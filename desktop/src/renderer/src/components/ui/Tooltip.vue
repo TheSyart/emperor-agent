@@ -6,6 +6,7 @@
  *
  * Props:
  * - label: bubble text (pre-line).
+ * - shortcut?: a key label after the text, such as ⇧⌘D.
  * - side: 'top' (default) | 'bottom' | 'right'.
  * - delayMs (default 400).
  * - disabled?.
@@ -15,11 +16,12 @@ import { onBeforeUnmount, ref } from 'vue'
 const props = withDefaults(
   defineProps<{
     label: string
+    shortcut?: string
     side?: 'top' | 'bottom' | 'right'
     delayMs?: number
     disabled?: boolean
   }>(),
-  { side: 'top', delayMs: 400, disabled: false },
+  { shortcut: '', side: 'top', delayMs: 400, disabled: false },
 )
 
 const GAP = 6
@@ -80,7 +82,8 @@ onBeforeUnmount(() => clearTimeout(timer))
       :data-side="side"
       :style="position"
     >
-      {{ label }}
+      {{ label
+      }}<kbd v-if="shortcut" class="ds-tooltip-shortcut">{{ shortcut }}</kbd>
     </div>
   </Teleport>
 </template>
@@ -104,6 +107,12 @@ onBeforeUnmount(() => clearTimeout(timer))
   white-space: pre-line;
   overflow-wrap: break-word;
   pointer-events: none;
+}
+
+.ds-tooltip-shortcut {
+  margin-left: var(--space-1-5);
+  font-family: var(--font-mono);
+  opacity: 0.7;
 }
 
 .ds-tooltip[data-side='top'] {

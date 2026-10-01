@@ -2,13 +2,23 @@
  * Dictation in the composer (VO-03). The 听写 button and the shortcut from
  * 设置 › 语音 start and stop one dictation for the chat on screen: partial
  * results show as a draft in the editor (editor/dictationDraft.ts) and the
- * final result goes in once, where dictation began. The button shows the
- * recording the whole time, and the recording stops as soon as you switch
- * chats or the composer goes away. A result that arrives after that is kept
- * in memory for its own chat and offered there; it is never written into
- * another chat. Nothing here sends a message.
+ * final result goes in once, where dictation began. While it records, the
+ * recording bar (DictationBar.vue, RV-06) takes the composer's bottom row
+ * and draws the last 3 seconds of the microphone's loudness. The recording
+ * stops as soon as you switch chats or the composer goes away. A result
+ * that arrives after that is kept in memory for its own chat and offered
+ * there; it is never written into another chat. Dictation never sends by
+ * itself: only the bar's send button does, once the final text is in.
  */
-import { computed, onBeforeUnmount, reactive, ref, watch, type Ref } from 'vue'
+import {
+  computed,
+  onBeforeUnmount,
+  reactive,
+  ref,
+  shallowRef,
+  watch,
+  type Ref,
+} from 'vue'
 import {
   cancelDictation,
   dictationStatus,
@@ -26,6 +36,9 @@ import type { ComposerEditorHandle } from '../chat/composerController'
 import { acceleratorLabel } from '../settings/computer/shortcut'
 
 export type DictationPhase = 'idle' | 'starting' | 'listening' | 'finishing'
+
+/** About 3 seconds of loudness, at the helper's 15 levels a second. */
+export const DICTATION_LEVEL_HISTORY = 45
 
 /** Results that arrived after their chat left the screen: chat → text. */
 const kept = reactive(new Map<string, string>())
@@ -83,14 +96,22 @@ export function useComposerDictation(options: {
   /** The chat whose draft this is; a change stops the dictation. */
   chat: () => string | null
   onError(message: string): void
+  /** The bar's send button: send the composer, final text included. */
+  onSend?(): void
 }) {
   const supported = dictationSupported()
   const mac = detectShortcutPlatform() === 'mac'
   const { settings } = useDictationSettings()
   const phase = ref<DictationPhase>('idle')
+  /** The microphone's latest levels (0–1), oldest first, while listening. */
+  const levels = shallowRef<readonly number[]>([])
+  /** The send button was pressed: send once the final text is in. */
+  const sending = ref(false)
   let session: string | null = null
   let owner: string | null = null
   let finalSeen = false
+  /** The final text went into this composer's editor. */
+  let finalInserted = false
   /** Cancelled, or its chat left, while the start was on its way. */
   let abandoned: 'cancel' | 'detach' | null = null
   /** Events that came before the start answered with its session id. */
@@ -108,7 +129,10 @@ export function useComposerDictation(options: {
     session = null
     owner = null
     finalSeen = false
+    finalInserted = false
     early = null
+    levels.value = []
+    sending.value = false
     phase.value = 'idle'
   }
 
@@ -126,19 +150,32 @@ export function useComposerDictation(options: {
       case 'partial':
         editor?.dictationPartial(session, event.text)
         return
+      case 'level': {
+        // A stop closes the microphone: the waveform holds still from then.
+        if (phase.value !== 'listening') return
+        const next = [...levels.value, event.value]
+        levels.value = next.slice(-DICTATION_LEVEL_HISTORY)
+        return
+      }
       case 'final':
         if (finalSeen) return
         finalSeen = true
-        if (editor) editor.dictationFinal(session, event.text)
-        else if (owner !== null) keep(owner, event.text)
+        if (editor) {
+          editor.dictationFinal(session, event.text)
+          finalInserted = true
+        } else if (owner !== null) keep(owner, event.text)
         return
       case 'error':
         options.onError(dictationErrorText(event.code, event.message))
         return
-      case 'ended':
+      case 'ended': {
+        // Asked to send: only with the final text in, never without it.
+        const send = sending.value && finalInserted
         editor?.dictationEnd(session)
         reset()
+        if (send) options.onSend?.()
         return
+      }
     }
   }
 
@@ -187,6 +224,17 @@ export function useComposerDictation(options: {
     if (session === null || phase.value === 'finishing') return
     phase.value = 'finishing'
     void stopDictation(session)
+  }
+
+  /**
+   * The bar's send button: ends the recording and sends once the final
+   * text is in. A send the user asked for; nothing else sends.
+   */
+  function stopAndSend(): void {
+    if (session === null) return
+    if (phase.value !== 'listening' && phase.value !== 'finishing') return
+    sending.value = true
+    stop()
   }
 
   /** Drops the dictation: nothing goes into the draft. */
@@ -267,9 +315,13 @@ export function useComposerDictation(options: {
   return {
     supported,
     phase,
+    levels,
+    sending,
     shortcut,
     keptText,
     toggle,
+    stop,
+    stopAndSend,
     cancel,
     handleKey,
     insertKept,

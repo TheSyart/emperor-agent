@@ -175,7 +175,8 @@ final class Controller {
         let handler = DictationEngineHandler(
             partial: { text in self.queue.async { self.partial(session, text) } },
             final: { text in self.queue.async { self.finish(session, text) } },
-            failure: { code, message in self.queue.async { self.fail(session, code, message) } })
+            failure: { code, message in self.queue.async { self.fail(session, code, message) } },
+            level: { value in self.queue.async { self.level(session, value) } })
         do {
             try engine.start(locale: Locale(identifier: chosen.id), device: input, handler: handler)
         } catch let error as DictationEngineError {
@@ -205,6 +206,12 @@ final class Controller {
     private func partial(_ session: String, _ text: String) {
         guard let current = current(session) else { return }
         output.send(current.sequence.partial(text))
+    }
+
+    /// Loudness for the composer's waveform, until a stop closes the microphone.
+    private func level(_ session: String, _ value: Double) {
+        guard let current = current(session), current.endReason == nil else { return }
+        output.send(current.sequence.level(value))
     }
 
     private func close(_ current: ActiveDictation, _ reason: DictationEndReason) {

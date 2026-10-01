@@ -63,6 +63,7 @@ import {
   commitDictation,
   dictationDraftPlugin,
   endDictation,
+  hasDictationDraft,
   showDictationPartial,
 } from './dictationDraft'
 import { trackEditorView } from './editorViews'
@@ -109,11 +110,14 @@ function attributes(): Record<string, string> {
   }
 }
 
-/** The placeholder sits on the empty first line. */
+/**
+ * The placeholder sits on the empty first line, unless a dictation draft
+ * shows there: the draft is a decoration, so the document is still empty.
+ */
 const placeholderPlugin = new Plugin({
   props: {
     decorations: (state) =>
-      isEmpty(state) && props.placeholder
+      isEmpty(state) && props.placeholder && !hasDictationDraft(state)
         ? DecorationSet.create(state.doc, [
             Decoration.node(0, state.doc.firstChild!.nodeSize, {
               class: 'composer-editor-empty',
@@ -485,6 +489,16 @@ defineExpose({
 }
 
 .composer-editor :deep(.composer-editor-input p) {
+  margin: 0;
+}
+
+/* ProseMirror ends a line that ends in a chip or the dictation draft with
+   an empty image for the caret. The base styles make images blocks, which
+   pushed an extra empty line under it; it stays inline, as in
+   prosemirror-view's own stylesheet. */
+.composer-editor :deep(img.ProseMirror-separator) {
+  display: inline;
+  border: none;
   margin: 0;
 }
 

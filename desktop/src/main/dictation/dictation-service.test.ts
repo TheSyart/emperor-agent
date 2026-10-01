@@ -187,6 +187,8 @@ function summary(events: DictationEvent[]): string[] {
       case 'partial':
       case 'final':
         return `${event.seq} ${event.type} ${event.text}`
+      case 'level':
+        return `${event.seq} level ${event.value}`
       case 'error':
         return `${event.seq} error ${event.code}`
       case 'ended':
@@ -398,6 +400,29 @@ describe('dictation service', () => {
       '3 partial 三',
       '4 final 终',
       '7 ended stopped',
+    ])
+  })
+
+  it('passes on the loudness in order, until the final (RV-06)', async () => {
+    const { service, listener, events, helper } = setup()
+    await service.start({}, listener)
+    await flush()
+    const session = 'session-0001'
+    helper().emit({ type: 'level', session, seq: 2, value: 0.1 })
+    helper().emit({ type: 'level', session, seq: 4, value: 0.6 })
+    helper().emit({ type: 'level', session, seq: 3, value: 0.3 })
+    helper().emit({ type: 'partial', session, seq: 5, text: '你' })
+    helper().emit({ type: 'final', session, seq: 6, text: '你。' })
+    helper().emit({ type: 'level', session, seq: 7, value: 0.9 })
+    helper().emit({ type: 'ended', session, seq: 8, reason: 'stopped' })
+    await flush()
+    expect(summary(events)).toEqual([
+      '1 started zh-CN',
+      '2 level 0.1',
+      '4 level 0.6',
+      '5 partial 你',
+      '6 final 你。',
+      '8 ended stopped',
     ])
   })
 

@@ -13,6 +13,7 @@ import {
   dictationDraftKey,
   dictationDraftPlugin,
   endDictation,
+  hasDictationDraft,
   showDictationPartial,
   spacedDictation,
 } from './dictationDraft'
@@ -132,6 +133,17 @@ describe('dictation draft in the composer', () => {
     let state = stateOf('new draft')
     state = apply(state, commitDictation(state, 's1', 'tail'))
     expect(content(state)).toBe('new draft tail')
+  })
+
+  it('says when a draft is on screen, so no placeholder goes under it', () => {
+    let state = stateOf('')
+    expect(hasDictationDraft(state)).toBe(false)
+    state = apply(state, beginDictation(state, 's1'))
+    expect(hasDictationDraft(state)).toBe(true)
+    state = apply(state, showDictationPartial(state, 's1', '你好'))
+    expect(hasDictationDraft(state)).toBe(true)
+    state = apply(state, endDictation(state, 's1'))
+    expect(hasDictationDraft(state)).toBe(false)
   })
 
   it('ends without inserting when nothing was heard', () => {

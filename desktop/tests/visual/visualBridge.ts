@@ -4413,6 +4413,18 @@ export async function installVisualCoreBridge(
           heard.forEach((event, index) =>
             setTimeout(() => emitDictation(event), 30 * (index + 1)),
           )
+          // RV-06: about 3 seconds of a voice's loudness for the waveform,
+          // ending on 0.37, after the last partial result.
+          const voice = [
+            0.02, 0.03, 0.02, 0.04, 0.03, 0.05, 0.04, 0.12, 0.35, 0.62, 0.48,
+            0.71, 0.55, 0.3, 0.06, 0.4, 0.66, 0.82, 0.58, 0.44, 0.27, 0.05,
+            0.04, 0.33, 0.52, 0.47, 0.69, 0.6, 0.38, 0.22, 0.09, 0.45, 0.73,
+            0.64, 0.5, 0.31, 0.06, 0.03, 0.05, 0.28, 0.56, 0.77, 0.61, 0.48,
+            0.37,
+          ]
+          setTimeout(() => {
+            for (const value of voice) emitDictation({ type: 'level', value })
+          }, 30 * heard.length)
           return { ok: true, session: visualDictation.session }
         },
         dictationStop: async () => {

@@ -12,12 +12,14 @@
  * the editor is accepted.
  *
  * Dictation (VO-03, composerDictation.ts): the mic before send and the
- * shortcut from 设置 › 语音, on macOS and in the rich editor only.
- * `dictationChat` names the chat on screen; a change stops the recording,
- * and a result that arrives afterwards waits above the input of its own
- * chat (插入 / 丢弃).
+ * shortcut from 设置 › 语音, on macOS and in the rich editor only. While
+ * it records, the recording bar takes the bottom row (RV-06): × cancel,
+ * the waveform and ■ stop (DictationBar), then send, which ends the
+ * dictation and sends once the final text is in. `dictationChat` names the
+ * chat on screen; a change stops the recording, and a result that arrives
+ * afterwards waits above the input of its own chat (插入 / 丢弃).
  */
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import AttachmentChip from '../chat/AttachmentChip.vue'
 import CapabilityPicker from '../chat/CapabilityPicker.vue'
 import {
@@ -40,8 +42,10 @@ import {
 } from '../icons/ds'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
+import Tooltip from '../ui/Tooltip.vue'
 import ContextMeter from './ContextMeter.vue'
 import ComposerEditor from './editor/ComposerEditor.vue'
+import DictationBar from './DictationBar.vue'
 import DictationButton from './DictationButton.vue'
 import { useComposerDictation } from './composerDictation'
 import ModelPicker from './ModelPicker.vue'
@@ -113,13 +117,45 @@ const dictation = useComposerDictation({
   editor,
   chat: () => props.dictationChat ?? null,
   onError: (message) => emit('error', message),
+  onSend: () => submit(),
 })
 const {
   supported: dictationSupported,
   phase: dictationPhase,
+  levels: dictationLevels,
+  sending: dictationSending,
   shortcut: dictationShortcut,
   keptText: dictationKept,
 } = dictation
+/** Recording: the recording bar holds the bottom row. */
+const dictationActive = computed(
+  () => richInput && dictationPhase.value !== 'idle',
+)
+const dictationSendDisabled = computed(
+  () =>
+    dictationPhase.value === 'starting' ||
+    dictationSending.value ||
+    goalCaptureStarting.value ||
+    Boolean(props.interactionBlocked),
+)
+
+/**
+ * The mic, or the recording bar, leaves with the row it is in. Focus that
+ * was there (or got lost with it) goes to the editor, so typing and the
+ * shortcut keep working; focus elsewhere in the window stays put.
+ */
+watch(dictationActive, () => {
+  const focused = document.activeElement
+  const inRow =
+    focused !== null &&
+    shell.value?.contains(focused) === true &&
+    focused.closest('.composer-editor') === null
+  if (!inRow && focused !== null && focused !== document.body) return
+  void nextTick(() => {
+    const now = document.activeElement
+    if (now === null || now === document.body) focusInput()
+  })
+})
 
 /** The dictation shortcut first, then the composer's own keys. */
 function editorKeydown(event: KeyboardEvent): void {
@@ -309,7 +345,28 @@ defineExpose(controller.expose)
         />
       </div>
 
-      <div class="row">
+      <div v-if="dictationActive" class="row dictation-row">
+        <DictationBar
+          :phase="dictationPhase"
+          :levels="dictationLevels"
+          :shortcut="dictationShortcut"
+          @cancel="dictation.cancel()"
+          @stop="dictation.stop()"
+        />
+        <Tooltip label="结束听写并发送">
+          <button
+            type="button"
+            class="primary"
+            aria-label="结束听写并发送"
+            :disabled="dictationSendDisabled"
+            @click="dictation.stopAndSend()"
+          >
+            <DsLoading v-if="dictationSending" :size="18" class="spin" />
+            <DsArrowUp v-else :size="18" />
+          </button>
+        </Tooltip>
+      </div>
+      <div v-else class="row">
         <div class="tools">
           <button
             ref="addAnchor"
@@ -361,11 +418,9 @@ defineExpose(controller.expose)
           />
           <DictationButton
             v-if="richInput && dictationSupported"
-            :phase="dictationPhase"
             :shortcut="dictationShortcut"
             :disabled="goalCaptureStarting || props.interactionBlocked"
-            @toggle="dictation.toggle()"
-            @cancel="dictation.cancel()"
+            @start="dictation.toggle()"
           />
           <template v-if="props.busy">
             <button
@@ -632,6 +687,12 @@ defineExpose(controller.expose)
   min-width: 0;
   padding: var(--space-0-5) var(--space-2) var(--space-1-5);
   container-type: inline-size;
+}
+
+/* RV-06: the recording bar, then the send button, on one line. */
+.dictation-row {
+  flex-wrap: nowrap;
+  gap: var(--space-2-5);
 }
 
 .tools,

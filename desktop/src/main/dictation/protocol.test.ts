@@ -127,6 +127,31 @@ describe('dictation helper protocol', () => {
     })
   })
 
+  it('parses the loudness the helper sends while listening (RV-06)', () => {
+    expect(
+      parseHelperEvent(
+        `{"seq":5,"session":"${session}","type":"level","value":0.43}`,
+      ),
+    ).toEqual({ type: 'level', session, seq: 5, value: 0.43 })
+    for (const value of [0, 1])
+      expect(
+        parseHelperEvent(
+          JSON.stringify({ type: 'level', session, seq: 6, value }),
+        ),
+      ).toMatchObject({ value })
+    for (const value of ['0.5', null, -0.01, 1.01, true])
+      expect(
+        () =>
+          parseHelperEvent(
+            JSON.stringify({ type: 'level', session, seq: 7, value }),
+          ),
+        String(value),
+      ).toThrow(DictationProtocolError)
+    expect(() =>
+      parseHelperEvent(`{"type":"level","session":"${session}","seq":8}`),
+    ).toThrow(DictationProtocolError)
+  })
+
   it('rejects anything else the helper might print', () => {
     for (const line of [
       'not json',

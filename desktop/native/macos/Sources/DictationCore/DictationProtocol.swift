@@ -3,7 +3,9 @@ import Foundation
 /// The dictation helper's wire protocol (VO-01): one JSON object per line on
 /// stdin (requests from Emperor's main process) and stdout (events). The
 /// helper runs as a child process, so the pipe itself is the authenticated
-/// channel; this layer only validates shapes and sizes.
+/// channel; this layer only validates shapes and sizes. While the
+/// microphone is open, `level` events carry its loudness (0–1, about 15 a
+/// second) for the composer's waveform (RV-06).
 public let dictationProtocolVersion = 1
 /// Longest accepted request line, in UTF-8 bytes.
 public let dictationMaxLineBytes = 64 * 1024
@@ -84,6 +86,8 @@ public enum DictationEvent: Equatable, Sendable {
     case status(DictationStatus)
     case started(session: String, seq: Int, locale: String)
     case partial(session: String, seq: Int, text: String)
+    /// The microphone's loudness, 0–1 with two decimals.
+    case level(session: String, seq: Int, value: Double)
     case final(session: String, seq: Int, text: String)
     case ended(session: String, seq: Int, reason: DictationEndReason)
     case error(session: String?, seq: Int?, code: DictationErrorCode, message: String)
@@ -207,6 +211,13 @@ public enum DictationCodec {
             body = ["type": "started", "session": session, "seq": seq, "locale": locale]
         case let .partial(session, seq, text):
             body = ["type": "partial", "session": session, "seq": seq, "text": text]
+        case let .level(session, seq, value):
+            // Hundredths as a decimal: a Double would print 0.42999999999999999.
+            let hundredths = value.isFinite ? Int((min(1, max(0, value)) * 100).rounded()) : 0
+            body = [
+                "type": "level", "session": session, "seq": seq,
+                "value": NSDecimalNumber(value: hundredths).dividing(by: 100),
+            ]
         case let .final(session, seq, text):
             body = ["type": "final", "session": session, "seq": seq, "text": text]
         case let .ended(session, seq, reason):

@@ -325,8 +325,11 @@ export class DictationService {
       return
     }
     if (seq <= session.lastSeq) return
+    // After the final the microphone is closed: no more text or loudness.
     if (
-      (event.type === 'final' || event.type === 'partial') &&
+      (event.type === 'final' ||
+        event.type === 'partial' ||
+        event.type === 'level') &&
       session.hasFinal
     )
       return

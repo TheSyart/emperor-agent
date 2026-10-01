@@ -441,6 +441,12 @@ export type DictationEndReason =
 export type DictationEvent =
   | { type: 'started'; session: string; seq: number; locale: string }
   | { type: 'partial'; session: string; seq: number; text: string }
+  /**
+   * RV-06: the microphone's loudness while listening (RMS on a decibel
+   * scale, 0–1), about 15 a second, for the composer's waveform. Only
+   * between `started` and `final`; never the audio itself.
+   */
+  | { type: 'level'; session: string; seq: number; value: number }
   | { type: 'final'; session: string; seq: number; text: string }
   | {
       type: 'error'

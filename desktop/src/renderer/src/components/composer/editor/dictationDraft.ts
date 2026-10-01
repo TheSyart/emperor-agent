@@ -114,6 +114,14 @@ export const dictationDraftPlugin = new Plugin<DictationDraftState>({
   },
 })
 
+/**
+ * A dictation draft is on screen (its text, or "…" before any): the editor
+ * draws no placeholder under it, even while the document itself is empty.
+ */
+export function hasDictationDraft(state: EditorState): boolean {
+  return Boolean(dictationDraftKey.getState(state)?.draft)
+}
+
 export function beginDictation(
   state: EditorState,
   session: string,
