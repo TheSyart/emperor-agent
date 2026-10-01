@@ -34,6 +34,7 @@ import {
   NM_BROWSER_KEYS,
   type NmBrowser,
   type NmManifestChange,
+  type NmManifestEntry,
 } from './nm-manifest'
 import { isExactHttpOrigin } from './web-origin'
 
@@ -86,6 +87,25 @@ export function defaultNmSocketPath(): string {
   )
 }
 
+/** A dotted extension version (`0.2.0`), else undefined. */
+function extensionVersion(value: unknown): string | undefined {
+  return typeof value === 'string' && /^\d{1,9}(?:\.\d{1,9}){0,3}$/.test(value)
+    ? value
+    : undefined
+}
+
+/** Requests main may send an authenticated extension. */
+const EXTENSION_METHODS = new Set([
+  'tabs.discover',
+  'target.list',
+  'target.observe',
+  'target.act',
+  'target.detach',
+  // 设置 › 电脑操作 › Chrome 和 Edge: 移除扩展程序, and an upgraded folder.
+  'extension.uninstall',
+  'extension.reload',
+])
+
 export interface PairingApproval {
   readonly pairingId: string
   readonly extensionId: string
@@ -107,6 +127,9 @@ export type NmBridgeEvent =
       readonly pairingId: string
       readonly extensionId: string
       readonly workerEpoch: number
+      /** The extension's manifest version, when it reports one. */
+      readonly version?: string
+      readonly browser?: PairingBrowser
     }
   | {
       readonly type: 'target-attached'
@@ -141,6 +164,10 @@ export interface NmHostManifests {
     extensionId: string,
     remainingExtensionIds: readonly string[],
   ): Promise<readonly NmManifestChange[]>
+  /** 移除扩展程序: delete every manifest Emperor wrote. */
+  removeAll?(): Promise<readonly NmManifestChange[]>
+  /** The manifests as they are now (read only). */
+  inspect?(): Promise<readonly NmManifestEntry[]>
 }
 
 export interface NmBridgeOptions {
@@ -503,11 +530,15 @@ class NmConnection {
           throw codeError('PROTOCOL_MISMATCH')
         this.ready = true
         this.bridge.connectionReady(this)
+        const version = extensionVersion(data.version)
+        const browser = pairingBrowser(data.browser)
         this.bridge.notify({
           type: 'ready',
           pairingId: pairing.pairingId,
           extensionId: pairing.extensionId,
           workerEpoch: data.workerEpoch,
+          ...(version ? { version } : {}),
+          ...(browser ? { browser } : {}),
         })
         this.startHeartbeat()
         return
@@ -615,15 +646,7 @@ class NmConnection {
     signal?: AbortSignal,
   ): Promise<unknown> {
     if (!this.isReady) return Promise.reject(codeError('DRIVER_UNAVAILABLE'))
-    if (
-      ![
-        'tabs.discover',
-        'target.list',
-        'target.observe',
-        'target.act',
-        'target.detach',
-      ].includes(method)
-    )
+    if (!EXTENSION_METHODS.has(method))
       return Promise.reject(codeError('CAPABILITY_DISABLED'))
     if (signal?.aborted) return Promise.reject(codeError('CANCELLED'))
     const id = ++this.nextRequestId
@@ -694,6 +717,30 @@ class NmConnection {
   destroy(): void {
     this.close()
     this.socket.destroy()
+  }
+
+  /**
+   * Emperor-side revoke: an authenticated extension hears `pair.revoked`
+   * first (it then forgets the pairing without onboarding again); the
+   * socket closes once that frame is written.
+   */
+  revoke(pairingId: string): void {
+    if (!this.isReady || this.pairing?.pairingId !== pairingId) {
+      this.destroy()
+      return
+    }
+    try {
+      this.sendSecure({
+        type: 'event',
+        name: 'pair.revoked',
+        data: { pairingId },
+      })
+    } catch {
+      /* closing anyway */
+    }
+    this.close()
+    this.socket.end()
+    setTimeout(() => this.socket.destroy(), 1_000).unref()
   }
 }
 
@@ -766,6 +813,41 @@ export class NmBridgeServer {
       .map((connection) => connection.pairingId!)
   }
 
+  /**
+   * Every stored pairing, connected or not (its browser closed), without
+   * secrets; empty when the store cannot be read.
+   */
+  async storedPairings(): Promise<readonly PairingSummary[]> {
+    return this.pairings.list().catch(() => [])
+  }
+
+  /**
+   * 移除扩展程序: delete every Emperor manifest. Only the instance that
+   * owns the socket touches manifests.
+   */
+  async removeHostManifests(): Promise<void> {
+    const removeAll = this.manifests?.removeAll
+    if (!removeAll || !this.server || this.stopping) return
+    await this.trackOwnedOperation(
+      removeAll.call(this.manifests).then(() => undefined),
+    )
+  }
+
+  /** Browsers whose manifest admits the Emperor extension (read only). */
+  async hostRegistrations(): Promise<NmBrowser[]> {
+    const manifests = this.manifests
+    const entries = manifests?.inspect
+      ? await manifests.inspect().catch(() => [])
+      : []
+    return entries
+      .filter(
+        (entry) =>
+          entry.state.kind === 'emperor' &&
+          entry.state.extensionIds.includes(EMPEROR_EXTENSION_ID),
+      )
+      .map((entry) => entry.browser)
+  }
+
   isRevoked(pairingId: string): boolean {
     return this.revokedPairings.has(pairingId)
   }
@@ -801,7 +883,7 @@ export class NmBridgeServer {
       : undefined
     await this.pairings.remove(pairingId)
     for (const connection of this.connections)
-      if (connection.hasPairing(pairingId)) connection.destroy()
+      if (connection.hasPairing(pairingId)) connection.revoke(pairingId)
     this.notify({ type: 'revoked', pairingId })
     if (revoked)
       await this.maintainManifests((manifests, remaining) =>

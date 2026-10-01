@@ -125,6 +125,61 @@ export interface BrowserPairingStatus {
   attachedTabs: number
 }
 
+/** Chrome or Edge, as the extension reports itself when it pairs. */
+export type BrowserExtensionBrowser = 'chrome' | 'edge'
+
+/** 设置 › 电脑操作 › Chrome 和 Edge: one browser and the Emperor extension in it. */
+export interface BrowserExtensionBrowserView {
+  browser: BrowserExtensionBrowser
+  /** Google Chrome / Microsoft Edge. */
+  name: string
+  /** The browser has run on this Mac. */
+  present: boolean
+  /** Loaded from Emperor's folder in some profile: on, off or not at all. */
+  extension: 'none' | 'loaded' | 'disabled'
+  /** Loaded from another folder instead (`~`-abbreviated). */
+  loadedFrom?: string
+  /** 开发者模式 is on in some profile. */
+  developerMode: boolean
+  /** Its Native Messaging manifest admits the Emperor extension. */
+  hostRegistered: boolean
+}
+
+/** The extension folder and where the extension is loaded (no secrets). */
+export interface BrowserExtensionStatus {
+  folder: {
+    /** `<stateRoot>/browser-extension`, for 拷贝路径. */
+    path: string
+    /** The same, `~`-abbreviated, to show. */
+    displayPath: string
+    /** Emperor put the extension there. */
+    ready: boolean
+    version: string | null
+  }
+  /** The extension version this Emperor ships. */
+  bundledVersion: string | null
+  browsers: BrowserExtensionBrowserView[]
+}
+
+/** 安装扩展程序: the folder, and the browsers that can now reach Emperor. */
+export interface BrowserExtensionInstallResult {
+  ok: boolean
+  registered: string[]
+  /**
+   * Why no browser was registered (a development build, no bridge, no
+   * Chrome or Edge has run yet), or why the folder could not be written.
+   */
+  reason?: 'no-host' | 'unavailable' | 'no-browser' | 'no-source' | 'io'
+  status: BrowserExtensionStatus
+}
+
+/** 移除扩展程序: how many connected browsers uninstalled it themselves. */
+export interface BrowserExtensionRemoveResult {
+  ok: boolean
+  uninstalled: number
+  status: BrowserExtensionStatus
+}
+
 export type MacHelperPermission = 'accessibility' | 'screen-recording'
 export type MacHelperPermissionStatus =
   'granted' | 'denied' | 'unknown' | 'stale'

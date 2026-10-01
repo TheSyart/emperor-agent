@@ -492,6 +492,14 @@ export class NmManifestRegistrar {
   }
 
   /**
+   * 移除扩展程序: remove every manifest Emperor wrote, whatever it admits.
+   * Foreign and unsafe files are left alone, as always.
+   */
+  removeAll(): Promise<NmManifestChange[]> {
+    return this.apply({ origins: () => [] })
+  }
+
+  /**
    * Emperor-side revoke. With no pairing left, remove every manifest
    * Emperor wrote ("断开连接时删除 manifest"); otherwise drop only the revoked
    * extension unless another pairing still uses it.
