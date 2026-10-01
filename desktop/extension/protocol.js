@@ -4,6 +4,22 @@ export const MAX_JSON_BYTES = 900_000 // Chrome: native host -> extension is lim
 export const MAX_INPUT_TEXT = 16_384
 // auth.begin refusal: Emperor holds no such pairing; forget it and pair again.
 export const PAIRING_UNKNOWN = 'PAIRING_UNKNOWN'
+/** The one site grant the onboarding page asks for (optional_host_permissions). */
+export const SITE_ORIGINS = ['https://*/*', 'http://*/*']
+
+/**
+ * 'edge' or 'chrome', for Emperor's list of connected browsers: the
+ * User-Agent Client Hints brand first, then Edge's `Edg/` UA token. Other
+ * Chromium browsers count as Chrome.
+ */
+export function browserName(nav) {
+  const brands = nav?.userAgentData?.brands
+  if (Array.isArray(brands)) {
+    if (brands.some((item) => item?.brand === 'Microsoft Edge')) return 'edge'
+    if (brands.some((item) => item?.brand === 'Google Chrome')) return 'chrome'
+  }
+  return /\bEdg\//.test(String(nav?.userAgent ?? '')) ? 'edge' : 'chrome'
+}
 
 export function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
