@@ -124,6 +124,26 @@ describe('layout primitives', () => {
 })
 
 describe('SettingsCard slots', () => {
+  it('marks a page’s master switch card, whose glyph sits on a tile', () => {
+    const root = mount(() =>
+      h(
+        'div',
+        null,
+        [true, false].map((master) =>
+          h(
+            SettingsCard,
+            { title: master ? '电脑操作' : '其他', master },
+            { leading: () => h('i', { class: 'glyph' }) },
+          ),
+        ),
+      ),
+    )
+    const [first, second] = root.querySelectorAll('.ds-settings-card')
+    expect(first!.hasAttribute('data-master')).toBe(true)
+    expect(first!.querySelector('.leading .glyph')).not.toBeNull()
+    expect(second!.hasAttribute('data-master')).toBe(false)
+  })
+
   it('shows a body and header slots the parent adds after mount', async () => {
     const editing = ref(false)
     const withLeading = ref(false)

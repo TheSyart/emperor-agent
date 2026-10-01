@@ -63,6 +63,8 @@
  *      brings its own frame (a CodeEditor); `variant="stack"` holds
  *      SettingsCards. Rows, EmptyStates and Selects switch to their card
  *      look by themselves (ui/surface.ts); SettingsCard and Modal reset it.
+ *    - A page with a master switch (电脑操作, 浏览器) opens with it:
+ *      `<SettingsCard master>` puts its 18px glyph on a gold tile.
  *    - Order a page by what the user decides: the switches and choices
  *      first, then the rest. When something is wrong, show one
  *      SettingsNotice at the top (tone warn / error / info, with the fix

@@ -374,8 +374,9 @@ onBeforeUnmount(() => {
         data-testid="computer-use-card"
         title="电脑操作"
         :description="cardDescription"
+        master
       >
-        <template #leading><MousePointerClick :size="20" /></template>
+        <template #leading><MousePointerClick :size="18" /></template>
         <template v-if="cardBadge" #meta>
           <StatusBadge
             :tone="cardBadge.tone"

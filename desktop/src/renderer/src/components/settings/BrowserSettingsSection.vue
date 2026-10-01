@@ -239,12 +239,11 @@ onBeforeUnmount(() => {
     <SettingsCard
       class="agent-card"
       data-testid="browser-agent-card"
+      title="浏览器"
       :description="agentDescription"
+      master
     >
-      <template #leading>
-        <span class="agent-glyph"><Globe :size="18" /></span>
-      </template>
-      <template #title><span class="agent-title">浏览器</span></template>
+      <template #leading><Globe :size="18" /></template>
       <template v-if="agentStage" #meta>
         <StatusBadge :tone="agentStage.tone">{{
           agentStage.stage
@@ -489,22 +488,6 @@ onBeforeUnmount(() => {
 /* After the notice, the control card keeps the groups' 20px rhythm. */
 .agent-card:not(:first-child) {
   margin-top: var(--space-5);
-}
-
-/* The page's master switch: its glyph on a gold tile, a heavier title. */
-.agent-glyph {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: calc(var(--space-8) + var(--space-1));
-  height: calc(var(--space-8) + var(--space-1));
-  border-radius: var(--radius-cell);
-  background: rgb(var(--accent-soft));
-  color: rgb(var(--accent-strong));
-}
-
-.agent-title {
-  font-weight: 600;
 }
 
 .browser-note {

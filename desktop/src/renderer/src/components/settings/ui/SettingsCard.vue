@@ -15,6 +15,9 @@
  *   l2 border — rows on the panel) | 'filled' (selector fill, no border —
  *   editors / add forms nested under a row).
  * - disabled?: dims the header and blocks toggling.
+ * - master?: a page's master switch (电脑操作, 浏览器), its first card: the
+ *   leading glyph (18px) sits on a 36px gold tile and the title is
+ *   semibold.
  * Slots: `leading` (16px glyph / StateDot), `title`, `description`, `meta`
  * (badges after the title), `actions` (buttons / Switch; never toggles),
  * default (body), `footer` (right-aligned buttons, e.g. 取消 / 保存).
@@ -32,6 +35,7 @@ const props = withDefaults(
     expandable?: boolean
     variant?: 'default' | 'outline' | 'filled'
     disabled?: boolean
+    master?: boolean
   }>(),
   {
     title: undefined,
@@ -39,6 +43,7 @@ const props = withDefaults(
     expandable: false,
     variant: 'default',
     disabled: false,
+    master: false,
   },
 )
 
@@ -83,6 +88,7 @@ function onHeaderClick(event: MouseEvent) {
     :data-expandable="expandable || undefined"
     :data-open="(expandable && open) || undefined"
     :data-disabled="disabled || undefined"
+    :data-master="master || undefined"
   >
     <div v-if="hasHeader()" class="head" @click="onHeaderClick">
       <span v-if="$slots.leading" class="leading"><slot name="leading" /></span>
@@ -196,6 +202,23 @@ function onHeaderClick(event: MouseEvent) {
   align-items: center;
   justify-content: center;
   color: rgb(var(--label-secondary));
+}
+
+/* A page's master switch: the glyph on a gold tile, a semibold title. */
+.ds-settings-card[data-master] .head {
+  padding: var(--space-3-5) var(--space-4);
+}
+
+.ds-settings-card[data-master] .leading {
+  width: calc(var(--space-8) + var(--space-1));
+  height: calc(var(--space-8) + var(--space-1));
+  border-radius: var(--radius-cell);
+  background: rgb(var(--accent-soft));
+  color: rgb(var(--accent-strong));
+}
+
+.ds-settings-card[data-master] .title {
+  font-weight: 600;
 }
 
 .head-text {
