@@ -22,8 +22,6 @@ export interface GrantRequirement {
   readonly callId: string
   /** Escalated by the high-impact classifier (payments, deletion, sending…). */
   readonly highImpact?: boolean
-  /** Terminal / script host (desktop): only once or task grants apply. */
-  readonly highRiskApp?: boolean
 }
 
 type Caller = Pick<
@@ -85,12 +83,6 @@ export function grantCovers(
       break
   }
   if (requiresOnce(requirement) && grant.scope !== 'once') return false
-  if (
-    requirement.highRiskApp === true &&
-    grant.scope !== 'once' &&
-    grant.scope !== 'task'
-  )
-    return false
 
   const scope = grant.targetScope
   if (scope.kind === 'browser') {

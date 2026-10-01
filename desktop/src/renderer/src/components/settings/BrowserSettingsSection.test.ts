@@ -62,7 +62,6 @@ function status(patch: Partial<ComputerUseStatusView> = {}) {
     supported: true,
     enabled: true,
     platform: 'macos',
-    stopped: false,
     drivers: [
       {
         driver: 'embedded-browser',
@@ -75,7 +74,6 @@ function status(patch: Partial<ComputerUseStatusView> = {}) {
       },
     ],
     targets: [],
-    killSwitch: { accelerator: 'Control+Alt+Command+.', registered: true },
     downloadRetentionDays: 30,
     ...patch,
   } as unknown as ComputerUseStatusView

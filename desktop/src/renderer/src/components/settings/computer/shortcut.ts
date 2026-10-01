@@ -96,8 +96,3 @@ export function acceleratorFromKey(
     .filter(Boolean)
     .join('+')
 }
-
-/** The platform default (spec 00 §6.6, decision D6); mirrors main's kill switch. */
-export function defaultKillSwitchAccelerator(mac: boolean): string {
-  return mac ? 'Control+Alt+Command+.' : 'Control+Alt+Shift+.'
-}

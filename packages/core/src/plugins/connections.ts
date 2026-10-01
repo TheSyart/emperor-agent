@@ -19,8 +19,7 @@ export function appConnectionKey(member: {
 export interface AppConnectionState {
   /**
    * `disabled`: switched off by the user (a Computer Use driver in
-   * Settings, or the emergency stop); `unsupported`: this machine cannot
-   * provide it.
+   * Settings); `unsupported`: this machine cannot provide it.
    */
   readonly state:
     'connected' | 'needs_connection' | 'failed' | 'disabled' | 'unsupported'

@@ -56,16 +56,6 @@ function deny(error: unknown): Decision {
   }
 }
 
-const ALWAYS_ALLOWED_WHEN_STOPPED = new Set([
-  'ui_get_capabilities',
-  'ui_list_targets',
-  'ui_action_status',
-  'ui_release_control',
-  'ui_cancel_action',
-  'browser_tab_list',
-  'browser_close',
-])
-
 function argsOf(call: ToolCallInfo): Record<string, unknown> {
   return typeof call.arguments === 'object' && call.arguments !== null
     ? (call.arguments as Record<string, unknown>)
@@ -87,14 +77,6 @@ export function createComputerUseGate(deps: GateDeps): PreExecuteMiddleware {
         throw new UiError(
           'PLAN_MODE_ACTION_DENIED',
           'plan mode is on; GUI actions are not allowed while planning',
-        )
-      if (deps.service.stopped && !ALWAYS_ALLOWED_WHEN_STOPPED.has(call.name))
-        throw new UiError(
-          'PERMISSION_DENIED',
-          'computer use is stopped; the user must resume it',
-          {
-            reason: 'emergency-stop',
-          },
         )
       if (entry.kind !== 'target' || entry.classify === undefined) {
         deps.service.issueTicket(agent.id, call.callId, { kind: 'control' })
@@ -198,7 +180,6 @@ export async function requestGrant(
         ? {}
         : { display: requirement.display }),
       ...(requirement.highImpact === true ? { highImpact: true } : {}),
-      ...(requirement.highRiskApp === true ? { highRiskApp: true } : {}),
       background: plan.background,
       signal: input.signal,
     },

@@ -65,9 +65,8 @@ describe('desktop CoreApi host (MIG-IPC-002)', () => {
         'pullRequests.view',
         'pullRequests.diff',
         'computerUse.status',
-        'computerUse.stop',
-        'computerUse.resume',
         'computerUse.setEnabled',
+        'computerUse.acknowledgeRetiredApps',
         'computerUse.listProfiles',
         'computerUse.manageProfile',
         'computerUse.listSitePermissions',
@@ -89,6 +88,11 @@ describe('desktop CoreApi host (MIG-IPC-002)', () => {
       'computerUse.listGrants',
       'computerUse.revokeGrant',
       'computerUse.narrowGrant',
+      // 2026-10-01: no emergency stop and no app lists.
+      'computerUse.stop',
+      'computerUse.resume',
+      'computerUse.setKillSwitch',
+      'computerUse.setAppLists',
     ])
       expect(coreOperationKeys()).not.toContain(retired)
   })

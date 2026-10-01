@@ -175,7 +175,7 @@ describe('ui_get_capabilities and computerUse.status', () => {
       const tool = seen.at(-1)!
       expect(tool.status).toBe('ok')
       expect(tool.platform).toBe(status.platform)
-      expect(tool.stopped).toBe(status.stopped)
+      expect(tool).not.toHaveProperty('stopped')
       expect(tool.drivers).toEqual(status.drivers.map(shown))
       return status.drivers.find((item) => item.driver === 'embedded-browser')!
     }
@@ -196,14 +196,8 @@ describe('ui_get_capabilities and computerUse.status', () => {
     expect(await compare()).toMatchObject({ enabled: false, available: false })
     settings.current = { enabled: true }
 
-    // 4. Emergency stop: unavailable with the same reason in both.
-    await api.computerUse.stop()
-    expect(await compare()).toMatchObject({
-      enabled: true,
-      available: false,
-      reason: 'emergency stop is engaged',
-    })
-    expect(seen.at(-1)!.stopped).toBe(true)
+    // 4. Back on: available again in both.
+    expect(await compare()).toMatchObject({ enabled: true, available: true })
     expect(statuses).toHaveLength(4)
   })
 })

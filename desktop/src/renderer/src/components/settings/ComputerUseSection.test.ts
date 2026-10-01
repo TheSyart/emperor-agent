@@ -68,11 +68,8 @@ const status = {
   supported: true,
   enabled: true,
   platform: 'macos',
-  stopped: false,
   drivers: [desktop, chrome],
   targets: [],
-  killSwitch: { accelerator: 'Control+Alt+Command+.', registered: true },
-  appLists: { protected: [], highRisk: [], sensitive: [] },
   screenshots: { count: 3, bytes: 1024 },
 } as unknown as ComputerUseStatusView
 
@@ -144,28 +141,32 @@ afterEach(() => {
 })
 
 describe('ComputerUseSection main page', () => {
-  it('shows the card, 控制, the protected apps and the stop row, nothing else', async () => {
+  it('shows the card and 控制, with no app lists and no emergency stop', async () => {
     const root = await mount()
     expect(root.querySelector('[data-testid="computer-use-card"]')).not.toBe(
       null,
     )
-    expect(groups(root)).toEqual([
-      '控制',
-      '不让 Emperor 操作的应用',
-      '紧急停止',
-    ])
+    expect(groups(root)).toEqual(['控制'])
     expect(
       [...root.querySelectorAll('[data-driver]')].map((row) =>
         row.getAttribute('data-driver'),
       ),
     ).toEqual(['desktop', 'external-browser'])
     const text = root.textContent ?? ''
-    for (const gone of ['高级', '须知', '当前能力', '诊断', '系统权限'])
+    for (const gone of [
+      '高级',
+      '须知',
+      '当前能力',
+      '诊断',
+      '系统权限',
+      '紧急停止',
+      '立即停止',
+      '不让 Emperor 操作的应用',
+    ])
       expect(text).not.toContain(gone)
     expect(root.querySelector('[data-testid="computer-use-advanced"]')).toBe(
       null,
     )
-    // No input fields on the main page: adding goes through a dialog.
     expect(root.querySelectorAll('input, textarea')).toHaveLength(0)
     // The Chrome pairing panel is mounted but hidden here.
     expect(
@@ -175,28 +176,25 @@ describe('ComputerUseSection main page', () => {
 
   it('keeps every former setting reachable', async () => {
     const root = await mount()
-    // Main page: the master switch, both drivers, protected apps, the stop.
+    // Main page: the master switch and both drivers.
     for (const selector of [
       '#computer-use-enabled',
       '#computer-use-driver-desktop',
       '#computer-use-driver-external-browser',
-      '[data-action="add-protected-app"]',
-      '[data-testid="kill-switch-edit"]',
     ])
       expect(root.querySelector(selector), selector).not.toBeNull()
-    expect(button(root, '立即停止')).toBeTruthy()
 
     await openPage('apps')
-    expect(groups(root)).toEqual(['系统权限', '应用名单', '截图'])
+    expect(groups(root)).toEqual(['系统权限', '截图'])
     for (const title of [
       'Emperor Computer Helper',
       '辅助功能',
       '屏幕录制',
-      '高风险应用',
-      '不截图的应用',
       '已保存的截图',
     ])
       expect(root.textContent).toContain(title)
+    for (const gone of ['高风险应用', '不截图的应用'])
+      expect(root.textContent).not.toContain(gone)
 
     await openPage('chrome')
     expect(
@@ -249,26 +247,6 @@ describe('ComputerUseSection main page', () => {
     })
   })
 
-  it('stops, then offers 恢复 on the card and in the stop row', async () => {
-    const root = await mount()
-    button(root, '立即停止').click()
-    await settle()
-    expect(core).toHaveBeenCalledWith('computerUse.stop')
-
-    app?.unmount()
-    const stopped = await mount({ stopped: true })
-    expect(
-      stopped.querySelector('[data-testid="computer-use-status"]')?.textContent,
-    ).toContain('已停止')
-    const resume = [...stopped.querySelectorAll('button')].filter(
-      (item) => item.textContent?.trim() === '恢复',
-    )
-    expect(resume).toHaveLength(2)
-    resume[0]!.click()
-    await settle()
-    expect(core).toHaveBeenCalledWith('computerUse.resume')
-  })
-
   it('explains that a saved per-item mode switched computer use off', async () => {
     const root = await mount({ enabled: false, scopedRetired: true })
     expect(
@@ -278,76 +256,6 @@ describe('ComputerUseSection main page', () => {
     root.querySelector<HTMLButtonElement>('#computer-use-enabled')!.click()
     await settle()
     expect(core).toHaveBeenCalledWith('computerUse.setEnabled', true)
-  })
-
-  it('adds a protected app in a dialog and removes one', async () => {
-    const root = await mount({
-      appLists: {
-        protected: ['com.agilebits.onepassword7'],
-        highRisk: [],
-        sensitive: [],
-      },
-    })
-    expect(
-      root.querySelector('[data-protected-app="com.agilebits.onepassword7"]'),
-    ).not.toBeNull()
-    root
-      .querySelector<HTMLButtonElement>('[data-action="add-protected-app"]')!
-      .click()
-    await settle()
-    const input = document.body.querySelector<HTMLInputElement>(
-      'form.app-id-form input',
-    )!
-    input.value = 'not a bundle id'
-    input.dispatchEvent(new Event('input'))
-    await settle()
-    document.body
-      .querySelector('form.app-id-form')!
-      .dispatchEvent(new Event('submit', { cancelable: true }))
-    await settle()
-    expect(document.body.textContent).toContain('请输入应用的 bundle ID')
-    input.value = 'com.example.Bank'
-    input.dispatchEvent(new Event('input'))
-    await settle()
-    document.body
-      .querySelector('form.app-id-form')!
-      .dispatchEvent(new Event('submit', { cancelable: true }))
-    await settle()
-    expect(core).toHaveBeenCalledWith('computerUse.setAppLists', {
-      protected: ['com.agilebits.onepassword7', 'com.example.Bank'],
-    })
-    button(root, '移除').click()
-    await settle()
-    expect(core).toHaveBeenCalledWith('computerUse.setAppLists', {
-      protected: [],
-    })
-  })
-
-  it('records a new stop shortcut and can restore the default', async () => {
-    const root = await mount()
-    root
-      .querySelector<HTMLButtonElement>('[data-testid="kill-switch-edit"]')!
-      .click()
-    await settle()
-    const capture = root.querySelector<HTMLElement>(
-      '[data-testid="kill-switch-capture"]',
-    )!
-    capture.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'k',
-        code: 'KeyK',
-        ctrlKey: true,
-        shiftKey: true,
-        bubbles: true,
-      }),
-    )
-    await settle()
-    expect(capture.textContent).toContain('K')
-    button(root, '保存').click()
-    await settle()
-    expect(core).toHaveBeenCalledWith('computerUse.setKillSwitch', {
-      accelerator: 'Control+Shift+K',
-    })
   })
 })
 
@@ -453,30 +361,10 @@ describe('ComputerUseSection › 任意应用', () => {
     expect(reconnect).toHaveBeenCalledOnce()
   })
 
-  it('adds a no-screenshot app and clears saved screenshots', async () => {
+  it('clears saved screenshots', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const root = await mount()
     await openPage('apps')
-    root
-      .querySelector<HTMLButtonElement>(
-        'button[aria-label="添加到不截图的应用"]',
-      )!
-      .click()
-    await settle()
-    const input = document.body.querySelector<HTMLInputElement>(
-      'form.app-id-form input',
-    )!
-    input.value = 'com.example.Notes'
-    input.dispatchEvent(new Event('input'))
-    await settle()
-    document.body
-      .querySelector('form.app-id-form')!
-      .dispatchEvent(new Event('submit', { cancelable: true }))
-    await settle()
-    expect(core).toHaveBeenCalledWith('computerUse.setAppLists', {
-      sensitive: ['com.example.Notes'],
-    })
-
     expect(root.textContent).toContain('已保存 3 张截图')
     root
       .querySelector<HTMLButtonElement>(

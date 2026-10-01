@@ -2,6 +2,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   statSync,
   writeFileSync,
 } from 'node:fs'
@@ -86,36 +87,24 @@ describe('computer use host wiring', () => {
       enabled: false,
       drivers: [],
     })
-    expect(await core.computerUse.stop()).toMatchObject({ stopped: false })
   })
 
-  it('stops and resumes through CoreApi and emits changes', async () => {
-    const { api: core, events } = await api({
+  it('reports the status through CoreApi', async () => {
+    const { api: core } = await api({
       extra: {
         computerUsePort: new FakeComputerUsePort(),
         computerUseSettings: () => ({ enabled: true }),
       },
     })
-    const status = await core.computerUse.status()
-    expect(status).toMatchObject({
+    expect(await core.computerUse.status()).toMatchObject({
       supported: true,
       enabled: true,
       platform: 'macos',
-      stopped: false,
       drivers: [{ driver: 'embedded-browser', enabled: true, available: true }],
     })
-    const stopped = await core.computerUse.stop()
-    expect(stopped.stopped).toBe(true)
-    expect(stopped.drivers[0]).toMatchObject({ available: false })
-    const resumed = await core.computerUse.resume()
-    expect(resumed.stopped).toBe(false)
-    const reasons = events
-      .filter((event) => event.event === 'computer_use_changed')
-      .map((event) => event.reason)
-    expect(reasons).toEqual(expect.arrayContaining(['kill-switch']))
   })
 
-  it('has no manual control, per-item mode or grant list operations', async () => {
+  it('has no manual control, per-item mode, grant list, emergency stop or app list operations', async () => {
     const { api: core } = await api({
       extra: {
         computerUsePort: new FakeComputerUsePort(),
@@ -128,10 +117,21 @@ describe('computer use host wiring', () => {
       'listGrants',
       'revokeGrant',
       'narrowGrant',
+      'stop',
+      'resume',
+      'setKillSwitch',
+      'setAppLists',
     ])
       expect(core.computerUse).not.toHaveProperty(name)
     const status = await core.computerUse.status()
-    expect(status).not.toHaveProperty('authorizationMode')
+    for (const field of [
+      'authorizationMode',
+      'stopped',
+      'stopReason',
+      'killSwitch',
+      'appLists',
+    ])
+      expect(status).not.toHaveProperty(field)
   })
 
   it('reports a URL-free computer use summary in diagnostics', async () => {
@@ -160,11 +160,11 @@ describe('computer use host wiring', () => {
     expect(payload.computerUse).toMatchObject({
       supported: true,
       enabled: true,
-      stopped: false,
       targets: 0,
       drivers: [{ driver: 'embedded-browser', available: true }],
     })
     expect(payload.computerUse).not.toHaveProperty('grants')
+    expect(payload.computerUse).not.toHaveProperty('killSwitch')
     // Counts only: no origin, URL or grant detail leaves the machine.
     expect(JSON.stringify(payload)).not.toContain('secret-origin')
     const { api: bare } = await api()
@@ -193,7 +193,6 @@ describe('computer use master switch', () => {
     expect(store.get()).toEqual({
       enabled: false,
       drivers: {},
-      appLists: { protected: [], highRisk: [], sensitive: [] },
       downloadRetentionDays: 30,
     })
     store.update({ enabled: true, drivers: { 'embedded-browser': true } })
@@ -206,24 +205,80 @@ describe('computer use master switch', () => {
     expect(new ComputerUseConfigStore(root).get()).toEqual({
       enabled: true,
       drivers: { 'embedded-browser': true },
-      appLists: { protected: [], highRisk: [], sensitive: [] },
       downloadRetentionDays: 30,
     })
     writeFileSync(
       path,
       '{"schemaVersion":1,"enabled":true,"drivers":{"desktop":false}}',
     )
-    // An older file without lists or retention reads with the defaults.
+    // An older file without retention reads with the default.
     expect(new ComputerUseConfigStore(root).get()).toEqual({
       enabled: true,
       drivers: { desktop: false },
-      appLists: { protected: [], highRisk: [], sensitive: [] },
       downloadRetentionDays: 30,
     })
     store.update({ downloadRetentionDays: 7 })
     expect(new ComputerUseConfigStore(root).get().downloadRetentionDays).toBe(7)
     writeFileSync(path, '{"schemaVersion":1,"enabled":"yes"}')
     expect(new ComputerUseConfigStore(root).get().enabled).toBe(false)
+  })
+
+  it('drops the retired app lists and stop shortcut once, never quarantining the file', () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-cu-lists-'))
+    const path = join(root, COMPUTER_USE_CONFIG_FILE)
+    writeFileSync(
+      path,
+      JSON.stringify({
+        schemaVersion: 1,
+        enabled: true,
+        drivers: { desktop: true },
+        downloadRetentionDays: 7,
+        killSwitchAccelerator: 'Control+Alt+Command+.',
+        appLists: {
+          protected: ['com.example.Bank', 'com.example.Bank'],
+          highRisk: ['com.googlecode.iterm2'],
+          sensitive: ['com.1password.1password'],
+        },
+      }),
+    )
+    const store = new ComputerUseConfigStore(root)
+    expect(store.get()).toEqual({
+      enabled: true,
+      drivers: { desktop: true },
+      downloadRetentionDays: 7,
+    })
+    // Written back once without the retired fields; nothing quarantined.
+    const saved = JSON.parse(readFileSync(path, 'utf8'))
+    expect(saved).not.toHaveProperty('appLists')
+    expect(saved).not.toHaveProperty('killSwitchAccelerator')
+    expect(readdirSync(root).some((name) => name.includes('corrupt'))).toBe(
+      false,
+    )
+    // The apps the user kept from Emperor are remembered for one notice.
+    expect(store.retiredProtectedApps()).toEqual(['com.example.Bank'])
+    expect(new ComputerUseConfigStore(root).retiredProtectedApps()).toEqual([
+      'com.example.Bank',
+    ])
+    store.acknowledgeRetiredProtectedApps()
+    expect(store.retiredProtectedApps()).toEqual([])
+    expect(new ComputerUseConfigStore(root).retiredProtectedApps()).toEqual([])
+
+    // Malformed leftovers are dropped too, never a reason to switch off.
+    writeFileSync(
+      path,
+      JSON.stringify({
+        schemaVersion: 1,
+        enabled: true,
+        killSwitchAccelerator: 42,
+        appLists: { protected: 'x', extra: [1] },
+      }),
+    )
+    const messy = new ComputerUseConfigStore(root)
+    expect(messy.get().enabled).toBe(true)
+    expect(messy.retiredProtectedApps()).toEqual([])
+    expect(readdirSync(root).some((name) => name.includes('corrupt'))).toBe(
+      false,
+    )
   })
 
   it('switches a saved per-item mode off once, with a notice until the user switches on', () => {
@@ -321,19 +376,14 @@ describe('computer use master switch', () => {
     ).toHaveLength(2)
   })
 
-  it('switches one driver, keeps its tools and persists the stop shortcut', async () => {
+  it('switches one driver and keeps its tools', async () => {
     const root = mkdtempSync(join(tmpdir(), 'emperor-cu-driver-'))
     const stateRoot = join(root, 'home')
-    const shortcuts: Array<string | null> = []
     const port = new FakeComputerUsePort()
     const { api: core } = await api({
       root,
       stateRoot,
-      extra: {
-        computerUsePort: port,
-        computerUseKillSwitchChanged: (accelerator: string | null) =>
-          shortcuts.push(accelerator),
-      },
+      extra: { computerUsePort: port },
     })
     await core.computerUse.setEnabled(true)
     const view = await core.computerUse.setDriverEnabled({
@@ -353,12 +403,9 @@ describe('computer use master switch', () => {
       driver: 'embedded-browser',
       enabled: true,
     })
-
-    await core.computerUse.setKillSwitch({ accelerator: 'Control+Shift+K' })
-    expect(core.host.computerUseKillSwitchAccelerator()).toBe('Control+Shift+K')
-    await core.computerUse.setKillSwitch({ accelerator: null })
-    expect(core.host.computerUseKillSwitchAccelerator()).toBeUndefined()
-    expect(shortcuts).toEqual(['Control+Shift+K', null])
+    expect(
+      new ComputerUseConfigStore(computerUseStateDir(stateRoot)).get().drivers,
+    ).toEqual({ 'embedded-browser': true })
   })
 
   it('switches off while a grant card is pending, refusing the card', async () => {
@@ -481,7 +528,7 @@ describe('computer use browser profiles', () => {
     expect(refusal).toBeDefined()
   })
 
-  it('shows a corrupt grants file as stopped until the user resumes', async () => {
+  it('starts over a corrupt grants file with no grants, usable at once', async () => {
     const root = mkdtempSync(join(tmpdir(), 'emperor-cu-corrupt-'))
     const stateRoot = join(root, 'home')
     const dir = computerUseStateDir(stateRoot)
@@ -495,15 +542,12 @@ describe('computer use browser profiles', () => {
         computerUseSettings: () => ({ enabled: true }),
       },
     })
-    const stopped = await core.computerUse.status()
-    expect(stopped).toMatchObject({
-      stopped: true,
-      stopReason: 'corrupt-store',
-    })
-    await core.computerUse.resume()
-    const resumed = await core.computerUse.status()
-    expect(resumed.stopped).toBe(false)
-    expect(resumed.stopReason).toBeUndefined()
+    const status = await core.computerUse.status()
+    expect(status).toMatchObject({ enabled: true })
+    expect(status.drivers[0]).toMatchObject({ available: true })
+    expect(status).not.toHaveProperty('stopReason')
+    expect(core.host.computerUse!.grants.list()).toEqual([])
+    expect(readdirSync(dir).some((name) => name.includes('corrupt'))).toBe(true)
   })
 
   it('clears and deletes a profile: closes its tabs, wipes it, revokes its grants', async () => {

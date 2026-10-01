@@ -115,13 +115,11 @@ test('Windows and Linux say 暂不支持', async ({ page }) => {
   await shot(page, 'voice-unsupported')
 })
 
-test('the shortcut editor refuses the emergency stop', async ({ page }) => {
+test('the shortcut editor refuses an Emperor shortcut', async ({ page }) => {
   const dialog = await openVoice(page)
   await dialog.getByTestId('dictation-shortcut-edit').click()
-  await dialog
-    .getByTestId('dictation-shortcut-capture')
-    .press('Control+Alt+Meta+Period')
-  await expect(dialog.getByRole('alert')).toContainText('急停')
+  await dialog.getByTestId('dictation-shortcut-capture').press('Meta+K')
+  await expect(dialog.getByRole('alert')).toContainText('搜索')
   await expect(dialog.getByRole('button', { name: '保存' })).toBeDisabled()
   await shot(page, 'voice-conflict')
 })

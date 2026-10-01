@@ -78,7 +78,6 @@ export function withPreviewPointer(
 
 interface PreviewPointerStatus {
   readonly enabled: boolean
-  readonly stopped: boolean
   readonly targets: readonly {
     readonly targetId: string
     readonly driver: string
@@ -89,13 +88,13 @@ interface PreviewPointerStatus {
 
 /**
  * Only for a desktop window or built-in tab the Agent controls, while
- * computer use is on and not stopped.
+ * computer use is on.
  */
 export function previewPointerAllowed(
   status: PreviewPointerStatus | null,
   targetId: string,
 ): boolean {
-  if (!status?.enabled || status.stopped) return false
+  if (!status?.enabled) return false
   const target = status.targets.find((item) => item.targetId === targetId)
   return (
     target !== undefined &&

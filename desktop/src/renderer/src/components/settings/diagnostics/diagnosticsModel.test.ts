@@ -774,7 +774,7 @@ describe('computer use diagnostics row', () => {
       .find((section) => section.id === 'desktop')!
       .rows.find((item) => item.id === 'computer-use')
 
-  it('reads off, unsupported, enabled and stopped states', () => {
+  it('reads off, unsupported and enabled states, with no stop shortcut', () => {
     expect(row({ supported: false })).toMatchObject({
       value: '不可用',
       tone: 'muted',
@@ -792,37 +792,22 @@ describe('computer use diagnostics row', () => {
       },
     ]
     expect(
-      row({
-        supported: true,
-        enabled: true,
-        stopped: false,
-        drivers,
-        targets: 1,
-        killSwitch: { accelerator: 'Control+Alt+Command+.', registered: true },
-      }),
+      row({ supported: true, enabled: true, drivers, targets: 1 }),
     ).toMatchObject({
       value: '已开启',
       tone: 'ok',
-      detail: '内置浏览器（基础） · 1 个目标 · 急停 ⌃⌥⌘.',
+      detail: '内置浏览器（基础） · 1 个目标',
     })
     expect(
       row({
         supported: true,
         enabled: true,
-        stopped: true,
-        drivers,
-        killSwitch: {
-          accelerator: 'Control+Alt+Shift+.',
-          registered: false,
-          error: '快捷键已被其他应用占用',
-        },
+        drivers: [{ ...drivers[0], available: false }],
       }),
     ).toMatchObject({
-      value: '已急停',
+      value: '已开启',
       tone: 'warn',
-      detail: expect.stringContaining(
-        '急停快捷键未注册：快捷键已被其他应用占用',
-      ),
+      detail: '没有可用驱动 · 0 个目标',
     })
   })
 })

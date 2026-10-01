@@ -14,17 +14,15 @@ import {
 } from './settingsHeader'
 import VoiceSettingsSection from './VoiceSettingsSection.vue'
 
-const { dictationStatus, openDictationPrivacy, core } = vi.hoisted(() => ({
+const { dictationStatus, openDictationPrivacy } = vi.hoisted(() => ({
   dictationStatus: vi.fn(),
   openDictationPrivacy: vi.fn(),
-  core: vi.fn(),
 }))
 
 vi.mock('../../api/dictation', () => ({
   dictationStatus,
   openDictationPrivacy,
 }))
-vi.mock('../../api/http', () => ({ core }))
 
 const ready: DictationStatus = {
   supported: true,
@@ -107,9 +105,6 @@ function saved(): Record<string, unknown> {
 
 beforeEach(() => {
   vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel')
-  core.mockResolvedValue({
-    killSwitch: { accelerator: 'Control+Alt+Command+.', registered: false },
-  })
   dictationStatus.mockResolvedValue(ready)
   openDictationPrivacy.mockResolvedValue(true)
 })
@@ -223,7 +218,7 @@ describe('VoiceSettingsSection', () => {
     expect(microphone.textContent).toContain('先用系统默认')
   })
 
-  it('refuses the emergency-stop shortcut, then saves a free one', async () => {
+  it('refuses an Emperor shortcut, then saves a free one', async () => {
     const root = await mount()
     const shortcut = row(root, '快捷键')
     expect(shortcut.textContent).toContain('⇧⌘D')
@@ -238,16 +233,14 @@ describe('VoiceSettingsSection', () => {
     )!
     capture.dispatchEvent(
       new KeyboardEvent('keydown', {
-        key: '.',
-        code: 'Period',
-        ctrlKey: true,
-        altKey: true,
+        key: 'k',
+        code: 'KeyK',
         metaKey: true,
         bubbles: true,
       }),
     )
     await settle()
-    expect(row(root, '快捷键').textContent).toContain('急停')
+    expect(row(root, '快捷键').textContent).toContain('搜索')
     const save = () =>
       [...row(root, '快捷键').querySelectorAll('button')].find(
         (button) => button.textContent?.trim() === '保存',

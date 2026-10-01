@@ -90,7 +90,6 @@ function kit(
   const captures: boolean[] = []
   const restored: string[] = []
   const driverListeners: Array<(event: DriverEvent) => void> = []
-  let sensitiveApps: string[] = []
   const driver: NativeDesktopDriver = {
     driver: 'desktop',
     capability: () => ({
@@ -246,10 +245,7 @@ function kit(
       bytes: bytes.byteLength,
     }),
     cancelGrantCards: () => undefined,
-    settings: () => ({
-      enabled: true,
-      appLists: { sensitive: sensitiveApps },
-    }),
+    settings: () => ({ enabled: true }),
     now: () => new Date(nowMs),
   })
   const gateDeps: GateDeps = {
@@ -346,9 +342,6 @@ function kit(
     captures,
     restored,
     bringForward,
-    markSensitive(appId: string) {
-      sensitiveApps = [appId]
-    },
     emitDriver(event: DriverEvent) {
       for (const listener of driverListeners) listener(event)
     },
@@ -705,7 +698,7 @@ describe('desktop_* tools', () => {
     expect(k.binds).toBe(0)
   })
 
-  it('marks Terminal as high risk in the bind requirement', async () => {
+  it('binds Terminal like any other app (no high-risk mark)', async () => {
     const k = kit()
     k.setWindow({
       windowRef: 'terminal-1',
@@ -730,8 +723,8 @@ describe('desktop_* tools', () => {
       driver: 'desktop',
       appId: 'com.apple.Terminal',
       windowRef: 'terminal-1',
-      highRiskApp: true,
     })
+    expect(classified.requirement).not.toHaveProperty('highRiskApp')
   })
 
   it('routes desktop actions through service.act, then reports the read-only driver error', async () => {
@@ -823,21 +816,10 @@ describe('desktop_* tools', () => {
     await k.run('desktop_bind', { windowRef: 'window-1' })
     k.service.pauseForUiDisconnect()
     k.service.resumeAfterUiReconnect()
-    // The emergency stop turns the picture off and releases the window (its
-    // release turns it off once more); a resume binds nothing again.
-    await k.service.emergencyStop()
-    k.service.resume()
-    expect(k.captures).toEqual([true, false, true, false, false])
-
-    const sensitive = kit(false, true, true)
-    sensitive.markSensitive('com.example.Writer')
-    await sensitive.run('desktop_list_windows')
-    await sensitive.run('desktop_bind', { windowRef: 'window-1' })
-    expect(sensitive.captures).toEqual([false])
-    expect(sensitive.service.listTargets()[0]?.previewBlocked).toBe(
-      'sensitive-app',
-    )
     expect(k.service.listTargets()[0]?.previewBlocked).toBeUndefined()
+    // Switching off releases the window, which turns the picture off.
+    await k.service.closeAll('revoked')
+    expect(k.captures).toEqual([true, false, true, false])
   })
 
   it('keeps working after the menu-bar Stop Sharing, without reopening the stream', async () => {
@@ -858,10 +840,9 @@ describe('desktop_* tools', () => {
     })
     expect(observed.denied).toBeUndefined()
     expect(JSON.stringify(observed)).toContain('stopped screen sharing')
-    // The picture never comes back for this binding; the emergency stop
-    // then releases the window like a task's end.
-    await k.service.emergencyStop()
-    k.service.resume()
+    // The picture never comes back for this binding; switching off then
+    // releases the window like a task's end.
+    await k.service.closeAll('revoked')
     expect(k.captures.filter(Boolean)).toEqual([true])
     const stale = await k.run('desktop_observe', {
       targetId: 'desktop-target-1',
@@ -1124,8 +1105,8 @@ describe('desktop_* tools', () => {
       callId: 'type-1',
       toolName: 'desktop_type',
     }).requirement
-    // Marked, but not confirmed input by input (the user's decision).
-    expect(requirement).toMatchObject({ highRiskApp: true })
+    // An ordinary app: not marked, not confirmed input by input.
+    expect(requirement).not.toHaveProperty('highRiskApp')
     expect(requirement.confirmEachTime).toBeUndefined()
     const press = GUI_TOOL_CATALOG.desktop_press!.classify!({
       args: { targetId: 'desktop-target-1', key: 'Enter' },

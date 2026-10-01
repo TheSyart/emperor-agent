@@ -21,7 +21,6 @@ import type {
   SubagentSupervisorDiagnosticsPayload,
   WorkspacePolicyDiagnosticsPayload,
 } from '../../../types'
-import { acceleratorLabel } from '../computer/shortcut'
 
 export type DiagnosticTone = 'ok' | 'warn' | 'error' | 'muted'
 
@@ -1201,22 +1200,14 @@ function computerUseRow(
   const drivers = (computerUse.drivers ?? [])
     .filter((driver) => driver.available)
     .map((driver) => driver.label)
-  const shortcut = computerUse.killSwitch
-  const shortcutText = shortcut?.registered
-    ? `急停 ${acceleratorLabel(shortcut.accelerator)}`
-    : `急停快捷键未注册${shortcut?.error ? `：${shortcut.error}` : ''}`
   return {
     ...base,
-    value: computerUse.stopped ? '已急停' : '已开启',
+    value: '已开启',
     detail: joinParts([
       drivers.length ? drivers.join('、') : '没有可用驱动',
       `${computerUse.targets ?? 0} 个目标`,
-      shortcutText,
     ]),
-    tone:
-      computerUse.stopped || !shortcut?.registered || drivers.length === 0
-        ? 'warn'
-        : 'ok',
+    tone: drivers.length === 0 ? 'warn' : 'ok',
   }
 }
 

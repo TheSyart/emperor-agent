@@ -2,16 +2,12 @@ import {
   app,
   BrowserWindow,
   dialog,
-  globalShortcut,
   ipcMain,
-  Menu,
-  nativeImage,
   protocol,
   net,
   session,
   shell,
   safeStorage,
-  Tray,
   type OpenDialogOptions,
   type Rectangle,
 } from 'electron'
@@ -65,16 +61,6 @@ import {
   listImportSources,
 } from './browser-import'
 import { registerDesktopCapabilityIpc } from './desktop-capability-ipc'
-import {
-  createKillSwitch,
-  defaultKillSwitchAccelerator,
-  type KillSwitch,
-} from './computer-use/kill-switch'
-import {
-  createStopEntries,
-  type StopEntries,
-  type StopMenuItem,
-} from './computer-use/stop-entries'
 import { PointerOverlay } from './computer-use/pointer-overlay'
 import { pointerAllowed } from './computer-use/pointer-overlay-view'
 import { createPreviewPointerRelay } from './computer-use/preview-pointer'
@@ -172,9 +158,6 @@ let credentialVault: CredentialVault | null = null
 let dictation: DictationService | null = null
 let agentPreview: AgentPreview | null = null
 let desktopPreview: DesktopPreview | null = null
-let killSwitch: KillSwitch | null = null
-let stopEntries: StopEntries | null = null
-let stopTray: Tray | null = null
 let pointerOverlay: PointerOverlay | null = null
 let didLoadRetry = false
 const trustedRendererPolicy = createTrustedRendererPolicy({
@@ -200,17 +183,13 @@ const trustedPetPolicy = createTrustedRendererPolicy({
  * What shows that the Agent works: the helper's capture streams give macOS
  * its purple sharing mark, the conversation shows a read-only preview, and
  * the virtual pointer follows desktop actions. Emperor draws no "正在操控"
- * bar of its own (2026-09-29); stopping stays with the kill switch, the
- * Dock menu and the tray fallback kept in sync here.
+ * bar of its own (2026-09-29) and has no emergency stop (2026-10-01): the
+ * master switch and stopping the conversation end the work. Here the
+ * on-screen pointer goes away once it may no longer show.
  */
 function syncControlIndicators(): void {
   const view = coreApi?.host.computerUse?.service.statusView() ?? null
   if (!pointerAllowed(view)) pointerOverlay?.clear()
-  stopEntries?.sync({
-    enabled: view?.enabled === true,
-    stopped: view?.stopped === true,
-    shortcutRegistered: killSwitch?.status().registered === true,
-  })
 }
 
 /**
@@ -239,55 +218,6 @@ function startDownloadRetention(): void {
   sweep()
   retentionTimer ??= setInterval(sweep, 6 * 60 * 60 * 1000)
   retentionTimer.unref?.()
-}
-
-function stopMenu(items: readonly StopMenuItem[]): Menu {
-  return Menu.buildFromTemplate(
-    items.map((item) => ({
-      label: item.label,
-      enabled: item.enabled,
-      ...(item.click === undefined ? {} : { click: item.click }),
-    })),
-  )
-}
-
-/** Dock menu and (when the shortcut is taken) a tray icon to stop (§6.6). */
-function createElectronStopEntries(): StopEntries {
-  return createStopEntries(
-    {
-      setDockMenu: (items) => {
-        app.dock?.setMenu(stopMenu(items ?? []))
-      },
-      showTray: (items, tooltip) => {
-        if (stopTray === null) {
-          const icon =
-            process.platform === 'darwin'
-              ? nativeImage.createFromNamedImage('NSStopProgressTemplate')
-              : nativeImage
-                  .createFromPath(appIconPath)
-                  .resize({ width: 16, height: 16 })
-          stopTray = new Tray(icon)
-        }
-        stopTray.setToolTip(tooltip)
-        stopTray.setContextMenu(stopMenu(items))
-      },
-      hideTray: () => {
-        stopTray?.destroy()
-        stopTray = null
-      },
-    },
-    {
-      stop: () => {
-        void coreApi?.computerUse.stop()
-      },
-      showApp: () => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.show()
-          mainWindow.focus()
-        } else if (runtimeReady) createWindow()
-      },
-    },
-  )
 }
 
 ipcMain.on(TERMINAL_SUBSCRIPTION_CHANNEL, (event, payload: unknown) => {
@@ -584,13 +514,6 @@ function createComputerUseHost(): void {
     credentials: () => credentialVault,
     desktop: () => nativeDesktop,
     indicate: () => queueMicrotask(syncControlIndicators),
-  })
-  killSwitch = createKillSwitch({
-    shortcuts: globalShortcut,
-    platform: process.platform,
-    onTrigger: () => {
-      void coreApi?.computerUse.stop()
-    },
   })
 }
 
@@ -1022,23 +945,7 @@ async function startup(): Promise<void> {
         ...(computerUsePort
           ? {
               computerUsePort,
-              computerUseKillSwitch: () =>
-                killSwitch?.status() ?? { accelerator: '', registered: false },
-              // The emergency-stop shortcut is held only while computer use
-              // is on, so it never steals the combination otherwise.
-              computerUseEnabledChanged: (enabled: boolean) => {
-                if (enabled) killSwitch?.register()
-                else killSwitch?.unregister()
-                syncControlIndicators()
-              },
-              // Settings › 电脑操作 changed the stop shortcut: applied at
-              // once while on, remembered while off.
-              computerUseKillSwitchChanged: (accelerator: string | null) => {
-                killSwitch?.setAccelerator(
-                  accelerator ?? defaultKillSwitchAccelerator(process.platform),
-                )
-                syncControlIndicators()
-              },
+              computerUseEnabledChanged: () => syncControlIndicators(),
             }
           : {}),
         terminalHost: new NodePtyHost(),
@@ -1052,11 +959,6 @@ async function startup(): Promise<void> {
     })
     const core = coreApi
     await browserPreferences.load(() => core.browser.preferences())
-    const savedAccelerator = coreApi.host.computerUseKillSwitchAccelerator()
-    if (savedAccelerator !== undefined)
-      killSwitch?.setAccelerator(savedAccelerator)
-    if (coreApi.host.computerUse?.enabled === true) killSwitch?.register()
-    if (computerUsePort) stopEntries ??= createElectronStopEntries()
     syncControlIndicators()
     startDownloadRetention()
     registerDesktopCapabilityIpc({
@@ -1336,8 +1238,6 @@ app.on('before-quit', () => {
 })
 
 app.on('will-quit', () => {
-  killSwitch?.dispose()
-  stopEntries?.dispose()
   dictation?.dispose()
 })
 

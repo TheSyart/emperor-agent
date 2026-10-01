@@ -103,10 +103,9 @@ describe('pointer overlay view', () => {
       state: 'attached',
       control: 'agent',
     }
-    const status = { enabled: true, stopped: false, targets: [target] }
+    const status = { enabled: true, targets: [target] }
     expect(pointerAllowed(status)).toBe(true)
     expect(pointerAllowed(null)).toBe(false)
-    expect(pointerAllowed({ ...status, stopped: true })).toBe(false)
     expect(pointerAllowed({ ...status, enabled: false })).toBe(false)
     for (const other of [
       { ...target, control: 'user-takeover' },

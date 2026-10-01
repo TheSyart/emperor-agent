@@ -101,9 +101,6 @@ function cancel() {
             >含回车：命令或表单会立即执行、提交。</span
           >
         </div>
-        <div v-if="presentation.highRiskApp" class="warning">
-          向终端或脚本类应用输入等于在命令沙箱之外执行命令。
-        </div>
         <div v-if="presentation.reason" class="reason">
           <span class="reason-label">来自 Agent，未经验证：</span
           >{{ presentation.reason }}

@@ -1,8 +1,3 @@
-import {
-  APP_IDENTITY,
-  APP_LIST_LIMIT,
-  KILL_SWITCH_ACCELERATOR,
-} from '../harness/computer-use/config'
 import { SITE_PERMISSION_KINDS } from '../harness/computer-use/site-permissions'
 import { validDownloadDirectory } from '../config/local-config'
 import { z } from 'zod'
@@ -881,10 +876,6 @@ export const CORE_OPERATION_REGISTRY = {
   'computerUse.status': operation(z.tuple([]), (api) =>
     api.computerUse.status(),
   ),
-  'computerUse.stop': operation(z.tuple([]), (api) => api.computerUse.stop()),
-  'computerUse.resume': operation(z.tuple([]), (api) =>
-    api.computerUse.resume(),
-  ),
   'computerUse.listProfiles': operation(z.tuple([]), (api) =>
     api.computerUse.listProfiles(),
   ),
@@ -940,40 +931,8 @@ export const CORE_OPERATION_REGISTRY = {
     ]),
     (api, [input]) => api.computerUse.setDriverEnabled(input),
   ),
-  'computerUse.setKillSwitch': operation(
-    z.tuple([
-      z
-        .object({
-          accelerator: z
-            .string()
-            .max(64)
-            .regex(KILL_SWITCH_ACCELERATOR)
-            .nullable(),
-        })
-        .strict(),
-    ]),
-    (api, [input]) => api.computerUse.setKillSwitch(input),
-  ),
-  'computerUse.setAppLists': operation(
-    z.tuple([
-      z
-        .object({
-          protected: z
-            .array(z.string().regex(APP_IDENTITY))
-            .max(APP_LIST_LIMIT)
-            .optional(),
-          highRisk: z
-            .array(z.string().regex(APP_IDENTITY))
-            .max(APP_LIST_LIMIT)
-            .optional(),
-          sensitive: z
-            .array(z.string().regex(APP_IDENTITY))
-            .max(APP_LIST_LIMIT)
-            .optional(),
-        })
-        .strict(),
-    ]),
-    (api, [input]) => api.computerUse.setAppLists(input),
+  'computerUse.acknowledgeRetiredApps': operation(z.tuple([]), (api) =>
+    api.computerUse.acknowledgeRetiredApps(),
   ),
   'computerUse.setDownloadRetention': operation(
     z.tuple([

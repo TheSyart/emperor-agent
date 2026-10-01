@@ -3,27 +3,27 @@
  * Settings › 电脑操作 — laid out like Codex's 电脑操控 (spec 00 §3.3, §6.6,
  * §6.9, revised 2026-09-29: the AI drives continuously while it is on):
  * - the master card: 电脑操作 on or off (off by default; turning it on
- *   registers the GUI tools); after an emergency stop it says 已停止 and
- *   offers 恢复. A notice explains when a saved per-item mode switched it
- *   off;
+ *   registers the GUI tools). A notice explains when a saved per-item mode
+ *   switched it off;
  * - 控制: 任意应用 (the macOS desktop driver) and Chrome 和 Edge (the
  *   extension connection), each with 管理 (its sub page) and its own
  *   switch (tools stay registered, §8.4); the stage is named only when it
- *   is not simply available;
- * - 不让 Emperor 操作的应用: the user's protected apps (添加 / 移除);
- * - 紧急停止: the shortcut (修改) and 立即停止 / 恢复.
+ *   is not simply available.
+ * Emperor operates every app but the system-protected ones; there are no
+ * app lists and no emergency stop (2026-10-01): switching off or stopping
+ * the conversation ends the work.
  * Sub pages (`useSettingsPages`):
  * - 任意应用: Emperor Computer Helper, Accessibility and Screen Recording
- *   with their repair actions (shown only when needed), the high-risk and
- *   no-screenshot app lists, and saved screenshots;
+ *   with their repair actions (shown only when needed), and saved
+ *   screenshots;
  * - Chrome 和 Edge: the extension pairing. The pairing panel stays mounted
  *   (hidden elsewhere) so the main page shows its summary, and a pairing
  *   code that starts waiting opens this page.
  * Emperor's control of the built-in browser, passwords, sign-ins, site
  * permissions and download retention live in 设置 › 浏览器.
  * Everything comes from `computerUse.status` and refreshes on the host's
- * `computer_use_changed` events. Stopping and resuming never wait on a
- * pending card (Core does not guard them).
+ * `computer_use_changed` events. Switching off never waits on a pending
+ * card (Core does not guard it).
  */
 import type { ComputerUseStatusView } from '@emperor/core/runtime-contract'
 import type {
@@ -44,7 +44,6 @@ import { core } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
 import Button from '../ui/Button.vue'
 import {
-  EmptyState,
   SettingsCard,
   SettingsGroup,
   SettingsRow,
@@ -60,12 +59,8 @@ import {
 import {
   computerUseHeadline,
   driverRows,
-  killSwitchRow,
   screenshotRow,
 } from './computer/computerUseSettingsModel'
-import KillSwitchEditor from './computer/KillSwitchEditor.vue'
-import AppIdDialog from './computer/AppIdDialog.vue'
-import AppListsSettings from './computer/AppListsSettings.vue'
 import BrowserPairingSettings from './computer/BrowserPairingSettings.vue'
 
 const ctx = useAppContext()
@@ -80,11 +75,9 @@ const error = ref('')
 const helper = ref<MacHelperStatus | null>(null)
 
 const headline = computed(() => computerUseHeadline(status.value, loaded.value))
-const killSwitch = computed(() => killSwitchRow(status.value))
 const screenshots = computed(() => screenshotRow(status.value))
 const supported = computed(() => Boolean(status.value?.supported))
 const enabled = computed(() => Boolean(status.value?.enabled))
-const stopped = computed(() => Boolean(status.value?.stopped))
 const macDesktop = computed(() => status.value?.platform === 'macos')
 
 const rows = computed(() => driverRows(status.value))
@@ -97,16 +90,12 @@ const chromeRow = computed(() =>
 
 /** The card names its state only when it is not simply on or off. */
 const cardBadge = computed(() =>
-  ['已急停', '已暂停', '不可用'].includes(headline.value.badge)
-    ? {
-        tone: headline.value.tone,
-        text:
-          headline.value.badge === '已急停' ? '已停止' : headline.value.badge,
-      }
+  headline.value.badge === '不可用'
+    ? { tone: headline.value.tone, text: headline.value.badge }
     : null,
 )
 const cardDescription = computed(() =>
-  stopped.value || !supported.value || status.value?.scopedRetired
+  !supported.value || status.value?.scopedRetired
     ? headline.value.description
     : '允许 Emperor 在对话里操作应用和网页',
 )
@@ -240,51 +229,12 @@ function setEnabled(next: boolean): void {
   void act(() => core('computerUse.setEnabled', next))
 }
 
-function stopAll(): void {
-  void act(() => core('computerUse.stop'))
-}
-
-function resumeAll(): void {
-  void act(() => core('computerUse.resume'))
-}
-
 function setDriverEnabled(
   driver: 'external-browser' | 'desktop',
   next: boolean,
 ): void {
   void act(() =>
     core('computerUse.setDriverEnabled', { driver, enabled: next }),
-  )
-}
-
-function setKillSwitch(accelerator: string | null): void {
-  void act(() => core('computerUse.setKillSwitch', { accelerator }))
-}
-
-const appLists = computed(() => ({
-  protected: status.value?.appLists?.protected ?? [],
-  highRisk: status.value?.appLists?.highRisk ?? [],
-  sensitive: status.value?.appLists?.sensitive ?? [],
-}))
-
-function setAppList(
-  kind: 'protected' | 'highRisk' | 'sensitive',
-  next: string[],
-): void {
-  void act(() => core('computerUse.setAppLists', { [kind]: next }))
-}
-
-const addingProtected = ref(false)
-
-function addProtected(id: string): void {
-  if (appLists.value.protected.includes(id)) return
-  setAppList('protected', [...appLists.value.protected, id])
-}
-
-function removeProtected(id: string): void {
-  setAppList(
-    'protected',
-    appLists.value.protected.filter((item) => item !== id),
   )
 }
 
@@ -363,7 +313,7 @@ onBeforeUnmount(() => {
   <SettingsSection
     :intro="
       page === 'apps'
-        ? '让 Emperor 操作你 Mac 上的应用所需的系统权限、另外的应用名单，以及保存的截图。'
+        ? '让 Emperor 操作你 Mac 上的应用所需的系统权限，以及保存的截图。'
         : undefined
     "
   >
@@ -467,13 +417,6 @@ onBeforeUnmount(() => {
           </div>
         </SettingsRow>
       </SettingsGroup>
-      <AppListsSettings
-        v-if="macDesktop"
-        :lists="appLists"
-        :busy="busy"
-        :kinds="['highRisk', 'sensitive']"
-        @change="setAppList"
-      />
       <SettingsGroup title="截图">
         <SettingsRow
           title="已保存的截图"
@@ -519,14 +462,6 @@ onBeforeUnmount(() => {
           >
         </template>
         <template #actions>
-          <Button
-            v-if="stopped"
-            size="sm"
-            variant="outline"
-            :disabled="busy"
-            @click="resumeAll"
-            >恢复</Button
-          >
           <Switch
             id="computer-use-enabled"
             :model-value="enabled"
@@ -599,76 +534,6 @@ onBeforeUnmount(() => {
           </div>
         </SettingsRow>
       </SettingsGroup>
-
-      <SettingsGroup v-if="macDesktop" title="不让 Emperor 操作的应用">
-        <template #actions>
-          <Button
-            size="sm"
-            variant="outline"
-            :disabled="busy"
-            data-action="add-protected-app"
-            @click="addingProtected = true"
-            >添加</Button
-          >
-        </template>
-        <EmptyState
-          v-if="!appLists.protected.length"
-          compact
-          title="暂无"
-          description="系统授权界面和 Emperor 自身已内置保护"
-        />
-        <SettingsRow
-          v-for="id in appLists.protected"
-          :key="id"
-          :title="id"
-          :data-protected-app="id"
-          dense
-        >
-          <Button
-            size="sm"
-            variant="outline"
-            :disabled="busy"
-            :aria-label="`移除 ${id}`"
-            @click="removeProtected(id)"
-            >移除</Button
-          >
-        </SettingsRow>
-      </SettingsGroup>
-
-      <SettingsGroup title="紧急停止">
-        <SettingsRow
-          :title="stopped ? '已停止' : '停止所有操作'"
-          :description="
-            stopped
-              ? '所有窗口和标签页已释放（没有关闭）；恢复后 Emperor 可以重新接手。'
-              : killSwitch.description
-          "
-        >
-          <div class="cu-control">
-            <KillSwitchEditor
-              :accelerator="status?.killSwitch.accelerator ?? ''"
-              :busy="busy"
-              @save="setKillSwitch"
-            />
-            <Button
-              v-if="stopped"
-              size="sm"
-              variant="outline"
-              :disabled="busy"
-              @click="resumeAll"
-              >恢复</Button
-            >
-            <Button
-              v-else
-              size="sm"
-              variant="danger"
-              :disabled="busy || !enabled"
-              @click="stopAll"
-              >立即停止</Button
-            >
-          </div>
-        </SettingsRow>
-      </SettingsGroup>
     </template>
 
     <!-- Chrome 和 Edge: always mounted, for the summary and the auto-open. -->
@@ -682,14 +547,6 @@ onBeforeUnmount(() => {
       />
     </div>
   </SettingsSection>
-
-  <AppIdDialog
-    v-model:open="addingProtected"
-    title="添加不让 Emperor 操作的应用"
-    description="Emperor 看不到也不能操作这些应用，例如密码管理器、网银客户端。"
-    :busy="busy"
-    @save="addProtected"
-  />
 </template>
 
 <style scoped>

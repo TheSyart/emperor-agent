@@ -195,19 +195,15 @@ const MAC_RESERVED: ReadonlyArray<readonly [string, string]> = [
 
 /**
  * Why `accelerator` cannot be the dictation shortcut, or null: it needs ⌃,
- * ⌥ or ⌘, and must not be the emergency stop, an Emperor shortcut, or one
- * that macOS or the app menu keeps.
+ * ⌥ or ⌘, and must not be an Emperor shortcut or one that macOS or the app
+ * menu keeps.
  */
 export function shortcutConflict(
   accelerator: string,
-  context: { killSwitch: string | null; mac: boolean },
+  context: { mac: boolean },
 ): string | null {
   const chord = parseAccelerator(accelerator)
   if (!chord) return '快捷键要包含 ⌃、⌥ 或 ⌘'
-  const killSwitch =
-    context.killSwitch === null ? null : parseAccelerator(context.killSwitch)
-  if (killSwitch && sameChord(killSwitch, chord))
-    return '与电脑操作的急停快捷键相同'
   for (const binding of SHORTCUTS)
     if (sameChord(bindingChord(binding, context.mac), chord))
       return `与 Emperor 的「${binding.label}」快捷键相同`

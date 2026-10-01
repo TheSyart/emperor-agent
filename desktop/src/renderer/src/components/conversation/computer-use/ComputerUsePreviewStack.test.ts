@@ -73,15 +73,13 @@ function target(over: Partial<UiTargetView> = {}): UiTargetView {
   }
 }
 
-function setTargets(targets: UiTargetView[], stopped = false): void {
+function setTargets(targets: UiTargetView[]): void {
   status = {
     supported: true,
     enabled: true,
     platform: 'macos',
-    stopped,
     drivers: [],
     targets,
-    killSwitch: { accelerator: 'Control+Alt+Command+.', registered: true },
   }
 }
 
@@ -346,12 +344,12 @@ describe('ComputerUsePreviewStack', () => {
     ).toEqual(['t-w', 'tab-1'])
   })
 
-  it('never shows a sensitive app, and dates the latest screenshot otherwise', async () => {
+  it('never shows a window that received a credential, and dates the latest screenshot otherwise', async () => {
     const takenAt = new Date()
     takenAt.setHours(9, 5, 0, 0)
     setTargets([
       target({
-        previewBlocked: 'sensitive-app',
+        previewBlocked: 'credential-filled',
         lastScreenshot: {
           attachmentId: 'att_secret',
           width: 1,
@@ -362,7 +360,7 @@ describe('ComputerUsePreviewStack', () => {
     ])
     const root = await mount()
     expect(card(root)?.querySelector('img')).toBeNull()
-    expect(root.textContent).toContain('不可预览：你标记的敏感应用')
+    expect(root.textContent).toContain('不可预览：已代填凭据')
     expect(bridge.agentPreviewStart).not.toHaveBeenCalled()
 
     setTargets([
@@ -409,19 +407,13 @@ describe('ComputerUsePreviewStack', () => {
     )
   })
 
-  it('marks cards waiting for the user and emergency-stopped cards', async () => {
+  it('marks cards waiting for the user', async () => {
     awaiting.value = true
     setTargets([target()])
     const root = await mount()
     expect(card(root)?.querySelector('.cu-card-status')?.textContent).toBe(
       '等待回复',
     )
-    setTargets([target()], true)
-    await announce()
-    expect(card(root)?.querySelector('.cu-card-status')?.textContent).toBe(
-      '已急停',
-    )
-    expect(bridge.agentPreviewStop).toHaveBeenCalledWith('t-1')
   })
 
   it('drops the whole group once the task released it, freeing every frame', async () => {
@@ -622,7 +614,7 @@ describe('ComputerUsePreviewStack', () => {
     await point('t-1', 0.5, 0.5)
     expect(card(root)?.querySelector('img')).not.toBeNull()
     expect(arrow(root)).toBeNull()
-    setTargets([target({ previewBlocked: 'sensitive-app' })])
+    setTargets([target({ previewBlocked: 'credential-filled' })])
     await announce()
     await point('t-1', 0.5, 0.5)
     expect(arrow(root)).toBeNull()

@@ -21,7 +21,7 @@ export interface GrantAnswer {
   readonly backgroundAllowed: boolean
   /** Why a non-denial was turned into a denial. */
   readonly invalid?: string
-  /** The card was dismissed (session stop, emergency stop, abort). */
+  /** The card was dismissed (session stop, switched off, abort). */
   readonly cancelled?: true
 }
 

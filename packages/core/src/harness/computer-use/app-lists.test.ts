@@ -1,6 +1,7 @@
-// The user's own protected / high-risk / sensitive app lists (spec 01 §4.4,
-// §5.2): enforced by the kernel on top of the built-in lists.
-import { mkdtempSync } from 'node:fs'
+// The app lists were retired (2026-10-01): Emperor operates every app except
+// the system-protected ones (spec 01 §4.4), with no high-risk mark and no
+// screenshot ban; apps the user had kept out are named once in Settings.
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -18,11 +19,7 @@ import type {
   TargetSnapshot,
 } from './port'
 import { defaultHighImpactClassifier } from './risk'
-import {
-  ComputerUseService,
-  type AppListKind,
-  type OpContext,
-} from './service/service'
+import { ComputerUseService, type OpContext } from './service/service'
 import { TINY_PNG } from './testing/fake-browser-driver'
 import { FakeComputerUsePort } from './testing/fake-port'
 import { GUI_TOOL_CATALOG } from './tools/catalog'
@@ -48,8 +45,8 @@ const windows: DesktopWindowInfo[] = [
   },
   {
     windowRef: 'w-shell',
-    appId: 'com.example.Shell',
-    appName: 'Shell',
+    appId: 'com.apple.Terminal',
+    appName: 'Terminal',
     pid: 13,
     title: 'zsh',
     minimized: false,
@@ -57,7 +54,7 @@ const windows: DesktopWindowInfo[] = [
   },
 ]
 
-function setup(lists: Partial<Record<AppListKind, readonly string[]>>) {
+function setup() {
   const store = new SessionLogStore({ root: '/tmp/unused', persist: false })
   store.create({ id: 's1' })
   const grants = new GrantStore({
@@ -167,7 +164,7 @@ function setup(lists: Partial<Record<AppListKind, readonly string[]>>) {
       bytes: bytes.byteLength,
     }),
     cancelGrantCards: () => undefined,
-    settings: () => ({ enabled: true, appLists: lists }),
+    settings: () => ({ enabled: true }),
   })
   return {
     service,
@@ -213,42 +210,46 @@ const bindCtx = (window: DesktopWindowInfo): OpContext => ({
   },
 })
 
-describe('user app lists', () => {
-  it('hides and refuses apps the user added to the protected list', async () => {
-    const k = setup({ protected: ['com.example.Bank'] })
+describe('every app but the system-protected ones', () => {
+  it('lists and binds any app; only the system-protected ones stay out of reach', async () => {
+    const k = setup()
     const signal = new AbortController().signal
     expect(
-      (await k.service.listDesktopApps(signal)).map((app) => app.appId),
-    ).not.toContain('com.example.Bank')
+      (await k.service.listDesktopApps(signal)).map((app) => app.appId).sort(),
+    ).toEqual(['com.apple.Terminal', 'com.example.Bank', 'com.example.Notes'])
     expect(
       (await k.service.listDesktopWindows(identity(true), undefined, signal))
         .map((window) => window.appId)
         .sort(),
-    ).toEqual(['com.example.Notes', 'com.example.Shell'])
-    // A guessed ref of the hidden window is refused as protected.
-    expect(() => k.service.desktopCandidate(identity(true), 'w-bank')).toThrow(
-      /protected/,
+    ).toEqual(['com.apple.Terminal', 'com.example.Bank', 'com.example.Notes'])
+    expect(k.service.desktopCandidate(identity(true), 'w-bank').appId).toBe(
+      'com.example.Bank',
     )
-    expect(k.service.isProtectedApp('com.example.Bank')).toBe(true)
-    // The built-in list still applies.
-    expect(k.service.isProtectedApp('com.apple.keychainaccess')).toBe(true)
-    expect(k.service.isProtectedApp('com.example.Notes')).toBe(false)
+    expect(k.service.isProtectedApp('com.example.Bank')).toBe(false)
+    // The system list stays: Emperor never grants itself permissions or
+    // types your password.
+    for (const appId of [
+      'com.apple.keychainaccess',
+      'com.apple.Passwords',
+      'com.apple.systempreferences',
+      'com.apple.SecurityAgent',
+      'com.apple.loginwindow',
+      'com.emperor.agent.desktop',
+    ])
+      expect(k.service.isProtectedApp(appId)).toBe(true)
   })
 
-  it('reads a sensitive app as structure only and never captures it', async () => {
-    const k = setup({ sensitive: ['com.example.Notes'] })
+  it('reads any app with its text and captures it', async () => {
+    const k = setup()
     const signal = new AbortController().signal
     await k.service.listDesktopWindows(identity(true), undefined, signal)
     const record = await k.service.bindDesktop(bindCtx(windows[1]!), 'w-notes')
     const observation = await k.service.observe(ctx(), {
       targetId: record.targetId,
     })
-    expect(k.observedWithText()).toBe(false)
-    expect(JSON.stringify(observation)).not.toContain('dear diary')
-    expect(observation.elements[0]).not.toHaveProperty('value')
-    expect(observation.redactions).toBe(1)
-    expect(observation.notes?.join(' ')).toContain('sensitive')
-    // Refused before any card, and in the kernel as well.
+    expect(k.observedWithText()).toBe(true)
+    expect(JSON.stringify(observation)).toContain('dear diary')
+    expect(observation.redactions).toBe(0)
     expect(() =>
       GUI_TOOL_CATALOG.desktop_screenshot!.classify!({
         args: { targetId: record.targetId },
@@ -258,19 +259,19 @@ describe('user app lists', () => {
         callId: 'c',
         toolName: 'desktop_screenshot',
       }),
-    ).toThrow(/sensitive/)
+    ).not.toThrow()
     await expect(
       k.service.screenshot(ctx(), { targetId: record.targetId }),
-    ).rejects.toMatchObject({ code: 'CAPABILITY_DISABLED' })
+    ).resolves.toBeDefined()
   })
 
-  it('marks a user-added high-risk app without confirming each input', async () => {
-    const k = setup({ highRisk: ['com.example.Shell'] })
+  it('types into a terminal like any other app (no high-risk mark)', async () => {
+    const k = setup()
     const signal = new AbortController().signal
     await k.service.listDesktopWindows(identity(true), undefined, signal)
     const record = await k.service.bindDesktop(bindCtx(windows[2]!), 'w-shell')
-    const classify = (fullAccess: boolean) =>
-      GUI_TOOL_CATALOG.desktop_type!.classify!({
+    for (const fullAccess of [false, true]) {
+      const requirement = GUI_TOOL_CATALOG.desktop_type!.classify!({
         args: { targetId: record.targetId, text: 'ls' },
         identity: identity(fullAccess),
         service: k.service,
@@ -278,35 +279,43 @@ describe('user app lists', () => {
         callId: 'c',
         toolName: 'desktop_type',
       }).requirement
-    for (const fullAccess of [false, true]) {
-      expect(classify(fullAccess)).toMatchObject({ highRiskApp: true })
-      expect(classify(fullAccess).confirmEachTime).toBeUndefined()
+      expect(requirement).not.toHaveProperty('highRiskApp')
+      expect(requirement.confirmEachTime).toBeUndefined()
     }
   })
 
-  it('persists the lists through CoreApi, deduplicated', async () => {
+  it('names the apps once kept out until Settings acknowledges them', async () => {
     const root = mkdtempSync(join(tmpdir(), 'cu-lists-api-'))
     const stateRoot = join(root, 'home')
+    const dir = computerUseStateDir(stateRoot)
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    writeFileSync(
+      join(dir, COMPUTER_USE_CONFIG_FILE),
+      JSON.stringify({
+        schemaVersion: 1,
+        enabled: true,
+        appLists: {
+          protected: ['com.example.Bank'],
+          highRisk: [],
+          sensitive: ['com.example.Notes'],
+        },
+      }),
+      { mode: 0o600 },
+    )
     const fixture = await makeApi({
       root,
       stateRoot,
       extra: { computerUsePort: new FakeComputerUsePort() },
     })
     try {
-      const view = await fixture.api.computerUse.setAppLists({
-        protected: ['com.example.Bank', 'com.example.Bank'],
-        sensitive: ['com.example.Notes'],
-      })
-      expect(view.appLists).toEqual({
-        protected: ['com.example.Bank'],
-        highRisk: [],
-        sensitive: ['com.example.Notes'],
-      })
-      expect(
-        new ComputerUseConfigStore(computerUseStateDir(stateRoot)).get()
-          .appLists.protected,
-      ).toEqual(['com.example.Bank'])
-      expect(COMPUTER_USE_CONFIG_FILE).toBe('config.json')
+      const view = await fixture.api.computerUse.status()
+      expect(view.enabled).toBe(true)
+      expect(view.retiredProtectedApps).toEqual(['com.example.Bank'])
+      const acknowledged =
+        await fixture.api.computerUse.acknowledgeRetiredApps()
+      expect(acknowledged).not.toHaveProperty('retiredProtectedApps')
+      expect(new ComputerUseConfigStore(dir).retiredProtectedApps()).toEqual([])
+      expect(fixture.api.computerUse).not.toHaveProperty('setAppLists')
     } finally {
       await fixture.api.close()
     }

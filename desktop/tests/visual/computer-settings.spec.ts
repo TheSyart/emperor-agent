@@ -5,8 +5,8 @@ import { resolve } from 'node:path'
 import { installVisualCoreBridge } from './visualBridge'
 
 // Settings › 电脑操作 (ST-03, laid out like Codex's 电脑操控): the master
-// card, 控制 (任意应用, Chrome 和 Edge), 不让 Emperor 操作的应用 and the stop
-// row; the 任意应用 and Chrome 和 Edge sub pages behind 管理.
+// card and 控制 (任意应用, Chrome 和 Edge); the 任意应用 and Chrome 和 Edge
+// sub pages behind 管理. No app lists and no emergency stop (2026-10-01).
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'computer-settings')
 
 test.beforeAll(() => {
@@ -59,57 +59,26 @@ function groupTitles(dialog: Locator) {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`computer use main page, stop and resume (${theme})`, async ({
-    page,
-  }) => {
+  test(`computer use main page (${theme})`, async ({ page }) => {
     const dialog = await openComputer(page, { theme })
     await expect(dialog.locator('#computer-use-enabled')).toHaveAttribute(
       'aria-checked',
       'true',
     )
-    await expect(groupTitles(dialog)).toHaveText([
-      '控制',
-      '不让 Emperor 操作的应用',
-      '紧急停止',
-    ])
+    await expect(groupTitles(dialog)).toHaveText(['控制'])
     await expect(dialog.locator('[data-driver]')).toHaveCount(2)
-    await expect(dialog).toContainText('com.agilebits.onepassword7')
-    await expect(dialog).toContainText('⌃⌥⌘.')
-    await expect(dialog).not.toContainText('高级')
+    // No app lists and no emergency stop (2026-10-01).
+    for (const gone of ['高级', '紧急停止', '立即停止', '不让 Emperor 操作'])
+      await expect(dialog).not.toContainText(gone)
     await expect(dialog.locator('input, textarea')).toHaveCount(0)
     await noHorizontalOverflow(page)
     await shot(page, `computer-${theme}`)
-
-    await dialog.getByRole('button', { name: '立即停止' }).click()
-    await expect(dialog.getByTestId('computer-use-status')).toHaveText('已停止')
-    await expect(dialog.getByRole('button', { name: '恢复' })).toHaveCount(2)
-    await shot(page, `computer-stopped-${theme}`)
-    await dialog.getByRole('button', { name: '恢复' }).first().click()
-    await expect(dialog.getByTestId('computer-use-status')).toHaveCount(0)
 
     // One driver off: spec 00 §6.9 wording.
     await dialog.locator('#computer-use-driver-desktop').click()
     await expect(dialog.locator('[data-driver="desktop"]')).toContainText(
       'Emperor 内建桌面控制已关闭',
     )
-    // The stop-shortcut editor.
-    await dialog.getByTestId('kill-switch-edit').click()
-    await expect(dialog.getByTestId('kill-switch-capture')).toBeFocused()
-    await page.keyboard.press('Control+Shift+K')
-    await expect(dialog.getByTestId('kill-switch-capture')).toContainText('K')
-    await noHorizontalOverflow(page)
-    await shot(page, `computer-controls-${theme}`)
-    await dialog.getByRole('button', { name: '保存' }).click()
-    await expect(dialog.getByRole('button', { name: '恢复默认' })).toBeVisible()
-
-    await dialog.locator('[data-action="add-protected-app"]').click()
-    const add = page.getByRole('dialog', {
-      name: '添加不让 Emperor 操作的应用',
-    })
-    await add.getByPlaceholder('com.example.App').fill('com.example.Bank')
-    await shot(page, `computer-protect-${theme}`)
-    await add.getByRole('button', { name: '添加' }).click()
-    await expect(dialog).toContainText('com.example.Bank')
 
     await dialog.locator('#computer-use-enabled').click()
     await expect(dialog.locator('#computer-use-enabled')).toHaveAttribute(
@@ -124,11 +93,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(dialog.getByTestId('settings-page-title')).toHaveText(
       '任意应用',
     )
-    await expect(groupTitles(dialog)).toHaveText([
-      '系统权限',
-      '应用名单',
-      '截图',
-    ])
+    await expect(groupTitles(dialog)).toHaveText(['系统权限', '截图'])
     await expect(dialog).toContainText('版本 0.3.0 · 协议 1')
     await expect(dialog).toContainText('已保存 14 张截图')
     // Granted: no repair buttons.
@@ -137,14 +102,6 @@ for (const theme of ['dark', 'light'] as const) {
     )
     await noHorizontalOverflow(page)
     await shot(page, `apps-${theme}`)
-
-    await dialog.getByRole('button', { name: '添加到不截图的应用' }).click()
-    const add = page.getByRole('dialog', { name: '添加到不截图的应用' })
-    await add.getByPlaceholder('com.example.App').fill('com.apple.Notes')
-    await add.getByRole('button', { name: '添加' }).click()
-    await expect(dialog.locator('[data-app-list="sensitive"]')).toContainText(
-      'com.apple.Notes',
-    )
 
     await dialog.getByTestId('settings-crumb').click()
     await dialog.getByTestId('browser-pairing-manage').click()

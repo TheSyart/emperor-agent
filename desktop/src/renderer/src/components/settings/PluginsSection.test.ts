@@ -503,7 +503,7 @@ describe('能力 › 插件', () => {
     await until(() => reads('computer-use') === 1)
 
     // The emergency stop and the driver switches only say computer_use_changed.
-    emit({ event: 'computer_use_changed', reason: 'kill-switch' })
+    emit({ event: 'computer_use_changed', reason: 'state' })
     await until(() => reads('computer-use') === 2)
     expect(reads('computer-use')).toBe(2)
 

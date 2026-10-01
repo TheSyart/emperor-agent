@@ -1894,7 +1894,7 @@ export class CoreApi {
   }
 
   /**
-   * Computer Use (GUI control). Stop, revoke and resume never call
+   * Computer Use (GUI control). Switching off and revoking never call
    * `assertMutation`: narrowing capability must work while a grant card or
    * plan mode is pending.
    */
@@ -1902,14 +1902,6 @@ export class CoreApi {
     status: async (): Promise<ComputerUseStatusView> =>
       (await this.host.computerUse?.service.status()) ??
       unsupportedComputerUseStatus(),
-    stop: async (): Promise<ComputerUseStatusView> => {
-      await this.host.computerUse?.service.emergencyStop()
-      return await this.computerUse.status()
-    },
-    resume: async (): Promise<ComputerUseStatusView> => {
-      this.host.computerUse?.service.resume()
-      return await this.computerUse.status()
-    },
     /** One driver's switch. Turning on is guarded; turning off never is. */
     setDriverEnabled: async (input: {
       driver: DriverKind
@@ -1931,20 +1923,12 @@ export class CoreApi {
         bytes: 0,
       },
     /**
-     * Replace the user's protected / high-risk / sensitive app lists.
-     * Removing an entry widens access, so any removal is guarded; adding
-     * never is.
+     * Settings showed once that the apps the user had kept from Emperor can
+     * be operated now (the app lists were retired). Never guarded: the
+     * reach widened with the update, this only hides the notice.
      */
-    setAppLists: async (
-      input: Partial<Record<'protected' | 'highRisk' | 'sensitive', string[]>>,
-    ): Promise<ComputerUseStatusView> => {
-      const current = this.host.computerUse?.service.statusView().appLists
-      const widened = (Object.keys(input) as Array<keyof typeof input>).some(
-        (kind) =>
-          (current?.[kind] ?? []).some((id) => !input[kind]!.includes(id)),
-      )
-      if (widened) this.assertMutation('computerUse', 'app-lists')
-      this.host.setComputerUseAppLists(input)
+    acknowledgeRetiredApps: async (): Promise<ComputerUseStatusView> => {
+      this.host.acknowledgeRetiredProtectedApps()
       return await this.computerUse.status()
     },
     /** Download inbox retention (never guarded: it only deletes sooner). */
@@ -1952,13 +1936,6 @@ export class CoreApi {
       days: 0 | 7 | 30 | 90
     }): Promise<ComputerUseStatusView> => {
       this.host.setComputerUseDownloadRetention(input.days)
-      return await this.computerUse.status()
-    },
-    /** The emergency-stop shortcut (`null` restores the platform default). */
-    setKillSwitch: async (input: {
-      accelerator: string | null
-    }): Promise<ComputerUseStatusView> => {
-      this.host.setComputerUseKillSwitch(input.accelerator)
       return await this.computerUse.status()
     },
     /** Master switch. Turning on is a guarded mutation; turning off never is. */
@@ -2793,10 +2770,8 @@ function unsupportedComputerUseStatus(): ComputerUseStatusView {
     supported: false,
     enabled: false,
     platform: null,
-    stopped: false,
     drivers: [],
     targets: [],
-    killSwitch: { accelerator: '', registered: false },
   }
 }
 
@@ -3080,7 +3055,6 @@ function computerUseDiagnostics(status: ComputerUseStatusView): Dict {
     supported: status.supported,
     enabled: status.enabled,
     platform: status.platform,
-    stopped: status.stopped,
     drivers: status.drivers.map((driver) => ({
       driver: driver.driver,
       stage: driver.stage,
@@ -3090,13 +3064,6 @@ function computerUseDiagnostics(status: ComputerUseStatusView): Dict {
       ...(driver.reason === undefined ? {} : { reason: driver.reason }),
     })),
     targets: status.targets.length,
-    killSwitch: {
-      accelerator: status.killSwitch.accelerator,
-      registered: status.killSwitch.registered,
-      ...(status.killSwitch.error === undefined
-        ? {}
-        : { error: status.killSwitch.error }),
-    },
   }
 }
 
@@ -3117,11 +3084,6 @@ function computerUseDriverState(
     return {
       state: 'unsupported',
       reason: driver?.reason ?? '这台电脑上不能使用',
-    }
-  if (status.stopped)
-    return {
-      state: 'disabled',
-      reason: '已急停；在「设置 › 电脑操作」里恢复后可用',
     }
   if (!driver.enabled)
     return { state: 'disabled', reason: '已在「设置 › 电脑操作」里关闭' }

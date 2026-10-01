@@ -110,28 +110,26 @@ function streamable(target: UiTargetView): boolean {
 
 /**
  * Targets whose live frames to subscribe: the first four streamable cards,
- * none while the preview is off screen or computer use is stopped.
+ * none while the preview is off screen.
  */
 export function liveTargetIds(
   ordered: readonly UiTargetView[],
-  options: { readonly stopped: boolean; readonly onScreen: boolean },
+  options: { readonly onScreen: boolean },
 ): string[] {
-  if (options.stopped || !options.onScreen) return []
+  if (!options.onScreen) return []
   return ordered
     .filter(streamable)
     .slice(0, LIVE_PREVIEW_LIMIT)
     .map((target) => target.targetId)
 }
 
-export type PreviewTone = 'active' | 'waiting' | 'paused' | 'stopped' | 'lost'
+export type PreviewTone = 'active' | 'waiting' | 'paused' | 'lost'
 
 export function previewStatus(
   target: UiTargetView,
-  options: { readonly stopped: boolean; readonly awaiting: boolean },
+  options: { readonly awaiting: boolean },
 ): { label: string; tone: PreviewTone } {
   if (releaseFailed(target)) return { label: '释放失败', tone: 'lost' }
-  if (options.stopped || target.control === 'stopped')
-    return { label: '已急停', tone: 'stopped' }
   if (target.state === 'recovering') return { label: '失联', tone: 'lost' }
   if (target.control === 'paused') return { label: '已暂停', tone: 'paused' }
   if (options.awaiting) return { label: '等待回复', tone: 'waiting' }
@@ -154,7 +152,6 @@ const BLOCKED_NOTE: Record<
   NonNullable<UiTargetView['previewBlocked']>,
   string
 > = {
-  'sensitive-app': '不可预览：你标记的敏感应用',
   'credential-filled': '不可预览：已代填凭据',
 }
 

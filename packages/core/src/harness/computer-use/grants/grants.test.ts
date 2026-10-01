@@ -1,4 +1,5 @@
 import {
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -118,16 +119,16 @@ describe('GrantStore', () => {
     expect(new GrantStore({ root: dir, now: time.now }).list()).toEqual([])
   })
 
-  it('quarantines a corrupt file and comes up suspended (fail closed)', () => {
+  it('quarantines a corrupt file and starts with no grants (nothing widens)', () => {
     const dir = root()
     new GrantStore({ root: dir }).issue(browserGrant())
     writeFileSync(join(dir, GRANTS_FILE), '{ not json')
     const store = new GrantStore({ root: dir })
     expect(store.list()).toEqual([])
-    expect(store.suspended?.by).toBe('corrupt-store')
     expect(readdirSync(dir).some((name) => name.includes('corrupt'))).toBe(true)
-    store.resume()
-    expect(new GrantStore({ root: dir }).suspended).toBeNull()
+    // Usable at once: there is no stopped state to resume from.
+    const fresh = store.issue(browserGrant({ scope: 'once', callId: 'c1' }))
+    expect(store.get(fresh.grantId)).toBeDefined()
   })
 
   it('drops individually invalid entries instead of widening them', () => {
@@ -150,7 +151,10 @@ describe('GrantStore', () => {
     ).toEqual([good.grantId])
     // Loading never fails closed over one bad entry (the store is usable).
     writeFileSync(join(dir, GRANTS_FILE), JSON.stringify(document))
-    expect(new GrantStore({ root: dir }).suspended).toBeNull()
+    expect(new GrantStore({ root: dir }).list()).toEqual([])
+    expect(readdirSync(dir).some((name) => name.includes('corrupt'))).toBe(
+      false,
+    )
   })
 
   it('bumps the revision on narrowing and revokes when nothing is left', () => {
@@ -178,11 +182,29 @@ describe('GrantStore', () => {
     expect(store.get(grant.grantId)).toBeUndefined()
   })
 
-  it('persists the emergency-stop suspension across restarts', () => {
+  it('reads a file the retired emergency stop suspended, dropping the suspension once', () => {
     const dir = root()
-    const store = new GrantStore({ root: dir })
-    store.suspend('kill-switch')
-    expect(new GrantStore({ root: dir }).suspended?.by).toBe('kill-switch')
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    const path = join(dir, GRANTS_FILE)
+    for (const by of ['kill-switch', 'corrupt-store']) {
+      writeFileSync(
+        path,
+        JSON.stringify({
+          schemaVersion: 1,
+          grants: [],
+          suspended: { at: '2026-09-30T00:00:00.000Z', by },
+        }),
+      )
+      const store = new GrantStore({ root: dir })
+      const grant = store.issue(browserGrant({ scope: 'once', callId: by }))
+      expect(store.get(grant.grantId)).toBeDefined()
+      expect(JSON.parse(readFileSync(path, 'utf8'))).not.toHaveProperty(
+        'suspended',
+      )
+    }
+    expect(readdirSync(dir).some((name) => name.includes('corrupt'))).toBe(
+      false,
+    )
   })
 
   it('revokes by predicate', () => {
@@ -344,16 +366,6 @@ describe('grant matching', () => {
         now,
       ),
     ).toBe(false)
-    const risky = { ...base, appId: 'com.apple.TextEdit', highRiskApp: true }
-    expect(grantCovers(desktop, risky, caller, now)).toBe(false)
-    expect(
-      grantCovers(
-        { ...desktop, scope: 'task', taskId: 's1:3' },
-        risky,
-        caller,
-        now,
-      ),
-    ).toBe(true)
   })
 
   it('prefers the narrowest covering grant', () => {

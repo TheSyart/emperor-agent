@@ -23,9 +23,9 @@ function target(over: Record<string, string> = {}) {
 
 function status(
   targets: ReturnType<typeof target>[],
-  over: { enabled?: boolean; stopped?: boolean } = {},
+  over: { enabled?: boolean } = {},
 ) {
-  return { enabled: true, stopped: false, targets, ...over }
+  return { enabled: true, targets, ...over }
 }
 
 describe('preview pointer', () => {
@@ -118,20 +118,16 @@ describe('preview pointer', () => {
     // Not under the Agent's control, or no longer held.
     const unheld: Record<string, string>[] = [
       { control: 'paused' },
-      { control: 'stopped' },
       { state: 'released' },
       { state: 'closed' },
       { state: 'lost' },
     ]
     for (const over of unheld)
       expect(previewPointerAllowed(status([target(over)]), 't-1')).toBe(false)
-    // Another target, computer use off or stopped, or no status at all.
+    // Another target, computer use off, or no status at all.
     expect(previewPointerAllowed(status([target()]), 't-2')).toBe(false)
     expect(
       previewPointerAllowed(status([target()], { enabled: false }), 't-1'),
-    ).toBe(false)
-    expect(
-      previewPointerAllowed(status([target()], { stopped: true }), 't-1'),
     ).toBe(false)
     expect(previewPointerAllowed(null, 't-1')).toBe(false)
   })

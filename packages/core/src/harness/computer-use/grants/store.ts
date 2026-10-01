@@ -4,9 +4,8 @@
  * log only records the facts of requests, decisions and revocations.
  *
  * Fail closed:
- * - a corrupt file is quarantined and the store comes up suspended (no grant
- *   matches) until the user resumes;
- * - the emergency stop suspends every grant, persisted across restarts;
+ * - a corrupt file is quarantined and the store starts with no grants, so
+ *   nothing widens;
  * - revoking or narrowing a grant bumps its revision, so a ticket issued
  *   against the old revision stops matching.
  *
@@ -20,11 +19,7 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { AtomicSnapshotSync } from '../../../store/persistence'
 import type { UiActionClass, UiGrant } from '../types'
-import {
-  GRANTS_CODEC,
-  type GrantSuspension,
-  type GrantsDocument,
-} from './codec'
+import { GRANTS_CODEC, type GrantsDocument } from './codec'
 
 export const GRANTS_FILE = 'grants.json'
 
@@ -34,11 +29,10 @@ const RETIRED_SCOPES: ReadonlySet<UiGrant['scope']> = new Set([
   'timed',
 ])
 
-export type GrantRevokeCause =
-  'user' | 'expiry' | 'kill-switch' | 'session-end' | 'task-end'
+export type GrantRevokeCause = 'user' | 'expiry' | 'session-end' | 'task-end'
 
 export interface GrantChange {
-  readonly kind: 'issued' | 'revoked' | 'narrowed' | 'suspended' | 'resumed'
+  readonly kind: 'issued' | 'revoked' | 'narrowed'
   readonly grant?: UiGrant
   readonly cause?: GrantRevokeCause
 }
@@ -60,7 +54,6 @@ export class GrantStore {
   private readonly now: () => Date
   private readonly idFactory: () => string
   private readonly grants = new Map<string, UiGrant>()
-  private suspension: GrantSuspension | null = null
   private readonly listeners = new Set<(change: GrantChange) => void>()
   private loaded = false
 
@@ -82,20 +75,15 @@ export class GrantStore {
 
   /** Read the persisted grants; expired entries are dropped. */
   load(): void {
-    const result = this.snapshot.read({
-      fallback: { grants: [], suspended: null },
-    })
+    const result = this.snapshot.read({ fallback: { grants: [] } })
     this.grants.clear()
-    this.suspension = result.value.suspended
-    if (result.receipt.recoveryAction === 'quarantined_corrupt_snapshot') {
-      this.suspension = { at: this.now().toISOString(), by: 'corrupt-store' }
-    }
     for (const grant of result.value.grants)
       if (!this.expired(grant) && !RETIRED_SCOPES.has(grant.scope))
         this.grants.set(grant.grantId, grant)
     this.loaded = true
     if (
       result.receipt.recoveryAction === 'quarantined_corrupt_snapshot' ||
+      result.receipt.recoveryAction === 'migrated_in_memory' ||
       result.value.grants.length !== this.grants.size
     )
       this.persist()
@@ -106,11 +94,6 @@ export class GrantStore {
     return () => {
       this.listeners.delete(listener)
     }
-  }
-
-  get suspended(): GrantSuspension | null {
-    this.ensureLoaded()
-    return this.suspension
   }
 
   /** Active (unexpired) grants. */
@@ -269,22 +252,6 @@ export class GrantStore {
     return narrowed
   }
 
-  /** Emergency stop: nothing matches until {@link resume}. Persisted. */
-  suspend(by: GrantSuspension['by']): void {
-    this.ensureLoaded()
-    this.suspension = { at: this.now().toISOString(), by }
-    this.persist()
-    this.emit({ kind: 'suspended' })
-  }
-
-  resume(): void {
-    this.ensureLoaded()
-    if (this.suspension === null) return
-    this.suspension = null
-    this.persist()
-    this.emit({ kind: 'resumed' })
-  }
-
   /** Remove expired grants; returns what was removed. */
   pruneExpired(): UiGrant[] {
     const expired = [...this.grants.values()].filter((grant) =>
@@ -315,10 +282,7 @@ export class GrantStore {
   }
 
   private persist(): void {
-    this.snapshot.write({
-      grants: [...this.grants.values()],
-      suspended: this.suspension,
-    })
+    this.snapshot.write({ grants: [...this.grants.values()] })
   }
 
   private emit(change: GrantChange): void {

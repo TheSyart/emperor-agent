@@ -25,7 +25,7 @@ export function createUiTools(runtime: ToolRuntime): ToolDefinition[] {
     defineTool({
       name: 'ui_get_capabilities',
       description:
-        'Report which computer-use drivers are available right now (built-in browser, desktop), what each can do, what is missing, whether computer use is stopped, and which actions run without asking. Call this before starting GUI work.',
+        'Report which computer-use drivers are available right now (built-in browser, desktop), what each can do, what is missing, and which actions run without asking. Call this before starting GUI work.',
       input: uiGetCapabilitiesInput,
       isConcurrencySafe: () => true,
       timeoutMs: 15_000,
@@ -40,7 +40,6 @@ export function createUiTools(runtime: ToolRuntime): ToolDefinition[] {
               tool: 'ui_get_capabilities',
               summary: {
                 platform: service.platform,
-                stopped: service.stopped,
                 autoApproved: op.identity.fullAccess
                   ? AUTO_APPROVED_CLASSES
                   : [],
@@ -58,7 +57,7 @@ export function createUiTools(runtime: ToolRuntime): ToolDefinition[] {
                     : { reason: driver.reason }),
                 })),
               },
-              meta: { drivers: drivers.length, stopped: service.stopped },
+              meta: { drivers: drivers.length },
             })
           },
         ),

@@ -46,8 +46,6 @@ export interface TargetRecord {
   revision: number
   state: TargetState
   control: ControlState
-  /** Control state before an emergency stop, restored on resume. */
-  controlBeforeStop?: ControlState
   /** The task's end is releasing it: no new action starts (§3.3). */
   releasing?: true
   /** Released, but giving up control failed: why (no action runs on it). */
@@ -238,14 +236,12 @@ export function targetOrigin(record: Pick<TargetRecord, 'url'>): string | null {
 }
 
 /**
- * Why a preview must not show `record`: a sensitive app, or a credential fill
- * (desktop windows for good; a browser tab until it navigates).
+ * Why a preview must not show `record`: a credential fill (desktop windows
+ * for good; a browser tab until it navigates).
  */
 export function previewBlocked(
   record: TargetRecord,
-  sensitiveApp: boolean,
 ): UiTargetView['previewBlocked'] {
-  if (sensitiveApp) return 'sensitive-app'
   const filled = record.credentialFilledGeneration
   if (filled === undefined) return undefined
   return record.driver === 'desktop' || filled === record.generation
@@ -253,12 +249,9 @@ export function previewBlocked(
     : undefined
 }
 
-export function targetView(
-  record: TargetRecord,
-  options: { sensitiveApp?: boolean } = {},
-): UiTargetView {
+export function targetView(record: TargetRecord): UiTargetView {
   const shot = record.screenshots.at(-1)
-  const blocked = previewBlocked(record, options.sensitiveApp === true)
+  const blocked = previewBlocked(record)
   return {
     targetId: record.targetId,
     ownerSessionId: record.ownerSessionId,

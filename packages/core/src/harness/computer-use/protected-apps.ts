@@ -14,16 +14,6 @@ const EXACT = new Set([
   'com.apple.ScreenSaver.Engine',
 ])
 
-const HIGH_RISK = new Set([
-  'com.apple.Terminal',
-  'com.googlecode.iterm2',
-  'dev.warp.Warp-Stable',
-  'com.mitchellh.ghostty',
-  'com.apple.ScriptEditor2',
-  'com.apple.Automator',
-  'com.apple.shortcuts',
-])
-
 export function protectedMacApp(appId: string): boolean {
   return (
     appId === 'com.emperor.agent.desktop' ||
@@ -31,8 +21,4 @@ export function protectedMacApp(appId: string): boolean {
     appId.startsWith('com.apple.systempreferences.') ||
     EXACT.has(appId)
   )
-}
-
-export function highRiskMacApp(appId: string): boolean {
-  return HIGH_RISK.has(appId)
 }

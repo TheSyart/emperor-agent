@@ -247,15 +247,10 @@ describe('computerUseGate', () => {
     expect(guard(k.call('bash'))).toBeUndefined()
   })
 
-  it('refuses target tools without an open target and while stopped', async () => {
+  it('refuses target tools without an open target', async () => {
     const k = setup({ fullAccess: true })
     const none = await k.gate(k.call('browser_observe'))
     expect((none as { reason: string }).reason).toMatch(/INVALID_REQUEST/)
-    await k.service.emergencyStop()
-    const stopped = await k.gate(
-      k.call('browser_open', { url: 'https://fixture.test/form' }),
-    )
-    expect((stopped as { reason: string }).reason).toMatch(/emergency-stop/)
     expect(await k.gate(k.call('ui_list_targets'))).toEqual({ kind: 'allow' })
   })
 

@@ -73,14 +73,10 @@ import {
 } from '../computer-use/install'
 import type { ComputerUseHostPort } from '../computer-use/port'
 import type { DriverKind } from '../computer-use/types'
-import type { AppListKind } from '../computer-use/service/service'
 import { createBrowserTools } from '../computer-use/tools/browser-tools'
 import { createDesktopTools } from '../computer-use/tools/desktop-tools'
 import { createExternalTools } from '../computer-use/tools/external-tools'
-import type {
-  ComputerUseSettings,
-  KillSwitchStatus,
-} from '../computer-use/service/service'
+import type { ComputerUseSettings } from '../computer-use/service/service'
 import { createMemoryTool, memoryMiddleware } from '../memory/memory'
 import { PlanModeController } from '../plan/plan-mode'
 import { agentInstructionsMiddleware } from '../prompt/agent-instructions'
@@ -177,15 +173,8 @@ export interface HarnessHostOptions extends KeptServicesOptions {
   computerUsePort?: ComputerUseHostPort | null
   /** Computer-use master switch and per-driver switches. */
   computerUseSettings?: () => ComputerUseSettings
-  /** Emergency-stop shortcut registration status (desktop). */
-  computerUseKillSwitch?: () => KillSwitchStatus
-  /** The master switch changed (desktop registers the kill switch only while on). */
+  /** The master switch changed (the desktop clears its pointer when off). */
   computerUseEnabledChanged?: (enabled: boolean) => void
-  /**
-   * The user changed the emergency-stop shortcut (`null`: the platform
-   * default); the desktop re-registers it and reports the result.
-   */
-  computerUseKillSwitchChanged?: (accelerator: string | null) => void
 }
 
 export interface SubmitInput {
@@ -254,8 +243,6 @@ export class HarnessHost {
   /** What `@plugin` gestures learn about a plugin (set by CoreApi's plugin service). */
   private pluginReferences: PluginReferenceResolver | null = null
   private computerUseEnabledChanged: ((enabled: boolean) => void) | undefined
-  private computerUseKillSwitchChanged:
-    ((accelerator: string | null) => void) | undefined
   readonly defaultPreset: string
   activeSessionId: string | null = null
   private readonly agents = new Map<string, Agent>()
@@ -589,18 +576,6 @@ export class HarnessHost {
     this.emitHost({ event: 'computer_use_changed', reason: 'state' })
   }
 
-  /**
-   * The user's additions to the protected / high-risk / sensitive app lists
-   * (01 §4.4, §5.2). Whole lists are replaced.
-   */
-  setComputerUseAppLists(
-    lists: Partial<Record<AppListKind, readonly string[]>>,
-  ): void {
-    if (this.computerUse === null) return
-    this.computerUseConfig?.update({ appLists: lists })
-    this.emitHost({ event: 'computer_use_changed', reason: 'state' })
-  }
-
   /** How long downloads stay in the inbox (0: until the user removes them). */
   setComputerUseDownloadRetention(days: 0 | 7 | 30 | 90): void {
     if (this.computerUse === null) return
@@ -608,17 +583,14 @@ export class HarnessHost {
     this.emitHost({ event: 'computer_use_changed', reason: 'state' })
   }
 
-  /** The user's emergency-stop shortcut (`null`: the platform default). */
-  setComputerUseKillSwitch(accelerator: string | null): void {
+  /**
+   * Settings showed that the apps once kept from Emperor can be operated now
+   * (the app lists were retired 2026-10-01); the notice does not return.
+   */
+  acknowledgeRetiredProtectedApps(): void {
     if (this.computerUse === null) return
-    this.computerUseConfig?.update({ killSwitchAccelerator: accelerator })
-    this.computerUseKillSwitchChanged?.(accelerator)
-    this.emitHost({ event: 'computer_use_changed', reason: 'kill-switch' })
-  }
-
-  /** The persisted emergency-stop shortcut, if the user changed it. */
-  computerUseKillSwitchAccelerator(): string | undefined {
-    return this.computerUseConfig?.get().killSwitchAccelerator
+    this.computerUseConfig?.acknowledgeRetiredProtectedApps()
+    this.emitHost({ event: 'computer_use_changed', reason: 'state' })
   }
 
   private installComputerUse(options: HarnessHostOptions): void {
@@ -629,9 +601,15 @@ export class HarnessHost {
       this.computerUseConfig = new ComputerUseConfigStore(stateDir)
     const config = this.computerUseConfig
     const settings =
-      options.computerUseSettings ?? (() => config?.get() ?? { enabled: false })
+      options.computerUseSettings ??
+      ((): ComputerUseSettings => {
+        if (config === null) return { enabled: false }
+        const retired = config.retiredProtectedApps()
+        return retired.length === 0
+          ? config.get()
+          : { ...config.get(), retiredProtectedApps: retired }
+      })
     this.computerUseEnabledChanged = options.computerUseEnabledChanged
-    this.computerUseKillSwitchChanged = options.computerUseKillSwitchChanged
     this.computerUse = installComputerUse({
       port,
       tools: this.tools,
@@ -654,9 +632,6 @@ export class HarnessHost {
         createExternalTools,
       ],
       settings,
-      ...(options.computerUseKillSwitch === undefined
-        ? {}
-        : { killSwitch: options.computerUseKillSwitch }),
       onChanged: (reason, sessionId) => {
         this.emitHost({
           event: 'computer_use_changed',

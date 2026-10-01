@@ -1126,16 +1126,10 @@ export async function installVisualCoreBridge(
             : []
       const visualComputerUseState = {
         enabled: visualComputerUseOn,
-        stopped: false,
         drivers: {} as Record<string, boolean>,
-        accelerator: 'Control+Alt+Command+.',
         screenshots: { count: 14, bytes: 9 * 1024 * 1024 },
         downloadRetentionDays: 30 as 0 | 7 | 30 | 90,
-        appLists: {
-          protected: ['com.agilebits.onepassword7'],
-          highRisk: [] as string[],
-          sensitive: [] as string[],
-        } as Record<'protected' | 'highRisk' | 'sensitive', string[]>,
+        retiredProtectedApps: [] as string[],
       }
       // 设置 › 浏览器: the user's browser choices, Emperor's sign-in
       // profiles, site permissions and the credential vault.
@@ -1276,7 +1270,6 @@ export async function installVisualCoreBridge(
           supported: true,
           enabled: on,
           platform: 'macos',
-          stopped: visualComputerUseState.stopped,
           drivers: [
             {
               driver: 'embedded-browser',
@@ -1284,7 +1277,7 @@ export async function installVisualCoreBridge(
               stage: 'experimental',
               label: '内置浏览器（基础）',
               enabled: on,
-              available: on && !visualComputerUseState.stopped,
+              available: on,
               actions: [
                 'click',
                 'fill',
@@ -1314,7 +1307,6 @@ export async function installVisualCoreBridge(
                 visualComputerUseState.drivers['external-browser'] !== false,
               available:
                 on &&
-                !visualComputerUseState.stopped &&
                 visualComputerUseState.drivers['external-browser'] !== false,
               actions: ['click', 'fill'],
               missing: ['外部浏览器新建标签页', '截图与坐标操作'],
@@ -1325,10 +1317,7 @@ export async function installVisualCoreBridge(
               stage: 'experimental',
               label: 'macOS 桌面',
               enabled: on && visualComputerUseState.drivers.desktop !== false,
-              available:
-                on &&
-                !visualComputerUseState.stopped &&
-                visualComputerUseState.drivers.desktop !== false,
+              available: on && visualComputerUseState.drivers.desktop !== false,
               actions: ['click', 'fill', 'typeText', 'press', 'select'],
               missing: ['自动用户活动检测'],
             },
@@ -1336,11 +1325,13 @@ export async function installVisualCoreBridge(
           targets: visualTargets(),
           screenshots: visualComputerUseState.screenshots,
           downloadRetentionDays: visualComputerUseState.downloadRetentionDays,
-          appLists: visualComputerUseState.appLists,
-          killSwitch: {
-            accelerator: visualComputerUseState.accelerator,
-            registered: on,
-          },
+          ...(visualComputerUseState.retiredProtectedApps.length > 0
+            ? {
+                retiredProtectedApps: [
+                  ...visualComputerUseState.retiredProtectedApps,
+                ],
+              }
+            : {}),
         }
       }
       const previewListeners = new Set<VisualCoreListener>()
@@ -2590,7 +2581,6 @@ export async function installVisualCoreBridge(
             reason: '填写报名表并提交',
             reason_unverified: true,
             high_impact: visualGrantHighImpact,
-            high_risk_app: false,
             background: false,
           },
         },
@@ -6713,12 +6703,6 @@ export async function installVisualCoreBridge(
             case 'computerUse.setEnabled':
               visualComputerUseState.enabled = args[0] === true
               return visualComputerUse()
-            case 'computerUse.stop':
-              visualComputerUseState.stopped = true
-              return visualComputerUse()
-            case 'computerUse.resume':
-              visualComputerUseState.stopped = false
-              return visualComputerUse()
             case 'computerUse.setDriverEnabled': {
               const input = (args[0] || {}) as {
                 driver?: string
@@ -6729,25 +6713,12 @@ export async function installVisualCoreBridge(
                   input.enabled === true
               return visualComputerUse()
             }
-            case 'computerUse.setAppLists': {
-              const input = (args[0] || {}) as Partial<
-                Record<'protected' | 'highRisk' | 'sensitive', string[]>
-              >
-              visualComputerUseState.appLists = {
-                ...visualComputerUseState.appLists,
-                ...input,
-              }
+            case 'computerUse.acknowledgeRetiredApps':
+              visualComputerUseState.retiredProtectedApps = []
               return visualComputerUse()
-            }
             case 'computerUse.setDownloadRetention': {
               const input = (args[0] || {}) as { days?: 0 | 7 | 30 | 90 }
               visualComputerUseState.downloadRetentionDays = input.days ?? 30
-              return visualComputerUse()
-            }
-            case 'computerUse.setKillSwitch': {
-              const input = (args[0] || {}) as { accelerator?: string | null }
-              visualComputerUseState.accelerator =
-                input.accelerator ?? 'Control+Alt+Command+.'
               return visualComputerUse()
             }
             case 'computerUse.clearScreenshots': {

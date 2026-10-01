@@ -1,13 +1,12 @@
 /**
  * Settings › 电脑操作 view model: the master switch text, one row per driver
- * (stage, what is missing, why it is unavailable), the kill switch and the
- * saved screenshots — all derived from `computerUse.status`.
+ * (stage, what is missing, why it is unavailable) and the saved screenshots
+ * — all derived from `computerUse.status`.
  */
 import type {
   ComputerUseStatusView,
   DriverCapability,
 } from '@emperor/core/runtime-contract'
-import { acceleratorLabel } from './shortcut'
 
 export type SettingsTone = 'ok' | 'warn' | 'error' | 'neutral' | 'accent'
 
@@ -47,19 +46,6 @@ export function computerUseHeadline(
       badge: '已关闭',
       description:
         '开启后，Agent 可以在内置浏览器、已连接的 Chrome 标签页和 Mac 窗口中连续操作',
-    }
-  if (status.stopped && status.stopReason === 'corrupt-store')
-    return {
-      tone: 'warn',
-      badge: '已暂停',
-      description:
-        '授权记录文件损坏，已隔离备份并暂停电脑操作；恢复后 Agent 才能继续',
-    }
-  if (status.stopped)
-    return {
-      tone: 'warn',
-      badge: '已急停',
-      description: '所有动作已停止，恢复后 Agent 才能继续操作',
     }
   const available = status.drivers.filter((driver) => driver.available)
   return {
@@ -125,44 +111,6 @@ export function driverRows(status: ComputerUseStatusView | null): DriverRow[] {
       switchedOn,
     }
   })
-}
-
-export interface KillSwitchRow {
-  readonly shortcut: string
-  readonly tone: SettingsTone
-  readonly badge: string
-  readonly description: string
-}
-
-export function killSwitchRow(
-  status: ComputerUseStatusView | null,
-): KillSwitchRow {
-  const kill = status?.killSwitch
-  const shortcut = kill?.accelerator
-    ? acceleratorLabel(kill.accelerator, status?.platform === 'macos')
-    : ''
-  if (!status?.enabled)
-    return {
-      shortcut,
-      tone: 'neutral',
-      badge: '未启用',
-      description: '开启电脑操作后注册全局快捷键',
-    }
-  if (kill?.registered)
-    return {
-      shortcut,
-      tone: 'ok',
-      badge: '已注册',
-      description: `在任何应用中按 ${shortcut} 立即停止所有操作`,
-    }
-  return {
-    shortcut,
-    tone: 'warn',
-    badge: '未注册',
-    description: kill?.error
-      ? `${kill.error}；仍可用下方按钮停止`
-      : '快捷键未注册；仍可用下方按钮停止',
-  }
 }
 
 export interface ScreenshotRow {

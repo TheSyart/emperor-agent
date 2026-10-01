@@ -112,7 +112,6 @@ const ordered = computed(() => stackOrder(targets.value, pick.value))
 const front = computed(() => ordered.value[0] ?? null)
 /** Strips behind the front card, deepest first (drawn top-down). */
 const behind = computed(() => ordered.value.slice(1, STACK_DEPTH).reverse())
-const stopped = computed(() => status.value?.stopped === true)
 const onScreen = computed(
   () =>
     measured.value &&
@@ -121,10 +120,7 @@ const onScreen = computed(
     (!compact.value || expanded.value || enlargedId.value !== null),
 )
 const liveIds = computed(() =>
-  liveTargetIds(ordered.value, {
-    stopped: stopped.value,
-    onScreen: onScreen.value,
-  }),
+  liveTargetIds(ordered.value, { onScreen: onScreen.value }),
 )
 const enlarged = computed(
   () =>
@@ -139,10 +135,7 @@ const enlargedOpen = computed({
 })
 
 function statusOf(target: UiTargetView) {
-  return previewStatus(target, {
-    stopped: stopped.value,
-    awaiting: props.awaiting,
-  })
+  return previewStatus(target, { awaiting: props.awaiting })
 }
 
 function frameOf(target: UiTargetView): PreviewFrame {
@@ -721,9 +714,7 @@ onBeforeUnmount(() => {
   color: rgb(var(--warn));
 }
 
-.cu-strip-status[data-tone='stopped'],
 .cu-strip-status[data-tone='lost'],
-.cu-card-status[data-tone='stopped'],
 .cu-card-status[data-tone='lost'] {
   color: rgb(var(--danger));
 }

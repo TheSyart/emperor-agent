@@ -118,10 +118,11 @@ describe('dictation shortcut', () => {
     expect(acceleratorMatches(press, 'nonsense', true)).toBe(false)
   })
 
-  it('refuses the emergency stop, app shortcuts and system shortcuts', () => {
-    const context = { killSwitch: 'Control+Alt+Command+.', mac: true }
+  it('refuses app shortcuts and system shortcuts', () => {
+    const context = { mac: true }
     expect(shortcutConflict('Command+Shift+D', context)).toBeNull()
-    expect(shortcutConflict('Alt+Control+Command+.', context)).toMatch(/急停/)
+    // The retired emergency stop's chord is free now.
+    expect(shortcutConflict('Alt+Control+Command+.', context)).toBeNull()
     expect(shortcutConflict('Command+K', context)).toMatch(/搜索/)
     expect(shortcutConflict('Control+`', context)).toMatch(/终端/)
     expect(shortcutConflict('Command+Q', context)).toMatch(/退出/)

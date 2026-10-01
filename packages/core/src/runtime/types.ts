@@ -284,7 +284,7 @@ export type RuntimeEvent = RuntimeEventEnvelope &
       }
     | {
         event: 'computer_use_changed'
-        reason: 'state' | 'targets' | 'grants' | 'kill-switch'
+        reason: 'state' | 'targets' | 'grants'
       }
     | (EnvironmentRuntimeEventFields & {
         event: 'environment_install_started'

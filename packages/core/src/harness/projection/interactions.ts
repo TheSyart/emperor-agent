@@ -291,7 +291,6 @@ export function grantInteraction(
         reason: asked.reason ?? null,
         reason_unverified: true,
         high_impact: asked.highImpact === true,
-        high_risk_app: asked.highRiskApp === true,
         background: asked.background === true,
       },
     },

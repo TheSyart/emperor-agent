@@ -222,7 +222,7 @@ export class PendingInteractions {
       this.changed(entry.sessionId)
     })
 
-  /** Dismiss every pending grant card (emergency stop); optionally one session. */
+  /** Dismiss every pending grant card (switched off); optionally one session. */
   cancelGrants(sessionId?: string): number {
     let count = 0
     for (const [wireId, entry] of [...this.pending]) {

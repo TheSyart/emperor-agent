@@ -6,14 +6,9 @@ import { describe, expect, it } from 'vitest'
 import {
   computerUseHeadline,
   driverRows,
-  killSwitchRow,
   screenshotRow,
 } from './computerUseSettingsModel'
-import {
-  acceleratorFromKey,
-  acceleratorLabel,
-  defaultKillSwitchAccelerator,
-} from './shortcut'
+import { acceleratorFromKey, acceleratorLabel } from './shortcut'
 
 const embedded: DriverCapability = {
   driver: 'embedded-browser',
@@ -45,10 +40,8 @@ function status(
     supported: true,
     enabled: true,
     platform: 'macos',
-    stopped: false,
     drivers: [embedded, desktop],
     targets: [],
-    killSwitch: { accelerator: 'Control+Alt+Command+.', registered: true },
     ...patch,
   }
 }
@@ -66,18 +59,6 @@ describe('computer use settings model', () => {
     expect(computerUseHeadline(status({ enabled: false }))).toMatchObject({
       badge: '已关闭',
       tone: 'neutral',
-    })
-    expect(computerUseHeadline(status({ stopped: true }))).toMatchObject({
-      badge: '已急停',
-      tone: 'warn',
-    })
-    expect(
-      computerUseHeadline(
-        status({ stopped: true, stopReason: 'corrupt-store' }),
-      ),
-    ).toMatchObject({
-      badge: '已暂停',
-      description: expect.stringContaining('授权记录文件损坏'),
     })
     expect(computerUseHeadline(status())).toMatchObject({
       badge: '已开启',
@@ -117,29 +98,6 @@ describe('computer use settings model', () => {
       driverRows(status({ drivers: [{ ...desktop, enabled: true }] }))[0]!
         .description,
     ).toBe('尚未开放')
-  })
-
-  it('reports the kill switch registration', () => {
-    expect(killSwitchRow(status())).toMatchObject({
-      shortcut: '⌃⌥⌘.',
-      badge: '已注册',
-    })
-    expect(killSwitchRow(status({ enabled: false })).badge).toBe('未启用')
-    expect(
-      killSwitchRow(
-        status({
-          killSwitch: {
-            accelerator: 'Control+Alt+Shift+.',
-            registered: false,
-            error: '快捷键已被其他应用占用',
-          },
-        }),
-      ),
-    ).toMatchObject({
-      shortcut: '⌃⌥⇧.',
-      tone: 'warn',
-      description: '快捷键已被其他应用占用；仍可用下方按钮停止',
-    })
   })
 
   it('explains a switch turned off by the retired per-item mode', () => {
@@ -193,7 +151,6 @@ describe('computer use settings model', () => {
     expect(
       acceleratorFromKey(key('ControlLeft', { ctrlKey: true }), true),
     ).toBeNull()
-    expect(defaultKillSwitchAccelerator(true)).toBe('Control+Alt+Command+.')
   })
 
   it('formats accelerators per platform', () => {

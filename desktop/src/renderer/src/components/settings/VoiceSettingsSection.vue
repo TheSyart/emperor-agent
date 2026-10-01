@@ -29,14 +29,12 @@ import {
   type DictationPrivacyPane,
   type DictationStatus,
 } from '../../api/dictation'
-import { core } from '../../api/http'
 import { shortcutConflict } from '../../dictation/model'
 import {
   DEFAULT_DICTATION_SHORTCUT,
   useDictationSettings,
 } from '../../dictation/settings'
 import { detectShortcutPlatform } from '../../shortcuts'
-import { defaultKillSwitchAccelerator } from './computer/shortcut'
 import {
   deviceChoice,
   helperView,
@@ -47,8 +45,6 @@ import {
 const mac = detectShortcutPlatform() === 'mac'
 const { settings, update } = useDictationSettings()
 const status = ref<DictationStatus | null>(null)
-/** The emergency stop's shortcut, reserved even while Computer Use is off. */
-const killSwitch = ref(defaultKillSwitchAccelerator(mac))
 const openFailed = ref<DictationPrivacyPane | null>(null)
 const saveFailed = ref(false)
 
@@ -81,17 +77,6 @@ async function load(): Promise<void> {
   status.value = await dictationStatus()
 }
 
-async function loadKillSwitch(): Promise<void> {
-  try {
-    const view = await core('computerUse.status')
-    const accelerator = view?.killSwitch?.accelerator
-    if (typeof accelerator === 'string' && accelerator)
-      killSwitch.value = accelerator
-  } catch {
-    // No Computer Use here: its default shortcut stays reserved.
-  }
-}
-
 function save(patch: Parameters<typeof update>[0]): void {
   saveFailed.value = !update(patch)
 }
@@ -113,7 +98,7 @@ function saveShortcut(accelerator: string | null): void {
 }
 
 function conflict(accelerator: string): string | null {
-  return shortcutConflict(accelerator, { killSwitch: killSwitch.value, mac })
+  return shortcutConflict(accelerator, { mac })
 }
 
 async function openPrivacy(pane: DictationPrivacyPane): Promise<void> {
@@ -130,7 +115,6 @@ function onFocus(): void {
 
 onMounted(() => {
   void load()
-  void loadKillSwitch()
   window.addEventListener('focus', onFocus)
 })
 

@@ -9,12 +9,10 @@
  *   releases it (the preview goes, the page stays) → the next task's stale
  *   handle says released-at-task-end, it takes the tab back and moves to
  *   another site without a card → a high-impact click still asks, once →
- *   the emergency stop releases and blocks the next call → resume → a
- *   credential fill asks once and leaks nowhere → the Computer Use plugin
+ *   a credential fill asks once and leaks nowhere → the Computer Use plugin
  *   (能力 › 插件) shows its drivers, and turning it off refuses the next
- *   call and turns Settings off (and back on from Settings) → the plugin
- *   switch never clears the emergency stop → switching off closes every
- *   Agent tab.
+ *   call and turns Settings off (and back on from Settings) → switching off
+ *   closes every Agent tab. There is no emergency stop (2026-10-01).
  * Prints `E2E-RESULT {json}` lines like the Electron harness.
  *
  *   node out-e2e/fullstack.cjs            (via scripts/e2e-cu.mjs --mode=fullstack)
@@ -193,7 +191,7 @@ async function closeSettings(page: Page): Promise<void> {
 
 /**
  * 已开启 / 已关闭 from the master switch, or what the card names when it is
- * neither simply on nor off (已停止 after an emergency stop).
+ * neither simply on nor off (不可用).
  */
 async function statusBadge(page: Page): Promise<string> {
   const dialog = page.getByRole('dialog', { name: '设置' })
@@ -775,52 +773,6 @@ async function fullstack(
     },
   )
 
-  // Turn 4: the emergency stop blocks the next action until resumed.
-  await check(
-    page,
-    'emergency stop blocks the next action; resume restores',
-    async () => {
-      await openSettings(page)
-      await page
-        .getByRole('dialog', { name: '设置' })
-        .getByRole('button', { name: '立即停止' })
-        .click()
-      await until(
-        async () => (await statusBadge(page)) === '已停止',
-        10_000,
-        'card 已停止',
-      )
-      await closeSettings(page)
-      model.enqueue(call('browser_observe'), (request) => {
-        const text = lastToolResult(request)
-        return {
-          text: text.includes('emergency-stop')
-            ? '操作已被急停。'
-            : `意外结果：${text.slice(0, 200)}`,
-        }
-      })
-      await send(page, '再看一下页面。')
-      await until(
-        () => assistantSaid(page, '操作已被急停'),
-        30_000,
-        'stop reply',
-      )
-      await openSettings(page)
-      await page
-        .getByRole('dialog', { name: '设置' })
-        .getByRole('button', { name: '恢复' })
-        // The card and the stop row both offer it.
-        .first()
-        .click()
-      await until(
-        async () => (await statusBadge(page)) === '已开启',
-        10_000,
-        'badge 已开启',
-      )
-      await closeSettings(page)
-    },
-  )
-
   model.enqueue(
     call('browser_open', { url: `${origin}/form` }),
     call('ui_credential_list', { origin }),
@@ -998,33 +950,6 @@ async function fullstack(
         'the plugin to follow Settings',
       )
       return { refused: refused.slice(0, 120) }
-    },
-  )
-
-  await check(
-    page,
-    'the plugin switch never clears the emergency stop',
-    async () => {
-      await core(page, 'computerUse.stop')
-      const ref = { pluginId: 'computer-use', scope: 'managed' }
-      await core(page, 'plugins.setEnabled', { ...ref, enabled: false })
-      await core(page, 'plugins.setEnabled', { ...ref, enabled: true })
-      const status = await core<{ enabled: boolean; stopped: boolean }>(
-        page,
-        'computerUse.status',
-      )
-      if (!status.enabled || !status.stopped)
-        throw new Error(`after off and on: ${JSON.stringify(status)}`)
-      const detail = await core<{
-        components: Array<{ id: string; state: string; reason: string | null }>
-      }>(page, 'plugins.getDetail', ref)
-      const browser = detail.components.find(
-        (member) => member.id === 'embedded-browser',
-      )
-      if (browser?.state !== 'disabled' || !browser.reason?.includes('急停'))
-        throw new Error(`built-in browser: ${JSON.stringify(browser)}`)
-      await core(page, 'computerUse.resume')
-      return { drivers: detail.components.map((member) => member.state) }
     },
   )
 
