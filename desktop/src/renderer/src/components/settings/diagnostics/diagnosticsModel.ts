@@ -31,6 +31,8 @@ export interface DiagnosticRow {
   detail: string
   tone: DiagnosticTone
   path?: string
+  /** The value is a path (shown in the code font). */
+  mono?: boolean
 }
 
 export interface DiagnosticGroup {
@@ -167,12 +169,24 @@ export interface DiagnosticSection {
   hidden: number
 }
 
+/** Card titles of 设置 › 诊断, 环境工具 included. */
+export const DIAGNOSTIC_SECTION_TITLES: Readonly<
+  Record<DiagnosticSectionId | 'environment', string>
+> = {
+  runtime: '运行时',
+  environment: '环境工具',
+  desktop: '桌面',
+  paths: '存储路径',
+  config: '配置',
+}
+
 /**
  * Settings › 诊断 sections: 运行时, 桌面 (pet + build dependencies), 存储路径
- * (roots + legacy-data warnings) and 配置 (config files, a condensed
- * effective-config summary, the slash command catalog). Rows Core returned
- * no data for are dropped (counted in `hidden`); home paths read `~`. The
- * view slots 环境工具 (environment probe) after 运行时.
+ * (the runtime root first, the other roots, legacy-data warnings) and 配置
+ * (config files, a condensed effective-config summary, the slash command
+ * catalog). Rows Core returned no data for are dropped (counted in
+ * `hidden`); home paths read `~`. The view slots 环境工具 (environment
+ * probe) after 运行时.
  */
 export function diagnosticSections(
   payload: DiagnosticsPayload | null | undefined,
@@ -182,20 +196,27 @@ export function diagnosticSections(
   const rows = (id: string) =>
     groups.find((group) => group.id === id)?.rows ?? []
   const sections: Array<Omit<DiagnosticSection, 'hidden'>> = [
-    { id: 'runtime', title: '运行时', rows: rows('runtime') },
+    {
+      id: 'runtime',
+      title: DIAGNOSTIC_SECTION_TITLES.runtime,
+      rows: rows('runtime'),
+    },
     {
       id: 'desktop',
-      title: '桌面',
+      title: DIAGNOSTIC_SECTION_TITLES.desktop,
       rows: [...rows('desktop'), ...rows('dependencies')],
     },
     {
       id: 'paths',
-      title: '存储路径',
-      rows: [...rows('storage'), ...rows('legacy-data')],
+      title: DIAGNOSTIC_SECTION_TITLES.paths,
+      rows: withRuntimeRoot(diagnostics.root, diagnostics.paths?.runtimeRoot, [
+        ...rows('storage'),
+        ...rows('legacy-data'),
+      ]),
     },
     {
       id: 'config',
-      title: '配置',
+      title: DIAGNOSTIC_SECTION_TITLES.config,
       rows: [
         configRow('model-config', '模型配置', diagnostics.modelConfig),
         configRow('local-config', '本地配置', diagnostics.localConfig),
@@ -224,6 +245,41 @@ function notReturned(row: DiagnosticRow): boolean {
   return row.tone === 'muted' && row.value === '未返回'
 }
 
+const RESOURCES_DETAIL = '内置技能/模板等只读资源所在目录'
+
+function withoutTrailingSlash(path: string): string {
+  return path.replace(/[\\/]+$/, '') || path
+}
+
+/**
+ * 运行根目录 heads 存储路径 (it used to be the page's lead-in). It is
+ * normally the built-in resources folder too: then one row says both.
+ */
+function withRuntimeRoot(
+  root: string | undefined,
+  runtimeRoot: string | undefined,
+  rows: DiagnosticRow[],
+): DiagnosticRow[] {
+  if (!root) return rows
+  const same =
+    Boolean(runtimeRoot) &&
+    withoutTrailingSlash(root) === withoutTrailingSlash(runtimeRoot ?? '')
+  return [
+    {
+      id: 'runtime-root',
+      label: '运行根目录',
+      value: withoutTrailingSlash(root),
+      detail: same ? RESOURCES_DETAIL : '',
+      tone: 'ok',
+      path: root,
+      mono: true,
+    },
+    ...(same
+      ? rows.filter((row) => row.id !== 'runtime-resources-root')
+      : rows),
+  ]
+}
+
 /** `/Users/<name>`, `/home/<name>` and `C:\Users\<name>` read as `~`. */
 export function shortenHomePaths(text: string): string {
   return text
@@ -236,6 +292,8 @@ export type DiagnosticIssueTone = 'warn' | 'error'
 export interface DiagnosticIssue {
   /** Section to open (an environment tool issue points at 'environment'). */
   sectionId: DiagnosticSectionId | 'environment'
+  /** That section's card title (「环境工具」). */
+  section: string
   id: string
   label: string
   value: string
@@ -250,12 +308,21 @@ export interface DiagnosticSectionCount {
   error: number
 }
 
+export interface DiagnosticBadge {
+  tone: 'ok' | DiagnosticIssueTone
+  text: string
+}
+
 export interface DiagnosticSummary {
   tone: 'ok' | DiagnosticIssueTone
   headline: string
   counts: Record<DiagnosticSectionId | 'environment', DiagnosticSectionCount>
   /** Errors first, then warnings. */
   issues: DiagnosticIssue[]
+  /** The overview's badges: 「n 项异常」「n 项需要关注」, or 「运行正常」. */
+  badges: DiagnosticBadge[]
+  /** The overview's one-line conclusion beside them. */
+  conclusion: string
 }
 
 export interface DiagnosticEnvironmentItem {
@@ -296,6 +363,7 @@ export function diagnosticSummary(
       if (row.tone === 'warn' || row.tone === 'error')
         issues.push({
           sectionId: section.id,
+          section: section.title,
           id: row.id,
           label: row.label,
           value: row.value,
@@ -307,6 +375,7 @@ export function diagnosticSummary(
     if (item.tone === 'warn' || item.tone === 'error')
       issues.push({
         sectionId: 'environment',
+        section: DIAGNOSTIC_SECTION_TITLES.environment,
         id: item.id,
         label: item.label,
         value: item.value,
@@ -316,6 +385,7 @@ export function diagnosticSummary(
   issues.sort((a, b) => Number(b.tone === 'error') - Number(a.tone === 'error'))
   const errors = issues.filter((issue) => issue.tone === 'error').length
   const warnings = issues.length - errors
+  const badges = issueBadges(errors, warnings)
   return {
     tone: errors ? 'error' : warnings ? 'warn' : 'ok',
     headline: errors
@@ -325,7 +395,45 @@ export function diagnosticSummary(
         : '运行正常',
     counts,
     issues,
+    badges: badges.length ? badges : [{ tone: 'ok', text: '运行正常' }],
+    conclusion: issues.length ? '其余都正常' : '没有需要关注的项目',
   }
+}
+
+function issueBadges(errors: number, warnings: number): DiagnosticBadge[] {
+  return [
+    ...(errors ? [{ tone: 'error' as const, text: `${errors} 项异常` }] : []),
+    ...(warnings
+      ? [{ tone: 'warn' as const, text: `${warnings} 项需要关注` }]
+      : []),
+  ]
+}
+
+/** A card's badges beside its title: only while something needs attention. */
+export function diagnosticSectionBadges(
+  count: DiagnosticSectionCount,
+): DiagnosticBadge[] {
+  return issueBadges(count.error, count.warn)
+}
+
+/**
+ * A card's line under its title: 「8 项 · 另有 4 项未返回数据」; 环境工具
+ * leads with the probed platform, 存储路径 says it holds the runtime root.
+ */
+export function diagnosticCardDescription(input: {
+  total: number
+  hidden: number
+  prefix?: string
+  runtimeRoot?: boolean
+}): string {
+  return [
+    input.prefix ?? '',
+    `${input.total} 项`,
+    input.hidden ? `另有 ${input.hidden} 项未返回数据` : '',
+    input.runtimeRoot ? '含运行根目录' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 const TONE_TEXT: Record<string, string> = {
@@ -336,19 +444,17 @@ const TONE_TEXT: Record<string, string> = {
   running: '进行中',
 }
 
-/** Plain-text report of the page (the 「复制报告」 action). */
+/**
+ * Plain-text report of the page (the 「复制报告」 action). The runtime root
+ * is a 存储路径 line, like on the page.
+ */
 export function diagnosticReportText(input: {
-  root?: string
   summary: DiagnosticSummary
   sections: readonly DiagnosticSection[]
   environment: readonly DiagnosticEnvironmentItem[]
   environmentLabel?: string
 }): string {
-  const lines = [
-    'Emperor 诊断报告',
-    input.root ? `运行根目录：${shortenHomePaths(input.root)}` : '',
-    `总体：${input.summary.headline}`,
-  ].filter(Boolean)
+  const lines = ['Emperor 诊断报告', `总体：${input.summary.headline}`]
   const block = (
     title: string,
     rows: ReadonlyArray<{
@@ -627,16 +733,14 @@ function storagePathRows(
       'runtime-resources-root',
       '内置资源目录',
       paths?.runtimeRoot,
-      '内置技能/模板等只读资源所在目录',
+      RESOURCES_DETAIL,
     ),
-    {
-      id: 'global-state-root',
-      label: 'Emperor Home',
-      value: sourceLabel(paths?.stateRootSource),
-      detail: paths?.stateRoot || '未返回',
-      tone: paths?.stateRoot ? 'ok' : 'muted',
-      path: paths?.stateRoot,
-    },
+    pathRow(
+      'global-state-root',
+      'Emperor Home',
+      paths?.stateRoot,
+      sourceLabel(paths?.stateRootSource),
+    ),
     hasBoundProject
       ? pathRow(
           'active-project-path',
@@ -662,27 +766,31 @@ function storagePathRows(
   ]
 }
 
+/** A located folder or file reads as the path itself; `detail` says what it is. */
 function pathRow(
   id: string,
   label: string,
   path: string | undefined,
   detail?: string,
 ): DiagnosticRow {
+  if (!path)
+    return { id, label, value: '未返回', detail: '未返回', tone: 'muted' }
   return {
     id,
     label,
-    value: path ? '已定位' : '未返回',
-    detail: detail || path || '未返回',
-    tone: path ? 'ok' : 'muted',
+    value: path,
+    detail: detail ?? '',
+    tone: 'ok',
     path,
+    mono: true,
   }
 }
 
 function sourceLabel(source: string | undefined): string {
   if (source === 'explicit') return '显式指定'
   if (source === 'env') return '环境变量 EMPEROR_CONFIG_DIR'
-  if (source === 'default') return '默认 ~/.emperor'
-  return '未知'
+  if (source === 'default') return '默认位置'
+  return '来源未知'
 }
 
 function legacyDataRows(

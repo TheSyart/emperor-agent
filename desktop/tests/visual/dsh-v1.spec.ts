@@ -1460,30 +1460,52 @@ test('diagnostics section reports environment status and re-detects', async ({
     height: 860,
   })
   const dialog = page.getByRole('dialog', { name: '设置' })
-  // Overview first: the state, one metric per section, then the issues.
+  // One overview card first: the state as badges, one conclusion, then the
+  // issues. No number tiles, no lead-in, no notice while requests work.
   const overview = dialog.getByTestId('diagnostics-overview')
-  await expect(overview.getByRole('heading')).toHaveText(/需要关注|异常/)
-  for (const metric of ['运行时', '环境工具', '存储路径', '配置'])
-    await expect(overview.getByText(metric, { exact: true })).toBeVisible()
+  await expect(overview.locator('.summary .ds-status-badge')).toHaveText([
+    '3 项需要关注',
+  ])
+  await expect(overview.locator('.conclusion')).toHaveText('其余都正常')
+  await expect(dialog.locator('.ds-metric')).toHaveCount(0)
+  await expect(dialog.locator('.ds-settings-section .intro')).toHaveCount(0)
+  await expect(dialog.locator('.ds-settings-notice')).toHaveCount(0)
   const issues = overview.getByRole('list', { name: '需要关注' })
-  await expect(issues.locator('[data-issue="environment-node"]')).toBeVisible()
+  await expect(issues.locator('[data-issue="environment-node"]')).toContainText(
+    '环境工具 · node',
+  )
   await expect(
     issues.locator('[data-issue="desktop-pet-modules"]'),
-  ).toBeVisible()
+  ).toContainText('桌面 · 桌宠模块')
   // The false 「0 个允许根」 warning is gone.
   await expect(dialog.getByText('0 个允许根')).toHaveCount(0)
-  // Section cards start collapsed; 5 of them, 环境工具 second.
+  // Five cards, collapsed, 环境工具 second; only those with an issue carry
+  // a badge, and 存储路径 holds the runtime root.
   const cards = dialog.locator('[data-diagnostic-card]')
   await expect(cards).toHaveCount(5)
   await expect(dialog.getByTestId('environment-section')).toHaveCount(0)
+  const badges = (id: string) =>
+    dialog.locator(`[data-diagnostic-card="${id}"] .head .ds-status-badge`)
+  await expect(badges('environment')).toHaveText(['2 项需要关注'])
+  await expect(badges('desktop')).toHaveText(['1 项需要关注'])
+  for (const id of ['runtime', 'paths', 'config'])
+    await expect(badges(id)).toHaveCount(0)
+  await expect(dialog.locator('[data-diagnostic-card="paths"]')).toContainText(
+    '含运行根目录',
+  )
   await shot(page, 'settings-diagnostics-overview')
 
   // An issue opens its card.
   await issues.locator('[data-issue="environment-node"]').click()
   const environment = dialog.getByTestId('environment-section')
-  await expect(environment.getByTestId('environment-tool-node')).toContainText(
-    '版本不匹配',
-  )
+  await expect(
+    environment.getByTestId('environment-tool-node').locator('.value'),
+  ).toHaveText('版本不匹配')
+  // A ready tool reads as its version, without a badge.
+  await expect(
+    environment.getByTestId('environment-tool-git').locator('.value'),
+  ).toHaveText('2.55.0')
+  await expect(environment.locator('.ds-status-badge')).toHaveCount(0)
   await expect(
     environment.getByText('blocked-visual Skill 需要 Python'),
   ).toBeVisible()
@@ -1499,12 +1521,13 @@ test('diagnostics section reports environment status and re-detects', async ({
   await expect(refresh).toHaveCount(1)
   await refresh.click()
   await expect(refresh).toBeEnabled()
-  await expect(environment.getByTestId('environment-tool-node')).toContainText(
-    '版本不匹配',
-  )
+  await expect(
+    environment.getByTestId('environment-tool-node').locator('.value'),
+  ).toHaveText('版本不匹配')
   await shot(page, 'settings-diagnostics-environment')
 
-  // Runtime rows use Chinese labels and hide rows Core did not return.
+  // Runtime rows use Chinese labels, show values without badges and hide
+  // rows Core did not return.
   await dialog
     .locator('[data-diagnostic-card="runtime"]')
     .getByRole('button', { name: /运行时/ })
@@ -1513,11 +1536,61 @@ test('diagnostics section reports environment status and re-detects', async ({
   await expect(runtime.getByText('定时任务存储')).toBeVisible()
   await expect(runtime.getByText('Owned Process Runtime')).toHaveCount(0)
   await expect(runtime.getByText(/另有 \d+ 项未返回数据/)).toBeVisible()
+  await expect(runtime.locator('.body .ds-status-badge')).toHaveCount(0)
   await shot(page, 'settings-diagnostics-runtime')
+
+  // 存储路径 starts with the runtime root, as a path.
+  await dialog
+    .locator('[data-diagnostic-card="paths"]')
+    .getByRole('button', { name: /存储路径/ })
+    .click()
+  const paths = dialog.locator('[data-diagnostic-card="paths"]')
+  const first = paths.locator('[data-row]').first()
+  await expect(first).toHaveAttribute('data-row', 'runtime-root')
+  await expect(first).toContainText('运行根目录')
+  await expect(paths.locator('[data-row="sessions-path"] .value')).toHaveText(
+    '~/.emperor/sessions',
+  )
+  await paths.scrollIntoViewIfNeeded()
+  await shot(page, 'settings-diagnostics-paths')
 
   await page.setViewportSize({ width: 390, height: 844 })
   await expectWithinViewport(page, dialog, { width: 390, height: 844 })
 })
+
+for (const theme of ['dark', 'light'] as const)
+  test(`diagnostics failures show notices on top (${theme})`, async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      const bridge = (
+        window as unknown as {
+          emperor: {
+            invokeCore: (key: string, ...args: unknown[]) => Promise<unknown>
+          }
+        }
+      ).emperor
+      const invoke = bridge.invokeCore
+      bridge.invokeCore = async (key: string, ...args: unknown[]) => {
+        if (key === 'environment.getStatus')
+          throw new Error('读不到 PATH，环境检测没有完成')
+        return await invoke(key, ...args)
+      }
+    })
+    await open(page, '/chat/build-ui?settings=diagnostics', {
+      width: 1280,
+      height: 860,
+      theme,
+    })
+    const dialog = page.getByRole('dialog', { name: '设置' })
+    const notice = dialog.locator('.ds-settings-notice')
+    await expect(notice).toHaveCount(1)
+    await expect(notice).toHaveAttribute('data-tone', 'error')
+    await expect(notice).toContainText('环境检测失败')
+    await expect(notice).toContainText('读不到 PATH，环境检测没有完成')
+    await expect(dialog.getByTestId('diagnostics-overview')).toBeVisible()
+    await shot(page, `settings-diagnostics-failed-${theme}`)
+  })
 
 test('pet section previews bundled sprites and toggles the pet', async ({
   page,

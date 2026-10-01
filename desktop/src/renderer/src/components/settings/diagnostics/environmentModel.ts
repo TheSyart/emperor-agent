@@ -64,6 +64,36 @@ export function environmentToolStatusLabel(
   return labels[status]
 }
 
+export interface EnvironmentToolRow {
+  id: string
+  label: string
+  /** The detected version of a ready tool, else its state. */
+  value: string
+  /** Why the tool is needed, what was found and what is required. */
+  detail: string
+  tone: EnvironmentTone
+}
+
+/** One 环境工具 row, read like the other diagnostics rows: 「git · 2.55.0」. */
+export function environmentToolRow(tool: EnvironmentTool): EnvironmentToolRow {
+  const ready = tool.status === 'ready'
+  return {
+    id: tool.id,
+    label: tool.id,
+    value: ready
+      ? tool.detectedVersion || environmentToolStatusLabel(tool.status)
+      : environmentToolStatusLabel(tool.status),
+    detail: [
+      tool.reason,
+      !ready && tool.detectedVersion ? `当前 ${tool.detectedVersion}` : '',
+      tool.requiredVersion ? `要求 ${tool.requiredVersion}` : '',
+    ]
+      .filter(Boolean)
+      .join(' · '),
+    tone: environmentToolTone(tool.status),
+  }
+}
+
 export function environmentJobStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     planned: '待开始',

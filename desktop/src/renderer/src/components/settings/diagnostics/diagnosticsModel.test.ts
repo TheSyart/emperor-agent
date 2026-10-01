@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { DiagnosticsPayload } from '../../../types'
 import {
+  diagnosticCardDescription,
   diagnosticReportText,
   diagnosticRows,
+  diagnosticSectionBadges,
   diagnosticSections,
   diagnosticStatusTone,
   diagnosticStatusText,
@@ -297,22 +299,26 @@ describe('diagnostics settings model', () => {
       '桌面能力',
       '依赖',
     ])
+    // A located path reads as the path itself, in the code font.
     expect(
       rows.find((row) => row.id === 'runtime-resources-root'),
     ).toMatchObject({
       label: '内置资源目录',
-      value: '已定位',
+      value: '/repo',
+      detail: '内置技能/模板等只读资源所在目录',
       path: '/repo',
+      mono: true,
     })
     expect(rows.find((row) => row.id === 'global-state-root')).toMatchObject({
       label: 'Emperor Home',
-      value: '默认 ~/.emperor',
-      detail: '/Users/me/.emperor-agent',
+      value: '/Users/me/.emperor-agent',
+      detail: '默认位置',
       path: '/Users/me/.emperor-agent',
+      mono: true,
     })
     expect(rows.find((row) => row.id === 'active-project-path')).toMatchObject({
       label: '当前项目',
-      value: '已定位',
+      value: '/repo/project',
       path: '/repo/project',
     })
     expect(rows.find((row) => row.id === 'sessions-path')).toMatchObject({
@@ -680,8 +686,12 @@ describe('diagnostics settings model', () => {
       paths.rows.find((row) => row.id === 'global-state-root'),
     ).toMatchObject({
       label: 'Emperor Home',
-      detail: '~/.emperor',
+      value: '~/.emperor',
       path: '/Users/me/.emperor',
+    })
+    expect(paths.rows.find((row) => row.id === 'sessions-path')).toMatchObject({
+      value: '~/.emperor/sessions',
+      mono: true,
     })
     // Effective config: no JSON, skills folded into one row.
     const config = sections[3]!
@@ -706,8 +716,48 @@ describe('diagnostics settings model', () => {
     ).toContain('legacy-state-migration')
   })
 
+  it('puts the runtime root first in 存储路径, one row when it holds the resources', () => {
+    const paths = (payload: Record<string, unknown>) =>
+      diagnosticSections(payload as never).find(
+        (section) => section.id === 'paths',
+      )!.rows
+    const shared = paths({
+      root: '/Users/me/app/',
+      paths: { runtimeRoot: '/Users/me/app', stateRoot: '/Users/me/.emperor' },
+    })
+    expect(shared[0]).toMatchObject({
+      id: 'runtime-root',
+      label: '运行根目录',
+      value: '~/app',
+      detail: '内置技能/模板等只读资源所在目录',
+      tone: 'ok',
+      path: '/Users/me/app/',
+      mono: true,
+    })
+    expect(shared.map((row) => row.id)).not.toContain('runtime-resources-root')
+    const apart = paths({
+      root: '/Users/me/code/emperor',
+      paths: {
+        runtimeRoot: '/Applications/Emperor.app/Contents/Resources/app',
+        stateRoot: '/Users/me/.emperor',
+      },
+    })
+    expect(apart.map((row) => row.id).slice(0, 2)).toEqual([
+      'runtime-root',
+      'runtime-resources-root',
+    ])
+    expect(apart[0]!.detail).toBe('')
+    // No root reported: no row.
+    expect(
+      paths({ paths: { stateRoot: '/Users/me/.emperor' } }).map(
+        (row) => row.id,
+      ),
+    ).not.toContain('runtime-root')
+  })
+
   it('summarises section health and lists issues, errors first', () => {
     const sections = diagnosticSections({
+      root: '/Users/me/code/app',
       scheduler: { lastActionErrors: [{}] },
       runtime: { events: 1 },
       dependencies: { nodeRuntime: true, desktopPetModules: false },
@@ -735,25 +785,73 @@ describe('diagnostics settings model', () => {
       ['desktop', 'desktop-pet-modules'],
       ['environment', 'environment-node'],
     ])
+    // Each issue names its card, for the overview line 「环境工具 · node」.
+    expect(summary.issues.map((issue) => issue.section)).toEqual([
+      '运行时',
+      '桌面',
+      '环境工具',
+    ])
     expect(summary.counts.environment).toEqual({
       total: 2,
       ok: 1,
       warn: 1,
       error: 0,
     })
-    expect(diagnosticSummary([], []).headline).toBe('运行正常')
+    // The overview: its badges, then one conclusion.
+    expect(summary.badges).toEqual([
+      { tone: 'error', text: '1 项异常' },
+      { tone: 'warn', text: '2 项需要关注' },
+    ])
+    expect(summary.conclusion).toBe('其余都正常')
+    const fine = diagnosticSummary([], [])
+    expect(fine.headline).toBe('运行正常')
+    expect(fine.badges).toEqual([{ tone: 'ok', text: '运行正常' }])
+    expect(fine.conclusion).toBe('没有需要关注的项目')
 
     const report = diagnosticReportText({
-      root: '/Users/me/code/app',
       summary,
       sections,
       environment: [],
       environmentLabel: 'macOS · arm64',
     })
-    expect(report).toContain('运行根目录：~/code/app')
+    // The runtime root is a 存储路径 line now, not a header of its own.
+    expect(report).not.toMatch(/^运行根目录/m)
+    expect(report).toContain('- [正常] 运行根目录：~/code/app')
     expect(report).toContain('总体：有 1 项异常，2 项需要关注')
     expect(report).toContain('## 环境工具 · macOS · arm64')
     expect(report).toContain('- [异常] 定时任务存储：异常')
+  })
+
+  it('marks a card only while something in it needs attention', () => {
+    expect(
+      diagnosticSectionBadges({ total: 8, ok: 7, warn: 0, error: 0 }),
+    ).toEqual([])
+    expect(
+      diagnosticSectionBadges({ total: 4, ok: 3, warn: 1, error: 0 }),
+    ).toEqual([{ tone: 'warn', text: '1 项需要关注' }])
+    expect(
+      diagnosticSectionBadges({ total: 4, ok: 1, warn: 2, error: 1 }),
+    ).toEqual([
+      { tone: 'error', text: '1 项异常' },
+      { tone: 'warn', text: '2 项需要关注' },
+    ])
+  })
+
+  it('describes a card by its size, what Core left out and what it holds', () => {
+    expect(diagnosticCardDescription({ total: 12, hidden: 0 })).toBe('12 项')
+    expect(diagnosticCardDescription({ total: 8, hidden: 4 })).toBe(
+      '8 项 · 另有 4 项未返回数据',
+    )
+    expect(
+      diagnosticCardDescription({
+        total: 4,
+        hidden: 0,
+        prefix: 'macOS · arm64',
+      }),
+    ).toBe('macOS · arm64 · 4 项')
+    expect(
+      diagnosticCardDescription({ total: 8, hidden: 0, runtimeRoot: true }),
+    ).toBe('8 项 · 含运行根目录')
   })
 
   it('reads home directories as ~', () => {

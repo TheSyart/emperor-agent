@@ -115,8 +115,15 @@ test('narrow window folds the nav rail into a top strip', async ({ page }) => {
 test('content-heavy sections keep the 564px column without overflow', async ({
   page,
 }) => {
-  // Scheduler left the modal for its own page (/scheduler).
-  for (const section of ['memory', 'tokens', 'diagnostics']) {
+  // Scheduler left the modal for its own page (/scheduler). 浏览器 and 语音
+  // are cards from edge to edge of the column (RV-05).
+  for (const section of [
+    'memory',
+    'tokens',
+    'diagnostics',
+    'browser',
+    'voice',
+  ]) {
     const dialog = await openSettings(page, section)
     const options = dialog.locator('.settings-options')
     await expect(options).toBeVisible()
@@ -130,6 +137,13 @@ test('content-heavy sections keep the 564px column without overflow', async ({
       )
     })
     expect(Math.round(width)).toBe(564)
+    // Every card group spans the column.
+    const cards = await options
+      .locator('.ds-settings-group[data-card] > .content')
+      .evaluateAll((els) =>
+        els.map((el) => Math.round(el.getBoundingClientRect().width)),
+      )
+    for (const card of cards) expect(card).toBe(564)
     await noHorizontalOverflow(page)
   }
 })

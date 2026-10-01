@@ -1,24 +1,29 @@
 <script setup lang="ts">
 /**
- * Settings › 诊断 — an overview first, details on demand:
- * - 概览: the overall state (「运行正常」 / 「有 n 项需要关注」), one Metric
- *   per section (正常 x/y) and the rows that need attention, errors first;
- *   clicking one opens its section card and scrolls to it.
- * - Section cards (collapsed by default): 运行时, 环境工具 (environment
- *   probe), 桌面, 存储路径, 配置. Each header summarises its rows; the body
- *   is compact rows with a status badge. Rows Core returned no data for are
- *   left out (the card says how many); home paths read `~`.
+ * Settings › 诊断 — a conclusion first, details on demand:
+ * - a SettingsNotice on top only while a request failed (诊断请求失败,
+ *   环境检测失败, or a folder that would not open);
+ * - the overview card: the state as badges (「n 项异常」「n 项需要关注」, or
+ *   「运行正常」) and one conclusion (「其余都正常」), then the rows that need
+ *   attention, errors first; clicking one opens its card and scrolls to it.
+ *   No number tiles;
+ * - five collapsible cards (collapsed by default), all alike: 运行时,
+ *   环境工具 (environment probe), 桌面, 存储路径 (the runtime root first)
+ *   and 配置. A card shows a badge beside its title only while something in
+ *   it needs attention; its line says how many rows it has (and how many
+ *   Core returned no data for, left out). Rows are DiagnosticItems: the
+ *   value as plain text, the why only where something needs attention;
+ *   home paths read `~`.
  * Header actions: 刷新 (diagnostics + environment re-detection) and 复制报告
  * (plain-text report of the page).
  */
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import IconButton from '../ui/IconButton.vue'
 import { useCopyFeedback } from '../ui/useCopyFeedback'
-import { DsCopy, DsFolderOpen, DsWarning } from '../icons/ds'
+import { DsCopy, DsFolderOpen, DsShieldAlert, DsWarning } from '../icons/ds'
 import {
-  Metric,
   SettingsCard,
-  SettingsRow,
+  SettingsNotice,
   SettingsSection,
   StatusBadge,
 } from './ui'
@@ -27,18 +32,19 @@ import { core } from '../../api/http'
 import { openPath } from '../../api/backend'
 import { useAppContext } from '../../composables/useAppContext'
 import type { DiagnosticsPayload } from '../../types'
+import DiagnosticItem from './diagnostics/DiagnosticItem.vue'
 import EnvironmentToolsGroup from './diagnostics/EnvironmentToolsGroup.vue'
 import {
+  DIAGNOSTIC_SECTION_TITLES,
   OPENABLE_DIAGNOSTIC_PATHS,
+  diagnosticCardDescription,
   diagnosticReportText,
+  diagnosticSectionBadges,
   diagnosticSections,
   diagnosticSummary,
-  shortenHomePaths,
   type DiagnosticIssue,
   type DiagnosticRow,
-  type DiagnosticSectionCount,
   type DiagnosticSectionId,
-  type DiagnosticTone,
 } from './diagnostics/diagnosticsModel'
 import {
   environmentDiagnosticItems,
@@ -56,19 +62,13 @@ const CARD_ORDER: readonly CardId[] = [
   'config',
 ]
 
-const METRICS: ReadonlyArray<{ id: CardId; label: string }> = [
-  { id: 'runtime', label: '运行时' },
-  { id: 'environment', label: '环境工具' },
-  { id: 'paths', label: '存储路径' },
-  { id: 'config', label: '配置' },
-]
-
 const ctx = useAppContext()
 const diagnostics = ref<DiagnosticsPayload | null>(
   ctx.boot.value?.diagnostics || null,
 )
 const loading = ref(false)
 const error = ref('')
+const revealError = ref('')
 const environment = ref<EnvironmentStatusPayload | null>(null)
 const environmentLoading = ref(false)
 const environmentError = ref('')
@@ -87,25 +87,47 @@ const platform = computed(() =>
 const summary = computed(() =>
   diagnosticSummary(sections.value, environmentItems.value),
 )
-const rootPath = computed(() => current.value?.root || '')
+
+/** One notice per failed request, on top of the page. */
+const notices = computed(() =>
+  [
+    { id: 'diagnostics', title: '诊断请求失败', detail: error.value },
+    { id: 'reveal', title: '没能打开这个位置', detail: revealError.value },
+    {
+      id: 'environment',
+      title: '环境检测失败',
+      detail: environmentError.value,
+    },
+  ].filter((notice) => notice.detail),
+)
 
 const cards = computed(() =>
   CARD_ORDER.map((id) => {
+    const count = summary.value.counts[id]
     if (id === 'environment')
       return {
         id,
-        title: '环境工具',
-        count: summary.value.counts.environment,
-        hidden: 0,
+        title: DIAGNOSTIC_SECTION_TITLES.environment,
+        badges: diagnosticSectionBadges(count),
+        description: diagnosticCardDescription({
+          total: count.total,
+          hidden: 0,
+          prefix: platform.value,
+        }),
         rows: [] as DiagnosticRow[],
       }
     const section = sections.value.find((item) => item.id === id)
+    const rows = section?.rows ?? []
     return {
       id,
-      title: section?.title ?? id,
-      count: summary.value.counts[id],
-      hidden: section?.hidden ?? 0,
-      rows: section?.rows ?? [],
+      title: section?.title ?? DIAGNOSTIC_SECTION_TITLES[id],
+      badges: diagnosticSectionBadges(count),
+      description: diagnosticCardDescription({
+        total: count.total,
+        hidden: section?.hidden ?? 0,
+        runtimeRoot: rows.some((row) => row.id === 'runtime-root'),
+      }),
+      rows,
     }
   }),
 )
@@ -113,7 +135,6 @@ const cards = computed(() =>
 const { copied, copy } = useCopyFeedback(
   () =>
     diagnosticReportText({
-      root: rootPath.value,
       summary: summary.value,
       sections: sections.value,
       environment: environmentItems.value,
@@ -150,6 +171,7 @@ async function refreshDiagnostics() {
   if (loading.value) return
   loading.value = true
   error.value = ''
+  revealError.value = ''
   try {
     diagnostics.value = await core('diagnostics.get')
   } catch (cause) {
@@ -176,11 +198,11 @@ async function refreshEnvironment() {
 
 async function reveal(target: string) {
   if (!target) return
-  error.value = ''
+  revealError.value = ''
   try {
     await openPath(target)
   } catch (cause) {
-    error.value = messageOf(cause)
+    revealError.value = messageOf(cause)
   }
 }
 
@@ -191,37 +213,6 @@ async function focusIssue(issue: DiagnosticIssue) {
   document
     .querySelector(`[data-diagnostic-card="${issue.sectionId}"]`)
     ?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-}
-
-function badgeTone(tone: DiagnosticTone | 'running') {
-  if (tone === 'muted') return 'neutral' as const
-  if (tone === 'running') return 'accent' as const
-  return tone
-}
-
-function countTone(count: DiagnosticSectionCount) {
-  return count.error ? 'error' : count.warn ? 'warn' : 'ok'
-}
-
-function countBadge(count: DiagnosticSectionCount): string {
-  if (!count.total) return '无数据'
-  if (count.error) return `${count.error} 项异常`
-  if (count.warn) return `${count.warn} 项需关注`
-  return '正常'
-}
-
-function cardDescription(
-  id: CardId,
-  count: DiagnosticSectionCount,
-  hidden: number,
-) {
-  return [
-    id === 'environment' ? platform.value : '',
-    `${count.total} 项`,
-    hidden ? `另有 ${hidden} 项未返回数据` : '',
-  ]
-    .filter(Boolean)
-    .join(' · ')
 }
 
 function openable(row: DiagnosticRow) {
@@ -236,42 +227,32 @@ function messageOf(cause: unknown): string {
 
 <template>
   <SettingsSection>
-    <template v-if="rootPath" #intro>
-      运行根目录 ·
-      <code class="intro-path" :title="rootPath">
-        {{ shortenHomePaths(rootPath) }}
-      </code>
-    </template>
+    <SettingsNotice
+      v-for="notice in notices"
+      :key="notice.id"
+      class="diag-notice"
+      tone="error"
+      :title="notice.title"
+      :description="notice.detail"
+    />
 
-    <div v-if="error" class="diag-alert" role="alert">
-      <DsWarning :size="16" class="alert-glyph" />
-      <span><strong>诊断请求失败</strong> {{ error }}</span>
-    </div>
-
-    <section
+    <SettingsCard
       class="overview"
-      :data-tone="summary.tone"
+      role="region"
       aria-label="诊断概览"
       data-testid="diagnostics-overview"
+      :data-tone="summary.tone"
     >
-      <div class="overview-head">
-        <span class="overview-dot" aria-hidden="true" />
-        <h3 class="headline">{{ summary.headline }}</h3>
-      </div>
-      <div class="metrics">
-        <Metric
-          v-for="metric in METRICS"
-          :key="metric.id"
-          :label="metric.label"
-          :value="`${summary.counts[metric.id].ok}/${summary.counts[metric.id].total}`"
-          :tone="
-            summary.counts[metric.id].total
-              ? countTone(summary.counts[metric.id])
-              : 'default'
-          "
-          :hint="countBadge(summary.counts[metric.id])"
-        />
-      </div>
+      <p class="summary">
+        <StatusBadge
+          v-for="badge in summary.badges"
+          :key="badge.text"
+          :tone="badge.tone"
+          :dot="badge.tone === 'ok'"
+          >{{ badge.text }}</StatusBadge
+        >
+        <span class="conclusion">{{ summary.conclusion }}</span>
+      </p>
       <ul v-if="summary.issues.length" class="issues" aria-label="需要关注">
         <li
           v-for="issue in summary.issues"
@@ -281,19 +262,27 @@ function messageOf(cause: unknown): string {
             type="button"
             class="issue"
             :data-issue="issue.id"
+            :data-tone="issue.tone"
+            :title="issue.detail"
             @click="focusIssue(issue)"
           >
-            <StatusBadge :tone="issue.tone" dot class="issue-badge">
-              {{ issue.value }}
-            </StatusBadge>
-            <span class="issue-label">{{ issue.label }}</span>
-            <span class="issue-detail" :title="issue.detail">
-              {{ issue.detail }}
+            <component
+              :is="issue.tone === 'error' ? DsShieldAlert : DsWarning"
+              :size="16"
+              class="issue-glyph"
+              aria-hidden="true"
+            />
+            <span class="issue-text">
+              <span class="issue-where"
+                >{{ issue.section }} · {{ issue.label }}</span
+              >
+              <span class="issue-what">{{ issue.value }}</span>
             </span>
+            <span class="issue-go" aria-hidden="true">查看</span>
           </button>
         </li>
       </ul>
-    </section>
+    </SettingsCard>
 
     <div class="cards">
       <SettingsCard
@@ -301,18 +290,17 @@ function messageOf(cause: unknown): string {
         :key="card.id"
         v-model:open="openCards[card.id]"
         expandable
-        variant="outline"
         :title="card.title"
-        :description="cardDescription(card.id, card.count, card.hidden)"
+        :description="card.description"
         :data-diagnostic-card="card.id"
       >
-        <template #meta>
+        <template v-if="card.badges.length" #meta>
           <StatusBadge
-            :tone="card.count.total ? countTone(card.count) : 'neutral'"
-            dot
+            v-for="badge in card.badges"
+            :key="badge.text"
+            :tone="badge.tone"
+            >{{ badge.text }}</StatusBadge
           >
-            {{ countBadge(card.count) }}
-          </StatusBadge>
         </template>
 
         <EnvironmentToolsGroup
@@ -322,26 +310,12 @@ function messageOf(cause: unknown): string {
           :error="environmentError"
         />
         <div v-else class="rows">
-          <SettingsRow
+          <DiagnosticItem
             v-for="row in card.rows"
             :key="row.id"
-            dense
-            :title="row.label"
+            :row="row"
             :data-row="row.id"
           >
-            <template #description>
-              <span class="detail" :title="row.path || row.detail">
-                {{ row.detail }}
-              </span>
-            </template>
-            <StatusBadge
-              :tone="badgeTone(row.tone)"
-              dot
-              class="value"
-              :title="row.value"
-            >
-              {{ row.value }}
-            </StatusBadge>
             <IconButton
               v-if="openable(row)"
               :label="`打开${row.label}`"
@@ -349,7 +323,7 @@ function messageOf(cause: unknown): string {
             >
               <DsFolderOpen :size="16" />
             </IconButton>
-          </SettingsRow>
+          </DiagnosticItem>
           <p v-if="!card.rows.length" class="empty">
             Core 没有返回这一组的数据。
           </p>
@@ -360,119 +334,56 @@ function messageOf(cause: unknown): string {
 </template>
 
 <style scoped>
-.intro-path {
-  font: var(--font-code-small);
-  overflow-wrap: anywhere;
-}
-
-.diag-alert {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
+.diag-notice + .diag-notice {
   margin-top: var(--space-2);
-  padding: var(--space-2-5) var(--space-3);
-  border-radius: var(--radius-row);
-  background: rgb(var(--state-error-soft));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--state-error-label));
-  overflow-wrap: anywhere;
 }
 
-.alert-glyph {
-  flex: none;
-  margin-top: var(--space-0-5);
+.overview:not(:first-child) {
+  margin-top: var(--space-5);
 }
 
-.overview {
+.summary {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  margin-top: var(--space-3);
-  padding: var(--space-3-5) var(--space-4);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-3));
-}
-
-.overview[data-tone='warn'] {
-  border-color: rgb(var(--state-warn) / 0.4);
-}
-
-.overview[data-tone='error'] {
-  border-color: rgb(var(--state-error) / 0.45);
-}
-
-.overview-head {
-  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.overview-dot {
-  flex: none;
-  width: var(--space-2);
-  height: var(--space-2);
-  border-radius: var(--radius-pill);
-  background: rgb(var(--state-ok));
-}
-
-.overview[data-tone='warn'] .overview-dot {
-  background: rgb(var(--state-warn));
-}
-
-.overview[data-tone='error'] .overview-dot {
-  background: rgb(var(--state-error));
-}
-
-.headline {
+  gap: var(--space-2) var(--space-3);
   margin: 0;
-  min-width: 0;
+}
+
+.conclusion {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
+  font-weight: 600;
   color: rgb(var(--label-primary));
-}
-
-.metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-2);
 }
 
 .issues {
   display: flex;
   flex-direction: column;
+  gap: var(--space-1-5);
   margin: 0;
   padding: 0;
   list-style: none;
-  border-top: 1px solid var(--border-l2);
 }
 
+/* A tinted row per issue; the whole row opens its card. */
 .issue {
-  display: grid;
-  grid-template-columns: auto minmax(0, max-content) minmax(0, 1fr);
+  display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-2-5);
   width: 100%;
-  min-height: var(--space-8);
-  padding: var(--space-1) var(--space-1-5);
+  padding: var(--space-2-5) var(--space-3);
   border: none;
-  border-radius: var(--radius-row);
-  background: transparent;
+  border-radius: var(--radius-cell);
+  background: rgb(var(--state-warn-soft));
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-.issues li:first-child .issue {
-  margin-top: var(--space-2);
-}
-
-.issue:hover {
-  background: var(--interactive-bg-hover);
+.issue[data-tone='error'] {
+  background: rgb(var(--state-error-soft));
 }
 
 .issue:focus-visible {
@@ -480,32 +391,53 @@ function messageOf(cause: unknown): string {
   box-shadow: 0 0 0 2px rgb(var(--focus-ring) / 0.5);
 }
 
-.issue-badge {
-  max-width: calc(var(--space-8) * 5);
+.issue-glyph {
+  flex: none;
+  color: rgb(var(--state-warn-label));
 }
 
-.issue-label {
+.issue[data-tone='error'] .issue-glyph {
+  color: rgb(var(--state-error-label));
+}
+
+.issue-text {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-2);
+  min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-primary));
-  white-space: nowrap;
 }
 
-.issue-detail {
-  min-width: 0;
-  overflow: hidden;
+.issue-where {
+  color: rgb(var(--label-primary));
+  overflow-wrap: anywhere;
+}
+
+.issue-what {
+  color: rgb(var(--label-secondary));
+  overflow-wrap: anywhere;
+}
+
+.issue-go {
+  flex: none;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 500;
+  color: rgb(var(--accent-strong));
+}
+
+.issue:hover .issue-go {
+  text-decoration: underline;
 }
 
 .cards {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  margin-top: var(--space-3);
+  gap: var(--space-2-5);
+  margin-top: var(--space-5);
 }
 
 .rows {
@@ -514,39 +446,11 @@ function messageOf(cause: unknown): string {
   min-width: 0;
 }
 
-/* One or two lines of detail; the full text (or path) is the tooltip. */
-.detail {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow-wrap: anywhere;
-}
-
-/* Right-aligned value badge: never wider than the control column. */
-.value {
-  max-width: calc(var(--space-8) * 6);
-}
-
 .empty {
   margin: 0;
   padding: var(--space-2) 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   color: rgb(var(--label-tertiary));
-}
-
-@container settings-panel (max-width: 560px) {
-  .metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .issue {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .issue-detail {
-    grid-column: 1 / -1;
-  }
 }
 </style>
