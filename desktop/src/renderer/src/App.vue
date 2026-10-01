@@ -45,7 +45,7 @@ import { shouldShowModelSetupPrompt } from './components/onboarding/modelSetupDi
 import { runInitialStartup } from './appStartup'
 import { buildSlashPaletteItems } from './commands'
 import { createCommandCatalogLoader } from './commandCatalog'
-import { onBrowserReveal } from './api/backend'
+import { onBrowserPairingRequest, onBrowserReveal } from './api/backend'
 import { core } from './api/http'
 import { useBootstrap } from './composables/useBootstrap'
 import { useNotifications } from './composables/useNotifications'
@@ -655,6 +655,13 @@ const stopBrowserReveal = onBrowserReveal(() => {
     void router.push(sessionLocation(sessionId.value)).catch(() => undefined)
 })
 onBeforeUnmount(stopBrowserReveal)
+
+// An extension asked to pair (设置 › 电脑操作 › Chrome 和 Edge, step 4):
+// show that page, where the user compares the code and clicks 允许.
+const stopPairingRequests = onBrowserPairingRequest(() => {
+  void settingsRoute.openSettings('computer', 'chrome')
+})
+onBeforeUnmount(stopPairingRequests)
 
 provideAppContext({
   boot,

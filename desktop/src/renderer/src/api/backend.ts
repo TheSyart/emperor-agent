@@ -17,6 +17,9 @@ import type {
   AgentDownloadView,
   AgentPreviewPointer,
   BrowserConnectResult,
+  BrowserExtensionInstallResult,
+  BrowserExtensionRemoveResult,
+  BrowserExtensionStatus,
   BrowserImportRequest,
   BrowserImportResult,
   BrowserImportSource,
@@ -30,6 +33,9 @@ import type {
 
 export type {
   AgentDownloadView,
+  BrowserExtensionInstallResult,
+  BrowserExtensionRemoveResult,
+  BrowserExtensionStatus,
   BrowserImportRequest,
   BrowserImportResult,
   BrowserImportSource,
@@ -159,6 +165,11 @@ interface EmperorBridge {
   denyBrowserPairing?: (pairingId: string) => Promise<{ denied: boolean }>
   revokeBrowserPairing?: (pairingId: string) => Promise<{ revoked: boolean }>
   connectBrowsers?: () => Promise<BrowserConnectResult>
+  browserExtensionStatus?: () => Promise<BrowserExtensionStatus>
+  installBrowserExtension?: () => Promise<BrowserExtensionInstallResult>
+  revealBrowserExtension?: () => Promise<{ ok: boolean }>
+  removeBrowserExtension?: () => Promise<BrowserExtensionRemoveResult>
+  onBrowserPairingRequest?: (listener: () => void) => () => void
   onAgentPreviewFrame?: (
     listener: (frame: AgentPreviewFrame) => void,
   ) => () => void
@@ -760,14 +771,44 @@ export async function macHelperReconnect(): Promise<MacHelperStatus> {
 }
 
 export async function browserPairings(): Promise<BrowserPairingStatus> {
-  return (
-    (await bridge()?.browserPairings?.()) ?? {
-      bridgeListening: false,
-      pendingPairings: [],
-      pairedConnections: [],
-      attachedTabs: 0,
-    }
-  )
+  const status = await bridge()?.browserPairings?.()
+  return status
+    ? { ...status, pairings: status.pairings ?? [] }
+    : {
+        bridgeListening: false,
+        pendingPairings: [],
+        pairedConnections: [],
+        attachedTabs: 0,
+        pairings: [],
+      }
+}
+
+/**
+ * 设置 › 电脑操作 › Chrome 和 Edge: the extension folder and where the
+ * extension is loaded; null without the desktop bridge.
+ */
+export async function browserExtensionStatus(): Promise<BrowserExtensionStatus | null> {
+  return (await bridge()?.browserExtensionStatus?.()) ?? null
+}
+
+/** 安装扩展程序: the folder, then the browser host; null without the bridge. */
+export async function installBrowserExtension(): Promise<BrowserExtensionInstallResult | null> {
+  return (await bridge()?.installBrowserExtension?.()) ?? null
+}
+
+/** 在访达中显示; false while the folder is not there. */
+export async function revealBrowserExtension(): Promise<boolean> {
+  return (await bridge()?.revealBrowserExtension?.())?.ok === true
+}
+
+/** 移除扩展程序; null without the bridge. */
+export async function removeBrowserExtension(): Promise<BrowserExtensionRemoveResult | null> {
+  return (await bridge()?.removeBrowserExtension?.()) ?? null
+}
+
+/** An extension asked to pair (main sends nothing else). */
+export function onBrowserPairingRequest(listener: () => void): () => void {
+  return bridge()?.onBrowserPairingRequest?.(listener) ?? (() => {})
 }
 
 export async function approveBrowserPairing(

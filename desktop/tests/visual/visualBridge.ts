@@ -61,6 +61,11 @@ type VisualBridge = {
   approveBrowserPairing?: (pairingId: string) => Promise<boolean>
   denyBrowserPairing?: (pairingId: string) => Promise<boolean>
   revokeBrowserPairing?: (pairingId: string) => Promise<boolean>
+  browserExtensionStatus?: () => Promise<unknown>
+  installBrowserExtension?: () => Promise<unknown>
+  revealBrowserExtension?: () => Promise<{ ok: boolean }>
+  removeBrowserExtension?: () => Promise<unknown>
+  onBrowserPairingRequest?: (listener: () => void) => () => void
   browserDownloads?: () => Promise<unknown>
   openBrowserDownload?: (id: string) => Promise<unknown>
   revealBrowserDownload?: (id: string) => Promise<unknown>
@@ -4371,22 +4376,96 @@ export async function installVisualCoreBridge(
           },
           lastErrorCode: null,
         }),
-        browserPairings: async () => ({
-          bridgeListening: true,
-          pendingPairings:
-            visualParams.get('visualPairing') === 'pending'
+        browserPairings: async () => {
+          // Chrome is paired and connected unless `?visualExtension=` says
+          // otherwise (`closed`: paired, Chrome not running).
+          const extension = visualParams.get('visualExtension')
+          const paired = extension === null || extension === 'closed'
+          const connected = extension === null
+          return {
+            bridgeListening: true,
+            pendingPairings:
+              visualParams.get('visualPairing') === 'pending'
+                ? [
+                    {
+                      pairingId: 'pair-visual-2',
+                      extensionId: 'aofcidkmgjlbaidneiodhljmoleejnpe',
+                      code: '482913',
+                      displayed: true,
+                      browser: 'chrome',
+                    },
+                  ]
+                : [],
+            pairedConnections: connected ? ['pair-visual-1'] : [],
+            attachedTabs: connected ? 2 : 0,
+            pairings: paired
               ? [
                   {
-                    pairingId: 'pair-visual-2',
-                    extensionId: 'aofcidkmgjlbaidneiodhljmoleejnpe',
-                    code: '482913',
-                    displayed: true,
+                    pairingId: 'pair-visual-1',
+                    browser: 'chrome',
+                    connected,
+                    tabs: connected ? 2 : 0,
+                    createdAt: '2026-09-30T08:00:00.000Z',
                   },
                 ]
               : [],
-          pairedConnections: ['pair-visual-1'],
-          attachedTabs: 2,
-        }),
+          }
+        },
+        ...(() => {
+          // 设置 › 电脑操作 › Chrome 和 Edge, `?visualExtension=`: `none`
+          // has no folder yet (安装扩展程序 puts it there), `ready` the
+          // folder but no browser has loaded it, `legacy` Chrome loaded it
+          // from a checkout; otherwise Chrome runs it. Edge is not installed.
+          const mode = visualParams.get('visualExtension')
+          let folderReady = mode !== 'none'
+          const status = () => ({
+            folder: {
+              path: '/Users/visual/.emperor/browser-extension',
+              displayPath: '~/.emperor/browser-extension',
+              ready: folderReady,
+              version: folderReady ? '0.2.0' : null,
+            },
+            bundledVersion: '0.2.0',
+            browsers: [
+              {
+                browser: 'chrome',
+                name: 'Google Chrome',
+                present: true,
+                extension:
+                  mode === null || mode === 'closed' ? 'loaded' : 'none',
+                ...(mode === 'legacy'
+                  ? {
+                      loadedFrom:
+                        '~/Documents/workspace/emperor-agent/desktop/extension',
+                    }
+                  : {}),
+                developerMode: mode !== 'none' && mode !== 'ready',
+                hostRegistered: folderReady,
+              },
+              {
+                browser: 'edge',
+                name: 'Microsoft Edge',
+                present: false,
+                extension: 'none',
+                developerMode: false,
+                hostRegistered: false,
+              },
+            ],
+          })
+          return {
+            browserExtensionStatus: async () => status(),
+            installBrowserExtension: async () => {
+              folderReady = true
+              return { ok: true, registered: ['chrome'], status: status() }
+            },
+            revealBrowserExtension: async () => ({ ok: folderReady }),
+            removeBrowserExtension: async () => {
+              folderReady = false
+              return { ok: true, uninstalled: 1, status: status() }
+            },
+            onBrowserPairingRequest: () => () => {},
+          }
+        })(),
         connectBrowsers: async () => ({ browsers: ['chrome'] }),
         approveBrowserPairing: async () => true,
         denyBrowserPairing: async () => true,

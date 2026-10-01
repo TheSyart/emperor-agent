@@ -27,8 +27,13 @@ import type {
   BrowserExtensionRemoveResult,
   BrowserExtensionStatus,
 } from '../../shared/ipc-contract'
-import type { ExtensionDetection } from './browser-extension-detect'
+import { discoverBrowsers } from '../browser-import/browser-discovery'
+import {
+  createExtensionDetector,
+  type ExtensionDetection,
+} from './browser-extension-detect'
 import type { NmBridgeEvent } from './nm-bridge'
+import { EMPEROR_EXTENSION_ID } from './nm-manifest'
 
 export const EXTENSION_FOLDER = 'browser-extension'
 /** Written last into a staged copy: `{ version, digest }`. */
@@ -333,6 +338,13 @@ export class BrowserExtensionService {
     }
   }
 
+  /** The folder for 在访达中显示, or null while Emperor has not put it there. */
+  async revealPath(): Promise<string | null> {
+    return (await this.folder.installed().catch(() => null))
+      ? this.folder.target
+      : null
+  }
+
   /** 安装扩展程序 / 重新安装扩展程序: the folder, then the browser host. */
   async install(): Promise<BrowserExtensionInstallResult> {
     try {
@@ -441,4 +453,45 @@ export class BrowserExtensionService {
     this.unsubscribe?.()
     this.unsubscribe = null
   }
+}
+
+/** The extension this app ships: in the app's Resources, or the checkout's. */
+export function bundledExtensionSource(options: {
+  packaged: boolean
+  /** `process.resourcesPath` when packaged. */
+  resourcesPath: string
+  /** The `desktop/` folder in a development build. */
+  desktopRoot: string
+}): string {
+  return options.packaged
+    ? join(options.resourcesPath, EXTENSION_FOLDER)
+    : join(options.desktopRoot, 'extension')
+}
+
+/**
+ * The service main runs: the folder under `stateRoot`, Chrome and Edge
+ * profiles under `homeDir`.
+ */
+export function createBrowserExtensionService(options: {
+  packaged: boolean
+  resourcesPath: string
+  desktopRoot: string
+  stateRoot: string
+  homeDir: string
+  bridge: ExtensionBridge | null
+}): BrowserExtensionService {
+  const target = join(options.stateRoot, EXTENSION_FOLDER)
+  return new BrowserExtensionService({
+    folder: new BrowserExtensionFolder({
+      source: bundledExtensionSource(options),
+      target,
+    }),
+    detect: createExtensionDetector({
+      extensionId: EMPEROR_EXTENSION_ID,
+      folder: target,
+      discover: () => discoverBrowsers({ homeDir: options.homeDir }),
+    }),
+    bridge: options.bridge,
+    homeDir: options.homeDir,
+  })
 }

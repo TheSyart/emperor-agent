@@ -7,6 +7,11 @@ import {
   BROWSER_ACTION_CHANNEL,
   BROWSER_REVEAL_CHANNEL,
   BROWSER_CONNECT_CHANNEL,
+  BROWSER_EXTENSION_INSTALL_CHANNEL,
+  BROWSER_EXTENSION_REMOVE_CHANNEL,
+  BROWSER_EXTENSION_REVEAL_CHANNEL,
+  BROWSER_EXTENSION_STATUS_CHANNEL,
+  BROWSER_PAIRING_REQUEST_CHANNEL,
   BROWSER_PAIRING_APPROVE_CHANNEL,
   BROWSER_PAIRING_DENY_CHANNEL,
   BROWSER_PAIRING_REVOKE_CHANNEL,
@@ -103,6 +108,7 @@ describe('desktop capability preload bridge', () => {
       'browserBounds',
       'browserClose',
       'browserDownloads',
+      'browserExtensionStatus',
       'browserHistory',
       'browserImportSources',
       'browserPairings',
@@ -110,6 +116,7 @@ describe('desktop capability preload bridge', () => {
       'clearBrowserData',
       'connectBrowsers',
       'denyBrowserPairing',
+      'installBrowserExtension',
       'macHelperReconnect',
       'macHelperRequestPermission',
       'macHelperResetPermission',
@@ -117,6 +124,7 @@ describe('desktop capability preload bridge', () => {
       'onAgentPreviewFrame',
       'onAgentPreviewPointer',
       'onBrowserDownload',
+      'onBrowserPairingRequest',
       'onBrowserReveal',
       'onBrowserState',
       'openBrowserDownload',
@@ -126,7 +134,9 @@ describe('desktop capability preload bridge', () => {
       'openLink',
       'openSkillsFolder',
       'removeBrowserDownload',
+      'removeBrowserExtension',
       'revealBrowserDownload',
+      'revealBrowserExtension',
       'revealReference',
       'revokeBrowserPairing',
       'runBrowserImport',
@@ -193,6 +203,29 @@ describe('desktop capability preload bridge', () => {
       [VAULT_MASTER_CHANNEL, { password: null }],
       [VAULT_RESET_CHANNEL, undefined],
     ])
+  })
+
+  it('reaches the extension folder through fixed channels without arguments', async () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createDesktopCapabilityBridge(ipc)
+    await bridge.browserExtensionStatus()
+    await bridge.installBrowserExtension()
+    await bridge.revealBrowserExtension()
+    await bridge.removeBrowserExtension()
+    expect(ipc.invoked).toEqual([
+      [BROWSER_EXTENSION_STATUS_CHANNEL, undefined],
+      [BROWSER_EXTENSION_INSTALL_CHANNEL, undefined],
+      [BROWSER_EXTENSION_REVEAL_CHANNEL, undefined],
+      [BROWSER_EXTENSION_REMOVE_CHANNEL, undefined],
+    ])
+    // A pairing request carries nothing; the listener gets nothing.
+    const listener = vi.fn()
+    const dispose = bridge.onBrowserPairingRequest(listener)
+    ipc.emit(BROWSER_PAIRING_REQUEST_CHANNEL, { code: '123456' })
+    dispose()
+    ipc.emit(BROWSER_PAIRING_REQUEST_CHANNEL, undefined)
+    expect(listener.mock.calls).toEqual([[]])
+    expect(ipc.removed).toHaveLength(1)
   })
 
   it('addresses Agent tab previews by id only, and sends nothing back to the tab', async () => {

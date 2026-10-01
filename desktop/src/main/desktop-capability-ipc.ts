@@ -6,6 +6,10 @@ import {
   AGENT_PREVIEW_STOP_CHANNEL,
   BROWSER_ACTION_CHANNEL,
   BROWSER_CONNECT_CHANNEL,
+  BROWSER_EXTENSION_INSTALL_CHANNEL,
+  BROWSER_EXTENSION_REMOVE_CHANNEL,
+  BROWSER_EXTENSION_REVEAL_CHANNEL,
+  BROWSER_EXTENSION_STATUS_CHANNEL,
   BROWSER_PAIRING_APPROVE_CHANNEL,
   BROWSER_PAIRING_DENY_CHANNEL,
   BROWSER_PAIRING_REVOKE_CHANNEL,
@@ -42,7 +46,12 @@ import {
   SELECT_FILE_CHANNEL,
   SKILLS_OPEN_FOLDER_CHANNEL,
   type BrowserConnectResult,
+  type BrowserExtensionBrowser,
+  type BrowserExtensionInstallResult,
+  type BrowserExtensionRemoveResult,
+  type BrowserExtensionStatus,
   type BrowserPairingStatus,
+  type BrowserPairingView,
   type FileDialogFilter,
   type MacHelperPermission,
   type MacHelperStatus,
@@ -119,6 +128,14 @@ interface SkillFolderCapability {
   }): string
 }
 
+interface BrowserExtensionCapability {
+  status(): Promise<BrowserExtensionStatus>
+  install(): Promise<BrowserExtensionInstallResult>
+  remove(): Promise<BrowserExtensionRemoveResult>
+  /** The folder for 在访达中显示, or null while there is none. */
+  revealPath(): Promise<string | null>
+}
+
 interface BrowserPairingCapability {
   readonly isListening: boolean
   pendingPairings(): readonly {
@@ -126,8 +143,13 @@ interface BrowserPairingCapability {
     extensionId: string
     code: string
     displayed: boolean
+    browser?: string
   }[]
   readyPairings(): string[]
+  /** Every stored pairing (no secrets), also those not connected now. */
+  storedPairings?(): Promise<
+    readonly { pairingId: string; createdAt?: string; browser?: string }[]
+  >
   approvePairing(pairingId: string): Promise<boolean>
   denyPairing(pairingId: string): boolean
   revokePairing(pairingId: string): Promise<void>
@@ -199,6 +221,10 @@ export function registerDesktopCapabilityIpc(input: {
   browserPairings?: BrowserPairingCapability
   /** Counts only authenticated, explicitly attached extension tabs. */
   externalAttachedCount?: () => number
+  /** The same tabs, with the pairing (`profileId`) each belongs to. */
+  externalAttachedTabs?: () => ReadonlyArray<{ profileId: string }>
+  /** 设置 › 电脑操作 › Chrome 和 Edge: the extension folder (main decides the path). */
+  browserExtension?: BrowserExtensionCapability
 }): void {
   const authorize = (event: unknown) => input.authorize(event)
   const { skills, openPath, selectFile } = input
@@ -260,7 +286,7 @@ export function registerDesktopCapabilityIpc(input: {
 
   input.ipcMain.handle(
     BROWSER_PAIRING_STATUS_CHANNEL,
-    (event): BrowserPairingStatus => {
+    async (event): Promise<BrowserPairingStatus> => {
       authorize(event)
       const bridge = input.browserPairings
       if (!bridge)
@@ -269,8 +295,13 @@ export function registerDesktopCapabilityIpc(input: {
           pendingPairings: [],
           pairedConnections: [],
           attachedTabs: 0,
+          pairings: [],
         }
       const count = input.externalAttachedCount?.() ?? 0
+      const ready = bridge.readyPairings().filter(pairingIdValid)
+      const stored = await (
+        bridge.storedPairings?.() ?? Promise.resolve([])
+      ).catch(() => [])
       return {
         bridgeListening: bridge.isListening === true,
         pendingPairings: bridge
@@ -281,16 +312,25 @@ export function registerDesktopCapabilityIpc(input: {
               /^[a-p]{32}$/.test(item.extensionId) &&
               /^\d{6}$/.test(item.code),
           )
-          .map(({ pairingId, extensionId, code, displayed }) => ({
-            pairingId,
-            extensionId,
-            code,
-            displayed: displayed === true,
-          })),
-        pairedConnections: bridge.readyPairings().filter(pairingIdValid),
+          .map(({ pairingId, extensionId, code, displayed, browser }) => {
+            const label = pairingBrowser(browser)
+            return {
+              pairingId,
+              extensionId,
+              code,
+              displayed: displayed === true,
+              ...(label ? { browser: label } : {}),
+            }
+          }),
+        pairedConnections: ready,
         attachedTabs: Number.isSafeInteger(count)
           ? Math.max(0, Math.min(count, 10_000))
           : 0,
+        pairings: pairingViews(
+          stored,
+          ready,
+          input.externalAttachedTabs?.() ?? [],
+        ),
       }
     },
   )
@@ -333,6 +373,63 @@ export function registerDesktopCapabilityIpc(input: {
       return { revoked: true }
     },
   )
+
+  const extension = input.browserExtension
+  if (extension) {
+    input.ipcMain.handle(
+      BROWSER_EXTENSION_STATUS_CHANNEL,
+      async (event, payload): Promise<BrowserExtensionStatus> => {
+        authorize(event)
+        noExtensionArgument(payload)
+        return extensionStatusView(await extension.status())
+      },
+    )
+    input.ipcMain.handle(
+      BROWSER_EXTENSION_INSTALL_CHANNEL,
+      async (event, payload): Promise<BrowserExtensionInstallResult> => {
+        authorize(event)
+        noExtensionArgument(payload)
+        const result = await extension.install()
+        return {
+          ok: result.ok === true,
+          registered: (result.registered ?? []).filter((name) =>
+            /^[a-z-]{1,32}$/.test(name),
+          ),
+          ...(INSTALL_REASONS.has(result.reason as string)
+            ? { reason: result.reason }
+            : {}),
+          status: extensionStatusView(result.status),
+        }
+      },
+    )
+    input.ipcMain.handle(
+      BROWSER_EXTENSION_REVEAL_CHANNEL,
+      async (event, payload) => {
+        authorize(event)
+        noExtensionArgument(payload)
+        const folder = await extension.revealPath()
+        if (!folder) return { ok: false }
+        input.showItemInFolder(folder)
+        return { ok: true }
+      },
+    )
+    input.ipcMain.handle(
+      BROWSER_EXTENSION_REMOVE_CHANNEL,
+      async (event, payload): Promise<BrowserExtensionRemoveResult> => {
+        authorize(event)
+        noExtensionArgument(payload)
+        const result = await extension.remove()
+        const uninstalled = Number.isSafeInteger(result.uninstalled)
+          ? Math.max(0, Math.min(result.uninstalled, 100))
+          : 0
+        return {
+          ok: result.ok === true,
+          uninstalled,
+          status: extensionStatusView(result.status),
+        }
+      },
+    )
+  }
 
   if (skills && openPath)
     input.ipcMain.handle(SKILLS_OPEN_FOLDER_CHANNEL, async (event, payload) => {
@@ -802,6 +899,108 @@ function sanitizeImportSources(value: {
           })),
       })),
   }
+}
+
+const INSTALL_REASONS = new Set([
+  'no-host',
+  'unavailable',
+  'no-browser',
+  'no-source',
+  'io',
+])
+
+/** The extension channels take no argument: main decides every path. */
+function noExtensionArgument(payload: unknown): void {
+  if (payload !== undefined) throw new Error('invalid browser extension input')
+}
+
+function pairingBrowser(value: unknown): BrowserExtensionBrowser | undefined {
+  return value === 'chrome' || value === 'edge' ? value : undefined
+}
+
+function clipped(value: unknown, length: number): string {
+  return typeof value === 'string' ? value.slice(0, length) : ''
+}
+
+/** Whitelists the folder status so nothing else crosses IPC. */
+function extensionStatusView(
+  value: BrowserExtensionStatus,
+): BrowserExtensionStatus {
+  const folder = value?.folder
+  return {
+    folder: {
+      path: clipped(folder?.path, 1024),
+      displayPath: clipped(folder?.displayPath, 1024),
+      ready: folder?.ready === true,
+      version:
+        typeof folder?.version === 'string'
+          ? folder.version.slice(0, 32)
+          : null,
+    },
+    bundledVersion:
+      typeof value?.bundledVersion === 'string'
+        ? value.bundledVersion.slice(0, 32)
+        : null,
+    browsers: (Array.isArray(value?.browsers) ? value.browsers : [])
+      .filter((item) => pairingBrowser(item?.browser) !== undefined)
+      .slice(0, 2)
+      .map((item) => ({
+        browser: pairingBrowser(item.browser)!,
+        name: clipped(item.name, 64),
+        present: item.present === true,
+        extension:
+          item.extension === 'loaded' || item.extension === 'disabled'
+            ? item.extension
+            : 'none',
+        ...(typeof item.loadedFrom === 'string' && item.loadedFrom
+          ? { loadedFrom: item.loadedFrom.slice(0, 1024) }
+          : {}),
+        developerMode: item.developerMode === true,
+        hostRegistered: item.hostRegistered === true,
+      })),
+  }
+}
+
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/
+
+/**
+ * Saved pairings (store order), then any connected one the store missed;
+ * each with its browser label and the tabs connected through it.
+ */
+function pairingViews(
+  stored: readonly {
+    pairingId: string
+    createdAt?: string
+    browser?: string
+  }[],
+  ready: readonly string[],
+  tabs: ReadonlyArray<{ profileId: string }>,
+): BrowserPairingView[] {
+  const views = new Map<string, BrowserPairingView>()
+  const tabCount = (pairingId: string) =>
+    tabs.filter((tab) => tab.profileId === pairingId).length
+  for (const item of [
+    ...stored,
+    ...ready.map((pairingId) => ({ pairingId })),
+  ] as readonly {
+    pairingId: string
+    createdAt?: string
+    browser?: string
+  }[]) {
+    if (!pairingIdValid(item.pairingId) || views.has(item.pairingId)) continue
+    views.set(item.pairingId, {
+      pairingId: item.pairingId,
+      browser: pairingBrowser(item.browser) ?? null,
+      connected: ready.includes(item.pairingId),
+      tabs: Math.min(tabCount(item.pairingId), 10_000),
+      createdAt:
+        typeof item.createdAt === 'string' && ISO_TIME.test(item.createdAt)
+          ? item.createdAt
+          : null,
+    })
+    if (views.size >= 100) break
+  }
+  return [...views.values()]
 }
 
 function pairingIdValid(value: unknown): value is string {

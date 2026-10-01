@@ -88,6 +88,10 @@ import {
   resolveNmHostPath,
 } from './computer-use/nm-manifest'
 import { ExternalBrowserDriver } from './computer-use/external-browser-driver'
+import {
+  createBrowserExtensionService,
+  type BrowserExtensionService,
+} from './computer-use/browser-extension-installer'
 import { registerCredentialVaultIpc } from './computer-use/credential-vault-ipc'
 import {
   authenticateCredentialReveal,
@@ -115,6 +119,7 @@ import {
   AGENT_PREVIEW_FRAME_CHANNEL,
   AGENT_PREVIEW_POINTER_CHANNEL,
   BROWSER_DOWNLOAD_EVENT_CHANNEL,
+  BROWSER_PAIRING_REQUEST_CHANNEL,
   BROWSER_REVEAL_CHANNEL,
   PET_STATUS_CHANNEL,
   TERMINAL_SUBSCRIPTION_CHANNEL,
@@ -160,6 +165,8 @@ let embeddedBrowser: EmbeddedBrowserDriver | null = null
 let nativeDesktop: MacosDesktopDriver | null = null
 let nmBridge: NmBridgeServer | null = null
 let externalBrowser: ExternalBrowserDriver | null = null
+// 设置 › 电脑操作 › Chrome 和 Edge: ~/.emperor/browser-extension.
+let browserExtension: BrowserExtensionService | null = null
 let credentialVault: CredentialVault | null = null
 let dictation: DictationService | null = null
 let agentPreview: AgentPreview | null = null
@@ -515,6 +522,23 @@ function createComputerUseHost(): void {
       ),
     })
     externalBrowser = new ExternalBrowserDriver(nmBridge)
+    browserExtension = createBrowserExtensionService({
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      desktopRoot: path.resolve(mainDir, '..', '..'),
+      stateRoot: config.stateRoot,
+      homeDir: userInfo().homedir,
+      bridge: nmBridge,
+    })
+    // An extension asked to pair: the renderer shows 电脑操作 › Chrome 和
+    // Edge for the code; the Dock icon bounces, focus is not taken.
+    nmBridge.subscribe((event) => {
+      if (event.type !== 'pairing' || event.request.displayed) return
+      const contents = mainWindow?.webContents
+      if (contents && !contents.isDestroyed())
+        contents.send(BROWSER_PAIRING_REQUEST_CHANNEL)
+      app.dock?.bounce('informational')
+    })
   }
   computerUsePort = new DesktopComputerUsePort({
     platform: process.platform,
@@ -549,6 +573,8 @@ function closeCoreHost(): void {
   void nativeDesktop?.shutdown().catch(() => undefined)
   externalBrowser?.dispose()
   externalBrowser = null
+  browserExtension?.dispose()
+  browserExtension = null
   void nmBridge?.stop().catch(() => undefined)
   nmBridge = null
   sessionEventBridge.dispose()
@@ -930,6 +956,8 @@ async function startup(): Promise<void> {
       console.warn(
         `Chrome/Edge connection unavailable: ${nmBridge.unavailableReason ?? 'unknown'}`,
       )
+    // Upgrade the extension folder in the background; never block startup.
+    void browserExtension?.start()
     coreApi = await createCoreHost({
       root: config.runtimeRoot,
       ipcMain,
@@ -976,6 +1004,8 @@ async function startup(): Promise<void> {
       ...(nativeDesktop ? { macHelper: nativeDesktop } : {}),
       ...(nmBridge ? { browserPairings: nmBridge } : {}),
       externalAttachedCount: () => externalBrowser?.listAttached().length ?? 0,
+      ...(browserExtension ? { browserExtension } : {}),
+      externalAttachedTabs: () => externalBrowser?.listAttached() ?? [],
       browser: {
         openUrl: (input) => requireBrowserViewHost().openUrl(input),
         setBounds: (bounds) => browserViewHost?.setBounds(bounds),

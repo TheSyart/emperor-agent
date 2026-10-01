@@ -17,6 +17,8 @@ import {
   BrowserExtensionFolder,
   BrowserExtensionService,
   EXTENSION_STAMP,
+  bundledExtensionSource,
+  createBrowserExtensionService,
   displayPath,
   newerVersion,
   shippedEntry,
@@ -499,6 +501,64 @@ describe('the extension service', () => {
     )
     service.dispose()
     expect(fake.subscribed).toBe(false)
+  })
+
+  it('reveals the folder only once Emperor put it there', async () => {
+    const f = await fixture()
+    const service = new BrowserExtensionService({
+      folder: f.folder(),
+      bridge: null,
+      homeDir: f.root,
+      detect: async () => [],
+    })
+    expect(await service.revealPath()).toBeNull()
+    await service.install()
+    expect(await service.revealPath()).toBe(f.target)
+  })
+
+  it('takes the extension from the app, or from desktop/extension in development', () => {
+    expect(
+      bundledExtensionSource({
+        packaged: true,
+        resourcesPath: '/Applications/Emperor Agent.app/Contents/Resources',
+        desktopRoot: '/src/desktop',
+      }),
+    ).toBe(
+      '/Applications/Emperor Agent.app/Contents/Resources/browser-extension',
+    )
+    expect(
+      bundledExtensionSource({
+        packaged: false,
+        resourcesPath: '/unused',
+        desktopRoot: '/src/desktop',
+      }),
+    ).toBe('/src/desktop/extension')
+  })
+
+  it('builds the service for a state root and a home it is given', async () => {
+    const f = await fixture()
+    const service = createBrowserExtensionService({
+      packaged: false,
+      resourcesPath: '',
+      desktopRoot: resolve(__dirname, '..', '..', '..'),
+      stateRoot: f.stateRoot,
+      // A home without Chrome or Edge: nothing real is read.
+      homeDir: f.root,
+      bridge: null,
+    })
+    const status = await service.status()
+    expect(status.folder).toMatchObject({
+      path: f.target,
+      displayPath: '~/emperor/browser-extension',
+      ready: false,
+    })
+    expect(status.bundledVersion).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(status.browsers.map((item) => [item.browser, item.present])).toEqual(
+      [
+        ['chrome', false],
+        ['edge', false],
+      ],
+    )
   })
 
   it('reloads nothing while the folder is not installed', async () => {

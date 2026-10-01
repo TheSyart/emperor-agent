@@ -32,6 +32,7 @@ const status = ref<BrowserPairingStatus>({
   pendingPairings: [],
   pairedConnections: [],
   attachedTabs: 0,
+  pairings: [],
 })
 const busy = ref(false)
 const error = ref('')

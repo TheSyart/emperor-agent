@@ -105,6 +105,34 @@ export const BROWSER_PAIRING_REVOKE_CHANNEL =
   'emperor:computer-use:browser-pairing-revoke'
 /** Settings › 连接 Chrome/Edge: register the Native Messaging host (01 §11). */
 export const BROWSER_CONNECT_CHANNEL = 'emperor:computer-use:browser-connect'
+/**
+ * 设置 › 电脑操作 › Chrome 和 Edge, trusted Settings renderer only, no
+ * argument: the extension folder and where the extension is loaded
+ * ({@link BrowserExtensionStatus}).
+ */
+export const BROWSER_EXTENSION_STATUS_CHANNEL =
+  'emperor:computer-use:browser-extension-status'
+/**
+ * 安装扩展程序: copy the extension into its folder and register the
+ * Native Messaging host ({@link BrowserExtensionInstallResult}).
+ */
+export const BROWSER_EXTENSION_INSTALL_CHANNEL =
+  'emperor:computer-use:browser-extension-install'
+/** 在访达中显示: show the extension folder; answers `{ ok }`. */
+export const BROWSER_EXTENSION_REVEAL_CHANNEL =
+  'emperor:computer-use:browser-extension-reveal'
+/**
+ * 移除扩展程序: connected browsers uninstall it, then pairings, host
+ * manifests and the folder go ({@link BrowserExtensionRemoveResult}).
+ */
+export const BROWSER_EXTENSION_REMOVE_CHANNEL =
+  'emperor:computer-use:browser-extension-remove'
+/**
+ * Main → renderer, no payload: an extension asked to pair; the renderer
+ * shows 电脑操作 › Chrome 和 Edge for the user to compare the code.
+ */
+export const BROWSER_PAIRING_REQUEST_CHANNEL =
+  'emperor:computer-use:browser-pairing-request'
 
 export interface BrowserConnectResult {
   /** Browsers that can now reach Emperor (e.g. `chrome`, `edge`). */
@@ -120,9 +148,25 @@ export interface BrowserPairingStatus {
     extensionId: string
     code: string
     displayed: boolean
+    /** What the extension says it runs in (a label). */
+    browser?: BrowserExtensionBrowser
   }>
   pairedConnections: string[]
   attachedTabs: number
+  /** Every saved pairing, also those whose browser is not running. */
+  pairings: BrowserPairingView[]
+}
+
+/** A saved pairing, as 设置 › 电脑操作 › Chrome 和 Edge lists it. */
+export interface BrowserPairingView {
+  pairingId: string
+  browser: BrowserExtensionBrowser | null
+  /** Its extension is connected now. */
+  connected: boolean
+  /** Tabs the user connected in that browser. */
+  tabs: number
+  /** When it was paired (ISO 8601), if known. */
+  createdAt: string | null
 }
 
 /** Chrome or Edge, as the extension reports itself when it pairs. */

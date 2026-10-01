@@ -8,6 +8,11 @@ import {
   AGENT_PREVIEW_STOP_CHANNEL,
   BROWSER_ACTION_CHANNEL,
   BROWSER_CONNECT_CHANNEL,
+  BROWSER_EXTENSION_INSTALL_CHANNEL,
+  BROWSER_EXTENSION_REMOVE_CHANNEL,
+  BROWSER_EXTENSION_REVEAL_CHANNEL,
+  BROWSER_EXTENSION_STATUS_CHANNEL,
+  BROWSER_PAIRING_REQUEST_CHANNEL,
   BROWSER_PAIRING_APPROVE_CHANNEL,
   BROWSER_PAIRING_DENY_CHANNEL,
   BROWSER_PAIRING_REVOKE_CHANNEL,
@@ -178,6 +183,22 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
     revokeBrowserPairing: (pairingId: string) =>
       ipcRenderer.invoke(BROWSER_PAIRING_REVOKE_CHANNEL, { pairingId }),
     connectBrowsers: () => ipcRenderer.invoke(BROWSER_CONNECT_CHANNEL),
+    /** 设置 › 电脑操作 › Chrome 和 Edge: the extension folder; no argument. */
+    browserExtensionStatus: () =>
+      ipcRenderer.invoke(BROWSER_EXTENSION_STATUS_CHANNEL),
+    installBrowserExtension: () =>
+      ipcRenderer.invoke(BROWSER_EXTENSION_INSTALL_CHANNEL),
+    revealBrowserExtension: () =>
+      ipcRenderer.invoke(BROWSER_EXTENSION_REVEAL_CHANNEL),
+    removeBrowserExtension: () =>
+      ipcRenderer.invoke(BROWSER_EXTENSION_REMOVE_CHANNEL),
+    /** An extension asked to pair; nothing about it crosses. */
+    onBrowserPairingRequest: (listener: () => void) => {
+      const wrapped = () => listener()
+      ipcRenderer.on(BROWSER_PAIRING_REQUEST_CHANNEL, wrapped)
+      return () =>
+        ipcRenderer.removeListener(BROWSER_PAIRING_REQUEST_CHANNEL, wrapped)
+    },
     agentPreviewStop: (targetId: string) =>
       ipcRenderer.send(AGENT_PREVIEW_STOP_CHANNEL, { targetId }),
     onAgentPreviewFrame: (listener: (frame: AgentPreviewFrame) => void) => {
