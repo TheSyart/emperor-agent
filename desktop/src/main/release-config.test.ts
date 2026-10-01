@@ -234,6 +234,29 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     ).toContain('assemble-dictation-app.sh')
   })
 
+  it('ships the Chrome/Edge extension on macOS, without its tests', () => {
+    const config = fs.readFileSync(
+      path.join(desktopRoot, 'electron-builder.yml'),
+      'utf8',
+    )
+    const mac = config.slice(config.indexOf('\nmac:'), config.indexOf('\nwin:'))
+    // Settings copies it into ~/.emperor/browser-extension for Chrome to load.
+    expect(mac).toContain(
+      [
+        '    - from: extension',
+        '      to: browser-extension',
+        '      filter:',
+        "        - '**/*'",
+        "        - '!tests{,/**/*}'",
+        "        - '!README.md'",
+        "        - '!**/.*'",
+      ].join('\n'),
+    )
+    expect(config.slice(0, config.indexOf('\nmac:'))).not.toContain(
+      'browser-extension',
+    )
+  })
+
   it('does not bundle the legacy Python backend by default', () => {
     const config = fs.readFileSync(
       path.join(desktopRoot, 'electron-builder.yml'),
@@ -703,6 +726,19 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       'emperor-nm-host',
     )
     fs.writeFileSync(messagingHost, 'native-fixture', { mode: 0o755 })
+    // The extension as the yml filter ships it: no tests, no README.
+    const extensionRoot = path.join(appOutDir, 'resources', 'browser-extension')
+    fs.cpSync(path.join(desktopRoot, 'extension'), extensionRoot, {
+      recursive: true,
+      filter: (file) => {
+        const inside = path.relative(path.join(desktopRoot, 'extension'), file)
+        return (
+          inside.split(path.sep)[0] !== 'tests' &&
+          inside !== 'README.md' &&
+          !path.basename(file).startsWith('.')
+        )
+      },
+    })
 
     const afterPack = require(
       path.join(desktopRoot, 'scripts', 'after-pack.cjs'),
@@ -776,6 +812,30 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       ),
     ).toThrow(/allowlist/i)
     fs.rmSync(strayHelper)
+    // The packaged extension: no test files, a real manifest, no symlinks.
+    const validate = () =>
+      afterPack.validatePackagedAppResources(
+        path.join(appOutDir, 'resources'),
+        'darwin',
+        'arm64',
+      )
+    fs.mkdirSync(path.join(extensionRoot, 'tests'))
+    fs.writeFileSync(path.join(extensionRoot, 'tests', 'worker.test.js'), '')
+    expect(validate).toThrow(/browser-extension/i)
+    fs.rmSync(path.join(extensionRoot, 'tests'), { recursive: true })
+    fs.renameSync(
+      path.join(extensionRoot, 'manifest.json'),
+      path.join(temp, 'manifest.json'),
+    )
+    expect(validate).toThrow(/browser-extension/i)
+    fs.renameSync(
+      path.join(temp, 'manifest.json'),
+      path.join(extensionRoot, 'manifest.json'),
+    )
+    fs.symlinkSync('/etc/hosts', path.join(extensionRoot, 'hosts.js'))
+    expect(validate).toThrow(/browser-extension/i)
+    fs.rmSync(path.join(extensionRoot, 'hosts.js'))
+    expect(validate).not.toThrow()
     fs.writeFileSync(path.join(petRoot, 'package.json'), '{}')
     expect(() =>
       afterPack.validatePackagedAppResources(

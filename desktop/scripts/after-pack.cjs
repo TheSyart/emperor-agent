@@ -167,6 +167,7 @@ function validatePackagedAppResources(
     assertRegularFile(messagingHost, 'Native Messaging host')
     if ((lstatSync(messagingHost).mode & 0o111) === 0)
       throw new Error('Native Messaging host is not executable')
+    validateBrowserExtension(join(resourcesRoot, 'browser-extension'))
   }
 
   const petRoot = join(resourcesRoot, 'desktop-pet')
@@ -188,6 +189,54 @@ function validatePackagedAppResources(
     if (existsSync(join(resourcesRoot, forbidden)))
       throw new Error(`packaged resources contain forbidden path: ${forbidden}`)
   }
+}
+
+const BROWSER_EXTENSION_FILES = [
+  'manifest.json',
+  'service-worker.js',
+  'welcome.html',
+  'icons/icon-128.png',
+]
+
+/**
+ * The Chrome/Edge extension Settings installs: regular files only, none of
+ * its tests or docs, and a Manifest V3 with the key that pins its ID.
+ */
+function validateBrowserExtension(root) {
+  const fail = (why) => {
+    throw new Error(`packaged browser-extension ${why}`)
+  }
+  if (!existsSync(root) || lstatSync(root).isSymbolicLink())
+    fail('is missing or unsafe')
+  if (!lstatSync(root).isDirectory()) fail('is not a directory')
+  const walk = (directory, prefix) => {
+    for (const name of readdirSync(directory)) {
+      const path = join(directory, name)
+      const relative = prefix ? `${prefix}/${name}` : name
+      const stat = lstatSync(path)
+      if (
+        name.startsWith('.') ||
+        relative === 'tests' ||
+        relative === 'README.md' ||
+        name.endsWith('.test.js')
+      )
+        fail(`contains a file that must not ship: ${relative}`)
+      if (stat.isDirectory()) walk(path, relative)
+      else if (!stat.isFile()) fail(`contains a non-regular entry: ${relative}`)
+    }
+  }
+  walk(root, '')
+  for (const file of BROWSER_EXTENSION_FILES)
+    if (!existsSync(join(root, file)) || !lstatSync(join(root, file)).isFile())
+      fail(`is missing ${file}`)
+  let manifest
+  try {
+    manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'))
+  } catch {
+    fail('has an unreadable manifest.json')
+  }
+  if (manifest?.manifest_version !== 3 || typeof manifest?.key !== 'string')
+    fail('manifest.json is not the pinned Manifest V3')
 }
 
 /** Editor dictation helper: its identity and the two usage strings. */

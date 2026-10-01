@@ -75,6 +75,15 @@ mac:
   extraResources:
     - from: out/native/credential-auth
       to: native/credential-auth
+    # The Chrome/Edge extension; Settings copies it into
+    # ~/.emperor/browser-extension for the browser to load.
+    - from: extension
+      to: browser-extension
+      filter:
+        - '**/*'
+        - '!tests{,/**/*}'
+        - '!README.md'
+        - '!**/.*'
   target:
     - dmg
     - zip
