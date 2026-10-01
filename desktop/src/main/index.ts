@@ -7,7 +7,6 @@ import {
   net,
   session,
   shell,
-  safeStorage,
   type OpenDialogOptions,
   type Rectangle,
 } from 'electron'
@@ -80,8 +79,10 @@ import {
 import { NmBridgeServer } from './computer-use/nm-bridge'
 import {
   EncryptedFilePairingStore,
-  electronPairingCipher,
+  localPairingCipher,
 } from './computer-use/nm-bridge-store'
+import { LocalSecretStore } from './local-secret-store'
+import { verifyPackagedSecrets } from './packaged-secrets-smoke'
 import {
   NmManifestRegistrar,
   resolveNmHostPath,
@@ -122,6 +123,11 @@ import {
 const mainDir = moduleDirFromUrl(import.meta.url)
 const mainArgv = process.argv.slice(2)
 const packagedSmoke = parsePackagedSmokeArgs(process.argv)
+// Emperor keeps no secret in the macOS Keychain (local-secret-store.ts).
+// Should Chromium itself reach for it, a mock keychain answers instead of a
+// "Safe Storage" prompt. Extra insurance only; keychain-free.test.ts and the
+// bundle audit hold the code to it.
+app.commandLine.appendSwitch('use-mock-keychain')
 let config = resolveConfig({ argv: mainArgv, env: process.env })
 let legacyRuntimeRoot = config.runtimeRoot
 let packagedRuntimeRevision = ''
@@ -400,9 +406,17 @@ function prepareMainRuntime(): void {
  * window is created on the first Agent tab only.
  */
 function createComputerUseHost(): void {
+  const computerUseRoot = path.join(config.stateRoot, 'computer-use')
+  // Passwords and browser pairings are sealed with Emperor's own key, never
+  // the Keychain. While vault entries still need a key that has gone, no new
+  // key is made over them; Settings offers 清空 instead.
+  const localSecrets = new LocalSecretStore({
+    keyPath: path.join(computerUseRoot, 'secrets', 'local.key'),
+    sealedDataExists: () => credentialVault?.hasSealedData ?? true,
+  })
   credentialVault = new CredentialVault({
-    path: path.join(config.stateRoot, 'computer-use', 'vault.json'),
-    storage: safeStorage,
+    path: path.join(computerUseRoot, 'vault.json'),
+    storage: localSecrets,
   })
   const driver = new EmbeddedBrowserDriver({
     electron: electronBrowserFactory(),
@@ -496,13 +510,8 @@ function createComputerUseHost(): void {
             }),
           }),
       pairings: new EncryptedFilePairingStore(
-        path.join(
-          config.stateRoot,
-          'computer-use',
-          'browser-pairings',
-          'pairings.json',
-        ),
-        electronPairingCipher(safeStorage),
+        path.join(computerUseRoot, 'browser-pairings', 'pairings.json'),
+        localPairingCipher(localSecrets),
       ),
     })
     externalBrowser = new ExternalBrowserDriver(nmBridge)
@@ -1138,27 +1147,8 @@ async function startup(): Promise<void> {
       })
     registerAppProtocol()
     if (packagedSmoke) {
-      if (process.platform === 'darwin') {
-        const probe = 'emperor-packaged-safe-storage-probe'
-        if (
-          !safeStorage.isEncryptionAvailable() ||
-          safeStorage.decryptString(safeStorage.encryptString(probe)) !== probe
-        )
-          throw new Error('packaged safeStorage round trip failed')
-        // The master-password KDF must exist in Electron's crypto, which
-        // lacks some of Node's (no Argon2), so derive it here for real.
-        const vault = new CredentialVault({
-          path: path.join(config.stateRoot, 'packaged-smoke-vault.json'),
-          storage: safeStorage,
-        })
-        vault.setMasterPassword(`${probe}-master`, { biometric: true })
-        vault.lock()
-        vault.unlockWithBiometrics()
-        vault.lock()
-        if (!vault.unlock(`${probe}-master`))
-          throw new Error('packaged credential vault round trip failed')
-        vault.lock()
-      }
+      // Local key and master password round trips, with no Keychain.
+      verifyPackagedSecrets(config.stateRoot)
       const attachment = await createPackagedSmokeAttachment(config.stateRoot)
       await runPackagedSmoke({
         core: coreApi,

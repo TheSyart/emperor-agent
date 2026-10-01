@@ -1,11 +1,15 @@
 /**
  * Main-process-only credential vault. The renderer may submit a secret from
  * Settings, but Core and the model only ever receive CredentialHandle data.
- * Each field is encrypted with Electron safeStorage; an optional master
- * password (scrypt) adds an AES-GCM layer. Decrypted values never persist; the
- * master key persists only when the user opts into biometric unlock, and then
- * only wrapped by safeStorage. The in-memory key is dropped after 30 idle
- * minutes (spec 00 §6.4).
+ * Each field is sealed with Emperor's local key (`l:`, local-secret-store.ts;
+ * no Keychain); an optional master password (scrypt) adds an AES-GCM layer
+ * around it (`m:`). Decrypted values and the master key never persist; the
+ * in-memory key is dropped after 30 idle minutes (spec 00 §6.4).
+ *
+ * `vault.json` is version 2. Version 1 sealed fields with the macOS
+ * Keychain; such a file is deleted on load and the vault starts over (plan
+ * rev 5). A local key that is lost or fails its checks leaves the vault
+ * unavailable with a reason until the user resets it (清空).
  */
 import * as crypto from 'node:crypto'
 import {
@@ -17,6 +21,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -32,11 +37,16 @@ import type {
   CredentialHandle,
 } from '@emperor/core/runtime-contract'
 
-interface SafeStorageLike {
+/** The local key store's surface (LocalSecretStore); tests pass stand-ins. */
+interface SecretStoreLike {
   isEncryptionAvailable(): boolean
   encryptString(value: string): Buffer
   decryptString(data: Buffer): string
   getSelectedStorageBackend?(): string
+  /** Why encryption is unavailable, when the store can tell. */
+  problem?(): 'key-missing' | 'key-invalid' | null
+  /** Forget an unusable key so a reset vault can start over. */
+  discardKey?(): void
 }
 
 /** Argon2id cost; `memory` is in KiB, as Node's argon2 options take it. */
@@ -84,16 +94,10 @@ interface MasterRecord {
   verifier: string
   /** Absent only in Argon2id files written before parameters were stored. */
   params?: Argon2Params | ScryptParams
-  /**
-   * Opt-in biometric unlock: the derived master key, base64, wrapped by
-   * safeStorage (`s:` envelope). Lives inside the master record so a new or
-   * removed master password drops it, even when an older build writes it.
-   */
-  biometricKey?: string
 }
 
 interface VaultFile {
-  version: 1
+  version: 2
   master?: MasterRecord
   entries: StoredEntry[]
 }
@@ -125,17 +129,14 @@ export interface CredentialVaultEntry extends CredentialHandle {
 export type CredentialFillTarget =
   string | Extract<CredentialBinding, { kind: 'app' }>
 
-export interface MasterPasswordOptions {
-  /** Also keep the key wrapped by safeStorage for system-verified unlock. */
-  biometric?: boolean
-}
-
 /**
  * Stable, secret-free failure reasons. Callers branch on `reason`; messages
  * are fixed English text and never include a value, handle secret or path.
  */
 export type CredentialVaultErrorReason =
   | 'vault-unavailable'
+  | 'vault-key-missing'
+  | 'vault-key-invalid'
   | 'vault-locked'
   | 'vault-kdf-unavailable'
   | 'vault-file-invalid'
@@ -148,11 +149,11 @@ export type CredentialVaultErrorReason =
   | 'invalid-binding'
   | 'invalid-totp'
   | 'master-password-too-short'
-  | 'biometric-unavailable'
-  | 'biometric-key-invalid'
 
 const REASON_CODE: Record<CredentialVaultErrorReason, UiErrorCode> = {
   'vault-unavailable': 'CAPABILITY_DISABLED',
+  'vault-key-missing': 'CAPABILITY_DISABLED',
+  'vault-key-invalid': 'CAPABILITY_DISABLED',
   'vault-locked': 'PERMISSION_REQUIRED',
   'vault-kdf-unavailable': 'CAPABILITY_DISABLED',
   'vault-file-invalid': 'DRIVER_UNAVAILABLE',
@@ -165,8 +166,6 @@ const REASON_CODE: Record<CredentialVaultErrorReason, UiErrorCode> = {
   'invalid-binding': 'INVALID_REQUEST',
   'invalid-totp': 'INVALID_REQUEST',
   'master-password-too-short': 'INVALID_REQUEST',
-  'biometric-unavailable': 'CAPABILITY_DISABLED',
-  'biometric-key-invalid': 'PERMISSION_REQUIRED',
 }
 
 /** A UiError, so a driver that lets it escape still reports the right code. */
@@ -360,12 +359,6 @@ function bound(
     : null
 }
 
-function withoutBiometricKey(master: MasterRecord): MasterRecord {
-  const next = { ...master }
-  delete next.biometricKey
-  return next
-}
-
 function verifies(master: MasterRecord, key: Buffer): boolean {
   try {
     return unseal(master.verifier, key).toString('utf8') === VERIFIER
@@ -479,26 +472,33 @@ export class CredentialVault implements CredentialVaultPort {
   private idleTimer: unknown = null
   private readonly now: () => number
   private readonly timers: VaultTimers
-  private readonly platform: NodeJS.Platform
 
   constructor(
     private readonly options: {
       path: string
-      storage: SafeStorageLike
+      /** The local key store (LocalSecretStore). */
+      storage: SecretStoreLike
       now?: () => number
       timers?: VaultTimers
-      platform?: NodeJS.Platform
       /** KDF for a newly set master password (tests use a cheap one). */
       kdf?: MasterKdf
     },
   ) {
     this.now = options.now ?? Date.now
     this.timers = options.timers ?? systemTimers
-    this.platform = options.platform ?? process.platform
-    this.file = existsSync(options.path)
-      ? (JSON.parse(readFileSync(options.path, 'utf8')) as VaultFile)
-      : { version: 1, entries: [] }
-    if (this.file.version !== 1 || !Array.isArray(this.file.entries))
+    let stored = existsSync(options.path)
+      ? (JSON.parse(readFileSync(options.path, 'utf8')) as {
+          version?: unknown
+        })
+      : null
+    if (stored?.version === 1) {
+      // Sealed by the macOS Keychain, which Emperor no longer uses: the user
+      // chose to drop these entries and start over (plan rev 5).
+      unlinkSync(options.path)
+      stored = null
+    }
+    this.file = (stored as VaultFile | null) ?? { version: 2, entries: [] }
+    if (this.file.version !== 2 || !Array.isArray(this.file.entries))
       throw new CredentialVaultError(
         'vault-file-invalid',
         'unsupported credential vault format',
@@ -515,18 +515,11 @@ export class CredentialVault implements CredentialVaultPort {
   }
 
   get available(): boolean {
-    if (!this.options.storage.isEncryptionAvailable()) return false
-    return this.backend !== 'basic_text'
+    return this.options.storage.isEncryptionAvailable()
   }
 
-  /**
-   * The safeStorage key store: macOS Keychain and Windows DPAPI are fixed;
-   * Linux reports its choice, and `basic_text` means no key service at all.
-   */
+  /** Where secrets are sealed: `emperor-local`, the local key file. */
   get backend(): string {
-    if (this.platform === 'darwin') return 'keychain'
-    if (this.platform === 'win32') return 'dpapi'
-    if (this.platform !== 'linux') return 'unknown'
     try {
       return this.options.storage.getSelectedStorageBackend?.() ?? 'unknown'
     } catch {
@@ -534,13 +527,32 @@ export class CredentialVault implements CredentialVaultPort {
     }
   }
 
-  get hasMasterPassword(): boolean {
-    return this.file.master !== undefined
+  /**
+   * Why the vault is unavailable: the local key is gone while entries need
+   * it, or its file failed the ownership and permission checks. Settings
+   * offers {@link reset} for both.
+   */
+  get problem(): 'key-missing' | 'key-invalid' | null {
+    try {
+      return this.options.storage.problem?.() ?? null
+    } catch {
+      return null
+    }
   }
 
-  /** The user opted into unlocking by system identity verification. */
-  get biometricUnlock(): boolean {
-    return typeof this.file.master?.biometricKey === 'string'
+  /**
+   * Whether any entry holds a value sealed under the local key. While one
+   * does, a missing key is lost rather than new (main wires this into the
+   * key store), so no new key is made over it.
+   */
+  get hasSealedData(): boolean {
+    return this.file.entries.some(
+      (entry) => Object.keys(entry.fields).length > 0,
+    )
+  }
+
+  get hasMasterPassword(): boolean {
+    return this.file.master !== undefined
   }
 
   get locked(): boolean {
@@ -701,6 +713,18 @@ export class CredentialVault implements CredentialVaultPort {
     return this.decrypt(entry.fields.password!)
   }
 
+  /**
+   * 清空: forget every entry and the master password, plus a local key file
+   * that failed its checks, so the vault starts over. The way out of a lost
+   * or unusable key; only ever done at the user's request.
+   */
+  reset(): void {
+    this.lock()
+    rmSync(this.options.path, { force: true })
+    this.file = { version: 2, entries: [] }
+    if (this.problem === 'key-invalid') this.options.storage.discardKey?.()
+  }
+
   lock(): void {
     this.masterKey?.fill(0)
     this.masterKey = null
@@ -708,14 +732,10 @@ export class CredentialVault implements CredentialVaultPort {
     this.idleTimer = null
   }
 
-  /**
-   * `biometric` opts into system-verified unlock, and only a correct
-   * password can: the key it derived is then kept wrapped by safeStorage.
-   */
-  unlock(password: string, options: MasterPasswordOptions = {}): boolean {
+  unlock(password: string): boolean {
     const master = this.file.master
     if (!master) return true
-    if (options.biometric) this.assertAvailable()
+    this.assertAvailable()
     const candidate = derive(
       password,
       Buffer.from(master.salt, 'base64'),
@@ -728,86 +748,11 @@ export class CredentialVault implements CredentialVaultPort {
     this.lock()
     this.masterKey = candidate
     this.touch()
-    if (options.biometric) {
-      // Rewrap even when enabled, so a fresh opt-in repairs a stale key.
-      this.file.master = { ...master, biometricKey: this.wrapKey(candidate) }
-      try {
-        this.persist()
-      } catch (error) {
-        this.file.master = master
-        throw error
-      }
-    }
     return true
   }
 
-  /**
-   * Unlock with the wrapped key. The caller has already verified the user's
-   * identity with the system (Touch ID or login password); this only unwraps.
-   * A key that no longer unwraps or verifies is removed for good.
-   */
-  unlockWithBiometrics(): void {
-    this.assertAvailable()
-    const master = this.file.master
-    if (!master) return
-    const wrapped = master.biometricKey
-    if (typeof wrapped !== 'string')
-      throw new CredentialVaultError(
-        'biometric-unavailable',
-        'biometric unlock is not enabled',
-      )
-    let key: Buffer | null = null
-    try {
-      if (!wrapped.startsWith('s:')) throw new Error('invalid envelope')
-      key = Buffer.from(
-        this.options.storage.decryptString(
-          Buffer.from(wrapped.slice(2), 'base64'),
-        ),
-        'base64',
-      )
-    } catch {
-      // safeStorage errors are not ours to vet; the reason says enough.
-      key = null
-    }
-    if (key === null || key.length !== 32 || !verifies(master, key)) {
-      key?.fill(0)
-      this.file.master = withoutBiometricKey(master)
-      try {
-        this.persist()
-      } catch {
-        // Cleared in memory; the next successful write drops it on disk.
-      }
-      throw new CredentialVaultError(
-        'biometric-key-invalid',
-        'biometric unlock key could not be read; use the master password',
-      )
-    }
-    this.lock()
-    this.masterKey = key
-    this.touch()
-  }
-
-  /** Needs no unlock: turning biometric unlock off only removes access. */
-  disableBiometricUnlock(): void {
-    const master = this.file.master
-    if (master?.biometricKey === undefined) return
-    this.file.master = withoutBiometricKey(master)
-    try {
-      this.persist()
-    } catch (error) {
-      this.file.master = master
-      throw error
-    }
-  }
-
-  /**
-   * Replacing or removing the master password drops biometric unlock unless
-   * `biometric` re-enables it for the new key.
-   */
-  setMasterPassword(
-    password: string | null,
-    options: MasterPasswordOptions = {},
-  ): void {
+  /** Re-seals every field: with the new master key, or without one. */
+  setMasterPassword(password: string | null): void {
     this.assertReady()
     if (password !== null && password.length < 12)
       throw new CredentialVaultError(
@@ -835,7 +780,6 @@ export class CredentialVault implements CredentialVaultPort {
               salt: salt.toString('base64'),
               verifier: seal(Buffer.from(VERIFIER), key),
               params: { ...kdf.params },
-              ...(options.biometric ? { biometricKey: this.wrapKey(key) } : {}),
             }
           : undefined
       for (const { entry, values } of plaintext)
@@ -892,11 +836,22 @@ export class CredentialVault implements CredentialVaultPort {
   }
 
   private assertAvailable(): void {
-    if (!this.available)
-      throw new CredentialVaultError(
-        'vault-unavailable',
-        'system credential encryption is unavailable',
-      )
+    if (this.available) return
+    const problem = this.problem
+    throw problem === 'key-missing'
+      ? new CredentialVaultError(
+          'vault-key-missing',
+          'the local key is missing; stored credentials cannot be decrypted',
+        )
+      : problem === 'key-invalid'
+        ? new CredentialVaultError(
+            'vault-key-invalid',
+            'the local key file failed its ownership or permission checks',
+          )
+        : new CredentialVaultError(
+            'vault-unavailable',
+            'local credential encryption is unavailable',
+          )
   }
 
   private assertReady(): void {
@@ -926,15 +881,11 @@ export class CredentialVault implements CredentialVaultPort {
     }, delay)
   }
 
-  private wrapKey(key: Buffer): string {
-    return `s:${this.options.storage.encryptString(key.toString('base64')).toString('base64')}`
-  }
-
   private encrypt(value: string): string {
-    const systemCipher = this.options.storage.encryptString(value)
+    const local = this.options.storage.encryptString(value)
     return this.masterKey
-      ? `m:${seal(systemCipher, this.masterKey)}`
-      : `s:${systemCipher.toString('base64')}`
+      ? `m:${seal(local, this.masterKey)}`
+      : `l:${local.toString('base64')}`
   }
 
   private decrypt(value: string): string {
@@ -944,15 +895,15 @@ export class CredentialVault implements CredentialVaultPort {
         'credential vault is locked',
       )
     try {
-      const systemCipher = value.startsWith('m:')
+      const local = value.startsWith('m:')
         ? unseal(value.slice(2), this.masterKey!)
-        : value.startsWith('s:')
+        : value.startsWith('l:')
           ? Buffer.from(value.slice(2), 'base64')
           : null
-      if (systemCipher === null) throw new Error('invalid envelope')
-      return this.options.storage.decryptString(systemCipher)
+      if (local === null) throw new Error('invalid envelope')
+      return this.options.storage.decryptString(local)
     } catch {
-      // Crypto and safeStorage errors are not ours to vet; drop them whole.
+      // Crypto and key store errors are not ours to vet; drop them whole.
       throw new CredentialVaultError(
         'credential-unreadable',
         'stored credential could not be decrypted',

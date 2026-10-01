@@ -12,7 +12,7 @@
     "dev": "electron-vite dev",
     "dev:renderer": "vite --config vite.renderer.config.ts",
     "build:native:mac": "node scripts/build-native-mac.mjs",
-    "build": "npm run build:native:mac && electron-vite build && npm run bundle:budget && node scripts/audit-preload.cjs",
+    "build": "npm run build:native:mac && electron-vite build && npm run bundle:budget && node scripts/audit-preload.cjs && node scripts/audit-main-keychain.cjs",
     "bundle:budget": "node scripts/check-renderer-budgets.mjs",
     "start": "electron-vite preview",
     "test": "vitest run && node --test tests/chrome-debugger-probe/worker.test.js",

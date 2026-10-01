@@ -406,6 +406,8 @@ export class HarnessHost {
       spillRoot: join(this.kept.paths.stateRoot, 'spill'),
       shellEnv: () => process.env,
       resolveBinary: (name) => (name === 'rg' ? this.ripgrepPath : undefined),
+      // The same directories Seatbelt keeps Shell out of (LocalSandbox).
+      protectedStateRoot: this.kept.paths.stateRoot,
     }
     const fs = createFsTools(services)
     tools.register(fs.read)

@@ -46,15 +46,11 @@ type VisualBridge = {
   vaultStatus?: () => Promise<unknown>
   vaultSave?: (draft: Record<string, unknown>) => Promise<unknown>
   vaultRemove?: (handleId: string) => Promise<{ ok: boolean }>
-  vaultUnlock?: (password: string, biometric?: boolean) => Promise<unknown>
+  vaultUnlock?: (password: string) => Promise<unknown>
   vaultLock?: () => Promise<{ ok: boolean }>
-  vaultSetMaster?: (
-    password: string | null,
-    biometric?: boolean,
-  ) => Promise<{ ok: boolean }>
+  vaultSetMaster?: (password: string | null) => Promise<{ ok: boolean }>
   vaultReveal?: (handleId: string) => Promise<{ password: string }>
-  vaultBiometricUnlock?: () => Promise<{ unlocked: boolean }>
-  vaultBiometricDisable?: () => Promise<{ ok: boolean }>
+  vaultReset?: () => Promise<{ ok: boolean }>
   clearBrowserData?: () => Promise<{ ok: boolean }>
   macHelperStatus?: () => Promise<unknown>
   macHelperRequestPermission?: (permission: string) => Promise<unknown>
@@ -1267,6 +1263,8 @@ export async function installVisualCoreBridge(
             revealUsername: false,
           },
         ] as Array<Record<string, unknown>>,
+        // `?visualVault=key-missing|key-invalid`: the local key is unusable.
+        vaultProblem: visualParams.get('visualVault'),
       }
       const visualComputerUse = () => {
         const on = visualComputerUseState.enabled
@@ -4251,12 +4249,13 @@ export async function installVisualCoreBridge(
         },
         dictationStatus: async () => visualDictationStatus(),
         vaultStatus: async () => ({
-          available: true,
-          backend: 'keychain',
+          available: !visualBrowserState.vaultProblem,
+          backend: 'emperor-local',
+          ...(visualBrowserState.vaultProblem
+            ? { problem: visualBrowserState.vaultProblem }
+            : {}),
           locked: false,
           hasMasterPassword: false,
-          biometricSupported: true,
-          biometricUnlock: false,
           handles: visualBrowserState.vault,
         }),
         vaultSave: async (draft: Record<string, unknown>) => {
@@ -4289,8 +4288,11 @@ export async function installVisualCoreBridge(
         vaultLock: async () => ({ ok: true }),
         vaultSetMaster: async () => ({ ok: true }),
         vaultReveal: async () => ({ password: 'visual-only' }),
-        vaultBiometricUnlock: async () => ({ unlocked: true }),
-        vaultBiometricDisable: async () => ({ ok: true }),
+        vaultReset: async () => {
+          visualBrowserState.vault = []
+          visualBrowserState.vaultProblem = null
+          return { ok: true }
+        },
         clearBrowserData: async () => ({ ok: true }),
         // `?visualDownloads=none`: both lists are empty.
         browserDownloads: async () =>

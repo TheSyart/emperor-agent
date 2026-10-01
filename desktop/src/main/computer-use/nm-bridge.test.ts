@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { mkdtemp, chmod, rm } from 'node:fs/promises'
 import { createConnection, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   NmBridgeServer,
+  PAIRING_UNKNOWN,
   type NmBridgeEvent,
   type NmHostManifests,
 } from './nm-bridge'
@@ -103,6 +105,35 @@ async function eventually(predicate: () => boolean): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 5))
   }
   throw new Error('condition did not become true')
+}
+
+describe('Native Messaging pairing protocol', () => {
+  it('names PAIRING_UNKNOWN the same on both sides', () => {
+    expect(PAIRING_UNKNOWN).toBe('PAIRING_UNKNOWN')
+    const extension = readFileSync(
+      new URL('../../../extension/protocol.js', import.meta.url),
+      'utf8',
+    )
+    expect(extension).toContain(
+      `export const PAIRING_UNKNOWN = '${PAIRING_UNKNOWN}'`,
+    )
+  })
+})
+
+/** Connects a raw client to the bridge's socket. */
+async function connect(socketPath: string): Promise<Client> {
+  const socket = createConnection(socketPath)
+  await new Promise<void>((resolve, reject) => {
+    socket.once('connect', resolve)
+    socket.once('error', reject)
+  })
+  return new Client(socket)
+}
+
+function nonce(): string {
+  return Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString(
+    'base64url',
+  )
 }
 
 describe.skipIf(process.platform !== 'darwin')(
@@ -342,6 +373,148 @@ describe.skipIf(process.platform !== 'darwin')(
         // An unknown pairing changes no manifest; a real one narrows it.
         ['unregister', 'b'.repeat(32), ['c'.repeat(32)]],
       ])
+    })
+
+    it('answers PAIRING_UNKNOWN for a pairing it does not hold, PERMISSION_DENIED otherwise', async () => {
+      const records = new Map<string, BrowserPairing>()
+      records.set('pairing-1', {
+        pairingId: 'pairing-1',
+        extensionId: 'a'.repeat(32),
+        secret: Buffer.alloc(32, 9).toString('base64url'),
+        createdAt: '2026-10-01T00:00:00.000Z',
+      })
+      directory = await mkdtemp(join(tmpdir(), 'eanm-test-'))
+      await chmod(directory, 0o700)
+      bridge = new NmBridgeServer({
+        pairings: memoryPairings(records),
+        socketPath: join(directory, 'nm.sock'),
+        heartbeatMs: 0,
+      })
+      await bridge.start()
+      client = await connect(bridge.socketPath)
+      const begin = (id: number, params: Record<string, unknown>) =>
+        client!.send({
+          type: 'request',
+          id,
+          method: 'auth.begin',
+          params,
+          deadlineMs: 15000,
+        })
+      // Never paired here, or cleared with a version 1 store: pair again.
+      begin(1, { protocol: 1, pairingId: 'pairing-gone', nonce: nonce() })
+      expect(await client.next()).toMatchObject({
+        id: 1,
+        ok: false,
+        error: { code: 'PAIRING_UNKNOWN', message: 'PAIRING_UNKNOWN' },
+      })
+      // Malformed requests are refused as before; a pairing is never dropped.
+      begin(2, { protocol: 2, pairingId: 'pairing-1', nonce: nonce() })
+      expect(await client.next()).toMatchObject({
+        id: 2,
+        error: { code: 'PERMISSION_DENIED' },
+      })
+      begin(3, { protocol: 1, pairingId: 'pairing-1', nonce: 'short' })
+      expect(await client.next()).toMatchObject({
+        id: 3,
+        error: { code: 'PERMISSION_DENIED' },
+      })
+      // A store that cannot be read fails closed, not as unknown.
+      const failing = new NmBridgeServer({
+        pairings: {
+          ...memoryPairings(records),
+          get: async () => {
+            throw new Error('pairing file permissions are not 0600')
+          },
+        },
+        socketPath: join(directory, 'failing.sock'),
+        heartbeatMs: 0,
+      })
+      await failing.start()
+      try {
+        const other = await connect(failing.socketPath)
+        other.send({
+          type: 'request',
+          id: 4,
+          method: 'auth.begin',
+          params: { protocol: 1, pairingId: 'pairing-1', nonce: nonce() },
+          deadlineMs: 15000,
+        })
+        expect(await other.next()).toMatchObject({
+          id: 4,
+          error: { code: 'PERMISSION_DENIED' },
+        })
+        other.socket.destroy()
+      } finally {
+        await failing.stop()
+      }
+      // The known pairing still authenticates.
+      begin(5, { protocol: 1, pairingId: 'pairing-1', nonce: nonce() })
+      expect(await client.next()).toMatchObject({ id: 5, ok: true })
+      expect(records.has('pairing-1')).toBe(true)
+    })
+
+    it('records only chrome or edge as the browser that paired', async () => {
+      const records = new Map<string, BrowserPairing>()
+      directory = await mkdtemp(join(tmpdir(), 'eanm-test-'))
+      await chmod(directory, 0o700)
+      bridge = new NmBridgeServer({
+        pairings: memoryPairings(records),
+        socketPath: join(directory, 'nm.sock'),
+        heartbeatMs: 0,
+      })
+      await bridge.start()
+      const ext: any = await import(
+        /* @vite-ignore */ new URL(
+          '../../../extension/crypto.js',
+          import.meta.url,
+        ).href
+      )
+      const pair = async (id: number, browser: unknown) => {
+        const offer = await ext.createPairOffer('a'.repeat(32))
+        client = await connect(bridge!.socketPath)
+        client.send({
+          type: 'request',
+          id,
+          method: 'pair.begin',
+          params: {
+            protocol: 1,
+            extensionId: offer.extensionId,
+            publicKey: offer.publicKey,
+            nonce: offer.nonce,
+            browser,
+          },
+          deadlineMs: 15000,
+        })
+        const answer = await client.next()
+        const pairingId = answer.result.pairingId as string
+        client.send({
+          type: 'event',
+          name: 'pair.displayed',
+          data: { pairingId },
+        })
+        await eventually(() =>
+          bridge!
+            .pendingPairings()
+            .some((item) => item.pairingId === pairingId && item.displayed),
+        )
+        const pending = bridge!
+          .pendingPairings()
+          .find((item) => item.pairingId === pairingId)
+        expect(await bridge!.approvePairing(pairingId)).toBe(true)
+        client.socket.destroy()
+        return { pending, stored: records.get(pairingId) }
+      }
+      const edge = await pair(1, 'edge')
+      expect(edge.pending?.browser).toBe('edge')
+      expect(edge.stored?.browser).toBe('edge')
+      const chrome = await pair(2, 'chrome')
+      expect(chrome.stored?.browser).toBe('chrome')
+      // Anything else is display metadata Emperor does not know: left out.
+      const odd = await pair(3, 'firefox')
+      expect(odd.pending).not.toHaveProperty('browser')
+      expect(odd.stored).not.toHaveProperty('browser')
+      const none = await pair(4, undefined)
+      expect(none.stored).not.toHaveProperty('browser')
     })
 
     it('requires UI code approval, authenticates and loses attached tabs on disconnect', async () => {
@@ -594,9 +767,10 @@ describe.skipIf(process.platform !== 'darwin')(
           nonce: extensionNonce,
         },
       })
+      // Revoked in Emperor: unknown from now on, so the extension pairs again.
       expect(await client.next()).toMatchObject({
         ok: false,
-        error: { code: 'PERMISSION_DENIED' },
+        error: { code: 'PAIRING_UNKNOWN' },
       })
       driver.dispose()
     })

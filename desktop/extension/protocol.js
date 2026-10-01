@@ -2,6 +2,8 @@ export const PROTOCOL = 1
 export const HOST_NAME = 'com.emperor.agent.browser'
 export const MAX_JSON_BYTES = 900_000 // Chrome: native host -> extension is limited to 1 MB.
 export const MAX_INPUT_TEXT = 16_384
+// auth.begin refusal: Emperor holds no such pairing; forget it and pair again.
+export const PAIRING_UNKNOWN = 'PAIRING_UNKNOWN'
 
 export function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)

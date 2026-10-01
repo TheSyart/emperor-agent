@@ -16,6 +16,7 @@ import {
 import type { ToolServices } from '../../services'
 import type { SpillRef } from '../../spill'
 import { jsGlobFiles, type GlobInput } from './js-engine'
+import { protectedStateFilter } from './protected'
 
 export type { GlobInput } from './js-engine'
 import {
@@ -118,6 +119,13 @@ async function globPaths(
   defaultWorkdir: string | undefined,
   input: GlobInput,
 ): Promise<string[]> {
+  const keep = await protectedStateFilter(
+    services,
+    context,
+    defaultWorkdir,
+    'glob',
+    input.path,
+  )
   let raw: string[]
   let workdir: string
   try {
@@ -137,7 +145,7 @@ async function globPaths(
     workdir = searchWorkdir(context, defaultWorkdir)
     raw = await jsGlobFiles(input, { workdir, signal: context.signal })
   }
-  return raw.map((line) => toWorkdirRelative(line, workdir))
+  return raw.filter(keep).map((line) => toWorkdirRelative(line, workdir))
 }
 
 const globInput = z.object({

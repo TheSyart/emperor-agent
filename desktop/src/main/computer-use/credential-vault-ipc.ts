@@ -1,10 +1,9 @@
 /** Trusted Settings-only IPC; secrets never pass through CoreApi or tool logs. */
 import {
-  VAULT_BIOMETRIC_DISABLE_CHANNEL,
-  VAULT_BIOMETRIC_UNLOCK_CHANNEL,
   VAULT_LOCK_CHANNEL,
   VAULT_MASTER_CHANNEL,
   VAULT_REMOVE_CHANNEL,
+  VAULT_RESET_CHANNEL,
   VAULT_SAVE_CHANNEL,
   VAULT_STATUS_CHANNEL,
   VAULT_UNLOCK_CHANNEL,
@@ -27,11 +26,7 @@ interface IpcMainLike {
 /** Failures of this IPC layer itself; same secret-free contract as the vault. */
 class VaultRequestError extends Error {
   constructor(
-    readonly reason:
-      | 'invalid-request'
-      | 'reveal-unverified'
-      | 'unlock-unverified'
-      | 'biometric-unsupported',
+    readonly reason: 'invalid-request' | 'reveal-unverified',
     message: string,
   ) {
     super(message)
@@ -41,7 +36,7 @@ class VaultRequestError extends Error {
 /**
  * Electron logs a handler's error and forwards only its message, so every
  * failure leaves as `[credential-vault:<reason>] <fixed text>`. Anything not
- * raised by the vault or this module (safeStorage, crypto, fs) is replaced
+ * raised by the vault or this module (the key store, crypto, fs) is replaced
  * wholesale: its text is not ours to vet and could echo input.
  */
 function sanitize(error: unknown): Error {
@@ -141,17 +136,16 @@ function draft(value: unknown): CredentialDraft {
 export function registerCredentialVaultIpc(input: {
   ipcMain: IpcMainLike
   authorize(event: unknown): void
-  /** System identity check (Touch ID or login password); absent: no reveal. */
-  authenticateReveal?(): Promise<boolean>
   /**
-   * Gate for biometric unlock; defaults to `authenticateReveal`, the same
-   * native check. Absent both, biometric unlock is unsupported.
+   * System identity check before 查看密码 (Touch ID or the login password,
+   * LocalAuthentication only); absent: no reveal. It unlocks nothing else.
    */
-  authenticateUnlock?(): Promise<boolean>
+  authenticateReveal?(): Promise<boolean>
   vault: Pick<
     CredentialVault,
     | 'available'
     | 'backend'
+    | 'problem'
     | 'locked'
     | 'hasMasterPassword'
     | 'entries'
@@ -161,39 +155,25 @@ export function registerCredentialVaultIpc(input: {
     | 'lock'
     | 'setMasterPassword'
     | 'revealPassword'
-    | 'biometricUnlock'
-    | 'unlockWithBiometrics'
-    | 'disableBiometricUnlock'
+    | 'reset'
   >
 }): void {
   const { ipcMain, vault } = input
-  const authenticateUnlock =
-    input.authenticateUnlock ?? input.authenticateReveal
-  /** Opting into biometric unlock needs a way to verify the user later. */
-  const optIn = (value: unknown): boolean => {
-    if (value === undefined || value === false) return false
-    if (value !== true)
-      throw new VaultRequestError('invalid-request', 'invalid biometric option')
-    if (!authenticateUnlock)
-      throw new VaultRequestError(
-        'biometric-unsupported',
-        'biometric unlock is not supported on this system',
-      )
-    return true
-  }
   // Authorization stays outside `guarded`: an untrusted sender is rejected
   // before any payload is read, with the policy's own error.
   ipcMain.handle(VAULT_STATUS_CHANNEL, (event) => {
     input.authorize(event)
-    return guarded(() => ({
-      available: vault.available,
-      backend: vault.backend,
-      locked: vault.locked,
-      hasMasterPassword: vault.hasMasterPassword,
-      biometricUnlock: vault.biometricUnlock,
-      biometricSupported: authenticateUnlock !== undefined,
-      handles: vault.entries(),
-    }))
+    return guarded(() => {
+      const problem = vault.problem
+      return {
+        available: vault.available,
+        backend: vault.backend,
+        ...(problem ? { problem } : {}),
+        locked: vault.locked,
+        hasMasterPassword: vault.hasMasterPassword,
+        handles: vault.entries(),
+      }
+    })
   })
   ipcMain.handle(VAULT_SAVE_CHANNEL, (event, payload) => {
     input.authorize(event)
@@ -206,15 +186,9 @@ export function registerCredentialVaultIpc(input: {
   })
   ipcMain.handle(VAULT_UNLOCK_CHANNEL, (event, payload) => {
     input.authorize(event)
-    return guarded(() => {
-      const request = record(payload)
-      const password = string(request.password, 4096)
-      return {
-        unlocked: optIn(request.biometric)
-          ? vault.unlock(password, { biometric: true })
-          : vault.unlock(password),
-      }
-    })
+    return guarded(() => ({
+      unlocked: vault.unlock(string(record(payload).password, 4096)),
+    }))
   })
   ipcMain.handle(VAULT_LOCK_CHANNEL, (event) => {
     input.authorize(event)
@@ -224,51 +198,15 @@ export function registerCredentialVaultIpc(input: {
   ipcMain.handle(VAULT_MASTER_CHANNEL, (event, payload) => {
     input.authorize(event)
     guarded(() => {
-      const request = record(payload)
-      const raw = request.password
-      const password = raw === null ? null : string(raw, 4096)
-      if (optIn(request.biometric) && password !== null)
-        vault.setMasterPassword(password, { biometric: true })
-      else vault.setMasterPassword(password)
+      const raw = record(payload).password
+      vault.setMasterPassword(raw === null ? null : string(raw, 4096))
     })
     return { ok: true }
   })
-  ipcMain.handle(VAULT_BIOMETRIC_UNLOCK_CHANNEL, async (event) => {
+  // Settings asks the user to confirm first; nothing else ever clears.
+  ipcMain.handle(VAULT_RESET_CHANNEL, (event) => {
     input.authorize(event)
-    if (!authenticateUnlock)
-      throw sanitize(
-        new VaultRequestError(
-          'biometric-unsupported',
-          'biometric unlock is not supported on this system',
-        ),
-      )
-    // Do not raise a system prompt that could not unlock anything.
-    if (!guarded(() => vault.biometricUnlock))
-      throw sanitize(
-        new CredentialVaultError(
-          'biometric-unavailable',
-          'biometric unlock is not enabled',
-        ),
-      )
-    const verified = await authenticateUnlock().catch(() => false)
-    if (!verified)
-      throw sanitize(
-        new VaultRequestError(
-          'unlock-unverified',
-          'system identity verification was cancelled or unavailable',
-        ),
-      )
-    input.authorize(event)
-    return guarded(() => {
-      vault.unlockWithBiometrics()
-      return { unlocked: true }
-    })
-  })
-  ipcMain.handle(VAULT_BIOMETRIC_DISABLE_CHANNEL, (event) => {
-    input.authorize(event)
-    guarded(() => {
-      vault.disableBiometricUnlock()
-    })
+    guarded(() => vault.reset())
     return { ok: true }
   })
   ipcMain.handle(VAULT_REVEAL_CHANNEL, async (event, payload) => {

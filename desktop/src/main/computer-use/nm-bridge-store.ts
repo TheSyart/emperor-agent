@@ -10,7 +10,11 @@ import {
 } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { LocalSecretError } from '../local-secret-store'
 import { parseToken } from './nm-bridge-crypto'
+
+/** The browser an extension said it runs in when it paired. */
+export type PairingBrowser = 'chrome' | 'edge'
 
 export interface BrowserPairing {
   readonly pairingId: string
@@ -18,6 +22,8 @@ export interface BrowserPairing {
   /** 32-byte HKDF output, base64url; only main's encrypted store holds it. */
   readonly secret: string
   readonly createdAt: string
+  /** Reported by the extension at `pair.begin`; display only, not proven. */
+  readonly browser?: PairingBrowser
 }
 
 /** A pairing without its secret; enough to maintain host manifests. */
@@ -33,25 +39,42 @@ export interface PairingStore {
 
 export interface PairingCipher {
   encrypt(plaintext: string): Buffer
+  /** Throws {@link PairingSecretLost} when the secret can never be read. */
   decrypt(ciphertext: Buffer): string
 }
 
-/** Pass Electron's main-process safeStorage; never call this from a renderer. */
-export function electronPairingCipher(safeStorage: {
-  isEncryptionAvailable(): boolean
+/**
+ * The record's secret is gone for good: its key is missing, or it was sealed
+ * under another key. The store forgets such a pairing; the extension then
+ * hears `PAIRING_UNKNOWN` and pairs again.
+ */
+export class PairingSecretLost extends Error {
+  constructor(options?: ErrorOptions) {
+    super('browser pairing secret can no longer be read', options)
+    this.name = 'PairingSecretLost'
+  }
+}
+
+/** Seals pairing secrets with Emperor's local key (local-secret-store.ts). */
+export function localPairingCipher(secrets: {
   encryptString(value: string): Buffer
   decryptString(value: Buffer): string
 }): PairingCipher {
   return {
-    encrypt: (value) => {
-      if (!safeStorage.isEncryptionAvailable())
-        throw new Error('encrypted browser pairing storage unavailable')
-      return safeStorage.encryptString(value)
-    },
+    encrypt: (value) => secrets.encryptString(value),
     decrypt: (value) => {
-      if (!safeStorage.isEncryptionAvailable())
-        throw new Error('encrypted browser pairing storage unavailable')
-      return safeStorage.decryptString(value)
+      try {
+        return secrets.decryptString(value)
+      } catch (cause) {
+        // An unusable key file fails closed instead: fixing it keeps pairings.
+        if (
+          cause instanceof LocalSecretError &&
+          (cause.reason === 'key-missing' ||
+            cause.reason === 'ciphertext-invalid')
+        )
+          throw new PairingSecretLost({ cause })
+        throw cause
+      }
     },
   }
 }
@@ -61,9 +84,18 @@ interface StoredRecord {
   readonly extensionId: string
   readonly ciphertext: string
   readonly createdAt: string
+  readonly browser?: PairingBrowser
 }
 
-/** Atomic 0600 snapshot. A malformed/loose file fails closed. */
+function pairingBrowser(value: unknown): value is PairingBrowser {
+  return value === 'chrome' || value === 'edge'
+}
+
+/**
+ * Atomic 0600 snapshot, version 2. Version 1 sealed secrets with the macOS
+ * Keychain: such a file is deleted on load and pairing starts over (plan
+ * rev 5). A malformed/loose file fails closed.
+ */
 export class EncryptedFilePairingStore implements PairingStore {
   private records: StoredRecord[] | null = null
   private mutation: Promise<void> = Promise.resolve()
@@ -105,10 +137,23 @@ export class EncryptedFilePairingStore implements PairingStore {
     }
     const parsed: unknown = JSON.parse(data)
     if (
+      parsed &&
+      typeof parsed === 'object' &&
+      'version' in parsed &&
+      parsed.version === 1
+    ) {
+      // Keychain-sealed secrets from before Emperor's local key: dropped.
+      await unlink(this.path).catch((cause: NodeJS.ErrnoException) => {
+        if (cause.code !== 'ENOENT') throw cause
+      })
+      this.records = []
+      return this.records
+    }
+    if (
       !parsed ||
       typeof parsed !== 'object' ||
       !('version' in parsed) ||
-      parsed.version !== 1 ||
+      parsed.version !== 2 ||
       !('records' in parsed) ||
       !Array.isArray(parsed.records)
     )
@@ -129,7 +174,8 @@ export class EncryptedFilePairingStore implements PairingStore {
         typeof record.createdAt !== 'string' ||
         !/^[A-Za-z0-9_-]{8,128}$/.test(record.pairingId) ||
         !/^[a-p]{32}$/.test(record.extensionId) ||
-        !/^[A-Za-z0-9+/=]+$/.test(record.ciphertext)
+        !/^[A-Za-z0-9+/=]+$/.test(record.ciphertext) ||
+        ('browser' in record && !pairingBrowser(record.browser))
       )
         throw new Error('invalid pairing record')
     }
@@ -137,27 +183,39 @@ export class EncryptedFilePairingStore implements PairingStore {
     return this.records
   }
 
+  /** Null for an unknown pairing, or one whose secret is lost (forgotten). */
   async get(pairingId: string): Promise<BrowserPairing | null> {
     const record = (await this.load()).find(
       (item) => item.pairingId === pairingId,
     )
     if (!record) return null
-    const secret = this.cipher.decrypt(Buffer.from(record.ciphertext, 'base64'))
+    let secret: string
+    try {
+      secret = this.cipher.decrypt(Buffer.from(record.ciphertext, 'base64'))
+    } catch (cause) {
+      if (!(cause instanceof PairingSecretLost)) throw cause
+      await this.remove(pairingId)
+      return null
+    }
     parseToken(secret, 32)
     return {
       pairingId: record.pairingId,
       extensionId: record.extensionId,
       secret,
       createdAt: record.createdAt,
+      ...(record.browser ? { browser: record.browser } : {}),
     }
   }
 
   async list(): Promise<readonly PairingSummary[]> {
-    return (await this.load()).map(({ pairingId, extensionId, createdAt }) => ({
-      pairingId,
-      extensionId,
-      createdAt,
-    }))
+    return (await this.load()).map(
+      ({ pairingId, extensionId, createdAt, browser }) => ({
+        pairingId,
+        extensionId,
+        createdAt,
+        ...(browser ? { browser } : {}),
+      }),
+    )
   }
 
   private async save(records: StoredRecord[]): Promise<void> {
@@ -171,7 +229,7 @@ export class EncryptedFilePairingStore implements PairingStore {
       0o600,
     )
     try {
-      await handle.writeFile(JSON.stringify({ version: 1, records }))
+      await handle.writeFile(JSON.stringify({ version: 2, records }))
       await handle.sync()
     } finally {
       await handle.close()
@@ -196,7 +254,8 @@ export class EncryptedFilePairingStore implements PairingStore {
     return this.enqueue(async () => {
       if (
         !/^[A-Za-z0-9_-]{8,128}$/.test(pairing.pairingId) ||
-        !/^[a-p]{32}$/.test(pairing.extensionId)
+        !/^[a-p]{32}$/.test(pairing.extensionId) ||
+        (pairing.browser !== undefined && !pairingBrowser(pairing.browser))
       )
         throw new Error('invalid pairing identity')
       parseToken(pairing.secret, 32)
@@ -208,6 +267,7 @@ export class EncryptedFilePairingStore implements PairingStore {
         extensionId: pairing.extensionId,
         ciphertext: this.cipher.encrypt(pairing.secret).toString('base64'),
         createdAt: pairing.createdAt,
+        ...(pairing.browser ? { browser: pairing.browser } : {}),
       })
       if (records.length > 100) throw new Error('too many browser pairings')
       await this.save(records)

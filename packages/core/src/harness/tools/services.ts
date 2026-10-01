@@ -27,4 +27,10 @@ export interface ToolServices {
   shellEnv?: () => NodeJS.ProcessEnv
   /** Resolve a bundled binary (e.g. ripgrep) path; undefined → rely on PATH. */
   resolveBinary?: (name: 'rg') => string | undefined
+  /**
+   * Emperor Home, whose `computer-use/` and `browser/` no file or search tool
+   * may read or change (sandbox/protected-state.ts; Seatbelt keeps Shell out
+   * of the same directories). Absent: nothing is protected (tests, probes).
+   */
+  protectedStateRoot?: string
 }

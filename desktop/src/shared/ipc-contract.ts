@@ -152,11 +152,8 @@ export const VAULT_UNLOCK_CHANNEL = 'emperor:computer-use:vault-unlock'
 export const VAULT_LOCK_CHANNEL = 'emperor:computer-use:vault-lock'
 export const VAULT_MASTER_CHANNEL = 'emperor:computer-use:vault-master'
 export const VAULT_REVEAL_CHANNEL = 'emperor:computer-use:vault-reveal'
-/** Unlock with the key kept for biometric unlock, after system verification. */
-export const VAULT_BIOMETRIC_UNLOCK_CHANNEL =
-  'emperor:computer-use:vault-biometric-unlock'
-export const VAULT_BIOMETRIC_DISABLE_CHANNEL =
-  'emperor:computer-use:vault-biometric-disable'
+/** 清空: drop every entry and the master password (and an unusable local key). */
+export const VAULT_RESET_CHANNEL = 'emperor:computer-use:vault-reset'
 
 export interface AgentPreviewFrame {
   targetId: string

@@ -27,9 +27,9 @@ Move Emperor Agent to the Applications folder before opening it: launched from t
 
 ## macOS 电脑操作 / Computer use on macOS
 
-电脑操作使用独立的 Emperor Computer Helper。未签名版本没有固定的签名身份，所以每次安装新版本后，macOS 都会把 Helper 当作新应用：请在 **设置 › 电脑操作** 按提示重新授予 **辅助功能** 与 **屏幕录制**（系统开关仍显示开启时，以设置页读到的状态为准）。使用凭据库时，钥匙串可能再请求一次确认。
+电脑操作使用独立的 Emperor Computer Helper。未签名版本没有固定的签名身份，所以每次安装新版本后，macOS 都会把 Helper 当作新应用：请在 **设置 › 电脑操作** 按提示重新授予 **辅助功能** 与 **屏幕录制**（系统开关仍显示开启时，以设置页读到的状态为准）。
 
-Computer use runs in the separate Emperor Computer Helper. An unsigned build has no stable signing identity, so after each update macOS treats the Helper as a new app: re-grant **Accessibility** and **Screen Recording** from **Settings › Computer Use** (trust the state shown there even if the system switches still look on). The credential vault may ask for Keychain access once more.
+Computer use runs in the separate Emperor Computer Helper. An unsigned build has no stable signing identity, so after each update macOS treats the Helper as a new app: re-grant **Accessibility** and **Screen Recording** from **Settings › Computer Use** (trust the state shown there even if the system switches still look on).
 
 ## macOS 语音听写 / Dictation on macOS
 

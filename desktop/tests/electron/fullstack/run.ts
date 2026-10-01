@@ -26,6 +26,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -498,6 +499,7 @@ async function fullstack(
             window as unknown as {
               emperor: {
                 vaultStatus(): Promise<{
+                  backend?: string
                   handles: Array<{ handleId: string; label: string }>
                 }>
               }
@@ -508,6 +510,17 @@ async function fullstack(
         vault.handles.find((item) => item.label === 'E2E credential')
           ?.handleId ?? ''
       if (!credentialHandleId) throw new Error('credential handle missing')
+      // Sealed with Emperor's own key in this home, never the Keychain.
+      if (vault.backend !== 'emperor-local')
+        throw new Error(`vault backend ${String(vault.backend)}`)
+      const sealedVault = JSON.parse(
+        readFileSync(join(home, 'computer-use', 'vault.json'), 'utf8'),
+      ) as { version?: number }
+      if (
+        sealedVault.version !== 2 ||
+        statSync(join(home, 'computer-use', 'secrets', 'local.key')).size !== 32
+      )
+        throw new Error('vault is not sealed with the local key')
       if ((await page.locator('body').innerText()).includes(fixturePassword))
         throw new Error('password appeared in Settings text')
 

@@ -1,7 +1,8 @@
 /**
  * Shared plumbing for the fs tools: the factory-owned state, session cwd
- * resolution, sandbox policy/escalation, the in-process write fence, and
- * model-facing remediation of guarded-mutation failures.
+ * resolution, sandbox policy/escalation, the in-process write fence, the
+ * refusal of Emperor's private state, and model-facing remediation of
+ * guarded-mutation failures.
  */
 
 import {
@@ -14,6 +15,10 @@ import {
   type SandboxExecutionPolicy,
 } from '../../../sandbox/policy'
 import { approveEscalation } from '../../../sandbox/escalation'
+import {
+  isProtectedStatePath,
+  PROTECTED_STATE_REASON,
+} from '../../../sandbox/protected-state'
 import type { ToolRunContext } from '../../definition'
 import type { ToolServices } from '../../services'
 import {
@@ -143,6 +148,25 @@ export async function fenceTarget(
     if (await isPathUnder(fresh.targetKey, root)) return fresh
   }
   throw sandboxDenied(policy, toolName, target)
+}
+
+/**
+ * Refuse Emperor's private state (sandbox/protected-state.ts): its
+ * `computer-use/` and `browser/` directories, by real path, in every sandbox
+ * mode. No escalation is offered; a wider mode would not change the answer.
+ */
+export async function refuseProtected(
+  state: FsToolState,
+  target: FsTarget,
+  verb: 'read' | 'write' | 'edit',
+): Promise<void> {
+  const stateRoot = state.services.protectedStateRoot
+  if (stateRoot === undefined) return
+  if (await isProtectedStatePath(target.targetKey, stateRoot))
+    throw new FsError(
+      `cannot ${verb} "${target.displayPath}": ${PROTECTED_STATE_REASON}`,
+      'FS_PROTECTED_PATH',
+    )
 }
 
 const REMEDIES: Partial<Record<string, string>> = {

@@ -17,6 +17,7 @@ import {
 import type { ToolServices } from '../../services'
 import { utf8Head, type SpillRef } from '../../spill'
 import { jsGrepMatches, type GrepInput, type GrepMatch } from './js-engine'
+import { protectedStateFilter } from './protected'
 
 export type { GrepInput, GrepMatch } from './js-engine'
 import {
@@ -227,6 +228,13 @@ async function grepRawMatches(
   defaultWorkdir: string | undefined,
   input: GrepInput,
 ): Promise<GrepMatch[]> {
+  const keep = await protectedStateFilter(
+    services,
+    context,
+    defaultWorkdir,
+    'grep',
+    input.path,
+  )
   let raw: GrepMatch[]
   let workdir: string
   try {
@@ -244,10 +252,12 @@ async function grepRawMatches(
     workdir = searchWorkdir(context, defaultWorkdir)
     raw = await jsGrepMatches(input, { workdir, signal: context.signal })
   }
-  return raw.map((match) => ({
-    ...match,
-    path: toWorkdirRelative(match.path, workdir),
-  }))
+  return raw
+    .filter((match) => keep(match.path))
+    .map((match) => ({
+      ...match,
+      path: toWorkdirRelative(match.path, workdir),
+    }))
 }
 
 const grepInput = z.object({

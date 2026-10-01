@@ -20,6 +20,7 @@ import {
 } from './fsio'
 import {
   fenceTarget,
+  refuseProtected,
   remediate,
   resolveMutationPolicy,
   sessionIdOf,
@@ -96,10 +97,13 @@ export function createEditTool(state: FsToolState): ToolDefinition<EditArgs> {
       const input = parseEditArgs(args)
       const policy = await resolveMutationPolicy(state, 'edit', args, context)
       const resolved = await resolveTarget(policy.workspaceRoot, input.filePath)
+      await refuseProtected(state, resolved, 'edit')
       const sessionId = sessionIdOf(context)
       try {
         const expected = state.observations.editIntent(sessionId, resolved)
         const target = await fenceTarget(resolved, policy, 'edit')
+        // The fence re-resolves: a symlink swapped in since is seen here.
+        if (target !== resolved) await refuseProtected(state, target, 'edit')
         const outcome = await state.locks.with(target.targetKey, async () => {
           const existing = await probe(target.targetKey)
           // Stale before matching: an edit based on an old read never reports

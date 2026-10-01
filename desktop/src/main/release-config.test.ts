@@ -445,6 +445,9 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     expect(runner).toContain('shell: false')
     expect(runner).not.toMatch(/env:\s*\{\s*\.\.\.process\.env/)
     expect(runner).toContain('PATH: emptyBin')
+    // Secrets need no Keychain: macOS runs with the synthetic HOME too.
+    expect(runner).toMatch(/\n\s+HOME: homeRoot,\n/)
+    expect(runner).not.toContain('process.env.HOME || homeRoot')
     expect(runner).toContain("APPDATA: join(homeRoot, 'AppData', 'Roaming')")
     expect(runner).toContain("LOCALAPPDATA: join(homeRoot, 'AppData', 'Local')")
     expect(runner).toContain('TEMP: tempRoot')

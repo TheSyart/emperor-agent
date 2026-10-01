@@ -123,6 +123,13 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(groupTitles(dialog)).toHaveText(['保护', '已保存'])
     await expect(dialog).toContainText('GitHub')
     await expect(dialog).toContainText('公司邮箱')
+    // Sealed with Emperor's own key, said plainly; no Keychain, no Touch ID.
+    await expect(dialog).toContainText(
+      'Emperor 本地密钥（保存在这台 Mac 的 Emperor 目录）',
+    )
+    await expect(dialog).toContainText('建议设置主密码')
+    await expect(dialog).not.toContainText('钥匙串')
+    await expect(dialog).not.toContainText('Touch ID')
     await noHorizontalOverflow(page)
     await shot(page, `passwords-${theme}`)
 
@@ -139,13 +146,41 @@ for (const theme of ['dark', 'light'] as const) {
     await dialog.locator('[data-action="vault-set-master"]').click()
     const master = page.getByRole('dialog', { name: '设置主密码' })
     await master.getByLabel('新的主密码').fill('correct horse battery')
-    await expect(master).toContainText('允许 Touch ID 解锁')
+    await expect(master).not.toContainText('Touch ID')
+    await expect(master.locator('input[type="checkbox"]')).toHaveCount(0)
     await shot(page, `passwords-master-${theme}`)
     await master.getByRole('button', { name: '取消' }).click()
 
     await dialog.getByTestId('settings-crumb').click()
     await expect(dialog.getByTestId('browser-agent-card')).toBeVisible()
     await expect(page).not.toHaveURL(/page=/)
+  })
+
+  test(`password manager with a lost local key (${theme})`, async ({
+    page,
+  }) => {
+    const dialog = await openBrowser(page, {
+      theme,
+      page: 'passwords&visualVault=key-missing',
+    })
+    const notice = dialog.locator('.ds-settings-notice')
+    await expect(notice).toHaveAttribute('data-tone', 'error')
+    await expect(notice).toContainText('已保存的密码无法解密')
+    await expect(notice).toContainText('本地密钥文件不见了')
+    await expect(dialog.locator('[data-action="add-credential"]')).toHaveCount(
+      0,
+    )
+    await noHorizontalOverflow(page)
+    await shot(page, `passwords-key-missing-${theme}`)
+    // 清空 asks first; accepting starts the vault over.
+    page.once('dialog', (prompt) => {
+      expect(prompt.message()).toContain('无法恢复')
+      void prompt.accept()
+    })
+    await notice.getByRole('button', { name: '清空' }).click()
+    await expect(notice).toHaveCount(0)
+    await expect(dialog).toContainText('还没有保存的密码')
+    await expect(dialog.locator('[data-action="add-credential"]')).toBeVisible()
   })
 
   test(`download rows and the download history (${theme})`, async ({

@@ -30,6 +30,9 @@ import {
   BROWSER_DOWNLOAD_REMOVE_CHANNEL,
   BROWSER_DOWNLOAD_REVEAL_CHANNEL,
   SKILLS_OPEN_FOLDER_CHANNEL,
+  VAULT_MASTER_CHANNEL,
+  VAULT_RESET_CHANNEL,
+  VAULT_UNLOCK_CHANNEL,
 } from '../shared/ipc-contract'
 import { createDesktopCapabilityBridge } from './desktop-capabilities'
 
@@ -128,10 +131,9 @@ describe('desktop capability preload bridge', () => {
       'revokeBrowserPairing',
       'runBrowserImport',
       'selectFile',
-      'vaultBiometricDisable',
-      'vaultBiometricUnlock',
       'vaultLock',
       'vaultRemove',
+      'vaultReset',
       'vaultReveal',
       'vaultSave',
       'vaultSetMaster',
@@ -172,6 +174,24 @@ describe('desktop capability preload bridge', () => {
       [BROWSER_PAIRING_DENY_CHANNEL, { pairingId }],
       [BROWSER_PAIRING_REVOKE_CHANNEL, { pairingId }],
       [BROWSER_CONNECT_CHANNEL, undefined],
+    ])
+  })
+
+  it('sends the master password alone and clears only through the reset channel', async () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createDesktopCapabilityBridge(ipc) as unknown as Record<
+      string,
+      (...args: unknown[]) => Promise<unknown>
+    >
+    await bridge.vaultUnlock!('correct horse battery', true)
+    await bridge.vaultSetMaster!('correct horse battery', true)
+    await bridge.vaultSetMaster!(null)
+    await bridge.vaultReset!('ignored')
+    expect(ipc.invoked).toEqual([
+      [VAULT_UNLOCK_CHANNEL, { password: 'correct horse battery' }],
+      [VAULT_MASTER_CHANNEL, { password: 'correct horse battery' }],
+      [VAULT_MASTER_CHANNEL, { password: null }],
+      [VAULT_RESET_CHANNEL, undefined],
     ])
   })
 

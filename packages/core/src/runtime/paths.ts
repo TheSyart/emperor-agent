@@ -619,7 +619,7 @@ export function createEmperorPathCatalog(
       source,
       true,
       true,
-      'lazy',
+      'bootstrap',
     ),
     descriptor(
       'browser',
@@ -628,7 +628,7 @@ export function createEmperorPathCatalog(
       source,
       true,
       true,
-      'lazy',
+      'bootstrap',
     ),
     descriptor(
       'codeIntelligence',

@@ -28,7 +28,7 @@ function cookie(over: Partial<CookieRecord> = {}): CookieRecord {
   }
 }
 
-/** A vault stand-in; no real safeStorage or Keychain. */
+/** A vault stand-in; no real key file or Keychain. */
 function fakeVault(
   over: Partial<{
     available: boolean

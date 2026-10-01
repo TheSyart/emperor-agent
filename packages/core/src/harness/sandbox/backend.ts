@@ -17,6 +17,7 @@ import {
   type ConfinedSandboxMode,
   type SandboxPolicy,
 } from './policy'
+import { protectedStateDirs } from './protected-state'
 
 export type SandboxEnforcement = 'full' | 'partial'
 
@@ -124,12 +125,10 @@ export function seatbeltProfileArgs(
       `(deny network-outbound (remote unix-socket (path-regex ${sbplString(pathPrefixRegex(directory))})))`,
     )
   if (protectedStateRoot !== undefined) {
-    // Browser state: profiles (cookies), the download inbox, remembered
-    // tabs (URLs), site permissions and profile metadata.
-    for (const directory of [
-      canonicalChild(protectedStateRoot, 'computer-use'),
-      canonicalChild(protectedStateRoot, 'browser'),
-    ])
+    // Computer Use (grants, vault, local key, pairings) and browser state
+    // (profiles with cookies, the download inbox, remembered tabs, site
+    // permissions): the directories the file and search tools refuse too.
+    for (const directory of protectedStateDirs(protectedStateRoot))
       forms.push(`(deny file-read* (subpath ${sbplString(directory)}))`)
   }
   return ['-p', forms.join(' ')]
@@ -142,7 +141,7 @@ export interface LocalSandboxOptions {
   probeBwrap?: () => boolean
   /** Test hook: replace the sandbox-exec executable. */
   seatbeltExec?: string
-  /** App state whose Computer Use grants, vault and browser profiles Shell must not read. */
+  /** Emperor Home: Shell must not read its protected state (protected-state.ts). */
   protectedStateRoot?: string
 }
 

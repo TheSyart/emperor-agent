@@ -1,7 +1,8 @@
 /**
- * Settings › 电脑操作 › 凭据 view model: protection strength per safeStorage
- * backend, the edit form's round trip, and vault error text. No secret
- * passes through here except the form values the user typed.
+ * Settings › 浏览器 › 密码管理器 view model: how stored secrets are protected
+ * (Emperor's local key, plus the optional master password), the edit form's
+ * round trip, and vault error text. No secret passes through here except the
+ * form values the user typed.
  */
 import type { CredentialBinding } from '@emperor/core/runtime-contract'
 import type { VaultEntry, VaultStatus } from '../../../api/backend'
@@ -12,14 +13,30 @@ export interface VaultBadge {
   readonly description: string
 }
 
-const BACKEND_LABEL: Readonly<Record<string, string>> = {
-  keychain: 'macOS 钥匙串',
-  dpapi: 'Windows DPAPI',
-  gnome_libsecret: 'GNOME Keyring（libsecret）',
-  kwallet: 'KWallet',
-  kwallet5: 'KWallet 5',
-  kwallet6: 'KWallet 6',
-  basic_text: 'basic_text',
+/** The key that seals every entry; the macOS Keychain is not used. */
+export const LOCAL_KEY_LABEL =
+  'Emperor 本地密钥（保存在这台 Mac 的 Emperor 目录）'
+
+/** The notice 密码管理器 shows while the local key cannot be used (清空). */
+export interface VaultProblem {
+  readonly title: string
+  readonly description: string
+}
+
+export function vaultProblem(status: VaultStatus | null): VaultProblem | null {
+  if (status?.problem === 'key-missing')
+    return {
+      title: '已保存的密码无法解密',
+      description:
+        '本地密钥文件不见了，没有它就打不开这些密码。清空后可以重新添加或导入；清空无法撤销。',
+    }
+  if (status?.problem === 'key-invalid')
+    return {
+      title: '已保存的密码无法解密',
+      description:
+        '本地密钥文件的权限或属主不对，Emperor 不会读取它。清空后会换一把新的本地密钥，再重新添加或导入密码；清空无法撤销。',
+    }
+  return null
 }
 
 export function vaultAvailability(status: VaultStatus | null): VaultBadge {
@@ -27,60 +44,46 @@ export function vaultAvailability(status: VaultStatus | null): VaultBadge {
     return {
       tone: 'neutral',
       badge: '读取中',
-      description: '正在读取凭据库状态…',
+      description: '正在读取密码管理器状态…',
     }
-  if (status.backend === 'basic_text')
+  if (status.problem)
     return {
       tone: 'error',
-      badge: '不可用',
-      description: '没有可用的系统密钥服务，凭据库已停用',
+      badge: '无法解密',
+      description: '本地密钥不可用，先清空才能继续使用',
     }
   if (!status.available)
     return {
       tone: 'error',
       badge: '不可用',
-      description: '系统加密不可用，凭据库已停用',
+      description: '本地加密不可用，密码管理器已停用',
     }
   if (status.locked)
     return {
       tone: 'warn',
       badge: '已锁定',
-      description: status.biometricUnlock
-        ? '用主密码或 Touch ID 解锁后，才能代填或修改凭据'
-        : '输入主密码解锁后，才能代填或修改凭据',
+      description: '输入主密码解锁后，才能代填或修改凭据',
     }
-  return { tone: 'ok', badge: '可用', description: '系统加密可用' }
+  return { tone: 'ok', badge: '可用', description: '本地加密可用' }
 }
 
-/** Spec 00 §6.4 / 03 §7.7: show how strongly stored secrets are protected. */
+/**
+ * Spec 00 §6.4 / 03 §7.7: show honestly how stored secrets are protected.
+ * The local key is basic protection — programs running as you can read it
+ * as they can read the vault — so without a master password it says so.
+ */
 export function vaultEncryption(status: VaultStatus | null): VaultBadge | null {
-  if (!status) return null
-  const backend = status.backend ?? 'unknown'
-  if (backend === 'basic_text')
-    return {
-      tone: 'error',
-      badge: '无保护',
-      description:
-        'basic_text：Linux 上没有可用的密钥服务，safeStorage 只能以明文保存加密密钥，秘密无法得到保护，所以凭据库已停用。请安装或启用 GNOME Keyring 或 KWallet 后重启 Emperor。',
-    }
-  if (!status.available) return null
-  const label = BACKEND_LABEL[backend] ?? '系统加密'
+  if (!status?.available) return null
   if (status.hasMasterPassword)
     return {
       tone: 'ok',
-      badge: '系统加密 + 主密码',
-      description: `${label}：在系统加密之外，再用主密码（scrypt 派生密钥）加一层加密。`,
-    }
-  if (backend === 'keychain')
-    return {
-      tone: 'ok',
-      badge: '系统加密',
-      description: `${label}：密钥只允许 Emperor 读取，其他程序读取会触发系统授权提示。`,
+      badge: '本地密钥 + 主密码',
+      description: `${LOCAL_KEY_LABEL}加密，外面再用主密码（scrypt 派生密钥）加一层。`,
     }
   return {
     tone: 'warn',
     badge: '基础',
-    description: `${label}：同一用户下运行的其他程序也可能解密，建议设置主密码。`,
+    description: `${LOCAL_KEY_LABEL}：以你身份运行的程序也能读到这把密钥，建议设置主密码。`,
   }
 }
 
@@ -246,7 +249,11 @@ export function parseBindings(
 
 /** Main tags vault IPC failures `[credential-vault:<reason>]`. */
 const REASON_TEXT: Readonly<Record<string, string>> = {
-  'vault-unavailable': '系统加密不可用，凭据库已停用。',
+  'vault-unavailable': '本地加密不可用，密码管理器已停用。',
+  'vault-key-missing':
+    '本地密钥文件不见了，已保存的密码无法解密。可以在密码管理器里清空后重新开始。',
+  'vault-key-invalid':
+    '本地密钥文件的权限或属主不对，Emperor 不会读取它。可以在密码管理器里清空后重新开始。',
   'vault-locked': '凭据库已锁定，请先用主密码解锁。',
   'vault-kdf-unavailable':
     '这个凭据库的主密码用 Argon2id 派生，当前运行环境不支持，无法解锁。',
@@ -255,20 +262,15 @@ const REASON_TEXT: Readonly<Record<string, string>> = {
   'credential-field-missing': '这个凭据没有保存该字段。',
   'credential-binding-mismatch': '目标与凭据绑定不一致。',
   'credential-unreadable':
-    '已保存的凭据无法解密。系统密钥可能已变更，请重新填写并保存。',
+    '已保存的凭据无法解密。本地密钥可能已更换，请重新填写并保存。',
   'credential-empty': '至少填写用户名、密码或 TOTP 密钥中的一项。',
   'invalid-label': '名称不能为空，最多 120 个字符。',
   'invalid-binding':
     '绑定无效：网站 origin 只能包含协议、主机和端口（如 https://example.com）；App 绑定须填写 Bundle ID，以及 Team ID 或绝对路径。',
   'invalid-totp': 'TOTP 密钥无效，应为至少 16 位的 Base32 字符。',
   'master-password-too-short': '主密码至少需要 12 个字符。',
-  'biometric-unavailable': '尚未开启 Touch ID 解锁，请用主密码解锁。',
-  'biometric-key-invalid':
-    'Touch ID 解锁已失效并已关闭。请用主密码解锁，需要时再重新开启。',
-  'biometric-unsupported': '当前系统不支持 Touch ID 解锁。',
   'invalid-request': '请求格式无效。',
   'reveal-unverified': '系统身份验证已取消或不可用。',
-  'unlock-unverified': '系统身份验证已取消或不可用。',
   internal: '凭据库操作失败。',
 }
 

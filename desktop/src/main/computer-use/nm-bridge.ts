@@ -25,6 +25,7 @@ import {
 } from './nm-bridge-crypto'
 import type {
   BrowserPairing,
+  PairingBrowser,
   PairingStore,
   PairingSummary,
 } from './nm-bridge-store'
@@ -54,6 +55,26 @@ function codeError(code: string): Error {
   return error
 }
 
+/**
+ * Plaintext refusal of `auth.begin` (protocol 1, extension README §Pairing):
+ * Emperor holds no such pairing. It was never made here, was revoked in
+ * Emperor, was cleared with a version 1 (Keychain-sealed) store, or its secret
+ * can no longer be read. The extension forgets its pairing and starts pairing
+ * again. Every other plaintext refusal stays `PERMISSION_DENIED`.
+ */
+export const PAIRING_UNKNOWN = 'PAIRING_UNKNOWN'
+
+/** What a refused plaintext request reports: only these two codes. */
+function refusalCode(cause: unknown): string {
+  return cause instanceof Error && cause.name === PAIRING_UNKNOWN
+    ? PAIRING_UNKNOWN
+    : 'PERMISSION_DENIED'
+}
+
+function pairingBrowser(value: unknown): PairingBrowser | undefined {
+  return value === 'chrome' || value === 'edge' ? value : undefined
+}
+
 export function defaultNmSocketPath(): string {
   if (process.platform !== 'darwin' || process.getuid === undefined)
     throw new Error('Native Messaging socket is macOS-only')
@@ -70,6 +91,8 @@ export interface PairingApproval {
   readonly extensionId: string
   readonly code: string
   readonly displayed: boolean
+  /** As the extension reported it at `pair.begin`; display only. */
+  readonly browser?: PairingBrowser
 }
 
 export type NmBridgeEvent =
@@ -145,7 +168,12 @@ class NmConnection {
   private buffer = Buffer.alloc(0)
   private queue: Promise<void> = Promise.resolve()
   private pendingPair:
-    (PendingPair & { displayed: boolean; approved: boolean }) | null = null
+    | (PendingPair & {
+        displayed: boolean
+        approved: boolean
+        browser?: PairingBrowser
+      })
+    | null = null
   private pendingAuth: {
     pairing: BrowserPairing
     extensionNonce: string
@@ -186,6 +214,7 @@ class NmConnection {
           extensionId: pending.extensionId,
           code: pending.code,
           displayed: pending.displayed,
+          ...(pending.browser ? { browser: pending.browser } : {}),
         }
   }
   hasPairing(pairingId: string): boolean {
@@ -269,8 +298,8 @@ class NmConnection {
     ) {
       try {
         await this.rawRequest(parsed.id, parsed.method, parsed.params)
-      } catch {
-        this.refuse(parsed.id, 'PERMISSION_DENIED')
+      } catch (cause) {
+        this.refuse(parsed.id, refusalCode(cause))
       }
       return
     }
@@ -294,7 +323,13 @@ class NmConnection {
       if (this.pendingPair || this.pendingAuth || this.pairing)
         throw codeError('PERMISSION_DENIED')
       const pair = createPair(params as unknown as PairOffer)
-      this.pendingPair = { ...pair, displayed: false, approved: false }
+      const browser = pairingBrowser(params.browser)
+      this.pendingPair = {
+        ...pair,
+        displayed: false,
+        approved: false,
+        ...(browser ? { browser } : {}),
+      }
       this.reply(id, {
         pairingId: pair.pairingId,
         publicKey: pair.publicKey,
@@ -313,11 +348,12 @@ class NmConnection {
       )
         throw codeError('PERMISSION_DENIED')
       if (this.bridge.isRevoked(params.pairingId))
-        throw codeError('PERMISSION_DENIED')
+        throw codeError(PAIRING_UNKNOWN)
       parseToken(params.nonce, 16)
       const pairing = await this.bridge.pairings.get(params.pairingId)
-      if (!pairing || this.bridge.isRevoked(params.pairingId) || this.closed)
-        throw codeError('PERMISSION_DENIED')
+      if (!pairing || this.bridge.isRevoked(params.pairingId))
+        throw codeError(PAIRING_UNKNOWN)
+      if (this.closed) throw codeError('PERMISSION_DENIED')
       const extensionNonce = params.nonce as string
       const mainNonce = token(randomBytes(16))
       this.pendingAuth = { pairing, extensionNonce, mainNonce }
@@ -408,6 +444,7 @@ class NmConnection {
         extensionId: pending.extensionId,
         secret: pending.secret,
         createdAt: new Date().toISOString(),
+        ...(pending.browser ? { browser: pending.browser } : {}),
       })
     } catch (cause) {
       pending.approved = false
