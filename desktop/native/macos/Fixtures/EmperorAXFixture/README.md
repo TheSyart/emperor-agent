@@ -43,6 +43,11 @@ parent with that identity and launches the standalone copy at
 helper with a granted Screen Recording TCC record still reports `denied`, while
 the same standalone App reports `granted`. A stable certificate requirement
 avoids rebinding TCC to each ad hoc binary hash.
+The signed fixture parent is a stand-in with Emperor's bundle ID
+(`com.emperor.agent.desktop`), which the helper requires of its parent. It
+carries Emperor's icon and the name “Emperor Agent（测试替身）”, and the script
+unregisters it from LaunchServices whenever it exits, so macOS does not show
+the stand-in for Emperor in permission prompts or Privacy & Security.
 If System Settings shows the helper enabled but `permissions.status` still says
 `denied` after an ad hoc rebuild, the Accessibility record may still bind the
 previous binary hash. Check the current helper's `codesign -dv --verbose=4`

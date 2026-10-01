@@ -18,6 +18,8 @@ test -x "$binary"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS"
 cp "$binary" "$app/Contents/MacOS/emperor-dictation-helper"
+# Emperor's icon, for the permission prompts and Privacy & Security (RV-07).
+"$native_dir/scripts/helper-icon.sh" "$app/Contents/Resources/icon.icns"
 # Emperor starts the helper as its child; the usage strings are shown when
 # macOS asks for the microphone and speech recognition (experiment E-D1
 # records whose name the grants are kept under).
@@ -28,6 +30,7 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
   <key>CFBundleIdentifier</key><string>com.emperor.agent.desktop.dictation-helper</string>
   <key>CFBundleName</key><string>Emperor Dictation Helper</string>
   <key>CFBundleExecutable</key><string>emperor-dictation-helper</string>
+  <key>CFBundleIconFile</key><string>icon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>

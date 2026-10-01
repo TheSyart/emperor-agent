@@ -20,6 +20,8 @@ test -x "$binary"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS"
 cp "$binary" "$app/Contents/MacOS/emperor-computer-helper"
+# Emperor's icon, for the permission prompts and Privacy & Security (RV-07).
+"$native_dir/scripts/helper-icon.sh" "$app/Contents/Resources/icon.icns"
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -27,6 +29,7 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
   <key>CFBundleIdentifier</key><string>com.emperor.agent.desktop.computer-helper</string>
   <key>CFBundleName</key><string>Emperor Computer Helper</string>
   <key>CFBundleExecutable</key><string>emperor-computer-helper</string>
+  <key>CFBundleIconFile</key><string>icon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>

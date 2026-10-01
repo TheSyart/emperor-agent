@@ -30,9 +30,20 @@ if [[ "${EMPEROR_FIXTURE_CREDENTIAL_MISMATCH_ONLY:-}" == "1" ]]; then
   echo "credential-mismatch copy TeamIdentifier=${mismatch_team:-none}"
 fi
 main_fixture="$native_dir/build/$arch/fixture-harness"
-socket_dir="$(mktemp -d /tmp/emperor-ax-fixture.XXXXXX)"
-trap 'rm -rf "$socket_dir"' EXIT
+# A stand-in for Emperor: signed runs give it Emperor's bundle ID, which the
+# helper checks on its parent.
 main_app="$main_fixture/Emperor Agent.app"
+socket_dir="$(mktemp -d /tmp/emperor-ax-fixture.XXXXXX)"
+lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+cleanup() {
+  rm -rf "$socket_dir"
+  # LaunchServices forgets the stand-in, so macOS does not take it for
+  # Emperor (same bundle ID) in permission prompts or Privacy & Security.
+  "$lsregister" -u "$main_app" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 helper_app="$main_app/Contents/Library/Helpers/Emperor Computer Helper.app"
 launch_helper="$helper_app"
 mkdir -p "$main_app/Contents/MacOS" "$(dirname "$helper_app")"
@@ -45,13 +56,18 @@ if [[ -n "${EMPEROR_DEV_SIGN_IDENTITY:-}" ]]; then
   # macOS attributes screen recording from a nested helper to its containing
   # app. Use the same signed helper as a standalone App for TCC acceptance.
   launch_helper="${EMPEROR_FIXTURE_HELPER_APP:-$native_dir/build/$arch/Emperor Computer Helper.app}"
+  # Should macOS still pick the stand-in for Emperor's bundle ID while it is
+  # registered, its prompt shows Emperor's icon and says it is the stand-in.
+  "$native_dir/scripts/helper-icon.sh" "$main_app/Contents/Resources/icon.icns"
   cat > "$main_app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleIdentifier</key><string>com.emperor.agent.desktop</string>
-  <key>CFBundleName</key><string>Emperor Agent</string>
+  <key>CFBundleName</key><string>Emperor Agent（测试替身）</string>
+  <key>CFBundleDisplayName</key><string>Emperor Agent（测试替身）</string>
   <key>CFBundleExecutable</key><string>Emperor Agent</string>
+  <key>CFBundleIconFile</key><string>icon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleVersion</key><string>1</string>
 </dict></plist>

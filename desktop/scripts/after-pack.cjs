@@ -161,6 +161,7 @@ function validatePackagedAppResources(
       (lstatSync(executable).mode & 0o111) === 0
     )
       throw new Error('packaged Computer Use helper identity is invalid')
+    validateHelperIcon(helper, 'Computer Use helper')
     validateDictationHelper(join(helpersRoot, 'Emperor Dictation Helper.app'))
     const messagingHost = join(helpersRoot, 'emperor-nm-host')
     assertRegularFile(messagingHost, 'Native Messaging host')
@@ -216,6 +217,30 @@ function validateDictationHelper(helper) {
     (lstatSync(executable).mode & 0o111) === 0
   )
     throw new Error('packaged dictation helper identity is invalid')
+  validateHelperIcon(helper, 'dictation helper')
+}
+
+/**
+ * A helper names its icon in Info.plist and carries it in Resources (RV-07);
+ * without it macOS shows a blank icon in the permission prompts and in
+ * System Settings › Privacy & Security.
+ */
+function validateHelperIcon(helper, label) {
+  const plist = readFileSync(join(helper, 'Contents', 'Info.plist'), 'utf8')
+  const name = /<key>CFBundleIconFile<\/key>\s*<string>([^<]+)<\/string>/.exec(
+    plist,
+  )?.[1]
+  if (!name || name.includes('/') || name.startsWith('.'))
+    throw new Error(`packaged ${label} icon is not named in Info.plist`)
+  const icon = join(
+    helper,
+    'Contents',
+    'Resources',
+    name.endsWith('.icns') ? name : `${name}.icns`,
+  )
+  assertRegularFile(icon, `${label} icon`)
+  if (readFileSync(icon).subarray(0, 4).toString('latin1') !== 'icns')
+    throw new Error(`packaged ${label} icon is not an icns file`)
 }
 
 function validatePackagedNodePty(resourcesRoot, platform, arch) {

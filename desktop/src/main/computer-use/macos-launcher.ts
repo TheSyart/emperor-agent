@@ -23,6 +23,9 @@ const SOCKET_PATH_LIMIT = 103 // sockaddr_un.sun_path includes a NUL; macOS allo
 const HELPER_IDENTIFIER = 'com.emperor.agent.desktop.computer-helper'
 /** Installed helper copies live in directories named by their lowercase CDHash. */
 const CDHASH_DIRECTORY = /^[0-9a-f]{40}$/
+/** LaunchServices' registration tool; `-u <app>` forgets an app bundle. */
+export const LSREGISTER =
+  '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
 
 /** The filesystem calls the packaged helper installer needs. Injected by tests. */
 export interface MacosHelperInstallFs {
@@ -266,8 +269,10 @@ async function assertInstalledHelper(
  * Removes helper copies that earlier app versions installed beside the current
  * one. Only lowercase-CDHash-named, user-owned real directories directly
  * inside `installedRoot` are candidates; symlinks are never followed, and a
- * copy stays while any running process was started from it. Best effort: a
- * failure here never blocks launching the verified current helper.
+ * copy stays while any running process was started from it. A copy goes out
+ * of LaunchServices before its files go (RV-07), so macOS does not keep
+ * offering the old bundle for the helper's ID. Best effort: a failure here
+ * never blocks launching the verified current helper.
  */
 async function removeStaleHelperCopies(
   installedRoot: string,
@@ -306,6 +311,13 @@ async function removeStaleHelperCopies(
           )
         )
           continue
+        await system
+          .execFile(
+            LSREGISTER,
+            ['-u', join(path, 'Emperor Computer Helper.app')],
+            { timeout: 5_000 },
+          )
+          .catch(() => undefined)
         await system.fs.rm(path, { recursive: true, force: true })
       } catch {
         /* Keep this copy; the next launch tries again. */

@@ -37,6 +37,12 @@ Computer use runs in the separate Emperor Computer Helper. An unsigned build has
 
 Dictation in the composer recognizes speech on this Mac and needs **Microphone** and **Speech Recognition**, which macOS asks for at the first dictation. An unsigned build has no stable signing identity, so after an update macOS may no longer honor the earlier grants: allow again if asked; if the system switches look on but dictation still reports a missing permission, check **Settings › 语音** and use 「打开系统设置」 to turn the switch off and on. If that does not help, run `tccutil reset Microphone com.emperor.agent.desktop` and `tccutil reset SpeechRecognition com.emperor.agent.desktop` in Terminal and allow again at the next dictation.
 
+## macOS Helper 图标 / Helper icons on macOS
+
+从这个版本起，Emperor Computer Helper 与 Emperor Dictation Helper 带有 Emperor 的图标，系统授权弹框和 **系统设置 › 隐私与安全性** 里不再显示空白图标。加上图标会改变 Helper 的 ad-hoc 签名，所以从旧版本更新后，macOS 会再要一次 **辅助功能**、**屏幕录制**、**麦克风** 与 **语音识别**：按 **设置 › 电脑操作** 与 **设置 › 语音** 的提示重新允许即可。如果隐私列表里的条目仍是空白图标，或者开关显示已开启、设置页却说没有权限，在终端运行 `tccutil reset Accessibility com.emperor.agent.desktop.computer-helper` 与 `tccutil reset ScreenCapture com.emperor.agent.desktop.computer-helper`，再重新允许。
+
+From this version, Emperor Computer Helper and Emperor Dictation Helper carry the Emperor icon, so permission prompts and **System Settings › Privacy & Security** no longer show a blank icon. Adding the icon changes the helpers' ad-hoc signature, so after updating from an earlier version macOS asks again for **Accessibility**, **Screen Recording**, **Microphone** and **Speech Recognition**: allow them again as **Settings › Computer Use** and **Settings › 语音** prompt. If an entry in the privacy lists still shows a blank icon, or its switch looks on while the settings page reports the permission missing, run `tccutil reset Accessibility com.emperor.agent.desktop.computer-helper` and `tccutil reset ScreenCapture com.emperor.agent.desktop.computer-helper` in Terminal and allow again.
+
 ## Windows 单应用确认 / Per-app confirmation
 
 确认 SHA-256 无误后，如果 SmartScreen 对话框和设备策略允许，可选择 **More info → Run anyway**。界面没有该选项时，不要绕过组织策略；请停止安装或联系管理员。Microsoft 对 unsigned app 警告的说明见 [Publish your first Windows app](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/publish-first-app)。不要更改整机 Defender 或 SmartScreen 安全策略。
