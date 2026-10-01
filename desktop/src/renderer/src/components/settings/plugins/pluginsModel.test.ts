@@ -345,8 +345,8 @@ describe('plugin detail model', () => {
         'Mac 应用',
         {
           section: 'computer',
-          page: 'apps',
-          label: '设置 › 电脑操作 › 任意应用',
+          page: null,
+          label: '设置 › 电脑操作',
         },
       ],
     ])

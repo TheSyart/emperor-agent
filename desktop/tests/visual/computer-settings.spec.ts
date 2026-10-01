@@ -4,9 +4,10 @@ import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { installVisualCoreBridge } from './visualBridge'
 
-// Settings › 电脑操作 (ST-03, laid out like Codex's 电脑操控): the master
-// card and 控制 (任意应用, Chrome 和 Edge); the 任意应用 and Chrome 和 Edge
-// sub pages behind 管理. No app lists and no emergency stop (2026-10-01).
+// Settings › 电脑操作 (ST-03, RV-03; laid out like Codex's 电脑操控): one
+// page with the notices, the master card, 控制 (任意应用, Chrome 和 Edge),
+// 系统权限 and 截图; Chrome 和 Edge behind 管理. No app lists and no
+// emergency stop (2026-10-01).
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'computer-settings')
 
 test.beforeAll(() => {
@@ -65,8 +66,20 @@ for (const theme of ['dark', 'light'] as const) {
       'aria-checked',
       'true',
     )
-    await expect(groupTitles(dialog)).toHaveText(['控制'])
+    await expect(groupTitles(dialog)).toHaveText(['控制', '系统权限', '截图'])
     await expect(dialog.locator('[data-driver]')).toHaveCount(2)
+    // 任意应用 needs no sub page: every app but the system's is in reach.
+    await expect(dialog.locator('[data-action="manage-apps"]')).toHaveCount(0)
+    await expect(dialog.locator('[data-driver="desktop"]')).toContainText(
+      '所有应用默认都能操作',
+    )
+    // All granted: one permission row and no notice.
+    await expect(dialog.locator('[data-permission]')).toHaveCount(1)
+    await expect(dialog.locator('[data-permission="all"]')).toContainText(
+      '已允许',
+    )
+    await expect(dialog.locator('.ds-settings-notice')).toHaveCount(0)
+    await expect(dialog).toContainText('已保存 14 张，共 9.0 MB')
     // No app lists and no emergency stop (2026-10-01).
     for (const gone of ['高级', '紧急停止', '立即停止', '不让 Emperor 操作'])
       await expect(dialog).not.toContainText(gone)
@@ -87,43 +100,57 @@ for (const theme of ['dark', 'light'] as const) {
     )
   })
 
-  test(`任意应用 and Chrome 和 Edge sub pages (${theme})`, async ({ page }) => {
-    const dialog = await openComputer(page, { theme })
-    await dialog.locator('[data-action="manage-apps"]').click()
-    await expect(dialog.getByTestId('settings-page-title')).toHaveText(
-      '任意应用',
+  test(`missing permissions go on top, with the fix (${theme})`, async ({
+    page,
+  }) => {
+    const dialog = await openComputer(page, {
+      theme,
+      query: '&visualHelper=denied',
+    })
+    const notice = dialog.getByTestId('computer-use-desktop-notice')
+    await expect(notice).toContainText('还缺 2 项系统权限，暂时不能操作应用')
+    await expect(notice.getByRole('button', { name: '请求权限' })).toBeVisible()
+    await expect(
+      notice.getByRole('button', { name: '重启 Helper' }),
+    ).toBeVisible()
+    await expect(dialog.locator('[data-driver="desktop"]')).toContainText(
+      '需要辅助功能和屏幕录制权限',
     )
-    await expect(groupTitles(dialog)).toHaveText(['系统权限', '截图'])
-    await expect(dialog).toContainText('版本 0.3.0 · 协议 1')
-    await expect(dialog).toContainText('已保存 14 张截图')
-    // Granted: no repair buttons.
-    await expect(dialog.getByRole('button', { name: '请求权限' })).toHaveCount(
-      0,
+    // The permissions unfold: each one and the Helper, with 重置授权.
+    await expect(dialog.locator('[data-permission]')).toHaveCount(3)
+    await expect(dialog.locator('[data-permission="helper"]')).toContainText(
+      '版本 0.3.0 · 协议 1',
     )
+    await expect(dialog.getByRole('button', { name: '重置授权' })).toBeVisible()
     await noHorizontalOverflow(page)
-    await shot(page, `apps-${theme}`)
-
-    await dialog.getByTestId('settings-crumb').click()
-    await dialog.getByTestId('browser-pairing-manage').click()
-    await expect(dialog.getByTestId('settings-page-title')).toHaveText(
-      'Chrome 和 Edge',
-    )
-    await expect(dialog).toContainText('2 个可操作标签页')
-    await noHorizontalOverflow(page)
-    await shot(page, `chrome-${theme}`)
+    await shot(page, `computer-permissions-${theme}`)
   })
 }
 
-test('任意应用 says what it needs while Accessibility is off', async ({
+test('the old 任意应用 link shows the main page; Chrome 和 Edge stays a sub page', async ({
   page,
 }) => {
-  const dialog = await openComputer(page, { query: '&visualHelper=denied' })
-  await expect(dialog.locator('[data-driver="desktop"]')).toContainText(
-    '需要辅助功能和屏幕录制权限',
+  const dialog = await openComputer(page, { query: '&page=apps' })
+  await expect(dialog.getByTestId('settings-crumb')).toHaveCount(0)
+  await expect(groupTitles(dialog)).toHaveText(['控制', '系统权限', '截图'])
+  await dialog.getByTestId('browser-pairing-manage').click()
+  await expect(dialog.getByTestId('settings-page-title')).toHaveText(
+    'Chrome 和 Edge',
   )
-  await dialog.locator('[data-action="manage-apps"]').click()
-  await expect(dialog.getByRole('button', { name: '请求权限' })).toBeVisible()
-  await shot(page, 'apps-denied')
+  await expect(dialog).toContainText('2 个可操作标签页')
+  await noHorizontalOverflow(page)
+  await shot(page, 'chrome')
+})
+
+test('names the apps once kept from Emperor until 知道了', async ({ page }) => {
+  const dialog = await openComputer(page, { query: '&visualRetiredApps=1' })
+  const notice = dialog.getByTestId('computer-use-retired-apps')
+  await expect(notice).toContainText('这些应用现在也可以由 Emperor 操作')
+  await expect(notice).toContainText('com.agilebits.onepassword7')
+  await expect(notice).toContainText('com.example.Bank')
+  await shot(page, 'computer-retired-apps')
+  await notice.getByRole('button', { name: '知道了' }).click()
+  await expect(notice).toHaveCount(0)
 })
 
 test('a waiting pairing code opens Chrome 和 Edge by itself', async ({
@@ -140,11 +167,11 @@ test('a waiting pairing code opens Chrome 和 Edge by itself', async ({
   await shot(page, 'chrome-pending')
 })
 
-test('fits a narrow window, main page and 任意应用', async ({ page }) => {
-  const dialog = await openComputer(page, { width: 700 })
+test('fits a narrow window, with and without a notice', async ({ page }) => {
+  await openComputer(page, { width: 700 })
   await noHorizontalOverflow(page)
   await shot(page, 'computer-narrow')
-  await dialog.locator('[data-action="manage-apps"]').click()
+  await openComputer(page, { width: 700, query: '&visualHelper=denied' })
   await noHorizontalOverflow(page)
-  await shot(page, 'apps-narrow')
+  await shot(page, 'computer-permissions-narrow')
 })

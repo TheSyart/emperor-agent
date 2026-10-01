@@ -407,7 +407,7 @@ describe('能力 › 插件', () => {
     for (const [driver, settings, page] of [
       ['embedded-browser', 'browser', undefined],
       ['external-browser', 'computer', 'chrome'],
-      ['desktop', 'computer', 'apps'],
+      ['desktop', 'computer', undefined],
     ] as const) {
       section
         .querySelector<HTMLElement>(`[data-driver-settings="${driver}"]`)!

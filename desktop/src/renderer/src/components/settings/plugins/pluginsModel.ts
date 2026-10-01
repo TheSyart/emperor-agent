@@ -200,10 +200,11 @@ const DRIVER_SETTINGS: Record<string, DriverSettings> = {
     page: 'chrome',
     label: '设置 › 电脑操作 › Chrome 和 Edge',
   },
+  // 任意应用 lives on the 电脑操作 page itself (2026-10-01).
   desktop: {
     section: 'computer',
-    page: 'apps',
-    label: '设置 › 电脑操作 › 任意应用',
+    page: null,
+    label: '设置 › 电脑操作',
   },
 }
 

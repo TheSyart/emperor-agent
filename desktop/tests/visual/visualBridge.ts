@@ -1129,7 +1129,11 @@ export async function installVisualCoreBridge(
         drivers: {} as Record<string, boolean>,
         screenshots: { count: 14, bytes: 9 * 1024 * 1024 },
         downloadRetentionDays: 30 as 0 | 7 | 30 | 90,
-        retiredProtectedApps: [] as string[],
+        // `?visualRetiredApps=1`: apps the retired protected list held.
+        retiredProtectedApps:
+          visualParams.get('visualRetiredApps') === '1'
+            ? ['com.agilebits.onepassword7', 'com.example.Bank']
+            : ([] as string[]),
       }
       // 设置 › 浏览器: the user's browser choices, Emperor's sign-in
       // profiles, site permissions and the credential vault.
@@ -4335,22 +4339,23 @@ export async function installVisualCoreBridge(
           path: `${projectDir}/downloads/invoice-2026-09.pdf`,
         }),
         agentDownloadSaveAs: async () => ({ ok: false, cancelled: true }),
-        // 设置 › 电脑操作: `?visualHelper=denied` leaves Accessibility off;
-        // `?visualPairing=pending` has a pairing code waiting.
-        macHelperStatus: async () => ({
-          available: true,
-          connected: true,
-          helperVersion: '0.3.0',
-          protocol: 1,
-          permissions: {
-            accessibility:
-              visualParams.get('visualHelper') === 'denied'
-                ? 'denied'
-                : 'granted',
-            'screen-recording': 'granted',
-          },
-          lastErrorCode: null,
-        }),
+        // 设置 › 电脑操作: `?visualHelper=denied` leaves Accessibility and
+        // Screen Recording off; `?visualPairing=pending` has a pairing code
+        // waiting.
+        macHelperStatus: async () => {
+          const denied = visualParams.get('visualHelper') === 'denied'
+          return {
+            available: true,
+            connected: true,
+            helperVersion: '0.3.0',
+            protocol: 1,
+            permissions: {
+              accessibility: denied ? 'denied' : 'granted',
+              'screen-recording': denied ? 'denied' : 'granted',
+            },
+            lastErrorCode: null,
+          }
+        },
         macHelperRequestPermission: async () => ({ opened: true }),
         macHelperResetPermission: async () => ({ reset: true }),
         macHelperReconnect: async () => ({

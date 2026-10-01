@@ -949,7 +949,8 @@ test('plugin detail lists Computer Use tools while it is off and links each driv
   for (const [driver, url] of [
     ['embedded-browser', /settings=browser(&|$)/],
     ['external-browser', /settings=computer&page=chrome/],
-    ['desktop', /settings=computer&page=apps/],
+    // 任意应用 is on the 电脑操作 page itself (2026-10-01).
+    ['desktop', /settings=computer(&|$)(?!.*page=)/],
   ] as const) {
     await tools.locator(`[data-driver-settings="${driver}"]`).click()
     await expect(page).toHaveURL(url)
