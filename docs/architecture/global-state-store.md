@@ -88,8 +88,9 @@
     command-invocations.json   # Slash command 幂等调用记录
     session-transitions.json   # /new 会话转换事务
   computer-use/              # 启用电脑操作后按需创建
-    config.json              # 总开关、授权模式、各驱动开关、急停快捷键、用户应用名单、下载保留天数
-    grants.json              # 会话与定时授权、急停挂起状态；不含凭据明文；损坏时隔离并挂起
+    config.json              # 总开关、各驱动开关、下载保留天数（读到已退役的授权模式、急停快捷键、应用名单时写回一次去掉）
+    retired-protected-apps.json  # 升级前「不让 Emperor 操作的应用」，设置页提示一次后删除
+    grants.json              # 授权记录（会话与定时授权已退役，加载时丢弃）；不含凭据明文；损坏时隔离，从空授权开始
     screenshots.json         # 截图配额清单（附件 ID、会话、大小、时间）
     vault.json               # Electron main 加密的凭据库
     browser-pairings/pairings.json  # 加密的外部浏览器配对信息
