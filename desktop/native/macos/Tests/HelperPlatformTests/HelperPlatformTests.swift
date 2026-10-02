@@ -1,3 +1,4 @@
+import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
@@ -6,6 +7,50 @@ import HelperCore
 import XCTest
 
 final class HelperPlatformTests: XCTestCase {
+    func testAnAppExecutableIsTheMainExecutableOfAnAppBundle() {
+        XCTAssertTrue(LiveWorkspace.isApplicationExecutable("/Applications/QQMusic.app/Contents/MacOS/QQMusic"))
+        // Electron helpers are apps too; their activation policy leaves them out later.
+        XCTAssertTrue(LiveWorkspace.isApplicationExecutable(
+            "/Applications/Foo.app/Contents/Frameworks/Foo Helper (Renderer).app/Contents/MacOS/Foo Helper (Renderer)"))
+        XCTAssertFalse(LiveWorkspace.isApplicationExecutable("/Applications/Foo.app/Contents/XPCServices/x.xpc/Contents/MacOS/x"))
+        XCTAssertFalse(LiveWorkspace.isApplicationExecutable("/Applications/Foo.app/Contents/Resources/tool"))
+        XCTAssertFalse(LiveWorkspace.isApplicationExecutable("/usr/bin/ssh"))
+        XCTAssertFalse(LiveWorkspace.isApplicationExecutable(""))
+    }
+
+    func testTheLiveListHasEveryAppProcessRunningNowOnceInPidOrder() {
+        // An app launched after the helper started is in the system's process
+        // list even though AppKit's cached list never saw it (the QQ音乐 case).
+        let paths: [pid_t: String] = [
+            42: "/Applications/Old.app/Contents/MacOS/Old",
+            300: "/Applications/QQMusic.app/Contents/MacOS/QQMusic",
+            7: "/Applications/Gone.app/Contents/MacOS/Gone",
+            9: "/usr/sbin/cfprefsd",
+        ]
+        let apps = LiveWorkspace.liveApplications(
+            pids: [300, 42, 42, 7, 9, -1, 0],
+            executablePath: { paths[$0] },
+            application: { pid in pid == 7 ? nil : "app\(pid)" })
+        XCTAssertEqual(apps, ["app42", "app300"])
+    }
+
+    func testTheLiveListHasEveryRegularAppStillRunningAndNoGoneOne() throws {
+        // AppKit's cached list can hold an app that has quit (its process is
+        // gone) and miss one launched since; the live list follows the system.
+        let cached = NSWorkspace.shared.runningApplications.filter {
+            $0.activationPolicy == .regular && $0.processIdentifier > 0
+        }
+        guard cached.contains(where: { $0.bundleIdentifier == "com.apple.finder" }) else {
+            throw XCTSkip("no Finder in this session")
+        }
+        func alive(_ pid: pid_t) -> Bool { kill(pid, 0) == 0 || errno == EPERM }
+        let live = LiveWorkspace.runningApplications().map(\.processIdentifier)
+        XCTAssertTrue(live.allSatisfy(alive))
+        for app in cached where alive(app.processIdentifier) {
+            XCTAssertTrue(Set(live).contains(app.processIdentifier), app.bundleIdentifier ?? "\(app.processIdentifier)")
+        }
+    }
+
     func testTypingRequiresAnEditableFocusedTextControl() {
         XCTAssertFalse(TextEntryPreflight.allowsTyping(role: "AXList", valueSettable: false),
                        "Finder type-to-select must not count as text entry")

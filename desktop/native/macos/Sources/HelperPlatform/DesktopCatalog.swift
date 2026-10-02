@@ -154,7 +154,9 @@ public final class DesktopCatalog {
     }
 
     public func apps() -> [[String: Any]] {
-        NSWorkspace.shared.runningApplications.compactMap { app in
+        // Live, not AppKit's cached list: an app launched after the helper
+        // started must be listed and bound like any other (LiveWorkspace).
+        LiveWorkspace.runningApplications().compactMap { app in
             guard app.activationPolicy == .regular,
                   let id = app.bundleIdentifier, !id.isEmpty,
                   app.processIdentifier > 0,
@@ -179,7 +181,7 @@ public final class DesktopCatalog {
         var nextKnown = appID == nil ? [:] : knownWindows.filter { $0.value.bundleID != appID }
         var result: [[String: Any]] = []
         var filteredPID: pid_t?
-        for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
+        for app in LiveWorkspace.runningApplications() where app.activationPolicy == .regular {
             guard let id = app.bundleIdentifier, !id.isEmpty,
                   app.processIdentifier > 0,
                   appID == nil || appID == id,
