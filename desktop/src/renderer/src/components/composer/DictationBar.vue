@@ -1,0 +1,178 @@
+<script setup lang="ts">
+/**
+ * DictationBar — the recording controls that take the composer's bottom
+ * row while dictating (RV-06, after Codex): × cancels and drops what was
+ * heard; the waveform follows the microphone's loudness, newest on the
+ * right, with silence as a row of dots; ■ stops and puts the text in. The
+ * composer adds its send button after it. With reduced motion the waveform
+ * does not scroll and shows only the current level. A polite live region
+ * says when listening starts and when the text is being recognized.
+ *
+ * Props: phase (starting / listening / finishing), levels (0–1, oldest
+ * first), shortcut (a label such as ⇧⌘D).
+ * Emits: cancel, stop.
+ */
+import { computed } from 'vue'
+import { useReducedMotion } from '../../composables/useReducedMotion'
+import { DsClose, DsLoading, DsStopSquare } from '../icons/ds'
+import Tooltip from '../ui/Tooltip.vue'
+import type { DictationPhase } from './composerDictation'
+import { dictationWaveSlots } from './dictationWave'
+
+const props = defineProps<{
+  phase: DictationPhase
+  levels: readonly number[]
+  shortcut: string
+}>()
+const emit = defineEmits<{ cancel: []; stop: [] }>()
+
+const reducedMotion = useReducedMotion()
+const slots = computed(() =>
+  dictationWaveSlots(props.levels, { reducedMotion: reducedMotion.value }),
+)
+const listening = computed(() => props.phase === 'listening')
+const live = computed(() =>
+  props.phase === 'listening'
+    ? '正在听写'
+    : props.phase === 'finishing'
+      ? '正在识别'
+      : '',
+)
+</script>
+
+<template>
+  <div class="dictation-bar" :data-phase="phase">
+    <Tooltip label="取消听写">
+      <button
+        type="button"
+        class="dictation-cancel"
+        aria-label="取消听写"
+        @click="emit('cancel')"
+      >
+        <DsClose :size="14" />
+      </button>
+    </Tooltip>
+    <div class="dictation-wave" aria-hidden="true">
+      <i
+        v-for="(level, index) in slots"
+        :key="index"
+        :class="level === null ? 'dot' : 'bar'"
+        :style="level === null ? undefined : { '--dictation-level': level }"
+      />
+    </div>
+    <Tooltip label="停止听写" :shortcut="shortcut">
+      <button
+        type="button"
+        class="dictation-stop"
+        aria-label="停止听写"
+        :disabled="!listening"
+        @click="emit('stop')"
+      >
+        <DsStopSquare v-if="listening" :size="12" />
+        <DsLoading v-else :size="14" class="dictation-spin" />
+      </button>
+    </Tooltip>
+    <span class="dictation-live" aria-live="polite">{{ live }}</span>
+  </div>
+</template>
+
+<style scoped>
+.dictation-bar {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-2-5);
+  min-width: 0;
+}
+
+.dictation-cancel,
+.dictation-stop {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--space-7);
+  height: var(--space-7);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: background-color var(--duration-ds-fast) ease;
+}
+
+.dictation-cancel {
+  background: var(--interactive-bg-hover);
+  color: rgb(var(--label-secondary));
+}
+
+.dictation-cancel:hover {
+  background: var(--interactive-bg-active);
+  color: rgb(var(--label-primary));
+}
+
+.dictation-stop {
+  background: rgb(var(--label-primary));
+  color: rgb(var(--input-major));
+}
+
+.dictation-stop:disabled {
+  background: var(--interactive-bg-hover);
+  color: rgb(var(--label-secondary));
+  cursor: default;
+}
+
+.dictation-cancel:focus-visible,
+.dictation-stop:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(var(--focus-ring) / 0.5);
+}
+
+/* Slots 3px wide, 2px apart, the newest at the right edge; older ones
+   leave on the left. A bar is 4–28px tall for levels 0–1. */
+.dictation-wave {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-0-5);
+  min-width: 0;
+  height: var(--space-8);
+  overflow: hidden;
+}
+
+.dictation-wave > i {
+  flex: none;
+  width: 3px;
+}
+
+.dictation-wave > .bar {
+  height: calc(var(--space-1) + var(--dictation-level) * var(--space-6));
+  border-radius: 2px;
+  background: rgb(var(--label-secondary));
+}
+
+.dictation-wave > .dot {
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--label-caption));
+}
+
+.dictation-spin {
+  animation: dictation-spin 1s linear infinite;
+}
+
+.dictation-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@keyframes dictation-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+</style>

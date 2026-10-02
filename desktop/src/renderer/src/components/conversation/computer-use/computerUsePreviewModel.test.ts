@@ -74,12 +74,12 @@ describe('conversation computer-use preview model', () => {
     })
     const shown = previewTargetsFor([...released, failed], 's1')
     expect(ids(shown)).toEqual(['stuck'])
-    expect(previewStatus(failed, { stopped: false, awaiting: false })).toEqual({
+    expect(previewStatus(failed, { awaiting: false })).toEqual({
       label: '释放失败',
       tone: 'lost',
     })
     // A failed release shows no live picture.
-    expect(liveTargetIds(shown, { stopped: false, onScreen: true })).toEqual([])
+    expect(liveTargetIds(shown, { onScreen: true })).toEqual([])
   })
 
   it('stacks the latest operation on top across windows and tabs', () => {
@@ -125,7 +125,7 @@ describe('conversation computer-use preview model', () => {
     expect(ids(stackOrder(later, pick))).toEqual(['a', 'b'])
   })
 
-  it('streams at most four cards and never blocked, external or stopped ones', () => {
+  it('streams at most four cards and never blocked or external ones', () => {
     const many = Array.from({ length: 6 }, (_, index) =>
       target({
         targetId: `w${index}`,
@@ -133,7 +133,7 @@ describe('conversation computer-use preview model', () => {
       }),
     )
     const ordered = previewTargetsFor(many, 's1')
-    expect(liveTargetIds(ordered, { stopped: false, onScreen: true })).toEqual([
+    expect(liveTargetIds(ordered, { onScreen: true })).toEqual([
       'w0',
       'w1',
       'w2',
@@ -148,14 +148,13 @@ describe('conversation computer-use preview model', () => {
       ),
       's1',
     )
-    expect(liveTargetIds(rotated, { stopped: false, onScreen: true })).toEqual([
+    expect(liveTargetIds(rotated, { onScreen: true })).toEqual([
       'w5',
       'w0',
       'w1',
       'w2',
     ])
     const special = [
-      target({ targetId: 'sensitive', previewBlocked: 'sensitive-app' }),
       target({ targetId: 'secret', previewBlocked: 'credential-filled' }),
       target({
         targetId: 'chrome',
@@ -165,32 +164,23 @@ describe('conversation computer-use preview model', () => {
       target({ targetId: 'recovering', state: 'recovering' }),
       target({ targetId: 'ok' }),
     ]
-    expect(liveTargetIds(special, { stopped: false, onScreen: true })).toEqual([
-      'ok',
-    ])
-    expect(liveTargetIds(special, { stopped: true, onScreen: true })).toEqual(
-      [],
-    )
-    expect(liveTargetIds(special, { stopped: false, onScreen: false })).toEqual(
-      [],
-    )
+    expect(liveTargetIds(special, { onScreen: true })).toEqual(['ok'])
+    expect(liveTargetIds(special, { onScreen: false })).toEqual([])
   })
 
   it('labels what each card is doing', () => {
-    const idle = { stopped: false, awaiting: false }
+    const idle = { awaiting: false }
     expect(previewStatus(target(), idle)).toEqual({
       label: '操作中',
       tone: 'active',
     })
-    expect(previewStatus(target(), { stopped: false, awaiting: true })).toEqual(
-      { label: '等待回复', tone: 'waiting' },
-    )
+    expect(previewStatus(target(), { awaiting: true })).toEqual({
+      label: '等待回复',
+      tone: 'waiting',
+    })
     expect(previewStatus(target({ state: 'recovering' }), idle).label).toBe(
       '失联',
     )
-    expect(
-      previewStatus(target(), { stopped: true, awaiting: true }).label,
-    ).toBe('已急停')
   })
 
   it('shows a live frame, else the dated latest screenshot, else why not', () => {
@@ -228,7 +218,7 @@ describe('conversation computer-use preview model', () => {
     ).toBe('暂无截图')
   })
 
-  it('never shows a picture of a sensitive app or after a credential fill', () => {
+  it('never shows a picture after a credential fill', () => {
     const now = new Date()
     const shot = {
       attachmentId: 'att_old',
@@ -236,28 +226,20 @@ describe('conversation computer-use preview model', () => {
       height: 1,
       takenAt: now.toISOString(),
     }
-    expect(
-      previewFrame(
-        target({ previewBlocked: 'sensitive-app', lastScreenshot: shot }),
-        'blob:live',
-        now,
-      ),
-    ).toEqual({ kind: 'blocked', note: '不可预览：你标记的敏感应用' })
-    expect(
-      previewFrame(
-        target({ previewBlocked: 'credential-filled', lastScreenshot: shot }),
-        undefined,
-        now,
-      ),
-    ).toEqual({ kind: 'blocked', note: '不可预览：已代填凭据' })
+    for (const frame of ['blob:live', undefined])
+      expect(
+        previewFrame(
+          target({ previewBlocked: 'credential-filled', lastScreenshot: shot }),
+          frame,
+          now,
+        ),
+      ).toEqual({ kind: 'blocked', note: '不可预览：已代填凭据' })
   })
 
   it('keeps the last frame after Stop Sharing, marked, and stops streaming it', () => {
     const now = new Date(2026, 8, 29, 18, 30)
     const stopped = target({ sharingStopped: true })
-    expect(
-      liveTargetIds([stopped], { stopped: false, onScreen: true }),
-    ).toEqual([])
+    expect(liveTargetIds([stopped], { onScreen: true })).toEqual([])
     expect(previewFrame(stopped, 'blob:last', now)).toEqual({
       kind: 'frozen',
       url: 'blob:last',
@@ -283,9 +265,7 @@ describe('conversation computer-use preview model', () => {
       note: '画面已停止共享',
     })
     // The Agent keeps working: the card still reads 操作中.
-    expect(
-      previewStatus(stopped, { stopped: false, awaiting: false }).label,
-    ).toBe('操作中')
+    expect(previewStatus(stopped, { awaiting: false }).label).toBe('操作中')
   })
 
   it('dates screenshots from another day', () => {

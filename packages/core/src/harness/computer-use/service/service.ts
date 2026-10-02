@@ -6,7 +6,7 @@
  * Before anything reaches a driver the service re-checks what the gate
  * decided (defense in depth): the gate ticket exists, its grant is still
  * valid at the same revision, the caller owns the target, the target is
- * live and not paused / taken over / stopped, the generation still matches
+ * live and not paused, the generation still matches
  * and the per-task budget is not spent. Then it journals `prepared`, takes
  * the per-target lock, and lets the driver report `dispatched` right before
  * the first side effect. A failure after dispatch is `OUTCOME_UNKNOWN` and is
@@ -79,7 +79,7 @@ import type {
   SitePermissionStore,
 } from '../site-permissions'
 import { KeyedMutex } from './mutex'
-import { highRiskMacApp, protectedMacApp } from '../protected-apps'
+import { protectedMacApp } from '../protected-apps'
 import { isExecutableDownload } from '../downloads'
 import {
   DEFAULT_EXTERNAL_BROWSER_SETTINGS,
@@ -112,32 +112,17 @@ export interface ComputerUseSettings {
   readonly scopedRetired?: true
   /** Per-driver switches; missing means on. */
   readonly drivers?: Partial<Record<DriverKind, boolean>>
-  /**
-   * The user's own additions (01 §4.4, §5.2): more protected apps (never
-   * controlled), high-risk apps (shown as such; their ordinary input runs
-   * like any other while computer use is on) and sensitive apps (structure
-   * only: no values, no screenshots).
-   */
-  readonly appLists?: Partial<Record<AppListKind, readonly string[]>>
   /** Inbox retention in days; 0 keeps downloads (default 30). */
   readonly downloadRetentionDays?: number
-}
-
-export type AppListKind = 'protected' | 'highRisk' | 'sensitive'
-
-export interface KillSwitchStatus {
-  readonly accelerator: string
-  readonly registered: boolean
-  readonly error?: string
+  /**
+   * Apps the user had kept from Emperor with the retired protected list
+   * (2026-10-01); Settings shows them once, then they are forgotten.
+   */
+  readonly retiredProtectedApps?: readonly string[]
 }
 
 export type ComputerUseChange =
-  | 'state'
-  | 'targets'
-  | 'grants'
-  | 'kill-switch'
-  | 'profiles'
-  | 'site-permissions'
+  'state' | 'targets' | 'grants' | 'profiles' | 'site-permissions'
 
 export interface SavedImage {
   readonly attachmentId: string
@@ -160,7 +145,7 @@ export interface ComputerUseServiceDeps {
   deleteImage?(attachmentId: string): void
   /** Screenshot quota ledger (spec 00 §8.5). */
   readonly screenshots?: ScreenshotLedger
-  /** Dismiss pending grant cards (emergency stop / session end). */
+  /** Dismiss pending grant cards (switch-off / session end). */
   cancelGrantCards(sessionId?: string): void
   settings(): ComputerUseSettings
   /** Persistent browser profiles (absent: only the temporary profile). */
@@ -169,7 +154,6 @@ export interface ComputerUseServiceDeps {
   readonly sitePermissions?: SitePermissionStore
   /** Persistent-profile tabs to offer back after a restart. */
   readonly restorable?: RestorableTabStore
-  killSwitch?(): KillSwitchStatus
   onChanged?(reason: ComputerUseChange, sessionId?: string): void
   now?(): Date
   /** Chrome/Edge 智能体权限 and 浏览器权限 (absent: the defaults). */
@@ -356,17 +340,12 @@ export class ComputerUseService {
     { origin: string; why: 'blocked' | 'denied' }
   >()
   private readonly externalGoneByOwner = new Map<string, string>()
-  private stoppedAt: string | undefined
   private closed = false
 
   constructor(private readonly deps: ComputerUseServiceDeps) {
     this.journal = new OperationJournal((sessionId, type, data) =>
       this.append(sessionId, type, data),
     )
-    // A persisted emergency stop, or a grants file found corrupt (quarantined,
-    // nothing matches): either way the user sees "stopped" and resumes.
-    const suspension = deps.grants.suspended
-    if (suspension !== null) this.stoppedAt = suspension.at
   }
 
   private now(): Date {
@@ -425,7 +404,6 @@ export class ComputerUseService {
     try {
       port.indicateControl({
         active: targets.some((target) => target.state === 'agent'),
-        stopped: this.stoppedAt !== undefined,
         targets,
       })
     } catch {
@@ -473,33 +451,13 @@ export class ComputerUseService {
     return this.deps.port?.platform ?? null
   }
 
-  get stopped(): boolean {
-    return this.stoppedAt !== undefined
-  }
-
-  private userAppList(kind: AppListKind): readonly string[] {
-    return this.deps.settings().appLists?.[kind] ?? []
-  }
-
-  /** Built-in protection list (01 §4.4) plus the user's additions. */
+  /**
+   * The system-protected apps (01 §4.4): Emperor itself, the system's
+   * password and authorization dialogs, Keychain Access, Passwords, System
+   * Settings and the login window. Every other app is operable.
+   */
   isProtectedApp(appId: string): boolean {
-    return (
-      this.platform === 'macos' &&
-      (protectedMacApp(appId) || this.userAppList('protected').includes(appId))
-    )
-  }
-
-  /** Terminals and script runners, built in plus the user's additions. */
-  isHighRiskApp(appId: string): boolean {
-    return (
-      this.platform === 'macos' &&
-      (highRiskMacApp(appId) || this.userAppList('highRisk').includes(appId))
-    )
-  }
-
-  /** User-marked apps whose values and pixels are never read (01 §5.2). */
-  isSensitiveApp(appId: string): boolean {
-    return this.userAppList('sensitive').includes(appId)
+    return this.platform === 'macos' && protectedMacApp(appId)
   }
 
   private assertEnabled(driver: DriverKind): void {
@@ -551,8 +509,6 @@ export class ComputerUseService {
   }
 
   listExternalTabs(ownerSessionId: string): readonly ExternalAttachedTarget[] {
-    if (this.stopped)
-      throw new UiError('PERMISSION_DENIED', 'computer use is stopped')
     const driver = this.browserDriver('external-browser')
     if (driver.listAttached === undefined)
       throw new UiError(
@@ -589,9 +545,7 @@ export class ComputerUseService {
   }
 
   async listDesktopApps(signal: AbortSignal): Promise<DesktopAppInfo[]> {
-    if (this.stopped)
-      throw new UiError('PERMISSION_DENIED', 'computer use is stopped')
-    // The helper hides the built-in list; the user's additions too.
+    // The helper hides the system-protected apps; filter here as well.
     return (await this.desktopDriver().listApps(signal)).filter(
       (app) => !this.isProtectedApp(app.appId),
     )
@@ -602,8 +556,6 @@ export class ComputerUseService {
     appId: string | undefined,
     signal: AbortSignal,
   ): Promise<DesktopWindowInfo[]> {
-    if (this.stopped)
-      throw new UiError('PERMISSION_DENIED', 'computer use is stopped')
     const all = await this.desktopDriver().listWindows(
       appId === undefined ? {} : { appId },
       signal,
@@ -686,7 +638,7 @@ export class ComputerUseService {
    */
   sitePermissionVerdict(request: SitePermissionRequest): boolean {
     const record = this.registry.get(request.targetId)
-    if (record === undefined || this.stopped) return false
+    if (record === undefined) return false
     const allowed =
       this.deps.sitePermissions?.allowed(
         record.profileId,
@@ -700,7 +652,7 @@ export class ComputerUseService {
         if (this.permissionNotes.size > 256) this.permissionNotes.clear()
         this.note(
           record.targetId,
-          `${request.origin.slice(0, 200)} asked for ${request.kind} access and was denied; only the user can allow it (Settings › 电脑操作 › 站点权限)`,
+          `${request.origin.slice(0, 200)} asked for ${request.kind} access and was denied; only the user can allow it (Settings › 浏览器 › 网站设置)`,
         )
       }
     }
@@ -720,17 +672,15 @@ export class ComputerUseService {
       const reason =
         capability.stage === 'unavailable'
           ? capability.reason
-          : this.stopped
-            ? 'emergency stop is engaged'
-            : !settings.enabled
-              ? 'computer use is turned off in Settings'
-              : !enabled
-                ? 'the user switched this driver off in Settings'
-                : capability.reason
+          : !settings.enabled
+            ? 'computer use is turned off in Settings'
+            : !enabled
+              ? 'the user switched this driver off in Settings'
+              : capability.reason
       return {
         ...capability,
         enabled,
-        available: capability.available && enabled && !this.stopped,
+        available: capability.available && enabled,
         ...(reason === undefined ? {} : { reason }),
       }
     })
@@ -810,14 +760,6 @@ export class ComputerUseService {
   }
 
   private assertActionable(record: TargetRecord): void {
-    if (this.stopped)
-      throw new UiError(
-        'PERMISSION_DENIED',
-        'computer use is stopped; the user must resume it',
-        {
-          reason: 'emergency-stop',
-        },
-      )
     switch (record.control) {
       case 'paused':
         throw new UiError(
@@ -825,10 +767,6 @@ export class ComputerUseService {
           'the app window is reloading; actions on this target resume by themselves once it is back',
           { reason: 'ui-reloading' },
         )
-      case 'stopped':
-        throw new UiError('PERMISSION_DENIED', 'computer use is stopped', {
-          reason: 'emergency-stop',
-        })
       default:
         break
     }
@@ -866,10 +804,7 @@ export class ComputerUseService {
   }
 
   private view(record: TargetRecord): UiTargetView {
-    return targetView(record, {
-      sensitiveApp:
-        record.appId !== undefined && this.isSensitiveApp(record.appId),
-    })
+    return targetView(record)
   }
 
   /**
@@ -916,10 +851,6 @@ export class ComputerUseService {
   ): TargetRecord {
     if (record.driver !== 'embedded-browser' || record.releasing === true)
       throw this.releasedError(record)
-    if (this.stopped)
-      throw new UiError('PERMISSION_DENIED', 'computer use is stopped', {
-        reason: 'emergency-stop',
-      })
     const snapshot = this.browserDriver('embedded-browser').snapshot(
       record.targetId,
     )
@@ -1001,10 +932,6 @@ export class ComputerUseService {
   private revalidate(ctx: OpContext, record: TargetRecord | undefined): void {
     const ticket = ctx.ticket
     if (ticket.kind === 'control') return
-    if (this.stopped)
-      throw new UiError('PERMISSION_DENIED', 'computer use is stopped', {
-        reason: 'emergency-stop',
-      })
     if (ticket.kind === 'auto') {
       if (!this.deps.settings().enabled)
         throw new UiError(
@@ -1179,10 +1106,6 @@ export class ComputerUseService {
     if (this.isProtectedApp(candidate.appId))
       throw new UiError('TARGET_FORBIDDEN', 'this app is protected')
     const driver = this.desktopDriver()
-    if (this.stopped)
-      throw new UiError('PERMISSION_DENIED', 'computer use is stopped', {
-        reason: 'emergency-stop',
-      })
     this.revalidate(ctx, undefined)
     if (
       ctx.ticket.requirement?.driver !== 'desktop' ||
@@ -1732,10 +1655,6 @@ export class ComputerUseService {
     },
   ): Promise<TargetRecord> {
     const driver = this.browserDriver(input.driver ?? 'embedded-browser')
-    if (this.stopped)
-      throw new UiError('PERMISSION_DENIED', 'computer use is stopped', {
-        reason: 'emergency-stop',
-      })
     this.revalidate(ctx, undefined)
     const profile = input.profile ?? { kind: 'temporary' as const }
     if (
@@ -1867,11 +1786,6 @@ export class ComputerUseService {
       record.revision,
     )
     const baseRevision = record.revision
-    // 01 §5.2: a user-marked sensitive app is observed as structure only.
-    const sensitive =
-      record.driver === 'desktop' &&
-      record.appId !== undefined &&
-      this.isSensitiveApp(record.appId)
     const observation = await this.run(
       ctx,
       op,
@@ -1893,7 +1807,7 @@ export class ComputerUseService {
             ...(input.query === undefined ? {} : { query: input.query }),
             ...(input.diff === true ? { diffFrom: baseRevision } : {}),
             ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
-            includeText: !sensitive && input.includeText !== false,
+            includeText: input.includeText !== false,
           },
           signal,
         ),
@@ -1922,19 +1836,8 @@ export class ComputerUseService {
     const pending = this.notes.get(record.targetId) ?? []
     this.notes.delete(record.targetId)
     const notes = [...(observation.notes ?? []), ...pending]
-    let elements = observation.elements
-    let redactions = observation.redactions
-    if (sensitive) {
-      elements = observation.elements.map((element) => {
-        if (element.value === undefined) return element
-        redactions += 1
-        const { value: _hidden, ...rest } = element
-        return rest
-      })
-      notes.push(
-        'the user marked this app as sensitive: only its structure is read, never field values or screenshots',
-      )
-    }
+    const elements = observation.elements
+    const redactions = observation.redactions
     return {
       target: targetRef(record),
       revision: observation.revision,
@@ -1948,7 +1851,7 @@ export class ComputerUseService {
       ...(observation.removed === undefined
         ? {}
         : { removed: observation.removed }),
-      ...(observation.textExcerpt === undefined || sensitive
+      ...(observation.textExcerpt === undefined
         ? {}
         : { textExcerpt: observation.textExcerpt }),
       ...(observation.diffFrom === undefined
@@ -1969,16 +1872,6 @@ export class ComputerUseService {
   ): Promise<ScreenshotResult> {
     const record = this.resolve(ctx.identity, input.targetId)
     const driver = this.driverOf(record.driver)
-    if (
-      record.driver === 'desktop' &&
-      record.appId !== undefined &&
-      this.isSensitiveApp(record.appId)
-    )
-      throw new UiError(
-        'CAPABILITY_DISABLED',
-        'the user marked this app as sensitive; screenshots are not taken',
-        { reason: 'sensitive-app' },
-      )
     this.assertActionable(record)
     this.revalidate(ctx, record)
     this.chargeBudget(ctx.identity)
@@ -2282,7 +2175,7 @@ export class ComputerUseService {
         'CAPABILITY_DISABLED',
         vault === null
           ? 'the credential vault is not available here'
-          : 'system credential encryption is unavailable, so saved credentials cannot be used',
+          : "the credential vault's local key is missing or failed its checks, so saved credentials cannot be used; the user can clear the vault in Settings › 浏览器 › 密码管理器",
         vault === null ? undefined : { reason: 'vault-encryption-unavailable' },
       )
     if (vault.locked)
@@ -2291,7 +2184,7 @@ export class ComputerUseService {
         'the credential vault is locked',
         {
           reason: 'vault-locked',
-          hint: 'Ask the user to unlock it in Settings › 电脑操作 › 凭据.',
+          hint: 'Ask the user to unlock it in Settings › 浏览器 › 密码管理器.',
         },
       )
   }
@@ -2473,7 +2366,7 @@ export class ComputerUseService {
         'the credential vault is locked',
         {
           reason: 'vault-locked',
-          hint: 'Ask the user to unlock it in Settings › 电脑操作 › 凭据.',
+          hint: 'Ask the user to unlock it in Settings › 浏览器 › 密码管理器.',
         },
       )
     const handle = vault.list().find((item) => item.handleId === input.handleId)
@@ -2906,7 +2799,7 @@ export class ComputerUseService {
   }
 
   // -------------------------------------------------------------------------
-  // The app window (00 §12) and the kill switch
+  // The app window (00 §12)
 
   /**
    * The UI went away (renderer crash or reload, 00 §12): pause every target
@@ -2936,14 +2829,8 @@ export class ComputerUseService {
       this.uiPaused.delete(targetId)
       const record = this.registry.get(targetId)
       if (record === undefined || !isLive(record)) continue
-      // Stopped meanwhile: the kill switch's resume brings it back to work.
-      if (record.control === 'stopped') {
-        if (record.controlBeforeStop === 'paused')
-          record.controlBeforeStop = 'agent'
-        continue
-      }
       if (record.control !== 'paused') continue
-      this.setControl(record, this.stopped ? 'stopped' : 'agent')
+      this.setControl(record, 'agent')
       resumed += 1
     }
     return resumed
@@ -2979,8 +2866,8 @@ export class ComputerUseService {
   /**
    * E-M16: while the Agent controls a desktop window, the helper keeps a
    * low-rate capture stream on it, so macOS badges that window and lists it
-   * under screen sharing. Paused and stopped targets and sensitive apps have
-   * none; the helper also refuses a window that received a credential. After
+   * under screen sharing. Paused targets have none; the helper also refuses
+   * a window that received a credential. After
    * the user's "Stop Sharing" the stream stays off for this binding: the
    * Agent keeps working (observations and screenshots do not need it).
    */
@@ -2991,58 +2878,14 @@ export class ComputerUseService {
     const active =
       record.control === 'agent' &&
       record.sharingStopped !== true &&
-      this.stoppedAt === undefined &&
       isLive(record) &&
-      record.releasing !== true &&
-      (record.appId === undefined || !this.isSensitiveApp(record.appId))
+      record.releasing !== true
     driver
       .setCapture(
         { targetId: record.targetId, generation: record.generation },
         active,
       )
       .catch(() => undefined)
-  }
-
-  /**
-   * Emergency stop (§6.6): cancel in-flight actions, stop every target,
-   * suspend every grant (persisted), dismiss pending grant cards and release
-   * any held keys; then every task's targets are released like at a task's
-   * end (2026-09-29 §3.3), so no window stays badged. Nothing runs again
-   * until the user resumes; the next task takes its windows and tabs anew.
-   */
-  async emergencyStop(): Promise<void> {
-    if (this.stoppedAt === undefined) this.stoppedAt = this.now().toISOString()
-    this.desktopCandidates.clear()
-    this.deps.grants.suspend('kill-switch')
-    for (const op of this.journal.inFlight()) op.controller.abort()
-    for (const record of this.registry.live()) {
-      if (record.control !== 'stopped')
-        record.controlBeforeStop = record.control
-      this.setControl(record, 'stopped')
-    }
-    this.deps.cancelGrantCards()
-    try {
-      await this.deps.port?.desktop()?.releaseAll()
-    } catch {
-      // best effort; the helper also releases on disconnect
-    }
-    this.changed('kill-switch')
-    await this.releaseEveryTask('emergency-stop')
-  }
-
-  resume(): void {
-    if (this.stoppedAt === undefined && this.deps.grants.suspended === null)
-      return
-    this.stoppedAt = undefined
-    this.deps.grants.resume()
-    for (const record of this.registry.live()) {
-      if (record.control === 'stopped') {
-        const previous = record.controlBeforeStop ?? 'agent'
-        record.controlBeforeStop = undefined
-        this.setControl(record, previous === 'stopped' ? 'agent' : previous)
-      }
-    }
-    this.changed('kill-switch')
   }
 
   /** Its front goes back to the user's app when the task ends. */
@@ -3362,26 +3205,15 @@ export class ComputerUseService {
       enabled: settings.enabled,
       ...(settings.scopedRetired === true ? { scopedRetired: true } : {}),
       platform: this.platform,
-      stopped: this.stopped,
-      ...(this.stoppedAt === undefined ? {} : { stoppedAt: this.stoppedAt }),
       ...(this.deps.screenshots === undefined
         ? {}
         : { screenshots: this.deps.screenshots.usage() }),
       downloadRetentionDays: settings.downloadRetentionDays ?? 30,
-      appLists: {
-        protected: [...this.userAppList('protected')],
-        highRisk: [...this.userAppList('highRisk')],
-        sensitive: [...this.userAppList('sensitive')],
-      },
-      ...(this.stopped && this.deps.grants.suspended?.by === 'corrupt-store'
-        ? { stopReason: 'corrupt-store' as const }
+      ...((settings.retiredProtectedApps?.length ?? 0) > 0
+        ? { retiredProtectedApps: [...settings.retiredProtectedApps!] }
         : {}),
       drivers: [],
       targets: this.listTargets(),
-      killSwitch: this.deps.killSwitch?.() ?? {
-        accelerator: '',
-        registered: false,
-      },
     }
   }
 
@@ -3402,11 +3234,10 @@ export class ComputerUseService {
   /**
    * Synchronous verdict for navigations the driver sees. Sub-frames only get
    * the scheme check (done by the driver). While computer use is on the AI
-   * may follow a page to any origin (D1); a page of a stopped target, or of
-   * a tab nobody owns yet, cannot move.
+   * may follow a page to any origin (D1); a page of a tab nobody owns yet
+   * cannot move.
    */
   navigationVerdict(request: NavigationRequest): 'allow' | 'block' {
-    if (this.stopped) return 'block'
     if (request.frame === 'sub') return 'allow'
     const origin = normalizeOrigin(request.url)
     if (origin === null) return 'block'
@@ -3439,9 +3270,8 @@ export class ComputerUseService {
       opener.driver === 'embedded-browser'
         ? this.deps.port?.embeddedBrowser()
         : this.deps.port?.externalBrowser()
-    if (!this.stopped && isLive(opener)) this.makeRoom(owner)
+    if (isLive(opener)) this.makeRoom(owner)
     if (
-      this.stopped ||
       !isLive(opener) ||
       opener.releasing === true ||
       this.registry.held(owner).length >=
@@ -3451,19 +3281,17 @@ export class ComputerUseService {
       void driver?.close(popup.targetId, 'agent').catch(() => undefined)
       this.note(
         opener.targetId,
-        `a popup to ${popup.url.slice(0, 300)} was closed: ${this.stopped ? 'computer use is stopped' : !isLive(opener) || opener.releasing === true ? 'its tab was released when the task ended' : 'too many open tabs'}`,
+        `a popup to ${popup.url.slice(0, 300)} was closed: ${!isLive(opener) || opener.releasing === true ? 'its tab was released when the task ended' : 'too many open tabs'}`,
       )
       return
     }
     const record = this.registry.add(owner, popup, this.now())
     this.registry.select(owner, opener.targetId)
     // A popup opened while the opener is paused (the app window reloading)
-    // or stopped shares that state, and resumes with it.
+    // shares that state, and resumes with it.
     if (opener.control !== 'agent') {
       record.control = opener.control
       if (this.uiPaused.has(opener.targetId)) this.uiPaused.add(record.targetId)
-      if (opener.control === 'stopped')
-        record.controlBeforeStop = opener.controlBeforeStop ?? 'agent'
       try {
         driver?.setPaused(record.targetId, true)
       } catch {

@@ -400,6 +400,36 @@ describe('Native Messaging manifest registrar', () => {
     ).toBe(true)
   })
 
+  it('removes every Emperor manifest when the extension is removed, paired or not', async () => {
+    const f = await fixture()
+    await f.install(
+      'chrome',
+      nmManifestText(f.hostPath, [EMPEROR_EXTENSION_ID]),
+    )
+    await f.install('edge', nmManifestText(OLD_HOST, [A, B]))
+    // Someone else's host under the same name stays.
+    const foreign = JSON.stringify({
+      name: 'com.emperor.agent.browser',
+      path: '/usr/local/bin/other-host',
+      type: 'stdio',
+      allowed_origins: [`chrome-extension://${A}/`],
+    })
+    await f.install('chromium', foreign)
+    expect(await f.registrar().removeAll()).toEqual([
+      { browser: 'chrome', file: f.manifest('chrome'), action: 'removed' },
+      {
+        browser: 'chromium',
+        file: f.manifest('chromium'),
+        action: 'skipped',
+        reason: 'foreign',
+      },
+      { browser: 'edge', file: f.manifest('edge'), action: 'removed' },
+    ])
+    expect(existsSync(f.manifest('chrome'))).toBe(false)
+    expect(existsSync(f.manifest('edge'))).toBe(false)
+    expect(await readFile(f.manifest('chromium'), 'utf8')).toBe(foreign)
+  })
+
   it('refuses to touch a manifest that points elsewhere, is not ours, or is a symlink', async () => {
     const f = await fixture()
     const foreign = JSON.stringify({

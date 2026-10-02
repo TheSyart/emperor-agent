@@ -5,15 +5,14 @@
  *
  * Order (the first rule that applies wins):
  * 1. protected target → `TARGET_FORBIDDEN`, whatever the preset;
- * 2. grants suspended (emergency stop, corrupt store) → `PERMISSION_DENIED`;
- * 3. the user already refused the same thing in this task → deny (no
+ * 2. the user already refused the same thing in this task → deny (no
  *    retrying around a refusal);
- * 4. a covering grant → allow;
- * 5. full GUI access (the master switch is on) + ordinary action (including
+ * 3. a covering grant → allow;
+ * 4. full GUI access (the master switch is on) + ordinary action (including
  *    transfer and terminal input), except high-impact or credential
  *    confirmation → auto-allow;
- * 6. the caller cannot ask (subagent) → `PERMISSION_REQUIRED`;
- * 7. otherwise → ask for this one action (the card only offers 「本次」).
+ * 5. the caller cannot ask (subagent) → `PERMISSION_REQUIRED`;
+ * 6. otherwise → ask for this one action (the card only offers 「本次」).
  */
 
 import type { UiCallerIdentity } from './identity'
@@ -127,23 +126,6 @@ export class UiActionPolicy {
           { reason: requirement.protectedReason },
         ),
       )
-    const suspended = this.grants.suspended
-    if (suspended !== null)
-      return deny(
-        new UiError(
-          'PERMISSION_DENIED',
-          suspended.by === 'kill-switch'
-            ? 'computer use is stopped; the user must resume it'
-            : 'the grant store was unreadable; the user must review grants',
-          {
-            reason:
-              suspended.by === 'kill-switch'
-                ? 'emergency-stop'
-                : 'grant-store-corrupt',
-          },
-        ),
-      )
-
     const actionClass = this.effectiveClass(requirement)
     const confirmEachTime =
       requirement.confirmEachTime === true || actionClass === 'high-impact'

@@ -5,6 +5,8 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs'
@@ -39,12 +41,18 @@ const engines = [
   { name: 'js fallback', enabled: true, resolveBinary: missingBinary },
 ] as const
 
-function setup(resolveBinary?: () => string | undefined) {
+function setup(
+  resolveBinary?: () => string | undefined,
+  options: { protectedStateRoot?: (workdir: string) => string } = {},
+) {
   const workdir = mkdtempSync(join(tmpdir(), 'emperor-search-'))
   const spillRoot = mkdtempSync(join(tmpdir(), 'emperor-spill-'))
   const services = {
     spillRoot,
     ...(resolveBinary !== undefined ? { resolveBinary } : {}),
+    ...(options.protectedStateRoot
+      ? { protectedStateRoot: options.protectedStateRoot(workdir) }
+      : {}),
   } as unknown as ToolServices
   const tools = createSearchTools(services)
   const h = createTestHarness()
@@ -211,6 +219,29 @@ for (const engine of engines) {
       expect(result.meta).toEqual({ matches: 0, truncated: false, files: [] })
     })
 
+    it("lists nothing in Emperor's private state, even from an ancestor", async () => {
+      const { workdir, run } = setup(engine.resolveBinary, {
+        protectedStateRoot: (dir) => join(dir, 'home', '.emperor'),
+      })
+      write(workdir, 'home/.emperor/computer-use/vault.json', '{}')
+      write(workdir, 'home/.emperor/browser/profiles/p1/Cookies', 'c')
+      write(workdir, 'home/.emperor/sessions/log.jsonl', '{}')
+      write(workdir, 'home/notes.md', 'n')
+      const listed = textOf((await run('glob', { pattern: '*' })).content)
+      expect(listed.split('\n').sort()).toEqual(
+        [
+          join('home', '.emperor', 'sessions', 'log.jsonl'),
+          join('home', 'notes.md'),
+        ].sort(),
+      )
+      const inside = await run('glob', {
+        pattern: '*',
+        path: 'home/.emperor/browser',
+      })
+      expect(inside.error?.info?.code).toBe('SEARCH_PROTECTED_PATH')
+      expect(textOf(inside.content)).not.toContain('Cookies')
+    })
+
     it('caps at 100 paths and saves the FULL sorted list to a spill file', async () => {
       const { workdir, spillRoot, run } = setup(engine.resolveBinary)
       for (let i = 0; i < 120; i++)
@@ -314,6 +345,51 @@ for (const engine of engines) {
       const bad = await run('grep', { pattern: '(' })
       expect(bad.isError).toBe(true)
       expect(bad.error?.info?.code).toBe('SEARCH_INVALID_PATTERN')
+    })
+
+    it("refuses Emperor's private state and leaves it out of wider searches", async () => {
+      const { workdir, run } = setup(engine.resolveBinary, {
+        protectedStateRoot: (dir) => join(dir, 'home', '.emperor'),
+      })
+      write(workdir, 'home/.emperor/computer-use/vault.json', 'needle vault\n')
+      write(
+        workdir,
+        'home/.emperor/computer-use/secrets/local.key',
+        'needle key\n',
+      )
+      write(workdir, 'home/.emperor/browser/profiles/p1/Cookies', 'needle\n')
+      write(workdir, 'home/.emperor/sessions/log.jsonl', 'needle session\n')
+      write(workdir, 'home/.emperor/computer-use-notes.txt', 'needle notes\n')
+      write(workdir, 'src/a.ts', 'needle\n')
+      // Inside: refused outright, however the root is spelled.
+      for (const path of [
+        'home/.emperor/computer-use',
+        'home/.emperor/browser/profiles',
+        join(realpathSync(workdir), 'home', '.emperor', 'computer-use'),
+      ]) {
+        const refused = await run('grep', { pattern: 'needle', path })
+        expect(refused.isError, path).toBe(true)
+        expect(refused.error?.info?.code).toBe('SEARCH_PROTECTED_PATH')
+        expect(textOf(refused.content)).not.toContain('needle vault')
+      }
+      symlinkSync(
+        join(workdir, 'home', '.emperor', 'computer-use'),
+        join(workdir, 'cu-link'),
+      )
+      expect(
+        (await run('grep', { pattern: 'needle', path: 'cu-link' })).error?.info
+          ?.code,
+      ).toBe('SEARCH_PROTECTED_PATH')
+      // An ancestor root: everything else is found, the private dirs are not.
+      const found = textOf(
+        (await run('grep', { pattern: 'needle', path: 'home/.emperor' }))
+          .content,
+      )
+      expect(found).toContain('needle session')
+      expect(found).toContain('needle notes')
+      expect(found).not.toContain('needle vault')
+      expect(found).not.toContain('needle key')
+      expect(found).not.toContain('Cookies')
     })
 
     it('runs end to end in an agent turn', async () => {

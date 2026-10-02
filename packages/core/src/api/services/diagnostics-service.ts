@@ -84,7 +84,7 @@ export interface CoreDiagnosticsServiceDeps {
   environmentSummary?: () => Dict | Promise<Dict>
   goalDiagnostics?: () => Dict | Promise<Dict>
   externalToolConfig?: () => Dict
-  /** Computer use summary (switch, drivers, kill switch); no grants or URLs. */
+  /** Computer use summary (switch, drivers, targets); no grants or URLs. */
   computerUse?: () => Promise<Dict>
 }
 

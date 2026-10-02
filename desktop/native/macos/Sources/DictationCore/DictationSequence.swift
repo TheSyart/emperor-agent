@@ -1,8 +1,8 @@
-/// One dictation's events, in order: `started`, any number of `partial`s,
-/// at most one `final`, then exactly one `ended`. Every event carries the
-/// next sequence number. A recognizer that repeats itself (the same partial
-/// twice, a second final, a partial after the final, anything after the
-/// end) is filtered here, so the main process never sees it.
+/// One dictation's events, in order: `started`, any number of `partial`s
+/// and `level`s, at most one `final`, then exactly one `ended`. Every event
+/// carries the next sequence number. A recognizer that repeats itself (the
+/// same partial twice, a second final, a partial after the final, anything
+/// after the end) is filtered here, so the main process never sees it.
 public struct DictationSequence: Sendable {
     public let session: String
     public private(set) var seq = 0
@@ -30,6 +30,14 @@ public struct DictationSequence: Sendable {
         guard !hasFinal, !hasEnded, text != lastPartial else { return nil }
         lastPartial = text
         return .partial(session: session, seq: next(), text: text)
+    }
+
+    /// The microphone's loudness, clamped to 0–1 with two decimals; only
+    /// while listening (after `started`, before the final result).
+    public mutating func level(_ value: Double) -> DictationEvent? {
+        guard hasStarted, !hasFinal, !hasEnded, value.isFinite else { return nil }
+        let clamped = min(1, max(0, value))
+        return .level(session: session, seq: next(), value: (clamped * 100).rounded() / 100)
     }
 
     public mutating func final(_ text: String) -> DictationEvent? {

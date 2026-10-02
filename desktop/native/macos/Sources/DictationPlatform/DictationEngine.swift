@@ -9,15 +9,20 @@ public struct DictationEngineHandler {
     public let partial: (String) -> Void
     public let final: (String) -> Void
     public let failure: (DictationErrorCode, String) -> Void
+    /// The microphone's loudness (0–1), about 15 times a second while it is
+    /// open (RV-06); a recognized file reports none.
+    public let level: (Double) -> Void
 
     public init(
         partial: @escaping (String) -> Void,
         final: @escaping (String) -> Void,
-        failure: @escaping (DictationErrorCode, String) -> Void
+        failure: @escaping (DictationErrorCode, String) -> Void,
+        level: @escaping (Double) -> Void = { _ in }
     ) {
         self.partial = partial
         self.final = final
         self.failure = failure
+        self.level = level
     }
 }
 
@@ -147,8 +152,10 @@ public final class SpeechRecognizerEngine: DictationEngine {
         self.recognizer = recognizer
         self.request = request
         cancelled = false
+        let meter = DictationLevelTap(sampleRate: format.sampleRate)
         input.installTap(onBus: 0, bufferSize: 2048, format: format) { buffer, _ in
             request.append(buffer)
+            for value in meter.levels(of: buffer) { handler.level(value) }
         }
         audio.prepare()
         do {

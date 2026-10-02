@@ -42,6 +42,7 @@ export type FsErrorCode =
   | 'FS_EDIT_NOT_FOUND'
   | 'FS_AMBIGUOUS_EDIT'
   | 'FS_SANDBOX_DENIED'
+  | 'FS_PROTECTED_PATH'
   | 'FS_ABORTED'
   | 'FS_IO_ERROR'
 

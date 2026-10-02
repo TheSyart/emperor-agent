@@ -105,6 +105,34 @@ export const BROWSER_PAIRING_REVOKE_CHANNEL =
   'emperor:computer-use:browser-pairing-revoke'
 /** Settings › 连接 Chrome/Edge: register the Native Messaging host (01 §11). */
 export const BROWSER_CONNECT_CHANNEL = 'emperor:computer-use:browser-connect'
+/**
+ * 设置 › 电脑操作 › Chrome 和 Edge, trusted Settings renderer only, no
+ * argument: the extension folder and where the extension is loaded
+ * ({@link BrowserExtensionStatus}).
+ */
+export const BROWSER_EXTENSION_STATUS_CHANNEL =
+  'emperor:computer-use:browser-extension-status'
+/**
+ * 安装扩展程序: copy the extension into its folder and register the
+ * Native Messaging host ({@link BrowserExtensionInstallResult}).
+ */
+export const BROWSER_EXTENSION_INSTALL_CHANNEL =
+  'emperor:computer-use:browser-extension-install'
+/** 在访达中显示: show the extension folder; answers `{ ok }`. */
+export const BROWSER_EXTENSION_REVEAL_CHANNEL =
+  'emperor:computer-use:browser-extension-reveal'
+/**
+ * 移除扩展程序: connected browsers uninstall it, then pairings, host
+ * manifests and the folder go ({@link BrowserExtensionRemoveResult}).
+ */
+export const BROWSER_EXTENSION_REMOVE_CHANNEL =
+  'emperor:computer-use:browser-extension-remove'
+/**
+ * Main → renderer, no payload: an extension asked to pair; the renderer
+ * shows 电脑操作 › Chrome 和 Edge for the user to compare the code.
+ */
+export const BROWSER_PAIRING_REQUEST_CHANNEL =
+  'emperor:computer-use:browser-pairing-request'
 
 export interface BrowserConnectResult {
   /** Browsers that can now reach Emperor (e.g. `chrome`, `edge`). */
@@ -120,9 +148,80 @@ export interface BrowserPairingStatus {
     extensionId: string
     code: string
     displayed: boolean
+    /** What the extension says it runs in (a label). */
+    browser?: BrowserExtensionBrowser
   }>
   pairedConnections: string[]
   attachedTabs: number
+  /** Every saved pairing, also those whose browser is not running. */
+  pairings: BrowserPairingView[]
+}
+
+/** A saved pairing, as 设置 › 电脑操作 › Chrome 和 Edge lists it. */
+export interface BrowserPairingView {
+  pairingId: string
+  browser: BrowserExtensionBrowser | null
+  /** Its extension is connected now. */
+  connected: boolean
+  /** Tabs the user connected in that browser. */
+  tabs: number
+  /** When it was paired (ISO 8601), if known. */
+  createdAt: string | null
+}
+
+/** Chrome or Edge, as the extension reports itself when it pairs. */
+export type BrowserExtensionBrowser = 'chrome' | 'edge'
+
+/** 设置 › 电脑操作 › Chrome 和 Edge: one browser and the Emperor extension in it. */
+export interface BrowserExtensionBrowserView {
+  browser: BrowserExtensionBrowser
+  /** Google Chrome / Microsoft Edge. */
+  name: string
+  /** The browser has run on this Mac. */
+  present: boolean
+  /** Loaded from Emperor's folder in some profile: on, off or not at all. */
+  extension: 'none' | 'loaded' | 'disabled'
+  /** Loaded from another folder instead (`~`-abbreviated). */
+  loadedFrom?: string
+  /** 开发者模式 is on in some profile. */
+  developerMode: boolean
+  /** Its Native Messaging manifest admits the Emperor extension. */
+  hostRegistered: boolean
+}
+
+/** The extension folder and where the extension is loaded (no secrets). */
+export interface BrowserExtensionStatus {
+  folder: {
+    /** `<stateRoot>/browser-extension`, for 拷贝路径. */
+    path: string
+    /** The same, `~`-abbreviated, to show. */
+    displayPath: string
+    /** Emperor put the extension there. */
+    ready: boolean
+    version: string | null
+  }
+  /** The extension version this Emperor ships. */
+  bundledVersion: string | null
+  browsers: BrowserExtensionBrowserView[]
+}
+
+/** 安装扩展程序: the folder, and the browsers that can now reach Emperor. */
+export interface BrowserExtensionInstallResult {
+  ok: boolean
+  registered: string[]
+  /**
+   * Why no browser was registered (a development build, no bridge, no
+   * Chrome or Edge has run yet), or why the folder could not be written.
+   */
+  reason?: 'no-host' | 'unavailable' | 'no-browser' | 'no-source' | 'io'
+  status: BrowserExtensionStatus
+}
+
+/** 移除扩展程序: how many connected browsers uninstalled it themselves. */
+export interface BrowserExtensionRemoveResult {
+  ok: boolean
+  uninstalled: number
+  status: BrowserExtensionStatus
 }
 
 export type MacHelperPermission = 'accessibility' | 'screen-recording'
@@ -152,11 +251,8 @@ export const VAULT_UNLOCK_CHANNEL = 'emperor:computer-use:vault-unlock'
 export const VAULT_LOCK_CHANNEL = 'emperor:computer-use:vault-lock'
 export const VAULT_MASTER_CHANNEL = 'emperor:computer-use:vault-master'
 export const VAULT_REVEAL_CHANNEL = 'emperor:computer-use:vault-reveal'
-/** Unlock with the key kept for biometric unlock, after system verification. */
-export const VAULT_BIOMETRIC_UNLOCK_CHANNEL =
-  'emperor:computer-use:vault-biometric-unlock'
-export const VAULT_BIOMETRIC_DISABLE_CHANNEL =
-  'emperor:computer-use:vault-biometric-disable'
+/** 清空: drop every entry and the master password (and an unusable local key). */
+export const VAULT_RESET_CHANNEL = 'emperor:computer-use:vault-reset'
 
 export interface AgentPreviewFrame {
   targetId: string
@@ -449,6 +545,12 @@ export type DictationEndReason =
 export type DictationEvent =
   | { type: 'started'; session: string; seq: number; locale: string }
   | { type: 'partial'; session: string; seq: number; text: string }
+  /**
+   * RV-06: the microphone's loudness while listening (RMS on a decibel
+   * scale, 0–1), about 15 a second, for the composer's waveform. Only
+   * between `started` and `final`; never the audio itself.
+   */
+  | { type: 'level'; session: string; seq: number; value: number }
   | { type: 'final'; session: string; seq: number; text: string }
   | {
       type: 'error'

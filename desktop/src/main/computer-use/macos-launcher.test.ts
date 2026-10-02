@@ -8,6 +8,7 @@ import {
   encodeJsonFrame,
 } from '../../../../packages/core/src/harness/computer-use/protocol/framing'
 import {
+  LSREGISTER,
   installPackagedMacosHelper,
   launchMacosHelper,
   macosHelperAppPath,
@@ -53,6 +54,8 @@ class FakeInstallSystem implements MacosHelperInstallSystem {
   readonly calls: string[][] = []
   processes: string[] = [MAIN]
   psFails = false
+  /** LaunchServices refuses to unregister (RV-07). */
+  lsregisterFails = false
   /** Signature applied by `codesign --force --sign -` (Preview re-seal). */
   resealed: FakeSignature | null = null
   /** Lets a test corrupt what ditto copies. */
@@ -108,6 +111,10 @@ class FakeInstallSystem implements MacosHelperInstallSystem {
       return { stdout: `${this.processes.join('\n')}\n`, stderr: '' }
     }
     if (file === 'plutil') return { stdout: '', stderr: '' }
+    if (file === LSREGISTER) {
+      if (this.lsregisterFails) throw new Error('lsregister failed')
+      return { stdout: '', stderr: '' }
+    }
     if (file === 'ditto') {
       const [from, to] = args.filter((arg) => !arg.startsWith('--')) as [
         string,
@@ -203,6 +210,7 @@ class FakeInstallSystem implements MacosHelperInstallSystem {
       }
     },
     rm: async (path) => {
+      this.calls.push(['rm', path])
       for (const [key] of this.subtree(path)) this.entries.delete(key)
     },
   }
@@ -619,6 +627,48 @@ describe('packaged macOS helper installation', () => {
     await expect(install(system)).resolves.toBe(installed(CDHASH))
     expect(system.children(INSTALLED_ROOT)).not.toContain(running)
     expect(system.children(INSTALLED_ROOT)).toContain(foreign)
+  })
+
+  it('unregisters a removed copy from LaunchServices first (RV-07)', async () => {
+    const system = new FakeInstallSystem({
+      app: signedApp,
+      helper: signedHelper,
+    })
+    const executable =
+      'Emperor Computer Helper.app/Contents/MacOS/emperor-computer-helper'
+    const running = '1'.repeat(40)
+    for (const name of [OLD_CDHASH, running])
+      system.add(`${INSTALLED_ROOT}/${name}/${executable}`, 'file')
+    system.processes.push(`${INSTALLED_ROOT}/${running}/${executable}`)
+
+    await expect(install(system)).resolves.toBe(installed(CDHASH))
+    const stale = `${INSTALLED_ROOT}/${OLD_CDHASH}`
+    const steps = system.calls.filter(
+      ([command]) => command === LSREGISTER || command === 'rm',
+    )
+    // Only the copy that goes is forgotten, and before its files are gone.
+    expect(steps.filter(([command]) => command === LSREGISTER)).toEqual([
+      [LSREGISTER, '-u', `${stale}/Emperor Computer Helper.app`],
+    ])
+    expect(steps.findIndex(([command]) => command === LSREGISTER)).toBeLessThan(
+      steps.findIndex(([command, path]) => command === 'rm' && path === stale),
+    )
+    expect(system.has(stale)).toBe(false)
+    expect(system.has(`${INSTALLED_ROOT}/${running}`)).toBe(true)
+  })
+
+  it('removes a stale copy even when LaunchServices will not unregister it', async () => {
+    const system = new FakeInstallSystem({
+      app: signedApp,
+      helper: signedHelper,
+    })
+    system.add(
+      `${INSTALLED_ROOT}/${OLD_CDHASH}/Emperor Computer Helper.app/Contents/Info.plist`,
+      'file',
+    )
+    system.lsregisterFails = true
+    await expect(install(system)).resolves.toBe(installed(CDHASH))
+    expect(system.children(INSTALLED_ROOT)).toEqual([CDHASH])
   })
 
   it('keeps old copies when running processes cannot be listed', async () => {

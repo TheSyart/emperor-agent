@@ -3,6 +3,7 @@ import type { CoreOperationResult } from '@emperor/core/api'
 import {
   environmentJobStatusLabel,
   environmentJobTone,
+  environmentToolRow,
   environmentToolSections,
   environmentToolStatusLabel,
   environmentToolTone,
@@ -21,6 +22,39 @@ describe('environment diagnostics model', () => {
     expect(environmentToolTone('missing')).toBe('warn')
     expect(environmentToolTone('blocked')).toBe('error')
     expect(environmentToolStatusLabel('version_mismatch')).toBe('版本不匹配')
+  })
+
+  it('reads a ready tool as its version, and a problem as its state and why', () => {
+    const [git, node, python] = statusPayload().status.tools
+    expect(
+      environmentToolRow({
+        ...git!,
+        status: 'ready',
+        detectedVersion: '1.0.0',
+      }),
+    ).toEqual({
+      id: 'git',
+      label: 'git',
+      value: '1.0.0',
+      detail: 'git required · 要求 >=1.0.0',
+      tone: 'ok',
+    })
+    expect(
+      environmentToolRow({ ...git!, status: 'ready', detectedVersion: null }),
+    ).toMatchObject({ value: '已就绪' })
+    expect(
+      environmentToolRow({ ...node!, detectedVersion: '22.16.0' }),
+    ).toEqual({
+      id: 'node',
+      label: 'node',
+      value: '版本不匹配',
+      detail: 'node required · 当前 22.16.0 · 要求 >=1.0.0',
+      tone: 'warn',
+    })
+    expect(environmentToolRow(python!)).toMatchObject({
+      value: '被阻止',
+      tone: 'error',
+    })
   })
 
   it('keeps historical job state readable without exposing install actions', () => {

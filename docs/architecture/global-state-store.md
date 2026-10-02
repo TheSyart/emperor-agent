@@ -87,13 +87,15 @@
   control/
     command-invocations.json   # Slash command 幂等调用记录
     session-transitions.json   # /new 会话转换事务
-  computer-use/              # 启用电脑操作后按需创建
-    config.json              # 总开关、授权模式、各驱动开关、急停快捷键、用户应用名单、下载保留天数
-    grants.json              # 会话与定时授权、急停挂起状态；不含凭据明文；损坏时隔离并挂起
+  computer-use/              # 启动时创建并设为 0700；Agent 的 Shell 与文件、搜索工具都不能读取
+    config.json              # 总开关、各驱动开关、下载保留天数（读到已退役的授权模式、急停快捷键、应用名单时写回一次去掉）
+    retired-protected-apps.json  # 升级前「不让 Emperor 操作的应用」，设置页提示一次后删除
+    grants.json              # 授权记录（会话与定时授权已退役，加载时丢弃）；不含凭据明文；损坏时隔离，从空授权开始
     screenshots.json         # 截图配额清单（附件 ID、会话、大小、时间）
-    vault.json               # Electron main 加密的凭据库
-    browser-pairings/pairings.json  # 加密的外部浏览器配对信息
-  browser/                   # 受限 Shell 的 Seatbelt 规则拒绝读取整个目录
+    vault.json               # 凭据库（版本 2）：本地密钥加密，可再加主密码；读到钥匙串时代的版本 1 即删除
+    secrets/local.key        # Emperor 本地密钥（32 字节，目录 0700、文件 0600），取代 macOS 钥匙串
+    browser-pairings/pairings.json  # 外部浏览器配对（版本 2，本地密钥加密，记录可带 chrome/edge）；版本 1 即删除
+  browser/                   # 启动时设为 0700；受限 Shell 的 Seatbelt 规则与 Agent 的文件、搜索工具都拒绝读取整个目录
     profiles.json            # 临时与持久 profile 元数据
     profiles/<profile-id>/   # 持久 profile 的网站数据
     site-permissions.json    # 精确 origin、profile 与权限

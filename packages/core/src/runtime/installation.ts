@@ -93,6 +93,10 @@ const PRIVATE_DIRS = [
   'plugins/data',
   'plugins/staging',
   'plugins/marketplaces',
+  // Private to Emperor (sandbox/protected-state.ts): grants, the vault and
+  // its local key, browser pairings; browser profiles, cookies, downloads.
+  'computer-use',
+  'browser',
 ]
 
 const PRIVATE_FILES = [

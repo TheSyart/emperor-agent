@@ -9,7 +9,19 @@ arch="$(uname -m)"
 mkdir -p "$native_dir/build/$arch"
 fixture="$(mktemp -d "$native_dir/build/$arch/socket-smoke.XXXXXX")"
 socket_dir="$(mktemp -d /tmp/emperor-cu-smoke.XXXXXX)"
-trap 'rm -rf "$fixture" "$socket_dir"' EXIT
+lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+cleanup() {
+  # LaunchServices forgets these copies before they go, so macOS does not
+  # offer a deleted bundle for Emperor's or the helper's ID (RV-07).
+  for bundle in \
+    "$fixture/Emperor Agent.app" \
+    "$fixture/Emperor Agent.app/Contents/Library/Helpers/Emperor Computer Helper.app" \
+    "$fixture/helper-build/Emperor Computer Helper.app"; do
+    "$lsregister" -u "$bundle" >/dev/null 2>&1 || true
+  done
+  rm -rf "$fixture" "$socket_dir"
+}
+trap cleanup EXIT
 # Build into the fixture, so the development helper and its TCC grants stay.
 "$native_dir/scripts/assemble-app.sh" "$arch" "$fixture/helper-build" >/dev/null
 app="$fixture/Emperor Agent.app"

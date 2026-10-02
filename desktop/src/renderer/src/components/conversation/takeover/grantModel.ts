@@ -36,7 +36,6 @@ export interface GrantPresentation {
   /** Agent-supplied reason; shown as unverified. */
   reason: string
   highImpact: boolean
-  highRiskApp: boolean
   input: GrantInput | null
   /** Whether to offer "allow in the background". */
   backgroundOffered: boolean
@@ -124,7 +123,6 @@ export function grantPresentation(
     (action) => ACTION_LABELS[action] ?? action,
   )
   const highImpact = meta.high_impact === true
-  const highRiskApp = meta.high_risk_app === true
   const scopes = scopeOptions(interaction)
   const preferred = ['task', 'once']
   const defaultScope =
@@ -149,7 +147,6 @@ export function grantPresentation(
     actions,
     reason: text(meta.reason),
     highImpact,
-    highRiskApp,
     input: grantInput(display.input),
     backgroundOffered: meta.background === true,
     tool: text(meta.tool_name),

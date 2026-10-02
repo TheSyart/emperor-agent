@@ -218,7 +218,7 @@ export interface CredentialVaultPort {
   list(): CredentialHandle[]
   /** Unlock required first (optional master password). */
   readonly locked: boolean
-  /** System encryption can protect secrets (false: never decrypt or fill). */
+  /** The local key can protect secrets (false: never decrypt or fill). */
   readonly available?: boolean
 }
 

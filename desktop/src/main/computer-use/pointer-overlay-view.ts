@@ -66,7 +66,6 @@ export function onSomeDisplay(
 
 interface PointerStatus {
   readonly enabled: boolean
-  readonly stopped: boolean
   readonly targets: readonly {
     readonly driver: string
     readonly state: string
@@ -92,7 +91,7 @@ export function agentControls(target: {
 
 /** The pointer shows only while the Agent controls a desktop window. */
 export function pointerAllowed(status: PointerStatus | null): boolean {
-  if (!status?.enabled || status.stopped) return false
+  if (!status?.enabled) return false
   return status.targets.some(
     (target) => target.driver === 'desktop' && agentControls(target),
   )

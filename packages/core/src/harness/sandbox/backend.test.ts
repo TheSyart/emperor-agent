@@ -5,9 +5,29 @@ import { createServer } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { LocalSandbox } from './backend'
+import { LocalSandbox, seatbeltProfileArgs } from './backend'
+import { protectedStateDirs } from './protected-state'
 
 describe('Computer Use Seatbelt confinement', () => {
+  it('denies Shell reads of exactly the directories the file tools refuse', () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-cu-profile-'))
+    try {
+      const state = join(root, 'state')
+      mkdirSync(join(state, 'computer-use'), { recursive: true })
+      const profile = seatbeltProfileArgs(
+        { mode: 'workspace-write', workspaceRoot: root },
+        state,
+      )[1]!
+      const denied = [
+        ...profile.matchAll(/\(deny file-read\* \(subpath "([^"]+)"\)\)/g),
+      ].map((match) => match[1])
+      expect(denied).toEqual(protectedStateDirs(state))
+      expect(denied).toHaveLength(2)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it.skipIf(process.platform !== 'darwin')(
     'keeps ordinary CLI reads working while refusing Computer Use state',
     () => {

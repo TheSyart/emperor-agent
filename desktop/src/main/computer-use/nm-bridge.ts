@@ -25,6 +25,7 @@ import {
 } from './nm-bridge-crypto'
 import type {
   BrowserPairing,
+  PairingBrowser,
   PairingStore,
   PairingSummary,
 } from './nm-bridge-store'
@@ -33,6 +34,7 @@ import {
   NM_BROWSER_KEYS,
   type NmBrowser,
   type NmManifestChange,
+  type NmManifestEntry,
 } from './nm-manifest'
 import { isExactHttpOrigin } from './web-origin'
 import {
@@ -59,6 +61,26 @@ function codeError(code: string): Error {
   return error
 }
 
+/**
+ * Plaintext refusal of `auth.begin` (protocol 1, extension README §Pairing):
+ * Emperor holds no such pairing. It was never made here, was revoked in
+ * Emperor, was cleared with a version 1 (Keychain-sealed) store, or its secret
+ * can no longer be read. The extension forgets its pairing and starts pairing
+ * again. Every other plaintext refusal stays `PERMISSION_DENIED`.
+ */
+export const PAIRING_UNKNOWN = 'PAIRING_UNKNOWN'
+
+/** What a refused plaintext request reports: only these two codes. */
+function refusalCode(cause: unknown): string {
+  return cause instanceof Error && cause.name === PAIRING_UNKNOWN
+    ? PAIRING_UNKNOWN
+    : 'PERMISSION_DENIED'
+}
+
+function pairingBrowser(value: unknown): PairingBrowser | undefined {
+  return value === 'chrome' || value === 'edge' ? value : undefined
+}
+
 export function defaultNmSocketPath(): string {
   if (process.platform !== 'darwin' || process.getuid === undefined)
     throw new Error('Native Messaging socket is macOS-only')
@@ -70,11 +92,34 @@ export function defaultNmSocketPath(): string {
   )
 }
 
+/** A dotted extension version (`0.2.0`), else undefined. */
+function extensionVersion(value: unknown): string | undefined {
+  return typeof value === 'string' && /^\d{1,9}(?:\.\d{1,9}){0,3}$/.test(value)
+    ? value
+    : undefined
+}
+
+/** Requests main may send an authenticated extension. */
+const EXTENSION_METHODS = new Set([
+  'tabs.discover',
+  'target.list',
+  'target.observe',
+  'target.act',
+  'target.detach',
+  // 设置 › 电脑操作 › Chrome 和 Edge: 移除扩展程序, and an upgraded folder.
+  'extension.uninstall',
+  'extension.reload',
+  // The Agent's own browsing (PLAN-CAP-001 RV-09, RV-10).
+  ...AGENT_REQUEST_METHODS,
+])
+
 export interface PairingApproval {
   readonly pairingId: string
   readonly extensionId: string
   readonly code: string
   readonly displayed: boolean
+  /** As the extension reported it at `pair.begin`; display only. */
+  readonly browser?: PairingBrowser
 }
 
 export type NmBridgeEvent =
@@ -89,6 +134,9 @@ export type NmBridgeEvent =
       readonly pairingId: string
       readonly extensionId: string
       readonly workerEpoch: number
+      /** The extension's manifest version, when it reports one. */
+      readonly version?: string
+      readonly browser?: PairingBrowser
     }
   | {
       readonly type: 'target-attached'
@@ -125,6 +173,10 @@ export interface NmHostManifests {
     extensionId: string,
     remainingExtensionIds: readonly string[],
   ): Promise<readonly NmManifestChange[]>
+  /** 移除扩展程序: delete every manifest Emperor wrote. */
+  removeAll?(): Promise<readonly NmManifestChange[]>
+  /** The manifests as they are now (read only). */
+  inspect?(): Promise<readonly NmManifestEntry[]>
 }
 
 export interface NmBridgeOptions {
@@ -152,7 +204,12 @@ class NmConnection {
   private buffer = Buffer.alloc(0)
   private queue: Promise<void> = Promise.resolve()
   private pendingPair:
-    (PendingPair & { displayed: boolean; approved: boolean }) | null = null
+    | (PendingPair & {
+        displayed: boolean
+        approved: boolean
+        browser?: PairingBrowser
+      })
+    | null = null
   private pendingAuth: {
     pairing: BrowserPairing
     extensionNonce: string
@@ -193,6 +250,7 @@ class NmConnection {
           extensionId: pending.extensionId,
           code: pending.code,
           displayed: pending.displayed,
+          ...(pending.browser ? { browser: pending.browser } : {}),
         }
   }
   hasPairing(pairingId: string): boolean {
@@ -276,8 +334,8 @@ class NmConnection {
     ) {
       try {
         await this.rawRequest(parsed.id, parsed.method, parsed.params)
-      } catch {
-        this.refuse(parsed.id, 'PERMISSION_DENIED')
+      } catch (cause) {
+        this.refuse(parsed.id, refusalCode(cause))
       }
       return
     }
@@ -301,7 +359,13 @@ class NmConnection {
       if (this.pendingPair || this.pendingAuth || this.pairing)
         throw codeError('PERMISSION_DENIED')
       const pair = createPair(params as unknown as PairOffer)
-      this.pendingPair = { ...pair, displayed: false, approved: false }
+      const browser = pairingBrowser(params.browser)
+      this.pendingPair = {
+        ...pair,
+        displayed: false,
+        approved: false,
+        ...(browser ? { browser } : {}),
+      }
       this.reply(id, {
         pairingId: pair.pairingId,
         publicKey: pair.publicKey,
@@ -320,11 +384,12 @@ class NmConnection {
       )
         throw codeError('PERMISSION_DENIED')
       if (this.bridge.isRevoked(params.pairingId))
-        throw codeError('PERMISSION_DENIED')
+        throw codeError(PAIRING_UNKNOWN)
       parseToken(params.nonce, 16)
       const pairing = await this.bridge.pairings.get(params.pairingId)
-      if (!pairing || this.bridge.isRevoked(params.pairingId) || this.closed)
-        throw codeError('PERMISSION_DENIED')
+      if (!pairing || this.bridge.isRevoked(params.pairingId))
+        throw codeError(PAIRING_UNKNOWN)
+      if (this.closed) throw codeError('PERMISSION_DENIED')
       const extensionNonce = params.nonce as string
       const mainNonce = token(randomBytes(16))
       this.pendingAuth = { pairing, extensionNonce, mainNonce }
@@ -415,6 +480,7 @@ class NmConnection {
         extensionId: pending.extensionId,
         secret: pending.secret,
         createdAt: new Date().toISOString(),
+        ...(pending.browser ? { browser: pending.browser } : {}),
       })
     } catch (cause) {
       pending.approved = false
@@ -473,11 +539,15 @@ class NmConnection {
           throw codeError('PROTOCOL_MISMATCH')
         this.ready = true
         this.bridge.connectionReady(this)
+        const version = extensionVersion(data.version)
+        const browser = pairingBrowser(data.browser)
         this.bridge.notify({
           type: 'ready',
           pairingId: pairing.pairingId,
           extensionId: pairing.extensionId,
           workerEpoch: data.workerEpoch,
+          ...(version ? { version } : {}),
+          ...(browser ? { browser } : {}),
         })
         this.startHeartbeat()
         return
@@ -594,16 +664,7 @@ class NmConnection {
     signal?: AbortSignal,
   ): Promise<unknown> {
     if (!this.isReady) return Promise.reject(codeError('DRIVER_UNAVAILABLE'))
-    if (
-      ![
-        'tabs.discover',
-        'target.list',
-        'target.observe',
-        'target.act',
-        'target.detach',
-        ...AGENT_REQUEST_METHODS,
-      ].includes(method)
-    )
+    if (!EXTENSION_METHODS.has(method))
       return Promise.reject(codeError('CAPABILITY_DISABLED'))
     if (signal?.aborted) return Promise.reject(codeError('CANCELLED'))
     const id = ++this.nextRequestId
@@ -674,6 +735,30 @@ class NmConnection {
   destroy(): void {
     this.close()
     this.socket.destroy()
+  }
+
+  /**
+   * Emperor-side revoke: an authenticated extension hears `pair.revoked`
+   * first (it then forgets the pairing without onboarding again); the
+   * socket closes once that frame is written.
+   */
+  revoke(pairingId: string): void {
+    if (!this.isReady || this.pairing?.pairingId !== pairingId) {
+      this.destroy()
+      return
+    }
+    try {
+      this.sendSecure({
+        type: 'event',
+        name: 'pair.revoked',
+        data: { pairingId },
+      })
+    } catch {
+      /* closing anyway */
+    }
+    this.close()
+    this.socket.end()
+    setTimeout(() => this.socket.destroy(), 1_000).unref()
   }
 }
 
@@ -746,6 +831,41 @@ export class NmBridgeServer {
       .map((connection) => connection.pairingId!)
   }
 
+  /**
+   * Every stored pairing, connected or not (its browser closed), without
+   * secrets; empty when the store cannot be read.
+   */
+  async storedPairings(): Promise<readonly PairingSummary[]> {
+    return this.pairings.list().catch(() => [])
+  }
+
+  /**
+   * 移除扩展程序: delete every Emperor manifest. Only the instance that
+   * owns the socket touches manifests.
+   */
+  async removeHostManifests(): Promise<void> {
+    const removeAll = this.manifests?.removeAll
+    if (!removeAll || !this.server || this.stopping) return
+    await this.trackOwnedOperation(
+      removeAll.call(this.manifests).then(() => undefined),
+    )
+  }
+
+  /** Browsers whose manifest admits the Emperor extension (read only). */
+  async hostRegistrations(): Promise<NmBrowser[]> {
+    const manifests = this.manifests
+    const entries = manifests?.inspect
+      ? await manifests.inspect().catch(() => [])
+      : []
+    return entries
+      .filter(
+        (entry) =>
+          entry.state.kind === 'emperor' &&
+          entry.state.extensionIds.includes(EMPEROR_EXTENSION_ID),
+      )
+      .map((entry) => entry.browser)
+  }
+
   isRevoked(pairingId: string): boolean {
     return this.revokedPairings.has(pairingId)
   }
@@ -781,7 +901,7 @@ export class NmBridgeServer {
       : undefined
     await this.pairings.remove(pairingId)
     for (const connection of this.connections)
-      if (connection.hasPairing(pairingId)) connection.destroy()
+      if (connection.hasPairing(pairingId)) connection.revoke(pairingId)
     this.notify({ type: 'revoked', pairingId })
     if (revoked)
       await this.maintainManifests((manifests, remaining) =>

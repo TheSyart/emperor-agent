@@ -1,9 +1,8 @@
 // Computer Use through the real stack: CoreApi → HarnessHost → ToolRegistry
 // (hooks, gate, guards) → GUI tools → kernel, with a scripted model and the
 // fake host port. Covers continuous AI control (no card for ordinary
-// actions), the per-action card for a high-impact click, plan mode, the
-// emergency stop while a card is pending, fail-closed stop, and the removed
-// up-front control tools.
+// actions), the per-action card for a high-impact click, plan mode, and the
+// removed up-front control tools.
 import { afterEach, describe, expect, it } from 'vitest'
 import type { GenerateOptions } from '../../llm/types'
 import {
@@ -166,43 +165,6 @@ describe('computer use end to end (scripted model, fake port)', () => {
     await api.chat.submit({ content: 'go', sessionId: id })
     expect(eventOf(events, 'ask_request')).toBeUndefined()
     expect(seen).toEqual({ denied: true })
-  })
-
-  it('the emergency stop dismisses a pending card and is not blocked by it', async () => {
-    let seen: string | undefined
-    const { api, events, id } = await setup([
-      openCheckout,
-      observe,
-      clickPay,
-      (request) => {
-        seen = JSON.stringify(request.messages.at(-1)?.content)
-        return replyChunks({ text: 'stopped' })
-      },
-    ])
-    const submitted = api.chat.submit({ content: 'pay', sessionId: id })
-    await waitFor(() => eventOf(events, 'ask_request') !== undefined)
-    const status = await api.computerUse.stop()
-    expect(status.stopped).toBe(true)
-    expect((await submitted).content).toBe('stopped')
-    expect(seen).toContain('PERMISSION_DENIED')
-    expect(api.control.get(id).pending).toBeNull()
-    expect(eventOf(events, 'interaction_cancelled')).toBeDefined()
-    await api.computerUse.resume()
-  })
-
-  it('stays stopped across a refusal: a stopped kernel refuses new requests', async () => {
-    let seen: string | undefined
-    const { api, events, id } = await setup([
-      openCheckout,
-      (request) => {
-        seen = JSON.stringify(request.messages.at(-1)?.content)
-        return replyChunks({ text: 'refused' })
-      },
-    ])
-    await api.computerUse.stop()
-    await api.chat.submit({ content: 'go', sessionId: id })
-    expect(eventOf(events, 'ask_request')).toBeUndefined()
-    expect(seen).toContain('emergency-stop')
   })
 
   it('tells the model the up-front control tools were removed', async () => {

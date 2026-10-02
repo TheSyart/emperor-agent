@@ -1,14 +1,18 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import {
+  chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { LocalSecretStore } from '../local-secret-store'
 import {
   CredentialVault,
   CredentialVaultError,
@@ -35,8 +39,10 @@ vi.mock('node:crypto', async (importOriginal) => {
   }
 })
 
+/** In-memory stand-in for the local key store (one fixed AES key). */
 const storage = {
   isEncryptionAvailable: () => true,
+  getSelectedStorageBackend: () => 'emperor-local',
   encryptString(value: string): Buffer {
     const key = Buffer.alloc(32, 7)
     const iv = randomBytes(12)
@@ -125,6 +131,17 @@ function vaultPath(): string {
     'computer-use',
     'vault.json',
   )
+}
+
+/** The real local key store beside `path`, as main wires it. */
+function localKey(
+  path: string,
+  sealedDataExists?: () => boolean,
+): LocalSecretStore {
+  return new LocalSecretStore({
+    keyPath: join(dirname(path), 'secrets', 'local.key'),
+    ...(sealedDataExists ? { sealedDataExists } : {}),
+  })
 }
 
 describe('CredentialVault', () => {
@@ -238,7 +255,7 @@ describe('CredentialVault', () => {
     expect(new CredentialVault({ path, storage }).locked).toBe(true)
   })
 
-  it('refuses to create entries without system encryption', () => {
+  it('refuses to create entries without local encryption', () => {
     const vault = new CredentialVault({
       path: vaultPath(),
       storage: { ...storage, isEncryptionAvailable: () => false },
@@ -268,7 +285,7 @@ describe('CredentialVault', () => {
       entries: Array<{ fields: { totp: string } }>
     }
     data.entries[0]!.fields.totp =
-      's:' + Buffer.from('corrupted').toString('base64')
+      'l:' + Buffer.from('corrupted').toString('base64')
     const corruptPath = vaultPath()
     mkdirSync(join(corruptPath, '..'), { recursive: true })
     writeFileSync(corruptPath, JSON.stringify(data))
@@ -338,7 +355,7 @@ describe('CredentialVault', () => {
       entries: Array<{ fields: { password: string } }>
     }
     data.entries[0]!.fields.password =
-      's:' + Buffer.from('corrupted').toString('base64')
+      'l:' + Buffer.from('corrupted').toString('base64')
     const corruptPath = vaultPath()
     mkdirSync(join(corruptPath, '..'), { recursive: true })
     writeFileSync(corruptPath, JSON.stringify({ ...data, master: undefined }))
@@ -470,7 +487,7 @@ describe('CredentialVault', () => {
     expect(legacy.secret(handle.handleId, 'password')).toBe('private')
   })
 
-  it('sets a master password with biometric unlock where the runtime has no Argon2', () => {
+  it('sets a master password where the runtime has no Argon2', () => {
     runtime.argon2 = false
     try {
       const path = vaultPath()
@@ -480,12 +497,10 @@ describe('CredentialVault', () => {
         bindings: [{ kind: 'origin', origin: 'https://x.test' }],
         password: 'private',
       })
-      vault.setMasterPassword('correct horse battery', { biometric: true })
-      vault.lock()
-      vault.unlockWithBiometrics()
-      expect(vault.secret(handle.handleId, 'password')).toBe('private')
+      vault.setMasterPassword('correct horse battery')
       vault.lock()
       expect(vault.unlock('correct horse battery')).toBe(true)
+      expect(vault.secret(handle.handleId, 'password')).toBe('private')
 
       // An Argon2id vault written where Argon2 existed cannot open here.
       const older = vaultPath()
@@ -510,25 +525,191 @@ describe('CredentialVault', () => {
     }
   })
 
-  it('reports the storage backend and disables basic_text on Linux', () => {
-    const linux = (backend: string) =>
+  it('names the local key as its backend on every platform, never the Keychain', () => {
+    const path = vaultPath()
+    const vault = new CredentialVault({ path, storage: localKey(path) })
+    expect(vault.backend).toBe('emperor-local')
+    expect(vault.available).toBe(true)
+    expect(vault.problem).toBeNull()
+    expect(
       new CredentialVault({
         path: vaultPath(),
-        storage: { ...storage, getSelectedStorageBackend: () => backend },
-        platform: 'linux',
-      })
-    expect(linux('gnome_libsecret').backend).toBe('gnome_libsecret')
-    expect(linux('gnome_libsecret').available).toBe(true)
-    expect(linux('basic_text').backend).toBe('basic_text')
-    expect(linux('basic_text').available).toBe(false)
+        storage: { ...storage, getSelectedStorageBackend: undefined },
+      }).backend,
+    ).toBe('unknown')
+  })
+
+  it('writes version 2: l: envelopes under the local key, m: around them with a master password', () => {
+    const path = vaultPath()
+    const vault = new CredentialVault({
+      path,
+      storage: localKey(path),
+      kdf: CHEAP_KDF,
+    })
+    expect(vault.hasSealedData).toBe(false)
+    const handle = vault.save({
+      label: 'site',
+      bindings: [{ kind: 'origin', origin: 'https://x.test' }],
+      username: 'alice',
+      password: 'private-value-26',
+    })
+    expect(vault.hasSealedData).toBe(true)
+    const plain = JSON.parse(readFileSync(path, 'utf8')) as {
+      version: number
+      entries: Array<{ fields: Record<string, string> }>
+    }
+    expect(plain.version).toBe(2)
+    for (const value of Object.values(plain.entries[0]!.fields)) {
+      expect(value).toMatch(/^l:/)
+      // The local store's own versioned envelope sits inside.
+      expect(
+        Buffer.from(value.slice(2), 'base64').subarray(0, 3).toString(),
+      ).toBe('el1')
+    }
+    expect(existsSync(join(dirname(path), 'secrets', 'local.key'))).toBe(true)
+    vault.setMasterPassword('correct horse battery')
+    const sealed = JSON.parse(readFileSync(path, 'utf8')) as {
+      version: number
+      master: Record<string, unknown>
+      entries: Array<{ fields: Record<string, string> }>
+    }
+    expect(sealed.version).toBe(2)
+    expect(sealed.master).not.toHaveProperty('biometricKey')
+    for (const value of Object.values(sealed.entries[0]!.fields))
+      expect(value).toMatch(/^m:/)
+    expect(JSON.stringify(sealed)).not.toContain('private-value-26')
+    const reopened = new CredentialVault({ path, storage: localKey(path) })
+    expect(reopened.unlock('correct horse battery')).toBe(true)
+    expect(reopened.secret(handle.handleId, 'password')).toBe(
+      'private-value-26',
+    )
+  })
+
+  it('clears a version 1 vault sealed by the Keychain and starts over', () => {
+    const path = vaultPath()
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(
+      path,
+      JSON.stringify({
+        version: 1,
+        master: {
+          kind: 'scrypt',
+          salt: 'c2FsdA==',
+          verifier: 'dmVyaWZpZXI=',
+          params: CHEAP_KDF.params,
+          biometricKey: 's:a2V5',
+        },
+        entries: [
+          {
+            handleId: 'cred_aaaaaaaaaaaaaaaaaaaaaaaa',
+            label: 'Old',
+            bindings: [{ kind: 'origin', origin: 'https://old.test' }],
+            revealUsername: true,
+            fillMode: 'auto',
+            fields: { password: 's:b2xk' },
+          },
+        ],
+      }),
+    )
+    const vault = new CredentialVault({ path, storage: localKey(path) })
+    expect(existsSync(path)).toBe(false)
+    expect(vault.list()).toEqual([])
+    expect(vault.hasMasterPassword).toBe(false)
+    expect(vault.locked).toBe(false)
+    vault.save({
+      label: 'New',
+      bindings: [{ kind: 'origin', origin: 'https://new.test' }],
+      password: 'fresh',
+    })
     expect(
-      new CredentialVault({ path: vaultPath(), storage, platform: 'darwin' })
-        .backend,
-    ).toBe('keychain')
+      (JSON.parse(readFileSync(path, 'utf8')) as { version: number }).version,
+    ).toBe(2)
+    // Formats it does not know still fail closed.
+    const future = vaultPath()
+    mkdirSync(dirname(future), { recursive: true })
+    writeFileSync(future, JSON.stringify({ version: 3, entries: [] }))
     expect(
-      new CredentialVault({ path: vaultPath(), storage, platform: 'win32' })
-        .backend,
-    ).toBe('dpapi')
+      caught(() => new CredentialVault({ path: future, storage })).reason,
+    ).toBe('vault-file-invalid')
+    expect(existsSync(future)).toBe(true)
+  })
+
+  it('refuses a lost local key and starts over only when reset', () => {
+    const path = vaultPath()
+    const first = new CredentialVault({ path, storage: localKey(path) })
+    const handle = first.save({
+      label: 'site',
+      bindings: [{ kind: 'origin', origin: 'https://x.test' }],
+      password: 'private',
+    })
+    const key = join(dirname(path), 'secrets', 'local.key')
+    rmSync(key)
+    let vault: CredentialVault | null = null
+    vault = new CredentialVault({
+      path,
+      storage: localKey(path, () => vault?.hasSealedData ?? true),
+    })
+    expect(vault.available).toBe(false)
+    expect(vault.problem).toBe('key-missing')
+    // Entries stay listed (names only) so the user sees what clearing drops.
+    expect(vault.list().map((item) => item.label)).toEqual(['site'])
+    const missing = caught(() => vault!.secret(handle.handleId, 'password'))
+    expect([missing.reason, missing.code]).toEqual([
+      'vault-key-missing',
+      'CAPABILITY_DISABLED',
+    ])
+    expect(
+      caught(() =>
+        vault!.save({
+          label: 'new',
+          bindings: [{ kind: 'origin', origin: 'https://y.test' }],
+          password: 'new',
+        }),
+      ).reason,
+    ).toBe('vault-key-missing')
+    // No new key appears behind the user's back.
+    expect(existsSync(key)).toBe(false)
+    vault.reset()
+    expect(existsSync(path)).toBe(false)
+    expect(vault.list()).toEqual([])
+    expect(vault.problem).toBeNull()
+    expect(vault.available).toBe(true)
+    const fresh = vault.save({
+      label: 'again',
+      bindings: [{ kind: 'origin', origin: 'https://x.test' }],
+      password: 'again',
+    })
+    expect(existsSync(key)).toBe(true)
+    expect(vault.secret(fresh.handleId, 'password')).toBe('again')
+  })
+
+  it('resets past a key file that fails its checks, with a new key', () => {
+    const path = vaultPath()
+    const first = new CredentialVault({ path, storage: localKey(path) })
+    first.save({
+      label: 'site',
+      bindings: [{ kind: 'origin', origin: 'https://x.test' }],
+      password: 'private',
+    })
+    first.setMasterPassword('correct horse battery')
+    const key = join(dirname(path), 'secrets', 'local.key')
+    chmodSync(key, 0o644)
+    const vault = new CredentialVault({ path, storage: localKey(path) })
+    expect(vault.problem).toBe('key-invalid')
+    expect(vault.available).toBe(false)
+    expect(caught(() => vault.unlock('correct horse battery')).reason).toBe(
+      'vault-key-invalid',
+    )
+    vault.reset()
+    expect(vault.hasMasterPassword).toBe(false)
+    expect(vault.problem).toBeNull()
+    expect(existsSync(key)).toBe(false)
+    vault.save({
+      label: 'again',
+      bindings: [{ kind: 'origin', origin: 'https://x.test' }],
+      password: 'again',
+    })
+    expect(statSync(key).mode & 0o777).toBe(0o600)
   })
 
   it('records the last fill, not a Settings reveal, and keeps older files readable', () => {
@@ -644,161 +825,5 @@ describe('CredentialVault', () => {
     expect(vault.entries()[0]!.lastUsedAt).toBe(now)
     expect(vault.entries()[0]).not.toHaveProperty('lastUsedTarget')
     expect(vault.list()[0]).not.toHaveProperty('lastUsedTarget')
-  })
-
-  it('unlocks by biometrics only after opting in with the right password', () => {
-    const path = vaultPath()
-    const clock = manualClock(10_000)
-    const vault = new CredentialVault({
-      path,
-      storage,
-      now: clock.now,
-      timers: clock.timers,
-      kdf: CHEAP_KDF,
-    })
-    const handle = vault.save({
-      label: 'site',
-      bindings: [{ kind: 'origin', origin: 'https://x.test' }],
-      password: 'private',
-    })
-    vault.setMasterPassword('correct horse battery')
-    expect(vault.biometricUnlock).toBe(false)
-    vault.lock()
-    expect(caught(() => vault.unlockWithBiometrics()).reason).toBe(
-      'biometric-unavailable',
-    )
-    expect(vault.unlock('wrong password here', { biometric: true })).toBe(false)
-    expect(vault.biometricUnlock).toBe(false)
-    expect(vault.locked).toBe(true)
-    expect(vault.unlock('correct horse battery', { biometric: true })).toBe(
-      true,
-    )
-    expect(vault.biometricUnlock).toBe(true)
-
-    // Only a safeStorage envelope of the key reaches disk.
-    const disk = readFileSync(path, 'utf8')
-    const stored = JSON.parse(disk) as { master: { biometricKey: string } }
-    expect(stored.master.biometricKey).toMatch(/^s:/)
-    const key = storage.decryptString(
-      Buffer.from(stored.master.biometricKey.slice(2), 'base64'),
-    )
-    expect(Buffer.from(key, 'base64')).toHaveLength(32)
-    expect(disk).not.toContain(key)
-
-    // After a restart the vault is locked until the system check passes.
-    const restarted = new CredentialVault({
-      path,
-      storage,
-      now: clock.now,
-      timers: clock.timers,
-    })
-    expect(restarted.locked).toBe(true)
-    expect(restarted.biometricUnlock).toBe(true)
-    restarted.unlockWithBiometrics()
-    expect(restarted.locked).toBe(false)
-    expect(restarted.secret(handle.handleId, 'password')).toBe('private')
-    // The idle relock still applies to a biometric unlock.
-    clock.advance(30 * 60_000)
-    expect(restarted.locked).toBe(true)
-    expect(() => restarted.secret(handle.handleId, 'password')).toThrow()
-  })
-
-  it('drops the biometric key on a new or removed master password, opt-out and a failed unwrap', () => {
-    const path = vaultPath()
-    const vault = new CredentialVault({ path, storage, kdf: CHEAP_KDF })
-    const handle = vault.save({
-      label: 'site',
-      bindings: [{ kind: 'origin', origin: 'https://x.test' }],
-      password: 'private',
-    })
-    const onDisk = () =>
-      (
-        JSON.parse(readFileSync(path, 'utf8')) as {
-          master?: { biometricKey?: string }
-        }
-      ).master
-    vault.setMasterPassword('correct horse battery', { biometric: true })
-    expect(vault.biometricUnlock).toBe(true)
-    // A new password alone does not carry the old key over.
-    vault.setMasterPassword('another long passphrase')
-    expect(vault.biometricUnlock).toBe(false)
-    expect(onDisk()).not.toHaveProperty('biometricKey')
-    vault.setMasterPassword('another long passphrase', { biometric: true })
-    expect(onDisk()).toHaveProperty('biometricKey')
-    vault.lock()
-    // Turning it off needs no unlock.
-    vault.disableBiometricUnlock()
-    expect(vault.biometricUnlock).toBe(false)
-    expect(onDisk()).not.toHaveProperty('biometricKey')
-    expect(caught(() => vault.unlockWithBiometrics()).reason).toBe(
-      'biometric-unavailable',
-    )
-    expect(vault.unlock('another long passphrase', { biometric: true })).toBe(
-      true,
-    )
-    vault.setMasterPassword(null)
-    expect(vault.biometricUnlock).toBe(false)
-    expect(onDisk()).toBeUndefined()
-
-    // A key that no longer unwraps to the master key is removed for good.
-    vault.setMasterPassword('correct horse battery', { biometric: true })
-    vault.lock()
-    const data = JSON.parse(readFileSync(path, 'utf8')) as {
-      master: { biometricKey: string }
-    }
-    data.master.biometricKey = `s:${storage
-      .encryptString(randomBytes(32).toString('base64'))
-      .toString('base64')}`
-    writeFileSync(path, JSON.stringify(data))
-    const stale = new CredentialVault({ path, storage })
-    const invalid = caught(() => stale.unlockWithBiometrics())
-    expect([invalid.reason, invalid.code]).toEqual([
-      'biometric-key-invalid',
-      'PERMISSION_REQUIRED',
-    ])
-    expect(stale.locked).toBe(true)
-    expect(stale.biometricUnlock).toBe(false)
-    expect(onDisk()).not.toHaveProperty('biometricKey')
-    expect(stale.unlock('correct horse battery')).toBe(true)
-    expect(stale.secret(handle.handleId, 'password')).toBe('private')
-
-    // So is one safeStorage can no longer decrypt (e.g. a reset keychain).
-    stale.unlock('correct horse battery', { biometric: true })
-    stale.lock()
-    const reset = new CredentialVault({
-      path,
-      storage: {
-        ...storage,
-        decryptString: () => {
-          throw new Error('keychain reset')
-        },
-      },
-    })
-    expect(caught(() => reset.unlockWithBiometrics()).reason).toBe(
-      'biometric-key-invalid',
-    )
-    expect(onDisk()).not.toHaveProperty('biometricKey')
-  })
-
-  it('opens vaults without a biometric key and ignores a malformed one', () => {
-    const path = vaultPath()
-    const vault = new CredentialVault({ path, storage, kdf: CHEAP_KDF })
-    vault.save({
-      label: 'site',
-      bindings: [{ kind: 'origin', origin: 'https://x.test' }],
-      password: 'private',
-    })
-    vault.setMasterPassword('correct horse battery')
-    const data = JSON.parse(readFileSync(path, 'utf8')) as {
-      master: Record<string, unknown>
-    }
-    data.master.biometricKey = 42
-    writeFileSync(path, JSON.stringify(data))
-    const reopened = new CredentialVault({ path, storage })
-    expect(reopened.biometricUnlock).toBe(false)
-    expect(caught(() => reopened.unlockWithBiometrics()).reason).toBe(
-      'biometric-unavailable',
-    )
-    expect(reopened.unlock('correct horse battery')).toBe(true)
   })
 })

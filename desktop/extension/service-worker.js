@@ -2,6 +2,7 @@ import {
   HOST_NAME,
   MAX_JSON_BYTES,
   PROTOCOL,
+  browserName,
   error,
   isObject,
   randomBytes,
@@ -40,6 +41,10 @@ const attachQueues = new Map()
 const pending = new Map()
 const targets = new Map()
 const byTab = new Map()
+/** The extension's own pages that may drive the worker. */
+const PAGES = ['popup.html', 'welcome.html']
+/** Let a response reach Emperor before the worker reloads or uninstalls. */
+const AFTER_RESPONSE_MS = 50
 // Tabs the Agent opens, navigation and downloads (PLAN-CAP-001 RV-09).
 const agent = createAgentFeatures({
   chrome,
@@ -153,8 +158,7 @@ function connect() {
         true,
       )
     })
-    if (pairing)
-      void authenticate().catch(() => disconnect('Authentication failed'))
+    if (pairing) void authenticate().catch(authenticationFailed)
   } catch {
     setStatus(
       'disconnected',
@@ -292,8 +296,52 @@ async function authenticate() {
   await sendSecure({
     type: 'event',
     name: 'bridge.ready',
-    data: { protocol: PROTOCOL, extensionId: chrome.runtime.id, workerEpoch },
+    data: {
+      protocol: PROTOCOL,
+      extensionId: chrome.runtime.id,
+      workerEpoch,
+      // Emperor reloads an extension older than the folder it installed.
+      version: chrome.runtime.getManifest().version,
+      browser: browserName(globalThis.navigator),
+    },
   })
+}
+
+/**
+ * Emperor answers an unknown pairing with PAIRING_UNKNOWN (its pairings
+ * were cleared): forget ours and start onboarding again, or the worker
+ * would stay stuck failing authentication. Other failures only disconnect.
+ */
+function authenticationFailed(cause) {
+  if (cause?.message !== 'PAIRING_UNKNOWN') {
+    disconnect('Authentication failed')
+    return
+  }
+  void forgetPairing('Emperor 不再认识这个配对，请重新连接', true).catch(() =>
+    setStatus('error', 'Extension storage is unavailable'),
+  )
+}
+
+/** Drop the local pairing without telling Emperor (it already let go). */
+async function forgetPairing(message, onboard = false) {
+  disconnect(message)
+  pairing = null
+  await chrome.storage.local.remove('pairing')
+  setStatus('unpaired', message)
+  if (onboard) await openWelcome()
+}
+
+/** Show the onboarding page, reusing a tab that already has it. */
+async function openWelcome() {
+  const url = chrome.runtime.getURL('welcome.html')
+  const open = (await chrome.tabs.query({})).find((tab) => tab.url === url)
+  if (Number.isSafeInteger(open?.id)) {
+    await chrome.tabs.update(open.id, { active: true })
+    if (Number.isSafeInteger(open.windowId))
+      await chrome.windows?.update(open.windowId, { focused: true })
+    return
+  }
+  await chrome.tabs.create({ url })
 }
 
 async function beginPairing() {
@@ -307,6 +355,8 @@ async function beginPairing() {
     extensionId: offer.extensionId,
     publicKey: offer.publicKey,
     nonce: offer.nonce,
+    // A label for Emperor's list; not part of the authenticated transcript.
+    browser: browserName(globalThis.navigator),
   })
   pendingPair = await finishPairOffer(offer, answer)
   setStatus('pairing', 'Compare this code with Emperor, then confirm there')
@@ -373,7 +423,7 @@ async function receiveFrame(frame, secure) {
       name: 'pair.ready',
       data: { pairingId: pairing.pairingId, proof },
     })
-    void authenticate().catch(() => disconnect('Authentication failed'))
+    void authenticate().catch(authenticationFailed)
     return
   }
   if (!secure && frame.type === 'event' && frame.name === 'pair.rejected') {
@@ -384,6 +434,12 @@ async function receiveFrame(frame, secure) {
   if (!secure) throw new Error('Unencrypted command rejected')
   if (frame.type === 'ping') {
     await sendSecure({ type: 'pong', seq: frame.seq })
+    return
+  }
+  // 断开 in Emperor: it removed the pairing; forget it without onboarding.
+  if (frame.type === 'event' && frame.name === 'pair.revoked') {
+    if (frame.data.pairingId === pairing?.pairingId)
+      await forgetPairing('已在 Emperor 中断开这个浏览器')
     return
   }
   if (frame.type !== 'request') return
@@ -414,6 +470,12 @@ async function receiveFrame(frame, secure) {
       ? { type: 'response', id: frame.id, ok: true, result: result.value }
       : { type: 'response', id: frame.id, ok: false, error: result.error },
   )
+  if (result.ok && typeof result.after === 'function')
+    setTimeout(() => {
+      void Promise.resolve()
+        .then(result.after)
+        .catch(() => setStatus('error', 'Emperor request failed'))
+    }, AFTER_RESPONSE_MS)
 }
 
 function failure(code, message, retryable = false) {
@@ -507,6 +569,18 @@ async function handleRequest(method, params, signal) {
   if (signal?.aborted) throw new Error('Request timed out')
   if (!isObject(params))
     return failure('INVALID_ARGUMENT', 'Parameters must be an object')
+  // 移除扩展程序 in Emperor. Needs no management permission.
+  if (method === 'extension.uninstall') {
+    if (typeof chrome.management?.uninstallSelf !== 'function')
+      return failure('CAPABILITY_DISABLED', 'Uninstall is unavailable')
+    return { ...success({ uninstalling: true }), after: uninstallSelf }
+  }
+  // Emperor replaced the extension folder with a newer build.
+  if (method === 'extension.reload')
+    return {
+      ...success({ reloading: true }),
+      after: () => chrome.runtime.reload(),
+    }
   if (agent.handles(method)) return agent.request(method, params, signal)
   if (method === 'tabs.discover') {
     const tabs = await chrome.tabs.query({})
@@ -650,6 +724,13 @@ async function handleRequest(method, params, signal) {
   return failure('CAPABILITY_DISABLED', 'Unsupported fixed method')
 }
 
+async function uninstallSelf() {
+  pairing = null
+  await chrome.storage.local.remove('pairing').catch(() => {})
+  disconnect('Removed by Emperor')
+  await chrome.management.uninstallSelf({ showConfirmDialog: false })
+}
+
 async function attachTabOnce(tabId, currentTraffic) {
   if (!traffic || traffic !== currentTraffic)
     throw new Error('Connection changed while connecting tab')
@@ -774,7 +855,7 @@ chrome.permissions.onRemoved.addListener(() => {
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (
     sender.id !== chrome.runtime.id ||
-    sender.url !== chrome.runtime.getURL('popup.html') ||
+    !PAGES.some((page) => sender.url === chrome.runtime.getURL(page)) ||
     !isObject(message)
   )
     return
@@ -813,5 +894,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 
 chrome.runtime.onStartup.addListener(() => {
   void initialize()
+})
+// Loaded for the first time (加载已解压的扩展程序): walk the user through
+// the site grant and pairing. A reload after an upgrade is an 'update'.
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details?.reason === 'install') void openWelcome().catch(() => {})
 })
 void initialize()

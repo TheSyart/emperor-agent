@@ -97,6 +97,10 @@ describe('unsigned preview release channel', () => {
       },
     })
 
+    // Resources come from the yml (the browser extension among them).
+    expect(config).not.toHaveProperty('extraResources')
+    expect(config.mac).not.toHaveProperty('extraResources')
+
     const serialized = JSON.stringify(config)
     expect(serialized).not.toContain('forceCodeSigning')
     expect(serialized).not.toContain('notarize')

@@ -321,12 +321,12 @@ export type TargetState =
   | 'closed'
   | 'lost'
 
-/** Who is steering a target right now (§6.6). */
 /**
- * `paused`: the app window is reloading (resumes with it); `stopped`: the
- * kill switch. The user no longer takes a target over (2026-09-29).
+ * Who is steering a target right now (§6.6). `paused`: the app window is
+ * reloading (resumes with it). The user no longer takes a target over
+ * (2026-09-29), and there is no emergency stop (2026-10-01).
  */
-export type ControlState = 'agent' | 'paused' | 'stopped'
+export type ControlState = 'agent' | 'paused'
 
 /** Action lifecycle (§5.7). */
 export type OperationState =
@@ -415,7 +415,6 @@ export interface ControlIndicatorTarget {
 /** What the on-screen control indicator should show (§6.6). */
 export interface ControlIndicatorState {
   readonly active: boolean
-  readonly stopped: boolean
   readonly targets: readonly ControlIndicatorTarget[]
 }
 
@@ -439,11 +438,10 @@ export interface UiTargetView {
   /** The Agent's latest operation on this target (the preview stacks by it). */
   readonly lastActiveAt?: string
   /**
-   * The conversation preview must not show this target's picture: an app the
-   * user marked sensitive, or a window / page that received a credential
-   * (a browser tab until it navigates).
+   * The conversation preview must not show this target's picture: a window
+   * or page that received a credential (a browser tab until it navigates).
    */
-  readonly previewBlocked?: 'sensitive-app' | 'credential-filled'
+  readonly previewBlocked?: 'credential-filled'
   /**
    * The user pressed "Stop Sharing" for this window: the Agent still works
    * on it, the conversation shows its last picture marked as stopped.
@@ -473,31 +471,18 @@ export interface ComputerUseStatusView {
    */
   readonly scopedRetired?: boolean
   readonly platform: HostPlatform | null
-  /** The emergency stop is engaged; all grants are suspended. */
-  readonly stopped: boolean
-  readonly stoppedAt?: string
-  /**
-   * Set when the stop was not the user's: the grants file was unreadable,
-   * was quarantined, and every grant is suspended until the user resumes.
-   */
-  readonly stopReason?: 'corrupt-store'
   /** Saved screenshots counted against the quota (spec 00 §8.5). */
   readonly screenshots?: { readonly count: number; readonly bytes: number }
   /** Days a download stays in the inbox; 0 keeps it. */
   readonly downloadRetentionDays?: number
-  /** The user's additions to the protected / high-risk / sensitive apps. */
-  readonly appLists?: {
-    readonly protected: readonly string[]
-    readonly highRisk: readonly string[]
-    readonly sensitive: readonly string[]
-  }
+  /**
+   * Apps the user had kept from Emperor, before the app lists were retired
+   * (2026-10-01): Settings says once that they can be operated now, until
+   * the user acknowledges it.
+   */
+  readonly retiredProtectedApps?: readonly string[]
   readonly drivers: readonly DriverCapability[]
   readonly targets: readonly UiTargetView[]
-  readonly killSwitch: {
-    readonly accelerator: string
-    readonly registered: boolean
-    readonly error?: string
-  }
 }
 
 /** A browser profile as the UI and tools see it (spec 00 §7.2). */

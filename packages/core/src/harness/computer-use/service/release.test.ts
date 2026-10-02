@@ -195,9 +195,7 @@ function fakeExternal() {
   return { driver, log, tabs }
 }
 
-function setup(
-  options: { settings?: { appLists?: { sensitive?: string[] } } } = {},
-) {
+function setup() {
   const store = new SessionLogStore({ root: '/tmp/unused', persist: false })
   store.create({ id: OWNER })
   store.create({ id: 's2' })
@@ -225,7 +223,7 @@ function setup(
       bytes: bytes.byteLength,
     }),
     cancelGrantCards: () => undefined,
-    settings: () => ({ enabled: true, ...options.settings }),
+    settings: () => ({ enabled: true }),
     onChanged: (reason) => changes.push(reason),
   })
   return { store, grants, port, desktop, external, service, changes }
@@ -286,11 +284,8 @@ afterEach(() => {
 
 describe('releasing a task (CU-04)', () => {
   it('releases every window and tab at the end of the task, closing none', async () => {
-    const k = setup({
-      settings: { appLists: { sensitive: ['com.example.Keys'] } },
-    })
+    const k = setup()
     await bindWindow(k, 'win-1', 'com.example.Writer')
-    // A sensitive app has no picture at all: it is released all the same.
     await bindWindow(k, 'win-2', 'com.example.Keys')
     const { record: tab } = await openTab(k)
     await attachExternal(k)

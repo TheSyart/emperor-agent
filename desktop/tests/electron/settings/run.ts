@@ -43,7 +43,6 @@ const SECTIONS: ReadonlyArray<readonly [string, string]> = [
 const SUB_PAGES: ReadonlyArray<
   readonly [section: string, opener: string, key: string, title: string]
 > = [
-  ['computer', '[data-action="manage-apps"]', 'apps', '任意应用'],
   [
     'computer',
     '[data-testid="browser-pairing-manage"]',
@@ -364,7 +363,7 @@ async function settings(page: Page): Promise<void> {
       > = [
         ['embedded-browser', 'browser', null],
         ['external-browser', 'computer', 'chrome'],
-        ['desktop', 'computer', 'apps'],
+        ['desktop', 'computer', null],
       ]
       const reached: string[] = []
       for (const [driver, section, key] of targets) {

@@ -31,7 +31,7 @@ Agent 能做什么由两个独立旋钮决定：**沙箱模式**限制文件写�
 
 - `write` / `edit` 在进程内做路径围栏：`read-only` 直接拒绝；`workspace-write` 在写入前重新解析真实路径（能发现被替换的符号链接祖先），要求目标位于可写根内。
 - `bash` 在受限模式下通过 OS 沙箱运行：macOS 使用 Seatbelt（`sandbox-exec`），Linux 使用 bubblewrap（启动时做一次功能探测）。其他平台没有后端，`read-only` 与 `workspace-write` 下的 `bash` 在启动前失败（fail closed），只有 `danger-full-access` 才会执行 Shell。
-- 受限 `bash` 主要限制文件写入。macOS Seatbelt 还拒读 Emperor 的电脑操作状态与浏览器数据，并拒绝向 Apple Events、WindowServer 和 Helper socket 发起部分连接；普通文件读取与互联网访问没有普遍禁止。`read`、`glob`、`grep` 不经过该 Shell 沙箱。
+- 受限 `bash` 主要限制文件写入。macOS Seatbelt 还拒读 Emperor 的电脑操作状态与浏览器数据，并拒绝向 Apple Events、WindowServer 和 Helper socket 发起部分连接；普通文件读取与互联网访问没有普遍禁止。`read`、`edit`、`write`、`glob`、`grep` 不经过该 Shell 沙箱，但与 Seatbelt 共用同一份受保护目录表（`sandbox/protected-state.ts`）：在任何模式下都拒绝 Emperor Home 的 `computer-use/` 与 `browser/`（按真实路径判断，符号链接、大小写和 `/System/Volumes/Data` 别名都算），`glob`、`grep` 从上级目录搜索时略过它们；这两个目录启动时设为 0700。
 - `memory_edit`、`scheduler`、MCP 工具与 Skill 加载不经过文件沙箱，也不需要审批；Memory 是应用状态，MCP server 的能力由其配置决定。
 - `skill_manage`（Skills 文件夹）与 `mcp_config`（`mcp_config.json`）同样不经过文件沙箱，但写入动作跟随权限预设：沙箱模式为 `danger-full-access` 时直接执行，其他模式下每次写入都通过 `ApprovalService` 询问一次，审批策略为 `never` 时被拒绝。查看类动作（`list`、`validate`、`reload`）不询问。
 
@@ -69,15 +69,15 @@ Plan 模式与权限预设相互独立：在 Plan 模式中切换预设，只改
 
 `ComputerUseService` 是内置浏览器、外部浏览器和桌面驱动的唯一执行入口。总开关默认关闭，各驱动另有开关；关闭的驱动保留工具，调用返回 `CAPABILITY_DISABLED`。开启后，目标由当前会话持有，动作需要有效租约、目标 generation 和观察 revision。普通文件或 Shell 权限预设本身不授予 GUI 目标控制权；反过来，电脑操作总开关也不限制 Shell。
 
-总开关打开后由 AI 连续操作（2026-09-29 起）：普通观察、交互、跳转和传输自动允许，身份的 `fullAccess` 就是总开关本身，与 Shell 预设独立。不再有逐项授权模式、人工暂停 / 接管 / 交还和控制浮层；旧版本保存的 `scoped` 设置在升级时让总开关关闭一次，并在设置页说明原因。只有三类情况暂停：高影响动作和凭据代填弹出 `grant_` 确认卡（每次都问，只允许这一次；凭据的绑定、字段类型与系统加密可用性在弹卡前检查，用户拒绝一次代填只记住该站点的代填），以及模型通过 `ask_user_question` 提问。子代理可执行普通动作，但不能弹卡：高影响动作和凭据代填返回 `PERMISSION_REQUIRED`（原因 `subagent-cannot-ask`），由父任务处理。
+总开关打开后由 AI 连续操作（2026-09-29 起）：普通观察、交互、跳转和传输自动允许，身份的 `fullAccess` 就是总开关本身，与 Shell 预设独立。不再有逐项授权模式、人工暂停 / 接管 / 交还和控制浮层；旧版本保存的 `scoped` 设置在升级时让总开关关闭一次，并在设置页说明原因。只有三类情况暂停：高影响动作和凭据代填弹出 `grant_` 确认卡（每次都问，只允许这一次；凭据的绑定、字段类型与本地加密可用性在弹卡前检查，用户拒绝一次代填只记住该站点的代填），以及模型通过 `ask_user_question` 提问。子代理可执行普通动作，但不能弹卡：高影响动作和凭据代填返回 `PERMISSION_REQUIRED`（原因 `subagent-cannot-ask`），由父任务处理。
 
-保护名单由内置名单与用户在设置中追加的 bundle ID 组成：保护的应用从列表中隐藏且返回 `TARGET_FORBIDDEN`；高风险应用（终端与脚本类）在确认卡上注明其执行不受命令沙箱约束；敏感应用只读结构，观察不含值，截图在弹卡前拒绝，也不录制预览画面。删除用户名单中的条目属于放宽，受 CoreApi mutation guard 约束。
+保护名单只有内置的系统名单（`protected-apps.ts`：授权弹窗与密码框、钥匙串访问、“密码”、系统设置、登录窗口和 Emperor 自身），不可配置；保护的应用从列表中隐藏且返回 `TARGET_FORBIDDEN`，其余应用都可以操作。用户追加的保护、高风险与不截图名单已于 2026-10-01 取消：`config.json` 里的旧 `appLists` 不校验、写回一次去掉，其中的保护应用记入 `retired-protected-apps.json`，供设置页提示一次（`computerUse.acknowledgeRetiredApps`）。
 
-`computerUseGate` 在工具执行前准备授权决定，`UiActionPolicy` 处理风险等级和主体，驱动在副作用前再次检查目标身份和版本。授权询问使用 `grant_` 交互，决定和动作状态进入 session log；无应答方、取消或急停均按拒绝处理。动作日志区分 prepared、dispatched 与 settled；若已经派发而结果无法确认，返回 `OUTCOME_UNKNOWN`，恢复时不重放该动作。
+`computerUseGate` 在工具执行前准备授权决定，`UiActionPolicy` 处理风险等级和主体，驱动在副作用前再次检查目标身份和版本。授权询问使用 `grant_` 交互，决定和动作状态进入 session log；无应答方、取消或关闭总开关均按拒绝处理。动作日志区分 prepared、dispatched 与 settled；若已经派发而结果无法确认，返回 `OUTCOME_UNKNOWN`，恢复时不重放该动作。
 
-**任务结束释放。** 根会话的 turn 结束且其下没有运行中的后台子代理时（或此后最后一个子代理结束时），宿主调用 `releaseTask`：中止并等待在途动作（已派发的记 `OUTCOME_UNKNOWN`，不重放）；桌面窗口依次停录制流、`input.releaseAll`、`front.restore`（仅本任务激活过的窗口，须在解绑前）、`target.release`；内置浏览器标签页保留页面，只让 ref 失效，下一任务可用 `browser_tab_select` 取回；外部 Chrome 标签页只解除认领，保持扩展连接；once 授权撤销。全部完成后目标同时进入 `released` 状态，预览整组消失；session log 记录 `ui/target-released` 与 `ui/task-released`。旧句柄返回 `STALE_TARGET`（原因 `released-at-task-end`），与“窗口已关闭”区分。释放失败的目标禁止新动作并带 `releaseFailed`，桌面失败时断开 Helper 连接以终止录制流。`ask_user_question` 在 turn 内阻塞，等待回答不会触发释放；急停、关闭总开关、删除会话走同一流程，后两者随后关闭剩余的内置页面。
+**任务结束释放。** 根会话的 turn 结束且其下没有运行中的后台子代理时（或此后最后一个子代理结束时），宿主调用 `releaseTask`：中止并等待在途动作（已派发的记 `OUTCOME_UNKNOWN`，不重放）；桌面窗口依次停录制流、`input.releaseAll`、`front.restore`（仅本任务激活过的窗口，须在解绑前）、`target.release`；内置浏览器标签页保留页面，只让 ref 失效，下一任务可用 `browser_tab_select` 取回；外部 Chrome 标签页只解除认领，保持扩展连接；once 授权撤销。全部完成后目标同时进入 `released` 状态，预览整组消失；session log 记录 `ui/target-released` 与 `ui/task-released`。旧句柄返回 `STALE_TARGET`（原因 `released-at-task-end`），与“窗口已关闭”区分。释放失败的目标禁止新动作并带 `releaseFailed`，桌面失败时断开 Helper 连接以终止录制流。`ask_user_question` 在 turn 内阻塞，等待回答不会触发释放；关闭总开关、删除会话走同一流程，随后关闭剩余的内置页面。
 
-应用窗口重载期间 Agent 目标暂停，窗口加载完成后由主进程恢复；这期间页面打开的弹窗随之暂停和恢复。急停取消动作、撤掉待回答的卡片、挂起授权、要求驱动释放输入，并释放全部目标。具体使用和已开放范围见[电脑操作（实验）](../user/computer-use.md)。
+应用窗口重载期间 Agent 目标暂停，窗口加载完成后由主进程恢复；这期间页面打开的弹窗随之暂停和恢复。紧急停止（快捷键、程序坞菜单、菜单栏图标、`computerUse.stop` / `resume`）与授权挂起已于 2026-10-01 取消：要让 Agent 停下，停止回合或关闭总开关；旧会话日志里的 `emergency-stop` 事件仍可读取。具体使用和已开放范围见[电脑操作（实验）](../user/computer-use.md)。
 
 ## CoreApi mutation guard
 

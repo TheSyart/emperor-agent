@@ -978,7 +978,6 @@ export interface ComputerUseDiagnosticsPayload {
   supported?: boolean
   enabled?: boolean
   platform?: string | null
-  stopped?: boolean
   drivers?: Array<{
     driver: string
     stage: string
@@ -989,7 +988,6 @@ export interface ComputerUseDiagnosticsPayload {
   }>
   targets?: number
   grants?: number
-  killSwitch?: { accelerator: string; registered: boolean; error?: string }
 }
 
 export interface MemoryContextExplanationPayload {

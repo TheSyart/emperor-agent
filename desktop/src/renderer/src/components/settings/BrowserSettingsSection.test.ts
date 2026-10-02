@@ -62,7 +62,6 @@ function status(patch: Partial<ComputerUseStatusView> = {}) {
     supported: true,
     enabled: true,
     platform: 'macos',
-    stopped: false,
     drivers: [
       {
         driver: 'embedded-browser',
@@ -75,7 +74,6 @@ function status(patch: Partial<ComputerUseStatusView> = {}) {
       },
     ],
     targets: [],
-    killSwitch: { accelerator: 'Control+Alt+Command+.', registered: true },
     downloadRetentionDays: 30,
     ...patch,
   } as unknown as ComputerUseStatusView
@@ -115,6 +113,13 @@ function row(root: HTMLElement, title: string): HTMLElement {
   ].find((item) => item.querySelector('.title')?.textContent?.trim() === title)
   if (!found) throw new Error(`no row ${title}`)
   return found
+}
+
+function groupTitle(element: Element | null | undefined): string | undefined {
+  return element
+    ?.closest('.ds-settings-group')
+    ?.querySelector(':scope > .head .title')
+    ?.textContent?.trim()
 }
 
 async function pick(root: HTMLElement, id: string, label: string) {
@@ -203,6 +208,17 @@ describe('BrowserSettingsSection', () => {
     ).toEqual(['位置', '下载前询问保存位置', '下载历史记录', '下载保留时间'])
     // The main page stays free of inputs: the folder is picked in a dialog.
     expect(root.querySelector('input')).toBeNull()
+    // No lead-in paragraph and nothing above the control card while all is
+    // well: the cards say it.
+    expect(root.querySelector('.ds-settings-section .intro')).toBeNull()
+    expect(root.querySelector('.ds-settings-notice')).toBeNull()
+    expect(
+      root.querySelector('.ds-settings-section > .body')?.firstElementChild,
+    ).toBe(root.querySelector('[data-testid="browser-agent-card"]'))
+    // 导入… sits with what it brings in: passwords and sign-ins.
+    const importButton = root.querySelector('[data-testid="open-import"]')
+    expect(importButton?.closest('.head')).not.toBeNull()
+    expect(groupTitle(importButton)).toBe('自动填充和密码')
     for (const gone of [
       '启用内置浏览器',
       '批注截图',
@@ -302,14 +318,46 @@ describe('BrowserSettingsSection', () => {
     finish({ ok: true })
     await settle()
     expect(clear).toHaveBeenCalledTimes(1)
-    expect(root.querySelector('[data-clear-status]')?.textContent).toContain(
-      '已清除',
-    )
+    // The outcome is a status badge in the row itself, before its button.
+    const outcome = () =>
+      row(root, '浏览数据').querySelector<HTMLElement>('[data-clear-status]')
+    expect(outcome()?.classList.contains('ds-status-badge')).toBe(true)
+    expect(outcome()?.dataset.tone).toBe('ok')
+    expect(outcome()?.textContent?.trim()).toBe('已清除')
+    expect(outcome()?.nextElementSibling).toBe(button())
     button().click()
     await settle()
-    expect(root.querySelector('[role="alert"]')?.textContent).toContain(
-      'disk busy',
-    )
+    expect(outcome()?.dataset.tone).toBe('error')
+    expect(outcome()?.textContent?.trim()).toBe('清除失败')
+    // Why, in the row's own line.
+    expect(
+      row(root, '浏览数据').querySelector('.description [role="alert"]')
+        ?.textContent,
+    ).toContain('disk busy')
+    expect(root.querySelector('.ds-settings-notice')).toBeNull()
+  })
+
+  it('says what went wrong in a notice at the top of the page', async () => {
+    const emperor = (
+      window as unknown as {
+        emperor: { invokeCore: (key: string, input?: unknown) => unknown }
+      }
+    ).emperor
+    const invoke = emperor.invokeCore
+    emperor.invokeCore = async (key: string, input?: unknown) => {
+      if (key === 'computerUse.status') throw new Error('电脑操作服务没有响应')
+      return await invoke(key, input)
+    }
+    const root = await mount()
+    const notice = root.querySelector<HTMLElement>('.ds-settings-notice')
+    expect(notice?.dataset.tone).toBe('error')
+    expect(notice?.getAttribute('role')).toBe('alert')
+    expect(notice?.textContent).toContain('电脑操作服务没有响应')
+    // First on the page, above the control card.
+    expect(
+      root.querySelector('.ds-settings-section > .body')?.firstElementChild,
+    ).toBe(notice)
+    expect(root.querySelector('.browser-error')).toBeNull()
   })
 
   it('picks the download folder in the system dialog and can go back to the default', async () => {

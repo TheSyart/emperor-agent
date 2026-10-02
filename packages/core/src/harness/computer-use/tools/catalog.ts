@@ -150,7 +150,6 @@ function onDesktopTarget(
       )
     if (input.service.isProtectedApp(target.appId))
       throw new UiError('TARGET_FORBIDDEN', 'this app is protected')
-    const highRisk = input.service.isHighRiskApp(target.appId)
     const { display, ...more } = extra?.(input, target) ?? {}
     return {
       target,
@@ -159,10 +158,6 @@ function onDesktopTarget(
         actionClass,
         appId: target.appId,
         windowRef: target.windowRef,
-        // High-risk apps (terminals, script editors) are marked, but their
-        // ordinary input runs like any other while computer use is on (the
-        // user's decision); high-impact keys and menus still ask each time.
-        ...(highRisk ? { highRiskApp: true } : {}),
         callId: input.callId,
         toolName: input.toolName,
         display: { appName: target.appId, title: target.title, ...display },
@@ -471,9 +466,6 @@ export const GUI_TOOL_CATALOG: Readonly<Record<string, CatalogEntry>> = {
           actionClass: 'observe',
           appId: candidate.appId,
           windowRef: candidate.windowRef,
-          ...(input.service.isHighRiskApp(candidate.appId)
-            ? { highRiskApp: true }
-            : {}),
           callId: input.callId,
           toolName: input.toolName,
           display: { appName: candidate.appName, title: candidate.title },
@@ -489,16 +481,7 @@ export const GUI_TOOL_CATALOG: Readonly<Record<string, CatalogEntry>> = {
   desktop_screenshot: {
     kind: 'target',
     planSafe: true,
-    classify: onDesktopTarget('observe', (input, target) => {
-      // Refuse before any card: a sensitive app is never captured.
-      if (input.service.isSensitiveApp(target.appId!))
-        throw new UiError(
-          'CAPABILITY_DISABLED',
-          'the user marked this app as sensitive; screenshots are not taken',
-          { reason: 'sensitive-app' },
-        )
-      return {}
-    }),
+    classify: onDesktopTarget('observe'),
   },
   desktop_click: {
     kind: 'target',

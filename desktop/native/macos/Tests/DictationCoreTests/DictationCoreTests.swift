@@ -109,4 +109,54 @@ final class DictationCoreTests: XCTestCase {
         XCTAssertNil(sequence.final("hello"))
         XCTAssertFalse(sequence.hasFinal)
     }
+
+    // RV-06: the microphone's loudness, for the composer's waveform.
+
+    func testEncodesALevelWithTwoDecimals() throws {
+        let text = String(decoding: DictationCodec.encode(.level(session: "abcdefgh", seq: 3, value: 0.43)), as: UTF8.self)
+        XCTAssertEqual(text, #"{"seq":3,"session":"abcdefgh","type":"level","value":0.43}"# + "\n")
+        XCTAssertEqual(try object(.level(session: "abcdefgh", seq: 4, value: 1))["value"] as? Double, 1)
+        XCTAssertEqual(try object(.level(session: "abcdefgh", seq: 5, value: 0))["value"] as? Double, 0)
+    }
+
+    func testSequenceSendsLevelsOnlyWhileListening() {
+        var sequence = DictationSequence(session: "abcdefgh")
+        XCTAssertNil(sequence.level(0.5), "no level before started")
+        _ = sequence.started(locale: "zh-CN")
+        XCTAssertEqual(sequence.level(0.4321), .level(session: "abcdefgh", seq: 2, value: 0.43))
+        XCTAssertEqual(sequence.level(1.7), .level(session: "abcdefgh", seq: 3, value: 1))
+        XCTAssertEqual(sequence.level(-0.2), .level(session: "abcdefgh", seq: 4, value: 0))
+        XCTAssertNil(sequence.level(.nan))
+        XCTAssertEqual(sequence.partial("你好"), .partial(session: "abcdefgh", seq: 5, text: "你好"))
+        _ = sequence.final("你好。")
+        XCTAssertNil(sequence.level(0.5), "the microphone is closed after the final")
+        _ = sequence.end(.stopped)
+        XCTAssertNil(sequence.level(0.5))
+    }
+
+    func testLevelMeterCutsAudioIntoFifteenthsOfASecond() {
+        var meter = DictationLevelMeter(sampleRate: 48_000)
+        XCTAssertEqual(meter.windowFrames, 3_200)
+        // Whatever the buffer size, a level comes every 3,200 frames.
+        XCTAssertEqual(meter.add([Float](repeating: 0, count: 4_800)), [0])
+        XCTAssertEqual(meter.add([Float](repeating: 0, count: 4_800)), [0, 0])
+        XCTAssertEqual(meter.add([Float](repeating: 0, count: 1_000)), [])
+        XCTAssertEqual(DictationLevelMeter(sampleRate: 44_100).windowFrames, 2_940)
+    }
+
+    func testLevelMeterPutsLoudnessOnADecibelScale() {
+        XCTAssertEqual(DictationLevelMeter.level(rms: 0), 0)
+        XCTAssertEqual(DictationLevelMeter.level(rms: .nan), 0)
+        XCTAssertEqual(DictationLevelMeter.level(rms: 0.001), 0, "-60 dB: room noise is silence")
+        XCTAssertEqual(DictationLevelMeter.level(rms: 0.01), 0.25, accuracy: 0.0001, "-40 dB")
+        XCTAssertEqual(DictationLevelMeter.level(rms: 0.1), 0.75, accuracy: 0.0001, "-20 dB: speech")
+        XCTAssertEqual(DictationLevelMeter.level(rms: 1), 1, "full scale")
+        var meter = DictationLevelMeter(sampleRate: 1_500)
+        let quiet = (0..<100).map { Float($0.isMultiple(of: 2) ? 0.01 : -0.01) }
+        let loud = (0..<100).map { Float($0.isMultiple(of: 2) ? 0.1 : -0.1) }
+        let levels = meter.add(quiet + loud)
+        XCTAssertEqual(levels.count, 2)
+        XCTAssertEqual(levels[0], 0.25, accuracy: 0.0001)
+        XCTAssertEqual(levels[1], 0.75, accuracy: 0.0001)
+    }
 }

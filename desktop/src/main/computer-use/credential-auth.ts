@@ -13,8 +13,9 @@ export function credentialAuthPath(input: {
 }
 
 /**
- * Touch ID or login-password check (LocalAuthentication). Gates both viewing
- * a password in Settings and biometric vault unlock; true only on success.
+ * Touch ID or login-password check (LocalAuthentication only, no Keychain).
+ * Gates viewing a password in Settings; it unlocks nothing. True only on
+ * success.
  */
 export async function authenticateCredentialReveal(
   binary: string,

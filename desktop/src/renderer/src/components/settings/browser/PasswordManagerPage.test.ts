@@ -17,8 +17,7 @@ const api = vi.hoisted(() => ({
   vaultLock: vi.fn(),
   vaultSetMaster: vi.fn(),
   vaultReveal: vi.fn(),
-  vaultBiometricUnlock: vi.fn(),
-  vaultBiometricDisable: vi.fn(),
+  vaultReset: vi.fn(),
 }))
 vi.mock('../../../api/backend', () => api)
 
@@ -38,7 +37,7 @@ const site: VaultEntry = {
 function status(patch: Partial<VaultStatus> = {}): VaultStatus {
   return {
     available: true,
-    backend: 'keychain',
+    backend: 'emperor-local',
     locked: false,
     hasMasterPassword: false,
     handles: [site],
@@ -76,7 +75,7 @@ async function openAdd(): Promise<void> {
   await settle()
 }
 
-/** Submit the master password / Touch ID dialog. */
+/** Submit the master password dialog. */
 async function submitProtect(): Promise<void> {
   document.body
     .querySelector('form.vault-protect')!
@@ -207,17 +206,44 @@ describe('credential vault settings', () => {
     expect(second).toMatchObject({ handleId: shown.handleId, username: '' })
   })
 
-  it('explains that a basic_text backend leaves the vault disabled', async () => {
+  it('offers 清空 when the local key is lost, and only after confirming', async () => {
     api.vaultStatus.mockResolvedValue(
-      status({ available: false, backend: 'basic_text', handles: [] }),
+      status({ available: false, problem: 'key-missing' }),
+    )
+    api.vaultReset.mockResolvedValue(undefined)
+    const root = await mount()
+    const notice = root.querySelector('.ds-settings-notice')
+    expect(notice?.getAttribute('data-tone')).toBe('error')
+    expect(notice?.textContent).toContain('已保存的密码无法解密')
+    expect(notice?.textContent).toContain('本地密钥')
+    expect(root.textContent).toContain('无法解密')
+    // Nothing can be added or changed until it is cleared.
+    expect(addAction()).toBeUndefined()
+    expect(button(root, '编辑').disabled).toBe(true)
+    expect(button(root, '查看密码').disabled).toBe(true)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    button(notice as HTMLElement, '清空').click()
+    await settle()
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(api.vaultReset).not.toHaveBeenCalled()
+    confirm.mockReturnValue(true)
+    api.vaultStatus.mockResolvedValue(status({ handles: [] }))
+    button(notice as HTMLElement, '清空').click()
+    await settle()
+    expect(api.vaultReset).toHaveBeenCalledTimes(1)
+    expect(root.querySelector('.ds-settings-notice')).toBeNull()
+    expect(addAction()).toBeDefined()
+    confirm.mockRestore()
+  })
+
+  it('names a key file that fails its checks', async () => {
+    api.vaultStatus.mockResolvedValue(
+      status({ available: false, problem: 'key-invalid', handles: [] }),
     )
     const root = await mount()
-    expect(root.textContent).toContain('无保护')
-    expect(root.textContent).toContain('basic_text')
-    expect(root.textContent).toContain('GNOME Keyring 或 KWallet')
-    expect(root.textContent).toContain('凭据库已停用')
-    expect(addAction()).toBeUndefined()
-    expect(form()).toBeNull()
+    const notice = root.querySelector('.ds-settings-notice')
+    expect(notice?.textContent).toContain('权限或属主不对')
+    expect(button(notice as HTMLElement, '清空')).toBeTruthy()
   })
 
   it('shows protection strength and each entry’s last fill', async () => {
@@ -227,24 +253,23 @@ describe('credential vault settings', () => {
       label: 'Used',
       lastUsedAt: Date.UTC(2026, 8, 25, 6, 30),
     }
-    api.vaultStatus.mockResolvedValue(
-      status({ backend: 'dpapi', handles: [site, used] }),
-    )
+    api.vaultStatus.mockResolvedValue(status({ handles: [site, used] }))
     const root = await mount()
-    expect(root.textContent).toContain('Windows DPAPI')
+    expect(root.textContent).toContain(
+      'Emperor 本地密钥（保存在这台 Mac 的 Emperor 目录）',
+    )
     expect(root.textContent).toContain('基础')
     expect(root.textContent).toContain('建议设置主密码')
+    expect(root.textContent).not.toContain('钥匙串')
+    expect(root.querySelector('.ds-settings-notice')).toBeNull()
     expect(root.textContent).toContain('尚未代填')
     expect(root.textContent).toContain('上次代填 2026')
 
     app?.unmount()
-    api.vaultStatus.mockResolvedValue(
-      status({ backend: 'gnome_libsecret', hasMasterPassword: true }),
-    )
+    api.vaultStatus.mockResolvedValue(status({ hasMasterPassword: true }))
     render(root)
     await settle()
-    expect(root.textContent).toContain('系统加密 + 主密码')
-    expect(root.textContent).toContain('GNOME Keyring')
+    expect(root.textContent).toContain('本地密钥 + 主密码')
   })
 
   it('names the target of the last fill beside its time', async () => {
@@ -340,97 +365,35 @@ describe('credential vault settings', () => {
     )
   })
 
-  it('unlocks with Touch ID once the user opted in with the password', async () => {
+  it('unlocks and sets the master password in a dialog, with no Touch ID', async () => {
     api.vaultStatus.mockResolvedValue(
-      status({
-        hasMasterPassword: true,
-        locked: true,
-        biometricSupported: true,
-        biometricUnlock: false,
-      }),
+      status({ hasMasterPassword: true, locked: true }),
     )
     api.vaultUnlock.mockResolvedValue(true)
     const root = await mount()
-    expect(() => button(root, '使用 Touch ID')).toThrow()
+    expect(document.body.textContent).not.toContain('Touch ID')
     // The page has no password field: 解锁 asks in a dialog.
     expect(root.querySelector('input[type="password"]')).toBeNull()
     button(root, '解锁').click()
     await settle()
+    expect(document.body.textContent).not.toContain('Touch ID')
+    expect(document.body.querySelector('label.vault-check')).toBeNull()
     await type(dialogInput('主密码'), 'correct horse battery')
-    await tick(checkbox(root, '允许 Touch ID 解锁'))
     await submitProtect()
-    expect(api.vaultUnlock).toHaveBeenCalledWith('correct horse battery', {
-      biometric: true,
-    })
+    expect(api.vaultUnlock).toHaveBeenCalledWith('correct horse battery')
     expect(document.body.querySelector('form.vault-protect')).toBeNull()
 
     app?.unmount()
-    api.vaultStatus.mockResolvedValue(
-      status({
-        hasMasterPassword: true,
-        locked: true,
-        biometricSupported: true,
-        biometricUnlock: true,
-      }),
-    )
-    api.vaultBiometricUnlock.mockResolvedValue(true)
-    api.vaultBiometricDisable.mockResolvedValue(undefined)
+    api.vaultStatus.mockResolvedValue(status())
+    api.vaultSetMaster.mockResolvedValue(undefined)
     render(root)
     await settle()
-    expect(root.textContent).toContain('用主密码或 Touch ID 解锁后')
-    expect(() => checkbox(root, '允许 Touch ID 解锁')).toThrow()
-    button(root, '使用 Touch ID').click()
-    await settle()
-    expect(api.vaultBiometricUnlock).toHaveBeenCalledTimes(1)
-    // Turning it off works while locked.
-    button(root, '关闭').click()
-    await settle()
-    expect(api.vaultBiometricDisable).toHaveBeenCalledTimes(1)
-  })
-
-  it('offers Touch ID with a new master password and hides it where unsupported', async () => {
-    api.vaultStatus.mockResolvedValue(status({ biometricSupported: true }))
-    api.vaultSetMaster.mockResolvedValue(undefined)
-    const root = await mount()
-    expect(root.querySelector('input[type="password"]')).toBeNull()
     button(root, '设置').click()
     await settle()
-    // The Touch ID choice shows up once there is a password to go with it.
-    expect(() => checkbox(root, '允许 Touch ID 解锁')).toThrow()
     await type(dialogInput('新的主密码'), 'correct horse battery')
-    await tick(checkbox(root, '允许 Touch ID 解锁'))
+    expect(document.body.textContent).not.toContain('Touch ID')
     await submitProtect()
-    expect(api.vaultSetMaster).toHaveBeenCalledWith('correct horse battery', {
-      biometric: true,
-    })
-
-    app?.unmount()
-    api.vaultStatus.mockResolvedValue(
-      status({
-        hasMasterPassword: true,
-        biometricSupported: true,
-        biometricUnlock: false,
-      }),
-    )
-    api.vaultUnlock.mockResolvedValue(true)
-    render(root)
-    await settle()
-    // Unlocked and not yet on: re-enter the master password to opt in.
-    button(root, '开启').click()
-    await settle()
-    await type(dialogInput('确认主密码'), 'correct horse battery')
-    await submitProtect()
-    expect(api.vaultUnlock).toHaveBeenCalledWith('correct horse battery', {
-      biometric: true,
-    })
-
-    app?.unmount()
-    api.vaultStatus.mockResolvedValue(
-      status({ hasMasterPassword: true, locked: true }),
-    )
-    render(root)
-    await settle()
-    expect(root.textContent).not.toContain('Touch ID')
+    expect(api.vaultSetMaster).toHaveBeenCalledWith('correct horse battery')
   })
 
   it('shows vault failures in Chinese and refreshes into the locked state', async () => {
@@ -448,10 +411,27 @@ describe('credential vault settings', () => {
     expect(root.querySelector('[role="alert"]')?.textContent).toBe(
       '凭据库已锁定，请先用主密码解锁。',
     )
+    // A notice at the top of the page, not a loose line.
+    const notice = root.querySelector<HTMLElement>('.ds-settings-notice')
+    expect(notice?.dataset.tone).toBe('error')
+    expect(
+      root.querySelector('.ds-settings-section > .body')?.firstElementChild,
+    ).toBe(notice)
     expect(api.vaultStatus).toHaveBeenCalledTimes(2)
     expect(root.textContent).toContain('已锁定')
     expect(button(root, '解锁')).toBeTruthy()
     expect(addAction()).toBeUndefined()
     expect(form()).toBeNull()
+  })
+
+  it('says what the page is in one short sentence', async () => {
+    api.vaultStatus.mockResolvedValue(status())
+    const root = await mount()
+    const intro =
+      root.querySelector('.ds-settings-section .intro')?.textContent?.trim() ??
+      ''
+    expect(intro).not.toBe('')
+    expect(intro.split(/[。！？；]/).filter(Boolean)).toHaveLength(1)
+    expect(intro.length).toBeLessThanOrEqual(42)
   })
 })

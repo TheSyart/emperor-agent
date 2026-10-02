@@ -9,7 +9,9 @@ import { installVisualCoreBridge } from './visualBridge'
 // 密码管理器 / 登录状态 / 网站设置 sub pages behind the 「浏览器 › …」
 // breadcrumb (ST-02). ST-05 adds the download rows (位置, 下载前询问保存位置,
 // 下载历史记录), the 下载历史记录 sub page and the 浏览器 pane's download
-// line.
+// line. RV-05: one card per group and no lead-in, 导入… beside
+// 自动填充和密码, the clear outcome as a badge in its row, failures in a
+// SettingsNotice at the top.
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'browser-settings')
 
 test.beforeAll(() => {
@@ -83,6 +85,16 @@ for (const theme of ['dark', 'light'] as const) {
       'Emperor',
     )
     await expect(dialog.locator('.section-title')).toHaveText('浏览器')
+    // The control card opens the page: no lead-in, no notice while all is
+    // well, and 导入… sits beside 自动填充和密码.
+    await expect(dialog.locator('.ds-settings-section .intro')).toHaveCount(0)
+    await expect(dialog.locator('.ds-settings-notice')).toHaveCount(0)
+    const autofill = dialog.locator('.ds-settings-group').filter({
+      has: page.locator('.head .title', { hasText: /^自动填充和密码$/ }),
+    })
+    await expect(
+      autofill.locator('.head').getByTestId('open-import'),
+    ).toBeVisible()
     await noHorizontalOverflow(page)
     await shot(page, `browser-${theme}`)
 
@@ -90,7 +102,10 @@ for (const theme of ['dark', 'light'] as const) {
     await page.getByRole('menuitem', { name: /^系统默认浏览器/ }).click()
     await expect(dialog).toContainText('本机地址会带着你系统浏览器里的登录打开')
     await dialog.locator('[data-action="clear-browser-data"]').click()
-    await expect(dialog.locator('[data-clear-status]')).toHaveText('已清除')
+    const cleared = dialog.locator('[data-clear-status]')
+    await expect(cleared).toHaveText('已清除')
+    await expect(cleared).toHaveAttribute('data-tone', 'ok')
+    await shot(page, `browser-cleared-${theme}`)
     await dialog.getByText('浏览器权限').scrollIntoViewIfNeeded()
     await shot(page, `browser-changed-${theme}`)
   })
@@ -108,6 +123,13 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(groupTitles(dialog)).toHaveText(['保护', '已保存'])
     await expect(dialog).toContainText('GitHub')
     await expect(dialog).toContainText('公司邮箱')
+    // Sealed with Emperor's own key, said plainly; no Keychain, no Touch ID.
+    await expect(dialog).toContainText(
+      'Emperor 本地密钥（保存在这台 Mac 的 Emperor 目录）',
+    )
+    await expect(dialog).toContainText('建议设置主密码')
+    await expect(dialog).not.toContainText('钥匙串')
+    await expect(dialog).not.toContainText('Touch ID')
     await noHorizontalOverflow(page)
     await shot(page, `passwords-${theme}`)
 
@@ -124,13 +146,41 @@ for (const theme of ['dark', 'light'] as const) {
     await dialog.locator('[data-action="vault-set-master"]').click()
     const master = page.getByRole('dialog', { name: '设置主密码' })
     await master.getByLabel('新的主密码').fill('correct horse battery')
-    await expect(master).toContainText('允许 Touch ID 解锁')
+    await expect(master).not.toContainText('Touch ID')
+    await expect(master.locator('input[type="checkbox"]')).toHaveCount(0)
     await shot(page, `passwords-master-${theme}`)
     await master.getByRole('button', { name: '取消' }).click()
 
     await dialog.getByTestId('settings-crumb').click()
     await expect(dialog.getByTestId('browser-agent-card')).toBeVisible()
     await expect(page).not.toHaveURL(/page=/)
+  })
+
+  test(`password manager with a lost local key (${theme})`, async ({
+    page,
+  }) => {
+    const dialog = await openBrowser(page, {
+      theme,
+      page: 'passwords&visualVault=key-missing',
+    })
+    const notice = dialog.locator('.ds-settings-notice')
+    await expect(notice).toHaveAttribute('data-tone', 'error')
+    await expect(notice).toContainText('已保存的密码无法解密')
+    await expect(notice).toContainText('本地密钥文件不见了')
+    await expect(dialog.locator('[data-action="add-credential"]')).toHaveCount(
+      0,
+    )
+    await noHorizontalOverflow(page)
+    await shot(page, `passwords-key-missing-${theme}`)
+    // 清空 asks first; accepting starts the vault over.
+    page.once('dialog', (prompt) => {
+      expect(prompt.message()).toContain('无法恢复')
+      void prompt.accept()
+    })
+    await notice.getByRole('button', { name: '清空' }).click()
+    await expect(notice).toHaveCount(0)
+    await expect(dialog).toContainText('还没有保存的密码')
+    await expect(dialog.locator('[data-action="add-credential"]')).toBeVisible()
   })
 
   test(`download rows and the download history (${theme})`, async ({
@@ -252,6 +302,52 @@ test('deep links to a sub page and fits a narrow window', async ({ page }) => {
   await noHorizontalOverflow(page)
   await shot(page, 'browser-narrow')
 })
+
+for (const theme of ['dark', 'light'] as const)
+  test(`a failure shows a notice on top; a failed clear says why in its row (${theme})`, async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      const bridge = (
+        window as unknown as {
+          emperor: {
+            clearBrowserData?: () => Promise<unknown>
+            invokeCore: (key: string, ...args: unknown[]) => Promise<unknown>
+          }
+        }
+      ).emperor
+      const invoke = bridge.invokeCore
+      bridge.clearBrowserData = async () => ({
+        ok: false,
+        error: '有页面正在下载，稍后再试',
+      })
+      bridge.invokeCore = async (key: string, ...args: unknown[]) => {
+        if (key === 'computerUse.setDriverEnabled')
+          throw new Error('电脑操作服务没有响应，请稍后再试')
+        return await invoke(key, ...args)
+      }
+    })
+    const dialog = await openBrowser(page, { theme })
+    await dialog.locator('#browser-agent').click()
+    const notice = dialog.locator('.ds-settings-notice')
+    await expect(notice).toHaveAttribute('data-tone', 'error')
+    await expect(notice).toContainText('电脑操作服务没有响应')
+    // On top of the page, above the control card.
+    const first = await dialog
+      .locator('.ds-settings-section > .body > *')
+      .first()
+      .getAttribute('class')
+    expect(first).toContain('ds-settings-notice')
+    await dialog.locator('[data-action="clear-browser-data"]').click()
+    const outcome = dialog.locator('[data-clear-status]')
+    await expect(outcome).toHaveText('清除失败')
+    await expect(outcome).toHaveAttribute('data-tone', 'error')
+    await expect(
+      dialog.getByText('没能清除：有页面正在下载，稍后再试'),
+    ).toBeVisible()
+    await noHorizontalOverflow(page)
+    await shot(page, `browser-failed-${theme}`)
+  })
 
 test('the control card waits for 电脑操作 and leads there', async ({
   page,

@@ -2,6 +2,9 @@
  * `~/.emperor/computer-use/grants.json` codec (schemaVersion 1). Only
  * `session` and `timed` grants are persisted; `once` and `task` grants live
  * in memory. Any entry that fails validation is dropped, never widened.
+ *
+ * `suspended` (the retired emergency stop and the corrupt-store stop,
+ * 2026-10-01) is read without validation and written back once without it.
  */
 
 import { z } from 'zod'
@@ -10,14 +13,8 @@ import { UI_ACTION_CLASSES, type UiActionClass, type UiGrant } from '../types'
 
 export const GRANTS_SCHEMA_VERSION = 1
 
-export interface GrantSuspension {
-  readonly at: string
-  readonly by: 'kill-switch' | 'corrupt-store'
-}
-
 export interface GrantsDocument {
   readonly grants: readonly UiGrant[]
-  readonly suspended: GrantSuspension | null
 }
 
 const iso = z.string().datetime({ offset: true })
@@ -70,11 +67,8 @@ const documentSchema = z
   .object({
     schemaVersion: z.literal(GRANTS_SCHEMA_VERSION),
     grants: z.array(z.unknown()),
-    suspended: z
-      .object({ at: iso, by: z.enum(['kill-switch', 'corrupt-store']) })
-      .strict()
-      .nullable()
-      .optional(),
+    /** Retired: read once, never validated, never written. */
+    suspended: z.unknown().optional(),
   })
   .strict()
 
@@ -86,7 +80,6 @@ export const GRANTS_CODEC: SnapshotCodec<GrantsDocument> = {
       grants: value.grants.filter(
         (grant) => grant.scope === 'session' || grant.scope === 'timed',
       ),
-      suspended: value.suspended,
     }
   },
   decode(input) {
@@ -101,8 +94,9 @@ export const GRANTS_CODEC: SnapshotCodec<GrantsDocument> = {
         grants.push(parsed.data)
     }
     return {
-      value: { grants, suspended: document.suspended ?? null },
+      value: { grants },
       schemaVersion: GRANTS_SCHEMA_VERSION,
+      ...(document.suspended === undefined ? {} : { migrated: true }),
     }
   },
 }

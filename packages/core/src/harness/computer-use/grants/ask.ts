@@ -42,7 +42,6 @@ export interface GrantAskRequest {
     input?: GrantDisplayInput
   }
   readonly highImpact?: boolean
-  readonly highRiskApp?: boolean
   /** Offer the "allow in background" checkbox. */
   readonly background?: boolean
   readonly signal?: AbortSignal
@@ -91,7 +90,6 @@ export class GrantAskService {
       ...(request.toolName === undefined ? {} : { toolName: request.toolName }),
       ...(request.display === undefined ? {} : { display: request.display }),
       ...(request.highImpact === true ? { highImpact: true } : {}),
-      ...(request.highRiskApp === true ? { highRiskApp: true } : {}),
       ...(request.background === true ? { background: true } : {}),
     })
 

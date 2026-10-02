@@ -15,7 +15,7 @@
 4. [模型、记忆与附件](models-memory-attachments.md)：数据怎样进入模型和怎样落盘。
 5. [Tools、Skills 与 MCP](tools-skills-mcp.md)：扩展 Agent 可以调用的能力。
 6. [定时任务、Hooks 与桌宠](automation-collaboration.md)：定时任务、Hooks、Watchlist 和桌宠。
-7. [电脑操作（实验）](computer-use.md)：受控浏览器、macOS 桌面、凭据与急停。
+7. [电脑操作（实验）](computer-use.md)：受控浏览器、macOS 桌面、凭据，以及怎样让 Agent 停下。
 8. [诊断与排障](diagnostics-troubleshooting.md)：无法启动、模型失败或状态不一致时从哪里查。
 
 ## 侧栏入口
@@ -44,7 +44,7 @@
 | 常规     | 运行状态、当前模型、已绑定项目数；外观（浅色 / 深色 / 跟随系统）；已归档对话                                                                                                        | [Chat 与 Build](chat-build.md#侧栏与会话操作)               |
 | 模型     | 模型配置卡片、连通测试、执行与成本策略                                                                                                                                              | [模型、记忆与附件](models-memory-attachments.md#模型配置)   |
 | Hooks    | “配置 / 测试 / 审计”三个标签                                                                                                                                                        | [定时任务、Hooks 与桌宠](automation-collaboration.md#hooks) |
-| 电脑操作 | 总开关；任意应用、Chrome 和 Edge 两个驱动及其二级页（系统权限、应用名单、截图、扩展配对）；不让 Emperor 操作的应用；紧急停止                                                        | [电脑操作（实验）](computer-use.md)                         |
+| 电脑操作 | 提醒卡（缺权限、Helper 未连接时）；总开关；任意应用、Chrome 和 Edge 两个驱动（Chrome 的扩展配对在二级页）；系统权限；截图                                                           | [电脑操作（实验）](computer-use.md)                         |
 | 浏览器   | 让 Emperor 控制内置浏览器；链接与本地 URL 打开位置、完整网址、浏览数据与浏览历史；从 Chrome/Edge 导入；密码管理器、登录状态；下载位置、下载前询问、下载历史记录与保留时间；网站设置 | [Chat 与 Build](chat-build.md#浏览器设置与数据)             |
 | 语音     | 麦克风与语音识别权限、麦克风、识别语言与听写快捷键；听写组件不可用时说明原因（macOS）                                                                                               | [Chat 与 Build](chat-build.md#语音听写)                     |
 | 记忆     | 上下文概览，以及“长期 / 用户档案 / 情景 / Watchlist / 版本”；用户档案中可开始或重新开始档案访谈                                                                                     | [模型、记忆与附件](models-memory-attachments.md#记忆层)     |

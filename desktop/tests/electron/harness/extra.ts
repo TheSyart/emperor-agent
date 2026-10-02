@@ -13,12 +13,13 @@ import type {
   TargetSnapshot,
 } from '@emperor/core/host-capabilities'
 import type { UiAction } from '@emperor/core/runtime-contract'
-import { safeStorage, session } from 'electron'
+import { session } from 'electron'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EmbeddedBrowserDriver } from '../../../src/main/computer-use/embedded-browser-driver'
 import { CredentialVault } from '../../../src/main/computer-use/credential-vault'
+import { LocalSecretStore } from '../../../src/main/local-secret-store'
 import { electronBrowserFactory } from '../../../src/main/computer-use/electron-factory'
 import { nativeImageCodec } from '../../../src/main/computer-use/images'
 import { AgentPreview } from '../../../src/main/computer-use/preview'
@@ -193,11 +194,14 @@ const CASES: Record<string, Case> = {
   ) => {
     const root = mkdtempSync(join(tmpdir(), 'emperor-cu-vault-e2e-'))
     const vaultPath = join(root, 'computer-use', 'vault.json')
-    const vault = new CredentialVault({ path: vaultPath, storage: safeStorage })
-    check(
-      vault.available,
-      'safeStorage is unavailable in this Electron session',
-    )
+    // Emperor's own key under the temporary root; no Keychain prompt.
+    const vault = new CredentialVault({
+      path: vaultPath,
+      storage: new LocalSecretStore({
+        keyPath: join(root, 'computer-use', 'secrets', 'local.key'),
+      }),
+    })
+    check(vault.available, 'the local key store is unavailable')
     const secret = 'e2e-private-password-74291'
     const handle = vault.save({
       label: 'fixture',

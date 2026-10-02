@@ -32,7 +32,9 @@ export type TargetClosedReason =
   'user' | 'agent' | 'lost' | 'revoked' | 'shutdown'
 /**
  * Why targets were released (2026-09-29 §3.3); `agent`: the Agent released
- * one early (ui_release_control).
+ * one early (ui_release_control). `emergency-stop` (and the `kill-switch`
+ * causes below) are no longer written since the emergency stop was retired
+ * (2026-10-01); older session logs still carry them.
  */
 export type TaskReleaseReason =
   'task-end' | 'session-deleted' | 'switched-off' | 'emergency-stop' | 'agent'
@@ -86,7 +88,6 @@ declare module '../../session-log/types' {
         input?: GrantDisplayInput
       }
       highImpact?: boolean
-      highRiskApp?: boolean
       background?: boolean
     }
     'ui/grant-decided': {

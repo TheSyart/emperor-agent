@@ -124,7 +124,7 @@ describe('grant cards', () => {
     expect(await outcome).toMatchObject({ decision: 'denied', cause: 'user' })
   })
 
-  it('fails closed on abort, session stop, emergency stop and no answerer', async () => {
+  it('fails closed on abort, session stop and no answerer', async () => {
     const aborted = setup()
     const controller = new AbortController()
     const first = aborted.ask.request(

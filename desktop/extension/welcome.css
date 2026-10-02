@@ -1,0 +1,209 @@
+/* Emperor's own palette (desktop/src/renderer/src/theme), light and dark. */
+:root {
+  color-scheme: light dark;
+  --bg: rgb(249 250 251);
+  --card: rgb(255 255 255);
+  --border: rgb(0 0 0 / 0.1);
+  --label: rgb(15 17 21);
+  --secondary: rgb(97 102 107);
+  --tertiary: rgb(129 133 140);
+  --accent: rgb(170 122 38);
+  --accent-strong: rgb(138 96 24);
+  --accent-soft: rgb(248 239 219);
+  --ok: rgb(21 128 61);
+  --ok-soft: rgb(230 250 237);
+  --error: rgb(200 30 30);
+  --button: rgb(15 17 21);
+  --button-label: rgb(255 255 255);
+  font:
+    14px/22px -apple-system,
+    BlinkMacSystemFont,
+    'PingFang SC',
+    'Segoe UI',
+    sans-serif;
+  color: var(--label);
+  background: var(--bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: rgb(21 21 23);
+    --card: rgb(50 50 53);
+    --border: rgb(255 255 255 / 0.12);
+    --label: rgb(249 250 251);
+    --secondary: rgb(207 211 214);
+    --tertiary: rgb(173 178 184);
+    --accent: rgb(214 172 92);
+    --accent-strong: rgb(226 190 118);
+    --accent-soft: rgb(62 53 36);
+    --ok: rgb(74 222 128);
+    --ok-soft: rgb(30 52 38);
+    --error: rgb(248 125 125);
+    --button: rgb(249 250 251);
+    --button-label: rgb(15 17 21);
+  }
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 56px 24px 64px;
+}
+
+header img {
+  display: block;
+  border-radius: 12px;
+}
+
+h1 {
+  margin: 20px 0 8px;
+  font-size: 22px;
+  line-height: 30px;
+  font-weight: 600;
+}
+
+header p {
+  margin: 0;
+  color: var(--secondary);
+}
+
+ol {
+  margin: 28px 0 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  counter-reset: step;
+}
+
+li {
+  display: flex;
+  gap: 16px;
+  padding: 16px 20px;
+  counter-increment: step;
+}
+
+li + li {
+  border-top: 1px solid var(--border);
+}
+
+.marker {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-top: 1px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--tertiary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.marker::before {
+  content: counter(step);
+}
+
+li[data-state='now'] .marker {
+  border: 1.5px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+li[data-state='done'] .marker {
+  border-color: transparent;
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+li[data-state='done'] .marker::before {
+  content: '✓';
+}
+
+li[data-state='todo'] .body {
+  color: var(--tertiary);
+}
+
+.body {
+  min-width: 0;
+}
+
+h2 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
+}
+
+.body p,
+#done p {
+  margin: 2px 0 0;
+  color: var(--secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+li[data-state='todo'] .body p {
+  color: var(--tertiary);
+}
+
+button {
+  margin-top: 12px;
+  padding: 0 14px;
+  height: 32px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--button);
+  color: var(--button-label);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+#code {
+  display: block;
+  margin-top: 12px;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 28px;
+  line-height: 36px;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+#status {
+  margin: 16px 0 0;
+  color: var(--secondary);
+  font-size: 12px;
+}
+
+#message {
+  margin: 4px 0 0;
+  color: var(--error);
+  font-size: 12px;
+}
+
+#done {
+  margin-top: 16px;
+  padding: 16px 20px;
+  border-radius: 12px;
+  background: var(--ok-soft);
+}
+
+#done h2 {
+  color: var(--ok);
+}

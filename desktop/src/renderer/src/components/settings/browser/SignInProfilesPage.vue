@@ -18,6 +18,7 @@ import {
   EmptyState,
   Field,
   SettingsGroup,
+  SettingsNotice,
   SettingsRow,
   SettingsSection,
   TextField,
@@ -127,11 +128,9 @@ onMounted(() => {
 
 <template>
   <SettingsSection
-    intro="Emperor 在内置浏览器里操作网页时使用这些 profile。持久 profile 保留网站的 Cookie 和登录，下次不用重新登录；你自己浏览用的内置浏览器不受影响。"
+    intro="Emperor 操作网页时用这些 profile，持久的会保留网站登录。"
   >
-    <p v-if="error && !dialog" class="profile-error" role="alert">
-      {{ error }}
-    </p>
+    <SettingsNotice v-if="error && !dialog" tone="error" :title="error" />
     <SettingsGroup title="持久 profile">
       <EmptyState
         v-if="!persistent.length"
@@ -186,7 +185,7 @@ onMounted(() => {
       @update:open="onDialogOpen"
     >
       <form id="profile-form" class="profile-form" @submit.prevent="submit">
-        <p v-if="error" class="profile-error" role="alert">{{ error }}</p>
+        <SettingsNotice v-if="error" tone="error" :title="error" />
         <Field label="名称">
           <TextField v-model="name" required :maxlength="60" />
         </Field>
@@ -208,13 +207,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.profile-error {
-  margin: var(--space-2) 0 0;
-  color: rgb(var(--danger));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-}
-
 .profile-form {
   display: grid;
   gap: var(--space-3);

@@ -76,7 +76,12 @@ function fakeAgent(id: string, cwd: string, mode?: SandboxMode): Agent {
 }
 
 function fixture(
-  options: { mode?: SandboxMode; answer?: ApprovalOutcome; cwd?: string } = {},
+  options: {
+    mode?: SandboxMode
+    answer?: ApprovalOutcome
+    cwd?: string
+    protectedStateRoot?: string
+  } = {},
 ): Fixture {
   const approvals: string[] = []
   const approval = {
@@ -101,6 +106,9 @@ function fixture(
     approval,
     spillRoot: join(root, '.spill'),
     writeStagingRoot: staging,
+    ...(options.protectedStateRoot === undefined
+      ? {}
+      : { protectedStateRoot: options.protectedStateRoot }),
   }
   const fs = createFsTools(services)
   const registry = new ToolRegistry()
@@ -820,6 +828,76 @@ describe('sandbox', () => {
     ).toEqual(['allowed-once'])
     const results = session.events.filter((e) => e.type === 'tool/result')
     expect(results).toHaveLength(2)
+  })
+})
+
+describe("Emperor's private state", () => {
+  /** A state root beside the workspace, as ~/.emperor is. */
+  function privateState(): string {
+    const state = join(staging, 'emperor-home')
+    mkdirSync(join(state, 'computer-use', 'secrets'), { recursive: true })
+    mkdirSync(join(state, 'browser', 'profiles', 'p1'), { recursive: true })
+    mkdirSync(join(state, 'spill'), { recursive: true })
+    writeFileSync(join(state, 'computer-use', 'vault.json'), 'sealed-vault-17')
+    writeFileSync(join(state, 'browser', 'profiles', 'p1', 'Cookies'), 'c')
+    writeFileSync(join(state, 'spill', 'grep-results.txt'), 'Found 1 match')
+    return state
+  }
+
+  it('read refuses computer-use and browser, also through a workspace symlink', async () => {
+    const state = privateState()
+    const f = fixture({ protectedStateRoot: state })
+    for (const path of [
+      join(state, 'computer-use', 'vault.json'),
+      join(state, 'computer-use', 'secrets', 'local.key'),
+      join(state, 'browser', 'profiles', 'p1', 'Cookies'),
+    ]) {
+      const result = await f.call('read', { file_path: path })
+      expect(result.isError, path).toBe(true)
+      expect(codeOf(result), path).toBe('FS_PROTECTED_PATH')
+      expect(text(result)).not.toContain('sealed-vault-17')
+    }
+    symlinkSync(join(state, 'computer-use'), join(root, 'cu'))
+    const linked = await f.call('read', { file_path: 'cu/vault.json' })
+    expect(codeOf(linked)).toBe('FS_PROTECTED_PATH')
+    expect(text(linked)).not.toContain('sealed-vault-17')
+    // The rest of Emperor Home (a spilled search result) stays readable.
+    const spill = await f.call('read', {
+      file_path: join(state, 'spill', 'grep-results.txt'),
+    })
+    expect(spill.isError).toBe(false)
+  })
+
+  it('write and edit refuse them in every mode, before any approval', async () => {
+    const state = privateState()
+    const vault = join(state, 'computer-use', 'vault.json')
+    for (const mode of [
+      'workspace-write',
+      'danger-full-access',
+    ] as SandboxMode[]) {
+      const f = fixture({ protectedStateRoot: state, mode })
+      const created = await f.call('write', {
+        file_path: join(state, 'browser', 'planted.txt'),
+        content: 'x',
+      })
+      expect(codeOf(created), mode).toBe('FS_PROTECTED_PATH')
+      expect(existsSync(join(state, 'browser', 'planted.txt'))).toBe(false)
+      const replaced = await f.call('write', {
+        file_path: vault,
+        content: 'x',
+      })
+      expect(codeOf(replaced), mode).toBe('FS_PROTECTED_PATH')
+      const edited = await f.call('edit', {
+        file_path: vault,
+        old_string: 'sealed',
+        new_string: 'opened',
+      })
+      expect(codeOf(edited), mode).toBe('FS_PROTECTED_PATH')
+      expect(readFileSync(vault, 'utf8')).toBe('sealed-vault-17')
+      // No escalation is offered: a wider mode would not help.
+      expect(text(replaced)).not.toContain('[sandbox:')
+      expect(f.approvals).toEqual([])
+    }
   })
 })
 

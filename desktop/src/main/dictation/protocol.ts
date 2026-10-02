@@ -52,6 +52,8 @@ export type HelperRequest =
 export type HelperSessionEvent =
   | { type: 'started'; session: string; seq: number; locale: string }
   | { type: 'partial'; session: string; seq: number; text: string }
+  /** The microphone's loudness, 0–1 (RV-06). */
+  | { type: 'level'; session: string; seq: number; value: number }
   | { type: 'final'; session: string; seq: number; text: string }
   | { type: 'ended'; session: string; seq: number; reason: DictationEndReason }
   | {
@@ -262,6 +264,18 @@ export function parseHelperEvent(line: string): HelperEvent {
         session: session(body.session),
         seq: seq(body.seq),
         text: text(body.text, 'text', MAX_TEXT, true),
+      }
+    case 'level':
+      if (
+        typeof body.value !== 'number' ||
+        !(body.value >= 0 && body.value <= 1)
+      )
+        fail('level is not a number from 0 to 1')
+      return {
+        type: 'level',
+        session: session(body.session),
+        seq: seq(body.seq),
+        value: body.value,
       }
     case 'ended':
       return {

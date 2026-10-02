@@ -113,11 +113,11 @@ function resolveAppPath(argv) {
 
 function smokeEnvironment() {
   const env = {
-    // macOS safeStorage resolves the login Keychain through the account's real
-    // home. State and Chromium data remain isolated by EMPEROR_CONFIG_DIR and
-    // the smoke's temporary cwd; a synthetic HOME makes the encryption probe fail.
-    HOME:
-      process.platform === 'darwin' ? process.env.HOME || homeRoot : homeRoot,
+    // A synthetic HOME on every platform, macOS included: Emperor's secrets
+    // use its own key under the state root, so nothing may need the user's
+    // login Keychain (the app's local-key and master-password round trip
+    // fails the smoke if something does).
+    HOME: homeRoot,
     USERPROFILE: homeRoot,
     EMPEROR_CONFIG_DIR: stateRoot,
     EMPEROR_BUILD_COMMIT: readGitCommit(repoRoot),

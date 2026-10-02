@@ -17,6 +17,9 @@ import type {
   AgentDownloadView,
   AgentPreviewPointer,
   BrowserConnectResult,
+  BrowserExtensionInstallResult,
+  BrowserExtensionRemoveResult,
+  BrowserExtensionStatus,
   BrowserImportRequest,
   BrowserImportResult,
   BrowserImportSource,
@@ -30,6 +33,9 @@ import type {
 
 export type {
   AgentDownloadView,
+  BrowserExtensionInstallResult,
+  BrowserExtensionRemoveResult,
+  BrowserExtensionStatus,
   BrowserImportRequest,
   BrowserImportResult,
   BrowserImportSource,
@@ -60,14 +66,15 @@ export interface VaultEntry extends CredentialHandle {
 
 export interface VaultStatus {
   available: boolean
-  /** safeStorage key store: keychain, dpapi, a Linux backend, or unknown. */
+  /** Where secrets are sealed: `emperor-local` (Emperor's local key file). */
   backend?: string
+  /**
+   * Why the vault is unavailable: the local key is gone while entries need
+   * it, or its file failed the permission checks. 清空 (vaultReset) fixes both.
+   */
+  problem?: 'key-missing' | 'key-invalid'
   locked: boolean
   hasMasterPassword: boolean
-  /** The user opted into unlocking with Touch ID or the login password. */
-  biometricUnlock?: boolean
-  /** This system can verify the user for biometric unlock. */
-  biometricSupported?: boolean
   handles: VaultEntry[]
 }
 
@@ -78,18 +85,11 @@ interface EmperorBridge {
   vaultStatus?: () => Promise<VaultStatus>
   vaultSave?: (draft: VaultDraft) => Promise<CredentialHandle>
   vaultRemove?: (handleId: string) => Promise<{ ok: boolean }>
-  vaultUnlock?: (
-    password: string,
-    biometric?: boolean,
-  ) => Promise<{ unlocked: boolean }>
+  vaultUnlock?: (password: string) => Promise<{ unlocked: boolean }>
   vaultLock?: () => Promise<{ ok: boolean }>
-  vaultSetMaster?: (
-    password: string | null,
-    biometric?: boolean,
-  ) => Promise<{ ok: boolean }>
+  vaultSetMaster?: (password: string | null) => Promise<{ ok: boolean }>
   vaultReveal?: (handleId: string) => Promise<{ password: string }>
-  vaultBiometricUnlock?: () => Promise<{ unlocked: boolean }>
-  vaultBiometricDisable?: () => Promise<{ ok: boolean }>
+  vaultReset?: () => Promise<{ ok: boolean }>
   selectDirectory?: () => Promise<string | null>
   getPathForFile?: (file: File) => string
   openPath?: (
@@ -165,6 +165,11 @@ interface EmperorBridge {
   denyBrowserPairing?: (pairingId: string) => Promise<{ denied: boolean }>
   revokeBrowserPairing?: (pairingId: string) => Promise<{ revoked: boolean }>
   connectBrowsers?: () => Promise<BrowserConnectResult>
+  browserExtensionStatus?: () => Promise<BrowserExtensionStatus>
+  installBrowserExtension?: () => Promise<BrowserExtensionInstallResult>
+  revealBrowserExtension?: () => Promise<{ ok: boolean }>
+  removeBrowserExtension?: () => Promise<BrowserExtensionRemoveResult>
+  onBrowserPairingRequest?: (listener: () => void) => () => void
   onAgentPreviewFrame?: (
     listener: (frame: AgentPreviewFrame) => void,
   ) => () => void
@@ -252,15 +257,10 @@ export async function vaultRemove(handleId: string): Promise<void> {
   await invoke(handleId)
 }
 
-/** `biometric`: on success, also allow Touch ID unlock from now on. */
-export async function vaultUnlock(
-  password: string,
-  options: { biometric?: boolean } = {},
-): Promise<boolean> {
+export async function vaultUnlock(password: string): Promise<boolean> {
   const invoke = bridge()?.vaultUnlock
   if (!invoke) throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
-  return (await (options.biometric ? invoke(password, true) : invoke(password)))
-    .unlocked
+  return (await invoke(password)).unlocked
 }
 
 export async function vaultLock(): Promise<void> {
@@ -269,28 +269,16 @@ export async function vaultLock(): Promise<void> {
   await invoke()
 }
 
-/**
- * Replacing or removing the master password turns Touch ID unlock off;
- * `biometric` re-enables it for the new password.
- */
-export async function vaultSetMaster(
-  password: string | null,
-  options: { biometric?: boolean } = {},
-): Promise<void> {
+/** Sets, changes (re-sealing every entry) or, with null, removes it. */
+export async function vaultSetMaster(password: string | null): Promise<void> {
   const invoke = bridge()?.vaultSetMaster
   if (!invoke) throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
-  await (options.biometric ? invoke(password, true) : invoke(password))
+  await invoke(password)
 }
 
-/** Main verifies the user (Touch ID or login password) before unlocking. */
-export async function vaultBiometricUnlock(): Promise<boolean> {
-  const invoke = bridge()?.vaultBiometricUnlock
-  if (!invoke) throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
-  return (await invoke()).unlocked
-}
-
-export async function vaultBiometricDisable(): Promise<void> {
-  const invoke = bridge()?.vaultBiometricDisable
+/** 清空: deletes every entry and the master password; confirm first. */
+export async function vaultReset(): Promise<void> {
+  const invoke = bridge()?.vaultReset
   if (!invoke) throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
   await invoke()
 }
@@ -783,14 +771,44 @@ export async function macHelperReconnect(): Promise<MacHelperStatus> {
 }
 
 export async function browserPairings(): Promise<BrowserPairingStatus> {
-  return (
-    (await bridge()?.browserPairings?.()) ?? {
-      bridgeListening: false,
-      pendingPairings: [],
-      pairedConnections: [],
-      attachedTabs: 0,
-    }
-  )
+  const status = await bridge()?.browserPairings?.()
+  return status
+    ? { ...status, pairings: status.pairings ?? [] }
+    : {
+        bridgeListening: false,
+        pendingPairings: [],
+        pairedConnections: [],
+        attachedTabs: 0,
+        pairings: [],
+      }
+}
+
+/**
+ * 设置 › 电脑操作 › Chrome 和 Edge: the extension folder and where the
+ * extension is loaded; null without the desktop bridge.
+ */
+export async function browserExtensionStatus(): Promise<BrowserExtensionStatus | null> {
+  return (await bridge()?.browserExtensionStatus?.()) ?? null
+}
+
+/** 安装扩展程序: the folder, then the browser host; null without the bridge. */
+export async function installBrowserExtension(): Promise<BrowserExtensionInstallResult | null> {
+  return (await bridge()?.installBrowserExtension?.()) ?? null
+}
+
+/** 在访达中显示; false while the folder is not there. */
+export async function revealBrowserExtension(): Promise<boolean> {
+  return (await bridge()?.revealBrowserExtension?.())?.ok === true
+}
+
+/** 移除扩展程序; null without the bridge. */
+export async function removeBrowserExtension(): Promise<BrowserExtensionRemoveResult | null> {
+  return (await bridge()?.removeBrowserExtension?.()) ?? null
+}
+
+/** An extension asked to pair (main sends nothing else). */
+export function onBrowserPairingRequest(listener: () => void): () => void {
+  return bridge()?.onBrowserPairingRequest?.(listener) ?? (() => {})
 }
 
 export async function approveBrowserPairing(

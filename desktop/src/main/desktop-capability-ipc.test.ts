@@ -9,6 +9,10 @@ import {
   BROWSER_PAIRING_DENY_CHANNEL,
   BROWSER_PAIRING_REVOKE_CHANNEL,
   BROWSER_CONNECT_CHANNEL,
+  BROWSER_EXTENSION_INSTALL_CHANNEL,
+  BROWSER_EXTENSION_REMOVE_CHANNEL,
+  BROWSER_EXTENSION_REVEAL_CHANNEL,
+  BROWSER_EXTENSION_STATUS_CHANNEL,
   BROWSER_PAIRING_STATUS_CHANNEL,
   BROWSER_BOUNDS_CHANNEL,
   BROWSER_CLOSE_CHANNEL,
@@ -69,10 +73,20 @@ describe('desktop capability IPC', () => {
           extensionId: 'a'.repeat(32),
           code: '123456',
           displayed: true,
+          browser: 'edge' as const,
           secret: 'must-not-cross-ipc',
         },
       ],
       readyPairings: () => [pairingId],
+      storedPairings: async () => [
+        {
+          pairingId,
+          extensionId: 'a'.repeat(32),
+          createdAt: '2026-10-01T08:00:00.000Z',
+          browser: 'chrome' as const,
+          secret: 'must-not-cross-ipc',
+        },
+      ],
       approvePairing: vi.fn(async () => true),
       denyPairing: vi.fn(() => true),
       revokePairing: vi.fn(async () => undefined),
@@ -89,6 +103,10 @@ describe('desktop capability IPC', () => {
       openExternal: vi.fn(),
       browserPairings: bridge,
       externalAttachedCount: () => 2,
+      externalAttachedTabs: () => [
+        { profileId: pairingId },
+        { profileId: pairingId },
+      ],
     })
     const status = await ipc.invoke(BROWSER_PAIRING_STATUS_CHANNEL)
     expect(status).toEqual({
@@ -99,10 +117,20 @@ describe('desktop capability IPC', () => {
           extensionId: 'a'.repeat(32),
           code: '123456',
           displayed: true,
+          browser: 'edge',
         },
       ],
       pairedConnections: [pairingId],
       attachedTabs: 2,
+      pairings: [
+        {
+          pairingId,
+          browser: 'chrome',
+          connected: true,
+          tabs: 2,
+          createdAt: '2026-10-01T08:00:00.000Z',
+        },
+      ],
     })
     expect(JSON.stringify(status)).not.toContain('must-not-cross-ipc')
     await expect(
@@ -126,6 +154,171 @@ describe('desktop capability IPC', () => {
     })
     expect(authorize).toHaveBeenCalledTimes(6)
   })
+  it('lists saved pairings whose browser is closed, and drops odd records', async () => {
+    const ipc = new FakeIpcMain()
+    const ready = 'R'.repeat(21) + 'A'
+    const closed = 'C'.repeat(21) + 'g'
+    registerDesktopCapabilityIpc({
+      ipcMain: ipc,
+      authorize: vi.fn(),
+      browser: fakeBrowser(),
+      references: { revealPath: vi.fn() },
+      showItemInFolder: vi.fn(),
+      openExternal: vi.fn(),
+      browserPairings: {
+        isListening: true,
+        pendingPairings: () => [],
+        readyPairings: () => [ready],
+        storedPairings: async () => [
+          { pairingId: closed, createdAt: 'not a date', browser: 'opera' },
+          { pairingId: '../escape', createdAt: '2026-10-01T00:00:00.000Z' },
+          { pairingId: ready, createdAt: '2026-10-01T00:00:00.000Z' },
+        ],
+        approvePairing: vi.fn(),
+        denyPairing: vi.fn(),
+        revokePairing: vi.fn(),
+      },
+      externalAttachedTabs: () => [{ profileId: closed }],
+    })
+    const status = (await ipc.invoke(BROWSER_PAIRING_STATUS_CHANNEL)) as {
+      pairings: unknown[]
+    }
+    expect(status.pairings).toEqual([
+      {
+        pairingId: closed,
+        browser: null,
+        connected: false,
+        tabs: 1,
+        createdAt: null,
+      },
+      {
+        pairingId: ready,
+        browser: null,
+        connected: true,
+        tabs: 0,
+        createdAt: '2026-10-01T00:00:00.000Z',
+      },
+    ])
+  })
+
+  it('reaches the extension folder only through fixed, argument-free channels', async () => {
+    const ipc = new FakeIpcMain()
+    const authorize = vi.fn()
+    const showItemInFolder = vi.fn()
+    const status = {
+      folder: {
+        path: '/Users/a/.emperor/browser-extension',
+        displayPath: '~/.emperor/browser-extension',
+        ready: true,
+        version: '0.2.0',
+        secret: 'dropped',
+      },
+      bundledVersion: '0.2.0',
+      browsers: [
+        {
+          browser: 'chrome' as const,
+          name: 'Google Chrome',
+          present: true,
+          extension: 'loaded' as const,
+          loadedFrom: '~/src/desktop/extension',
+          developerMode: true,
+          hostRegistered: true,
+          profileFiles: ['dropped'],
+        },
+        {
+          browser: 'brave' as never,
+          name: 'Brave',
+          present: true,
+          extension: 'none' as const,
+          developerMode: false,
+          hostRegistered: false,
+        },
+      ],
+    }
+    let revealPath: string | null = '/Users/a/.emperor/browser-extension'
+    const extension = {
+      status: vi.fn(async () => status),
+      install: vi.fn(async () => ({
+        ok: true,
+        registered: ['chrome', '../evil'],
+        reason: 'invented' as never,
+        status,
+      })),
+      remove: vi.fn(async () => ({ ok: true, uninstalled: 99_999, status })),
+      revealPath: vi.fn(async () => revealPath),
+    }
+    registerDesktopCapabilityIpc({
+      ipcMain: ipc,
+      authorize,
+      browser: fakeBrowser(),
+      references: { revealPath: vi.fn() },
+      showItemInFolder,
+      openExternal: vi.fn(),
+      browserExtension: extension,
+    })
+    const clean = {
+      folder: {
+        path: '/Users/a/.emperor/browser-extension',
+        displayPath: '~/.emperor/browser-extension',
+        ready: true,
+        version: '0.2.0',
+      },
+      bundledVersion: '0.2.0',
+      browsers: [
+        {
+          browser: 'chrome',
+          name: 'Google Chrome',
+          present: true,
+          extension: 'loaded',
+          loadedFrom: '~/src/desktop/extension',
+          developerMode: true,
+          hostRegistered: true,
+        },
+      ],
+    }
+    await expect(ipc.invoke(BROWSER_EXTENSION_STATUS_CHANNEL)).resolves.toEqual(
+      clean,
+    )
+    await expect(
+      ipc.invoke(BROWSER_EXTENSION_INSTALL_CHANNEL),
+    ).resolves.toEqual({ ok: true, registered: ['chrome'], status: clean })
+    await expect(ipc.invoke(BROWSER_EXTENSION_REMOVE_CHANNEL)).resolves.toEqual(
+      {
+        ok: true,
+        uninstalled: 100,
+        status: clean,
+      },
+    )
+    await expect(ipc.invoke(BROWSER_EXTENSION_REVEAL_CHANNEL)).resolves.toEqual(
+      {
+        ok: true,
+      },
+    )
+    expect(showItemInFolder).toHaveBeenCalledWith(
+      '/Users/a/.emperor/browser-extension',
+    )
+    revealPath = null
+    await expect(ipc.invoke(BROWSER_EXTENSION_REVEAL_CHANNEL)).resolves.toEqual(
+      {
+        ok: false,
+      },
+    )
+    expect(showItemInFolder).toHaveBeenCalledTimes(1)
+    // The renderer never chooses a path or a browser.
+    for (const channel of [
+      BROWSER_EXTENSION_STATUS_CHANNEL,
+      BROWSER_EXTENSION_INSTALL_CHANNEL,
+      BROWSER_EXTENSION_REVEAL_CHANNEL,
+      BROWSER_EXTENSION_REMOVE_CHANNEL,
+    ])
+      await expect(ipc.invoke(channel, { path: '/etc' })).rejects.toThrow(
+        'invalid browser extension input',
+      )
+    expect(extension.install).toHaveBeenCalledTimes(1)
+    expect(extension.remove).toHaveBeenCalledTimes(1)
+    expect(authorize).toHaveBeenCalledTimes(9)
+  })
+
   it('exposes bounded helper diagnostics and only explicit permission requests', async () => {
     const ipc = new FakeIpcMain()
     const authorize = vi.fn()

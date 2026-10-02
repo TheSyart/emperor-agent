@@ -124,6 +124,26 @@ describe('layout primitives', () => {
 })
 
 describe('SettingsCard slots', () => {
+  it('marks a page’s master switch card, whose glyph sits on a tile', () => {
+    const root = mount(() =>
+      h(
+        'div',
+        null,
+        [true, false].map((master) =>
+          h(
+            SettingsCard,
+            { title: master ? '电脑操作' : '其他', master },
+            { leading: () => h('i', { class: 'glyph' }) },
+          ),
+        ),
+      ),
+    )
+    const [first, second] = root.querySelectorAll('.ds-settings-card')
+    expect(first!.hasAttribute('data-master')).toBe(true)
+    expect(first!.querySelector('.leading .glyph')).not.toBeNull()
+    expect(second!.hasAttribute('data-master')).toBe(false)
+  })
+
   it('shows a body and header slots the parent adds after mount', async () => {
     const editing = ref(false)
     const withLeading = ref(false)
@@ -449,6 +469,32 @@ describe('card layout', () => {
     const text = root.querySelector('.ds-settings-row > .text')!
     expect(text.firstElementChild?.className).toBe('eyebrow')
     expect(text.querySelector('.eyebrow')?.textContent).toBe('风险升高')
+  })
+
+  it('leads a row with a marker and aligns it to the top', () => {
+    const root = mount(() =>
+      h(SettingsGroup, {}, () =>
+        h(
+          SettingsRow,
+          { title: '加载扩展', description: '两行说明' },
+          {
+            leading: () => h('span', { class: 'step' }, '3'),
+            default: () => h('button', 'x'),
+          },
+        ),
+      ),
+    )
+    const row = root.querySelector<HTMLElement>('.ds-settings-row')!
+    expect(row.hasAttribute('data-leading')).toBe(true)
+    expect(row.firstElementChild?.className).toBe('leading')
+    expect(row.querySelector('.leading > .step')?.textContent).toBe('3')
+    expect(row.children[1]?.className).toBe('text')
+    // Rows without one are unchanged.
+    const plain = mount(() => h(SettingsRow, { title: '主题' }))
+    expect(
+      plain.querySelector('.ds-settings-row')?.hasAttribute('data-leading'),
+    ).toBe(false)
+    expect(plain.querySelector('.leading')).toBeNull()
   })
 
   it('renders a notice with its tone, title, text and actions', () => {

@@ -15,7 +15,12 @@ import {
   resolveTarget,
   streamWholeText,
 } from './fsio'
-import { sessionCwd, sessionIdOf, type FsToolState } from './shared'
+import {
+  refuseProtected,
+  sessionCwd,
+  sessionIdOf,
+  type FsToolState,
+} from './shared'
 
 /** Default and maximum number of lines returned by one call. */
 export const READ_LIMIT = 2000
@@ -227,6 +232,7 @@ export function createReadTool(state: FsToolState): ToolDefinition<ReadArgs> {
         sessionCwd(state, context, input.filePath),
         input.filePath,
       )
+      await refuseProtected(state, target, 'read')
       const sessionId = sessionIdOf(context)
       const info = await probe(target.targetKey)
       if (info === null) {

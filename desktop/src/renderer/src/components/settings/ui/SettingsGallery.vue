@@ -331,9 +331,19 @@ const facts = [
 
             <SettingsGroup
               title="卡片"
-              description="SettingsCard：可展开、actions 区不触发展开"
+              description="SettingsCard：master 是页面的总开关；可展开、actions 区不触发展开"
               variant="stack"
             >
+              <SettingsCard
+                title="电脑操作"
+                description="允许 Emperor 在对话里操作应用和网页"
+                master
+              >
+                <template #leading><DsCode :size="18" /></template>
+                <template #actions>
+                  <Switch :model-value="true" aria-label="电脑操作" />
+                </template>
+              </SettingsCard>
               <SettingsCard
                 v-model:open="cardOpen"
                 title="aihot"

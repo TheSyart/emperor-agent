@@ -87,7 +87,9 @@ public final class SpeechAnalyzerEngine: DictationEngine {
                 handler.failure(.recognizerUnavailable, "本机识别模型不可用")
                 return
             }
+            let meter = DictationLevelTap(sampleRate: inputFormat.sampleRate)
             input.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) { buffer, _ in
+                for value in meter.levels(of: buffer) { handler.level(value) }
                 if let converted = Self.convert(buffer, with: converter, to: format) {
                     continuation.yield(AnalyzerInput(buffer: converted))
                 }

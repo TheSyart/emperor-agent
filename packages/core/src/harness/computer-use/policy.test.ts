@@ -99,7 +99,6 @@ describe('UiActionPolicy preset matrix (D1)', () => {
           origin: undefined,
           profileId: undefined,
           appId: 'com.apple.Terminal',
-          highRiskApp: true,
         }),
       ),
     ).toMatchObject({ kind: 'allow', via: 'auto' })
@@ -154,16 +153,6 @@ describe('UiActionPolicy rules', () => {
       expect(verdict.error.code).toBe('TARGET_FORBIDDEN')
       expect(verdict.error.reason).toBe('emperor-self')
     }
-  })
-
-  it('refuses everything while suspended, even with full access', () => {
-    const { grants, policy } = setup()
-    grants.suspend('kill-switch')
-    const verdict = policy.evaluate(who({ fullAccess: true }), need())
-    expect(verdict).toMatchObject({
-      kind: 'deny',
-      error: { code: 'PERMISSION_DENIED', reason: 'emergency-stop' },
-    })
   })
 
   it('allows through a covering grant', () => {
@@ -289,7 +278,6 @@ describe('UiActionPolicy rules', () => {
         origin: undefined,
         profileId: undefined,
         appId: 'com.apple.Terminal',
-        highRiskApp: true,
       }),
     )
     expect(terminal).toMatchObject({

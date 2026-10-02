@@ -256,6 +256,8 @@ test('worker pairs, authenticates, handles a fixed observation and follows navig
         `chrome-extension://abcdefghijklmnopabcdefghijklmnop/${path}`,
       onMessage: runtimeMessages,
       onStartup: event(),
+      onInstalled: event(),
+      getManifest: () => ({ version: '0.2.0' }),
       connectNative() {
         port = {
           onMessage: event(),

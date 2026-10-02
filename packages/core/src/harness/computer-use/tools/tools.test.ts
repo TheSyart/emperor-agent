@@ -235,7 +235,6 @@ describe('ui_* tools', () => {
     expect(restricted.json).toMatchObject({
       status: 'ok',
       platform: 'macos',
-      stopped: false,
       autoApproved: [],
       alwaysConfirmed: ['credential-fill', 'high-impact'],
       drivers: [{ driver: 'embedded-browser', available: true }],

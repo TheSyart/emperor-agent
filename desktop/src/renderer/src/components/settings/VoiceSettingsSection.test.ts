@@ -14,17 +14,15 @@ import {
 } from './settingsHeader'
 import VoiceSettingsSection from './VoiceSettingsSection.vue'
 
-const { dictationStatus, openDictationPrivacy, core } = vi.hoisted(() => ({
+const { dictationStatus, openDictationPrivacy } = vi.hoisted(() => ({
   dictationStatus: vi.fn(),
   openDictationPrivacy: vi.fn(),
-  core: vi.fn(),
 }))
 
 vi.mock('../../api/dictation', () => ({
   dictationStatus,
   openDictationPrivacy,
 }))
-vi.mock('../../api/http', () => ({ core }))
 
 const ready: DictationStatus = {
   supported: true,
@@ -85,6 +83,26 @@ function row(root: HTMLElement, title: string): HTMLElement {
   return found
 }
 
+function groups(root: HTMLElement): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>('.ds-settings-group')]
+}
+
+function groupTitle(group: HTMLElement): string | undefined {
+  return group.querySelector(':scope > .head .title')?.textContent?.trim()
+}
+
+function notice(root: HTMLElement): HTMLElement | null {
+  return root.querySelector<HTMLElement>('.ds-settings-notice')
+}
+
+function noticeButton(root: HTMLElement, label: string): HTMLButtonElement {
+  const found = [
+    ...(notice(root)?.querySelectorAll<HTMLButtonElement>('button') ?? []),
+  ].find((button) => button.textContent?.trim() === label)
+  if (!found) throw new Error(`no notice button ${label}`)
+  return found
+}
+
 async function pick(root: HTMLElement, title: string, label: string) {
   const trigger = row(root, title).querySelector<HTMLButtonElement>(
     '.ds-select',
@@ -107,9 +125,6 @@ function saved(): Record<string, unknown> {
 
 beforeEach(() => {
   vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel')
-  core.mockResolvedValue({
-    killSwitch: { accelerator: 'Control+Alt+Command+.', registered: false },
-  })
   dictationStatus.mockResolvedValue(ready)
   openDictationPrivacy.mockResolvedValue(true)
 })
@@ -139,7 +154,28 @@ describe('VoiceSettingsSection', () => {
     expect(root.querySelector('.ds-select')).toBeNull()
   })
 
-  it('shows why the helper is unavailable and checks again on refresh', async () => {
+  it('puts 听写 first, and the permissions as one line in the last card', async () => {
+    const root = await mount()
+    expect(groups(root).map(groupTitle)).toEqual(['听写', '系统权限'])
+    // What dictation is moved from the lead-in to the 听写 card.
+    expect(root.querySelector('.ds-settings-section .intro')).toBeNull()
+    expect(
+      groups(root)[0]!.querySelector(':scope > .head .description')
+        ?.textContent,
+    ).toBe('在输入框里用说话代替打字，识别在这台 Mac 上完成')
+    expect(
+      [...groups(root)[0]!.querySelectorAll('.ds-settings-row .title')].map(
+        (title) => title.textContent?.trim(),
+      ),
+    ).toEqual(['麦克风', '识别语言', '快捷键'])
+    const last = groups(root)[1]!
+    expect(last.querySelectorAll('.ds-settings-row')).toHaveLength(1)
+    expect(
+      last.querySelector('[data-testid="dictation-permissions"]')?.textContent,
+    ).toContain('已允许')
+  })
+
+  it('shows why the helper is unavailable in a notice on top, and checks again', async () => {
     dictationStatus.mockResolvedValueOnce({
       ...ready,
       available: false,
@@ -150,19 +186,35 @@ describe('VoiceSettingsSection', () => {
       permissions: { microphone: 'unknown', speech: 'unknown' },
     })
     const root = await mount()
-    const helper = row(root, '听写组件')
-    expect(helper.textContent).toContain('不可用')
-    expect(helper.textContent).toContain('Emperor Dictation Helper 无法启动')
+    const shown = notice(root)!
+    expect(shown.dataset.tone).toBe('warn')
+    expect(shown.querySelector('.title')?.textContent).toBe('听写组件不可用')
+    expect(shown.textContent).toContain('Emperor Dictation Helper 无法启动')
+    expect(
+      root.querySelector('.ds-settings-section > .body')?.firstElementChild,
+    ).toBe(shown)
+    // No loose helper row, and no permission card while they are unknown.
+    expect(() => row(root, '听写组件')).toThrow()
+    expect(groups(root).map(groupTitle)).toEqual(['听写'])
+    noticeButton(root, '重新检测').click()
+    await settle()
+    expect(dictationStatus).toHaveBeenCalledTimes(2)
+    // Available again: nothing to say any more.
+    expect(notice(root)).toBeNull()
+    expect(groups(root).map(groupTitle)).toEqual(['听写', '系统权限'])
+  })
+
+  it('checks the helper again from the header refresh', async () => {
+    await mount()
     await header.actions.value.find((action) => action.id === 'refresh')!
       .onClick!()
     await settle()
     expect(dictationStatus).toHaveBeenCalledTimes(2)
-    // Available again: the row has nothing to say any more.
-    expect(() => row(root, '听写组件')).toThrow()
   })
 
   it('keeps quiet about a working helper and merges two granted permissions', async () => {
     const root = await mount()
+    expect(notice(root)).toBeNull()
     expect(() => row(root, '听写组件')).toThrow()
     expect(root.querySelector('[data-testid="dictation-helper"]')).toBeNull()
     const both = row(root, '麦克风和语音识别')
@@ -178,19 +230,54 @@ describe('VoiceSettingsSection', () => {
     expect(dictationStatus).toHaveBeenCalledTimes(2)
   })
 
-  it('shows both permissions, one row each, until both are granted', async () => {
+  it('raises a denied permission in a notice, and lists each until both match', async () => {
     dictationStatus.mockResolvedValue({
       ...ready,
       permissions: { microphone: 'denied', speech: 'undetermined' },
     })
     const root = await mount()
+    const shown = notice(root)!
+    expect(shown.querySelector('.title')?.textContent).toBe(
+      '听写需要麦克风权限',
+    )
+    // The permission card stays last, one row each, with no buttons.
+    expect(groups(root).map(groupTitle)).toEqual(['听写', '系统权限'])
     const microphone = row(root, '麦克风权限')
     expect(microphone.textContent).toContain('已拒绝')
     expect(row(root, '语音识别权限').textContent).toContain('尚未询问')
+    expect(microphone.querySelector('button')).toBeNull()
     expect(row(root, '语音识别权限').querySelector('button')).toBeNull()
-    microphone.querySelector<HTMLButtonElement>('button')!.click()
+    noticeButton(root, '打开系统设置').click()
     await settle()
     expect(openDictationPrivacy).toHaveBeenCalledWith('microphone')
+  })
+
+  it('says the way by hand when System Settings did not open', async () => {
+    dictationStatus.mockResolvedValue({
+      ...ready,
+      permissions: { microphone: 'granted', speech: 'denied' },
+    })
+    openDictationPrivacy.mockResolvedValue(false)
+    const root = await mount()
+    noticeButton(root, '打开系统设置').click()
+    await settle()
+    expect(openDictationPrivacy).toHaveBeenCalledWith('speech')
+    expect(notice(root)!.textContent).toContain(
+      '没能打开系统设置，请手动前往「系统设置 › 隐私与安全性 › 语音识别」',
+    )
+    expect(root.querySelector('.voice-note')).toBeNull()
+  })
+
+  it('says in a notice when a choice could not be saved for next time', async () => {
+    const root = await mount()
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('quota exceeded')
+    })
+    await pick(root, '识别语言', '英语（美国）')
+    const shown = notice(root)!
+    expect(shown.dataset.tone).toBe('error')
+    expect(shown.textContent).toContain('只在本次打开期间有效')
+    expect(root.querySelector('.voice-note')).toBeNull()
   })
 
   it('follows the system language, and saves a language picked by hand', async () => {
@@ -223,7 +310,7 @@ describe('VoiceSettingsSection', () => {
     expect(microphone.textContent).toContain('先用系统默认')
   })
 
-  it('refuses the emergency-stop shortcut, then saves a free one', async () => {
+  it('refuses an Emperor shortcut, then saves a free one', async () => {
     const root = await mount()
     const shortcut = row(root, '快捷键')
     expect(shortcut.textContent).toContain('⇧⌘D')
@@ -238,16 +325,14 @@ describe('VoiceSettingsSection', () => {
     )!
     capture.dispatchEvent(
       new KeyboardEvent('keydown', {
-        key: '.',
-        code: 'Period',
-        ctrlKey: true,
-        altKey: true,
+        key: 'k',
+        code: 'KeyK',
         metaKey: true,
         bubbles: true,
       }),
     )
     await settle()
-    expect(row(root, '快捷键').textContent).toContain('急停')
+    expect(row(root, '快捷键').textContent).toContain('搜索')
     const save = () =>
       [...row(root, '快捷键').querySelectorAll('button')].find(
         (button) => button.textContent?.trim() === '保存',

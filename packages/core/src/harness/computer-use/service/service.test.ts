@@ -410,55 +410,22 @@ describe('ComputerUseService', () => {
     expect(k.service.lookup(other, record.targetId)).toBeUndefined()
   })
 
-  it('emergency stop cancels, releases every task, suspends and dismisses cards', async () => {
+  it('switching off cancels, releases every task and dismisses cards', async () => {
     const k = setup()
-    const { record, ref } = await openForm(k)
+    const { ref } = await openForm(k)
     k.port.browser.faults = { hangAfterDispatch: true }
     const inflight = k.service.act(ctx(), {
       action: { kind: 'click', ref: ref('I agree') },
     })
     await new Promise((resolve) => setTimeout(resolve, 5))
-    await k.service.emergencyStop()
+    await k.service.closeAll('revoked')
     await expectUiError(inflight, 'OUTCOME_UNKNOWN')
     expect(k.cancelled).toEqual([undefined])
-    expect(k.grants.suspended?.by).toBe('kill-switch')
-    // Released like at a task's end (§3.3): the page stays, nothing is shown.
     expect(k.service.listTargets()).toEqual([])
-    expect(k.port.browser.list()).toHaveLength(1)
-    expect(k.port.indicator.at(-1)).toMatchObject({
-      stopped: true,
-      active: false,
-    })
-    await expectUiError(
-      k.service.observe(ctx(), { targetId: record.targetId }),
-      'STALE_TARGET',
-      'released-at-task-end',
-    )
-    k.service.resume()
-    expect(k.grants.suspended).toBeNull()
-    // The next task takes the tab back and observes it anew.
-    await k.service.select(who(), record.targetId)
-    await k.service.observe(ctx(), {})
+    expect(k.port.indicator.at(-1)).toEqual({ active: false, targets: [] })
   })
 
-  it('emergency stop asks the desktop helper to release held keys and buttons', async () => {
-    const k = setup()
-    const releaseAll = vi.fn(async () => undefined)
-    ;(k.port as unknown as { desktop: () => unknown }).desktop = () => ({
-      driver: 'desktop',
-      releaseAll,
-      setPaused: () => undefined,
-    })
-    await k.service.emergencyStop()
-    expect(releaseAll).toHaveBeenCalledOnce()
-    // A helper that fails to answer never blocks the stop.
-    releaseAll.mockRejectedValueOnce(new Error('helper gone'))
-    k.service.resume()
-    await k.service.emergencyStop()
-    expect(k.service.stopped).toBe(true)
-  })
-
-  it('emergency stop aborts a dispatched desktop drag before releasing held input', async () => {
+  it('switching off aborts a dispatched desktop drag before releasing held input', async () => {
     const k = setup()
     const snapshot: TargetSnapshot = {
       targetId: 'desktop-fixture',
@@ -511,12 +478,11 @@ describe('ComputerUseService', () => {
       action: { kind: 'drag', from: 'r1.1', to: 'r1.2' },
     })
     await sent
-    await k.service.emergencyStop()
+    await k.service.closeAll('revoked')
     await expectUiError(inflight, 'OUTCOME_UNKNOWN')
-    expect(setPaused).toHaveBeenCalledWith(snapshot.targetId, true)
     expect(releaseAll).toHaveBeenCalled()
     expect(abortedAtRelease).toBe(true)
-    // Released too: the window has to be bound again (after a resume).
+    // Released too: the window has to be bound again.
     await expectUiError(
       k.service.act(ctx(), {
         targetId: snapshot.targetId,
@@ -559,19 +525,6 @@ describe('ComputerUseService', () => {
     const observation = await k.service.observe(ctx(), {})
     expect(observation.notes?.join(' ')).toContain('app window is reloading')
     expect(k.service.listTargets()[0]!.control).toBe('agent')
-  })
-
-  it('keeps a target the emergency stop released released when the window comes back', async () => {
-    const k = setup()
-    await openForm(k)
-    k.service.pauseForUiDisconnect()
-    await k.service.emergencyStop()
-    expect(k.service.resumeAfterUiReconnect()).toBe(0)
-    k.service.resume()
-    expect(k.service.listTargets()).toEqual([])
-    expect(k.service.listTabs('s1').map((tab) => tab.state)).toEqual([
-      'released',
-    ])
   })
 
   it('offers no user takeover: the Agent keeps control of its targets', () => {

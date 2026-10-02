@@ -8,6 +8,11 @@ import {
   AGENT_PREVIEW_STOP_CHANNEL,
   BROWSER_ACTION_CHANNEL,
   BROWSER_CONNECT_CHANNEL,
+  BROWSER_EXTENSION_INSTALL_CHANNEL,
+  BROWSER_EXTENSION_REMOVE_CHANNEL,
+  BROWSER_EXTENSION_REVEAL_CHANNEL,
+  BROWSER_EXTENSION_STATUS_CHANNEL,
+  BROWSER_PAIRING_REQUEST_CHANNEL,
   BROWSER_PAIRING_APPROVE_CHANNEL,
   BROWSER_PAIRING_DENY_CHANNEL,
   BROWSER_PAIRING_REVOKE_CHANNEL,
@@ -37,11 +42,10 @@ import {
   REFERENCE_REVEAL_CHANNEL,
   SELECT_FILE_CHANNEL,
   SKILLS_OPEN_FOLDER_CHANNEL,
-  VAULT_BIOMETRIC_DISABLE_CHANNEL,
-  VAULT_BIOMETRIC_UNLOCK_CHANNEL,
   VAULT_LOCK_CHANNEL,
   VAULT_MASTER_CHANNEL,
   VAULT_REMOVE_CHANNEL,
+  VAULT_RESET_CHANNEL,
   VAULT_SAVE_CHANNEL,
   VAULT_STATUS_CHANNEL,
   VAULT_UNLOCK_CHANNEL,
@@ -89,25 +93,15 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
       ipcRenderer.invoke(VAULT_SAVE_CHANNEL, draft),
     vaultRemove: (handleId: string) =>
       ipcRenderer.invoke(VAULT_REMOVE_CHANNEL, { handleId }),
-    /** `biometric`: also allow Touch ID unlock with this password's key. */
-    vaultUnlock: (password: string, biometric?: boolean) =>
-      ipcRenderer.invoke(
-        VAULT_UNLOCK_CHANNEL,
-        biometric === true ? { password, biometric } : { password },
-      ),
+    vaultUnlock: (password: string) =>
+      ipcRenderer.invoke(VAULT_UNLOCK_CHANNEL, { password }),
     vaultLock: () => ipcRenderer.invoke(VAULT_LOCK_CHANNEL),
-    vaultSetMaster: (password: string | null, biometric?: boolean) =>
-      ipcRenderer.invoke(
-        VAULT_MASTER_CHANNEL,
-        biometric === true ? { password, biometric } : { password },
-      ),
+    vaultSetMaster: (password: string | null) =>
+      ipcRenderer.invoke(VAULT_MASTER_CHANNEL, { password }),
     vaultReveal: (handleId: string) =>
       ipcRenderer.invoke(VAULT_REVEAL_CHANNEL, { handleId }),
-    /** Main runs the system identity check before unlocking. */
-    vaultBiometricUnlock: () =>
-      ipcRenderer.invoke(VAULT_BIOMETRIC_UNLOCK_CHANNEL),
-    vaultBiometricDisable: () =>
-      ipcRenderer.invoke(VAULT_BIOMETRIC_DISABLE_CHANNEL),
+    /** 清空 (Settings confirms first): every entry and the master password. */
+    vaultReset: () => ipcRenderer.invoke(VAULT_RESET_CHANNEL),
     /** Address-bar submit only; main normalizes and may answer ok:false. */
     openBrowserUrl: (url: string) =>
       ipcRenderer.invoke(BROWSER_OPEN_CHANNEL, { url }),
@@ -189,6 +183,22 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
     revokeBrowserPairing: (pairingId: string) =>
       ipcRenderer.invoke(BROWSER_PAIRING_REVOKE_CHANNEL, { pairingId }),
     connectBrowsers: () => ipcRenderer.invoke(BROWSER_CONNECT_CHANNEL),
+    /** 设置 › 电脑操作 › Chrome 和 Edge: the extension folder; no argument. */
+    browserExtensionStatus: () =>
+      ipcRenderer.invoke(BROWSER_EXTENSION_STATUS_CHANNEL),
+    installBrowserExtension: () =>
+      ipcRenderer.invoke(BROWSER_EXTENSION_INSTALL_CHANNEL),
+    revealBrowserExtension: () =>
+      ipcRenderer.invoke(BROWSER_EXTENSION_REVEAL_CHANNEL),
+    removeBrowserExtension: () =>
+      ipcRenderer.invoke(BROWSER_EXTENSION_REMOVE_CHANNEL),
+    /** An extension asked to pair; nothing about it crosses. */
+    onBrowserPairingRequest: (listener: () => void) => {
+      const wrapped = () => listener()
+      ipcRenderer.on(BROWSER_PAIRING_REQUEST_CHANNEL, wrapped)
+      return () =>
+        ipcRenderer.removeListener(BROWSER_PAIRING_REQUEST_CHANNEL, wrapped)
+    },
     agentPreviewStop: (targetId: string) =>
       ipcRenderer.send(AGENT_PREVIEW_STOP_CHANNEL, { targetId }),
     onAgentPreviewFrame: (listener: (frame: AgentPreviewFrame) => void) => {

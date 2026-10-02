@@ -35,7 +35,6 @@ import {
   type ComputerUseChange,
   type ComputerUseSettings,
   type ExternalConfirmation,
-  type KillSwitchStatus,
 } from './service/service'
 import type { ToolRuntime } from './tools/runtime'
 import { createUiTools } from './tools/ui-tools'
@@ -116,7 +115,6 @@ export interface InstallComputerUseOptions {
   planActive(agent: Agent): boolean
   routeVision(agent: Agent): boolean
   settings(): ComputerUseSettings
-  killSwitch?(): KillSwitchStatus
   onChanged?(reason: ComputerUseChange, sessionId?: string): void
   readonly highImpact?: HighImpactClassifier
   /** Driver tool families beyond `ui_*` (browser, desktop). */
@@ -193,9 +191,6 @@ export function installComputerUse(
     ...(profiles === undefined ? {} : { profiles }),
     ...(sitePermissions === undefined ? {} : { sitePermissions }),
     ...(restorable === undefined ? {} : { restorable }),
-    ...(options.killSwitch === undefined
-      ? {}
-      : { killSwitch: options.killSwitch }),
     ...(options.onChanged === undefined
       ? {}
       : { onChanged: options.onChanged }),

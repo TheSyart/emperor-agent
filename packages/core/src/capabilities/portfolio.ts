@@ -53,7 +53,7 @@ const PORTFOLIO: readonly OptionalCapabilityPortfolioEntry[] = Object.freeze([
     userEntry:
       'Settings › 电脑操作 (the Computer Use plugin in 能力 › 插件 is the same switch); read-only previews and permission cards in the conversation',
     dataAuthority:
-      'grants.json is canonical for GUI grants; vault.json (safeStorage-encrypted) is canonical for credentials; the session log records requests, decisions, auto-approvals and every action without secret values; browser profiles live under ~/.emperor/browser/profiles; computer-use/config.json holds the switches',
+      'grants.json is canonical for GUI grants; vault.json (sealed with the Emperor local key, optionally under a master password) is canonical for credentials; the session log records requests, decisions, auto-approvals and every action without secret values; browser profiles live under ~/.emperor/browser/profiles; computer-use/config.json holds the switches',
     evaluation: {
       command: 'npm test --workspace @emperor/core -- src/harness/computer-use',
       receiptRequiredForMutation: true,

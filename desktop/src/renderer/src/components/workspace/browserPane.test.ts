@@ -503,10 +503,8 @@ describe('BrowserPane and Agent tabs', () => {
       supported: true,
       enabled: true,
       platform: 'macos',
-      stopped: false,
       drivers: [],
       targets: [agentTarget()],
-      killSwitch: { accelerator: 'Control+Alt+Command+.', registered: true },
     }
     const root = mount()
     await flush()

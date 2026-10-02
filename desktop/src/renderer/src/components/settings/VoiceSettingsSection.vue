@@ -1,20 +1,27 @@
 <script setup lang="ts">
 /**
- * Settings › 语音 — editor dictation (VO-02; macOS only for now): the two
- * permissions macOS asks for the first time you dictate (one row once both
- * are granted), and this window's microphone, language and shortcut
- * (dictation/settings.ts). The dictation helper gets a row only when it is
- * unavailable, to say why. Only the devices and languages the helper
- * reports are offered (voice/voiceSettingsModel.ts). The helper is asked
- * again from the header's refresh and whenever the window regains focus,
- * e.g. after changing a permission in System Settings. Elsewhere the page
- * says 暂不支持.
+ * Settings › 语音 — editor dictation (VO-02; macOS only for now), choices
+ * first:
+ * - a SettingsNotice on top only while something stops dictation: the
+ *   dictation helper unavailable (why, and 重新检测) or a permission denied
+ *   or restricted (with 打开系统设置); another one if a choice could not be
+ *   saved for the next start;
+ * - 听写: this window's microphone, language and shortcut
+ *   (dictation/settings.ts). Only the devices and languages the helper
+ *   reports are offered;
+ * - 系统权限, last: the two permissions macOS asks for the first time you
+ *   dictate, one line while they agree (「麦克风和语音识别 · 已允许」).
+ * The wording is voice/voiceSettingsModel.ts. The helper is asked again
+ * from the header's refresh and whenever the window regains focus, e.g.
+ * after changing a permission in System Settings. Elsewhere the page says
+ * 暂不支持.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   EmptyState,
   Select,
   SettingsGroup,
+  SettingsNotice,
   SettingsRow,
   SettingsSection,
   StatusBadge,
@@ -29,47 +36,30 @@ import {
   type DictationPrivacyPane,
   type DictationStatus,
 } from '../../api/dictation'
-import { core } from '../../api/http'
 import { shortcutConflict } from '../../dictation/model'
 import {
   DEFAULT_DICTATION_SHORTCUT,
   useDictationSettings,
 } from '../../dictation/settings'
 import { detectShortcutPlatform } from '../../shortcuts'
-import { defaultKillSwitchAccelerator } from './computer/shortcut'
 import {
   deviceChoice,
-  helperView,
   localeChoice,
-  permissionView,
+  permissionRows,
+  voiceNotice,
+  type VoiceNoticeAction,
 } from './voice/voiceSettingsModel'
 
 const mac = detectShortcutPlatform() === 'mac'
 const { settings, update } = useDictationSettings()
 const status = ref<DictationStatus | null>(null)
-/** The emergency stop's shortcut, reserved even while Computer Use is off. */
-const killSwitch = ref(defaultKillSwitchAccelerator(mac))
 const openFailed = ref<DictationPrivacyPane | null>(null)
 const saveFailed = ref(false)
 
-const helper = computed(() => helperView(status.value))
 const supported = computed(() => status.value?.supported !== false)
 const ready = computed(() => status.value?.available === true)
-const microphone = computed(() =>
-  permissionView(
-    'microphone',
-    status.value?.permissions.microphone ?? 'unknown',
-  ),
-)
-const speech = computed(() =>
-  permissionView('speech', status.value?.permissions.speech ?? 'unknown'),
-)
-/** Nothing to decide about the permissions: one row says so. */
-const permissionsGranted = computed(
-  () =>
-    status.value?.permissions.microphone === 'granted' &&
-    status.value.permissions.speech === 'granted',
-)
+const notice = computed(() => voiceNotice(status.value, openFailed.value))
+const permissions = computed(() => permissionRows(status.value))
 const device = computed(() =>
   status.value ? deviceChoice(status.value, settings.value) : null,
 )
@@ -79,17 +69,6 @@ const locale = computed(() =>
 
 async function load(): Promise<void> {
   status.value = await dictationStatus()
-}
-
-async function loadKillSwitch(): Promise<void> {
-  try {
-    const view = await core('computerUse.status')
-    const accelerator = view?.killSwitch?.accelerator
-    if (typeof accelerator === 'string' && accelerator)
-      killSwitch.value = accelerator
-  } catch {
-    // No Computer Use here: its default shortcut stays reserved.
-  }
 }
 
 function save(patch: Parameters<typeof update>[0]): void {
@@ -113,11 +92,16 @@ function saveShortcut(accelerator: string | null): void {
 }
 
 function conflict(accelerator: string): string | null {
-  return shortcutConflict(accelerator, { killSwitch: killSwitch.value, mac })
+  return shortcutConflict(accelerator, { mac })
 }
 
 async function openPrivacy(pane: DictationPrivacyPane): Promise<void> {
   openFailed.value = (await openDictationPrivacy(pane)) ? null : pane
+}
+
+function runNoticeAction(action: VoiceNoticeAction): void {
+  if (action.kind === 'open') void openPrivacy(action.pane)
+  else void load()
 }
 
 useSettingsHeader({
@@ -130,7 +114,6 @@ function onFocus(): void {
 
 onMounted(() => {
   void load()
-  void loadKillSwitch()
   window.addEventListener('focus', onFocus)
 })
 
@@ -140,80 +123,44 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <SettingsSection
-    :intro="
-      supported
-        ? '在聊天输入框里用说话代替打字。识别在这台 Mac 上完成，声音和文字都不会发到网络。'
-        : undefined
-    "
-  >
+  <SettingsSection>
     <EmptyState
       v-if="!supported"
       title="暂不支持"
       :description="status?.reason ?? '听写目前只支持 macOS'"
     />
     <template v-else>
-      <SettingsRow
-        v-if="status && !status.available"
-        title="听写组件"
-        :description="helper.description"
+      <SettingsNotice
+        v-if="notice"
+        class="voice-notice"
+        :tone="notice.tone"
+        :title="notice.title"
+        :description="notice.description"
+        :data-voice-notice="notice.id"
       >
-        <StatusBadge :tone="helper.tone" dot data-testid="dictation-helper">{{
-          helper.badge
-        }}</StatusBadge>
-      </SettingsRow>
+        <template v-if="notice.actions.length" #actions>
+          <Button
+            v-for="action in notice.actions"
+            :key="action.kind === 'open' ? action.pane : action.kind"
+            size="sm"
+            variant="outline"
+            @click="runNoticeAction(action)"
+            >{{ action.label }}</Button
+          >
+        </template>
+      </SettingsNotice>
+      <SettingsNotice
+        v-if="saveFailed"
+        class="voice-notice"
+        tone="error"
+        title="没能保存到本机"
+        description="这次更改只在本次打开期间有效。"
+      />
 
       <SettingsGroup
-        title="系统权限"
-        :description="
-          permissionsGranted
-            ? undefined
-            : '第一次听写时 macOS 会询问这两项；以后可以在系统设置里更改。'
-        "
+        title="听写"
+        description="在输入框里用说话代替打字，识别在这台 Mac 上完成"
       >
-        <SettingsRow
-          v-if="permissionsGranted"
-          title="麦克风和语音识别"
-          description="只在听写时打开麦克风，在这台 Mac 上识别，不联网"
-          data-testid="dictation-permissions"
-        >
-          <StatusBadge tone="ok">已允许</StatusBadge>
-        </SettingsRow>
-        <template v-else>
-          <SettingsRow title="麦克风权限" :description="microphone.hint">
-            <div class="voice-permission">
-              <StatusBadge :tone="microphone.tone">{{
-                microphone.label
-              }}</StatusBadge>
-              <Button
-                v-if="microphone.canOpen"
-                size="sm"
-                variant="outline"
-                @click="openPrivacy('microphone')"
-                >打开系统设置</Button
-              >
-            </div>
-          </SettingsRow>
-          <SettingsRow title="语音识别权限" :description="speech.hint">
-            <div class="voice-permission">
-              <StatusBadge :tone="speech.tone">{{ speech.label }}</StatusBadge>
-              <Button
-                v-if="speech.canOpen"
-                size="sm"
-                variant="outline"
-                @click="openPrivacy('speech')"
-                >打开系统设置</Button
-              >
-            </div>
-          </SettingsRow>
-        </template>
-        <p v-if="openFailed" class="voice-note" role="alert">
-          没能打开系统设置，请手动前往「系统设置 › 隐私与安全性 ›
-          {{ openFailed === 'microphone' ? '麦克风' : '语音识别' }}」。
-        </p>
-      </SettingsGroup>
-
-      <SettingsGroup title="听写">
         <SettingsRow title="麦克风" :description="device?.description">
           <template v-if="device?.tone" #badge>
             <StatusBadge :tone="device.tone">需要留意</StatusBadge>
@@ -242,7 +189,7 @@ onBeforeUnmount(() => {
         </SettingsRow>
         <SettingsRow
           title="快捷键"
-          description="在聊天输入框里按下开始听写，再按一次结束；只在 Emperor 窗口里有效。"
+          description="在输入框里按下开始，再按一次结束"
         >
           <ShortcutEditor
             :accelerator="settings.shortcut"
@@ -254,27 +201,32 @@ onBeforeUnmount(() => {
             @save="saveShortcut"
           />
         </SettingsRow>
-        <p v-if="saveFailed" class="voice-note" role="alert">
-          这次更改只在本次打开期间有效：无法保存到本机。
-        </p>
+      </SettingsGroup>
+
+      <SettingsGroup v-if="permissions.length" title="系统权限">
+        <SettingsRow
+          v-for="permission in permissions"
+          :key="permission.id"
+          :title="permission.title"
+          :description="permission.description"
+          :data-testid="
+            permission.id === 'both' ? 'dictation-permissions' : undefined
+          "
+          :data-permission="permission.id"
+        >
+          <StatusBadge
+            :tone="permission.tone"
+            :dot="permission.tone === 'ok'"
+            >{{ permission.badge }}</StatusBadge
+          >
+        </SettingsRow>
       </SettingsGroup>
     </template>
   </SettingsSection>
 </template>
 
 <style scoped>
-.voice-permission {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-2);
-}
-
-.voice-note {
-  margin: var(--space-2) 0 0;
-  color: rgb(var(--state-error-label));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
+.voice-notice + .voice-notice {
+  margin-top: var(--space-2);
 }
 </style>

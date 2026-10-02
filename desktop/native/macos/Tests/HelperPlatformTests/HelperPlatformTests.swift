@@ -24,7 +24,7 @@ final class HelperPlatformTests: XCTestCase {
         XCTAssertFalse(TextLengthPostcondition.changed(before: nil, after: 143))
     }
 
-    func testProcessTargetedKeysStopAtTheKillSwitch() throws {
+    func testProcessTargetedKeysStopAtTheRelease() throws {
         let gate = HeldInputGate()
         gate.begin()
         var posted = 0

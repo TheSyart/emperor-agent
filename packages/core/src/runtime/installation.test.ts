@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdtempSync,
@@ -101,6 +102,29 @@ describe('bootstrapEmperorHome', () => {
           0o777,
       ).toBe(0o600)
     }
+  })
+
+  it('keeps computer-use and browser private (0700) from every start', () => {
+    if (process.platform === 'win32') return
+    const parent = tmp('emperor-installation-private-')
+    const emperorHome = join(parent, '.emperor')
+    const boot = () =>
+      bootstrapEmperorHome({
+        emperorHome,
+        source: 'explicit',
+        legacyHome: null,
+        appVersion: '1.2.3',
+        runtimeRevision: 'runtime-1',
+      })
+    boot()
+    for (const name of ['computer-use', 'browser'])
+      expect(statSync(join(emperorHome, name)).mode & 0o777, name).toBe(0o700)
+    // Made by an older build with the default umask: tightened next start.
+    chmodSync(join(emperorHome, 'computer-use'), 0o755)
+    chmodSync(join(emperorHome, 'browser'), 0o755)
+    boot()
+    for (const name of ['computer-use', 'browser'])
+      expect(statSync(join(emperorHome, name)).mode & 0o777, name).toBe(0o700)
   })
 
   it('atomically renames the default legacy root and records prepared/applied migration receipts', () => {

@@ -46,15 +46,11 @@ type VisualBridge = {
   vaultStatus?: () => Promise<unknown>
   vaultSave?: (draft: Record<string, unknown>) => Promise<unknown>
   vaultRemove?: (handleId: string) => Promise<{ ok: boolean }>
-  vaultUnlock?: (password: string, biometric?: boolean) => Promise<unknown>
+  vaultUnlock?: (password: string) => Promise<unknown>
   vaultLock?: () => Promise<{ ok: boolean }>
-  vaultSetMaster?: (
-    password: string | null,
-    biometric?: boolean,
-  ) => Promise<{ ok: boolean }>
+  vaultSetMaster?: (password: string | null) => Promise<{ ok: boolean }>
   vaultReveal?: (handleId: string) => Promise<{ password: string }>
-  vaultBiometricUnlock?: () => Promise<{ unlocked: boolean }>
-  vaultBiometricDisable?: () => Promise<{ ok: boolean }>
+  vaultReset?: () => Promise<{ ok: boolean }>
   clearBrowserData?: () => Promise<{ ok: boolean }>
   macHelperStatus?: () => Promise<unknown>
   macHelperRequestPermission?: (permission: string) => Promise<unknown>
@@ -65,6 +61,11 @@ type VisualBridge = {
   approveBrowserPairing?: (pairingId: string) => Promise<boolean>
   denyBrowserPairing?: (pairingId: string) => Promise<boolean>
   revokeBrowserPairing?: (pairingId: string) => Promise<boolean>
+  browserExtensionStatus?: () => Promise<unknown>
+  installBrowserExtension?: () => Promise<unknown>
+  revealBrowserExtension?: () => Promise<{ ok: boolean }>
+  removeBrowserExtension?: () => Promise<unknown>
+  onBrowserPairingRequest?: (listener: () => void) => () => void
   browserDownloads?: () => Promise<unknown>
   openBrowserDownload?: (id: string) => Promise<unknown>
   revealBrowserDownload?: (id: string) => Promise<unknown>
@@ -1126,16 +1127,14 @@ export async function installVisualCoreBridge(
             : []
       const visualComputerUseState = {
         enabled: visualComputerUseOn,
-        stopped: false,
         drivers: {} as Record<string, boolean>,
-        accelerator: 'Control+Alt+Command+.',
         screenshots: { count: 14, bytes: 9 * 1024 * 1024 },
         downloadRetentionDays: 30 as 0 | 7 | 30 | 90,
-        appLists: {
-          protected: ['com.agilebits.onepassword7'],
-          highRisk: [] as string[],
-          sensitive: [] as string[],
-        } as Record<'protected' | 'highRisk' | 'sensitive', string[]>,
+        // `?visualRetiredApps=1`: apps the retired protected list held.
+        retiredProtectedApps:
+          visualParams.get('visualRetiredApps') === '1'
+            ? ['com.agilebits.onepassword7', 'com.example.Bank']
+            : ([] as string[]),
       }
       // 设置 › 浏览器: the user's browser choices, Emperor's sign-in
       // profiles, site permissions and the credential vault.
@@ -1269,6 +1268,8 @@ export async function installVisualCoreBridge(
             revealUsername: false,
           },
         ] as Array<Record<string, unknown>>,
+        // `?visualVault=key-missing|key-invalid`: the local key is unusable.
+        vaultProblem: visualParams.get('visualVault'),
       }
       // 设置 › 电脑操作 › Chrome 和 Edge: 智能体权限 and 浏览器权限
       // (PLAN-CAP-001 RV-09). `?visualChromeRules=empty` starts with the
@@ -1325,7 +1326,6 @@ export async function installVisualCoreBridge(
           supported: true,
           enabled: on,
           platform: 'macos',
-          stopped: visualComputerUseState.stopped,
           drivers: [
             {
               driver: 'embedded-browser',
@@ -1333,7 +1333,7 @@ export async function installVisualCoreBridge(
               stage: 'experimental',
               label: '内置浏览器（基础）',
               enabled: on,
-              available: on && !visualComputerUseState.stopped,
+              available: on,
               actions: [
                 'click',
                 'fill',
@@ -1363,7 +1363,6 @@ export async function installVisualCoreBridge(
                 visualComputerUseState.drivers['external-browser'] !== false,
               available:
                 on &&
-                !visualComputerUseState.stopped &&
                 visualComputerUseState.drivers['external-browser'] !== false,
               actions: ['click', 'fill'],
               missing: ['主框架以外的语义操作', '截图与坐标操作'],
@@ -1374,10 +1373,7 @@ export async function installVisualCoreBridge(
               stage: 'experimental',
               label: 'macOS 桌面',
               enabled: on && visualComputerUseState.drivers.desktop !== false,
-              available:
-                on &&
-                !visualComputerUseState.stopped &&
-                visualComputerUseState.drivers.desktop !== false,
+              available: on && visualComputerUseState.drivers.desktop !== false,
               actions: ['click', 'fill', 'typeText', 'press', 'select'],
               missing: ['自动用户活动检测'],
             },
@@ -1385,11 +1381,13 @@ export async function installVisualCoreBridge(
           targets: visualTargets(),
           screenshots: visualComputerUseState.screenshots,
           downloadRetentionDays: visualComputerUseState.downloadRetentionDays,
-          appLists: visualComputerUseState.appLists,
-          killSwitch: {
-            accelerator: visualComputerUseState.accelerator,
-            registered: on,
-          },
+          ...(visualComputerUseState.retiredProtectedApps.length > 0
+            ? {
+                retiredProtectedApps: [
+                  ...visualComputerUseState.retiredProtectedApps,
+                ],
+              }
+            : {}),
         }
       }
       const previewListeners = new Set<VisualCoreListener>()
@@ -2639,7 +2637,6 @@ export async function installVisualCoreBridge(
             reason: '填写报名表并提交',
             reason_unverified: true,
             high_impact: visualGrantHighImpact,
-            high_risk_app: false,
             background: false,
           },
         },
@@ -4320,12 +4317,13 @@ export async function installVisualCoreBridge(
         },
         dictationStatus: async () => visualDictationStatus(),
         vaultStatus: async () => ({
-          available: true,
-          backend: 'keychain',
+          available: !visualBrowserState.vaultProblem,
+          backend: 'emperor-local',
+          ...(visualBrowserState.vaultProblem
+            ? { problem: visualBrowserState.vaultProblem }
+            : {}),
           locked: false,
           hasMasterPassword: false,
-          biometricSupported: true,
-          biometricUnlock: false,
           handles: visualBrowserState.vault,
         }),
         vaultSave: async (draft: Record<string, unknown>) => {
@@ -4358,8 +4356,11 @@ export async function installVisualCoreBridge(
         vaultLock: async () => ({ ok: true }),
         vaultSetMaster: async () => ({ ok: true }),
         vaultReveal: async () => ({ password: 'visual-only' }),
-        vaultBiometricUnlock: async () => ({ unlocked: true }),
-        vaultBiometricDisable: async () => ({ ok: true }),
+        vaultReset: async () => {
+          visualBrowserState.vault = []
+          visualBrowserState.vaultProblem = null
+          return { ok: true }
+        },
         clearBrowserData: async () => ({ ok: true }),
         // `?visualDownloads=none`: both lists are empty.
         browserDownloads: async () =>
@@ -4408,22 +4409,23 @@ export async function installVisualCoreBridge(
           path: `${projectDir}/downloads/invoice-2026-09.pdf`,
         }),
         agentDownloadSaveAs: async () => ({ ok: false, cancelled: true }),
-        // 设置 › 电脑操作: `?visualHelper=denied` leaves Accessibility off;
-        // `?visualPairing=pending` has a pairing code waiting.
-        macHelperStatus: async () => ({
-          available: true,
-          connected: true,
-          helperVersion: '0.3.0',
-          protocol: 1,
-          permissions: {
-            accessibility:
-              visualParams.get('visualHelper') === 'denied'
-                ? 'denied'
-                : 'granted',
-            'screen-recording': 'granted',
-          },
-          lastErrorCode: null,
-        }),
+        // 设置 › 电脑操作: `?visualHelper=denied` leaves Accessibility and
+        // Screen Recording off; `?visualPairing=pending` has a pairing code
+        // waiting.
+        macHelperStatus: async () => {
+          const denied = visualParams.get('visualHelper') === 'denied'
+          return {
+            available: true,
+            connected: true,
+            helperVersion: '0.3.0',
+            protocol: 1,
+            permissions: {
+              accessibility: denied ? 'denied' : 'granted',
+              'screen-recording': denied ? 'denied' : 'granted',
+            },
+            lastErrorCode: null,
+          }
+        },
         macHelperRequestPermission: async () => ({ opened: true }),
         macHelperResetPermission: async () => ({ reset: true }),
         macHelperReconnect: async () => ({
@@ -4437,22 +4439,96 @@ export async function installVisualCoreBridge(
           },
           lastErrorCode: null,
         }),
-        browserPairings: async () => ({
-          bridgeListening: true,
-          pendingPairings:
-            visualParams.get('visualPairing') === 'pending'
+        browserPairings: async () => {
+          // Chrome is paired and connected unless `?visualExtension=` says
+          // otherwise (`closed`: paired, Chrome not running).
+          const extension = visualParams.get('visualExtension')
+          const paired = extension === null || extension === 'closed'
+          const connected = extension === null
+          return {
+            bridgeListening: true,
+            pendingPairings:
+              visualParams.get('visualPairing') === 'pending'
+                ? [
+                    {
+                      pairingId: 'pair-visual-2',
+                      extensionId: 'aofcidkmgjlbaidneiodhljmoleejnpe',
+                      code: '482913',
+                      displayed: true,
+                      browser: 'chrome',
+                    },
+                  ]
+                : [],
+            pairedConnections: connected ? ['pair-visual-1'] : [],
+            attachedTabs: connected ? 2 : 0,
+            pairings: paired
               ? [
                   {
-                    pairingId: 'pair-visual-2',
-                    extensionId: 'aofcidkmgjlbaidneiodhljmoleejnpe',
-                    code: '482913',
-                    displayed: true,
+                    pairingId: 'pair-visual-1',
+                    browser: 'chrome',
+                    connected,
+                    tabs: connected ? 2 : 0,
+                    createdAt: '2026-09-30T08:00:00.000Z',
                   },
                 ]
               : [],
-          pairedConnections: ['pair-visual-1'],
-          attachedTabs: 2,
-        }),
+          }
+        },
+        ...(() => {
+          // 设置 › 电脑操作 › Chrome 和 Edge, `?visualExtension=`: `none`
+          // has no folder yet (安装扩展程序 puts it there), `ready` the
+          // folder but no browser has loaded it, `legacy` Chrome loaded it
+          // from a checkout; otherwise Chrome runs it. Edge is not installed.
+          const mode = visualParams.get('visualExtension')
+          let folderReady = mode !== 'none'
+          const status = () => ({
+            folder: {
+              path: '/Users/visual/.emperor/browser-extension',
+              displayPath: '~/.emperor/browser-extension',
+              ready: folderReady,
+              version: folderReady ? '0.2.0' : null,
+            },
+            bundledVersion: '0.2.0',
+            browsers: [
+              {
+                browser: 'chrome',
+                name: 'Google Chrome',
+                present: true,
+                extension:
+                  mode === null || mode === 'closed' ? 'loaded' : 'none',
+                ...(mode === 'legacy'
+                  ? {
+                      loadedFrom:
+                        '~/Documents/workspace/emperor-agent/desktop/extension',
+                    }
+                  : {}),
+                developerMode: mode !== 'none' && mode !== 'ready',
+                hostRegistered: folderReady,
+              },
+              {
+                browser: 'edge',
+                name: 'Microsoft Edge',
+                present: false,
+                extension: 'none',
+                developerMode: false,
+                hostRegistered: false,
+              },
+            ],
+          })
+          return {
+            browserExtensionStatus: async () => status(),
+            installBrowserExtension: async () => {
+              folderReady = true
+              return { ok: true, registered: ['chrome'], status: status() }
+            },
+            revealBrowserExtension: async () => ({ ok: folderReady }),
+            removeBrowserExtension: async () => {
+              folderReady = false
+              return { ok: true, uninstalled: 1, status: status() }
+            },
+            onBrowserPairingRequest: () => () => {},
+          }
+        })(),
         connectBrowsers: async () => ({ browsers: ['chrome'] }),
         approveBrowserPairing: async () => true,
         denyBrowserPairing: async () => true,
@@ -4481,6 +4557,18 @@ export async function installVisualCoreBridge(
           heard.forEach((event, index) =>
             setTimeout(() => emitDictation(event), 30 * (index + 1)),
           )
+          // RV-06: about 3 seconds of a voice's loudness for the waveform,
+          // ending on 0.37, after the last partial result.
+          const voice = [
+            0.02, 0.03, 0.02, 0.04, 0.03, 0.05, 0.04, 0.12, 0.35, 0.62, 0.48,
+            0.71, 0.55, 0.3, 0.06, 0.4, 0.66, 0.82, 0.58, 0.44, 0.27, 0.05,
+            0.04, 0.33, 0.52, 0.47, 0.69, 0.6, 0.38, 0.22, 0.09, 0.45, 0.73,
+            0.64, 0.5, 0.31, 0.06, 0.03, 0.05, 0.28, 0.56, 0.77, 0.61, 0.48,
+            0.37,
+          ]
+          setTimeout(() => {
+            for (const value of voice) emitDictation({ type: 'level', value })
+          }, 30 * heard.length)
           return { ok: true, session: visualDictation.session }
         },
         dictationStop: async () => {
@@ -6786,12 +6874,6 @@ export async function installVisualCoreBridge(
             case 'computerUse.setEnabled':
               visualComputerUseState.enabled = args[0] === true
               return visualComputerUse()
-            case 'computerUse.stop':
-              visualComputerUseState.stopped = true
-              return visualComputerUse()
-            case 'computerUse.resume':
-              visualComputerUseState.stopped = false
-              return visualComputerUse()
             case 'computerUse.setDriverEnabled': {
               const input = (args[0] || {}) as {
                 driver?: string
@@ -6802,25 +6884,12 @@ export async function installVisualCoreBridge(
                   input.enabled === true
               return visualComputerUse()
             }
-            case 'computerUse.setAppLists': {
-              const input = (args[0] || {}) as Partial<
-                Record<'protected' | 'highRisk' | 'sensitive', string[]>
-              >
-              visualComputerUseState.appLists = {
-                ...visualComputerUseState.appLists,
-                ...input,
-              }
+            case 'computerUse.acknowledgeRetiredApps':
+              visualComputerUseState.retiredProtectedApps = []
               return visualComputerUse()
-            }
             case 'computerUse.setDownloadRetention': {
               const input = (args[0] || {}) as { days?: 0 | 7 | 30 | 90 }
               visualComputerUseState.downloadRetentionDays = input.days ?? 30
-              return visualComputerUse()
-            }
-            case 'computerUse.setKillSwitch': {
-              const input = (args[0] || {}) as { accelerator?: string | null }
-              visualComputerUseState.accelerator =
-                input.accelerator ?? 'Control+Alt+Command+.'
               return visualComputerUse()
             }
             case 'computerUse.clearScreenshots': {

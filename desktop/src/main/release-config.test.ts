@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { spawnSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
@@ -97,6 +98,102 @@ async function waitForCompleteAsar(
   )
 }
 
+describe('macOS helper icons (RV-07)', () => {
+  const scripts = path.join(desktopRoot, 'native', 'macos', 'scripts')
+  const read = (name: string) =>
+    fs.readFileSync(path.join(scripts, name), 'utf8')
+
+  it('gives both helpers the icon before their bundle is sealed', () => {
+    for (const name of ['assemble-app.sh', 'assemble-dictation-app.sh']) {
+      const script = read(name)
+      expect(script, name).toContain(
+        '"$native_dir/scripts/helper-icon.sh" "$app/Contents/Resources/icon.icns"',
+      )
+      expect(script, name).toContain(
+        '<key>CFBundleIconFile</key><string>icon</string>',
+      )
+      expect(script.indexOf('helper-icon.sh'), name).toBeLessThan(
+        script.indexOf('codesign --force'),
+      )
+    }
+    const icon = read('helper-icon.sh')
+    expect(icon).toContain('build/icon.png')
+    expect(icon).toMatch(/\bsips\b/)
+    expect(icon).toMatch(/\biconutil\b/)
+  })
+
+  it.runIf(process.platform === 'darwin')(
+    'makes the icon from build/icon.png, and stops on a missing or broken image',
+    () => {
+      const script = path.join(scripts, 'helper-icon.sh')
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'emperor-icon-'))
+      const run = (...args: string[]) =>
+        spawnSync('bash', [script, ...args], { encoding: 'utf8' })
+      try {
+        const output = path.join(dir, 'Resources', 'icon.icns')
+        const made = run(output)
+        expect(made.status, made.stderr).toBe(0)
+        const bytes = fs.readFileSync(output)
+        expect(bytes.subarray(0, 4).toString('latin1')).toBe('icns')
+        expect(bytes.byteLength).toBeGreaterThan(10_000)
+
+        const missing = path.join(dir, 'missing.icns')
+        expect(run(missing, path.join(dir, 'nothing.png')).status).not.toBe(0)
+        expect(fs.existsSync(missing)).toBe(false)
+        fs.writeFileSync(path.join(dir, 'broken.png'), 'not an image')
+        const broken = path.join(dir, 'broken.icns')
+        const failed = run(broken, path.join(dir, 'broken.png'))
+        expect(failed.status).not.toBe(0)
+        expect(failed.stderr).toMatch(/helper-icon/)
+        expect(fs.existsSync(broken)).toBe(false)
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it('names the fixture stand-in, gives it the icon, and has LaunchServices forget it', () => {
+    const script = read('fixture-integration.sh')
+    // The helper checks its parent's bundle ID, so the stand-in keeps it.
+    expect(script).toContain(
+      '<key>CFBundleIdentifier</key><string>com.emperor.agent.desktop</string>',
+    )
+    expect(script).toContain(
+      '<key>CFBundleDisplayName</key><string>Emperor Agent（测试替身）</string>',
+    )
+    expect(script).toContain('<key>CFBundleIconFile</key><string>icon</string>')
+    expect(script).toContain(
+      '"$native_dir/scripts/helper-icon.sh" "$main_app/Contents/Resources/icon.icns"',
+    )
+    expect(script.indexOf('helper-icon.sh')).toBeLessThan(
+      script.indexOf('codesign --force --options runtime'),
+    )
+    // Every exit, an error or ⌃C included, unregisters the stand-in.
+    expect(script).toMatch(/"\$lsregister" -u "\$main_app"/)
+    expect(script).toMatch(/\ntrap cleanup EXIT\n/)
+    expect(script).toMatch(/\ntrap 'exit 130' INT\n/)
+    expect(script).toMatch(/\ntrap 'exit 143' TERM\n/)
+    expect(script.indexOf('main_app=')).toBeLessThan(
+      script.indexOf('trap cleanup EXIT'),
+    )
+  })
+
+  it('has LaunchServices forget the socket smoke copies before they are deleted', () => {
+    const script = read('socket-smoke.sh')
+    for (const bundle of [
+      '$fixture/Emperor Agent.app',
+      '$fixture/Emperor Agent.app/Contents/Library/Helpers/Emperor Computer Helper.app',
+      '$fixture/helper-build/Emperor Computer Helper.app',
+    ])
+      expect(script).toContain(`"${bundle}"`)
+    expect(script).toMatch(/"\$lsregister" -u "\$bundle"/)
+    expect(script.indexOf('"$lsregister" -u')).toBeLessThan(
+      script.indexOf('rm -rf "$fixture"'),
+    )
+    expect(script).toMatch(/\ntrap cleanup EXIT\n/)
+  })
+})
+
 describe('desktop release packaging (MIG-REL-001)', () => {
   it('says why dictation needs the microphone and speech recognition', () => {
     const config = fs.readFileSync(
@@ -135,6 +232,29 @@ describe('desktop release packaging (MIG-REL-001)', () => {
         'utf8',
       ),
     ).toContain('assemble-dictation-app.sh')
+  })
+
+  it('ships the Chrome/Edge extension on macOS, without its tests', () => {
+    const config = fs.readFileSync(
+      path.join(desktopRoot, 'electron-builder.yml'),
+      'utf8',
+    )
+    const mac = config.slice(config.indexOf('\nmac:'), config.indexOf('\nwin:'))
+    // Settings copies it into ~/.emperor/browser-extension for Chrome to load.
+    expect(mac).toContain(
+      [
+        '    - from: extension',
+        '      to: browser-extension',
+        '      filter:',
+        "        - '**/*'",
+        "        - '!tests{,/**/*}'",
+        "        - '!README.md'",
+        "        - '!**/.*'",
+      ].join('\n'),
+    )
+    expect(config.slice(0, config.indexOf('\nmac:'))).not.toContain(
+      'browser-extension',
+    )
   })
 
   it('does not bundle the legacy Python backend by default', () => {
@@ -348,6 +468,9 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     expect(runner).toContain('shell: false')
     expect(runner).not.toMatch(/env:\s*\{\s*\.\.\.process\.env/)
     expect(runner).toContain('PATH: emptyBin')
+    // Secrets need no Keychain: macOS runs with the synthetic HOME too.
+    expect(runner).toMatch(/\n\s+HOME: homeRoot,\n/)
+    expect(runner).not.toContain('process.env.HOME || homeRoot')
     expect(runner).toContain("APPDATA: join(homeRoot, 'AppData', 'Roaming')")
     expect(runner).toContain("LOCALAPPDATA: join(homeRoot, 'AppData', 'Local')")
     expect(runner).toContain('TEMP: tempRoot')
@@ -559,10 +682,16 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       'Contents',
     )
     fs.mkdirSync(path.join(helper, 'MacOS'), { recursive: true })
-    fs.writeFileSync(
-      path.join(helper, 'Info.plist'),
+    // RV-07: each helper carries Emperor's icon (an .icns starts with "icns").
+    const iconKey = '<key>CFBundleIconFile</key><string>icon</string>'
+    const icon = Buffer.concat([Buffer.from('icns'), Buffer.alloc(28)])
+    const helperInfo = [
       '<string>com.emperor.agent.desktop.computer-helper</string>',
-    )
+      iconKey,
+    ].join('\n')
+    fs.writeFileSync(path.join(helper, 'Info.plist'), helperInfo)
+    fs.mkdirSync(path.join(helper, 'Resources'), { recursive: true })
+    fs.writeFileSync(path.join(helper, 'Resources', 'icon.icns'), icon)
     fs.writeFileSync(
       path.join(helper, 'MacOS', 'emperor-computer-helper'),
       'native-fixture',
@@ -580,8 +709,11 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       '<string>com.emperor.agent.desktop.dictation-helper</string>',
       '<key>NSMicrophoneUsageDescription</key>',
       '<key>NSSpeechRecognitionUsageDescription</key>',
+      iconKey,
     ].join('\n')
     fs.writeFileSync(path.join(dictation, 'Info.plist'), dictationInfo)
+    fs.mkdirSync(path.join(dictation, 'Resources'), { recursive: true })
+    fs.writeFileSync(path.join(dictation, 'Resources', 'icon.icns'), icon)
     fs.writeFileSync(
       path.join(dictation, 'MacOS', 'emperor-dictation-helper'),
       'native-fixture',
@@ -594,6 +726,19 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       'emperor-nm-host',
     )
     fs.writeFileSync(messagingHost, 'native-fixture', { mode: 0o755 })
+    // The extension as the yml filter ships it: no tests, no README.
+    const extensionRoot = path.join(appOutDir, 'resources', 'browser-extension')
+    fs.cpSync(path.join(desktopRoot, 'extension'), extensionRoot, {
+      recursive: true,
+      filter: (file) => {
+        const inside = path.relative(path.join(desktopRoot, 'extension'), file)
+        return (
+          inside.split(path.sep)[0] !== 'tests' &&
+          inside !== 'README.md' &&
+          !path.basename(file).startsWith('.')
+        )
+      },
+    })
 
     const afterPack = require(
       path.join(desktopRoot, 'scripts', 'after-pack.cjs'),
@@ -638,6 +783,25 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       ),
     ).toThrow(/dictation helper/i)
     fs.writeFileSync(path.join(dictation, 'Info.plist'), dictationInfo)
+    // RV-07: without an icon macOS shows a blank one in permission prompts.
+    const validate = () =>
+      afterPack.validatePackagedAppResources(
+        path.join(appOutDir, 'resources'),
+        'darwin',
+        'arm64',
+      )
+    fs.rmSync(path.join(dictation, 'Resources', 'icon.icns'))
+    expect(validate).toThrow(/dictation helper icon/i)
+    fs.writeFileSync(path.join(dictation, 'Resources', 'icon.icns'), 'PNG')
+    expect(validate).toThrow(/dictation helper icon/i)
+    fs.writeFileSync(path.join(dictation, 'Resources', 'icon.icns'), icon)
+    fs.writeFileSync(
+      path.join(helper, 'Info.plist'),
+      '<string>com.emperor.agent.desktop.computer-helper</string>',
+    )
+    expect(validate).toThrow(/Computer Use helper icon/i)
+    fs.writeFileSync(path.join(helper, 'Info.plist'), helperInfo)
+    expect(validate).not.toThrow()
     const strayHelper = path.join(appOutDir, 'Library', 'Helpers', 'unexpected')
     fs.writeFileSync(strayHelper, 'x')
     expect(() =>
@@ -648,6 +812,34 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       ),
     ).toThrow(/allowlist/i)
     fs.rmSync(strayHelper)
+    // The packaged extension: no test files, a real manifest, no symlinks.
+    fs.mkdirSync(path.join(extensionRoot, 'tests'))
+    fs.writeFileSync(path.join(extensionRoot, 'tests', 'worker.test.js'), '')
+    expect(validate).toThrow(/browser-extension/i)
+    fs.rmSync(path.join(extensionRoot, 'tests'), { recursive: true })
+    fs.renameSync(
+      path.join(extensionRoot, 'manifest.json'),
+      path.join(temp, 'manifest.json'),
+    )
+    expect(validate).toThrow(/browser-extension/i)
+    fs.renameSync(
+      path.join(temp, 'manifest.json'),
+      path.join(extensionRoot, 'manifest.json'),
+    )
+    // The worker imports agent.js (RV-09): a build without it must fail.
+    fs.renameSync(
+      path.join(extensionRoot, 'agent.js'),
+      path.join(temp, 'agent.js'),
+    )
+    expect(validate).toThrow(/agent\.js/)
+    fs.renameSync(
+      path.join(temp, 'agent.js'),
+      path.join(extensionRoot, 'agent.js'),
+    )
+    fs.symlinkSync('/etc/hosts', path.join(extensionRoot, 'hosts.js'))
+    expect(validate).toThrow(/browser-extension/i)
+    fs.rmSync(path.join(extensionRoot, 'hosts.js'))
+    expect(validate).not.toThrow()
     fs.writeFileSync(path.join(petRoot, 'package.json'), '{}')
     expect(() =>
       afterPack.validatePackagedAppResources(

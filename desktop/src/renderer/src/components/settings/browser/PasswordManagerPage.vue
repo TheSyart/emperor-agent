@@ -1,20 +1,20 @@
 <script setup lang="ts">
 /**
  * 设置 › 浏览器 › 密码管理器 — the credential vault Emperor fills from:
- * 保护 (how the vault is protected; the master password and Touch ID) and
- * 已保存 (one row per entry: 查看密码 / 编辑 / 删除). 添加 (header) and 编辑
- * open the entry form in a dialog; setting, changing or entering the master
- * password and turning Touch ID on happen in a small dialog too, so the
- * page itself has no input fields. Credential values travel only over the
- * trusted preload → main IPC.
+ * 保护 (how the vault is protected: Emperor's local key, and the master
+ * password) and 已保存 (one row per entry: 查看密码 / 编辑 / 删除). 添加
+ * (header) and 编辑 open the entry form in a dialog; setting, changing or
+ * entering the master password happens in a small dialog too, so the page
+ * itself has no input fields. When the local key is lost or fails its
+ * checks, a notice on top offers 清空 (after a confirmation). Credential
+ * values travel only over the trusted preload → main IPC.
  */
 import { Plus } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
-  vaultBiometricDisable,
-  vaultBiometricUnlock,
   vaultLock,
   vaultRemove,
+  vaultReset,
   vaultReveal,
   vaultSave,
   vaultSetMaster,
@@ -29,6 +29,7 @@ import { useSettingsHeader } from '../settingsHeader'
 import {
   EmptyState,
   SettingsGroup,
+  SettingsNotice,
   SettingsRow,
   SettingsSection,
   StatusBadge,
@@ -46,6 +47,7 @@ import {
   vaultAvailability,
   vaultEncryption,
   vaultErrorText,
+  vaultProblem,
 } from './credentialVaultModel'
 
 const status = ref<VaultStatus | null>(null)
@@ -58,34 +60,25 @@ const form = ref(emptyForm())
 const password = ref('')
 const totpSeed = ref('')
 const master = ref('')
-/** Opt into Touch ID unlock with the password being unlocked or set. */
-const unlockBiometric = ref(false)
-const masterBiometric = ref(false)
-/** Re-entered master password that turns Touch ID unlock on while unlocked. */
-const confirmMaster = ref('')
-/** The master password / Touch ID dialog, when open. */
-type ProtectDialog = 'unlock' | 'set' | 'change' | 'touch-id'
+/** The master password dialog, when open. */
+type ProtectDialog = 'unlock' | 'set' | 'change'
 const protect = ref<ProtectDialog | null>(null)
 const PROTECT_TITLES: Record<ProtectDialog, string> = {
   unlock: '解锁密码管理器',
   set: '设置主密码',
   change: '更改主密码',
-  'touch-id': '开启 Touch ID 解锁',
 }
 const PROTECT_SUBMIT: Record<ProtectDialog, string> = {
   unlock: '解锁',
   set: '保存',
   change: '保存',
-  'touch-id': '开启',
 }
 const revealed = ref<{ handleId: string; password: string } | null>(null)
 let hideTimer: ReturnType<typeof setTimeout> | null = null
 
 const availability = computed(() => vaultAvailability(status.value))
 const encryption = computed(() => vaultEncryption(status.value))
-const biometricOffered = computed(() =>
-  Boolean(status.value?.hasMasterPassword && status.value.biometricSupported),
-)
+const problem = computed(() => vaultProblem(status.value))
 const formUnsigned = computed(() => unsignedFormWarning(form.value.appBindings))
 /** A dialog shows its own errors while it is open. */
 const pageError = computed(() =>
@@ -207,9 +200,6 @@ function reveal(handleId: string): void {
 function openProtect(kind: ProtectDialog): void {
   error.value = ''
   master.value = ''
-  confirmMaster.value = ''
-  unlockBiometric.value = false
-  masterBiometric.value = false
   protect.value = kind
 }
 
@@ -219,47 +209,35 @@ function onProtectOpen(open: boolean): void {
 
 function submitProtect(): void {
   if (protect.value === 'unlock') unlock()
-  else if (protect.value === 'touch-id') enableTouchId()
   else setMaster()
 }
 
 function unlock(): void {
   void run(async () => {
-    const biometric = biometricOffered.value && unlockBiometric.value
-    if (!(await vaultUnlock(master.value, { biometric })))
-      throw new Error('主密码不正确')
+    if (!(await vaultUnlock(master.value))) throw new Error('主密码不正确')
     master.value = ''
-    unlockBiometric.value = false
-    protect.value = null
-  })
-}
-
-function unlockWithTouchId(): void {
-  void run(async () => {
-    await vaultBiometricUnlock()
-  })
-}
-
-function enableTouchId(): void {
-  void run(async () => {
-    if (!(await vaultUnlock(confirmMaster.value, { biometric: true })))
-      throw new Error('主密码不正确')
-    confirmMaster.value = ''
     protect.value = null
   })
 }
 
 function setMaster(): void {
   void run(async () => {
-    const biometric =
-      Boolean(master.value) &&
-      Boolean(status.value?.biometricSupported) &&
-      masterBiometric.value
-    await vaultSetMaster(master.value || null, { biometric })
+    await vaultSetMaster(master.value || null)
     master.value = ''
-    masterBiometric.value = false
     protect.value = null
   })
+}
+
+/** 清空: the way out when the local key is lost or fails its checks. */
+function reset(): void {
+  if (
+    !window.confirm(
+      '清空后，已保存的密码和主密码都会删除，无法恢复。确定清空？',
+    )
+  )
+    return
+  hidePassword()
+  void run(vaultReset)
 }
 
 function removeTotpChanged(): void {
@@ -276,9 +254,26 @@ onBeforeUnmount(hidePassword)
 
 <template>
   <SettingsSection
-    intro="保存网站或 macOS App 的账号密码，供 Emperor 操作网页和应用时代填。Emperor 只拿到名称和句柄；密码在主进程解密，由受信驱动代填到精确绑定的目标，每次代填前都会请你确认。"
+    intro="Emperor 操作网页和 App 时用来代填的账号密码，每次代填前都会请你确认。"
   >
-    <p v-if="pageError" class="vault-error" role="alert">{{ error }}</p>
+    <SettingsNotice
+      v-if="problem"
+      tone="error"
+      :title="problem.title"
+      :description="problem.description"
+    >
+      <template #actions>
+        <Button
+          size="sm"
+          variant="danger"
+          :disabled="busy"
+          data-action="vault-reset"
+          @click="reset"
+          >清空</Button
+        >
+      </template>
+    </SettingsNotice>
+    <SettingsNotice v-if="pageError" tone="error" :title="pageError" />
     <SettingsGroup title="保护">
       <SettingsRow title="保护状态" :description="availability.description">
         <StatusBadge :tone="availability.tone">{{
@@ -301,14 +296,6 @@ onBeforeUnmount(hidePassword)
       >
         <div class="vault-inline">
           <template v-if="status.locked">
-            <Button
-              v-if="biometricOffered && status.biometricUnlock"
-              size="sm"
-              variant="outline"
-              :disabled="busy"
-              @click="unlockWithTouchId"
-              >使用 Touch ID</Button
-            >
             <Button
               size="sm"
               variant="outline"
@@ -346,35 +333,6 @@ onBeforeUnmount(hidePassword)
           >
         </div>
       </SettingsRow>
-      <SettingsRow
-        v-if="biometricOffered && (status?.biometricUnlock || !status?.locked)"
-        title="Touch ID 解锁"
-        :description="
-          status?.biometricUnlock
-            ? '可用 Touch ID 或 Mac 登录密码代替主密码解锁。能通过这项系统验证的人，都能解锁凭据库。'
-            : '开启后可用 Touch ID 或 Mac 登录密码代替主密码解锁。'
-        "
-      >
-        <div v-if="status?.biometricUnlock" class="vault-inline">
-          <StatusBadge tone="ok">已开启</StatusBadge>
-          <Button
-            size="sm"
-            variant="outline"
-            :disabled="busy"
-            @click="run(vaultBiometricDisable)"
-            >关闭</Button
-          >
-        </div>
-        <Button
-          v-else
-          size="sm"
-          variant="outline"
-          :disabled="busy"
-          data-action="vault-touch-id"
-          @click="openProtect('touch-id')"
-          >开启</Button
-        >
-      </SettingsRow>
     </SettingsGroup>
     <SettingsGroup
       v-if="status?.available || status?.handles.length"
@@ -410,21 +368,21 @@ onBeforeUnmount(hidePassword)
           v-if="handle.fields.includes('password')"
           size="sm"
           variant="outline"
-          :disabled="busy || status?.locked"
+          :disabled="busy || !writable"
           @click="reveal(handle.handleId)"
           >查看密码</Button
         >
         <Button
           size="sm"
           variant="outline"
-          :disabled="busy || status?.locked"
+          :disabled="busy || !writable"
           @click="edit(handle)"
           >编辑</Button
         >
         <Button
           size="sm"
           variant="danger"
-          :disabled="busy || status?.locked"
+          :disabled="busy || !writable"
           @click="remove(handle.handleId)"
           >删除</Button
         >
@@ -442,16 +400,8 @@ onBeforeUnmount(hidePassword)
         autocomplete="off"
         @submit.prevent="submitProtect"
       >
-        <p v-if="error" class="vault-error" role="alert">{{ error }}</p>
-        <label v-if="protect === 'touch-id'"
-          >主密码<input
-            v-model="confirmMaster"
-            type="password"
-            autocomplete="off"
-            aria-label="确认主密码"
-            required
-        /></label>
-        <label v-else-if="protect === 'unlock'"
+        <SettingsNotice v-if="error" tone="error" :title="error" />
+        <label v-if="protect === 'unlock'"
           >主密码<input
             v-model="master"
             type="password"
@@ -470,31 +420,10 @@ onBeforeUnmount(hidePassword)
         <p v-if="protect === 'set' || protect === 'change'" class="vault-note">
           {{
             protect === 'change'
-              ? '至少 12 个字符；留空保存会关闭主密码。更改或关闭主密码会同时关闭 Touch ID 解锁。'
-              : '至少 12 个字符。'
+              ? '至少 12 个字符；留空保存会关闭主密码。'
+              : '至少 12 个字符。忘记主密码就无法找回已保存的密码。'
           }}
         </p>
-        <p v-if="protect === 'touch-id'" class="vault-note">
-          开启后，能通过 Touch ID 或 Mac 登录密码验证的人，都能解锁凭据库。
-        </p>
-        <label
-          v-if="
-            protect === 'unlock' && biometricOffered && !status?.biometricUnlock
-          "
-          class="vault-check"
-          ><input v-model="unlockBiometric" type="checkbox" />允许 Touch ID
-          解锁</label
-        >
-        <label
-          v-if="
-            (protect === 'set' || protect === 'change') &&
-            status?.biometricSupported &&
-            master
-          "
-          class="vault-check"
-          ><input v-model="masterBiometric" type="checkbox" />允许 Touch ID
-          解锁</label
-        >
       </form>
       <template #footer>
         <Button variant="outline" type="button" @click="protect = null"
@@ -521,7 +450,7 @@ onBeforeUnmount(hidePassword)
         autocomplete="off"
         @submit.prevent="save"
       >
-        <p v-if="error" class="vault-error" role="alert">{{ error }}</p>
+        <SettingsNotice v-if="error" tone="error" :title="error" />
         <label
           >名称<input v-model="form.label" required maxlength="120"
         /></label>
@@ -599,10 +528,6 @@ onBeforeUnmount(hidePassword)
 </template>
 
 <style scoped>
-.vault-error {
-  color: rgb(var(--danger));
-  font-size: var(--fs-xs);
-}
 .vault-inline {
   display: flex;
   align-items: center;

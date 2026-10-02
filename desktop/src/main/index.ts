@@ -2,16 +2,11 @@ import {
   app,
   BrowserWindow,
   dialog,
-  globalShortcut,
   ipcMain,
-  Menu,
-  nativeImage,
   protocol,
   net,
   session,
   shell,
-  safeStorage,
-  Tray,
   type OpenDialogOptions,
   type Rectangle,
 } from 'electron'
@@ -65,16 +60,6 @@ import {
   listImportSources,
 } from './browser-import'
 import { registerDesktopCapabilityIpc } from './desktop-capability-ipc'
-import {
-  createKillSwitch,
-  defaultKillSwitchAccelerator,
-  type KillSwitch,
-} from './computer-use/kill-switch'
-import {
-  createStopEntries,
-  type StopEntries,
-  type StopMenuItem,
-} from './computer-use/stop-entries'
 import { PointerOverlay } from './computer-use/pointer-overlay'
 import { pointerAllowed } from './computer-use/pointer-overlay-view'
 import { createPreviewPointerRelay } from './computer-use/preview-pointer'
@@ -94,14 +79,20 @@ import {
 import { NmBridgeServer } from './computer-use/nm-bridge'
 import {
   EncryptedFilePairingStore,
-  electronPairingCipher,
+  localPairingCipher,
 } from './computer-use/nm-bridge-store'
+import { LocalSecretStore } from './local-secret-store'
+import { verifyPackagedSecrets } from './packaged-secrets-smoke'
 import {
   NmManifestRegistrar,
   resolveNmHostPath,
 } from './computer-use/nm-manifest'
 import { ExternalBrowserDriver } from './computer-use/external-browser-driver'
 import { ExternalDownloadLog } from './computer-use/external-downloads'
+import {
+  createBrowserExtensionService,
+  type BrowserExtensionService,
+} from './computer-use/browser-extension-installer'
 import { registerCredentialVaultIpc } from './computer-use/credential-vault-ipc'
 import {
   authenticateCredentialReveal,
@@ -129,6 +120,7 @@ import {
   AGENT_PREVIEW_FRAME_CHANNEL,
   AGENT_PREVIEW_POINTER_CHANNEL,
   BROWSER_DOWNLOAD_EVENT_CHANNEL,
+  BROWSER_PAIRING_REQUEST_CHANNEL,
   BROWSER_REVEAL_CHANNEL,
   PET_STATUS_CHANNEL,
   TERMINAL_SUBSCRIPTION_CHANNEL,
@@ -137,6 +129,11 @@ import {
 const mainDir = moduleDirFromUrl(import.meta.url)
 const mainArgv = process.argv.slice(2)
 const packagedSmoke = parsePackagedSmokeArgs(process.argv)
+// Emperor keeps no secret in the macOS Keychain (local-secret-store.ts).
+// Should Chromium itself reach for it, a mock keychain answers instead of a
+// "Safe Storage" prompt. Extra insurance only; keychain-free.test.ts and the
+// bundle audit hold the code to it.
+app.commandLine.appendSwitch('use-mock-keychain')
 let config = resolveConfig({ argv: mainArgv, env: process.env })
 let legacyRuntimeRoot = config.runtimeRoot
 let packagedRuntimeRevision = ''
@@ -171,13 +168,12 @@ let nmBridge: NmBridgeServer | null = null
 let externalBrowser: ExternalBrowserDriver | null = null
 /** Emperor's downloads in the user's own Chrome/Edge (RV-09). */
 let externalDownloads: ExternalDownloadLog | null = null
+// 设置 › 电脑操作 › Chrome 和 Edge: ~/.emperor/browser-extension.
+let browserExtension: BrowserExtensionService | null = null
 let credentialVault: CredentialVault | null = null
 let dictation: DictationService | null = null
 let agentPreview: AgentPreview | null = null
 let desktopPreview: DesktopPreview | null = null
-let killSwitch: KillSwitch | null = null
-let stopEntries: StopEntries | null = null
-let stopTray: Tray | null = null
 let pointerOverlay: PointerOverlay | null = null
 let didLoadRetry = false
 const trustedRendererPolicy = createTrustedRendererPolicy({
@@ -203,17 +199,13 @@ const trustedPetPolicy = createTrustedRendererPolicy({
  * What shows that the Agent works: the helper's capture streams give macOS
  * its purple sharing mark, the conversation shows a read-only preview, and
  * the virtual pointer follows desktop actions. Emperor draws no "正在操控"
- * bar of its own (2026-09-29); stopping stays with the kill switch, the
- * Dock menu and the tray fallback kept in sync here.
+ * bar of its own (2026-09-29) and has no emergency stop (2026-10-01): the
+ * master switch and stopping the conversation end the work. Here the
+ * on-screen pointer goes away once it may no longer show.
  */
 function syncControlIndicators(): void {
   const view = coreApi?.host.computerUse?.service.statusView() ?? null
   if (!pointerAllowed(view)) pointerOverlay?.clear()
-  stopEntries?.sync({
-    enabled: view?.enabled === true,
-    stopped: view?.stopped === true,
-    shortcutRegistered: killSwitch?.status().registered === true,
-  })
 }
 
 /**
@@ -242,55 +234,6 @@ function startDownloadRetention(): void {
   sweep()
   retentionTimer ??= setInterval(sweep, 6 * 60 * 60 * 1000)
   retentionTimer.unref?.()
-}
-
-function stopMenu(items: readonly StopMenuItem[]): Menu {
-  return Menu.buildFromTemplate(
-    items.map((item) => ({
-      label: item.label,
-      enabled: item.enabled,
-      ...(item.click === undefined ? {} : { click: item.click }),
-    })),
-  )
-}
-
-/** Dock menu and (when the shortcut is taken) a tray icon to stop (§6.6). */
-function createElectronStopEntries(): StopEntries {
-  return createStopEntries(
-    {
-      setDockMenu: (items) => {
-        app.dock?.setMenu(stopMenu(items ?? []))
-      },
-      showTray: (items, tooltip) => {
-        if (stopTray === null) {
-          const icon =
-            process.platform === 'darwin'
-              ? nativeImage.createFromNamedImage('NSStopProgressTemplate')
-              : nativeImage
-                  .createFromPath(appIconPath)
-                  .resize({ width: 16, height: 16 })
-          stopTray = new Tray(icon)
-        }
-        stopTray.setToolTip(tooltip)
-        stopTray.setContextMenu(stopMenu(items))
-      },
-      hideTray: () => {
-        stopTray?.destroy()
-        stopTray = null
-      },
-    },
-    {
-      stop: () => {
-        void coreApi?.computerUse.stop()
-      },
-      showApp: () => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.show()
-          mainWindow.focus()
-        } else if (runtimeReady) createWindow()
-      },
-    },
-  )
 }
 
 ipcMain.on(TERMINAL_SUBSCRIPTION_CHANNEL, (event, payload: unknown) => {
@@ -473,9 +416,17 @@ function prepareMainRuntime(): void {
  * window is created on the first Agent tab only.
  */
 function createComputerUseHost(): void {
+  const computerUseRoot = path.join(config.stateRoot, 'computer-use')
+  // Passwords and browser pairings are sealed with Emperor's own key, never
+  // the Keychain. While vault entries still need a key that has gone, no new
+  // key is made over them; Settings offers 清空 instead.
+  const localSecrets = new LocalSecretStore({
+    keyPath: path.join(computerUseRoot, 'secrets', 'local.key'),
+    sealedDataExists: () => credentialVault?.hasSealedData ?? true,
+  })
   credentialVault = new CredentialVault({
-    path: path.join(config.stateRoot, 'computer-use', 'vault.json'),
-    storage: safeStorage,
+    path: path.join(computerUseRoot, 'vault.json'),
+    storage: localSecrets,
   })
   const driver = new EmbeddedBrowserDriver({
     electron: electronBrowserFactory(),
@@ -569,13 +520,8 @@ function createComputerUseHost(): void {
             }),
           }),
       pairings: new EncryptedFilePairingStore(
-        path.join(
-          config.stateRoot,
-          'computer-use',
-          'browser-pairings',
-          'pairings.json',
-        ),
-        electronPairingCipher(safeStorage),
+        path.join(computerUseRoot, 'browser-pairings', 'pairings.json'),
+        localPairingCipher(localSecrets),
       ),
     })
     externalDownloads = new ExternalDownloadLog(
@@ -583,6 +529,23 @@ function createComputerUseHost(): void {
     )
     externalBrowser = new ExternalBrowserDriver(nmBridge, 'macos', {
       downloads: externalDownloads,
+    })
+    browserExtension = createBrowserExtensionService({
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      desktopRoot: path.resolve(mainDir, '..', '..'),
+      stateRoot: config.stateRoot,
+      homeDir: userInfo().homedir,
+      bridge: nmBridge,
+    })
+    // An extension asked to pair: the renderer shows 电脑操作 › Chrome 和
+    // Edge for the code; the Dock icon bounces, focus is not taken.
+    nmBridge.subscribe((event) => {
+      if (event.type !== 'pairing' || event.request.displayed) return
+      const contents = mainWindow?.webContents
+      if (contents && !contents.isDestroyed())
+        contents.send(BROWSER_PAIRING_REQUEST_CHANNEL)
+      app.dock?.bounce('informational')
     })
   }
   computerUsePort = new DesktopComputerUsePort({
@@ -592,13 +555,6 @@ function createComputerUseHost(): void {
     credentials: () => credentialVault,
     desktop: () => nativeDesktop,
     indicate: () => queueMicrotask(syncControlIndicators),
-  })
-  killSwitch = createKillSwitch({
-    shortcuts: globalShortcut,
-    platform: process.platform,
-    onTrigger: () => {
-      void coreApi?.computerUse.stop()
-    },
   })
 }
 
@@ -625,6 +581,8 @@ function closeCoreHost(): void {
   void nativeDesktop?.shutdown().catch(() => undefined)
   externalBrowser?.dispose()
   externalBrowser = null
+  browserExtension?.dispose()
+  browserExtension = null
   void nmBridge?.stop().catch(() => undefined)
   nmBridge = null
   sessionEventBridge.dispose()
@@ -1006,6 +964,8 @@ async function startup(): Promise<void> {
       console.warn(
         `Chrome/Edge connection unavailable: ${nmBridge.unavailableReason ?? 'unknown'}`,
       )
+    // Upgrade the extension folder in the background; never block startup.
+    void browserExtension?.start()
     coreApi = await createCoreHost({
       root: config.runtimeRoot,
       ipcMain,
@@ -1030,23 +990,7 @@ async function startup(): Promise<void> {
         ...(computerUsePort
           ? {
               computerUsePort,
-              computerUseKillSwitch: () =>
-                killSwitch?.status() ?? { accelerator: '', registered: false },
-              // The emergency-stop shortcut is held only while computer use
-              // is on, so it never steals the combination otherwise.
-              computerUseEnabledChanged: (enabled: boolean) => {
-                if (enabled) killSwitch?.register()
-                else killSwitch?.unregister()
-                syncControlIndicators()
-              },
-              // Settings › 电脑操作 changed the stop shortcut: applied at
-              // once while on, remembered while off.
-              computerUseKillSwitchChanged: (accelerator: string | null) => {
-                killSwitch?.setAccelerator(
-                  accelerator ?? defaultKillSwitchAccelerator(process.platform),
-                )
-                syncControlIndicators()
-              },
+              computerUseEnabledChanged: () => syncControlIndicators(),
             }
           : {}),
         terminalHost: new NodePtyHost(),
@@ -1060,11 +1004,6 @@ async function startup(): Promise<void> {
     })
     const core = coreApi
     await browserPreferences.load(() => core.browser.preferences())
-    const savedAccelerator = coreApi.host.computerUseKillSwitchAccelerator()
-    if (savedAccelerator !== undefined)
-      killSwitch?.setAccelerator(savedAccelerator)
-    if (coreApi.host.computerUse?.enabled === true) killSwitch?.register()
-    if (computerUsePort) stopEntries ??= createElectronStopEntries()
     syncControlIndicators()
     startDownloadRetention()
     registerDesktopCapabilityIpc({
@@ -1073,6 +1012,8 @@ async function startup(): Promise<void> {
       ...(nativeDesktop ? { macHelper: nativeDesktop } : {}),
       ...(nmBridge ? { browserPairings: nmBridge } : {}),
       externalAttachedCount: () => externalBrowser?.listAttached().length ?? 0,
+      ...(browserExtension ? { browserExtension } : {}),
+      externalAttachedTabs: () => externalBrowser?.listAttached() ?? [],
       browser: {
         openUrl: (input) => requireBrowserViewHost().openUrl(input),
         setBounds: (bounds) => browserViewHost?.setBounds(bounds),
@@ -1249,27 +1190,8 @@ async function startup(): Promise<void> {
       })
     registerAppProtocol()
     if (packagedSmoke) {
-      if (process.platform === 'darwin') {
-        const probe = 'emperor-packaged-safe-storage-probe'
-        if (
-          !safeStorage.isEncryptionAvailable() ||
-          safeStorage.decryptString(safeStorage.encryptString(probe)) !== probe
-        )
-          throw new Error('packaged safeStorage round trip failed')
-        // The master-password KDF must exist in Electron's crypto, which
-        // lacks some of Node's (no Argon2), so derive it here for real.
-        const vault = new CredentialVault({
-          path: path.join(config.stateRoot, 'packaged-smoke-vault.json'),
-          storage: safeStorage,
-        })
-        vault.setMasterPassword(`${probe}-master`, { biometric: true })
-        vault.lock()
-        vault.unlockWithBiometrics()
-        vault.lock()
-        if (!vault.unlock(`${probe}-master`))
-          throw new Error('packaged credential vault round trip failed')
-        vault.lock()
-      }
+      // Local key and master password round trips, with no Keychain.
+      verifyPackagedSecrets(config.stateRoot)
       const attachment = await createPackagedSmokeAttachment(config.stateRoot)
       await runPackagedSmoke({
         core: coreApi,
@@ -1349,8 +1271,6 @@ app.on('before-quit', () => {
 })
 
 app.on('will-quit', () => {
-  killSwitch?.dispose()
-  stopEntries?.dispose()
   dictation?.dispose()
 })
 

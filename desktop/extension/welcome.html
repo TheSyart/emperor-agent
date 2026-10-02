@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>连接 Emperor Agent</title>
+    <link rel="icon" href="icons/icon-32.png" />
+    <link rel="stylesheet" href="welcome.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="icons/icon-128.png" alt="" width="56" height="56" />
+        <h1>连接 Emperor Agent</h1>
+        <p>
+          再完成两步，Emperor
+          就能操作你在这个浏览器里连接的标签页。它只碰你连接的标签页，读不到密码和输入框里的内容。
+        </p>
+      </header>
+      <ol>
+        <li id="step-sites" data-state="now">
+          <span class="marker" aria-hidden="true"></span>
+          <div class="body">
+            <h2>允许访问网站</h2>
+            <p>
+              Emperor
+              要读取和点按你连接的网页。浏览器只会问一次，之后连接任何网站的标签页都不用再允许。
+            </p>
+            <button id="allow" type="button">允许访问网站</button>
+          </div>
+        </li>
+        <li id="step-pair" data-state="todo">
+          <span class="marker" aria-hidden="true"></span>
+          <div class="body">
+            <h2>在 Emperor 中确认配对</h2>
+            <p>
+              Emperor 会打开「设置 › 电脑操作 › Chrome 和 Edge」。下面的验证码与
+              Emperor 里显示的一致时，在 Emperor 中点「允许」。
+            </p>
+            <strong id="code" aria-label="配对验证码" hidden></strong>
+            <button id="pair" type="button" hidden>连接 Emperor</button>
+          </div>
+        </li>
+      </ol>
+      <p id="status" role="status"></p>
+      <p id="message" role="alert"></p>
+      <section id="done" hidden>
+        <h2>已连接 Emperor</h2>
+        <p>
+          打开要让 Emperor 操作的网页，点工具栏里的 Emperor
+          图标，再点「连接当前标签页」。可以关掉这一页了。
+        </p>
+      </section>
+    </main>
+    <script src="welcome.js" type="module"></script>
+  </body>
+</html>

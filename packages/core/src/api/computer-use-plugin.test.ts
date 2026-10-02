@@ -235,38 +235,6 @@ describe('the Computer Use plugin', () => {
     expect((await api.computerUse.status()).enabled).toBe(false)
   })
 
-  it('never clears the emergency stop', async () => {
-    const port = new FakeComputerUsePort()
-    port.extraDrivers = [CHROME_NOT_PAIRED, HELPER_MISSING]
-    const { api } = await cuApi({ port })
-    await api.computerUse.setEnabled(true)
-    await api.computerUse.stop()
-
-    await api.plugins.setEnabled({ ...REF, enabled: false })
-    await api.plugins.setEnabled({ ...REF, enabled: true })
-    expect((await api.computerUse.status()).stopped).toBe(true)
-
-    const detail = await api.plugins.getDetail(REF)
-    expect(
-      detail.components
-        .filter((member) => member.kind === 'app')
-        .map((member) => [member.id, member.state, member.reason]),
-    ).toEqual([
-      // A driver this machine lacks stays unsupported, stop or not.
-      ['desktop', 'unsupported', '没有找到 Emperor Computer Helper'],
-      [
-        'embedded-browser',
-        'disabled',
-        '已急停；在「设置 › 电脑操作」里恢复后可用',
-      ],
-      [
-        'external-browser',
-        'disabled',
-        '已急停；在「设置 › 电脑操作」里恢复后可用',
-      ],
-    ])
-  })
-
   it("shows each driver's real state, and asks the host nothing while off", async () => {
     const port = new FakeComputerUsePort()
     port.extraDrivers = [CHROME_NOT_PAIRED, HELPER_MISSING]

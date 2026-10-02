@@ -19,9 +19,10 @@
  * - divider (default true): draw the bottom hairline.
  * - labelFor?: id of the control the title labels (renders a <label>).
  * - dense?: 10px vertical padding (list rows: archived sessions, entries).
- * Slots: `eyebrow` (a small label above the title, e.g. ⚠ 风险升高),
- * `title`, `description`, `badge` (inline after the title, e.g. a
- * StatusBadge), default (the control / value).
+ * Slots: `leading` (a step marker or icon left of the text; the row then
+ * aligns to the top), `eyebrow` (a small label above the title, e.g. ⚠
+ * 风险升高), `title`, `description`, `badge` (inline after the title, e.g.
+ * a StatusBadge), default (the control / value).
  */
 import { computed } from 'vue'
 import { useSurface } from '../../ui/surface'
@@ -56,7 +57,9 @@ withDefaults(
     :data-divider="divider || undefined"
     :data-dense="dense || undefined"
     :data-in-card="inCard || undefined"
+    :data-leading="$slots.leading ? '' : undefined"
   >
+    <div v-if="$slots.leading" class="leading"><slot name="leading" /></div>
     <div
       v-if="
         $slots.eyebrow ||
@@ -207,6 +210,31 @@ withDefaults(
 
 .ds-settings-row[data-in-card] .text {
   padding-right: var(--space-4);
+}
+
+/* A step marker or icon left of the text, the row aligned to the top; a
+   control that does not fit stays under the text, not under the marker. */
+.ds-settings-row[data-leading] {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.leading {
+  display: flex;
+  align-items: center;
+  min-height: var(--lh-s);
+}
+
+@container (max-width: 479px) {
+  .ds-settings-row[data-leading] {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .ds-settings-row[data-leading] > .control {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
 }
 
 /* Very narrow sections: drop the trailing air so the wrap point moves out. */

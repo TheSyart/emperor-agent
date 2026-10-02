@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { highRiskMacApp, protectedMacApp } from './protected-apps'
+import { protectedMacApp } from './protected-apps'
 
 describe('macOS desktop target protection', () => {
   it('rejects Emperor, authorization, passwords and login windows by bundle ID', () => {
@@ -23,9 +23,13 @@ describe('macOS desktop target protection', () => {
     expect(protectedMacApp('com.apple.systempreferencesMalicious')).toBe(false)
   })
 
-  it('requires special treatment for terminal and automation apps', () => {
-    expect(highRiskMacApp('com.apple.Terminal')).toBe(true)
-    expect(highRiskMacApp('com.apple.ScriptEditor2')).toBe(true)
-    expect(highRiskMacApp('com.apple.TextEdit')).toBe(false)
+  it('treats terminal and automation apps as ordinary apps', () => {
+    for (const id of [
+      'com.apple.Terminal',
+      'com.googlecode.iterm2',
+      'com.apple.ScriptEditor2',
+      'com.apple.shortcuts',
+    ])
+      expect(protectedMacApp(id)).toBe(false)
   })
 })

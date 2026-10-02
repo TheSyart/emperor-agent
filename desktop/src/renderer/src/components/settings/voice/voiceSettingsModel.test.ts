@@ -5,7 +5,9 @@ import {
   deviceChoice,
   helperView,
   localeChoice,
+  permissionRows,
   permissionView,
+  voiceNotice,
 } from './voiceSettingsModel'
 
 const status: DictationStatus = {
@@ -145,6 +147,12 @@ describe('voice settings view', () => {
     expect(foreign.tone).toBe('warn')
   })
 
+  it('says in one sentence which languages are offered; more is in the manual', () => {
+    const { description } = localeChoice(status, defaultDictationSettings())
+    expect(description).toBe('只列出这台 Mac 能在本机识别的语言')
+    expect(description).not.toContain('系统设置')
+  })
+
   it('marks a chosen language this Mac can no longer recognize', () => {
     const choice = localeChoice(status, {
       ...defaultDictationSettings(),
@@ -158,5 +166,149 @@ describe('voice settings view', () => {
     expect(
       localeChoice({ ...status, locales: [] }, defaultDictationSettings()).tone,
     ).toBe('error')
+  })
+})
+
+describe('voice settings notice', () => {
+  const granted: DictationStatus = {
+    ...status,
+    permissions: { microphone: 'granted', speech: 'granted' },
+  }
+
+  it('stays away while dictation can work', () => {
+    expect(voiceNotice(null)).toBeNull()
+    expect(voiceNotice(granted)).toBeNull()
+    // Not asked yet is how every Mac starts: macOS asks at the first dictation.
+    expect(
+      voiceNotice({
+        ...granted,
+        permissions: { microphone: 'undetermined', speech: 'undetermined' },
+      }),
+    ).toBeNull()
+    // Windows and Linux get 暂不支持 instead.
+    expect(
+      voiceNotice({ ...granted, supported: false, available: false }),
+    ).toBeNull()
+  })
+
+  it('says why the helper is unavailable and offers to check again', () => {
+    expect(
+      voiceNotice({
+        ...granted,
+        available: false,
+        reason: 'Emperor Dictation Helper 无法启动',
+        permissions: { microphone: 'unknown', speech: 'unknown' },
+      }),
+    ).toEqual({
+      id: 'helper',
+      tone: 'warn',
+      title: '听写组件不可用',
+      description: 'Emperor Dictation Helper 无法启动',
+      actions: [{ kind: 'retry', label: '重新检测' }],
+    })
+  })
+
+  it('names a denied permission and opens its System Settings list', () => {
+    const notice = voiceNotice({
+      ...granted,
+      permissions: { microphone: 'denied', speech: 'undetermined' },
+    })
+    expect(notice).toMatchObject({
+      id: 'permissions',
+      tone: 'warn',
+      title: '听写需要麦克风权限',
+      actions: [{ kind: 'open', pane: 'microphone', label: '打开系统设置' }],
+    })
+    expect(notice!.description).toContain(
+      '「系统设置 › 隐私与安全性 › 麦克风」',
+    )
+    // System Settings did not open: the way there by hand.
+    expect(
+      voiceNotice(
+        {
+          ...granted,
+          permissions: { microphone: 'denied', speech: 'undetermined' },
+        },
+        'microphone',
+      )!.description,
+    ).toMatch(/^没能打开系统设置/)
+  })
+
+  it('offers one button per denied list when both are denied', () => {
+    const notice = voiceNotice({
+      ...granted,
+      permissions: { microphone: 'denied', speech: 'denied' },
+    })!
+    expect(notice.title).toBe('听写需要麦克风和语音识别权限')
+    expect(notice.actions).toEqual([
+      { kind: 'open', pane: 'microphone', label: '打开麦克风设置' },
+      { kind: 'open', pane: 'speech', label: '打开语音识别设置' },
+    ])
+  })
+
+  it('sends a managed Mac to its administrator, with nothing to open', () => {
+    const notice = voiceNotice({
+      ...granted,
+      permissions: { microphone: 'granted', speech: 'restricted' },
+    })!
+    expect(notice.title).toBe('这台 Mac 不允许听写使用语音识别')
+    expect(notice.description).toContain('管理员')
+    expect(notice.actions).toEqual([])
+  })
+})
+
+describe('voice settings permission rows', () => {
+  it('merges two permissions in the same state into one row', () => {
+    expect(
+      permissionRows({
+        ...status,
+        permissions: { microphone: 'granted', speech: 'granted' },
+      }),
+    ).toEqual([
+      {
+        id: 'both',
+        title: '麦克风和语音识别',
+        description: '只在听写时打开麦克风，不联网',
+        badge: '已允许',
+        tone: 'ok',
+      },
+    ])
+    expect(
+      permissionRows({
+        ...status,
+        permissions: { microphone: 'undetermined', speech: 'undetermined' },
+      }),
+    ).toEqual([
+      {
+        id: 'both',
+        title: '麦克风和语音识别',
+        description: '第一次听写时 macOS 会询问',
+        badge: '尚未询问',
+        tone: 'neutral',
+      },
+    ])
+  })
+
+  it('lists each permission while they differ, the fix left to the notice', () => {
+    const rows = permissionRows({
+      ...status,
+      permissions: { microphone: 'denied', speech: 'undetermined' },
+    })
+    expect(rows.map((row) => [row.id, row.title, row.badge])).toEqual([
+      ['microphone', '麦克风权限', '已拒绝'],
+      ['speech', '语音识别权限', '尚未询问'],
+    ])
+    expect(rows[0]!.description).not.toContain('系统设置')
+  })
+
+  it('shows none while the helper cannot tell', () => {
+    expect(permissionRows(null)).toEqual([])
+    expect(
+      permissionRows({
+        ...status,
+        available: false,
+        permissions: { microphone: 'unknown', speech: 'unknown' },
+      }),
+    ).toEqual([])
   })
 })

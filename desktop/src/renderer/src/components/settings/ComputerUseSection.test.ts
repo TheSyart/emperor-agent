@@ -30,13 +30,20 @@ vi.mock('../../api/backend', () => ({
 const pairingSummary = vi.hoisted(() => ({
   value: { pending: 0, paired: 0, tabs: 0 },
 }))
-vi.mock('./computer/BrowserPairingSettings.vue', () => ({
+vi.mock('./computer/ChromeEdgePage.vue', () => ({
   default: {
+    props: ['active'],
     emits: ['connection-changed', 'summary'],
     mounted(this: { $emit: (name: string, value: unknown) => void }) {
       this.$emit('summary', pairingSummary.value)
     },
-    render: () => h('div', { class: 'pairing-mock' }, '浏览器配对设置'),
+    render(this: { active?: boolean }) {
+      return h(
+        'div',
+        { class: 'pairing-mock', 'data-active': String(this.active) },
+        '浏览器配对设置',
+      )
+    },
   },
 }))
 
@@ -68,11 +75,8 @@ const status = {
   supported: true,
   enabled: true,
   platform: 'macos',
-  stopped: false,
   drivers: [desktop, chrome],
   targets: [],
-  killSwitch: { accelerator: 'Control+Alt+Command+.', registered: true },
-  appLists: { protected: [], highRisk: [], sensitive: [] },
   screenshots: { count: 3, bytes: 1024 },
 } as unknown as ComputerUseStatusView
 
@@ -143,29 +147,55 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+function notices(root: HTMLElement): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>('.ds-settings-notice')]
+}
+
+function rowText(root: HTMLElement, title: string): string {
+  const row = [...root.querySelectorAll('.ds-settings-row')].find(
+    (item) => item.querySelector('.title')?.textContent?.trim() === title,
+  )
+  if (!row) throw new Error(`no row ${title}`)
+  return row.textContent ?? ''
+}
+
+const accessibilityOff = {
+  ...granted,
+  permissions: { accessibility: 'denied', 'screen-recording': 'granted' },
+}
+
 describe('ComputerUseSection main page', () => {
-  it('shows the card, 控制, the protected apps and the stop row, nothing else', async () => {
+  it('lays out the master card, 控制, 系统权限 and 截图 on one page', async () => {
     const root = await mount()
     expect(root.querySelector('[data-testid="computer-use-card"]')).not.toBe(
       null,
     )
-    expect(groups(root)).toEqual([
-      '控制',
-      '不让 Emperor 操作的应用',
-      '紧急停止',
-    ])
+    expect(groups(root)).toEqual(['控制', '系统权限', '截图'])
     expect(
       [...root.querySelectorAll('[data-driver]')].map((row) =>
         row.getAttribute('data-driver'),
       ),
     ).toEqual(['desktop', 'external-browser'])
+    // 任意应用 has no sub page any more: just its switch.
+    expect(root.querySelector('[data-action="manage-apps"]')).toBeNull()
+    expect(rowText(root, '任意应用')).toContain('所有应用默认都能操作')
+    // All granted: the permissions fold into one row, and no notice shows.
+    expect(rowText(root, '辅助功能和屏幕录制')).toContain('已允许')
+    expect(notices(root)).toEqual([])
+    expect(root.textContent).toContain('已保存 3 张')
     const text = root.textContent ?? ''
-    for (const gone of ['高级', '须知', '当前能力', '诊断', '系统权限'])
+    for (const gone of [
+      '高级',
+      '须知',
+      '当前能力',
+      '诊断',
+      '紧急停止',
+      '立即停止',
+      '不让 Emperor 操作的应用',
+      '高风险应用',
+      '不截图的应用',
+    ])
       expect(text).not.toContain(gone)
-    expect(root.querySelector('[data-testid="computer-use-advanced"]')).toBe(
-      null,
-    )
-    // No input fields on the main page: adding goes through a dialog.
     expect(root.querySelectorAll('input, textarea')).toHaveLength(0)
     // The Chrome pairing panel is mounted but hidden here.
     expect(
@@ -173,36 +203,20 @@ describe('ComputerUseSection main page', () => {
     ).toBe('none')
   })
 
-  it('keeps every former setting reachable', async () => {
+  it('shows the main page for the old 任意应用 link, and keeps Chrome 和 Edge', async () => {
     const root = await mount()
-    // Main page: the master switch, both drivers, protected apps, the stop.
-    for (const selector of [
-      '#computer-use-enabled',
-      '#computer-use-driver-desktop',
-      '#computer-use-driver-external-browser',
-      '[data-action="add-protected-app"]',
-      '[data-testid="kill-switch-edit"]',
-    ])
-      expect(root.querySelector(selector), selector).not.toBeNull()
-    expect(button(root, '立即停止')).toBeTruthy()
-
     await openPage('apps')
-    expect(groups(root)).toEqual(['系统权限', '应用名单', '截图'])
-    for (const title of [
-      'Emperor Computer Helper',
-      '辅助功能',
-      '屏幕录制',
-      '高风险应用',
-      '不截图的应用',
-      '已保存的截图',
-    ])
-      expect(root.textContent).toContain(title)
-
+    expect(host.page.value).toBeNull()
+    expect(groups(root)).toEqual(['控制', '系统权限', '截图'])
     await openPage('chrome')
     expect(
       root.querySelector<HTMLElement>('#computer-use-pairing')!.style.display,
     ).toBe('')
     expect(root.textContent).toContain('浏览器配对设置')
+    // The page polls its folder only while it is the one on screen.
+    expect(
+      root.querySelector('.pairing-mock')?.getAttribute('data-active'),
+    ).toBe('true')
   })
 
   it('names a stage only when the driver is not simply available', async () => {
@@ -215,17 +229,110 @@ describe('ComputerUseSection main page', () => {
     expect(badge('external-browser')).toBeUndefined()
   })
 
-  it('says what 任意应用 needs while its permissions are missing', async () => {
+  it('puts a missing permission on top, with the button that asks for it', async () => {
+    requestPermission.mockResolvedValue({ opened: true })
+    const root = await mount({}, accessibilityOff)
+    const [notice] = notices(root)
+    expect(notice?.getAttribute('role')).toBe('alert')
+    expect(notice?.textContent).toContain(
+      '还缺「辅助功能」权限，暂时不能操作应用',
+    )
+    expect(notice?.textContent).toContain('~/.emperor/native-helpers/')
+    expect(rowText(root, '任意应用')).toContain('需要辅助功能权限')
+    // The rows unfold: each permission and the Helper.
+    expect(rowText(root, '辅助功能')).toContain('未允许')
+    expect(rowText(root, '屏幕录制')).toContain('已允许')
+    expect(rowText(root, 'Emperor Computer Helper')).toContain(
+      '版本 0.1.0 · 协议 1',
+    )
+    expect(requestPermission).not.toHaveBeenCalled()
+    button(notice!, '请求权限').click()
+    await settle()
+    expect(requestPermission).toHaveBeenCalledOnce()
+    expect(requestPermission).toHaveBeenCalledWith('accessibility')
+  })
+
+  it('shows the Helper’s last error while something is off', async () => {
+    const root = await mount(
+      {},
+      { ...accessibilityOff, lastErrorCode: 'AX_DENIED' },
+    )
+    expect(root.textContent).toContain('最近错误码：AX_DENIED')
+  })
+
+  it('requires a second confirmation before resetting a denied grant', async () => {
+    resetPermission.mockResolvedValue({ reset: true })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const root = await mount({}, accessibilityOff)
+    const reset = button(root, '重置授权')
+    reset.click()
+    await settle()
+    expect(resetPermission).not.toHaveBeenCalled()
+    confirm.mockReturnValue(true)
+    reset.click()
+    await settle()
+    expect(resetPermission).toHaveBeenCalledTimes(1)
+    expect(resetPermission).toHaveBeenCalledWith('accessibility')
+  })
+
+  it('warns that an ad-hoc preview must regain permissions after updates', async () => {
+    const root = await mount({}, { ...accessibilityOff, previewBuild: true })
+    expect(notices(root)[0]?.textContent).toContain(
+      '预览版每次更新后需要重新授权',
+    )
+    // Nothing to fix: no notice, even in a preview build.
+    app?.unmount()
+    const fine = await mount({}, { ...granted, previewBuild: true })
+    expect(notices(fine)).toEqual([])
+  })
+
+  it('restarts a connected helper so a new screen-recording grant applies', async () => {
+    reconnect.mockResolvedValue({ ...granted })
     const root = await mount(
       {},
       {
         ...granted,
-        permissions: { accessibility: 'denied', 'screen-recording': 'granted' },
+        permissions: { accessibility: 'granted', 'screen-recording': 'denied' },
       },
     )
-    expect(
-      root.querySelector('[data-driver="desktop"]')?.textContent,
-    ).toContain('需要辅助功能和屏幕录制权限')
+    helperStatus.mockResolvedValue(granted)
+    const restart = root.querySelector<HTMLButtonElement>(
+      '[data-testid="mac-helper-restart"]',
+    )
+    expect(restart?.textContent?.trim()).toBe('重启 Helper')
+    restart!.click()
+    await settle()
+    expect(reconnect).toHaveBeenCalledOnce()
+    expect(root.querySelector('[data-testid="mac-helper-restart"]')).toBeNull()
+    expect(notices(root)).toEqual([])
+  })
+
+  it('shows why automatic restarts stopped and reconnects on request', async () => {
+    reconnect.mockResolvedValue({ ...granted })
+    const root = await mount(
+      {},
+      {
+        available: true,
+        connected: false,
+        autoRestartSuspended: true,
+        reason: 'Helper 在一分钟内崩溃超过 3 次，已停止自动重启',
+        permissions: {
+          accessibility: 'unknown',
+          'screen-recording': 'unknown',
+        },
+      },
+    )
+    expect(notices(root)[0]?.textContent).toContain(
+      'Emperor Computer Helper 已停止自动重启',
+    )
+    expect(rowText(root, '任意应用')).toContain(
+      'Emperor Computer Helper 未连接',
+    )
+    root
+      .querySelector<HTMLButtonElement>('[data-testid="mac-helper-reconnect"]')!
+      .click()
+    await settle()
+    expect(reconnect).toHaveBeenCalledOnce()
   })
 
   it('turns computer use on, and one driver off', async () => {
@@ -249,24 +356,14 @@ describe('ComputerUseSection main page', () => {
     })
   })
 
-  it('stops, then offers 恢复 on the card and in the stop row', async () => {
-    const root = await mount()
-    button(root, '立即停止').click()
+  it('reports an action that failed', async () => {
+    const root = await mount({ enabled: false })
+    core.mockRejectedValueOnce(new Error('另一项操作正在等待确认'))
+    root.querySelector<HTMLButtonElement>('#computer-use-enabled')!.click()
     await settle()
-    expect(core).toHaveBeenCalledWith('computerUse.stop')
-
-    app?.unmount()
-    const stopped = await mount({ stopped: true })
-    expect(
-      stopped.querySelector('[data-testid="computer-use-status"]')?.textContent,
-    ).toContain('已停止')
-    const resume = [...stopped.querySelectorAll('button')].filter(
-      (item) => item.textContent?.trim() === '恢复',
-    )
-    expect(resume).toHaveLength(2)
-    resume[0]!.click()
-    await settle()
-    expect(core).toHaveBeenCalledWith('computerUse.resume')
+    const [notice] = notices(root)
+    expect(notice?.getAttribute('data-tone')).toBe('error')
+    expect(notice?.textContent).toContain('另一项操作正在等待确认')
   })
 
   it('explains that a saved per-item mode switched computer use off', async () => {
@@ -280,209 +377,31 @@ describe('ComputerUseSection main page', () => {
     expect(core).toHaveBeenCalledWith('computerUse.setEnabled', true)
   })
 
-  it('adds a protected app in a dialog and removes one', async () => {
+  it('names the apps once kept from Emperor, until the user has read it', async () => {
     const root = await mount({
-      appLists: {
-        protected: ['com.agilebits.onepassword7'],
-        highRisk: [],
-        sensitive: [],
-      },
+      retiredProtectedApps: ['com.agilebits.onepassword7'],
     })
-    expect(
-      root.querySelector('[data-protected-app="com.agilebits.onepassword7"]'),
-    ).not.toBeNull()
-    root
-      .querySelector<HTMLButtonElement>('[data-action="add-protected-app"]')!
-      .click()
-    await settle()
-    const input = document.body.querySelector<HTMLInputElement>(
-      'form.app-id-form input',
+    const notice = root.querySelector<HTMLElement>(
+      '[data-testid="computer-use-retired-apps"]',
     )!
-    input.value = 'not a bundle id'
-    input.dispatchEvent(new Event('input'))
+    expect(notice.getAttribute('role')).toBe('status')
+    expect(notice.textContent).toContain('com.agilebits.onepassword7')
+    button(notice, '知道了').click()
     await settle()
-    document.body
-      .querySelector('form.app-id-form')!
-      .dispatchEvent(new Event('submit', { cancelable: true }))
-    await settle()
-    expect(document.body.textContent).toContain('请输入应用的 bundle ID')
-    input.value = 'com.example.Bank'
-    input.dispatchEvent(new Event('input'))
-    await settle()
-    document.body
-      .querySelector('form.app-id-form')!
-      .dispatchEvent(new Event('submit', { cancelable: true }))
-    await settle()
-    expect(core).toHaveBeenCalledWith('computerUse.setAppLists', {
-      protected: ['com.agilebits.onepassword7', 'com.example.Bank'],
-    })
-    button(root, '移除').click()
-    await settle()
-    expect(core).toHaveBeenCalledWith('computerUse.setAppLists', {
-      protected: [],
-    })
+    expect(core).toHaveBeenCalledWith('computerUse.acknowledgeRetiredApps')
   })
 
-  it('records a new stop shortcut and can restore the default', async () => {
-    const root = await mount()
-    root
-      .querySelector<HTMLButtonElement>('[data-testid="kill-switch-edit"]')!
-      .click()
-    await settle()
-    const capture = root.querySelector<HTMLElement>(
-      '[data-testid="kill-switch-capture"]',
-    )!
-    capture.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'k',
-        code: 'KeyK',
-        ctrlKey: true,
-        shiftKey: true,
-        bubbles: true,
-      }),
-    )
-    await settle()
-    expect(capture.textContent).toContain('K')
-    button(root, '保存').click()
-    await settle()
-    expect(core).toHaveBeenCalledWith('computerUse.setKillSwitch', {
-      accelerator: 'Control+Shift+K',
-    })
-  })
-})
-
-describe('ComputerUseSection › 任意应用', () => {
-  it('shows the helper, its last error and what the driver lacks', async () => {
-    const root = await mount(
-      {},
-      {
-        ...granted,
-        permissions: { accessibility: 'denied', 'screen-recording': 'granted' },
-        lastErrorCode: 'AX_DENIED',
-      },
-    )
-    await openPage('apps')
-    expect(root.textContent).toContain('版本 0.1.0 · 协议 1')
-    expect(root.textContent).toContain('最近错误码：AX_DENIED')
-    expect(root.textContent).toContain('尚不支持：自动用户活动检测')
-  })
-
-  it('requests a permission only after a user click', async () => {
-    requestPermission.mockResolvedValue({ opened: true })
-    const root = await mount(
-      {},
-      {
-        ...granted,
-        permissions: { accessibility: 'denied', 'screen-recording': 'granted' },
-      },
-    )
-    await openPage('apps')
-    expect(requestPermission).not.toHaveBeenCalled()
-    button(root, '请求权限').click()
-    await settle()
-    expect(requestPermission).toHaveBeenCalledOnce()
-    expect(requestPermission).toHaveBeenCalledWith('accessibility')
-  })
-
-  it('requires a second confirmation before resetting a denied TCC grant', async () => {
-    resetPermission.mockResolvedValue({ reset: true })
+  it('clears saved screenshots after a confirmation', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    const root = await mount(
-      {},
-      {
-        ...granted,
-        permissions: { accessibility: 'denied', 'screen-recording': 'granted' },
-      },
-    )
-    await openPage('apps')
-    const reset = button(root, '重置授权')
-    reset.click()
-    await settle()
-    expect(resetPermission).not.toHaveBeenCalled()
-    confirm.mockReturnValue(true)
-    reset.click()
-    await settle()
-    expect(resetPermission).toHaveBeenCalledWith('accessibility')
-  })
-
-  it('warns that an ad-hoc Preview must regain macOS permissions after updates', async () => {
-    const root = await mount({}, { ...granted, previewBuild: true })
-    await openPage('apps')
-    expect(root.textContent).toContain('预览版每次更新后需重新授权')
-  })
-
-  it('restarts a connected helper so a new screen-recording grant applies', async () => {
-    reconnect.mockResolvedValue({ ...granted })
-    const root = await mount(
-      {},
-      {
-        ...granted,
-        permissions: { accessibility: 'granted', 'screen-recording': 'denied' },
-      },
-    )
-    helperStatus.mockResolvedValue(granted)
-    await openPage('apps')
-    const restart = root.querySelector<HTMLButtonElement>(
-      '[data-testid="mac-helper-restart"]',
-    )
-    expect(restart?.textContent?.trim()).toBe('重启 Helper')
-    restart!.click()
-    await settle()
-    expect(reconnect).toHaveBeenCalledOnce()
-    expect(root.querySelector('[data-testid="mac-helper-restart"]')).toBeNull()
-  })
-
-  it('shows why automatic restarts stopped and reconnects on request', async () => {
-    reconnect.mockResolvedValue({ ...granted })
-    const root = await mount(
-      {},
-      {
-        available: true,
-        connected: false,
-        autoRestartSuspended: true,
-        reason: 'Helper 在一分钟内崩溃超过 3 次，已停止自动重启',
-        permissions: {},
-      },
-    )
-    await openPage('apps')
-    expect(root.textContent).toContain('已停止自动重启')
-    root
-      .querySelector<HTMLButtonElement>('[data-testid="mac-helper-reconnect"]')!
-      .click()
-    await settle()
-    expect(reconnect).toHaveBeenCalledOnce()
-  })
-
-  it('adds a no-screenshot app and clears saved screenshots', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const root = await mount()
-    await openPage('apps')
-    root
-      .querySelector<HTMLButtonElement>(
-        'button[aria-label="添加到不截图的应用"]',
-      )!
-      .click()
-    await settle()
-    const input = document.body.querySelector<HTMLInputElement>(
-      'form.app-id-form input',
+    const clear = root.querySelector<HTMLButtonElement>(
+      '[data-testid="computer-use-clear-screenshots"]',
     )!
-    input.value = 'com.example.Notes'
-    input.dispatchEvent(new Event('input'))
+    clear.click()
     await settle()
-    document.body
-      .querySelector('form.app-id-form')!
-      .dispatchEvent(new Event('submit', { cancelable: true }))
-    await settle()
-    expect(core).toHaveBeenCalledWith('computerUse.setAppLists', {
-      sensitive: ['com.example.Notes'],
-    })
-
-    expect(root.textContent).toContain('已保存 3 张截图')
-    root
-      .querySelector<HTMLButtonElement>(
-        '[data-testid="computer-use-clear-screenshots"]',
-      )!
-      .click()
+    expect(core).not.toHaveBeenCalledWith('computerUse.clearScreenshots', {})
+    confirm.mockReturnValue(true)
+    clear.click()
     await settle()
     expect(core).toHaveBeenCalledWith('computerUse.clearScreenshots', {})
   })

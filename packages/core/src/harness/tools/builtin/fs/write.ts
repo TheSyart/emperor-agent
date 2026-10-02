@@ -19,6 +19,7 @@ import {
 } from './fsio'
 import {
   fenceTarget,
+  refuseProtected,
   remediate,
   resolveMutationPolicy,
   sessionIdOf,
@@ -62,10 +63,13 @@ export function createWriteTool(state: FsToolState): ToolDefinition<WriteArgs> {
         throw new Error('file_path must be a non-empty string')
       const policy = await resolveMutationPolicy(state, 'write', args, context)
       const resolved = await resolveTarget(policy.workspaceRoot, args.file_path)
+      await refuseProtected(state, resolved, 'write')
       const sessionId = sessionIdOf(context)
       const intent = state.observations.writeIntent(sessionId, resolved)
       try {
         const target = await fenceTarget(resolved, policy, 'write')
+        // The fence re-resolves: a symlink swapped in since is seen here.
+        if (target !== resolved) await refuseProtected(state, target, 'write')
         const outcome = await state.locks.with(target.targetKey, async () => {
           const existing = await probe(target.targetKey)
           if (existing !== null && existing.type !== 'file') {

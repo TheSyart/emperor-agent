@@ -123,7 +123,7 @@ async function moveDownload(): Promise<void> {
       data-testid="computer-use-binding-mismatch"
     >
       已拒绝代填：当前网址或应用与凭据登记的不一致，可能是仿冒页面。请核对地址，需要时在「设置
-      › 电脑操作 › 凭据」中更新绑定。
+      › 浏览器 › 密码管理器」中更新绑定。
     </div>
     <div
       v-if="recordsText"
