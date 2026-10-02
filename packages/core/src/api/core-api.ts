@@ -25,6 +25,13 @@ import type {
 } from '../harness/computer-use/types'
 import { GUI_TOOL_CATALOG } from '../harness/computer-use/tools/catalog'
 import { listGuiTools } from '../harness/computer-use/tools/listing'
+import {
+  DEFAULT_EXTERNAL_BROWSER_SETTINGS,
+  applyExternalBrowserSettingsPatch,
+  widensExternalBrowserSettings,
+  type ExternalBrowserSettings,
+  type ExternalBrowserSettingsPatch,
+} from '../harness/computer-use/external-site-rules'
 import type { JobSnapshot } from '../harness/jobs/registry'
 import type { SubagentRecord } from '../harness/subagent/manager'
 import {
@@ -2031,6 +2038,30 @@ export class CoreApi {
           kind: input.kind,
         })
       return { permissions: service.listSitePermissions() }
+    },
+    /**
+     * Settings › 电脑操作 › Chrome 和 Edge: 浏览器权限 and 智能体权限
+     * (PLAN-CAP-001 RV-09).
+     */
+    externalBrowserSettings: (): ExternalBrowserSettings =>
+      this.host.computerUse?.service.externalBrowserSettings() ??
+      DEFAULT_EXTERNAL_BROWSER_SETTINGS,
+    /**
+     * Change them. A change that lets the Agent do more (a looser rule, an
+     * exception removed from a stricter one, history without asking) is a
+     * guarded mutation; narrowing never is.
+     */
+    setExternalBrowserSettings: (
+      patch: ExternalBrowserSettingsPatch,
+    ): ExternalBrowserSettings => {
+      const service = this.host.computerUse?.service
+      if (service === undefined)
+        throw new Error('computer use is not available on this host')
+      const before = service.externalBrowserSettings()
+      const after = applyExternalBrowserSettingsPatch(before, patch)
+      if (widensExternalBrowserSettings(before, after))
+        this.assertMutation('computerUse', 'externalBrowserSettings')
+      return service.setExternalBrowserSettings(patch)
     },
   }
 

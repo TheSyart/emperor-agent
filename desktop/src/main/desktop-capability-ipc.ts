@@ -97,6 +97,10 @@ interface InboxDownloadLike {
   readonly time: number
   readonly bytes: number
   readonly exists: boolean
+  /** From the user's own Chrome or Edge (RV-09): browser and outcome. */
+  readonly browser?: string
+  readonly state?: string
+  readonly reason?: string
 }
 
 /** Computer Use: stream an Agent tab or window for the preview (by id only). */
@@ -629,6 +633,30 @@ function agentDownloadView(entry: InboxDownloadLike): AgentDownloadView {
     time: entry.time,
     bytes: entry.bytes,
     exists: entry.exists,
+    ...externalDownloadFacts(entry),
+  }
+}
+
+/** Chrome/Edge rows (RV-09): only the values the page knows how to say. */
+function externalDownloadFacts(
+  entry: InboxDownloadLike,
+): Pick<AgentDownloadView, 'browser' | 'state' | 'reason'> {
+  if (entry.browser !== 'chrome' && entry.browser !== 'edge') return {}
+  if (
+    entry.state !== 'completed' &&
+    entry.state !== 'refused' &&
+    entry.state !== 'interrupted'
+  )
+    return {}
+  return {
+    browser: entry.browser,
+    state: entry.state,
+    ...(entry.state === 'refused' &&
+    (entry.reason === 'executable' ||
+      entry.reason === 'blocked' ||
+      entry.reason === 'denied')
+      ? { reason: entry.reason }
+      : {}),
   }
 }
 

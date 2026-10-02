@@ -94,3 +94,8 @@ export { writeJsonAtomic } from '../store/atomic-json'
 export { LocalSandbox } from '../harness/sandbox/backend'
 export { loadBundledToolCatalog } from '../environment/catalog'
 export type { LoadedToolCatalog } from '../environment/catalog'
+export type {
+  ExternalDriverEvent,
+  ExternalSiteDecider,
+  ExternalSiteVerdict,
+} from '../harness/computer-use/port'

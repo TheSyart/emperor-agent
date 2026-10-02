@@ -16,14 +16,22 @@ import type {
   TargetSnapshot,
   WaitOutcome,
   WaitRequest,
+  ExternalSiteDecider,
+  ExternalSiteVerdict,
 } from '@emperor/core/host-capabilities'
-import { UiError } from '@emperor/core/host-capabilities'
+import { UiError, isExecutableDownload } from '@emperor/core/host-capabilities'
 import type {
   DriverCapability,
   UiElement,
   UiRole,
 } from '@emperor/core/runtime-contract'
 import { NmBridgeServer, type NmBridgeEvent } from './nm-bridge'
+import type { NmAgentEvent } from './nm-bridge-agent'
+import {
+  externalDownloadId,
+  type ExternalDownloadLog,
+  type ExternalDownloadState,
+} from './external-downloads'
 import { isExactHttpOrigin } from './web-origin'
 
 const ROLES = new Set<string>([
@@ -64,10 +72,43 @@ export interface ExternalAttachedTab {
 }
 
 interface TabState extends ExternalAttachedTab {
+  origin: string
+  generation: number
   revision: number
   claimedBy: string | null
   paused: boolean
   elements: Map<string, UiElement>
+  /** The page moved to a site that needs the user's approval (RV-09). */
+  pendingOrigin: string | null
+}
+
+/** A download the extension holds until Emperor decides (RV-09). */
+interface HeldDownload {
+  readonly pairingId: string
+  /** The browser's own id. */
+  readonly browserId: number
+  readonly targetId: string
+  readonly filename: string
+  /** Origin of the file ('' when the browser did not say). */
+  readonly fileOrigin: string
+  readonly pageOrigin: string
+  readonly browser: 'chrome' | 'edge'
+  readonly timer: ReturnType<typeof setTimeout>
+  decided: boolean
+}
+
+export interface ExternalBrowserDriverOptions {
+  /** 下载历史记录 › Emperor 的下载 (RV-09). */
+  readonly downloads?: Pick<ExternalDownloadLog, 'record'>
+  now?(): number
+}
+
+/** How long a held download waits for a verdict before it is refused. */
+const DOWNLOAD_DECISION_MS = 10 * 60_000
+const DECISION_RANK: Readonly<Record<ExternalSiteVerdict, number>> = {
+  allow: 0,
+  ask: 1,
+  block: 2,
 }
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -134,17 +175,47 @@ function toElements(value: unknown, revision: number): UiElement[] {
   })
 }
 
+/** A bridge failure as the kernel's error vocabulary. */
+function bridgeError(error: unknown, message: string): UiError {
+  const code = (error as Error | undefined)?.name
+  if (code === 'PERMISSION_REQUIRED')
+    return new UiError(
+      'PERMISSION_REQUIRED',
+      'the extension may not read this site yet; the user allows all sites in the extension',
+      { reason: 'site-access' },
+    )
+  if (code === 'INVALID_ARGUMENT')
+    return new UiError('INVALID_REQUEST', 'only http(s) URLs can be opened')
+  if (code === 'OUTCOME_UNKNOWN')
+    return new UiError(
+      'OUTCOME_UNKNOWN',
+      'the tab may have opened; list the tabs before retrying',
+    )
+  return new UiError('DRIVER_UNAVAILABLE', message, { cause: error })
+}
+
 export class ExternalBrowserDriver implements BrowserDriver {
   readonly driver = 'external-browser' as const
   private readonly tabs = new Map<string, TabState>()
   private readonly listeners = new Set<DriverEventListener>()
   private readonly unsubscribeBridge: () => void
   private navigationPolicy: NavigationPolicy | null = null
+  private siteDecider: ExternalSiteDecider | null = null
+  /** When each pairing's worker last connected (newest opens new tabs). */
+  private readonly readyOrder = new Map<string, number>()
+  private readySequence = 0
+  private readonly held = new Map<string, HeldDownload>()
+  private readonly heldIds = new Map<string, string>()
+  private readonly downloadLog: Pick<ExternalDownloadLog, 'record'> | null
+  private readonly now: () => number
 
   constructor(
     private readonly bridge: NmBridgeServer,
     private readonly platform: DriverCapability['platform'] = 'macos',
+    options: ExternalBrowserDriverOptions = {},
   ) {
+    this.downloadLog = options.downloads ?? null
+    this.now = options.now ?? (() => Date.now())
     this.unsubscribeBridge = bridge.subscribe((event) => this.onBridge(event))
   }
 
@@ -152,6 +223,9 @@ export class ExternalBrowserDriver implements BrowserDriver {
     this.unsubscribeBridge()
     this.tabs.clear()
     this.listeners.clear()
+    for (const held of this.held.values()) clearTimeout(held.timer)
+    this.held.clear()
+    this.heldIds.clear()
   }
 
   private emit(event: DriverEvent): void {
@@ -209,9 +283,11 @@ export class ExternalBrowserDriver implements BrowserDriver {
         claimedBy: null,
         paused: false,
         elements: new Map(),
+        pendingOrigin: null,
       })
       return
     }
+    if (this.onAgentEvent(event)) return
     if (event.type === 'target-lost') {
       const tab = this.tabs.get(event.targetId)
       if (
@@ -229,6 +305,12 @@ export class ExternalBrowserDriver implements BrowserDriver {
       for (const tab of [...this.tabs.values()])
         if (tab.profileId === event.pairingId)
           this.drop(tab.targetId, event.type)
+      // The extension refuses what it held when the connection ends.
+      for (const [id, held] of [...this.held])
+        if (held.pairingId === event.pairingId) this.forgetDownload(id)
+      if (event.type === 'ready')
+        this.readyOrder.set(event.pairingId, ++this.readySequence)
+      else this.readyOrder.delete(event.pairingId)
     }
   }
 
@@ -243,13 +325,13 @@ export class ExternalBrowserDriver implements BrowserDriver {
       label: 'Chrome/Edge 连接',
       enabled: true,
       available,
-      actions: ['click', 'fill'],
+      actions: ['click', 'fill', 'navigate'],
       missing: [
-        '外部浏览器新建标签页',
         '主框架以外的语义操作',
         '截图与坐标操作',
-        '滚动、键盘快捷键和站点导航',
-        '凭据代填、上传与下载',
+        '滚动和键盘快捷键',
+        '凭据代填与上传',
+        '下载进 Emperor 收件箱（下载留在浏览器自己的下载文件夹）',
       ],
       ...(blocked !== null
         ? {
@@ -357,18 +439,385 @@ export class ExternalBrowserDriver implements BrowserDriver {
     }
   }
 
+  /**
+   * Open `url` in a new background tab of the connected browser (its tab
+   * group 「Emperor」), already this task's (RV-09). The kernel applied the
+   * 浏览 rule; a page that lands on another site is judged here.
+   */
   async open(
-    _request: {
+    request: {
       profile: BrowserProfileSpec
       url: string
       ownerSessionId: string
     },
-    _signal: AbortSignal,
+    signal: AbortSignal,
   ): Promise<TargetSnapshot> {
-    throw new UiError(
-      'CAPABILITY_DISABLED',
-      'Connect an existing tab in the extension, then attach it explicitly',
+    const profileId =
+      request.profile.kind === 'persistent'
+        ? request.profile.profileId
+        : this.openProfile()
+    if (profileId === null || !this.bridge.readyPairings().includes(profileId))
+      throw new UiError(
+        'DRIVER_UNAVAILABLE',
+        'no Chrome or Edge is connected',
+        {
+          reason: 'not-connected',
+        },
+      )
+    let requested: string
+    try {
+      requested = new URL(request.url).origin
+    } catch {
+      throw new UiError('INVALID_REQUEST', 'only http(s) URLs can be opened')
+    }
+    let response: unknown
+    try {
+      response = await this.bridge.request(
+        profileId,
+        'tab.open',
+        { url: request.url },
+        45_000,
+        signal,
+      )
+    } catch (error) {
+      throw bridgeError(error, 'the browser could not open the tab')
+    }
+    if (
+      !object(response) ||
+      typeof response.targetId !== 'string' ||
+      !/^[0-9a-f-]{36}$/.test(response.targetId) ||
+      !safeInteger(response.tabId) ||
+      !safeInteger(response.windowId) ||
+      !safeInteger(response.generation) ||
+      response.generation < 1 ||
+      !isExactHttpOrigin(response.origin)
     )
+      throw new UiError('DRIVER_UNAVAILABLE', 'invalid extension response')
+    for (const tab of [...this.tabs.values()])
+      if (
+        tab.targetId === response.targetId ||
+        (tab.profileId === profileId && tab.tabId === response.tabId)
+      )
+        this.drop(tab.targetId, 'reattached')
+    const tab: TabState = {
+      targetId: response.targetId,
+      profileId,
+      tabId: response.tabId,
+      windowId: response.windowId,
+      origin: response.origin,
+      generation: response.generation,
+      revision: 0,
+      claimedBy: request.ownerSessionId,
+      paused: false,
+      elements: new Map(),
+      pendingOrigin: null,
+    }
+    this.tabs.set(tab.targetId, tab)
+    if (tab.origin !== requested) {
+      const verdict = this.decide(tab.origin, 'browse')
+      if (verdict !== 'allow') {
+        await this.detach(tab, 'released')
+        throw verdict === 'block'
+          ? new UiError(
+              'PERMISSION_DENIED',
+              `the page went on to ${tab.origin}, which the user blocked for Emperor`,
+              { reason: 'site-blocked' },
+            )
+          : new UiError(
+              'PERMISSION_REQUIRED',
+              `the page went on to ${tab.origin}, which needs the user's approval; open that site with external_tab_open to ask`,
+              { reason: 'site-needs-approval' },
+            )
+      }
+    }
+    return this.snapshotOf(tab)
+  }
+
+  /** The connection a new tab opens in: the browser connected last. */
+  openProfile(): string | null {
+    const ready = this.bridge.readyPairings()
+    return (
+      [...ready].sort(
+        (a, b) => (this.readyOrder.get(b) ?? 0) - (this.readyOrder.get(a) ?? 0),
+      )[0] ?? null
+    )
+  }
+
+  setSiteDecider(decider: ExternalSiteDecider): void {
+    this.siteDecider = decider
+  }
+
+  private decide(
+    url: string,
+    kind: 'browse' | 'download',
+  ): ExternalSiteVerdict {
+    return (
+      this.siteDecider?.(url, kind) ?? (kind === 'browse' ? 'allow' : 'ask')
+    )
+  }
+
+  /** Tell the extension to let the tab go, and forget it. */
+  private async detach(tab: TabState, reason: string): Promise<void> {
+    try {
+      await this.bridge.request(
+        tab.profileId,
+        'target.detach',
+        { targetId: tab.targetId, generation: tab.generation },
+        5_000,
+      )
+    } catch {
+      // the extension drops it on its own when the page is gone
+    } finally {
+      this.drop(tab.targetId, reason)
+    }
+  }
+
+  /** The target carries on in its tab's new page under a new generation. */
+  private followed(tab: TabState, origin: string, generation: number): void {
+    tab.origin = origin
+    tab.generation = generation
+    tab.pendingOrigin = null
+    tab.elements.clear()
+    this.emit({
+      type: 'navigated',
+      targetId: tab.targetId,
+      url: origin,
+      generation,
+      revision: tab.revision,
+      sameDocument: false,
+    })
+  }
+
+  private async follow(tab: TabState, origin: string): Promise<void> {
+    const generation = tab.generation
+    try {
+      const response = await this.bridge.request(
+        tab.profileId,
+        'target.follow',
+        { targetId: tab.targetId, generation, origin },
+        15_000,
+      )
+      if (this.tabs.get(tab.targetId) !== tab || tab.generation !== generation)
+        return
+      if (
+        !object(response) ||
+        response.origin !== origin ||
+        !safeInteger(response.generation) ||
+        response.generation <= generation
+      )
+        throw new Error('invalid extension response')
+      this.followed(tab, origin, response.generation)
+    } catch (error) {
+      // The page moved again: the extension reports that move next.
+      if ((error as Error | undefined)?.name === 'STALE_TARGET') return
+      if (this.tabs.get(tab.targetId) === tab && tab.generation === generation)
+        this.drop(tab.targetId, 'navigation-failed')
+    }
+  }
+
+  /**
+   * A target's page moved (by itself, or the Agent's navigation landed on
+   * another site): follow it, disconnect it from a blocked site, or let a
+   * task's tab wait for the user's approval. A tab nobody holds follows a
+   * site that asks; the next claim asks instead.
+   */
+  private onPageMoved(tab: TabState, origin: string): void {
+    const verdict = this.decide(origin, 'browse')
+    if (verdict === 'block') {
+      this.emit({
+        type: 'navigation-blocked',
+        targetId: tab.targetId,
+        url: origin,
+      })
+      void this.detach(tab, 'site-blocked')
+      return
+    }
+    if (verdict === 'ask' && origin !== tab.origin && tab.claimedBy !== null) {
+      tab.pendingOrigin = origin
+      this.emit({
+        type: 'navigation-pending',
+        targetId: tab.targetId,
+        url: origin,
+      })
+      return
+    }
+    void this.follow(tab, origin)
+  }
+
+  resolveNavigation(targetId: string, allow: boolean): void {
+    const tab = this.tabs.get(targetId)
+    if (!tab || tab.pendingOrigin === null) return
+    const origin = tab.pendingOrigin
+    tab.pendingOrigin = null
+    if (allow) void this.follow(tab, origin)
+    else void this.detach(tab, 'site-denied')
+  }
+
+  /** The Agent's own browsing (RV-09); true when `event` was one of it. */
+  private onAgentEvent(event: NmBridgeEvent): boolean {
+    const agent = event as NmAgentEvent
+    if (agent.type === 'target-navigated') {
+      const tab = this.tabs.get(agent.targetId)
+      if (
+        tab?.profileId === agent.pairingId &&
+        tab.generation === agent.generation
+      )
+        this.onPageMoved(tab, agent.origin)
+      return true
+    }
+    if (agent.type === 'download-pending') {
+      this.onDownloadPending(agent)
+      return true
+    }
+    if (agent.type === 'download-done') {
+      this.onDownloadDone(agent)
+      return true
+    }
+    return false
+  }
+
+  private onDownloadPending(
+    event: Extract<NmAgentEvent, { type: 'download-pending' }>,
+  ): void {
+    const tab = this.tabs.get(event.targetId)
+    if (!tab || tab.profileId !== event.pairingId) {
+      void this.bridge
+        .request(
+          event.pairingId,
+          'download.resolve',
+          { downloadId: event.downloadId, allow: false },
+          5_000,
+        )
+        .catch(() => undefined)
+      return
+    }
+    const id = externalDownloadId()
+    const timer = setTimeout(
+      () => this.resolveDownload(id, { allow: false, reason: 'denied' }),
+      DOWNLOAD_DECISION_MS,
+    )
+    timer.unref?.()
+    this.held.set(id, {
+      pairingId: event.pairingId,
+      browserId: event.downloadId,
+      targetId: tab.targetId,
+      filename: event.filename,
+      fileOrigin: event.origin,
+      pageOrigin: tab.origin,
+      browser: event.browser,
+      timer,
+      decided: false,
+    })
+    this.heldIds.set(`${event.pairingId}:${event.downloadId}`, id)
+    if (this.held.size > 100) {
+      const oldest = this.held.keys().next().value
+      if (oldest !== undefined) this.forgetDownload(oldest)
+    }
+    if (tab.claimedBy === null) {
+      // No task to ask for: only what the rules allow outright.
+      const page = this.decide(tab.origin, 'download')
+      const file =
+        event.origin === '' ? 'allow' : this.decide(event.origin, 'download')
+      const verdict = DECISION_RANK[page] >= DECISION_RANK[file] ? page : file
+      const executable = isExecutableDownload(event.filename, event.mimeType)
+      this.resolveDownload(
+        id,
+        verdict === 'allow' && !executable
+          ? { allow: true }
+          : {
+              allow: false,
+              reason: executable
+                ? 'executable'
+                : verdict === 'block'
+                  ? 'blocked'
+                  : 'denied',
+            },
+      )
+      return
+    }
+    this.emit({
+      type: 'download-requested',
+      targetId: tab.targetId,
+      downloadId: id,
+      url: event.origin,
+      filename: event.filename,
+      ...(event.mimeType === '' ? {} : { mimeType: event.mimeType }),
+      bytes: event.bytes,
+    })
+  }
+
+  resolveDownload(
+    downloadId: string,
+    verdict: { readonly allow: boolean; readonly reason?: string },
+  ): void {
+    const held = this.held.get(downloadId)
+    if (!held || held.decided) return
+    held.decided = true
+    clearTimeout(held.timer)
+    void this.bridge
+      .request(
+        held.pairingId,
+        'download.resolve',
+        { downloadId: held.browserId, allow: verdict.allow },
+        5_000,
+      )
+      .catch(() => undefined)
+    if (verdict.allow) return
+    this.recordDownload(downloadId, held, 'refused', 0, verdict.reason)
+    this.forgetDownload(downloadId)
+  }
+
+  private onDownloadDone(
+    event: Extract<NmAgentEvent, { type: 'download-done' }>,
+  ): void {
+    const id = this.heldIds.get(`${event.pairingId}:${event.downloadId}`)
+    const held = id === undefined ? undefined : this.held.get(id)
+    if (id === undefined || !held?.decided) return
+    this.forgetDownload(id)
+    const state = event.state === 'complete' ? 'completed' : 'interrupted'
+    const filename = event.filename || held.filename
+    this.recordDownload(id, held, state, event.bytes, undefined, filename)
+    this.emit({
+      type: 'download-finished',
+      targetId: held.targetId,
+      downloadId: id,
+      state,
+      filename,
+      bytes: event.bytes,
+      url: held.fileOrigin,
+    })
+  }
+
+  private recordDownload(
+    id: string,
+    held: HeldDownload,
+    state: ExternalDownloadState,
+    bytes: number,
+    reason?: string,
+    name = held.filename,
+  ): void {
+    try {
+      this.downloadLog?.record({
+        id,
+        name,
+        origin: held.fileOrigin || held.pageOrigin,
+        browser: held.browser,
+        state,
+        ...(reason === undefined ? {} : { reason }),
+        bytes,
+        time: this.now(),
+      })
+    } catch {
+      // the history is a convenience; the browser has its own
+    }
+  }
+
+  private forgetDownload(id: string): void {
+    const held = this.held.get(id)
+    if (!held) return
+    clearTimeout(held.timer)
+    this.held.delete(id)
+    this.heldIds.delete(`${held.pairingId}:${held.browserId}`)
   }
 
   historyTarget(): null {
@@ -423,6 +872,7 @@ export class ExternalBrowserDriver implements BrowserDriver {
     signal: AbortSignal,
   ): Promise<DriverObservation> {
     const tab = this.current(request.targetId, request.generation)
+    this.assertNotWaiting(tab)
     const response = await this.bridge.request(
       tab.profileId,
       'target.observe',
@@ -508,9 +958,12 @@ export class ExternalBrowserDriver implements BrowserDriver {
   ): Promise<ActOutcome> {
     const tab = this.current(request.targetId, request.generation)
     if (tab.paused) throw new UiError('TARGET_BUSY', 'external tab is paused')
+    this.assertNotWaiting(tab)
+    const action = request.action
+    if (action.kind === 'navigate')
+      return await this.navigate(tab, action.url, request, hooks, signal)
     if (request.expectedRevision !== tab.revision)
       throw new UiError('STALE_ELEMENT', 'observe the external tab again')
-    const action = request.action
     if (action.kind !== 'click' && action.kind !== 'fill')
       throw new UiError(
         'CAPABILITY_DISABLED',
@@ -565,6 +1018,80 @@ export class ExternalBrowserDriver implements BrowserDriver {
         'OUTCOME_UNKNOWN',
         'external action may have run; observe the tab before retrying',
       )
+    }
+  }
+
+  private assertNotWaiting(tab: TabState): void {
+    if (tab.pendingOrigin !== null)
+      throw new UiError(
+        'TARGET_BUSY',
+        `the page went to ${tab.pendingOrigin}; it waits for the user to approve that site`,
+        { reason: 'site-needs-approval' },
+      )
+  }
+
+  /** Go to `url` in this tab; the kernel applied the 浏览 rule (RV-09). */
+  private async navigate(
+    tab: TabState,
+    url: string,
+    request: ActRequest,
+    hooks: ActHooks,
+    signal: AbortSignal,
+  ): Promise<ActOutcome> {
+    let destination: string
+    try {
+      destination = new URL(url).origin
+    } catch {
+      throw new UiError('INVALID_REQUEST', 'only http(s) URLs can be opened')
+    }
+    if (!isExactHttpOrigin(destination))
+      throw new UiError('INVALID_REQUEST', 'only http(s) URLs can be opened')
+    hooks.dispatched()
+    let response: unknown
+    try {
+      response = await this.bridge.request(
+        tab.profileId,
+        'target.navigate',
+        { targetId: tab.targetId, generation: tab.generation, url },
+        Math.max(request.deadlineMs, 30_000),
+        signal,
+      )
+    } catch {
+      throw new UiError(
+        'OUTCOME_UNKNOWN',
+        'the navigation may have happened; observe the tab before retrying',
+      )
+    }
+    if (
+      this.tabs.get(tab.targetId) !== tab ||
+      !object(response) ||
+      !isExactHttpOrigin(response.origin)
+    )
+      throw new UiError(
+        'OUTCOME_UNKNOWN',
+        'the tab changed during navigation; observe it again',
+      )
+    if (response.pending === true) {
+      // Redirected elsewhere: judged like a page that moved by itself.
+      this.onPageMoved(tab, response.origin)
+      return {
+        outcome: 'observed',
+        afterRevision: tab.revision,
+        url: response.origin,
+        changes: [`the page went on to ${response.origin}`],
+      }
+    }
+    if (
+      !safeInteger(response.generation) ||
+      response.generation <= tab.generation
+    )
+      throw new UiError('OUTCOME_UNKNOWN', 'invalid extension response')
+    this.followed(tab, response.origin, response.generation)
+    return {
+      outcome: 'observed',
+      afterRevision: tab.revision,
+      url: tab.origin,
+      changes: [`went to ${tab.origin}`],
     }
   }
 

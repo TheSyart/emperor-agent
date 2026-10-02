@@ -4,7 +4,14 @@
   "description": "Connect a tab you choose to Emperor Agent.",
   "version": "0.1.0",
   "minimum_chrome_version": "105",
-  "permissions": ["nativeMessaging", "tabs", "scripting", "storage"],
+  "permissions": [
+    "nativeMessaging",
+    "tabs",
+    "scripting",
+    "storage",
+    "tabGroups",
+    "downloads"
+  ],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
   "background": {
     "service_worker": "service-worker.js",

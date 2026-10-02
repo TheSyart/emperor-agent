@@ -5,6 +5,7 @@
  * Hosts without a port (CLI, ACP) never call this.
  */
 
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import type { Session } from '../../session-log/session'
 import type { Agent } from '../agent/agent'
@@ -33,10 +34,62 @@ import {
   ComputerUseService,
   type ComputerUseChange,
   type ComputerUseSettings,
+  type ExternalConfirmation,
   type KillSwitchStatus,
 } from './service/service'
 import type { ToolRuntime } from './tools/runtime'
 import { createUiTools } from './tools/ui-tools'
+import { ExternalSiteRuleStore } from './external-site-rules'
+import type { UiTargetScope } from './types'
+
+/**
+ * Chrome/Edge cards outside a tool call (RV-09): a page that moved to a
+ * site needing approval, or a download, shows the usual grant card (「本次」
+ * or 拒绝) in the owner's conversation. A caller that cannot ask, or a
+ * conversation that is gone, reads as a refusal. An accepted card leaves a
+ * `once` grant bound to no tool call; it ends with the task.
+ */
+export function createExternalConfirmation(deps: {
+  readonly ask: GrantAskService
+  readonly grants: GrantStore
+  sessionFor(sessionId: string): Session | undefined
+}): (request: ExternalConfirmation) => Promise<boolean> {
+  return async (request) => {
+    const { identity } = request
+    const session = deps.sessionFor(identity.ownerSessionId)
+    if (session === undefined || !identity.canAsk) return false
+    const targetScope: UiTargetScope = {
+      kind: 'browser',
+      profileId: request.profileId,
+      origins: [request.origin],
+    }
+    const actions = [request.actionClass]
+    const outcome = await deps.ask.request(
+      {
+        session,
+        subject: identity.subject,
+        driver: 'external-browser',
+        targetScope,
+        actions,
+        allowedScopes: ['once'],
+        display: request.display,
+        background: false,
+      },
+      () =>
+        deps.grants.issue({
+          subject: identity.subject,
+          ownerSessionId: identity.ownerSessionId,
+          driver: 'external-browser',
+          targetScope,
+          allowedActions: actions,
+          scope: 'once',
+          backgroundAllowed: true,
+          callId: `external-${randomUUID()}`,
+        }),
+    )
+    return outcome.grant !== undefined
+  }
+}
 
 export interface AttachmentSaver {
   save(input: { raw: Uint8Array; name: string; mime: string }): {
@@ -110,6 +163,12 @@ export function installComputerUse(
   const policy = new UiActionPolicy({ grants, now })
   const ask = new GrantAskService()
   ask.setAnswerer(options.pending.grantAnswerer)
+  const externalSites = new ExternalSiteRuleStore(options.stateDir)
+  const confirmExternal = createExternalConfirmation({
+    ask,
+    grants,
+    sessionFor: options.sessionFor,
+  })
   const service = new ComputerUseService({
     port: options.port,
     grants,
@@ -141,6 +200,8 @@ export function installComputerUse(
       ? {}
       : { onChanged: options.onChanged }),
     now,
+    externalSites,
+    confirmExternal,
   })
   const identity = (agent: Agent | undefined) =>
     resolveIdentity(agent, {

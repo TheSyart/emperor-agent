@@ -4,6 +4,10 @@ import {
   KILL_SWITCH_ACCELERATOR,
 } from '../harness/computer-use/config'
 import { SITE_PERMISSION_KINDS } from '../harness/computer-use/site-permissions'
+import {
+  EXTERNAL_HISTORY_ACCESS,
+  EXTERNAL_SITE_DECISIONS,
+} from '../harness/computer-use/external-site-rules'
 import { validDownloadDirectory } from '../config/local-config'
 import { z } from 'zod'
 import type { CoreApi } from './core-api'
@@ -924,6 +928,40 @@ export const CORE_OPERATION_REGISTRY = {
         .strict(),
     ]),
     (api, [input]) => api.computerUse.setSitePermission(input),
+  ),
+  // Settings › 电脑操作 › Chrome 和 Edge (PLAN-CAP-001 RV-09).
+  'computerUse.externalBrowserSettings': operation(z.tuple([]), (api) =>
+    api.computerUse.externalBrowserSettings(),
+  ),
+  'computerUse.setExternalBrowserSettings': operation(
+    z.tuple([
+      z
+        .object({
+          defaults: z
+            .object({
+              browse: z.enum(EXTERNAL_SITE_DECISIONS).optional(),
+              download: z.enum(EXTERNAL_SITE_DECISIONS).optional(),
+            })
+            .strict()
+            .optional(),
+          sites: z
+            .array(
+              z
+                .object({
+                  pattern: z.string().min(1).max(300),
+                  browse: z.enum(EXTERNAL_SITE_DECISIONS),
+                  download: z.enum(EXTERNAL_SITE_DECISIONS),
+                })
+                .strict(),
+            )
+            .max(1_000)
+            .optional(),
+          history: z.enum(EXTERNAL_HISTORY_ACCESS).optional(),
+          siteTools: z.boolean().optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.computerUse.setExternalBrowserSettings(input),
   ),
   'computerUse.setEnabled': operation(
     z.tuple([z.boolean()]),

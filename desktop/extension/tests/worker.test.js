@@ -45,7 +45,7 @@ async function waitUntil(predicate) {
   throw new Error('Timed out waiting for worker')
 }
 
-test('worker pairs, authenticates, handles a fixed observation and invalidates on navigation', async () => {
+test('worker pairs, authenticates, handles a fixed observation and follows navigation only when told', async () => {
   const stored = {}
   const runtimeMessages = event()
   const tabUpdated = event()
@@ -308,6 +308,7 @@ test('worker pairs, authenticates, handles a fixed observation and invalidates o
         id,
         windowId: 3,
         url: tabUrl,
+        status: 'complete',
       }),
       query: async () => [{ id: 7, windowId: 3, url: tabUrl }],
       sendMessage: async (_id, request) => {
@@ -455,14 +456,11 @@ test('worker pairs, authenticates, handles a fixed observation and invalidates o
   tabUpdated.fire(7, { status: 'loading' })
   releaseIdentity()
   assert.equal((await pendingAction).error.code, 'STALE_TARGET')
-  await waitUntil(() =>
-    observed.some(
-      (item) => item.type === 'event' && item.name === 'target.lost',
-    ),
-  )
+  // While the tab loads a new page the target stays connected but refuses
+  // work; Emperor decides whether it follows (PLAN-CAP-001 RV-09).
   assert.equal(
     (await popup({ kind: 'status', tabId: 7 })).value.currentTabAttached,
-    false,
+    true,
   )
   assert.equal(
     (
@@ -472,6 +470,54 @@ test('worker pairs, authenticates, handles a fixed observation and invalidates o
       })
     ).error.code,
     'STALE_TARGET',
+  )
+  const listedWhileLoading = await mainRequest('target.list', {})
+  assert.equal(
+    listedWhileLoading.result.targets.some(
+      (item) =>
+        item.targetId === newTabTarget.targetId &&
+        item.generation === newTabTarget.generation,
+    ),
+    true,
+  )
+  tabUpdated.fire(7, { status: 'complete' })
+  await waitUntil(() =>
+    observed.some(
+      (item) => item.type === 'event' && item.name === 'target.navigated',
+    ),
+  )
+  assert.deepEqual(
+    observed.find((item) => item.name === 'target.navigated').data,
+    {
+      targetId: newTabTarget.targetId,
+      generation: newTabTarget.generation,
+      origin: 'https://example.com',
+    },
+  )
+  const followed = await mainRequest('target.follow', {
+    targetId: newTabTarget.targetId,
+    generation: newTabTarget.generation,
+    origin: 'https://example.com',
+  })
+  assert.equal(followed.ok, true)
+  assert.ok(followed.result.generation > newTabTarget.generation)
+  assert.equal(
+    (
+      await mainRequest('target.observe', {
+        targetId: newTabTarget.targetId,
+        generation: newTabTarget.generation,
+      })
+    ).error.code,
+    'STALE_TARGET',
+  )
+  assert.equal(
+    (
+      await mainRequest('target.observe', {
+        targetId: newTabTarget.targetId,
+        generation: followed.result.generation,
+      })
+    ).ok,
+    true,
   )
 
   // Two popup requests can attach different tabs while storage writes are

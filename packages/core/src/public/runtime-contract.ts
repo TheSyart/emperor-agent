@@ -75,3 +75,10 @@ export {
   type SitePermission,
   type SitePermissionKind,
 } from '../harness/computer-use/types'
+export type {
+  ExternalBrowserSettings,
+  ExternalBrowserSettingsPatch,
+  ExternalHistoryAccess,
+  ExternalSiteDecision,
+  ExternalSiteRule,
+} from '../harness/computer-use/external-site-rules'

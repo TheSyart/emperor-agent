@@ -35,6 +35,11 @@ import {
   type NmManifestChange,
 } from './nm-manifest'
 import { isExactHttpOrigin } from './web-origin'
+import {
+  AGENT_REQUEST_METHODS,
+  parseAgentEvent,
+  type NmAgentEvent,
+} from './nm-bridge-agent'
 
 const BROWSER_TO_MAIN_MAX = 64 * 1024 * 1024
 const MAIN_TO_BROWSER_MAX = 1024 * 1024
@@ -103,6 +108,8 @@ export type NmBridgeEvent =
     }
   | { readonly type: 'disconnected'; readonly pairingId: string }
   | { readonly type: 'revoked'; readonly pairingId: string }
+  // The Agent's own browsing (PLAN-CAP-001 RV-09).
+  | NmAgentEvent
 
 /** Host manifest upkeep (01 §11), implemented by `NmManifestRegistrar`. */
 export interface NmHostManifests {
@@ -525,6 +532,15 @@ class NmConnection {
         this.socket.destroy()
         return
       }
+      const agentEvent = parseAgentEvent(
+        frame.name,
+        data,
+        this.pairing!.pairingId,
+      )
+      if (agentEvent !== null) {
+        this.bridge.notify(agentEvent)
+        return
+      }
       throw codeError('CAPABILITY_DISABLED')
     }
     if (
@@ -585,6 +601,7 @@ class NmConnection {
         'target.observe',
         'target.act',
         'target.detach',
+        ...AGENT_REQUEST_METHODS,
       ].includes(method)
     )
       return Promise.reject(codeError('CAPABILITY_DISABLED'))

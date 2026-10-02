@@ -101,6 +101,7 @@ import {
   resolveNmHostPath,
 } from './computer-use/nm-manifest'
 import { ExternalBrowserDriver } from './computer-use/external-browser-driver'
+import { ExternalDownloadLog } from './computer-use/external-downloads'
 import { registerCredentialVaultIpc } from './computer-use/credential-vault-ipc'
 import {
   authenticateCredentialReveal,
@@ -168,6 +169,8 @@ let embeddedBrowser: EmbeddedBrowserDriver | null = null
 let nativeDesktop: MacosDesktopDriver | null = null
 let nmBridge: NmBridgeServer | null = null
 let externalBrowser: ExternalBrowserDriver | null = null
+/** Emperor's downloads in the user's own Chrome/Edge (RV-09). */
+let externalDownloads: ExternalDownloadLog | null = null
 let credentialVault: CredentialVault | null = null
 let dictation: DictationService | null = null
 let agentPreview: AgentPreview | null = null
@@ -575,7 +578,12 @@ function createComputerUseHost(): void {
         electronPairingCipher(safeStorage),
       ),
     })
-    externalBrowser = new ExternalBrowserDriver(nmBridge)
+    externalDownloads = new ExternalDownloadLog(
+      path.join(config.stateRoot, 'computer-use', 'external-downloads.json'),
+    )
+    externalBrowser = new ExternalBrowserDriver(nmBridge, 'macos', {
+      downloads: externalDownloads,
+    })
   }
   computerUsePort = new DesktopComputerUsePort({
     platform: process.platform,
@@ -1146,7 +1154,12 @@ async function startup(): Promise<void> {
             path.join(workspace, 'downloads'),
           )
         },
-        list: () => embeddedBrowser?.downloads?.list() ?? [],
+        // The inbox, then what the Agent downloaded in Chrome/Edge (RV-09).
+        list: () =>
+          [
+            ...(embeddedBrowser?.downloads?.list() ?? []),
+            ...(externalDownloads?.list() ?? []),
+          ].sort((a, b) => b.time - a.time),
       },
       userDownloads: {
         list: () => userDownloads?.list() ?? [],

@@ -1270,6 +1270,55 @@ export async function installVisualCoreBridge(
           },
         ] as Array<Record<string, unknown>>,
       }
+      // 设置 › 电脑操作 › Chrome 和 Edge: 智能体权限 and 浏览器权限
+      // (PLAN-CAP-001 RV-09). `?visualChromeRules=empty` starts with the
+      // default row only.
+      let visualExternalBrowser: Record<string, unknown> = {
+        defaults: { browse: 'allow', download: 'ask' },
+        sites:
+          visualParams.get('visualChromeRules') === 'empty'
+            ? []
+            : [
+                {
+                  pattern: '*.mybank.example',
+                  browse: 'ask',
+                  download: 'block',
+                },
+                { pattern: 'github.com', browse: 'allow', download: 'allow' },
+              ],
+        history: 'ask',
+        siteTools: false,
+      }
+      // 下载历史记录 › Emperor 的下载 also lists the Agent's downloads in
+      // the user's own Chrome or Edge (no file actions there).
+      visualBrowserState.downloads.agent.push(
+        {
+          id: 'xd_00000000000a',
+          name: 'statement-2026-09.pdf',
+          site: 'https://files.mybank.example',
+          sessionId: null,
+          time: Date.parse(now) - 50 * 60_000,
+          bytes: 0,
+          exists: false,
+          browser: 'chrome',
+          state: 'refused',
+          reason: 'blocked',
+        },
+        {
+          id: 'xd_00000000000b',
+          name: 'release-notes.md',
+          site: 'https://github.com',
+          sessionId: null,
+          time: Date.parse(now) - 4 * 60 * 60_000,
+          bytes: 12_288,
+          exists: false,
+          browser: 'edge',
+          state: 'completed',
+        },
+      )
+      visualBrowserState.downloads.agent.sort(
+        (a, b) => Number(b.time) - Number(a.time),
+      )
       const visualComputerUse = () => {
         const on = visualComputerUseState.enabled
         return {
@@ -1317,7 +1366,7 @@ export async function installVisualCoreBridge(
                 !visualComputerUseState.stopped &&
                 visualComputerUseState.drivers['external-browser'] !== false,
               actions: ['click', 'fill'],
-              missing: ['外部浏览器新建标签页', '截图与坐标操作'],
+              missing: ['主框架以外的语义操作', '截图与坐标操作'],
             },
             {
               driver: 'desktop',
@@ -6141,6 +6190,11 @@ export async function installVisualCoreBridge(
                           'Claim one Chrome tab that the user connected from the Emperor extension.',
                           false,
                         ],
+                        [
+                          'external_tab_open',
+                          'Open an http(s) URL in a new tab of the user’s own Chrome or Edge (in the tab group “Emperor”) and work in it.',
+                          false,
+                        ],
                       ]),
                     },
                     {
@@ -6754,6 +6808,30 @@ export async function installVisualCoreBridge(
               const removed = visualComputerUseState.screenshots.count
               visualComputerUseState.screenshots = { count: 0, bytes: 0 }
               return { removed, bytes: 0 }
+            }
+            // Chrome/Edge 智能体权限 and 浏览器权限 (RV-09).
+            case 'computerUse.externalBrowserSettings':
+              return visualExternalBrowser
+            case 'computerUse.setExternalBrowserSettings': {
+              const patch = (args[0] || {}) as Record<string, unknown>
+              const sites = Array.isArray(patch.sites)
+                ? (patch.sites as Array<Record<string, unknown>>).map(
+                    (rule) => ({
+                      ...rule,
+                      pattern: String(rule.pattern).trim().toLowerCase(),
+                    }),
+                  )
+                : visualExternalBrowser.sites
+              visualExternalBrowser = {
+                ...visualExternalBrowser,
+                ...patch,
+                defaults: {
+                  ...(visualExternalBrowser.defaults as object),
+                  ...((patch.defaults as object | undefined) ?? {}),
+                },
+                sites,
+              }
+              return visualExternalBrowser
             }
             default:
               return {}

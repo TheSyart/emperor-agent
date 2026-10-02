@@ -320,6 +320,57 @@ export type DriverEvent =
       readonly type: 'sharing-stopped'
       readonly targetId: string
     }
+  | ExternalDriverEvent
+
+/**
+ * Chrome/Edge (智能体权限, PLAN-CAP-001 RV-09): what the external driver
+ * reports about the user's own browser.
+ */
+export type ExternalDriverEvent =
+  | {
+      /**
+       * The page moved by itself to a site that needs the user's approval;
+       * the tab waits (every action refused) until `resolveNavigation`.
+       */
+      readonly type: 'navigation-pending'
+      readonly targetId: string
+      /** Origin of the new page. */
+      readonly url: string
+    }
+  | {
+      /**
+       * A download from a tab the Agent works in waits for the kernel's
+       * verdict (`resolveDownload`). `url` is the file's origin ('' when the
+       * browser does not say, e.g. a blob).
+       */
+      readonly type: 'download-requested'
+      readonly targetId: string
+      readonly downloadId: string
+      readonly url: string
+      readonly filename: string
+      readonly mimeType?: string
+      /** -1 when the size is not known yet. */
+      readonly bytes: number
+    }
+  | {
+      /** An allowed download ended in the browser's own download folder. */
+      readonly type: 'download-finished'
+      readonly targetId: string
+      readonly downloadId: string
+      readonly state: 'completed' | 'interrupted'
+      readonly filename: string
+      readonly bytes: number
+      readonly url: string
+    }
+
+/** Chrome/Edge: what the user's 智能体权限 say about one site (RV-09). */
+export type ExternalSiteVerdict = 'allow' | 'ask' | 'block'
+
+/** Synchronous per-site verdict supplied by the kernel. */
+export type ExternalSiteDecider = (
+  url: string,
+  kind: 'browse' | 'download',
+) => ExternalSiteVerdict
 
 export type DriverEventListener = (event: DriverEvent) => void
 
@@ -413,6 +464,23 @@ export interface BrowserDriver extends TargetDriver {
     ownerSessionId: string,
     signal: AbortSignal,
   ): Promise<TargetSnapshot>
+  /**
+   * Chrome/Edge: the user's per-site rules, for pages that move by
+   * themselves and for downloads of tabs nobody works in (RV-09).
+   */
+  setSiteDecider?(decider: ExternalSiteDecider): void
+  /** Chrome/Edge: the connection a new tab opens in (null: none is ready). */
+  openProfile?(): string | null
+  /**
+   * Chrome/Edge: the user's answer for a `navigation-pending` tab: carry on
+   * in the new page, or disconnect the tab.
+   */
+  resolveNavigation?(targetId: string, allow: boolean): void
+  /** Chrome/Edge: the kernel's verdict for a `download-requested` event. */
+  resolveDownload?(
+    downloadId: string,
+    verdict: { readonly allow: boolean; readonly reason?: string },
+  ): void
 }
 
 export interface ExternalAttachedTarget {

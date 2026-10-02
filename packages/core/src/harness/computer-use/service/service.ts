@@ -80,6 +80,19 @@ import type {
 } from '../site-permissions'
 import { KeyedMutex } from './mutex'
 import { highRiskMacApp, protectedMacApp } from '../protected-apps'
+import { isExecutableDownload } from '../downloads'
+import {
+  DEFAULT_EXTERNAL_BROWSER_SETTINGS,
+  externalSiteDecision,
+  externalSiteError,
+  stricterDecision,
+  type ExternalBrowserSettings,
+  type ExternalBrowserSettingsPatch,
+  type ExternalSiteDecision,
+  type ExternalSiteKind,
+  type ExternalSiteRuleStore,
+} from '../external-site-rules'
+import type { ExternalDriverEvent } from '../port'
 import {
   TargetRegistry,
   isLive,
@@ -159,6 +172,27 @@ export interface ComputerUseServiceDeps {
   killSwitch?(): KillSwitchStatus
   onChanged?(reason: ComputerUseChange, sessionId?: string): void
   now?(): Date
+  /** Chrome/Edge 智能体权限 and 浏览器权限 (absent: the defaults). */
+  readonly externalSites?: ExternalSiteRuleStore
+  /**
+   * Ask the user about something a Chrome/Edge page did by itself (moved to
+   * a site that needs approval, started a download): one card in the
+   * owner's conversation. Resolves whether the user allowed it; absent or
+   * failing: refused.
+   */
+  confirmExternal?(request: ExternalConfirmation): Promise<boolean>
+}
+
+/** A card about a Chrome/Edge page, outside any tool call (RV-09). */
+export interface ExternalConfirmation {
+  /** Who last drove the owner's targets (the card goes to its root). */
+  readonly identity: UiCallerIdentity
+  /** The browser connection (pairing) of the tab. */
+  readonly profileId: string
+  /** The site in question (normalized origin). */
+  readonly origin: string
+  readonly actionClass: 'navigate' | 'transfer'
+  readonly display: { readonly url: string; readonly title: string }
 }
 
 /** What the gate decided for one call; the service re-validates it. */
@@ -312,6 +346,16 @@ export class ComputerUseService {
   private readonly unsubscribers: Array<() => void> = []
   /** Task releases in progress, by owner (a second call joins the first). */
   private readonly releases = new Map<string, Promise<TaskReleaseSummary>>()
+  /**
+   * Chrome/Edge tabs a page took to a blocked site, or to one the user did
+   * not approve: why they were disconnected (bounded), and per owner the
+   * latest one for a call without a targetId (said once).
+   */
+  private readonly externalGone = new Map<
+    string,
+    { origin: string; why: 'blocked' | 'denied' }
+  >()
+  private readonly externalGoneByOwner = new Map<string, string>()
   private stoppedAt: string | undefined
   private closed = false
 
@@ -629,6 +673,9 @@ export class ComputerUseService {
       browser.setSitePermissionPolicy?.((request) =>
         this.sitePermissionVerdict(request),
       )
+      browser.setSiteDecider?.((url, kind) =>
+        this.externalSiteDecision(url, kind),
+      )
     }
   }
 
@@ -751,6 +798,8 @@ export class ComputerUseService {
     if (record !== undefined) return record
     const released = this.releasedTarget(identity, targetId)
     if (released !== undefined) throw this.releasedError(released)
+    const gone = this.externalGoneError(identity, targetId)
+    if (gone !== undefined) throw gone
     throw new UiError(
       'INVALID_REQUEST',
       targetId === undefined
@@ -1280,6 +1329,339 @@ export class ComputerUseService {
     return record
   }
 
+  // -------------------------------------------------------------------------
+  // Chrome/Edge 智能体权限 (PLAN-CAP-001 RV-09): the user's per-site rules
+  // for browsing and downloads in their own browser.
+
+  /** 浏览器权限 and 智能体权限 of Settings › 电脑操作 › Chrome 和 Edge. */
+  externalBrowserSettings(): ExternalBrowserSettings {
+    return this.deps.externalSites?.get() ?? DEFAULT_EXTERNAL_BROWSER_SETTINGS
+  }
+
+  /** Only the user changes them (CoreApi guards a change that widens). */
+  setExternalBrowserSettings(
+    patch: ExternalBrowserSettingsPatch,
+  ): ExternalBrowserSettings {
+    const store = this.deps.externalSites
+    if (store === undefined)
+      throw new UiError(
+        'CAPABILITY_DISABLED',
+        'Chrome/Edge settings are not available on this host',
+      )
+    const next = store.update(patch)
+    this.changed('state')
+    return next
+  }
+
+  /** What the user's rules say about `url` in their own Chrome or Edge. */
+  externalSiteDecision(
+    url: string,
+    kind: ExternalSiteKind,
+  ): ExternalSiteDecision {
+    return externalSiteDecision(this.externalBrowserSettings(), url, kind)
+  }
+
+  /** The connected browser a new Chrome/Edge tab opens in. */
+  externalOpenProfile(): string {
+    const profile =
+      this.browserDriver('external-browser').openProfile?.() ?? null
+    if (profile === null)
+      throw new UiError(
+        'CAPABILITY_DISABLED',
+        'no Chrome or Edge is connected to Emperor',
+        {
+          reason: 'not-connected',
+          hint: 'Ask the user to open Chrome or Edge with the Emperor extension connected.',
+        },
+      )
+    return profile
+  }
+
+  /**
+   * The gate applied the 浏览 rule to this destination; check it again
+   * right before the driver (a blocked site never, a site that asks only
+   * with the user's card). Chrome/Edge tabs only go to a URL.
+   */
+  private assertExternalAction(ctx: OpContext, action: UiAction): void {
+    if (action.kind === 'history')
+      throw new UiError(
+        'CAPABILITY_DISABLED',
+        'a Chrome/Edge tab goes to a URL; back, forward and reload are not available',
+        { hint: 'Call browser_navigate with the URL instead.' },
+      )
+    if (action.kind === 'navigate') this.assertExternalBrowse(ctx, action.url)
+  }
+
+  private assertExternalBrowse(ctx: OpContext, url: string): void {
+    const decision = this.externalSiteDecision(url, 'browse')
+    if (decision === 'block') throw externalSiteError(url)
+    if (decision === 'ask' && ctx.ticket.kind !== 'grant')
+      throw new UiError(
+        'PERMISSION_REQUIRED',
+        'the user wants to approve this site before Emperor opens it',
+        { reason: 'site-needs-approval' },
+      )
+  }
+
+  /**
+   * Open `url` in a new tab of the user's Chrome or Edge (its tab group
+   * 「Emperor」) and give the tab to this task.
+   */
+  async openExternal(
+    ctx: OpContext,
+    input: { url: string },
+  ): Promise<TargetRecord> {
+    const driver = this.browserDriver('external-browser')
+    this.revalidate(ctx, undefined)
+    this.assertExternalBrowse(ctx, input.url)
+    const profileId = this.externalOpenProfile()
+    await this.releases.get(ctx.identity.ownerSessionId)
+    this.assertRoom(ctx.identity.ownerSessionId, 'too many open targets')
+    this.chargeBudget(ctx.identity)
+    this.lastIdentity.set(ctx.identity.ownerSessionId, ctx.identity)
+    const op = this.prepare(ctx, 'new', { kind: 'open', url: input.url }, 0)
+    const snapshot = await this.run(
+      ctx,
+      op,
+      `open:${ctx.identity.ownerSessionId}`,
+      async (signal) => {
+        this.journal.dispatched(op)
+        return await driver.open(
+          {
+            profile: { kind: 'persistent', profileId },
+            url: input.url,
+            ownerSessionId: ctx.identity.ownerSessionId,
+          },
+          signal,
+        )
+      },
+      (value) => ({ afterRevision: value.revision }),
+    )
+    if (
+      snapshot.driver !== 'external-browser' ||
+      snapshot.kind !== 'external-tab'
+    ) {
+      await driver.close(snapshot.targetId, 'lost').catch(() => undefined)
+      throw new UiError('STALE_TARGET', 'the new tab is not a Chrome/Edge tab')
+    }
+    const record = this.registry.add(
+      ctx.identity.ownerSessionId,
+      snapshot,
+      this.now(),
+    )
+    const origin = targetOrigin(record)
+    this.append(ctx.identity.ownerSessionId, 'ui/target-opened', {
+      targetId: record.targetId,
+      kind: record.kind,
+      driver: record.driver,
+      generation: record.generation,
+      profileId: record.profileId,
+      title: record.title.slice(0, 200),
+      ...(origin === null ? {} : { origin }),
+    })
+    this.append(ctx.identity.ownerSessionId, 'ui/control-state', {
+      targetId: record.targetId,
+      state: 'agent',
+    })
+    this.changed('targets', ctx.identity.ownerSessionId)
+    return record
+  }
+
+  /**
+   * Why a Chrome/Edge tab is gone, when a page took it to a blocked site or
+   * the user did not approve where it went. Without a targetId: the
+   * owner's latest such tab, said once.
+   */
+  externalGoneError(
+    identity: UiCallerIdentity,
+    targetId?: string,
+  ): UiError | undefined {
+    let id = targetId
+    if (id === undefined) {
+      id = this.externalGoneByOwner.get(identity.ownerSessionId)
+      this.externalGoneByOwner.delete(identity.ownerSessionId)
+    }
+    const gone = id === undefined ? undefined : this.externalGone.get(id)
+    if (gone === undefined || id === undefined) return undefined
+    if (this.registry.get(id)?.ownerSessionId !== identity.ownerSessionId)
+      return undefined
+    return gone.why === 'blocked'
+      ? new UiError(
+          'PERMISSION_DENIED',
+          `the page went to ${gone.origin}, which the user blocked for Emperor; the tab was disconnected`,
+          {
+            reason: 'site-blocked',
+            hint: 'Do not go there another way. Continue on an allowed site with external_tab_open, or tell the user.',
+          },
+        )
+      : new UiError(
+          'PERMISSION_DENIED',
+          `the page went to ${gone.origin} and the user did not allow Emperor there; the tab was disconnected`,
+          {
+            reason: 'user-denied',
+            hint: 'Do not go there another way; continue elsewhere or ask the user.',
+          },
+        )
+  }
+
+  private rememberExternalGone(
+    record: TargetRecord,
+    origin: string,
+    why: 'blocked' | 'denied',
+  ): void {
+    this.externalGone.set(record.targetId, {
+      origin: origin.slice(0, 300),
+      why,
+    })
+    if (this.externalGone.size > 64) {
+      const oldest = this.externalGone.keys().next().value
+      if (oldest !== undefined) this.externalGone.delete(oldest)
+    }
+    this.externalGoneByOwner.set(record.ownerSessionId, record.targetId)
+  }
+
+  private async confirmExternal(
+    request: ExternalConfirmation,
+  ): Promise<boolean> {
+    try {
+      return (await this.deps.confirmExternal?.(request)) === true
+    } catch {
+      return false
+    }
+  }
+
+  private externalDriver(): BrowserDriver | null {
+    return this.portDriver('external-browser') as BrowserDriver | null
+  }
+
+  /**
+   * The page moved by itself to a site that needs approval: the tab waits
+   * until the user answers one card; a refusal disconnects it.
+   */
+  private async confirmExternalNavigation(
+    record: TargetRecord,
+    url: string,
+  ): Promise<void> {
+    const identity = this.lastIdentity.get(record.ownerSessionId)
+    const allowed =
+      identity !== undefined &&
+      isLive(record) &&
+      (await this.confirmExternal({
+        identity,
+        profileId: record.profileId,
+        origin: url,
+        actionClass: 'navigate',
+        display: { url, title: '网页跳转到了需要你批准的网站' },
+      }))
+    if (!allowed) this.rememberExternalGone(record, url, 'denied')
+    try {
+      this.externalDriver()?.resolveNavigation?.(record.targetId, allowed)
+    } catch {
+      // the tab is disconnected either way
+    }
+  }
+
+  /**
+   * A download from a tab the Agent works in (RV-09): executables and
+   * installers never (the inbox's rule), then the stricter 下载 rule of the
+   * page and of the file's site; 需要批准 asks the user with one card.
+   */
+  private async decideExternalDownload(
+    record: TargetRecord,
+    event: Extract<ExternalDriverEvent, { type: 'download-requested' }>,
+  ): Promise<void> {
+    const name = event.filename.slice(0, 200)
+    const pageOrigin = targetOrigin(record) ?? record.url
+    const finish = (allow: boolean, reason?: string): void => {
+      try {
+        this.externalDriver()?.resolveDownload?.(event.downloadId, {
+          allow,
+          ...(reason === undefined ? {} : { reason }),
+        })
+      } catch {
+        // the extension refuses a download it never hears about
+      }
+      if (allow) return
+      this.append(record.ownerSessionId, 'ui/download', {
+        operationId: `external:${event.downloadId}`,
+        targetId: record.targetId,
+        downloadId: event.downloadId,
+        state: 'refused',
+        filename: name,
+        bytes: Math.max(0, event.bytes),
+        ...(event.url === '' ? {} : { origin: event.url }),
+        ...(event.mimeType === undefined
+          ? {}
+          : { mimeType: event.mimeType.slice(0, 200) }),
+        pageOrigin,
+      })
+    }
+    if (isExecutableDownload(event.filename, event.mimeType ?? '')) {
+      finish(false, 'executable')
+      this.note(
+        record.targetId,
+        `the download ${name} was refused: executable files and installers are never downloaded`,
+      )
+      return
+    }
+    const decision = stricterDecision(
+      this.externalSiteDecision(pageOrigin, 'download'),
+      event.url === ''
+        ? 'allow'
+        : this.externalSiteDecision(event.url, 'download'),
+    )
+    if (decision === 'allow') return finish(true)
+    if (decision === 'block') {
+      finish(false, 'blocked')
+      this.note(
+        record.targetId,
+        `the download ${name} was refused: the user blocks downloads from this site for Emperor`,
+      )
+      return
+    }
+    const identity = this.lastIdentity.get(record.ownerSessionId)
+    const site = event.url === '' ? pageOrigin : event.url
+    const allowed =
+      identity !== undefined &&
+      (await this.confirmExternal({
+        identity,
+        profileId: record.profileId,
+        origin: site,
+        actionClass: 'transfer',
+        display: { url: `${name} · ${site}`, title: `下载「${name}」` },
+      }))
+    if (allowed) return finish(true)
+    finish(false, 'denied')
+    this.note(
+      record.targetId,
+      `the download ${name} was refused: the user did not approve it`,
+    )
+  }
+
+  private externalDownloadFinished(
+    record: TargetRecord,
+    event: Extract<ExternalDriverEvent, { type: 'download-finished' }>,
+  ): void {
+    const name = event.filename.slice(0, 200)
+    const pageOrigin = targetOrigin(record) ?? record.url
+    this.append(record.ownerSessionId, 'ui/download', {
+      operationId: `external:${event.downloadId}`,
+      targetId: record.targetId,
+      downloadId: event.downloadId,
+      state: event.state,
+      filename: name,
+      bytes: Math.max(0, event.bytes),
+      ...(event.url === '' ? {} : { origin: event.url }),
+      pageOrigin,
+    })
+    this.note(
+      record.targetId,
+      event.state === 'completed'
+        ? `the download ${name} finished in the browser's own download folder`
+        : `the download ${name} was interrupted`,
+    )
+  }
+
   async open(
     ctx: OpContext,
     input: {
@@ -1661,6 +2043,8 @@ export class ComputerUseService {
     this.assertActionable(record)
     this.revalidate(ctx, record)
     const action = input.action
+    if (record.driver === 'external-browser')
+      this.assertExternalAction(ctx, action)
     if (
       (action.kind === 'clickPoint' || action.kind === 'drag') &&
       !ctx.vision
@@ -3099,10 +3483,22 @@ export class ComputerUseService {
         this.changed('targets', record.ownerSessionId)
         break
       case 'navigation-blocked':
+        // Chrome/Edge: the page went to a blocked site; the tab is lost next.
+        if (record.driver === 'external-browser')
+          this.rememberExternalGone(record, event.url, 'blocked')
         this.note(
           record.targetId,
           `navigation to ${event.url.slice(0, 300)} was blocked`,
         )
+        break
+      case 'navigation-pending':
+        void this.confirmExternalNavigation(record, event.url)
+        break
+      case 'download-requested':
+        void this.decideExternalDownload(record, event)
+        break
+      case 'download-finished':
+        this.externalDownloadFinished(record, event)
         break
       case 'popup-blocked':
         this.note(

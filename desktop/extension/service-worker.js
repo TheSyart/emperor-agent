@@ -19,6 +19,7 @@ import {
   pairingProof,
   seal,
 } from './crypto.js'
+import { createAgentFeatures } from './agent.js'
 
 let port = null
 let traffic = null
@@ -39,6 +40,23 @@ const attachQueues = new Map()
 const pending = new Map()
 const targets = new Map()
 const byTab = new Map()
+// Tabs the Agent opens, navigation and downloads (PLAN-CAP-001 RV-09).
+const agent = createAgentFeatures({
+  chrome,
+  targets,
+  byTab,
+  connected: () => !!traffic,
+  sendEvent: (name, data) => sendSecure({ type: 'event', name, data }),
+  nextGeneration,
+  identify: async (tabId) => {
+    const identity = await contentCall({ tabId }, 'identity', {})
+    return identity?.ok && typeof identity.documentId === 'string'
+      ? identity.documentId
+      : null
+  },
+  invalidate,
+  currentTarget,
+})
 
 async function uiStatus(tabId) {
   if (Number.isSafeInteger(tabId) && byTab.has(tabId)) {
@@ -154,6 +172,7 @@ function disconnect(message, retry = false) {
   port = null
   traffic = null
   pendingPair = null
+  agent.reset()
   targets.clear()
   byTab.clear()
   attachQueues.clear()
@@ -423,6 +442,8 @@ async function invalidate(target, reason) {
 async function currentTarget(params) {
   const target = targets.get(params?.targetId)
   if (!target || target.generation !== params?.generation) return null
+  // Loading a new page: Emperor decides whether the target follows it.
+  if (target.navigating) return null
   let tab
   try {
     tab = await chrome.tabs.get(target.tabId)
@@ -457,7 +478,9 @@ async function currentTarget(params) {
     await invalidate(target, 'document-changed')
     return null
   }
-  return targets.get(target.targetId) === target ? target : null
+  return targets.get(target.targetId) === target && !target.navigating
+    ? target
+    : null
 }
 
 async function contentCall(target, method, params, signal) {
@@ -484,6 +507,7 @@ async function handleRequest(method, params, signal) {
   if (signal?.aborted) throw new Error('Request timed out')
   if (!isObject(params))
     return failure('INVALID_ARGUMENT', 'Parameters must be an object')
+  if (agent.handles(method)) return agent.request(method, params, signal)
   if (method === 'tabs.discover') {
     const tabs = await chrome.tabs.query({})
     return success({
@@ -500,7 +524,10 @@ async function handleRequest(method, params, signal) {
   if (method === 'target.list') {
     const live = []
     for (const attached of [...targets.values()]) {
-      const target = await currentTarget(attached)
+      // A target loading a new page is still there under its old identity.
+      const target = attached.navigating
+        ? attached
+        : await currentTarget(attached)
       if (!target) continue
       const { targetId, tabId, windowId, origin, generation, revision } = target
       live.push({ targetId, tabId, windowId, origin, generation, revision })
@@ -540,6 +567,7 @@ async function handleRequest(method, params, signal) {
         )
       }
       target.revision = nextRevision
+      agent.touch(target)
       target.observation = {
         documentId: observation.documentId,
         mutationVersion: observation.mutationVersion,
@@ -584,6 +612,7 @@ async function handleRequest(method, params, signal) {
       (typeof action.text !== 'string' || action.text.length > 16_384)
     )
       return failure('INVALID_ARGUMENT', 'Invalid non-secret input')
+    agent.touch(target)
     try {
       const outcome = await contentCall(
         target,
@@ -722,10 +751,18 @@ chrome.tabs.onDetached.addListener((tabId) =>
 chrome.tabs.onAttached.addListener((tabId) =>
   invalidateTab(tabId, 'window-transfer'),
 )
-chrome.tabs.onUpdated.addListener((tabId, changes) => {
+chrome.tabs.onUpdated.addListener((tabId, changes, tab) => {
+  // A target follows its tab to a new page once Emperor agrees (RV-09).
+  if (agent.onTabUpdated(tabId, changes, tab)) return
   if (changes.status === 'loading' || typeof changes.url === 'string')
     invalidateTab(tabId, 'navigation')
 })
+chrome.downloads?.onDeterminingFilename.addListener((item, suggest) =>
+  agent.onDeterminingFilename(item, suggest),
+)
+chrome.downloads?.onChanged.addListener((delta) =>
+  agent.onDownloadChanged(delta),
+)
 chrome.permissions.onRemoved.addListener(() => {
   for (const target of targets.values())
     void currentTarget({

@@ -91,7 +91,7 @@ describe('the tool catalog of 能力 › 工具', () => {
     expect(gui.map((tool) => tool.name).sort()).toEqual(
       Object.keys(GUI_TOOL_CATALOG).sort(),
     )
-    expect(gui).toHaveLength(44)
+    expect(gui).toHaveLength(45)
     for (const tool of gui) {
       expect(tool.source).toBe('builtin')
       expect(tool).not.toHaveProperty('category')

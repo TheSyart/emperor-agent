@@ -6,6 +6,7 @@
  */
 
 import { UiError } from '../errors'
+import { externalSiteError } from '../external-site-rules'
 import { normalizeOrigin } from '../grants/match'
 import type { UiCallerIdentity } from '../identity'
 import type { UiRequirement } from '../policy'
@@ -59,10 +60,26 @@ function currentTarget(
   // Released at the end of an earlier task: say so (it was not closed).
   const released = input.service.releasedTarget(input.identity, targetId)
   if (released !== undefined) throw input.service.releasedError(released)
+  // A Chrome/Edge page went to a blocked or unapproved site: say so.
+  const gone = input.service.externalGoneError(input.identity, targetId)
+  if (gone !== undefined) throw gone
   throw new UiError(
     'INVALID_REQUEST',
     targetId === undefined ? missing : `unknown target ${targetId}`,
   )
+}
+
+/**
+ * Chrome/Edge 智能体权限 (RV-09) for a destination: a blocked site is
+ * refused before any card; one that needs approval asks each time.
+ */
+function externalBrowse(
+  input: ClassifyInput,
+  url: string,
+): Partial<UiRequirement> {
+  const decision = input.service.externalSiteDecision(url, 'browse')
+  if (decision === 'block') throw externalSiteError(url)
+  return decision === 'ask' ? { confirmEachTime: true } : {}
 }
 
 function onTarget(
@@ -351,6 +368,12 @@ export const GUI_TOOL_CATALOG: Readonly<Record<string, CatalogEntry>> = {
           'select a browser tab for this tool',
         )
       const history = input.args.history
+      if (target.driver === 'external-browser' && typeof history === 'string')
+        throw new UiError(
+          'CAPABILITY_DISABLED',
+          'a Chrome/Edge tab goes to a URL; back, forward and reload are not available',
+          { hint: 'Call browser_navigate with the URL instead.' },
+        )
       const destination =
         typeof history === 'string'
           ? (input.service.historyTarget(
@@ -369,6 +392,9 @@ export const GUI_TOOL_CATALOG: Readonly<Record<string, CatalogEntry>> = {
           callId: input.callId,
           toolName: input.toolName,
           display: { url: destination, title: target.title },
+          ...(target.driver === 'external-browser'
+            ? externalBrowse(input, destination)
+            : {}),
         },
       }
     },
@@ -395,6 +421,29 @@ export const GUI_TOOL_CATALOG: Readonly<Record<string, CatalogEntry>> = {
           callId: input.callId,
           toolName: input.toolName,
           display: { url: candidate.origin, title: '连接外部浏览器标签页' },
+          ...externalBrowse(input, candidate.origin),
+        },
+      }
+    },
+  },
+  external_tab_open: {
+    kind: 'target',
+    planSafe: false,
+    classify: (input) => {
+      const url = webUrl(input.args.url)
+      return {
+        requirement: {
+          driver: 'external-browser',
+          actionClass: 'navigate',
+          profileId: input.service.externalOpenProfile(),
+          origin: url,
+          callId: input.callId,
+          toolName: input.toolName,
+          display: { url, title: '在 Chrome/Edge 打开新标签页' },
+          ...externalBrowse(input, url),
+          ...(typeof input.args.reason === 'string'
+            ? { reason: input.args.reason }
+            : {}),
         },
       }
     },

@@ -323,6 +323,14 @@ export interface AgentDownloadView {
   time: number
   bytes: number
   exists: boolean
+  /**
+   * Downloaded in the user's own Chrome or Edge (PLAN-CAP-001 RV-09): the
+   * file stays in that browser's download folder (no file actions here).
+   */
+  browser?: 'chrome' | 'edge'
+  state?: 'completed' | 'refused' | 'interrupted'
+  /** Why a refused one was refused. */
+  reason?: 'executable' | 'blocked' | 'denied'
 }
 
 /** 设置 › 浏览器 › 下载历史记录, newest first in each group. */
