@@ -104,6 +104,16 @@ describe('macOS helper icons (RV-07)', () => {
     fs.readFileSync(path.join(scripts, name), 'utf8')
 
   it('gives both helpers the icon before their bundle is sealed', () => {
+    // Computer Use's own logo for its Helper (what macOS shows in the
+    // permission lists); the Dictation Helper keeps Emperor's.
+    const logo = 'assets/generated/plugin-logos/computer-use.png'
+    expect(fs.existsSync(path.join(desktopRoot, '..', logo))).toBe(true)
+    expect(read('assemble-app.sh')).toContain(
+      `"$native_dir/scripts/helper-icon.sh" "$app/Contents/Resources/icon.icns" "$native_dir/../../../${logo}"`,
+    )
+    expect(read('assemble-dictation-app.sh')).toMatch(
+      /"\$native_dir\/scripts\/helper-icon\.sh" "\$app\/Contents\/Resources\/icon\.icns"\n/,
+    )
     for (const name of ['assemble-app.sh', 'assemble-dictation-app.sh']) {
       const script = read(name)
       expect(script, name).toContain(

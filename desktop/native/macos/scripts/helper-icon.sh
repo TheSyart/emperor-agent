@@ -1,11 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
-# Emperor's icon as an .icns for a helper bundle (RV-07). Without one, the
-# helpers show a blank icon in macOS permission prompts and in
-# System Settings › Privacy & Security. Made from desktop/build/icon.png
-# (1024px) with sips and iconutil; a missing or broken image stops the
-# build instead of leaving a helper without an icon.
+# An .icns for a helper bundle (RV-07). Without one, the helpers show a
+# blank icon in macOS permission prompts and in System Settings › Privacy &
+# Security. Made with sips and iconutil from the given square PNG of at
+# least 1024px: Computer Use's logo for the Computer Helper, Emperor's
+# desktop/build/icon.png (the default) for the others. A missing or broken
+# image stops the build instead of leaving a helper without an icon.
 
 if [[ $# -ne 1 && $# -ne 2 ]]; then
   echo 'usage: helper-icon.sh <output.icns> [source.png]' >&2

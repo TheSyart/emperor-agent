@@ -20,8 +20,9 @@ test -x "$binary"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS"
 cp "$binary" "$app/Contents/MacOS/emperor-computer-helper"
-# Emperor's icon, for the permission prompts and Privacy & Security (RV-07).
-"$native_dir/scripts/helper-icon.sh" "$app/Contents/Resources/icon.icns"
+# Computer Use's logo, for the permission prompts and Privacy & Security
+# (RV-07): the user grants Accessibility and Screen Recording to this Helper.
+"$native_dir/scripts/helper-icon.sh" "$app/Contents/Resources/icon.icns" "$native_dir/../../../assets/generated/plugin-logos/computer-use.png"
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
