@@ -16,7 +16,6 @@ import type {
 import type {
   AgentDownloadView,
   AgentPreviewPointer,
-  BrowserConnectResult,
   BrowserExtensionInstallResult,
   BrowserExtensionRemoveResult,
   BrowserExtensionStatus,
@@ -164,7 +163,6 @@ interface EmperorBridge {
   approveBrowserPairing?: (pairingId: string) => Promise<{ approved: boolean }>
   denyBrowserPairing?: (pairingId: string) => Promise<{ denied: boolean }>
   revokeBrowserPairing?: (pairingId: string) => Promise<{ revoked: boolean }>
-  connectBrowsers?: () => Promise<BrowserConnectResult>
   browserExtensionStatus?: () => Promise<BrowserExtensionStatus>
   installBrowserExtension?: () => Promise<BrowserExtensionInstallResult>
   revealBrowserExtension?: () => Promise<{ ok: boolean }>
@@ -819,16 +817,6 @@ export async function approveBrowserPairing(
 
 export async function denyBrowserPairing(pairingId: string): Promise<boolean> {
   return (await bridge()?.denyBrowserPairing?.(pairingId))?.denied === true
-}
-
-/** Settings › 连接 Chrome/Edge: let the Emperor extension reach this app. */
-export async function connectBrowsers(): Promise<BrowserConnectResult> {
-  return (
-    (await bridge()?.connectBrowsers?.()) ?? {
-      browsers: [],
-      reason: 'unavailable',
-    }
-  )
 }
 
 export async function revokeBrowserPairing(

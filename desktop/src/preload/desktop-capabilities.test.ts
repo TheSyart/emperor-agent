@@ -6,7 +6,6 @@ import {
   AGENT_PREVIEW_STOP_CHANNEL,
   BROWSER_ACTION_CHANNEL,
   BROWSER_REVEAL_CHANNEL,
-  BROWSER_CONNECT_CHANNEL,
   BROWSER_EXTENSION_INSTALL_CHANNEL,
   BROWSER_EXTENSION_REMOVE_CHANNEL,
   BROWSER_EXTENSION_REVEAL_CHANNEL,
@@ -114,7 +113,6 @@ describe('desktop capability preload bridge', () => {
       'browserPairings',
       'chooseDownloadFolder',
       'clearBrowserData',
-      'connectBrowsers',
       'denyBrowserPairing',
       'installBrowserExtension',
       'macHelperReconnect',
@@ -177,13 +175,11 @@ describe('desktop capability preload bridge', () => {
     await bridge.approveBrowserPairing(pairingId)
     await bridge.denyBrowserPairing(pairingId)
     await bridge.revokeBrowserPairing(pairingId)
-    await bridge.connectBrowsers()
     expect(ipc.invoked).toEqual([
       [BROWSER_PAIRING_STATUS_CHANNEL, undefined],
       [BROWSER_PAIRING_APPROVE_CHANNEL, { pairingId }],
       [BROWSER_PAIRING_DENY_CHANNEL, { pairingId }],
       [BROWSER_PAIRING_REVOKE_CHANNEL, { pairingId }],
-      [BROWSER_CONNECT_CHANNEL, undefined],
     ])
   })
 

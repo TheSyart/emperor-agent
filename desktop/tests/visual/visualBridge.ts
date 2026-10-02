@@ -57,7 +57,6 @@ type VisualBridge = {
   macHelperResetPermission?: (permission: string) => Promise<unknown>
   macHelperReconnect?: () => Promise<unknown>
   browserPairings?: () => Promise<unknown>
-  connectBrowsers?: () => Promise<unknown>
   approveBrowserPairing?: (pairingId: string) => Promise<boolean>
   denyBrowserPairing?: (pairingId: string) => Promise<boolean>
   revokeBrowserPairing?: (pairingId: string) => Promise<boolean>
@@ -4533,7 +4532,6 @@ export async function installVisualCoreBridge(
             onBrowserPairingRequest: () => () => {},
           }
         })(),
-        connectBrowsers: async () => ({ browsers: ['chrome'] }),
         approveBrowserPairing: async () => true,
         denyBrowserPairing: async () => true,
         revokeBrowserPairing: async () => true,

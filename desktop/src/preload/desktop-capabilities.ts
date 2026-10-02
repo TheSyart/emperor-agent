@@ -7,7 +7,6 @@ import {
   AGENT_PREVIEW_START_CHANNEL,
   AGENT_PREVIEW_STOP_CHANNEL,
   BROWSER_ACTION_CHANNEL,
-  BROWSER_CONNECT_CHANNEL,
   BROWSER_EXTENSION_INSTALL_CHANNEL,
   BROWSER_EXTENSION_REMOVE_CHANNEL,
   BROWSER_EXTENSION_REVEAL_CHANNEL,
@@ -182,7 +181,6 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
       ipcRenderer.invoke(BROWSER_PAIRING_DENY_CHANNEL, { pairingId }),
     revokeBrowserPairing: (pairingId: string) =>
       ipcRenderer.invoke(BROWSER_PAIRING_REVOKE_CHANNEL, { pairingId }),
-    connectBrowsers: () => ipcRenderer.invoke(BROWSER_CONNECT_CHANNEL),
     /** 设置 › 电脑操作 › Chrome 和 Edge: the extension folder; no argument. */
     browserExtensionStatus: () =>
       ipcRenderer.invoke(BROWSER_EXTENSION_STATUS_CHANNEL),

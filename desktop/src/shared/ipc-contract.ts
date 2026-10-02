@@ -103,8 +103,6 @@ export const BROWSER_PAIRING_DENY_CHANNEL =
   'emperor:computer-use:browser-pairing-deny'
 export const BROWSER_PAIRING_REVOKE_CHANNEL =
   'emperor:computer-use:browser-pairing-revoke'
-/** Settings › 连接 Chrome/Edge: register the Native Messaging host (01 §11). */
-export const BROWSER_CONNECT_CHANNEL = 'emperor:computer-use:browser-connect'
 /**
  * 设置 › 电脑操作 › Chrome 和 Edge, trusted Settings renderer only, no
  * argument: the extension folder and where the extension is loaded
@@ -133,13 +131,6 @@ export const BROWSER_EXTENSION_REMOVE_CHANNEL =
  */
 export const BROWSER_PAIRING_REQUEST_CHANNEL =
   'emperor:computer-use:browser-pairing-request'
-
-export interface BrowserConnectResult {
-  /** Browsers that can now reach Emperor (e.g. `chrome`, `edge`). */
-  browsers: string[]
-  /** Why none could be registered: a development build, or no bridge. */
-  reason?: 'no-host' | 'unavailable'
-}
 
 export interface BrowserPairingStatus {
   bridgeListening: boolean

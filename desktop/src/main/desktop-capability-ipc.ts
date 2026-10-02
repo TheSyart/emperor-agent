@@ -5,7 +5,6 @@ import {
   AGENT_PREVIEW_START_CHANNEL,
   AGENT_PREVIEW_STOP_CHANNEL,
   BROWSER_ACTION_CHANNEL,
-  BROWSER_CONNECT_CHANNEL,
   BROWSER_EXTENSION_INSTALL_CHANNEL,
   BROWSER_EXTENSION_REMOVE_CHANNEL,
   BROWSER_EXTENSION_REVEAL_CHANNEL,
@@ -45,7 +44,6 @@ import {
   REFERENCE_REVEAL_CHANNEL,
   SELECT_FILE_CHANNEL,
   SKILLS_OPEN_FOLDER_CHANNEL,
-  type BrowserConnectResult,
   type BrowserExtensionBrowser,
   type BrowserExtensionInstallResult,
   type BrowserExtensionRemoveResult,
@@ -157,7 +155,6 @@ interface BrowserPairingCapability {
   approvePairing(pairingId: string): Promise<boolean>
   denyPairing(pairingId: string): boolean
   revokePairing(pairingId: string): Promise<void>
-  connectBrowsers?(): Promise<BrowserConnectResult>
 }
 
 export function registerDesktopCapabilityIpc(input: {
@@ -354,19 +351,6 @@ export function registerDesktopCapabilityIpc(input: {
     const pairingId = pairingIdentity(payload)
     return { denied: input.browserPairings?.denyPairing(pairingId) === true }
   })
-  input.ipcMain.handle(
-    BROWSER_CONNECT_CHANNEL,
-    async (event): Promise<BrowserConnectResult> => {
-      authorize(event)
-      const connect = input.browserPairings?.connectBrowsers
-      if (!connect) return { browsers: [], reason: 'unavailable' }
-      const result = await connect.call(input.browserPairings)
-      return {
-        browsers: result.browsers.filter((name) => /^[a-z-]{1,32}$/.test(name)),
-        ...(result.reason === undefined ? {} : { reason: result.reason }),
-      }
-    },
-  )
   input.ipcMain.handle(
     BROWSER_PAIRING_REVOKE_CHANNEL,
     async (event, payload) => {

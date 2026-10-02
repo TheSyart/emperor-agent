@@ -8,7 +8,6 @@ import {
   BROWSER_PAIRING_APPROVE_CHANNEL,
   BROWSER_PAIRING_DENY_CHANNEL,
   BROWSER_PAIRING_REVOKE_CHANNEL,
-  BROWSER_CONNECT_CHANNEL,
   BROWSER_EXTENSION_INSTALL_CHANNEL,
   BROWSER_EXTENSION_REMOVE_CHANNEL,
   BROWSER_EXTENSION_REVEAL_CHANNEL,
@@ -90,9 +89,6 @@ describe('desktop capability IPC', () => {
       approvePairing: vi.fn(async () => true),
       denyPairing: vi.fn(() => true),
       revokePairing: vi.fn(async () => undefined),
-      connectBrowsers: vi.fn(async () => ({
-        browsers: ['chrome', '../evil'],
-      })),
     }
     registerDesktopCapabilityIpc({
       ipcMain: ipc,
@@ -148,11 +144,7 @@ describe('desktop capability IPC', () => {
     expect(bridge.approvePairing).toHaveBeenCalledTimes(1)
     expect(bridge.denyPairing).toHaveBeenCalledTimes(1)
     expect(bridge.revokePairing).toHaveBeenCalledTimes(1)
-    // Only plain browser keys cross back to the renderer.
-    await expect(ipc.invoke(BROWSER_CONNECT_CHANNEL)).resolves.toEqual({
-      browsers: ['chrome'],
-    })
-    expect(authorize).toHaveBeenCalledTimes(6)
+    expect(authorize).toHaveBeenCalledTimes(5)
   })
   it('lists saved pairings whose browser is closed, and drops odd records', async () => {
     const ipc = new FakeIpcMain()
