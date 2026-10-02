@@ -95,6 +95,8 @@
     vault.json               # 凭据库（版本 2）：本地密钥加密，可再加主密码；读到钥匙串时代的版本 1 即删除
     secrets/local.key        # Emperor 本地密钥（32 字节，目录 0700、文件 0600），取代 macOS 钥匙串
     browser-pairings/pairings.json  # 外部浏览器配对（版本 2，本地密钥加密，记录可带 chrome/edge）；版本 1 即删除
+    external-site-rules.json # Chrome/Edge 的智能体权限（浏览、下载的默认与按网站例外）和历史记录、站点工具设置（0600）
+    external-downloads.json  # 「Emperor 的下载」里来自 Chrome/Edge 的记录（最新 200 条，0600；文件留在浏览器的下载文件夹）
   browser/                   # 启动时设为 0700；受限 Shell 的 Seatbelt 规则与 Agent 的文件、搜索工具都拒绝读取整个目录
     profiles.json            # 临时与持久 profile 元数据
     profiles/<profile-id>/   # 持久 profile 的网站数据
@@ -102,6 +104,7 @@
     restorable.json          # 正常退出时记下的持久 profile 标签页（7 天）
     downloads/               # Agent 下载收件箱，按保留天数清理
       .index.json            # 下载 ID → 当前位置与所属会话（重启后仍可显示、移动）
+  browser-extension/         # 随应用分发的 Chrome/Edge 扩展副本（暂存目录 + 两次改名，带版本与摘要的 emperor-bundle.json；不用符号链接）
   run/                       # 本机 Helper 和浏览器 bridge socket
   native-helpers/<cdhash>/   # 签名 Helper 的独立安装版本（macOS）
   migrations/

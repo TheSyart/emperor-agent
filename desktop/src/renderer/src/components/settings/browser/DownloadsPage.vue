@@ -137,7 +137,7 @@ onBeforeUnmount(() => unsubscribe())
     </SettingsGroup>
     <SettingsGroup
       title="Emperor 的下载"
-      description="Emperor 在对话里下载的文件先放进收件箱，按「下载保留时间」自动删除。"
+      description="Emperor 在对话里下载的文件。内置浏览器的先放进收件箱，按「下载保留时间」自动删除；Chrome 和 Edge 的留在浏览器自己的下载文件夹。"
     >
       <EmptyState v-if="!emperor.length" compact title="暂无" />
       <SettingsRow
