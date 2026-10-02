@@ -4,20 +4,31 @@
  * Emperor may read from the user's own Chrome or Edge besides its tabs.
  *
  * - 历史记录: 始终询问 (default; a card before each search) / 始终允许 /
- *   从不 (the Agent is not offered the history tool at all). Saved at once
- *   through `computerUse.setExternalBrowserSettings`; a failed save says
- *   why and keeps the old choice.
+ *   从不 (the Agent is not offered the history tool at all).
+ * - 启用站点工具 (WebMCP, RV-11): while today's browsers do not offer it
+ *   (`siteToolsAvailable` false) the row says 不可用 and why, and the switch
+ *   stays off and disabled — no make-believe switch.
+ *
+ * Changes are saved at once through `computerUse.setExternalBrowserSettings`;
+ * a failed save says why and keeps the old choice.
  *
  * Several root nodes (the group and its error line): the page places them
  * straight into its SettingsSection.
  */
 import type {
-  ExternalBrowserSettings,
+  ExternalBrowserSettingsView,
   ExternalHistoryAccess,
 } from '@emperor/core/runtime-contract'
-import { onMounted, ref, shallowRef } from 'vue'
+import { computed, onMounted, ref, shallowRef } from 'vue'
 import { core } from '../../../../api/http'
-import { Select, SettingsGroup, SettingsRow, type SelectOption } from '../../ui'
+import {
+  Select,
+  SettingsGroup,
+  SettingsRow,
+  StatusBadge,
+  Switch,
+  type SelectOption,
+} from '../../ui'
 
 const HISTORY: readonly SelectOption<ExternalHistoryAccess>[] = [
   { value: 'ask', label: '始终询问' },
@@ -25,7 +36,7 @@ const HISTORY: readonly SelectOption<ExternalHistoryAccess>[] = [
   { value: 'never', label: '从不' },
 ]
 
-const settings = shallowRef<ExternalBrowserSettings | null>(null)
+const settings = shallowRef<ExternalBrowserSettingsView | null>(null)
 const saving = ref(false)
 const error = ref('')
 
@@ -33,19 +44,33 @@ function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
 }
 
-async function setHistory(value: ExternalHistoryAccess | undefined) {
-  if (value === undefined || saving.value) return
+const siteToolsDescription = computed(() => {
+  const reason = settings.value?.siteToolsReason
+  return `让 Emperor 发现并调用网站公开的站点工具（WebMCP）。${reason ? `${reason}。` : ''}`
+})
+
+async function save(
+  patch: { history: ExternalHistoryAccess } | { siteTools: boolean },
+) {
+  if (saving.value) return
   saving.value = true
   error.value = ''
   try {
-    settings.value = await core('computerUse.setExternalBrowserSettings', {
-      history: value,
-    })
+    settings.value = await core('computerUse.setExternalBrowserSettings', patch)
   } catch (cause) {
     error.value = message(cause)
   } finally {
     saving.value = false
   }
+}
+
+function setHistory(value: ExternalHistoryAccess | undefined) {
+  if (value !== undefined) void save({ history: value })
+}
+
+function setSiteTools(value: boolean | undefined) {
+  if (value !== undefined && settings.value?.siteToolsAvailable)
+    void save({ siteTools: value })
 }
 
 onMounted(async () => {
@@ -71,6 +96,22 @@ onMounted(async () => {
         :options="HISTORY"
         :disabled="settings === null || saving"
         @update:model-value="setHistory"
+      />
+    </SettingsRow>
+    <SettingsRow
+      title="启用站点工具"
+      :description="siteToolsDescription"
+      label-for="external-site-tools"
+      data-row="site-tools"
+    >
+      <template v-if="settings && !settings.siteToolsAvailable" #badge>
+        <StatusBadge>不可用</StatusBadge>
+      </template>
+      <Switch
+        id="external-site-tools"
+        :model-value="settings?.siteTools === true"
+        :disabled="!settings?.siteToolsAvailable || saving"
+        @update:model-value="setSiteTools"
       />
     </SettingsRow>
   </SettingsGroup>

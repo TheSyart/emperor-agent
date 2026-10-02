@@ -145,7 +145,13 @@ describe('Chrome/Edge settings through CoreApi', () => {
       sites: [],
       history: 'ask',
       siteTools: false,
+      // RV-11: not offered by today's browsers.
+      siteToolsAvailable: false,
+      siteToolsReason: expect.stringContaining('实验开关'),
     })
+    expect(() =>
+      core.computerUse.setExternalBrowserSettings({ siteTools: true }),
+    ).toThrow(/站点工具目前不可用/)
     const saved = core.computerUse.setExternalBrowserSettings({
       sites: [{ pattern: '*.Bank.example', browse: 'ask', download: 'block' }],
     })

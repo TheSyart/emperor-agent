@@ -1289,6 +1289,10 @@ export async function installVisualCoreBridge(
               ],
         history: 'ask',
         siteTools: false,
+        // 启用站点工具 (RV-11): not offered by today's browsers.
+        siteToolsAvailable: false,
+        siteToolsReason:
+          'Chrome 和 Edge 正式版还没有向扩展开放（只在试用网站提供，还需打开实验开关）',
       }
       // 下载历史记录 › Emperor 的下载 also lists the Agent's downloads in
       // the user's own Chrome or Edge (no file actions there).

@@ -68,6 +68,44 @@ export const DEFAULT_EXTERNAL_BROWSER_SETTINGS: ExternalBrowserSettings =
     siteTools: false,
   })
 
+/**
+ * 启用站点工具 (WebMCP, PLAN-CAP-001 RV-11), checked 2026-10-02: stable
+ * Chrome (154 on this Mac, no flags) has no `document.modelContext` on
+ * ordinary sites; only sites in the origin trial (Chrome 149–156) expose
+ * one, and listing or calling a page's tools from outside the page — what
+ * an extension would do — needs the "WebMCP for testing" flag (Google's
+ * own inspector extension says so). Edge has it behind a flag. There is no
+ * extension API for it. So the switch says why and cannot be turned on;
+ * no site tools are offered. Re-check when Chrome ships it (planned 157).
+ */
+export const SITE_TOOLS_AVAILABILITY: {
+  readonly available: boolean
+  readonly reason: string
+} = Object.freeze({
+  available: false,
+  reason:
+    'Chrome 和 Edge 正式版还没有向扩展开放（只在试用网站提供，还需打开实验开关）',
+})
+
+/** What Settings shows: the stored settings plus whether 站点工具 can be on. */
+export interface ExternalBrowserSettingsView extends ExternalBrowserSettings {
+  readonly siteToolsAvailable: boolean
+  /** Why 站点工具 cannot be switched on (while not available). */
+  readonly siteToolsReason?: string
+}
+
+export function externalBrowserSettingsView(
+  settings: ExternalBrowserSettings,
+): ExternalBrowserSettingsView {
+  const { available, reason } = SITE_TOOLS_AVAILABILITY
+  return {
+    ...settings,
+    siteTools: settings.siteTools && available,
+    siteToolsAvailable: available,
+    ...(available ? {} : { siteToolsReason: reason }),
+  }
+}
+
 export const EXTERNAL_SITE_RULES_FILE = 'external-site-rules.json'
 export const MAX_EXTERNAL_SITE_RULES = 200
 
@@ -313,6 +351,10 @@ export function applyExternalBrowserSettingsPatch(
   if (patch.history !== undefined && !isHistoryAccess(patch.history))
     throw new ValidationError(
       `「${String(patch.history)}」不是有效的历史记录设置`,
+    )
+  if (patch.siteTools === true && !SITE_TOOLS_AVAILABILITY.available)
+    throw new ValidationError(
+      `站点工具目前不可用：${SITE_TOOLS_AVAILABILITY.reason}`,
     )
   return {
     defaults,

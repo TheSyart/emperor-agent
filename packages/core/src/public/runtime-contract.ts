@@ -78,6 +78,7 @@ export {
 export type {
   ExternalBrowserSettings,
   ExternalBrowserSettingsPatch,
+  ExternalBrowserSettingsView,
   ExternalHistoryAccess,
   ExternalSiteDecision,
   ExternalSiteRule,

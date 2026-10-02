@@ -327,6 +327,15 @@ for (const theme of ['dark', 'light'] as const)
     await expect(browser.locator('#external-history-access')).toHaveText(
       '始终询问',
     )
+    // 站点工具 (RV-11): 不可用, with the reason; the switch cannot be used.
+    const siteTools = browser.locator('[data-row="site-tools"]')
+    await expect(siteTools).toContainText('不可用')
+    await expect(siteTools).toContainText('实验开关')
+    await expect(siteTools.getByRole('switch')).toBeDisabled()
+    await expect(siteTools.getByRole('switch')).toHaveAttribute(
+      'aria-checked',
+      'false',
+    )
     const agent = dialog.locator('[data-group="agent-permissions"]')
     await agent.scrollIntoViewIfNeeded()
     await expect(

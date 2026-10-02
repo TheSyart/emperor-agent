@@ -13,7 +13,9 @@ import {
   DEFAULT_EXTERNAL_BROWSER_SETTINGS,
   EXTERNAL_SITE_RULES_FILE,
   ExternalSiteRuleStore,
+  SITE_TOOLS_AVAILABILITY,
   applyExternalBrowserSettingsPatch,
+  externalBrowserSettingsView,
   externalSiteDecision,
   externalSiteRule,
   normalizeSitePattern,
@@ -329,5 +331,40 @@ describe('ExternalSiteRuleStore', () => {
     })
     expect(store.decide('https://www.bank.example/', 'browse')).toBe('ask')
     expect(store.decide('https://elsewhere.example/', 'download')).toBe('ask')
+  })
+})
+
+describe('启用站点工具 (WebMCP, RV-11)', () => {
+  it('is not available in the browsers people use today, and says why', () => {
+    expect(SITE_TOOLS_AVAILABILITY.available).toBe(false)
+    expect(SITE_TOOLS_AVAILABILITY.reason).toMatch(/正式版还没有/)
+    expect(SITE_TOOLS_AVAILABILITY.reason).toMatch(/实验开关/)
+  })
+
+  it('cannot be switched on while it is not available (no make-believe switch)', () => {
+    expect(() =>
+      applyExternalBrowserSettingsPatch(DEFAULT_EXTERNAL_BROWSER_SETTINGS, {
+        siteTools: true,
+      }),
+    ).toThrow(/站点工具目前不可用/)
+    // Switching it off is always fine.
+    expect(
+      applyExternalBrowserSettingsPatch(DEFAULT_EXTERNAL_BROWSER_SETTINGS, {
+        siteTools: false,
+      }).siteTools,
+    ).toBe(false)
+  })
+
+  it('reads as off, with the reason, even if a file says on', () => {
+    expect(
+      externalBrowserSettingsView({
+        ...DEFAULT_EXTERNAL_BROWSER_SETTINGS,
+        siteTools: true,
+      }),
+    ).toMatchObject({
+      siteTools: false,
+      siteToolsAvailable: false,
+      siteToolsReason: SITE_TOOLS_AVAILABILITY.reason,
+    })
   })
 })

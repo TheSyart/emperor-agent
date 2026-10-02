@@ -28,9 +28,10 @@ import { listGuiTools } from '../harness/computer-use/tools/listing'
 import {
   DEFAULT_EXTERNAL_BROWSER_SETTINGS,
   applyExternalBrowserSettingsPatch,
+  externalBrowserSettingsView,
   widensExternalBrowserSettings,
-  type ExternalBrowserSettings,
   type ExternalBrowserSettingsPatch,
+  type ExternalBrowserSettingsView,
 } from '../harness/computer-use/external-site-rules'
 import type { JobSnapshot } from '../harness/jobs/registry'
 import type { SubagentRecord } from '../harness/subagent/manager'
@@ -2018,11 +2019,13 @@ export class CoreApi {
     },
     /**
      * Settings › 电脑操作 › Chrome 和 Edge: 浏览器权限 and 智能体权限
-     * (PLAN-CAP-001 RV-09).
+     * (PLAN-CAP-001 RV-09), and whether 站点工具 can be on (RV-11).
      */
-    externalBrowserSettings: (): ExternalBrowserSettings =>
-      this.host.computerUse?.service.externalBrowserSettings() ??
-      DEFAULT_EXTERNAL_BROWSER_SETTINGS,
+    externalBrowserSettings: (): ExternalBrowserSettingsView =>
+      externalBrowserSettingsView(
+        this.host.computerUse?.service.externalBrowserSettings() ??
+          DEFAULT_EXTERNAL_BROWSER_SETTINGS,
+      ),
     /**
      * Change them. A change that lets the Agent do more (a looser rule, an
      * exception removed from a stricter one, history without asking) is a
@@ -2030,7 +2033,7 @@ export class CoreApi {
      */
     setExternalBrowserSettings: (
       patch: ExternalBrowserSettingsPatch,
-    ): ExternalBrowserSettings => {
+    ): ExternalBrowserSettingsView => {
       const service = this.host.computerUse?.service
       if (service === undefined)
         throw new Error('computer use is not available on this host')
@@ -2038,7 +2041,9 @@ export class CoreApi {
       const after = applyExternalBrowserSettingsPatch(before, patch)
       if (widensExternalBrowserSettings(before, after))
         this.assertMutation('computerUse', 'externalBrowserSettings')
-      return service.setExternalBrowserSettings(patch)
+      return externalBrowserSettingsView(
+        service.setExternalBrowserSettings(patch),
+      )
     },
   }
 
