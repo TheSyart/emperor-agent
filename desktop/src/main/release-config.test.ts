@@ -813,12 +813,6 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     ).toThrow(/allowlist/i)
     fs.rmSync(strayHelper)
     // The packaged extension: no test files, a real manifest, no symlinks.
-    const validate = () =>
-      afterPack.validatePackagedAppResources(
-        path.join(appOutDir, 'resources'),
-        'darwin',
-        'arm64',
-      )
     fs.mkdirSync(path.join(extensionRoot, 'tests'))
     fs.writeFileSync(path.join(extensionRoot, 'tests', 'worker.test.js'), '')
     expect(validate).toThrow(/browser-extension/i)
