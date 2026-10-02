@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import HelperCore
@@ -24,10 +25,16 @@ enum CGWindowInventory {
                   let width = (bounds["Width"] as? NSNumber)?.doubleValue,
                   let height = (bounds["Height"] as? NSNumber)?.doubleValue,
                   [x, y, width, height].allSatisfy(\.isFinite) else { return nil }
+            let layer = row[kCGWindowLayer as String] as? Int ?? 0
+            // macOS Dock has a non-rectangular, screen-sized backing window.
+            // Its rectangle alone is not proof that it covers the point.
+            let dockSurface = layer == Int(CGWindowLevelForKey(.dockWindow)) &&
+                NSRunningApplication(processIdentifier: Int32(rawPID))?.bundleIdentifier == "com.apple.dock"
             return ScreenWindow(id: UInt32(rawID), pid: Int32(rawPID),
-                                layer: row[kCGWindowLayer as String] as? Int ?? 0,
+                                layer: layer,
                                 frame: Rect(x: x, y: y, width: width, height: height),
-                                alpha: (row[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1)
+                                alpha: (row[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1,
+                                dockSurface: dockSurface)
         }
     }
 

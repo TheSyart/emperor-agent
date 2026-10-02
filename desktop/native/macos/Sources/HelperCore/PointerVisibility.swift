@@ -7,9 +7,13 @@ public struct ScreenWindow: Equatable {
     public let layer: Int
     public let frame: Rect
     public let alpha: Double
+    /// Dock's non-rectangular surface may have screen-sized bounds even
+    /// where the underlying application remains visible and hit-testable.
+    public let dockSurface: Bool
 
-    public init(id: UInt32, pid: Int32, layer: Int, frame: Rect, alpha: Double) {
+    public init(id: UInt32, pid: Int32, layer: Int, frame: Rect, alpha: Double, dockSurface: Bool = false) {
         self.id = id; self.pid = pid; self.layer = layer; self.frame = frame; self.alpha = alpha
+        self.dockSurface = dockSurface
     }
 }
 
@@ -19,11 +23,16 @@ public struct ScreenWindow: Equatable {
 /// does, because it would hide the target.
 public enum PointerVisibility {
     public static func visible(at point: Point, windows frontToBack: [ScreenWindow],
-                               targetWindowID: UInt32?, targetPID: Int32, mainPID: Int32?) -> Bool {
+                               targetWindowID: UInt32?, targetPID: Int32, mainPID: Int32?,
+                               pointOwnerPID: Int32? = nil) -> Bool {
         for window in frontToBack {
             if window.alpha <= 0.01 { continue }
             if let mainPID, window.pid == mainPID, window.layer != 0 { continue }
             guard contains(window.frame, point) else { continue }
+            // Dock reports a screen-sized rectangle with alpha 1 even at
+            // clear points. Only a successful system AX hit on another
+            // process lets us look through that non-rectangular surface.
+            if window.dockSurface, let pointOwnerPID, pointOwnerPID != window.pid { continue }
             if let targetWindowID { return window.id == targetWindowID }
             return window.pid == targetPID
         }

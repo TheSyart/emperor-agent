@@ -497,6 +497,44 @@ final class HelperCoreTests: XCTestCase {
                                                  targetWindowID: 7, targetPID: target, mainPID: main))
     }
 
+    func testTheTransparentDockBackingDoesNotHideTheTargetAtItsClearPoints() {
+        let target: Int32 = 42
+        let dock = ScreenWindow(id: 9, pid: 691, layer: 20,
+                                frame: Rect(x: 0, y: 0, width: 1512, height: 982), alpha: 1,
+                                dockSurface: true)
+        let targetWindow = ScreenWindow(id: 7, pid: target, layer: 0,
+                                        frame: Rect(x: 0, y: 33, width: 1512, height: 856), alpha: 1)
+        XCTAssertTrue(PointerVisibility.visible(
+            at: Point(x: 292, y: 196), windows: [dock, targetWindow],
+            targetWindowID: 7, targetPID: target, mainPID: 10, pointOwnerPID: target))
+    }
+
+    func testTheRealDockOrAnUnverifiedDockPointStillHidesThePointer() {
+        let dock = ScreenWindow(id: 9, pid: 691, layer: 20,
+                                frame: Rect(x: 0, y: 0, width: 1512, height: 982), alpha: 1,
+                                dockSurface: true)
+        let target = ScreenWindow(id: 7, pid: 42, layer: 0,
+                                  frame: Rect(x: 0, y: 33, width: 1512, height: 856), alpha: 1)
+        for hitPID: Int32? in [691, nil] {
+            XCTAssertFalse(PointerVisibility.visible(
+                at: Point(x: 292, y: 196), windows: [dock, target],
+                targetWindowID: 7, targetPID: 42, mainPID: 10, pointOwnerPID: hitPID))
+        }
+    }
+
+    func testSkippingTheTransparentDockDoesNotSkipARealWindowInFront() {
+        let dock = ScreenWindow(id: 9, pid: 691, layer: 20,
+                                frame: Rect(x: 0, y: 0, width: 1512, height: 982), alpha: 1,
+                                dockSurface: true)
+        let other = ScreenWindow(id: 8, pid: 99, layer: 0,
+                                 frame: Rect(x: 0, y: 33, width: 1512, height: 856), alpha: 1)
+        let target = ScreenWindow(id: 7, pid: 42, layer: 0,
+                                  frame: Rect(x: 0, y: 33, width: 1512, height: 856), alpha: 1)
+        XCTAssertFalse(PointerVisibility.visible(
+            at: Point(x: 292, y: 196), windows: [dock, other, target],
+            targetWindowID: 7, targetPID: 42, mainPID: 10, pointOwnerPID: 99))
+    }
+
     func testThePointerPayloadCarriesTheTargetWindowFrame() throws {
         let entries = try XCTUnwrap(fixture("messages")["messages"] as? [[String: Any]])
         func golden(_ name: String) throws -> [String: Any] {

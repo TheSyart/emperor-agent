@@ -824,9 +824,22 @@ public final class DesktopActionExecutor {
     /// window's frame, for the conversation preview when it is covered.
     private func pointerPayload(at point: CGPoint, to end: CGPoint?, target: BoundTarget) -> [String: Any] {
         let at = Point(x: point.x, y: point.y)
+        let windows = CGWindowInventory.onScreen()
+        var pointOwnerPID: pid_t?
+        if windows.contains(where: { $0.dockSurface }) {
+            let system = AXUIElementCreateSystemWide()
+            AXUIElementSetMessagingTimeout(system, 0.2)
+            var hit: AXUIElement?
+            if AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &hit) == .success,
+               let hit {
+                var pid: pid_t = 0
+                if AXUIElementGetPid(hit, &pid) == .success, pid > 0 { pointOwnerPID = pid }
+            }
+        }
         let visible = PointerVisibility.visible(
-            at: at, windows: CGWindowInventory.onScreen(),
-            targetWindowID: target.cgWindowID, targetPID: target.pid, mainPID: verifiedMainPID)
+            at: at, windows: windows,
+            targetWindowID: target.cgWindowID, targetPID: target.pid, mainPID: verifiedMainPID,
+            pointOwnerPID: pointOwnerPID)
         return PointerPayload.make(at: at, to: end.map { Point(x: $0.x, y: $0.y) },
                                    visible: visible, window: target.frame)
     }
