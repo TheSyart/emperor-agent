@@ -14,6 +14,8 @@ export const AGENT_REQUEST_METHODS = [
   'target.navigate',
   'target.follow',
   'download.resolve',
+  // 历史记录 (RV-10).
+  'history.search',
 ] as const
 
 export type NmAgentEvent =

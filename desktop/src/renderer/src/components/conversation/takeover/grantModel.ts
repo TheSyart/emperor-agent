@@ -132,7 +132,13 @@ export function grantPresentation(
     scopes[0]?.value ??
     ''
   const verb = actions.length > 0 ? actions.join('、') : '操作'
-  const place = targetKind === 'browser' ? '这个网站' : '这个应用'
+  // The history search (RV-10) is about no site at all.
+  const place =
+    text(meta.tool_name) === 'external_history_search'
+      ? '你的浏览历史记录'
+      : targetKind === 'browser'
+        ? '这个网站'
+        : '这个应用'
   return {
     headline: highImpact
       ? `允许 Agent 在${place}执行一次高影响操作？`

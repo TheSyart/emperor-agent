@@ -16,6 +16,7 @@ import type {
   TargetSnapshot,
   WaitOutcome,
   WaitRequest,
+  ExternalHistoryEntry,
   ExternalSiteDecider,
   ExternalSiteVerdict,
 } from '@emperor/core/host-capabilities'
@@ -173,6 +174,32 @@ function toElements(value: unknown, revision: number): UiElement[] {
       actions,
     }
   })
+}
+
+/** One history row from the extension, or null when it is not a web page. */
+function historyEntry(raw: unknown): ExternalHistoryEntry | null {
+  if (
+    !object(raw) ||
+    typeof raw.url !== 'string' ||
+    raw.url.length > 2_048 ||
+    typeof raw.title !== 'string' ||
+    typeof raw.lastVisitTime !== 'number' ||
+    !Number.isFinite(raw.lastVisitTime) ||
+    raw.lastVisitTime < 0
+  )
+    return null
+  try {
+    const protocol = new URL(raw.url).protocol
+    if (protocol !== 'http:' && protocol !== 'https:') return null
+  } catch {
+    return null
+  }
+  return {
+    url: raw.url,
+    title: raw.title.slice(0, 200),
+    lastVisitTime: Math.round(raw.lastVisitTime),
+    visitCount: safeInteger(raw.visitCount) ? raw.visitCount : 0,
+  }
 }
 
 /** A bridge failure as the kernel's error vocabulary. */
@@ -1019,6 +1046,69 @@ export class ExternalBrowserDriver implements BrowserDriver {
         'external action may have run; observe the tab before retrying',
       )
     }
+  }
+
+  /**
+   * 历史记录 (RV-10): search every connected browser; newest first, one row
+   * per address (its latest visit). One browser failing is not an error;
+   * all of them failing is.
+   */
+  async searchHistory(
+    request: {
+      readonly query: string
+      readonly startTime: number
+      readonly maxResults: number
+    },
+    signal: AbortSignal,
+  ): Promise<ExternalHistoryEntry[]> {
+    const pairings = this.bridge.readyPairings()
+    if (pairings.length === 0)
+      throw new UiError(
+        'DRIVER_UNAVAILABLE',
+        'no Chrome or Edge is connected',
+        {
+          reason: 'not-connected',
+        },
+      )
+    const answers = await Promise.allSettled(
+      pairings.map((pairing) =>
+        this.bridge.request(
+          pairing,
+          'history.search',
+          {
+            text: request.query,
+            startTime: request.startTime,
+            maxResults: request.maxResults,
+          },
+          15_000,
+          signal,
+        ),
+      ),
+    )
+    if (answers.every((answer) => answer.status === 'rejected'))
+      throw new UiError(
+        'DRIVER_UNAVAILABLE',
+        'the browser did not answer the history search',
+      )
+    const byUrl = new Map<string, ExternalHistoryEntry>()
+    for (const answer of answers) {
+      if (
+        answer.status !== 'fulfilled' ||
+        !object(answer.value) ||
+        !Array.isArray(answer.value.items)
+      )
+        continue
+      for (const raw of answer.value.items.slice(0, 200)) {
+        const entry = historyEntry(raw)
+        if (entry === null) continue
+        const known = byUrl.get(entry.url)
+        if (known === undefined || entry.lastVisitTime > known.lastVisitTime)
+          byUrl.set(entry.url, entry)
+      }
+    }
+    return [...byUrl.values()]
+      .sort((a, b) => b.lastVisitTime - a.lastVisitTime)
+      .slice(0, request.maxResults)
   }
 
   private assertNotWaiting(tab: TabState): void {

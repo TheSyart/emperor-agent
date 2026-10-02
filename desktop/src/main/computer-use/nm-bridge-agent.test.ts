@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { AGENT_REQUEST_METHODS, parseAgentEvent } from './nm-bridge-agent'
 
 describe('the extension’s Agent messages (RV-09)', () => {
-  it('lets main ask for a tab, a navigation, a follow and a download verdict', () => {
+  it('lets main ask for a tab, a navigation, a follow, a download verdict and a history search', () => {
     expect(AGENT_REQUEST_METHODS).toEqual([
       'tab.open',
       'target.navigate',
       'target.follow',
       'download.resolve',
+      'history.search',
     ])
   })
 

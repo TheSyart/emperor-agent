@@ -515,3 +515,146 @@ describe('downloads', () => {
     ])
   })
 })
+
+describe('history (RV-10)', () => {
+  it('searches every connected browser, newest first, one row per page', async () => {
+    const k = fixture({
+      'history.search': () => ({
+        items: [
+          {
+            url: 'https://github.com/a',
+            title: 'A',
+            lastVisitTime: 300,
+            visitCount: 2,
+          },
+          {
+            url: 'https://news.example/',
+            title: 'News',
+            lastVisitTime: 100,
+            visitCount: 1,
+          },
+          { url: 'chrome://settings', title: 'x', lastVisitTime: 999 },
+          { url: 'https://broken.example/', title: 7, lastVisitTime: 5 },
+        ],
+      }),
+    })
+    k.setReady([pairingId, 'pairing-2'])
+    k.request.mockImplementation(async (pairing, method) => {
+      if (method !== 'history.search') throw new Error('unexpected')
+      return pairing === pairingId
+        ? {
+            items: [
+              {
+                url: 'https://github.com/a',
+                title: 'A',
+                lastVisitTime: 300,
+                visitCount: 2,
+              },
+              {
+                url: 'https://news.example/',
+                title: 'News',
+                lastVisitTime: 100,
+                visitCount: 1,
+              },
+              { url: 'chrome://settings', title: 'x', lastVisitTime: 999 },
+              { url: 'https://broken.example/', title: 7, lastVisitTime: 5 },
+            ],
+          }
+        : {
+            items: [
+              {
+                url: 'https://github.com/a',
+                title: 'A (Edge)',
+                lastVisitTime: 500,
+                visitCount: 4,
+              },
+              {
+                url: 'https://docs.example/x',
+                title: 'Docs',
+                lastVisitTime: 200,
+                visitCount: 1,
+              },
+            ],
+          }
+    })
+    const entries = await k.driver.searchHistory(
+      { query: 'a', startTime: 50, maxResults: 3 },
+      new AbortController().signal,
+    )
+    expect(k.request.mock.calls.map((call) => call.slice(0, 3))).toEqual([
+      [
+        pairingId,
+        'history.search',
+        { text: 'a', startTime: 50, maxResults: 3 },
+      ],
+      [
+        'pairing-2',
+        'history.search',
+        { text: 'a', startTime: 50, maxResults: 3 },
+      ],
+    ])
+    expect(entries).toEqual([
+      {
+        url: 'https://github.com/a',
+        title: 'A (Edge)',
+        lastVisitTime: 500,
+        visitCount: 4,
+      },
+      {
+        url: 'https://docs.example/x',
+        title: 'Docs',
+        lastVisitTime: 200,
+        visitCount: 1,
+      },
+      {
+        url: 'https://news.example/',
+        title: 'News',
+        lastVisitTime: 100,
+        visitCount: 1,
+      },
+    ])
+  })
+
+  it('answers with what one browser found when another fails, and fails when none answers', async () => {
+    const k = fixture()
+    k.setReady([pairingId, 'pairing-2'])
+    k.request.mockImplementation(async (pairing) => {
+      if (pairing === pairingId) throw new Error('DRIVER_UNAVAILABLE')
+      return {
+        items: [
+          {
+            url: 'https://docs.example/',
+            title: 'Docs',
+            lastVisitTime: 1,
+            visitCount: 1,
+          },
+        ],
+      }
+    })
+    expect(
+      await k.driver.searchHistory(
+        { query: '', startTime: 0, maxResults: 20 },
+        new AbortController().signal,
+      ),
+    ).toHaveLength(1)
+    k.request.mockImplementation(async () => {
+      throw new Error('DRIVER_UNAVAILABLE')
+    })
+    await expect(
+      k.driver.searchHistory(
+        { query: '', startTime: 0, maxResults: 20 },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ code: 'DRIVER_UNAVAILABLE' })
+    k.setReady([])
+    await expect(
+      k.driver.searchHistory(
+        { query: '', startTime: 0, maxResults: 20 },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({
+      code: 'DRIVER_UNAVAILABLE',
+      reason: 'not-connected',
+    })
+  })
+})

@@ -254,6 +254,13 @@ export function installComputerUse(
   })
 
   let registrations: Array<() => void> = []
+  // 历史记录 「从不」 (RV-10): the history tool is not offered at all.
+  const visibilityOf = (name: string) =>
+    name === 'external_history_search'
+      ? {
+          visible: () => service.externalBrowserSettings().history !== 'never',
+        }
+      : {}
   const register = (): void => {
     if (registrations.length > 0) return
     const definitions = [
@@ -261,7 +268,9 @@ export function installComputerUse(
       ...(options.toolFamilies ?? []).flatMap((family) => family(runtime)),
     ]
     registrations = [
-      ...definitions.map((definition) => options.tools.register(definition)),
+      ...definitions.map((definition) =>
+        options.tools.register(definition, visibilityOf(definition.name)),
+      ),
       installComputerUsePromptSection(options.prompt),
     ]
   }

@@ -2644,6 +2644,20 @@ export async function installVisualCoreBridge(
           },
         },
       }
+      // 历史记录 (RV-10): `?visualGrant=history` asks before a search.
+      if (visualParams.get('visualGrant') === 'history')
+        Object.assign(visualGrantInteraction.meta.grant, {
+          driver: 'external-browser',
+          target_scope: {
+            kind: 'browser',
+            profileId: 'pair-visual-1',
+            origins: [],
+          },
+          actions: ['observe'],
+          display: { url: '浏览历史记录：搜索「季度报告」' },
+          tool_name: 'external_history_search',
+          reason: '找到上周看过的季度报告',
+        })
       if (
         visualControlMode === 'ask' ||
         visualControlMode === 'plan' ||
@@ -6194,6 +6208,11 @@ export async function installVisualCoreBridge(
                           'external_tab_open',
                           'Open an http(s) URL in a new tab of the user’s own Chrome or Edge (in the tab group “Emperor”) and work in it.',
                           false,
+                        ],
+                        [
+                          'external_history_search',
+                          'Search the browsing history of the user’s own Chrome or Edge, as the user’s setting allows.',
+                          true,
                         ],
                       ]),
                     },

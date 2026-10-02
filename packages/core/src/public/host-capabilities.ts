@@ -96,6 +96,7 @@ export { loadBundledToolCatalog } from '../environment/catalog'
 export type { LoadedToolCatalog } from '../environment/catalog'
 export type {
   ExternalDriverEvent,
+  ExternalHistoryEntry,
   ExternalSiteDecider,
   ExternalSiteVerdict,
 } from '../harness/computer-use/port'

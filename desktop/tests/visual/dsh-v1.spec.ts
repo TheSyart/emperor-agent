@@ -873,7 +873,7 @@ test('plugin detail fits a narrow window and links Computer Use to its settings'
 const CU_TOOL_GROUPS = [
   /^\s*通用\s*6\s*$/,
   /^\s*内置浏览器\s*19\s*$/,
-  /^\s*Chrome 和 Edge\s*3\s*$/,
+  /^\s*Chrome 和 Edge\s*4\s*$/,
   /^\s*Mac 应用\s*17\s*$/,
 ]
 

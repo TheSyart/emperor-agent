@@ -363,7 +363,7 @@ describe('the Computer Use plugin’s tools', () => {
     }))
   }
 
-  it('lists the 45 tools by driver, as the factories define them', async () => {
+  it('lists the 46 tools by driver, as the factories define them', async () => {
     const { api } = await cuApi()
     await api.computerUse.setEnabled(true)
     const { tools } = await api.plugins.getDetail(REF)
@@ -378,7 +378,7 @@ describe('the Computer Use plugin’s tools', () => {
     ).toEqual([
       ['ui', 'computer-use', '通用', 6],
       ['embedded-browser', 'computer-use', '内置浏览器', 19],
-      ['external-browser', 'computer-use', 'Chrome 和 Edge', 3],
+      ['external-browser', 'computer-use', 'Chrome 和 Edge', 4],
       ['desktop', 'computer-use', 'Mac 应用', 17],
     ])
     for (const [id, factory] of FACTORIES)
@@ -416,7 +416,7 @@ describe('the Computer Use plugin’s tools', () => {
     const before = port.capabilityCalls
     const { tools } = await api.plugins.getDetail(REF)
     expect(tools.note).toBe('打开电脑操作后可用')
-    expect(tools.groups.flatMap((group) => group.tools)).toHaveLength(45)
+    expect(tools.groups.flatMap((group) => group.tools)).toHaveLength(46)
     // Listing them asks the host nothing.
     expect(port.capabilityCalls).toBe(before)
   })

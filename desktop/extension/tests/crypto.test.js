@@ -48,6 +48,8 @@ test('MV3 manifest has fixed worker and no blanket host grant or network API', (
     // for Emperor's verdict in onDeterminingFilename.
     'tabGroups',
     'downloads',
+    // RV-10: history.search, used only as the user's 历史记录 setting says.
+    'history',
   ])
   // Chrome rejects debugger as optional; the M5 content-script path does not use it.
   assert.equal(manifest.optional_permissions, undefined)

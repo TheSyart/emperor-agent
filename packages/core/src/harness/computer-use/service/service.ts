@@ -92,7 +92,7 @@ import {
   type ExternalSiteKind,
   type ExternalSiteRuleStore,
 } from '../external-site-rules'
-import type { ExternalDriverEvent } from '../port'
+import type { ExternalDriverEvent, ExternalHistoryEntry } from '../port'
 import {
   TargetRegistry,
   isLive,
@@ -1635,6 +1635,67 @@ export class ComputerUseService {
     this.note(
       record.targetId,
       `the download ${name} was refused: the user did not approve it`,
+    )
+  }
+
+  /**
+   * 历史记录 (RV-10): search the user's Chrome/Edge history as their setting
+   * says — 从不 refuses (the tool is not offered either), 始终询问 needs this
+   * call's own card (`grantId`), 始终允许 runs at once.
+   */
+  async searchExternalHistory(
+    ctx: OpContext,
+    input: {
+      query: string
+      days: number
+      maxResults: number
+      grantId?: string
+    },
+  ): Promise<readonly ExternalHistoryEntry[]> {
+    const access = this.externalBrowserSettings().history
+    if (access === 'never')
+      throw new UiError(
+        'CAPABILITY_DISABLED',
+        'the user does not let Emperor read the browser history',
+        {
+          reason: 'history-off',
+          hint: 'Do not look for it another way; ask the user if you need it.',
+        },
+      )
+    if (access === 'ask') {
+      const grant =
+        input.grantId === undefined
+          ? undefined
+          : this.deps.grants.get(input.grantId)
+      if (
+        grant === undefined ||
+        grant.scope !== 'once' ||
+        grant.callId !== ctx.callId ||
+        grant.subject !== ctx.identity.subject ||
+        grant.driver !== 'external-browser' ||
+        !grant.allowedActions.includes('observe')
+      )
+        throw new UiError(
+          'PERMISSION_REQUIRED',
+          'the user approves each search of the browser history',
+          { reason: 'history-needs-approval' },
+        )
+    }
+    const driver = this.browserDriver('external-browser')
+    if (driver.searchHistory === undefined)
+      throw new UiError(
+        'CAPABILITY_DISABLED',
+        'this browser connection cannot search the history',
+      )
+    this.chargeBudget(ctx.identity)
+    this.lastIdentity.set(ctx.identity.ownerSessionId, ctx.identity)
+    return await driver.searchHistory(
+      {
+        query: input.query,
+        startTime: this.now().getTime() - input.days * 86_400_000,
+        maxResults: input.maxResults,
+      },
+      AbortSignal.any([ctx.signal, AbortSignal.timeout(30_000)]),
     )
   }
 

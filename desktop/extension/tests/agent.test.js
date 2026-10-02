@@ -31,6 +31,7 @@ function harness(options = {}) {
   const groups = []
   const grouped = []
   const sent = []
+  const searched = []
   const cancelled = []
   const created = []
   const updates = []
@@ -104,6 +105,28 @@ function harness(options = {}) {
         },
       ],
     },
+    history: {
+      search: async (query) => {
+        searched.push(query)
+        return [
+          {
+            id: '1',
+            url: 'https://github.com/emperor/issues/7?tab=1',
+            title: 'Issue 7 '.repeat(60),
+            lastVisitTime: 1_700_000_000_123.4,
+            visitCount: 3,
+            typedCount: 1,
+          },
+          { id: '2', url: 'chrome://settings/', title: 'Settings' },
+          { id: '3', url: 'file:///Users/me/notes.txt', title: 'notes' },
+          {
+            id: '4',
+            url: 'https://news.example/today',
+            lastVisitTime: 1_699_000_000_000,
+          },
+        ]
+      },
+    },
   }
   const agent = createAgentFeatures({
     chrome,
@@ -163,6 +186,7 @@ function harness(options = {}) {
   }
   return {
     agent,
+    searched,
     tabs,
     groups,
     grouped,
@@ -580,5 +604,48 @@ test('refuses held downloads when the connection to Emperor ends', async () => {
       () => {},
     ),
     undefined,
+  )
+})
+
+test('searches the history for Emperor: web pages only, bounded, nothing else', async () => {
+  const h = harness()
+  const result = await h.agent.request('history.search', {
+    text: 'issue'.repeat(100),
+    startTime: 1_690_000_000_000,
+    maxResults: 2,
+  })
+  assert.equal(result.ok, true)
+  // Asks the browser for a little more, as non-web pages are dropped.
+  assert.deepEqual(h.searched, [
+    {
+      text: 'issue'.repeat(100).slice(0, 200),
+      startTime: 1_690_000_000_000,
+      maxResults: 4,
+    },
+  ])
+  assert.deepEqual(result.value.items, [
+    {
+      url: 'https://github.com/emperor/issues/7?tab=1',
+      title: 'Issue 7 '.repeat(60).slice(0, 200),
+      lastVisitTime: 1_700_000_000_123,
+      visitCount: 3,
+    },
+    {
+      url: 'https://news.example/today',
+      title: '',
+      lastVisitTime: 1_699_000_000_000,
+      visitCount: 0,
+    },
+  ])
+  // Defaults: from the epoch only when asked; 20 pages; at most 100.
+  await h.agent.request('history.search', { text: '' })
+  await h.agent.request('history.search', { text: 'x', maxResults: 5000 })
+  assert.deepEqual(h.searched.slice(1), [
+    { text: '', startTime: 0, maxResults: 40 },
+    { text: 'x', startTime: 0, maxResults: 200 },
+  ])
+  assert.equal(
+    (await h.agent.request('history.search', { text: 7 })).error.code,
+    'INVALID_ARGUMENT',
   )
 })

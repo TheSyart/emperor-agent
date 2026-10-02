@@ -481,6 +481,29 @@ export interface BrowserDriver extends TargetDriver {
     downloadId: string,
     verdict: { readonly allow: boolean; readonly reason?: string },
   ): void
+  /**
+   * Chrome/Edge 历史记录 (RV-10): web pages of every connected browser's
+   * history visited since `startTime` (ms), newest first, one per address.
+   * The kernel decided beforehand whether the user was asked.
+   */
+  searchHistory?(
+    request: {
+      readonly query: string
+      readonly startTime: number
+      readonly maxResults: number
+    },
+    signal: AbortSignal,
+  ): Promise<readonly ExternalHistoryEntry[]>
+}
+
+/** One page of the user's Chrome/Edge history (RV-10). */
+export interface ExternalHistoryEntry {
+  readonly url: string
+  /** As the page set it: untrusted. */
+  readonly title: string
+  /** When it was last visited (ms since the epoch). */
+  readonly lastVisitTime: number
+  readonly visitCount: number
 }
 
 export interface ExternalAttachedTarget {

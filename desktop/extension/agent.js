@@ -7,7 +7,9 @@
 //   `target.follow` (carry on under a new generation) or `target.detach`;
 // - a download from a tab the Agent just worked in is held in
 //   onDeterminingFilename (pause comes too late for small files) until
-//   Emperor answers `download.resolve`.
+//   Emperor answers `download.resolve`;
+// - `history.search` (RV-10) returns web pages of the browsing history;
+//   Emperor decides beforehand whether the user is asked.
 //
 // Download items carry no tab id. A download counts as the Agent's when the
 // page that started it (its referrer, or the origin inside a blob: URL) is
@@ -358,6 +360,47 @@ export function createAgentFeatures(deps) {
     }
   }
 
+  /** 历史记录 (RV-10): web pages of the history, newest first, bounded. */
+  async function searchHistory(params) {
+    if (typeof params.text !== 'string')
+      return failure('INVALID_ARGUMENT', 'Invalid history search')
+    const wanted = Number.isSafeInteger(params.maxResults)
+      ? Math.min(Math.max(params.maxResults, 1), 100)
+      : 20
+    // Chrome looks back only one day unless told otherwise.
+    const startTime =
+      Number.isFinite(params.startTime) && params.startTime >= 0
+        ? params.startTime
+        : 0
+    // A little more than asked: other schemes are dropped below.
+    const items = await chrome.history.search({
+      text: params.text.slice(0, 200),
+      startTime,
+      maxResults: wanted * 2,
+    })
+    return success({
+      items: (Array.isArray(items) ? items : [])
+        .filter(
+          (item) =>
+            typeof item?.url === 'string' &&
+            item.url.length <= MAX_URL &&
+            safeOrigin(item.url),
+        )
+        .slice(0, wanted)
+        .map((item) => ({
+          url: item.url,
+          title: typeof item.title === 'string' ? item.title.slice(0, 200) : '',
+          lastVisitTime: Number.isFinite(item.lastVisitTime)
+            ? Math.round(item.lastVisitTime)
+            : 0,
+          visitCount:
+            Number.isSafeInteger(item.visitCount) && item.visitCount >= 0
+              ? item.visitCount
+              : 0,
+        })),
+    })
+  }
+
   /** Answer a held download once; a refusal cancels it. */
   function decide(id, allow) {
     const entry = heldDownloads.get(id)
@@ -380,6 +423,7 @@ export function createAgentFeatures(deps) {
       'target.navigate',
       'target.follow',
       'download.resolve',
+      'history.search',
     ],
 
     handles(method) {
@@ -392,6 +436,7 @@ export function createAgentFeatures(deps) {
       if (method === 'tab.open') return openTab(params, signal)
       if (method === 'target.navigate') return navigate(params, signal)
       if (method === 'target.follow') return follow(params)
+      if (method === 'history.search') return searchHistory(params)
       if (method === 'download.resolve') {
         if (
           !Number.isSafeInteger(params.downloadId) ||

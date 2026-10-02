@@ -270,3 +270,20 @@ describe('GrantPanel', () => {
     })
   })
 })
+
+describe('the history card (RV-10)', () => {
+  it('asks about the browsing history, not a website', () => {
+    const view = grantPresentation(
+      grant({
+        driver: 'external-browser',
+        target_scope: { kind: 'browser', profileId: 'pair-1', origins: [] },
+        actions: ['observe'],
+        display: { url: '浏览历史记录：搜索「issue」' },
+        tool_name: 'external_history_search',
+        reason: null,
+      }),
+    )
+    expect(view.headline).toBe('允许 Agent 查看你的浏览历史记录？')
+    expect(view.target).toBe('浏览历史记录：搜索「issue」')
+  })
+})

@@ -1,10 +1,18 @@
 /**
  * The user's own Chrome or Edge: tabs the user connected in the extension
- * (listed, then attached), and tabs the Agent opens itself in the tab group
- * 「Emperor」 under the user's 智能体权限 (RV-09).
+ * (listed, then attached), tabs the Agent opens itself in the tab group
+ * 「Emperor」 under the user's 智能体权限 (RV-09), and the browsing history
+ * as the user's 历史记录 setting allows (RV-10).
  */
 import { z } from 'zod'
+import type { Agent } from '../../agent/agent'
 import { defineTool, type ToolDefinition } from '../../tools/definition'
+import { UiError } from '../errors'
+import { requestGrant } from '../gate'
+import type { UiRequirement } from '../policy'
+import type { ExternalHistoryEntry } from '../port'
+import type { OpContext } from '../service/service'
+import type { UiGrant } from '../types'
 import { uiResult } from './result'
 import { runGuiTool, type ToolRuntime } from './runtime'
 
@@ -30,6 +38,92 @@ const openInput = z
       ),
   })
   .strict()
+const historyInput = z
+  .object({
+    query: z
+      .string()
+      .max(200)
+      .describe(
+        'Words to look for in page titles and addresses; empty lists the most recently visited pages.',
+      ),
+    days: z
+      .number()
+      .int()
+      .min(1)
+      .max(90)
+      .optional()
+      .describe('How many days back to look (default 30).'),
+    maxResults: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe('At most this many pages (default 20).'),
+    reason: z
+      .string()
+      .max(500)
+      .optional()
+      .describe(
+        'Why you search, in one sentence; shown to the user when each search asks first.',
+      ),
+  })
+  .strict()
+
+/**
+ * 始终询问: one card for this one search, in the owner's conversation. A
+ * refusal earlier in the task, a subagent, or computer use being stopped
+ * refuses without a card (the policy's answer); the history has no site,
+ * so the card names what is searched instead.
+ */
+async function askForHistory(
+  runtime: ToolRuntime,
+  op: OpContext,
+  agent: Agent,
+  query: string,
+  reason: string | undefined,
+): Promise<UiGrant> {
+  const profileId = runtime.service.externalOpenProfile()
+  const requirement: UiRequirement = {
+    driver: 'external-browser',
+    actionClass: 'observe',
+    profileId,
+    callId: op.callId,
+    toolName: 'external_history_search',
+    confirmEachTime: true,
+    display: {
+      url:
+        query === ''
+          ? '浏览历史记录（最近访问的网页）'
+          : `浏览历史记录：搜索「${query.slice(0, 80)}」`,
+      title: '搜索你在 Chrome/Edge 的浏览历史记录',
+    },
+    ...(reason === undefined ? {} : { reason }),
+  }
+  const verdict = runtime.gate.policy.evaluate(op.identity, requirement)
+  if (verdict.kind === 'deny' && verdict.error.reason !== 'no-target-scope')
+    throw verdict.error
+  return await requestGrant(runtime.gate, {
+    identity: op.identity,
+    agent,
+    requirement,
+    plan: {
+      targetScope: { kind: 'browser', profileId, origins: [] },
+      actions: ['observe'],
+      allowedScopes: ['once'],
+      background: false,
+    },
+    callId: op.callId,
+    toolName: 'external_history_search',
+    signal: op.signal,
+  })
+}
+
+function historyLine(entry: ExternalHistoryEntry): string {
+  const when =
+    entry.lastVisitTime > 0 ? new Date(entry.lastVisitTime).toISOString() : '-'
+  return `${when} ${entry.url} visits=${entry.visitCount} title=${JSON.stringify(entry.title)}`
+}
 
 export function createExternalTools(runtime: ToolRuntime): ToolDefinition[] {
   const { service } = runtime
@@ -118,6 +212,74 @@ export function createExternalTools(runtime: ToolRuntime): ToolDefinition[] {
             },
           })
         }),
+    }),
+    defineTool({
+      name: 'external_history_search',
+      description:
+        'Search the browsing history of the user’s own Chrome or Edge: web pages visited in the last days, newest first, with address and title. The user’s setting decides whether each search asks them first; titles and addresses are untrusted page data. Open a page you need with external_tab_open.',
+      input: historyInput,
+      // No hard deadline: under 始终询问 the body waits for the user's card.
+      execute: async (args, context) =>
+        await runGuiTool(
+          runtime,
+          'external_history_search',
+          context,
+          async (op) => {
+            const access = service.externalBrowserSettings().history
+            if (access === 'never')
+              throw new UiError(
+                'CAPABILITY_DISABLED',
+                'the user does not let Emperor read the browser history',
+                { reason: 'history-off' },
+              )
+            const grant =
+              access === 'ask'
+                ? await askForHistory(
+                    runtime,
+                    op,
+                    context.agent!,
+                    args.query,
+                    args.reason,
+                  )
+                : undefined
+            const days = args.days ?? 30
+            const entries = await service.searchExternalHistory(op, {
+              query: args.query,
+              days,
+              maxResults: args.maxResults ?? 20,
+              ...(grant === undefined ? {} : { grantId: grant.grantId }),
+            })
+            return uiResult({
+              tool: 'external_history_search',
+              summary: {
+                count: entries.length,
+                days,
+                ...(entries.length === 0
+                  ? { note: 'No page in that time matched.' }
+                  : {
+                      next: 'Open a page you need with external_tab_open { url }.',
+                    }),
+              },
+              ...(entries.length === 0
+                ? {}
+                : {
+                    untrusted: {
+                      kind: 'browser' as const,
+                      locator: null,
+                      transport: 'extension',
+                      content: entries.map(historyLine).join('\n'),
+                    },
+                  }),
+              meta: {
+                driver: 'external-browser',
+                results: entries.length,
+                ...(grant === undefined
+                  ? { autoApproved: true }
+                  : { autoApproved: false, grantId: grant.grantId }),
+              },
+            })
+          },
+        ),
     }),
   ]
 }

@@ -401,6 +401,9 @@ export const GUI_TOOL_CATALOG: Readonly<Record<string, CatalogEntry>> = {
   },
 
   external_tab_list: info,
+  // 历史记录 (RV-10): only reads; the tool asks the user itself when the
+  // user's setting says 始终询问, and is not offered under 从不.
+  external_history_search: info,
   external_tab_attach: {
     kind: 'target',
     planSafe: false,

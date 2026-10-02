@@ -10,7 +10,8 @@
     "scripting",
     "storage",
     "tabGroups",
-    "downloads"
+    "downloads",
+    "history"
   ],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
   "background": {
