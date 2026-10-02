@@ -1730,7 +1730,7 @@ export class ComputerUseService {
         'CAPABILITY_DISABLED',
         vault === null
           ? 'the credential vault is not available here'
-          : 'system credential encryption is unavailable, so saved credentials cannot be used',
+          : "the credential vault's local key is missing or failed its checks, so saved credentials cannot be used; the user can clear the vault in Settings › 浏览器 › 密码管理器",
         vault === null ? undefined : { reason: 'vault-encryption-unavailable' },
       )
     if (vault.locked)
@@ -1739,7 +1739,7 @@ export class ComputerUseService {
         'the credential vault is locked',
         {
           reason: 'vault-locked',
-          hint: 'Ask the user to unlock it in Settings › 电脑操作 › 凭据.',
+          hint: 'Ask the user to unlock it in Settings › 浏览器 › 密码管理器.',
         },
       )
   }
@@ -1921,7 +1921,7 @@ export class ComputerUseService {
         'the credential vault is locked',
         {
           reason: 'vault-locked',
-          hint: 'Ask the user to unlock it in Settings › 电脑操作 › 凭据.',
+          hint: 'Ask the user to unlock it in Settings › 浏览器 › 密码管理器.',
         },
       )
     const handle = vault.list().find((item) => item.handleId === input.handleId)

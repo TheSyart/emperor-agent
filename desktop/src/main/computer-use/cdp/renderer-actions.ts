@@ -348,7 +348,7 @@ export async function fillTarget(
       {
         reason: 'secret-field',
         // The user cannot type into a built-in browser tab (no takeover).
-        hint: 'Fill a saved credential with browser_fill_credential. Without one, ask the user with ask_user_question to save it in Settings › 电脑操作 › 凭据, or to do this step in their own browser.',
+        hint: 'Fill a saved credential with browser_fill_credential. Without one, ask the user with ask_user_question to save it in Settings › 浏览器 › 密码管理器, or to do this step in their own browser.',
       },
     )
   if (!field.editable)
