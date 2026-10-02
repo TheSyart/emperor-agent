@@ -40,7 +40,8 @@ function formatCode(code) {
 }
 
 function statusText(state) {
-  if (state.connected) return '已连接 Emperor'
+  // Connected: the finished card below says so.
+  if (state.connected) return ''
   if (state.pairingCode) return '等待你在 Emperor 中点「允许」'
   if (state.status === 'authenticating') return '正在连接 Emperor…'
   if (state.paired) return '已配对，等 Emperor 打开后自动连接'

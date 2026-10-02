@@ -149,7 +149,8 @@ test('shows the finished state once Emperor approved the pairing', async () => {
     assert.equal(page.el('done').hidden, false)
     assert.equal(page.el('step-pair').dataset.state, 'done')
     assert.equal(page.el('code').hidden, true)
-    assert.equal(page.el('status').textContent, '已连接 Emperor')
+    // The finished card says it; the status line does not repeat it.
+    assert.equal(page.el('status').textContent, '')
   } finally {
     page.restore()
   }
