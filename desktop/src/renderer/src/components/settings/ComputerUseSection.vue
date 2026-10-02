@@ -67,7 +67,7 @@ import {
   permissionsToReset,
   screenshotRow,
 } from './computer/computerUseSettingsModel'
-import BrowserPairingSettings from './computer/BrowserPairingSettings.vue'
+import ChromeEdgePage from './computer/ChromeEdgePage.vue'
 
 const ctx = useAppContext()
 const { page, open: openPage } = useSettingsPages({
@@ -501,10 +501,8 @@ onBeforeUnmount(() => {
 
     <!-- Chrome 和 Edge: always mounted, for the summary and the auto-open. -->
     <div v-show="page === 'chrome'" id="computer-use-pairing">
-      <p v-if="chromeRow?.missing.length" class="cu-note">
-        实验阶段，尚不支持：{{ chromeRow.missing.join('、') }}
-      </p>
-      <BrowserPairingSettings
+      <ChromeEdgePage
+        :active="page === 'chrome'"
         @connection-changed="reload"
         @summary="onPairingSummary"
       />
@@ -541,12 +539,5 @@ onBeforeUnmount(() => {
   line-height: var(--lh-xxs);
   color: rgb(var(--label-secondary));
   overflow-wrap: anywhere;
-}
-
-.cu-note {
-  margin: var(--space-2) 0 0;
-  color: rgb(var(--label-tertiary));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
 }
 </style>

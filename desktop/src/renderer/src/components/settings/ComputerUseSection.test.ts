@@ -30,13 +30,20 @@ vi.mock('../../api/backend', () => ({
 const pairingSummary = vi.hoisted(() => ({
   value: { pending: 0, paired: 0, tabs: 0 },
 }))
-vi.mock('./computer/BrowserPairingSettings.vue', () => ({
+vi.mock('./computer/ChromeEdgePage.vue', () => ({
   default: {
+    props: ['active'],
     emits: ['connection-changed', 'summary'],
     mounted(this: { $emit: (name: string, value: unknown) => void }) {
       this.$emit('summary', pairingSummary.value)
     },
-    render: () => h('div', { class: 'pairing-mock' }, '浏览器配对设置'),
+    render(this: { active?: boolean }) {
+      return h(
+        'div',
+        { class: 'pairing-mock', 'data-active': String(this.active) },
+        '浏览器配对设置',
+      )
+    },
   },
 }))
 
@@ -206,6 +213,10 @@ describe('ComputerUseSection main page', () => {
       root.querySelector<HTMLElement>('#computer-use-pairing')!.style.display,
     ).toBe('')
     expect(root.textContent).toContain('浏览器配对设置')
+    // The page polls its folder only while it is the one on screen.
+    expect(
+      root.querySelector('.pairing-mock')?.getAttribute('data-active'),
+    ).toBe('true')
   })
 
   it('names a stage only when the driver is not simply available', async () => {

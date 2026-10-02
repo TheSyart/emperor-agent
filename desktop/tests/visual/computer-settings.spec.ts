@@ -175,3 +175,134 @@ test('fits a narrow window, with and without a notice', async ({ page }) => {
   await noHorizontalOverflow(page)
   await shot(page, 'computer-permissions-narrow')
 })
+
+// 设置 › 电脑操作 › Chrome 和 Edge (RV-08), against the approved preview
+// (画面 3 and 4): the install guide before the extension is in a browser,
+// and the connected page with another pairing code waiting.
+async function openChromePage(
+  page: Page,
+  theme: 'dark' | 'light',
+  query: string,
+): Promise<Locator> {
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await page.goto(
+    `/chat/build-ui?settings=computer&page=chrome&visualComputerUse=on&visualTheme=${theme}${query}`,
+  )
+  const dialog = page.getByRole('dialog', { name: '设置' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByTestId('settings-page-title')).toHaveText(
+    'Chrome 和 Edge',
+  )
+  // The settings dialog fades in; shoot once it has settled.
+  await page.waitForTimeout(400)
+  return dialog
+}
+
+function stepStates(dialog: Locator) {
+  return dialog
+    .getByTestId('chrome-install-steps')
+    .locator('[data-step]')
+    .evaluateAll((rows) =>
+      rows.map(
+        (row) =>
+          `${row.getAttribute('data-step')}:${row.getAttribute('data-state')}`,
+      ),
+    )
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`Chrome 和 Edge: the install guide (${theme})`, async ({ page }) => {
+    const dialog = await openChromePage(page, theme, '&visualExtension=none')
+    await expect(dialog.getByTestId('chrome-status')).toHaveText('未安装扩展')
+    await expect(dialog.getByTestId('chrome-connections')).toHaveCount(0)
+    await expect(
+      dialog.getByRole('button', { name: '移除扩展程序' }),
+    ).toHaveCount(0)
+    expect(await stepStates(dialog)).toEqual([
+      'folder:now',
+      'developer:todo',
+      'load:todo',
+      'connect:todo',
+    ])
+    await noHorizontalOverflow(page)
+    await shot(page, `chrome-install-empty-${theme}`)
+
+    await dialog.getByRole('button', { name: '安装扩展程序' }).click()
+    await expect
+      .poll(() => stepStates(dialog))
+      .toEqual(['folder:done', 'developer:now', 'load:todo', 'connect:todo'])
+    const folder = dialog.locator('[data-step="folder"]')
+    await expect(folder).toContainText('扩展已准备好')
+    await expect(folder).toContainText('~/.emperor/browser-extension')
+    await expect(dialog.locator('[data-step="developer"]')).toContainText(
+      'chrome://extensions',
+    )
+    await expect(dialog.locator('[data-step="load"]')).toContainText('⌘⇧G')
+    // 浏览器权限 and 智能体权限 come with RV-09; nothing stands in for them.
+    await expect(groupTitles(dialog)).toHaveText(['安装扩展'])
+    await noHorizontalOverflow(page)
+    await shot(page, `chrome-install-${theme}`)
+  })
+
+  test(`Chrome 和 Edge: connected, another code waiting (${theme})`, async ({
+    page,
+  }) => {
+    const dialog = await openChromePage(page, theme, '&visualPairing=pending')
+    await expect(dialog.getByTestId('chrome-status')).toHaveText(
+      '已连接 1 个浏览器',
+    )
+    await expect(dialog).toContainText('扩展 0.2.0')
+    await expect(
+      dialog.getByRole('button', { name: '重新安装扩展程序' }),
+    ).toBeVisible()
+    await expect(
+      dialog.getByRole('button', { name: '移除扩展程序' }),
+    ).toBeVisible()
+    await expect(dialog.getByTestId('chrome-install-steps')).toHaveCount(0)
+    await expect(groupTitles(dialog)).toHaveText(['连接'])
+    const connections = dialog.getByTestId('chrome-connections')
+    await expect(connections.locator('.ds-settings-row')).toHaveCount(3)
+    await expect(dialog.getByLabel('配对验证码 482913')).toHaveText('482 913')
+    await expect(connections).toContainText('已连接 · 2 个可操作标签页')
+    await expect(connections).toContainText('这台 Mac 没有安装 Edge')
+    await noHorizontalOverflow(page)
+    await shot(page, `chrome-connected-${theme}`)
+  })
+}
+
+test('Chrome 和 Edge: a closed browser’s pairing and an extension from a checkout', async ({
+  page,
+}) => {
+  const closed = await openChromePage(page, 'dark', '&visualExtension=closed')
+  await expect(closed.getByTestId('chrome-status')).toHaveText(
+    '已安装 · 未连接',
+  )
+  await expect(closed.getByTestId('chrome-connections')).toContainText(
+    '未连接 · 浏览器打开后自动连接',
+  )
+  await expect(
+    closed.getByRole('button', { name: '撤销 Google Chrome' }),
+  ).toBeVisible()
+  await shot(page, 'chrome-closed')
+
+  const legacy = await openChromePage(page, 'dark', '&visualExtension=legacy')
+  await expect(legacy.getByTestId('chrome-elsewhere')).toContainText(
+    '~/Documents/workspace/emperor-agent/desktop/extension',
+  )
+  await legacy.getByRole('button', { name: '重新安装', exact: true }).click()
+  await expect(legacy.getByTestId('chrome-install-steps')).toBeVisible()
+  await noHorizontalOverflow(page)
+  await shot(page, 'chrome-legacy')
+})
+
+test('Chrome 和 Edge fits a narrow window', async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 860 })
+  await page.goto(
+    '/chat/build-ui?settings=computer&page=chrome&visualComputerUse=on&visualTheme=dark&visualExtension=ready',
+  )
+  const dialog = page.getByRole('dialog', { name: '设置' })
+  await expect(dialog.getByTestId('chrome-install-steps')).toBeVisible()
+  await page.waitForTimeout(400)
+  await noHorizontalOverflow(page)
+  await shot(page, 'chrome-install-narrow')
+})

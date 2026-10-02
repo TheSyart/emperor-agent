@@ -471,6 +471,32 @@ describe('card layout', () => {
     expect(text.querySelector('.eyebrow')?.textContent).toBe('风险升高')
   })
 
+  it('leads a row with a marker and aligns it to the top', () => {
+    const root = mount(() =>
+      h(SettingsGroup, {}, () =>
+        h(
+          SettingsRow,
+          { title: '加载扩展', description: '两行说明' },
+          {
+            leading: () => h('span', { class: 'step' }, '3'),
+            default: () => h('button', 'x'),
+          },
+        ),
+      ),
+    )
+    const row = root.querySelector<HTMLElement>('.ds-settings-row')!
+    expect(row.hasAttribute('data-leading')).toBe(true)
+    expect(row.firstElementChild?.className).toBe('leading')
+    expect(row.querySelector('.leading > .step')?.textContent).toBe('3')
+    expect(row.children[1]?.className).toBe('text')
+    // Rows without one are unchanged.
+    const plain = mount(() => h(SettingsRow, { title: '主题' }))
+    expect(
+      plain.querySelector('.ds-settings-row')?.hasAttribute('data-leading'),
+    ).toBe(false)
+    expect(plain.querySelector('.leading')).toBeNull()
+  })
+
   it('renders a notice with its tone, title, text and actions', () => {
     const root = mount(() =>
       h('div', null, [
