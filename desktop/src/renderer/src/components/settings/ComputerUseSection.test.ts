@@ -262,17 +262,56 @@ describe('ComputerUseSection main page', () => {
 
   it('requires a second confirmation before resetting a denied grant', async () => {
     resetPermission.mockResolvedValue({ reset: true })
+    requestPermission.mockResolvedValue({ opened: true })
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const root = await mount({}, accessibilityOff)
     const reset = button(root, '重置授权')
     reset.click()
     await settle()
     expect(resetPermission).not.toHaveBeenCalled()
+    expect(requestPermission).not.toHaveBeenCalled()
     confirm.mockReturnValue(true)
     reset.click()
     await settle()
     expect(resetPermission).toHaveBeenCalledTimes(1)
     expect(resetPermission).toHaveBeenCalledWith('accessibility')
+    expect(requestPermission).toHaveBeenCalledWith('accessibility')
+  })
+
+  it('registers the current recording helper after reset and preserves working Accessibility', async () => {
+    resetPermission.mockResolvedValue({ reset: true })
+    requestPermission.mockResolvedValue({ opened: true })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const root = await mount(
+      {},
+      {
+        ...granted,
+        permissions: { accessibility: 'granted', 'screen-recording': 'denied' },
+      },
+    )
+    button(root, '重置授权').click()
+    await settle()
+    expect(resetPermission.mock.calls).toEqual([['screen-recording']])
+    expect(requestPermission.mock.calls).toEqual([['screen-recording']])
+    expect(resetPermission.mock.invocationCallOrder[0]).toBeLessThan(
+      requestPermission.mock.invocationCallOrder[0]!,
+    )
+  })
+
+  it('refreshes grants when returning from System Settings, without restarting or requesting them', async () => {
+    const root = await mount({}, accessibilityOff)
+    helperStatus.mockResolvedValue(granted)
+    window.dispatchEvent(new Event('focus'))
+    await settle()
+    expect(notices(root)).toEqual([])
+    expect(rowText(root, '辅助功能和屏幕录制')).toContain('已允许')
+    expect(reconnect).not.toHaveBeenCalled()
+    expect(requestPermission).not.toHaveBeenCalled()
+    app?.unmount()
+    const calls = helperStatus.mock.calls.length
+    window.dispatchEvent(new Event('focus'))
+    await settle()
+    expect(helperStatus).toHaveBeenCalledTimes(calls)
   })
 
   it('warns that an ad-hoc preview must regain permissions after updates', async () => {

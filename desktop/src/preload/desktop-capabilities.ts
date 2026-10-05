@@ -49,7 +49,7 @@ import {
   VAULT_STATUS_CHANNEL,
   VAULT_UNLOCK_CHANNEL,
   VAULT_REVEAL_CHANNEL,
-  type AgentPreviewFrame,
+  type AgentPreviewUpdate,
   type AgentPreviewPointer,
   type BrowserViewAction,
   type BrowserViewState,
@@ -199,9 +199,9 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
     },
     agentPreviewStop: (targetId: string) =>
       ipcRenderer.send(AGENT_PREVIEW_STOP_CHANNEL, { targetId }),
-    onAgentPreviewFrame: (listener: (frame: AgentPreviewFrame) => void) => {
+    onAgentPreviewFrame: (listener: (frame: AgentPreviewUpdate) => void) => {
       const wrapped = (_event: unknown, payload: unknown) =>
-        listener(payload as AgentPreviewFrame)
+        listener(payload as AgentPreviewUpdate)
       ipcRenderer.on(AGENT_PREVIEW_FRAME_CHANNEL, wrapped)
       return () =>
         ipcRenderer.removeListener(AGENT_PREVIEW_FRAME_CHANNEL, wrapped)

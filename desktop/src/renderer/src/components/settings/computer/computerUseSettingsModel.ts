@@ -223,7 +223,7 @@ export function desktopNotice(
     '辅助功能和屏幕录制要授予 Emperor Computer Helper。系统设置的列表里找不到它时，点「+」，按 ⌘⇧G 输入 ~/.emperor/native-helpers/ 选择。',
     recording ? '打开屏幕录制开关后，点「重启 Helper」生效。' : '',
     helper.previewBuild
-      ? '预览版每次更新后需要重新授权；开关已打开却仍不生效时，点「系统权限」旁的「重置授权」重新登记。'
+      ? '预览版每次更新后需要重新授权；已打开的同名条目可能仍属于旧版。点「系统权限」旁的「重置授权」会重新登记当前 Helper，再在系统设置里授权。'
       : '',
   ].join('')
   return {

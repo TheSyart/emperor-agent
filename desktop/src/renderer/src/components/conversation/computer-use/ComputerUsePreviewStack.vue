@@ -44,6 +44,10 @@ import {
   watch,
 } from 'vue'
 import { attachmentRawUrl } from '../../../api/attachments'
+import type {
+  AgentPreviewError,
+  AgentPreviewUpdate,
+} from '../../../../../shared/ipc-contract'
 import {
   agentPreviewStart,
   agentPreviewStop,
@@ -139,7 +143,17 @@ function statusOf(target: UiTargetView) {
 }
 
 function frameOf(target: UiTargetView): PreviewFrame {
-  return previewFrame(target, frames.value[target.targetId], now.value)
+  const frame = previewFrame(target, frames.value[target.targetId], now.value)
+  const error = previewErrors.value[target.targetId]
+  if (error && frame.kind !== 'blocked' && !target.sharingStopped)
+    return {
+      kind: 'none',
+      note:
+        error === 'screen-recording-permission-missing'
+          ? '需要屏幕录制权限，请在「设置 › 电脑操作」中重新授权'
+          : '实时画面暂不可用，请在「设置 › 电脑操作」中检查连接',
+    }
+  return frame
 }
 
 function frameSrc(frame: PreviewFrame): string {
@@ -181,10 +195,16 @@ function scheduleRefresh(): void {
 // --- live frames (object URLs) -------------------------------------------
 
 const frames = ref<Record<string, string>>({})
+const previewErrors = ref<Record<string, AgentPreviewError>>({})
 /** Each live frame's size: the pointer goes on the letterboxed picture. */
 const frameSizes = ref<Record<string, { width: number; height: number }>>({})
-const streaming = new Set<string>()
+const streaming = new Map<string, symbol>()
 let stopFrames = () => {}
+
+function clearPreviewError(targetId: string): void {
+  const { [targetId]: _error, ...rest } = previewErrors.value
+  previewErrors.value = rest
+}
 
 function dropFrame(targetId: string): void {
   const url = frames.value[targetId]
@@ -204,34 +224,52 @@ function syncLive(): void {
       .filter((target) => target.sharingStopped === true)
       .map((target) => target.targetId),
   )
-  for (const targetId of [...streaming])
+  for (const targetId of streaming.keys())
     if (!wanted.has(targetId)) {
       streaming.delete(targetId)
       agentPreviewStop(targetId)
+      clearPreviewError(targetId)
       if (!frozen.has(targetId)) dropFrame(targetId)
     }
   for (const targetId of wanted)
     if (!streaming.has(targetId)) {
-      streaming.add(targetId)
-      agentPreviewStart(targetId).catch(() => undefined)
+      const token = Symbol()
+      streaming.set(targetId, token)
+      const failed = () => {
+        if (streaming.get(targetId) === token)
+          previewErrors.value = {
+            ...previewErrors.value,
+            [targetId]: 'preview-unavailable',
+          }
+      }
+      agentPreviewStart(targetId)
+        .then((result) => {
+          if (!result.ok) failed()
+        })
+        .catch(failed)
     }
 }
 
 function stopAllLive(): void {
-  for (const targetId of streaming) agentPreviewStop(targetId)
+  for (const targetId of streaming.keys()) agentPreviewStop(targetId)
   streaming.clear()
+  previewErrors.value = {}
   for (const url of Object.values(frames.value)) URL.revokeObjectURL(url)
   frames.value = {}
   frameSizes.value = {}
 }
 
-function onFrame(frame: {
-  targetId: string
-  width: number
-  height: number
-  jpeg: Uint8Array
-}): void {
+function onFrame(frame: AgentPreviewUpdate): void {
   if (!streaming.has(frame.targetId)) return
+  if ('error' in frame) {
+    dropFrame(frame.targetId)
+    previewErrors.value = {
+      ...previewErrors.value,
+      [frame.targetId]: frame.error,
+    }
+    return
+  }
+  clearPreviewError(frame.targetId)
   const url = URL.createObjectURL(
     new Blob([new Uint8Array(frame.jpeg)], { type: 'image/jpeg' }),
   )

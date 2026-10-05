@@ -5,6 +5,7 @@ import type {
   ComputerUseStatusView,
   UiTargetView,
 } from '@emperor/core/runtime-contract'
+import type { AgentPreviewUpdate } from '../../../../../shared/ipc-contract'
 import ComputerUsePreviewStack from './ComputerUsePreviewStack.vue'
 import {
   previewLayout,
@@ -12,13 +13,7 @@ import {
   requestPreviewFocus,
 } from './computerUsePreviewState'
 
-type FrameListener = (frame: {
-  targetId: string
-  seq: number
-  width: number
-  height: number
-  jpeg: Uint8Array
-}) => void
+type FrameListener = (frame: AgentPreviewUpdate) => void
 type PointerListener = (pointer: {
   targetId: string
   x: number
@@ -220,6 +215,51 @@ afterEach(() => {
 })
 
 describe('ComputerUsePreviewStack', () => {
+  it('explains recording denial, drops stale pictures and recovers on a new frame', async () => {
+    setTargets([target()])
+    const root = await mount()
+    frameListeners[0]!({
+      targetId: 't-1',
+      seq: 1,
+      width: 10,
+      height: 10,
+      jpeg: Uint8Array.of(1),
+    })
+    await flush()
+    frameListeners[0]!({
+      targetId: 't-1',
+      error: 'screen-recording-permission-missing',
+    })
+    await flush()
+    expect(card(root)?.querySelector('img')).toBeNull()
+    expect(card(root)?.textContent).toContain('屏幕录制权限')
+    expect(card(root)?.textContent).toContain('设置 › 电脑操作')
+    expect(revoked).toContain('blob:frame-1')
+    frameListeners[0]!({
+      targetId: 't-1',
+      seq: 1,
+      width: 10,
+      height: 10,
+      jpeg: Uint8Array.of(2),
+    })
+    await flush()
+    expect(card(root)?.querySelector('img')?.getAttribute('src')).toBe(
+      'blob:frame-2',
+    )
+    expect(card(root)?.textContent).not.toContain('屏幕录制权限')
+  })
+
+  it('shows a failed preview subscription instead of waiting forever', async () => {
+    setTargets([target()])
+    bridge.agentPreviewStart.mockResolvedValue({
+      ok: false,
+      error: 'private detail',
+    })
+    const root = await mount()
+    expect(card(root)?.textContent).toContain('实时画面暂不可用')
+    expect(card(root)?.textContent).not.toContain('private detail')
+  })
+
   it('shows nothing while the session controls no window or tab', async () => {
     setTargets([target({ ownerSessionId: 's2' })])
     const root = await mount()

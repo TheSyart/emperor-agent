@@ -113,6 +113,7 @@ public final class ReadOnlyDispatcher {
             let afterSeq = params["afterSeq"] == nil ? nil : nonnegativeInteger(params["afterSeq"])
             if params["afterSeq"] != nil && afterSeq == nil { throw invalid("Invalid preview sequence") }
             let target = try catalog.target(id: identifier(params, "targetId"), generation: generation)
+            try DesktopPermissions.requireScreenRecording()
             guard let frame = captures.preview(targetID: target.id, maxEdge: maxEdge, afterSeq: afterSeq) else {
                 return NativeReply(result: ["seq": 0, "live": false])
             }

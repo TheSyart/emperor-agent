@@ -47,9 +47,9 @@ const HELPER_REASON_HINTS: Readonly<Record<string, string>> = {
   'target-closed-after-dispatch':
     'The window (or its app) closed right after this action, which usually means the action did what it was meant to, such as closing or quitting. Confirm with desktop_list_windows; never repeat it.',
   'accessibility-permission-missing':
-    'macOS Accessibility permission for Emperor Computer Helper is off, so nothing was done. There is no card to confirm in Emperor: ask the user to turn it on in System Settings › Privacy & Security › Accessibility (Settings › 电脑操作 has a button that opens it), and wait until they say it is on.',
+    'macOS has not granted Accessibility to the current Emperor Computer Helper, so nothing was done. Ask the user to grant it in System Settings › Privacy & Security › Accessibility. If an enabled same-name entry still fails after an unsigned preview update, Settings › 电脑操作 › 重置授权 resets the missing grant and registers the current Helper. Wait for the user to grant it; there is no approval card in Emperor.',
   'screen-recording-permission-missing':
-    'macOS Screen Recording permission for Emperor Computer Helper is off, so nothing was captured. There is no card to confirm in Emperor: ask the user to turn it on in System Settings › Privacy & Security › Screen & System Audio Recording (Settings › 电脑操作 has a button that opens it), and wait until they say it is on.',
+    'macOS has not granted Screen Recording to the current Emperor Computer Helper, so nothing was captured. Ask the user to grant it in System Settings › Privacy & Security › Screen & System Audio Recording. If an enabled same-name entry still fails after an unsigned preview update, Settings › 电脑操作 › 重置授权 resets the missing grant and registers the current Helper. After granting, use 重启 Helper and observe again. Wait for the user; there is no approval card in Emperor.',
   'menu-item-disabled':
     "The command is unavailable in the app's current state; observe the window before choosing another route.",
   'menu-path-is-menu':

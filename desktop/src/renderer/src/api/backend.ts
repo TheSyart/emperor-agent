@@ -15,6 +15,8 @@ import type {
 } from '@emperor/core/runtime-contract'
 import type {
   AgentDownloadView,
+  AgentPreviewFrame,
+  AgentPreviewUpdate,
   AgentPreviewPointer,
   BrowserExtensionInstallResult,
   BrowserExtensionRemoveResult,
@@ -32,6 +34,8 @@ import type {
 
 export type {
   AgentDownloadView,
+  AgentPreviewFrame,
+  AgentPreviewUpdate,
   BrowserExtensionInstallResult,
   BrowserExtensionRemoveResult,
   BrowserExtensionStatus,
@@ -169,7 +173,7 @@ interface EmperorBridge {
   removeBrowserExtension?: () => Promise<BrowserExtensionRemoveResult>
   onBrowserPairingRequest?: (listener: () => void) => () => void
   onAgentPreviewFrame?: (
-    listener: (frame: AgentPreviewFrame) => void,
+    listener: (frame: AgentPreviewUpdate) => void,
   ) => () => void
   onAgentPreviewPointer?: (
     listener: (pointer: AgentPreviewPointer) => void,
@@ -217,15 +221,6 @@ export interface BrowserOpenResult {
   url?: string
   /** User-facing reason when the input was refused or the view is unavailable. */
   error?: string
-}
-
-/** One JPEG frame of an Agent tab (computer use preview). */
-export interface AgentPreviewFrame {
-  targetId: string
-  seq: number
-  width: number
-  height: number
-  jpeg: Uint8Array
 }
 
 /** The started preview's page viewport. */
@@ -908,7 +903,7 @@ export function agentPreviewStop(targetId: string): void {
 }
 
 export function onAgentPreviewFrame(
-  listener: (frame: AgentPreviewFrame) => void,
+  listener: (frame: AgentPreviewUpdate) => void,
 ): () => void {
   return bridge()?.onAgentPreviewFrame?.(listener) ?? (() => {})
 }

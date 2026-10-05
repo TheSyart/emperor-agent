@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { AgentPreviewFrame } from '../../shared/ipc-contract'
+import type { AgentPreviewUpdate } from '../../shared/ipc-contract'
+import { UiError } from '../../../../packages/core/src/harness/computer-use/errors'
 import {
   DESKTOP_TARGET_ID,
   DesktopPreview,
@@ -11,7 +12,7 @@ const ID = 't-256F5CF2-A23D-4041-8ACA-E3C082832F8B'
 
 function harness(frames: Array<DesktopPreviewFrame | null | Error>) {
   const timers: Array<() => void> = []
-  const sent: AgentPreviewFrame[] = []
+  const sent: AgentPreviewUpdate[] = []
   const calls: Array<[string, number | undefined]> = []
   let release: (() => void) | undefined
   let hold = false
@@ -67,13 +68,55 @@ describe('DesktopPreview', () => {
     await k.tick()
     await k.tick()
     await k.tick()
-    expect(k.sent.map((frame) => frame.seq)).toEqual([3, 5])
+    expect(
+      k.sent.flatMap((frame) => ('seq' in frame ? [frame.seq] : [])),
+    ).toEqual([3, 5])
     expect(k.calls.map(([, afterSeq]) => afterSeq)).toEqual([
       undefined,
       3,
       3,
-      3,
+      undefined,
     ])
+  })
+
+  it('reports missing recording permission once and recovers even when stream sequences restart', async () => {
+    const jpeg = Uint8Array.of(1)
+    const denied = new UiError('PERMISSION_REQUIRED', 'private native detail', {
+      reason: 'screen-recording-permission-missing',
+    })
+    const k = harness([
+      { seq: 42, jpeg, width: 8, height: 6 },
+      denied,
+      denied,
+      { seq: 1, jpeg, width: 8, height: 6 },
+    ])
+    k.preview.start(ID)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await k.tick()
+    await k.tick()
+    await k.tick()
+    expect(k.sent).toEqual([
+      { targetId: ID, seq: 42, jpeg, width: 8, height: 6 },
+      { targetId: ID, error: 'screen-recording-permission-missing' },
+      { targetId: ID, seq: 1, jpeg, width: 8, height: 6 },
+    ])
+    expect(k.calls.map(([, afterSeq]) => afterSeq)).toEqual([
+      undefined,
+      42,
+      undefined,
+      undefined,
+    ])
+  })
+
+  it('does not report a late failure after the preview has stopped', async () => {
+    const k = harness([new Error('private native detail')])
+    k.holdNext()
+    k.preview.start(ID)
+    k.preview.stop(ID)
+    k.release()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(k.sent).toEqual([])
+    expect(k.timers).toEqual([])
   })
 
   it('keeps one request in flight per window and stops polling on stop', async () => {

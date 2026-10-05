@@ -169,6 +169,18 @@ async function refreshHelper(): Promise<void> {
 }
 
 async function reload(): Promise<void> {
+  if (reloading !== null) return reloading
+  reloading = loadStatus()
+  try {
+    await reloading
+  } finally {
+    reloading = null
+  }
+}
+
+let reloading: Promise<void> | null = null
+
+async function loadStatus(): Promise<void> {
   try {
     status.value = await core('computerUse.status')
     await refreshHelper()
@@ -252,7 +264,7 @@ function resetPermissions(): void {
   const labels = targets.map((item) => PERMISSION_LABELS[item]).join('和')
   if (
     !window.confirm(
-      `重置 Emperor Computer Helper 的${labels}授权？之后需要在系统设置里重新打开开关。`,
+      `重置 Emperor Computer Helper 的${labels}授权并登记当前版本？之后需要在系统设置里重新打开开关。`,
     )
   )
     return
@@ -262,7 +274,15 @@ function resetPermissions(): void {
       if (!result.reset)
         throw new Error(`${PERMISSION_LABELS[permission]}授权重置失败`)
     }
+    const result = await macHelperRequestPermission(targets[0]!)
+    if (!result.opened)
+      throw new Error('授权已重置，但无法打开系统设置；请点「请求权限」重试')
   })
+}
+
+function refreshOnReturn(): void {
+  if (!busy.value && document.visibilityState !== 'hidden')
+    void ctx.runSafely(reload)
 }
 
 useSettingsHeader({ actions: () => [refreshAction(() => reload())] })
@@ -272,6 +292,8 @@ let timer: ReturnType<typeof setTimeout> | null = null
 
 onMounted(() => {
   void ctx.runSafely(reload)
+  window.addEventListener('focus', refreshOnReturn)
+  document.addEventListener('visibilitychange', refreshOnReturn)
   unsubscribe = onCoreEvent((event) => {
     if (
       !event ||
@@ -282,12 +304,14 @@ onMounted(() => {
       return
     timer = setTimeout(() => {
       timer = null
-      void reload()
+      if (!busy.value) void reload()
     }, 80)
   })
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('focus', refreshOnReturn)
+  document.removeEventListener('visibilitychange', refreshOnReturn)
   unsubscribe()
   if (timer !== null) clearTimeout(timer)
 })

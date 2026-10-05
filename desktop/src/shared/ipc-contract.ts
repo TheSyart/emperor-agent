@@ -57,7 +57,7 @@ export const SELECT_FILE_CHANNEL = 'emperor:select-file'
  */
 export const AGENT_PREVIEW_START_CHANNEL = 'emperor:computer-use:preview-start'
 export const AGENT_PREVIEW_STOP_CHANNEL = 'emperor:computer-use:preview-stop'
-/** Main → renderer {@link AgentPreviewFrame}. */
+/** Main → renderer {@link AgentPreviewUpdate}. */
 export const AGENT_PREVIEW_FRAME_CHANNEL = 'emperor:computer-use:preview-frame'
 /**
  * Main → renderer {@link AgentPreviewPointer}: where the Agent's latest
@@ -252,6 +252,13 @@ export interface AgentPreviewFrame {
   height: number
   jpeg: Uint8Array
 }
+
+/** Only bounded recovery states cross IPC; native error text stays in main. */
+export type AgentPreviewError =
+  'screen-recording-permission-missing' | 'preview-unavailable'
+
+export type AgentPreviewUpdate =
+  AgentPreviewFrame | { targetId: string; error: AgentPreviewError }
 
 /** Where an action landed: `x`, `y` are shares (0–1) of the window or page. */
 export interface AgentPreviewPointer {

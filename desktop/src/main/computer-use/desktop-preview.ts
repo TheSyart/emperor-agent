@@ -7,7 +7,11 @@
  * `routedPreview` sends each target id to the right one.
  */
 
-import type { AgentPreviewFrame } from '../../shared/ipc-contract'
+import { UiError } from '../../../../packages/core/src/harness/computer-use/errors'
+import type {
+  AgentPreviewError,
+  AgentPreviewUpdate,
+} from '../../shared/ipc-contract'
 
 /** Desktop target ids come from the helper: `t-` + an uppercase UUID. */
 export const DESKTOP_TARGET_ID =
@@ -30,7 +34,7 @@ export interface DesktopPreviewSource {
 
 export interface DesktopPreviewOptions {
   source(): DesktopPreviewSource | null
-  send(frame: AgentPreviewFrame): void
+  send(frame: AgentPreviewUpdate): void
   intervalMs?: number
   maxTargets?: number
   setTimer?(run: () => void, ms: number): unknown
@@ -42,6 +46,7 @@ type StartResult =
 
 interface Poll {
   lastSeq?: number
+  error?: AgentPreviewError
   timer: unknown
   inFlight: boolean
 }
@@ -93,8 +98,10 @@ export class DesktopPreview {
     if (poll === undefined || poll.inFlight) return
     poll.inFlight = true
     try {
-      const frame =
-        (await this.options.source()?.preview(targetId, poll.lastSeq)) ?? null
+      const source = this.options.source()
+      if (source === null)
+        throw new UiError('DRIVER_UNAVAILABLE', 'Helper unavailable')
+      const frame = await source.preview(targetId, poll.lastSeq)
       if (
         this.polls.get(targetId) === poll &&
         frame?.jpeg !== undefined &&
@@ -103,6 +110,7 @@ export class DesktopPreview {
         frame.seq !== poll.lastSeq
       ) {
         poll.lastSeq = frame.seq
+        delete poll.error
         this.options.send({
           targetId,
           seq: frame.seq,
@@ -111,8 +119,19 @@ export class DesktopPreview {
           jpeg: frame.jpeg,
         })
       }
-    } catch {
-      // Keep polling: the helper may be restarting.
+    } catch (cause) {
+      if (this.polls.get(targetId) !== poll) return
+      const error: AgentPreviewError =
+        cause instanceof UiError &&
+        cause.reason === 'screen-recording-permission-missing'
+          ? 'screen-recording-permission-missing'
+          : 'preview-unavailable'
+      // A restarted capture stream begins at sequence zero again.
+      delete poll.lastSeq
+      if (poll.error !== error) {
+        poll.error = error
+        this.options.send({ targetId, error })
+      }
     } finally {
       poll.inFlight = false
       if (this.polls.get(targetId) === poll)
