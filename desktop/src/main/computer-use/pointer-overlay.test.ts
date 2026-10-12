@@ -174,6 +174,17 @@ describe('PointerOverlay', () => {
     expect(win.visible).toBe(false)
   })
 
+  it('disables native corner clipping around the arrow tip and left outline', async () => {
+    const overlay = new PointerOverlay()
+    overlay.show({ x: 400, y: 300, visible: true })
+    await settle()
+    const win = mocked.windows[0] as TestWindow
+    // Native rounded corners cut this small transparent window's closed SVG
+    // outline even though webContents.capturePage renders the full arrow.
+    expect(win.options.roundedCorners).toBe(false)
+    overlay.dispose()
+  })
+
   it('steps aside for an action and comes back where it was if nothing was sent', async () => {
     const overlay = new PointerOverlay()
     overlay.signal({ kind: 'move', pointer: { x: 50, y: 60, visible: true } })

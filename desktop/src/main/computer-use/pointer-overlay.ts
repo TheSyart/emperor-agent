@@ -94,6 +94,9 @@ export class PointerOverlay {
       show: false,
       frame: false,
       transparent: true,
+      // macOS otherwise rounds this 32 px panel and cuts the arrow's tip
+      // and left outline, despite the SVG itself being a closed path.
+      roundedCorners: false,
       hasShadow: false,
       resizable: false,
       movable: false,
