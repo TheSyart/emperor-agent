@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：遇到启动、模型、会话、工具或打包问题的用户和开发者<br>
-> 最后核验：2026-09-24<br>
+> 最后核验：2026-10-15<br>
 > 事实源：`packages/core/src/api/services/diagnostics-service.ts`、`packages/core/src/session-log/`、`packages/core/src/environment/tool-catalog.json`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/renderer/src/components/settings/DiagnosticsSection.vue` 与 `diagnostics/`、`desktop/src/renderer/src/components/pages/pulls/`、当前构建与运行脚本
 
 先进入“设置 → 诊断”。页面顶部是一张概览卡：一句结论（一切正常时是「运行正常」，否则是「n 项需要关注」「n 项异常」加「其余都正常」），下面只列需要关注的项目（异常在前），点一项会展开它所在的分组并滚到那里。读取诊断或探测环境失败时，概览上方出现一张提醒卡写明原因。右上角「复制报告」把整页复制成纯文本，便于反馈问题；刷新会重新读取诊断并重新探测环境。
@@ -39,7 +39,7 @@
 | MCP 没有工具                                      | 能力页“MCP”标签中该 server 卡片的状态和最近错误（含错误码），再查 `mcp_config.json`、命令/URL 和环境变量                                                                                                                                                                                                                                                  |
 | 定时任务没执行                                    | 定时任务页中任务是否已开启、下次运行时间，任务对话框中的运行历史和最近错误，目标会话是否有待回答的交互                                                                                                                                                                                                                                                    |
 | Pull Request 页或「审查」的 PR 操作不可用         | 诊断 → 环境工具中 `gh` 的状态与版本，以及是否已 `gh auth login`，见下文 [GitHub CLI（gh）](#github-cligh)                                                                                                                                                                                                                                                 |
-| 工作台的浏览器打不开网址                          | 只支持用户在地址栏输入的 `http(s)` 网址；带用户名密码或其他协议的地址会被拒绝，见 [浏览器的限制](chat-build.md#浏览器的限制)                                                                                                                                                                                                                              |
+| 工作台的浏览器打不开网址                          | 只支持不含用户名密码的 `http(s)` 网址；地址栏、历史和界面链接都可打开，链接打开位置由「设置 › 浏览器」决定，见 [浏览器的限制](chat-build.md#浏览器的限制)                                                                                                                                                                                                 |
 | Emperor Computer Helper 不在权限列表              | 设置 → 电脑操作中确认 Helper 已连接，点击对应“请求权限”；录屏列表仍没有时，用“＋ 添加”选择 `~/.emperor/native-helpers/` 中当前版本的 Helper，见[电脑操作](computer-use.md)                                                                                                                                                                                |
 | Helper 开关已打开，但状态仍为拒绝或失效           | 确认授权的是当前安装版本；必要时在“设置 → 电脑操作”按对应“重置授权”，重新登记并开启。重置会撤销现有系统授权                                                                                                                                                                                                                                               |
 | Chrome 扩展显示未连接                             | 确认 Emperor 正在运行，并在“设置 → 电脑操作 → Chrome 和 Edge”按“安装扩展”的四步装好扩展，然后在扩展中重新连接；配对码须由你对照两端确认，见[电脑操作](computer-use.md)                                                                                                                                                                                    |

@@ -18,6 +18,15 @@ final class HelperPlatformTests: XCTestCase {
         XCTAssertFalse(LiveWorkspace.isApplicationExecutable(""))
     }
 
+    func testARegularAppInASystemCodeSigningCloneIsStillAnApplicationExecutable() {
+        // Observed proc_pidpath for a live Chrome; NSRunningApplication still
+        // reports its canonical /Applications/...app executable URL.
+        XCTAssertTrue(LiveWorkspace.isApplicationExecutable(
+            "/private/var/folders/example/X/com.example.Browser.code_sign_clone/code_sign_clone.example/Browser.app.bundle/Contents/MacOS/Browser"))
+        XCTAssertFalse(LiveWorkspace.isApplicationExecutable(
+            "/Applications/Service.bundle/Contents/MacOS/Service"))
+    }
+
     func testTheLiveListHasEveryAppProcessRunningNowOnceInPidOrder() {
         // An app launched after the helper started is in the system's process
         // list even though AppKit's cached list never saw it (the QQ音乐 case).

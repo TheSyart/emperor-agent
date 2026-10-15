@@ -21,6 +21,7 @@ Emperor Agent 是一款面向个人长期使用的桌面 Agent。你可以用它
 - [下载与首次使用](#download)
 - [Chat、Build、Plan 与 Goal](#workflows)
 - [功能与成熟度](#capabilities)
+- [浏览器、电脑操作与听写](#browser-computer-voice)
 - [数据、权限与安全](#data-security)
 - [当前边界](#boundaries)
 - [从源码运行](#source)
@@ -143,7 +144,7 @@ Build 会话绑定一个本地文件夹，适合代码、文档和其他项目�
 
 ## 功能与成熟度
 
-下面的分级描述当前能力边界，不代表公开安装包已经进入 Stable。
+下面的分级描述当前源码的能力边界，不代表所有真机用例或公开安装包已经通过 Stable 验收。
 
 ### 可直接使用
 
@@ -163,21 +164,44 @@ Build 会话绑定一个本地文件夹，适合代码、文档和其他项目�
 
 ### 预览能力
 
-| 能力             | 入口与限制                                                                                                                                                       |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Goal             | `/goal`；同一会话内自动续跑，重启后需要显式恢复                                                                                                                  |
-| Scheduler        | 定时任务页面和 `scheduler` 工具；任务使用与普通对话相同的权限                                                                                                    |
-| Pull Request     | 侧栏「Pull Request」页；只读，需要本机已安装并登录的 GitHub CLI（`gh`）                                                                                          |
-| Hooks            | Settings → Hooks；`hooks.json` 配置，仅 `command` handler                                                                                                        |
-| Headless ACP V1  | 源码 operator preview；本机 stdio、纯文本、Build 会话，无桌面开关                                                                                                |
-| 桌宠 companion   | 设置页手动启用；默认关闭，由主 Electron 进程托管                                                                                                                 |
-| 电脑操作（实验） | 设置 → 电脑操作，默认关闭；目前面向 macOS，Agent 可操作内置浏览器、已连接的 Chrome 标签页和桌面应用，各驱动仍在实验阶段，见[电脑操作](docs/user/computer-use.md) |
+| 能力              | 入口与限制                                                                                                                                                       |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Goal              | `/goal`；同一会话内自动续跑，重启后需要显式恢复                                                                                                                  |
+| Scheduler         | 定时任务页面和 `scheduler` 工具；任务使用与普通对话相同的权限                                                                                                    |
+| GitHub            | 侧栏「Pull Request」页；启用预装 GitHub 插件后可浏览 PR、Issue 与 CI，只读，需要本机已安装并登录的 GitHub CLI（`gh`）                                            |
+| 语音听写（macOS） | 输入框麦克风或 ⇧⌘D；本机识别、插入草稿、不自动发送，需要麦克风与语音识别权限                                                                                     |
+| Hooks             | Settings → Hooks；`hooks.json` 配置，仅 `command` handler                                                                                                        |
+| Headless ACP V1   | 源码 operator preview；本机 stdio、纯文本、Build 会话，无桌面开关                                                                                                |
+| 桌宠 companion    | 设置页手动启用；默认关闭，由主 Electron 进程托管                                                                                                                 |
+| 电脑操作（实验）  | 设置 → 电脑操作，默认关闭；目前面向 macOS，Agent 可操作内置浏览器、已连接的 Chrome 标签页和桌面应用，各驱动仍在实验阶段，见[电脑操作](docs/user/computer-use.md) |
 
 ### 基础设施
 
 | 能力      | 当前状态                                   |
 | --------- | ------------------------------------------ |
 | Watchlist | 已有检查和调度链路，主要供受控后台维护使用 |
+
+<a id="browser-computer-voice"></a>
+
+## 浏览器、电脑操作与听写
+
+### 你自己浏览网页
+
+右侧工作台的内置浏览器适用于网页和本机开发站点。「设置 › 浏览器」管理网页与本地链接的打开位置、临时浏览历史、下载、密码管理器和登录状态；网页链接默认交给系统浏览器，本机链接默认在 Emperor 打开。你自己的浏览数据使用独立的内存会话，与 Agent 的登录状态分开。
+
+下载默认保存到系统下载文件夹，可以修改位置或逐次选择。可执行文件和安装包会被拦截，单个文件上限为 2 GiB；下载记录区分「你的下载」与「Emperor 的下载」。macOS 可以从已完全退出的 Chrome 或 Edge 导入已保存的密码和 Cookie，导入在本机进行，读取浏览器密钥时可能出现钥匙串授权框。详见[浏览器设置与数据](docs/user/chat-build.md#浏览器设置与数据)。
+
+### 让 Agent 操作应用和网页
+
+在「设置 › 电脑操作」开启总开关，或启用预装 Computer Use 插件。Agent 可以操作受控内置浏览器、你连接的 Chrome/Edge 网页和 macOS 应用；各驱动有独立开关和缺失能力说明。macOS 桌面需要给 Emperor Computer Helper 授予辅助功能与屏幕录制权限。
+
+支持的辅助功能动作可以在后台完成；坐标动作、部分原生菜单命令和 Electron 应用输入仍需要目标切到前台，不能保证所有应用全程后台操作。对话预览显示受控目标和虚拟指针；被其他窗口遮挡的落点不显示桌面指针。系统菜单栏「停止共享」只停画面。要停止 Agent，停止当前回合或关掉电脑操作总开关；任务结束释放目标，窗口与页面仍保留。
+
+普通操作连续进行，高影响操作和凭据代填逐次确认。Chrome/Edge 扩展从设置页安装引导，配对码由你核对；浏览、下载和历史搜索受该页规则约束。截图、坐标动作、跨源 frame 和外部浏览器凭据代填等仍未开放，WebMCP 站点工具当前不可用。详见[电脑操作（实验）](docs/user/computer-use.md)。
+
+### 在输入框里听写
+
+点麦克风或按 ⇧⌘D 开始与结束听写。识别在本机进行，声音不落盘；结束后文字插入原来的光标或选区，不会自动发送。麦克风、语言和快捷键在「设置 › 语音」选择；当前语言没有本机识别模型时会提示原因，Windows 和 Linux 暂不支持。详见[语音听写](docs/user/chat-build.md#语音听写)。
 
 <a id="data-security"></a>
 
@@ -189,17 +213,22 @@ Build 会话绑定一个本地文件夹，适合代码、文档和其他项目�
 
 常用路径（相对 Emperor Home）：
 
-| 数据         | 路径                                    |
-| ------------ | --------------------------------------- |
-| 模型配置     | `model_config.json`                     |
-| 会话记录     | `sessions/<session-id>/log.jsonl`       |
-| 全局长期记忆 | `memory/MEMORY.local.md`                |
-| 项目私有记忆 | `projects/<project-id>/AGENTS.local.md` |
-| 附件         | `memory/attachments/`                   |
-| Hooks 配置   | `hooks.json`                            |
-| 用户 Skills  | `skills/`                               |
-| 大工具结果   | `spill/`                                |
-| 受管工具环境 | `environment/`                          |
+| 数据                         | 路径                                    |
+| ---------------------------- | --------------------------------------- |
+| 模型配置                     | `model_config.json`                     |
+| 会话记录                     | `sessions/<session-id>/log.jsonl`       |
+| 全局长期记忆                 | `memory/MEMORY.local.md`                |
+| 项目私有记忆                 | `projects/<project-id>/AGENTS.local.md` |
+| 附件                         | `memory/attachments/`                   |
+| Hooks 配置                   | `hooks.json`                            |
+| 用户 Skills                  | `skills/`                               |
+| 插件与插件数据               | `plugins/cache/`、`plugins/data/`       |
+| 电脑操作状态与凭据           | `computer-use/`                         |
+| Agent 浏览器数据与下载收件箱 | `browser/`                              |
+| Chrome/Edge 扩展             | `browser-extension/`                    |
+| macOS 电脑操作 Helper        | `native-helpers/`                       |
+| 大工具结果                   | `spill/`                                |
+| 受管工具环境                 | `environment/`                          |
 
 首次启动当前版本时，旧版本的 `sessions/` 目录会整体移到 `sessions.legacy-<时间戳>/` 保留，新版本从空的会话列表开始。完整规则见[全局私有存储根架构](docs/architecture/global-state-store.md)。
 
@@ -207,12 +236,14 @@ Build 项目目录不会承载私有会话、记忆或附件数据。
 
 ### 安全要点
 
-- 权限预设限制 Agent 的文件写入；读取文件和网络访问不受沙箱限制。
+- 权限预设主要限制 Agent 的文件写入；普通文件读取与网络访问没有普遍禁止。文件与搜索工具始终拒读 Emperor Home 的 `computer-use/` 和 `browser/`；macOS 受限 Shell 也对这些目录及部分系统 GUI 连接做额外限制。
 - 子代理继承当前沙箱模式，但不能请求提权。
 - 记忆编辑、MCP 工具、Skill 加载和 Scheduler 工具不需要审批；只配置你信任的 MCP server。
 - Agent 用 `skill_manage` 修改 Skills、用 `mcp_config` 修改 MCP 配置时，除 `danger-full-access` 外每次写入都需要你批准。
 - 有待回答的问题或审批，或处于 Plan 模式时，你在界面上对定时任务、Skill、Plugin、模型和 MCP 配置的修改会被暂时拒绝；先回答或退出 Plan 再改。
-- 右侧工作台的浏览器只打开你在地址栏输入的 `http(s)` 网址，使用不落盘的独立会话，拒绝网页的权限请求和下载。
+- 用户内置浏览器只加载不带账号密码的 `http(s)` 地址，拒绝网页权限请求；支持受文件类型、大小与保存位置规则约束的下载。浏览数据与 Agent 的持久 profile 分开，清除浏览数据不会删除下载好的文件。
+- 电脑操作与 Shell 权限独立。高影响动作和凭据代填逐次确认；完全放行的 Shell 仍可能执行电脑操作服务以外的命令，总开关不能限制这些命令。
+- 凭据与浏览器配对用 Emperor 本地密钥加密，不依赖 macOS 钥匙串。以同一用户运行的程序可能读到这把密钥；凭据库可再设主密码。秘密只在受信设置、main 与驱动的代填通道处理，模型工具使用句柄。
 - MCP 结果和外部内容按不可信输入处理。涉及命令、文件、模型配置或外部服务时，仍应检查请求内容和授权范围。
 
 <a id="boundaries"></a>
@@ -227,6 +258,8 @@ Build 项目目录不会承载私有会话、记忆或附件数据。
 - 默认没有内置网页搜索或网页抓取工具。
 - 没有 macOS / Linux 以外的 Shell 沙箱后端。
 - Watchlist 仍属于受控后台维护基础设施，不提供外部消息平台连接器。
+- 电脑操作仍属实验能力，不能保证所有应用后台操作；Edge、部分系统权限和真实应用场景仍需目标环境验收。
+- macOS Preview 更新可能改变 Helper 的代码身份，旧授权开关即使仍开着也可能无效；按设置页提示重新授权并重启 Helper。
 
 <a id="source"></a>
 
@@ -285,6 +318,8 @@ npm --prefix desktop run package:verify
 | 想了解什么                       | 文档                                                              |
 | -------------------------------- | ----------------------------------------------------------------- |
 | 从安装到完整界面能力             | [用户手册](docs/user/README.md)                                   |
+| 浏览器、下载与语音听写           | [会话与项目工作](docs/user/chat-build.md)                         |
+| Agent 操作应用、网页与凭据       | [电脑操作（实验）](docs/user/computer-use.md)                     |
 | 当前系统边界和执行链路           | [架构总览](docs/architecture/overview.md)                         |
 | Goal 状态、续跑与授权            | [Goal 架构](docs/architecture/goal-mode.md)                       |
 | 私有数据位置与旧数据迁移         | [全局私有存储根架构](docs/architecture/global-state-store.md)     |

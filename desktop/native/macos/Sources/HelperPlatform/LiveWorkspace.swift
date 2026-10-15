@@ -45,9 +45,13 @@ enum LiveWorkspace {
     static func isApplicationExecutable(_ path: String) -> Bool {
         let parts = path.split(separator: "/", omittingEmptySubsequences: true)
         guard parts.count >= 4 else { return false }
+        // proc_pidpath can point at macOS's code_sign_clone copy, whose
+        // bundle ends in .app.bundle. It is still the app's own executable;
+        // NSRunningApplication and activationPolicy validate the live app.
+        let bundle = parts[parts.count - 4]
         return parts[parts.count - 2] == "MacOS"
             && parts[parts.count - 3] == "Contents"
-            && parts[parts.count - 4].hasSuffix(".app")
+            && (bundle.hasSuffix(".app") || bundle.hasSuffix(".app.bundle"))
     }
 
     private static func allProcessIDs() -> [pid_t] {

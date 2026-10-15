@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：安装包用户、首次使用者<br>
-> 最后核验：2026-09-24<br>
+> 最后核验：2026-10-15<br>
 > 事实源：`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/sidebar/sidebarNav.ts`、`desktop/src/renderer/src/components/settings/settingsSections.ts` 与各设置分区（含 `ComputerUseSection.vue`）、Composer 与 CoreApi 用户入口
 
 这组文档按实际任务组织。你不需要先理解 CoreApi、runtime event 或磁盘 store。
@@ -15,7 +15,9 @@
 4. [模型、记忆与附件](models-memory-attachments.md)：数据怎样进入模型和怎样落盘。
 5. [Tools、Skills 与 MCP](tools-skills-mcp.md)：扩展 Agent 可以调用的能力。
 6. [定时任务、Hooks 与桌宠](automation-collaboration.md)：定时任务、Hooks、Watchlist 和桌宠。
-7. [电脑操作（实验）](computer-use.md)：受控浏览器、macOS 桌面、凭据，以及怎样让 Agent 停下。
+7. [电脑操作（实验）](computer-use.md)：受控浏览器、macOS 桌面、Chrome/Edge 连接、凭据，以及怎样让 Agent 停下。
+   - 自己浏览网页、管理下载与导入登录，见 [浏览器设置与数据](chat-build.md#浏览器设置与数据)。
+   - 输入框麦克风与本机识别，见 [语音听写](chat-build.md#语音听写)。
 8. [诊断与排障](diagnostics-troubleshooting.md)：无法启动、模型失败或状态不一致时从哪里查。
 
 ## 侧栏入口
@@ -26,12 +28,12 @@
 - Emperor 标志与名称、搜索对话和通知铃铛；
 - 「新对话」（右侧的 `+` 在项目中新建会话），以及四个整页入口：
 
-| 入口         | 用途                                                                 | 详细说明                                                       |
-| ------------ | -------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Pull Request | 通过本机 GitHub CLI 只读浏览与你相关的打开状态 PR                    | [Chat 与 Build](chat-build.md#pull-request)                    |
-| 定时任务     | 创建、编辑、暂停、恢复、立即运行和删除定时任务                       | [定时任务、Hooks 与桌宠](automation-collaboration.md#定时任务) |
-| 能力         | 插件 / Skills / MCP / 工具四个标签：安装、导入、启停、删除和查看工具 | [Tools、Skills 与 MCP](tools-skills-mcp.md)                    |
-| 探索         | 应用内置的精选 Skills 与 MCP server，安装前先预览                    | [Tools、Skills 与 MCP](tools-skills-mcp.md#探索)               |
+| 入口         | 用途                                                                    | 详细说明                                                       |
+| ------------ | ----------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Pull Request | 通过本机 GitHub CLI 只读浏览 PR；启用 GitHub 插件后还可查看 Issue 和 CI | [Chat 与 Build](chat-build.md#pull-request)                    |
+| 定时任务     | 创建、编辑、暂停、恢复、立即运行和删除定时任务                          | [定时任务、Hooks 与桌宠](automation-collaboration.md#定时任务) |
+| 能力         | 插件 / Skills / MCP / 工具四个标签：安装、导入、启停、删除和查看工具    | [Tools、Skills 与 MCP](tools-skills-mcp.md)                    |
+| 探索         | 应用内置的精选 Skills 与 MCP server，安装前先预览                       | [Tools、Skills 与 MCP](tools-skills-mcp.md#探索)               |
 
 再往下是「置顶」「项目」「对话」三组会话，底部是「设置」和明暗切换按钮（跟随系统在「设置 › 常规」中选择）。侧栏和会话操作见 [Chat 与 Build](chat-build.md#侧栏与会话操作)。
 

@@ -12,7 +12,7 @@ desktop/native/browser-host/build.sh arm64 release
 desktop/native/browser-host/build.sh x86_64 release
 ```
 
-The script prints the absolute artifact path, `desktop/native/browser-host/build/<arch>/release/emperor-nm-host`. It compiles with the macOS 14 deployment target, ad-hoc signs the build artifact for local verification, and does **not** register it with any browser. The packager copies this binary to `Emperor Agent.app/Contents/Library/Helpers/emperor-nm-host` and signs the nested binary with the production identity before signing the outer app. The fixture build (`build.sh <arch> fixture`) enables an explicit test-only peer executable and socket override; never package that binary.
+The script prints the absolute artifact path, `desktop/native/browser-host/build/<arch>/release/emperor-nm-host`. It compiles with the macOS 14 deployment target, ad-hoc signs the build artifact for local verification, and does **not** register it with any browser. The packager copies this binary to `Emperor Agent.app/Contents/Library/Helpers/emperor-nm-host`. Current Preview packages ad-hoc seal the nested binaries and outer app; a production-signed distribution must sign the host with the same Team ID as the main app before signing the outer app. The fixture build (`build.sh <arch> fixture`) enables an explicit test-only peer executable and socket override; never package that binary.
 
 The default socket is `<getpwuid(uid).pw_dir>/.emperor/run/nm-<uid>.sock`. Emperor main must create `run/` owned by the user with mode **0700** and the socket owned by the user with no group/other permissions (use **0600**). The host checks these before connecting, then verifies `getpeereid` and `LOCAL_PEERPID` on the connected socket. A production-signed host requires the main process signature to satisfy bundle identifier `com.emperor.agent.desktop`, Apple generic anchor, and the host's own Team ID. An ad-hoc development host accepts only the precise executable path derived from its nested app location: `Emperor Agent.app/Contents/MacOS/Emperor Agent`. It does not trust an environment variable or a command-line path in production.
 
@@ -20,7 +20,7 @@ The socket uses the **Chrome Native Messaging** frame format: native-endian unsi
 
 ## Manifest generation and registration
 
-A packaged Emperor registers the manifest itself (Settings › 电脑操作 › 连接 Chrome/Edge, for the pinned extension ID `oobcokoopgkhlhpohfdpelkafiidojjn`), keeps its `path` on the running app at startup, and removes it when the last pairing is revoked in Settings. The commands below are for development and diagnosis. Read the 32-character extension ID from `chrome://extensions` or `edge://extensions`. The manifest has exactly one `allowed_origins` entry. Generate a reviewable manifest without installing it:
+A packaged Emperor registers the manifest when the user chooses Settings › 电脑操作 › Chrome 和 Edge › 安装扩展程序, for the pinned extension ID `oobcokoopgkhlhpohfdpelkafiidojjn`. It installs the extension into `~/.emperor/browser-extension/`, keeps the host manifest path on the running app at startup, and removes the manifest when the last pairing is revoked in Emperor. 移除扩展程序 also removes manifests, pairings and the installed extension folder; offline browsers may need manual extension removal. The commands below are for development and diagnosis. Read the 32-character extension ID from `chrome://extensions` or `edge://extensions`. The manifest has exactly one `allowed_origins` entry. Generate a reviewable manifest without installing it:
 
 ```sh
 desktop/native/browser-host/manifest.sh generate \
@@ -36,7 +36,7 @@ desktop/native/browser-host/manifest.sh install chrome '<absolute-host-binary>' 
 desktop/native/browser-host/manifest.sh uninstall chrome '<absolute-host-binary>'
 ```
 
-Supported browser keys: `chrome`, `chrome-beta`, `chrome-dev`, `chrome-canary`, `chrome-for-testing`, `chromium`, `edge`. Registration creates `com.emperor.agent.browser.json` in that browser's user-level `NativeMessagingHosts/` directory. Uninstall removes only a regular, user-owned manifest with this host name. The app should re-register when its bundle path moves. For the macOS Chrome integration check on 2026-09-24, the user loaded the extension and the host manifest was installed for its exact ID; see `private-docs/progress/2026-09-23-computer-use/receipts/M5-chrome-pairing.md` for the observed behavior and remaining limits.
+Supported browser keys: `chrome`, `chrome-beta`, `chrome-dev`, `chrome-canary`, `chrome-for-testing`, `chromium`, `edge`. Registration creates `com.emperor.agent.browser.json` in that browser's user-level `NativeMessagingHosts/` directory. Uninstall removes only a regular, user-owned manifest with this host name. The app should re-register when its bundle path moves. The packaged installation and pairing flow is documented in the [Computer Use manual](../../../docs/user/computer-use.md#chrome-扩展连接); development builds use the commands above rather than the packaged registration UI.
 
 ## Checks
 
@@ -47,6 +47,6 @@ python3 desktop/native/browser-host/smoke.py \
 desktop/native/browser-host/build.sh arm64 release
 ```
 
-The fixture uses a real Unix socket and subprocess. It verifies unmodified bidirectional frames, rejects the wrong peer executable and invalid extension origin, handles an absent main, and rejects oversized frames in both directions. The signed production host and Emperor main completed a real Chrome pairing and page operation check on 2026-09-24. Extension worker lifetime, real tab ID reuse, and Edge loading remain unverified.
+The fixture uses a real Unix socket and subprocess. It verifies unmodified bidirectional frames, rejects the wrong peer executable and invalid extension origin, handles an absent main, and rejects oversized frames in both directions. These fixture checks do not replace a packaged Chrome/Edge pairing and page-operation test. Extension worker lifetime, real tab ID reuse, and Edge loading still require real-browser acceptance.
 
 Reference: [Chrome Native Messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging).

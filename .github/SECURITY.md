@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：安全研究者、用户、维护者<br>
-> 最后核验：2026-08-12<br>
-> 事实源：Electron IPC、Core 权限与 workspace policy、Release workflows、GitHub Private Vulnerability Reporting
+> 最后核验：2026-10-15<br>
+> 事实源：`packages/core/src/harness/sandbox/`、`packages/core/src/harness/computer-use/`、`desktop/src/main/local-secret-store.ts`、`desktop/src/main/desktop-capability-ipc.ts`、`desktop/extension/`、Release workflows
 
 ## 支持范围
 
@@ -11,7 +11,8 @@ Emperor Agent 是本地单用户 Electron 应用。当前接受以下主线代�
 
 - Electron renderer、preload 与 main-process IPC 的信任边界；
 - 模型或工具对本地文件、进程和 workspace 的越权访问；
-- Ask / Plan、权限模式、Goal、Scheduler、Team 或 Hook 绕过 Core guard；
+- 审批 / Plan、权限预设、Goal、Scheduler、子代理或 Hook 绕过 Core guard；
+- 电脑操作的目标身份、租约、revision、凭据代填确认、系统保护名单或扩展配对被绕过；
 - `stateRoot` 私有数据、附件、凭证、日志或 runtime event 泄露；
 - MCP、Web、Skill、Plugin 与其他外部工具输出导致的注入或不安全执行；
 - 官方 GitHub Actions、安装包、checksum、SBOM、attestation 和更新说明的供应链问题。
@@ -58,5 +59,8 @@ Emperor Agent 是本地单用户 Electron 应用。当前接受以下主线代�
 
 - “本地运行”不等于完全离线；模型 Provider、MCP、Web 和外部工具可能收到任务内容。
 - MCP、网页、Skill/Plugin 来源和外部工具输出按不可信输入处理。网络调研的来源核验用于防止未经验证的草稿发布，不能替代权限、SSRF、凭据或 workspace 边界。
-- `smart_auto` 与 `full_access` 都不关闭路径安全、schema、Core deny、Goal 或 AgentDefinition；`full_access` 只让主 Agent、非 Plan 的已授权宿主命令免询问，Plan、子代理和其他隔离执行器仍使用各自 containment。
+- 当前权限预设是 `read-only`、`workspace-write` 和 `danger-full-access`；前两者限制文件写入，超出范围需要逐次批准。普通读取与网络访问没有普遍禁止，子代理不能请求提权。文件与搜索工具在所有预设下拒读 Emperor Home 的 `computer-use/` 与 `browser/`，macOS 受限 Shell 另有相应目录和系统连接限制。
+- 电脑操作独立于 Shell 权限：总开关打开后普通动作连续进行，识别为高影响的动作与凭据代填逐次确认；内置的系统保护名单不可修改。图形界面里向终端输入命令不经过 Agent Shell 沙箱，`danger-full-access` Shell 也可能绕过电脑操作服务的限制；总开关不能作为整个进程的浏览器或桌面隔离边界。
+- 电脑操作凭据与浏览器配对用 `computer-use/secrets/local.key` 加密，不使用 macOS 钥匙串；这属于本地基础保护，同一用户的程序可以读取密钥。凭据库可再加主密码；遗失密钥或主密码可能使数据无法解密。Chrome/Edge 导入会读取来源浏览器的钥匙串项目，是单独的授权路径。模型工具只接收凭据句柄，秘密只在受信设置与 main/驱动通道处理。
+- macOS 辅助功能与屏幕录制授予 Computer Helper；若主应用也获录屏权限，它的 Shell 子进程可能继承截图能力。Preview 更新改变 Helper 身份后，需以当前 Helper 的权限诊断为准。
 - 未签名 Preview 的安装说明见 [`docs/release/unsigned-preview-notice.md`](../docs/release/unsigned-preview-notice.md)；不要关闭整机 Gatekeeper、Defender 或 SmartScreen。

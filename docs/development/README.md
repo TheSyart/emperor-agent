@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：贡献者、维护者<br>
-> 最后核验：2026-09-22<br>
+> 最后核验：2026-10-15<br>
 > 事实源：根目录与 `desktop/package.json`、`packages/core/package.json`、`Makefile`
 
 这里提供源码开发的最短入口，并维护公共的工程约束、关键目录和禁止提交项；系统边界先读[架构总览](../architecture/overview.md)。
@@ -11,6 +11,7 @@
 
 - Node.js 22 或更高版本。
 - npm；根 workspace 与 `desktop/` 各有独立 lockfile 和依赖安装。
+- 构建 macOS Helper 需要 Xcode 26 或更高版本及 macOS 26 SDK（包含 SpeechAnalyzer 类型）；运行时通过系统版本检查选择可用能力。Preview 的两种 macOS 架构在 CI 中显式选择 Xcode 26。
 - macOS、Windows 或 Linux 桌面环境。普通安装包用户不需要 Node.js。
 - 构建桌面安装包需要可编译 Electron 原生依赖的 C/C++ 工具链；`node-pty` 在 CI 的目标平台按 Electron ABI rebuild。发布包只携带运行时 JS、目标原生 binding 和 helper，不携带其测试或构建脚本。
 
@@ -52,36 +53,40 @@ npm --prefix desktop run package:verify
 
 ## 修改从哪里开始
 
-| 目标                     | 入口                                                                                                           |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| 内核组合根               | `packages/core/src/harness/host/host.ts`、`harness/host/services.ts`                                           |
-| CoreApi 或服务           | `packages/core/src/api/core-api.ts`、`api/operations.ts`、`api/services/`                                      |
-| Agent loop / middleware  | `packages/core/src/harness/agent/`                                                                             |
-| Session log              | `packages/core/src/session-log/`                                                                               |
-| Provider / 模型          | `packages/core/src/llm/catalog.ts`、`llm/route.ts`、`llm/adapters/`、`config/model-config.ts`                  |
-| 工具                     | `packages/core/src/harness/tools/builtin/`、`harness/tools/registry.ts`                                        |
-| 权限 / Plan / 问题       | `packages/core/src/harness/sandbox/`、`harness/approval/`、`harness/plan/`、`harness/questions/`               |
-| 压缩                     | `packages/core/src/harness/compaction/`                                                                        |
-| Goal                     | `packages/core/src/harness/goal/`、`api/services/goal-service.ts`                                              |
-| 子代理 / 后台任务        | `packages/core/src/harness/subagent/`、`harness/jobs/`                                                         |
-| Hooks                    | `packages/core/src/harness/hooks/`、`api/services/hooks-service.ts`                                            |
-| 提示词 / 工作区说明      | `packages/core/src/harness/prompt/`、`templates/agent/persona.md`                                              |
-| Runtime event 投影       | `packages/core/src/harness/projection/`                                                                        |
-| Session 索引 / Memory    | `packages/core/src/sessions/`、`memory/`、`projects/`、`harness/memory/memory.ts`                              |
-| Scheduler / MCP / Skills | `packages/core/src/scheduler/`、`mcp/`、`skills/`、`plugins/` 与对应 API service                               |
-| Snapshot / Git / Files   | `packages/core/src/workspace/`                                                                                 |
-| Pull Request 查询        | `packages/core/src/workspace/pull-request-browser.ts`、`environment/tool-catalog.json` 的 `gh`                 |
-| 用户 Terminal            | `packages/core/src/workspace/terminal.ts`、`desktop/src/main/terminal-*`                                       |
-| Electron host / IPC      | `desktop/src/main/`、`desktop/src/preload/`                                                                    |
-| Headless / ACP stdio     | `packages/core/src/acp/`、`scripts/build-acp.mjs`                                                              |
-| Vue UI                   | `desktop/src/renderer/src/`                                                                                    |
-| 外壳、路由与快捷键       | `renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`router.ts`、`shortcuts.ts` |
-| 侧栏与通知               | `renderer/src/components/sidebar/`、`runtime/notifications.ts`、`composables/useNotifications.ts`              |
-| 右侧工作台与环境信息卡   | `renderer/src/components/workspace/`、`components/conversation/environment/`                                   |
-| 整页（定时任务、插件等） | `renderer/src/components/pages/`（`PageShell.vue`、`pageLifecycle.ts`）                                        |
-| 受管插件 Logo            | `assets/generated/plugin-logos/`；材质、透明边界与包内引用见[插件 Logo 设计规范](../design/plugin-logos.md)    |
-| 内置浏览器               | `desktop/src/main/browser-view.ts`、`browser-view-policy.ts`、`desktop-capability-ipc.ts`                      |
-| 设置弹窗                 | `desktop/src/renderer/src/components/settings/`（分区、`ui/` 原语、`settingsHeader.ts`）                       |
+| 目标                       | 入口                                                                                                                                          |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| 内核组合根                 | `packages/core/src/harness/host/host.ts`、`harness/host/services.ts`                                                                          |
+| CoreApi 或服务             | `packages/core/src/api/core-api.ts`、`api/operations.ts`、`api/services/`                                                                     |
+| Agent loop / middleware    | `packages/core/src/harness/agent/`                                                                                                            |
+| Session log                | `packages/core/src/session-log/`                                                                                                              |
+| Provider / 模型            | `packages/core/src/llm/catalog.ts`、`llm/route.ts`、`llm/adapters/`、`config/model-config.ts`                                                 |
+| 工具                       | `packages/core/src/harness/tools/builtin/`、`harness/tools/registry.ts`                                                                       |
+| 权限 / Plan / 问题         | `packages/core/src/harness/sandbox/`、`harness/approval/`、`harness/plan/`、`harness/questions/`                                              |
+| 压缩                       | `packages/core/src/harness/compaction/`                                                                                                       |
+| Goal                       | `packages/core/src/harness/goal/`、`api/services/goal-service.ts`                                                                             |
+| 子代理 / 后台任务          | `packages/core/src/harness/subagent/`、`harness/jobs/`                                                                                        |
+| Hooks                      | `packages/core/src/harness/hooks/`、`api/services/hooks-service.ts`                                                                           |
+| 提示词 / 工作区说明        | `packages/core/src/harness/prompt/`、`templates/agent/persona.md`                                                                             |
+| Runtime event 投影         | `packages/core/src/harness/projection/`                                                                                                       |
+| Session 索引 / Memory      | `packages/core/src/sessions/`、`memory/`、`projects/`、`harness/memory/memory.ts`                                                             |
+| Scheduler / MCP / Skills   | `packages/core/src/scheduler/`、`mcp/`、`skills/`、`plugins/` 与对应 API service                                                              |
+| Snapshot / Git / Files     | `packages/core/src/workspace/`                                                                                                                |
+| Pull Request 查询          | `packages/core/src/workspace/pull-request-browser.ts`、`environment/tool-catalog.json` 的 `gh`                                                |
+| 用户 Terminal              | `packages/core/src/workspace/terminal.ts`、`desktop/src/main/terminal-*`                                                                      |
+| Electron host / IPC        | `desktop/src/main/`、`desktop/src/preload/`                                                                                                   |
+| Headless / ACP stdio       | `packages/core/src/acp/`、`scripts/build-acp.mjs`                                                                                             |
+| Vue UI                     | `desktop/src/renderer/src/`                                                                                                                   |
+| 外壳、路由与快捷键         | `renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`router.ts`、`shortcuts.ts`                                |
+| 侧栏与通知                 | `renderer/src/components/sidebar/`、`runtime/notifications.ts`、`composables/useNotifications.ts`                                             |
+| 右侧工作台与环境信息卡     | `renderer/src/components/workspace/`、`components/conversation/environment/`                                                                  |
+| 整页（定时任务、插件等）   | `renderer/src/components/pages/`（`PageShell.vue`、`pageLifecycle.ts`）                                                                       |
+| 受管插件 Logo              | `assets/generated/plugin-logos/`；材质、透明边界与包内引用见[插件 Logo 设计规范](../design/plugin-logos.md)                                   |
+| 用户内置浏览器与下载       | `desktop/src/main/browser-view.ts`、`browser-view-policy.ts`、`user-browser-history.ts`、`user-downloads.ts`、`desktop-capability-ipc.ts`     |
+| 电脑操作与对话预览         | `packages/core/src/harness/computer-use/`、`desktop/src/main/computer-use/`、`desktop/native/macos/`、`components/conversation/computer-use/` |
+| Chrome/Edge 扩展与原生消息 | `desktop/extension/`、`desktop/native/browser-host/`、`desktop/src/main/computer-use/nm-bridge.ts`、`browser-extension-installer.ts`          |
+| 密码导入与本地密钥         | `desktop/src/main/browser-import/`、`local-secret-store.ts`、`computer-use/credential-vault.ts`                                               |
+| 本机语音听写               | `desktop/src/main/dictation/`、`desktop/native/macos/Sources/DictationPlatform/`、`desktop/src/renderer/src/dictation/`                       |
+| 设置弹窗                   | `desktop/src/renderer/src/components/settings/`（分区、`ui/` 原语、`settingsHeader.ts`）                                                      |
 
 跨层改动请使用[扩展 Emperor Agent](extending-emperor.md)的同步清单，不要只修改最先报错的一层。
 

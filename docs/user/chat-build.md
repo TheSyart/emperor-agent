@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用普通会话或项目会话的用户<br>
-> 最后核验：2026-09-23<br>
+> 最后核验：2026-10-15<br>
 > 事实源：`packages/core/src/sessions/store.ts`、`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/prompt/agent-instructions.ts`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/sidebar/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/composer/`、`desktop/src/renderer/src/components/trajectory/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/pages/pulls/`、`desktop/src/renderer/src/components/pages/github/`、`desktop/src/main/browser-view.ts`
 
 Chat（普通对话）和 Build（项目工作）是会话类型。它们决定 Agent 的工作目录和能看到哪些长期上下文，不决定权限。
@@ -136,7 +136,7 @@ Build 会话的第一行是「± 分支名 +A −D」：当前分支、与上游
 - 页面由你打开：在地址栏提交、从浏览历史中选择，或点击界面里的网页链接（按「设置 › 浏览器」的两个打开位置决定在哪里打开）。Agent 和模型输出不能自己打开网页。
 - 浏览器使用独立的内存会话：Cookie、缓存和存储不写入磁盘，也不与应用自身的数据共享。切换到其他面板或切换会话时页面关闭，这些数据随之清空；只收起工作台时页面暂时隐藏。
 - 网页请求的摄像头、麦克风、通知等权限一律拒绝，弹出窗口不会在应用内打开：外部网址交给系统浏览器，本机地址直接忽略。本机地址也不能用「在外部打开」。
-- 下载按「设置 › 浏览器 › 下载」保存（见下文）。可执行文件、安装包和打开时会运行命令的 macOS 文件会被拦截，超过 2 GB 的文件不会下载；面板底部一行显示正在下载、已下载或已拦截及原因。
+- 下载按「设置 › 浏览器 › 下载」保存（见下文）。可执行文件、安装包和打开时会运行命令的 macOS 文件会被拦截，超过 2 GiB 的文件不会下载；面板底部一行显示正在下载、已下载或已拦截及原因。
 - 页面画在界面之上，因此打开弹窗、菜单或拖动分隔条时会暂时隐藏，结束后恢复。
 
 ### 浏览器设置与数据
@@ -157,7 +157,7 @@ Build 会话的第一行是「± 分支名 +A −D」：当前分支、与上游
   - **下载前询问保存位置**：打开后每次下载先弹出系统的保存对话框，从「位置」开始，可以改名字和文件夹。
   - **下载历史记录**：「管理」后的二级页分两组。「你的下载」可以打开、在访达中显示或从列表移除（文件保留），被拦截的写明原因；「Emperor 的下载」列出收件箱中的文件，可以在访达中显示、移到工作区或另存为。
   - **下载保留时间**：Emperor 下载的文件在收件箱中保留的时间。
-  - 沿用 Emperor 收件箱的检查：可执行文件、安装包，以及打开时会运行命令或启动本机应用的 macOS 文件（如 `.terminal`、`.fileloc`、`.webloc`、AppleScript）一律拦截，在保存对话框里改成这类名字的也一样，已经写出的会被删除。单个文件最大 2 GB，事先知道大小的不开始下载，下载中超过的立即停止。在 macOS 上，下载好的文件带系统的隔离标记，第一次打开时由系统检查。
+  - 沿用 Emperor 收件箱的检查：可执行文件、安装包，以及打开时会运行命令或启动本机应用的 macOS 文件（如 `.terminal`、`.fileloc`、`.webloc`、AppleScript）一律拦截，在保存对话框里改成这类名字的也一样，已经写出的会被删除。单个文件最大 2 GiB，事先知道大小的不开始下载，下载中超过的立即停止。在 macOS 上，下载好的文件带系统的隔离标记，第一次打开时由系统检查。
   - 下载记录保存在 `~/.emperor/browser/user-downloads.json`（只有你能读写），只有名称、来源网站、保存位置、时间、状态和大小，不含下载地址，最多保留最近 200 条。
 - **浏览器权限**：「网站设置」管理 Emperor 操作的网页可以用哪些摄像头、麦克风、位置、通知等权限。
 
@@ -201,7 +201,7 @@ Build 会话的第一行是「± 分支名 +A −D」：当前分支、与上游
 
 - **Issue**：列出打开状态的 Issue，分「与我相关」（你创建、被分配、被提到或评论过）、「我的仓库」（你名下仓库里的 Issue，包括别人开的）、「分配给我」「我创建的」「提到我」，可以按文本搜索；上次选的分类会记住。点开一个 Issue 在原处显示状态、标签、负责人、描述和最近 30 条评论，「在 GitHub 打开」查看其余内容。路径为 `/github/issues/<owner>/<repo>/<number>`。
 - **CI**：列出一个仓库最近 30 次 GitHub Actions 运行。仓库默认取当前项目的 GitHub `origin`，也可以输入 `owner/name` 后按「查看」。点开一次运行显示各个作业及其步骤的结果和用时；日志在 GitHub 上查看（「日志」按钮）。路径为 `/github/ci/<owner>/<repo>/<运行 ID>`。仓库没有运行记录或没有启用 Actions 时显示「没有运行记录」。
-- 标题和描述都按文字显示，描述中的 HTML 不会执行，链接在系统浏览器中打开。
+- 标题和描述都按文字显示，描述中的 HTML 不会执行；描述中的网页链接按「设置 › 浏览器」的打开位置处理，「在 GitHub 打开」始终交给系统浏览器。
 
 插件还带一个 GitHub Skill，让 Agent 在终端里用 `gh` 做同样的只读查询。在「能力 › 插件」里停用 GitHub 插件后，这两个标签和 Skill 一起撤下，页面恢复为「Pull Request」，已登录的 `gh` 不受影响；直接打开 `/github/…` 地址时，页面说明插件已停用并给出打开插件的按钮。
 

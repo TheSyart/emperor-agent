@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：发布维护者<br>
-> 最后核验：2026-07-16<br>
-> 事实源：`.github/workflows/release-preview.yml`、`scripts/preview-*-contract.mjs`、`scripts/publish-preview-release.sh`
+> 最后核验：2026-10-15<br>
+> 事实源：`.github/workflows/release-preview.yml`、`scripts/preview-*-contract.mjs`、`scripts/packaged-smoke-contract.mjs`、`scripts/publish-preview-release.sh`
 
 当前公开安装包使用未签名 Preview 渠道。它通过独立 workflow 构建、验证和发布为 GitHub Pre-release，不应被描述为 Stable，也不能混入受信签名渠道的产物。
 
@@ -45,6 +45,8 @@ flowchart LR
   SBOM --> Attest["GitHub provenance / SBOM attestation"]
   Attest --> Publish["Atomic GitHub Pre-release"]
 ```
+
+macOS job 在安装依赖和运行质量门禁前显式选择 Xcode 26，确保能编译 macOS 26 的听写接口；不依赖 runner 默认的旧 SDK。
 
 平台矩阵：
 

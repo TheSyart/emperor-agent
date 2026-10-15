@@ -13,6 +13,7 @@ import {
 } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { assertPackagedSmokeReceipt } from './packaged-smoke-contract.mjs'
 
 const previewTagPattern =
   /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-preview\.([1-9]\d*)$/
@@ -71,15 +72,12 @@ export function createPreviewCandidate({
   const smokeName = `${spec.smoke}-${arch}.json`
   const smokePath = join(dist, 'packaged-smoke', smokeName)
   const smoke = readJson(smokePath, 'packaged smoke receipt')
-  if (
-    smoke.schemaVersion !== 1 ||
-    smoke.appVersion !== version ||
-    smoke.commit !== commit ||
-    smoke.platform !== spec.smoke ||
-    smoke.arch !== arch ||
-    smoke.exitCode !== 0
-  )
-    throw new Error('packaged smoke receipt does not match Preview candidate')
+  assertPackagedSmokeReceipt(smoke, {
+    appVersion: version,
+    commit,
+    platform: spec.smoke,
+    arch,
+  })
 
   const artifacts = expectedNames.map((name) => fileRecord(join(dist, name)))
   const smokeReceipt = fileRecord(smokePath)

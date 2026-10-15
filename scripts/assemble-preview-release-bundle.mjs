@@ -12,6 +12,7 @@ import {
 } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { assertPackagedSmokeReceipt } from './packaged-smoke-contract.mjs'
 import {
   classifyReleaseTag,
   previewVersion,
@@ -254,30 +255,15 @@ function assertPreviewBase(receipt, platform, arch) {
 }
 
 function validateSmokeReceipt(receipt, platform, arch, name) {
-  if (
-    receipt.schemaVersion !== 1 ||
-    receipt.appVersion !== version ||
-    receipt.commit !== commit ||
-    receipt.platform !== platform ||
-    receipt.arch !== arch ||
-    receipt.exitCode !== 0 ||
-    receipt.stateRoot !== '$TEMP/stateRoot' ||
-    !/^[a-f0-9]{64}$/.test(receipt.runtimeManifestHash || '') ||
-    !/^[a-f0-9]{64}$/.test(receipt.runtimeRevision || '') ||
-    receipt.installJobs?.before !== 0 ||
-    receipt.installJobs?.after !== 0
-  ) {
-    fail(`invalid Preview packaged smoke receipt: ${name}`)
-  }
-  for (const operation of [
-    'bootstrap',
-    'diagnostics',
-    'environment',
-    'glob',
-    'grep',
-  ]) {
-    if (receipt.operations?.[operation]?.ok !== true)
-      fail(`${name} failed ${operation}`)
+  try {
+    assertPackagedSmokeReceipt(receipt, {
+      appVersion: version,
+      commit,
+      platform,
+      arch,
+    })
+  } catch (error) {
+    fail(`invalid Preview packaged smoke receipt: ${name}: ${error.message}`)
   }
 }
 

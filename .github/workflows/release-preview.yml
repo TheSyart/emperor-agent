@@ -27,6 +27,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
+      - name: Select Xcode with the macOS 26 SDK
+        run: sudo xcode-select -s /Applications/Xcode_26.0.1.app/Contents/Developer
       - uses: actions/setup-node@v4
         with:
           node-version: '24'

@@ -1,0 +1,69 @@
+/** Complete, hand-written schema 2 fixture for the release consumers. */
+export function packagedSmokeFixture(
+  platform: string,
+  arch: string,
+  appVersion: string,
+  commit: string,
+) {
+  return {
+    schemaVersion: 2,
+    appVersion,
+    commit,
+    platform,
+    arch,
+    exitCode: 0,
+    stateRoot: '$TEMP/stateRoot',
+    runtimeManifestHash: 'b'.repeat(64),
+    runtimeRevision: 'c'.repeat(64),
+    installJobs: { before: 0, after: 0 },
+    operations: {
+      bootstrap: { ok: true },
+      diagnostics: {
+        ok: true,
+        sandbox: {
+          backend:
+            platform === 'darwin'
+              ? 'macos-seatbelt'
+              : platform === 'win32'
+                ? 'windows-unsupported'
+                : 'linux-bwrap',
+          status: platform === 'win32' ? 'unsupported' : 'available',
+          provenance: 'host-os',
+        },
+        lifecycle: {
+          state: 'ready',
+          readyServices: [
+            'harness-kernel',
+            'mcp',
+            'process-runtime',
+            'scheduler',
+          ],
+        },
+      },
+      environment: { ok: true },
+      glob: { ok: true },
+      grep: { ok: true },
+      terminal: { ok: true, outputBytes: 1 },
+      seatbelt: {
+        ok: true,
+        mode: platform === 'darwin' ? 'workspace-write' : 'not-macos',
+        commands: platform === 'darwin' ? 18 : 0,
+        protectedStateDenied: platform === 'darwin',
+      },
+      renderer: {
+        ok: true,
+        nodeGlobalsAbsent: true,
+        coreBridge: true,
+        coreBootstrap: true,
+        deepLinkRenders: true,
+        attachment: { ok: true, bytes: 34 },
+        webPreferences: {
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+        },
+        chromiumSandbox: 'enabled',
+      },
+    },
+  }
+}

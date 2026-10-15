@@ -12,6 +12,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
+import { packagedSmokeFixture } from './test-fixtures/packaged-smoke'
 
 const repoRoot = resolve(__dirname, '..', '..', '..')
 const assembler = join(
@@ -63,6 +64,69 @@ describe('unsigned Preview release bundle assembler', () => {
       runId,
     })
     expect(manifest.artifacts).toHaveLength(7)
+  })
+
+  it.each([
+    {
+      name: 'legacy schema',
+      platform: 'linux',
+      mutate: (r: ReturnType<typeof packagedSmokeFixture>) => {
+        r.schemaVersion = 1
+      },
+    },
+    {
+      name: 'missing renderer',
+      platform: 'linux',
+      mutate: (r: ReturnType<typeof packagedSmokeFixture>) => {
+        Reflect.deleteProperty(r.operations, 'renderer')
+      },
+    },
+    {
+      name: 'renderer Node globals',
+      platform: 'linux',
+      mutate: (r: ReturnType<typeof packagedSmokeFixture>) => {
+        r.operations.renderer.nodeGlobalsAbsent = false
+      },
+    },
+    {
+      name: 'macOS Chromium sandbox disabled',
+      platform: 'darwin',
+      mutate: (r: ReturnType<typeof packagedSmokeFixture>) => {
+        r.operations.renderer.chromiumSandbox = 'disabled-for-linux-test'
+      },
+    },
+    {
+      name: 'wrong OS sandbox backend',
+      platform: 'darwin',
+      mutate: (r: ReturnType<typeof packagedSmokeFixture>) => {
+        r.operations.diagnostics.sandbox.backend = 'linux-bwrap'
+      },
+    },
+    {
+      name: 'missing lifecycle service',
+      platform: 'linux',
+      mutate: (r: ReturnType<typeof packagedSmokeFixture>) => {
+        r.operations.diagnostics.lifecycle.readyServices = ['harness-kernel']
+      },
+    },
+    {
+      name: 'missing Seatbelt protected-state check',
+      platform: 'darwin',
+      mutate: (r: ReturnType<typeof packagedSmokeFixture>) => {
+        r.operations.seatbelt.protectedStateDenied = false
+      },
+    },
+  ])('rejects a rehashed smoke receipt with $name', ({ platform, mutate }) => {
+    const fixture = createFixture()
+    rewriteSmoke(
+      fixture,
+      platform,
+      platform === 'darwin' ? 'arm64' : 'x64',
+      mutate,
+    )
+    const result = runAssembler(fixture)
+    expect(result.status).toBe(1)
+    expect(result.stderr).toMatch(/smoke|renderer|sandbox|lifecycle|Seatbelt/i)
   })
 
   it('copies bilingual risk disclosure with official single-app paths', () => {
@@ -411,23 +475,35 @@ function receiptBase(platform: string, arch: string) {
 }
 
 function smokeReceipt(platform: string, arch: string) {
-  return {
-    schemaVersion: 1,
-    appVersion: version,
-    commit,
-    platform,
-    arch,
-    exitCode: 0,
-    stateRoot: '$TEMP/stateRoot',
-    runtimeManifestHash: 'b'.repeat(64),
-    runtimeRevision: 'c'.repeat(64),
-    installJobs: { before: 0, after: 0 },
-    operations: Object.fromEntries(
-      ['bootstrap', 'diagnostics', 'environment', 'glob', 'grep'].map(
-        (name) => [name, { ok: true }],
-      ),
-    ),
+  return packagedSmokeFixture(platform, arch, version, commit)
+}
+
+function rewriteSmoke(
+  fixture: ReturnType<typeof createFixture>,
+  platform: string,
+  arch: string,
+  mutate: (receipt: ReturnType<typeof packagedSmokeFixture>) => void,
+) {
+  const smokePath = join(
+    fixture.input,
+    'packaged-smoke',
+    `${platform}-${arch}.json`,
+  )
+  const receipt = readJson(smokePath) as ReturnType<typeof packagedSmokeFixture>
+  mutate(receipt)
+  writeJson(smokePath, receipt)
+  const candidatePlatform =
+    platform === 'darwin' ? 'macos' : platform === 'win32' ? 'windows' : 'linux'
+  const candidatePath = join(
+    fixture.input,
+    'preview-receipts',
+    `candidate-${candidatePlatform}-${arch}.json`,
+  )
+  const candidate = readJson(candidatePath) as {
+    packagedSmoke: ReturnType<typeof fileRecord>
   }
+  candidate.packagedSmoke = fileRecord(smokePath)
+  writeJson(candidatePath, candidate)
 }
 
 function mutateReceipt(

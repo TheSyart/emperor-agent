@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：安装 Preview 的用户<br>
-> 最后核验：2026-09-29<br>
-> 事实源：`.github/workflows/release-preview.yml`、Preview electron-builder 配置与发布 contract
+> 最后核验：2026-10-15<br>
+> 事实源：`.github/workflows/release-preview.yml`、Preview electron-builder 配置与发布 contract、`desktop/src/main/computer-use/macos-launcher.ts`、`desktop/src/main/dictation/` 与 macOS Helper 打包脚本
 
 > **Unsigned Preview / 未签名预览版**  
 > `channel: preview` · `signingStatus: unsigned`
@@ -27,9 +27,9 @@ Move Emperor Agent to the Applications folder before opening it: launched from t
 
 ## macOS 电脑操作 / Computer use on macOS
 
-电脑操作使用独立的 Emperor Computer Helper。未签名版本没有固定的签名身份，所以每次安装新版本后，macOS 都会把 Helper 当作新应用：请在 **设置 › 电脑操作** 按提示重新授予 **辅助功能** 与 **屏幕录制**（系统开关仍显示开启时，以设置页读到的状态为准）。
+电脑操作使用独立的 Emperor Computer Helper。未签名版本没有固定的签名身份，更新使 Helper 的代码身份改变时，之前的系统授权可能失效：请在 **设置 › 电脑操作** 按提示重新授予 **辅助功能** 与 **屏幕录制**（系统开关仍显示开启时，以设置页读到的状态为准）。
 
-Computer use runs in the separate Emperor Computer Helper. An unsigned build has no stable signing identity, so after each update macOS treats the Helper as a new app: re-grant **Accessibility** and **Screen Recording** from **Settings › Computer Use** (trust the state shown there even if the system switches still look on).
+Computer use runs in the separate Emperor Computer Helper. An unsigned build has no stable signing identity; an update that changes the Helper code identity may invalidate earlier grants. Re-grant **Accessibility** and **Screen Recording** from **Settings › Computer Use** (trust the state shown there even if the system switches still look on).
 
 ## macOS 语音听写 / Dictation on macOS
 
@@ -39,9 +39,9 @@ Dictation in the composer recognizes speech on this Mac and needs **Microphone**
 
 ## macOS Helper 图标 / Helper icons on macOS
 
-从这个版本起，Emperor Computer Helper 带有 Computer Use 的图标，Emperor Dictation Helper 带有 Emperor 的图标，系统授权弹框和 **系统设置 › 隐私与安全性** 里不再显示空白图标。加上图标会改变 Helper 的 ad-hoc 签名，所以从旧版本更新后，macOS 会再要一次 **辅助功能**、**屏幕录制**、**麦克风** 与 **语音识别**：按 **设置 › 电脑操作** 与 **设置 › 语音** 的提示重新允许即可。如果隐私列表里的条目仍是空白图标，或者开关显示已开启、设置页却说没有权限，在终端运行 `tccutil reset Accessibility com.emperor.agent.desktop.computer-helper` 与 `tccutil reset ScreenCapture com.emperor.agent.desktop.computer-helper`，再重新允许。
+Emperor Computer Helper 包内带有 Computer Use 图标，Emperor Dictation Helper 包内带有 Emperor 图标，供系统授权弹框与 **系统设置 › 隐私与安全性** 使用。更换图标或代码会改变 Helper 的 ad-hoc 签名，之前的授权可能失效；是否重新询问取决于实际系统授权状态。分别在 **设置 › 电脑操作** 与 **设置 › 语音** 核对所需权限，按提示处理。如果隐私列表里的条目仍是空白图标，或者开关显示已开启、设置页却说没有权限，在终端运行 `tccutil reset Accessibility com.emperor.agent.desktop.computer-helper` 与 `tccutil reset ScreenCapture com.emperor.agent.desktop.computer-helper`，再重新允许。
 
-From this version, Emperor Computer Helper carries the Computer Use icon and Emperor Dictation Helper the Emperor icon, so permission prompts and **System Settings › Privacy & Security** no longer show a blank icon. Adding the icon changes the helpers' ad-hoc signature, so after updating from an earlier version macOS asks again for **Accessibility**, **Screen Recording**, **Microphone** and **Speech Recognition**: allow them again as **Settings › Computer Use** and **Settings › 语音** prompt. If an entry in the privacy lists still shows a blank icon, or its switch looks on while the settings page reports the permission missing, run `tccutil reset Accessibility com.emperor.agent.desktop.computer-helper` and `tccutil reset ScreenCapture com.emperor.agent.desktop.computer-helper` in Terminal and allow again.
+Emperor Computer Helper bundles the Computer Use icon and Emperor Dictation Helper bundles the Emperor icon for permission prompts and **System Settings › Privacy & Security**. Changing an icon or code changes the helper's ad-hoc signature and may invalidate earlier grants; whether macOS asks again depends on the actual permission state. Check **Settings › Computer Use** and **Settings › 语音** separately and follow their prompts. If an entry in the privacy lists still shows a blank icon, or its switch looks on while the settings page reports the permission missing, run `tccutil reset Accessibility com.emperor.agent.desktop.computer-helper` and `tccutil reset ScreenCapture com.emperor.agent.desktop.computer-helper` in Terminal and allow again.
 
 ## Windows 单应用确认 / Per-app confirmation
 

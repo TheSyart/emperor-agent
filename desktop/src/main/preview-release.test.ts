@@ -4,6 +4,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { createRequire } from 'node:module'
 import { spawnSync } from 'node:child_process'
+import { packagedSmokeFixture } from './test-fixtures/packaged-smoke'
 
 const desktopRoot = path.resolve(__dirname, '..', '..')
 const repoRoot = path.resolve(desktopRoot, '..')
@@ -247,14 +248,7 @@ describe('unsigned preview release channel', () => {
     }
     fs.writeFileSync(
       path.join(dist, 'packaged-smoke', 'linux-x64.json'),
-      `${JSON.stringify({
-        schemaVersion: 1,
-        appVersion: '0.1.0-preview.1',
-        commit,
-        platform: 'linux',
-        arch: 'x64',
-        exitCode: 0,
-      })}\n`,
+      `${JSON.stringify(packagedSmokeFixture('linux', 'x64', '0.1.0-preview.1', commit))}\n`,
     )
 
     const result = runContract(
@@ -300,6 +294,29 @@ describe('unsigned preview release channel', () => {
     expect(
       fs.readFileSync(path.join(dist, 'SHA256SUMS-linux-x64.txt'), 'utf8'),
     ).toContain('UNSIGNED-PREVIEW')
+
+    const invalidSmoke = packagedSmokeFixture(
+      'linux',
+      'x64',
+      '0.1.0-preview.1',
+      commit,
+    )
+    invalidSmoke.operations.renderer.coreBridge = false
+    fs.writeFileSync(
+      path.join(dist, 'packaged-smoke', 'linux-x64.json'),
+      JSON.stringify(invalidSmoke),
+    )
+    const refused = runContract(
+      'candidate',
+      dist,
+      tag,
+      commit,
+      runId,
+      'linux',
+      'x64',
+    )
+    expect(refused.status).toBe(1)
+    expect(refused.stderr).toContain('renderer sandbox')
 
     fs.rmSync(root, { recursive: true, force: true })
   })
