@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
 async function makeRouter() {
@@ -18,6 +18,22 @@ async function resolve(path: string) {
 }
 
 describe('renderer routes', () => {
+  beforeAll(async () => {
+    // Cold Vite/SFC transforms are setup work. Keep loading the real views,
+    // but finish that work before the short navigation assertions start.
+    const router = await makeRouter()
+    for (const path of [
+      '/chat',
+      '/scheduler',
+      '/capabilities',
+      '/pulls',
+      '/github/issues',
+      '/github/ci',
+      '/explore',
+    ])
+      await router.push(path)
+  }, 60_000)
+
   it('serves chat and trajectory tabs per session', async () => {
     const chat = await resolve('/chat/s_123')
     expect(chat.name).toBe('chat')
