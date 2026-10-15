@@ -162,8 +162,14 @@ describe('Computer Use Seatbelt confinement', () => {
             cwd: root,
             env: { ...process.env, npm_config_cache: join(root, 'npm-cache') },
             encoding: 'utf8',
-            timeout: 30_000,
+            // A cold macOS 26 SDK module cache on Intel CI can take more
+            // than 30 seconds; other commands retain their normal bound.
+            timeout: command[0] === '/usr/bin/swiftc' ? 120_000 : 30_000,
           })
+          expect(
+            result.error,
+            `${command.join(' ')}: ${result.stderr}`,
+          ).toBeUndefined()
           expect(result.status, `${command.join(' ')}: ${result.stderr}`).toBe(
             0,
           )

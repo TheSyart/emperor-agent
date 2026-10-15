@@ -64,9 +64,13 @@ test('the onboarding page may drive pairing, and the pairing says which browser 
     assert.match(started.value.pairingCode, /^\d{6}$/)
     assert.equal(browser.state.pairBegin.browser, 'edge')
     await waitUntil(
-      async () => (await status(browser, 'welcome.html')).connected,
-      'connected worker',
+      () =>
+        browser.state.observed.some(
+          (frame) => frame.type === 'event' && frame.name === 'bridge.ready',
+        ),
+      'authenticated bridge ready event',
     )
+    assert.equal((await status(browser, 'welcome.html')).connected, true)
     const ready = browser.state.observed.find(
       (frame) => frame.type === 'event' && frame.name === 'bridge.ready',
     )

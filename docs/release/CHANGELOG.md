@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 本轮未签名 Preview 只发布 macOS arm64 / x64 的 DMG 与 ZIP；发布清单、回执和来源校验按双架构完整验证，Windows / Linux 暂不更新。
+
 ### Fixed
 
 - Preview 发布链升级到当前打包冒烟契约：候选包与聚合步骤要求 schema 2，并校验渲染层隔离、主机沙箱、服务就绪和 macOS 受保护目录拒读，避免旧发布脚本拒绝新产物。

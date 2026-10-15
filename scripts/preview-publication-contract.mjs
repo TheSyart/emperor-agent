@@ -42,6 +42,8 @@ for (const [label, value] of [
     value.channel !== 'preview' ||
     value.signingStatus !== 'unsigned' ||
     value.notarized !== false ||
+    JSON.stringify(value.platforms) !==
+      JSON.stringify(['macos-arm64', 'macos-x64']) ||
     value.tag !== tag ||
     value.commit !== commit ||
     value.runId !== runId
@@ -50,15 +52,20 @@ for (const [label, value] of [
   }
 }
 if (manifest.version !== version) fail('Preview manifest version mismatch')
+if (
+  JSON.stringify(manifest.verification?.packagedSmoke) !==
+    JSON.stringify(['macos-arm64', 'macos-x64']) ||
+  JSON.stringify(manifest.verification?.linuxLifecycle) !== '[]' ||
+  manifest.verification?.resourceInspection !== true ||
+  manifest.verification?.checksumsVerified !== true
+)
+  fail('Preview manifest verification matrix mismatch')
 
 const expectedArtifacts = [
   `Emperor-Agent-${version}-UNSIGNED-PREVIEW-macos-arm64.dmg`,
   `Emperor-Agent-${version}-UNSIGNED-PREVIEW-macos-arm64.zip`,
   `Emperor-Agent-${version}-UNSIGNED-PREVIEW-macos-x64.dmg`,
   `Emperor-Agent-${version}-UNSIGNED-PREVIEW-macos-x64.zip`,
-  `Emperor-Agent-${version}-UNSIGNED-PREVIEW-windows-x64.exe`,
-  `Emperor-Agent-${version}-UNSIGNED-PREVIEW-linux-x64.AppImage`,
-  `Emperor-Agent-${version}-UNSIGNED-PREVIEW-linux-x64.deb`,
 ]
 const manifestArtifacts = Array.isArray(manifest.artifacts)
   ? manifest.artifacts

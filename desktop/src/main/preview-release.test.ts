@@ -53,16 +53,18 @@ describe('unsigned preview release channel', () => {
     expect(preview).not.toContain('workflow_dispatch:')
   })
 
-  it('builds the fixed cross-platform matrix without signing credentials', () => {
+  it('builds both macOS architectures without signing credentials', () => {
     const workflow = readWorkflow('release-preview.yml')
 
     expect(workflow).toContain('macos-15')
     expect(workflow).toContain('macos-15-intel')
-    expect(workflow).toContain('windows-2022')
-    expect(workflow).toContain('ubuntu-22.04')
+    expect(workflow).not.toContain('windows-preview:')
+    expect(workflow).not.toContain('linux-preview-build:')
     expect(workflow).toContain('ubuntu-24.04')
     expect(workflow).toContain('arch: arm64')
     expect(workflow).toContain('arch: x64')
+    expect(workflow).toContain('actions/setup-python@v5')
+    expect(workflow).toContain("python-version: '3.11'")
     expect(workflow).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'")
     expect(workflow).toContain('contents: read')
     expect(workflow).not.toContain('forceCodeSigning')
@@ -123,9 +125,7 @@ describe('unsigned preview release channel', () => {
 
     expect(workflow).toContain('preview-aggregate:')
     expect(workflow).toContain('preview-publish:')
-    expect(workflow).toMatch(
-      /needs:\s*\[macos-preview, windows-preview, linux-preview-build, linux-preview-smoke\]/,
-    )
+    expect(workflow).toMatch(/needs:\s*\[macos-preview\]/)
     expect(workflow).toContain('needs: preview-aggregate')
     expect(workflow).toContain('id-token: write')
     expect(workflow).toContain('attestations: write')

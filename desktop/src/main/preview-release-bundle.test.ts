@@ -37,7 +37,7 @@ afterEach(() => {
 })
 
 describe('unsigned Preview release bundle assembler', () => {
-  it('assembles exactly seven artifacts with explicit unsigned metadata', () => {
+  it('assembles exactly four macOS artifacts with explicit unsigned metadata', () => {
     const fixture = createFixture()
     const result = runAssembler(fixture)
 
@@ -63,27 +63,27 @@ describe('unsigned Preview release bundle assembler', () => {
       commit,
       runId,
     })
-    expect(manifest.artifacts).toHaveLength(7)
+    expect(manifest.artifacts).toHaveLength(4)
   })
 
   it.each([
     {
       name: 'legacy schema',
-      platform: 'linux',
+      platform: 'darwin',
       mutate: (r: ReturnType<typeof packagedSmokeFixture>) => {
         r.schemaVersion = 1
       },
     },
     {
       name: 'missing renderer',
-      platform: 'linux',
+      platform: 'darwin',
       mutate: (r: ReturnType<typeof packagedSmokeFixture>) => {
         Reflect.deleteProperty(r.operations, 'renderer')
       },
     },
     {
       name: 'renderer Node globals',
-      platform: 'linux',
+      platform: 'darwin',
       mutate: (r: ReturnType<typeof packagedSmokeFixture>) => {
         r.operations.renderer.nodeGlobalsAbsent = false
       },
@@ -104,7 +104,7 @@ describe('unsigned Preview release bundle assembler', () => {
     },
     {
       name: 'missing lifecycle service',
-      platform: 'linux',
+      platform: 'darwin',
       mutate: (r: ReturnType<typeof packagedSmokeFixture>) => {
         r.operations.diagnostics.lifecycle.readyServices = ['harness-kernel']
       },
@@ -118,12 +118,7 @@ describe('unsigned Preview release bundle assembler', () => {
     },
   ])('rejects a rehashed smoke receipt with $name', ({ platform, mutate }) => {
     const fixture = createFixture()
-    rewriteSmoke(
-      fixture,
-      platform,
-      platform === 'darwin' ? 'arm64' : 'x64',
-      mutate,
-    )
+    rewriteSmoke(fixture, platform, 'arm64', mutate)
     const result = runAssembler(fixture)
     expect(result.status).toBe(1)
     expect(result.stderr).toMatch(/smoke|renderer|sandbox|lifecycle|Seatbelt/i)
@@ -188,8 +183,11 @@ describe('unsigned Preview release bundle assembler', () => {
   it('rejects checksum and candidate receipt hash mismatches', () => {
     const checksumFixture = createFixture()
     writeFileSync(
-      join(checksumFixture.input, 'SHA256SUMS-windows-x64.txt'),
-      `${'0'.repeat(64)}  ${artifactNames()[4]}\n`,
+      join(checksumFixture.input, 'SHA256SUMS-macos-x64.txt'),
+      `${artifactNames()
+        .slice(2)
+        .map((name) => `${'0'.repeat(64)}  ${name}`)
+        .join('\n')}\n`,
     )
     const checksum = runAssembler(checksumFixture)
     expect(checksum.status).toBe(1)
@@ -199,7 +197,7 @@ describe('unsigned Preview release bundle assembler', () => {
     const receiptPath = join(
       receiptFixture.input,
       'preview-receipts',
-      'candidate-linux-x64.json',
+      'candidate-macos-x64.json',
     )
     const receipt = readJson(receiptPath) as {
       artifacts: Array<{ sha256: string }>
@@ -225,12 +223,12 @@ describe('unsigned Preview release bundle assembler', () => {
     expect(wrongCommit.stderr).toContain('macos/arm64')
 
     const runFixture = createFixture()
-    mutateReceipt(runFixture.input, 'candidate-windows-x64.json', (receipt) => {
+    mutateReceipt(runFixture.input, 'candidate-macos-x64.json', (receipt) => {
       receipt.runId = '654321'
     })
     const wrongRun = runAssembler(runFixture)
     expect(wrongRun.status).toBe(1)
-    expect(wrongRun.stderr).toContain('windows/x64')
+    expect(wrongRun.stderr).toContain('macos/x64')
   })
 
   it('rejects Stable, Internal and unrecognized input files', () => {
@@ -238,6 +236,8 @@ describe('unsigned Preview release bundle assembler', () => {
       'UNSIGNED-INTERNAL.txt',
       'release-manifest.json',
       'unexpected.txt',
+      `Emperor-Agent-${version}-UNSIGNED-PREVIEW-windows-x64.exe`,
+      `Emperor-Agent-${version}-UNSIGNED-PREVIEW-linux-x64.deb`,
     ]) {
       const fixture = createFixture()
       writeFileSync(join(fixture.input, name), 'blocked\n')
@@ -320,7 +320,6 @@ function createFixture(): { root: string; input: string; output: string } {
   mkdirSync(input)
   mkdirSync(join(input, 'packaged-smoke'), { recursive: true })
   mkdirSync(join(input, 'preview-receipts'), { recursive: true })
-  mkdirSync(join(input, 'preview-linux-receipts'), { recursive: true })
 
   for (const name of artifactNames())
     writeFileSync(join(input, name), `fixture:${name}\n`)
@@ -360,28 +359,6 @@ function createFixture(): { root: string; input: string; output: string } {
     )
   }
 
-  for (const ubuntuVersion of ['22.04', '24.04']) {
-    writeJson(
-      join(
-        input,
-        'preview-linux-receipts',
-        `UNSIGNED-PREVIEW-ubuntu-${ubuntuVersion}.json`,
-      ),
-      {
-        ...receiptBase('linux', 'x64'),
-        ubuntuVersion,
-        appImageSmoke: true,
-        debInstall: true,
-        debSmoke: true,
-        debRemove: true,
-        sourceReceipts: [
-          `${ubuntuVersion}-appimage.json`,
-          `${ubuntuVersion}-deb.json`,
-          `${ubuntuVersion}-lifecycle.json`,
-        ].map((name) => ({ name, sha256: 'b'.repeat(64), size: 100 })),
-      },
-    )
-  }
   return { root, input, output }
 }
 
@@ -424,9 +401,6 @@ function artifactNames(): string[] {
     `Emperor-Agent-${version}-UNSIGNED-PREVIEW-macos-arm64.zip`,
     `Emperor-Agent-${version}-UNSIGNED-PREVIEW-macos-x64.dmg`,
     `Emperor-Agent-${version}-UNSIGNED-PREVIEW-macos-x64.zip`,
-    `Emperor-Agent-${version}-UNSIGNED-PREVIEW-windows-x64.exe`,
-    `Emperor-Agent-${version}-UNSIGNED-PREVIEW-linux-x64.AppImage`,
-    `Emperor-Agent-${version}-UNSIGNED-PREVIEW-linux-x64.deb`,
   ]
 }
 
@@ -444,18 +418,6 @@ function candidateGroups() {
       arch: 'x64',
       smokePlatform: 'darwin',
       artifacts: artifacts.slice(2, 4),
-    },
-    {
-      platform: 'windows',
-      arch: 'x64',
-      smokePlatform: 'win32',
-      artifacts: artifacts.slice(4, 5),
-    },
-    {
-      platform: 'linux',
-      arch: 'x64',
-      smokePlatform: 'linux',
-      artifacts: artifacts.slice(5, 7),
     },
   ]
 }

@@ -45,9 +45,6 @@ const artifactNames = [
   `Emperor-Agent-${version}-UNSIGNED-PREVIEW-macos-arm64.zip`,
   `Emperor-Agent-${version}-UNSIGNED-PREVIEW-macos-x64.dmg`,
   `Emperor-Agent-${version}-UNSIGNED-PREVIEW-macos-x64.zip`,
-  `Emperor-Agent-${version}-UNSIGNED-PREVIEW-windows-x64.exe`,
-  `Emperor-Agent-${version}-UNSIGNED-PREVIEW-linux-x64.AppImage`,
-  `Emperor-Agent-${version}-UNSIGNED-PREVIEW-linux-x64.deb`,
 ]
 const groups = [
   candidateGroup(
@@ -57,12 +54,7 @@ const groups = [
     artifactNames.slice(0, 2),
   ),
   candidateGroup('macos', 'x64', 'darwin-x64.json', artifactNames.slice(2, 4)),
-  candidateGroup('windows', 'x64', 'win32-x64.json', artifactNames.slice(4, 5)),
-  candidateGroup('linux', 'x64', 'linux-x64.json', artifactNames.slice(5, 7)),
 ]
-const lifecycleNames = ['22.04', '24.04'].map(
-  (value) => `UNSIGNED-PREVIEW-ubuntu-${value}.json`,
-)
 const files = inventory(inputRoot)
 
 if ([...files.keys()].some((name) => name.includes('UNSIGNED-INTERNAL'))) {
@@ -80,7 +72,6 @@ const expectedInputs = new Set([
     group.receiptName,
     group.markerName,
   ]),
-  ...lifecycleNames,
 ])
 const unexpected = [...files.keys()].filter((name) => !expectedInputs.has(name))
 if (unexpected.length > 0) {
@@ -127,19 +118,6 @@ for (const group of groups) {
   assertPreviewBase(marker, group.platform, group.arch)
 }
 
-for (const ubuntuVersion of ['22.04', '24.04']) {
-  const name = `UNSIGNED-PREVIEW-ubuntu-${ubuntuVersion}.json`
-  const receipt = readJson(required(files, name))
-  assertPreviewBase(receipt, 'linux', 'x64')
-  if (receipt.ubuntuVersion !== ubuntuVersion)
-    fail(`wrong Ubuntu Preview receipt: ${ubuntuVersion}`)
-  for (const key of ['appImageSmoke', 'debInstall', 'debSmoke', 'debRemove']) {
-    if (receipt[key] !== true)
-      fail(`Ubuntu ${ubuntuVersion} Preview receipt failed ${key}`)
-  }
-  validateSourceReceiptRecords(receipt.sourceReceipts, ubuntuVersion)
-}
-
 rmSync(outputRoot, { recursive: true, force: true })
 mkdirSync(outputRoot, { recursive: true })
 for (const artifact of artifacts) {
@@ -155,7 +133,6 @@ const receiptRecords = [
     fileRecord(required(files, group.markerName)),
     fileRecord(required(files, group.smokeName)),
   ]),
-  ...lifecycleNames.map((name) => fileRecord(required(files, name))),
 ].sort((left, right) => left.name.localeCompare(right.name))
 
 writeFileSync(
@@ -170,6 +147,7 @@ const marker = {
   channel: 'preview',
   signingStatus: 'unsigned',
   notarized: false,
+  platforms: ['macos-arm64', 'macos-x64'],
   tag,
   commit,
   runId,
@@ -181,8 +159,8 @@ writeJson(join(outputRoot, 'preview-release-manifest.json'), {
   artifacts: manifestArtifacts,
   receipts: receiptRecords,
   verification: {
-    packagedSmoke: ['macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64'],
-    linuxLifecycle: ['ubuntu-22.04', 'ubuntu-24.04'],
+    packagedSmoke: ['macos-arm64', 'macos-x64'],
+    linuxLifecycle: [],
     resourceInspection: true,
     checksumsVerified: true,
     attestationMeaning:
@@ -264,27 +242,6 @@ function validateSmokeReceipt(receipt, platform, arch, name) {
     })
   } catch (error) {
     fail(`invalid Preview packaged smoke receipt: ${name}: ${error.message}`)
-  }
-}
-
-function validateSourceReceiptRecords(records, ubuntuVersion) {
-  const expected = [
-    `${ubuntuVersion}-appimage.json`,
-    `${ubuntuVersion}-deb.json`,
-    `${ubuntuVersion}-lifecycle.json`,
-  ]
-  if (!Array.isArray(records) || records.length !== expected.length)
-    fail(`invalid Ubuntu ${ubuntuVersion} source receipt records`)
-  const names = records.map((record) => record?.name).sort()
-  if (JSON.stringify(names) !== JSON.stringify(expected.sort()))
-    fail(`invalid Ubuntu ${ubuntuVersion} source receipt names`)
-  for (const record of records) {
-    if (
-      !/^[a-f0-9]{64}$/.test(record?.sha256 || '') ||
-      !Number.isSafeInteger(record?.size) ||
-      record.size <= 0
-    )
-      fail(`invalid Ubuntu ${ubuntuVersion} source receipt digest`)
   }
 }
 

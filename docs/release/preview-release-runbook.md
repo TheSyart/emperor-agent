@@ -38,8 +38,8 @@ v<version>-preview.<n>
 
 ```mermaid
 flowchart LR
-  Tag["Preview tag"] --> Candidates["macOS / Windows / Linux candidates"]
-  Candidates --> Smoke["Packaged smoke + Linux lifecycle"]
+  Tag["Preview tag"] --> Candidates["macOS arm64 / x64 candidates"]
+  Candidates --> Smoke["Packaged smoke"]
   Smoke --> Aggregate["Fail-closed aggregate"]
   Aggregate --> SBOM["Checksums + CycloneDX SBOM"]
   SBOM --> Attest["GitHub provenance / SBOM attestation"]
@@ -48,21 +48,23 @@ flowchart LR
 
 macOS job 在安装依赖和运行质量门禁前显式选择 Xcode 26，确保能编译 macOS 26 的听写接口；不依赖 runner 默认的旧 SDK。
 
-平台矩阵：
+打包使用 Python 3.11：当前 node-pty 的 Electron rebuild 所用 node-gyp 仍依赖 `distutils`，不能直接使用已移除该模块的 Python 3.12 及以上版本。
+
+平台矩阵（用户 2026-10-15 决定只发布 macOS）：
 
 - macOS arm64：unsigned DMG 与 ZIP。
 - macOS x64：unsigned DMG 与 ZIP。
-- Windows x64：unsigned NSIS EXE。
-- Linux x64：AppImage 与 DEB，并在 Ubuntu 22.04 / 24.04 跑安装、smoke、移除生命周期验证。
 
-每个平台先运行质量门禁、打包 smoke 并生成 candidate receipt。Aggregate job 下载所有 candidate 和 Linux lifecycle receipt，按 publication contract 检查 tag、commit、workflow run、平台矩阵、marker 与文件清单；缺少或混入意外资产时直接失败。
+本轮不构建、聚合或发布 Windows / Linux 包；保留旧 Release。常规 CI 的 Windows job 当前已标为不支持，不能把它的失败视为已通过。
+
+每个平台先运行质量门禁、打包 smoke 并生成 candidate receipt。Aggregate job 下载两个 macOS candidate，按 publication contract 检查 tag、commit、workflow run、平台矩阵、marker 与文件清单；缺少或混入意外资产时直接失败。
 
 ## 聚合与供应链材料
 
 聚合 job 生成或验证：
 
 - 平台安装包及 `UNSIGNED-PREVIEW` 命名；
-- candidate、packaged smoke 和 Linux lifecycle receipts；packaged smoke schema 2 必须同时带不含路径的 host-OS sandbox backend/status/provenance、全部 required/ready 的 lifecycle receipt，以及真实 ASAR renderer 的 Node globals absent、Core bridge/bootstrap、attachment 字节、sandbox/context-isolation/node-integration 结果；Linux 测试若使用 `--no-sandbox` 只能标记 `disabled-for-linux-test`，其他平台必须标记 Chromium sandbox enabled；
+- 两个 macOS candidate 与 packaged smoke receipts；packaged smoke schema 2 必须同时带不含路径的 host-OS sandbox backend/status/provenance、全部 required/ready 的 lifecycle receipt，以及真实 ASAR renderer 的 Node globals absent、Core bridge/bootstrap、attachment 字节、sandbox/context-isolation/node-integration 结果；Linux 测试若使用 `--no-sandbox` 只能标记 `disabled-for-linux-test`，其他平台必须标记 Chromium sandbox enabled；
 - `ARTIFACT-SHA256SUMS.txt` 与全 bundle `SHA256SUMS.txt`；
 - 合并后的 CycloneDX SBOM；
 - GitHub build provenance 与 SBOM attestations；
@@ -72,10 +74,10 @@ Publish job 会重新验证 contract、checksums 和 attestations，先创建 dr
 
 ## 发布后验收
 
-1. GitHub Release 标记为 Pre-release，标题和正文明确 `UNSIGNED-PREVIEW`。
-2. 七个用户安装资产齐全：两个 macOS 架构各 DMG / ZIP、Windows EXE、Linux AppImage / DEB。
+1. GitHub Release 标记为 Pre-release，标题和正文明确 `UNSIGNED-PREVIEW` 与本轮仅 macOS。
+2. 四个用户安装资产齐全：两个 macOS 架构各 DMG / ZIP；manifest 与 marker 的 `platforms` 必须为 `macos-arm64`、`macos-x64`，混入其他平台或缺架构直接失败。
 3. 安全说明、SBOM、checksum、manifest 与 receipt 资产齐全。
-4. 随机下载每个平台至少一个资产，用 `SHA256SUMS.txt` 复核。
+4. 下载两个 macOS 架构各至少一个资产，用 `SHA256SUMS.txt` 复核。
 5. 使用下面的命令验证构建来源；`<file>` 替换为实际资产：
 
    ```bash

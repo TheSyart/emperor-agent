@@ -198,9 +198,15 @@ describe('runWorkerSession over an in-process MessageChannel', () => {
         log('after')
         return 'unreachable'`),
     )
-    await new Promise((resolve) => setTimeout(resolve, 20))
+    const start = await vi.waitFor(
+      () => {
+        const message = host.ofType('child-start')[0]
+        if (!message) throw new Error('no child-start yet')
+        return message
+      },
+      { timeout: 5_000 },
+    )
     host.send({ type: 'cancel', reason: 'stop' })
-    const start = host.ofType('child-start')[0]!
     host.send({ type: 'child-started', callId: start.callId, childId: 'c' })
     const result = await host.result()
     host.close()

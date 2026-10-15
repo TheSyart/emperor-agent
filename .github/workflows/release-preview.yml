@@ -36,6 +36,10 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             desktop/package-lock.json
+      # node-gyp used by the node-pty Electron rebuild still imports distutils.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: Validate Preview tag
         run: node scripts/preview-release-contract.mjs assert "$GITHUB_REF_NAME" preview
       - name: Install dependencies
@@ -69,148 +73,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  windows-preview:
-    name: UNSIGNED-PREVIEW Windows (x64)
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            desktop/package-lock.json
-      - name: Validate Preview tag
-        shell: bash
-        run: node scripts/preview-release-contract.mjs assert "$GITHUB_REF_NAME" preview
-      - name: Install dependencies
-        shell: bash
-        run: |
-          npm ci
-          npm --prefix desktop ci
-      - name: Quality gate
-        shell: bash
-        run: ./scripts/check.sh
-      - name: Apply Preview package version
-        shell: bash
-        run: npm --prefix desktop version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
-      - name: Build unsigned NSIS package
-        shell: bash
-        run: |
-          npm --prefix desktop run build
-          cd desktop
-          npx electron-builder --config electron-builder.preview.cjs --win nsis --x64 --publish never
-      - name: Run packaged smoke and create candidate receipt
-        shell: bash
-        run: |
-          npm --prefix desktop run package:smoke
-          node scripts/preview-release-contract.mjs candidate desktop/dist "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID" windows x64
-      - name: Upload unsigned Windows candidate
-        uses: actions/upload-artifact@v4
-        with:
-          name: UNSIGNED-PREVIEW-windows-x64-candidate
-          path: |
-            desktop/dist/*-UNSIGNED-PREVIEW-windows-x64.exe
-            desktop/dist/SHA256SUMS-windows-x64.txt
-            desktop/dist/packaged-smoke/win32-x64.json
-            desktop/dist/preview-receipts/candidate-windows-x64.json
-            desktop/dist/preview-receipts/UNSIGNED-PREVIEW-windows-x64.marker.json
-          if-no-files-found: error
-          retention-days: 7
-
-  linux-preview-build:
-    name: UNSIGNED-PREVIEW Linux build (x64)
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            desktop/package-lock.json
-      - name: Validate Preview tag
-        run: node scripts/preview-release-contract.mjs assert "$GITHUB_REF_NAME" preview
-      - name: Install dependencies
-        run: |
-          npm ci
-          npm --prefix desktop ci
-      - name: Quality gate
-        run: make check
-      - name: Apply Preview package version
-        run: npm --prefix desktop version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
-      - name: Build unsigned AppImage and DEB
-        run: |
-          npm --prefix desktop run build
-          cd desktop
-          npx electron-builder --config electron-builder.preview.cjs --linux AppImage deb --x64 --publish never
-      - name: Run packaged smoke and create candidate receipt
-        run: |
-          npm --prefix desktop run package:smoke
-          node scripts/preview-release-contract.mjs candidate desktop/dist "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID" linux x64
-      - name: Upload unsigned Linux candidate
-        uses: actions/upload-artifact@v4
-        with:
-          name: UNSIGNED-PREVIEW-linux-x64-candidate
-          path: |
-            desktop/dist/*-UNSIGNED-PREVIEW-linux-x64.AppImage
-            desktop/dist/*-UNSIGNED-PREVIEW-linux-x64.deb
-            desktop/dist/SHA256SUMS-linux-x64.txt
-            desktop/dist/packaged-smoke/linux-x64.json
-            desktop/dist/preview-receipts/candidate-linux-x64.json
-            desktop/dist/preview-receipts/UNSIGNED-PREVIEW-linux-x64.marker.json
-          if-no-files-found: error
-          retention-days: 7
-
-  linux-preview-smoke:
-    name: UNSIGNED-PREVIEW Linux smoke (${{ matrix.version }})
-    needs: linux-preview-build
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-22.04
-            version: '22.04'
-          - runner: ubuntu-24.04
-            version: '24.04'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - name: Download unsigned Linux candidate
-        uses: actions/download-artifact@v4
-        with:
-          name: UNSIGNED-PREVIEW-linux-x64-candidate
-          path: desktop/dist
-      - name: Install, smoke and remove AppImage and DEB
-        run: scripts/verify-linux-release.sh smoke
-      - name: Wrap lifecycle receipt as Preview
-        run: >-
-          node scripts/preview-release-contract.mjs linux-lifecycle
-          desktop/dist "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID"
-          "${{ matrix.version }}"
-      - name: Upload Preview lifecycle receipt
-        uses: actions/upload-artifact@v4
-        with:
-          name: UNSIGNED-PREVIEW-linux-${{ matrix.version }}-receipts
-          path: desktop/dist/preview-linux-receipts/UNSIGNED-PREVIEW-ubuntu-${{ matrix.version }}.json
-          if-no-files-found: error
-          retention-days: 7
-
   preview-aggregate:
     name: Verify and attest UNSIGNED-PREVIEW bundle
-    needs:
-      [macos-preview, windows-preview, linux-preview-build, linux-preview-smoke]
+    needs: [macos-preview]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -236,12 +101,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: UNSIGNED-PREVIEW-*-candidate
-          path: preview-inputs
-          merge-multiple: true
-      - name: Download Preview lifecycle receipts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: UNSIGNED-PREVIEW-linux-*-receipts
           path: preview-inputs
           merge-multiple: true
       - name: Assemble fail-closed Preview bundle
