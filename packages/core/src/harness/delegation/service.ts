@@ -25,6 +25,10 @@ import {
 } from './fold'
 import { redactExecutorText } from './redaction'
 import { buildDelegationBrief } from './context'
+import type {
+  DelegationQuestion,
+  DelegationQuestionOutcome,
+} from './interactions'
 import type { ExecutorRegistry } from './registry'
 import type { DelegationWorkspaceService } from '../../workspace/delegation-workspaces'
 import {
@@ -53,6 +57,10 @@ export interface DelegationServiceOptions {
     secretValues?: string[]
   }>
   onEvent?: (event: NormalizedExecutorEvent) => void
+  onQuestion?: (
+    question: DelegationQuestion,
+    signal: AbortSignal,
+  ) => Promise<DelegationQuestionOutcome>
 }
 interface Entry {
   journal: DelegationJournal
@@ -63,6 +71,7 @@ interface Entry {
   closing?: Promise<{ quiescent: boolean }>
   held?: { workspace?: ResourceLease; budget?: BudgetLease; quiescent: boolean }
   stop: boolean
+  inputFailure?: string
   waiters: Set<() => void>
 }
 export class DelegationService {
@@ -570,6 +579,7 @@ export class DelegationService {
     const activeRunId = runId
     const controller = new AbortController()
     e.controller = controller
+    e.inputFailure = undefined
     e.closing = undefined
     let budget: BudgetLease | undefined,
       workspace: ResourceLease | undefined,
@@ -782,11 +792,6 @@ export class DelegationService {
           text + '\n',
           { mode: 0o600 },
         )
-        try {
-          this.options.onEvent?.(event)
-        } catch {
-          /* UI subscribers do not change execution. */
-        }
         if (event.type === 'text_delta')
           summary = boundText(summary + event.text, 8192)
         if (event.type === 'usage')
@@ -830,6 +835,24 @@ export class DelegationService {
             })
           })
         }
+        // Publish only after durable question linkage and phase are committed.
+        try {
+          this.options.onEvent?.(event)
+        } catch {
+          /* observer only */
+        }
+        if (event.type === 'question' && !e.stop) {
+          const question: DelegationQuestion = {
+            owner: record.owner,
+            delegationId: id,
+            runId: activeRunId,
+            generation: run.generation,
+            requestId: event.requestId,
+            backend: record.backend,
+            questions: event.questions,
+          }
+          void this.handleQuestion(question, controller.signal)
+        }
         if (event.type === 'turn_finished') {
           status = event.status
           structured = event.structured
@@ -848,6 +871,7 @@ export class DelegationService {
       if (failureCode === 'OUTCOME_UNKNOWN') quiescent = false
     } finally {
       if (timer) clearTimeout(timer)
+      controller.abort()
       if (session) {
         try {
           e.closing ??= session.close()
@@ -864,21 +888,23 @@ export class DelegationService {
       }
       const phase = !quiescent
         ? 'outcome_unknown'
-        : e.stop
-          ? status === 'completed'
-            ? 'completed'
-            : current.phase === 'queued'
-              ? 'cancelled'
-              : 'cancelled'
-          : status === 'completed'
-            ? 'completed'
-            : status === 'failed'
-              ? 'failed'
-              : status === 'interrupted'
-                ? 'interrupted'
-                : sent
-                  ? 'outcome_unknown'
-                  : 'failed'
+        : e.inputFailure
+          ? 'interrupted'
+          : e.stop
+            ? status === 'completed'
+              ? 'completed'
+              : current.phase === 'queued'
+                ? 'cancelled'
+                : 'cancelled'
+            : status === 'completed'
+              ? 'completed'
+              : status === 'failed'
+                ? 'failed'
+                : status === 'interrupted'
+                  ? 'interrupted'
+                  : sent
+                    ? 'outcome_unknown'
+                    : 'failed'
       if (phase === 'cancelled' && current.phase === 'preparing') {
         await this.change(e, activeRunId, { phase: 'cancelling' })
         current = e.journal.load().runs[activeRunId]!
@@ -929,14 +955,137 @@ export class DelegationService {
         summary,
         usage,
         ...(structured === undefined ? {} : { structured }),
-        ...(failureCode ? { failureCode } : {}),
+        ...(e.inputFailure
+          ? { acceptance: 'needs_user' as const, failureCode: e.inputFailure }
+          : failureCode
+            ? { failureCode }
+            : {}),
+      })
+      await this.serial(e, async () => {
+        for (const interaction of Object.values(e.journal.load().interactions))
+          if (
+            interaction.runId === activeRunId &&
+            ['pending', 'answering'].includes(interaction.state)
+          )
+            await this.append(e, { ...interaction, state: 'cancelled' })
       })
       e.controller = undefined
     }
   }
+  private async handleQuestion(
+    question: DelegationQuestion,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const e = this.entry(question.delegationId)
+    try {
+      const outcome = await (this.options.onQuestion?.(question, signal) ??
+        Promise.resolve({ outcome: 'unavailable' } as const))
+      if (e.stop || signal.aborted) return
+      if (outcome.outcome === 'answered') {
+        await this.answer(question.delegationId, {
+          rootSessionId: question.owner.rootSessionId,
+          runId: question.runId,
+          generation: question.generation,
+          requestId: question.requestId,
+          answers: outcome.answers,
+        })
+      } else
+        await this.interrupt(
+          question.delegationId,
+          question.runId,
+          'QUESTION_' + outcome.outcome.toUpperCase(),
+        )
+    } catch {
+      if (!e.stop && !signal.aborted)
+        await this.interrupt(
+          question.delegationId,
+          question.runId,
+          'QUESTION_UNAVAILABLE',
+        ).catch(() => undefined)
+    }
+  }
+  async answer(
+    id: string,
+    input: {
+      rootSessionId: string
+      runId: string
+      generation: number
+      requestId: string
+      answers: Record<string, string>
+    },
+  ): Promise<void> {
+    const e = this.entry(id)
+    await this.serial(e, async () => {
+      const state = e.journal.load(),
+        run = state.runs[input.runId],
+        request = state.interactions[input.requestId]
+      if (state.record!.owner.rootSessionId !== input.rootSessionId)
+        throw new DelegationError(
+          'PERMISSION_DENIED',
+          'question belongs to another root session',
+        )
+      if (
+        e.stop ||
+        state.record!.currentRunId !== input.runId ||
+        !run ||
+        run.generation !== input.generation ||
+        TERMINAL_RUN_PHASES.has(run.phase)
+      )
+        throw new DelegationError(
+          'STALE_RUN',
+          'question run is no longer current',
+        )
+      if (
+        !request ||
+        request.state !== 'pending' ||
+        request.runId !== input.runId ||
+        request.generation !== input.generation ||
+        !e.session
+      )
+        throw new DelegationError(
+          'STALE_REQUEST',
+          'question is no longer pending',
+        )
+      const questions =
+        request.questions as import('./types').ExecutorQuestion[]
+      const answers: Record<string, string> = {}
+      for (const q of questions) {
+        const text = input.answers[q.id]
+        if (
+          typeof text !== 'string' ||
+          !text.trim() ||
+          Buffer.byteLength(text) > 4096
+        )
+          throw new DelegationError(
+            'INVALID_ANSWER',
+            'each business question needs bounded text',
+          )
+        answers[q.id] = text
+      }
+      await this.append(e, { ...request, state: 'answering' })
+      await e.session.answer({
+        requestId: input.requestId,
+        generation: input.generation,
+        kind: 'question',
+        answers,
+      })
+      await this.append(e, { ...request, state: 'answered' })
+      if (
+        !Object.values(e.journal.load().interactions).some(
+          (q) => q.runId === input.runId && q.state === 'pending',
+        )
+      )
+        await this.append(e, {
+          type: 'run-changed',
+          runId: input.runId,
+          patch: { phase: 'running' },
+        })
+    })
+  }
   async interrupt(
     id: string,
     expectedRunId: string,
+    inputFailure?: string,
   ): Promise<{ requested: boolean }> {
     const e = this.entry(id),
       state = e.journal.load(),
@@ -945,6 +1094,19 @@ export class DelegationService {
       throw new DelegationError('STALE_RUN', 'interrupt target changed')
     if (TERMINAL_RUN_PHASES.has(run.phase)) return { requested: false }
     e.stop = true
+    e.inputFailure ??= inputFailure
+    if (inputFailure && e.session) {
+      for (const request of Object.values(state.interactions))
+        if (request.runId === expectedRunId && request.state === 'pending')
+          await e.session
+            .answer({
+              requestId: request.requestId,
+              generation: request.generation,
+              kind: 'deny',
+              reason: inputFailure,
+            })
+            .catch(() => undefined)
+    }
     await this.serial(e, async () => {
       const current = e.journal.load().runs[expectedRunId]!
       if (current.phase === 'queued')

@@ -62,7 +62,7 @@ export type DelegationEvent =
       requestId: string
       runId: string
       generation: number
-      state: 'pending' | 'answered' | 'cancelled'
+      state: 'pending' | 'answering' | 'answered' | 'cancelled'
       questions?: unknown
     }
   | { type: 'outbox'; notice: DelegationNotice }
@@ -97,7 +97,7 @@ const transitions: Record<RunPhase, readonly RunPhase[]> = {
     'outcome_unknown',
   ],
   waiting_input: ['running', 'cancelling', 'interrupted', 'outcome_unknown'],
-  cancelling: ['cancelled', 'completed', 'outcome_unknown'],
+  cancelling: ['cancelled', 'completed', 'interrupted', 'outcome_unknown'],
   completed: [],
   failed: [],
   cancelled: [],

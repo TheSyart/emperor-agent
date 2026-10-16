@@ -588,8 +588,12 @@ export class CoreApi {
       }),
       mutations: this.workspaceMutations,
       runtime: (profile, id) => executorRuntime.prepare(profile, id),
+      onQuestion: (question, signal) =>
+        host.delegationInteractions.ask(question, signal),
     })
     host.delegations = this.delegations
+    host.delegationQuestionTimeoutMs = () =>
+      this.executorConfig.read().limits.questionTimeoutMs
     const projectRootOf = (sessionId: string): string | null => {
       try {
         return resolveWorkspaceProject(sessionId).projectRoot

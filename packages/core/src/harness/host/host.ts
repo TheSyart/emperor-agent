@@ -1,3 +1,4 @@
+import { DelegationInteractionBridge } from '../delegation/interactions'
 /**
  * `HarnessHost`: the single composition root of Emperor's agent kernel.
  *
@@ -254,6 +255,8 @@ export class HarnessHost {
   readonly goalInstall: InstalledGoal
   readonly subagents: SubagentManager
   delegations: DelegationService | null = null
+  delegationQuestionTimeoutMs = () => 15 * 60 * 1000
+  readonly delegationInteractions: DelegationInteractionBridge
   /** Dynamic workflows (`workflow` / `ralph` tools) over in-process subagents. */
   readonly workflows: WorkflowEngine
   readonly workflowRuns = new WorkflowRunRegistry()
@@ -340,6 +343,19 @@ export class HarnessHost {
     })
     this.mcpTools = new McpToolBridge(kept.mcpClient, this.tools)
     kept.mcpClient.setReservedToolNames(() => this.mcpTools.reservedNames())
+    this.delegationInteractions = new DelegationInteractionBridge({
+      pending: this.pending,
+      root: (id) => {
+        try {
+          return this.agentFor(id)
+        } catch {
+          return undefined
+        }
+      },
+      available: (owner) =>
+        this.eventSink !== null && owner.source !== 'scheduler',
+      timeoutMs: () => this.delegationQuestionTimeoutMs(),
+    })
     this.goalInstall = this.compose(options)
   }
 
@@ -1375,6 +1391,7 @@ export class HarnessHost {
   }
 
   stop(sessionId: string): boolean {
+    this.delegationInteractions.cancelRoot(sessionId)
     const externalActive =
       this.delegations
         ?.list()
@@ -1383,13 +1400,11 @@ export class HarnessHost {
             state.record?.owner.rootSessionId === sessionId &&
             state.record.availability === 'active',
         ) ?? false
-    void this.delegations
-      ?.stopRoot(sessionId)
-      .catch((error) =>
-        logger.warn('external delegation stop requires recovery', {
-          error: String(error),
-        }),
-      )
+    void this.delegations?.stopRoot(sessionId).catch((error) =>
+      logger.warn('external delegation stop requires recovery', {
+        error: String(error),
+      }),
+    )
     const agent = this.agents.get(sessionId)
     if (agent === undefined) return externalActive
     const running = agent.status === 'running'
@@ -1690,13 +1705,12 @@ export class HarnessHost {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
-    await this.delegations
-      ?.shutdown()
-      .catch((error) =>
-        logger.warn('external delegation shutdown requires recovery', {
-          error: String(error),
-        }),
-      )
+    this.delegationInteractions.cancelRoot()
+    await this.delegations?.shutdown().catch((error) =>
+      logger.warn('external delegation shutdown requires recovery', {
+        error: String(error),
+      }),
+    )
     await this.computerUse?.dispose().catch(() => {})
     for (const agent of this.agents.values()) agent.dispose()
     for (const unsubscribe of this.unsubscribes.values()) unsubscribe()

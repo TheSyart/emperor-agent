@@ -168,27 +168,33 @@ export class PendingInteractions {
 
   readonly questionAnswerer: UserQuestionAnswerer = (request) =>
     new Promise<UserAnswers>((resolve, reject) => {
+      const abort = () => {
+        if (this.pending.get(wireId) === entry) {
+          this.pending.delete(wireId)
+          this.changed(entry.sessionId)
+          reject(new UserQuestionDismissed('the question was cancelled'))
+        }
+      }
+      const cleanup = () => request.signal?.removeEventListener('abort', abort)
       const entry: PendingQuestion = {
         kind: request.intent?.kind === 'plan-review' ? 'plan' : 'question',
         id: request.id,
         sessionId: request.agent.id,
         questions: request.questions,
-        resolve,
-        reject,
+        resolve: (answers) => {
+          cleanup()
+          resolve(answers)
+        },
+        reject: (error) => {
+          cleanup()
+          reject(error)
+        },
       }
       const wireId = this.wireId(entry)
       this.pending.set(wireId, entry)
-      request.signal?.addEventListener(
-        'abort',
-        () => {
-          if (this.pending.get(wireId) === entry) {
-            this.pending.delete(wireId)
-            this.changed(entry.sessionId)
-          }
-        },
-        { once: true },
-      )
-      this.changed(entry.sessionId)
+      request.signal?.addEventListener('abort', abort, { once: true })
+      if (request.signal?.aborted) abort()
+      else this.changed(entry.sessionId)
     })
 
   /** Computer Use grant cards (`grant_<id>`); keyed by the root session. */
