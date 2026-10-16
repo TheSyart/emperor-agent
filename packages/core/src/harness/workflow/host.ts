@@ -294,6 +294,11 @@ export class WorkerRun implements WorkflowRun {
     try {
       run = await this.provider.start({
         prompt: request.prompt,
+        clientRequestId: this.id + ':' + callId,
+        ...(request.backend === undefined ? {} : { backend: request.backend }),
+        ...(request.profileId === undefined
+          ? {}
+          : { profileId: request.profileId }),
         parent: this.parent,
         signal: this.controller.signal,
         ...(request.schema === undefined
@@ -365,7 +370,15 @@ export class WorkerRun implements WorkflowRun {
         }
       },
     )
-    this.post({ type: 'child-started', callId, childId: run.id })
+    this.post({
+      type: 'child-started',
+      callId,
+      childId: run.id,
+      ...(run.externalRunId === undefined
+        ? {}
+        : { externalRunId: run.externalRunId }),
+      ...(run.backend === undefined ? {} : { backend: run.backend }),
+    })
     void forwardResult.then((forward) => {
       forward()
     })

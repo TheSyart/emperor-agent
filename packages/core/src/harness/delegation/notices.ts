@@ -19,7 +19,16 @@ export function settlementNotice(
             .subarray(0, 8192)
             .toString('utf8')
             .replace(/\uFFFD$/, '')
-  return { id: 'dgn-' + run.id, runId: run.id, text: bounded, delivered: false }
+  return {
+    id: 'dgn-' + run.id,
+    recipient:
+      run.generation === 1 && record.startSpec?.runInBackground === false
+        ? 'collector'
+        : 'parent',
+    runId: run.id,
+    text: bounded,
+    delivered: false,
+  }
 }
 /** Parent receipt is the durable inbox insertion, including after it was consumed. */
 export class DelegationNoticeOutbox {

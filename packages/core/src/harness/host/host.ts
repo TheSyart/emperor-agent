@@ -1,3 +1,4 @@
+import { createRoutingChildProvider } from '../delegation/workflow-provider'
 import { DelegationInteractionBridge } from '../delegation/interactions'
 /**
  * `HarnessHost`: the single composition root of Emperor's agent kernel.
@@ -336,7 +337,20 @@ export class HarnessHost {
       approval: this.approval,
     })
     this.workflows = new WorkflowEngine([
-      createSpawnChildProvider({ manager: this.subagents, llm: this.llm }),
+      createRoutingChildProvider({
+        internal: createSpawnChildProvider({
+          manager: this.subagents,
+          llm: this.llm,
+        }),
+        delegations: () => this.delegations ?? undefined,
+        ownerResolver: (agent, callId) => this.delegationOwner(agent, callId),
+        readOnly: (agent) => {
+          const parent = this.delegationParent(
+            this.delegationOwner(agent, 'workflow'),
+          )
+          return parent.policy.mode === 'read-only' || !!parent.planMode
+        },
+      }),
     ])
     this.hooks = new ClaudeCodeHooks({
       configPaths: defaultHookConfigPaths({ stateRoot: kept.paths.stateRoot }),
@@ -1332,13 +1346,11 @@ export class HarnessHost {
   }
   private resumeDelegationNotices(input: SubmitInput): void {
     if (input.scheduler || (input.source && input.source !== 'user')) return
-    void this.delegations
-      ?.resumeRootNotices(input.sessionId)
-      .catch((error) =>
-        logger.warn('external result notification remains pending', {
-          error: String(error),
-        }),
-      )
+    void this.delegations?.resumeRootNotices(input.sessionId).catch((error) =>
+      logger.warn('external result notification remains pending', {
+        error: String(error),
+      }),
+    )
   }
   async submit(input: SubmitInput): Promise<SubmitResult> {
     const agent = this.agentFor(input.sessionId)

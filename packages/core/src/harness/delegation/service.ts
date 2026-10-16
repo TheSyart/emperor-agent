@@ -479,7 +479,8 @@ export class DelegationService {
             ),
         })
         for (const notice of Object.values(state.outbox))
-          if (!notice.delivered) await outbox.dispatch(record.owner, notice)
+          if (!notice.delivered && notice.recipient !== 'collector')
+            await outbox.dispatch(record.owner, notice)
       })
     e.noticeTail = operation
     await operation
@@ -618,6 +619,7 @@ export class DelegationService {
   start(
     owner: DelegationOwner,
     spec: DelegationStart,
+    signal?: AbortSignal,
   ): Promise<DelegationRecord> {
     if (this.disposed)
       return Promise.reject(
@@ -640,7 +642,7 @@ export class DelegationService {
         )
       return previous.promise
     }
-    const promise = this.create(owner, spec, digest)
+    const promise = this.create(owner, spec, digest, signal)
     this.starts.set(key, { digest, promise })
     void promise.catch(() => {
       if (
@@ -656,7 +658,13 @@ export class DelegationService {
     owner: DelegationOwner,
     spec: DelegationStart,
     digest: string,
+    signal?: AbortSignal,
   ): Promise<DelegationRecord> {
+    if (signal?.aborted)
+      throw new DelegationError(
+        'ABORTED',
+        'caller stopped before delegation start',
+      )
     const epoch = this.rootEpochs.get(owner.rootSessionId) ?? 0
     this.rootEpochs.set(owner.rootSessionId, epoch)
     if (!spec.clientRequestId || !spec.prompt.trim())
@@ -678,8 +686,9 @@ export class DelegationService {
       config.limits.maxDepth,
     )
     const profile = this.profile(spec)
-    const probe = await this.options.registry.requireAvailable(profile)
+    const probe = await this.options.registry.requireAvailable(profile, signal)
     if (
+      signal?.aborted ||
       this.disposed ||
       (this.rootEpochs.get(owner.rootSessionId) ?? 0) !== epoch
     )
@@ -737,6 +746,17 @@ export class DelegationService {
       },
     })
     const result = entry.journal.load().record!
+    if (signal) {
+      const abort = () => {
+        void this.interrupt(id, runId).catch(() => undefined)
+      }
+      signal.addEventListener('abort', abort, { once: true })
+      if (signal.aborted) abort()
+      void this.wait(id, runId).then(
+        () => signal.removeEventListener('abort', abort),
+        () => signal.removeEventListener('abort', abort),
+      )
+    }
     this.pump(id)
     return result
   }
@@ -1307,7 +1327,8 @@ export class DelegationService {
         if (event.type === 'turn_finished') {
           status = event.status
           structured = event.structured
-          summary = boundText(event.text ?? summary, 8192)
+          if (event.status === 'failed') failureCode = 'EXECUTOR_TURN_FAILED'
+          summary = boundText(event.text ?? event.error ?? summary, 8192)
           break
         }
       }

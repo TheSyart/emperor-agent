@@ -15,6 +15,7 @@ export interface DelegationMessage {
   payloadDigest?: string
 }
 export interface DelegationNotice {
+  recipient?: 'parent' | 'collector'
   id: string
   runId: string
   text: string
