@@ -29,6 +29,26 @@ export class DelegationResources {
       (r) => r.keys.includes(key) && r.owner !== exceptOwner,
     )
   }
+  /** Recovered unknown writers block new work without waiting on other quarantines. */
+  quarantine(keys: string[], owner: string): ResourceLease {
+    const request: ResourceRequest = {
+      keys: [...new Set(keys)].sort(),
+      owner,
+      mode: 'exclusive',
+    }
+    if (!owner || !request.keys.length || request.keys.some((k) => !k))
+      throw new DelegationError(
+        'INVALID_RESOURCE',
+        'quarantine identity required',
+      )
+    this.active.add(request)
+    return {
+      release: () => {
+        this.active.delete(request)
+        this.drain()
+      },
+    }
+  }
   acquire(
     request: ResourceRequest,
     signal?: AbortSignal | null,

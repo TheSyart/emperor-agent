@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { appendFileSync, mkdirSync, existsSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   DelegationError,
@@ -36,6 +36,15 @@ import {
   type WorkspaceMutationCoordinator,
 } from '../../workspace/mutation-coordinator'
 import type { ResourceLease } from './resources'
+import { DelegationRecovery, type RecoveryReport } from './recovery'
+import { DelegationNoticeOutbox, settlementNotice } from './notices'
+import {
+  saveOwnership,
+  loadOwnership,
+  type ProcessOwnership,
+} from './ownership'
+import { terminateRecordedProcess } from './process'
+import { durableReplaceSync } from '../../store/persistence'
 export interface DelegationServiceOptions {
   root: string
   config: () => ExecutorConfig
@@ -56,6 +65,13 @@ export interface DelegationServiceOptions {
     tempRoot: string
     secretValues?: string[]
   }>
+  notices?: {
+    parent: (
+      owner: DelegationOwner,
+    ) => import('../agent/agent').Agent | undefined
+    canWake: (owner: DelegationOwner) => boolean
+    flush: (sessionId: string) => void
+  }
   onEvent?: (event: NormalizedExecutorEvent) => void
   onQuestion?: (
     question: DelegationQuestion,
@@ -65,8 +81,10 @@ export interface DelegationServiceOptions {
 interface Entry {
   journal: DelegationJournal
   tail: Promise<unknown>
+  noticeTail?: Promise<void>
   active?: Promise<void>
   controller?: AbortController
+  inspectionController?: AbortController
   session?: ExecutorSession
   closing?: Promise<{ quiescent: boolean }>
   held?: { workspace?: ResourceLease; budget?: BudgetLease; quiescent: boolean }
@@ -88,8 +106,383 @@ export class DelegationService {
     { key: string; probe: ExecutorProbe }
   >()
   private disposed = false
+  private reconciled = false
+  recoveryReport: RecoveryReport = { loaded: [], issues: [] }
   constructor(private readonly options: DelegationServiceOptions) {
     this.budget = new DelegationBudget(options.config())
+  }
+  private workspaceAvailable(record: DelegationRecord): boolean {
+    try {
+      const lease = this.options.workspaces.get(record.workspaceLeaseId)
+      return (
+        !!lease &&
+        lease.id === record.workspaceLeaseId &&
+        lease.owner.rootSessionId === record.owner.rootSessionId &&
+        lease.owner.parentAgentId === record.owner.parentAgentId &&
+        lease.owner.taskScopeId === record.owner.taskScopeId &&
+        lease.mode === record.startSpec?.workspace &&
+        ['ready', 'retained'].includes(lease.status) &&
+        existsSync(record.cwd) &&
+        realpathSync(lease.cwd) === realpathSync(record.cwd)
+      )
+    } catch {
+      return false
+    }
+  }
+  async reconcile(): Promise<RecoveryReport> {
+    if (this.reconciled) return this.recoveryReport
+    this.reconciled = true
+    const recovery = new DelegationRecovery({
+      root: this.options.root,
+      attach: async (journal, original) => {
+        const id = original.record!.id
+        if (this.entries.has(id)) return
+        const e: Entry = {
+          journal,
+          tail: Promise.resolve(),
+          stop: true,
+          waiters: new Set(),
+        }
+        this.entries.set(id, e)
+        await this.append(e, { type: 'dispatch-paused', paused: true })
+        const workspaceAvailable = this.workspaceAvailable(original.record!)
+        for (const run of Object.values(original.runs)) {
+          let quiescent = run.quiescent ?? false
+          if (
+            (!TERMINAL_RUN_PHASES.has(run.phase) && run.phase !== 'queued') ||
+            (run.phase === 'outcome_unknown' && !run.recoveryResolved)
+          ) {
+            if (run.process) {
+              try {
+                const owned = loadOwnership(this.options.root, run.id)
+                if (
+                  owned.delegationId !== id ||
+                  owned.generation !== run.generation ||
+                  owned.boundaryReceiptId !== run.process.boundaryReceiptId ||
+                  owned.policyDigest !== run.process.policyDigest ||
+                  owned.pid !== run.process.pid ||
+                  owned.fingerprint !== run.process.fingerprint
+                )
+                  throw new DelegationError(
+                    'OWNER_MISMATCH',
+                    'stored process identity changed',
+                  )
+                const exit = await terminateRecordedProcess(owned)
+                saveOwnership(this.options.root, { ...owned, exit })
+                quiescent = exit.quiescent
+              } catch {
+                quiescent = false
+              }
+            }
+            // A lost protocol cannot establish native completion, even if the tree is now stopped.
+            await this.append(e, {
+              type: 'run-changed',
+              runId: run.id,
+              patch: {
+                phase: 'outcome_unknown',
+                quiescent,
+                finishedAt: Date.now(),
+                failureCode: 'CONNECTION_LOST',
+                acceptance: 'needs_user',
+              },
+            })
+          }
+          const current = e.journal.load().runs[run.id]!,
+            held =
+              (current.phase === 'outcome_unknown' &&
+                !current.recoveryResolved) ||
+              (!TERMINAL_RUN_PHASES.has(current.phase) &&
+                current.phase !== 'queued')
+          const budget =
+            run.quotaReserved || run.startedAt !== undefined
+              ? this.budget.restore(
+                  original.record!.owner.taskScopeId,
+                  original.record!.profileId,
+                  run.usage,
+                  held,
+                )
+              : undefined
+          if (held) {
+            const workspace =
+              original.record!.startSpec?.workspace !== 'shared-readonly'
+                ? this.options.mutations.resources.quarantine(
+                    [workspaceMutationDomain(original.record!.cwd)],
+                    id,
+                  )
+                : undefined
+            e.held = { budget, workspace, quiescent }
+          }
+          if (
+            TERMINAL_RUN_PHASES.has(current.phase) &&
+            !original.outbox['dgn-' + run.id]
+          )
+            await this.append(e, {
+              type: 'outbox',
+              notice: settlementNotice(original.record!, current),
+            })
+        }
+        for (const message of Object.values(e.journal.load().messages))
+          if (message.status === 'sending')
+            await this.append(e, {
+              type: 'message-delivery',
+              messageId: message.id,
+              status: 'delivery_unknown',
+            })
+        for (const interaction of Object.values(e.journal.load().interactions))
+          if (['pending', 'answering'].includes(interaction.state))
+            await this.append(e, { ...interaction, state: 'cancelled' })
+        if (!workspaceAvailable)
+          await this.append(e, {
+            type: 'recovery',
+            reason: 'workspace ownership is missing; existing files retained',
+          })
+        const record = e.journal.load().record!
+        if (record.clientRequestId && record.requestDigest) {
+          const key = JSON.stringify([
+            record.owner.rootSessionId,
+            record.owner.parentAgentId,
+            record.owner.taskScopeId,
+            record.clientRequestId,
+          ])
+          this.starts.set(key, {
+            digest: record.requestDigest,
+            promise: Promise.resolve(record),
+          })
+        }
+        // Pending notices remain durable until a direct user resumes this root.
+      },
+    })
+    this.recoveryReport = await recovery.reconcile()
+    return this.recoveryReport
+  }
+  async inspectRecovery(
+    id: string,
+  ): Promise<import('./types').NativeSessionInspection> {
+    const e = this.entry(id)
+    return this.serial(e, async () => {
+      const state = e.journal.load(),
+        record = state.record!,
+        run = record.currentRunId ? state.runs[record.currentRunId] : undefined
+      if (e.active || !run || !TERMINAL_RUN_PHASES.has(run.phase))
+        throw new DelegationError(
+          'ACTIVE_RUN',
+          'inspection requires a settled host run',
+        )
+      if (run.phase === 'outcome_unknown' && !e.held?.quiescent)
+        throw new DelegationError(
+          'OUTCOME_UNKNOWN',
+          'stop proof is required before native history can be opened',
+        )
+      if (!record.providerSessionId || !record.startSpec)
+        throw new DelegationError(
+          'PROVIDER_SESSION_MISSING',
+          'delivery has no confirmed native session',
+        )
+      const adapter = this.options.adapters.get(record.backend)
+      if (!adapter?.inspect)
+        throw new DelegationError(
+          'HISTORY_UNAVAILABLE',
+          'executor has no pinned history reader',
+        )
+      const profile = this.profile({
+          ...record.startSpec,
+          profileId: record.profileId,
+        }),
+        runtime = await this.options.runtime(profile, id)
+      await this.options.registry.requireAvailable(profile)
+      const controller = new AbortController(),
+        inspectionId = 'dgr-inspection-' + randomUUID(),
+        boundaryReceiptId = 'dgb-' + randomUUID()
+      e.inspectionController = controller
+      let ownership: ProcessOwnership | undefined
+      const timer = setTimeout(() => controller.abort(), 30000)
+      timer.unref()
+      try {
+        const history = await adapter.inspect({
+          delegationId: id,
+          profile,
+          cwd: record.cwd,
+          environment: runtime.environment,
+          secretValues: runtime.secretValues,
+          runtimeRoot: runtime.runtimeRoot,
+          resumeSessionId: record.providerSessionId,
+          generation: run.generation,
+          boundaryReceiptId,
+          signal: controller.signal,
+          policy: {
+            mode: 'read-only',
+            workspaceRoot: record.cwd,
+            runtimeStateRoots: [runtime.runtimeRoot],
+            privateTempRoot: runtime.tempRoot,
+          },
+          onProcessStarted: async (identity) => {
+            ownership = {
+              schemaVersion: 1,
+              ...identity,
+              delegationId: id,
+              runId: inspectionId,
+              generation: run.generation,
+              boundaryReceiptId,
+              policyDigest: 'native-history-readonly',
+              cwd: record.cwd,
+              platform: process.platform,
+              descendants: [],
+            }
+            saveOwnership(this.options.root, ownership)
+          },
+          onProcessObserved: (descendants) => {
+            if (ownership) {
+              ownership = { ...ownership, descendants }
+              saveOwnership(this.options.root, ownership)
+            }
+          },
+          onProcessExit: (exit) => {
+            if (ownership)
+              saveOwnership(this.options.root, { ...ownership, exit })
+          },
+        })
+        if (history.sessionId !== record.providerSessionId)
+          throw new DelegationError(
+            'PROVIDER_SESSION_CHANGED',
+            'history belongs to another session',
+          )
+        const sanitized = JSON.parse(
+          redactExecutorText(
+            JSON.stringify(history),
+            runtime.secretValues ?? [],
+          ),
+        ) as import('./types').NativeSessionInspection
+        durableReplaceSync(
+          join(this.options.root, 'inspections', inspectionId + '.json'),
+          JSON.stringify(sanitized) + '\n',
+        )
+        await this.append(e, {
+          type: 'run-changed',
+          runId: run.id,
+          patch: {
+            recoveryInspection: {
+              id: inspectionId,
+              sessionId: history.sessionId,
+              inspectedAt: Date.now(),
+              nativeStatus: history.nativeStatus,
+            },
+          },
+        })
+        return sanitized
+      } finally {
+        clearTimeout(timer)
+        controller.abort()
+        e.inspectionController = undefined
+      }
+    })
+  }
+  async recover(
+    id: string,
+    expectedRevision: number,
+  ): Promise<DelegationRecord> {
+    const e = this.entry(id)
+    return this.serial(e, async () => {
+      const state = e.journal.load(),
+        record = state.record!,
+        run = record.currentRunId ? state.runs[record.currentRunId] : undefined
+      if (!run || run.revision !== expectedRevision)
+        throw new DelegationError('STALE_REVISION', 'recovery facts changed')
+      if (e.active)
+        throw new DelegationError(
+          'ACTIVE_RUN',
+          'live execution cannot be repaired',
+        )
+      if (run.phase === 'outcome_unknown' && !e.held?.quiescent)
+        throw new DelegationError(
+          'OUTCOME_UNKNOWN',
+          'process shutdown cannot be proved; writer remains quarantined',
+        )
+      if (
+        run.phase === 'outcome_unknown' &&
+        record.providerSessionId &&
+        !run.recoveryInspection
+      )
+        throw new DelegationError(
+          'HISTORY_NOT_INSPECTED',
+          'inspect the native session and preserved workspace before explicit recovery',
+        )
+      if (!this.workspaceAvailable(record))
+        throw new DelegationError(
+          'WORKSPACE_UNAVAILABLE',
+          'workspace ownership needs inspection; artifacts retained',
+        )
+      if (run.phase === 'queued')
+        await this.append(e, {
+          type: 'run-changed',
+          runId: run.id,
+          patch: {
+            phase: 'cancelled',
+            finishedAt: Date.now(),
+            failureCode: 'RESTART_PAUSED',
+            quiescent: true,
+          },
+        })
+      else if (!TERMINAL_RUN_PHASES.has(run.phase))
+        throw new DelegationError('ACTIVE_RUN', 'run has not settled')
+      for (const message of Object.values(state.messages))
+        if (['queued', 'sending', 'delivery_unknown'].includes(message.status))
+          await this.append(e, {
+            type: 'message-delivery',
+            messageId: message.id,
+            status: 'cancelled',
+          })
+      await this.append(e, {
+        type: 'run-changed',
+        runId: run.id,
+        patch: { recoveryResolved: true },
+      })
+      await this.append(e, { type: 'availability', availability: 'idle' })
+      await this.append(e, { type: 'dispatch-paused', paused: false })
+      e.held?.workspace?.release()
+      e.held?.budget?.release()
+      e.held = undefined
+      e.stop = false
+      return e.journal.load().record!
+    })
+  }
+  async resumeRootNotices(rootSessionId: string): Promise<void> {
+    for (const e of this.entries.values())
+      if (e.journal.load().record!.owner.rootSessionId === rootSessionId) {
+        // Only resume automatic notification, never a queued provider operation.
+        const state = e.journal.load(),
+          run = state.record!.currentRunId
+            ? state.runs[state.record!.currentRunId]
+            : undefined
+        if (run && !TERMINAL_RUN_PHASES.has(run.phase)) continue
+        await this.serial(e, () =>
+          this.append(e, { type: 'dispatch-paused', paused: false }),
+        )
+        await this.dispatchNotices(state.record!.id)
+      }
+  }
+  async dispatchNotices(id: string): Promise<void> {
+    const e = this.entry(id)
+    if (!this.options.notices) return
+    const operation = (e.noticeTail ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(async () => {
+        const state = e.journal.load(),
+          record = state.record!
+        const outbox = new DelegationNoticeOutbox({
+          ...this.options.notices!,
+          canWake: (owner) =>
+            !e.journal.load().record!.dispatchPaused &&
+            this.options.notices!.canWake(owner),
+          markDelivered: (noticeId) =>
+            this.serial(e, () =>
+              this.append(e, { type: 'notice-delivered', noticeId }),
+            ),
+        })
+        for (const notice of Object.values(state.outbox))
+          if (!notice.delivered) await outbox.dispatch(record.owner, notice)
+      })
+    e.noticeTail = operation
+    await operation
   }
   private entry(id: string): Entry {
     safeDelegationKey(id)
@@ -161,9 +554,15 @@ export class DelegationService {
     const entries = [...this.entries.values()].filter(
       (e) => e.journal.load().record?.owner.rootSessionId === rootSessionId,
     )
-    for (const e of entries) e.stop = true
+    for (const e of entries) {
+      e.stop = true
+      e.inspectionController?.abort()
+    }
     await Promise.all(
       entries.map(async (e) => {
+        await this.serial(e, () =>
+          this.append(e, { type: 'dispatch-paused', paused: true }),
+        )
         const state = e.journal.load(),
           id = state.record!.id,
           run = state.record!.currentRunId
@@ -376,6 +775,11 @@ export class DelegationService {
           'NEEDS_RECOVERY',
           'conversation is closed or requires recovery',
         )
+      if (record.dispatchPaused && run?.phase === 'queued')
+        throw new DelegationError(
+          'RESTART_PAUSED',
+          'review the preserved queue before sending new work',
+        )
       const previous = state.messages[input.messageId]
       if (previous) {
         if (previous.text !== input.text)
@@ -490,6 +894,7 @@ export class DelegationService {
       if (count >= this.options.config().limits.maxQueuedMessages)
         throw new DelegationError('QUEUE_LIMIT', 'queued message limit reached')
       e.stop = false
+      await this.append(e, { type: 'dispatch-paused', paused: false })
       await this.append(e, {
         type: 'message-enqueued',
         message: { id: input.messageId, text: input.text, status: 'queued' },
@@ -501,7 +906,7 @@ export class DelegationService {
   }
   private pump(id: string): void {
     const e = this.entry(id)
-    if (e.active || e.stop) return
+    if (e.active || e.stop || e.journal.load().record?.dispatchPaused) return
     const state = e.journal.load()
     if (
       state.record!.availability === 'closed' ||
@@ -602,6 +1007,7 @@ export class DelegationService {
         record.profileId,
         controller.signal,
       )
+      await this.change(e, activeRunId, { quotaReserved: true })
       if (e.stop)
         throw new DelegationError('ABORTED', 'cancelled before prepare')
       await this.change(e, activeRunId, {
@@ -692,7 +1098,52 @@ export class DelegationService {
             }
           : {}),
       })
+      const boundaryReceiptId = 'dgb-' + randomUUID(),
+        policyDigest = createHash('sha256')
+          .update(
+            JSON.stringify({
+              cwd: record.cwd,
+              permission: record.effectivePermission,
+              runtimeRoot: runtime.runtimeRoot,
+              commonDir: lease?.snapshot?.commonDir ?? null,
+            }),
+          )
+          .digest('hex')
+      let ownership: ProcessOwnership | undefined
       session = await this.options.adapters.get(record.backend)!.open({
+        onProcessStarted: async (identity) => {
+          ownership = {
+            schemaVersion: 1,
+            ...identity,
+            delegationId: id,
+            runId: activeRunId,
+            generation: run.generation,
+            boundaryReceiptId,
+            policyDigest,
+            cwd: record.cwd,
+            platform: process.platform,
+            descendants: [],
+          }
+          saveOwnership(this.options.root, ownership)
+          await this.change(e, activeRunId, {
+            process: { ...identity, boundaryReceiptId, policyDigest },
+          })
+        },
+        onProcessObserved: (descendants) => {
+          if (!ownership)
+            throw new DelegationError(
+              'OWNER_MISMATCH',
+              'process root was not persisted',
+            )
+          ownership = { ...ownership, descendants }
+          saveOwnership(this.options.root, ownership)
+        },
+        onProcessExit: (exit) => {
+          if (ownership) {
+            ownership = { ...ownership, exit }
+            saveOwnership(this.options.root, ownership)
+          }
+        },
         delegationId: id,
         profile: {
           ...profile,
@@ -702,7 +1153,7 @@ export class DelegationService {
         usageBaseline,
         cwd: record.cwd,
         environment: runtime.environment,
-        boundaryReceiptId: 'dgb-' + randomUUID(),
+        boundaryReceiptId,
         resumeSessionId: record.providerSessionId,
         generation: run.generation,
         signal: controller.signal,
@@ -951,6 +1402,7 @@ export class DelegationService {
       }
       await this.change(e, activeRunId, {
         phase: finalPhase,
+        quiescent,
         finishedAt: Date.now(),
         summary,
         usage,
@@ -969,6 +1421,16 @@ export class DelegationService {
           )
             await this.append(e, { ...interaction, state: 'cancelled' })
       })
+      await this.serial(e, () =>
+        this.append(e, {
+          type: 'outbox',
+          notice: settlementNotice(
+            e.journal.load().record!,
+            e.journal.load().runs[activeRunId]!,
+          ),
+        }),
+      )
+      void this.dispatchNotices(id).catch(() => undefined)
       e.controller = undefined
     }
   }

@@ -21,6 +21,7 @@ export interface DelegationNotice {
   delivered: boolean
 }
 export type DelegationEvent =
+  | { type: 'dispatch-paused'; paused: boolean }
   | { type: 'workspace-bound'; leaseId: string; cwd: string }
   | { type: 'created'; record: DelegationRecord }
   | { type: 'message-enqueued'; message: DelegationMessage }
@@ -37,6 +38,11 @@ export type DelegationEvent =
         Pick<
           DelegationRunRecord,
           | 'phase'
+          | 'recoveryResolved'
+          | 'recoveryInspection'
+          | 'quotaReserved'
+          | 'process'
+          | 'quiescent'
           | 'summary'
           | 'failureCode'
           | 'startedAt'
@@ -151,6 +157,9 @@ export class DelegationFold {
       return r
     }
     switch (e.type) {
+      case 'dispatch-paused':
+        next.record!.dispatchPaused = e.paused
+        break
       case 'workspace-bound':
         if (!next.record)
           throw new DelegationError('JOURNAL_CORRUPT', 'descriptor missing')

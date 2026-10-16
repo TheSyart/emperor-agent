@@ -19,6 +19,41 @@ export class DelegationBudget {
   private lastScope: string | undefined
   private readonly scopeOrder: string[] = []
   constructor(private config: ExecutorConfig) {}
+  restore(
+    scope: string,
+    profile: string,
+    usage: { estimatedUsd?: number } | undefined,
+    held: boolean,
+  ): BudgetLease | undefined {
+    const s = this.scopes.get(scope) ?? {
+      runs: 0,
+      knownEstimatedUsd: 0,
+      unknownRuns: 0,
+    }
+    s.runs++
+    if (
+      usage?.estimatedUsd === undefined ||
+      !Number.isFinite(usage.estimatedUsd) ||
+      usage.estimatedUsd < 0
+    )
+      s.unknownRuns++
+    else s.knownEstimatedUsd += usage.estimatedUsd
+    this.scopes.set(scope, s)
+    if (!held) return undefined
+    this.active.set(profile, (this.active.get(profile) ?? 0) + 1)
+    let released = false
+    return {
+      release: () => {
+        if (released) return
+        released = true
+        this.active.set(
+          profile,
+          Math.max(0, (this.active.get(profile) ?? 1) - 1),
+        )
+        this.drain()
+      },
+    }
+  }
   reconfigure(config: ExecutorConfig): void {
     this.config = config
     this.drain()

@@ -17,7 +17,11 @@ import {
   type ExecutorTurnInput,
   type NormalizedExecutorEvent,
 } from '../types'
-import { ManagedAgentProcess, type ManagedProcessHandle } from '../process'
+import {
+  ManagedAgentProcess,
+  readJsonLines,
+  type ManagedProcessHandle,
+} from '../process'
 import { redactExecutorText } from '../redaction'
 import { jsonSchema } from '../../tools/json-schema'
 import { AsyncQueue } from './async-queue'
@@ -178,6 +182,62 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
     } = {},
   ) {
     this.processes = options.processes ?? new ManagedAgentProcess()
+  }
+  async inspect(
+    input: ExecutorOpenInput,
+  ): Promise<import('../types').NativeSessionInspection> {
+    if (!input.resumeSessionId)
+      throw new DelegationError(
+        'PROVIDER_SESSION_MISSING',
+        'history inspection needs an existing Claude session',
+      )
+    // SDK session-reading helpers use process env for their config directory.
+    // A separate Node process keeps per-conversation state out of the host env.
+    const sdk = import.meta.resolve('@anthropic-ai/claude-agent-sdk')
+    const source = `const {getSessionMessages}=await import(process.argv[1]);const sessionId=process.argv[2];const rows=await getSessionMessages(sessionId,{dir:process.argv[3]});const turns=rows.slice(-20).map(row=>({id:row.uuid,status:row.type,text:Array.isArray(row.message?.content)?row.message.content.filter(x=>x.type==='text').map(x=>x.text).join('\\n'):typeof row.message?.content==='string'?row.message.content:''})).map(row=>({...row,text:row.text.slice(-8192)}));console.log(JSON.stringify({sessionId,nativeStatus:'unknown',turns}));`
+    const h = await this.processes.open({
+      executable: process.execPath,
+      args: [
+        '--input-type=module',
+        '-e',
+        source,
+        sdk,
+        input.resumeSessionId,
+        input.cwd,
+      ],
+      cwd: input.cwd,
+      env: { ...input.environment, ELECTRON_RUN_AS_NODE: '1' },
+      policy: input.policy,
+      signal: input.signal,
+      secretValues: input.secretValues,
+      onSpawn: input.onProcessStarted,
+      onObserved: input.onProcessObserved,
+      onExit: input.onProcessExit,
+    })
+    let value: import('../types').NativeSessionInspection | undefined
+    try {
+      for await (const row of readJsonLines(h.stdout)) {
+        if (
+          value ||
+          row.sessionId !== input.resumeSessionId ||
+          !Array.isArray(row.turns)
+        )
+          throw new DelegationError(
+            'PROTOCOL_INVALID',
+            'unexpected SDK history response',
+          )
+        value = row as unknown as import('../types').NativeSessionInspection
+      }
+      const receipt = await h.closed
+      if (receipt.exitCode !== 0 || !receipt.quiescent || !value)
+        throw new DelegationError(
+          'HISTORY_UNAVAILABLE',
+          'SDK history inspection failed',
+        )
+      return value
+    } finally {
+      await h.terminate()
+    }
   }
   async open(input: ExecutorOpenInput): Promise<ExecutorSession> {
     const providerSessionId = input.resumeSessionId ?? randomUUID()
@@ -459,6 +519,9 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
             signal: input.signal,
             policy: input.policy,
             secretValues: input.secretValues,
+            onSpawn: input.onProcessStarted,
+            onObserved: input.onProcessObserved,
+            onExit: input.onProcessExit,
           })
           return handle.spawnedProcess
         },

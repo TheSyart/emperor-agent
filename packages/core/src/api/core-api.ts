@@ -588,6 +588,11 @@ export class CoreApi {
       }),
       mutations: this.workspaceMutations,
       runtime: (profile, id) => executorRuntime.prepare(profile, id),
+      notices: {
+        parent: (owner) => host.delegationNoticeParent(owner),
+        canWake: (owner) => host.delegationNoticeParent(owner) !== undefined,
+        flush: (sessionId) => host.sessions.flush(sessionId),
+      },
       onQuestion: (question, signal) =>
         host.delegationInteractions.ask(question, signal),
     })
@@ -908,6 +913,7 @@ export class CoreApi {
     let api: CoreApi | null = null
     try {
       api = new CoreApi(root, host, opts)
+      await api.delegations.reconcile()
       await api.environmentService.initialize()
       await api.delegations.probeProfiles()
       await api.sessionTransitionService.recover()

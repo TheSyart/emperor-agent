@@ -201,6 +201,12 @@ export class Agent {
     if (wakeup) this.wakeDriver(wakingAfterAbort)
   }
 
+  /** Wake an already durable inbox without inserting another message. */
+  wakeInbox(): void {
+    if (this.disposed) throw new Error(`agent "${this.id}" is disposed`)
+    if (this.inbox.hasPending) this.wakeDriver()
+  }
+
   /** A new prompt: starts a turn when idle, else waits for the next turn. */
   followup(message: UserMessage): void {
     this.send(message, 'next-turn', true)

@@ -17,6 +17,13 @@ import { DelegationError } from './types'
 import { redactExecutorText } from './redaction'
 const execute = promisify(execFile)
 export interface ManagedProcessSpec {
+  onSpawn?: (
+    identity: import('./process-types').OwnedProcessIdentity,
+  ) => Promise<void>
+  onObserved?: (
+    descendants: import('./process-types').OwnedDescendant[],
+  ) => void
+  onExit?: (receipt: ProcessExitReceipt) => void
   executable: string
   args: string[]
   cwd: string
@@ -26,13 +33,8 @@ export interface ManagedProcessSpec {
   maxFrameBytes?: number
   secretValues?: readonly string[]
 }
-export interface ProcessExitReceipt {
-  pid: number | null
-  exitCode: number | null
-  signal: NodeJS.Signals | null
-  quiescent: boolean
-  failureCode?: string
-}
+import type { ProcessExitReceipt } from './process-types'
+export type { ProcessExitReceipt } from './process-types'
 export interface AgentSpawnedProcess {
   stdin: Writable
   stdout: Readable
@@ -267,7 +269,15 @@ export class ManagedAgentProcess {
       child.once('spawn', () => {
         identity.pid = child.pid ?? null
         identity.fingerprint = child.pid ? fingerprint(child.pid) : ''
-        resolve()
+        Promise.resolve()
+          .then(() => spec.onSpawn?.({ ...identity }))
+          .then(resolve, (error) => {
+            failureCode = 'OWNERSHIP_PERSIST_FAILED'
+            reject(error)
+            void terminate().catch(() => {
+              failureCode = 'OUTCOME_UNKNOWN'
+            })
+          })
       })
       child.once('error', reject)
     })
@@ -292,6 +302,7 @@ export class ManagedAgentProcess {
           proofFailed = true
           return null
         }
+        const previousSize = descendants.size
         const owned = new Set<number>()
         const root = child.pid ? rows.get(child.pid) : undefined
         if (
@@ -314,6 +325,24 @@ export class ManagedAgentProcess {
               descendants.set(row.pid, row.birth)
               owned.add(row.pid)
               changed = true
+            }
+          }
+        }
+        if (descendants.size !== previousSize) {
+          try {
+            spec.onObserved?.(
+              [...descendants].map(([pid, fingerprint]) => ({
+                pid,
+                fingerprint,
+              })),
+            )
+          } catch {
+            proofFailed = true
+            failureCode = 'OWNERSHIP_PERSIST_FAILED'
+            try {
+              signal('SIGTERM')
+            } catch {
+              /* receipt will retain the writer lease */
             }
           }
         }
@@ -471,13 +500,20 @@ export class ManagedAgentProcess {
         quiescent = false
         failureCode = 'OUTCOME_UNKNOWN'
       }
-      settle({
+      const receipt: ProcessExitReceipt = {
         pid: child.pid ?? null,
         exitCode: code,
         signal: sig,
         quiescent,
         ...(failureCode ? { failureCode } : {}),
-      })
+      }
+      try {
+        spec.onExit?.(receipt)
+      } catch {
+        receipt.quiescent = false
+        receipt.failureCode = 'OWNERSHIP_PERSIST_FAILED'
+      }
+      settle(receipt)
     }
     const abort = () => {
       void terminate().catch(() => {
@@ -539,5 +575,89 @@ export class ManagedAgentProcess {
     })
     spec.signal?.addEventListener('abort', abort, { once: true })
     return handle
+  }
+}
+
+/** Stop only process identities recorded by the host; never kill by PID alone. */
+export async function terminateRecordedProcess(
+  ownership: import('./process-types').ProcessOwnership,
+): Promise<ProcessExitReceipt> {
+  const receipt: ProcessExitReceipt = {
+    pid: ownership.pid,
+    exitCode: null,
+    signal: null,
+    quiescent: false,
+    failureCode: 'OUTCOME_UNKNOWN',
+  }
+  if (
+    process.platform === 'win32' ||
+    ownership.platform !== process.platform ||
+    !ownership.pid
+  )
+    return receipt
+  let rows = await processTable()
+  if (!rows) return receipt
+  const root = rows.get(ownership.pid)
+  if (root && root.birth !== ownership.fingerprint)
+    return { ...receipt, failureCode: 'OWNER_MISMATCH' }
+  const known = new Map(
+    ownership.descendants.map((x) => [x.pid, x.fingerprint]),
+  )
+  if (root) known.set(root.pid, root.birth)
+  for (let changed = true; changed;) {
+    changed = false
+    for (const row of rows.values())
+      if (known.has(row.parent) && !known.has(row.pid)) {
+        if (known.size >= 1025) return receipt
+        known.set(row.pid, row.birth)
+        changed = true
+      }
+  }
+  const kill = (kind: NodeJS.Signals) => {
+    // Signal the group while its held leader identity is still live. Killing
+    // the leader first can turn a subsequent group signal into EPERM on macOS.
+    if (root && fingerprint(root.pid) === root.birth && root.group === root.pid)
+      try {
+        process.kill(-root.pid, kind)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+      }
+    for (const [pid, birth] of [...known].reverse())
+      if (pid !== root?.pid && fingerprint(pid) === birth)
+        try {
+          process.kill(pid, kind)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+        }
+    if (root && root.group !== root.pid && fingerprint(root.pid) === root.birth)
+      try {
+        process.kill(root.pid, kind)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+      }
+  }
+  const active = (table: Map<number, ProcessRow>) =>
+    [...known].some(([pid, birth]) => {
+      const row = table.get(pid)
+      return row?.birth === birth && !row.state.startsWith('Z')
+    }) ||
+    [...table.values()].some(
+      (row) => row.group === ownership.pid && !row.state.startsWith('Z'),
+    )
+  try {
+    if (active(rows)) kill('SIGTERM')
+    const deadline = Date.now() + 2500,
+      forceAt = Date.now() + 2000
+    while (true) {
+      rows = await processTable()
+      if (!rows) return receipt
+      if (!active(rows))
+        return { ...receipt, quiescent: true, failureCode: undefined }
+      if (Date.now() >= deadline) return receipt
+      if (Date.now() >= forceAt) kill('SIGKILL')
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+  } catch {
+    return receipt
   }
 }

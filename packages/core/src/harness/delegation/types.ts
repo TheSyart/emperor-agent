@@ -95,6 +95,7 @@ export interface DelegationStart {
   clientRequestId: string
 }
 export interface DelegationRecord {
+  dispatchPaused?: boolean
   clientRequestId?: string
   requestDigest?: string
   startSpec?: DelegationStart
@@ -113,6 +114,22 @@ export interface DelegationRecord {
   createdAt: number
 }
 export interface DelegationRunRecord {
+  recoveryResolved?: boolean
+  recoveryInspection?: {
+    id: string
+    sessionId: string
+    inspectedAt: number
+    nativeStatus: string
+  }
+  quotaReserved?: boolean
+  process?: {
+    pid: number | null
+    startedAt: number
+    fingerprint: string
+    boundaryReceiptId: string
+    policyDigest: string
+  }
+  quiescent?: boolean
   structured?: unknown
   id: string
   delegationId: string
@@ -130,6 +147,15 @@ export interface DelegationRunRecord {
   usage?: { inputTokens?: number; outputTokens?: number; estimatedUsd?: number }
 }
 export interface ExecutorOpenInput {
+  onProcessStarted?: (
+    identity: import('./process-types').OwnedProcessIdentity,
+  ) => Promise<void>
+  onProcessObserved?: (
+    descendants: import('./process-types').OwnedDescendant[],
+  ) => void
+  onProcessExit?: (
+    receipt: import('./process-types').ProcessExitReceipt,
+  ) => void
   outputSchema?: ObjectJsonSchema
   usageBaseline?: { estimatedUsd?: number }
   policy: SandboxExecutionPolicy
@@ -196,7 +222,13 @@ export type NormalizedExecutorEvent = ExecutorEventPayload & {
   generation: number
   sourceEventId?: string
 }
+export interface NativeSessionInspection {
+  sessionId: string
+  nativeStatus: string
+  turns: { id?: string; status?: string; text: string }[]
+}
 export interface ExecutorSession {
+  inspect?(): Promise<NativeSessionInspection>
   readonly providerSessionId: string
   readonly events: AsyncIterable<NormalizedExecutorEvent>
   submit(input: ExecutorTurnInput): Promise<{ providerTurnId: string }>
@@ -206,6 +238,7 @@ export interface ExecutorSession {
   close(): Promise<{ quiescent: boolean }>
 }
 export interface ExecutorAdapter {
+  inspect?(input: ExecutorOpenInput): Promise<NativeSessionInspection>
   readonly backend: ExternalBackend
   open(input: ExecutorOpenInput): Promise<ExecutorSession>
 }

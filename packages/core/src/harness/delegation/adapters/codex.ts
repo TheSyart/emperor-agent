@@ -183,6 +183,31 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
   ) {
     this.processes = options.processes ?? new ManagedAgentProcess()
   }
+  async inspect(
+    input: ExecutorOpenInput,
+  ): Promise<import('../types').NativeSessionInspection> {
+    if (!input.resumeSessionId)
+      throw new DelegationError(
+        'PROVIDER_SESSION_MISSING',
+        'history inspection needs an existing thread',
+      )
+    const session = await this.open(input)
+    let history: import('../types').NativeSessionInspection | undefined,
+      error: unknown
+    try {
+      history = await session.inspect!()
+    } catch (cause) {
+      error = cause
+    }
+    const exit = await session.close()
+    if (!exit.quiescent)
+      throw new DelegationError(
+        'OUTCOME_UNKNOWN',
+        'inspection process stop is unproved',
+      )
+    if (error) throw error
+    return history!
+  }
   async open(input: ExecutorOpenInput): Promise<ExecutorSession> {
     const events = new AsyncQueue<NormalizedExecutorEvent>(),
       pending = new Map<string, { rpcId: RpcId; questions: string[] }>()
@@ -446,6 +471,9 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
         policy: input.policy,
         signal: input.signal,
         secretValues: input.secretValues,
+        onSpawn: input.onProcessStarted,
+        onObserved: input.onProcessObserved,
+        onExit: input.onProcessExit,
       })
       await handle.started
       const options: CodexRpcOptions = {
@@ -527,6 +555,48 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
     }
     return {
       providerSessionId,
+      inspect: async () => {
+        if (active)
+          throw new DelegationError(
+            'ACTIVE_RUN',
+            'history inspection must not overlap inference',
+          )
+        const response = await rpc!.request('thread/read', {
+          threadId: providerSessionId,
+          includeTurns: true,
+        })
+        const thread = record(response.thread)
+        if (thread.id !== providerSessionId)
+          throw new DelegationError(
+            'PROVIDER_SESSION_CHANGED',
+            'history returned another thread',
+          )
+        const turns = (Array.isArray(thread.turns) ? thread.turns : [])
+          .slice(-20)
+          .map((value) => {
+            const turn = record(value),
+              items = Array.isArray(turn.items) ? turn.items : []
+            return {
+              ...(typeof turn.id === 'string' ? { id: turn.id } : {}),
+              ...(typeof turn.status === 'string'
+                ? { status: turn.status }
+                : {}),
+              text: items
+                .map(record)
+                .filter((item) => item.type === 'agentMessage')
+                .map((item) => (typeof item.text === 'string' ? item.text : ''))
+                .join('\n')
+                .slice(-8192),
+            }
+          })
+        const status = record(thread.status)
+        return {
+          sessionId: providerSessionId,
+          nativeStatus:
+            typeof status.type === 'string' ? status.type : 'unknown',
+          turns,
+        }
+      },
       events,
       submit: async (turn) => {
         if (closed || startFailure)

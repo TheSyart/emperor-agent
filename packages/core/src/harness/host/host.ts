@@ -1321,6 +1321,25 @@ export class HarnessHost {
    * Deliver one user prompt. Resolves when the turn that consumed it ended
    * (or immediately for an interjection into a running turn).
    */
+  delegationNoticeParent(
+    owner: import('../delegation/types').DelegationOwner,
+  ): Agent | undefined {
+    const root = this.kept.sessionStore.get(owner.rootSessionId)
+    if (!root || root.archived_at || this.closed) return undefined
+    return owner.parentAgentId === owner.rootSessionId
+      ? this.agentFor(owner.rootSessionId)
+      : this.agents.get(owner.parentAgentId)
+  }
+  private resumeDelegationNotices(input: SubmitInput): void {
+    if (input.scheduler || (input.source && input.source !== 'user')) return
+    void this.delegations
+      ?.resumeRootNotices(input.sessionId)
+      .catch((error) =>
+        logger.warn('external result notification remains pending', {
+          error: String(error),
+        }),
+      )
+  }
   async submit(input: SubmitInput): Promise<SubmitResult> {
     const agent = this.agentFor(input.sessionId)
     this.activeSessionId = input.sessionId
@@ -1353,6 +1372,7 @@ export class HarnessHost {
     })
     if (input.delivery === 'interject' && agent.status === 'running') {
       agent.steer(message)
+      this.resumeDelegationNotices(input)
       return {
         sessionId: agent.id,
         messageId: message.id,
@@ -1367,6 +1387,7 @@ export class HarnessHost {
     input.signal?.addEventListener('abort', onAbort, { once: true })
     try {
       agent.followup(message)
+      this.resumeDelegationNotices(input)
       await agent.whenIdle()
     } finally {
       input.signal?.removeEventListener('abort', onAbort)
