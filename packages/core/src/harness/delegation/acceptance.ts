@@ -191,6 +191,17 @@ export class DelegationAcceptance {
       receipt.cwd,
       'agent',
       async () => {
+        const currentScope = this.options.scope(receipt.runId)
+        if (
+          controller.signal.aborted ||
+          currentScope.permission !== scope.permission ||
+          currentScope.taskScopeId !== scope.taskScopeId
+        ) {
+          result.state = 'needs_user'
+          result.reason = 'PERMISSION_CHANGED'
+          this.save(result)
+          return result
+        }
         if (!(await isCurrent())) {
           result.reason = 'TREE_CHANGED'
           this.save(result)
@@ -209,6 +220,16 @@ export class DelegationAcceptance {
           return result
         }
         for (let i = 0; i < criteria.commands.length; i++) {
+          const currentScope = this.options.scope(receipt.runId)
+          if (
+            controller.signal.aborted ||
+            currentScope.permission !== scope.permission ||
+            currentScope.taskScopeId !== scope.taskScopeId
+          ) {
+            result.state = 'needs_user'
+            result.reason = 'PERMISSION_CHANGED'
+            break
+          }
           const command = criteria.commands[i]!,
             runtimeRoot = join(
               this.options.root,
@@ -261,6 +282,10 @@ export class DelegationAcceptance {
                 workspaceRoot: receipt.cwd,
                 runtimeStateRoots: [runtimeRoot],
                 privateTempRoot: tempRoot,
+                readOnlyRoots: this.options.receipts.verificationReadOnlyRoots(
+                  receiptId,
+                  receipt.cwd,
+                ),
               },
               onSpawn: async (identity) => {
                 ownership = {
@@ -367,7 +392,10 @@ export class DelegationAcceptance {
             break
           }
         }
-        if (!(await isCurrent())) {
+        if (this.options.scope(receipt.runId).permission !== scope.permission) {
+          result.state = 'needs_user'
+          result.reason = 'PERMISSION_CHANGED'
+        } else if (!(await isCurrent())) {
           result.state = 'unverified'
           result.reason = 'TREE_CHANGED_DURING_VERIFICATION'
         } else if (result.state !== 'failed' && result.state !== 'needs_user') {

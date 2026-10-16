@@ -381,11 +381,13 @@ it('collects real artifacts through Core composition and requires independent cr
         ),
       ).toBe(true),
     )
-    api.host.stop(root)
+    api.control.setPermissionMode('read-only', root)
     expect((await cancelled).state).not.toBe('passed')
     expect(api.delegationAcceptance.isActive(run.id)).toBe(false)
     await new Promise((resolve) => setTimeout(resolve, 2500))
-    expect(existsSync(join(record.cwd, 'late-verifier-write'))).toBe(false)
+    expect(existsSync(join(receipt.receipt!.cwd, 'late-verifier-write'))).toBe(
+      false,
+    )
     const live = events.filter(
       (event) =>
         event.session_id === root &&

@@ -66,6 +66,9 @@ it.skipIf(process.platform === 'win32')(
         quiescent: true,
       })
       expect((await h.closed).quiescent).toBe(true)
+      expect(await terminateRecordedProcess(restored)).toMatchObject({
+        quiescent: true,
+      })
       expect(loadOwnership(f.root, 'dgr-x').exit?.quiescent).toBe(true)
     } finally {
       await h.terminate().catch(() => {})

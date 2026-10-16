@@ -14,6 +14,13 @@ if (process.platform === 'darwin') {
   const arch = MACOS_NATIVE_ARCH[process.arch]
   if (!arch)
     throw new Error(`Unsupported macOS native architecture: ${process.arch}`)
+  const scannerBuild = spawnSync(
+    process.execPath,
+    [resolve(desktop, '../scripts/build-delegation-scanner.mjs')],
+    { stdio: 'inherit' },
+  )
+  if (scannerBuild.status !== 0)
+    throw new Error('delegation scanner build failed')
   const source = resolve(desktop, 'native/macos/CredentialAuth/main.swift')
   const output = resolve(desktop, 'out/native/credential-auth')
   mkdirSync(dirname(output), { recursive: true })

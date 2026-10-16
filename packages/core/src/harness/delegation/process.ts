@@ -5,6 +5,10 @@ import {
   type ChildProcessWithoutNullStreams,
 } from 'node:child_process'
 import { promisify } from 'node:util'
+import { randomUUID } from 'node:crypto'
+import { existsSync, writeFileSync, readFileSync } from 'node:fs'
+import { resolve, dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   Transform,
   type TransformCallback,
@@ -192,6 +196,66 @@ export async function* readJsonLines(
   }
   if (pending.length) yield decode(pending)
 }
+function boundaryScanner(): string {
+  const suffix = `native/build/${process.platform}-${process.arch}/delegation-scan`
+  const candidates = [
+    ...((process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
+      ? [
+          join(
+            (process as NodeJS.Process & { resourcesPath: string })
+              .resourcesPath,
+            'native/delegation-scan',
+          ),
+        ]
+      : []),
+    resolve(dirname(fileURLToPath(import.meta.url)), '../../../', suffix),
+    resolve(process.cwd(), 'packages/core', suffix),
+    resolve(process.cwd(), '../packages/core', suffix),
+    resolve(process.cwd(), suffix),
+  ]
+  const found = candidates.find((path) => existsSync(path))
+  if (!found)
+    throw new DelegationError(
+      'CONTAINMENT_UNAVAILABLE',
+      'macOS delegation scanner missing; build the native helper before running external agents',
+    )
+  return found
+}
+async function boundaryPids(boundary: {
+  tag: string
+  scannerPath: string
+}): Promise<number[] | null> {
+  if (!/^[a-f0-9-]{36}$/.test(boundary.tag)) return null
+  if (
+    ['denied', 'allowed'].some((kind) => {
+      try {
+        return (
+          readFileSync(
+            `/private/tmp/emperor-boundary-${boundary.tag}-${kind}`,
+            'utf8',
+          ) !== boundary.tag
+        )
+      } catch {
+        return true
+      }
+    })
+  )
+    return null
+  try {
+    const result = await execute(boundary.scannerPath, [boundary.tag], {
+      timeout: 2000,
+      maxBuffer: 64 * 1024,
+      encoding: 'utf8',
+    })
+    const pids = result.stdout.split('\n').filter(Boolean).map(Number)
+    return pids.length <= 1024 &&
+      pids.every((pid) => Number.isSafeInteger(pid) && pid > 1)
+      ? pids
+      : null
+  } catch {
+    return null
+  }
+}
 export class ManagedAgentProcess {
   private readonly sandbox: SandboxBackend
   constructor(
@@ -211,11 +275,26 @@ export class ManagedAgentProcess {
   spawn(spec: ManagedProcessSpec): ManagedProcessHandle {
     if (spec.signal?.aborted)
       throw new DelegationError('ABORTED', 'process start cancelled')
+    const boundary =
+      process.platform === 'darwin'
+        ? { tag: randomUUID(), scannerPath: boundaryScanner() }
+        : undefined
+    if (boundary)
+      for (const kind of ['denied', 'allowed'])
+        writeFileSync(
+          `/private/tmp/emperor-boundary-${boundary.tag}-${kind}`,
+          boundary.tag,
+          { mode: 0o600, flag: 'wx' },
+        )
+    const policy = {
+      ...spec.policy,
+      ...(boundary ? { processBoundaryTag: boundary.tag } : {}),
+    }
     let argv = [spec.executable, ...spec.args]
     if (spec.policy.mode !== 'danger-full-access') {
       try {
         argv = this.sandbox.confine(argv, {
-          ...spec.policy,
+          ...policy,
           mode: spec.policy.mode,
         }).argv
       } catch {
@@ -225,6 +304,13 @@ export class ManagedAgentProcess {
         )
       }
     }
+    if (boundary && policy.mode === 'danger-full-access')
+      argv = [
+        '/usr/bin/sandbox-exec',
+        '-p',
+        `(version 1)(allow default)(deny file-read-data (literal "/private/tmp/emperor-boundary-${boundary.tag}-denied"))`,
+        ...argv,
+      ]
     const child = spawn(argv[0]!, argv.slice(1), {
       cwd: spec.cwd,
       env: {
@@ -246,6 +332,7 @@ export class ManagedAgentProcess {
       pid: child.pid ?? null,
       startedAt: Date.now(),
       fingerprint: '',
+      ...(boundary ? { boundary } : {}),
     }
     const output = new FrameLimit(spec.maxFrameBytes ?? 4 * 1024 * 1024)
     child.stdout.pipe(output)
@@ -303,6 +390,18 @@ export class ManagedAgentProcess {
           return null
         }
         const previousSize = descendants.size
+        if (boundary) {
+          const marked = await boundaryPids(boundary)
+          if (!marked) {
+            proofFailed = true
+            return null
+          }
+          for (const pid of marked) {
+            const row = rows.get(pid)
+            if (row && pid !== child.pid && !row.state.startsWith('Z'))
+              descendants.set(pid, row.birth)
+          }
+        }
         const owned = new Set<number>()
         const root = child.pid ? rows.get(child.pid) : undefined
         if (
@@ -496,6 +595,9 @@ export class ManagedAgentProcess {
       timers.forEach(clearTimeout)
       spec.signal?.removeEventListener('abort', abort)
       if (!quiescent) failureCode = 'OUTCOME_UNKNOWN'
+      // Keep the tiny marker pair with the ownership proof. Independent
+      // recovery readers can still be observing this exit; deleting here
+      // races their final scan and turns a proven stop into unknown.
       if (proofFailed) {
         quiescent = false
         failureCode = 'OUTCOME_UNKNOWN'
@@ -600,9 +702,17 @@ export async function terminateRecordedProcess(
   const root = rows.get(ownership.pid)
   if (root && root.birth !== ownership.fingerprint)
     return { ...receipt, failureCode: 'OWNER_MISMATCH' }
+  const marked = ownership.boundary
+    ? await boundaryPids(ownership.boundary)
+    : []
+  if (!marked) return receipt
   const known = new Map(
     ownership.descendants.map((x) => [x.pid, x.fingerprint]),
   )
+  for (const pid of marked) {
+    const row = rows.get(pid)
+    if (row) known.set(pid, row.birth)
+  }
   if (root) known.set(root.pid, root.birth)
   for (let changed = true; changed;) {
     changed = false
@@ -651,6 +761,14 @@ export async function terminateRecordedProcess(
     while (true) {
       rows = await processTable()
       if (!rows) return receipt
+      if (ownership.boundary) {
+        const marked = await boundaryPids(ownership.boundary)
+        if (!marked) return receipt
+        for (const pid of marked) {
+          const row = rows.get(pid)
+          if (row) known.set(pid, row.birth)
+        }
+      }
       if (!active(rows))
         return { ...receipt, quiescent: true, failureCode: undefined }
       if (Date.now() >= deadline) return receipt

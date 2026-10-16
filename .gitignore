@@ -90,3 +90,5 @@ pnpm-debug.log*
 # Agent Team 运行期状态（队友配置 / inbox / 独立 thread）
 .team/
 /packages/*/.team/
+
+/packages/core/native/build/

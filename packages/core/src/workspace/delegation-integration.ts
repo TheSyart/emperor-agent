@@ -23,7 +23,10 @@ import {
   type DelegationAcceptance,
 } from '../harness/delegation/acceptance'
 import { durableReplaceSync } from '../store/persistence'
-import type { WorkspaceMutationCoordinator } from './mutation-coordinator'
+import {
+  workspaceMutationDomain,
+  type WorkspaceMutationCoordinator,
+} from './mutation-coordinator'
 import type { HardenedGitRunner } from './git-runner'
 export interface IntegrationBase {
   cwd: string
@@ -486,6 +489,21 @@ export class DelegationIntegration {
     }
     return recovered
   }
+  private async withApplyResources<T>(
+    paths: string[],
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const lease = await this.options.mutations.resources.acquire({
+      keys: paths.map(workspaceMutationDomain),
+      mode: 'exclusive',
+      owner: 'agent',
+    })
+    try {
+      return await action()
+    } finally {
+      lease.release()
+    }
+  }
   async applyIntegration(
     previewId: string,
     expectedRevision: number,
@@ -526,9 +544,8 @@ export class DelegationIntegration {
         'PERMISSION_DENIED',
         'integration target no longer matches the source owner',
       )
-    return this.options.mutations.runExclusive(
-      preview.target.cwd,
-      'agent',
+    return this.withApplyResources(
+      [preview.target.cwd, source.cwd, preview.cwd],
       async () => {
         if (!this.options.canApply?.(source.runId))
           throw new DelegationError(
@@ -540,6 +557,17 @@ export class DelegationIntegration {
           throw new DelegationError(
             'STALE_REVISION',
             'preview was already consumed',
+          )
+        if (
+          !fresh.verificationId ||
+          (await this.options.acceptance.current(fresh.verificationId))
+            .state !== 'passed' ||
+          (await this.options.acceptance.current(fresh.acceptanceId)).state !==
+            'passed'
+        )
+          throw new DelegationError(
+            'ACCEPTANCE_REQUIRED',
+            'source and preview became unverified while waiting for integration resources',
           )
         const current = await this.captureBase(preview.target.cwd)
         if (

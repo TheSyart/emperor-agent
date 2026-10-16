@@ -144,3 +144,7 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 - 新 session 事件类型：通过 `declare module '../../session-log/types'` 扩展 `SessionEventMap`，需要界面可见时同步 `harness/projection/`。
 - 新工具：见[扩展 Emperor Agent](../development/extending-emperor.md#新工具)。
 - 改变压缩、修复或 fork 语义时，同步 session-log 与 compaction 的测试。
+
+## 外部子会话
+
+`subagent` 可显式选择 claude-code/codex；internal 保持默认。`dlg-*` 是持久会话，`dgr-*` 是单轮 task，原生 ID 独立保存。队列继续沿用原生会话，Codex steer 绑定当前 turn；输出刷新 UI，终态才投递稳定去重通知。[完整生命周期](external-agent-delegation.md)。

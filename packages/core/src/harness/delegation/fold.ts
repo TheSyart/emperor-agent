@@ -38,6 +38,7 @@ export type DelegationEvent =
       patch: Partial<
         Pick<
           DelegationRunRecord,
+          | 'goalFailureDisposition'
           | 'phase'
           | 'recoveryResolved'
           | 'recoveryInspection'
@@ -250,7 +251,12 @@ export class DelegationFold {
           )
         Object.assign(run, e.patch)
         run.revision++
-        if (TERMINAL_RUN_PHASES.has(run.phase))
+        if (
+          phase &&
+          TERMINAL_RUN_PHASES.has(run.phase) &&
+          next.record!.currentRunId === run.id &&
+          next.record!.availability !== 'closed'
+        )
           next.record!.availability =
             run.phase === 'outcome_unknown' ? 'needs_recovery' : 'idle'
         break

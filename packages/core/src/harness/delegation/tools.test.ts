@@ -207,3 +207,19 @@ it('collect exposes execution and acceptance separately and unknown IDs are reje
     JSON.stringify(await f.call('inspect_agent', { agent_id: 'other-task' })),
   ).toContain('INVALID_ID')
 })
+it('foreground and collect expose host identities and current workspace in model-visible content', async () => {
+  const f = fixture()
+  for (const result of [
+    await f.call('subagent', {
+      backend: 'codex',
+      description: 'work',
+      prompt: 'work',
+      run_in_background: false,
+    }),
+    await f.call('collect_agent', { agent_id: 'dlg-test' }),
+  ]) {
+    expect(JSON.stringify(result.content)).toContain('/fixture')
+    expect(JSON.stringify(result.content)).toContain('dlg-test')
+    expect(JSON.stringify(result.content)).toContain('unverified')
+  }
+})

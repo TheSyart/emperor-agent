@@ -107,6 +107,15 @@ export function seatbeltProfileArgs(
     '(deny file-write*)',
     `(allow file-write* (literal ${sbplString('/dev/null')}))`,
   ]
+  if (policy.processBoundaryTag) {
+    const root = '/private/tmp/emperor-boundary-' + policy.processBoundaryTag
+    forms.push(
+      `(deny file-read-data (literal ${sbplString(root + '-denied')}))`,
+    )
+    forms.push(
+      `(allow file-read-data (literal ${sbplString(root + '-allowed')}))`,
+    )
+  }
   const roots = writableRoots(policy)
   if (roots.length > 0) {
     forms.push(

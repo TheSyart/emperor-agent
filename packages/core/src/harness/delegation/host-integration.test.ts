@@ -137,6 +137,24 @@ it('scheduler and ordinary children share global quota; stable Goal identity ret
       service.verifyGoalCompletion({ id: 'g', revision: 9 }, 'root'),
     ).resolves.toBeUndefined()
 
+    await service.bindReceipt(
+      a.id,
+      a.currentRunId!,
+      'receipt-' + a.id,
+      'failed',
+      'acceptance-' + a.id,
+    )
+    await service.disposeGoalFailure(
+      a.id,
+      'User explicitly accepted this fixture failure and omitted its deliverable',
+    )
+    await expect(
+      service.verifyGoalCompletion({ id: 'g', revision: 9 }, 'root'),
+    ).rejects.toThrow('no current host acceptance')
+    await service.close(a.id)
+    await expect(
+      service.verifyGoalCompletion({ id: 'g', revision: 9 }, 'root'),
+    ).resolves.toBeUndefined()
     expect(service.list().every((s) => s.record!.dispatchPaused)).toBe(true)
   } finally {
     releases.forEach((release) => release())

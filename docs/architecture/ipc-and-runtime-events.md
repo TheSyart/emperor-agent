@@ -217,3 +217,7 @@ Packaged smoke 会创建隐藏的生产 BrowserWindow、加载 ASAR 内的 `app:
 只影响 Chat 或 Trajectory 显示的内容不需要新增 runtime event：直接从原始 `SessionEvent` 在 `conversation/assembler.ts` / `nodes/*`（或 Trajectory model）中折叠。
 
 Payload 应有界，不包含密钥、任意绝对路径或未经筛选的工具原始输出。
+
+## 外部执行器操作与投影
+
+严格受控操作为 executors.list/probe/configure 和 delegations.get/send/interrupt/recover/collect/receipt/validate/integrate/close。归档根可读不可写，跨根拒绝。external-agent task 每轮一行；created/run_changed/output/interaction/receipt 五种 delegation 投影由 owning session 的日志重放，输出合并不改变原始分页偏移。[状态约定](external-agent-delegation.md)。

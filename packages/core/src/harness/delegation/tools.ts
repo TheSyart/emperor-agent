@@ -75,6 +75,26 @@ function messageId(owner: DelegationOwner, callId: string, id: string): string {
     ].join('-')
   )
 }
+function closingText(
+  record: DelegationRecord,
+  run: DelegationRunRecord,
+): string {
+  return (
+    JSON.stringify({
+      delegationId: record.id,
+      runId: run.id,
+      backend: record.backend,
+      cwd: record.cwd,
+      phase: run.phase,
+      acceptance: run.acceptance,
+      receiptId: run.receiptId,
+      providerSessionId: record.providerSessionId,
+      providerTurnId: run.providerTurnId,
+    }) +
+    '\n' +
+    (run.summary ?? '(executor returned no closing text)')
+  )
+}
 export function createDelegationTools(
   options: DelegationToolOptions,
 ): ToolDefinition[] {
@@ -219,7 +239,7 @@ export function createDelegationTools(
               'DELEGATION_FAILED',
             )
           return {
-            content: run.summary ?? '(executor returned no closing text)',
+            content: closingText(service().inspect(record.id).record!, run),
             meta: {
               ...meta,
               kind: 'foreground',
@@ -403,7 +423,7 @@ export function createDelegationTools(
           )
         const run = await service().wait(args.agent_id, runId)
         return {
-          content: run.summary ?? 'External run ' + run.phase,
+          content: closingText(service().inspect(args.agent_id).record!, run),
           meta: {
             subagentId: args.agent_id,
             runId,

@@ -256,6 +256,9 @@ export class HarnessHost {
     requiresCompletionVerification: (agent, ref) =>
       (this.delegations?.requiredForGoal(ref, this.rootOf(agent).id).length ??
         0) > 0,
+    completionCurrent: (agent, ref) =>
+      this.delegations?.goalCompletionCurrent(ref, this.rootOf(agent).id) ??
+      true,
     verifyCompletion: async (agent, ref) => {
       await this.delegations?.verifyGoalCompletion(ref, this.rootOf(agent).id)
     },
@@ -1179,13 +1182,11 @@ export class HarnessHost {
         if (this.delegations?.parentPermissionsRevoked(root.id)) {
           this.goals.disarm(root)
           this.delegationInteractions.cancelRoot(root.id)
-          void this.delegations
-            .stopRoot(root.id)
-            .catch((error) =>
-              logger.warn('external permission revocation needs recovery', {
-                error: String(error),
-              }),
-            )
+          void this.delegations.stopRoot(root.id).catch((error) =>
+            logger.warn('external permission revocation needs recovery', {
+              error: String(error),
+            }),
+          )
         }
       }
       // The splice is logged before the inbox applies it: diff afterwards.

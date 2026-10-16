@@ -230,3 +230,9 @@ Agent 被要求只通过 `mcp_config` 添加 server，不使用 mcporter，也�
 - 不要把 API Key 直接写进可提交的项目文件，优先使用 `${ENV_NAME}`。MCP 标签读取配置时保留 `${ENV_NAME}`，把 args、env、headers、URL 中其余字面字符串显示为 `[REDACTED]`；保存原始配置时，未改动的掩码只从同一 server 同一字段回填，没有旧值的掩码会被拒绝。
 
 排查加载问题时，先看能力页“MCP”标签中该 server 卡片的状态和最近错误，再检查配置 JSON、执行环境和“设置 → 诊断”。
+
+## Claude Code 与 Codex 子代理
+
+在设置「执行器」启用 profile，填写 CLI 路径、选择模型路由或本机 CLI 登录，保存后检测。默认关闭，检测可用不等于真实认证或执行成功。你可以要求父 Agent 调度 Claude Code/Codex；工具仍是 subagent/send_message/collect_agent。环境信息里的外部任务显示本轮状态、真实日志、原生身份与独立成果验收。
+
+Claude 的消息排队继续，Codex 可干预当前轮。问题回到聊天卡片；停止会取消受管执行并保留成果。验收命令通过后还要查看整合预览，再明确应用；任务摘要中的“通过”不会代替宿主测试。

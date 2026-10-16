@@ -331,10 +331,19 @@ export class CoreDelegationService {
       },
     )
   }
-  async close(input: { id: string; sessionId?: string | null }) {
+  async close(input: {
+    id: string
+    sessionId?: string | null
+    failureDisposition?: string
+  }) {
     const state = this.access(input.id, input.sessionId, true)
     for (const run of Object.values(state.runs))
       await this.options.acceptance.stopRun(run.id)
+    if (input.failureDisposition)
+      await this.options.service.disposeGoalFailure(
+        input.id,
+        input.failureDisposition,
+      )
     return this.options.service.close(input.id)
   }
   async wait(runId: string, timeoutMs: number, sessionId?: string | null) {

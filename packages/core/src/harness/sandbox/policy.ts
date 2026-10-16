@@ -42,6 +42,8 @@ export interface SandboxExecutionPolicy {
   /** Host-only grants for an external runtime. Never accepted from model or IPC arguments. */
   runtimeStateRoots?: readonly string[]
   privateTempRoot?: string
+  /** Unforgeable host nonce carried by inherited macOS Seatbelt policy. */
+  processBoundaryTag?: string
   readOnlyRoots?: readonly string[]
 }
 

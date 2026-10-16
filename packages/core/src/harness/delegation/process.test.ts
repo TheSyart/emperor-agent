@@ -366,4 +366,35 @@ describe('managed streaming agent process', () => {
       }
     },
   )
+  it.skipIf(process.platform !== 'darwin')(
+    'finds a fast double-fork writer after its parent exited and session changed',
+    async () => {
+      const f = fixture(),
+        marker = join(f.workspace, 'double-fork-late')
+      const python = '/opt/homebrew/bin/python3'
+      const code = `import os,time,pathlib
+if os.fork()==0:
+ os.setsid()
+ if os.fork()==0:
+  time.sleep(1)
+  pathlib.Path(${JSON.stringify(marker)}).write_text('escaped')
+ os._exit(0)
+os.wait()
+time.sleep(.3)
+`
+      const h = await new ManagedAgentProcess().open({
+        executable: python,
+        args: ['-c', code],
+        cwd: f.workspace,
+        env: process.env,
+        policy: f.policy,
+      })
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      await h.terminate()
+      const result = await h.closed
+      await new Promise((resolve) => setTimeout(resolve, 1200))
+      expect(result.quiescent).toBe(true)
+      expect(existsSync(marker)).toBe(false)
+    },
+  )
 })

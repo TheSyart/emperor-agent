@@ -94,3 +94,7 @@ Plan 模式与权限预设相互独立：在 Plan 模式中切换预设，只改
 - 修改应用配置而非 workspace 文件的工具：参照 `skill_manage` / `mcp_config`，在写入前按沙箱模式判断并调用注入的 `ApprovalService.request()`，拒绝、取消或通道不可用时抛出 `ToolError`。
 - 新沙箱后端：`harness/sandbox/backend.ts` 的平台链、profile 生成与拒绝特征测试。
 - 新交互类型：`harness/host/interactions.ts`、`harness/projection/interactions.ts`、`control.*` operation 与 renderer 底部面板。
+
+## 外部执行器权限
+
+外部启动不接受任意 env/argv/owner；原生进程采用私有环境和 OS 边界。根与全部活动祖先权限取交集；Plan 拒绝启动，权限收窄停止已有外部执行。stop/close 等待受管资源，无法证明停止时保留 writer 隔离。[边界与认证](external-agent-delegation.md#工作区进程与认证)。

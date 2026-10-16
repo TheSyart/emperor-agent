@@ -900,8 +900,15 @@ export const CORE_OPERATION_REGISTRY = {
     ]),
     (api, [input]) => api.delegations.integrate(input),
   ),
-  'delegations.close': operation(z.tuple([externalRef]), (api, [input]) =>
-    api.delegations.close(input),
+  'delegations.close': operation(
+    z.tuple([
+      externalRef
+        .extend({
+          failureDisposition: z.string().trim().min(1).max(4096).optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.delegations.close(input),
   ),
 
   'attachments.rawPath': operation(z.tuple([idSchema]), (api, [id]) =>

@@ -77,3 +77,7 @@ CoreApi `goals.*`（`api/services/goal-service.ts`）是对同一服务的门面
 - Goal 不提高权限，续跑轮与普通 turn 使用同一沙箱模式和审批策略。
 - 续跑轮在同一 session 的 inbox 中排队，与用户消息、Scheduler 提交串行。
 - 删除 session 会连同 log 一起删除其 Goal。
+
+## 必需外部任务
+
+自动 Goal 续轮在 outstanding 外部工作期间等待，用户消息不被此门禁阻塞。子任务按稳定 Goal ID 归属和计费，普通 revision 变化不丢历史。complete 前重查所有必需子任务的当前宿主验收；关闭失败子会话本身不足以绕过，需用户另填明确失败处置理由。根 stop 立即解除自动续跑，重启不重发队列。[调度边界](external-agent-delegation.md#goalscheduler-与默认限额)。

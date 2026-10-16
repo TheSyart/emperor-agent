@@ -51,6 +51,7 @@ export interface GoalServiceOptions {
   defaultMaxGoalRounds?: number
   /** Host-owned current artifact proof, never an executor self-report. */
   verifyCompletion?: (agent: Agent, ref: GoalRef) => Promise<void>
+  completionCurrent?: (agent: Agent, ref: GoalRef) => boolean
   requiresCompletionVerification?: (agent: Agent, ref: GoalRef) => boolean
   /** Minimum admitted rounds before the model may self-report `blocked` (dsh-tool-goal default 3). */
   blockedAfterConsecutiveRounds?: number
@@ -434,7 +435,9 @@ export class GoalService {
     if (
       this.options.verifyCompletion &&
       (this.options.requiresCompletionVerification?.(agent, ref) ?? true) &&
-      (proof?.id !== ref.id || proof.revision !== ref.revision)
+      (proof?.id !== ref.id ||
+        proof.revision !== ref.revision ||
+        this.options.completionCurrent?.(agent, ref) === false)
     )
       throw new GoalError(
         'required external delegation verification is missing; verify current artifacts before completing',

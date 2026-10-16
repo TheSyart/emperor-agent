@@ -126,3 +126,7 @@ ACP 的 `session/prompt` 也进入同一个 `chat.submit`。`session/new` 只能
 - 不恢复 Python、HTTP 或 WebSocket 的产品主链路。
 
 具体清单见[扩展 Emperor Agent](../development/extending-emperor.md)。
+
+## 外部 Agent 执行
+
+HarnessHost 还组合默认关闭的 DelegationService，通过受管 Claude SDK CLI 与独占 Codex stdio app-server 执行原生子会话。执行、成果验收与整合是独立状态；[调度架构](external-agent-delegation.md)说明权限、持久工作区、终态通知与恢复边界。

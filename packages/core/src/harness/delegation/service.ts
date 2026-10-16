@@ -106,6 +106,7 @@ export class DelegationService {
     { digest: string; promise: Promise<DelegationRecord> }
   >()
   private readonly rootEpochs = new Map<string, number>()
+  private readonly goalProofs = new Map<string, string>()
   private readonly probes = new Map<
     string,
     { key: string; probe: ExecutorProbe }
@@ -548,11 +549,7 @@ export class DelegationService {
   parentPermissionsRevoked(rootSessionId: string): boolean {
     return this.list().some((state) => {
       const record = state.record!
-      if (
-        record.owner.rootSessionId !== rootSessionId ||
-        record.availability !== 'active'
-      )
-        return false
+      if (record.owner.rootSessionId !== rootSessionId) return false
       try {
         const parent = this.options.parent(record.owner)
         return (
@@ -592,13 +589,80 @@ export class DelegationService {
         state.record.owner.goalRef?.id === goal.id,
     )
   }
+  async disposeGoalFailure(id: string, reason: string): Promise<void> {
+    const e = this.entry(id),
+      state = e.journal.load(),
+      record = state.record!,
+      run = state.runs[record.currentRunId!]
+    if (
+      !reason.trim() ||
+      Buffer.byteLength(reason) > 4096 ||
+      !record.owner.requiredForGoal ||
+      !run ||
+      !TERMINAL_RUN_PHASES.has(run.phase) ||
+      !run.quiescent ||
+      run.acceptance === 'passed' ||
+      Object.values(state.messages).some((m) =>
+        ['queued', 'sending', 'delivery_unknown'].includes(m.status),
+      )
+    )
+      throw new DelegationError(
+        'INVALID_DISPOSITION',
+        'explicit human reason and a settled failed or unverified required run are required',
+      )
+    await this.change(e, run.id, {
+      goalFailureDisposition: {
+        source: 'human',
+        reason: reason.trim(),
+        at: Date.now(),
+      },
+    })
+  }
+  private goalProof(
+    goal: { id: string; revision: number },
+    root: string,
+  ): string {
+    return JSON.stringify(
+      this.requiredForGoal(goal, root)
+        .map((state) => ({
+          id: state.record!.id,
+          currentRunId: state.record!.currentRunId,
+          availability: state.record!.availability,
+          runs: Object.values(state.runs).map((run) => [run.id, run.revision]),
+          messages: Object.values(state.messages).map((message) => [
+            message.id,
+            message.status,
+          ]),
+        }))
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    )
+  }
+  goalCompletionCurrent(
+    goal: { id: string; revision: number },
+    root: string,
+  ): boolean {
+    return (
+      this.goalProofs.get(JSON.stringify([root, goal.id])) ===
+      this.goalProof(goal, root)
+    )
+  }
   async verifyGoalCompletion(
     goal: { id: string; revision: number },
     rootSessionId: string,
   ): Promise<void> {
+    const key = JSON.stringify([rootSessionId, goal.id]),
+      proof = this.goalProof(goal, rootSessionId)
+    this.goalProofs.delete(key)
     for (const state of this.requiredForGoal(goal, rootSessionId)) {
       const record = state.record!,
         run = record.currentRunId ? state.runs[record.currentRunId] : undefined
+      if (
+        run?.goalFailureDisposition?.source === 'human' &&
+        run.quiescent &&
+        TERMINAL_RUN_PHASES.has(run.phase) &&
+        record.availability === 'closed'
+      )
+        continue
       if (
         !run ||
         record.availability === 'needs_recovery' ||
@@ -617,6 +681,12 @@ export class DelegationService {
           `required delegation ${record.id} has no current host acceptance; inspect, validate, or explicitly block the Goal`,
         )
     }
+    if (this.goalProof(goal, rootSessionId) !== proof)
+      throw new DelegationError(
+        'REQUIRED_DELEGATION_UNVERIFIED',
+        'required delegation state changed during completion verification',
+      )
+    this.goalProofs.set(key, proof)
   }
   executorContext(): string {
     let config: ExecutorConfig

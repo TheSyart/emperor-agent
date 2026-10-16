@@ -114,6 +114,7 @@ export interface DelegationRecord {
   createdAt: number
 }
 export interface DelegationRunRecord {
+  goalFailureDisposition?: { source: 'human'; reason: string; at: number }
   recoveryResolved?: boolean
   recoveryInspection?: {
     id: string
@@ -251,5 +252,74 @@ export class DelegationError extends Error {
   ) {
     super(`${code}: ${detail}`)
     this.name = 'DelegationError'
+  }
+  /** IPC carries fixed domain guidance, never native stdout or credentials. */
+  toSafe(): { code: string; message: string; action: string } {
+    const code = /^[A-Z][A-Z0-9_]{0,63}$/.test(this.code)
+      ? this.code
+      : 'EXTERNAL_OPERATION_FAILED'
+    const guidance: Record<string, [string, string]> = {
+      INTEGRATION_CONFLICT: [
+        '工作区或 Git 索引已改变，请重新生成整合预览。',
+        'regenerate_integration_preview',
+      ],
+      STALE_REVISION: [
+        '任务状态已经变化，请刷新后重试。',
+        'refresh_delegation',
+      ],
+      ACCEPTANCE_REQUIRED: [
+        '成果或预览尚未通过当前验收，请重新验证。',
+        'validate_current_artifacts',
+      ],
+      REQUIRED_DELEGATION_UNVERIFIED: [
+        'Goal 仍有未验收的必需外部任务。',
+        'validate_current_artifacts',
+      ],
+      PERMISSION_DENIED: [
+        '当前会话没有执行此操作的权限。',
+        'review_task_permission',
+      ],
+      PERMISSION_REVOKED: [
+        '父任务权限已收窄，请检查任务详情。',
+        'review_task_permission',
+      ],
+      PLAN_MODE_UNSUPPORTED: [
+        'Plan 模式不支持启动外部执行，请先完成计划确认。',
+        'review_task_permission',
+      ],
+      OUTCOME_UNKNOWN: [
+        '尚未证明执行器停止，请检查保留成果与原生历史。',
+        'inspect_retained_results',
+      ],
+      DELIVERY_UNKNOWN: [
+        '消息送达状态未知，请先查看原生历史，避免重复发送。',
+        'inspect_retained_results',
+      ],
+      AUTH_REQUIRED: [
+        '执行器认证不可用，请在执行器设置中重新配置。',
+        'configure_executor',
+      ],
+      EXECUTOR_MISSING: [
+        '找不到执行器 CLI，请检查安装与可执行文件路径。',
+        'configure_executor',
+      ],
+      EXECUTOR_DISABLED: [
+        '请先在执行器设置中启用对应 profile。',
+        'configure_executor',
+      ],
+      EXECUTOR_INCOMPATIBLE: [
+        'CLI 版本与固定协议基线不兼容。',
+        'configure_executor',
+      ],
+      CONTAINMENT_UNAVAILABLE: [
+        '操作系统执行边界不可用，请检查执行器诊断。',
+        'configure_executor',
+      ],
+    }
+    const [message, action] = guidance[code] ?? [
+      '外部执行器操作未成功，请刷新任务详情并检查保留的日志。',
+      'inspect_retained_results',
+    ]
+    return { code, message, action }
   }
 }

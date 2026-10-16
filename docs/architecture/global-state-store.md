@@ -195,3 +195,7 @@ Release 在创建 Core 前由 `bootstrapEmperorHome()` 执行默认根迁移：
 - `projectLegacyPrivateData`：当前绑定项目的源码目录里检测到的旧私有数据（仅提示）。
 - `kernel.archivedLegacySessions`：首次启动新内核时旧会话目录被移到的位置。
 - `effectiveConfig`：从现有事实源即时计算的脱敏值与来源，不是落盘文件。
+
+## 外部委派状态
+
+Emperor Home 的 delegations/ 保存 conversations journal、每轮 transcript、工作区 lease、process ownership、私有 native state、内容寻址 artifacts、验收和 integration preview。它们属于私有运行数据；关闭会话或停用 profile 不删除成果。恢复先只读核验，不重放未知发送或崩溃中的 apply。[恢复语义](external-agent-delegation.md#崩溃恢复与通知)。

@@ -1,6 +1,12 @@
 import { expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync, symlinkSync, mkdirSync } from 'node:fs'
+import {
+  readFileSync,
+  writeFileSync,
+  symlinkSync,
+  mkdirSync,
+  truncateSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { delegationRepository, fixtureGit } from './delegation-test-fixture'
 import { SnapshotService } from './delegation-snapshot'
@@ -114,4 +120,19 @@ it('reports escaping links, nested repositories, and ignored files without follo
       expect.objectContaining({ path: '.env' }),
     ]),
   )
+})
+
+it('refuses a sparse oversized selected file before reading it into the snapshot digest', async () => {
+  const { root, repo, runner } = delegationRepository()
+  const file = join(repo, 'oversized.bin')
+  writeFileSync(file, '')
+  truncateSync(file, 17 * 1024 * 1024)
+  await expect(
+    new SnapshotService({ runner, tempRoot: join(root, 'tmp') }).capture({
+      id: 'dlg-size',
+      cwd: repo,
+      base: 'snapshot',
+      untracked: ['oversized.bin'],
+    }),
+  ).rejects.toThrow('SNAPSHOT_LIMIT')
 })

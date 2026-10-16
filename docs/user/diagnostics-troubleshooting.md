@@ -182,3 +182,9 @@ npm --prefix desktop run package:verify
 普通问题应包含：应用来源、平台与架构、复现步骤、期望结果、实际结果和脱敏日志。不要上传 API Key、环境变量、用户文档或完整 `stateRoot`。
 
 安全漏洞不要公开披露复现细节，按 [Security Policy](../../.github/SECURITY.md) 使用私密报告入口。
+
+## 外部执行器不可用
+
+执行器设置页区分 missing、needs_auth、incompatible、containment_unavailable 和 available。当前协议固定 Claude Code 2.1.281 / Codex 0.153.4；安装了不同版本不能仅修改 expectedVersion 绕过。不要把密钥发到聊天或填写为启动参数。Claude 的仅 Keychain OAuth 登录当前不能导入；选择明确的模型路由或支持的本机 CLI 配置。
+
+outcome_unknown/delivery_unknown 表示停止或发送确认不足；先检查保留文件和原生历史，再按详情的明确恢复动作处理，勿反复重发。Linux/Windows 的本机验证不能用 macOS 结果代替。出现缺失 macOS scanner 时，源码开发者运行 `node scripts/build-delegation-scanner.mjs`，安装包用户重新核对包完整性；不要关闭边界强行执行。

@@ -42,6 +42,7 @@ let generation = 0,
   alive = true,
   timer: ReturnType<typeof setTimeout> | undefined,
   unsubscribe = () => {}
+const failureDisposition = ref('')
 const record = computed(() => view.value?.record),
   run = computed(() => view.value?.runs[props.runId]),
   receipt = computed(() => delivery.value?.receipt),
@@ -524,6 +525,22 @@ onBeforeUnmount(() => {
             冲突 · {{ path }}
           </li>
         </ul>
+        <label
+          v-if="
+            record?.owner.requiredForGoal && !active && acceptance !== 'passed'
+          "
+          class="external-form"
+        >
+          明确接受本项失败的处置理由（填写后关闭会话，Goal 才能将其视为已处置）
+          <input
+            v-model="failureDisposition"
+            aria-label="必需任务失败处置理由"
+            :disabled="busy || !mutable"
+          />
+        </label>
+        <p v-if="run?.goalFailureDisposition" class="external-note">
+          用户已处置失败：{{ run.goalFailureDisposition.reason }}
+        </p>
         <Button
           v-if="canApply"
           data-apply
@@ -546,7 +563,17 @@ onBeforeUnmount(() => {
         v-if="record?.availability !== 'closed'"
         size="sm"
         :disabled="busy"
-        @click="action(() => closeDelegation({ id: delegationId, sessionId }))"
+        @click="
+          action(() =>
+            closeDelegation({
+              id: delegationId,
+              sessionId,
+              ...(failureDisposition.trim()
+                ? { failureDisposition: failureDisposition.trim() }
+                : {}),
+            }),
+          )
+        "
         >关闭外部会话</Button
       ><Button size="sm" @click="emit('close')">返回聊天</Button></template
     >

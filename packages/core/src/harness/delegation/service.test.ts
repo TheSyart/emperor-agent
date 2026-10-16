@@ -113,6 +113,9 @@ function fixture(
     registry,
     prepare,
     mutations,
+    setPlan: (active: boolean) => {
+      parent = { ...parent, planMode: active }
+    },
     setParent: (mode: DelegationParentContext['policy']['mode']) => {
       parent = { cwd: f.root, policy: { mode, workspaceRoot: f.root } }
     },
@@ -487,4 +490,15 @@ it('awaits the same shutdown barrier for concurrent and repeated close requests'
     await f.service.shutdown()
     f.cleanup()
   }
+})
+
+it('revocation includes idle terminal conversations whose auxiliary verification can still run', async () => {
+  const f = fixture()
+  const record = await f.service.start(f.owner, spec)
+  await f.service.wait(record.id, record.currentRunId!)
+  f.setPlan(true)
+  expect(f.service.inspect(record.id).record!.availability).toBe('idle')
+  expect(f.service.parentPermissionsRevoked('root')).toBe(true)
+  await f.service.shutdown()
+  f.cleanup()
 })

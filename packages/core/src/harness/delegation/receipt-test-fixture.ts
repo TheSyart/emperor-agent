@@ -6,7 +6,9 @@ import { DelegationWorkspaceService } from '../../workspace/delegation-workspace
 import { WorkspaceMutationCoordinator } from '../../workspace/mutation-coordinator'
 import { fixtureDelegationRecord, fixtureDelegationRun } from './testing'
 import { DelegationReceipts } from './receipts'
-export async function receiptFixture() {
+export async function receiptFixture(
+  workspace: 'isolated-worktree' | 'shared-exclusive' = 'isolated-worktree',
+) {
   const f = delegationRepository(),
     mutations = new WorkspaceMutationCoordinator(),
     snapshots = new SnapshotService({
@@ -23,7 +25,7 @@ export async function receiptFixture() {
     owner = fixtureDelegationRecord().owner
   const lease = await workspaces.prepare(owner, {
       cwd: f.repo,
-      workspace: 'isolated-worktree',
+      workspace,
       base: 'committed',
     }),
     record = {

@@ -63,3 +63,7 @@
 - 默认没有内置网页搜索或网页抓取工具；需要联网时通过 MCP、Skill 或命令完成，相关内容会离开本机。
 
 产品首页见 [README](../../README.md)，开发者入口见 [开发指南](../development/README.md)。
+
+## 调度外部编码 Agent
+
+设置「执行器」可显式启用 Claude Code/Codex，父 Agent 使用统一子代理工具调度。任务详情支持队列、Codex 当前轮干预、停止、原生历史、宿主验收和整合预览。参见[工具说明](tools-skills-mcp.md#claude-code-与-codex-子代理)及[故障排查](diagnostics-troubleshooting.md#外部执行器不可用)。

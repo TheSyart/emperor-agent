@@ -1,5 +1,5 @@
-import { expect, it } from 'vitest'
-import { writeFileSync, readFileSync } from 'node:fs'
+import { expect, it, vi } from 'vitest'
+import { writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { receiptFixture } from './receipt-test-fixture'
 import {
@@ -291,3 +291,87 @@ it('returns bounded needs_user and retains the writer when verification shutdown
     }
   }
 }, 20000)
+
+it('protects shared Git metadata and the isolated Git pointer during actual host verification', async () => {
+  for (const workspace of ['shared-exclusive', 'isolated-worktree'] as const) {
+    const f = await receiptFixture(workspace)
+    try {
+      const file = join(
+          f.lease.cwd,
+          workspace === 'shared-exclusive' ? '.git/config' : '.git',
+        ),
+        before = readFileSync(file)
+      const receipt = await f.receipts.collect(f.run.id),
+        acceptance = new DelegationAcceptance({
+          root: join(f.root, 'state'),
+          receipts: f.receipts,
+          mutations: f.mutations,
+          scope: () => ({ taskScopeId: 'task', permission: 'workspace-write' }),
+        })
+      const criteria = {
+        description: 'Git metadata must remain protected',
+        commands: [
+          {
+            executable: process.execPath,
+            args: [
+              '-e',
+              workspace === 'shared-exclusive'
+                ? 'require("fs").appendFileSync(".git/config","\\n# illegal verification write\\n")'
+                : 'require("fs").writeFileSync(".git",require("fs").readFileSync(".git"))',
+            ],
+          },
+        ],
+      }
+      const result = await acceptance.validate(receipt.id, criteria, {
+        source: 'host-plan',
+        taskScopeId: 'task',
+        criteriaDigest: criteriaDigest(criteria),
+      })
+      expect(result.state).toBe('failed')
+      expect(readFileSync(file)).toEqual(before)
+    } finally {
+      f.cleanup()
+    }
+  }
+}, 45000)
+it('rechecks narrowed permission after waiting for the verification workspace lease', async () => {
+  const f = await fixture()
+  let permission: 'workspace-write' | 'read-only' = 'workspace-write'
+  const acceptance = new DelegationAcceptance({
+    root: join(f.root, 'state'),
+    receipts: f.receipts,
+    mutations: f.mutations,
+    scope: () => ({ taskScopeId: 'task', permission }),
+  })
+  const held = await f.mutations.resources.acquire({
+    keys: [f.lease.cwd],
+    mode: 'exclusive',
+    owner: 'hold',
+  })
+  const criteria = {
+    description: 'must not write after narrowing',
+    commands: [
+      {
+        executable: process.execPath,
+        args: [
+          '-e',
+          'require("fs").writeFileSync("permission-late.txt","forbidden")',
+        ],
+      },
+    ],
+  }
+  const pending = acceptance.validate(f.receipt.id, criteria, {
+    source: 'host-plan',
+    taskScopeId: 'task',
+    criteriaDigest: criteriaDigest(criteria),
+  })
+  await vi.waitFor(() => expect(acceptance.isActive(f.run.id)).toBe(true))
+  permission = 'read-only'
+  held.release()
+  try {
+    await pending
+    expect(existsSync(join(f.lease.cwd, 'permission-late.txt'))).toBe(false)
+  } finally {
+    f.cleanup()
+  }
+})

@@ -13,6 +13,11 @@ files:
   - '!out/native/**/*'
   - package.json
   - '!node_modules{,/**/*}'
+  - node_modules/@anthropic-ai/claude-agent-sdk/package.json
+  - node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
+  - node_modules/@anthropic-ai/claude-agent-sdk/manifest*.json
+  - node_modules/@anthropic-ai/claude-agent-sdk-*/package.json
+  - node_modules/@anthropic-ai/claude-agent-sdk-*/claude*
   - node_modules/typescript/package.json
   - node_modules/typescript/lib/typescript.js
   - node_modules/node-pty/package.json
@@ -56,6 +61,8 @@ extraResources:
 
 asar: true
 asarUnpack:
+  - node_modules/@anthropic-ai/claude-agent-sdk/node_modules/@anthropic-ai/claude-agent-sdk-*/claude*
+  - node_modules/@anthropic-ai/claude-agent-sdk-*/claude*
   - node_modules/node-pty/prebuilds/**/*
   - node_modules/node-pty/build/Release/**/*
 
@@ -73,6 +80,8 @@ mac:
     NSMicrophoneUsageDescription: Emperor 只在你向聊天输入框听写时使用麦克风；声音只在这台 Mac 上处理，不会保存。
     NSSpeechRecognitionUsageDescription: Emperor 在这台 Mac 上把你说的话识别成文字，填进聊天输入框；不会发送到网络。
   extraResources:
+    - from: ../packages/core/native/build/darwin-${arch}/delegation-scan
+      to: native/delegation-scan
     - from: out/native/credential-auth
       to: native/credential-auth
   target:

@@ -517,6 +517,19 @@ export class DelegationReceipts {
       closeSync(fd)
     }
   }
+  /** Trusted original Git binding, shared by source and projection verification. */
+  verificationReadOnlyRoots(id: string, cwd: string): string[] {
+    const receipt = this.get(id),
+      { lease } = this.options.resolve(receipt.runId)
+    const pointer = join(cwd, '.git')
+    return [
+      ...new Set([
+        pointer,
+        join(lease.path, '.git'),
+        ...(lease.snapshot ? [lease.snapshot.commonDir] : []),
+      ]),
+    ]
+  }
   async current(id: string): Promise<boolean> {
     const receipt = this.get(id),
       binding = this.options.resolve(receipt.runId)

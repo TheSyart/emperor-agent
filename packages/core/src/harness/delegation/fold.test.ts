@@ -66,3 +66,29 @@ describe('delegation state transitions', () => {
     expect(fold.state.lastSeq).toBe(0)
   })
 })
+it('terminal metadata cannot reopen a closed conversation or idle a newer active run', () => {
+  const fold = new DelegationFold()
+  const events: DelegationEvent[] = [
+    { type: 'created', record: record() },
+    { type: 'run-created', run: run() },
+    { type: 'run-changed', runId: 'dgr-1', patch: { phase: 'cancelled' } },
+    { type: 'availability', availability: 'closed' },
+    {
+      type: 'run-changed',
+      runId: 'dgr-1',
+      patch: { summary: 'native history inspected' },
+    },
+  ]
+  events.forEach((e, i) => fold.apply(entry(i + 1, e)))
+  expect(fold.state.record?.availability).toBe('closed')
+  fold.apply(entry(6, { type: 'availability', availability: 'idle' }))
+  fold.apply(entry(7, { type: 'run-created', run: run('dgr-2') }))
+  fold.apply(
+    entry(8, {
+      type: 'run-changed',
+      runId: 'dgr-1',
+      patch: { summary: 'old metadata' },
+    }),
+  )
+  expect(fold.state.record?.availability).toBe('active')
+})

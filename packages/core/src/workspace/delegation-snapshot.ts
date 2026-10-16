@@ -148,7 +148,25 @@ export class SnapshotService {
     const digest = createHash('sha256').update(
       JSON.stringify({ head, included, excluded }),
     )
+    if (included.length > 10000)
+      throw new DelegationError(
+        'SNAPSHOT_LIMIT',
+        'snapshot file count exceeded',
+      )
+    let totalBytes = 0
     for (const path of included) {
+      const file = join(root, path)
+      if (existsSync(file)) {
+        const stat = lstatSync(file)
+        if (stat.isFile()) {
+          totalBytes += stat.size
+          if (stat.size > 16 * 1024 * 1024 || totalBytes > 128 * 1024 * 1024)
+            throw new DelegationError(
+              'SNAPSHOT_LIMIT',
+              'snapshot byte limit exceeded before hashing',
+            )
+        }
+      }
       digest.update(path)
       if (existsSync(join(root, path)) && lstatSync(join(root, path)).isFile())
         digest.update(readFileSync(join(root, path)))

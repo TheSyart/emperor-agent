@@ -118,13 +118,11 @@ export function createSessionKit(deps: SessionKitDeps): SessionKit {
         }
       },
       onChildStarted(callId, childId, externalRunId, backend) {
-        pending
-          .get(callId)
-          ?.started.resolve({
-            id: childId,
-            ...(externalRunId === undefined ? {} : { externalRunId }),
-            ...(backend === undefined ? {} : { backend }),
-          })
+        pending.get(callId)?.started.resolve({
+          id: childId,
+          ...(externalRunId === undefined ? {} : { externalRunId }),
+          ...(backend === undefined ? {} : { backend }),
+        })
       },
       onChildStartError(callId, rendered) {
         const entry = pending.get(callId)

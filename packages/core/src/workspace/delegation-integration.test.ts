@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { join } from 'node:path'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { receiptFixture } from '../harness/delegation/receipt-test-fixture'
@@ -389,6 +389,43 @@ it('keeps unreadable integration state and reports recovery without disabling or
       },
     ])
     expect(readFileSync(path, 'utf8')).toBe('{"schemaVersion":999}')
+  } finally {
+    f.cleanup()
+  }
+}, 45000)
+
+it('refuses an acceptance that became stale while apply waited for its target lease', async () => {
+  const f = await fixture()
+  const preview = await f.integration.previewIntegration(
+    f.receipt.id,
+    await f.integration.captureBase(f.repo),
+    f.accepted.id,
+  )
+  const held = await f.mutations.resources.acquire({
+    keys: [f.repo],
+    mode: 'exclusive',
+    owner: 'hold',
+  })
+  const acquire = f.mutations.resources.acquire.bind(f.mutations.resources)
+  let queued = false
+  vi.spyOn(f.mutations.resources, 'acquire').mockImplementation(
+    (request, signal) => {
+      if (request.owner === 'agent' && request.keys.includes(f.repo))
+        queued = true
+      return acquire(request, signal)
+    },
+  )
+  const applying = f.integration.applyIntegration(
+    preview.id,
+    preview.revision,
+    { source: 'host-plan', taskScopeId: 'task', previewDigest: preview.digest },
+  )
+  await vi.waitFor(() => expect(queued).toBe(true))
+  writeFileSync(join(f.lease.cwd, 'src/a.txt'), 'new unverified correction')
+  held.release()
+  try {
+    await expect(applying).rejects.toThrow('ACCEPTANCE_REQUIRED')
+    expect(readFileSync(join(f.repo, 'src/a.txt'), 'utf8')).toBe('base')
   } finally {
     f.cleanup()
   }

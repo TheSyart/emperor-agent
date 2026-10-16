@@ -10,6 +10,7 @@ export interface OwnedProcessIdentity {
   pid: number | null
   startedAt: number
   fingerprint: string
+  boundary?: { tag: string; scannerPath: string }
 }
 export interface OwnedDescendant {
   pid: number

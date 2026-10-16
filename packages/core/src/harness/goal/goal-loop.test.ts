@@ -918,3 +918,16 @@ describe('external delegation goal boundary', () => {
     expect(goals.complete(agent, goal).phase).toBe('complete')
   })
 })
+it('rejects a completion proof if required delegation state changed during its async boundary', async () => {
+  let current = true
+  const h = createTestHarness(),
+    agent = h.agent(),
+    goals = new GoalService({
+      verifyCompletion: async () => {},
+      completionCurrent: () => current,
+    })
+  const goal = goals.create(agent, { objective: 'fixture proof race' })
+  await goals.verifyCompletion(agent, goal)
+  current = false
+  expect(() => goals.complete(agent, goal)).toThrow('verification')
+})
