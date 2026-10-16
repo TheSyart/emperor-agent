@@ -15,6 +15,7 @@ import {
   type NormalizedExecutorEvent,
   type ExecutorProbe,
 } from './types'
+import { defaultExecutorConfig } from './config'
 import { DelegationPolicy, type DelegationParentContext } from './policy'
 import { DelegationBudget, type BudgetLease } from './budget'
 import { DelegationJournal } from './journal'
@@ -72,6 +73,9 @@ export interface DelegationServiceOptions {
     canWake: (owner: DelegationOwner) => boolean
     flush: (sessionId: string) => void
   }
+  onState?: (state: DelegationState, event: DelegationEvent) => void
+  onSettled?: (id: string, runId: string) => Promise<void>
+  onStopRoot?: (rootSessionId: string) => Promise<void>
   onEvent?: (event: NormalizedExecutorEvent) => void
   onQuestion?: (
     question: DelegationQuestion,
@@ -105,11 +109,18 @@ export class DelegationService {
     string,
     { key: string; probe: ExecutorProbe }
   >()
+  private shutdownPromise?: Promise<void>
   private disposed = false
   private reconciled = false
   recoveryReport: RecoveryReport = { loaded: [], issues: [] }
   constructor(private readonly options: DelegationServiceOptions) {
-    this.budget = new DelegationBudget(options.config())
+    let config: ExecutorConfig
+    try {
+      config = options.config()
+    } catch {
+      config = defaultExecutorConfig()
+    }
+    this.budget = new DelegationBudget(config)
   }
   private workspaceAvailable(record: DelegationRecord): boolean {
     try {
@@ -501,10 +512,16 @@ export class DelegationService {
     return [...this.entries.values()].map((e) => e.journal.load())
   }
   async probeProfiles(): Promise<void> {
+    let config: ExecutorConfig
+    try {
+      config = this.options.config()
+    } catch {
+      return
+    }
+    this.budget.reconfigure(config)
     await Promise.all(
-      this.options
-        .config()
-        .profiles.filter((p) => p.enabled)
+      config.profiles
+        .filter((p) => p.enabled)
         .map(async (profile) => {
           let probe: ExecutorProbe
           try {
@@ -527,9 +544,15 @@ export class DelegationService {
     )
   }
   executorContext(): string {
+    let config: ExecutorConfig
+    try {
+      config = this.options.config()
+    } catch {
+      return 'External executors unavailable: EXECUTOR_CONFIG_INVALID; original configuration retained.'
+    }
     return [
       'External executor profiles (internal remains the default):',
-      ...this.options.config().profiles.map((profile) => {
+      ...config.profiles.map((profile) => {
         const cached = this.probes.get(profile.id),
           probe =
             cached?.key === JSON.stringify(profile) ? cached.probe : undefined
@@ -548,6 +571,7 @@ export class DelegationService {
     ].join('\n')
   }
   async stopRoot(rootSessionId: string): Promise<void> {
+    const auxiliary = this.options.onStopRoot?.(rootSessionId)
     this.rootEpochs.set(
       rootSessionId,
       (this.rootEpochs.get(rootSessionId) ?? 0) + 1,
@@ -583,14 +607,18 @@ export class DelegationService {
           })
       }),
     )
+    await auxiliary
   }
-  async shutdown(): Promise<void> {
-    this.disposed = true
-    const roots = new Set([
-      ...this.rootEpochs.keys(),
-      ...this.list().map((s) => s.record!.owner.rootSessionId),
-    ])
-    await Promise.all([...roots].map((id) => this.stopRoot(id)))
+  shutdown(): Promise<void> {
+    this.shutdownPromise ??= (async () => {
+      this.disposed = true
+      const roots = new Set([
+        ...this.rootEpochs.keys(),
+        ...this.list().map((s) => s.record!.owner.rootSessionId),
+      ])
+      await Promise.all([...roots].map((id) => this.stopRoot(id)))
+    })()
+    return this.shutdownPromise
   }
   private serial<T>(e: Entry, action: () => Promise<T>): Promise<T> {
     const next = e.tail.catch(() => undefined).then(action)
@@ -599,6 +627,7 @@ export class DelegationService {
   }
   private async append(e: Entry, event: DelegationEvent): Promise<void> {
     await e.journal.append(event)
+    this.options.onState?.(e.journal.load(), event)
     for (const wake of e.waiters) wake()
   }
   private profile(spec: DelegationStart): ExecutorProfile {
@@ -973,7 +1002,7 @@ export class DelegationService {
   ): Promise<void> {
     await this.serial(e, async () => {
       const run = e.journal.load().runs[runId]
-      if (run && !TERMINAL_RUN_PHASES.has(run.phase))
+      if (run && (!TERMINAL_RUN_PHASES.has(run.phase) || !('phase' in patch)))
         await this.append(e, { type: 'run-changed', runId, patch })
     })
   }
@@ -1444,6 +1473,16 @@ export class DelegationService {
           )
             await this.append(e, { ...interaction, state: 'cancelled' })
       })
+      if (quiescent && finalPhase !== 'outcome_unknown') {
+        try {
+          await this.options.onSettled?.(id, activeRunId)
+        } catch {
+          await this.change(e, activeRunId, {
+            acceptance: 'needs_user',
+            failureCode: 'ARTIFACT_COLLECTION_FAILED',
+          })
+        }
+      }
       await this.serial(e, () =>
         this.append(e, {
           type: 'outbox',
@@ -1635,9 +1674,42 @@ export class DelegationService {
     await e.active
     return { requested: true }
   }
-  async wait(id: string, runId: string): Promise<DelegationRunRecord> {
+  async bindIntegration(
+    id: string,
+    runId: string,
+    previewId: string,
+  ): Promise<void> {
+    await this.change(this.entry(id), runId, {
+      integrationPreviewId: previewId,
+    })
+  }
+  async bindReceipt(
+    id: string,
+    runId: string,
+    receiptId: string,
+    acceptance: DelegationRunRecord['acceptance'],
+    acceptanceId?: string,
+  ): Promise<void> {
+    const e = this.entry(id)
+    await this.serial(e, () =>
+      this.append(e, {
+        type: 'receipt',
+        runId,
+        receiptId,
+        acceptance,
+        ...(acceptanceId ? { acceptanceId } : {}),
+      }),
+    )
+  }
+  async wait(
+    id: string,
+    runId: string,
+    signal?: AbortSignal,
+  ): Promise<DelegationRunRecord> {
     const e = this.entry(id)
     while (true) {
+      if (signal?.aborted)
+        throw new DelegationError('ABORTED', 'wait cancelled')
       const run = e.journal.load().runs[runId]
       if (!run) throw new DelegationError('RUN_NOT_FOUND', 'run missing')
       if (TERMINAL_RUN_PHASES.has(run.phase)) {
@@ -1647,9 +1719,12 @@ export class DelegationService {
       await new Promise<void>((resolve) => {
         const wake = () => {
           e.waiters.delete(wake)
+          signal?.removeEventListener('abort', wake)
           resolve()
         }
         e.waiters.add(wake)
+        signal?.addEventListener('abort', wake, { once: true })
+        if (signal?.aborted) wake()
       })
     }
   }

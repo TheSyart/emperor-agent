@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
-import { DelegationService } from './service'
+import { DelegationService, type DelegationServiceOptions } from './service'
 import { DelegationJournal } from './journal'
 import { defaultExecutorConfig } from './config'
 import { ExecutorRegistry } from './registry'
@@ -35,6 +35,10 @@ function fixture(
     open: ExecutorOpenInput,
   ) => AsyncIterable<NormalizedExecutorEvent>,
   prepareGate?: Promise<void>,
+  callbacks: Pick<
+    DelegationServiceOptions,
+    'onSettled' | 'onState' | 'onStopRoot'
+  > = {},
 ) {
   const f = delegationTestDirectory(),
     config = defaultExecutorConfig()
@@ -81,6 +85,7 @@ function fixture(
   }
   const mutations = new WorkspaceMutationCoordinator()
   const service = new DelegationService({
+    ...callbacks,
     root: f.root,
     config: () => config,
     registry,
@@ -417,4 +422,69 @@ it('startup with unknown process ownership retains capacity and workspace instea
   )
   expect(f.mutations.hasActiveWriter(f.root)).toBe(true)
   f.cleanup()
+})
+
+it('finishes durable receipt collection before submitting a queued followup', async () => {
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+      release = resolve
+    }),
+    collected = vi.fn(async () => {
+      await gate
+    })
+  const f = fixture(undefined, undefined, { onSettled: collected })
+  try {
+    const record = await f.service.start(f.owner, spec)
+    await vi.waitFor(() => expect(collected).toHaveBeenCalledOnce())
+    await f.service.send(record.id, {
+      messageId: 'dgm-followup',
+      text: 'next',
+      delivery: 'queue',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(f.adapter.submitted).toHaveLength(1)
+    release()
+    await vi.waitFor(() => expect(f.adapter.submitted).toHaveLength(2))
+    expect(f.service.inspect(record.id).runs[record.currentRunId!]?.phase).toBe(
+      'completed',
+    )
+  } finally {
+    release()
+    await f.service.shutdown()
+    f.cleanup()
+  }
+})
+
+it('awaits the same shutdown barrier for concurrent and repeated close requests', async () => {
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+      release = resolve
+    }),
+    stop = vi.fn(async () => {
+      await gate
+    })
+  const f = fixture(undefined, undefined, { onStopRoot: stop })
+  try {
+    const record = await f.service.start(f.owner, spec)
+    await f.service.wait(record.id, record.currentRunId!)
+    const first = f.service.shutdown(),
+      second = f.service.shutdown()
+    await vi.waitFor(() => expect(stop).toHaveBeenCalled())
+    expect(stop).toHaveBeenCalledTimes(1)
+    let settled = false
+    void second.then(() => {
+      settled = true
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(settled).toBe(false)
+    release()
+    await Promise.all([first, second])
+    const seq = f.service.inspect(record.id).lastSeq
+    await f.service.shutdown()
+    expect(f.service.inspect(record.id).lastSeq).toBe(seq)
+  } finally {
+    release()
+    await f.service.shutdown()
+    f.cleanup()
+  }
 })

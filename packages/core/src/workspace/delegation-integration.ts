@@ -459,18 +459,30 @@ export class DelegationIntegration {
     return preview
   }
   /** Interrupted writes require inspection; startup never replays or rolls back them. */
-  reconcile(): { previewId: string; status: 'needs_user' }[] {
+  reconcile(): { previewId: string; status: 'needs_user'; reason?: string }[] {
     const root = join(this.options.root, 'integrations')
     if (!existsSync(root)) return []
-    const recovered: { previewId: string; status: 'needs_user' }[] = []
+    const recovered: {
+      previewId: string
+      status: 'needs_user'
+      reason?: string
+    }[] = []
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory() || !/^dpi-[a-f0-9-]+$/.test(entry.name)) continue
-      const preview = this.get(entry.name)
-      if (preview.reason !== 'APPLY_IN_PROGRESS') continue
-      preview.status = 'needs_user'
-      preview.reason = 'APPLY_INTERRUPTED'
-      this.save(preview)
-      recovered.push({ previewId: preview.id, status: 'needs_user' })
+      try {
+        const preview = this.get(entry.name)
+        if (preview.reason !== 'APPLY_IN_PROGRESS') continue
+        preview.status = 'needs_user'
+        preview.reason = 'APPLY_INTERRUPTED'
+        this.save(preview)
+        recovered.push({ previewId: preview.id, status: 'needs_user' })
+      } catch {
+        recovered.push({
+          previewId: entry.name,
+          status: 'needs_user',
+          reason: 'PREVIEW_UNREADABLE',
+        })
+      }
     }
     return recovered
   }

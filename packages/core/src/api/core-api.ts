@@ -4,6 +4,7 @@
  * adds the operation surface (sessions, config, workspace, git, terminals,
  * scheduler, plugins, environment, diagnostics) on top of it.
  */
+import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
@@ -119,6 +120,20 @@ import { TurnSnapshots } from '../workspace/turn-snapshots'
 import { DelegationWorkspaceService } from '../workspace/delegation-workspaces'
 import { SnapshotService } from '../workspace/delegation-snapshot'
 import { ExecutorConfigStore } from '../harness/delegation/config'
+import { CoreExecutorService } from './services/executor-service'
+import {
+  CoreDelegationService,
+  externalTask,
+} from './services/delegation-service'
+import { DelegationReceipts } from '../harness/delegation/receipts'
+import { DelegationAcceptance } from '../harness/delegation/acceptance'
+import { DelegationIntegration } from '../workspace/delegation-integration'
+import type {
+  DelegationState,
+  DelegationEvent,
+} from '../harness/delegation/fold'
+import type { DelegationProjection } from '../harness/delegation/events'
+
 import { ExecutorRegistry } from '../harness/delegation/registry'
 import { DelegationService } from '../harness/delegation/service'
 import { ExecutorRuntimeService } from '../harness/delegation/runtime'
@@ -191,7 +206,17 @@ export interface CoreRuntimeReplayPayload {
 /** A Task-panel row: a background job, a subagent session, or a workflow run. */
 export interface CoreTaskRecord {
   id: string
-  kind: 'job' | 'subagent' | 'workflow'
+  kind: 'job' | 'subagent' | 'workflow' | 'external-agent'
+  delegation_id?: string
+  backend?: string
+  model?: string
+  capabilities?: import('../harness/delegation/types').ExecutorCapabilities
+  acceptance?: import('../harness/delegation/types').DelegationRunRecord['acceptance']
+  receipt_id?: string
+  usage?: import('../harness/delegation/types').DelegationRunRecord['usage']
+  workspace_summary?: string
+  recoverable?: boolean
+  revision?: number
   job_kind?: string
   label: string
   description: string
@@ -251,7 +276,21 @@ export class CoreApi {
   readonly workspaceMutations = new WorkspaceMutationCoordinator()
   readonly executorConfig: ExecutorConfigStore
   readonly executorRegistry = new ExecutorRegistry()
-  readonly delegations: DelegationService
+  readonly delegationRuntime: DelegationService
+  readonly delegationService: CoreDelegationService
+  readonly delegations: CoreDelegationService
+  readonly executors: CoreExecutorService
+  readonly delegationReceipts: DelegationReceipts
+  readonly delegationAcceptance: DelegationAcceptance
+  readonly delegationIntegration: DelegationIntegration
+  private closePromise?: Promise<void>
+  private readonly delegationOutput = new Map<
+    string,
+    {
+      timer: ReturnType<typeof setTimeout>
+      output: { role: string; content: string }[]
+    }
+  >()
   /** Per-turn file records of Build projects (E-track contract §5). */
   readonly turnFiles: TurnFileRecorder
   readonly gitReceipts: GitOperationReceiptStore
@@ -564,7 +603,17 @@ export class CoreApi {
     const executorProcesses = new ManagedAgentProcess({
       sandbox: host.sandboxBackend,
     })
-    this.delegations = new DelegationService({
+    const externalWorkspaces = new DelegationWorkspaceService({
+      root: this.paths.delegationsRoot,
+      runner: turnGit,
+      mutations: this.workspaceMutations,
+      snapshots: new SnapshotService({
+        runner: turnGit,
+        tempRoot: join(this.paths.delegationsRoot, 'indexes'),
+        resources: this.workspaceMutations.resources,
+      }),
+    })
+    this.delegationRuntime = new DelegationService({
       root: this.paths.delegationsRoot,
       config: () => this.executorConfig.read(),
       registry: this.executorRegistry,
@@ -576,16 +625,7 @@ export class CoreApi {
         ['codex', new CodexExecutorAdapter({ processes: executorProcesses })],
       ]),
       parent: (owner) => host.delegationParent(owner),
-      workspaces: new DelegationWorkspaceService({
-        root: this.paths.delegationsRoot,
-        runner: turnGit,
-        mutations: this.workspaceMutations,
-        snapshots: new SnapshotService({
-          runner: turnGit,
-          tempRoot: join(this.paths.delegationsRoot, 'indexes'),
-          resources: this.workspaceMutations.resources,
-        }),
-      }),
+      workspaces: externalWorkspaces,
       mutations: this.workspaceMutations,
       runtime: (profile, id) => executorRuntime.prepare(profile, id),
       notices: {
@@ -593,12 +633,131 @@ export class CoreApi {
         canWake: (owner) => host.delegationNoticeParent(owner) !== undefined,
         flush: (sessionId) => host.sessions.flush(sessionId),
       },
+      onState: (state, event) => this.projectDelegation(state, event),
+      onEvent: (event) => {
+        if (
+          event.type !== 'text_delta' &&
+          event.type !== 'tool_started' &&
+          event.type !== 'tool_finished'
+        )
+          return
+        const key = event.runId,
+          pending = this.delegationOutput.get(key)
+        const item = {
+          role: event.type === 'text_delta' ? 'assistant' : 'tool',
+          content:
+            event.type === 'text_delta'
+              ? event.text
+              : JSON.stringify({
+                  type: event.type,
+                  ...('name' in event ? { name: event.name } : {}),
+                  ...('status' in event ? { status: event.status } : {}),
+                  ...('detail' in event ? { detail: event.detail } : {}),
+                }),
+        }
+        if (pending) pending.output.push(item)
+        else
+          this.delegationOutput.set(key, {
+            output: [item],
+            timer: setTimeout(() => this.flushDelegationOutput(key), 100),
+          })
+      },
+      onSettled: async (id, runId) => {
+        this.flushDelegationOutput(runId)
+        const receipt = await this.delegationReceipts.collect(runId)
+        await this.delegationRuntime.bindReceipt(
+          id,
+          runId,
+          receipt.id,
+          'unverified',
+        )
+      },
+      onStopRoot: (id) => this.delegationAcceptance.stopRoot(id),
       onQuestion: (question, signal) =>
         host.delegationInteractions.ask(question, signal),
     })
-    host.delegations = this.delegations
-    host.delegationQuestionTimeoutMs = () =>
-      this.executorConfig.read().limits.questionTimeoutMs
+    host.delegations = this.delegationRuntime
+    const facts = (runId: string) => {
+      const state = this.delegationRuntime.list().find((s) => s.runs[runId])
+      if (!state?.record)
+        throw new DelegationError('RUN_NOT_FOUND', 'external run not found')
+      return {
+        record: state.record,
+        run: state.runs[runId]!,
+        lease: externalWorkspaces.get(state.record.workspaceLeaseId),
+      }
+    }
+    this.delegationReceipts = new DelegationReceipts({
+      root: this.paths.delegationsRoot,
+      runner: turnGit,
+      mutations: this.workspaceMutations,
+      resolve: facts,
+    })
+    this.delegationAcceptance = new DelegationAcceptance({
+      root: this.paths.delegationsRoot,
+      receipts: this.delegationReceipts,
+      mutations: this.workspaceMutations,
+      processes: executorProcesses,
+      scope: (runId) => {
+        const { record, run } = facts(runId),
+          parent = host.delegationParent(record.owner)
+        return {
+          taskScopeId: record.owner.taskScopeId,
+          permission: parent.planMode ? 'read-only' : parent.policy.mode,
+          rootSessionId: record.owner.rootSessionId,
+          generation: run.generation,
+        }
+      },
+    })
+    this.delegationIntegration = new DelegationIntegration({
+      root: this.paths.delegationsRoot,
+      receipts: this.delegationReceipts,
+      acceptance: this.delegationAcceptance,
+      mutations: this.workspaceMutations,
+      runner: turnGit,
+      scope: (runId) => facts(runId).record.owner.taskScopeId,
+      canApply: (runId) => {
+        const { record } = facts(runId),
+          entry = host.kept.sessionStore.get(record.owner.rootSessionId)
+        if (!entry || entry.archived_at) return false
+        const parent = host.delegationParent(record.owner)
+        return !parent.planMode && parent.policy.mode !== 'read-only'
+      },
+    })
+    this.delegationService = new CoreDelegationService({
+      root: this.paths.delegationsRoot,
+      service: this.delegationRuntime,
+      receipts: this.delegationReceipts,
+      acceptance: this.delegationAcceptance,
+      integration: this.delegationIntegration,
+      activeSession: () => host.activeSessionId,
+      session: (id) => host.kept.sessionStore.get(id),
+      assertMutation: (id, action) => {
+        if (id !== host.activeSessionId)
+          throw new DelegationError(
+            'PERMISSION_DENIED',
+            'activate the owning chat before controlling its task',
+          )
+        if (action !== 'control') this.assertMutation('delegations', action)
+      },
+    })
+    this.delegations = this.delegationService
+    this.executors = new CoreExecutorService({
+      store: this.executorConfig,
+      registry: this.executorRegistry,
+      assertConfigure: () => this.assertMutation('executors', 'configure'),
+      refresh: () => this.delegationRuntime.probeProfiles(),
+      checkAuth: async (profile) => {
+        await executorRuntime.prepare(profile, 'dlg-probe-' + randomUUID())
+      },
+    })
+    host.delegationQuestionTimeoutMs = () => {
+      try {
+        return this.executorConfig.read().limits.questionTimeoutMs
+      } catch {
+        return 15 * 60_000
+      }
+    }
     const projectRootOf = (sessionId: string): string | null => {
       try {
         return resolveWorkspaceProject(sessionId).projectRoot
@@ -913,9 +1072,11 @@ export class CoreApi {
     let api: CoreApi | null = null
     try {
       api = new CoreApi(root, host, opts)
-      await api.delegations.reconcile()
+      await api.delegationRuntime.reconcile()
+      await api.delegationAcceptance.reconcile()
+      api.delegationIntegration.reconcile()
       await api.environmentService.initialize()
-      await api.delegations.probeProfiles()
+      await api.delegationRuntime.probeProfiles()
       await api.sessionTransitionService.recover()
       await api.syncPlugins()
       return api
@@ -926,10 +1087,82 @@ export class CoreApi {
     }
   }
 
-  async close(): Promise<void> {
-    this.terminalService.closeAll()
-    this.onboardingService.dispose()
-    await this.host.close()
+  close(): Promise<void> {
+    this.closePromise ??= (async () => {
+      this.terminalService.closeAll()
+      this.onboardingService.dispose()
+      try {
+        await this.delegationAcceptance.stopRoot()
+        await this.delegationRuntime.shutdown()
+      } finally {
+        for (const key of this.delegationOutput.keys())
+          this.flushDelegationOutput(key)
+        await this.host.close()
+      }
+    })()
+    return this.closePromise
+  }
+
+  private flushDelegationOutput(runId: string): void {
+    const pending = this.delegationOutput.get(runId)
+    if (!pending) return
+    clearTimeout(pending.timer)
+    this.delegationOutput.delete(runId)
+    const state = this.delegationRuntime.list().find((s) => s.runs[runId])
+    if (!state?.record) return
+    this.appendDelegationProjection(state, {
+      event: 'delegation_output',
+      delegation_id: state.record.id,
+      run_id: runId,
+      journal_seq: state.lastSeq,
+      output: pending.output,
+    })
+  }
+  private appendDelegationProjection(
+    state: DelegationState,
+    projection: DelegationProjection,
+  ): void {
+    if (
+      !state.record ||
+      !this.host.kept.sessionStore.get(state.record.owner.rootSessionId)
+    )
+      return
+    this.host
+      .agentFor(state.record.owner.rootSessionId)
+      .session.append(
+        'delegation/projection',
+        JSON.parse(JSON.stringify(projection)) as DelegationProjection,
+      )
+    this.host.sessions.flush(state.record.owner.rootSessionId)
+  }
+  private projectDelegation(
+    state: DelegationState,
+    event: DelegationEvent,
+  ): void {
+    const record = state.record
+    if (!record) return
+    const name =
+      event.type === 'created'
+        ? 'delegation_created'
+        : event.type === 'interaction'
+          ? 'delegation_interaction'
+          : event.type === 'receipt'
+            ? 'delegation_receipt'
+            : 'delegation_run_changed'
+    const runId =
+      'runId' in event
+        ? event.runId
+        : event.type === 'run-created'
+          ? event.run.id
+          : record.currentRunId
+    const run = runId ? state.runs[runId] : undefined
+    this.appendDelegationProjection(state, {
+      event: name,
+      delegation_id: record.id,
+      run_id: runId,
+      journal_seq: state.lastSeq,
+      ...(run ? { task: externalTask(state, run) } : {}),
+    })
   }
 
   async bootstrap(opts: { sessionId?: string | null } = {}) {
@@ -2118,29 +2351,34 @@ export class CoreApi {
         String(opts.sessionId ?? '').trim() || this.host.activeSessionId
       return sessionId ? this.sessionTasks(sessionId) : []
     },
-    get: (taskId: string): CoreTaskRecord | null => this.findTask(taskId),
+    get: (
+      taskId: string,
+      opts: { sessionId?: string | null } = {},
+    ): CoreTaskRecord | null => this.findTask(taskId, opts.sessionId),
     transcript: (
       taskId: string,
-      opts: { offset?: number; limit?: number } = {},
+      opts: { offset?: number; limit?: number; sessionId?: string | null } = {},
     ) => {
-      const task = this.requireTask(taskId)
+      const task = this.requireTask(taskId, opts.sessionId)
       const offset = Math.max(0, Math.floor(Number(opts.offset ?? 0)) || 0)
       const limit = Math.max(
         1,
         Math.min(500, Math.floor(Number(opts.limit ?? 200)) || 200),
       )
       const entries =
-        task.kind === 'workflow'
-          ? this.workflowTranscript(task.id)
-          : task.kind === 'subagent'
-            ? this.subagentTranscript(task.id)
-            : [
-                {
-                  role: 'output',
-                  content: this.host.jobs.peek(task.id, this.jobOwner(task))
-                    .text,
-                },
-              ]
+        task.kind === 'external-agent'
+          ? this.delegationService.transcript(task.id, opts.sessionId)
+          : task.kind === 'workflow'
+            ? this.workflowTranscript(task.id)
+            : task.kind === 'subagent'
+              ? this.subagentTranscript(task.id)
+              : [
+                  {
+                    role: 'output',
+                    content: this.host.jobs.peek(task.id, this.jobOwner(task))
+                      .text,
+                  },
+                ]
       return {
         taskId: task.id,
         entries: entries.slice(offset, offset + limit),
@@ -2151,13 +2389,15 @@ export class CoreApi {
     },
     wait: async (
       taskId: string,
-      opts: { timeoutMs?: number } = {},
+      opts: { timeoutMs?: number; sessionId?: string | null } = {},
     ): Promise<Dict | null> => {
-      const task = this.requireTask(taskId)
+      const task = this.requireTask(taskId, opts.sessionId)
       const timeoutMs = Math.max(
         0,
         Math.min(600_000, Number(opts.timeoutMs ?? 30_000) || 30_000),
       )
+      if (task.kind === 'external-agent')
+        return this.delegationService.wait(task.id, timeoutMs, opts.sessionId)
       if (task.kind === 'workflow') {
         const deadline = Date.now() + timeoutMs
         let current = this.findTask(task.id)
@@ -2191,14 +2431,19 @@ export class CoreApi {
         clearTimeout(timer)
       }
     },
-    readOutput: async (taskId: string, _opts: { cursor?: string } = {}) => {
-      const task = this.requireTask(taskId)
+    readOutput: async (
+      taskId: string,
+      opts: { cursor?: string; sessionId?: string | null } = {},
+    ) => {
+      const task = this.requireTask(taskId, opts.sessionId)
       const content =
         task.kind === 'job'
           ? this.host.jobs.peek(task.id, this.jobOwner(task)).text
-          : (task.kind === 'workflow'
-              ? this.workflowTranscript(task.id)
-              : this.subagentTranscript(task.id)
+          : (task.kind === 'external-agent'
+              ? this.delegationService.transcript(task.id, opts.sessionId)
+              : task.kind === 'workflow'
+                ? this.workflowTranscript(task.id)
+                : this.subagentTranscript(task.id)
             )
               .map((entry) => `${entry.role}: ${entry.content}`)
               .join('\n\n')
@@ -2214,9 +2459,14 @@ export class CoreApi {
       taskId: string,
       _opts: { reason?: string } = {},
     ): Promise<Dict> => {
-      this.assertMutation('tasks', 'cancel')
-      this.requireTask(taskId)
-      this.cancelTask(taskId)
+      const task = this.requireTask(taskId)
+      if (task.kind !== 'external-agent') this.assertMutation('tasks', 'cancel')
+      if (task.kind === 'external-agent')
+        await this.delegationService.interrupt({
+          id: task.delegation_id!,
+          runId: task.id,
+        })
+      else this.cancelTask(taskId)
       return { ...this.findTask(taskId) }
     },
     resume: async (_taskId: string, _opts: Dict = {}): Promise<never> => {
@@ -2427,8 +2677,10 @@ export class CoreApi {
   }
 
   private sessionTasks(sessionId: string): CoreTaskRecord[] {
+    if (this.host.kept.sessionStore.get(sessionId)?.archived_at)
+      return this.delegationService.tasks(sessionId)
     const root = this.rootAgentOf(sessionId)
-    if (root === null) return []
+    if (root === null) return this.delegationService.tasks(sessionId)
     const jobs = this.sessionJobs(sessionId).map((job) =>
       jobTask(job, sessionId),
     )
@@ -2442,9 +2694,12 @@ export class CoreApi {
           live: this.host.workflowRuns.isLive(record.runId),
         }) as CoreTaskRecord,
     )
-    return [...workflows, ...children, ...jobs].sort(
-      (left, right) => right.started_at - left.started_at,
-    )
+    return [
+      ...this.delegationService.tasks(sessionId),
+      ...workflows,
+      ...children,
+      ...jobs,
+    ].sort((left, right) => right.started_at - left.started_at)
   }
 
   private allSubagents(): SubagentRecord[] {
@@ -2453,9 +2708,16 @@ export class CoreApi {
     return root === null ? [] : this.host.subagents.list(root, 'descendants')
   }
 
-  private findTask(taskId: string): CoreTaskRecord | null {
+  private findTask(
+    taskId: string,
+    sessionId?: string | null,
+  ): CoreTaskRecord | null {
     const id = String(taskId ?? '').trim()
     if (!id) return null
+    if (id.startsWith('dgr-')) {
+      const { state, run } = this.delegationService.run(id, sessionId)
+      return externalTask(state, run)
+    }
     for (const entry of this.host.kept.sessionStore.list({
       includeArchived: false,
     })) {
@@ -2465,8 +2727,11 @@ export class CoreApi {
     return null
   }
 
-  private requireTask(taskId: string): CoreTaskRecord {
-    const task = this.findTask(taskId)
+  private requireTask(
+    taskId: string,
+    sessionId?: string | null,
+  ): CoreTaskRecord {
+    const task = this.findTask(taskId, sessionId)
     if (task === null)
       throw new CoreMutationGuardError(
         403,
@@ -2478,6 +2743,12 @@ export class CoreApi {
   private cancelTask(taskId: string): boolean {
     const task = this.findTask(taskId)
     if (task === null) return false
+    if (task.kind === 'external-agent') {
+      void this.delegationService
+        .interrupt({ id: task.delegation_id!, runId: task.id })
+        .catch(() => undefined)
+      return true
+    }
     if (task.kind === 'workflow')
       return this.host.workflowRuns.cancel(
         task.id,

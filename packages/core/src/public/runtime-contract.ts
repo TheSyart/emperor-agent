@@ -74,3 +74,25 @@ export {
   type SitePermission,
   type SitePermissionKind,
 } from '../harness/computer-use/types'
+
+export type {
+  ExecutorConfig,
+  ExecutorProfile,
+  ExecutorProbe,
+  ExecutorCapabilities,
+  DelegationRecord,
+  DelegationRunRecord,
+} from '../harness/delegation/types'
+export type {
+  DelegationProjection,
+  DelegationRuntimeName,
+} from '../harness/delegation/events'
+export type { DelegationReceipt } from '../harness/delegation/receipts'
+export type {
+  AcceptanceCriteria,
+  AcceptanceReceipt,
+} from '../harness/delegation/acceptance'
+export type {
+  IntegrationPreview,
+  IntegrationReceipt,
+} from '../workspace/delegation-integration'

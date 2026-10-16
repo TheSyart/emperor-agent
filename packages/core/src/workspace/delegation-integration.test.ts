@@ -371,3 +371,25 @@ it('reconciles an interrupted apply as needs_user without replaying writes or ro
     f.cleanup()
   }
 }, 45000)
+it('keeps unreadable integration state and reports recovery without disabling ordinary startup', async () => {
+  const f = await fixture()
+  try {
+    const preview = await f.integration.previewIntegration(
+      f.receipt.id,
+      await f.integration.captureBase(f.repo),
+      f.accepted.id,
+    )
+    const path = join(f.root, 'state/integrations', preview.id, 'preview.json')
+    writeFileSync(path, '{"schemaVersion":999}')
+    expect(f.integration.reconcile()).toEqual([
+      {
+        previewId: preview.id,
+        status: 'needs_user',
+        reason: 'PREVIEW_UNREADABLE',
+      },
+    ])
+    expect(readFileSync(path, 'utf8')).toBe('{"schemaVersion":999}')
+  } finally {
+    f.cleanup()
+  }
+}, 45000)

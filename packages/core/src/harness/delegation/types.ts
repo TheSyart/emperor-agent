@@ -141,6 +141,8 @@ export interface DelegationRunRecord {
   startedAt?: number
   finishedAt?: number
   acceptance: 'unverified' | 'passed' | 'failed' | 'needs_user'
+  integrationPreviewId?: string
+  acceptanceId?: string
   receiptId?: string
   failureCode?: string
   summary?: string

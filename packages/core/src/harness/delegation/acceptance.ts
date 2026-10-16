@@ -69,7 +69,7 @@ export class DelegationAcceptance {
   >()
   private readonly active = new Map<
     AbortController,
-    { rootSessionId?: string; done: Promise<unknown> }
+    { runId: string; rootSessionId?: string; done: Promise<unknown> }
   >()
   constructor(
     private readonly options: {
@@ -388,6 +388,7 @@ export class DelegationAcceptance {
       controller.signal,
     )
     this.active.set(controller, {
+      runId: receipt.runId,
       rootSessionId: scope.rootSessionId,
       done: operation,
     })
@@ -495,6 +496,11 @@ export class DelegationAcceptance {
     }
     return report
   }
+  pendingRecoveries(runId: string): string[] {
+    return [...this.quarantines]
+      .filter(([, entry]) => entry.ownership.parentRunId === runId)
+      .map(([id]) => id)
+  }
   async recoverVerification(id: string): Promise<void> {
     const pending = this.quarantines.get(id)
     if (!pending)
@@ -511,6 +517,16 @@ export class DelegationAcceptance {
       )
     pending.lease.release()
     this.quarantines.delete(id)
+  }
+  isActive(runId: string): boolean {
+    return [...this.active.values()].some((entry) => entry.runId === runId)
+  }
+  async stopRun(runId: string): Promise<void> {
+    const selected = [...this.active].filter(
+      ([, entry]) => entry.runId === runId,
+    )
+    for (const [controller] of selected) controller.abort()
+    await Promise.allSettled(selected.map(([, entry]) => entry.done))
   }
   async stopRoot(rootSessionId?: string): Promise<void> {
     const selected = [...this.active].filter(

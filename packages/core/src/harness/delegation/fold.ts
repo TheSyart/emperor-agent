@@ -49,6 +49,8 @@ export type DelegationEvent =
           | 'startedAt'
           | 'finishedAt'
           | 'acceptance'
+          | 'integrationPreviewId'
+          | 'acceptanceId'
           | 'receiptId'
           | 'usage'
           | 'structured'
@@ -76,6 +78,7 @@ export type DelegationEvent =
   | { type: 'notice-delivered'; noticeId: string }
   | {
       type: 'receipt'
+      acceptanceId?: string
       runId: string
       receiptId: string
       acceptance: DelegationRunRecord['acceptance']
@@ -293,7 +296,13 @@ export class DelegationFold {
         break
       case 'receipt': {
         const run = requireRun(e.runId)
+        if (!TERMINAL_RUN_PHASES.has(run.phase))
+          throw new DelegationError(
+            'ACTIVE_RUN',
+            'receipt requires terminal execution',
+          )
         run.receiptId = e.receiptId
+        if (e.acceptanceId) run.acceptanceId = e.acceptanceId
         run.acceptance = e.acceptance
         run.revision++
         break

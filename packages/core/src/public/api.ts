@@ -94,3 +94,6 @@ export type {
   SessionLineage,
   SubagentChildView,
 } from '../harness/host/session-views'
+
+export type { CoreExecutorService } from '../api/services/executor-service'
+export type { CoreDelegationService } from '../api/services/delegation-service'

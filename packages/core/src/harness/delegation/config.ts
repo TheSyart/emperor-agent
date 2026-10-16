@@ -28,7 +28,7 @@ const profile = z
     concurrencyLimit: z.number().int().min(1).max(2),
   })
   .strict()
-const schema = z
+export const executorConfigSchema = z
   .object({
     schemaVersion: z.literal(1),
     revision: z.number().int().nonnegative(),
@@ -66,7 +66,7 @@ const schema = z
         })
   })
 export function parseExecutorConfig(value: unknown): ExecutorConfig {
-  const result = schema.safeParse(value)
+  const result = executorConfigSchema.safeParse(value)
   if (!result.success)
     throw new DelegationError(
       'EXECUTOR_CONFIG_INVALID',

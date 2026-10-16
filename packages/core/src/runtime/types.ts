@@ -100,6 +100,19 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         target_turn_id?: string | null
         content?: string
       }
+    | {
+        event:
+          | 'delegation_created'
+          | 'delegation_run_changed'
+          | 'delegation_output'
+          | 'delegation_interaction'
+          | 'delegation_receipt'
+        delegation_id: string
+        run_id?: string
+        journal_seq: number
+        task?: RuntimeEventPayload
+        output?: { role: string; content: string }[]
+      }
     | { event: 'message_delta'; delta?: string }
     | {
         event: 'agent_thought'

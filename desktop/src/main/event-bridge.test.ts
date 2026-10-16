@@ -28,6 +28,23 @@ describe('CoreEventBridge (MIG-IPC-003)', () => {
     ])
   })
 
+  it('transports durable external run events without changing their root/run identities', () => {
+    const bridge = new CoreEventBridge(),
+      window = new FakeWebContents()
+    bridge.attach(window)
+    const event = {
+      event: 'delegation_receipt',
+      session_id: 'root',
+      delegation_id: 'dlg-one',
+      run_id: 'dgr-one',
+      journal_seq: 8,
+      seq: 129,
+      task: { status: 'completed', acceptance: 'unverified' },
+    }
+    bridge.emit(event)
+    expect(window.sent).toEqual([[CORE_EVENT_CHANNEL, event]])
+  })
+
   it('skips destroyed windows and supports detach', () => {
     const bridge = new CoreEventBridge()
     const live = new FakeWebContents()

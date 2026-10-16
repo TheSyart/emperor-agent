@@ -55,6 +55,15 @@ const EXPECTED_OPERATIONS = [
   'control.get',
   'control.setMode',
   'control.setPermissionMode',
+  'delegations.close',
+  'delegations.collect',
+  'delegations.get',
+  'delegations.integrate',
+  'delegations.interrupt',
+  'delegations.receipt',
+  'delegations.recover',
+  'delegations.send',
+  'delegations.validate',
   'desktopPet.get',
   'desktopPet.setEnabled',
   'diagnostics.get',
@@ -63,6 +72,9 @@ const EXPECTED_OPERATIONS = [
   'environment.getInstallLog',
   'environment.getStatus',
   'environment.install',
+  'executors.configure',
+  'executors.list',
+  'executors.probe',
   'files.list',
   'files.read',
   'files.search',
@@ -850,7 +862,7 @@ describe('CoreApi tasks and tools', () => {
     const { api } = await setup()
     const id = session(api)
     api.host.agentFor(id)
-    expect(api.host.delegations).toBe(api.delegations)
+    expect(api.host.delegations).toBe(api.delegationRuntime)
     expect(
       api.executorConfig.read().profiles.every((profile) => !profile.enabled),
     ).toBe(true)
@@ -858,7 +870,7 @@ describe('CoreApi tasks and tools', () => {
       .schemas()
       .find((tool) => tool.name === 'subagent')!
     expect(JSON.stringify(schema.parameters)).toContain('claude-code')
-    const stop = vi.spyOn(api.delegations, 'stopRoot').mockResolvedValue()
+    const stop = vi.spyOn(api.delegationRuntime, 'stopRoot').mockResolvedValue()
     api.host.stop(id)
     expect(stop).toHaveBeenCalledWith(id)
   })
