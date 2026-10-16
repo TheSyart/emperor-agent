@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { DelegationError, type ExecutorProfile } from './types'
 import { safeDelegationKey } from './fold'
+import { durableReplaceSync } from '../../store/persistence'
 export interface ExecutorCredential {
   apiKey: string
   baseUrl?: string
@@ -61,6 +62,7 @@ export class ExecutorRuntimeService {
     ])
       mkdirSync(path, { recursive: true, mode: 0o700 })
     const ambient = this.options.environment ?? process.env
+    const credentialSecrets: string[] = []
     const environment: Record<string, string> = Object.fromEntries(
       baseKeys.flatMap((key) => (ambient[key] ? [[key, ambient[key]!]] : [])),
     )
@@ -163,14 +165,65 @@ export class ExecutorRuntimeService {
           'AUTH_REQUIRED',
           'managed Claude login has no resolvable credential',
         )
-    } else
-      throw new DelegationError(
-        'AUTH_REQUIRED',
-        'managed Codex authentication has not been prepared',
-      )
-    const secretValues = Object.entries(environment)
-      .filter(([key, value]) => value && /KEY|TOKEN|SECRET/i.test(key))
-      .map(([, value]) => value)
+    } else {
+      const local = join(environment.CODEX_HOME!, 'auth.json')
+      const path = existsSync(local)
+        ? local
+        : join(this.options.home ?? homedir(), '.codex', 'auth.json')
+      if (!existsSync(path))
+        throw new DelegationError(
+          'AUTH_REQUIRED',
+          'managed Codex login file is missing',
+        )
+      let auth: Record<string, unknown>
+      try {
+        auth = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+      } catch {
+        throw new DelegationError(
+          'AUTH_REQUIRED',
+          'managed Codex authentication file is invalid',
+        )
+      }
+      if (typeof auth.OPENAI_API_KEY === 'string' && auth.OPENAI_API_KEY) {
+        environment.OPENAI_API_KEY = auth.OPENAI_API_KEY
+      } else {
+        const source = auth.tokens as Record<string, unknown> | undefined
+        if (
+          auth.auth_mode !== 'chatgpt' ||
+          !source ||
+          typeof source.access_token !== 'string' ||
+          typeof source.refresh_token !== 'string'
+        )
+          throw new DelegationError(
+            'AUTH_REQUIRED',
+            'managed Codex ChatGPT tokens are unavailable',
+          )
+        const tokens = Object.fromEntries(
+          ['access_token', 'refresh_token', 'id_token', 'account_id'].flatMap(
+            (key) =>
+              typeof source[key] === 'string' ? [[key, source[key]]] : [],
+          ),
+        )
+        credentialSecrets.push(...(Object.values(tokens) as string[]))
+        durableReplaceSync(
+          join(environment.CODEX_HOME!, 'auth.json'),
+          JSON.stringify({
+            auth_mode: 'chatgpt',
+            OPENAI_API_KEY: null,
+            tokens,
+            ...(typeof auth.last_refresh === 'string'
+              ? { last_refresh: auth.last_refresh }
+              : {}),
+          }) + '\n',
+        )
+      }
+    }
+    const secretValues = [
+      ...credentialSecrets,
+      ...Object.entries(environment)
+        .filter(([key, value]) => value && /KEY|TOKEN|SECRET/i.test(key))
+        .map(([, value]) => value),
+    ]
     return { runtimeRoot, tempRoot, environment, secretValues }
   }
 }

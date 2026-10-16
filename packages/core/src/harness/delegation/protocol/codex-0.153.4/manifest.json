@@ -20,7 +20,18 @@
     "v2/ThreadResumeParams.json": "cca984de74264b1f6d625a3b3fbbbbacf96008eaa4dfad5fad963c5692d9c031",
     "v2/ThreadReadParams.json": "73a3652ef09f20b837294d443ed9bdb69ba279b3bd6a4306499e06dafb53b034",
     "v2/TurnStartParams.json": "07fcc3b56ac167e0056907ac94b2be425ce7600708b9f1472176875f481170a6",
-    "v2/TurnSteerParams.json": "df4ada862fc82e26c47fd88332b427e7bea853cb2cc265e192f993fd283994c7"
+    "v2/TurnSteerParams.json": "df4ada862fc82e26c47fd88332b427e7bea853cb2cc265e192f993fd283994c7",
+    "CommandExecutionRequestApprovalResponse.json": "067e85d39d1a9803c2305036693ed7cde0463e03efeb8e7e5eea61b5d812fdb5",
+    "FileChangeRequestApprovalResponse.json": "f3256027583cf898a161d84f461c02a10a5a2f86bb2cfa24475b1bcddf711901",
+    "PermissionsRequestApprovalResponse.json": "16e831a4e85d23b8edd77a6c691b8836bdb1044d3e3c29e7b7d30f4395fe77ff",
+    "ServerRequest.json": "f8fd1c58a4cbc60b78c5024cc2908a107f9493798a2450d7d80210c980d458e7",
+    "v2/AgentMessageDeltaNotification.json": "b3dbe1ec02dc04f0ce2b846b58a3bb657dbb4d8b7560c10ab53f376631aca71d",
+    "v2/TurnCompletedNotification.json": "db2e23f73794da5fbe60f029db8266ceb711d04e6127a044dd6f82f80f9c9850",
+    "v2/ThreadTokenUsageUpdatedNotification.json": "25719331e1905aef4ad507f23d25648dfa9a7c8512b05c565af557fef8b2027c",
+    "v2/TurnStartResponse.json": "603d090947ca0c2068918919cecda37efbd60ce868796d682a4056ea456f76d9",
+    "v2/ThreadStartResponse.json": "baeb3f47b3000630c358fa8afc4e73953ae363c0b114c79350df916157503608",
+    "v2/TurnInterruptParams.json": "af131202a6e9f2ba1bb681fa711ae18771e32e491337e6185a5e8371db25a7d1",
+    "v2/TurnSteerResponse.json": "bf8b9f6d9f97c31636c30f99acffa971bd9a44e09c1817900cf82b1d272cd15e"
   },
   "generatedSha256": {
     "ClientRequest.json": "25bc001b5dfe3b35785597b8f9ad9e5aaf7e437331fa9921f041c9e0e03fc9f3",
@@ -30,6 +41,17 @@
     "v2/ThreadResumeParams.json": "8ac68582a81d60940b10b330be8546123f56bfe246b56f8a4f121da00f347cf2",
     "v2/ThreadReadParams.json": "dfe040c6ac71d30795b8be3f3ff232e66f362a37f883b491e5d1ea367f470db4",
     "v2/TurnStartParams.json": "a3835e8c1e942e4b358e1a670939b89918b16c4d13105a579899892b7ade6dea",
-    "v2/TurnSteerParams.json": "4a52eb76e7a717bb388484ccd7538737fca0df35481fc30a21e259f1bfe96e37"
+    "v2/TurnSteerParams.json": "4a52eb76e7a717bb388484ccd7538737fca0df35481fc30a21e259f1bfe96e37",
+    "CommandExecutionRequestApprovalResponse.json": "6d0767113e22f311381809b6b236b0dde2b99b01992879c26bf7b1ea0e003cb7",
+    "FileChangeRequestApprovalResponse.json": "b95b03ee6be674e25cee2e863cc135a28620e1070addd2f34685aadee27cde08",
+    "PermissionsRequestApprovalResponse.json": "23f3f24e9dbf35db3e0b85703f0d934da5a1cff3cbb611fba8bcd41f3b4a04b0",
+    "ServerRequest.json": "31f580ad468fbd18766eb7adb12744be4e3790e3357b58bd4413c0108c4f65d0",
+    "v2/AgentMessageDeltaNotification.json": "996e6c0ea65e57bed5a00f410b94381fe5ebf804333e5d00c2b6e6d47e5c55f6",
+    "v2/TurnCompletedNotification.json": "78af2a37391e8e669a4020cb58593e4d3e378756ced79d5fec72374fa69fb94b",
+    "v2/ThreadTokenUsageUpdatedNotification.json": "aba4f6c7e4a19b2b842c08ee793b57000c07dafd57b922ad0d8e7c76609108c2",
+    "v2/TurnStartResponse.json": "6fc49c3e5d0ce11a3a109ae194619b04d6e3ff98fa29bac683fdb754608958be",
+    "v2/ThreadStartResponse.json": "656f8fd0fe91f533126cbfdb9369cfab550927a229e48dd46460f6f015d2b186",
+    "v2/TurnInterruptParams.json": "6dff382dae73d1dbc58406ed045605f647e7a49660e2540fbd2c6c24d60c5f2b",
+    "v2/TurnSteerResponse.json": "866ba9a77c12b5d570c837d58f73bf40b24e50fa93404bdf792dd984d313b1aa"
   }
 }

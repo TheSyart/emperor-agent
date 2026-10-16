@@ -4,6 +4,65 @@ import { join } from 'node:path'
 import { ExecutorRuntimeService } from './runtime'
 import { delegationTestDirectory } from './testing'
 import { defaultExecutorConfig } from './config'
+import { readFileSync, statSync } from 'node:fs'
+it('stages only explicit managed Codex auth fields into a private per-conversation home', async () => {
+  const f = delegationTestDirectory(),
+    home = join(f.root, 'host-home')
+  mkdirSync(join(home, '.codex'), { recursive: true })
+  writeFileSync(
+    join(home, '.codex', 'auth.json'),
+    JSON.stringify({
+      auth_mode: 'chatgpt',
+      tokens: {
+        access_token: 'fixture-access',
+        refresh_token: 'fixture-refresh',
+        id_token: 'fixture-id',
+        account_id: 'fixture-account',
+        unrelated: 'omit',
+      },
+      last_refresh: '2026-10-16T00:00:00Z',
+      otherSecret: 'omit',
+    }),
+  )
+  const runtime = await new ExecutorRuntimeService({
+    root: f.root,
+    home,
+    environment: { PATH: '/fixture' },
+  }).prepare(
+    {
+      ...defaultExecutorConfig().profiles[1]!,
+      authRef: { kind: 'managed-cli-login' },
+    },
+    'dlg-codex',
+  )
+  const path = join(runtime.environment.CODEX_HOME!, 'auth.json'),
+    auth = JSON.parse(readFileSync(path, 'utf8'))
+  expect(auth.tokens.access_token).toBe('fixture-access')
+  expect(auth.tokens.unrelated).toBeUndefined()
+  expect(auth.otherSecret).toBeUndefined()
+  expect(statSync(path).mode & 0o777).toBe(0o600)
+  expect(runtime.secretValues).toContain('fixture-access')
+  auth.tokens.access_token = 'refreshed-fixture'
+  writeFileSync(path, JSON.stringify(auth))
+  await new ExecutorRuntimeService({
+    root: f.root,
+    home,
+    environment: { PATH: '/fixture' },
+  }).prepare(
+    {
+      ...defaultExecutorConfig().profiles[1]!,
+      authRef: { kind: 'managed-cli-login' },
+    },
+    'dlg-codex',
+  )
+  expect(JSON.parse(readFileSync(path, 'utf8')).tokens.access_token).toBe(
+    'refreshed-fixture',
+  )
+  expect(existsSync(join(runtime.environment.CODEX_HOME!, 'config.toml'))).toBe(
+    false,
+  )
+  f.cleanup()
+})
 it('imports only explicit managed credential/env keys into per-conversation runtime, without copying settings or plugins', async () => {
   const f = delegationTestDirectory()
   const home = join(f.root, 'home')
