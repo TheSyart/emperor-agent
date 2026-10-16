@@ -253,6 +253,7 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
       if (closePromise) return closePromise
       closePromise = (async () => {
         closed = true
+        await handle?.captureDescendants()
         rejectSubmit(
           new DelegationError(
             'EXECUTOR_CLOSED',
@@ -700,6 +701,7 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
         })
       },
       interrupt: async () => {
+        await handle?.captureDescendants()
         interrupted = true
         let timer: ReturnType<typeof setTimeout> | undefined
         try {

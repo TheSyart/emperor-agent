@@ -54,6 +54,7 @@ export interface ManagedProcessHandle {
   started: Promise<void>
   closed: Promise<ProcessExitReceipt>
   diagnostics(): string
+  captureDescendants(): Promise<void>
   interrupt(): Promise<void>
   terminate(): Promise<void>
 }
@@ -102,25 +103,45 @@ function fingerprint(pid: number): string {
     return execFileSync('/bin/ps', ['-p', String(pid), '-o', 'lstart='], {
       encoding: 'utf8',
       timeout: 1000,
-    }).trim()
+    })
+      .trim()
+      .replace(/\s+/g, ' ')
   } catch {
     return ''
   }
 }
-async function liveGroup(pid: number): Promise<number[] | null> {
-  if (process.platform === 'win32') return []
+interface ProcessRow {
+  pid: number
+  parent: number
+  group: number
+  state: string
+  birth: string
+}
+async function processTable(): Promise<Map<number, ProcessRow> | null> {
+  if (process.platform === 'win32') return null
   try {
-    const { stdout } = await execute('/bin/ps', ['-axo', 'pid=,pgid=,stat='], {
-      timeout: 1000,
-      maxBuffer: 4 * 1024 * 1024,
-    })
-    return stdout
-      .trim()
-      .split('\n')
-      .flatMap((line) => {
-        const [p, g, s] = line.trim().split(/\s+/)
-        return Number(g) === pid && !s?.startsWith('Z') ? [Number(p)] : []
+    const { stdout } = await execute(
+      '/bin/ps',
+      ['-axo', 'pid=,ppid=,pgid=,stat=,lstart='],
+      {
+        timeout: 1000,
+        maxBuffer: 4 * 1024 * 1024,
+      },
+    )
+    const rows = new Map<number, ProcessRow>()
+    for (const line of stdout.trim().split('\n')) {
+      const fields = line.trim().split(/\s+/),
+        pid = Number(fields[0])
+      if (fields.length < 9 || !Number.isSafeInteger(pid)) continue
+      rows.set(pid, {
+        pid,
+        parent: Number(fields[1]),
+        group: Number(fields[2]),
+        state: fields[3]!,
+        birth: fields.slice(4).join(' '),
       })
+    }
+    return rows
   } catch {
     return null
   }
@@ -259,6 +280,80 @@ export class ManagedAgentProcess {
       if (optionsIdentity()) return true
       return false
     }
+    const descendants = new Map<number, string>()
+    let proofFailed = false
+    let scan: Promise<Map<number, ProcessRow> | null> | undefined
+    const scanTree = (): Promise<Map<number, ProcessRow> | null> => {
+      if (scan) return scan
+      const operation = (async () => {
+        const rows = await processTable()
+        if (!rows) {
+          proofFailed = true
+          return null
+        }
+        const owned = new Set<number>()
+        const root = child.pid ? rows.get(child.pid) : undefined
+        if (
+          root?.birth === identity.fingerprint &&
+          (!this.options.identityMatches ||
+            this.options.identityMatches(handle))
+        )
+          owned.add(root.pid)
+        for (const [pid, birth] of descendants)
+          if (rows.get(pid)?.birth === birth) owned.add(pid)
+        for (let changed = true; changed;) {
+          changed = false
+          for (const row of rows.values()) {
+            if (owned.has(row.pid) || row.state.startsWith('Z')) continue
+            if (owned.has(row.parent)) {
+              if (descendants.size >= 1024) {
+                proofFailed = true
+                continue
+              }
+              descendants.set(row.pid, row.birth)
+              owned.add(row.pid)
+              changed = true
+            }
+          }
+        }
+        return rows
+      })()
+      scan = operation
+      void operation.then(
+        () => {
+          if (scan === operation) scan = undefined
+        },
+        () => {
+          proofFailed = true
+          if (scan === operation) scan = undefined
+        },
+      )
+      return operation
+    }
+    const captureDescendants = async (): Promise<void> => {
+      await scanTree()
+    }
+    const stopDescendants = async (kind: NodeJS.Signals): Promise<void> => {
+      const rows = await scanTree()
+      if (!rows) return
+      // Children may call setsid/setpgid. Signal held descendant identities,
+      // independently of the root group, before their parents disappear.
+      for (const [pid, birth] of [...descendants].reverse()) {
+        const row = rows.get(pid)
+        if (!row || row.state.startsWith('Z') || row.birth !== birth) continue
+        if (fingerprint(pid) !== birth) continue
+        try {
+          process.kill(pid, kind)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ESRCH')
+            proofFailed = true
+        }
+      }
+    }
+    const watch = setInterval(() => {
+      if (!done) void scanTree()
+    }, 100)
+    watch.unref()
     const optionsIdentity = () =>
       this.options.identityMatches
         ? this.options.identityMatches(handle)
@@ -274,6 +369,12 @@ export class ManagedAgentProcess {
       afterConfirmation = false,
     ): boolean => {
       if (done) return false
+      if (
+        afterConfirmation &&
+        confirmedGroup &&
+        (child.exitCode !== null || child.signalCode !== null)
+      )
+        return false
       if (!matches() && !(afterConfirmation && confirmedGroup))
         throw new DelegationError(
           'OUTCOME_UNKNOWN',
@@ -292,9 +393,10 @@ export class ManagedAgentProcess {
     }
     const scheduleKill = () => {
       timers.push(
-        setTimeout(() => {
+        setTimeout(async () => {
           if (!done)
             try {
+              await stopDescendants('SIGKILL')
               signal('SIGKILL', true)
             } catch {
               failureCode = 'OUTCOME_UNKNOWN'
@@ -305,13 +407,16 @@ export class ManagedAgentProcess {
     const terminate = async () => {
       if (done) return
       shutdownDeadline = Math.max(shutdownDeadline, Date.now() + 2500)
-      signal('SIGTERM', confirmedGroup)
+      await stopDescendants('SIGTERM')
+      if (child.exitCode === null && child.signalCode === null)
+        signal('SIGTERM', confirmedGroup)
       scheduleKill()
       await closed
     }
     const interrupt = async () => {
       if (done) return
       shutdownDeadline = Date.now() + 7500
+      await stopDescendants('SIGINT')
       signal('SIGINT')
       timers.push(
         setTimeout(() => {
@@ -325,19 +430,26 @@ export class ManagedAgentProcess {
     }
     const finish = async (code: number | null, sig: NodeJS.Signals | null) => {
       if (done) return
-      let quiescent = true
+      let quiescent = !proofFailed && process.platform !== 'win32'
       if (child.pid && process.platform !== 'win32') {
         const until = Math.max(
           shutdownDeadline,
           Date.now() + (confirmedGroup ? 2500 : 100),
         )
         while (true) {
-          const members = await liveGroup(child.pid)
-          if (members === null) {
+          const rows = await scanTree()
+          if (rows === null) {
             quiescent = false
             break
           }
-          if (members.length === 0) break
+          const activeDescendants = [...descendants].filter(([pid, birth]) => {
+            const row = rows.get(pid)
+            return row?.birth === birth && !row.state.startsWith('Z')
+          })
+          const groupMembers = [...rows.values()].filter(
+            (row) => row.group === child.pid && !row.state.startsWith('Z'),
+          )
+          if (activeDescendants.length === 0 && groupMembers.length === 0) break
           if (Date.now() >= until) {
             quiescent = false
             break
@@ -347,9 +459,14 @@ export class ManagedAgentProcess {
       }
       if (done) return
       done = true
+      clearInterval(watch)
       timers.forEach(clearTimeout)
       spec.signal?.removeEventListener('abort', abort)
       if (!quiescent) failureCode = 'OUTCOME_UNKNOWN'
+      if (proofFailed) {
+        quiescent = false
+        failureCode = 'OUTCOME_UNKNOWN'
+      }
       settle({
         pid: child.pid ?? null,
         exitCode: code,
@@ -397,6 +514,7 @@ export class ManagedAgentProcess {
         Buffer.from(redactExecutorText(stderr.toString('utf8'), secrets))
           .subarray(-64 * 1024)
           .toString('utf8'),
+      captureDescendants,
       terminate,
       interrupt,
     }

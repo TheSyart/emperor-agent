@@ -25,10 +25,58 @@ function fixture() {
   return { ...d, workspace, runtime, temp, policy }
 }
 describe('managed streaming agent process', () => {
+  it.skipIf(process.platform === 'win32')(
+    'stops an owned descendant that created a separate process group',
+    async () => {
+      const f = fixture(),
+        late = join(f.workspace, 'detached-late')
+      const nested =
+        'console.log(JSON.stringify({pid:process.pid}));setTimeout(()=>{require("fs").writeFileSync(process.argv[1],"escaped");process.exit(0)},1500)'
+      const code =
+        'require("child_process").spawn(process.execPath,["-e",' +
+        JSON.stringify(nested) +
+        ',process.argv[1]],{detached:true,stdio:["ignore","inherit","inherit"]});setInterval(()=>{},1000)'
+      const h = await new ManagedAgentProcess().open({
+        executable: process.execPath,
+        args: ['-e', code, late],
+        cwd: f.workspace,
+        env: process.env,
+        policy: { ...f.policy, mode: 'danger-full-access' },
+      })
+      let nestedPid = 0
+      for await (const row of readJsonLines(h.stdout)) {
+        nestedPid = Number(row.pid)
+        break
+      }
+      try {
+        await h.terminate()
+        await new Promise((resolve) => setTimeout(resolve, 1700))
+        expect(existsSync(late)).toBe(false)
+        expect((await h.closed).quiescent).toBe(true)
+      } finally {
+        try {
+          process.kill(nestedPid, 'SIGKILL')
+        } catch {
+          /* already stopped */
+        }
+      }
+    },
+  )
   it('does not expose malformed protocol contents through parser errors', async () => {
-    const consume = async () => { for await(const _row of readJsonLines(Readable.from(['{"token":"fixture-secret",broken}\n']))) { /* consume */ } }
-    try { await consume(); expect.fail('malformed JSON must fail') }
-    catch(error) { expect(String(error)).not.toContain('fixture-secret'); expect(String(error)).toContain('PROTOCOL_INVALID') }
+    const consume = async () => {
+      for await (const _row of readJsonLines(
+        Readable.from(['{"token":"fixture-secret",broken}\n']),
+      )) {
+        /* consume */
+      }
+    }
+    try {
+      await consume()
+      expect.fail('malformed JSON must fail')
+    } catch (error) {
+      expect(String(error)).not.toContain('fixture-secret')
+      expect(String(error)).toContain('PROTOCOL_INVALID')
+    }
   })
   it('streams stdin and stdout through a real child without collecting all output', async () => {
     const f = fixture(),
