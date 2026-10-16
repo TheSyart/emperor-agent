@@ -27,8 +27,10 @@ export function conversationPhase(input: {
   composer: ComposerPhase
   child: boolean
   tab: 'chat' | 'trajectory'
+  externalActivity?: boolean
 }): ConversationPhase {
-  if (input.child || input.tab !== 'chat') return 'active'
+  if (input.child || input.tab !== 'chat' || input.externalActivity)
+    return 'active'
   return input.composer === 'active' ? 'active' : 'hero'
 }
 

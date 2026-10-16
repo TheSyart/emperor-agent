@@ -5,6 +5,10 @@
          when a history-mode route such as /chat/:id is reloaded. -->
     <base href="/" />
     <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' app: data: blob: https: http:; font-src 'self' data:; media-src 'self' app: data: blob: https: http:; connect-src 'self' app: https: http: ws: wss:; worker-src 'self' blob:; frame-src 'self' app: data: blob:; object-src 'none'; base-uri 'self'; form-action 'none'"
+    />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Emperor Agent</title>

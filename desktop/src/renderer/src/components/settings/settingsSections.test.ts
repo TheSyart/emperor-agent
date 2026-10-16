@@ -25,6 +25,7 @@ describe('settings sections', () => {
     expect(keys).toEqual([
       'general',
       'model',
+      'executors',
       'hooks',
       'computer',
       'voice',

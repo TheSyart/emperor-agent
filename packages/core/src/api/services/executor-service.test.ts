@@ -65,3 +65,45 @@ it('keeps invalid optional executor config intact and the ordinary chat API usab
     await next.api.close()
   }
 })
+it('resolves model credential references from the private state config rather than the runtime resources root', async () => {
+  const { api } = await makeApi()
+  try {
+    writeFileSync(
+      api.paths.modelConfigFile,
+      JSON.stringify({
+        schemaVersion: 2,
+        activeModelId: 'route',
+        models: [
+          {
+            entryId: 'route',
+            provider: 'openai',
+            protocol: 'openai',
+            modelId: 'gpt-fixture',
+            apiBase: 'https://example.invalid/v1',
+            apiKey: 'route-fixture-secret',
+            contextWindowTokens: 128000,
+            maxTokens: 4096,
+            reasoningEffort: null,
+          },
+        ],
+      }),
+    )
+    const config = api.executorConfig.read(),
+      profile = config.profiles.find((p) => p.backend === 'codex')!
+    profile.enabled = true
+    profile.authRef = { kind: 'model-route', routeId: 'route' }
+    const { vi } = await import('vitest')
+    vi.spyOn(api.executorRegistry, 'probe').mockResolvedValue({
+      status: 'available',
+      checkedAt: Date.now(),
+      authVerified: false,
+      capabilities: api.executorRegistry.capabilities('codex'),
+    })
+    await api.executors.configure({ expectedRevision: 0, config })
+    const probe = await api.executors.probe({ profileId: profile.id })
+    expect(probe.status).toBe('available')
+    expect(JSON.stringify(probe)).not.toContain('route-fixture-secret')
+  } finally {
+    await api.close()
+  }
+})

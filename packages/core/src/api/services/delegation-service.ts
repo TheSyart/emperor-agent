@@ -246,14 +246,32 @@ export class CoreDelegationService {
   }
   async receipt(input: { runId: string; sessionId?: string | null }) {
     const { run } = this.run(input.runId, input.sessionId)
+    let preview: ReturnType<DelegationIntegration['get']> | null = null,
+      previewError: string | null = null,
+      patch: ReturnType<DelegationReceipts['readPatch']> = null,
+      patchError: string | null = null
+    if (run.integrationPreviewId)
+      try {
+        preview = this.options.integration.get(run.integrationPreviewId)
+      } catch {
+        previewError =
+          'PREVIEW_UNREADABLE: retained preview requires inspection'
+      }
+    if (run.receiptId)
+      try {
+        patch = this.options.receipts.readPatch(run.receiptId)
+      } catch {
+        patchError = 'PATCH_UNREADABLE: inspect the retained workspace'
+      }
     return {
+      patch,
+      patchError,
+      previewError,
       receipt: run.receiptId ? this.options.receipts.get(run.receiptId) : null,
       acceptance: run.acceptanceId
         ? await this.options.acceptance.current(run.acceptanceId)
         : null,
-      preview: run.integrationPreviewId
-        ? this.options.integration.get(run.integrationPreviewId)
-        : null,
+      preview,
       verificationActive: this.options.acceptance.isActive(run.id),
       verificationRecoveryIds: this.options.acceptance.pendingRecoveries(
         run.id,

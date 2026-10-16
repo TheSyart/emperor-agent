@@ -44,7 +44,7 @@ import {
 import { useRoute, useRouter } from 'vue-router'
 import { pluginDetailLocation } from '../../capabilities/pluginChoices'
 import type { SessionLineage } from '@emperor/core/runtime-contract'
-import { openExternal, revealReference } from '../../api/backend'
+import { openExternal, revealReference, onCoreEvent } from '../../api/backend'
 import { core } from '../../api/http'
 import { activateModelEntry, setModelReasoningEffort } from '../../api/model'
 import { fetchSessionLineage } from '../../api/sessions'
@@ -189,9 +189,44 @@ const composerPhase = computed(() =>
     busy: isActiveSession.value && ctx.busy.value,
   }),
 )
+// Durable external tasks remain useful even when this chat has no visible messages.
+const externalActivity = ref(false)
+let externalActivityGeneration = 0
+watch(
+  viewingId,
+  async (id) => {
+    const generation = ++externalActivityGeneration
+    externalActivity.value = false
+    if (!id || sessionStore.isDraftSessionId(id)) return
+    try {
+      const tasks = await core('tasks.list', { sessionId: id })
+      if (generation === externalActivityGeneration)
+        externalActivity.value = tasks.some(
+          (task) => task.kind === 'external-agent',
+        )
+    } catch {
+      /* an unavailable optional task feature does not block chat */
+    }
+  },
+  { immediate: true },
+)
+const unsubscribeExternalActivity = onCoreEvent((input) => {
+  if (!input || typeof input !== 'object') return
+  const event = input as Record<string, unknown>
+  if (
+    event.session_id === viewingId.value &&
+    String(event.event).startsWith('delegation_')
+  )
+    externalActivity.value = true
+})
+onBeforeUnmount(() => {
+  externalActivityGeneration++
+  unsubscribeExternalActivity()
+})
 const phase = computed(() =>
   conversationPhase({
     composer: composerPhase.value,
+    externalActivity: externalActivity.value,
     child: child.value || unknownSession.value,
     tab: tab.value,
   }),

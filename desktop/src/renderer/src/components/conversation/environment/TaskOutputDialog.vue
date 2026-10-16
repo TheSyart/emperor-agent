@@ -13,6 +13,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef } from 'vue'
 import { core } from '../../../api/http'
+import { mergeExternalTranscript } from '@emperor/core/runtime-contract'
 import Button from '../../ui/Button.vue'
 import Modal from '../../ui/Modal.vue'
 import {
@@ -25,7 +26,8 @@ const PAGE_SIZE = 200
 const props = defineProps<{
   taskId: string
   label: string
-  kind: 'job' | 'workflow'
+  kind: 'job' | 'workflow' | 'external-agent'
+  sessionId?: string
   live: boolean
 }>()
 
@@ -46,6 +48,7 @@ async function load(reset: boolean): Promise<void> {
     const page = await core('tasks.transcript', props.taskId, {
       offset: reset ? 0 : entries.value.length,
       limit: PAGE_SIZE,
+      sessionId: props.sessionId,
     })
     if (current !== generation) return
     entries.value = reset ? page.entries : [...entries.value, ...page.entries]
@@ -67,9 +70,19 @@ onBeforeUnmount(() => {
   generation += 1
 })
 
-const text = computed(() => transcriptText(entries.value))
+const text = computed(() =>
+  transcriptText(
+    props.kind === 'external-agent'
+      ? mergeExternalTranscript(entries.value)
+      : entries.value,
+  ),
+)
 const title = computed(() =>
-  props.kind === 'workflow' ? '工作流记录' : '命令输出',
+  props.kind === 'workflow'
+    ? '工作流记录'
+    : props.kind === 'external-agent'
+      ? '外部智能体输出'
+      : '命令输出',
 )
 const emptyText = computed(() => {
   if (loading.value) return '正在读取…'

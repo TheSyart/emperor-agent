@@ -96,3 +96,5 @@ export type {
   IntegrationPreview,
   IntegrationReceipt,
 } from '../workspace/delegation-integration'
+
+export { mergeExternalTranscript } from '../runtime/external-transcript'

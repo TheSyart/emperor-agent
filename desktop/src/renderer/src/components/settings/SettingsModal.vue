@@ -46,6 +46,7 @@ import { useSettingsRoute } from './useSettingsRoute'
 const SECTION_BODIES: Record<SettingsModalSection, Component> = {
   general: defineAsyncComponent(() => import('./GeneralSection.vue')),
   model: defineAsyncComponent(() => import('./ModelSection.vue')),
+  executors: defineAsyncComponent(() => import('./ExecutorsSection.vue')),
   hooks: defineAsyncComponent(() => import('./HooksSection.vue')),
   computer: defineAsyncComponent(() => import('./ComputerUseSection.vue')),
   voice: defineAsyncComponent(() => import('./VoiceSettingsSection.vue')),

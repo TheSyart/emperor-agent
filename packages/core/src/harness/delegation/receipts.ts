@@ -6,6 +6,11 @@ import {
   readFileSync,
   rmSync,
   realpathSync,
+  openSync,
+  closeSync,
+  readSync,
+  fstatSync,
+  constants,
 } from 'node:fs'
 import { join, resolve, relative, isAbsolute, sep } from 'node:path'
 import type { DelegationRecord, DelegationRunRecord } from './types'
@@ -477,6 +482,40 @@ export class DelegationReceipts {
     for (const file of [...value.baseFiles, ...value.resultFiles])
       this.artifacts.read(file)
     return value
+  }
+  readPatch(
+    id: string,
+    limit = 256 * 1024,
+  ): { content: string; truncated: boolean } | null {
+    const receipt = this.get(id)
+    if (!receipt.patch) return null
+    const expected = join(this.options.root, 'patches', id + '.patch')
+    if (receipt.patch !== expected)
+      throw new DelegationError(
+        'RECEIPT_CORRUPT',
+        'patch escaped its owned location',
+      )
+    const fd = openSync(expected, constants.O_RDONLY | constants.O_NOFOLLOW)
+    try {
+      const stat = fstatSync(fd)
+      if (!stat.isFile())
+        throw new DelegationError(
+          'RECEIPT_CORRUPT',
+          'patch is not a regular file',
+        )
+      const size = Math.min(
+        stat.size,
+        Math.max(1, Math.min(256 * 1024, Math.floor(limit))),
+      )
+      const bytes = Buffer.alloc(size),
+        length = readSync(fd, bytes, 0, size, 0)
+      return {
+        content: bytes.subarray(0, length).toString('utf8'),
+        truncated: stat.size > length,
+      }
+    } finally {
+      closeSync(fd)
+    }
   }
   async current(id: string): Promise<boolean> {
     const receipt = this.get(id),

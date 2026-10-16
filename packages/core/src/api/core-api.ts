@@ -7,6 +7,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { mergeExternalTranscript } from '../runtime/external-transcript'
 import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
 import type { MessageReference } from '../harness/host/message-references'
 import type { AttachmentStore } from '../attachments/store'
@@ -572,7 +573,7 @@ export class CoreApi {
     const executorRuntime = new ExecutorRuntimeService({
       root: this.paths.delegationsRoot,
       resolveRoute: async (id, backend) => {
-        const config = await loadModelConfig(this.root)
+        const config = await loadModelConfig(this.paths.modelConfigFile)
         const entry = config.raw.models.find((entry) => entry.entryId === id)
         if (!entry?.apiKey)
           throw new DelegationError(
@@ -2440,7 +2441,9 @@ export class CoreApi {
         task.kind === 'job'
           ? this.host.jobs.peek(task.id, this.jobOwner(task)).text
           : (task.kind === 'external-agent'
-              ? this.delegationService.transcript(task.id, opts.sessionId)
+              ? mergeExternalTranscript(
+                  this.delegationService.transcript(task.id, opts.sessionId),
+                )
               : task.kind === 'workflow'
                 ? this.workflowTranscript(task.id)
                 : this.subagentTranscript(task.id)

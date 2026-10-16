@@ -81,3 +81,13 @@ describe('conversation shell model', () => {
     expect(crumbs[2]!.current).toBe(true)
   })
 })
+it('keeps retained external task controls reachable even when the visible chat transcript is empty', () => {
+  expect(
+    conversationPhase({
+      composer: 'blank',
+      child: false,
+      tab: 'chat',
+      externalActivity: true,
+    }),
+  ).toBe('active')
+})

@@ -1323,6 +1323,11 @@ type RendererRuntimePayloadProjection = {
 /** `task_*` / `workflow_*` event payload: a Core job or workflow-run record projected from the session log. */
 export interface RuntimeTaskEventRecord {
   id: string
+  delegation_id?: string
+  backend?: string
+  acceptance?: string
+  receipt_id?: string
+  revision?: number
   kind?: string
   label?: string
   command?: string

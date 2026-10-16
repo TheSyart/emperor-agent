@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   createTaskProjectionState,
+  isTaskRuntimeEvent,
   reduceTaskProjection,
   replayTaskProjection,
   type TaskRuntimeEvent,
@@ -105,5 +106,40 @@ describe('task projection', () => {
       event: jobEvent('task_done', 48, 'completed'),
     }).state
     expect(projection.tasks[0]?.status).toBe('killed')
+  })
+})
+
+it('projects separate external runs and never revives a terminal run when acceptance arrives', () => {
+  const event = (
+    id: string,
+    status: string,
+    seq: number,
+    acceptance = 'unverified',
+  ) =>
+    ({
+      event: 'delegation_run_changed',
+      delegation_id: 'dlg-one',
+      run_id: id,
+      journal_seq: seq,
+      seq,
+      session_id: 'root',
+      task: {
+        id,
+        kind: 'external-agent',
+        status,
+        acceptance,
+        delegation_id: 'dlg-one',
+      },
+    }) as TaskRuntimeEvent
+  expect(isTaskRuntimeEvent(event('dgr-one', 'completed', 16))).toBe(true)
+  const state = replayTaskProjection([
+    event('dgr-one', 'completed', 16),
+    event('dgr-two', 'running', 32),
+    event('dgr-one', 'running', 48, 'passed'),
+  ])
+  expect(state.tasks).toHaveLength(2)
+  expect(state.tasks.find((task) => task.id === 'dgr-one')).toMatchObject({
+    status: 'completed',
+    acceptance: 'passed',
   })
 })

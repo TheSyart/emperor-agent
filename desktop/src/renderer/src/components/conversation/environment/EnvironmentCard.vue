@@ -76,7 +76,7 @@ import {
 } from 'vue'
 import { useRouter } from 'vue-router'
 import { attachmentRawUrl } from '../../../api/attachments'
-import { openExternal } from '../../../api/backend'
+import { openExternal, onCoreEvent } from '../../../api/backend'
 import { core } from '../../../api/http'
 import { useAppContext } from '../../../composables/useAppContext'
 import {
@@ -130,6 +130,9 @@ const ENV_CARD_INLINE_MIN = 1120
 /** Gap (px) kept under a card that runs down beside the padded composer. */
 const INLINE_BOTTOM_GAP = 16
 const VISIBLE_ROWS = 3
+const ExternalAgentDetails = defineAsyncComponent(
+  () => import('./ExternalAgentDetails.vue'),
+)
 const TaskOutputDialog = defineAsyncComponent(
   () => import('./TaskOutputDialog.vue'),
 )
@@ -477,6 +480,55 @@ function planValue(summary: PlanSummary): string {
 
 // ── subagents and background tasks (tasks.list) ─────────────────────────
 const tasks = shallowRef<RuntimeTaskRecord[]>([])
+const externalTask = shallowRef<RuntimeTaskRecord | null>(null)
+const externalGroups = computed(() =>
+  Object.values(
+    tasks.value
+      .filter((task) => task.kind === 'external-agent')
+      .reduce<Record<string, RuntimeTaskRecord[]>>((groups, task) => {
+        ;(groups[task.delegation_id!] ??= []).push(task)
+        return groups
+      }, {}),
+  ),
+)
+const externalPhase: Record<string, string> = {
+  queued: '排队中',
+  preparing: '准备中',
+  running: '执行中',
+  waiting_input: '等待回答',
+  cancelling: '停止中',
+  completed: '执行完成',
+  failed: '执行失败',
+  cancelled: '已取消',
+  interrupted: '已中断',
+  outcome_unknown: '结果待确认',
+}
+let unsubscribeDelegations = () => {}
+onMounted(() => {
+  unsubscribeDelegations = onCoreEvent((input) => {
+    if (!activated.value || !input || typeof input !== 'object') return
+    const event = input as Record<string, unknown>
+    if (
+      event.session_id !== props.sessionId ||
+      !String(event.event).startsWith('delegation_') ||
+      event.event === 'delegation_output'
+    )
+      return
+    clearTimeout(taskTimer)
+    taskTimer = setTimeout(() => void loadTasks(), 100)
+  })
+})
+onBeforeUnmount(() => unsubscribeDelegations())
+function closeExternal() {
+  externalTask.value = null
+  void loadTasks()
+}
+function configureExternal() {
+  externalTask.value = null
+  void router.push({
+    query: { ...router.currentRoute.value.query, settings: 'executors' },
+  })
+}
 const showAllSubagents = ref(false)
 const backgroundOpen = ref(false)
 const showAllBackground = ref(false)
@@ -510,6 +562,7 @@ watch(
     backgroundOpen.value = false
     showAllBackground.value = false
     outputTask.value = null
+    externalTask.value = null
     void loadTasks()
   },
   { immediate: true },
@@ -865,6 +918,40 @@ function openLauncher(): void {
       </section>
 
       <section
+        v-if="externalGroups.length"
+        class="section"
+        data-section="external-agents"
+      >
+        <h3 class="section-head">外部智能体</h3>
+        <details
+          v-for="group in externalGroups"
+          :key="group[0]!.delegation_id"
+          class="external-group"
+          open
+        >
+          <summary>
+            {{ group[0]!.backend === 'codex' ? 'Codex' : 'Claude Code' }} ·
+            {{ group.length }} 轮
+          </summary>
+          <button
+            v-for="task in group"
+            :key="task.id"
+            type="button"
+            class="row agent"
+            :data-external-run="task.id"
+            :title="`${task.label} · ${task.id}`"
+            @click="externalTask = task"
+          >
+            <span class="row-label">{{ task.label }}</span
+            ><span class="row-value">{{
+              externalPhase[task.status] ?? task.status
+            }}</span>
+          </button>
+          <p class="muted-line">点击查看成果与独立验收</p>
+        </details>
+      </section>
+
+      <section
         v-if="background.total"
         class="section"
         data-section="background"
@@ -1132,6 +1219,16 @@ function openLauncher(): void {
       </template>
     </Menu>
 
+    <ExternalAgentDetails
+      v-if="externalTask?.delegation_id"
+      :key="externalTask.id"
+      :run-id="externalTask.id"
+      :delegation-id="externalTask.delegation_id"
+      :session-id="sessionId"
+      @close="closeExternal"
+      @configure="configureExternal"
+    />
+
     <TaskOutputDialog
       v-if="outputTask"
       :key="outputTask.id"
@@ -1181,6 +1278,17 @@ function openLauncher(): void {
 </template>
 
 <style scoped>
+.external-group {
+  min-width: 0;
+  margin-top: var(--space-2);
+}
+.external-group summary {
+  color: rgb(var(--label-secondary));
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
 .environment-card {
   position: absolute;
   top: var(--space-3);

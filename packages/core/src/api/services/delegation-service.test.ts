@@ -291,6 +291,10 @@ it('collects real artifacts through Core composition and requires independent cr
       run.receiptId,
     )
     const receipt = await api.delegations.receipt({ runId: run.id })
+    expect(receipt.patch?.content).toContain('diff --git')
+    expect(
+      api.delegationReceipts.readPatch(run.receiptId!, 32)?.truncated,
+    ).toBe(true)
     expect(receipt.receipt?.changedFiles.map((file) => file.path)).toEqual(
       expect.arrayContaining(['src/a.txt', 'artifact.bin']),
     )
