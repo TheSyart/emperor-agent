@@ -260,15 +260,19 @@ export class SnapshotService {
         await git.execute(root, ['write-tree'], { env })
       ).stdout.trim()
       const commit = (
-        await git.execute(root, ['commit-tree', tree, '-p', head], {
-          stdin: 'Emperor delegation base snapshot\n',
-          env: {
-            GIT_AUTHOR_NAME: 'Emperor Agent',
-            GIT_AUTHOR_EMAIL: 'delegation@localhost',
-            GIT_COMMITTER_NAME: 'Emperor Agent',
-            GIT_COMMITTER_EMAIL: 'delegation@localhost',
+        await git.execute(
+          root,
+          ['commit-tree', '--no-gpg-sign', tree, '-p', head],
+          {
+            stdin: 'Emperor delegation base snapshot\n',
+            env: {
+              GIT_AUTHOR_NAME: 'Emperor Agent',
+              GIT_AUTHOR_EMAIL: 'delegation@localhost',
+              GIT_COMMITTER_NAME: 'Emperor Agent',
+              GIT_COMMITTER_EMAIL: 'delegation@localhost',
+            },
           },
-        })
+        )
       ).stdout.trim()
       const ref = 'refs/emperor/delegations/' + input.id + '/base'
       await git.execute(root, ['update-ref', ref, commit])

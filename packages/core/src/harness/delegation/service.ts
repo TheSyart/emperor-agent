@@ -1184,7 +1184,9 @@ export class DelegationService {
           workspaceRoot: record.cwd,
           runtimeStateRoots: [runtime.runtimeRoot],
           privateTempRoot: runtime.tempRoot,
-          readOnlyRoots: lease?.snapshot ? [lease.snapshot.commonDir] : [],
+          readOnlyRoots: lease?.snapshot
+            ? [lease.snapshot.commonDir, join(lease.path, '.git')]
+            : [],
         },
       })
       e.session = session

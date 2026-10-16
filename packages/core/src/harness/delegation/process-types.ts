@@ -16,6 +16,8 @@ export interface OwnedDescendant {
   fingerprint: string
 }
 export interface ProcessOwnership extends OwnedProcessIdentity {
+  purpose?: 'inference' | 'inspection' | 'verification'
+  parentRunId?: string
   schemaVersion: 1
   delegationId: string
   runId: string

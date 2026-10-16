@@ -14,6 +14,12 @@ import {
   withPersistenceLockSync,
 } from '../store/persistence'
 import { safeDelegationKey } from '../harness/delegation/fold'
+import {
+  ArtifactStore,
+  artifactTreeDigest,
+  workspaceArtifacts,
+  sha256,
+} from '../harness/delegation/artifacts'
 export interface DelegationWorkspaceLease {
   id: string
   revision: number
@@ -34,6 +40,41 @@ export class DelegationWorkspaceService {
       save?: (path: string, text: string) => void
     },
   ) {}
+  private async archiveBaseline(
+    lease: DelegationWorkspaceLease,
+  ): Promise<void> {
+    const store = new ArtifactStore(join(this.options.root, 'artifacts'))
+    await this.options.mutations.runExclusive(lease.cwd, 'agent', async () => {
+      const captured = await workspaceArtifacts(
+        lease.cwd,
+        store,
+        this.options.runner,
+      )
+      const after = await workspaceArtifacts(
+        lease.cwd,
+        store,
+        this.options.runner,
+      )
+      const digest = artifactTreeDigest(captured.files)
+      if (artifactTreeDigest(after.files) !== digest)
+        throw new DelegationError(
+          'TREE_CHANGED',
+          'workspace changed while recording its initial baseline',
+        )
+      durableReplaceSync(
+        join(this.options.root, 'baselines', lease.id + '.json'),
+        JSON.stringify({
+          schemaVersion: 1,
+          leaseId: lease.id,
+          cwd: lease.cwd,
+          ownerDigest: sha256(JSON.stringify(lease.owner)),
+          digest,
+          files: captured.files,
+          excluded: captured.excluded,
+        }) + '\n',
+      )
+    })
+  }
   private path(id: string): string {
     safeDelegationKey(id)
     return join(this.options.root, 'leases', id + '.json')
@@ -105,6 +146,7 @@ export class DelegationWorkspaceService {
           'non-Git writes require explicit shared-exclusive',
         )
       lease = { ...lease, revision: 2, status: 'ready' }
+      await this.archiveBaseline(lease)
       this.save(lease)
       return lease
     }
@@ -170,6 +212,7 @@ export class DelegationWorkspaceService {
       status: 'ready',
       revision: 2,
     }
+    await this.archiveBaseline(lease)
     this.save(lease)
     return structuredClone(lease)
   }
