@@ -519,27 +519,40 @@ export class DelegationService {
       const lease = record.workspaceLeaseId
         ? this.options.workspaces.get(record.workspaceLeaseId)
         : undefined
-      session = await this.options.adapters
-        .get(record.backend)!
-        .open({
-          delegationId: id,
-          profile,
-          cwd: record.cwd,
-          environment: runtime.environment,
-          boundaryReceiptId: 'dgb-' + randomUUID(),
-          resumeSessionId: record.providerSessionId,
-          generation: run.generation,
-          signal: controller.signal,
-          runtimeRoot: runtime.runtimeRoot,
-          secretValues: runtime.secretValues,
-          policy: {
-            mode: record.effectivePermission,
-            workspaceRoot: record.cwd,
-            runtimeStateRoots: [runtime.runtimeRoot],
-            privateTempRoot: runtime.tempRoot,
-            readOnlyRoots: lease?.snapshot ? [lease.snapshot.commonDir] : [],
-          },
-        })
+      const prior = Object.values(state.runs).filter(
+        (r) => r.id !== activeRunId && r.providerTurnId,
+      )
+      const usageBaseline = prior.every(
+        (r) => r.usage?.estimatedUsd !== undefined,
+      )
+        ? {
+            estimatedUsd: prior.reduce((n, r) => n + r.usage!.estimatedUsd!, 0),
+          }
+        : undefined
+      session = await this.options.adapters.get(record.backend)!.open({
+        delegationId: id,
+        profile: {
+          ...profile,
+          defaultModel: spec.model ?? profile.defaultModel,
+        },
+        outputSchema: spec.outputSchema,
+        usageBaseline,
+        cwd: record.cwd,
+        environment: runtime.environment,
+        boundaryReceiptId: 'dgb-' + randomUUID(),
+        resumeSessionId: record.providerSessionId,
+        generation: run.generation,
+        signal: controller.signal,
+        runtimeRoot: runtime.runtimeRoot,
+        secretValues: runtime.secretValues,
+        policy: {
+          mode: record.effectivePermission,
+          workspaceRoot: record.cwd,
+          runtimeStateRoots: [runtime.runtimeRoot],
+          privateTempRoot: runtime.tempRoot,
+          readOnlyRoots: lease?.snapshot ? [lease.snapshot.commonDir] : [],
+        },
+      })
       e.session = session
       if (e.stop || controller.signal.aborted)
         throw new DelegationError('ABORTED', 'cancelled before submit')

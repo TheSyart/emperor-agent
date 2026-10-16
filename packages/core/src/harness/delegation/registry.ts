@@ -38,7 +38,12 @@ export class ExecutorRegistry {
         shell: false,
       })
       const version = stdout.match(/\b(\d+\.\d+\.\d+)\b/)?.[1]
-      if (!version || version !== profile.expectedVersion)
+      const supported = profile.backend === 'codex' ? '0.153.4' : '2.1.281'
+      if (
+        !version ||
+        version !== profile.expectedVersion ||
+        profile.expectedVersion !== supported
+      )
         return {
           ...base,
           status: 'incompatible',

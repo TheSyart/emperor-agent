@@ -30,6 +30,17 @@ function fixture(version = '0.153.4') {
   return { root, executablePath, profile }
 }
 describe('executor registry', () => {
+  it('cannot opt into an unsupported protocol by changing expectedVersion to match the binary', async () => {
+    const { profile } = fixture('0.999.0')
+    expect(
+      (
+        await new ExecutorRegistry().probe({
+          ...profile,
+          expectedVersion: '0.999.0',
+        })
+      ).status,
+    ).toBe('incompatible')
+  })
   it('pins the exact checked-in schema bytes in the protocol manifest', () => {
     const root = join(__dirname, 'protocol/codex-0.153.4')
     const manifest = JSON.parse(

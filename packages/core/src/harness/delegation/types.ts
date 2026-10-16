@@ -129,6 +129,8 @@ export interface DelegationRunRecord {
   usage?: { inputTokens?: number; outputTokens?: number; estimatedUsd?: number }
 }
 export interface ExecutorOpenInput {
+  outputSchema?: ObjectJsonSchema
+  usageBaseline?: { estimatedUsd?: number }
   policy: SandboxExecutionPolicy
   runtimeRoot: string
   secretValues?: readonly string[]
