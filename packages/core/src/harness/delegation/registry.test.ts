@@ -1,6 +1,8 @@
 import { mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
 import { defaultExecutorConfig } from './config'
 import { ExecutorRegistry } from './registry'
@@ -28,6 +30,18 @@ function fixture(version = '0.153.4') {
   return { root, executablePath, profile }
 }
 describe('executor registry', () => {
+  it('pins the exact checked-in schema bytes in the protocol manifest', () => {
+    const root = join(__dirname, 'protocol/codex-0.153.4')
+    const manifest = JSON.parse(
+      readFileSync(join(root, 'manifest.json'), 'utf8'),
+    )
+    for (const [name, digest] of Object.entries(manifest.sha256))
+      expect(
+        createHash('sha256')
+          .update(readFileSync(join(root, name)))
+          .digest('hex'),
+      ).toBe(digest)
+  })
   it('reports an exact version without claiming authenticated inference', async () => {
     const { profile } = fixture()
     const result = await new ExecutorRegistry().probe(profile)

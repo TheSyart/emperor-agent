@@ -13,6 +13,16 @@
     "turn/interrupt"
   ],
   "sha256": {
+    "ClientRequest.json": "7d4d90d2a4296725bdb3d3338f649c8545db186c67276404ef2361e9cbdfa06f",
+    "ToolRequestUserInputParams.json": "8e148062b1a15949d32d85bf6793796ae337b57f08e5e91425c03f40f6bf2a27",
+    "ToolRequestUserInputResponse.json": "b1f86faf40e07f070cd6d17f7eab2f071902f06420181f2b4743951c49117164",
+    "v2/ThreadStartParams.json": "38f4bc872094c5690878e93dd1078541243fcb19959c1c5695f4fcb6d8bb8a24",
+    "v2/ThreadResumeParams.json": "cca984de74264b1f6d625a3b3fbbbbacf96008eaa4dfad5fad963c5692d9c031",
+    "v2/ThreadReadParams.json": "73a3652ef09f20b837294d443ed9bdb69ba279b3bd6a4306499e06dafb53b034",
+    "v2/TurnStartParams.json": "07fcc3b56ac167e0056907ac94b2be425ce7600708b9f1472176875f481170a6",
+    "v2/TurnSteerParams.json": "df4ada862fc82e26c47fd88332b427e7bea853cb2cc265e192f993fd283994c7"
+  },
+  "generatedSha256": {
     "ClientRequest.json": "25bc001b5dfe3b35785597b8f9ad9e5aaf7e437331fa9921f041c9e0e03fc9f3",
     "ToolRequestUserInputParams.json": "fda15b62e7446105b59c8ed85c908abed2a47db70653e57c92c47a2f204fa77a",
     "ToolRequestUserInputResponse.json": "5073b245f741fa8ce62ec52e4dd1809b7831f9c4284c279a78abc9b171f8e3f2",
