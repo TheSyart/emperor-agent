@@ -252,7 +252,14 @@ export class HarnessHost {
   readonly questions = new UserQuestionService()
   readonly compaction: CompactionEngine
   readonly jobs = new JobRegistry()
-  readonly goals = new GoalService()
+  readonly goals = new GoalService({
+    requiresCompletionVerification: (agent, ref) =>
+      (this.delegations?.requiredForGoal(ref, this.rootOf(agent).id).length ??
+        0) > 0,
+    verifyCompletion: async (agent, ref) => {
+      await this.delegations?.verifyGoalCompletion(ref, this.rootOf(agent).id)
+    },
+  })
   readonly goalInstall: InstalledGoal
   readonly subagents: SubagentManager
   delegations: DelegationService | null = null
@@ -598,7 +605,12 @@ export class HarnessHost {
       engine: this.workflows,
       runs: this.workflowRuns,
     })
-    const goal = installGoal({ prompt, middleware, tools }, this.goals)
+    const goal = installGoal({ prompt, middleware, tools }, this.goals, {
+      driverOptions: {
+        hasOutstandingDelegations: (id) =>
+          this.delegations?.hasOutstanding(id) ?? false,
+      },
+    })
     void createGoalTools
     // Middleware (order matters): instructions, memory, skills, compaction, hooks.
     middleware.preStep.push(
@@ -1010,7 +1022,7 @@ export class HarnessHost {
       rootSessionId: root.id,
       parentAgentId: agent.id,
       taskScopeId: activeGoal
-        ? 'goal:' + activeGoal.id + ':' + activeGoal.revision
+        ? 'goal:' + activeGoal.id
         : 'message:' + (messageId ?? root.id),
       ...(activeGoal
         ? { goalRef: { id: activeGoal.id, revision: activeGoal.revision } }
@@ -1033,12 +1045,24 @@ export class HarnessHost {
         'PARENT_NOT_FOUND',
         'delegation parent is not active',
       )
-    const policy = this.sandbox.resolve({ session: parent.session })
-    return {
-      cwd: policy.workspaceRoot,
-      policy,
-      planMode: this.planMode.get(parent.session).active,
+    let policy = this.sandbox.resolve({ session: parent.session })
+    let planMode = false
+    const rank = {
+      'read-only': 0,
+      'workspace-write': 1,
+      'danger-full-access': 2,
     }
+    for (
+      let ancestor: Agent | undefined = parent;
+      ancestor;
+      ancestor = ancestor.owner
+    ) {
+      const ancestorPolicy = this.sandbox.resolve({ session: ancestor.session })
+      if (rank[ancestorPolicy.mode] < rank[policy.mode])
+        policy = { ...policy, mode: ancestorPolicy.mode }
+      planMode ||= this.planMode.get(ancestor.session).active
+    }
+    return { cwd: policy.workspaceRoot, policy, planMode }
   }
   canControlDelegation(agent: Agent, owner: DelegationOwner): boolean {
     if (this.rootOf(agent).id !== owner.rootSessionId) return false
@@ -1150,6 +1174,20 @@ export class HarnessHost {
         new Set(this.queuedPrompts(sessionId).map((p) => p.prompt_id)),
       )
     const unsubscribe = agent.session.subscribe((_session, event) => {
+      if (event.type === 'sandbox/mode' || event.type === 'plan/mode') {
+        const root = this.rootOf(agent)
+        if (this.delegations?.parentPermissionsRevoked(root.id)) {
+          this.goals.disarm(root)
+          this.delegationInteractions.cancelRoot(root.id)
+          void this.delegations
+            .stopRoot(root.id)
+            .catch((error) =>
+              logger.warn('external permission revocation needs recovery', {
+                error: String(error),
+              }),
+            )
+        }
+      }
       // The splice is logged before the inbox applies it: diff afterwards.
       if (agent.owner === undefined && event.type === 'agent/inbox/spliced')
         queueMicrotask(() => {
@@ -1442,6 +1480,7 @@ export class HarnessHost {
     if (agent === undefined) return externalActive
     const running = agent.status === 'running'
     this.pending.cancelSession(sessionId)
+    this.goals.disarm(agent)
     agent.cancel({ kind: 'user' })
     this.subagents.disposeChildrenOf(sessionId)
     return running || externalActive

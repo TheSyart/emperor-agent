@@ -73,6 +73,7 @@ export interface DelegationServiceOptions {
     canWake: (owner: DelegationOwner) => boolean
     flush: (sessionId: string) => void
   }
+  acceptanceCurrent?: (id: string) => Promise<{ state: string }>
   onState?: (state: DelegationState, event: DelegationEvent) => void
   onSettled?: (id: string, runId: string) => Promise<void>
   onStopRoot?: (rootSessionId: string) => Promise<void>
@@ -542,6 +543,80 @@ export class DelegationService {
           this.probes.set(profile.id, { key: JSON.stringify(profile), probe })
         }),
     )
+  }
+  /** Revoke existing processes when any live ancestor narrows their authority. */
+  parentPermissionsRevoked(rootSessionId: string): boolean {
+    return this.list().some((state) => {
+      const record = state.record!
+      if (
+        record.owner.rootSessionId !== rootSessionId ||
+        record.availability !== 'active'
+      )
+        return false
+      try {
+        const parent = this.options.parent(record.owner)
+        return (
+          !!parent.planMode ||
+          permissionRank(parent.policy.mode) <
+            permissionRank(record.effectivePermission)
+        )
+      } catch {
+        return true
+      }
+    })
+  }
+  hasOutstanding(
+    owner: string | Pick<DelegationOwner, 'rootSessionId'>,
+  ): boolean {
+    const root = typeof owner === 'string' ? owner : owner.rootSessionId
+    return this.list().some(
+      (state) =>
+        state.record?.owner.rootSessionId === root &&
+        (state.record.availability === 'needs_recovery' ||
+          Object.values(state.runs).some(
+            (run) => !TERMINAL_RUN_PHASES.has(run.phase),
+          ) ||
+          Object.values(state.messages).some((message) =>
+            ['queued', 'sending', 'delivery_unknown'].includes(message.status),
+          )),
+    )
+  }
+  requiredForGoal(
+    goal: { id: string; revision: number },
+    rootSessionId: string,
+  ): DelegationState[] {
+    return this.list().filter(
+      (state) =>
+        state.record?.owner.rootSessionId === rootSessionId &&
+        state.record.owner.requiredForGoal &&
+        state.record.owner.goalRef?.id === goal.id,
+    )
+  }
+  async verifyGoalCompletion(
+    goal: { id: string; revision: number },
+    rootSessionId: string,
+  ): Promise<void> {
+    for (const state of this.requiredForGoal(goal, rootSessionId)) {
+      const record = state.record!,
+        run = record.currentRunId ? state.runs[record.currentRunId] : undefined
+      if (
+        !run ||
+        record.availability === 'needs_recovery' ||
+        !TERMINAL_RUN_PHASES.has(run.phase) ||
+        !run.quiescent ||
+        run.acceptance !== 'passed' ||
+        !run.acceptanceId ||
+        Object.values(state.messages).some((message) =>
+          ['queued', 'sending', 'delivery_unknown'].includes(message.status),
+        ) ||
+        (await this.options.acceptanceCurrent?.(run.acceptanceId))?.state !==
+          'passed'
+      )
+        throw new DelegationError(
+          'REQUIRED_DELEGATION_UNVERIFIED',
+          `required delegation ${record.id} has no current host acceptance; inspect, validate, or explicitly block the Goal`,
+        )
+    }
   }
   executorContext(): string {
     let config: ExecutorConfig

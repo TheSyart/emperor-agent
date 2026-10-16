@@ -1,0 +1,146 @@
+import { expect, it, vi } from 'vitest'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { DelegationService } from './service'
+import { defaultExecutorConfig } from './config'
+import { ExecutorRegistry } from './registry'
+import {
+  FakeExecutorAdapter,
+  delegationTestDirectory,
+  fixtureDelegationRecord,
+} from './testing'
+import { WorkspaceMutationCoordinator } from '../../workspace/mutation-coordinator'
+import type { DelegationStart } from './types'
+
+it('scheduler and ordinary children share global quota; stable Goal identity retains required children across revisions', async () => {
+  const f = delegationTestDirectory(),
+    config = defaultExecutorConfig(),
+    registry = new ExecutorRegistry()
+  config.profiles.forEach((p) => {
+    p.enabled = true
+    p.concurrencyLimit = 2
+  })
+  const releases: (() => void)[] = [],
+    started: string[] = []
+  const script: ConstructorParameters<typeof FakeExecutorAdapter>[1] =
+    async function* (turn, open) {
+      started.push(turn.runId)
+      await new Promise<void>((resolve) => {
+        releases.push(resolve)
+        open.signal.addEventListener('abort', () => resolve(), { once: true })
+      })
+      yield {
+        type: 'turn_finished',
+        status: 'completed',
+        delegationId: open.delegationId,
+        runId: turn.runId,
+        generation: open.generation,
+      }
+    }
+  const service = new DelegationService({
+    root: f.root,
+    config: () => config,
+    registry: {
+      capabilities: (backend) => registry.capabilities(backend),
+      requireAvailable: async (p) => ({
+        status: 'available',
+        capabilities: registry.capabilities(p.backend),
+        checkedAt: 1,
+        authVerified: false,
+      }),
+    },
+    adapters: new Map([
+      ['codex', new FakeExecutorAdapter('codex', script)],
+      ['claude-code', new FakeExecutorAdapter('claude-code', script)],
+    ]),
+    acceptanceCurrent: async () => ({ state: 'passed' }),
+    parent: () => ({
+      cwd: f.root,
+      policy: { workspaceRoot: f.root, mode: 'read-only' },
+    }),
+    workspaces: {
+      prepare: async (owner) => ({
+        id: 'lease',
+        revision: 1,
+        owner,
+        cwd: f.root,
+        path: f.root,
+        mode: 'shared-readonly',
+        status: 'ready',
+      }),
+      retain: vi.fn(),
+      get: vi.fn(),
+      release: vi.fn(),
+    },
+    mutations: new WorkspaceMutationCoordinator(),
+    runtime: async (_, id) => {
+      const root = join(f.root, id)
+      mkdirSync(root, { recursive: true })
+      return { runtimeRoot: root, tempRoot: root, environment: {} }
+    },
+  })
+  try {
+    const owner = {
+      ...fixtureDelegationRecord().owner,
+      taskScopeId: 'goal:g',
+      goalRef: { id: 'g', revision: 1 },
+      requiredForGoal: true,
+    }
+    const spec: DelegationStart = {
+      backend: 'codex',
+      description: 'fixture',
+      prompt: 'fixture',
+      context: 'isolated',
+      workspace: 'shared-readonly',
+      base: 'committed',
+      runInBackground: true,
+      clientRequestId: '1',
+    }
+    const a = await service.start(owner, spec),
+      b = await service.start(
+        { ...owner, source: 'scheduler', goalRef: { id: 'g', revision: 3 } },
+        { ...spec, backend: 'claude-code', clientRequestId: '2' },
+      ),
+      c = await service.start(
+        { ...owner, source: 'scheduler' },
+        { ...spec, clientRequestId: '3' },
+      )
+    await vi.waitFor(() => expect(started).toHaveLength(2))
+    expect(service.hasOutstanding('root')).toBe(true)
+    expect(
+      service
+        .requiredForGoal({ id: 'g', revision: 9 }, 'root')
+        .map((s) => s.record!.id)
+        .sort(),
+    ).toEqual([a.id, b.id, c.id].sort())
+    expect(service.budget.usage('goal:g').runs).toBe(2)
+    releases[1]!()
+    await vi.waitFor(() => expect(started).toHaveLength(3))
+    releases.forEach((release) => release())
+    await Promise.all(
+      [a, b, c].map((record) => service.wait(record.id, record.currentRunId!)),
+    )
+    await service.stopRoot('root')
+    expect(service.hasOutstanding('root')).toBe(false)
+    await expect(
+      service.verifyGoalCompletion({ id: 'g', revision: 9 }, 'root'),
+    ).rejects.toThrow('no current host acceptance')
+    for (const record of [a, b, c])
+      await service.bindReceipt(
+        record.id,
+        record.currentRunId!,
+        'receipt-' + record.id,
+        'passed',
+        'acceptance-' + record.id,
+      )
+    await expect(
+      service.verifyGoalCompletion({ id: 'g', revision: 9 }, 'root'),
+    ).resolves.toBeUndefined()
+
+    expect(service.list().every((s) => s.record!.dispatchPaused)).toBe(true)
+  } finally {
+    releases.forEach((release) => release())
+    await service.shutdown()
+    f.cleanup()
+  }
+})

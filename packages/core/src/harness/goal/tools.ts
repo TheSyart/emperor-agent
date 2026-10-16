@@ -171,6 +171,11 @@ export function createGoalTools(service: GoalService): ToolDefinition[] {
     description: UPDATE_DESCRIPTION,
     input: updateInput,
     async execute(args, context) {
+      if (args.action === 'complete')
+        await service.verifyCompletion(callingAgent(context), {
+          id: args.goal_id,
+          revision: args.revision,
+        })
       const { goal, authority } = service.updateDetailed(
         callingAgent(context),
         {

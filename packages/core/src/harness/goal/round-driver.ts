@@ -68,6 +68,7 @@ interface DriverState {
 export interface GoalRoundDriverOptions {
   /** Durability checkpoint awaited after a goal change, before queuing work (e.g. the session store flush). */
   flush?: (session: Session) => Promise<void>
+  hasOutstandingDelegations?: (agentId: string) => boolean
 }
 
 /** Whether a message is a `<goal_round>` continuation prompt. */
@@ -157,6 +158,12 @@ export class GoalRoundDriver {
     return () => {
       this.detach(state)
     }
+  }
+
+  /** Semantic settlement only; output deltas must never trigger model polling. */
+  delegationSettled(agentId: string): void {
+    for (const state of this.states.values())
+      if (state.agent.id === agentId) this.requestDrive(state)
   }
 
   private detach(state: DriverState): void {
@@ -384,7 +391,11 @@ export class GoalRoundDriver {
       })
       return
     }
-    if (agent.inbox.hasPending) return
+    if (
+      agent.inbox.hasPending ||
+      this.options.hasOutstandingDelegations?.(agent.id)
+    )
+      return
 
     const round = goal.roundsStarted + 1
     const message = contextMessage(
@@ -441,6 +452,7 @@ export class GoalRoundDriver {
       try {
         const goal = this.service.get(agent)
         valid =
+          !this.options.hasOutstandingDelegations?.(agent.id) &&
           this.isArmedActive(goal, attempt) &&
           isNextRound({ goal, roundsStarted: goal.roundsStarted }, attempt)
       } catch (error: unknown) {

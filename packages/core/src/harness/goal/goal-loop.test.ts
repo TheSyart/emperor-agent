@@ -864,3 +864,57 @@ describe('same-session goal driving', () => {
     expect(t.h.adapter.requests).toHaveLength(1)
   })
 })
+
+describe('external delegation goal boundary', () => {
+  it('waits without empty model rounds while direct user work bypasses the wait gate', async () => {
+    let outstanding = true
+    const h = createTestHarness({
+      replies: [{ text: 'user response' }, { text: 'after child' }],
+    })
+    const goals = new GoalService()
+    const { driver } = installGoal(
+      { prompt: h.prompt, middleware: h.middleware },
+      goals,
+      {
+        driverOptions: { hasOutstandingDelegations: () => outstanding },
+      },
+    )
+    const agent = h.agent(),
+      detach = driver.attach(agent)
+    goals.create(agent, { objective: 'fixture goal', maxGoalRounds: 1 })
+    await settle(agent)
+    expect(h.adapter.requests).toHaveLength(0)
+    agent.followup(userText('direct user input'))
+    await settle(agent)
+    expect(h.adapter.requests).toHaveLength(1)
+    expect(roundEvents(agent)).toEqual([])
+    outstanding = false
+    driver.delegationSettled(agent.id)
+    await settle(agent)
+    expect(h.adapter.requests).toHaveLength(2)
+    expect(roundEvents(agent)).toEqual([1])
+    driver.delegationSettled(agent.id)
+    await settle(agent)
+    expect(h.adapter.requests).toHaveLength(2)
+    detach()
+  })
+  it('rejects a required unverified child at the domain completion boundary, including revised goals', async () => {
+    let accepted = false
+    const h = createTestHarness(),
+      agent = h.agent()
+    const goals = new GoalService({
+      verifyCompletion: async () => {
+        if (!accepted) throw new Error('required delegation unverified')
+      },
+    })
+    let goal = goals.create(agent, { objective: 'fixture goal' })
+    await expect(goals.verifyCompletion(agent, goal)).rejects.toThrow(
+      'unverified',
+    )
+    expect(() => goals.complete(agent, goal)).toThrow('verification')
+    goal = goals.edit(agent, goal, { objective: 'edited fixture' })
+    accepted = true
+    await goals.verifyCompletion(agent, goal)
+    expect(goals.complete(agent, goal).phase).toBe('complete')
+  })
+})

@@ -103,3 +103,31 @@ it('bounds UTF-8 notices and uses one stable notice identity per run', () => {
   expect(Buffer.byteLength(a.text)).toBeLessThanOrEqual(8192)
   expect(a.text).not.toContain('\uFFFD')
 })
+
+it('out of order settlements each wake once and late stopped notices remain pending', async () => {
+  const parent = createTestHarness().agent(),
+    record = fixtureDelegationRecord(),
+    wake = vi.spyOn(parent, 'wakeInbox').mockImplementation(() => {})
+  let stopped = false
+  const box = new DelegationNoticeOutbox({
+    parent: () => parent,
+    canWake: () => !stopped,
+    flush: () => {},
+    markDelivered: async () => {},
+  })
+  const notices = [1, 2, 3].map((n) =>
+    settlementNotice(record, fixtureDelegationRun('dgr-' + n)),
+  )
+  for (const notice of [notices[1]!, notices[0]!, notices[1]!, notices[0]!])
+    await box.dispatch(record.owner, notice)
+  expect(wake).toHaveBeenCalledTimes(2)
+  stopped = true
+  expect(await box.dispatch(record.owner, notices[2]!)).toMatchObject({
+    delivered: false,
+  })
+  expect(wake).toHaveBeenCalledTimes(2)
+  expect(parent.inbox.nextTurn.map((m) => m.id)).toEqual([
+    notices[1]!.id,
+    notices[0]!.id,
+  ])
+})

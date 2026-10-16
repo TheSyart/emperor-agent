@@ -634,6 +634,7 @@ export class CoreApi {
         canWake: (owner) => host.delegationNoticeParent(owner) !== undefined,
         flush: (sessionId) => host.sessions.flush(sessionId),
       },
+      acceptanceCurrent: (id) => this.delegationAcceptance.current(id),
       onState: (state, event) => this.projectDelegation(state, event),
       onEvent: (event) => {
         if (
