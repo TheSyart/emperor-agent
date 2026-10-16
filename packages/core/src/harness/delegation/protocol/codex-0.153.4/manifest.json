@@ -1,0 +1,25 @@
+{
+  "protocolVersion": "0.153.4",
+  "source": "https://learn.chatgpt.com/docs/app-server",
+  "generatedBy": "codex app-server generate-json-schema",
+  "transport": "stdio://",
+  "methods": [
+    "initialize",
+    "thread/start",
+    "thread/resume",
+    "thread/read",
+    "turn/start",
+    "turn/steer",
+    "turn/interrupt"
+  ],
+  "sha256": {
+    "ClientRequest.json": "25bc001b5dfe3b35785597b8f9ad9e5aaf7e437331fa9921f041c9e0e03fc9f3",
+    "ToolRequestUserInputParams.json": "fda15b62e7446105b59c8ed85c908abed2a47db70653e57c92c47a2f204fa77a",
+    "ToolRequestUserInputResponse.json": "5073b245f741fa8ce62ec52e4dd1809b7831f9c4284c279a78abc9b171f8e3f2",
+    "v2/ThreadStartParams.json": "792e2f32e37cece971bd616664ea2053741acbed4e9c92e9d1766427718f2ecd",
+    "v2/ThreadResumeParams.json": "8ac68582a81d60940b10b330be8546123f56bfe246b56f8a4f121da00f347cf2",
+    "v2/ThreadReadParams.json": "dfe040c6ac71d30795b8be3f3ff232e66f362a37f883b491e5d1ea367f470db4",
+    "v2/TurnStartParams.json": "a3835e8c1e942e4b358e1a670939b89918b16c4d13105a579899892b7ade6dea",
+    "v2/TurnSteerParams.json": "4a52eb76e7a717bb388484ccd7538737fca0df35481fc30a21e259f1bfe96e37"
+  }
+}

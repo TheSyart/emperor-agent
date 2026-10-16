@@ -48,6 +48,7 @@ export type EmperorPathId =
   | 'scheduler'
   | 'team'
   | 'tasks'
+  | 'delegations'
   | 'processes'
   | 'control'
   | 'goals'
@@ -123,6 +124,7 @@ export interface RuntimePaths {
   schedulerRoot: string
   teamRoot: string
   tasksRoot: string
+  delegationsRoot: string
   processesRoot: string
   controlRoot: string
   goalsRoot: string
@@ -586,6 +588,15 @@ export function createEmperorPathCatalog(
       'lazy',
     ),
     descriptor(
+      'delegations',
+      join(emperorHome, 'delegations'),
+      'user',
+      source,
+      true,
+      true,
+      'lazy',
+    ),
+    descriptor(
       'control',
       join(emperorHome, 'control'),
       'user',
@@ -739,6 +750,7 @@ export function createEmperorPathCatalog(
         schedulerRoot: path('scheduler')!,
         teamRoot: path('team')!,
         tasksRoot: path('tasks')!,
+        delegationsRoot: path('delegations')!,
         processesRoot: path('processes')!,
         controlRoot: path('control')!,
         goalsRoot: path('goals')!,
