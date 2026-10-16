@@ -68,3 +68,39 @@ export function delegationTestDirectory(): { root: string; cleanup(): void } {
   const root = mkdtempSync(join(tmpdir(), 'emperor-delegation-test-'))
   return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) }
 }
+
+import type { DelegationRecord, DelegationRunRecord } from './types'
+import { ExecutorRegistry } from './registry'
+export function fixtureDelegationRecord(): DelegationRecord {
+  return {
+    schemaVersion: 1,
+    id: 'dlg-test',
+    owner: {
+      rootSessionId: 'root',
+      parentAgentId: 'root',
+      taskScopeId: 'task',
+      requiredForGoal: false,
+      depth: 1,
+      source: 'model',
+    },
+    backend: 'codex',
+    profileId: 'codex-default',
+    cwd: '/fixture',
+    workspaceLeaseId: 'lease',
+    effectivePermission: 'read-only',
+    capabilitySnapshot: new ExecutorRegistry().capabilities('codex'),
+    availability: 'idle',
+    createdAt: 1,
+  }
+}
+export function fixtureDelegationRun(id = 'dgr-1'): DelegationRunRecord {
+  return {
+    id,
+    delegationId: 'dlg-test',
+    revision: 0,
+    generation: 1,
+    messageId: 'dgm-1',
+    phase: 'queued',
+    acceptance: 'unverified',
+  }
+}
