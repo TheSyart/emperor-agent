@@ -39,6 +39,10 @@ export interface SandboxExecutionPolicy {
   mode: SandboxMode
   workspaceRoot: string
   sessionId?: string
+  /** Host-only grants for an external runtime. Never accepted from model or IPC arguments. */
+  runtimeStateRoots?: readonly string[]
+  privateTempRoot?: string
+  readOnlyRoots?: readonly string[]
 }
 
 export interface SandboxPolicy extends SandboxExecutionPolicy {
@@ -82,6 +86,17 @@ export function canonicalPath(path: string): string {
 
 /** Writable roots for one policy (workspace + temp under workspace-write; none otherwise). */
 export function writableRoots(policy: SandboxExecutionPolicy): string[] {
+  if (policy.privateTempRoot !== undefined) {
+    return [
+      ...new Set(
+        [
+          ...(policy.mode === 'workspace-write' ? [policy.workspaceRoot] : []),
+          ...(policy.runtimeStateRoots ?? []),
+          policy.privateTempRoot,
+        ].map(canonicalPath),
+      ),
+    ]
+  }
   if (policy.mode !== 'workspace-write') return []
   return [
     ...new Set([policy.workspaceRoot, '/tmp', tmpdir()].map(canonicalPath)),

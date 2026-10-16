@@ -69,7 +69,12 @@ export function bwrapProfileArgs(policy: SandboxPolicy): string[] {
     '/proc',
     '--die-with-parent',
   ]
-  if (policy.mode === 'workspace-write') {
+  if (policy.privateTempRoot !== undefined) {
+    args.push('--tmpfs', '/tmp')
+    for (const root of writableRoots(policy)) args.push('--bind', root, root)
+    for (const root of policy.readOnlyRoots ?? [])
+      args.push('--ro-bind', root, root)
+  } else if (policy.mode === 'workspace-write') {
     args.push('--tmpfs', '/tmp')
     args.push('--bind', policy.workspaceRoot, policy.workspaceRoot)
   }
@@ -108,6 +113,10 @@ export function seatbeltProfileArgs(
       `(allow file-write* ${roots.map((root) => `(subpath ${sbplString(root)})`).join(' ')})`,
     )
   }
+  for (const root of policy.readOnlyRoots ?? [])
+    forms.push(
+      `(deny file-write* (subpath ${sbplString(canonicalPath(root))}))`,
+    )
   // E-M13: these operations were checked against a real sandbox-exec child.
   // They apply only to confined Shell modes, never danger-full-access.
   forms.push(
