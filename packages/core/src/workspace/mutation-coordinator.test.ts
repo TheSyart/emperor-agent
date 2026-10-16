@@ -2,9 +2,37 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { WorkspaceMutationCoordinator } from './mutation-coordinator'
+import {
+  WorkspaceMutationCoordinator,
+  workspaceMutationDomain,
+} from './mutation-coordinator'
 
 describe('WorkspaceMutationCoordinator', () => {
+  it('holds renderer Git mutations behind non-Git shared-exclusive and real tool writers', async () => {
+    const coordinator = new WorkspaceMutationCoordinator()
+    const root = mkdtempSync(join(tmpdir(), 'emperor-nongit-lease-'))
+    const tool = await coordinator.acquireWriter(root, 'tool')
+    const exclusive = coordinator.resources.acquire({
+      keys: [workspaceMutationDomain(root)],
+      mode: 'exclusive',
+      owner: 'external',
+    })
+    let externalAcquired = false
+    void exclusive.then(() => {
+      externalAcquired = true
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(externalAcquired).toBe(false)
+    tool.release()
+    const lease = await exclusive
+    const mutate = vi.fn()
+    const renderer = coordinator.runExclusive(root, 'renderer_git', mutate)
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(mutate).not.toHaveBeenCalled()
+    lease.release()
+    await renderer
+    expect(mutate).toHaveBeenCalledOnce()
+  })
   it('serializes Agent and Renderer Git mutations for one workspace', async () => {
     const coordinator = new WorkspaceMutationCoordinator()
     const order: string[] = []

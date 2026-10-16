@@ -73,6 +73,7 @@ export interface JobHooks {
 }
 
 export interface JobStart {
+  retainExecutionLease?: () => { release(): void }
   kind: JobKind
   /** One-line model-facing label (the command). */
   label: string
@@ -120,6 +121,7 @@ export const JOB_WAIT_TIMEOUT = 'JOB_WAIT_TIMEOUT'
 export const JOB_NOTICE_PRODUCER = 'jobs'
 
 interface TrackedJob {
+  releaseExecutionLease?: () => void
   id: string
   kind: JobKind
   label: string
@@ -199,7 +201,14 @@ export class JobRegistry {
         `background job limit reached for this owner (limit: ${this.maxPerOwner}); use job_kill to stop an unneeded job, wait for it to finish, then retry`,
       )
     }
-    const hooks = spec.run()
+    const executionLease = spec.retainExecutionLease?.()
+    let hooks: JobHooks
+    try {
+      hooks = spec.run()
+    } catch (error) {
+      executionLease?.release()
+      throw error
+    }
     const count = (this.counters.get(spec.kind) ?? 0) + 1
     this.counters.set(spec.kind, count)
     const id = `${spec.kind}-${count}`
@@ -208,6 +217,9 @@ export class JobRegistry {
       markSettled = resolve
     })
     const job: TrackedJob = {
+      releaseExecutionLease: executionLease
+        ? () => executionLease.release()
+        : undefined,
       id,
       kind: spec.kind,
       label: spec.label,
@@ -458,6 +470,8 @@ export class JobRegistry {
     job.exitCode = outcome.exitCode
     job.output = outcome.output
     job.finishedAt = Date.now()
+    job.releaseExecutionLease?.()
+    job.releaseExecutionLease = undefined
     if (job.waiters > 0) job.reported = true
     const snapshot = this.snapshot(job)
     const resolvers = [...job.waitResolvers]

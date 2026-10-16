@@ -21,6 +21,8 @@ export interface ToolRunContext {
   readonly agent?: Agent
   /** Aborts on turn cancellation or tool timeout. */
   readonly signal: AbortSignal
+  /** Retain the actual execution lease for a background producer until it settles. */
+  readonly retainWorkspaceLease?: () => { release(): void }
   /** Queue a context message to enter the very next step. */
   deferContext(context: UserMessage): void
   /** End the turn after this step's tool results are committed. */

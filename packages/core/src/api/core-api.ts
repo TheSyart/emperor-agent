@@ -118,6 +118,7 @@ import { HardenedGitRunner } from '../workspace/git-runner'
 import { TurnSnapshots } from '../workspace/turn-snapshots'
 import {
   TurnFileRecorder,
+  mayWriteFiles,
   type TurnFilesReverted,
 } from '../harness/host/turn-files'
 import {
@@ -487,7 +488,12 @@ export class CoreApi {
       resolveProject: resolveWorkspaceProject,
       resolveRuntime: resolveGit,
       run: runGit,
-      hasActiveWriter: (sessionId) => host.isBusy(sessionId),
+      hasActiveWriter: (sessionId) =>
+        host.isBusy(sessionId) ||
+        this.workspaceMutations.hasActiveWriter(
+          resolveWorkspaceProject(sessionId).projectRoot,
+          'renderer_git',
+        ),
       stateRoot: this.paths.stateRoot,
       bindings: this.workspaceBindings,
       receipts: this.gitReceipts,
@@ -513,6 +519,26 @@ export class CoreApi {
         return null
       }
     }
+    host.tools.setWorkspaceAccessLeaseProvider({
+      acquire: async (call) => {
+        if (!mayWriteFiles(call.name)) return undefined
+        const root = host.sandbox.resolve({
+          session: call.agent?.session,
+        }).workspaceRoot
+        const args = call.arguments as {
+          workdir?: unknown
+          file_path?: unknown
+        } | null
+        const extra = args?.workdir ?? args?.file_path
+        const keys = [workspaceMutationDomain(root)]
+        if (typeof extra === 'string')
+          keys.push(workspaceMutationDomain(resolve(root, extra)))
+        return this.workspaceMutations.resources.acquire(
+          { keys, mode: 'shared', owner: call.callId },
+          call.signal,
+        )
+      },
+    })
     this.turnFiles = new TurnFileRecorder({
       snapshots: new TurnSnapshots({
         exec: (cwd, args, options) => turnGit.execute(cwd, args, options),
@@ -523,6 +549,7 @@ export class CoreApi {
       rootOf: (agent) => host.rootOf(agent),
       sessionLog: (sessionId) => host.sessionLog(sessionId),
       workspaceBusy: (projectRoot) => {
+        if (this.workspaceMutations.hasActiveWriter(projectRoot)) return true
         const domain = workspaceMutationDomain(projectRoot)
         return host
           .busySessions()

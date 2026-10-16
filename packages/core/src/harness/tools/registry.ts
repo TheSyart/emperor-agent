@@ -67,6 +67,9 @@ export type ToolResultObserver = (
   call: ToolCallInfo,
   result: ToolExecutionResult,
 ) => void
+export interface WorkspaceAccessLeaseProvider {
+  acquire(call: ToolCallInfo): Promise<{ release(): void } | undefined>
+}
 export type ApprovalOutcome =
   'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
 export type ApprovalHandler = (request: {
@@ -124,6 +127,12 @@ export class ToolRegistry {
   readonly guards: ToolGuard[] = []
   readonly observers: ToolResultObserver[] = []
   private approval: ApprovalHandler | undefined
+  private executionLeases: WorkspaceAccessLeaseProvider | undefined
+  setWorkspaceAccessLeaseProvider(
+    provider: WorkspaceAccessLeaseProvider | undefined,
+  ): void {
+    this.executionLeases = provider
+  }
   private readonly states = new WeakMap<ToolRunContext, CallState>()
 
   /**
@@ -380,12 +389,38 @@ export class ToolRegistry {
       definition.timeoutMs === undefined
         ? undefined
         : deadline(context.signal, definition.timeoutMs, TOOL_TIMEOUT)
-    const bodyContext: ToolRunContext =
+    let bodyContext: ToolRunContext =
       limit === undefined ? context : { ...context, signal: limit.signal }
     this.states.set(bodyContext, state)
+    let releaseLease: (() => void) | undefined
     try {
+      const lease = await this.executionLeases?.acquire(bodyContext)
+      if (lease) {
+        let references = 1
+        const retain = () => {
+          references++
+          let released = false
+          return {
+            release: () => {
+              if (released) return
+              released = true
+              if (--references === 0) lease.release()
+            },
+          }
+        }
+        releaseLease = () => {
+          if (--references === 0) lease.release()
+        }
+        bodyContext = { ...bodyContext, retainWorkspaceLease: retain }
+        this.states.set(bodyContext, state)
+      }
+      if (bodyContext.signal.aborted) return toolAbortedResult(true)
       state.bodyInvoked = true
-      const body = definition.execute(context.arguments, bodyContext)
+      const releaseBody = releaseLease
+      const body = definition
+        .execute(context.arguments, bodyContext)
+        .finally(() => releaseBody?.())
+      releaseLease = undefined
       const returned =
         limit === undefined
           ? await body
@@ -440,6 +475,7 @@ export class ToolRegistry {
       if (context.signal.aborted) return toolAbortedResult(false)
       return toolErrorResult(error)
     } finally {
+      releaseLease?.()
       limit?.dispose()
     }
   }

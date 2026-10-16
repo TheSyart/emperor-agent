@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { GenerateOptions } from '../llm/types'
 import { replyChunks, type ScriptedReply } from '../harness/testing'
 import type { CoreApi } from './core-api'
+import { workspaceMutationDomain } from '../workspace/mutation-coordinator'
 import { CoreMutationGuardError } from './mutation-guard'
 import { coreOperationKeys } from './operations'
 import {
@@ -845,6 +846,40 @@ describe('CoreApi mutation guard', () => {
 })
 
 describe('CoreApi tasks and tools', () => {
+  it('holds real internal tool dispatch behind an external workspace lease', async () => {
+    const { api } = await setup()
+    const id = session(api)
+    const agent = api.host.agentFor(id)
+    const root = api.host.sessionWorkspaceRoot(id)
+    let invoked = false
+    api.host.tools.register({
+      name: 'mcp_fixture_writer',
+      description: 'lease fixture',
+      parameters: {},
+      parse: (r) => r,
+      execute: async () => {
+        invoked = true
+        return 'wrote'
+      },
+    })
+    const lease = await api.workspaceMutations.resources.acquire({
+      keys: [workspaceMutationDomain(root)],
+      mode: 'exclusive',
+      owner: 'external',
+    })
+    const run = api.host.tools.execute({
+      name: 'mcp_fixture_writer',
+      arguments: {},
+      agent,
+      callId: 'lease-check',
+      signal: new AbortController().signal,
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(invoked).toBe(false)
+    lease.release()
+    expect((await run).isError).toBe(false)
+    expect(invoked).toBe(true)
+  })
   it('lists a background bash job and serves its transcript', async () => {
     const { api } = await setup({
       replies: [

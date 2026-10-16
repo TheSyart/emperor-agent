@@ -1,5 +1,9 @@
 import { existsSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import {
+  DelegationResources,
+  type ResourceLease,
+} from '../harness/delegation/resources'
 
 export interface WorkspaceMutationHost {
   runExclusive<T>(
@@ -13,6 +17,20 @@ export interface WorkspaceMutationHost {
 /** Agent tools and trusted Renderer Git actions share one Core-owned queue. */
 export class WorkspaceMutationCoordinator implements WorkspaceMutationHost {
   private readonly tails = new Map<string, Promise<void>>()
+  constructor(readonly resources = new DelegationResources()) {}
+  hasActiveWriter(root: string, exceptOwner?: string): boolean {
+    return this.resources.hasActive(workspaceMutationDomain(root), exceptOwner)
+  }
+  acquireWriter(
+    root: string,
+    owner: string,
+    signal?: AbortSignal | null,
+  ): Promise<ResourceLease> {
+    return this.resources.acquire(
+      { keys: [workspaceMutationDomain(root)], mode: 'shared', owner },
+      signal,
+    )
+  }
 
   async runExclusive<T>(
     workspaceRoot: string,
@@ -21,6 +39,10 @@ export class WorkspaceMutationCoordinator implements WorkspaceMutationHost {
     signal?: AbortSignal | null,
   ): Promise<T> {
     const key = workspaceMutationDomain(workspaceRoot)
+    const lease = await this.resources.acquire(
+      { keys: [key], mode: 'exclusive', owner: _owner },
+      signal,
+    )
     const previous = this.tails.get(key) ?? Promise.resolve()
     let release!: () => void
     const gate = new Promise<void>((done) => {
@@ -34,6 +56,7 @@ export class WorkspaceMutationCoordinator implements WorkspaceMutationHost {
       return await action()
     } finally {
       release()
+      lease.release()
       // A cancelled waiter releases its own gate immediately, but its tail still
       // represents the running predecessor. Keep that tail discoverable until
       // the whole chain settles so a later mutation cannot overtake it.
