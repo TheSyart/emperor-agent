@@ -43,7 +43,17 @@ export class SnapshotService {
   }
   async capture(input: SnapshotInput): Promise<BaseSnapshot> {
     safeDelegationKey(input.id)
-    const git = this.options.runner
+    const git: Pick<HardenedGitRunner, 'execute'> = {
+      execute: async (cwd, args, options) => {
+        const result = await this.options.runner.execute(cwd, args, options)
+        if (result.stdoutTruncated)
+          throw new DelegationError(
+            'SNAPSHOT_LIMIT',
+            'Git inventory was truncated; source completeness is unverified',
+          )
+        return result
+      },
+    }
     const cwd = realpathSync(input.cwd)
     const root = realpathSync(
       (await git.execute(cwd, ['rev-parse', '--show-toplevel'])).stdout.trim(),
@@ -81,6 +91,7 @@ export class SnapshotService {
           '-z',
           '--others',
           '--ignored',
+          '--directory',
           '--exclude-standard',
         ])
       ).stdout,

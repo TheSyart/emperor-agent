@@ -1,9 +1,42 @@
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync, symlinkSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { delegationRepository, fixtureGit } from './delegation-test-fixture'
 import { SnapshotService } from './delegation-snapshot'
+it('reports ignored dependency directories once rather than expanding their contents into the brief', async () => {
+  const { root, repo, runner } = delegationRepository()
+  mkdirSync(join(repo, 'ignored'))
+  for (let i = 0; i < 10; i++)
+    writeFileSync(join(repo, 'ignored', 'file-' + i), 'ignored')
+  const snapshot = await new SnapshotService({
+    runner,
+    tempRoot: join(root, 'tmp'),
+  }).capture({ id: 'dlg-ignored', cwd: repo, base: 'committed' })
+  expect(snapshot.excluded).toContainEqual({
+    path: 'ignored/',
+    reason: 'ignored',
+  })
+  expect(
+    snapshot.excluded.filter((e) => e.path.startsWith('ignored/')).length,
+  ).toBe(1)
+})
+it('refuses a truncated Git inventory instead of calling an incomplete snapshot complete', async () => {
+  const { root, repo, runner } = delegationRepository(),
+    execute = runner.execute.bind(runner)
+  vi.spyOn(runner, 'execute').mockImplementation(async (cwd, args, options) =>
+    args.includes('ls-files')
+      ? { exitCode: 0, stdout: 'partial\0', stderr: '', stdoutTruncated: true }
+      : execute(cwd, args, options),
+  )
+  await expect(
+    new SnapshotService({ runner, tempRoot: join(root, 'tmp') }).capture({
+      id: 'dlg-truncated',
+      cwd: repo,
+      base: 'committed',
+    }),
+  ).rejects.toThrow('SNAPSHOT_LIMIT')
+})
 it('captures selected dirty tracked/untracked bytes without moving HEAD or user index', async () => {
   const { root, repo, runner } = delegationRepository()
   const head = fixtureGit(repo, 'rev-parse', 'HEAD')

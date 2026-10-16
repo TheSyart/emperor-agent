@@ -25,7 +25,7 @@ export function delegationRepository() {
   const repo = join(root, 'repo')
   mkdirSync(join(repo, 'src'), { recursive: true })
   writeFileSync(join(repo, 'src', 'a.txt'), 'base')
-  writeFileSync(join(repo, '.gitignore'), '.env*\\nignored/\\n')
+  writeFileSync(join(repo, '.gitignore'), '.env*\nignored/\n')
   fixtureGit(repo, 'init', '-q', '-b', 'main')
   fixtureGit(repo, 'add', '-A')
   fixtureGit(repo, 'commit', '-qm', 'base')

@@ -8,8 +8,15 @@
  * UI through the projector, and answers pending interactions for CoreApi.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from 'node:fs'
+import { join, resolve, relative, isAbsolute, sep } from 'node:path'
 import { AttachmentStore, type AttachmentRef } from '../../attachments/store'
 import type { MessageReference } from './message-references'
 import {
@@ -95,6 +102,12 @@ import { LocalSandbox, type SandboxBackend } from '../sandbox/backend'
 import { SandboxPolicyService, type SandboxMode } from '../sandbox/policy'
 import { SubagentManager } from '../subagent/manager'
 import { installSubagents } from '../subagent/tools'
+import { createDelegationTools } from '../delegation/tools'
+import type { DelegationService } from '../delegation/service'
+import { DelegationError, type DelegationOwner } from '../delegation/types'
+import type { DelegationParentContext } from '../delegation/policy'
+import { discoverInstructionFiles } from '../prompt/agent-instructions'
+import { workspaceMutationDomain } from '../../workspace/mutation-coordinator'
 import {
   createSpawnChildProvider,
   installWorkflow,
@@ -240,6 +253,7 @@ export class HarnessHost {
   readonly goals = new GoalService()
   readonly goalInstall: InstalledGoal
   readonly subagents: SubagentManager
+  delegations: DelegationService | null = null
   /** Dynamic workflows (`workflow` / `ralph` tools) over in-process subagents. */
   readonly workflows: WorkflowEngine
   readonly workflowRuns = new WorkflowRunRegistry()
@@ -491,7 +505,65 @@ export class HarnessHost {
     installMcpConfigPromptSection(prompt, {
       configPath: mcpConfigDisplayPath(this.kept.paths.stateRoot),
     })
-    installSubagents(this.subagents, tools, prompt)
+    installSubagents(
+      this.subagents,
+      tools,
+      prompt,
+      createDelegationTools({
+        internalManager: this.subagents,
+        delegations: () => this.delegations ?? undefined,
+        ownerResolver: (agent, callId) => this.delegationOwner(agent, callId),
+        canControl: (agent, owner) => this.canControlDelegation(agent, owner),
+        parentReadOnly: (agent) =>
+          this.sandbox.resolve({ session: agent.session }).mode === 'read-only',
+        briefContext: (agent) => {
+          const cwd = this.sandbox.resolve({
+              session: agent.session,
+            }).workspaceRoot,
+            root = workspaceMutationDomain(cwd)
+          const instructions = discoverInstructionFiles(cwd, {
+            globalDir: this.kept.paths.stateRoot,
+          }).filter((file) => {
+            if (
+              file.absolutePath === join(this.kept.paths.stateRoot, 'AGENTS.md')
+            )
+              return false
+            const path = relative(root, realpathSync(file.absolutePath))
+            if (
+              isAbsolute(path) ||
+              path === '..' ||
+              path.startsWith('..' + sep)
+            )
+              throw new DelegationError(
+                'PERMISSION_DENIED',
+                'workspace instruction resolves outside source root',
+              )
+            if (
+              statSync(file.absolutePath).size > Buffer.byteLength(file.content)
+            )
+              throw new DelegationError(
+                'BRIEF_LIMIT',
+                'workspace instruction exceeds complete brief budget',
+              )
+            return true
+          })
+          const goal = this.goals.get(this.rootOf(agent))
+          return {
+            instructions,
+            ...(goal && goal.phase !== 'complete'
+              ? { goal: goal.objective }
+              : {}),
+          }
+        },
+      }),
+    )
+    prompt.context({
+      name: 'external-executors',
+      order: 121,
+      text: () =>
+        this.delegations?.executorContext() ??
+        'External executors are not composed; internal subagents remain available.',
+    })
     installWorkflow(tools, prompt, {
       engine: this.workflows,
       runs: this.workflowRuns,
@@ -887,6 +959,70 @@ export class HarnessHost {
   }
 
   /** The root (session-level) agent of an owner chain. */
+  delegationOwner(agent: Agent, callId: string): DelegationOwner {
+    const root = this.rootOf(agent),
+      goal = this.goals.get(root)
+    let messageId: string | undefined
+    for (let i = root.session.events.length - 1; i >= 0; i--) {
+      const e = root.session.events[i]!
+      if (
+        e.type === 'user/message' &&
+        (e.data.source.kind === 'user' ||
+          (e.data.source.kind === 'context' &&
+            e.data.source.producer === 'scheduler'))
+      ) {
+        messageId = e.data.id
+        break
+      }
+    }
+    const activeGoal = goal && goal.phase !== 'complete' ? goal : undefined
+    return {
+      rootSessionId: root.id,
+      parentAgentId: agent.id,
+      taskScopeId: activeGoal
+        ? 'goal:' + activeGoal.id + ':' + activeGoal.revision
+        : 'message:' + (messageId ?? root.id),
+      ...(activeGoal
+        ? { goalRef: { id: activeGoal.id, revision: activeGoal.revision } }
+        : {}),
+      requiredForGoal: Boolean(activeGoal),
+      parentCallId: callId,
+      depth: agent.depth + 1,
+      source:
+        currentTurnSource(root.session.events) === 'scheduler'
+          ? 'scheduler'
+          : 'model',
+    }
+  }
+  delegationParent(owner: DelegationOwner): DelegationParentContext {
+    const parent =
+      this.agents.get(owner.parentAgentId) ??
+      this.subagents.get(owner.parentAgentId)
+    if (!parent || this.rootOf(parent).id !== owner.rootSessionId)
+      throw new DelegationError(
+        'PARENT_NOT_FOUND',
+        'delegation parent is not active',
+      )
+    const policy = this.sandbox.resolve({ session: parent.session })
+    return {
+      cwd: policy.workspaceRoot,
+      policy,
+      planMode: this.planMode.get(parent.session).active,
+    }
+  }
+  canControlDelegation(agent: Agent, owner: DelegationOwner): boolean {
+    if (this.rootOf(agent).id !== owner.rootSessionId) return false
+    if (agent.id === owner.rootSessionId || agent.id === owner.parentAgentId)
+      return true
+    let target =
+      this.agents.get(owner.parentAgentId) ??
+      this.subagents.get(owner.parentAgentId)
+    while (target) {
+      if (target.id === agent.id) return true
+      target = target.owner
+    }
+    return false
+  }
   rootOf(agent: Agent): Agent {
     let current = agent
     while (current.owner !== undefined) current = current.owner
@@ -1239,13 +1375,28 @@ export class HarnessHost {
   }
 
   stop(sessionId: string): boolean {
+    const externalActive =
+      this.delegations
+        ?.list()
+        .some(
+          (state) =>
+            state.record?.owner.rootSessionId === sessionId &&
+            state.record.availability === 'active',
+        ) ?? false
+    void this.delegations
+      ?.stopRoot(sessionId)
+      .catch((error) =>
+        logger.warn('external delegation stop requires recovery', {
+          error: String(error),
+        }),
+      )
     const agent = this.agents.get(sessionId)
-    if (agent === undefined) return false
+    if (agent === undefined) return externalActive
     const running = agent.status === 'running'
     this.pending.cancelSession(sessionId)
     agent.cancel({ kind: 'user' })
     this.subagents.disposeChildrenOf(sessionId)
-    return running
+    return running || externalActive
   }
 
   isBusy(sessionId: string | null): boolean {
@@ -1539,6 +1690,13 @@ export class HarnessHost {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    await this.delegations
+      ?.shutdown()
+      .catch((error) =>
+        logger.warn('external delegation shutdown requires recovery', {
+          error: String(error),
+        }),
+      )
     await this.computerUse?.dispose().catch(() => {})
     for (const agent of this.agents.values()) agent.dispose()
     for (const unsubscribe of this.unsubscribes.values()) unsubscribe()

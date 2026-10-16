@@ -44,6 +44,7 @@ export type DelegationEvent =
           | 'acceptance'
           | 'receiptId'
           | 'usage'
+          | 'structured'
         >
       >
     }

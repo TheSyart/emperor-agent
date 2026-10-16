@@ -78,6 +78,76 @@ describe('managed streaming agent process', () => {
       expect(String(error)).toContain('PROTOCOL_INVALID')
     }
   })
+  it.skipIf(process.platform === 'win32')(
+    'refreshes an in-flight observation after process exit before proving quiescence',
+    async () => {
+      const f = fixture()
+      let resolveScan!: (
+        rows: Map<
+          number,
+          {
+            pid: number
+            parent: number
+            group: number
+            state: string
+            birth: string
+          }
+        >,
+      ) => void
+      let scans = 0
+      const pending = new Promise<
+        Map<
+          number,
+          {
+            pid: number
+            parent: number
+            group: number
+            state: string
+            birth: string
+          }
+        >
+      >((resolve) => {
+        resolveScan = resolve
+      })
+      const manager = new ManagedAgentProcess({
+        observeProcesses: async () => (++scans === 1 ? pending : new Map()),
+      })
+      const h = await manager.open({
+        executable: process.execPath,
+        args: [
+          '-e',
+          'process.stdin.resume();process.stdin.on("end",()=>process.exit(0))',
+        ],
+        cwd: f.workspace,
+        env: process.env,
+        policy: { ...f.policy, mode: 'danger-full-access' },
+      })
+      const capture = h.captureDescendants()
+      h.stdin.end()
+      await new Promise<void>((resolve) =>
+        h.child.once('exit', () => resolve()),
+      )
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      const pid = h.identity.pid!
+      resolveScan(
+        new Map([
+          [
+            pid,
+            {
+              pid,
+              parent: process.pid,
+              group: pid,
+              state: 'S',
+              birth: h.identity.fingerprint,
+            },
+          ],
+        ]),
+      )
+      await capture
+      expect(await h.closed).toMatchObject({ exitCode: 0, quiescent: true })
+      expect(scans).toBeGreaterThanOrEqual(2)
+    },
+  )
   it('streams stdin and stdout through a real child without collecting all output', async () => {
     const f = fixture(),
       manager = new ManagedAgentProcess()

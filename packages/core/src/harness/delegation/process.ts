@@ -196,6 +196,7 @@ export class ManagedAgentProcess {
     private readonly options: {
       sandbox?: SandboxBackend
       identityMatches?: (handle: ManagedProcessHandle) => boolean
+      observeProcesses?: () => Promise<Map<number, ProcessRow> | null>
     } = {},
   ) {
     this.sandbox = options.sandbox ?? new LocalSandbox()
@@ -286,7 +287,7 @@ export class ManagedAgentProcess {
     const scanTree = (): Promise<Map<number, ProcessRow> | null> => {
       if (scan) return scan
       const operation = (async () => {
-        const rows = await processTable()
+        const rows = await (this.options.observeProcesses ?? processTable)()
         if (!rows) {
           proofFailed = true
           return null
@@ -432,6 +433,9 @@ export class ManagedAgentProcess {
       if (done) return
       let quiescent = !proofFailed && process.platform !== 'win32'
       if (child.pid && process.platform !== 'win32') {
+        // A scan already in flight can describe the group before the exit.
+        // Drain it before starting the bounded final observation window.
+        if (scan) await scan
         const until = Math.max(
           shutdownDeadline,
           Date.now() + (confirmedGroup ? 2500 : 100),

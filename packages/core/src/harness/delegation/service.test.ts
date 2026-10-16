@@ -105,6 +105,7 @@ function fixture(
     adapter,
     service,
     config,
+    registry,
     prepare,
     mutations,
     setParent: (mode: DelegationParentContext['policy']['mode']) => {
@@ -112,6 +113,87 @@ function fixture(
     },
   }
 }
+it('root stop fences an in-flight start before any provider work is dispatched', async () => {
+  const f = fixture()
+  let ready!: () => void
+  const gate = new Promise<void>((resolve) => {
+    ready = resolve
+  })
+  vi.spyOn(f.registry, 'requireAvailable').mockImplementation(
+    async (profile) => {
+      await gate
+      return {
+        status: 'available',
+        checkedAt: Date.now(),
+        authVerified: false,
+        capabilities: f.registry.capabilities(profile.backend),
+      }
+    },
+  )
+  const starting = f.service.start(f.owner, spec).catch((error) => error)
+  await f.service.stopRoot('root')
+  ready()
+  expect(String(await starting)).toContain('ABORTED')
+  expect(f.service.list()).toEqual([])
+  expect(f.adapter.opened.length).toBe(0)
+  f.cleanup()
+})
+it('root stop cancels active and queued descendant work without closing an idle conversation', async () => {
+  let prepared!: () => void
+  const gate = new Promise<void>((resolve) => {
+    prepared = resolve
+  })
+  const f = fixture(undefined, gate),
+    record = await f.service.start(f.owner, spec)
+  await vi.waitFor(() => expect(f.prepare).toHaveBeenCalled())
+  await f.service.send(record.id, {
+    messageId: 'dgm-after',
+    text: 'after',
+    delivery: 'queue',
+  })
+  const stopping = f.service.stopRoot('root')
+  prepared()
+  await stopping
+  expect((await f.service.wait(record.id, record.currentRunId!)).phase).toBe(
+    'cancelled',
+  )
+  expect(f.adapter.submitted.length).toBe(0)
+  expect(
+    Object.values(f.service.inspect(record.id).messages).every(
+      (m) => m.status === 'cancelled',
+    ),
+  ).toBe(true)
+  f.cleanup()
+})
+it('a queued send cannot reopen a conversation while its current run is cancelling', async () => {
+  let prepared!: () => void
+  const gate = new Promise<void>((resolve) => {
+    prepared = resolve
+  })
+  const f = fixture(undefined, gate),
+    record = await f.service.start(f.owner, spec)
+  await vi.waitFor(() => expect(f.prepare).toHaveBeenCalled())
+  const stopping = f.service.interrupt(record.id, record.currentRunId!)
+  await vi.waitFor(() =>
+    expect(f.service.inspect(record.id).runs[record.currentRunId!]!.phase).toBe(
+      'cancelling',
+    ),
+  )
+  await expect(
+    f.service.send(record.id, {
+      messageId: 'dgm-race',
+      text: 'do more',
+      delivery: 'queue',
+    }),
+  ).rejects.toThrow('STOPPING')
+  prepared()
+  await stopping
+  expect((await f.service.wait(record.id, record.currentRunId!)).phase).toBe(
+    'cancelled',
+  )
+  expect(f.adapter.submitted.length).toBe(0)
+  f.cleanup()
+})
 it('background start returns a durable queued identity before the provider finishes', async () => {
   let finish!: () => void
   const gate = new Promise<void>((r) => {

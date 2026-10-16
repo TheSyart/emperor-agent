@@ -846,6 +846,22 @@ describe('CoreApi mutation guard', () => {
 })
 
 describe('CoreApi tasks and tools', () => {
+  it('composes external tools with the shared Core workspace coordinator and stops them with the root', async () => {
+    const { api } = await setup()
+    const id = session(api)
+    api.host.agentFor(id)
+    expect(api.host.delegations).toBe(api.delegations)
+    expect(
+      api.executorConfig.read().profiles.every((profile) => !profile.enabled),
+    ).toBe(true)
+    const schema = api.host.tools
+      .schemas()
+      .find((tool) => tool.name === 'subagent')!
+    expect(JSON.stringify(schema.parameters)).toContain('claude-code')
+    const stop = vi.spyOn(api.delegations, 'stopRoot').mockResolvedValue()
+    api.host.stop(id)
+    expect(stop).toHaveBeenCalledWith(id)
+  })
   it('holds real internal tool dispatch behind an external workspace lease', async () => {
     const { api } = await setup()
     const id = session(api)

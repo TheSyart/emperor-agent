@@ -116,6 +116,20 @@ import {
 } from '../workspace/mutation-coordinator'
 import { HardenedGitRunner } from '../workspace/git-runner'
 import { TurnSnapshots } from '../workspace/turn-snapshots'
+import { DelegationWorkspaceService } from '../workspace/delegation-workspaces'
+import { SnapshotService } from '../workspace/delegation-snapshot'
+import { ExecutorConfigStore } from '../harness/delegation/config'
+import { ExecutorRegistry } from '../harness/delegation/registry'
+import { DelegationService } from '../harness/delegation/service'
+import { ExecutorRuntimeService } from '../harness/delegation/runtime'
+import { ClaudeExecutorAdapter } from '../harness/delegation/adapters/claude'
+import { CodexExecutorAdapter } from '../harness/delegation/adapters/codex'
+import {
+  DelegationError,
+  type ExecutorAdapter,
+} from '../harness/delegation/types'
+import { ManagedAgentProcess } from '../harness/delegation/process'
+import { loadModelConfig } from '../config/model-config'
 import {
   TurnFileRecorder,
   mayWriteFiles,
@@ -235,6 +249,9 @@ export class CoreApi {
   readonly workspaceReferenceService: WorkspaceReferenceService
   readonly workspaceBindings: WorkspaceBindingStore
   readonly workspaceMutations = new WorkspaceMutationCoordinator()
+  readonly executorConfig: ExecutorConfigStore
+  readonly executorRegistry = new ExecutorRegistry()
+  readonly delegations: DelegationService
   /** Per-turn file records of Build projects (E-track contract §5). */
   readonly turnFiles: TurnFileRecorder
   readonly gitReceipts: GitOperationReceiptStore
@@ -512,6 +529,67 @@ export class CoreApi {
       run: runGit,
       privateHome: resolve(this.paths.stateRoot, 'git', 'runtime-home'),
     })
+    this.executorConfig = new ExecutorConfigStore(this.paths.delegationsRoot)
+    const executorRuntime = new ExecutorRuntimeService({
+      root: this.paths.delegationsRoot,
+      resolveRoute: async (id, backend) => {
+        const config = await loadModelConfig(this.root)
+        const entry = config.raw.models.find((entry) => entry.entryId === id)
+        if (!entry?.apiKey)
+          throw new DelegationError(
+            'AUTH_REQUIRED',
+            'selected model credential route is missing',
+          )
+        if (
+          entry.protocol !==
+          (backend === 'claude-code' ? 'anthropic' : 'openai')
+        )
+          throw new DelegationError(
+            'AUTH_ROUTE_INVALID',
+            'credential route protocol does not match the external executor',
+          )
+        if (
+          (entry.legacy?.extraBody &&
+            Object.keys(entry.legacy.extraBody).length) ||
+          (entry.legacy?.extraHeaders &&
+            Object.keys(entry.legacy.extraHeaders).length)
+        )
+          throw new DelegationError(
+            'AUTH_ROUTE_UNSUPPORTED',
+            'external executors require a credential route without custom legacy headers/body',
+          )
+        return { apiKey: entry.apiKey, baseUrl: entry.apiBase }
+      },
+    })
+    const executorProcesses = new ManagedAgentProcess({
+      sandbox: host.sandboxBackend,
+    })
+    this.delegations = new DelegationService({
+      root: this.paths.delegationsRoot,
+      config: () => this.executorConfig.read(),
+      registry: this.executorRegistry,
+      adapters: new Map<string, ExecutorAdapter>([
+        [
+          'claude-code',
+          new ClaudeExecutorAdapter({ processes: executorProcesses }),
+        ],
+        ['codex', new CodexExecutorAdapter({ processes: executorProcesses })],
+      ]),
+      parent: (owner) => host.delegationParent(owner),
+      workspaces: new DelegationWorkspaceService({
+        root: this.paths.delegationsRoot,
+        runner: turnGit,
+        mutations: this.workspaceMutations,
+        snapshots: new SnapshotService({
+          runner: turnGit,
+          tempRoot: join(this.paths.delegationsRoot, 'indexes'),
+          resources: this.workspaceMutations.resources,
+        }),
+      }),
+      mutations: this.workspaceMutations,
+      runtime: (profile, id) => executorRuntime.prepare(profile, id),
+    })
+    host.delegations = this.delegations
     const projectRootOf = (sessionId: string): string | null => {
       try {
         return resolveWorkspaceProject(sessionId).projectRoot
@@ -827,6 +905,7 @@ export class CoreApi {
     try {
       api = new CoreApi(root, host, opts)
       await api.environmentService.initialize()
+      await api.delegations.probeProfiles()
       await api.sessionTransitionService.recover()
       await api.syncPlugins()
       return api

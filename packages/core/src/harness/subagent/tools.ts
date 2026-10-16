@@ -322,9 +322,10 @@ export function installSubagents(
   manager: SubagentManager,
   tools: ToolRegistry,
   prompt: SystemPromptAssembler,
+  delegationTools?: ToolDefinition[],
 ): () => void {
   const disposers: Array<() => void> = []
-  for (const tool of createSubagentTools(manager))
+  for (const tool of delegationTools ?? createSubagentTools(manager))
     disposers.push(tools.register(tool))
   disposers.push(
     tools.register(createReportTool(manager), {

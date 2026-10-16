@@ -113,6 +113,7 @@ export interface DelegationRecord {
   createdAt: number
 }
 export interface DelegationRunRecord {
+  structured?: unknown
   id: string
   delegationId: string
   revision: number

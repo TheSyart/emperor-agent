@@ -13,6 +13,7 @@ import {
   type ExecutorAdapter,
   type ExecutorSession,
   type NormalizedExecutorEvent,
+  type ExecutorProbe,
 } from './types'
 import { DelegationPolicy, type DelegationParentContext } from './policy'
 import { DelegationBudget, type BudgetLease } from './budget'
@@ -23,6 +24,7 @@ import {
   type DelegationEvent,
 } from './fold'
 import { redactExecutorText } from './redaction'
+import { buildDelegationBrief } from './context'
 import type { ExecutorRegistry } from './registry'
 import type { DelegationWorkspaceService } from '../../workspace/delegation-workspaces'
 import {
@@ -71,6 +73,12 @@ export class DelegationService {
     string,
     { digest: string; promise: Promise<DelegationRecord> }
   >()
+  private readonly rootEpochs = new Map<string, number>()
+  private readonly probes = new Map<
+    string,
+    { key: string; probe: ExecutorProbe }
+  >()
+  private disposed = false
   constructor(private readonly options: DelegationServiceOptions) {
     this.budget = new DelegationBudget(options.config())
   }
@@ -85,6 +93,95 @@ export class DelegationService {
   }
   inspect(id: string): DelegationState {
     return this.entry(id).journal.load()
+  }
+  list(): DelegationState[] {
+    return [...this.entries.values()].map((e) => e.journal.load())
+  }
+  async probeProfiles(): Promise<void> {
+    await Promise.all(
+      this.options
+        .config()
+        .profiles.filter((p) => p.enabled)
+        .map(async (profile) => {
+          let probe: ExecutorProbe
+          try {
+            probe = await this.options.registry.requireAvailable(profile)
+          } catch (error) {
+            probe = {
+              status:
+                error instanceof DelegationError &&
+                error.code === 'EXECUTOR_MISSING'
+                  ? 'missing'
+                  : 'incompatible',
+              capabilities: this.options.registry.capabilities(profile.backend),
+              checkedAt: Date.now(),
+              authVerified: false,
+              diagnostic: 'executor preflight failed',
+            }
+          }
+          this.probes.set(profile.id, { key: JSON.stringify(profile), probe })
+        }),
+    )
+  }
+  executorContext(): string {
+    return [
+      'External executor profiles (internal remains the default):',
+      ...this.options.config().profiles.map((profile) => {
+        const cached = this.probes.get(profile.id),
+          probe =
+            cached?.key === JSON.stringify(profile) ? cached.probe : undefined
+        return (
+          profile.id +
+          ' backend=' +
+          profile.backend +
+          ' status=' +
+          (!profile.enabled ? 'disabled' : (probe?.status ?? 'unchecked')) +
+          ' persistentSession=true queuedFollowup=true steer=' +
+          (profile.backend === 'codex') +
+          ' authVerified=' +
+          (probe?.authVerified ?? false)
+        )
+      }),
+    ].join('\n')
+  }
+  async stopRoot(rootSessionId: string): Promise<void> {
+    this.rootEpochs.set(
+      rootSessionId,
+      (this.rootEpochs.get(rootSessionId) ?? 0) + 1,
+    )
+    const entries = [...this.entries.values()].filter(
+      (e) => e.journal.load().record?.owner.rootSessionId === rootSessionId,
+    )
+    for (const e of entries) e.stop = true
+    await Promise.all(
+      entries.map(async (e) => {
+        const state = e.journal.load(),
+          id = state.record!.id,
+          run = state.record!.currentRunId
+            ? state.runs[state.record!.currentRunId]
+            : undefined
+        if (run && !TERMINAL_RUN_PHASES.has(run.phase))
+          await this.interrupt(id, run.id)
+        else
+          await this.serial(e, async () => {
+            for (const message of Object.values(e.journal.load().messages))
+              if (message.status === 'queued')
+                await this.append(e, {
+                  type: 'message-delivery',
+                  messageId: message.id,
+                  status: 'cancelled',
+                })
+          })
+      }),
+    )
+  }
+  async shutdown(): Promise<void> {
+    this.disposed = true
+    const roots = new Set([
+      ...this.rootEpochs.keys(),
+      ...this.list().map((s) => s.record!.owner.rootSessionId),
+    ])
+    await Promise.all([...roots].map((id) => this.stopRoot(id)))
   }
   private serial<T>(e: Entry, action: () => Promise<T>): Promise<T> {
     const next = e.tail.catch(() => undefined).then(action)
@@ -114,6 +211,10 @@ export class DelegationService {
     owner: DelegationOwner,
     spec: DelegationStart,
   ): Promise<DelegationRecord> {
+    if (this.disposed)
+      return Promise.reject(
+        new DelegationError('EXECUTOR_CLOSED', 'delegation service is closing'),
+      )
     const key = JSON.stringify([
       owner.rootSessionId,
       owner.parentAgentId,
@@ -148,6 +249,8 @@ export class DelegationService {
     spec: DelegationStart,
     digest: string,
   ): Promise<DelegationRecord> {
+    const epoch = this.rootEpochs.get(owner.rootSessionId) ?? 0
+    this.rootEpochs.set(owner.rootSessionId, epoch)
     if (!spec.clientRequestId || !spec.prompt.trim())
       throw new DelegationError(
         'INVALID_REQUEST',
@@ -168,6 +271,15 @@ export class DelegationService {
     )
     const profile = this.profile(spec)
     const probe = await this.options.registry.requireAvailable(profile)
+    if (
+      this.disposed ||
+      (this.rootEpochs.get(owner.rootSessionId) ?? 0) !== epoch
+    )
+      throw new DelegationError(
+        'ABORTED',
+        'root session stopped before delegation was accepted',
+      )
+    this.probes.set(profile.id, { key: JSON.stringify(profile), probe })
     if (!this.options.adapters.has(spec.backend))
       throw new DelegationError(
         'EXECUTOR_UNAVAILABLE',
@@ -227,6 +339,7 @@ export class DelegationService {
       text: string
       delivery: 'queue' | 'steer'
       expectedRunId?: string
+      signal?: AbortSignal
     },
   ): Promise<{
     messageId: string
@@ -235,6 +348,8 @@ export class DelegationService {
   }> {
     const e = this.entry(id)
     const result = await this.serial(e, async () => {
+      if (input.signal?.aborted)
+        throw new DelegationError('ABORTED', 'parent tool call was cancelled')
       safeDelegationKey(input.messageId)
       if (!input.text.trim() || Buffer.byteLength(input.text) > 32 * 1024)
         throw new DelegationError(
@@ -264,6 +379,11 @@ export class DelegationService {
             'DELIVERY_UNKNOWN',
             'message acceptance is unknown',
           )
+        if (previous.status === 'cancelled')
+          throw new DelegationError(
+            'MESSAGE_CANCELLED',
+            'this message was cancelled; use a new explicit send',
+          )
         return {
           messageId: input.messageId,
           state:
@@ -272,6 +392,11 @@ export class DelegationService {
               : ('queued' as const),
         }
       }
+      if (e.stop && run && !TERMINAL_RUN_PHASES.has(run.phase))
+        throw new DelegationError(
+          'STOPPING',
+          'wait for current cancellation proof before sending another message',
+        )
       const spec = record.startSpec!
       const effective = this.policy.resolve(
         this.options.parent(record.owner),
@@ -313,6 +438,17 @@ export class DelegationService {
           runId: run.id,
           messageId: input.messageId,
         })
+        if (e.stop || input.signal?.aborted) {
+          await this.append(e, {
+            type: 'message-delivery',
+            messageId: input.messageId,
+            status: 'cancelled',
+          })
+          throw new DelegationError(
+            'ABORTED',
+            'parent stopped before steer was sent',
+          )
+        }
         try {
           await e.session.steer({
             providerTurnId: run.providerTurnId,
@@ -344,11 +480,11 @@ export class DelegationService {
       ).length
       if (count >= this.options.config().limits.maxQueuedMessages)
         throw new DelegationError('QUEUE_LIMIT', 'queued message limit reached')
+      e.stop = false
       await this.append(e, {
         type: 'message-enqueued',
         message: { id: input.messageId, text: input.text, status: 'queued' },
       })
-      e.stop = false
       return { messageId: input.messageId, state: 'queued' as const }
     })
     this.pump(id)
@@ -446,6 +582,7 @@ export class DelegationService {
       summary = '',
       failureCode: string | undefined,
       usage: DelegationRunRecord['usage']
+    let structured: unknown
     try {
       if (e.stop) controller.abort()
       const config = this.options.config()
@@ -529,6 +666,22 @@ export class DelegationService {
             estimatedUsd: prior.reduce((n, r) => n + r.usage!.estimatedUsd!, 0),
           }
         : undefined
+      const dispatchText = buildDelegationBrief({
+        prompt: state.messages[messageId]!.text,
+        description: spec.description,
+        context: spec.context,
+        ...(lease?.snapshot
+          ? {
+              workspace: {
+                cwd: record.cwd,
+                base: spec.base,
+                commit: lease.snapshot.commit,
+                manifestDigest: lease.snapshot.manifestDigest,
+                excluded: lease.snapshot.excluded,
+              },
+            }
+          : {}),
+      })
       session = await this.options.adapters.get(record.backend)!.open({
         delegationId: id,
         profile: {
@@ -565,7 +718,7 @@ export class DelegationService {
       const provider = await session.submit({
         runId: activeRunId,
         messageId,
-        text: state.messages[messageId]!.text,
+        text: dispatchText,
         outputSchema: spec.outputSchema,
       })
       accepted = true
@@ -679,6 +832,7 @@ export class DelegationService {
         }
         if (event.type === 'turn_finished') {
           status = event.status
+          structured = event.structured
           summary = boundText(event.text ?? summary, 8192)
           break
         }
@@ -774,6 +928,7 @@ export class DelegationService {
         finishedAt: Date.now(),
         summary,
         usage,
+        ...(structured === undefined ? {} : { structured }),
         ...(failureCode ? { failureCode } : {}),
       })
       e.controller = undefined
