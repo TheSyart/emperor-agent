@@ -51,6 +51,7 @@ export class FakeExecutorAdapter implements ExecutorAdapter {
       },
       close: async () => {
         release()
+        return { quiescent: true }
       },
     }
     this.sessions.push(session)

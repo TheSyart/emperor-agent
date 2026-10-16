@@ -21,6 +21,7 @@ export interface DelegationNotice {
   delivered: boolean
 }
 export type DelegationEvent =
+  | { type: 'workspace-bound'; leaseId: string; cwd: string }
   | { type: 'created'; record: DelegationRecord }
   | { type: 'message-enqueued'; message: DelegationMessage }
   | {
@@ -149,6 +150,20 @@ export class DelegationFold {
       return r
     }
     switch (e.type) {
+      case 'workspace-bound':
+        if (!next.record)
+          throw new DelegationError('JOURNAL_CORRUPT', 'descriptor missing')
+        if (
+          next.record.workspaceLeaseId &&
+          next.record.workspaceLeaseId !== e.leaseId
+        )
+          throw new DelegationError(
+            'WORKSPACE_CHANGED',
+            'conversation workspace cannot change',
+          )
+        next.record.cwd = e.cwd
+        next.record.workspaceLeaseId = e.leaseId
+        break
       case 'created':
         if (next.record)
           throw new DelegationError(

@@ -1,4 +1,4 @@
-import type { SandboxMode } from '../sandbox/policy'
+import type { SandboxMode, SandboxExecutionPolicy } from '../sandbox/policy'
 import type { ObjectJsonSchema } from '../tools/json-schema'
 export type ExecutorBackend = 'internal' | 'claude-code' | 'codex'
 export type ExternalBackend = Exclude<ExecutorBackend, 'internal'>
@@ -95,6 +95,9 @@ export interface DelegationStart {
   clientRequestId: string
 }
 export interface DelegationRecord {
+  clientRequestId?: string
+  requestDigest?: string
+  startSpec?: DelegationStart
   schemaVersion: 1
   id: string
   owner: DelegationOwner
@@ -126,6 +129,9 @@ export interface DelegationRunRecord {
   usage?: { inputTokens?: number; outputTokens?: number; estimatedUsd?: number }
 }
 export interface ExecutorOpenInput {
+  policy: SandboxExecutionPolicy
+  runtimeRoot: string
+  secretValues?: readonly string[]
   delegationId: string
   profile: ExecutorProfile
   cwd: string
@@ -194,7 +200,7 @@ export interface ExecutorSession {
   steer(input: ExecutorSteerInput): Promise<void>
   answer(input: ExecutorInteractionAnswer): Promise<void>
   interrupt(providerTurnId: string): Promise<void>
-  close(): Promise<void>
+  close(): Promise<{ quiescent: boolean }>
 }
 export interface ExecutorAdapter {
   readonly backend: ExternalBackend
