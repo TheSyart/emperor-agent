@@ -786,7 +786,7 @@ export function workflowScenario(now = Date.now()): Scenario {
   )
   return {
     id: 'workflow',
-    label: '工作流 / 子代理',
+    label: '工作流 / 子智能体',
     sessions: [{ id: 'workflow', events }],
   }
 }

@@ -87,7 +87,7 @@ const stateLabel = computed(() => {
             (backend === 'codex' || backend === 'claude-code')
           "
           :icon-id="backend"
-          :label="backend"
+          :label="backend === 'codex' ? 'Codex' : 'Claude Code'"
           size="xs"
           :data-agent-logo="backend"
         />

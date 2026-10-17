@@ -220,4 +220,10 @@ Payload 应有界，不包含密钥、任意绝对路径或未经筛选的工具
 
 ## 外部执行器操作与投影
 
-严格受控操作为 executors.list/probe/configure 和 delegations.get/send/interrupt/recover/collect/receipt/validate/integrate/close。归档根可读不可写，跨根拒绝。external-agent task 每轮一行；created/run_changed/output/interaction/receipt 五种 delegation 投影由 owning session 的日志重放，输出合并不改变原始分页偏移。[状态约定](external-agent-delegation.md)。
+严格受控操作为 executors.list/probe/configure 和 delegations.get/history/send/interrupt/recover/collect/receipt/validate/integrate/close。归档根可读不可写，跨根拒绝。external-agent task 每轮一行；created/run_changed/output/interaction/receipt 五种 delegation 投影由 owning session 的日志重放，输出合并不改变原始分页偏移。[状态约定](external-agent-delegation.md)。
+
+`agents.list({ rootSessionIds })` 提供统一子智能体树的浏览安全 DTO；`AgentView` 和 `agentTitle` / `agentSourceLabel` / `agentPhaseLabel` 从 `@emperor/core/api` 与 `@emperor/core/runtime-contract` 导出。`agent_tree_changed { rootSessionId, revision }` 仅通知树拓扑或状态变化，renderer 的共享缓存按根失效；聊天文字输出不使树全量重读。原有 `sessions.children` 保持兼容。
+
+`delegations.history` 是公开对话的有界游标分页接口，默认 tail 200、最多 500 项，保留稳定条目及 run/tool 身份；before 和 after 互斥，跨委派游标被拒绝。私有 native transcript 不经此接口返回。`references.resolve` 的可选 delegationId 把相对引用限定到该根拥有的委派 cwd，既有路径与图片 capability 检查继续生效。
+
+外部路由 `/chat/:sessionId/agents/:delegationId` 的 sessionId 为根；`dlg-*` 和 `dgr-*` 均不是可激活 Emperor session。内部 `sub-*` 路由经 lineage 解析 owning root，保持 Core 控制上下文和主聊天草稿。独立页及详情中的继续/回答只导航到根，不自动发送，也不直接调用 send/steer。

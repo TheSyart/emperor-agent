@@ -65,7 +65,7 @@ watch(
     >
       <ProviderLogo
         :icon-id="run.backend"
-        :label="run.backend"
+        :label="agentSourceLabel(run.backend)"
         size="xs"
         :data-agent-logo="run.backend"
       />
@@ -79,7 +79,7 @@ watch(
     </button>
     <div v-if="open" ref="content" class="stream-content">
       <p v-if="run.truncated" class="stream-note">
-        显示最近的输出，更多过程可在任务详情查看。
+        显示最近的输出，更多过程可打开子智能体查看。
       </p>
       <ConversationMarkdown
         v-if="run.text"

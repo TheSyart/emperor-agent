@@ -266,6 +266,32 @@ describe('tool registry titles and summaries', () => {
     ).toBe('Ship it · 继续规划')
   })
 
+  it('keeps continuation cards named after the creation task, with the source separate', () => {
+    expect(
+      row(
+        tool(
+          'send_message',
+          { agent_id: 'dlg-one', message: 'a different followup task' },
+          undefined,
+          {
+            externalAgent: {
+              title: 'creation task',
+              delegationId: 'dlg-one',
+              runId: 'dgr-next',
+              backend: 'claude-code',
+              phase: 'outcome_unknown',
+              text: '',
+              activity: [],
+            },
+          },
+        ),
+      ),
+    ).toMatchObject({
+      title: 'creation task',
+      summary: 'Claude Code · 结果待确认',
+    })
+  })
+
   it('subagent, jobs, workflow, ralph', () => {
     const running = tool(
       'subagent',
@@ -282,14 +308,33 @@ describe('tool registry titles and summaries', () => {
       },
     )
     expect(row(running)).toMatchObject({
-      title: '子代理',
-      summary: 'research · 后台运行中',
+      title: 'research',
+      summary: 'Emperor · 后台运行中',
       body: 'subagent',
     })
+    expect(row(tool('subagent', {})).title).toBe('Emperor 子智能体')
+    expect(
+      row(
+        tool(
+          'subagent',
+          { backend: 'codex', description: 'changed followup' },
+          undefined,
+          {
+            externalAgent: {
+              title: 'creation task',
+              delegationId: 'dlg-one',
+              runId: 'dgr-next',
+              backend: 'codex',
+              phase: 'waiting_input',
+              text: '',
+              activity: [],
+            },
+          },
+        ),
+      ),
+    ).toMatchObject({ title: 'creation task', summary: 'Codex · 等待回答' })
     expect(subagentStatusLabel(running)).toBe('后台运行中')
-    expect(row(tool('subagent_fork', { description: 'x' })).title).toBe(
-      '分叉子代理',
-    )
+    expect(row(tool('subagent_fork', { description: 'x' })).title).toBe('x')
     expect(
       row(
         tool(

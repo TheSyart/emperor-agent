@@ -130,3 +130,5 @@ ACP 的 `session/prompt` 也进入同一个 `chat.submit`。`session/new` 只能
 ## 外部 Agent 执行
 
 HarnessHost 还组合 DelegationService，通过受管 Claude SDK CLI 与独占 Codex stdio app-server 执行原生子会话。两个执行器默认启用并复用本机 CLI 登录；普通文字结果直接回收，文件成果在交付与整合前检查。执行、成果检查与整合是独立状态；[调度架构](external-agent-delegation.md)说明权限、持久工作区、终态通知与恢复边界。
+
+桌面端统一以「子智能体」展示内部 Emperor、Claude Code 与 Codex。`agents.list` 和 `agent_tree_changed` 提供按实际父级组织的共享树；父卡片、侧栏和环境信息使用创建描述及独立来源标记。外部独立只读对话通过根会话加稳定 `dlg-*` 路由、`delegations.history` 公开游标分页读取，主 Core 上下文保留 owning root。文件交付、验收与整合仍在「任务详情」。详见[统一入口](external-agent-delegation.md#统一子智能体入口与公开对话)。

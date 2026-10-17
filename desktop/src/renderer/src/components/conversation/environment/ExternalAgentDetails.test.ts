@@ -169,6 +169,19 @@ it('keeps continuation and steer inputs out of task details and routes followup 
   expect(dom.textContent).toContain('主会话')
   expect(api.sendDelegationMessage).not.toHaveBeenCalled()
 })
+it('keeps paused execution inspectable without a direct scheduling recovery action', async () => {
+  const paused = state('codex', 'outcome_unknown')
+  Object.assign(paused.record, {
+    availability: 'needs_recovery',
+    dispatchPaused: true,
+  })
+  api.getDelegation.mockResolvedValue(paused)
+  const dom = await mount()
+  expect(dom.textContent).toContain('结果待确认')
+  expect(dom.textContent).not.toContain('恢复调度')
+  expect(dom.textContent).toContain('返回主会话')
+  expect(api.recoverDelegation).not.toHaveBeenCalled()
+})
 it('shows passed host evidence and preserves a conflicting integration preview without an apply action', async () => {
   api.getDelegationReceipt.mockResolvedValue({
     receipt: {

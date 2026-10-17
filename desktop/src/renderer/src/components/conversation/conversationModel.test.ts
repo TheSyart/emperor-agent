@@ -79,6 +79,7 @@ describe('conversation shell model', () => {
     expect(crumbs[0]!.sessionId).toBe('root')
     expect(crumbs[1]!.subagent).toBe(true)
     expect(crumbs[2]!.current).toBe(true)
+    expect(crumbs[2]!.source).toBe('Emperor')
   })
 })
 it('keeps retained external task controls reachable even when the visible chat transcript is empty', () => {
@@ -90,4 +91,15 @@ it('keeps retained external task controls reachable even when the visible chat t
       externalActivity: true,
     }),
   ).toBe('active')
+})
+
+it('uses the canonical Emperor fallback when a child creation description is absent', () => {
+  expect(
+    conversationCrumbs({
+      sessionId: 'sub-child',
+      session: undefined,
+      lineage: { chain: [{ sessionId: 'root' }, { sessionId: 'sub-child' }] },
+      titleOf: () => 'generated title',
+    }).at(-1)?.label,
+  ).toBe('Emperor 子智能体')
 })

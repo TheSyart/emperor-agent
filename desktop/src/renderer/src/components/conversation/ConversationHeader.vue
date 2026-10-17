@@ -65,6 +65,9 @@ const tabs = [
             :aria-current="crumb.current ? 'page' : undefined"
             >{{ crumb.label }}</span
           >
+          <span v-if="crumb.source" class="source-badge">{{
+            crumb.source
+          }}</span>
         </template>
       </nav>
       <div class="actions">
@@ -106,6 +109,11 @@ const tabs = [
 </template>
 
 <style scoped>
+.source-badge {
+  color: rgb(var(--label-tertiary));
+  font-size: var(--fs-xxs);
+}
+
 .conversation-header {
   position: relative;
   flex: none;

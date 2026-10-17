@@ -66,4 +66,4 @@
 
 ## 调度外部编码 Agent
 
-Claude Code/Codex 默认启用并复用本机 CLI 登录，主 Agent 使用统一子代理工具直接派工。设置「外部智能体」自动检测本机配置；普通文字结果直接返回，文件成果在交付或整合前检查。任务详情支持队列、Codex 当前轮干预、停止、原生历史和整合预览。参见[工具说明](tools-skills-mcp.md#claude-code-与-codex-子代理)及[故障排查](diagnostics-troubleshooting.md#外部执行器不可用)。
+Claude Code/Codex 默认启用并复用本机 CLI 登录，主 Agent 使用统一子智能体工具直接派工。设置「外部智能体」自动检测本机配置；普通文字结果直接返回，文件成果在交付或整合前检查。侧栏、父卡片和环境信息提供同一子智能体只读对话入口；任务详情保留文件交付、差异、验收与整合。继续派工和回答回到主会话，保留草稿且不自动发送。参见[工具说明](tools-skills-mcp.md#claude-code-与-codex-子智能体)及[故障排查](diagnostics-troubleshooting.md#外部执行器不可用)。

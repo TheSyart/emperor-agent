@@ -261,7 +261,7 @@ describe('background task lines', () => {
       backgroundTaskDetail(
         task({ ...workflow, workflow_tool: 'workflow', rounds: 4 }),
       ),
-    ).toBe('4 个代理')
+    ).toBe('4 个子智能体')
     expect(
       backgroundTaskDetail(task({ ...workflow, workflow_tool: 'workflow' })),
     ).toBe('工作流')
@@ -295,7 +295,7 @@ describe('transcriptText', () => {
         { role: 'agent', content: '#1 completed' },
         { role: 'custom', content: 'x' },
       ]),
-    ).toBe('[阶段] 实现\n[代理] #1 completed\n[custom] x')
+    ).toBe('[阶段] 实现\n[子智能体] #1 completed\n[custom] x')
     expect(transcriptText([])).toBe('')
   })
 })

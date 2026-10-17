@@ -9,6 +9,8 @@ import {
 import type { DelegationState } from '../../harness/delegation/fold'
 import type { DelegationProjection } from '../../harness/delegation/events'
 import type { CoreApi } from '../core-api'
+import { externalTask } from './delegation-service'
+import { agentTitle } from '../../runtime/agent-view'
 import { LOG_FILE } from '../../session-log/store'
 
 function publish(api: CoreApi, rootId: string, parentId: string) {
@@ -199,4 +201,28 @@ it('flushes output from cached ownership without rereading every durable delegat
     vi.spyOn(f.api.delegationRuntime, 'list').mockImplementation(original)
     await f.api.close()
   }
+})
+
+it('keeps run task labels aligned with canonical creation names, including missing-name fallback', () => {
+  const record = fixtureDelegationRecord()
+  const run = fixtureDelegationRun()
+  const state: DelegationState = {
+    record,
+    runs: { [run.id]: run },
+    messages: {},
+    interactions: {},
+    outbox: {},
+    lastSeq: 1,
+  }
+  const created = externalTask(state, run)
+  const continued = externalTask(state, {
+    ...run,
+    id: 'dgr-next',
+  })
+  expect(continued.description).toBe(created.description)
+  if (record.startSpec)
+    record.startSpec = { ...record.startSpec, description: '' }
+  expect(externalTask(state, run).description).toBe(
+    agentTitle(undefined, record.backend),
+  )
 })

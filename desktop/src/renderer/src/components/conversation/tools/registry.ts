@@ -5,6 +5,11 @@
 // `desktop_*` to the Computer Use view.
 import type { Component } from 'vue'
 import {
+  agentTitle,
+  agentSourceLabel,
+  type AgentBackend,
+} from '@emperor/core/api'
+import {
   DsAgent,
   DsApi,
   DsBrowse,
@@ -322,34 +327,41 @@ export function subagentStatusLabel(data: ToolChatData): string {
   return SUBAGENT_STOP_LABEL[sub.stopReason ?? 'completed'] ?? '已结束'
 }
 
-function subagentSpec(fork: boolean): ToolViewSpec {
+function subagentBackend(data: ToolChatData): AgentBackend {
+  const backend =
+    data.externalAgent?.backend ?? stringArg(argsOf(data), 'backend')
+  return backend === 'codex' || backend === 'claude-code' ? backend : 'internal'
+}
+function subagentSpec(): ToolViewSpec {
   return {
     icon: DsSubagent,
     body: 'subagent',
-    title: (data) => {
-      const backend =
-        data.externalAgent?.backend ?? stringArg(argsOf(data), 'backend')
-      return backend === 'codex'
-        ? 'Codex 子代理'
-        : backend === 'claude-code'
-          ? 'Claude Code 子代理'
-          : fork
-            ? '分叉子代理'
-            : '子代理'
-    },
-    summary: (data) =>
-      join(
-        data.subagent?.description ?? stringArg(argsOf(data), 'description'),
-        subagentStatusLabel(data),
+    title: (data) =>
+      agentTitle(
+        data.externalAgent?.title ??
+          data.subagent?.description ??
+          stringArg(argsOf(data), 'description'),
+        subagentBackend(data),
       ),
+    summary: (data) =>
+      join(agentSourceLabel(subagentBackend(data)), subagentStatusLabel(data)),
   }
 }
 
 const agentMessage = (title: string, key: string): ToolViewSpec => ({
   icon: DsAgent,
   body: 'generic',
-  title: () => title,
-  summary: (data) => truncate(stringArg(argsOf(data), key) ?? ''),
+  title: (data) =>
+    data.externalAgent
+      ? agentTitle(data.externalAgent.title, data.externalAgent.backend)
+      : title,
+  summary: (data) =>
+    data.externalAgent
+      ? join(
+          agentSourceLabel(data.externalAgent.backend),
+          subagentStatusLabel(data),
+        )
+      : truncate(stringArg(argsOf(data), key) ?? ''),
 })
 
 const jobSpec = (title: string): ToolViewSpec => ({
@@ -514,11 +526,11 @@ const REGISTRY: Readonly<Record<string, ToolViewSpec>> = {
   todo_write: todoWrite,
   ask_user_question: askUserQuestion,
   exit_plan_mode: exitPlanMode,
-  subagent: subagentSpec(false),
-  subagent_fork: subagentSpec(true),
+  subagent: subagentSpec(),
+  subagent_fork: subagentSpec(),
   send_message: agentMessage('发送消息', 'message'),
-  interrupt_agent: agentMessage('中断代理', 'agent_id'),
-  list_agents: agentMessage('列出代理', 'scope'),
+  interrupt_agent: agentMessage('中断子智能体', 'agent_id'),
+  list_agents: agentMessage('列出子智能体', 'scope'),
   report: agentMessage('汇报', 'output'),
   job_output: jobSpec('任务输出'),
   job_kill: jobSpec('停止任务'),

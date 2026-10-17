@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { createApp, h, nextTick, ref } from 'vue'
 import { afterEach, describe, expect, it } from 'vitest'
+import { createRouter, createMemoryHistory, type Router } from 'vue-router'
 import { loadKernelLog, LogBuilder } from '../../conversation/testing/fixtures'
 import ChatTimeline from './ChatTimeline.vue'
 import { createFixtureStore, type FixtureStore } from './gallery/fixtureStore'
@@ -24,6 +25,7 @@ globalThis.IntersectionObserver ??= class {
 let container: HTMLDivElement | null = null
 let app: ReturnType<typeof createApp> | null = null
 let fixture: FixtureStore | null = null
+let router: Router
 
 afterEach(() => {
   app?.unmount()
@@ -64,6 +66,23 @@ function mount(
         'onOpen-subagent': events.openSubagent,
       }),
   })
+  router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', component: { render: () => null } },
+      {
+        path: '/chat/:sessionId',
+        name: 'chat',
+        component: { render: () => null },
+      },
+      {
+        path: '/chat/:sessionId/agents/:delegationId',
+        name: 'external-agent',
+        component: { render: () => null },
+      },
+    ],
+  })
+  app.use(router)
   app.mount(container)
   return container
 }
@@ -109,6 +128,59 @@ describe('ChatTimeline over the recorded kernel log', () => {
     expect(live?.querySelector('[data-agent-logo="codex"]')).not.toBeNull()
     expect(live?.textContent).toContain('正在读取项目')
     expect(live?.textContent).toContain('shell')
+    const entry = root.querySelector<HTMLAnchorElement>('[data-agent-entry]')
+    expect(entry?.textContent).toContain('live work')
+    expect(entry?.getAttribute('href')).toBe(
+      '/chat/live-external/agents/dlg-one',
+    )
+    expect(
+      root.querySelector('[data-agent-details]')?.textContent?.trim(),
+    ).toBe('任务详情')
+    expect(entry?.querySelector('button')).toBeNull()
+    const toggle = live?.querySelector<HTMLButtonElement>('.stream-toggle')
+    toggle?.click()
+    await settle()
+    expect(live?.querySelector('.stream-content')).toBeNull()
+    expect(root.querySelector('[data-agent-entry]')).not.toBeNull()
+    entry?.click()
+    await settle()
+    expect(router.currentRoute.value.name).toBe('external-agent')
+    expect(router.currentRoute.value.params).toEqual({
+      sessionId: 'live-external',
+      delegationId: 'dlg-one',
+    })
+  })
+  it('keeps a continued external run on its creation name and stable dlg route', async () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.call(1, 1, 'followup-call', 'send_message', {
+      agent_id: 'dlg-one',
+      message: 'new prompt changes scope',
+    })
+    log.add('delegation/projection', {
+      event: 'delegation_run_changed',
+      delegation_id: 'dlg-one',
+      run_id: 'dgr-next',
+      current_run_id: 'dgr-next',
+      parent_call_id: 'followup-call',
+      backend: 'codex',
+      journal_seq: 2,
+      task: { description: 'original creation task', status: 'waiting_input' },
+    })
+    const root = mount('root', [{ id: 'root', events: [...log.events] }])
+    await settle()
+    const entry = root.querySelector<HTMLAnchorElement>('[data-agent-entry]')!
+    expect(entry.textContent).toContain('original creation task')
+    expect(entry.textContent).not.toContain('new prompt changes scope')
+    expect(entry.getAttribute('href')).toBe('/chat/root/agents/dlg-one')
+    expect(root.querySelector('.tool-row')?.textContent).toContain(
+      'original creation task',
+    )
+    expect(root.querySelector('.tool-row')?.textContent).toContain(
+      'Codex · 等待回答',
+    )
+    expect(root.querySelector('[data-agent-details]')?.closest('a')).toBeNull()
   })
   it('renders every chat row kind of the fixture', async () => {
     const log = loadKernelLog()
@@ -146,7 +218,8 @@ describe('ChatTimeline over the recorded kernel log', () => {
     expect(tools[0]).toContain('终端')
     expect(tools[0]).toContain('print alpha')
     expect(tools[2]).toContain('已回答 1/1 · Which color?')
-    expect(tools[3]).toContain('research · 已完成')
+    expect(tools[3]).toContain('research')
+    expect(tools[3]).toContain('Emperor · 已完成')
     expect(root.querySelector('[data-subagent-line]')?.textContent).toContain(
       'child found x',
     )
@@ -167,9 +240,7 @@ describe('ChatTimeline over the recorded kernel log', () => {
       },
     )
     await settle()
-    root
-      .querySelector<HTMLButtonElement>('[data-subagent-line] .open-link')
-      ?.click()
+    root.querySelector<HTMLButtonElement>('[data-agent-entry]')?.click()
     expect(opened).toHaveLength(1)
     expect(opened[0]).toMatch(/^sub-/)
     const bash = root.querySelector<HTMLElement>(
@@ -228,6 +299,23 @@ describe('ChatTimeline reveal', () => {
       render: () =>
         h(ChatTimeline, { sessionId: 'showcase', store, ref: timeline }),
     })
+    router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', component: { render: () => null } },
+        {
+          path: '/chat/:sessionId',
+          name: 'chat',
+          component: { render: () => null },
+        },
+        {
+          path: '/chat/:sessionId/agents/:delegationId',
+          name: 'external-agent',
+          component: { render: () => null },
+        },
+      ],
+    })
+    app.use(router)
     app.mount(container)
     await settle()
     const key = container

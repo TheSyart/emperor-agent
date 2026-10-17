@@ -60,7 +60,7 @@ const phases: Record<string, string> = {
   failed: '本轮执行失败',
   cancelled: '本轮已取消',
   interrupted: '本轮已中断',
-  outcome_unknown: '执行结果待恢复确认',
+  outcome_unknown: '结果待确认',
 }
 const acceptance = computed(
   () => delivery.value?.acceptance?.state ?? 'unverified',
@@ -185,7 +185,7 @@ function verify() {
     }
   })
 }
-function recover(verificationId?: string) {
+function recoverVerification(verificationId: string) {
   return action(async () => {
     await recoverDelegation({
       id: props.delegationId,
@@ -195,7 +195,7 @@ function recover(verificationId?: string) {
           ? view.value?.runs[record.value.currentRunId]?.revision
           : run.value?.revision) ?? 0,
       inspect: false,
-      ...(verificationId ? { verificationId } : {}),
+      verificationId,
     })
   })
 }
@@ -261,7 +261,7 @@ onBeforeUnmount(() => {
           ><ProviderLogo
             v-if="record"
             :icon-id="record.backend"
-            :label="record.backend"
+            :label="agentSourceLabel(record.backend)"
             size="xs"
             :data-agent-logo="record.backend"
           /><span v-if="record">{{ agentSourceLabel(record.backend) }}</span
@@ -310,7 +310,7 @@ onBeforeUnmount(() => {
         }}
       </p>
       <p v-if="run?.phase === 'waiting_input'" class="external-note">
-        请在当前聊天的提问卡片回答。<Button size="sm" @click="emit('close')"
+        请返回主会话的提问卡片回答。<Button size="sm" @click="returnRoot"
           >返回提问</Button
         >
       </p>
@@ -325,22 +325,22 @@ onBeforeUnmount(() => {
           @click="stop"
           >{{ stopping ? '正在停止…' : '停止本轮' }}</Button
         ><Button
-          v-if="
-            record?.availability === 'needs_recovery' || record?.dispatchPaused
-          "
-          size="sm"
-          :disabled="busy"
-          @click="recover()"
-          >恢复调度</Button
-        ><Button
           v-for="id in delivery?.verificationRecoveryIds ?? []"
           :key="id"
           size="sm"
           :disabled="busy"
-          @click="recover(id)"
+          @click="recoverVerification(id)"
           >确认验证进程已停止</Button
         >
       </div>
+      <p
+        v-if="
+          record?.availability === 'needs_recovery' || record?.dispatchPaused
+        "
+        class="external-note"
+      >
+        当前调度已暂停或结果待确认，请返回主会话处理。此页面不会恢复或重新派发执行。
+      </p>
       <p class="external-note">
         请返回主会话回答问题或继续派工。<Button size="sm" @click="returnRoot"
           >返回主会话</Button

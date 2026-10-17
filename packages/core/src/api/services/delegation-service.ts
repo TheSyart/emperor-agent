@@ -2,6 +2,7 @@ import {
   DelegationHistory,
   type DelegationHistoryOptions,
 } from './delegation-history'
+import { agentTitle } from '../../runtime/agent-view'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DelegationService } from '../../harness/delegation/service'
@@ -29,8 +30,8 @@ export function externalTask(state: DelegationState, run: DelegationRunRecord) {
   return {
     id: run.id,
     kind: 'external-agent' as const,
-    label: record.startSpec?.description ?? record.backend,
-    description: record.startSpec?.description ?? record.backend,
+    label: agentTitle(record.startSpec?.description, record.backend),
+    description: agentTitle(record.startSpec?.description, record.backend),
     status: run.phase,
     session_id: record.owner.rootSessionId,
     owner_id: record.owner.parentAgentId,

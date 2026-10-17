@@ -123,7 +123,7 @@ const title = computed(() =>
   props.kind === 'workflow'
     ? '工作流记录'
     : props.kind === 'external-agent'
-      ? '外部智能体输出'
+      ? '子智能体输出'
       : '命令输出',
 )
 const emptyText = computed(() => {

@@ -20,9 +20,8 @@
  *   merge or rebase is unfinished. Other sessions show one muted line.
  * - 计划: the latest `exit_plan_mode` call (conversation/planSummary.ts);
  *   click reveals its row.
- * - 子智能体: `tasks.list` of the session, active first; deterministic
- *   `--avatar-*` colors; three shown, 「再显示 n 个」 for the rest; click opens
- *   the child session.
+ * - 子智能体: `agents.list` shared root tree; active plus recent stable agents,
+ *   five shown initially; canonical routes preserve the root context.
  * - 后台任务: background jobs / workflow runs, only when there are any;
  *   expands to one line each (live first) with 「输出」 (TaskOutputDialog,
  *   `tasks.transcript`) and, while running, 「停止」 (`tasks.cancel`;
@@ -76,7 +75,7 @@ import {
 } from 'vue'
 import { useRouter } from 'vue-router'
 import { attachmentRawUrl } from '../../../api/attachments'
-import { openExternal, onCoreEvent } from '../../../api/backend'
+import { openExternal } from '../../../api/backend'
 import { core } from '../../../api/http'
 import { useAppContext } from '../../../composables/useAppContext'
 import {
@@ -89,20 +88,16 @@ import type { RuntimeTaskRecord } from '../../../types'
 import { DsSkill } from '../../icons/ds'
 import DocumentIcon from '../../ui/DocumentIcon.vue'
 import IconButton from '../../ui/IconButton.vue'
-import ProviderLogo from '../../ui/ProviderLogo.vue'
+import EnvironmentAgents from './EnvironmentAgents.vue'
 import Menu from '../../ui/Menu.vue'
 import MenuItem from '../../ui/MenuItem.vue'
 import { modalLayerCount } from '../../ui/modalStack'
 import {
-  avatarToken,
   backgroundTaskLines,
   backgroundTaskSummary,
   backgroundTaskTime,
   compareBranchLink,
-  environmentSubagentGroups,
   isLiveTaskStatus,
-  SUBAGENT_STATUS_LABEL,
-  subagentTaskStatus,
   type BackgroundTaskLine,
   type CompareLink,
   type RemoteInfo,
@@ -131,9 +126,6 @@ const ENV_CARD_INLINE_MIN = 1120
 /** Gap (px) kept under a card that runs down beside the padded composer. */
 const INLINE_BOTTOM_GAP = 16
 const VISIBLE_ROWS = 3
-const ExternalAgentDetails = defineAsyncComponent(
-  () => import('./ExternalAgentDetails.vue'),
-)
 const TaskOutputDialog = defineAsyncComponent(
   () => import('./TaskOutputDialog.vue'),
 )
@@ -282,7 +274,7 @@ const writesBlockedReason = computed(() => {
 const writesDisabled = computed(() => Boolean(writesBlockedReason.value))
 const unavailableLine = computed(() =>
   props.child
-    ? '子会话 · 在父会话中查看变更与分支'
+    ? '子智能体 · 在父智能体中查看变更与分支'
     : '未绑定项目 · Build 会话可查看变更与分支',
 )
 const gitLine = computed(() => {
@@ -481,56 +473,6 @@ function planValue(summary: PlanSummary): string {
 
 // ── subagents and background tasks (tasks.list) ─────────────────────────
 const tasks = shallowRef<RuntimeTaskRecord[]>([])
-const externalTask = shallowRef<RuntimeTaskRecord | null>(null)
-const externalGroups = computed(() =>
-  Object.values(
-    tasks.value
-      .filter((task) => task.kind === 'external-agent')
-      .reduce<Record<string, RuntimeTaskRecord[]>>((groups, task) => {
-        ;(groups[task.delegation_id!] ??= []).push(task)
-        return groups
-      }, {}),
-  ),
-)
-const externalPhase: Record<string, string> = {
-  queued: '排队中',
-  preparing: '准备中',
-  running: '执行中',
-  waiting_input: '等待回答',
-  cancelling: '停止中',
-  completed: '执行完成',
-  failed: '执行失败',
-  cancelled: '已取消',
-  interrupted: '已中断',
-  outcome_unknown: '结果待确认',
-}
-let unsubscribeDelegations = () => {}
-onMounted(() => {
-  unsubscribeDelegations = onCoreEvent((input) => {
-    if (!activated.value || !input || typeof input !== 'object') return
-    const event = input as Record<string, unknown>
-    if (
-      event.session_id !== props.sessionId ||
-      !String(event.event).startsWith('delegation_') ||
-      event.event === 'delegation_output'
-    )
-      return
-    clearTimeout(taskTimer)
-    taskTimer = setTimeout(() => void loadTasks(), 100)
-  })
-})
-onBeforeUnmount(() => unsubscribeDelegations())
-function closeExternal() {
-  externalTask.value = null
-  void loadTasks()
-}
-function configureExternal() {
-  externalTask.value = null
-  void router.push({
-    query: { ...router.currentRoute.value.query, settings: 'executors' },
-  })
-}
-const showAllSubagents = ref(false)
 const backgroundOpen = ref(false)
 const showAllBackground = ref(false)
 /** The background task whose 「输出」 is open. */
@@ -559,11 +501,9 @@ watch(
   () => props.sessionId,
   () => {
     tasks.value = []
-    showAllSubagents.value = false
     backgroundOpen.value = false
     showAllBackground.value = false
     outputTask.value = null
-    externalTask.value = null
     void loadTasks()
   },
   { immediate: true },
@@ -600,28 +540,6 @@ onBeforeUnmount(() => {
   clearInterval(clockTimer)
 })
 
-const subagents = computed(() =>
-  environmentSubagentGroups(
-    tasks.value
-      .filter((task) => task.kind === 'subagent')
-      .map((task) => ({
-        id: task.id,
-        name: task.description || task.label || '子智能体',
-        status: subagentTaskStatus(task),
-        started_at: task.started_at,
-        ended_at: task.finished_at ?? task.started_at,
-        avatar: avatarToken(task.id),
-      })),
-  ),
-)
-const visibleSubagents = computed(() =>
-  showAllSubagents.value
-    ? subagents.value.ordered
-    : subagents.value.ordered.slice(0, VISIBLE_ROWS),
-)
-const hiddenSubagents = computed(() =>
-  Math.max(0, subagents.value.ordered.length - VISIBLE_ROWS),
-)
 const background = computed(() => backgroundTaskSummary(tasks.value))
 const backgroundValue = computed(() =>
   background.value.running
@@ -686,7 +604,7 @@ async function stopTask(line: BackgroundTaskLine): Promise<void> {
   if (
     line.confirmStop &&
     !window.confirm(
-      `停止工作流「${line.label}」？它正在运行的子代理也会一起停止。`,
+      `停止工作流「${line.label}」？它正在运行的子智能体也会一起停止。`,
     )
   )
     return
@@ -877,86 +795,7 @@ function openLauncher(): void {
         </button>
       </section>
 
-      <section
-        v-if="subagents.ordered.length"
-        class="section"
-        data-section="subagents"
-      >
-        <h3 class="section-head">
-          子智能体
-          <span v-if="subagents.active.length" class="section-meta"
-            >{{ subagents.active.length }} 个运行中</span
-          >
-        </h3>
-        <button
-          v-for="agent in visibleSubagents"
-          :key="agent.id"
-          type="button"
-          class="row agent"
-          :title="agent.name"
-          @click="emit('open-subagent', agent.id)"
-        >
-          <span
-            class="avatar"
-            :data-status="agent.status"
-            :style="{ background: `rgb(var(${agent.avatar}))` }"
-            aria-hidden="true"
-          />
-          <span class="row-label">{{ agent.name }}</span>
-          <span class="row-value" :data-status="agent.status">{{
-            SUBAGENT_STATUS_LABEL[agent.status] ?? agent.status
-          }}</span>
-        </button>
-        <button
-          v-if="hiddenSubagents"
-          type="button"
-          class="more"
-          :aria-expanded="showAllSubagents"
-          @click="showAllSubagents = !showAllSubagents"
-        >
-          {{ showAllSubagents ? '收起' : `再显示 ${hiddenSubagents} 个` }}
-        </button>
-      </section>
-
-      <section
-        v-if="externalGroups.length"
-        class="section"
-        data-section="external-agents"
-      >
-        <h3 class="section-head">外部智能体</h3>
-        <details
-          v-for="group in externalGroups"
-          :key="group[0]!.delegation_id"
-          class="external-group"
-          open
-        >
-          <summary>
-            <ProviderLogo
-              :icon-id="group[0]!.backend"
-              :label="group[0]!.backend ?? 'Agent'"
-              size="xs"
-              :data-agent-logo="group[0]!.backend"
-            />
-            {{ group[0]!.backend === 'codex' ? 'Codex' : 'Claude Code' }} ·
-            {{ group.length }} 轮
-          </summary>
-          <button
-            v-for="task in group"
-            :key="task.id"
-            type="button"
-            class="row agent"
-            :data-external-run="task.id"
-            :title="`${task.label} · ${task.id}`"
-            @click="externalTask = task"
-          >
-            <span class="row-label">{{ task.label }}</span
-            ><span class="row-value">{{
-              externalPhase[task.status] ?? task.status
-            }}</span>
-          </button>
-          <p class="muted-line">点击查看结果、继续对话或检查文件交付</p>
-        </details>
-      </section>
+      <EnvironmentAgents :root-session-id="ctx.sessionId.value" />
 
       <section
         v-if="background.total"
@@ -1226,17 +1065,6 @@ function openLauncher(): void {
       </template>
     </Menu>
 
-    <ExternalAgentDetails
-      v-if="externalTask?.delegation_id"
-      :key="externalTask.id"
-      :run-id="externalTask.id"
-      :delegation-id="externalTask.delegation_id"
-      :session-id="sessionId"
-      @close="closeExternal"
-      @configure="configureExternal"
-      @root="router.push({ name: 'chat', params: { sessionId } })"
-    />
-
     <TaskOutputDialog
       v-if="outputTask"
       :key="outputTask.id"
@@ -1286,17 +1114,6 @@ function openLauncher(): void {
 </template>
 
 <style scoped>
-.external-group {
-  min-width: 0;
-  margin-top: var(--space-2);
-}
-.external-group summary {
-  color: rgb(var(--label-secondary));
-  font-size: var(--fs-xs);
-  cursor: pointer;
-  overflow-wrap: anywhere;
-}
-
 .environment-card {
   position: absolute;
   top: var(--space-3);

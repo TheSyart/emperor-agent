@@ -8,21 +8,56 @@
  *
  * Props: node (tool).
  */
-import { computed } from 'vue'
+import { computed, defineAsyncComponent, inject, ref } from 'vue'
+import { routerKey } from 'vue-router'
+import { agentSourceLabel } from '@emperor/core/api'
 import type { ToolChatNode, ToolGrantView } from '../../../conversation/types'
-import { DsChevronRight, DsShieldAlert } from '../../icons/ds'
+import { DsShieldAlert } from '../../icons/ds'
 import StateDot from '../../ui/StateDot.vue'
 import type { StateDotState } from '../../ui/stateDot'
 import { useChatContext } from '../chatContext'
-import { subagentStatusLabel } from '../tools/registry'
+import { subagentStatusLabel, toolView } from '../tools/registry'
 import { lastLine } from '../tools/toolModel'
 import ToolCallRow from './ToolCallRow.vue'
 import WorkflowRunPanel from './WorkflowRunPanel.vue'
 import ExternalAgentStream from '../tools/ExternalAgentStream.vue'
 
 const props = defineProps<{ node: ToolChatNode }>()
-const { actions } = useChatContext()
+const chat = useChatContext()
+const { actions } = chat
+const router = inject(routerKey, undefined)
 const data = computed(() => props.node.data)
+const owner = computed(() => chat.rootSessionId?.() ?? chat.sessionId())
+const detailsRun = ref<{ runId: string; delegationId: string } | null>(null)
+const ExternalAgentDetails = defineAsyncComponent(
+  () => import('../environment/ExternalAgentDetails.vue'),
+)
+const entryBackend = computed(
+  () => data.value.externalAgent?.backend ?? 'internal',
+)
+const entryTitle = computed(() => toolView(data.value.name).title(data.value))
+const entryHref = computed(() =>
+  data.value.externalAgent
+    ? `/chat/${encodeURIComponent(owner.value)}/agents/${encodeURIComponent(data.value.externalAgent.delegationId)}`
+    : `/chat/${encodeURIComponent(data.value.subagent?.subagentId ?? '')}`,
+)
+function openAgent(event: MouseEvent) {
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  if (data.value.externalAgent) {
+    if (!router) return
+    event.preventDefault()
+    void router.push({
+      name: 'external-agent',
+      params: {
+        sessionId: owner.value,
+        delegationId: data.value.externalAgent.delegationId,
+      },
+    })
+  } else if (data.value.subagent) {
+    event.preventDefault()
+    actions.openSubagent(data.value.subagent.subagentId)
+  }
+}
 
 const subagentDot = computed<StateDotState>(() => {
   const sub = data.value.subagent
@@ -79,6 +114,31 @@ const hasChildren = computed(
 
 <template>
   <div class="tool-call" :data-chat-call-id="data.callId">
+    <div v-if="data.externalAgent || data.subagent" class="agent-entry-row">
+      <a
+        data-agent-entry
+        class="agent-entry"
+        :href="entryHref"
+        @click="openAgent"
+      >
+        {{ entryTitle }}
+        <span>{{ agentSourceLabel(entryBackend) }} · 子智能体 ↗</span>
+      </a>
+      <button
+        v-if="data.externalAgent"
+        type="button"
+        class="open-link"
+        data-agent-details
+        @click="
+          detailsRun = {
+            runId: data.externalAgent.runId,
+            delegationId: data.externalAgent.delegationId,
+          }
+        "
+      >
+        任务详情
+      </button>
+    </div>
     <ToolCallRow :data="data" />
     <div v-if="hasChildren" class="subcalls" data-subcalls>
       <ExternalAgentStream
@@ -137,13 +197,6 @@ const hasChildren = computed(
           <span class="sep" aria-hidden="true" />
           <span class="sub-text">{{ subagentLine }}</span>
         </template>
-        <button
-          type="button"
-          class="open-link"
-          @click="actions.openSubagent(data.subagent.subagentId)"
-        >
-          打开子会话<DsChevronRight :size="12" />
-        </button>
       </div>
       <WorkflowRunPanel
         v-if="data.workflow"
@@ -151,10 +204,42 @@ const hasChildren = computed(
         :expansion-key="`workflow:${data.callId}`"
       />
     </div>
+    <ExternalAgentDetails
+      v-if="detailsRun"
+      :run-id="detailsRun.runId"
+      :delegation-id="detailsRun.delegationId"
+      :session-id="owner"
+      @close="detailsRun = null"
+      @root="router?.push({ name: 'chat', params: { sessionId: owner } })"
+      @configure="
+        router?.push({
+          query: { ...router.currentRoute.value.query, settings: 'executors' },
+        })
+      "
+    />
   </div>
 </template>
 
 <style scoped>
+.agent-entry-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.agent-entry {
+  min-width: 0;
+  color: rgb(var(--label-primary));
+  font-size: var(--fs-s);
+  text-decoration: none;
+}
+.agent-entry:hover {
+  text-decoration: underline;
+}
+.agent-entry span {
+  color: rgb(var(--label-tertiary));
+  font-size: var(--fs-xs);
+  margin-left: var(--space-2);
+}
 .tool-call {
   display: flex;
   flex-direction: column;

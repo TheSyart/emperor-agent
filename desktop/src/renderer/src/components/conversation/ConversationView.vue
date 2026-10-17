@@ -619,7 +619,7 @@ async function stopChild(): Promise<void> {
     const cancelled = await core('tasks.cancel', id)
     if (!cancelled) {
       stoppingChild.value = false
-      ctx.showToast('子代理已结束或无法停止')
+      ctx.showToast('子智能体已结束或无法停止')
     }
   } catch (error) {
     stoppingChild.value = false
@@ -819,6 +819,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         :running="childRunning"
         :stopping="stoppingChild"
         @back="backToParent"
+        @root="navigate(lineage?.chain[0]?.sessionId ?? ctx.sessionId.value)"
         @stop="stopChild"
       />
       <div v-else class="stack">

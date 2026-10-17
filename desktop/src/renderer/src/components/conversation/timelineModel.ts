@@ -47,7 +47,7 @@ export function turnStatusLabel(snapshot: ChatSnapshot): string {
       if (node.data.question !== undefined) return '等待你的回答…'
       if (node.data.approvals.some((a) => a.outcome === undefined))
         return '等待审批…'
-      if (node.data.subagent?.status === 'running') return '子代理运行中…'
+      if (node.data.subagent?.status === 'running') return '子智能体运行中…'
       if (node.data.workflow?.status === 'running') return '工作流运行中…'
       return `${toolView(node.data.name).title(node.data)}中…`
     }
