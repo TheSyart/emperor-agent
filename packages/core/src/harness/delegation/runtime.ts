@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { DelegationError, type ExecutorProfile } from './types'
 import { safeDelegationKey } from './fold'
 import { durableReplaceSync } from '../../store/persistence'
+import { executorEnvironment } from './environment'
 export interface ExecutorCredential {
   apiKey: string
   baseUrl?: string
@@ -61,7 +62,10 @@ export class ExecutorRuntimeService {
       join(runtimeRoot, 'codex'),
     ])
       mkdirSync(path, { recursive: true, mode: 0o700 })
-    const ambient = this.options.environment ?? process.env
+    const ambient = executorEnvironment(
+      this.options.environment,
+      this.options.home,
+    )
     const credentialSecrets: string[] = []
     const environment: Record<string, string> = Object.fromEntries(
       baseKeys.flatMap((key) => (ambient[key] ? [[key, ambient[key]!]] : [])),

@@ -1,10 +1,48 @@
 import { expect, it } from 'vitest'
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync, symlinkSync } from 'node:fs'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { join } from 'node:path'
 import { ExecutorRuntimeService } from './runtime'
 import { delegationTestDirectory } from './testing'
 import { defaultExecutorConfig } from './config'
 import { readFileSync, statSync } from 'node:fs'
+it('runs an env-node CLI from a GUI PATH while keeping the isolated HOME and auth allowlist', async () => {
+  const f = delegationTestDirectory()
+  try {
+    const bin = join(f.root, '.local', 'bin')
+    mkdirSync(bin, { recursive: true })
+    symlinkSync(process.execPath, join(bin, 'emperor-fixture-node'))
+    const executablePath = join(f.root, 'cli')
+    writeFileSync(
+      executablePath,
+      '#!/usr/bin/env emperor-fixture-node\nconsole.log(JSON.stringify({home:process.env.HOME,secret:process.env.UNRELATED_SECRET}))\n',
+      { mode: 0o700 },
+    )
+    const runtime = await new ExecutorRuntimeService({
+      root: f.root,
+      home: f.root,
+      environment: { PATH: '/usr/bin:/bin', UNRELATED_SECRET: 'omit' },
+      resolveRoute: async () => ({ apiKey: 'fixture-key' }),
+    }).prepare(
+      {
+        ...defaultExecutorConfig().profiles[1]!,
+        authRef: { kind: 'model-route', routeId: 'fixture' },
+      },
+      'dlg-gui-path',
+    )
+    const { stdout } = await promisify(execFile)(executablePath, [], {
+      env: runtime.environment,
+      timeout: 5000,
+    })
+    expect(JSON.parse(stdout)).toEqual({
+      home: join(runtime.runtimeRoot, 'home'),
+    })
+    expect(runtime.environment.PATH?.split(':')).toContain(bin)
+  } finally {
+    f.cleanup()
+  }
+})
 it('reuses explicit local CLI authentication directories without importing their settings or plugins', async () => {
   const f = delegationTestDirectory()
   try {

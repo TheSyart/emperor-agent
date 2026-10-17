@@ -185,6 +185,8 @@ npm --prefix desktop run package:verify
 
 ## 外部执行器不可用
 
+终端能运行 CLI，而 App 显示未安装时，先在设置「子智能体」重新检测。App 会为探测和执行补全常用工具目录；自定义安装位置可用「更正路径」指定。若派工在预检阶段失败，子智能体列表不会出现尚未创建的任务；之后通过终端补跑的 CLI 只显示在后台任务中。修正问题后，回主会话使用对应 Claude Code / Codex 子智能体重新派工，才能查看受管独立会话和实时输出。
+
 设置「子智能体」会检测 CLI 和本地登录配置，区分 missing、needs_auth、incompatible、containment_unavailable 和 available。默认复用本机登录；已有关闭或自定义配置会保留。needs_auth 表示没有找到当前认证方式所需的本地配置，并不代表已向厂商确认登录过期。当前协议固定 Claude Code 2.1.281 / Codex 0.153.4；安装了不同版本不能仅修改 expectedVersion 绕过。不要把密钥发到聊天或填写为启动参数。Claude 的仅 Keychain OAuth 登录不读取；使用原先明确配置的模型路由或支持的 CLI 文件/环境变量认证，自定义配置目录支持 CLAUDE_CONFIG_DIR / CODEX_HOME。需要登录配置时，可在终端手动运行 `claude auth login` 或 `codex login`；Claude 仍需可读取的文件或环境变量认证，不能仅依赖钥匙串。配置完成后重新检测；缺少 CLI 时打开该行的「安装说明」，核对本机安装。版本不兼容会同时显示实际与预期版本；「更正路径」只编辑所选配置的可执行文件路径，保存后重新检测。检测失败与配置读取失败可重试；保存版本冲突时草稿保留，明确选择「丢弃修改并重新读取」后再编辑。
 
 outcome_unknown/delivery_unknown 表示停止或发送确认不足；先查看子智能体只读对话中的公开输出和任务详情中的保留成果，再点击「返回主会话」，向主 Agent 说明待确认状态，由主会话处理后续检查与恢复，勿反复重发。任务详情中的「确认验证进程已停止」只处理宿主验证进程的恢复确认，不会恢复或重新派发外部执行；调度暂停或结果待确认时仍需返回主会话处理。Linux/Windows 的本机验证不能用 macOS 结果代替。出现缺失 macOS scanner 时，源码开发者运行 `node scripts/build-delegation-scanner.mjs`，安装包用户重新核对包完整性；不要关闭边界强行执行。

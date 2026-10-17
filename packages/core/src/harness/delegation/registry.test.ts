@@ -1,4 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs'
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  chmodSync,
+  mkdirSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
@@ -30,6 +36,32 @@ function fixture(version = '0.153.4') {
   return { root, executablePath, profile }
 }
 describe('executor registry', () => {
+  it('discovers local user executables when launched with a GUI-only PATH', async () => {
+    const { root, profile } = fixture()
+    const bin = join(root, '.local', 'bin')
+    mkdirSync(bin, { recursive: true })
+    const name = 'emperor-fixture-cli'
+    writeFileSync(
+      join(bin, name),
+      '#!/bin/sh\nprintf "codex-cli 0.153.4\\n"\n',
+      { mode: 0o700 },
+    )
+    const registry = new ExecutorRegistry({
+      home: root,
+      environment: { PATH: '/usr/bin:/bin' },
+    })
+    expect(
+      (await registry.probe({ ...profile, executablePath: name })).status,
+    ).toBe('available')
+    expect(
+      (
+        await registry.probe({
+          ...profile,
+          executablePath: join(root, 'missing', name),
+        })
+      ).status,
+    ).toBe('missing')
+  })
   it('cannot opt into an unsupported protocol by changing expectedVersion to match the binary', async () => {
     const { profile } = fixture('0.999.0')
     expect(

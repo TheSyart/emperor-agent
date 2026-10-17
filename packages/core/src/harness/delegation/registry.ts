@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { executorEnvironment } from './environment'
 import {
   DelegationError,
   type ExecutorProfile,
@@ -9,6 +10,12 @@ import {
 } from './types'
 const run = promisify(execFile)
 export class ExecutorRegistry {
+  constructor(
+    private readonly options: {
+      home?: string
+      environment?: NodeJS.ProcessEnv
+    } = {},
+  ) {}
   capabilities(backend: ExternalBackend): ExecutorCapabilities {
     return {
       persistentSession: true,
@@ -36,6 +43,7 @@ export class ExecutorRegistry {
         maxBuffer: 4096,
         signal,
         shell: false,
+        env: executorEnvironment(this.options.environment, this.options.home),
       })
       const version = stdout.match(/\b(\d+\.\d+\.\d+)\b/)?.[1]
       const supported = profile.backend === 'codex' ? '0.153.4' : '2.1.281'
