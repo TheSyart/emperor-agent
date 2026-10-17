@@ -38,8 +38,11 @@ import {
 import {
   createExternalHistoryFeed,
   type ExternalHistoryPage,
-  type ExternalHistoryEntry,
 } from './externalHistoryFeed'
+import {
+  externalTimelineRows,
+  externalToolStatusLabel,
+} from './externalTimelineModel'
 import { provideDelegationLinks } from './delegationLinks'
 import ConversationMarkdown from './parts/ConversationMarkdown.vue'
 import ExternalAgentDetails from './environment/ExternalAgentDetails.vue'
@@ -174,8 +177,6 @@ function parent() {
 function root() {
   void navigate(rootId.value)
 }
-// Join small text batches for normal prose/markdown, while keeping each rendered
-// unit bounded and tools/questions in their durable position.
 const runLabels: Record<string, string> = {
   queued: '等待调度',
   preparing: '正在准备',
@@ -191,34 +192,12 @@ const runLabels: Record<string, string> = {
 function runLabel(status: string) {
   return runLabels[status] ?? '结果待确认'
 }
-const rows = computed(() => {
-  const result: (
-    | ExternalHistoryEntry
-    | { id: string; runId: string; type: 'run'; text: string }
-  )[] = []
-  let previousRun = ''
-  for (const entry of page.value.entries) {
-    if (entry.runId !== previousRun) {
-      result.push({
-        id: entry.runId + ':heading',
-        runId: entry.runId,
-        type: 'run',
-        text: `第 ${Math.max(1, Object.keys(state.value?.runs ?? {}).indexOf(entry.runId) + 1)} 轮`,
-      })
-      previousRun = entry.runId
-    }
-    const last = result.at(-1)
-    if (
-      entry.type === 'text' &&
-      last?.type === 'text' &&
-      last.runId === entry.runId &&
-      (last.text?.length ?? 0) + (entry.text?.length ?? 0) <= 32768
-    )
-      last.text = (last.text ?? '') + (entry.text ?? '')
-    else result.push({ ...entry })
-  }
-  return result
-})
+const rows = computed(() =>
+  externalTimelineRows(
+    page.value.entries,
+    Object.keys(state.value?.runs ?? {}),
+  ),
+)
 let feed: ReturnType<typeof createExternalHistoryFeed> | undefined,
   generation = 0
 let activated = true
@@ -542,12 +521,14 @@ async function stop() {
           :item="item"
           :active="active"
           :data-index="index"
-          :size-dependencies="[item.text]"
+          :size-dependencies="[item.text, item.name, item.status]"
         >
           <article
             class="child-entry"
             :data-entry-id="item.id"
             :data-entry-type="item.type"
+            :data-tool-id="item.toolId"
+            :data-run-id="item.runId"
           >
             <h2 v-if="item.type === 'run'" :title="item.runId">
               {{ item.text }}
@@ -560,7 +541,10 @@ async function stop() {
               >
             </h2>
             <template v-else
-              ><p v-if="item.type !== 'text'" class="child-entry-label">
+              ><p
+                v-if="item.type !== 'text' && item.type !== 'tool-detail'"
+                class="child-entry-label"
+              >
                 {{
                   item.type === 'prompt'
                     ? item.chronology === 'unknown'
@@ -574,8 +558,8 @@ async function stop() {
                         ? '权限请求'
                         : item.type === 'state'
                           ? `轮次结果 · ${runLabel(item.status)}`
-                          : `${item.name || '工具'} · ${item.status}`
-                }}<code v-if="item.toolId">{{ item.toolId }}</code>
+                          : `${item.name || '工具'} · ${externalToolStatusLabel(item.status)}`
+                }}
               </p>
               <ConversationMarkdown v-if="item.text" :text="item.text"
             /></template>

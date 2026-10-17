@@ -192,6 +192,72 @@ it('renders canonical title, public readonly output and actual ancestry; return 
     ),
   ).toBe(true)
 })
+it('updates one public tool activity on live completion, retaining its name and both details without visible protocol IDs', async () => {
+  let completed = false
+  const original = bridge.invokeCore.getMockImplementation()!
+  bridge.invokeCore.mockImplementation(
+    (key: string, input: Record<string, unknown>) => {
+      if (key !== 'delegations.history') return original(key, input)
+      return Promise.resolve({
+        entries: !input.after
+          ? [
+              {
+                id: 'start',
+                runId: currentRun,
+                type: 'tool',
+                toolId: 'call_read',
+                name: 'Read',
+                status: 'running',
+                text: '读取公开文件',
+              },
+            ]
+          : completed
+            ? [
+                {
+                  id: 'finish',
+                  runId: currentRun,
+                  type: 'tool',
+                  toolId: 'call_read',
+                  status: 'completed',
+                  text: '读取完成',
+                },
+              ]
+            : [],
+        before: 'start',
+        after: completed ? 'finish' : 'start',
+        hasBefore: false,
+        hasAfter: false,
+      })
+    },
+  )
+  const dom = await mount()
+  const initial = dom.querySelector('[data-entry-type="tool"]')!
+  const key = initial.getAttribute('data-entry-id')
+  const initialText = initial.textContent
+  completed = true
+  bridge.listener({
+    event: 'delegation_run_changed',
+    session_id: 'root',
+    delegation_id: 'dlg-one',
+  })
+  await settle()
+  const tools = dom.querySelectorAll('[data-entry-type="tool"]')
+  expect(tools).toHaveLength(1)
+  expect(initialText).toContain('Read · 运行中')
+  expect(tools[0]!.getAttribute('data-entry-id')).toBe(key)
+  expect(tools[0]!.getAttribute('data-tool-id')).toBe('call_read')
+  expect(tools[0]!.getAttribute('data-run-id')).toBe('dgr-one')
+  expect(tools[0]!.textContent).toContain('Read · 已完成')
+  expect(tools[0]!.textContent).toContain('读取公开文件')
+  expect(tools[0]!.textContent).toContain('读取完成')
+  expect(tools[0]!.textContent).not.toContain('运行中')
+  expect(dom.textContent).not.toContain('call_read')
+  expect(
+    bridge.invokeCore.mock.calls
+      .filter(([key]) => key === 'delegations.history')
+      .at(-1)?.[1],
+  ).toEqual({ id: 'dlg-one', sessionId: 'root', after: 'start' })
+})
 it('captures stop run and owner and stays stopping until durable state confirms, without stopping the next run', async () => {
   const dom = await mount()
   dom.querySelector<HTMLButtonElement>('[data-stop-child]')!.click()
