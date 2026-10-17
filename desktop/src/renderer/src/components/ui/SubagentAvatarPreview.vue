@@ -19,7 +19,7 @@ onMounted(() => {
   const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')
   const player = createAvatarPreviewPlayer({
     count: frames.length,
-    hidden: document.hidden,
+    hidden: document.hidden || !document.hasFocus(),
     reduced: reduced?.matches,
     decode: () =>
       Promise.all(
@@ -58,13 +58,21 @@ onMounted(() => {
       }
     },
   })
-  const visibility = () => player.setHidden(document.hidden),
+  // Electron can keep document.hidden=false for a hidden native window.
+  // Focus is an additional settings-only pause signal; the player keeps time.
+  const visibility = () =>
+      player.setHidden(document.hidden || !document.hasFocus()),
+    blur = () => player.setHidden(true),
     motion = () => player.setReducedMotion(reduced?.matches ?? false)
   document.addEventListener('visibilitychange', visibility)
+  window.addEventListener('focus', visibility)
+  window.addEventListener('blur', blur)
   reduced?.addEventListener('change', motion)
   dispose = () => {
     player.destroy()
     document.removeEventListener('visibilitychange', visibility)
+    window.removeEventListener('focus', visibility)
+    window.removeEventListener('blur', blur)
     reduced?.removeEventListener('change', motion)
   }
 })

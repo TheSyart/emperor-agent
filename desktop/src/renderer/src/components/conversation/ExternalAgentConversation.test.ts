@@ -208,6 +208,22 @@ it('renders canonical title, public readonly output and actual ancestry; return 
     ),
   ).toBe(true)
 })
+it('retains the full canonical title as visible text, tooltip and accessible name', async () => {
+  const title = '长标题边界检查'.repeat(20)
+  const original = bridge.invokeCore.getMockImplementation()!
+  bridge.invokeCore.mockImplementation(
+    async (key: string, input: Record<string, unknown>) => {
+      const value = await original(key, input)
+      if (key === 'agents.list') value.agents[1].title = title
+      return value
+    },
+  )
+  const dom = await mount()
+  const heading = dom.querySelector('h1')!
+  expect(heading.textContent).toBe(title)
+  expect(heading.title).toBe(title)
+  expect(heading.getAttribute('aria-label')).toBe(title)
+})
 it('updates one public tool activity on live completion, retaining its name and both details without visible protocol IDs', async () => {
   let completed = false
   const original = bridge.invokeCore.getMockImplementation()!

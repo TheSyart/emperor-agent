@@ -455,7 +455,7 @@ async function stop() {
         <span v-else>子智能体</span>
       </nav>
       <div class="child-title">
-        <h1>{{ title }}</h1>
+        <h1 :title="title" :aria-label="title">{{ title }}</h1>
         <ProviderLogo
           v-if="record"
           :icon-id="record.backend"
@@ -670,22 +670,28 @@ async function stop() {
   flex: 1;
   min-height: 0;
 }
-.child-conversation[data-env-card] .child-timeline,
-.child-conversation[data-env-card] .child-footer {
+.child-conversation[data-env-card] .child-timeline {
   padding-inline-end: calc(var(--env-card-width) + var(--space-4));
 }
 .child-header {
+  flex: none;
+  min-width: 0;
   padding: var(--space-4) var(--space-6);
   border-bottom: 1px solid var(--border-l2);
 }
 .child-header nav {
   display: flex;
-  flex-wrap: wrap;
+  overflow: hidden;
+  white-space: nowrap;
   gap: var(--space-2);
   color: rgb(var(--label-tertiary));
   font: var(--font-code-small);
 }
 .child-header nav button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   border: 0;
   padding: 0;
   background: none;
@@ -701,7 +707,11 @@ async function stop() {
 }
 h1 {
   margin: 0;
-  flex: 1;
+  flex: 1 1 120px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--fs-md);
   font-weight: 600;
 }
@@ -738,6 +748,7 @@ h1 {
   border-radius: var(--radius-card);
 }
 .child-footer {
+  flex: none;
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
@@ -746,7 +757,8 @@ h1 {
   border-top: 1px solid var(--border-l2);
 }
 .child-footer > span {
-  flex: 1;
+  flex: 1 0 auto;
+  white-space: nowrap;
   font: var(--font-code-small);
   color: rgb(var(--label-caption));
 }

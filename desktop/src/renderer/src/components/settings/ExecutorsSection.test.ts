@@ -82,6 +82,7 @@ async function toggle(vendor = 'claude-code') {
   await settle()
 }
 beforeEach(() => {
+  vi.spyOn(document, 'hasFocus').mockReturnValue(true)
   vi.stubGlobal(
     'requestAnimationFrame',
     vi.fn(() => 1),
@@ -101,6 +102,7 @@ beforeEach(() => {
 afterEach(() => {
   app?.unmount()
   root?.remove()
+  vi.restoreAllMocks()
   vi.clearAllMocks()
   vi.unstubAllGlobals()
 })

@@ -196,7 +196,11 @@ let measureHost: (() => void) | null = null
 
 onMounted(() => {
   document.addEventListener('keydown', onKeydown)
-  const host = root.value?.closest<HTMLElement>('.conversation-root')
+  // External viewers own a bounded body above their full-width readonly footer.
+  // Native/root conversations retain their original composer/preview reservation.
+  const childSeat = root.value?.closest<HTMLElement>('.child-view-area')
+  const host =
+    childSeat ?? root.value?.closest<HTMLElement>('.conversation-root')
   if (!host || typeof ResizeObserver === 'undefined') return
   const measure = () => {
     const card = root.value
@@ -208,7 +212,9 @@ onMounted(() => {
     const available =
       host.getBoundingClientRect().bottom -
       card.getBoundingClientRect().top -
-      Math.max(INLINE_BOTTOM_GAP, previewLayout.reservedHeight)
+      (childSeat
+        ? INLINE_BOTTOM_GAP
+        : Math.max(INLINE_BOTTOM_GAP, previewLayout.reservedHeight))
     inlineMaxHeight.value = Math.max(0, Math.round(available))
   }
   measureHost = measure
