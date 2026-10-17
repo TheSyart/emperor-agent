@@ -139,6 +139,72 @@ describe('unified sidebar agent tree', () => {
     expect(restarted.expanded.root).toBe(false)
   })
 
+  it.each([false, true])(
+    'retains live expansion through deferred initial hydration (saved collapse: %s)',
+    async (collapsed) => {
+      vi.useFakeTimers()
+      try {
+        const initial = deferred<{ agents: AgentView[] }>()
+        const replacement = deferred<{ agents: AgentView[] }>()
+        const fetch = vi
+          .fn()
+          .mockReturnValueOnce(initial.promise)
+          .mockReturnValueOnce(replacement.promise)
+        const store = createAgentTreeStore(fetch, {
+          debounceMs: 10,
+          storage: {
+            getItem: () =>
+              collapsed
+                ? JSON.stringify({
+                    expanded: { root: false, 'sub-parent': false },
+                  })
+                : null,
+            setItem: () => undefined,
+          },
+        })
+        store.sync(['root'])
+        store.handleEvent({
+          event: 'agent_tree_changed',
+          rootSessionId: 'root',
+          revision: 1,
+        })
+        await vi.advanceTimersByTimeAsync(10)
+        expect(fetch).toHaveBeenCalledTimes(2)
+        replacement.resolve({
+          agents: [
+            agent('sub-parent'),
+            agent('dlg-first', 'sub-parent', { phase: 'running' }),
+          ],
+        })
+        await vi.advanceTimersByTimeAsync(0)
+        expect(store.counts.root).toBe(1)
+        expect(store.expanded.root).toBe(!collapsed)
+        expect(store.expanded['sub-parent']).toBe(!collapsed)
+        // The superseded initial response must neither publish stale rows nor erase the live expansion.
+        initial.resolve({ agents: [agent('stale-history')] })
+        await vi.advanceTimersByTimeAsync(0)
+        expect(store.trees.root.agents.map((child) => child.id).sort()).toEqual(
+          ['dlg-first', 'sub-parent'],
+        )
+        expect(store.expanded.root).toBe(!collapsed)
+      } finally {
+        vi.useRealTimers()
+      }
+    },
+  )
+
+  it('keeps a deferred initial historical snapshot collapsed when no live event arrives', async () => {
+    const initial = deferred<{ agents: AgentView[] }>()
+    const store = createAgentTreeStore(() => initial.promise)
+    store.sync(['root'])
+    initial.resolve({
+      agents: [agent('sub-parent'), agent('dlg-history', 'sub-parent')],
+    })
+    await vi.waitFor(() => expect(store.trees.root).toBeDefined())
+    expect(store.expanded.root).not.toBe(true)
+    expect(store.expanded['sub-parent']).not.toBe(true)
+  })
+
   it('ignores old, archived and rapid-navigation fetches; refreshes only the event root and never text', async () => {
     const first = deferred<{ agents: AgentView[] }>()
     const second = deferred<{ agents: AgentView[] }>()

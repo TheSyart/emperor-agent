@@ -161,9 +161,11 @@ export function createAgentTreeStore(
       if (!roots.has(root) || generations.get(root) !== generation) return
       const tree = buildAgentTree(root, agents)
       const previous = seen.get(root)
-      if (previous) {
+      // A live invalidation can fence the initial read before it establishes seen.
+      // Its retained revision distinguishes the replacement from ordinary history hydration.
+      if (previous || revisions.has(root)) {
         for (const agent of tree.agents) {
-          if (previous.has(agent.id)) continue
+          if (previous?.has(agent.id)) continue
           if (expanded[root] !== false) expanded[root] = true
           for (const parent of ancestors(tree, agent.id))
             if (expanded[parent] !== false) expanded[parent] = true
