@@ -41,7 +41,7 @@ import { DsLoading } from '../icons/ds'
 }
 .question {
   width: 55%;
-  height: var(--space-10);
+  height: calc(var(--space-8) + var(--space-2));
   margin-inline-start: auto;
   border-radius: var(--radius-card);
 }
