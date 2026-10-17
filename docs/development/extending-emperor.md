@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core、Electron 与 renderer 开发者<br>
-> 最后核验：2026-09-23<br>
+> 最后核验：2026-10-17<br>
 > 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/api/operations.ts`、`packages/core/src/harness/projection/`、`packages/core/src/llm/`、`packages/core/src/harness/tools/builtin/`、`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/pages/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/settings/`
 
 Emperor Agent 的扩展通常横跨内核、CoreApi、Electron contract、renderer 投影和文档。先确定权威状态属于哪里：会话内的一切属于 session log；长期数据属于对应的保留服务。然后从内核或服务向外接入，不要把策略散落到组件或 prompt 文案。
@@ -183,4 +183,6 @@ Scheduler 的调度、misfire 与准入逻辑在 `packages/core/src/scheduler/se
 
 ## 子智能体界面扩展
 
-名称与来源使用浏览器安全入口 `@emperor/core/runtime-contract` 的 `agentTitle`、`agentSourceLabel`、`agentPhaseLabel` 和 `AgentView`；侧栏和环境信息复用 `components/sidebar/agentTree.ts` 的根范围缓存及 `agentLocation`。保持 `sub-*`、`dlg-*` 与 `dgr-*` 身份边界，路由中的 owning root 不随外部轮次改变。父卡片入口与折叠、图片/复制、任务详情应使用独立交互元素，禁止用可点击外壳包裹全部输出。继续与回答只返回根聊天并保留草稿，不自动调用 send/steer；后台工具控制 API 保持兼容。公开分页、图片范围及状态说明见[外部调度架构](../architecture/external-agent-delegation.md#统一子智能体入口与公开对话)。
+名称与来源使用浏览器安全入口 `@emperor/core/runtime-contract` 的 `agentTitle`、`agentSourceLabel`、`agentPhaseLabel` 和 `AgentView`；`components/sidebar/agentTree.ts` 提供根范围共享缓存及 `agentLocation`，环境信息显示子智能体入口；侧栏只渲染主会话，并在子会话路由上标记 owning root。保持 `sub-*`、`dlg-*` 与 `dgr-*` 身份边界，路由中的 owning root 不随外部轮次改变。父卡片入口与折叠、图片/复制、任务详情应使用独立交互元素，禁止用可点击外壳包裹全部输出。继续与回答只返回根聊天并保留草稿，不自动调用 send/steer；后台工具控制 API 保持兼容。公开分页、图片范围及状态说明见[外部调度架构](../architecture/external-agent-delegation.md#统一子智能体入口与公开对话)。
+
+修改子智能体设置时保持 `executors` 路由键，界面标签为「子智能体」。`ExecutorsSection.vue` 用真实 API 完整往返配置，只有所选 profile 的启用和按需路径可变；覆盖多 profile、dirty/stale、加载失败及晚到响应的测试。角色由 `SubagentAvatar.vue` / `subagentAvatars.ts` 共享；仅设置页使用 `SubagentAvatarPreview.vue` 和独立 `avatarPreview.ts` 时间采样器，不把预览时钟接入任务头像。

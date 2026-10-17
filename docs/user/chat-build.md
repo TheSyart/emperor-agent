@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用普通会话或项目会话的用户<br>
-> 最后核验：2026-09-23<br>
+> 最后核验：2026-10-17<br>
 > 事实源：`packages/core/src/sessions/store.ts`、`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/prompt/agent-instructions.ts`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/sidebar/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/composer/`、`desktop/src/renderer/src/components/trajectory/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/pages/pulls/`、`desktop/src/renderer/src/components/pages/github/`、`desktop/src/main/browser-view.ts`
 
 Chat（普通对话）和 Build（项目工作）是会话类型。它们决定 Agent 的工作目录和能看到哪些长期上下文，不决定权限。
@@ -67,7 +67,7 @@ Build 绑定一个本地文件夹。Agent 在该目录内读取文件、按当�
 
 「环境信息」卡浮在对话右上角，电脑操作的预览在右下角，两者互不遮挡。
 
-- **展开方式**：对话区域足够宽时卡片默认展开，对话内容和输入框向左让出位置；你用标题栏的「环境信息」按钮或快捷键 ⌥⌘E 关掉后，会一直保持关闭，直到再次打开。较窄时卡片默认不显示，按需打开后覆盖在对话上，按 Esc 或卡片上的关闭按钮收起。
+- **展开方式**：对话区域足够宽时卡片默认展开，对话内容和输入框向左让出位置；你用标题栏的「环境信息」按钮或快捷键 ⌥⌘E 关掉后，会一直保持关闭，直到再次打开。较窄时卡片默认不显示，按需打开后仍为卡片留出空间，保持对话、输入框及电脑操作预览可用；按 Esc 或卡片上的关闭按钮收起。
 - **标题**：Build 会话的卡片标题是项目名，其他会话是「环境信息」。
 
 Build 会话的第一行是「± 分支名 +A −D」：当前分支、与上游相差的提交数和工作区的增删行数，点击打开「审查」。合并或变基未完成时，下面多一行提示。
@@ -106,9 +106,9 @@ Build 会话的第一行是「± 分支名 +A −D」：当前分支、与上游
 
 ## 子智能体
 
-侧栏按实际父级嵌套 Emperor、Claude Code 和 Codex 子智能体，任务名取创建时的 description，来源独立显示。活动项和最近项优先，超过五项可显示全部；完成项仍可查看，收起父级不会清空子项状态。子项不提供顶层会话的置顶、项目和删除菜单。继续派工后卡片仍沿用原创建名称，展开可看本次派工内容。父级记录不可用或成环时，环境信息保留已知父级 ID 并显示提示；加载失败时可点击「重试」。
+左侧会话栏只列主会话，查看子智能体时仍选中所属主会话。右侧「环境信息 › 子智能体」列出 Emperor、Claude Code 和 Codex 的任务入口，名称取创建时的 description，来源独立显示。活动项和最近项优先，超过五项可显示全部；完成项仍可查看。继续派工后卡片仍沿用原创建名称，展开可看本次派工内容。父级记录不可用或成环时，环境信息保留已知父级 ID 并显示提示；加载失败时可点击「重试」。
 
-父任务卡片名称、侧栏与环境信息指向同一子智能体。内部会话使用 `/chat/<subId>`；外部会话使用 `/chat/<rootId>/agents/<dlgId>`，后续轮次仍使用同一入口。父卡片保留实时摘要和过程折叠，「任务详情」单独查看文件、差异、验收与整合。
+父任务卡片名称与环境信息指向同一子智能体。内部会话使用 `/chat/<subId>`；外部会话使用 `/chat/<rootId>/agents/<dlgId>`，后续轮次仍使用同一入口。父卡片保留实时摘要和过程折叠，「任务详情」单独查看文件、差异、验收与整合。内部子智能体使用按会话身份固定分配的透明角色头像，环境信息、路径导航与父卡片保持一致；只有「设置 › 子智能体」的本地预览轮换角色，不会改变任务头像。
 
 - 头部显示根会话和实际父级路径，可返回上级；内部与外部对话均只读，没有模型选择或发送输入框。
 - 外部对话按轮次显示公开任务、文字、工具、问题和状态，历史可分段读取；只有接近底部时自动跟随。

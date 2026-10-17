@@ -453,7 +453,7 @@ describe('ComputerUsePreviewStack', () => {
     columnWidth = 900
     const rectangles = vi
       .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
-      .mockImplementation(function () {
+      .mockImplementation(function (this: HTMLElement) {
         if (this.classList.contains('conversation-root'))
           return { top: 0, bottom: 900 } as DOMRect
         if (this.classList.contains('cu-preview'))

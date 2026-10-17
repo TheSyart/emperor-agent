@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：安装包用户、首次使用者<br>
-> 最后核验：2026-09-24<br>
+> 最后核验：2026-10-17<br>
 > 事实源：`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/sidebar/sidebarNav.ts`、`desktop/src/renderer/src/components/settings/settingsSections.ts` 与各设置分区（含 `ComputerUseSection.vue`）、Composer 与 CoreApi 用户入口
 
 这组文档按实际任务组织。你不需要先理解 CoreApi、runtime event 或磁盘 store。
@@ -39,19 +39,20 @@
 
 点击侧栏底部的「设置」打开设置弹窗。左侧导航列出下表中的分区，右上角是当前分区的操作，例如刷新或「添加模型」。
 
-| 分区     | 用途                                                                                            | 详细说明                                                    |
-| -------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| 常规     | 运行状态、当前模型、已绑定项目数；外观（浅色 / 深色 / 跟随系统）；已归档对话                    | [Chat 与 Build](chat-build.md#侧栏与会话操作)               |
-| 模型     | 模型配置卡片、连通测试、执行与成本策略                                                          | [模型、记忆与附件](models-memory-attachments.md#模型配置)   |
-| Hooks    | “配置 / 测试 / 审计”三个标签                                                                    | [定时任务、Hooks 与桌宠](automation-collaboration.md#hooks) |
-| 电脑操作 | 总开关、驱动状态、授权、浏览器 profile、站点权限、凭据与急停                                    | [电脑操作（实验）](computer-use.md)                         |
-| 语音     | 听写组件状态、麦克风与语音识别权限、麦克风、识别语言与听写快捷键（macOS）                       | [Chat 与 Build](chat-build.md#语音听写)                     |
-| 记忆     | 上下文概览，以及“长期 / 用户档案 / 情景 / Watchlist / 版本”；用户档案中可开始或重新开始档案访谈 | [模型、记忆与附件](models-memory-attachments.md#记忆层)     |
-| 用量     | Token 统计、活跃度热力图、趋势、模型排名和缓存                                                  | [诊断与排障](diagnostics-troubleshooting.md#常用状态入口)   |
-| 桌宠     | 启用或关闭 companion，预览动画                                                                  | [定时任务、Hooks 与桌宠](automation-collaboration.md)       |
-| 诊断     | 顶部概览与需要关注的项目，下方是可折叠的运行时、环境工具、桌面、存储路径和配置                  | [诊断与排障](diagnostics-troubleshooting.md)                |
+| 分区     | 用途                                                                                            | 详细说明                                                      |
+| -------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| 常规     | 运行状态、当前模型、已绑定项目数；外观（浅色 / 深色 / 跟随系统）；已归档对话                    | [Chat 与 Build](chat-build.md#侧栏与会话操作)                 |
+| 模型     | 模型配置卡片、连通测试、执行与成本策略                                                          | [模型、记忆与附件](models-memory-attachments.md#模型配置)     |
+| 子智能体 | 本地角色预览、Claude Code/Codex 开关、本机可用性检测与保存                                      | [工具说明](tools-skills-mcp.md#claude-code-与-codex-子智能体) |
+| Hooks    | “配置 / 测试 / 审计”三个标签                                                                    | [定时任务、Hooks 与桌宠](automation-collaboration.md#hooks)   |
+| 电脑操作 | 总开关、驱动状态、授权、浏览器 profile、站点权限、凭据与急停                                    | [电脑操作（实验）](computer-use.md)                           |
+| 语音     | 听写组件状态、麦克风与语音识别权限、麦克风、识别语言与听写快捷键（macOS）                       | [Chat 与 Build](chat-build.md#语音听写)                       |
+| 记忆     | 上下文概览，以及“长期 / 用户档案 / 情景 / Watchlist / 版本”；用户档案中可开始或重新开始档案访谈 | [模型、记忆与附件](models-memory-attachments.md#记忆层)       |
+| 用量     | Token 统计、活跃度热力图、趋势、模型排名和缓存                                                  | [诊断与排障](diagnostics-troubleshooting.md#常用状态入口)     |
+| 桌宠     | 启用或关闭 companion，预览动画                                                                  | [定时任务、Hooks 与桌宠](automation-collaboration.md)         |
+| 诊断     | 顶部概览与需要关注的项目，下方是可折叠的运行时、环境工具、桌面、存储路径和配置                  | [诊断与排障](diagnostics-troubleshooting.md)                  |
 
-定时任务、插件、Skills、MCP 和工具已从设置弹窗移到上面的整页。旧的 `?settings=scheduler`、`?settings=plugins`、`?settings=skills`、`?settings=mcp`、`?settings=tools` 链接以及 `/plugins/*`、`/skills/<名称>`、`/mcp`、`/tools` 会自动跳到对应页面；原「配置」分区并入“记忆 › 用户档案”，`?settings=configs` 会打开「记忆」。
+定时任务、插件、Skills、MCP 和工具已从设置弹窗移到上面的整页。旧的 `?settings=scheduler`、`?settings=plugins`、`?settings=skills`、`?settings=mcp`、`?settings=tools` 链接以及 `/plugins/*`、`/skills/<名称>`、`/mcp`、`/tools` 会自动跳到对应页面；旧的 `?settings=executors` 仍打开「子智能体」。原「配置」分区并入“记忆 › 用户档案”，`?settings=configs` 会打开「记忆」。
 
 ## 使用前需要知道的边界
 
@@ -66,4 +67,4 @@
 
 ## 调度外部编码 Agent
 
-Claude Code/Codex 默认启用并复用本机 CLI 登录，主 Agent 使用统一子智能体工具直接派工。设置「外部智能体」自动检测本机配置；普通文字结果直接返回，文件成果在交付或整合前检查。侧栏、父卡片和环境信息提供同一子智能体只读对话入口；任务详情保留文件交付、差异、验收与整合。继续派工和回答回到主会话，保留草稿且不自动发送。参见[工具说明](tools-skills-mcp.md#claude-code-与-codex-子智能体)及[故障排查](diagnostics-troubleshooting.md#外部执行器不可用)。
+Claude Code/Codex 默认启用并复用本机 CLI 登录，主 Agent 使用统一子智能体工具直接派工。设置「子智能体」统一显示本地、Claude Code 和 Codex，检测本机 CLI 与登录配置；普通文字结果直接返回，文件成果在交付或整合前检查。左侧会话栏只列主会话，父卡片和右侧环境信息提供同一子智能体独立只读对话入口；任务详情保留文件交付、差异、验收与整合。继续派工和回答回到主会话，保留草稿且不自动发送。参见[工具说明](tools-skills-mcp.md#claude-code-与-codex-子智能体)及[故障排查](diagnostics-troubleshooting.md#外部执行器不可用)。

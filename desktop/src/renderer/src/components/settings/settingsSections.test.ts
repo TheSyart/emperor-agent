@@ -48,6 +48,13 @@ describe('settings sections', () => {
     ])
   })
 
+  it('keeps the executors deep link under the unified label', () => {
+    expect(
+      SETTINGS_SECTIONS.find((section) => section.key === 'executors')?.label,
+    ).toBe('子智能体')
+    expect(modalSettingsSection('executors')).toBe('executors')
+  })
+
   it('opens the retired 配置 section as 记忆', () => {
     expect(normalizeSettingsSection('configs')).toBe('memory')
     expect(modalSettingsSection('configs')).toBe('memory')

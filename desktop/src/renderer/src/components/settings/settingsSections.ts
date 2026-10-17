@@ -13,7 +13,7 @@
 export const SETTINGS_SECTIONS = [
   { key: 'general', label: '常规' },
   { key: 'model', label: '模型' },
-  { key: 'executors', label: '外部智能体' },
+  { key: 'executors', label: '子智能体' },
   { key: 'hooks', label: 'Hooks' },
   { key: 'computer', label: '电脑操作' },
   { key: 'voice', label: '语音' },

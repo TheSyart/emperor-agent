@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：希望扩展 Agent 能力的用户<br>
-> 最后核验：2026-09-23<br>
+> 最后核验：2026-10-17<br>
 > 事实源：`packages/core/src/harness/host/host.ts`（`compose()`）、`packages/core/src/harness/tools/builtin/`（含 `skill-manage.ts`、`mcp-config.ts`）、`packages/core/src/harness/workflow/`、`packages/core/src/skills/`、`packages/core/src/plugins/`、`packages/core/src/mcp/`、`desktop/src/renderer/src/components/pages/capabilities/`、`desktop/src/renderer/src/components/pages/explore/`、`desktop/src/renderer/src/components/settings/`（插件 / Skills / MCP / 工具分区组件）
 
 Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资源包；Plugin 是带来源、版本和启用状态的 Skill 分发单元；MCP 把外部 server 暴露的工具接入 Agent。
@@ -233,11 +233,11 @@ Agent 被要求只通过 `mcp_config` 添加 server，不使用 mcporter，也�
 
 ## Claude Code 与 Codex 子智能体
 
-安装并在终端配置好 Claude Code/Codex 后，可直接要求主 Agent 派工。两个执行器默认启用并复用本机登录，不需要在 Emperor 再填一次密钥。设置「外部智能体」会自动检测 CLI 和本地登录配置，也支持修改路径、关闭执行器或选择模型凭据引用。已有显式配置会保留；只存在于钥匙串中的登录凭据不会被读取，需要 CLI 的文件或环境变量认证。
+安装并在终端配置好 Claude Code/Codex 后，可直接要求主 Agent 派工。两个执行器默认启用并复用本机登录，不需要在 Emperor 再填一次密钥。「设置 › 子智能体」统一显示本地、Claude Code 和 Codex 三行。本地是内置能力，只预览自动分配的透明角色头像；外部来源可启用或关闭，使用顶部「重新检测」「保存配置」。同一来源有多份配置时先选择配置，修改只影响所选配置。认证方式、默认模型、版本和调度限制等既有配置会保留；只存在于钥匙串中的登录凭据不会被读取，需要 CLI 的文件或环境变量认证。
 
-工具仍是 subagent/send_message/collect_agent。普通文字结果可直接回收和继续派工；文件成果在交付或整合前检查，任务详情显示差异、检查结果和整合预览。执行器自报“通过”不会代替实际测试。自动检测不提交模型任务，真实调用中的认证错误会另行提示。
+工具仍是 subagent/send_message/collect_agent。普通文字结果可直接回收和继续派工；文件成果在交付或整合前检查，任务详情显示差异、检查结果和整合预览。执行器自报“通过”不会代替实际测试。检测只确认 CLI 与本地配置可读，不向厂商验证登录，也不提交模型任务，真实调用中的认证错误会另行提示。缺少 CLI、登录配置、版本或运行环境异常会显示对应帮助、重试及按需路径修正；安装说明只打开官方网页。未保存的编辑不会被刷新覆盖，版本冲突需要明确丢弃并重新读取。
 
-对话卡片、侧栏和环境信息使用同一创建任务名称，另标 Emperor / Claude Code / Codex 来源。点击卡片名称、侧栏或环境信息中的子智能体打开同一独立只读对话，按轮次查看任务、公开输出、工具和问题；历史可分页读取，接近底部才跟随。卡片仍保留「收起过程 / 查看过程」和独立「任务详情」，后者查看文件交付、差异、验收与整合。
+左侧会话栏只显示主会话；对话卡片和环境信息中的子智能体使用同一创建任务名称，另标 Emperor / Claude Code / Codex 来源。点击卡片名称、来源图标或环境信息中的子智能体打开同一独立只读对话，按轮次查看任务、公开输出、工具和问题；历史可分页读取，接近底部才跟随。卡片仍保留「收起过程 / 查看过程」和独立「任务详情」，后者查看文件交付、差异、验收与整合。
 
 回复中的本地 PNG、JPEG、GIF、WebP 图片链接会直接显示预览，Markdown 图片语法也受支持。预览只读取当前会话的普通聊天工作区、Build 项目或其外部子智能体工作区，保留原文件入口；缺失、过大或不支持的文件仍可通过文件链接处理。
 

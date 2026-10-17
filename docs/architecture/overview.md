@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、开发者、希望理解产品边界的用户<br>
-> 最后核验：2026-09-23<br>
+> 最后核验：2026-10-17<br>
 > 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/api/core-api.ts`、`packages/core/src/api/operations.ts`、`desktop/src/main/`、`desktop/src/preload/`、`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/workspace/`
 
 Emperor Agent 的桌面主产品是本地单用户 Electron 应用。Electron main 进程内创建一个 TypeScript `CoreApi`；`CoreApi` 背后是唯一的内核组合根 `HarnessHost`。Vue renderer 只能通过 preload 暴露的 IPC contract 请求 Core，并通过 runtime events 接收过程状态。源码还提供默认不随桌面安装包开放的 ACP V1 stdio operator preview，它为受信本机 client 创建独立的 `CoreApi`。产品主线没有 Python runtime、HTTP backend 或 WebSocket backend。
@@ -131,4 +131,4 @@ ACP 的 `session/prompt` 也进入同一个 `chat.submit`。`session/new` 只能
 
 HarnessHost 还组合 DelegationService，通过受管 Claude SDK CLI 与独占 Codex stdio app-server 执行原生子会话。两个执行器默认启用并复用本机 CLI 登录；普通文字结果直接回收，文件成果在交付与整合前检查。执行、成果检查与整合是独立状态；[调度架构](external-agent-delegation.md)说明权限、持久工作区、终态通知与恢复边界。
 
-桌面端统一以「子智能体」展示内部 Emperor、Claude Code 与 Codex。`agents.list` 和 `agent_tree_changed` 提供按实际父级组织的共享树；父卡片、侧栏和环境信息使用创建描述及独立来源标记。外部独立只读对话通过根会话加稳定 `dlg-*` 路由、`delegations.history` 公开游标分页读取，主 Core 上下文保留 owning root。文件交付、验收与整合仍在「任务详情」。详见[统一入口](external-agent-delegation.md#统一子智能体入口与公开对话)。
+桌面端统一以「子智能体」展示内部 Emperor、Claude Code 与 Codex。`agents.list` 和 `agent_tree_changed` 提供按实际父级组织的共享树；左侧只显示主会话；父卡片和环境信息使用创建描述及独立来源标记，子会话保持所属主会话选中。内部子智能体以稳定身份固定透明角色头像；设置「子智能体」合并本地预览与两个外部来源的开关、检测和保存，`executors` 查询键继续兼容。外部独立只读对话通过根会话加稳定 `dlg-*` 路由、`delegations.history` 公开游标分页读取，主 Core 上下文保留 owning root。文件交付、验收与整合仍在「任务详情」。详见[统一入口](external-agent-delegation.md#统一子智能体入口与公开对话)。

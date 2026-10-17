@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：遇到启动、模型、会话、工具或打包问题的用户和开发者<br>
-> 最后核验：2026-09-24<br>
+> 最后核验：2026-10-17<br>
 > 事实源：`packages/core/src/api/services/diagnostics-service.ts`、`packages/core/src/session-log/`、`packages/core/src/environment/tool-catalog.json`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/renderer/src/components/settings/DiagnosticsSection.vue` 与 `diagnostics/`、`desktop/src/renderer/src/components/pages/pulls/`、当前构建与运行脚本
 
 先进入“设置 → 诊断”。页面顶部是概览：一句总体状态（「运行正常」或「有 n 项需要关注」）、运行时 / 环境工具 / 存储路径 / 配置四个小块的正常项计数，以及所有需要关注的项目（异常在前），点击某一项会展开它所在的分组。右上角「复制报告」把整页复制成纯文本，便于反馈问题；刷新会重新读取诊断并重新探测环境。
@@ -103,7 +103,7 @@ MCP 的 args、env、headers 和 URL 在有效配置里统一显示为 `[REDACTE
 
 CoreApi 的 `tasks.*` 把后台 job（`bash` 的后台命令）、子代理会话和工作流运行（`workflow` / `ralph`）汇总在一起。界面中：
 
-- 环境信息卡的「子智能体」复用侧栏根会话树，内部和外部均按稳定身份展示创建任务名称、来源和实际父级路径；点击打开独立只读对话，运行中可以停止。
+- 环境信息卡的「子智能体」读取根会话拥有的共享索引，内部和外部均按稳定身份展示创建任务名称和来源，实际父级保留在路径提示中；点击打开独立只读对话，运行中可以停止。
 - 「后台任务」行显示后台命令和工作流运行的数量；点击展开后，每个任务有「输出」（只读查看命令输出或工作流记录）和运行中才有的「停止」。停止工作流前会先确认，它正在运行的子代理会一起停止。
 - 工作流在前台运行，停止当前 turn 会同时取消它；应用在运行中退出后，该运行记为已中断。
 - 后台命令由 Agent 通过 `job_output`、`job_list`、`job_kill` 读取和停止，你也可以在「后台任务」中查看输出或停止它；后台命令只存在于当前进程，应用退出时会被终止。
@@ -185,6 +185,6 @@ npm --prefix desktop run package:verify
 
 ## 外部执行器不可用
 
-设置「外部智能体」会自动检测 CLI 和本地登录配置，区分 missing、needs_auth、incompatible、containment_unavailable 和 available。默认复用本机登录；已有关闭或自定义配置会保留。needs_auth 表示没有找到当前认证方式所需的本地配置，并不代表已向厂商确认登录过期。当前协议固定 Claude Code 2.1.281 / Codex 0.153.4；安装了不同版本不能仅修改 expectedVersion 绕过。不要把密钥发到聊天或填写为启动参数。Claude 的仅 Keychain OAuth 登录不读取；选择明确的模型路由或支持的 CLI 文件/环境变量认证，自定义配置目录支持 CLAUDE_CONFIG_DIR / CODEX_HOME。
+设置「子智能体」会检测 CLI 和本地登录配置，区分 missing、needs_auth、incompatible、containment_unavailable 和 available。默认复用本机登录；已有关闭或自定义配置会保留。needs_auth 表示没有找到当前认证方式所需的本地配置，并不代表已向厂商确认登录过期。当前协议固定 Claude Code 2.1.281 / Codex 0.153.4；安装了不同版本不能仅修改 expectedVersion 绕过。不要把密钥发到聊天或填写为启动参数。Claude 的仅 Keychain OAuth 登录不读取；使用原先明确配置的模型路由或支持的 CLI 文件/环境变量认证，自定义配置目录支持 CLAUDE_CONFIG_DIR / CODEX_HOME。需要登录配置时，可在终端手动运行 `claude auth login` 或 `codex login`；Claude 仍需可读取的文件或环境变量认证，不能仅依赖钥匙串。配置完成后重新检测；缺少 CLI 时打开该行的「安装说明」，核对本机安装。版本不兼容会同时显示实际与预期版本；「更正路径」只编辑所选配置的可执行文件路径，保存后重新检测。检测失败与配置读取失败可重试；保存版本冲突时草稿保留，明确选择「丢弃修改并重新读取」后再编辑。
 
 outcome_unknown/delivery_unknown 表示停止或发送确认不足；先检查保留文件和原生历史，再按详情的明确恢复动作处理，勿反复重发。Linux/Windows 的本机验证不能用 macOS 结果代替。出现缺失 macOS scanner 时，源码开发者运行 `node scripts/build-delegation-scanner.mjs`，安装包用户重新核对包完整性；不要关闭边界强行执行。

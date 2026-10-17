@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed, useId } from 'vue'
-import { subagentFrame, subagentSheet } from './subagentAvatars'
+import { subagentFrame, subagentFrames, subagentSheet } from './subagentAvatars'
 const props = withDefaults(
-  defineProps<{ sessionId: string; size?: number }>(),
+  defineProps<{ sessionId: string; size?: number; frameId?: string }>(),
   { size: 28 },
 )
-const frame = computed(() => subagentFrame(props.sessionId))
+const frame = computed(
+  () =>
+    subagentFrames.find((frame) => frame.id === props.frameId) ??
+    subagentFrame(props.sessionId),
+)
 const clip = `native-portrait-${useId()}`
 </script>
 <template>

@@ -1,11 +1,12 @@
 <script setup lang="ts">
-/** Local CLI login is the default. Secrets stay in the host resolver. */
+/** Minimal source controls. Hidden settings are round-tripped without edits. */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type {
   ExecutorConfig,
   ExecutorProfile,
   ExecutorProbe,
 } from '@emperor/core/runtime-contract'
+import { openExternal } from '../../api/backend'
 import {
   listExecutors,
   configureExecutors,
@@ -13,70 +14,119 @@ import {
 } from '../../api/delegations'
 import {
   SettingsSection,
-  SettingsGroup,
-  SettingsRow,
   TextField,
   Select,
   Switch,
-  StatusBadge,
   useSettingsHeader,
-  refreshAction,
 } from './ui'
 import Button from '../ui/Button.vue'
 import ProviderLogo from '../ui/ProviderLogo.vue'
+import SubagentAvatarPreview from '../ui/SubagentAvatarPreview.vue'
 const config = ref<ExecutorConfig | null>(null),
   probes = ref<Record<string, ExecutorProbe | null>>({}),
+  probeErrors = ref<Record<string, string>>({}),
+  selected = ref<Record<string, string>>({}),
+  recovery = ref<Record<string, boolean>>({}),
   loading = ref(false),
   busy = ref(false),
-  error = ref('')
+  error = ref(''),
+  saved = ref(''),
+  reloadRequested = ref(false),
+  stale = ref(false)
 let generation = 0
-const saved = ref('')
 const dirty = computed(
   () => config.value !== null && JSON.stringify(config.value) !== saved.value,
 )
-const labels: Record<ExecutorProbe['status'], string> = {
-  available: '可用',
-  missing: '未找到',
-  needs_auth: '需要认证',
-  incompatible: '版本不兼容',
-  containment_unavailable: '隔离不可用',
-}
-function probeLabel(profile: ExecutorProfile) {
-  return probes.value[profile.id]
-    ? labels[probes.value[profile.id]!.status]
-    : '未检测'
-}
-function probeDetail(profile: ExecutorProfile) {
+const rows = computed(() =>
+  (['claude-code', 'codex'] as const).map((backend) => {
+    const profiles =
+      config.value?.profiles.filter((profile) => profile.backend === backend) ??
+      []
+    return {
+      backend,
+      name: backend === 'codex' ? 'Codex' : 'Claude Code',
+      profiles,
+      profile:
+        profiles.find((profile) => profile.id === selected.value[backend]) ??
+        profiles[0],
+    }
+  }),
+)
+const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+const message = (cause: unknown) =>
+  cause instanceof Error ? cause.message : String(cause)
+function label(profile: ExecutorProfile) {
+  if (loading.value) return '检测中…'
+  if (probeErrors.value[profile.id]) return '检测失败'
   const probe = probes.value[profile.id]
-  if (!probe) return '正在检测本机 CLI 和登录配置…'
-  if (probe.status === 'available')
-    return `${profile.authRef.kind === 'managed-cli-login' ? '本机登录配置' : '模型凭据引用'}已读取，${profile.enabled ? '可直接派工' : '启用后可派工'}`
-  if (probe.status === 'needs_auth')
-    return profile.authRef.kind === 'managed-cli-login'
-      ? '未找到可读取的本机登录配置，请先在终端配置对应 CLI。'
-      : '所选模型凭据不可用，请检查凭据引用。'
-  return probe.diagnostic ?? '请检查 CLI 安装和路径。'
+  if (!probe) return '未检测'
+  if (probe.diagnostic === 'executor version probe failed') return '检测失败'
+  if (probe.diagnostic === 'AUTH_REQUIRED') return '需要登录配置'
+  if (probe.diagnostic === 'AUTH_ROUTE_UNAVAILABLE') return '凭据不可用'
+  return {
+    available: '可用',
+    missing: '未找到 CLI',
+    needs_auth: '需要登录配置',
+    incompatible: '版本不兼容',
+    containment_unavailable: '运行环境不可用',
+  }[probe.status]
 }
-async function load() {
+function detail(profile: ExecutorProfile) {
+  if (probeErrors.value[profile.id])
+    return `检测失败：${probeErrors.value[profile.id]}`
+  const probe = probes.value[profile.id]
+  if (!probe) return ''
+  if (probe.diagnostic === 'executor version probe failed')
+    return 'CLI 版本检测失败，请检查可执行权限及本机运行环境后重试。'
+  if (probe.diagnostic === 'AUTH_ROUTE_UNAVAILABLE')
+    return '所选模型凭据不可读，请在模型设置检查原配置。'
+  if (probe.status === 'needs_auth' || probe.diagnostic === 'AUTH_REQUIRED')
+    return profile.authRef.kind === 'model-route'
+      ? '所选模型凭据不可读，请在模型设置检查原配置。'
+      : `请在终端运行 ${profile.backend === 'codex' ? 'codex login' : 'claude auth login'}。${profile.backend === 'claude-code' ? 'Emperor 需要可读取的 CLI 文件或环境变量认证；仅钥匙串登录不可用。' : ''}配置完成后重新检测。`
+  if (probe.status === 'missing')
+    return '未找到 CLI，请检查本机安装或更正路径后保存。'
+  if (probe.status === 'incompatible')
+    return `CLI 版本不兼容：实际 ${probe.executableVersion ?? '未知'}，预期 ${profile.expectedVersion}。请检查本机 CLI 版本。`
+  if (probe.status === 'containment_unavailable')
+    return '本机运行环境不可用，请检查 CLI 运行环境后重试。'
+  return ''
+}
+function hasIssue(profile: ExecutorProfile) {
+  return (
+    !!probeErrors.value[profile.id] ||
+    (!!probes.value[profile.id] &&
+      probes.value[profile.id]!.status !== 'available')
+  )
+}
+async function load(forceProbe = false, discard = false) {
+  if (loading.value || busy.value) return
+  if (dirty.value && !discard) {
+    reloadRequested.value = true
+    return
+  }
   const current = ++generation
   loading.value = true
+  error.value = ''
+  reloadRequested.value = false
   try {
     const result = await listExecutors()
     if (current !== generation) return
-    config.value = result.config
-      ? (JSON.parse(JSON.stringify(result.config)) as ExecutorConfig)
-      : null
+    config.value = clone(result.config)
     saved.value = JSON.stringify(config.value)
+    stale.value = false
     probes.value = Object.fromEntries(
       result.profiles.map((entry) => [entry.profile.id, entry.probe]),
     )
-    if (result.diagnostic) error.value = result.diagnostic
+    probeErrors.value = {}
+    if (result.diagnostic)
+      error.value = `${result.diagnostic}；请检查原配置后重新检测。`
     await Promise.all(
       result.profiles
-        .filter((entry) => !entry.probe)
+        .filter((entry) => forceProbe || !entry.probe)
         .map(async (entry) => {
-          const profile = result.config?.profiles.find(
-            (p) => p.id === entry.profile.id,
+          const profile = config.value?.profiles.find(
+            (profile) => profile.id === entry.profile.id,
           )
           if (!profile) return
           const key = JSON.stringify(profile)
@@ -90,65 +140,79 @@ async function load() {
             )
               probes.value[profile.id] = probe
           } catch (cause) {
-            if (current === generation) error.value = String(cause)
+            if (current === generation)
+              probeErrors.value[profile.id] = message(cause)
           }
         }),
     )
   } catch (cause) {
-    if (current === generation) error.value = String(cause)
+    if (current === generation)
+      error.value = `读取配置失败：${message(cause)}；请重新检测。`
   } finally {
     if (current === generation) loading.value = false
   }
 }
+async function installHelp(profile: ExecutorProfile) {
+  try {
+    await openExternal(
+      profile.backend === 'codex'
+        ? 'https://learn.chatgpt.com/docs/codex/cli'
+        : 'https://code.claude.com/docs/en/setup',
+    )
+  } catch {
+    error.value = '无法打开安装说明，请检查系统浏览器后重试。'
+  }
+}
 async function save() {
-  if (busy.value || !config.value) return
+  if (
+    busy.value ||
+    loading.value ||
+    !config.value ||
+    !dirty.value ||
+    stale.value
+  )
+    return
+  const current = ++generation,
+    draft = clone(config.value)
   busy.value = true
   error.value = ''
   try {
-    await configureExecutors({
-      expectedRevision: config.value.revision,
-      config: JSON.parse(JSON.stringify(config.value)) as ExecutorConfig,
+    const result = await configureExecutors({
+      expectedRevision: draft.revision,
+      config: draft,
     })
-    await load()
+    if (current !== generation) return
+    config.value = clone(result)
+    saved.value = JSON.stringify(config.value)
+    probes.value = {}
+    probeErrors.value = {}
+    reloadRequested.value = false
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause)
-    await load()
+    if (current !== generation) return
+    error.value = message(cause)
+    if (error.value.includes('STALE_REVISION')) {
+      stale.value = true
+      reloadRequested.value = true
+    }
   } finally {
-    busy.value = false
+    if (current === generation) busy.value = false
   }
-}
-async function detect(profile: ExecutorProfile) {
-  if (busy.value) return
-  busy.value = true
-  error.value = ''
-  try {
-    probes.value[profile.id] = await probeExecutor({ profileId: profile.id })
-  } catch (cause) {
-    error.value = String(cause)
-  } finally {
-    busy.value = false
-  }
-}
-function auth(
-  profile: ExecutorProfile,
-  kind: 'managed-cli-login' | 'model-route',
-) {
-  profile.authRef =
-    kind === 'managed-cli-login' ? { kind } : { kind, routeId: '' }
-}
-function number(value: string, max: number) {
-  const n = Number(value)
-  return Math.max(1, Math.min(max, Number.isFinite(n) ? Math.floor(n) : 1))
 }
 useSettingsHeader({
   actions: () => [
-    refreshAction(load, { label: '刷新执行器配置' }),
+    {
+      id: 'detect-executors',
+      label: loading.value ? '检测中…' : '重新检测',
+      onClick: () => load(true),
+      disabled: loading.value || busy.value,
+      busy: loading.value,
+    },
     {
       id: 'save-executors',
       label: '保存配置',
       kind: 'primary',
       onClick: save,
-      disabled: busy.value || loading.value || !dirty.value,
+      disabled: busy.value || loading.value || !dirty.value || stale.value,
       busy: busy.value,
     },
   ],
@@ -159,154 +223,180 @@ onBeforeUnmount(() => {
 })
 </script>
 <template>
-  <SettingsSection
-    intro="默认复用本机 Claude Code、Codex 登录，由主代理直接派工。普通任务返回结果，文件成果在交付或整合前检查。"
-  >
+  <SettingsSection intro="由主会话统一派工。">
     <p v-if="error" class="executor-error" role="alert">{{ error }}</p>
-    <p v-if="loading && !config" class="executor-note">正在读取执行器配置…</p>
-    <template v-if="config">
-      <SettingsGroup
-        v-for="profile in config.profiles"
-        :key="profile.id"
-        :title="`${profile.backend === 'codex' ? 'Codex' : 'Claude Code'} · ${profile.id}`"
+    <p v-if="loading && !config" class="executor-note" role="status">
+      正在读取子智能体配置…
+    </p>
+    <div v-if="reloadRequested" class="reload-notice" role="status">
+      <span>有未保存的修改。重新读取会丢弃这些修改。</span>
+      <Button
+        size="sm"
+        variant="outline"
+        data-discard-executor-edits
+        :disabled="busy || loading"
+        @click="load(true, true)"
+        >丢弃修改并重新读取</Button
       >
-        <template #title
-          ><ProviderLogo
-            :icon-id="profile.backend"
-            :label="profile.backend"
-            size="xs"
-            :data-agent-logo="profile.backend"
+    </div>
+    <div class="sources">
+      <section class="source" data-settings-agent="local">
+        <div class="source-main">
+          <SubagentAvatarPreview />
+          <div class="source-copy">
+            <h3>本地</h3>
+            <p>自动分配角色头像</p>
+          </div>
+          <span class="executor-note">内置</span>
+        </div>
+      </section>
+      <section
+        v-for="row in rows"
+        :key="row.backend"
+        class="source"
+        :data-settings-agent="row.backend"
+        :data-profile-id="row.profile?.id"
+      >
+        <div class="source-main">
+          <ProviderLogo
+            :icon-id="row.backend"
+            :label="row.name"
+            size="lg"
+            :data-agent-logo="row.backend"
           />
-          {{ profile.backend === 'codex' ? 'Codex' : 'Claude Code' }} ·
-          {{ profile.id }}</template
-        >
-        <template #actions
-          ><StatusBadge
-            :tone="probes[profile.id]?.status === 'available' ? 'ok' : 'warn'"
-            >{{ probeLabel(profile) }}</StatusBadge
-          ><StatusBadge v-if="!profile.enabled">已关闭</StatusBadge></template
-        >
-        <SettingsRow
-          title="启用执行器"
-          :description="`协议基线 ${profile.expectedVersion}`"
-          ><Switch
-            v-model="profile.enabled"
-            data-executor-enabled
-            :disabled="busy"
-            :aria-label="`启用 ${profile.id}`"
-        /></SettingsRow>
-        <SettingsRow
-          title="可执行文件"
-          layout="stacked"
-          :label-for="`executor-path-${profile.id}`"
-          ><TextField
-            :id="`executor-path-${profile.id}`"
-            v-model="profile.executablePath"
-            monospace
-            :disabled="busy"
-            autocomplete="off"
-        /></SettingsRow>
-        <SettingsRow
-          title="默认模型"
-          layout="stacked"
-          :label-for="`executor-model-${profile.id}`"
-          ><TextField
-            :id="`executor-model-${profile.id}`"
-            :model-value="profile.defaultModel ?? ''"
-            placeholder="留空使用执行器默认模型"
-            :disabled="busy"
-            @update:model-value="profile.defaultModel = $event || undefined"
-        /></SettingsRow>
-        <SettingsRow
-          title="认证方式"
-          description="使用本机已配置的 CLI 登录，或引用模型设置中的凭据。这里不接收密钥。"
-          ><Select
-            :model-value="profile.authRef.kind"
-            :options="[
-              { value: 'managed-cli-login', label: '本机 CLI 登录' },
-              { value: 'model-route', label: '模型凭据引用' },
-            ]"
-            :disabled="busy"
-            @change="auth(profile, $event)"
-        /></SettingsRow>
-        <SettingsRow
-          v-if="profile.authRef.kind === 'model-route'"
-          title="模型条目 ID"
-          layout="stacked"
-          :label-for="`executor-route-${profile.id}`"
-          ><TextField
-            :id="`executor-route-${profile.id}`"
-            v-model="profile.authRef.routeId"
-            :disabled="busy"
-            placeholder="模型设置中的条目 ID"
-            monospace
-        /></SettingsRow>
-        <SettingsRow title="并发上限"
-          ><Select
-            v-model="profile.concurrencyLimit"
-            :options="[
-              { value: 1, label: '1 个任务' },
-              { value: 2, label: '2 个任务' },
-            ]"
-            :disabled="busy"
-        /></SettingsRow>
-        <SettingsRow title="检测结果" :description="probeDetail(profile)"
-          ><template #default
-            ><span class="executor-note"
-              >{{ probes[profile.id]?.executableVersion ?? '尚无版本记录' }} ·
-              本机检测</span
-            ><Button
-              size="sm"
-              variant="outline"
-              :disabled="busy || loading || dirty"
-              @click="detect(profile)"
-              >检测</Button
-            ></template
-          ></SettingsRow
-        >
-      </SettingsGroup>
-      <SettingsGroup title="调度配额">
-        <SettingsRow title="全局并发"
-          ><Select
-            v-model="config.limits.globalConcurrency"
-            :options="[
-              { value: 1, label: '1 个任务' },
-              { value: 2, label: '2 个任务' },
-            ]"
-            :disabled="busy"
-        /></SettingsRow>
-        <SettingsRow title="每个任务最多执行轮数"
-          ><TextField
-            type="number"
-            :model-value="String(config.limits.maxRunsPerTask)"
-            :disabled="busy"
-            aria-label="每任务最多轮数"
-            @update:model-value="
-              config.limits.maxRunsPerTask = number($event, 32)
+          <div class="source-copy">
+            <h3>{{ row.name }}</h3>
+            <p v-if="row.profile">
+              {{
+                row.profile.authRef.kind === 'managed-cli-login'
+                  ? '本机登录配置'
+                  : '模型凭据引用'
+              }}{{ probes[row.profile.id]?.status === 'available' ? '可读' : ''
+              }}<span> · </span
+              ><span :data-probe-status="probes[row.profile.id]?.status">{{
+                label(row.profile)
+              }}</span>
+            </p>
+            <p v-else>{{ loading ? '读取中…' : '未配置' }}</p>
+          </div>
+          <Select
+            v-if="row.profiles.length > 1"
+            :model-value="row.profile!.id"
+            :options="
+              row.profiles.map((profile) => ({
+                value: profile.id,
+                label: profile.id,
+              }))
             "
-        /></SettingsRow>
-      </SettingsGroup>
-      <p class="executor-note">
-        自动检测只读取本机 CLI
-        和登录配置，不提交模型任务。修改后使用顶部“保存配置”提交。
-      </p>
-    </template>
+            size="sm"
+            data-executor-profile
+            :aria-label="`${row.name} 配置`"
+            :disabled="busy || loading"
+            @change="selected[row.backend] = $event"
+          />
+          <Switch
+            v-if="row.profile"
+            v-model="row.profile.enabled"
+            data-executor-enabled
+            :disabled="busy || loading"
+            :aria-label="`启用 ${row.name}`"
+          />
+        </div>
+        <template v-if="row.profile && hasIssue(row.profile)">
+          <div class="source-help">
+            <p role="status">{{ detail(row.profile) }}</p>
+            <div class="recovery-actions">
+              <Button
+                v-if="probes[row.profile.id]?.status === 'missing'"
+                size="sm"
+                variant="ghost"
+                data-executor-install-help
+                @click="installHelp(row.profile)"
+                >安装说明</Button
+              ><Button
+                size="sm"
+                variant="ghost"
+                :disabled="busy || loading"
+                @click="load(true)"
+                >重试</Button
+              ><Button
+                size="sm"
+                variant="ghost"
+                data-executor-recovery
+                :disabled="busy || loading"
+                @click="recovery[row.profile.id] = !recovery[row.profile.id]"
+                >更正路径</Button
+              >
+            </div>
+            <TextField
+              v-if="recovery[row.profile.id]"
+              v-model="row.profile.executablePath"
+              :aria-label="`${row.name} 可执行文件路径`"
+              :disabled="busy || loading"
+              autocomplete="off"
+              monospace
+            />
+          </div>
+        </template>
+      </section>
+    </div>
   </SettingsSection>
 </template>
 <style scoped>
-.executor-actions {
+.sources {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
+  flex-direction: column;
+}
+.source {
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--border-l2);
+}
+.source:last-child {
+  border-bottom: none;
+}
+.source-main {
+  display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-4) 0;
+  flex-wrap: wrap;
 }
-.executor-note {
+.source-copy {
+  flex: 1;
+  min-width: 140px;
+}
+h3,
+p {
+  margin: 0;
+}
+h3 {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  font-weight: 500;
+  color: rgb(var(--label-primary));
+}
+.source-copy p,
+.executor-note,
+.source-help,
+.reload-notice {
   color: rgb(var(--label-tertiary));
   font-size: var(--fs-xs);
-  text-wrap: pretty;
+  line-height: var(--lh-xs);
   overflow-wrap: anywhere;
+}
+.source-help {
+  padding-top: var(--space-2);
+  padding-left: calc(40px + var(--space-3));
+}
+.recovery-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+}
+.reload-notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 .executor-error {
   color: rgb(var(--state-error-label));
