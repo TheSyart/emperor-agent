@@ -13,6 +13,7 @@ type Started = SessionEvent<'subagent/started'>['data'] & {
   at: number
   stopReason?: string
   settledAt?: number
+  childTurnEndSeq?: number
 }
 interface InternalFacts {
   id: string
@@ -23,6 +24,9 @@ interface InternalFacts {
   updatedAt: number
   phase: AgentPhase
   stopReason?: string
+  turnEventSeq?: number
+  turnEventAt?: number
+  liveState?: boolean
   unavailable?: AgentView['unavailable']
   children: Started[]
 }
@@ -48,6 +52,33 @@ function settledPhase(reason?: string): AgentPhase {
     : reason === 'interrupted' || !reason
       ? 'unknown'
       : 'failed'
+}
+/** A parent may reject an otherwise completed turn (e.g. missing structured
+ * output). Apply that final validation only to its corresponding child run.
+ * New facts identify the exact turn/end; legacy logs use strict timestamps and
+ * keep conflicting millisecond ties unknown rather than guessing a final state.
+ */
+function nativeState(
+  node: InternalFacts,
+  started?: Started,
+): { phase: AgentPhase; stopReason?: string } {
+  const own = { phase: node.phase, stopReason: node.stopReason }
+  if (node.unavailable || node.liveState || !started?.stopReason) return own
+  const settled = {
+    phase: settledPhase(started.stopReason),
+    stopReason: started.stopReason,
+  }
+  if (node.turnEventSeq === undefined) return settled
+  if (started.childTurnEndSeq !== undefined) {
+    if (started.childTurnEndSeq === node.turnEventSeq) return settled
+    if (started.childTurnEndSeq < node.turnEventSeq) return own
+    return { phase: 'unknown' }
+  }
+  if (started.settledAt! > node.turnEventAt!) return settled
+  if (started.settledAt! < node.turnEventAt!) return own
+  return node.phase === 'unknown' || node.stopReason === started.stopReason
+    ? own
+    : { phase: 'unknown' }
 }
 function externalView(state: DelegationState): AgentView | undefined {
   const r = state.record
@@ -181,6 +212,7 @@ export class CoreAgentService {
       const children = new Map<string, Started>()
       let phase: AgentPhase = 'unknown',
         stopReason: string | undefined
+      let turnEventSeq: number | undefined, turnEventAt: number | undefined
       let updatedAt = s.header.createdAt
       for (const e of own) {
         if (!RELEVANT.has(e.type)) continue
@@ -192,7 +224,12 @@ export class CoreAgentService {
           if (child) {
             child.stopReason = e.data.stopReason
             child.settledAt = e.time
+            child.childTurnEndSeq = e.data.childTurnEndSeq
           }
+        }
+        if (e.type === 'turn/start' || e.type === 'turn/end') {
+          turnEventSeq = e.seq
+          turnEventAt = e.time
         }
         if (e.type === 'turn/start') {
           phase = this.options.live(id) ? 'running' : 'unknown'
@@ -223,6 +260,10 @@ export class CoreAgentService {
         updatedAt,
         phase,
         stopReason,
+        turnEventSeq,
+        turnEventAt,
+        liveState:
+          live?.status === 'running' || live?.lastStopReason !== undefined,
         ...(descriptor &&
         s.header.parentSession &&
         descriptor.parentSession !== s.header.parentSession
@@ -311,6 +352,7 @@ export class CoreAgentService {
       const started = nodes
         .get(node.parent)
         ?.children.find((c) => c.subagentId === node.id)
+      const state = nativeState(node, started)
       rows.push({
         id: node.id,
         kind: 'internal',
@@ -318,18 +360,13 @@ export class CoreAgentService {
         rootSessionId: root,
         parentAgentId: node.parent,
         title: agentTitle(node.description ?? started?.description, 'internal'),
-        phase:
-          node.unavailable || node.stopReason || node.phase !== 'unknown'
-            ? node.phase
-            : settledPhase(started?.stopReason),
+        phase: state.phase,
         createdAt: node.createdAt,
         updatedAt: Math.max(node.updatedAt, started?.settledAt ?? 0),
         ...((node.parentCallId ?? started?.callId)
           ? { parentCallId: node.parentCallId ?? started?.callId }
           : {}),
-        ...((node.stopReason ?? started?.stopReason)
-          ? { stopReason: node.stopReason ?? started?.stopReason }
-          : {}),
+        ...(state.stopReason ? { stopReason: state.stopReason } : {}),
         ...(node.unavailable ? { unavailable: node.unavailable } : {}),
       })
     }

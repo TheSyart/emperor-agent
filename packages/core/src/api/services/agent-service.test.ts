@@ -118,8 +118,8 @@ describe('unified child-agent read index', () => {
     expect(agentTitle(undefined, 'claude-code')).toBe('Claude Code 子智能体')
     expect(agentTitle('   ', 'codex')).toBe('Codex 子智能体')
     expect(agentSourceLabel('internal')).toBe('Emperor')
-    expect(agentPhaseLabel('waiting')).toBe('等待输入')
-    expect(agentPhaseLabel('unknown')).toBe('状态未知')
+    expect(agentPhaseLabel('waiting')).toBe('等待回答')
+    expect(agentPhaseLabel('unknown')).toBe('结果待确认')
   })
   it('rebuilds all providers under actual parents with stable conversation identities across runs', () => {
     const a = external('dlg-codex', 'root', 'sub-parent'),
@@ -279,6 +279,152 @@ describe('unified child-agent read index', () => {
     })
     f.sessions.closeAll()
   })
+  it.each([
+    {
+      name: 'parent validation corrects a completed child turn',
+      marker: true,
+      sameTime: false,
+      continuation: 'none',
+      phase: 'failed',
+      reason: 'error',
+    },
+    {
+      name: 'later open turn supersedes the prior settlement',
+      marker: true,
+      sameTime: false,
+      continuation: 'open',
+      phase: 'unknown',
+      reason: 'interrupted',
+    },
+    {
+      name: 'later closed turn supersedes the prior settlement',
+      marker: true,
+      sameTime: false,
+      continuation: 'closed',
+      phase: 'completed',
+      reason: 'completed',
+    },
+    {
+      name: 'event identity disambiguates a later open turn in the same millisecond',
+      marker: true,
+      sameTime: true,
+      continuation: 'open',
+      phase: 'unknown',
+      reason: 'interrupted',
+    },
+    {
+      name: 'event identity disambiguates a later closed turn in the same millisecond',
+      marker: true,
+      sameTime: true,
+      continuation: 'closed',
+      phase: 'completed',
+      reason: 'completed',
+    },
+    {
+      name: 'event identity preserves parent validation in the same millisecond',
+      marker: true,
+      sameTime: true,
+      continuation: 'none',
+      phase: 'failed',
+      reason: 'error',
+    },
+    {
+      name: 'legacy same-millisecond open continuation remains interrupted',
+      marker: false,
+      sameTime: true,
+      continuation: 'open',
+      phase: 'unknown',
+      reason: 'interrupted',
+    },
+    {
+      name: 'legacy same-millisecond closed continuation cannot prove its final settlement',
+      marker: false,
+      sameTime: true,
+      continuation: 'closed',
+      phase: 'unknown',
+      reason: undefined,
+    },
+    {
+      name: 'legacy later parent validation remains authoritative',
+      marker: false,
+      sameTime: false,
+      continuation: 'none',
+      phase: 'failed',
+      reason: 'error',
+    },
+    {
+      name: 'legacy later open turns supersede earlier settlements',
+      marker: false,
+      sameTime: false,
+      continuation: 'open',
+      phase: 'unknown',
+      reason: 'interrupted',
+    },
+    {
+      name: 'legacy later closed turns supersede earlier settlements',
+      marker: false,
+      sameTime: false,
+      continuation: 'closed',
+      phase: 'completed',
+      reason: 'completed',
+    },
+    {
+      name: 'legacy equal timestamps with conflicting final states remain unknown',
+      marker: false,
+      sameTime: true,
+      continuation: 'none',
+      phase: 'unknown',
+      reason: undefined,
+    },
+  ])(
+    'folds durable native chronology: $name',
+    ({ marker, sameTime, continuation, phase, reason }) => {
+      let now = 1000
+      const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+      const f = fixture()
+      try {
+        const session = child(f, 'sub-chronology', 'root')
+        session.append('turn/start', { turn: 1 })
+        if (!sameTime) now = 1100
+        const ended = session.append('turn/end', {
+          turn: 1,
+          reason: { kind: 'completed' },
+        })
+        if (!sameTime) now = 1200
+        f.sessions.get('root')!.append('subagent/settled', {
+          subagentId: session.id,
+          stopReason: 'error',
+          ...(marker ? { childTurnEndSeq: ended.seq } : {}),
+        })
+        if (continuation !== 'none') {
+          if (!sameTime) now = 1300
+          session.append('turn/start', { turn: 2 })
+          if (continuation === 'closed') {
+            if (!sameTime) now = 1400
+            session.append('turn/end', {
+              turn: 2,
+              reason: { kind: 'completed' },
+            })
+          }
+        }
+        const before = f.service
+          .list(['root'])
+          .agents.find((row) => row.id === session.id)
+        expect(before?.phase).toBe(phase)
+        expect(before?.stopReason).toBe(reason)
+        f.sessions.closeAll()
+        f.service.rebuild()
+        const after = f.service
+          .list(['root'])
+          .agents.find((row) => row.id === session.id)
+        expect(after?.phase).toBe(phase)
+        expect(after?.stopReason).toBe(reason)
+      } finally {
+        f.sessions.closeAll()
+        clock.mockRestore()
+      }
+    },
+  )
   it('reconstructs header-only older children from their actual parent creation and settlement facts', () => {
     const f = fixture()
     f.sessions.create({

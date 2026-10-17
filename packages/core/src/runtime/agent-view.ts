@@ -41,9 +41,9 @@ export function agentTitle(
 export function agentPhaseLabel(phase: AgentPhase): string {
   return {
     running: '运行中',
-    waiting: '等待输入',
+    waiting: '等待回答',
     completed: '已完成',
     failed: '失败',
-    unknown: '状态未知',
+    unknown: '结果待确认',
   }[phase]
 }

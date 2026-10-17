@@ -78,6 +78,61 @@ describe('agents.list Core boundary', () => {
       if (!closed) await f.api.close()
     }
   })
+  it('preserves structured-output validation failure when rebuilding without the live manager', async () => {
+    const f = await makeApi({
+      replies: [{ text: 'completed without the required result' }],
+    })
+    let closed = false
+    try {
+      const rootId = String(
+        f.api.sessions.create({ title: 'structured parent' }).id,
+      )
+      const child = f.api.host.subagents.start(f.api.host.agentFor(rootId), {
+        description: 'return a structured result',
+        prompt: 'finish',
+        mode: 'spawn',
+        background: false,
+        outputSchema: {
+          type: 'object',
+          properties: { result: { type: 'string' } },
+          required: ['result'],
+        },
+      })
+      const settled = await f.api.host.subagents.waitForSettlement(
+        child.id,
+        new AbortController().signal,
+      )
+      await child.whenIdle()
+      expect(child.session.lastOf('turn/end')?.data.reason.kind).toBe(
+        'completed',
+      )
+      expect(settled.stopReason).toBe('error')
+      const before = f.api.agents
+        .list({ rootSessionIds: [rootId] })
+        .agents.find((row) => row.id === child.id)
+      expect(before).toMatchObject({ phase: 'failed', stopReason: 'error' })
+      const settlementFact = f.api.host.sessions
+        .get(rootId)
+        ?.lastOf('subagent/settled')?.data
+      const turnEndSeq = child.session.lastOf('turn/end')?.seq
+      await f.api.close()
+      closed = true
+      const restarted = await makeApi({ root: f.root, stateRoot: f.stateRoot })
+      try {
+        expect(restarted.api.host.subagents.record(child.id)).toBeUndefined()
+        expect(
+          restarted.api.agents
+            .list({ rootSessionIds: [rootId] })
+            .agents.find((row) => row.id === child.id),
+        ).toMatchObject({ phase: 'failed', stopReason: 'error' })
+        expect(settlementFact).toMatchObject({ childTurnEndSeq: turnEndSeq })
+      } finally {
+        await restarted.api.close()
+      }
+    } finally {
+      if (!closed) await f.api.close()
+    }
+  })
   it('rebuilds a durable external conversation after restart without activating a dlg as a native session', async () => {
     const f = await makeApi()
     const rootId = String(f.api.sessions.create({ title: 'external owner' }).id)

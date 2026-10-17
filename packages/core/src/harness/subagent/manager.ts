@@ -49,6 +49,8 @@ declare module '../../session-log/types' {
     'subagent/settled': {
       subagentId: string
       stopReason: SubagentStopReason
+      /** Exact own child turn/end position; absent in older persisted logs. */
+      childTurnEndSeq?: number
       text?: string
     }
     /** Log-only on the CHILD: its creation facts (first event). */
@@ -417,6 +419,7 @@ export class SubagentManager {
       parent?.session.append('subagent/settled', {
         subagentId: entry.record.id,
         stopReason: settlement.stopReason,
+        ...(lastEnd === undefined ? {} : { childTurnEndSeq: lastEnd.seq }),
         ...(text === undefined ? {} : { text }),
       })
     } catch (error: unknown) {
