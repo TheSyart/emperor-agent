@@ -36,6 +36,9 @@ it.each([
   ['interrupted', '已中断'],
   ['cancelled', '已取消'],
   ['provider_paused', '状态：provider_paused'],
+  ['toString', '状态：toString'],
+  ['constructor', '状态：constructor'],
+  ['__proto__', '状态：__proto__'],
   [undefined, '状态未记录'],
 ])('renders recorded tool status %s truthfully as %s', (status, label) => {
   expect(externalToolStatusLabel(status)).toBe(label)

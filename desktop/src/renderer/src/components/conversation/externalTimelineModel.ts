@@ -95,5 +95,8 @@ const toolStatuses: Record<string, string> = {
 }
 
 export function externalToolStatusLabel(status: string | undefined): string {
-  return status ? (toolStatuses[status] ?? `状态：${status}`) : '状态未记录'
+  if (!status) return '状态未记录'
+  return Object.hasOwn(toolStatuses, status)
+    ? toolStatuses[status]!
+    : `状态：${status}`
 }
