@@ -281,3 +281,70 @@ it('retains a pending stop when reopening the same KeepAlive child before the ru
   await settle()
   expect(root.querySelector('[data-stop-child]')).toBeNull()
 })
+it('fences a delayed older-page completion after switching to a reused child scroller', async () => {
+  const original = bridge.invokeCore.getMockImplementation()!
+  let finishOld!: (page: unknown) => void, finishNew!: (page: unknown) => void
+  bridge.invokeCore.mockImplementation(
+    (key: string, input: Record<string, unknown>) => {
+      if (key === 'delegations.history' && input.before)
+        return new Promise((resolve) => {
+          if (input.id === 'dlg-one') finishOld = resolve
+          else finishNew = resolve
+        })
+      if (key === 'delegations.history')
+        return Promise.resolve({
+          entries: input.after
+            ? []
+            : [{ id: 'first', runId: currentRun, type: 'text', text: 'first' }],
+          before: 'first',
+          after: 'first',
+          hasBefore: true,
+          hasAfter: false,
+        })
+      return original(key, input)
+    },
+  )
+  const dom = await mount()
+  const timeline = dom.querySelector<HTMLElement>('.child-timeline')!
+  Object.defineProperty(timeline, 'scrollHeight', {
+    configurable: true,
+    value: 500,
+  })
+  timeline.scrollTop = 50
+  const olderButton = () =>
+    [...dom.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+      /加载更早记录|正在读取…/.test(b.textContent ?? ''),
+    )!
+  olderButton().click()
+  await settle()
+  expect(olderButton().disabled).toBe(true)
+  route.params = { sessionId: 'root', delegationId: 'dlg-two' }
+  await settle()
+  expect(olderButton().disabled).toBe(false)
+  timeline.scrollTop = 25
+  Object.defineProperty(timeline, 'scrollHeight', {
+    configurable: true,
+    value: 900,
+  })
+  olderButton().click()
+  await settle()
+  expect(olderButton().disabled).toBe(true)
+  finishOld({
+    entries: [],
+    before: 'first',
+    after: 'first',
+    hasBefore: false,
+    hasAfter: false,
+  })
+  await settle()
+  expect(timeline.scrollTop).toBe(25)
+  expect(olderButton().disabled).toBe(true)
+  finishNew({
+    entries: [],
+    before: 'first',
+    after: 'first',
+    hasBefore: false,
+    hasAfter: false,
+  })
+  await settle()
+})

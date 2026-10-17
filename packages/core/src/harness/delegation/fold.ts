@@ -12,6 +12,10 @@ export interface DelegationMessage {
   text: string
   status: 'queued' | 'sending' | 'accepted' | 'delivery_unknown' | 'cancelled'
   seq?: number
+  /** Durable send-intent linkage, reconstructed for old journals as well. */
+  runId?: string
+  sendIntentSeq?: number
+  acceptedSeq?: number
   payloadDigest?: string
 }
 export interface DelegationNotice {
@@ -209,6 +213,7 @@ export class DelegationFold {
         if (!message)
           throw new DelegationError('MESSAGE_NOT_FOUND', 'message missing')
         message.status = e.status
+        if (e.status === 'accepted') message.acceptedSeq = entry.seq
         break
       }
       case 'run-created':
@@ -263,8 +268,11 @@ export class DelegationFold {
       }
       case 'send-intent':
         requireRun(e.runId)
-        if (next.messages[e.messageId])
+        if (next.messages[e.messageId]) {
           next.messages[e.messageId]!.status = 'sending'
+          next.messages[e.messageId]!.runId = e.runId
+          next.messages[e.messageId]!.sendIntentSeq = entry.seq
+        }
         break
       case 'provider-bound': {
         const run = requireRun(e.runId)

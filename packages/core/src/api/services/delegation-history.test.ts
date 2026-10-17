@@ -6,6 +6,7 @@ import {
   appendFileSync,
   rmSync,
 } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DelegationHistory } from './delegation-history'
@@ -175,6 +176,12 @@ it('defaults to a 200-entry tail, caps at 500 and exposes only public tool/quest
         ...Array.from({ length: 505 }, (_, i) =>
           write({ type: 'text_delta', text: String(i), thinking: 'secret' }),
         ),
+        write({ type: 'public_prompt', text: 'secret' }),
+        write({
+          type: 'public_prompt',
+          messageId: 'dgm-unowned',
+          text: 'secret',
+        }),
         write({
           type: 'question',
           requestId: 'question-one',
@@ -210,6 +217,257 @@ it('defaults to a 200-entry tail, caps at 500 and exposes only public tool/quest
       text: 'Read only',
     })
     expect(JSON.stringify(tail)).not.toContain('secret')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+it('retains accepted same-run steer instructions at durable output positions across catchup and reload', async () => {
+  const { fixture, spec } =
+    await import('../../harness/delegation/service-test-fixture')
+  const { vi } = await import('vitest')
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const f = fixture(async function* (turn, open) {
+    const identity = {
+      delegationId: open.delegationId,
+      runId: turn.runId,
+      generation: open.generation,
+    }
+    yield { ...identity, type: 'text_delta', text: 'before correction' }
+    await gate
+    yield { ...identity, type: 'text_delta', text: 'after correction' }
+    yield { ...identity, type: 'turn_finished', status: 'completed' }
+  })
+  try {
+    const record = await f.service.start(f.owner, spec)
+    const runId = record.currentRunId!
+    const history = new DelegationHistory(f.root)
+    await vi.waitFor(() =>
+      expect(
+        history.read(f.service.inspect(record.id)).entries.at(-1)?.text,
+      ).toBe('before correction'),
+    )
+    const first = history.read(f.service.inspect(record.id))
+    let atNotification: ReturnType<DelegationHistory['read']> | undefined
+    f.options.onState = (state, event) => {
+      if (
+        event.type === 'message-delivery' &&
+        event.messageId === 'dgm-correct' &&
+        event.status === 'accepted'
+      )
+        atNotification = new DelegationHistory(f.root).read(state, {
+          after: first.after!,
+        })
+    }
+    await f.service.send(record.id, {
+      messageId: 'dgm-correct',
+      text: 'accepted correction',
+      delivery: 'steer',
+      expectedRunId: runId,
+    })
+    const correction = history.read(f.service.inspect(record.id), {
+      after: first.after!,
+    })
+    expect(atNotification?.entries).toEqual(correction.entries)
+    expect(correction.entries).toEqual([
+      expect.objectContaining({
+        type: 'prompt',
+        runId,
+        messageId: 'dgm-correct',
+        status: 'accepted',
+        chronology: 'recorded',
+        text: 'accepted correction',
+      }),
+    ])
+    expect(
+      new DelegationHistory(f.root).read(f.service.inspect(record.id), {
+        after: first.after!,
+      }).entries,
+    ).toEqual(correction.entries)
+    release()
+    await f.service.wait(record.id, runId)
+    const next = history.read(f.service.inspect(record.id), {
+      after: correction.after!,
+    })
+    expect(next.entries[0]?.text).toBe('after correction')
+    expect(next.entries.some((e) => e.messageId === 'dgm-correct')).toBe(false)
+    expect(
+      new DelegationHistory(f.root)
+        .read(f.service.inspect(record.id))
+        .entries.map((e) => e.id),
+    ).toEqual(
+      history.read(f.service.inspect(record.id)).entries.map((e) => e.id),
+    )
+  } finally {
+    release()
+    await f.service.shutdown()
+    f.cleanup()
+  }
+})
+it('reconstructs legacy accepted steer linkage without inventing its order among transcript outputs', async () => {
+  const { DelegationJournal } = await import('../../harness/delegation/journal')
+  const root = mkdtempSync(join(tmpdir(), 'history-legacy-instructions-'))
+  try {
+    const record = fixtureDelegationRecord(),
+      run = fixtureDelegationRun(),
+      journal = new DelegationJournal(root, record.id)
+    await journal.append({ type: 'created', record })
+    await journal.append({
+      type: 'message-enqueued',
+      message: { id: run.messageId, text: 'initial', status: 'accepted' },
+    })
+    await journal.append({ type: 'run-created', run })
+    await journal.append({
+      type: 'run-changed',
+      runId: run.id,
+      patch: { phase: 'preparing' },
+    })
+    await journal.append({
+      type: 'run-changed',
+      runId: run.id,
+      patch: { phase: 'running' },
+    })
+    for (const [id, text, status] of [
+      ['dgm-old-one', 'legacy one', 'accepted'],
+      ['dgm-old-two', 'legacy two', 'accepted'],
+      ['dgm-unknown', 'unknown delivery', 'delivery_unknown'],
+    ] as const) {
+      await journal.append({
+        type: 'message-enqueued',
+        message: { id, text, status: 'queued' },
+      })
+      await journal.append({
+        type: 'send-intent',
+        runId: run.id,
+        messageId: id,
+      })
+      await journal.append({ type: 'message-delivery', messageId: id, status })
+    }
+    const dir = join(root, 'conversations', record.id, 'runs')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, run.id + '.jsonl'),
+      JSON.stringify({
+        delegationId: record.id,
+        runId: run.id,
+        type: 'text_delta',
+        text: 'historical output',
+      }) + '\n',
+    )
+    const history = new DelegationHistory(root),
+      page = history.read(journal.load())
+    expect(
+      page.entries.filter((e) => e.type === 'prompt').map((e) => e.text),
+    ).toEqual(['initial', 'legacy one', 'legacy two'])
+    const outputId = page.entries.find((e) => e.type === 'text')!.id
+    const oldCursor = Buffer.from(
+      JSON.stringify([
+        record.id,
+        outputId,
+        createHash('sha256')
+          .update(record.id + '\0' + outputId)
+          .digest('hex')
+          .slice(0, 16),
+      ]),
+    ).toString('base64url')
+    expect(
+      history
+        .read(journal.load(), { after: oldCursor })
+        .entries.filter((e) => e.messageId)
+        .map((e) => e.text),
+    ).toEqual(['legacy one', 'legacy two'])
+    const corrections = page.entries.filter((e) => e.messageId)
+    expect(corrections).toEqual([
+      expect.objectContaining({
+        messageId: 'dgm-old-one',
+        status: 'accepted',
+        chronology: 'unknown',
+      }),
+      expect.objectContaining({
+        messageId: 'dgm-old-two',
+        status: 'accepted',
+        chronology: 'unknown',
+      }),
+    ])
+    expect(new DelegationHistory(root).read(journal.load()).entries).toEqual(
+      page.entries,
+    )
+    expect(
+      history.read(journal.load(), { after: page.after! }).entries,
+    ).toEqual([])
+    appendFileSync(
+      join(dir, run.id + '.jsonl'),
+      JSON.stringify({
+        delegationId: record.id,
+        runId: run.id,
+        type: 'text_delta',
+        text: 'later observed output',
+      }) + '\n',
+    )
+    expect(
+      history
+        .read(journal.load(), { after: page.after! })
+        .entries.map((e) => e.text),
+    ).toEqual(['later observed output'])
+    expect(
+      new DelegationHistory(root)
+        .read(journal.load(), { after: page.after! })
+        .entries.map((e) => e.text),
+    ).toEqual(['later observed output'])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+it('pages each legacy instruction part without acknowledging undisplayed parts or losing later output', () => {
+  const root = mkdtempSync(join(tmpdir(), 'history-legacy-parts-'))
+  try {
+    const record = fixtureDelegationRecord(),
+      run = fixtureDelegationRun()
+    const state: DelegationState = {
+      record,
+      runs: { [run.id]: run },
+      messages: {},
+      interactions: {},
+      outbox: {},
+      lastSeq: 1,
+    }
+    const dir = join(root, 'conversations', record.id, 'runs')
+    mkdirSync(dir, { recursive: true })
+    const path = join(dir, run.id + '.jsonl')
+    const output = (text: string) =>
+      JSON.stringify({
+        delegationId: record.id,
+        runId: run.id,
+        type: 'text_delta',
+        text,
+      }) + '\n'
+    writeFileSync(path, output('before'))
+    const history = new DelegationHistory(root),
+      first = history.read(state)
+    state.messages['dgm-long'] = {
+      id: 'dgm-long',
+      runId: run.id,
+      sendIntentSeq: 2,
+      acceptedSeq: 3,
+      seq: 1,
+      status: 'accepted',
+      text: 'X'.repeat(10000),
+    }
+    let next = history.read(state, { after: first.after!, limit: 1 })
+    let text = next.entries[0]!.text!
+    appendFileSync(path, output('later'))
+    let later = false
+    for (let i = 0; i < 5 && (next.hasAfter || i === 0); i++) {
+      next = history.read(state, { after: next.after!, limit: 1 })
+      if (next.entries[0]?.type === 'prompt') text += next.entries[0].text
+      if (next.entries[0]?.text === 'later') later = true
+      if (!next.hasAfter) break
+    }
+    expect(text.length).toBe(10000)
+    expect([...text].every((c) => c === 'X')).toBe(true)
+    expect(later).toBe(true)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

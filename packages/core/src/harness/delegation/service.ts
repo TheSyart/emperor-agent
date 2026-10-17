@@ -782,7 +782,43 @@ export class DelegationService {
   }
   private async append(e: Entry, event: DelegationEvent): Promise<void> {
     await e.journal.append(event)
-    this.options.onState?.(e.journal.load(), event)
+    const state = e.journal.load()
+    if (event.type === 'message-delivery' && event.status === 'accepted') {
+      const message = state.messages[event.messageId]
+      const run = message?.runId ? state.runs[message.runId] : undefined
+      if (message && run && message.id !== run.messageId) {
+        // Record the acknowledged public instruction at its actual durable
+        // transcript position before publishing the state callback. No await
+        // separates this append from the snapshot/notification below.
+        try {
+          const directory = join(
+            this.options.root,
+            'conversations',
+            state.record!.id,
+            'runs',
+          )
+          mkdirSync(directory, { recursive: true, mode: 0o700 })
+          appendFileSync(
+            join(directory, run.id + '.jsonl'),
+            JSON.stringify({
+              type: 'public_prompt',
+              delegationId: state.record!.id,
+              runId: run.id,
+              generation: run.generation,
+              messageId: message.id,
+              text: message.text,
+              status: 'accepted',
+            }) + '\n',
+            { mode: 0o600 },
+          )
+        } catch {
+          // The accepted instruction remains authoritative in the control
+          // journal. History reconstructs it with explicit unknown chronology
+          // if its output-position mirror could not be written.
+        }
+      }
+    }
+    this.options.onState?.(state, event)
     for (const wake of e.waiters) wake()
   }
   private profile(spec: DelegationStart): ExecutorProfile {

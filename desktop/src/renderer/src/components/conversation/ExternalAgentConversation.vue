@@ -91,6 +91,7 @@ const { click, links } = provideDelegationLinks(() => ({
   sessionId: rootId.value,
   delegationId: delegationId.value,
 }))
+watch([() => run.value?.id, () => run.value?.phase], () => links.refresh())
 const ancestors = computed(() => {
   const chain: AgentView[] = [],
     seen = new Set([delegationId.value])
@@ -173,6 +174,7 @@ let feed: ReturnType<typeof createExternalHistoryFeed> | undefined,
   generation = 0
 let activated = true
 function disposeFeed() {
+  olderLoading.value = false
   generation++
   feed?.dispose()
   feed = undefined
@@ -276,17 +278,23 @@ function scroll(event: Event) {
 }
 async function older() {
   if (olderLoading.value) return
+  const current = generation,
+    originatingFeed = feed
   olderLoading.value = true
   following.value = false
   const el = scroller.value?.$el,
     height = el?.scrollHeight ?? 0,
     top = el?.scrollTop ?? 0
   try {
-    await feed?.older()
+    await originatingFeed?.older()
+    if (current !== generation || originatingFeed !== feed) return
     await nextTick()
-    if (el) el.scrollTop = top + el.scrollHeight - height
+    if (current !== generation || originatingFeed !== feed) return
+    if (el && scroller.value?.$el === el)
+      el.scrollTop = top + el.scrollHeight - height
   } finally {
-    olderLoading.value = false
+    if (current === generation && originatingFeed === feed)
+      olderLoading.value = false
   }
 }
 async function stop() {
@@ -387,7 +395,11 @@ async function stop() {
               ><p v-if="item.type !== 'text'" class="child-entry-label">
                 {{
                   item.type === 'prompt'
-                    ? '任务要求'
+                    ? item.chronology === 'unknown'
+                      ? '已接收补充要求 · 输出先后未知'
+                      : item.status === 'accepted'
+                        ? '补充要求 · 已接收'
+                        : '任务要求'
                     : item.type === 'question'
                       ? '等待回答'
                       : item.type === 'permission'

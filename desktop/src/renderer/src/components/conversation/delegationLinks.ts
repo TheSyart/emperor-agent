@@ -28,9 +28,8 @@ export function provideDelegationLinks(
     },
   )
   provide(LINK_STATUS_KEY, links)
-  watch(
-    () => [scope().sessionId, scope().delegationId],
-    () => links.refresh(),
+  watch([() => scope().sessionId, () => scope().delegationId], () =>
+    links.refresh(),
   )
   async function click(event: Event) {
     const anchor = (event.target as HTMLElement | null)?.closest(

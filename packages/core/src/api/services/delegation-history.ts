@@ -24,6 +24,9 @@ export interface DelegationHistoryEntry {
   name?: string
   status?: string
   requestId?: string
+  messageId?: string
+  /** Legacy journals have instruction order but no position among output bytes. */
+  chronology?: 'recorded' | 'unknown'
 }
 export interface DelegationHistoryPage {
   entries: DelegationHistoryEntry[]
@@ -38,6 +41,7 @@ export interface DelegationHistoryOptions {
   limit?: number
 }
 interface Position {
+  messageId?: string
   offset: number
   bytes: number
   part: number
@@ -49,6 +53,10 @@ interface RunIndex {
 }
 const PART = 4096
 const MAX_PAGE = 240 * 1024
+// One control-journal event is bounded below 8 MiB (at most 2048 text
+// pieces). Reserve a larger range so every journal-sequence/part pair has
+// its own durable frontier without acknowledging undisplayed pieces.
+const CONTROL_PART_STRIDE = 8192
 const invalid = () =>
   new DelegationError(
     'HISTORY_CURSOR_INVALID',
@@ -79,6 +87,18 @@ export class DelegationHistory {
     const str = (key: string) =>
       typeof event[key] === 'string' ? (event[key] as string) : undefined
     const bounded = (key: string) => str(key)?.slice(0, 512)
+    if (event.type === 'public_prompt') {
+      if (!bounded('messageId')) return null
+      return {
+        id,
+        runId,
+        type: 'prompt',
+        messageId: bounded('messageId'),
+        status: 'accepted',
+        chronology: 'recorded',
+        text: str('text') ?? '',
+      }
+    }
     if (event.type === 'text_delta')
       return { id, runId, type: 'text', text: str('text') ?? '' }
     if (event.type === 'tool_started' || event.type === 'tool_finished')
@@ -136,7 +156,7 @@ export class DelegationHistory {
           readFileSync(path + '.public-index.json', 'utf8'),
         ) as { version: number; index: RunIndex }
         if (
-          cached.version === 1 &&
+          cached.version === 2 &&
           cached.index.ino === stat.ino &&
           Number.isSafeInteger(cached.index.offset) &&
           cached.index.offset >= 0 &&
@@ -197,7 +217,15 @@ export class DelegationHistory {
                 part < Math.max(1, Math.ceil((entry.text?.length ?? 0) / PART));
                 part++
               )
-                index.entries.push({ offset, bytes, part })
+                index.entries.push({
+                  offset,
+                  bytes,
+                  part,
+                  ...(event.type === 'public_prompt' &&
+                  typeof event.messageId === 'string'
+                    ? { messageId: event.messageId }
+                    : {}),
+                })
           }
           index.offset += bytes
           pending = pending.subarray(bytes)
@@ -215,7 +243,7 @@ export class DelegationHistory {
       try {
         durableReplaceSync(
           path + '.public-index.json',
-          JSON.stringify({ version: 1, index }) + '\n',
+          JSON.stringify({ version: 2, index }) + '\n',
         )
       } catch {
         /* Cache write failure cannot hide durable output. */
@@ -234,7 +262,11 @@ export class DelegationHistory {
     if (options.before !== undefined && options.after !== undefined)
       throw invalid()
     const owner = state.record!
-    const rows: { id: string; load: () => DelegationHistoryEntry }[] = []
+    const rows: {
+      id: string
+      legacySeq?: number
+      load: () => DelegationHistoryEntry
+    }[] = []
     let loadedEvent: { key: string; value: Record<string, unknown> } | undefined
     const readEvent = (path: string, position: Position, runId: string) => {
       const key = `${path}:${position.offset}`
@@ -268,8 +300,27 @@ export class DelegationHistory {
         'runs',
         run.id + '.jsonl',
       )
-      if (existsSync(path))
-        for (const position of this.index(path, owner.id, run.id).entries) {
+      const runIndex = existsSync(path)
+        ? this.index(path, owner.id, run.id)
+        : undefined
+      const positionedMessages = new Set(
+        runIndex?.entries.flatMap((position) =>
+          position.messageId ? [position.messageId] : [],
+        ) ?? [],
+      )
+      if (runIndex)
+        for (const position of runIndex.entries) {
+          const message = position.messageId
+            ? state.messages[position.messageId]
+            : undefined
+          if (
+            position.messageId &&
+            (!message ||
+              message.id === run.messageId ||
+              message.runId !== run.id ||
+              message.status !== 'accepted')
+          )
+            continue
           const id = `${run.id}:${position.offset}:${position.part}`
           rows.push({
             id,
@@ -279,6 +330,7 @@ export class DelegationHistory {
                 id,
                 run.id,
               )!
+              if (message) entry.text = message.text
               return {
                 ...entry,
                 ...(entry.text !== undefined
@@ -293,6 +345,50 @@ export class DelegationHistory {
             },
           })
         }
+      // Old journals can reconstruct accepted same-run corrections from send
+      // intents, but cannot establish their interleaving with output bytes.
+      // Keep that ambiguity explicit, with stable journal-based identities.
+      for (const message of Object.values(state.messages)
+        .filter(
+          (message) =>
+            message.id !== run.messageId &&
+            message.runId === run.id &&
+            message.status === 'accepted' &&
+            !positionedMessages.has(message.id),
+        )
+        .sort(
+          (a, b) =>
+            (a.acceptedSeq ?? a.sendIntentSeq ?? a.seq ?? 0) -
+            (b.acceptedSeq ?? b.sendIntentSeq ?? b.seq ?? 0),
+        )) {
+        for (
+          let part = 0;
+          part < Math.max(1, Math.ceil(message.text.length / PART));
+          part++
+        ) {
+          const entry: DelegationHistoryEntry = {
+            id: `${run.id}:message:${message.sendIntentSeq ?? message.seq ?? message.id}:${part}`,
+            runId: run.id,
+            type: 'prompt',
+            messageId: message.id,
+            status: 'accepted',
+            chronology: 'unknown',
+            text: message.text.slice(part * PART, (part + 1) * PART),
+          }
+          rows.push({
+            id: entry.id,
+            legacySeq:
+              (message.acceptedSeq ??
+                message.sendIntentSeq ??
+                message.seq ??
+                0) *
+                CONTROL_PART_STRIDE +
+              part +
+              1,
+            load: () => entry,
+          })
+        }
+      }
       if (TERMINAL_RUN_PHASES.has(run.phase)) {
         const result = run.summary ?? run.failureCode ?? ''
         for (
@@ -311,72 +407,150 @@ export class DelegationHistory {
         }
       }
     }
-    const encode = (id: string) =>
-      Buffer.from(
+    // Legacy instructions form a journal-ordered lane whose placement among
+    // output bytes is unknown. Carry both durable frontiers in the opaque
+    // cursor, so later output cannot be inserted behind a consumed prompt.
+    const sourceAt: number[] = [],
+      legacyAt: number[] = []
+    let source = -1,
+      legacy = 0
+    for (const [index, row] of rows.entries()) {
+      if (row.legacySeq === undefined) source = index
+      else legacy = Math.max(legacy, row.legacySeq)
+      sourceAt.push(source)
+      legacyAt.push(legacy)
+    }
+    const exact = (id: string, sourceId: string, acknowledged: number) => {
+      const payload = [owner.id, id, sourceId, acknowledged]
+      return Buffer.from(
         JSON.stringify([
-          owner.id,
-          id,
+          ...payload,
           createHash('sha256')
-            .update(owner.id + '\0' + id)
+            .update(JSON.stringify(payload))
             .digest('hex')
             .slice(0, 16),
         ]),
       ).toString('base64url')
-    let anchor = -1
+    }
+    let anchor = -1,
+      sourceAnchor = -1,
+      acknowledged = 0
     const cursor = options.before ?? options.after
     if (cursor !== undefined) {
       if (cursor.length > 1024) throw invalid()
       try {
-        const [delegation, id] = JSON.parse(
+        const decoded = JSON.parse(
           Buffer.from(cursor, 'base64url').toString(),
-        ) as string[]
-        if (
-          delegation !== owner.id ||
-          typeof id !== 'string' ||
-          encode(id) !== cursor
-        )
-          throw invalid()
-        anchor = rows.findIndex((r) => r.id === id)
+        ) as unknown[]
+        const [delegation, id] = decoded
+        if (delegation !== owner.id || typeof id !== 'string') throw invalid()
+        anchor = rows.findIndex((row) => row.id === id)
         if (anchor < 0 && id !== '$empty') throw invalid()
+        if (decoded.length === 3) {
+          const old = Buffer.from(
+            JSON.stringify([
+              owner.id,
+              id,
+              createHash('sha256')
+                .update(owner.id + '\0' + id)
+                .digest('hex')
+                .slice(0, 16),
+            ]),
+          ).toString('base64url')
+          if (old !== cursor) throw invalid()
+          sourceAnchor = sourceAt[anchor] ?? -1
+          // Older cursors predate the public-instruction lane. Deliver any
+          // retained accepted corrections they could not have acknowledged.
+          acknowledged = 0
+        } else {
+          const sourceId = decoded[2],
+            seq = decoded[3]
+          if (
+            decoded.length !== 5 ||
+            typeof sourceId !== 'string' ||
+            typeof seq !== 'number' ||
+            !Number.isSafeInteger(seq) ||
+            seq < 0 ||
+            exact(id, sourceId, seq) !== cursor
+          )
+            throw invalid()
+          sourceAnchor = rows.findIndex(
+            (row) => row.id === sourceId && row.legacySeq === undefined,
+          )
+          if (sourceAnchor < 0 && sourceId !== '$empty') throw invalid()
+          acknowledged = seq
+        }
       } catch {
         throw invalid()
       }
     }
-    const limit = Math.min(500, Math.max(1, Math.trunc(options.limit ?? 200)))
     const forward = options.after !== undefined
+    const encode = (index: number) => {
+      const sourceIndex = forward
+        ? Math.max(sourceAt[index] ?? -1, sourceAnchor)
+        : (sourceAt[index] ?? -1)
+      return exact(
+        rows[index]?.id ?? '$empty',
+        rows[sourceIndex]?.id ?? '$empty',
+        Math.max(legacyAt[index] ?? 0, forward ? acknowledged : 0),
+      )
+    }
+    const limit = Math.min(500, Math.max(1, Math.trunc(options.limit ?? 200)))
     const end = options.before !== undefined ? Math.max(0, anchor) : rows.length
     const entries: DelegationHistoryEntry[] = []
-    let bytes = 0,
-      start = forward ? anchor + 1 : end - 1
-    while (
-      start >= 0 &&
-      start < (forward ? rows.length : end) &&
-      entries.length < limit
+    const selected: number[] = []
+    let bytes = 0
+    for (
+      let index = forward ? 0 : end - 1;
+      index >= 0 &&
+      index < (forward ? rows.length : end) &&
+      entries.length < limit;
+      index += forward ? 1 : -1
     ) {
-      const entry = rows[start]!.load(),
+      const row = rows[index]!
+      if (
+        forward &&
+        (row.legacySeq === undefined
+          ? index <= sourceAnchor
+          : row.legacySeq <= acknowledged)
+      )
+        continue
+      const entry = row.load(),
         size = Buffer.byteLength(JSON.stringify(entry))
       if (bytes + size > MAX_PAGE) break
       entries.push(entry)
+      selected.push(index)
       bytes += size
-      start += forward ? 1 : -1
     }
-    if (!forward) entries.reverse()
-    const first = entries.length
-      ? rows.findIndex((r) => r.id === entries[0]!.id)
-      : forward
-        ? anchor + 1
-        : end
-    const last = entries.length ? first + entries.length - 1 : first - 1
+    if (!forward) {
+      entries.reverse()
+      selected.reverse()
+    }
+    const first = selected[0] ?? (forward ? sourceAnchor + 1 : end)
+    const last = selected.at(-1) ?? first - 1
+    const after = entries.length
+      ? encode(last)
+      : (cursor ?? exact('$empty', '$empty', 0))
+    // Remaining control entries can precede the source frontier; the cursor
+    // acknowledges them separately instead of claiming an invented chronology.
+    let hasAfter = last < rows.length - 1
+    if (forward) {
+      const lastSource = Math.max(sourceAt[last] ?? -1, sourceAnchor)
+      const lastAcknowledged = Math.max(legacyAt[last] ?? 0, acknowledged)
+      hasAfter = rows.some((row, index) =>
+        row.legacySeq === undefined
+          ? index > lastSource
+          : row.legacySeq > lastAcknowledged,
+      )
+    }
     return {
       entries,
       before: entries.length
-        ? encode(entries[0]!.id)
-        : (cursor ?? encode('$empty')),
-      after: entries.length
-        ? encode(entries.at(-1)!.id)
-        : (cursor ?? encode('$empty')),
+        ? encode(first)
+        : (cursor ?? exact('$empty', '$empty', 0)),
+      after,
       hasBefore: first > 0,
-      hasAfter: last < rows.length - 1,
+      hasAfter,
     }
   }
 }

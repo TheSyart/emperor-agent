@@ -9,7 +9,7 @@ import StateDot from '../../ui/StateDot.vue'
 import ProviderLogo from '../../ui/ProviderLogo.vue'
 const props = defineProps<{ run: ToolExternalAgentView; callId: string }>()
 const chat = useChatContext()
-const { click } = provideDelegationLinks(() => ({
+const { click, links } = provideDelegationLinks(() => ({
   sessionId: chat.rootSessionId?.() ?? chat.sessionId(),
   delegationId: props.run.delegationId,
 }))
@@ -35,6 +35,8 @@ const labels: Record<string, string> = {
   outcome_unknown: '结果待确认',
 }
 const label = computed(() => labels[props.run.phase] ?? props.run.phase)
+// Files may appear after their first mention, including a run with no further text.
+watch([() => props.run.runId, () => props.run.phase], () => links.refresh())
 const content = ref<HTMLElement | null>(null)
 watch(
   () => [props.run.text, props.run.activity.length],
