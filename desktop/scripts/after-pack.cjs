@@ -6,7 +6,6 @@ const {
   rmSync,
 } = require('node:fs')
 const { join } = require('node:path')
-const { execFileSync } = require('node:child_process')
 const { extractFile, listPackage } = require('@electron/asar')
 const { validateRuntimeManifest } = require('./before-pack.cjs')
 const {
@@ -351,24 +350,6 @@ async function afterPack(context) {
   const arch = electronBuilderArch(context.arch)
   prunePackagedNodePty(resourcesRoot, platform, arch)
   validatePackagedAppResources(resourcesRoot, platform, arch)
-  // Preview has no developer certificate. Seal the bundle with an ad-hoc
-  // signature so the main executable has a stable bundle identifier and the
-  // helper can bind a local peer to this exact build's cdhash. This remains
-  // an untrusted Preview for Gatekeeper and needs TCC re-authorization after
-  // every changed build.
-  if (
-    platform === 'darwin' &&
-    context.packager.config?.mac?.identity === null
-  ) {
-    const app = join(context.appOutDir, `${appInfo.productFilename}.app`)
-    execFileSync('codesign', ['--force', '--deep', '--sign', '-', app], {
-      stdio: 'inherit',
-    })
-    execFileSync('codesign', ['--verify', '--deep', '--strict', app], {
-      stdio: 'inherit',
-    })
-    require('./after-sign.cjs').validateMacPackage(app, arch)
-  }
 }
 
 function electronBuilderArch(value) {

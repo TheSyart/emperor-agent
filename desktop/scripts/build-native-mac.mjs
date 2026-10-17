@@ -24,10 +24,7 @@ if (process.platform === 'darwin') {
   const source = resolve(desktop, 'native/macos/CredentialAuth/main.swift')
   const output = resolve(desktop, 'out/native/credential-auth')
   mkdirSync(dirname(output), { recursive: true })
-  for (const [command, args] of [
-    ['swiftc', [source, '-o', output]],
-    ['codesign', ['-s', '-', '--force', output]],
-  ]) {
+  for (const [command, args] of [['swiftc', [source, '-o', output]]]) {
     const result = spawnSync(command, args, { stdio: 'inherit' })
     if (result.status !== 0)
       throw new Error(`${command} failed while building credential-auth`)

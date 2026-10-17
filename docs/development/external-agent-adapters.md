@@ -9,7 +9,7 @@
 
 Claude 使用 SDK startup 与自定义 managed spawn，业务问题经过权限回调转换，内部 Agent/Task/MCP/后台调度被关闭。Codex 使用应用独占 stdio app-server：initialize、initialized、thread/start 或 resume、turn/start；没有共享桌面 daemon 或 exec fallback。收到中断 ACK 后仍要等待原生终态及进程静止；未知协议请求默认拒绝。
 
-源码运行 macOS helper 先执行 `node scripts/build-delegation-scanner.mjs`；Core pretest 与 desktop native build 会执行同一脚本。安装包携带已编译 helper，无需用户编译器。SDK 作为 main external 依赖，打包包含 SDK 和目标平台可选 CLI binary；可执行 binary 在 asar 外。profile 仍需要明确可发现且匹配版本的 CLI，Codex 不由应用安装。
+源码运行 macOS helper 先执行 `node scripts/build-delegation-scanner.mjs`；Core pretest 与 desktop native build 会执行同一脚本。安装包携带已编译 helper，无需用户编译器。默认原生构建和 Preview 打包不执行 codesign 重签，Preview 的 afterSign 已禁用；可选的正式发布签名流程独立保留。SDK 作为 main external 依赖，打包包含 SDK 和目标平台可选 CLI binary；可执行 binary 在 asar 外。profile 仍需要明确可发现且匹配版本的 CLI，Codex 不由应用安装。
 
 ## 真实验收
 
@@ -40,3 +40,5 @@ scenario receipt 分别记录真实父调用、两个后端的身份映射、固
 适配器实现 ExecutorAdapter/open/inspect，输出带 delegationId/runId/generation 的规范化事件。新后端必须明确声明 persistent session、queue、steer、问题、usage 和 OS 边界能力；不得假定与已有后端相同。只准经 ManagedAgentProcess 启动，以 shell=false、私有环境、受管 ownership 与严格输出上限运行。原生会话恢复、终态、错误和当前 turn fencing 都必须有 contract 与真实证据。
 
 公共入口集中在 `api/operations.ts` 的严格 schema；renderer 只调用已有通用 IPC。不要添加任意 argv/env/owner 的启动接口，也不要让子代理控制宿主验收或 Git 应用。验证命令是单独的人工授权 criteria，不是原生启动参数。
+
+当前桌面主进程使用 `LocalSecretStorage`，密钥在状态目录 `secret-storage/key`，不导入 Electron safeStorage。packaged smoke 必须真实验证本地密钥、凭据库重载、主密码 KDF 和 macOS 浏览器配对重载，并在 `operations.secretStorage` 保存结果。不能只删除原钥匙串检查而省略存储验收。

@@ -39,6 +39,15 @@ function runContract(...args: string[]) {
 }
 
 describe('unsigned preview release channel', () => {
+  it('disables signature hooks and certificate requirements for Preview', () => {
+    const config = require(
+      path.join(desktopRoot, 'electron-builder.preview.cjs'),
+    )
+    expect(config.mac.identity).toBeNull()
+    expect(config.afterSign).toBeNull()
+    expect(config.forceCodeSigning).toBe(false)
+  })
+
   it('routes Preview tags automatically while keeping Frozen Stable manual', () => {
     const stable = readWorkflow('release.yml')
     const preview = readWorkflow('release-preview.yml')
@@ -98,7 +107,7 @@ describe('unsigned preview release channel', () => {
     })
 
     const serialized = JSON.stringify(config)
-    expect(serialized).not.toContain('forceCodeSigning')
+    expect(config.forceCodeSigning).toBe(false)
     expect(serialized).not.toContain('notarize')
     expect(serialized).not.toContain('azureSignOptions')
   })

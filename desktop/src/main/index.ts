@@ -9,7 +9,6 @@ import {
   protocol,
   net,
   shell,
-  safeStorage,
   Tray,
   type OpenDialogOptions,
   type Rectangle,
@@ -75,6 +74,7 @@ import { DesktopComputerUsePort, hostPlatform } from './computer-use/port'
 import { AgentPreview } from './computer-use/preview'
 import { DesktopPreview, routedPreview } from './computer-use/desktop-preview'
 import { CredentialVault } from './computer-use/credential-vault'
+import { LocalSecretStorage } from './local-secret-storage'
 import { MacosDesktopDriver } from './computer-use/macos-desktop-driver'
 import {
   launchMacosHelper,
@@ -436,9 +436,12 @@ function prepareMainRuntime(): void {
  * window is created on the first Agent tab only.
  */
 function createComputerUseHost(): void {
+  const secretStorage = new LocalSecretStorage(
+    path.join(config.stateRoot, 'secret-storage', 'key'),
+  )
   credentialVault = new CredentialVault({
     path: path.join(config.stateRoot, 'computer-use', 'vault.json'),
-    storage: safeStorage,
+    storage: secretStorage,
   })
   const driver = new EmbeddedBrowserDriver({
     electron: electronBrowserFactory(),
@@ -536,7 +539,7 @@ function createComputerUseHost(): void {
           'browser-pairings',
           'pairings.json',
         ),
-        electronPairingCipher(safeStorage),
+        electronPairingCipher(secretStorage),
       ),
     })
     externalBrowser = new ExternalBrowserDriver(nmBridge)
@@ -1125,27 +1128,6 @@ async function startup(): Promise<void> {
       })
     registerAppProtocol()
     if (packagedSmoke) {
-      if (process.platform === 'darwin') {
-        const probe = 'emperor-packaged-safe-storage-probe'
-        if (
-          !safeStorage.isEncryptionAvailable() ||
-          safeStorage.decryptString(safeStorage.encryptString(probe)) !== probe
-        )
-          throw new Error('packaged safeStorage round trip failed')
-        // The master-password KDF must exist in Electron's crypto, which
-        // lacks some of Node's (no Argon2), so derive it here for real.
-        const vault = new CredentialVault({
-          path: path.join(config.stateRoot, 'packaged-smoke-vault.json'),
-          storage: safeStorage,
-        })
-        vault.setMasterPassword(`${probe}-master`, { biometric: true })
-        vault.lock()
-        vault.unlockWithBiometrics()
-        vault.lock()
-        if (!vault.unlock(`${probe}-master`))
-          throw new Error('packaged credential vault round trip failed')
-        vault.lock()
-      }
       const attachment = await createPackagedSmokeAttachment(config.stateRoot)
       await runPackagedSmoke({
         core: coreApi,

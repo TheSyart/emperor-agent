@@ -42,7 +42,7 @@ export interface VaultEntry extends CredentialHandle {
 
 export interface VaultStatus {
   available: boolean
-  /** safeStorage key store: keychain, dpapi, a Linux backend, or unknown. */
+  /** Main-process storage backend; current default is local-file. */
   backend?: string
   locked: boolean
   hasMasterPassword: boolean

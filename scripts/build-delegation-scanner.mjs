@@ -21,7 +21,6 @@ if (process.platform === 'darwin') {
         '/usr/bin/clang',
         ['-O2', '-Wall', '-Wextra', '-Werror', source, '-o', output],
       ],
-      ['/usr/bin/codesign', ['-s', '-', '--force', output]],
     ]) {
       const r = spawnSync(exe, args, { stdio: 'inherit' })
       if (r.status !== 0) throw new Error('delegation scanner build failed')

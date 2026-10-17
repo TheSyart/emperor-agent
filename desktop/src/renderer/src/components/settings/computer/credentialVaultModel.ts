@@ -64,6 +64,14 @@ export function vaultEncryption(status: VaultStatus | null): VaultBadge | null {
         'basic_text：Linux 上没有可用的密钥服务，safeStorage 只能以明文保存加密密钥，秘密无法得到保护，所以凭据库已停用。请安装或启用 GNOME Keyring 或 KWallet 后重启 Emperor。',
     }
   if (!status.available) return null
+  if (backend === 'local-file')
+    return {
+      tone: status.hasMasterPassword ? 'ok' : 'neutral',
+      badge: status.hasMasterPassword ? '本地加密 + 主密码' : '本地加密',
+      description: status.hasMasterPassword
+        ? '密钥和密文保存在本机状态目录，主密码再加一层加密。'
+        : '密钥和密文保存在本机状态目录，不使用系统钥匙串。',
+    }
   const label = BACKEND_LABEL[backend] ?? '系统加密'
   if (status.hasMasterPassword)
     return {
@@ -255,7 +263,7 @@ const REASON_TEXT: Readonly<Record<string, string>> = {
   'credential-field-missing': '这个凭据没有保存该字段。',
   'credential-binding-mismatch': '目标与凭据绑定不一致。',
   'credential-unreadable':
-    '已保存的凭据无法解密。系统密钥可能已变更，请重新填写并保存。',
+    '已保存的凭据无法解密。旧系统密文或密钥变更后，需要重新填写并保存；原记录不会自动迁移。',
   'credential-empty': '至少填写用户名、密码或 TOTP 密钥中的一项。',
   'invalid-label': '名称不能为空，最多 120 个字符。',
   'invalid-binding':

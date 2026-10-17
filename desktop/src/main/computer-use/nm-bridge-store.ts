@@ -36,22 +36,22 @@ export interface PairingCipher {
   decrypt(ciphertext: Buffer): string
 }
 
-/** Pass Electron's main-process safeStorage; never call this from a renderer. */
-export function electronPairingCipher(safeStorage: {
+/** Pass the main-process secret storage; never call this from a renderer. */
+export function electronPairingCipher(storage: {
   isEncryptionAvailable(): boolean
   encryptString(value: string): Buffer
   decryptString(value: Buffer): string
 }): PairingCipher {
   return {
     encrypt: (value) => {
-      if (!safeStorage.isEncryptionAvailable())
+      if (!storage.isEncryptionAvailable())
         throw new Error('encrypted browser pairing storage unavailable')
-      return safeStorage.encryptString(value)
+      return storage.encryptString(value)
     },
     decrypt: (value) => {
-      if (!safeStorage.isEncryptionAvailable())
+      if (!storage.isEncryptionAvailable())
         throw new Error('encrypted browser pairing storage unavailable')
-      return safeStorage.decryptString(value)
+      return storage.decryptString(value)
     },
   }
 }

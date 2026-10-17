@@ -1,9 +1,15 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { searchProbe, writeJsonAtomic } from '@emperor/core/host-capabilities'
 import type { CoreApi } from '@emperor/core/api'
 import type { PackagedRendererSmokeReceipt } from './packaged-renderer-smoke'
+import { LocalSecretStorage } from './local-secret-storage'
+import { CredentialVault } from './computer-use/credential-vault'
+import {
+  EncryptedFilePairingStore,
+  electronPairingCipher,
+} from './computer-use/nm-bridge-store'
 
 /** The built-in Skills a packaged runtime ships (sorted), nothing more. */
 export const PACKAGED_BUILT_IN_SKILLS = ['skill-creator']
@@ -81,6 +87,13 @@ export interface PackagedSmokeReceipt {
   startedAt: string
   finishedAt: string
   operations: {
+    secretStorage: {
+      ok: boolean
+      backend: 'local-file'
+      vaultReload: boolean
+      masterPassword: boolean
+      pairingReload: boolean | 'not-macos'
+    }
     bootstrap: { ok: boolean; builtInSkills: string[]; pluginSkills: string[] }
     diagnostics: {
       ok: boolean
@@ -136,6 +149,7 @@ export async function runPackagedSmoke(
   const base = await receiptBase(opts, startedAt)
 
   try {
+    const secretStorage = await verifyLocalSecrets(stateRoot, opts.platform)
     await createSmokeWorkspace(workspaceRoot)
     const bootstrap = asRecord(await opts.core.bootstrap())
     const builtInSkills = skillNames(bootstrap.skills, 'builtin')
@@ -212,6 +226,7 @@ export async function runPackagedSmoke(
       ...base,
       finishedAt: (opts.now ?? (() => new Date().toISOString()))(),
       operations: {
+        secretStorage,
         bootstrap: { ok: true, builtInSkills, pluginSkills },
         diagnostics: { ok: true, sandbox, lifecycle },
         environment: {
@@ -238,6 +253,13 @@ export async function runPackagedSmoke(
       ...base,
       finishedAt: (opts.now ?? (() => new Date().toISOString()))(),
       operations: {
+        secretStorage: {
+          ok: false,
+          backend: 'local-file',
+          vaultReload: false,
+          masterPassword: false,
+          pairingReload: false,
+        },
         bootstrap: { ok: false, builtInSkills: [], pluginSkills: [] },
         diagnostics: {
           ok: false,
@@ -269,6 +291,71 @@ export async function runPackagedSmoke(
     }
     await writeJsonAtomic(receiptPath, receipt).catch(() => {})
     throw error
+  }
+}
+
+/** Actual packaged Node crypto, persisted key, vault/KDF and pairing reload. */
+async function verifyLocalSecrets(
+  stateRoot: string,
+  platform: string,
+): Promise<PackagedSmokeReceipt['operations']['secretStorage']> {
+  const keyPath = join(stateRoot, 'secret-storage', 'key')
+  const storage = new LocalSecretStorage(keyPath)
+  const vaultPath = join(stateRoot, 'packaged-smoke-secrets', 'vault.json')
+  const secret = randomBytes(32).toString('base64url')
+  const master = randomBytes(32).toString('base64url')
+  const vault = new CredentialVault({ path: vaultPath, storage })
+  const handle = vault.save({
+    label: 'packaged smoke',
+    bindings: [{ kind: 'origin', origin: 'https://packaged-smoke.invalid' }],
+    password: secret,
+  })
+  vault.setMasterPassword(master)
+  vault.lock()
+  const reloaded = new CredentialVault({
+    path: vaultPath,
+    storage: new LocalSecretStorage(keyPath),
+  })
+  try {
+    if (
+      vault.backend !== 'local-file' ||
+      reloaded.unlock('wrong-master') ||
+      !reloaded.unlock(master) ||
+      reloaded.secret(handle.handleId, 'password') !== secret
+    )
+      throw new Error('packaged local vault round trip failed')
+  } finally {
+    reloaded.lock()
+  }
+  if (platform === 'darwin') {
+    const pairingPath = join(
+      stateRoot,
+      'packaged-smoke-secrets',
+      'pairings.json',
+    )
+    const pairing = {
+      pairingId: randomBytes(16).toString('base64url'),
+      extensionId: 'a'.repeat(32),
+      secret,
+      createdAt: new Date().toISOString(),
+    }
+    await new EncryptedFilePairingStore(
+      pairingPath,
+      electronPairingCipher(storage),
+    ).put(pairing)
+    const read = await new EncryptedFilePairingStore(
+      pairingPath,
+      electronPairingCipher(new LocalSecretStorage(keyPath)),
+    ).get(pairing.pairingId)
+    if (read?.secret !== secret)
+      throw new Error('packaged local pairing round trip failed')
+  }
+  return {
+    ok: true,
+    backend: 'local-file',
+    vaultReload: true,
+    masterPassword: true,
+    pairingReload: platform === 'darwin' ? true : 'not-macos',
   }
 }
 

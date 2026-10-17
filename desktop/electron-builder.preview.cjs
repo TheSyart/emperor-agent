@@ -1,5 +1,7 @@
 module.exports = {
   extends: './electron-builder.yml',
+  afterSign: null,
+  forceCodeSigning: false,
   mac: {
     target: ['dmg', 'zip'],
     identity: null,

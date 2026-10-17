@@ -42,9 +42,7 @@ if [[ -n "${EMPEROR_DEV_SIGN_IDENTITY:-}" ]]; then
   codesign --force --options runtime --timestamp=none \
     --entitlements "$native_dir/scripts/dictation-helper.entitlements" \
     --sign "$EMPEROR_DEV_SIGN_IDENTITY" "$app"
-else
-  codesign --force --sign - "$app"
+  codesign --verify --strict "$app"
 fi
 plutil -lint "$app/Contents/Info.plist"
-codesign --verify --strict "$app"
 echo "$app"

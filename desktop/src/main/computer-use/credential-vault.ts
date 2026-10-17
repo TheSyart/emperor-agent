@@ -1,10 +1,10 @@
 /**
  * Main-process-only credential vault. The renderer may submit a secret from
  * Settings, but Core and the model only ever receive CredentialHandle data.
- * Each field is encrypted with Electron safeStorage; an optional master
+ * Each field uses main-process local file encryption; an optional master
  * password (scrypt) adds an AES-GCM layer. Decrypted values never persist; the
  * master key persists only when the user opts into biometric unlock, and then
- * only wrapped by safeStorage. The in-memory key is dropped after 30 idle
+ * only wrapped by the configured local storage. The in-memory key is dropped after 30 idle
  * minutes (spec 00 §6.4).
  */
 import * as crypto from 'node:crypto'
@@ -32,7 +32,7 @@ import type {
   CredentialHandle,
 } from '@emperor/core/runtime-contract'
 
-interface SafeStorageLike {
+interface SecretStorageLike {
   isEncryptionAvailable(): boolean
   encryptString(value: string): Buffer
   decryptString(data: Buffer): string
@@ -484,7 +484,7 @@ export class CredentialVault implements CredentialVaultPort {
   constructor(
     private readonly options: {
       path: string
-      storage: SafeStorageLike
+      storage: SecretStorageLike
       now?: () => number
       timers?: VaultTimers
       platform?: NodeJS.Platform
@@ -520,10 +520,12 @@ export class CredentialVault implements CredentialVaultPort {
   }
 
   /**
-   * The safeStorage key store: macOS Keychain and Windows DPAPI are fixed;
-   * Linux reports its choice, and `basic_text` means no key service at all.
+   * Local file storage takes precedence. Legacy injected system stores retain
+   * their platform labels; `basic_text` is unavailable.
    */
   get backend(): string {
+    const selected = this.options.storage.getSelectedStorageBackend?.()
+    if (selected === 'local-file') return selected
     if (this.platform === 'darwin') return 'keychain'
     if (this.platform === 'win32') return 'dpapi'
     if (this.platform !== 'linux') return 'unknown'

@@ -23,6 +23,8 @@ if [[ "$mode" == "fixture" ]]; then
 fi
 
 xcrun swiftc "${flags[@]}" "$native_dir/main.swift" -o "$output"
-codesign --force --sign - --timestamp=none "$output" >/dev/null
-codesign --verify --strict "$output"
+if [[ -n "${EMPEROR_DEV_SIGN_IDENTITY:-}" ]]; then
+  codesign --force --sign "$EMPEROR_DEV_SIGN_IDENTITY" --timestamp=none "$output" >/dev/null
+  codesign --verify --strict "$output"
+fi
 printf '%s\n' "$output"

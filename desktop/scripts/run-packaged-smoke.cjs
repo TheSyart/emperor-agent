@@ -193,6 +193,7 @@ function validateReceipt(receipt) {
   )
     throw new Error('packaged smoke receipt is invalid')
   for (const name of [
+    'secretStorage',
     'bootstrap',
     'diagnostics',
     'environment',
@@ -212,6 +213,15 @@ function validateReceipt(receipt) {
       receipt.operations.seatbelt.protectedStateDenied !== true)
   )
     throw new Error('packaged macOS Seatbelt command matrix is invalid')
+  const secrets = receipt.operations.secretStorage
+  if (
+    secrets.backend !== 'local-file' ||
+    secrets.vaultReload !== true ||
+    secrets.masterPassword !== true ||
+    secrets.pairingReload !==
+      (receipt.platform === 'darwin' ? true : 'not-macos')
+  )
+    throw new Error('packaged local secret storage receipt is invalid')
   const renderer = receipt.operations.renderer
   if (
     renderer.nodeGlobalsAbsent !== true ||

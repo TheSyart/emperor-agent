@@ -33,6 +33,7 @@ type AfterPackHook = (context: {
   arch: string | number
   packager: {
     appInfo: { version: string; productFilename: string }
+    config?: { mac: { identity: null } }
   }
 }) => Promise<void>
 
@@ -605,6 +606,7 @@ describe('desktop release packaging (MIG-REL-001)', () => {
         arch: 3,
         packager: {
           appInfo: { version: '0.1.0', productFilename: 'Emperor Agent' },
+          config: { mac: { identity: null } },
         },
       }),
     ).resolves.toBeUndefined()

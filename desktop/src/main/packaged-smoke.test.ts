@@ -152,6 +152,13 @@ describe('packaged smoke contract', () => {
       projectRoot: path.join(fixture.stateRoot, 'packaged-smoke-workspace'),
     })
     expect(receipt.operations).toMatchObject({
+      secretStorage: {
+        ok: true,
+        backend: 'local-file',
+        vaultReload: true,
+        masterPassword: true,
+        pairingReload: true,
+      },
       bootstrap: {
         ok: true,
         builtInSkills: ['skill-creator'],
