@@ -295,7 +295,14 @@ it('fences a delayed older-page completion after switching to a reused child scr
         return Promise.resolve({
           entries: input.after
             ? []
-            : [{ id: 'first', runId: currentRun, type: 'text', text: 'first' }],
+            : [
+                {
+                  id: 'first',
+                  runId: currentRun,
+                  type: 'text',
+                  text: `first ${input.id}`,
+                },
+              ],
           before: 'first',
           after: 'first',
           hasBefore: true,
@@ -315,20 +322,27 @@ it('fences a delayed older-page completion after switching to a reused child scr
     [...dom.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
       /加载更早记录|正在读取…/.test(b.textContent ?? ''),
     )!
+  await vi.waitFor(() => expect(olderButton()?.disabled).toBe(false))
   olderButton().click()
-  await settle()
-  expect(olderButton().disabled).toBe(true)
+  await vi.waitFor(() => {
+    expect(typeof finishOld).toBe('function')
+    expect(olderButton().disabled).toBe(true)
+  })
   route.params = { sessionId: 'root', delegationId: 'dlg-two' }
-  await settle()
-  expect(olderButton().disabled).toBe(false)
+  await vi.waitFor(() => {
+    expect(dom.textContent).toContain('first dlg-two')
+    expect(olderButton()?.disabled).toBe(false)
+  })
   timeline.scrollTop = 25
   Object.defineProperty(timeline, 'scrollHeight', {
     configurable: true,
     value: 900,
   })
   olderButton().click()
-  await settle()
-  expect(olderButton().disabled).toBe(true)
+  await vi.waitFor(() => {
+    expect(typeof finishNew).toBe('function')
+    expect(olderButton().disabled).toBe(true)
+  })
   finishOld({
     entries: [],
     before: 'first',
@@ -346,5 +360,5 @@ it('fences a delayed older-page completion after switching to a reused child scr
     hasBefore: false,
     hasAfter: false,
   })
-  await settle()
+  await vi.waitFor(() => expect(dom.querySelector('.child-more')).toBeNull())
 })

@@ -28,9 +28,12 @@ describe('sidebar deletion safeguards and navigation', () => {
     expect(root).not.toContain('activate(')
   })
 
-  it('shows running subagent counts from sessions.children', () => {
+  it('shows unified running child counts on idle roots in every placement', () => {
     expect(root).toContain('subagents.counts[session.id]')
-    expect(row).toContain('个子代理运行中')
+    expect(row).toContain('个子智能体运行中')
+    expect(root.match(/<SidebarAgentTree/g)).toHaveLength(3)
+    expect(root).not.toContain('runningSessionIds')
+    expect(root).toContain('subagents.reveal')
   })
 })
 

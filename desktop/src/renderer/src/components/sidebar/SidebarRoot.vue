@@ -11,7 +11,8 @@
  * layout (sorts, orders, pins) lives in useSidebarState.
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import type { AgentView } from '@emperor/core/api'
 import { selectDirectory } from '../../api/backend'
 import { useAppContext } from '../../composables/useAppContext'
 import { useSession } from '../../composables/useSession'
@@ -37,14 +38,16 @@ import SidebarSearchResults from './SidebarSearchResults.vue'
 import SidebarSectionHeader from './SidebarSectionHeader.vue'
 import SidebarTopRow from './SidebarTopRow.vue'
 import { useSidebarState } from './useSidebarState'
-import { useSubagentCounts } from './subagentCounts'
+import { agentLocation, useAgentTree } from './agentTree'
+import SidebarAgentTree from './SidebarAgentTree.vue'
 
 const props = defineProps<{ collapsed: boolean; width: number }>()
 const emit = defineEmits<{ toggle: [] }>()
 
 const router = useRouter()
+const route = useRoute()
 const ctx = useAppContext()
-const subagents = useSubagentCounts()
+const subagents = useAgentTree()
 const {
   sessions,
   projects,
@@ -92,13 +95,62 @@ const searchVisible = computed(() => searchOpen.value || searching.value)
 const searchResults = computed(() =>
   searchSidebarSessions(sessions.value, searchQuery.value),
 )
-const runningSessionIds = computed(() =>
-  Object.entries(ctx.sessionRuntimeStates)
-    .filter(([, state]) => state.running)
-    .map(([id]) => id),
+const layoutLoaded = ref(false)
+const visibleRootIds = computed(() =>
+  sessions.value
+    .filter((session) => !session.archived_at && !session.draft)
+    .map((session) => session.id),
 )
-
-watch(runningSessionIds, (ids) => subagents.sync(ids), { immediate: true })
+watch(visibleRootIds, (ids) => subagents.sync(ids), { immediate: true })
+const selectedAgent = computed(() => {
+  const id =
+    route.name === 'external-agent'
+      ? route.params.delegationId
+      : route.params.sessionId
+  if (typeof id !== 'string') return undefined
+  for (const tree of Object.values(subagents.trees)) {
+    const agent = tree.byId[id]
+    if (
+      agent &&
+      (route.name !== 'external-agent' ||
+        agent.rootSessionId === route.params.sessionId)
+    )
+      return agent
+  }
+  return undefined
+})
+const selectedAgentId = computed(() => selectedAgent.value?.id || '')
+// A stable key prevents a state refresh from reopening an explicitly collapsed branch.
+watch(
+  () =>
+    layoutLoaded.value && selectedAgent.value
+      ? `${selectedAgent.value.rootSessionId}:${selectedAgent.value.id}`
+      : '',
+  (key) => {
+    const agent = selectedAgent.value
+    if (!key || !agent) return
+    subagents.reveal(agent.rootSessionId, agent.id)
+    if (
+      grouped.value.pinned.some((session) => session.id === agent.rootSessionId)
+    )
+      pinnedCollapsed.value = false
+    const project = grouped.value.projects.find((item) =>
+      item.sessions.some((session) => session.id === agent.rootSessionId),
+    )
+    if (project) {
+      projectsCollapsed.value = false
+      if (layout.isProjectCollapsed(project.id))
+        layout.toggleProject(project.id)
+    } else chatsCollapsed.value = false
+  },
+  { immediate: true },
+)
+function hasChildren(root: string): boolean {
+  return Boolean(subagents.trees[root]?.agents.length || subagents.errors[root])
+}
+function openAgent(agent: AgentView): void {
+  void router.push(agentLocation(agent)).catch(() => undefined)
+}
 
 function indicator(session: SessionInfo) {
   return sessionRuntimeIndicator(
@@ -261,6 +313,7 @@ onMounted(async () => {
     layout.load(),
     sessions.value.length ? Promise.resolve() : load(),
   ])
+  layoutLoaded.value = true
 })
 
 defineExpose({ focusSearch })
@@ -335,24 +388,34 @@ defineExpose({ focusSearch })
             label="置顶"
           />
           <template v-if="!pinnedCollapsed">
-            <SessionRow
-              v-for="session in grouped.pinned"
-              :key="session.id"
-              pinned
-              manual
-              :session="session"
-              :active="session.id === activeId"
-              :indicator="indicator(session)"
-              :pending-label="pendingLabel(session)"
-              :subagents="subagents.counts[session.id] || 0"
-              :can-delete="canDelete(session)"
-              @open="openSession(session.id)"
-              @rename="doRename(session.id, $event)"
-              @pin="layout.togglePin(session.id)"
-              @archive="doArchive(session.id)"
-              @delete="doDelete(session.id)"
-              @move="layout.movePinned(session.id, $event)"
-            />
+            <template v-for="session in grouped.pinned" :key="session.id">
+              <SessionRow
+                pinned
+                manual
+                :session="session"
+                :active="session.id === activeId && !selectedAgentId"
+                :indicator="indicator(session)"
+                :pending-label="pendingLabel(session)"
+                :subagents="subagents.counts[session.id] || 0"
+                :has-children="hasChildren(session.id)"
+                :children-expanded="Boolean(subagents.expanded[session.id])"
+                @toggle-children="subagents.toggle(session.id)"
+                :can-delete="canDelete(session)"
+                @open="openSession(session.id)"
+                @rename="doRename(session.id, $event)"
+                @pin="layout.togglePin(session.id)"
+                @archive="doArchive(session.id)"
+                @delete="doDelete(session.id)"
+                @move="layout.movePinned(session.id, $event)"
+              />
+              <SidebarAgentTree
+                :store="subagents"
+                :root-id="session.id"
+                :parent-id="session.id"
+                :selected-id="selectedAgentId"
+                @open="openAgent"
+              />
+            </template>
           </template>
         </section>
 
@@ -384,24 +447,37 @@ defineExpose({ focusSearch })
                 @new-session="newProjectSession(project)"
               />
               <template v-if="!layout.isProjectCollapsed(project.id)">
-                <SessionRow
-                  v-for="session in project.sessions"
-                  :key="session.id"
-                  nested
-                  :session="session"
-                  :active="session.id === activeId"
-                  :indicator="indicator(session)"
-                  :pending-label="pendingLabel(session)"
-                  :subagents="subagents.counts[session.id] || 0"
-                  :can-delete="canDelete(session)"
-                  :manual="sidebarState.project_sort === 'manual'"
-                  @open="openSession(session.id)"
-                  @rename="doRename(session.id, $event)"
-                  @pin="layout.togglePin(session.id)"
-                  @archive="doArchive(session.id)"
-                  @delete="doDelete(session.id)"
-                  @move="layout.moveProjectSession(project, session.id, $event)"
-                />
+                <template v-for="session in project.sessions" :key="session.id">
+                  <SessionRow
+                    nested
+                    :session="session"
+                    :active="session.id === activeId && !selectedAgentId"
+                    :indicator="indicator(session)"
+                    :pending-label="pendingLabel(session)"
+                    :subagents="subagents.counts[session.id] || 0"
+                    :has-children="hasChildren(session.id)"
+                    :children-expanded="Boolean(subagents.expanded[session.id])"
+                    @toggle-children="subagents.toggle(session.id)"
+                    :can-delete="canDelete(session)"
+                    :manual="sidebarState.project_sort === 'manual'"
+                    @open="openSession(session.id)"
+                    @rename="doRename(session.id, $event)"
+                    @pin="layout.togglePin(session.id)"
+                    @archive="doArchive(session.id)"
+                    @delete="doDelete(session.id)"
+                    @move="
+                      layout.moveProjectSession(project, session.id, $event)
+                    "
+                  />
+                  <SidebarAgentTree
+                    class="project-agent-tree"
+                    :store="subagents"
+                    :root-id="session.id"
+                    :parent-id="session.id"
+                    :selected-id="selectedAgentId"
+                    @open="openAgent"
+                  />
+                </template>
                 <div v-if="!project.sessions.length" class="empty nested">
                   暂无会话
                 </div>
@@ -432,23 +508,33 @@ defineExpose({ focusSearch })
           <template v-if="!chatsCollapsed">
             <template v-for="group in chatDayGroups" :key="group.key">
               <div v-if="group.label" class="day-label">{{ group.label }}</div>
-              <SessionRow
-                v-for="session in group.sessions"
-                :key="session.id"
-                :session="session"
-                :active="session.id === activeId"
-                :indicator="indicator(session)"
-                :pending-label="pendingLabel(session)"
-                :subagents="subagents.counts[session.id] || 0"
-                :can-delete="canDelete(session)"
-                :manual="sidebarState.chat_sort === 'manual'"
-                @open="openSession(session.id)"
-                @rename="doRename(session.id, $event)"
-                @pin="layout.togglePin(session.id)"
-                @archive="doArchive(session.id)"
-                @delete="doDelete(session.id)"
-                @move="layout.moveChat(session.id, $event)"
-              />
+              <template v-for="session in group.sessions" :key="session.id">
+                <SessionRow
+                  :session="session"
+                  :active="session.id === activeId && !selectedAgentId"
+                  :indicator="indicator(session)"
+                  :pending-label="pendingLabel(session)"
+                  :subagents="subagents.counts[session.id] || 0"
+                  :has-children="hasChildren(session.id)"
+                  :children-expanded="Boolean(subagents.expanded[session.id])"
+                  @toggle-children="subagents.toggle(session.id)"
+                  :can-delete="canDelete(session)"
+                  :manual="sidebarState.chat_sort === 'manual'"
+                  @open="openSession(session.id)"
+                  @rename="doRename(session.id, $event)"
+                  @pin="layout.togglePin(session.id)"
+                  @archive="doArchive(session.id)"
+                  @delete="doDelete(session.id)"
+                  @move="layout.moveChat(session.id, $event)"
+                />
+                <SidebarAgentTree
+                  :store="subagents"
+                  :root-id="session.id"
+                  :parent-id="session.id"
+                  :selected-id="selectedAgentId"
+                  @open="openAgent"
+                />
+              </template>
             </template>
             <div v-if="!grouped.chats.length" class="empty">暂无对话</div>
           </template>
@@ -664,6 +750,10 @@ defineExpose({ focusSearch })
   padding-right: var(--space-2);
   overflow-y: auto;
   scrollbar-gutter: stable;
+}
+
+.project-agent-tree {
+  margin-left: calc(var(--space-8) + var(--space-1-5));
 }
 
 .section + .section {
