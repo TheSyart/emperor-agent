@@ -875,7 +875,20 @@ export class CoreApi {
         await this.workspaceGitService.ignoredPaths({ sessionId, paths }),
     })
     this.workspaceReferenceService = new WorkspaceReferenceService({
-      resolveProject: resolveWorkspaceProject,
+      resolveProject: (sessionId) => {
+        const session = this.requireReadableSession(
+          sessionId,
+          'references.resolve',
+        ) as { id: string; mode?: string | null }
+        if (session.mode === 'build') return resolveWorkspaceProject(sessionId)
+        return {
+          sessionId,
+          projectRoot: host.sessionWorkspaceRoot(sessionId),
+          projectName: '工作区',
+        }
+      },
+      preferReveal: (sessionId) =>
+        kept.sessionStore.get(sessionId)?.mode !== 'build',
     })
     this.terminalService = new TerminalService({
       host: opts.terminalHost ?? unavailablePtyHost(),
@@ -1810,15 +1823,20 @@ export class CoreApi {
           )
         return image
       }
-      for (const state of this.delegationRuntime.list()) {
-        if (
-          !state.record ||
-          state.record.owner.rootSessionId !== input.sessionId
-        )
-          continue
+      const ownedRoots = [
+        this.host.sessionWorkspaceRoot(input.sessionId),
+        ...this.delegationRuntime
+          .list()
+          .flatMap((state) =>
+            state.record?.owner.rootSessionId === input.sessionId
+              ? [state.record.cwd]
+              : [],
+          ),
+      ]
+      for (const root of ownedRoots) {
         let cwd: string
         try {
-          cwd = realpathSync(state.record.cwd)
+          cwd = realpathSync(root)
         } catch {
           continue
         }

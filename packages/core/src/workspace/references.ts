@@ -40,18 +40,21 @@ interface StoredReference {
 
 export interface WorkspaceReferenceServiceOptions {
   resolveProject: ResolveWorkspaceProject
+  preferReveal?: (sessionId: string) => boolean
   maxEntries?: number
 }
 
 export class WorkspaceReferenceService {
   private readonly resolveProject: ResolveWorkspaceProject
   private readonly maxEntries: number
+  private readonly preferReveal: (sessionId: string) => boolean
   private readonly references = new Map<string, StoredReference>()
   private readonly cache = new Map<string, string>()
 
   constructor(options: WorkspaceReferenceServiceOptions) {
     this.resolveProject = options.resolveProject
     this.maxEntries = options.maxEntries ?? 2_000
+    this.preferReveal = options.preferReveal ?? (() => false)
   }
 
   resolve(input: ResolveReferenceInput): ReferenceDescriptor {
@@ -194,7 +197,7 @@ export class WorkspaceReferenceService {
     }
     const fallback = basename(target) || target
 
-    if (canonicalWithin) {
+    if (canonicalWithin && !this.preferReveal(input.sessionId)) {
       const relativePath = toProjectPath(relative(projectRoot, lexicalTarget))
       const descriptor: ReferenceDescriptor = {
         id: referenceId(),
