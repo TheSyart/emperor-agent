@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-09-24<br>
-> 事实源：`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store
+> 最后核验：2026-10-18<br>
+> 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store
 
 ## 两个根的区分
 
@@ -20,6 +20,12 @@
 - Emperor Home：显式 `stateRoot` 参数 > `EMPEROR_CONFIG_DIR` > `~/.emperor`。
 
 ## 目录模型
+
+桌面 App 在迁移、凭据库和 Core 初始化之前，按规范化的 Emperor Home 路径取得进程级独占锁。不同安装位置、开发或预览包，以及不同 Chromium 用户目录不能绕过同一数据目录的锁；符号链接别名归并到实际路径。不同 Emperor Home 可以独立运行。
+
+锁存储位于数据目录同级的 `.<目录名>.emperor-writer.sqlite`，使用 Electron 内置 SQLite 的独占事务持有系统文件锁，不用于存储聊天内容。锁文件不删除，不按 PID、时间或心跳强行接管；连接持有到进程真正退出，包括退出钩子，进程崩溃后由系统释放。首次取得锁不创建 Emperor Home 本身，以保留旧目录迁移语义；可能迁移旧目录时，在任何迁移写入前同时保留新位置和旧位置的独占权，包括尚不存在的旧目录及符号链接目标。取得锁后重新解析路径，覆盖迁移期间身份变化；反复变化时阻止启动。正常退出先等待 Core 关闭和记录刷新。
+
+未取得锁的桌面实例只显示独立恢复页，不初始化迁移、Core 或本地写入服务。关闭占用目录的实例后可以重试；锁存储损坏或不可写时保持阻止启动。不要在 App 运行期间删除锁文件。
 
 ```text
 ~/.emperor/

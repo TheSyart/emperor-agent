@@ -7,6 +7,16 @@ import {
 } from './recovery'
 
 describe('bootstrap recovery surface', () => {
+  it('explains live data ownership without starting Core or offering a lock override', () => {
+    const payload = recoveryPayload(
+      Object.assign(new Error('private cause'), { code: 'state_root_in_use' }),
+      { emperorHome: '/tmp/shared', legacyHome: null },
+    )
+    expect(payload.errorCode).toBe('state_root_in_use')
+    expect(payload.title).toBe('数据目录正在使用')
+    expect(payload.message).toContain('退出另一个 App 后重试')
+    expect(payload.message).not.toContain('private cause')
+  })
   it('maps startup failures to stable, bounded payloads without exposing stack traces', () => {
     const error = Object.assign(new Error('layout <broken>'), {
       code: 'installation_layout_newer',
