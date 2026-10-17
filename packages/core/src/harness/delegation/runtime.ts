@@ -104,7 +104,8 @@ export class ExecutorRuntimeService {
       }
     } else if (profile.backend === 'claude-code') {
       const home = this.options.home ?? homedir(),
-        settings = join(home, '.claude', 'settings.json')
+        sourceDirectory = ambient.CLAUDE_CONFIG_DIR || join(home, '.claude'),
+        settings = join(sourceDirectory, 'settings.json')
       let configured: Record<string, unknown> = {}
       if (existsSync(settings)) {
         try {
@@ -140,7 +141,7 @@ export class ExecutorRuntimeService {
         !environment.ANTHROPIC_AUTH_TOKEN &&
         !environment.CLAUDE_CODE_OAUTH_TOKEN
       ) {
-        const path = join(home, '.claude', '.credentials.json')
+        const path = join(sourceDirectory, '.credentials.json')
         if (existsSync(path)) {
           try {
             const d = JSON.parse(readFileSync(path, 'utf8')) as {
@@ -169,7 +170,11 @@ export class ExecutorRuntimeService {
       const local = join(environment.CODEX_HOME!, 'auth.json')
       const path = existsSync(local)
         ? local
-        : join(this.options.home ?? homedir(), '.codex', 'auth.json')
+        : join(
+            ambient.CODEX_HOME ||
+              join(this.options.home ?? homedir(), '.codex'),
+            'auth.json',
+          )
       if (!existsSync(path))
         throw new DelegationError(
           'AUTH_REQUIRED',

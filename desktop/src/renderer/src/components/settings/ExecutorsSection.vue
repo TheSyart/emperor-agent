@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** External CLIs are opt-in profiles. Secrets stay in the host credential resolver. */
+/** Local CLI login is the default. Secrets stay in the host resolver. */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type {
   ExecutorConfig,
@@ -45,6 +45,17 @@ function probeLabel(profile: ExecutorProfile) {
     ? labels[probes.value[profile.id]!.status]
     : '未检测'
 }
+function probeDetail(profile: ExecutorProfile) {
+  const probe = probes.value[profile.id]
+  if (!probe) return '正在检测本机 CLI 和登录配置…'
+  if (probe.status === 'available')
+    return `${profile.authRef.kind === 'managed-cli-login' ? '本机登录配置' : '模型凭据引用'}已读取，${profile.enabled ? '可直接派工' : '启用后可派工'}`
+  if (probe.status === 'needs_auth')
+    return profile.authRef.kind === 'managed-cli-login'
+      ? '未找到可读取的本机登录配置，请先在终端配置对应 CLI。'
+      : '所选模型凭据不可用，请检查凭据引用。'
+  return probe.diagnostic ?? '请检查 CLI 安装和路径。'
+}
 async function load() {
   const current = ++generation
   loading.value = true
@@ -59,6 +70,29 @@ async function load() {
       result.profiles.map((entry) => [entry.profile.id, entry.probe]),
     )
     if (result.diagnostic) error.value = result.diagnostic
+    await Promise.all(
+      result.profiles
+        .filter((entry) => !entry.probe)
+        .map(async (entry) => {
+          const profile = result.config?.profiles.find(
+            (p) => p.id === entry.profile.id,
+          )
+          if (!profile) return
+          const key = JSON.stringify(profile)
+          try {
+            const probe = await probeExecutor({ profileId: profile.id })
+            if (
+              current === generation &&
+              JSON.stringify(
+                config.value?.profiles.find((p) => p.id === profile.id),
+              ) === key
+            )
+              probes.value[profile.id] = probe
+          } catch (cause) {
+            if (current === generation) error.value = String(cause)
+          }
+        }),
+    )
   } catch (cause) {
     if (current === generation) error.value = String(cause)
   } finally {
@@ -125,7 +159,7 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <SettingsSection
-    intro="让 Claude Code 和 Codex 作为外部子代理执行任务。启用后仍由主代理选择调度；默认使用内部子代理。"
+    intro="默认复用本机 Claude Code、Codex 登录，由主代理直接派工。普通任务返回结果，文件成果在交付或整合前检查。"
   >
     <p v-if="error" class="executor-error" role="alert">{{ error }}</p>
     <p v-if="loading && !config" class="executor-note">正在读取执行器配置…</p>
@@ -205,17 +239,11 @@ onBeforeUnmount(() => {
             ]"
             :disabled="busy"
         /></SettingsRow>
-        <SettingsRow
-          title="检测结果"
-          :description="probes[profile.id]?.diagnostic"
+        <SettingsRow title="检测结果" :description="probeDetail(profile)"
           ><template #default
             ><span class="executor-note"
               >{{ probes[profile.id]?.executableVersion ?? '尚无版本记录' }} ·
-              {{
-                probes[profile.id]?.authVerified
-                  ? '认证已验证'
-                  : '本次检测未校验服务端认证'
-              }}</span
+              本机检测</span
             ><Button
               size="sm"
               variant="outline"
@@ -248,7 +276,8 @@ onBeforeUnmount(() => {
         /></SettingsRow>
       </SettingsGroup>
       <p class="executor-note">
-        使用顶部“保存配置”提交修改，再检测执行器。检测不会提交模型任务。
+        自动检测只读取本机 CLI
+        和登录配置，不提交模型任务。修改后使用顶部“保存配置”提交。
       </p>
     </template>
   </SettingsSection>

@@ -92,6 +92,26 @@ it('shows all five probe states and keeps authentication as references without a
   expect(dom.querySelectorAll('input[type=password]')).toHaveLength(0)
   expect(dom.querySelectorAll('[data-executor-enabled]')).toHaveLength(5)
 })
+it('automatically detects unprobed local executors and presents dispatch readiness without a remote-auth warning', async () => {
+  const original = payload()
+  original.config.profiles.forEach((profile) => {
+    profile.enabled = true
+  })
+  const value = {
+    ...original,
+    profiles: original.config.profiles.map((profile) => ({
+      profile,
+      probe: null,
+    })),
+  }
+  listExecutors.mockResolvedValue(value)
+  const dom = await mount()
+  expect(probeExecutor).toHaveBeenCalledTimes(5)
+  expect(dom.textContent).toContain('本机登录')
+  expect(dom.textContent).not.toContain('本次检测未校验服务端认证')
+  expect(dom.textContent).toContain('可直接派工')
+  expect(configureExecutors).not.toHaveBeenCalled()
+})
 it('saves an explicit enable with revision and refreshes stale configuration without replaying the save', async () => {
   const dom = await mount(),
     toggle = dom.querySelector<HTMLButtonElement>('[data-executor-enabled]')!

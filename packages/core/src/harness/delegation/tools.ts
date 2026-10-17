@@ -142,7 +142,7 @@ export function createDelegationTools(
       name,
       description:
         legacy.get(name)!.description +
-        ' Optional backend selects internal (default), claude-code or codex. External contexts are isolated or a host-built brief; exact fork is internal only. Completed execution still requires artifact acceptance.',
+        ' Optional backend selects internal (default), claude-code or codex. Enabled external CLIs reuse local login and can be dispatched directly. External contexts are isolated or a host-built brief; exact fork is internal only. Collect ordinary text results directly; check file artifacts at delivery or integration.',
       input: z.object({
         description: z.string(),
         prompt: z.string(),
@@ -403,7 +403,7 @@ export function createDelegationTools(
     defineTool({
       name: 'collect_agent',
       description:
-        'Wait for a specific external run and collect its summary, structured output and acceptance state. Completed execution alone does not mean its artifacts passed acceptance.',
+        'Wait for a specific external run and collect its summary, structured output and delivery check state. Successful text results can be used directly. Check changed files before final delivery or integration; execution completion is not evidence that tests passed.',
       input: z.object({
         agent_id: z.string(),
         expected_run_id: z.string().optional(),

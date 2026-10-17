@@ -72,6 +72,11 @@ export function parseExecutorConfig(value: unknown): ExecutorConfig {
       'EXECUTOR_CONFIG_INVALID',
       'configuration does not match the supported schema',
     )
+  // Older defaults referenced no model at all. Reuse the local login without
+  // changing saved enable/path/model choices or rewriting the source file.
+  for (const profile of result.data.profiles)
+    if (profile.authRef.kind === 'model-route' && !profile.authRef.routeId)
+      profile.authRef = { kind: 'managed-cli-login' }
   return result.data
 }
 export function defaultExecutorConfig(): ExecutorConfig {
@@ -82,20 +87,20 @@ export function defaultExecutorConfig(): ExecutorConfig {
       {
         id: 'claude-default',
         backend: 'claude-code',
-        enabled: false,
+        enabled: true,
         executablePath: 'claude',
         expectedVersion: '2.1.281',
-        authRef: { kind: 'model-route', routeId: '' },
+        authRef: { kind: 'managed-cli-login' },
         stateDirectoryId: 'claude-default',
         concurrencyLimit: 1,
       },
       {
         id: 'codex-default',
         backend: 'codex',
-        enabled: false,
+        enabled: true,
         executablePath: 'codex',
         expectedVersion: '0.153.4',
-        authRef: { kind: 'model-route', routeId: '' },
+        authRef: { kind: 'managed-cli-login' },
         stateDirectoryId: 'codex-default',
         concurrencyLimit: 1,
       },

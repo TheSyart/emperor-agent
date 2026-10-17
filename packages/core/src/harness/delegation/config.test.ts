@@ -27,14 +27,42 @@ describe('executor configuration', () => {
     expect(paths.delegationsRoot).toBe(join(store.root, 'delegations'))
     expect(paths.pathCatalog.get('delegations').createPolicy).toBe('lazy')
   })
-  it('starts with both external profiles disabled and no secret fields', () => {
+  it('makes both local CLI logins available for direct delegation without secret fields', () => {
     const store = setup()
     const config = store.read()
     expect(config.profiles.map((p) => [p.backend, p.enabled])).toEqual([
-      ['claude-code', false],
-      ['codex', false],
+      ['claude-code', true],
+      ['codex', true],
+    ])
+    expect(config.profiles.map((p) => p.authRef)).toEqual([
+      { kind: 'managed-cli-login' },
+      { kind: 'managed-cli-login' },
     ])
     expect(JSON.stringify(config)).not.toMatch(/apiKey|accessToken/)
+  })
+  it('resolves empty legacy credential references locally while retaining saved choices and bytes', () => {
+    const store = setup()
+    const config = store.read()
+    config.profiles[0]!.enabled = false
+    config.profiles[0]!.executablePath = '/custom/claude'
+    config.profiles[0]!.authRef = { kind: 'model-route', routeId: '' }
+    config.profiles[1]!.authRef = {
+      kind: 'model-route',
+      routeId: 'chosen-route',
+    }
+    writeFileSync(store.file, JSON.stringify(config))
+    const before = readFileSync(store.file, 'utf8')
+    const loaded = store.read()
+    expect(loaded.profiles[0]).toMatchObject({
+      enabled: false,
+      executablePath: '/custom/claude',
+      authRef: { kind: 'managed-cli-login' },
+    })
+    expect(loaded.profiles[1]!.authRef).toEqual({
+      kind: 'model-route',
+      routeId: 'chosen-route',
+    })
+    expect(readFileSync(store.file, 'utf8')).toBe(before)
   })
   it('roundtrips a profile and advances the revision', () => {
     const store = setup()

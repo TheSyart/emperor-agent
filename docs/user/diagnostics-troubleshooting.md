@@ -185,6 +185,6 @@ npm --prefix desktop run package:verify
 
 ## 外部执行器不可用
 
-执行器设置页区分 missing、needs_auth、incompatible、containment_unavailable 和 available。当前协议固定 Claude Code 2.1.281 / Codex 0.153.4；安装了不同版本不能仅修改 expectedVersion 绕过。不要把密钥发到聊天或填写为启动参数。Claude 的仅 Keychain OAuth 登录当前不能导入；选择明确的模型路由或支持的本机 CLI 配置。
+设置「外部智能体」会自动检测 CLI 和本地登录配置，区分 missing、needs_auth、incompatible、containment_unavailable 和 available。默认复用本机登录；已有关闭或自定义配置会保留。needs_auth 表示没有找到当前认证方式所需的本地配置，并不代表已向厂商确认登录过期。当前协议固定 Claude Code 2.1.281 / Codex 0.153.4；安装了不同版本不能仅修改 expectedVersion 绕过。不要把密钥发到聊天或填写为启动参数。Claude 的仅 Keychain OAuth 登录不读取；选择明确的模型路由或支持的 CLI 文件/环境变量认证，自定义配置目录支持 CLAUDE_CONFIG_DIR / CODEX_HOME。
 
 outcome_unknown/delivery_unknown 表示停止或发送确认不足；先检查保留文件和原生历史，再按详情的明确恢复动作处理，勿反复重发。Linux/Windows 的本机验证不能用 macOS 结果代替。出现缺失 macOS scanner 时，源码开发者运行 `node scripts/build-delegation-scanner.mjs`，安装包用户重新核对包完整性；不要关闭边界强行执行。

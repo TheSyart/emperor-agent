@@ -864,7 +864,12 @@ describe('CoreApi tasks and tools', () => {
     api.host.agentFor(id)
     expect(api.host.delegations).toBe(api.delegationRuntime)
     expect(
-      api.executorConfig.read().profiles.every((profile) => !profile.enabled),
+      api.executorConfig
+        .read()
+        .profiles.every(
+          (profile) =>
+            profile.enabled && profile.authRef.kind === 'managed-cli-login',
+        ),
     ).toBe(true)
     const schema = api.host.tools
       .schemas()

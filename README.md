@@ -163,15 +163,16 @@ Build 会话绑定一个本地文件夹，适合代码、文档和其他项目�
 
 ### 预览能力
 
-| 能力             | 入口与限制                                                                                                                                                       |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Goal             | `/goal`；同一会话内自动续跑，重启后需要显式恢复                                                                                                                  |
-| Scheduler        | 定时任务页面和 `scheduler` 工具；任务使用与普通对话相同的权限                                                                                                    |
-| Pull Request     | 侧栏「Pull Request」页；只读，需要本机已安装并登录的 GitHub CLI（`gh`）                                                                                          |
-| Hooks            | Settings → Hooks；`hooks.json` 配置，仅 `command` handler                                                                                                        |
-| Headless ACP V1  | 源码 operator preview；本机 stdio、纯文本、Build 会话，无桌面开关                                                                                                |
-| 桌宠 companion   | 设置页手动启用；默认关闭，由主 Electron 进程托管                                                                                                                 |
-| 电脑操作（实验） | 设置 → 电脑操作，默认关闭；目前面向 macOS，Agent 可操作内置浏览器、已连接的 Chrome 标签页和桌面应用，各驱动仍在实验阶段，见[电脑操作](docs/user/computer-use.md) |
+| 能力             | 入口与限制                                                                                                                                                                         |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Goal             | `/goal`；同一会话内自动续跑，重启后需要显式恢复                                                                                                                                    |
+| Scheduler        | 定时任务页面和 `scheduler` 工具；任务使用与普通对话相同的权限                                                                                                                      |
+| Pull Request     | 侧栏「Pull Request」页；只读，需要本机已安装并登录的 GitHub CLI（`gh`）                                                                                                            |
+| Hooks            | Settings → Hooks；`hooks.json` 配置，仅 `command` handler                                                                                                                          |
+| Headless ACP V1  | 源码 operator preview；本机 stdio、纯文本、Build 会话，无桌面开关                                                                                                                  |
+| 桌宠 companion   | 设置页手动启用；默认关闭，由主 Electron 进程托管                                                                                                                                   |
+| 外部子代理       | 默认复用本机 Claude Code、Codex 登录，主 Agent 直接派工；普通文字结果直接返回，文件成果在交付或整合前检查，见[工具说明](docs/user/tools-skills-mcp.md#claude-code-与-codex-子代理) |
+| 电脑操作（实验） | 设置 → 电脑操作，默认关闭；目前面向 macOS，Agent 可操作内置浏览器、已连接的 Chrome 标签页和桌面应用，各驱动仍在实验阶段，见[电脑操作](docs/user/computer-use.md)                   |
 
 ### 基础设施
 

@@ -60,6 +60,17 @@ export interface DelegationReceipt {
   acceptance: 'unverified'
   unresolved: string[]
 }
+export function requiresArtifactAcceptance(
+  record: Pick<DelegationRecord, 'effectivePermission'>,
+  receipt: Pick<DelegationReceipt, 'changedFiles' | 'unresolved' | 'excluded'>,
+): boolean {
+  return (
+    receipt.changedFiles.length > 0 ||
+    receipt.unresolved.length > 0 ||
+    (record.effectivePermission !== 'read-only' &&
+      receipt.excluded.some((item) => item.reason !== 'private-runtime'))
+  )
+}
 export class DelegationReceipts {
   readonly artifacts: ArtifactStore
   constructor(

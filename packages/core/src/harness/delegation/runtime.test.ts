@@ -5,6 +5,55 @@ import { ExecutorRuntimeService } from './runtime'
 import { delegationTestDirectory } from './testing'
 import { defaultExecutorConfig } from './config'
 import { readFileSync, statSync } from 'node:fs'
+it('reuses explicit local CLI authentication directories without importing their settings or plugins', async () => {
+  const f = delegationTestDirectory()
+  try {
+    const claude = join(f.root, 'custom-claude'),
+      codex = join(f.root, 'custom-codex')
+    mkdirSync(claude)
+    mkdirSync(codex)
+    writeFileSync(
+      join(claude, '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'custom-claude-token' } }),
+    )
+    writeFileSync(
+      join(codex, 'auth.json'),
+      JSON.stringify({ OPENAI_API_KEY: 'custom-codex-key' }),
+    )
+    const service = new ExecutorRuntimeService({
+      root: f.root,
+      home: join(f.root, 'unused-home'),
+      environment: {
+        PATH: '/fixture',
+        CLAUDE_CONFIG_DIR: claude,
+        CODEX_HOME: codex,
+      },
+    })
+    const a = await service.prepare(
+      {
+        ...defaultExecutorConfig().profiles[0]!,
+        authRef: { kind: 'managed-cli-login' },
+      },
+      'dlg-custom-claude',
+    )
+    const b = await service.prepare(
+      {
+        ...defaultExecutorConfig().profiles[1]!,
+        authRef: { kind: 'managed-cli-login' },
+      },
+      'dlg-custom-codex',
+    )
+    expect(a.environment.CLAUDE_CODE_OAUTH_TOKEN).toBe('custom-claude-token')
+    expect(b.environment.OPENAI_API_KEY).toBe('custom-codex-key')
+    expect(a.environment.CLAUDE_CONFIG_DIR).not.toBe(claude)
+    expect(b.environment.CODEX_HOME).not.toBe(codex)
+    expect(
+      existsSync(join(a.environment.CLAUDE_CONFIG_DIR!, 'settings.json')),
+    ).toBe(false)
+  } finally {
+    f.cleanup()
+  }
+})
 it('stages only explicit managed Codex auth fields into a private per-conversation home', async () => {
   const f = delegationTestDirectory(),
     home = join(f.root, 'host-home')

@@ -126,7 +126,10 @@ import {
   CoreDelegationService,
   externalTask,
 } from './services/delegation-service'
-import { DelegationReceipts } from '../harness/delegation/receipts'
+import {
+  DelegationReceipts,
+  requiresArtifactAcceptance,
+} from '../harness/delegation/receipts'
 import { DelegationAcceptance } from '../harness/delegation/acceptance'
 import { DelegationIntegration } from '../workspace/delegation-integration'
 import type {
@@ -635,6 +638,10 @@ export class CoreApi {
         flush: (sessionId) => host.sessions.flush(sessionId),
       },
       acceptanceCurrent: (id) => this.delegationAcceptance.current(id),
+      deliveryRequiresAcceptance: (id, record) => {
+        const receipt = this.delegationReceipts.get(id)
+        return requiresArtifactAcceptance(record, receipt)
+      },
       onState: (state, event) => this.projectDelegation(state, event),
       onEvent: (event) => {
         if (

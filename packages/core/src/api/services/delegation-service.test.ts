@@ -14,6 +14,7 @@ import {
   fixtureDelegationRun,
 } from '../../harness/delegation/testing'
 import type { DelegationState } from '../../harness/delegation/fold'
+import type { DelegationRunRecord } from '../../harness/delegation/types'
 import { SessionProjector } from '../../harness/projection/projector'
 async function fixture(
   replies?: import('../../harness/testing').ScriptedReply[],
@@ -29,7 +30,7 @@ async function fixture(
       parentAgentId: root,
     },
   }
-  const run = {
+  const run: DelegationRunRecord = {
     ...fixtureDelegationRun(),
     delegationId: record.id,
     phase: 'completed' as const,
@@ -71,6 +72,50 @@ it('exposes one terminal task per external run and keeps old rows terminal on fo
     expect(await f.api.tasks.wait(f.run.id, { timeoutMs: 5 })).toMatchObject({
       status: 'completed',
     })
+  } finally {
+    await f.api.close()
+  }
+})
+it('checks excluded writable deliverables but lets readonly text results complete without an artifact gate', async () => {
+  const f = await fixture()
+  try {
+    f.record.owner.goalRef = { id: 'goal-text', revision: 1 }
+    f.record.owner.requiredForGoal = true
+    f.record.effectivePermission = 'workspace-write'
+    f.run.receiptId = 'drr-text'
+    const receipt = {
+      id: 'drr-text',
+      changedFiles: [],
+      unresolved: [],
+      excluded: [{ path: 'ignored', reason: 'ignored' }],
+    }
+    vi.spyOn(f.api.delegationReceipts, 'get').mockReturnValue(receipt as any)
+    vi.spyOn(f.api.delegationReceipts, 'readPatch').mockReturnValue(null)
+    const verify = () =>
+      f.api.delegationRuntime.verifyGoalCompletion(
+        { id: 'goal-text', revision: 1 },
+        f.root,
+      )
+    await expect(verify()).rejects.toThrow('no current host acceptance')
+    expect(
+      (await f.api.delegations.receipt({ runId: f.run.id, sessionId: f.root }))
+        .requiresAcceptance,
+    ).toBe(true)
+    f.record.effectivePermission = 'read-only'
+    await expect(verify()).resolves.toBeUndefined()
+    expect(
+      (await f.api.delegations.receipt({ runId: f.run.id, sessionId: f.root }))
+        .requiresAcceptance,
+    ).toBe(false)
+    for (const phase of [
+      'failed',
+      'cancelled',
+      'interrupted',
+      'outcome_unknown',
+    ] as const) {
+      f.run.phase = phase
+      await expect(verify()).rejects.toThrow('no current host acceptance')
+    }
   } finally {
     await f.api.close()
   }

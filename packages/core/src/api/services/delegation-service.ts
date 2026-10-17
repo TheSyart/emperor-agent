@@ -2,7 +2,10 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DelegationService } from '../../harness/delegation/service'
 import type { DelegationState } from '../../harness/delegation/fold'
-import type { DelegationReceipts } from '../../harness/delegation/receipts'
+import {
+  requiresArtifactAcceptance,
+  type DelegationReceipts,
+} from '../../harness/delegation/receipts'
 import {
   criteriaDigest,
   type AcceptanceCriteria,
@@ -245,7 +248,7 @@ export class CoreDelegationService {
     return accepted
   }
   async receipt(input: { runId: string; sessionId?: string | null }) {
-    const { run } = this.run(input.runId, input.sessionId)
+    const { run, record } = this.run(input.runId, input.sessionId)
     let preview: ReturnType<DelegationIntegration['get']> | null = null,
       previewError: string | null = null,
       patch: ReturnType<DelegationReceipts['readPatch']> = null,
@@ -263,11 +266,17 @@ export class CoreDelegationService {
       } catch {
         patchError = 'PATCH_UNREADABLE: inspect the retained workspace'
       }
+    const receipt = run.receiptId
+      ? this.options.receipts.get(run.receiptId)
+      : null
     return {
       patch,
       patchError,
       previewError,
-      receipt: run.receiptId ? this.options.receipts.get(run.receiptId) : null,
+      receipt,
+      requiresAcceptance: receipt
+        ? requiresArtifactAcceptance(record, receipt)
+        : false,
       acceptance: run.acceptanceId
         ? await this.options.acceptance.current(run.acceptanceId)
         : null,

@@ -5,7 +5,7 @@
 > 最后核验：2026-10-17<br>
 > 事实源：`packages/core/src/harness/delegation/`、`packages/core/src/workspace/delegation-*.ts`、`packages/core/src/api/services/delegation-service.ts`
 
-Emperor 的父 Agent 可以通过原有子代理工具选择 `internal`、`claude-code` 或 `codex`。默认仍是 internal。外部 profile 默认关闭，需要用户在设置的「执行器」中启用、指定 CLI 路径与认证引用。backend 与内部 provider/model 路由是不同维度。
+Emperor 的父 Agent 可以通过原有子代理工具选择 `internal`、`claude-code` 或 `codex`。未指定 backend 时仍用 internal；两个外部 profile 默认启用并复用本机 CLI 登录，主代理可直接派工。设置「外部智能体」自动检测 CLI 与本地登录配置，可修改路径或显式选择模型凭据引用。已有配置中的开关、路径和有效凭据引用保持不变；旧版空引用按本机登录解析，不自动覆写文件。backend 与内部 provider/model 路由是不同维度。
 
 ```mermaid
 flowchart TD
@@ -16,7 +16,8 @@ flowchart TD
   Service --> Workspace[持久工作区与写入租约]
   Claude --> Receipt[冻结成果与文件树指纹]
   Codex --> Receipt
-  Receipt --> Verify[宿主独立测试与明确审查要求]
+  Receipt --> Result[普通文字结果直接回收]
+  Receipt --> Verify[文件交付前的测试与审查]
   Verify --> Preview[保留的 Git 整合预览工作区]
   Preview --> Apply[精确 revision/digest 的人工应用]
 ```
@@ -37,7 +38,7 @@ macOS 使用 Seatbelt；Linux 实现使用 bubblewrap PID namespace。受管进�
 
 Windows 没有完整的受限执行/进程树停止证明：能力声明为 none，不能把未证明的停止标记为 quiescent。Linux 有实现及协议测试；真实 Linux/Windows 验收需要在对应目标机执行，macOS 证据不能替代。
 
-每个会话有私有 HOME/config/temp。Claude 从明确模型路由或本机 CLI 设置读取窄认证配置；仅 Keychain OAuth 尚不支持，返回 AUTH_REQUIRED。Codex managed CLI 登录选择性复制 ChatGPT token 到私有 CODEX_HOME，并保留其本地刷新版本。认证不传到 renderer、日志摘要或公共 receipt。运行环境不继承宿主全部密钥。
+每个会话有私有 HOME/config/temp。默认从本机 CLI 设置和凭据文件读取窄认证配置，支持显式 CLAUDE_CONFIG_DIR / CODEX_HOME；也可选择模型凭据引用。Claude 仅 Keychain OAuth 不读取，返回 AUTH_REQUIRED。Codex managed CLI 登录选择性复制 ChatGPT token 到私有 CODEX_HOME，并保留其本地刷新版本。认证不传到 renderer、日志摘要或公共 receipt。运行环境不继承宿主全部密钥，也不导入本机插件或 hooks。设置页的检测只确认本地可用条件，真实调用失败时单独报告认证错误。
 
 ## 崩溃恢复与通知
 
@@ -53,7 +54,7 @@ Windows 没有完整的受限执行/进程树停止证明：能力声明为 none
 
 ## Goal、Scheduler 与默认限额
 
-自动 Goal 轮次在外部任务 outstanding 时等待，用户消息正常优先。Goal 使用稳定 Goal ID 共享配额，revision 仅用于审计/CAS。Goal 下创建的外部任务默认必需：完成前重查最新轮次的当前宿主验收。用户也可在任务详情填写明确失败处置理由并关闭该会话；这会记录人工处置，仍保留失败验收，模型不能自行把任务改成可选。
+自动 Goal 轮次在外部任务 outstanding 时等待，用户消息正常优先。Goal 使用稳定 Goal ID 共享配额，revision 仅用于审计/CAS。Goal 下创建的外部任务默认必需：成功完成、进程已停止且 receipt 确认没有文件改动或未解决成果项的文字结果可直接回收；有文件成果时，在交付前重查当前宿主验收。失败、中断、结果未知、待发消息或已失败的检查仍会阻止完成。用户也可在任务详情填写明确失败处置理由并关闭该会话；这会记录人工处置，仍保留失败验收，模型不能自行把任务改成可选。
 
 Scheduler 与普通调用使用同一服务、权限与配额。无人工 answerer 的提问明确结束为 needs_user。根 stop 立即解除 Goal 自动续跑并取消全部受管后代；恢复通知不会自动恢复队列推理。
 

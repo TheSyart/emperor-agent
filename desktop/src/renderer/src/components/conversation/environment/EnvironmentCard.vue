@@ -947,7 +947,7 @@ function openLauncher(): void {
               externalPhase[task.status] ?? task.status
             }}</span>
           </button>
-          <p class="muted-line">点击查看成果与独立验收</p>
+          <p class="muted-line">点击查看结果、继续对话或检查文件交付</p>
         </details>
       </section>
 

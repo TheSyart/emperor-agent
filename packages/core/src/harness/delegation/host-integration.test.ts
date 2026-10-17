@@ -21,7 +21,8 @@ it('scheduler and ordinary children share global quota; stable Goal identity ret
     p.concurrencyLimit = 2
   })
   const releases: (() => void)[] = [],
-    started: string[] = []
+    started: string[] = [],
+    deliveryRequiresAcceptance = vi.fn().mockReturnValue(true)
   const script: ConstructorParameters<typeof FakeExecutorAdapter>[1] =
     async function* (turn, open) {
       started.push(turn.runId)
@@ -54,6 +55,7 @@ it('scheduler and ordinary children share global quota; stable Goal identity ret
       ['claude-code', new FakeExecutorAdapter('claude-code', script)],
     ]),
     acceptanceCurrent: async () => ({ state: 'passed' }),
+    deliveryRequiresAcceptance,
     parent: () => ({
       cwd: f.root,
       policy: { workspaceRoot: f.root, mode: 'read-only' },
@@ -125,6 +127,32 @@ it('scheduler and ordinary children share global quota; stable Goal identity ret
     await expect(
       service.verifyGoalCompletion({ id: 'g', revision: 9 }, 'root'),
     ).rejects.toThrow('no current host acceptance')
+    // Successful text results do not require an invented artifact test. A
+    // settled receipt still identifies the result; failed checks stay blocking.
+    deliveryRequiresAcceptance.mockReturnValue(false)
+    await expect(
+      service.verifyGoalCompletion({ id: 'g', revision: 9 }, 'root'),
+    ).rejects.toThrow('no current host acceptance')
+    for (const record of [a, b, c])
+      await service.bindReceipt(
+        record.id,
+        record.currentRunId!,
+        'receipt-' + record.id,
+        'unverified',
+      )
+    await expect(
+      service.verifyGoalCompletion({ id: 'g', revision: 9 }, 'root'),
+    ).resolves.toBeUndefined()
+    await service.bindReceipt(
+      a.id,
+      a.currentRunId!,
+      'receipt-' + a.id,
+      'failed',
+    )
+    await expect(
+      service.verifyGoalCompletion({ id: 'g', revision: 9 }, 'root'),
+    ).rejects.toThrow('no current host acceptance')
+    deliveryRequiresAcceptance.mockReturnValue(true)
     for (const record of [a, b, c])
       await service.bindReceipt(
         record.id,

@@ -74,6 +74,11 @@ export interface DelegationServiceOptions {
     flush: (sessionId: string) => void
   }
   acceptanceCurrent?: (id: string) => Promise<{ state: string }>
+  /** Host receipt decides whether this run has files to check at delivery. */
+  deliveryRequiresAcceptance?: (
+    receiptId: string,
+    record: DelegationRecord,
+  ) => boolean
   onState?: (state: DelegationState, event: DelegationEvent) => void
   onSettled?: (id: string, runId: string) => Promise<void>
   onStopRoot?: (rootSessionId: string) => Promise<void>
@@ -663,22 +668,28 @@ export class DelegationService {
         record.availability === 'closed'
       )
         continue
+      const resultOnly =
+        run?.receiptId &&
+        run.acceptance === 'unverified' &&
+        this.options.deliveryRequiresAcceptance?.(run.receiptId, record) ===
+          false
       if (
         !run ||
         record.availability === 'needs_recovery' ||
-        !TERMINAL_RUN_PHASES.has(run.phase) ||
+        run.phase !== 'completed' ||
         !run.quiescent ||
-        run.acceptance !== 'passed' ||
-        !run.acceptanceId ||
         Object.values(state.messages).some((message) =>
           ['queued', 'sending', 'delivery_unknown'].includes(message.status),
         ) ||
-        (await this.options.acceptanceCurrent?.(run.acceptanceId))?.state !==
-          'passed'
+        (!resultOnly &&
+          (run.acceptance !== 'passed' ||
+            !run.acceptanceId ||
+            (await this.options.acceptanceCurrent?.(run.acceptanceId))
+              ?.state !== 'passed'))
       )
         throw new DelegationError(
           'REQUIRED_DELEGATION_UNVERIFIED',
-          `required delegation ${record.id} has no current host acceptance; inspect, validate, or explicitly block the Goal`,
+          `required delegation ${record.id} has no current host acceptance or settled text result; inspect its outcome and check file deliverables before delivery`,
         )
     }
     if (this.goalProof(goal, rootSessionId) !== proof)
@@ -697,6 +708,7 @@ export class DelegationService {
     }
     return [
       'External executor profiles (internal remains the default):',
+      'Use enabled local CLIs directly for ordinary delegation. Local availability and login are checked automatically on dispatch; an unchecked profile is not a request for user approval. Reuse sessions for follow-up. Collect successful text results directly; check file deliverables before final delivery or integration. Do not require manual artifact acceptance for text-only work.',
       ...config.profiles.map((profile) => {
         const cached = this.probes.get(profile.id),
           probe =
@@ -708,9 +720,7 @@ export class DelegationService {
           ' status=' +
           (!profile.enabled ? 'disabled' : (probe?.status ?? 'unchecked')) +
           ' persistentSession=true queuedFollowup=true steer=' +
-          (profile.backend === 'codex') +
-          ' authVerified=' +
-          (probe?.authVerified ?? false)
+          (profile.backend === 'codex')
         )
       }),
     ].join('\n')

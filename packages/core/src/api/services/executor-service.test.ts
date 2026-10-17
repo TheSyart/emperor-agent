@@ -2,7 +2,7 @@ import { expect, it } from 'vitest'
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { makeApi } from '../test-helpers'
 import { invokeCoreOperation } from '../operations'
-it('lists disabled executor defaults and revision-fences configuration without credential fields', async () => {
+it('lists local-login executor defaults and revision-fences configuration without credential fields', async () => {
   const { api } = await makeApi()
   try {
     const initial = api.executors.list()

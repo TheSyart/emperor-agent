@@ -62,10 +62,16 @@ const phases: Record<string, string> = {
 const acceptance = computed(
   () => delivery.value?.acceptance?.state ?? 'unverified',
 )
+const hasFileDelivery = computed(
+  () =>
+    delivery.value?.requiresAcceptance ??
+    ((receipt.value?.changedFiles.length ?? 0) > 0 ||
+      (receipt.value?.unresolved.length ?? 0) > 0),
+)
 const acceptanceLabel = computed(
   () =>
     ({
-      unverified: '未验证',
+      unverified: '交付前待检查',
       passed: '验收通过',
       failed: '验收失败',
       needs_user: '需要处理',
@@ -282,7 +288,11 @@ onBeforeUnmount(() => {
       </header>
       <div class="external-status">
         <span>{{ phases[run?.phase ?? ''] ?? '正在读取…' }}</span
-        ><span :data-acceptance="acceptance">{{ acceptanceLabel }}</span>
+        ><span
+          v-if="hasFileDelivery || delivery?.acceptance"
+          :data-acceptance="acceptance"
+          >{{ acceptanceLabel }}</span
+        >
       </div>
       <p v-if="error" role="alert" class="external-error">{{ error }}</p>
       <p v-if="run?.failureCode" class="external-note">
@@ -382,8 +392,32 @@ onBeforeUnmount(() => {
           排队消息在当前轮结束后执行，新轮次会生成新任务记录。
         </p>
       </section>
-      <section class="external-section">
-        <h3>成果与验收</h3>
+      <p
+        v-if="
+          receipt &&
+          !hasFileDelivery &&
+          run?.phase === 'completed' &&
+          (!delivery?.acceptance || acceptance === 'passed')
+        "
+        class="external-note"
+        data-text-result
+      >
+        结果已返回，可继续派工或发送后续消息。
+      </p>
+      <details
+        v-if="receipt && !hasFileDelivery && receipt.excluded.length"
+        class="external-note"
+      >
+        <summary>未收集的本地文件 · {{ receipt.excluded.length }} 项</summary>
+        <p v-for="item in receipt.excluded" :key="item.path">
+          {{ item.path }} · {{ item.reason }}
+        </p>
+      </details>
+      <section
+        v-if="!receipt || hasFileDelivery || delivery?.acceptance"
+        class="external-section"
+      >
+        <h3>文件交付与检查</h3>
         <Button
           v-if="!receipt && !active"
           size="sm"
@@ -439,7 +473,7 @@ onBeforeUnmount(() => {
               </p>
             </li>
           </ul>
-          <details>
+          <details v-if="hasFileDelivery || delivery?.acceptance">
             <summary>独立验证当前成果</summary>
             <div class="external-form">
               <label
@@ -475,7 +509,7 @@ onBeforeUnmount(() => {
               >
             </div>
           </details>
-          <div class="external-actions">
+          <div v-if="hasFileDelivery" class="external-actions">
             <Button
               size="sm"
               variant="outline"

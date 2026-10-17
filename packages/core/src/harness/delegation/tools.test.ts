@@ -207,6 +207,14 @@ it('collect exposes execution and acceptance separately and unknown IDs are reje
     JSON.stringify(await f.call('inspect_agent', { agent_id: 'other-task' })),
   ).toContain('INVALID_ID')
 })
+it('describes direct dispatch and defers file checks to delivery instead of requiring acceptance for all tasks', () => {
+  const f = fixture()
+  const start = f.h.tools.get('subagent')!
+  expect(start.description).not.toContain(
+    'Completed execution still requires artifact acceptance',
+  )
+  expect(start.description).toContain('delivery')
+})
 it('foreground and collect expose host identities and current workspace in model-visible content', async () => {
   const f = fixture()
   for (const result of [

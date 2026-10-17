@@ -96,11 +96,69 @@ afterEach(() => {
   document.body.innerHTML = ''
   vi.clearAllMocks()
 })
-it('separates native completion from unverified delivery and hides unsupported Claude steer', async () => {
+it('shows completed execution without an artifact warning before collection and hides unsupported Claude steer', async () => {
   const dom = await mount()
   expect(dom.textContent).toContain('本轮执行完成')
-  expect(dom.textContent).toContain('未验证')
+  expect(dom.textContent).not.toContain('未验证')
   expect(dom.querySelector('[data-steer]')).toBeNull()
+})
+it('collects text-only results without file acceptance or integration controls', async () => {
+  api.getDelegationReceipt.mockResolvedValue({
+    receipt: { id: 'drr-text', changedFiles: [], unresolved: [], excluded: [] },
+    acceptance: null,
+    preview: null,
+  })
+  const dom = await mount()
+  expect(dom.textContent).toContain('结果已返回')
+  expect(dom.querySelector('[data-acceptance]')).toBeNull()
+  expect(dom.textContent).not.toContain('独立验证当前成果')
+  expect(dom.textContent).not.toContain('生成整合预览')
+})
+it('shows delivery checks for changed files without marking them passed', async () => {
+  api.getDelegationReceipt.mockResolvedValue({
+    receipt: {
+      id: 'drr-code',
+      changedFiles: [{ path: 'main.ts', status: 'modified' }],
+      unresolved: [],
+      excluded: [],
+    },
+    acceptance: null,
+    preview: null,
+  })
+  const dom = await mount()
+  expect(dom.querySelector('[data-acceptance]')?.textContent).toBe(
+    '交付前待检查',
+  )
+  expect(dom.textContent).toContain('独立验证当前成果')
+})
+it('keeps excluded writable output visible as a file delivery', async () => {
+  api.getDelegationReceipt.mockResolvedValue({
+    receipt: {
+      id: 'drr-excluded',
+      changedFiles: [],
+      unresolved: [],
+      excluded: [{ path: 'ignored', reason: 'ignored' }],
+    },
+    requiresAcceptance: true,
+    acceptance: null,
+    preview: null,
+  })
+  const dom = await mount()
+  expect(dom.querySelector('[data-text-result]')).toBeNull()
+  expect(dom.textContent).toContain('ignored')
+  expect(dom.textContent).toContain('独立验证当前成果')
+})
+it('retains the retry-check form for a previous failed text check', async () => {
+  api.getDelegationReceipt.mockResolvedValue({
+    receipt: { id: 'drr-text', changedFiles: [], unresolved: [], excluded: [] },
+    requiresAcceptance: false,
+    acceptance: { state: 'failed', evidence: [] },
+    preview: null,
+  })
+  const dom = await mount()
+  expect(dom.textContent).toContain('验收失败')
+  expect(dom.textContent).toContain('独立验证当前成果')
+  expect(dom.textContent).not.toContain('生成整合预览')
 })
 it('sends a queued followup once and refreshes stale clicks without automatically resending', async () => {
   const dom = await mount(),
