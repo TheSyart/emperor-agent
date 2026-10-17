@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, defineAsyncComponent } from 'vue'
 import {
   agentPhaseLabel,
   agentSourceLabel,
@@ -7,8 +7,11 @@ import {
   type AgentView,
 } from '@emperor/core/runtime-contract'
 import BrandMark from '../brand/BrandMark.vue'
-import ProviderLogo from '../ui/ProviderLogo.vue'
 import { DsChevronRight } from '../icons/ds'
+// The full provider artwork catalog belongs to the expanded child UI.
+const ProviderLogo = defineAsyncComponent(
+  () => import('../ui/ProviderLogo.vue'),
+)
 
 const props = withDefaults(
   defineProps<{

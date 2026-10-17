@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
-import { createApp, h, nextTick, type App } from 'vue'
+import { createApp, h, nextTick, ref, type App } from 'vue'
+import { provideDelegationLinks } from './delegationLinks'
+import ConversationMarkdown from './parts/ConversationMarkdown.vue'
 import { afterEach, expect, it, vi } from 'vitest'
 import ExternalAgentStream from './tools/ExternalAgentStream.vue'
 import { createExpansionStore, provideChatContext } from './chatContext'
@@ -142,4 +144,50 @@ it('retries an early missing inline image when the same run settles', async () =
   expect(root.querySelector('img.md-image-preview')?.getAttribute('src')).toBe(
     'data:image/png;base64,AQ==',
   )
+})
+
+it('keeps archived-root references inert and clears prior image capabilities', async () => {
+  const enabled = ref(true)
+  core.mockImplementation(async (key: string) =>
+    key === 'references.resolve'
+      ? {
+          id: 'ref-one',
+          kind: 'external_file',
+          available: true,
+          tooltip: '/work/sun.png',
+          actions: ['reveal'],
+        }
+      : {
+          kind: 'image',
+          truncated: false,
+          mimeType: 'image/png',
+          dataBase64: 'AQ==',
+        },
+  )
+  root = document.createElement('div')
+  document.body.append(root)
+  app = createApp({
+    setup() {
+      const { click } = provideDelegationLinks(
+        () => ({ sessionId: 'root', delegationId: 'dlg-one' }),
+        () => enabled.value,
+      )
+      return () =>
+        h('div', { onClickCapture: click }, [
+          h(ConversationMarkdown, {
+            text: '![太阳](sun.png) [文件](result.txt)',
+          }),
+        ])
+    },
+  })
+  app.mount(root)
+  await settle()
+  expect(root.querySelector('img.md-image-preview')).not.toBeNull()
+  core.mockClear()
+  enabled.value = false
+  await settle()
+  expect(root.querySelector('img.md-image-preview')).toBeNull()
+  root.querySelector<HTMLAnchorElement>('a.md-link-chip')!.click()
+  await settle()
+  expect(core).not.toHaveBeenCalled()
 })

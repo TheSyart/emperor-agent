@@ -183,4 +183,4 @@ Scheduler 的调度、misfire 与准入逻辑在 `packages/core/src/scheduler/se
 
 ## 子智能体界面扩展
 
-名称与来源使用 `@emperor/core/api` 的 `agentTitle`、`agentSourceLabel`、`agentPhaseLabel` 和 `AgentView`；侧栏和环境信息复用 `components/sidebar/agentTree.ts` 的根范围缓存及 `agentLocation`。保持 `sub-*`、`dlg-*` 与 `dgr-*` 身份边界，路由中的 owning root 不随外部轮次改变。父卡片入口与折叠、图片/复制、任务详情应使用独立交互元素，禁止用可点击外壳包裹全部输出。继续与回答只返回根聊天并保留草稿，不自动调用 send/steer；后台工具控制 API 保持兼容。公开分页、图片范围及状态说明见[外部调度架构](../architecture/external-agent-delegation.md#统一子智能体入口与公开对话)。
+名称与来源使用浏览器安全入口 `@emperor/core/runtime-contract` 的 `agentTitle`、`agentSourceLabel`、`agentPhaseLabel` 和 `AgentView`；侧栏和环境信息复用 `components/sidebar/agentTree.ts` 的根范围缓存及 `agentLocation`。保持 `sub-*`、`dlg-*` 与 `dgr-*` 身份边界，路由中的 owning root 不随外部轮次改变。父卡片入口与折叠、图片/复制、任务详情应使用独立交互元素，禁止用可点击外壳包裹全部输出。继续与回答只返回根聊天并保留草稿，不自动调用 send/steer；后台工具控制 API 保持兼容。公开分页、图片范围及状态说明见[外部调度架构](../architecture/external-agent-delegation.md#统一子智能体入口与公开对话)。

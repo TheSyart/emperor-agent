@@ -3,6 +3,7 @@ import {
   computed,
   nextTick,
   onBeforeUnmount,
+  onMounted,
   onActivated,
   onDeactivated,
   ref,
@@ -18,8 +19,17 @@ import {
   agentSourceLabel,
   agentPhaseLabel,
   type AgentView,
-} from '@emperor/core/api'
+} from '@emperor/core/runtime-contract'
 import { invokeCore, onCoreEvent } from '../../api/backend'
+import { useSession } from '../../composables/useSession'
+import { agentAncestry } from './environment/environmentAgentsModel'
+import {
+  owningRootAvailability,
+  externalConversationFailure,
+  externalConversationMessages,
+  type OwningRootAvailability,
+  type ExternalConversationAvailability,
+} from './externalConversationAvailability'
 import {
   getDelegation,
   interruptDelegation,
@@ -39,6 +49,13 @@ const route = useRoute(),
   router = useRouter()
 const rootId = computed(() => String(route.params.sessionId ?? ''))
 const delegationId = computed(() => String(route.params.delegationId ?? ''))
+const rootAvailability = ref<OwningRootAvailability>('loading')
+const availability = ref<ExternalConversationAvailability>('loading')
+const canOpenRoot = computed(() => rootAvailability.value === 'available')
+const controlsAvailable = computed(
+  () => canOpenRoot.value && availability.value === 'ready',
+)
+const sessions = useSession().sessions
 const state = shallowRef<DelegationView | null>(null)
 const agents = shallowRef<AgentView[]>([])
 const page = shallowRef<ExternalHistoryPage>({
@@ -81,29 +98,37 @@ const live = computed(() =>
   ),
 )
 const phase = computed(() =>
-  stopping.value === run.value?.id || run.value?.phase === 'cancelling'
-    ? '正在停止…'
-    : agent.value
-      ? agentPhaseLabel(agent.value.phase)
-      : '正在读取…',
+  availability.value !== 'ready'
+    ? externalConversationMessages[availability.value]
+    : stopping.value === run.value?.id || run.value?.phase === 'cancelling'
+      ? '正在停止…'
+      : agent.value
+        ? agentPhaseLabel(agent.value.phase)
+        : runLabel(run.value?.phase ?? ''),
 )
-const { click, links } = provideDelegationLinks(() => ({
-  sessionId: rootId.value,
-  delegationId: delegationId.value,
-}))
+const { click, links } = provideDelegationLinks(
+  () => ({
+    sessionId: rootId.value,
+    delegationId: delegationId.value,
+  }),
+  () => controlsAvailable.value,
+)
 watch([() => run.value?.id, () => run.value?.phase], () => links.refresh())
-const ancestors = computed(() => {
-  const chain: AgentView[] = [],
-    seen = new Set([delegationId.value])
-  let id = agent.value?.parentAgentId ?? record.value?.owner.parentAgentId
-  while (id && id !== rootId.value && !seen.has(id)) {
-    seen.add(id)
-    const parent = agents.value.find((a) => a.id === id)
-    if (!parent) break
-    chain.unshift(parent)
-    id = parent.parentAgentId
-  }
-  return chain
+const ancestry = computed(() => {
+  const current =
+    agent.value ??
+    (record.value
+      ? {
+          id: record.value.id,
+          rootSessionId: record.value.owner.rootSessionId,
+          parentAgentId: record.value.owner.parentAgentId,
+          title: title.value,
+          backend: record.value.backend,
+        }
+      : undefined)
+  return current
+    ? agentAncestry(rootId.value, current, agents.value)
+    : undefined
 })
 function location(id: string) {
   return id.startsWith('dlg-')
@@ -113,17 +138,41 @@ function location(id: string) {
       }
     : { name: 'chat', params: { sessionId: id } }
 }
-function parent() {
-  void router.push(
-    location(
-      agent.value?.parentAgentId ??
-        record.value?.owner.parentAgentId ??
-        rootId.value,
-    ),
+async function readRoot(sessionId: string, current: number) {
+  const result = owningRootAvailability(
+    sessionId,
+    await invokeCore('sessions.list', { includeArchived: true }),
   )
+  if (current === generation) {
+    rootAvailability.value = result
+    if (result !== 'available') detailsRunId.value = null
+  }
+  if (result === 'missing')
+    throw Object.assign(new Error('Owning root missing'), {
+      code: 'ROOT_NOT_FOUND',
+    })
+  return result
+}
+async function navigate(id: string) {
+  if (!canOpenRoot.value) return
+  const current = generation
+  try {
+    if (
+      (await readRoot(rootId.value, current)) !== 'available' ||
+      current !== generation
+    )
+      return
+    void router.push(location(id))
+  } catch (cause) {
+    if (current === generation) fail(cause)
+  }
+}
+function parent() {
+  if (controlsAvailable.value && ancestry.value?.parentId)
+    void navigate(ancestry.value.parentId)
 }
 function root() {
-  void router.push({ name: 'chat', params: { sessionId: rootId.value } })
+  void navigate(rootId.value)
 }
 // Join small text batches for normal prose/markdown, while keeping each rendered
 // unit bounded and tools/questions in their durable position.
@@ -173,7 +222,14 @@ const rows = computed(() => {
 let feed: ReturnType<typeof createExternalHistoryFeed> | undefined,
   generation = 0
 let activated = true
+let rootCheckTimer: ReturnType<typeof setInterval> | undefined
+let rootVisibilityChanged: (() => void) | undefined
 function disposeFeed() {
+  if (rootVisibilityChanged)
+    document.removeEventListener('visibilitychange', rootVisibilityChanged)
+  rootVisibilityChanged = undefined
+  clearInterval(rootCheckTimer)
+  rootCheckTimer = undefined
   olderLoading.value = false
   generation++
   feed?.dispose()
@@ -201,6 +257,8 @@ function openFeed() {
     hasAfter: false,
   }
   loading.value = true
+  rootAvailability.value = 'loading'
+  availability.value = 'loading'
   error.value = ''
   stopping.value = requestedStops.get(stopKey(sessionId, id)) ?? null
   following.value = true
@@ -215,6 +273,7 @@ function openFeed() {
           changed()
       }),
     read: async (cursor) => {
+      await readRoot(sessionId, current)
       const [history, view, tree] = await Promise.all([
         invokeCore('delegations.history', { id, sessionId, ...cursor }),
         getDelegation({ id, sessionId }),
@@ -245,6 +304,7 @@ function openFeed() {
       const follow = following.value
       const contentChanged = page.value.entries.length !== value.entries.length
       page.value = value
+      availability.value = 'ready'
       loading.value = false
       error.value = ''
       if (contentChanged && !live.value) links.refresh()
@@ -254,15 +314,60 @@ function openFeed() {
         })
     },
     error: (cause) => {
-      if (current === generation) {
-        error.value = String(cause)
-        loading.value = false
-      }
+      if (current === generation) fail(cause)
     },
   })
   void feed.start()
+  // Core has no archive/delete broadcast. Poll only inexpensive root metadata;
+  // retained history is refreshed only after its availability actually changes.
+  let checkingRoot = false
+  const checkRoot = async () => {
+    if (checkingRoot || current !== generation) return
+    checkingRoot = true
+    const previous = rootAvailability.value
+    try {
+      const next = await readRoot(sessionId, current)
+      if (current === generation && next !== previous) void feed?.refresh()
+    } catch (cause) {
+      if (current === generation) {
+        if (rootAvailability.value !== 'missing')
+          rootAvailability.value = 'error'
+        fail(cause)
+      }
+    } finally {
+      checkingRoot = false
+    }
+  }
+  rootVisibilityChanged = () => {
+    clearInterval(rootCheckTimer)
+    rootCheckTimer = undefined
+    if (document.visibilityState === 'hidden') return
+    refresh()
+    rootCheckTimer = setInterval(checkRoot, 5000)
+  }
+  document.addEventListener('visibilitychange', rootVisibilityChanged)
+  if (document.visibilityState !== 'hidden')
+    rootCheckTimer = setInterval(checkRoot, 5000)
+}
+function fail(cause: unknown) {
+  availability.value = externalConversationFailure(cause)
+  loading.value = false
+  error.value =
+    availability.value === 'error' ? externalConversationMessages.error : ''
+  detailsRunId.value = null
+  if (rootAvailability.value === 'loading') rootAvailability.value = 'error'
+}
+function refresh() {
+  if (activated) void feed?.refresh()
 }
 watch([rootId, delegationId, () => route.name], openFeed, { immediate: true })
+// Local archive/delete changes are not delegation events. Re-read the typed
+// root state when the sidebar list changes, and on focus after other windows.
+watch(
+  () => sessions.value.some((session) => session.id === rootId.value),
+  refresh,
+)
+onMounted(() => window.addEventListener('focus', refresh))
 onActivated(() => {
   activated = true
   if (!feed) openFeed()
@@ -271,7 +376,10 @@ onDeactivated(() => {
   activated = false
   disposeFeed()
 })
-onBeforeUnmount(disposeFeed)
+onBeforeUnmount(() => {
+  disposeFeed()
+  window.removeEventListener('focus', refresh)
+})
 function scroll(event: Event) {
   const el = event.target as HTMLElement
   following.value = el.scrollHeight - el.scrollTop - el.clientHeight < 64
@@ -302,10 +410,19 @@ async function stop() {
     sessionId = rootId.value,
     id = delegationId.value,
     current = generation
-  if (!runId || !live.value || stopping.value) return
+  if (!controlsAvailable.value || !runId || !live.value || stopping.value)
+    return
   stopping.value = runId
   requestedStops.set(stopKey(sessionId, id), runId)
   try {
+    if (
+      (await readRoot(sessionId, current)) !== 'available' ||
+      current !== generation
+    ) {
+      requestedStops.delete(stopKey(sessionId, id))
+      if (current === generation) stopping.value = null
+      return
+    }
     await interruptDelegation({ id, runId, sessionId })
     if (current === generation) await feed?.refresh()
   } catch (cause) {
@@ -325,13 +442,20 @@ async function stop() {
   >
     <header class="child-header">
       <nav aria-label="子智能体路径">
-        <button @click="root">主会话</button
-        ><template v-for="ancestor in ancestors" :key="ancestor.id"
-          ><span>/</span
-          ><button @click="router.push(location(ancestor.id))">
-            {{ ancestor.title }}
-          </button></template
-        ><span>/ 子智能体</span>
+        <template v-if="ancestry && !ancestry.unavailable">
+          <button v-if="controlsAvailable" @click="root">主会话</button
+          ><span v-else>主会话</span>
+          <template v-for="ancestor in ancestry.ancestors" :key="ancestor.id">
+            <span>/</span
+            ><button v-if="controlsAvailable" @click="navigate(ancestor.id)">
+              {{ ancestor.title }}</button
+            ><span v-else>{{ ancestor.title }}</span> </template
+          ><span>/ 子智能体</span>
+        </template>
+        <span v-else-if="ancestry?.unavailable" data-unavailable-parent>{{
+          ancestry.text
+        }}</span>
+        <span v-else>子智能体</span>
       </nav>
       <div class="child-title">
         <h1>{{ title }}</h1>
@@ -343,7 +467,7 @@ async function stop() {
         /><span v-if="record">{{ agentSourceLabel(record.backend) }}</span
         ><span role="status">{{ phase }}</span
         ><Button
-          v-if="run"
+          v-if="run && controlsAvailable"
           size="sm"
           variant="outline"
           @click="detailsRunId = run.id"
@@ -351,11 +475,54 @@ async function stop() {
         >
       </div>
     </header>
+    <p
+      v-if="rootAvailability === 'archived'"
+      class="child-note"
+      data-root-archived
+    >
+      主会话已归档 ·
+      可查看历史公开输出；继续派工、停止任务和本地文件访问不可用。
+    </p>
+    <p
+      v-if="!loading && availability !== 'ready' && availability !== 'error'"
+      class="child-note"
+      role="alert"
+    >
+      {{ externalConversationMessages[availability] }}
+    </p>
     <p v-if="error" class="child-error" role="alert">
       {{ error }} <Button size="sm" @click="feed?.refresh()">重试</Button>
     </p>
     <p v-if="loading" class="child-note">正在读取子智能体对话…</p>
+    <div class="child-diagnostics">
+      <p
+        v-for="issue in availability === 'ready'
+          ? (page.unavailable ?? [])
+          : []"
+        :key="issue.runId"
+        class="child-note"
+        role="alert"
+      >
+        {{ issue.runId }} ·
+        {{
+          issue.reason === 'missing_public_log'
+            ? '公开记录缺失'
+            : '公开记录损坏'
+        }}。仅显示仍可读取的公开记录和已保留的任务状态。
+      </p>
+      <p
+        v-if="
+          availability === 'ready' &&
+          (page.unavailableCount ?? 0) > (page.unavailable?.length ?? 0)
+        "
+        class="child-note"
+      >
+        共 {{ page.unavailableCount }} 轮公开记录不可用，以上列出前
+        {{ page.unavailable?.length }} 轮。
+      </p>
+    </div>
     <DynamicScroller
+      v-show="availability === 'ready'"
       ref="scroller"
       class="child-timeline"
       :items="rows"
@@ -385,6 +552,7 @@ async function stop() {
             <h2 v-if="item.type === 'run'" :title="item.runId">
               {{ item.text }}
               <Button
+                v-if="controlsAvailable"
                 size="sm"
                 variant="outline"
                 @click="detailsRunId = item.runId"
@@ -414,19 +582,34 @@ async function stop() {
           </article> </DynamicScrollerItem
       ></template>
       <template #after
-        ><p v-if="!loading && !page.entries.length" class="child-note">
+        ><p
+          v-if="
+            availability === 'ready' &&
+            !page.entries.length &&
+            !page.unavailable?.length
+          "
+          class="child-note"
+        >
           尚无公开输出。
         </p></template
       >
     </DynamicScroller>
     <footer class="child-footer">
       <span>子智能体对话 · 只读</span
-      ><Button size="sm" @click="parent">返回父智能体</Button
-      ><Button size="sm" @click="root">{{
-        run?.phase === 'waiting_input' ? '返回主会话回答' : '返回主会话继续派工'
+      ><Button
+        v-if="controlsAvailable && ancestry?.parentId"
+        size="sm"
+        @click="parent"
+        >返回父智能体</Button
+      ><Button v-if="canOpenRoot" size="sm" @click="root">{{
+        availability !== 'ready'
+          ? '返回主会话'
+          : run?.phase === 'waiting_input'
+            ? '返回主会话回答'
+            : '返回主会话继续派工'
       }}</Button
       ><Button
-        v-if="live"
+        v-if="live && controlsAvailable"
         data-stop-child
         size="sm"
         variant="danger"
@@ -438,7 +621,7 @@ async function stop() {
       >
     </footer>
     <ExternalAgentDetails
-      v-if="detailsRunId"
+      v-if="detailsRunId && controlsAvailable"
       :key="detailsRunId"
       :run-id="detailsRunId"
       :delegation-id="delegationId"
@@ -538,6 +721,11 @@ h1 {
   padding: var(--space-4);
   text-align: center;
   color: rgb(var(--label-secondary));
+}
+.child-diagnostics {
+  flex: none;
+  max-height: 160px;
+  overflow: auto;
 }
 .child-error {
   padding: var(--space-3);

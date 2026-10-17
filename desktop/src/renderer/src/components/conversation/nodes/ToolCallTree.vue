@@ -10,7 +10,7 @@
  */
 import { computed, defineAsyncComponent, inject, ref } from 'vue'
 import { routerKey } from 'vue-router'
-import { agentSourceLabel } from '@emperor/core/api'
+import { agentSourceLabel } from '@emperor/core/runtime-contract'
 import type { ToolChatNode, ToolGrantView } from '../../../conversation/types'
 import { DsShieldAlert } from '../../icons/ds'
 import StateDot from '../../ui/StateDot.vue'

@@ -32,6 +32,8 @@ export function createExternalHistoryFeed(options: {
     const entries = [...unique.values()]
     page = {
       entries,
+      unavailable: next.unavailable,
+      unavailableCount: next.unavailableCount,
       before: older || !page.before ? next.before : page.before,
       after: older ? page.after : (next.after ?? page.after),
       hasBefore: older || !page.before ? next.hasBefore : page.hasBefore,

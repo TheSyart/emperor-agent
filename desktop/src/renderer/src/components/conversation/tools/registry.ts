@@ -10,7 +10,7 @@ import {
   type AgentBackend,
   type AgentView,
   agentPhaseLabel,
-} from '@emperor/core/api'
+} from '@emperor/core/runtime-contract'
 import {
   DsAgent,
   DsApi,

@@ -30,6 +30,12 @@ export interface DelegationHistoryEntry {
 }
 export interface DelegationHistoryPage {
   entries: DelegationHistoryEntry[]
+  /** Public transcript unavailable; journal prompts/results may still be trustworthy. */
+  unavailable?: {
+    runId: string
+    reason: 'missing_public_log' | 'corrupt_public_log'
+  }[]
+  unavailableCount?: number
   before: string | null
   after: string | null
   hasBefore: boolean
@@ -47,6 +53,7 @@ interface Position {
   part: number
 }
 interface RunIndex {
+  mtimeMs: number
   ino: number
   offset: number
   entries: Position[]
@@ -66,6 +73,19 @@ const invalid = () =>
 export class DelegationHistory {
   private readonly indexes = new Map<string, RunIndex>()
   constructor(private readonly root: string) {}
+  private parse(bytes: string): Record<string, unknown> {
+    try {
+      const value: unknown = JSON.parse(bytes)
+      if (!value || typeof value !== 'object' || Array.isArray(value))
+        throw new Error('not an event')
+      return value as Record<string, unknown>
+    } catch {
+      throw new DelegationError(
+        'TRANSCRIPT_CORRUPT',
+        'invalid normalized event',
+      )
+    }
+  }
   private event(path: string, position: Position): Record<string, unknown> {
     const fd = openSync(path, 'r')
     try {
@@ -74,7 +94,7 @@ export class DelegationHistory {
         readSync(fd, bytes, 0, bytes.length, position.offset) !== bytes.length
       )
         throw invalid()
-      return JSON.parse(bytes.toString('utf8')) as Record<string, unknown>
+      return this.parse(bytes.toString('utf8'))
     } finally {
       closeSync(fd)
     }
@@ -156,8 +176,10 @@ export class DelegationHistory {
           readFileSync(path + '.public-index.json', 'utf8'),
         ) as { version: number; index: RunIndex }
         if (
-          cached.version === 2 &&
+          cached.version === 3 &&
           cached.index.ino === stat.ino &&
+          (cached.index.offset < stat.size ||
+            cached.index.mtimeMs === stat.mtimeMs) &&
           Number.isSafeInteger(cached.index.offset) &&
           cached.index.offset >= 0 &&
           cached.index.offset <= stat.size &&
@@ -178,8 +200,13 @@ export class DelegationHistory {
         /* A damaged cache is rebuildable from normalized durable facts. */
       }
     }
-    if (!index || index.ino !== stat.ino || index.offset > stat.size)
-      index = { ino: stat.ino, offset: 0, entries: [] }
+    if (
+      !index ||
+      index.ino !== stat.ino ||
+      index.offset > stat.size ||
+      (index.offset === stat.size && index.mtimeMs !== stat.mtimeMs)
+    )
+      index = { ino: stat.ino, mtimeMs: stat.mtimeMs, offset: 0, entries: [] }
     const previousOffset = index.offset
     const fd = openSync(path, 'r')
     try {
@@ -202,9 +229,9 @@ export class DelegationHistory {
           const bytes = newline + 1,
             offset = index.offset
           if (newline) {
-            const event = JSON.parse(
+            const event = this.parse(
               pending.subarray(0, newline).toString('utf8'),
-            ) as Record<string, unknown>
+            )
             if (event.runId !== runId || event.delegationId !== delegationId)
               throw new DelegationError(
                 'TRANSCRIPT_CORRUPT',
@@ -239,11 +266,12 @@ export class DelegationHistory {
     } finally {
       closeSync(fd)
     }
+    index.mtimeMs = stat.mtimeMs
     if (index.offset !== previousOffset) {
       try {
         durableReplaceSync(
           path + '.public-index.json',
-          JSON.stringify({ version: 2, index }) + '\n',
+          JSON.stringify({ version: 3, index }) + '\n',
         )
       } catch {
         /* Cache write failure cannot hide durable output. */
@@ -262,6 +290,22 @@ export class DelegationHistory {
     if (options.before !== undefined && options.after !== undefined)
       throw invalid()
     const owner = state.record!
+    const unavailable: NonNullable<DelegationHistoryPage['unavailable']> = []
+    const unavailableRunIds = new Set<string>()
+    let unavailableCount = 0,
+      diagnosticBytes = 0
+    const unavailableRun = (
+      issue: NonNullable<DelegationHistoryPage['unavailable']>[number],
+    ) => {
+      if (unavailableRunIds.has(issue.runId)) return
+      unavailableRunIds.add(issue.runId)
+      unavailableCount++
+      const bytes = Buffer.byteLength(JSON.stringify(issue)) + 1
+      if (unavailable.length < 200 && diagnosticBytes + bytes <= 32 * 1024) {
+        unavailable.push(issue)
+        diagnosticBytes += bytes
+      }
+    }
     const rows: {
       id: string
       legacySeq?: number
@@ -300,9 +344,37 @@ export class DelegationHistory {
         'runs',
         run.id + '.jsonl',
       )
-      const runIndex = existsSync(path)
-        ? this.index(path, owner.id, run.id)
-        : undefined
+      let runIndex: RunIndex | undefined
+      if (!existsSync(path)) {
+        // A completed provider turn necessarily passed through normalized events.
+        // Earlier/no-output runs may legitimately have no transcript yet.
+        if (
+          run.phase === 'completed' ||
+          existsSync(path + '.public-index.json')
+        )
+          unavailableRun({ runId: run.id, reason: 'missing_public_log' })
+      } else {
+        try {
+          runIndex = this.index(path, owner.id, run.id)
+          const transcriptBytes = statSync(path).size
+          if (run.phase === 'completed' && transcriptBytes === 0)
+            unavailableRun({ runId: run.id, reason: 'missing_public_log' })
+          if (
+            TERMINAL_RUN_PHASES.has(run.phase) &&
+            runIndex.offset < transcriptBytes
+          ) {
+            unavailableRun({ runId: run.id, reason: 'corrupt_public_log' })
+          }
+        } catch (cause) {
+          if (
+            !(cause instanceof DelegationError) ||
+            cause.code !== 'TRANSCRIPT_CORRUPT'
+          )
+            throw cause
+          unavailableRun({ runId: run.id, reason: 'corrupt_public_log' })
+          this.indexes.delete(path)
+        }
+      }
       const positionedMessages = new Set(
         runIndex?.entries.flatMap((position) =>
           position.messageId ? [position.messageId] : [],
@@ -445,7 +517,7 @@ export class DelegationHistory {
         const [delegation, id] = decoded
         if (delegation !== owner.id || typeof id !== 'string') throw invalid()
         anchor = rows.findIndex((row) => row.id === id)
-        if (anchor < 0 && id !== '$empty') throw invalid()
+        const lostIds = anchor < 0 && id !== '$empty' ? [id] : []
         if (decoded.length === 3) {
           const old = Buffer.from(
             JSON.stringify([
@@ -477,8 +549,21 @@ export class DelegationHistory {
           sourceAnchor = rows.findIndex(
             (row) => row.id === sourceId && row.legacySeq === undefined,
           )
-          if (sourceAnchor < 0 && sourceId !== '$empty') throw invalid()
+          if (sourceAnchor < 0 && sourceId !== '$empty') lostIds.push(sourceId)
           acknowledged = seq
+        }
+        if (lostIds.length) {
+          // Only a validated, same-delegation cursor whose rows belong to
+          // diagnosed unavailable runs may restart from retained journal facts.
+          if (
+            !lostIds.every(
+              (lost) =>
+                /^dgr-[^:]+:\d+:\d+$/.test(lost) &&
+                unavailableRunIds.has(lost.split(':')[0]!),
+            )
+          )
+            throw invalid()
+          return this.read(state, { limit: options.limit })
         }
       } catch {
         throw invalid()
@@ -499,7 +584,8 @@ export class DelegationHistory {
     const end = options.before !== undefined ? Math.max(0, anchor) : rows.length
     const entries: DelegationHistoryEntry[] = []
     const selected: number[] = []
-    let bytes = 0
+    // Reserve the envelope/cursors and charge diagnostics to the same page budget.
+    let bytes = 2048 + diagnosticBytes
     for (
       let index = forward ? 0 : end - 1;
       index >= 0 &&
@@ -545,6 +631,7 @@ export class DelegationHistory {
     }
     return {
       entries,
+      ...(unavailableCount ? { unavailable, unavailableCount } : {}),
       before: entries.length
         ? encode(first)
         : (cursor ?? exact('$empty', '$empty', 0)),

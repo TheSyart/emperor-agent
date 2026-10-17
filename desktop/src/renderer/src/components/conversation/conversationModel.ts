@@ -2,7 +2,7 @@
  * Pure helpers for the ConversationView shell: layout phase (hero vs
  * active), child-session detection and breadcrumb construction.
  */
-import { agentTitle } from '@emperor/core/api'
+import { agentTitle } from '@emperor/core/runtime-contract'
 import type { SessionLineage } from '@emperor/core/runtime-contract'
 import type { ComposerPhase } from '../../conversation/composerPhase'
 import type { SessionInfo } from '../../types'

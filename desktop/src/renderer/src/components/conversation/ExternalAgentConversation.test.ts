@@ -11,6 +11,7 @@ import {
 } from 'vue'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import ExternalAgentConversation from './ExternalAgentConversation.vue'
+import { useSession } from '../../composables/useSession'
 const bridge = vi.hoisted(() => ({
   invokeCore: vi.fn(),
   push: vi.fn(),
@@ -66,9 +67,14 @@ let app: App | undefined, root: HTMLDivElement
 let currentRun = 'dgr-one',
   phase = 'running'
 let stopResolve: (() => void) | undefined
+let archived = false,
+  rootExists = true
 async function settle() {
-  for (let i = 0; i < 30; i++) await Promise.resolve()
+  for (let i = 0; i < 80; i++) await Promise.resolve()
   await nextTick()
+  // A real click happens after listeners attach. Vue capture/bubble timestamp
+  // guards reject synthetic clicks in the same millisecond as mounting.
+  await new Promise((resolve) => setTimeout(resolve, 1))
 }
 async function mount() {
   root = document.createElement('div')
@@ -80,12 +86,19 @@ async function mount() {
 }
 beforeEach(() => {
   currentRun = 'dgr-one'
+  archived = false
+  rootExists = true
+  useSession().sessions.value = [{ id: 'root', title: 'Root' } as never]
   phase = 'running'
   stopResolve = undefined
   route.name = 'external-agent'
   route.params = { sessionId: 'root', delegationId: 'dlg-one' }
   bridge.invokeCore.mockImplementation(
     async (key: string, input: Record<string, unknown>) => {
+      if (key === 'sessions.list')
+        return rootExists
+          ? [{ id: 'root', archived_at: archived ? '2026-10-17' : null }]
+          : []
       if (key === 'delegations.get')
         return {
           record: {
@@ -102,12 +115,16 @@ beforeEach(() => {
           agents: [
             {
               id: 'sub-parent',
+              rootSessionId: 'root',
+              kind: 'internal',
               title: '父任务',
               backend: 'internal',
               parentAgentId: 'root',
             },
             {
-              id: 'dlg-one',
+              id: input.rootSessionIds ? route.params.delegationId : 'dlg-one',
+              rootSessionId: 'root',
+              kind: 'external',
               title: '检验图片',
               backend: 'codex',
               phase: phase === 'completed' ? 'completed' : 'running',
@@ -153,18 +170,25 @@ it('renders canonical title, public readonly output and actual ancestry; return 
   expect(dom.querySelector('textarea,input,select')).toBeNull()
   const buttons = [...dom.querySelectorAll<HTMLButtonElement>('button')]
   buttons.find((b) => b.textContent === '返回父智能体')!.click()
+  await settle()
   expect(bridge.push).toHaveBeenLastCalledWith({
     name: 'chat',
     params: { sessionId: 'sub-parent' },
   })
   buttons.find((b) => b.textContent?.includes('返回主会话继续派工'))!.click()
+  await settle()
   expect(bridge.push).toHaveBeenLastCalledWith({
     name: 'chat',
     params: { sessionId: 'root' },
   })
   expect(
     bridge.invokeCore.mock.calls.every(([key]) =>
-      ['delegations.history', 'delegations.get', 'agents.list'].includes(key),
+      [
+        'sessions.list',
+        'delegations.history',
+        'delegations.get',
+        'agents.list',
+      ].includes(key),
     ),
   ).toBe(true)
 })
@@ -361,4 +385,273 @@ it('fences a delayed older-page completion after switching to a reused child scr
     hasAfter: false,
   })
   await vi.waitFor(() => expect(dom.querySelector('.child-more')).toBeNull())
+})
+
+function overrideRead(key: string, result: () => unknown) {
+  const original = bridge.invokeCore.getMockImplementation()!
+  bridge.invokeCore.mockImplementation(
+    (operation: string, input: Record<string, unknown>) =>
+      operation === key
+        ? Promise.resolve().then(result)
+        : original(operation, input),
+  )
+}
+it('distinguishes pending history from a valid conversation with no public output', async () => {
+  let finish!: (value: unknown) => void
+  overrideRead(
+    'delegations.history',
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+  )
+  const dom = await mount()
+  expect(dom.textContent).toContain('正在读取子智能体对话')
+  expect(dom.textContent).not.toContain('尚无公开输出')
+  finish({
+    entries: [],
+    before: null,
+    after: null,
+    hasBefore: false,
+    hasAfter: false,
+  })
+  await settle()
+  expect(dom.textContent).toContain('尚无公开输出')
+})
+it('opens an archived direct route as historical output without activation or control actions', async () => {
+  archived = true
+  const dom = await mount()
+  expect(dom.textContent).toContain('主会话已归档')
+  expect(dom.textContent).toContain('公开结果')
+  expect(dom.querySelector('[data-stop-child]')).toBeNull()
+  expect(
+    [...dom.querySelectorAll('button')].some((b) =>
+      b.textContent?.includes('继续派工'),
+    ),
+  ).toBe(false)
+  expect(dom.textContent).not.toContain('返回父智能体')
+  for (const button of dom.querySelectorAll<HTMLButtonElement>('button'))
+    button.click()
+  await settle()
+  expect(bridge.push).not.toHaveBeenCalled()
+  expect(
+    bridge.invokeCore.mock.calls.every(([key]) =>
+      [
+        'sessions.list',
+        'delegations.history',
+        'delegations.get',
+        'agents.list',
+      ].includes(key),
+    ),
+  ).toBe(true)
+})
+it('updates an open viewer after local archive even without a running child event', async () => {
+  const dom = await mount()
+  archived = true
+  useSession().sessions.value = []
+  await settle()
+  expect(dom.textContent).toContain('主会话已归档')
+  expect(dom.textContent).toContain('公开结果')
+  expect(dom.querySelector('[data-stop-child]')).toBeNull()
+  expect(
+    [...dom.querySelectorAll('button')].some((b) =>
+      b.textContent?.includes('继续派工'),
+    ),
+  ).toBe(false)
+})
+it('does not read children of a missing root or label unavailable history as empty', async () => {
+  rootExists = false
+  const dom = await mount()
+  expect(dom.textContent).toContain('主会话不存在')
+  expect(dom.textContent).not.toContain('正在读取')
+  expect(dom.textContent).not.toContain('尚无公开输出')
+  expect(
+    bridge.invokeCore.mock.calls.every(([key]) => key === 'sessions.list'),
+  ).toBe(true)
+})
+it.each([
+  ['DELEGATION_NOT_FOUND', '子智能体不存在'],
+  ['PERMISSION_DENIED', '子智能体不可读取'],
+  ['TRANSCRIPT_CORRUPT', '公开记录损坏'],
+  ['INTERNAL_ERROR', '暂时无法读取'],
+])('renders %s as an explicit unavailable state', async (code, message) => {
+  overrideRead('delegations.get', () => {
+    throw Object.assign(new Error('safe IPC error'), { code })
+  })
+  const dom = await mount()
+  expect(dom.textContent).toContain(message)
+  expect(dom.textContent).not.toContain('正在读取')
+  expect(dom.textContent).not.toContain('尚无公开输出')
+  expect(dom.querySelector('[data-stop-child]')).toBeNull()
+  expect(
+    [...dom.querySelectorAll('button')].some((b) =>
+      b.textContent?.includes('重试'),
+    ),
+  ).toBe(code === 'INTERNAL_ERROR')
+})
+it('can retry a transient read error and restore a valid timeline', async () => {
+  const original = bridge.invokeCore.getMockImplementation()!
+  let failed = true
+  bridge.invokeCore.mockImplementation(
+    (key: string, input: Record<string, unknown>) => {
+      if (key === 'delegations.get' && failed)
+        return Promise.reject(new Error('temporary'))
+      return original(key, input)
+    },
+  )
+  const dom = await mount()
+  expect(dom.textContent).toContain('暂时无法读取')
+  failed = false
+  ;[...dom.querySelectorAll<HTMLButtonElement>('button')]
+    .find((b) => b.textContent?.includes('重试'))!
+    .click()
+  await settle()
+  expect(dom.textContent).toContain('公开结果')
+  expect(dom.textContent).not.toContain('暂时无法读取')
+})
+it.each(['missing', 'foreign', 'conflicting', 'self-cycle', 'cycle'])(
+  'keeps actual %s parent evidence without inventing a root path or navigating it',
+  async (kind) => {
+    const child = {
+      id: 'dlg-one',
+      kind: 'external',
+      backend: 'codex',
+      title: '检验图片',
+      phase: 'running',
+      rootSessionId: 'root',
+      parentAgentId: kind === 'self-cycle' ? 'dlg-one' : 'sub-parent',
+      ...(kind === 'foreign' ? { unavailable: 'foreign_parent' } : {}),
+      ...(kind === 'conflicting' ? { unavailable: 'conflicting_parent' } : {}),
+    }
+    const parent = {
+      id: 'sub-parent',
+      kind: 'internal',
+      backend: 'internal',
+      title: '父任务',
+      rootSessionId: kind === 'foreign' ? 'other-root' : 'root',
+      parentAgentId: kind === 'cycle' ? 'dlg-one' : 'root',
+    }
+    overrideRead('agents.list', () => ({
+      agents:
+        kind === 'missing' || kind === 'self-cycle' ? [child] : [child, parent],
+    }))
+    const dom = await mount()
+    const path = dom.querySelector('nav')!
+    expect(path.textContent).not.toContain('主会话')
+    expect(path.textContent).toContain(
+      kind.includes('cycle') ? '父级循环' : '父级不可用',
+    )
+    expect(path.textContent).toContain(child.parentAgentId)
+    expect(dom.textContent).not.toContain('返回父智能体')
+    expect(path.querySelector('button')).toBeNull()
+    ;[...dom.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent?.includes('返回主会话继续派工'))!
+      .click()
+    await settle()
+    expect(bridge.push).toHaveBeenLastCalledWith({
+      name: 'chat',
+      params: { sessionId: 'root' },
+    })
+  },
+)
+it('routes a valid external parent under the same owning root', async () => {
+  overrideRead('agents.list', () => ({
+    agents: [
+      {
+        id: 'dlg-parent',
+        kind: 'external',
+        backend: 'claude-code',
+        title: '外部父任务',
+        rootSessionId: 'root',
+        parentAgentId: 'root',
+      },
+      {
+        id: 'dlg-one',
+        kind: 'external',
+        backend: 'codex',
+        title: '检验图片',
+        phase: 'running',
+        rootSessionId: 'root',
+        parentAgentId: 'dlg-parent',
+      },
+    ],
+  }))
+  const dom = await mount()
+  expect(dom.querySelector('nav')?.textContent).toContain('主会话')
+  expect(dom.querySelector('nav')?.textContent).toContain('外部父任务')
+  ;[...dom.querySelectorAll<HTMLButtonElement>('button')]
+    .find((b) => b.textContent === '返回父智能体')!
+    .click()
+  await settle()
+  expect(bridge.push).toHaveBeenLastCalledWith({
+    name: 'external-agent',
+    params: { sessionId: 'root', delegationId: 'dlg-parent' },
+  })
+})
+
+it.each(['missing_public_log', 'corrupt_public_log'])(
+  'shows %s diagnostic on retained history, including a catch-up refresh',
+  async (reason) => {
+    let unavailable: unknown[] = []
+    overrideRead('delegations.history', () => ({
+      entries: [],
+      before: null,
+      after: null,
+      hasBefore: false,
+      hasAfter: false,
+      unavailable,
+    }))
+    const dom = await mount()
+    expect(dom.textContent).toContain('尚无公开输出')
+    unavailable = [{ runId: 'dgr-one', reason }]
+    bridge.listener({ event: 'agent_tree_changed', rootSessionId: 'root' })
+    await settle()
+    expect(dom.textContent).toContain(
+      reason === 'missing_public_log' ? '公开记录缺失' : '公开记录损坏',
+    )
+    expect(dom.textContent).toContain('dgr-one')
+    expect(dom.textContent).not.toContain('尚无公开输出')
+  },
+)
+it('observes a backend archive while focused without repeatedly reading unchanged history', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+  try {
+    const dom = await mount()
+    const initialHistoryReads = bridge.invokeCore.mock.calls.filter(
+      ([key]) => key === 'delegations.history',
+    ).length
+    await vi.advanceTimersByTimeAsync(5000)
+    await settle()
+    expect(
+      bridge.invokeCore.mock.calls.filter(
+        ([key]) => key === 'delegations.history',
+      ),
+    ).toHaveLength(initialHistoryReads)
+    archived = true
+    await vi.advanceTimersByTimeAsync(5000)
+    await settle()
+    expect(dom.textContent).toContain('主会话已归档')
+    expect(dom.textContent).toContain('公开结果')
+    expect(dom.querySelector('[data-stop-child]')).toBeNull()
+    const visibility = vi
+      .spyOn(document, 'visibilityState', 'get')
+      .mockReturnValue('hidden')
+    document.dispatchEvent(new Event('visibilitychange'))
+    const hiddenCalls = bridge.invokeCore.mock.calls.length
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(bridge.invokeCore.mock.calls).toHaveLength(hiddenCalls)
+    visibility.mockReturnValue('visible')
+    document.dispatchEvent(new Event('visibilitychange'))
+    await settle()
+    expect(bridge.invokeCore.mock.calls.length).toBeGreaterThan(hiddenCalls)
+    visibility.mockRestore()
+    app!.unmount()
+    app = undefined
+    const calls = bridge.invokeCore.mock.calls.length
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(bridge.invokeCore.mock.calls).toHaveLength(calls)
+  } finally {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  }
 })

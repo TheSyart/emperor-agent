@@ -472,3 +472,213 @@ it('pages each legacy instruction part without acknowledging undisplayed parts o
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+it.each([
+  'missing',
+  'empty-terminal',
+  'invalid-json',
+  'foreign-identity',
+  'partial-terminal',
+])(
+  'reports %s public logs without disguising retained journal facts as complete output',
+  (kind) => {
+    const root = mkdtempSync(join(tmpdir(), 'history-unavailable-'))
+    try {
+      const record = fixtureDelegationRecord(),
+        run = {
+          ...fixtureDelegationRun(),
+          phase: 'completed' as const,
+          summary: 'retained result',
+        }
+      const state: DelegationState = {
+        record,
+        runs: { [run.id]: run },
+        messages: {
+          [run.messageId]: {
+            id: run.messageId,
+            text: 'retained request',
+            status: 'accepted',
+          },
+        },
+        interactions: {},
+        outbox: {},
+        lastSeq: 3,
+      }
+      const dir = join(root, 'conversations', record.id, 'runs')
+      mkdirSync(dir, { recursive: true })
+      const path = join(dir, run.id + '.jsonl')
+      if (kind === 'empty-terminal') writeFileSync(path, '')
+      if (kind === 'invalid-json')
+        writeFileSync(path, '{invalid secret payload}\n')
+      if (kind === 'foreign-identity')
+        writeFileSync(
+          path,
+          JSON.stringify({
+            delegationId: 'dlg-foreign',
+            runId: run.id,
+            type: 'text_delta',
+            text: 'foreign secret',
+          }) + '\n',
+        )
+      if (kind === 'partial-terminal')
+        writeFileSync(path, '{"type":"text_delta"')
+      const result = new DelegationHistory(root).read(state)
+      expect(result.unavailable).toEqual([
+        {
+          runId: run.id,
+          reason:
+            kind === 'missing' || kind === 'empty-terminal'
+              ? 'missing_public_log'
+              : 'corrupt_public_log',
+        },
+      ])
+      expect(result.entries.map((entry) => entry.text)).toEqual([
+        'retained request',
+        'retained result',
+      ])
+      expect(JSON.stringify(result)).not.toContain('secret')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  },
+)
+it.each(['queued', 'preparing', 'running'] as const)(
+  'does not invent missing history for a %s run before any output',
+  (phase) => {
+    const root = mkdtempSync(join(tmpdir(), 'history-pending-'))
+    try {
+      const record = fixtureDelegationRecord(),
+        run = { ...fixtureDelegationRun(), phase }
+      const state: DelegationState = {
+        record,
+        runs: { [run.id]: run },
+        messages: {},
+        interactions: {},
+        outbox: {},
+        lastSeq: 1,
+      }
+      const result = new DelegationHistory(root).read(state)
+      expect(result.unavailable ?? []).toEqual([])
+      expect(result.entries).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  },
+)
+it('bounds missing-log diagnostics together with retained entries and reports the total', () => {
+  const root = mkdtempSync(join(tmpdir(), 'history-diagnostics-budget-'))
+  try {
+    const runs = Array.from({ length: 600 }, (_, index) => ({
+      ...fixtureDelegationRun(`dgr-${index}`),
+      phase: 'completed' as const,
+    }))
+    const state: DelegationState = {
+      record: fixtureDelegationRecord(),
+      runs: Object.fromEntries(runs.map((run) => [run.id, run])),
+      messages: {},
+      interactions: {},
+      outbox: {},
+      lastSeq: 1,
+    }
+    const result = new DelegationHistory(root).read(state, { limit: 500 })
+    expect(result.unavailableCount).toBe(600)
+    expect(result.unavailable).toHaveLength(200)
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(240 * 1024)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+it('reports corruption of an already indexed public row without exposing replacement contents', () => {
+  const root = mkdtempSync(join(tmpdir(), 'history-cached-corrupt-'))
+  try {
+    const record = fixtureDelegationRecord(),
+      run = fixtureDelegationRun()
+    const state: DelegationState = {
+      record,
+      runs: { [run.id]: run },
+      messages: {},
+      interactions: {},
+      outbox: {},
+      lastSeq: 1,
+    }
+    const dir = join(root, 'conversations', record.id, 'runs')
+    mkdirSync(dir, { recursive: true })
+    const path = join(dir, run.id + '.jsonl')
+    const raw =
+      JSON.stringify({
+        delegationId: record.id,
+        runId: run.id,
+        type: 'text_delta',
+        text: 'safe',
+      }) + '\n'
+    writeFileSync(path, raw)
+    const history = new DelegationHistory(root)
+    expect(history.read(state).entries[0]?.text).toBe('safe')
+    writeFileSync(path, '{'.repeat(Buffer.byteLength(raw) - 1) + '\n')
+    const page = history.read(state)
+    expect(page.unavailable).toEqual([
+      { runId: run.id, reason: 'corrupt_public_log' },
+    ])
+    expect(page.entries).toEqual([])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+it('keeps a missing-log diagnostic when refreshing with a cursor into the removed transcript', () => {
+  const root = mkdtempSync(join(tmpdir(), 'history-missing-cursor-'))
+  try {
+    const record = fixtureDelegationRecord(),
+      run = fixtureDelegationRun()
+    const state: DelegationState = {
+      record,
+      runs: { [run.id]: run },
+      messages: {},
+      interactions: {},
+      outbox: {},
+      lastSeq: 1,
+    }
+    const dir = join(root, 'conversations', record.id, 'runs')
+    mkdirSync(dir, { recursive: true })
+    const path = join(dir, run.id + '.jsonl')
+    writeFileSync(
+      path,
+      JSON.stringify({
+        delegationId: record.id,
+        runId: run.id,
+        type: 'text_delta',
+        text: 'safe',
+      }) + '\n',
+    )
+    const history = new DelegationHistory(root)
+    const first = history.read(state)
+    rmSync(path)
+    const page = history.read(state, { after: first.after! })
+    expect(page.unavailable).toEqual([
+      { runId: run.id, reason: 'missing_public_log' },
+    ])
+    expect(page.hasAfter).toBe(false)
+    expect(() => history.read(state, { after: 'invalid' })).toThrow(
+      'HISTORY_CURSOR_INVALID',
+    )
+    const payload = [
+      record.id,
+      `${run.id}:not-an-offset`,
+      `${run.id}:not-an-offset`,
+      0,
+    ]
+    const forged = Buffer.from(
+      JSON.stringify([
+        ...payload,
+        createHash('sha256')
+          .update(JSON.stringify(payload))
+          .digest('hex')
+          .slice(0, 16),
+      ]),
+    ).toString('base64url')
+    expect(() => history.read(state, { after: forged })).toThrow(
+      'HISTORY_CURSOR_INVALID',
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

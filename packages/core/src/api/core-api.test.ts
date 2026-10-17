@@ -59,6 +59,7 @@ const EXPECTED_OPERATIONS = [
   'delegations.close',
   'delegations.collect',
   'delegations.get',
+  'delegations.history',
   'delegations.integrate',
   'delegations.interrupt',
   'delegations.receipt',

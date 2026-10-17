@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { agentAncestry } from './environmentAgentsModel'
 import {
   agentTitle,
   agentSourceLabel,
   agentPhaseLabel,
   type AgentView,
-} from '@emperor/core/api'
+} from '@emperor/core/runtime-contract'
 import {
   useAgentTree,
   agentLocation,
@@ -45,36 +46,8 @@ watch(
   },
   { immediate: true },
 )
-function ancestry(agent: AgentView): { text: string; unavailable?: string } {
-  const parts = [agentTitle(agent.title, agent.backend)]
-  const seen = new Set([agent.id])
-  let current = agent
-  function broken(label: string, id: string) {
-    const unavailable = `${label} · ${id}${id !== agent.parentAgentId ? `（父级 ${agent.parentAgentId}）` : ''}`
-    return { text: [unavailable, ...parts].join(' / '), unavailable }
-  }
-  while (true) {
-    const id = current.parentAgentId
-    if (
-      ['missing_parent', 'foreign_parent', 'conflicting_parent'].includes(
-        current.unavailable ?? '',
-      )
-    )
-      return broken('父级不可用', id)
-    if (current.unavailable === 'cyclic_parent') return broken('父级循环', id)
-    if (seen.has(id)) return broken('父级循环', id)
-    if (id === props.rootSessionId) {
-      if (tree.value?.unavailable.some((row) => row.id === agent.id))
-        return broken('父级不可用', agent.parentAgentId)
-      return { text: ['主会话', ...parts].join(' / ') }
-    }
-    const parent = tree.value?.byId[id]
-    if (!parent || parent.rootSessionId !== props.rootSessionId)
-      return broken('父级不可用', id)
-    parts.unshift(agentTitle(parent.title, parent.backend))
-    seen.add(id)
-    current = parent
-  }
+function ancestry(agent: AgentView) {
+  return agentAncestry(props.rootSessionId, agent, agents.value)
 }
 </script>
 <template>

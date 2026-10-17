@@ -4,17 +4,24 @@ import { createLinkStatusSource, LINK_STATUS_KEY } from './parts/linkStatus'
 /** Each external output has its own relative-path capability and image cache. */
 export function provideDelegationLinks(
   scope: () => { sessionId: string; delegationId: string },
+  enabled: () => boolean = () => true,
 ) {
   const links = createLinkStatusSource(
     (href) =>
-      invokeCore('references.resolve', {
-        ...scope(),
-        sourceMessageId: 'delegation-output',
-        href,
-        label: href,
-      }),
+      !enabled()
+        ? Promise.resolve({
+            kind: 'external_file' as const,
+            available: false,
+            tooltip: '当前主会话不可访问本地文件',
+          })
+        : invokeCore('references.resolve', {
+            ...scope(),
+            sourceMessageId: 'delegation-output',
+            href,
+            label: href,
+          }),
     async (reference) => {
-      if (!reference.id) return null
+      if (!enabled() || !reference.id) return null
       const image = await invokeCore('references.image', {
         sessionId: scope().sessionId,
         referenceId: reference.id,
@@ -28,7 +35,7 @@ export function provideDelegationLinks(
     },
   )
   provide(LINK_STATUS_KEY, links)
-  watch([() => scope().sessionId, () => scope().delegationId], () =>
+  watch([() => scope().sessionId, () => scope().delegationId, enabled], () =>
     links.refresh(),
   )
   async function click(event: Event) {
@@ -38,6 +45,7 @@ export function provideDelegationLinks(
     if (!(anchor instanceof HTMLAnchorElement)) return
     event.preventDefault()
     event.stopPropagation()
+    if (!enabled()) return
     const href = anchor.getAttribute('href')
     if (!href) return
     try {

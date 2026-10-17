@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { agentTitle, agentSourceLabel } from '@emperor/core/api'
+import { agentTitle, agentSourceLabel } from '@emperor/core/runtime-contract'
 import { computed, nextTick, ref, watch } from 'vue'
 import type { ToolExternalAgentView } from '../../../conversation/types'
 import { provideDelegationLinks } from '../delegationLinks'

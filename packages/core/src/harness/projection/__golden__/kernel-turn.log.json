@@ -2134,6 +2134,7 @@
         "data": {
           "subagentId": "sub-<id12>",
           "stopReason": "completed",
+          "childTurnEndSeq": 22,
           "text": "child found x"
         }
       },

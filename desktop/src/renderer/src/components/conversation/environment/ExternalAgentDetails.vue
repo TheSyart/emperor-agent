@@ -13,7 +13,7 @@ import {
   type DelegationView,
   type DelegationDelivery,
 } from '../../../api/delegations'
-import { agentTitle, agentSourceLabel } from '@emperor/core/api'
+import { agentTitle, agentSourceLabel } from '@emperor/core/runtime-contract'
 import { onCoreEvent } from '../../../api/backend'
 import Modal from '../../ui/Modal.vue'
 import Button from '../../ui/Button.vue'
