@@ -12,7 +12,6 @@
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { AgentView } from '@emperor/core/api'
 import { selectDirectory } from '../../api/backend'
 import { useAppContext } from '../../composables/useAppContext'
 import { useSession } from '../../composables/useSession'
@@ -38,8 +37,8 @@ import SidebarSearchResults from './SidebarSearchResults.vue'
 import SidebarSectionHeader from './SidebarSectionHeader.vue'
 import SidebarTopRow from './SidebarTopRow.vue'
 import { useSidebarState } from './useSidebarState'
-import { agentLocation, useAgentTree } from './agentTree'
-import SidebarAgentTree from './SidebarAgentTree.vue'
+import { useAgentTree } from './agentTree'
+import { fetchSessionLineage } from '../../api/sessions'
 
 const props = defineProps<{ collapsed: boolean; width: number }>()
 const emit = defineEmits<{ toggle: [] }>()
@@ -119,23 +118,54 @@ const selectedAgent = computed(() => {
   }
   return undefined
 })
-const selectedAgentId = computed(() => selectedAgent.value?.id || '')
-// A stable key prevents a state refresh from reopening an explicitly collapsed branch.
+const lineageRoot = ref('')
+let selectionGeneration = 0
 watch(
   () =>
-    layoutLoaded.value && selectedAgent.value
-      ? `${selectedAgent.value.rootSessionId}:${selectedAgent.value.id}`
-      : '',
-  (key) => {
-    const agent = selectedAgent.value
-    if (!key || !agent) return
-    subagents.reveal(agent.rootSessionId, agent.id)
+    [
+      route.name,
+      route.params.sessionId,
+      selectedAgent.value?.rootSessionId,
+      sessions.value.length,
+    ] as const,
+  async ([name, id, indexedRoot]) => {
+    const generation = ++selectionGeneration
+    lineageRoot.value = ''
     if (
-      grouped.value.pinned.some((session) => session.id === agent.rootSessionId)
+      name === 'external-agent' ||
+      typeof id !== 'string' ||
+      indexedRoot ||
+      sessions.value.some((session) => session.id === id) ||
+      isDraftSessionId(id)
     )
+      return
+    try {
+      const lineage = await fetchSessionLineage(id)
+      if (generation === selectionGeneration && lineage.chain.length > 1)
+        lineageRoot.value = lineage.chain[0]!.sessionId
+    } catch {
+      /* A missing child must not select an unrelated root. */
+    }
+  },
+  { immediate: true },
+)
+const selectedRootId = computed(() => {
+  if (route.name === 'external-agent')
+    return String(route.params.sessionId ?? '')
+  if (selectedAgent.value) return selectedAgent.value.rootSessionId
+  if (lineageRoot.value) return lineageRoot.value
+  const id = route.params.sessionId
+  return typeof id === 'string' ? id : activeId.value
+})
+// Opening a child reveals only its owning main row/project group.
+watch(
+  () => (layoutLoaded.value ? selectedRootId.value : ''),
+  (root) => {
+    if (!root) return
+    if (grouped.value.pinned.some((session) => session.id === root))
       pinnedCollapsed.value = false
     const project = grouped.value.projects.find((item) =>
-      item.sessions.some((session) => session.id === agent.rootSessionId),
+      item.sessions.some((session) => session.id === root),
     )
     if (project) {
       projectsCollapsed.value = false
@@ -145,12 +175,6 @@ watch(
   },
   { immediate: true },
 )
-function hasChildren(root: string): boolean {
-  return Boolean(subagents.trees[root]?.agents.length || subagents.errors[root])
-}
-function openAgent(agent: AgentView): void {
-  void router.push(agentLocation(agent)).catch(() => undefined)
-}
 
 function indicator(session: SessionInfo) {
   return sessionRuntimeIndicator(
@@ -393,13 +417,10 @@ defineExpose({ focusSearch })
                 pinned
                 manual
                 :session="session"
-                :active="session.id === activeId && !selectedAgentId"
+                :active="session.id === selectedRootId"
                 :indicator="indicator(session)"
                 :pending-label="pendingLabel(session)"
                 :subagents="subagents.counts[session.id] || 0"
-                :has-children="hasChildren(session.id)"
-                :children-expanded="Boolean(subagents.expanded[session.id])"
-                @toggle-children="subagents.toggle(session.id)"
                 :can-delete="canDelete(session)"
                 @open="openSession(session.id)"
                 @rename="doRename(session.id, $event)"
@@ -407,13 +428,6 @@ defineExpose({ focusSearch })
                 @archive="doArchive(session.id)"
                 @delete="doDelete(session.id)"
                 @move="layout.movePinned(session.id, $event)"
-              />
-              <SidebarAgentTree
-                :store="subagents"
-                :root-id="session.id"
-                :parent-id="session.id"
-                :selected-id="selectedAgentId"
-                @open="openAgent"
               />
             </template>
           </template>
@@ -451,13 +465,10 @@ defineExpose({ focusSearch })
                   <SessionRow
                     nested
                     :session="session"
-                    :active="session.id === activeId && !selectedAgentId"
+                    :active="session.id === selectedRootId"
                     :indicator="indicator(session)"
                     :pending-label="pendingLabel(session)"
                     :subagents="subagents.counts[session.id] || 0"
-                    :has-children="hasChildren(session.id)"
-                    :children-expanded="Boolean(subagents.expanded[session.id])"
-                    @toggle-children="subagents.toggle(session.id)"
                     :can-delete="canDelete(session)"
                     :manual="sidebarState.project_sort === 'manual'"
                     @open="openSession(session.id)"
@@ -468,14 +479,6 @@ defineExpose({ focusSearch })
                     @move="
                       layout.moveProjectSession(project, session.id, $event)
                     "
-                  />
-                  <SidebarAgentTree
-                    class="project-agent-tree"
-                    :store="subagents"
-                    :root-id="session.id"
-                    :parent-id="session.id"
-                    :selected-id="selectedAgentId"
-                    @open="openAgent"
                   />
                 </template>
                 <div v-if="!project.sessions.length" class="empty nested">
@@ -511,13 +514,10 @@ defineExpose({ focusSearch })
               <template v-for="session in group.sessions" :key="session.id">
                 <SessionRow
                   :session="session"
-                  :active="session.id === activeId && !selectedAgentId"
+                  :active="session.id === selectedRootId"
                   :indicator="indicator(session)"
                   :pending-label="pendingLabel(session)"
                   :subagents="subagents.counts[session.id] || 0"
-                  :has-children="hasChildren(session.id)"
-                  :children-expanded="Boolean(subagents.expanded[session.id])"
-                  @toggle-children="subagents.toggle(session.id)"
                   :can-delete="canDelete(session)"
                   :manual="sidebarState.chat_sort === 'manual'"
                   @open="openSession(session.id)"
@@ -526,13 +526,6 @@ defineExpose({ focusSearch })
                   @archive="doArchive(session.id)"
                   @delete="doDelete(session.id)"
                   @move="layout.moveChat(session.id, $event)"
-                />
-                <SidebarAgentTree
-                  :store="subagents"
-                  :root-id="session.id"
-                  :parent-id="session.id"
-                  :selected-id="selectedAgentId"
-                  @open="openAgent"
                 />
               </template>
             </template>
@@ -750,10 +743,6 @@ defineExpose({ focusSearch })
   padding-right: var(--space-2);
   overflow-y: auto;
   scrollbar-gutter: stable;
-}
-
-.project-agent-tree {
-  margin-left: calc(var(--space-8) + var(--space-1-5));
 }
 
 .section + .section {

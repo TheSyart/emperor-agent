@@ -63,6 +63,7 @@ beforeEach(() => {
     loading: ref(false),
     canDeletePersistedSession: ref(true),
     load: vi.fn(),
+    isDraftSessionId: (id: string) => id.startsWith('draft:'),
     getSession: (id: string) => sessions.find((s) => s.id === id),
   }
   agents = [
@@ -119,48 +120,65 @@ async function mount(path: string) {
   await settle()
   return router
 }
-it('reveals selected nested actual parents and a collapsed project, then respects a user collapse across refreshes', async () => {
-  const router = await mount('/chat/project-root/agents/dlg-deep')
-  expect(root.querySelector('[data-agent-id="sub-parent"]')).not.toBeNull()
+it('keeps main rows only and selects the external owning root before child hydration', async () => {
+  let resolveAgents!: (value: { agents: AgentView[] }) => void
+  const original = mock.core.getMockImplementation()!
+  mock.core.mockImplementation((key: string, input: any) =>
+    key === 'agents.list'
+      ? new Promise((resolve) => {
+          resolveAgents = resolve
+        })
+      : original(key, input),
+  )
+  await mount('/chat/project-root/agents/dlg-deep')
   expect(
-    root.querySelector('[data-agent-id="dlg-deep"] [aria-current="page"]'),
-  ).not.toBeNull()
-  expect(root.querySelector('.session-row[data-active]')).toBeNull()
-  const toggle = root.querySelector('.agent-row .expander') as HTMLButtonElement
-  toggle.click()
+    root.querySelector('.session-row[data-active]')?.getAttribute('title'),
+  ).toBe('project-root')
+  expect(root.querySelector('[data-agent-id]')).toBeNull()
+  expect(root.querySelector('.tree-toggle')).toBeNull()
+  resolveAgents({ agents })
   await settle()
-  expect(root.querySelector('[data-agent-id="dlg-deep"]')).toBeNull()
-  await store.refresh('project-root')
-  await settle()
-  expect(root.querySelector('[data-agent-id="dlg-deep"]')).toBeNull()
-  await router.push('/chat/pinned')
-  await router.push('/chat/project-root/agents/dlg-deep')
-  await settle()
-  expect(root.querySelector('[data-agent-id="dlg-deep"]')).not.toBeNull()
-  const child = root.querySelector(
-    '[data-agent-id="sub-parent"] .agent-open',
-  ) as HTMLButtonElement
-  child.click()
-  await settle()
-  expect(router.currentRoute.value.params.sessionId).toBe('sub-parent')
+  expect(root.querySelector('[data-agent-id]')).toBeNull()
 })
-it('renders children under pinned/project/chat placements without child management actions and navigates using stable dlg IDs', async () => {
-  const router = await mount('/chat/pinned')
-  // Expanding roots does not activate them or invoke a model.
-  for (const id of ['pinned', 'project-root', 'chat-root']) store.toggle(id)
-  const folder = root.querySelector('.project-row') as HTMLDivElement
-  folder.click()
-  await settle()
-  for (const id of ['dlg-pin', 'sub-parent', 'dlg-chat'])
-    expect(root.querySelector(`[data-agent-id="${id}"]`)).not.toBeNull()
-  const child = root.querySelector('[data-agent-id="dlg-pin"]') as HTMLElement
-  expect(child.querySelector('[aria-label="会话操作"]')).toBeNull()
-  ;(child.querySelector('.agent-open') as HTMLButtonElement).click()
-  await settle()
-  expect(router.currentRoute.value.name).toBe('external-agent')
-  expect(router.currentRoute.value.params).toEqual({
-    sessionId: 'pinned',
-    delegationId: 'dlg-pin',
+it('resolves a direct native child from lineage while the child index is delayed', async () => {
+  const original = mock.core.getMockImplementation()!
+  mock.core.mockImplementation((key: string, input: any) => {
+    if (key === 'agents.list') return new Promise(() => {})
+    if (key === 'sessions.lineage')
+      return {
+        chain: [{ sessionId: 'project-root' }, { sessionId: input.sessionId }],
+      }
+    return original(key, input)
   })
-  expect(mock.session.activeId.value).toBe('pinned')
+  const router = await mount('/chat/sub-parent')
+  expect(
+    root.querySelector('.session-row[data-active]')?.getAttribute('title'),
+  ).toBe('project-root')
+  expect(root.querySelectorAll('.session-row')).toHaveLength(3)
+  expect(root.querySelector('[data-agent-id]')).toBeNull()
+  expect(
+    mock.core.mock.calls.every(([key]) =>
+      [
+        'agents.list',
+        'sessions.lineage',
+        'sidebar.get',
+        'sidebar.patch',
+      ].includes(key),
+    ),
+  ).toBe(true)
+  await router.push('/chat/pinned')
+  await settle()
+  expect(
+    root.querySelector('.session-row[data-active]')?.getAttribute('title'),
+  ).toBe('pinned')
+})
+it('preserves main session actions and search without child rows', async () => {
+  await mount('/chat/pinned/agents/dlg-pin')
+  expect(
+    root.querySelector('.session-row[data-active]')?.getAttribute('title'),
+  ).toBe('pinned')
+  expect(root.querySelectorAll('[aria-label="会话操作"]')).toHaveLength(2)
+  expect(root.querySelector('[data-agent-id]')).toBeNull()
+  ;(root.querySelector('[aria-label="搜索对话"]') as HTMLButtonElement)?.click()
+  await settle()
 })

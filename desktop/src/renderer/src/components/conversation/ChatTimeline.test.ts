@@ -222,6 +222,12 @@ describe('ChatTimeline over the recorded kernel log', () => {
     expect(entry?.textContent).toContain('original native creation')
     expect(entry?.textContent).toContain('Emperor')
     expect(entry?.getAttribute('href')).toBe('/chat/sub-existing')
+    expect(
+      entry.querySelector('[data-agent-identity="sub-existing"]'),
+    ).not.toBeNull()
+    expect(
+      root.querySelector('.tool-row [data-agent-identity="sub-existing"]'),
+    ).not.toBeNull()
     expect(root.querySelector('.tool-row')?.textContent).toContain(
       'original native creation',
     )

@@ -19,6 +19,7 @@ import { useChatContext } from '../chatContext'
 import { subagentStatusLabel, toolView } from '../tools/registry'
 import { lastLine, nativeAgentTarget } from '../tools/toolModel'
 import { useAgentTree } from '../../sidebar/agentTree'
+import SubagentAvatar from '../../ui/SubagentAvatar.vue'
 import ToolCallRow from './ToolCallRow.vue'
 import WorkflowRunPanel from './WorkflowRunPanel.vue'
 import ExternalAgentStream from '../tools/ExternalAgentStream.vue'
@@ -137,6 +138,11 @@ const hasChildren = computed(
         :href="entryHref"
         @click="openAgent"
       >
+        <SubagentAvatar
+          v-if="nativeId && !data.externalAgent"
+          :session-id="nativeId"
+          :size="24"
+        />
         {{ entryTitle }}
         <span>{{ agentSourceLabel(entryBackend) }} · 子智能体 ↗</span>
       </a>
@@ -243,6 +249,9 @@ const hasChildren = computed(
   gap: var(--space-2);
 }
 .agent-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   min-width: 0;
   color: rgb(var(--label-primary));
   font-size: var(--fs-s);
@@ -251,7 +260,7 @@ const hasChildren = computed(
 .agent-entry:hover {
   text-decoration: underline;
 }
-.agent-entry span {
+.agent-entry > span:not(.subagent-avatar) {
   color: rgb(var(--label-tertiary));
   font-size: var(--fs-xs);
   margin-left: var(--space-2);

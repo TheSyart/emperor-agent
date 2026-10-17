@@ -73,6 +73,7 @@ import ReadOnlyComposer from '../composer/ReadOnlyComposer.vue'
 import TodoDock from '../composer/TodoDock.vue'
 import { frameActions, useFrameState } from '../shell/frameState'
 import Button from '../ui/Button.vue'
+import { useAgentTree } from '../sidebar/agentTree'
 import { requestWorkspace } from '../workspace/workspaceState'
 import ChatTimeline from './ChatTimeline.vue'
 import ConversationHeader from './ConversationHeader.vue'
@@ -229,10 +230,16 @@ onBeforeUnmount(() => {
   externalActivityGeneration++
   unsubscribeExternalActivity()
 })
+const agentTree = useAgentTree()
+const owningRootId = computed(
+  () => lineage.value?.chain[0]?.sessionId ?? viewingId.value,
+)
 const phase = computed(() =>
   conversationPhase({
     composer: composerPhase.value,
-    externalActivity: externalActivity.value,
+    externalActivity:
+      externalActivity.value ||
+      Boolean(agentTree.trees[owningRootId.value]?.agents.length),
     child: child.value || unknownSession.value,
     tab: tab.value,
   }),
@@ -792,6 +799,8 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         v-if="envCardShown"
         :key="viewingId"
         :session-id="viewingId"
+        :root-session-id="owningRootId"
+        :native-session-id="child ? viewingId : undefined"
         :snapshot="snapshot"
         :build="buildSession"
         :agent-busy="agentBusyHere"
@@ -910,7 +919,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   container: conversation / inline-size;
   position: relative;
   --chat-content-width: 748px;
-  --env-card-width: 340px;
+  --env-card-width: min(340px, 42cqi);
   --composer-card-max: calc(var(--chat-content-width) + var(--space-8));
   --composer-clearance: var(--space-4);
   --dock-inset: var(--space-2);
@@ -935,11 +944,12 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   min-height: 0;
 }
 
-/* Wide column: the chat and the composer make room for the environment card
-   (no transition on the padding — the card appears at once). */
+/* Every opened card reserves space, including a narrow manual toggle. */
+.conversation-root[data-env-card] .chat-body-slot,
+.conversation-root[data-env-card] .composer-seat {
+  padding-inline-end: calc(var(--env-card-width) + var(--space-4));
+}
 @container conversation (min-width: 1120px) {
-  .conversation-root[data-env-card] .chat-body-slot,
-  .conversation-root[data-env-card] .stack,
   .conversation-root[data-cu-preview] .chat-body-slot {
     padding-inline-end: calc(var(--env-card-width) + var(--space-4));
   }

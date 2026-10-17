@@ -11,6 +11,7 @@ import {
 } from 'vue'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import ExternalAgentConversation from './ExternalAgentConversation.vue'
+import { EMPTY_CHAT_SNAPSHOT } from '../../conversation/chatSnapshot'
 import { useSession } from '../../composables/useSession'
 const bridge = vi.hoisted(() => ({
   invokeCore: vi.fn(),
@@ -61,6 +62,21 @@ vi.mock('vue-virtual-scroller', () => ({
       (_, { slots }) =>
       () =>
         h('div', slots.default?.()),
+  }),
+}))
+vi.mock('../../composables/useSessionConversation', () => ({
+  useSessionConversation: () => ref({ snapshot: ref(EMPTY_CHAT_SNAPSHOT) }),
+}))
+vi.mock('./environment/EnvironmentCard.vue', () => ({
+  __esModule: true,
+  default: defineComponent({
+    props: ['sessionId', 'rootSessionId', 'agents'],
+    setup: (props) => () =>
+      h(
+        'aside',
+        { 'data-test-root-card': props.rootSessionId },
+        props.agents?.map((a: { id: string }) => a.id).join(','),
+      ),
   }),
 }))
 let app: App | undefined, root: HTMLDivElement
@@ -720,4 +736,17 @@ it('observes a backend archive while focused without repeatedly reading unchange
     vi.restoreAllMocks()
     vi.useRealTimers()
   }
+})
+
+it('seats root-scoped sibling entries beside the external viewer without scheduling', async () => {
+  await mount()
+  expect(
+    root.querySelector('[data-test-root-card="root"]')?.textContent,
+  ).toContain('sub-parent')
+  expect(
+    root.querySelector('[data-test-root-card="root"]')?.textContent,
+  ).toContain('dlg-one')
+  expect(bridge.invokeCore.mock.calls.map(([key]) => key)).not.toContain(
+    'delegations.start',
+  )
 })

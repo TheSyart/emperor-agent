@@ -73,7 +73,7 @@ export function visibleAgentChildren(
 ): AgentView[] {
   const sorted = [...agents].sort(recentFirst)
   if (all) return sorted
-  return sorted.slice(0, Math.max(5, sorted.filter(active).length))
+  return sorted.slice(0, 5)
 }
 export function agentLocation(agent: AgentView): RouteLocationRaw {
   return agent.kind === 'external'

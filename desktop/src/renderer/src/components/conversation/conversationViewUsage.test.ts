@@ -85,7 +85,7 @@ describe('ConversationView composer seat integration', () => {
     expect(source).toContain('container: conversation / inline-size')
   })
 
-  it('seats the environment card beside a wide chat and over a narrow one', () => {
+  it('seats the environment card beside chat with reserved space at every opened width', () => {
     expect(source).toContain('v-if="envCardShown"')
     expect(source).toContain("phase.value !== 'hero'")
     expect(source).toContain('@reveal="revealRow"')

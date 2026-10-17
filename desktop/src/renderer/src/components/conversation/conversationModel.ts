@@ -14,6 +14,7 @@ export interface HeaderCrumb {
   sessionId?: string
   current?: boolean
   subagent?: boolean
+  nativeSessionId?: string
   source?: string
 }
 
@@ -66,7 +67,9 @@ export function conversationCrumbs(input: {
         sessionId: entry.sessionId,
         current,
         subagent: index > 0 && !current,
-        ...(index > 0 ? { source: 'Emperor' } : {}),
+        ...(index > 0
+          ? { source: 'Emperor', nativeSessionId: entry.sessionId }
+          : {}),
       }
     })
   }

@@ -78,6 +78,8 @@ describe('conversation shell model', () => {
     ])
     expect(crumbs[0]!.sessionId).toBe('root')
     expect(crumbs[1]!.subagent).toBe(true)
+    expect(crumbs[1]!.nativeSessionId).toBe('kid1')
+    expect(crumbs[2]!.nativeSessionId).toBe('kid2')
     expect(crumbs[2]!.current).toBe(true)
     expect(crumbs[2]!.source).toBe('Emperor')
   })

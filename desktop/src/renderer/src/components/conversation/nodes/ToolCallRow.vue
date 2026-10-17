@@ -16,6 +16,7 @@ import type { ToolChatData } from '../../../conversation/types'
 import { DsInspect } from '../../icons/ds'
 import DisclosureRow from '../../ui/DisclosureRow.vue'
 import StateDot from '../../ui/StateDot.vue'
+import SubagentAvatar from '../../ui/SubagentAvatar.vue'
 import ProviderLogo from '../../ui/ProviderLogo.vue'
 import { useChatContext, useExpansion } from '../chatContext'
 import { TOOL_BODIES } from '../tools/bodies'
@@ -80,7 +81,12 @@ const stateLabel = computed(() => {
       :tone="failure !== null ? 'error' : 'default'"
     >
       <template #icon>
-        <StateDot v-if="state === 'error'" state="error" />
+        <SubagentAvatar
+          v-if="!data.externalAgent && (data.subagent?.subagentId || agent?.id)"
+          :session-id="data.subagent?.subagentId || agent!.id"
+          :size="20"
+        />
+        <StateDot v-else-if="state === 'error'" state="error" />
         <StateDot v-else-if="state === 'stopped'" state="warn" />
         <ProviderLogo
           v-else-if="

@@ -3,7 +3,7 @@
  * EnvironmentCard — 环境信息, the chat-tab card floating at the top right of
  * the conversation (async chunk; ConversationView seats it while
  * `frameActions.envCardVisible` on an active chat: beside a wide chat by
- * default until closed by hand, over a narrow one on demand).
+ * default until closed by hand, beside a narrow one on demand).
  *
  * Title: the project name in a Build session, else 环境信息. The 「…」 menu
  * holds 打开工作台 and the Git actions: 工作位置 ▸ 本地 / worktree
@@ -33,7 +33,7 @@
  *
  * Layout: absolute inside the view area. From a 1120px conversation column
  * the chat and the composer make room for it (ConversationView pads them);
- * narrower, it overlays the chat and Escape closes it.
+ * narrower, opening the card also reserves chat and composer space.
  *
  * Props: sessionId, snapshot (the viewed chat window), build (a Build session
  * bound to a project), agentBusy (a turn runs in it), child (a subagent view),
@@ -59,7 +59,6 @@ import {
   Plus,
   TriangleAlert,
   Workflow,
-  X,
 } from 'lucide-vue-next'
 import {
   computed,
@@ -91,7 +90,8 @@ import IconButton from '../../ui/IconButton.vue'
 import EnvironmentAgents from './EnvironmentAgents.vue'
 import Menu from '../../ui/Menu.vue'
 import MenuItem from '../../ui/MenuItem.vue'
-import { modalLayerCount } from '../../ui/modalStack'
+import SubagentAvatar from '../../ui/SubagentAvatar.vue'
+import type { AgentView } from '@emperor/core/api'
 import {
   backgroundTaskLines,
   backgroundTaskSummary,
@@ -117,12 +117,6 @@ import {
 import { previewLayout } from '../computer-use/computerUsePreviewState'
 import { isGitStatus } from '../../workspace/workspaceTypes'
 
-/**
- * Conversation column width from which the card sits beside the chat
- * (mirrors the `@container conversation (min-width: 1120px)` rule in
- * ConversationView).
- */
-const ENV_CARD_INLINE_MIN = 1120
 /** Gap (px) kept under a card that runs down beside the padded composer. */
 const INLINE_BOTTOM_GAP = 16
 const VISIBLE_ROWS = 3
@@ -133,6 +127,9 @@ const TaskOutputDialog = defineAsyncComponent(
 const props = withDefaults(
   defineProps<{
     sessionId: string
+    rootSessionId?: string
+    agents?: AgentView[]
+    nativeSessionId?: string
     snapshot: ChatSnapshot
     build?: boolean
     agentBusy?: boolean
@@ -151,9 +148,8 @@ const emit = defineEmits<{
 const ctx = useAppContext()
 const router = useRouter()
 
-// ── placement: beside the chat or overlaying it ────────────────────────
+// ── placement: always beside the chat ────────────────────────
 const root = ref<HTMLElement | null>(null)
-const overlay = ref(false)
 let resizeObserver: ResizeObserver | null = null
 /**
  * ConversationView is kept alive: a cached (deactivated) card must neither
@@ -163,13 +159,13 @@ const activated = ref(true)
 /**
  * Beside the chat the composer stack is padded away from the card, so the
  * card may run down to the column bottom (px; null = the CSS cap above the
- * composer seat, used while overlaying).
+ * composer seat before the first measurement).
  */
 const inlineMaxHeight = ref<number | null>(null)
 
 /**
  * Escape closes an open card menu first (focus may still sit on its row),
- * then — only while overlaying the chat and under no modal — the card.
+ * without stealing Escape from a modal or the conversation.
  */
 function onKeydown(event: KeyboardEvent): void {
   if (!activated.value || event.key !== 'Escape') return
@@ -187,9 +183,6 @@ function onKeydown(event: KeyboardEvent): void {
     sourcesMenu.value = false
     return
   }
-  if (!overlay.value || modalLayerCount() > 0) return
-  event.preventDefault()
-  emit('close')
 }
 
 onActivated(() => {
@@ -206,9 +199,8 @@ onMounted(() => {
   const host = root.value?.closest<HTMLElement>('.conversation-root')
   if (!host || typeof ResizeObserver === 'undefined') return
   const measure = () => {
-    overlay.value = host.clientWidth < ENV_CARD_INLINE_MIN
     const card = root.value
-    if (!card || overlay.value) {
+    if (!card) {
       inlineMaxHeight.value = null
       return
     }
@@ -217,7 +209,7 @@ onMounted(() => {
       host.getBoundingClientRect().bottom -
       card.getBoundingClientRect().top -
       Math.max(INLINE_BOTTOM_GAP, previewLayout.reservedHeight)
-    inlineMaxHeight.value = Math.max(160, Math.round(available))
+    inlineMaxHeight.value = Math.max(0, Math.round(available))
   }
   measureHost = measure
   measure()
@@ -719,7 +711,6 @@ function openLauncher(): void {
   <aside
     ref="root"
     class="environment-card"
-    :data-overlay="overlay || undefined"
     :data-session-id="sessionId"
     :style="
       inlineMaxHeight === null
@@ -729,6 +720,11 @@ function openLauncher(): void {
     aria-label="环境信息"
   >
     <header class="card-head">
+      <SubagentAvatar
+        v-if="nativeSessionId"
+        :session-id="nativeSessionId"
+        :size="24"
+      />
       <h2 class="card-title" :title="title || '环境信息'">
         {{ title || '环境信息' }}
       </h2>
@@ -742,9 +738,6 @@ function openLauncher(): void {
           <Ellipsis :size="15" />
         </IconButton>
       </span>
-      <IconButton v-if="overlay" label="关闭环境信息" @click="emit('close')">
-        <X :size="15" />
-      </IconButton>
     </header>
 
     <div class="card-body">
@@ -795,7 +788,10 @@ function openLauncher(): void {
         </button>
       </section>
 
-      <EnvironmentAgents :root-session-id="ctx.sessionId.value" />
+      <EnvironmentAgents
+        :root-session-id="rootSessionId || sessionId"
+        :agents="agents"
+      />
 
       <section
         v-if="background.total"
@@ -1118,7 +1114,7 @@ function openLauncher(): void {
   position: absolute;
   top: var(--space-3);
   right: var(--space-4);
-  z-index: var(--z-raised);
+  z-index: var(--z-sticky);
   display: flex;
   flex-direction: column;
   width: min(var(--env-card-width, 340px), 100% - 2 * var(--space-4));
@@ -1129,17 +1125,6 @@ function openLauncher(): void {
   background: rgb(var(--bg-layer-1));
   box-shadow: var(--shadow-lv2);
   color: rgb(var(--label-primary));
-}
-
-/* Beside the chat it may run past the composer seat (padded away from it),
-   so it stacks above the seat's fade. */
-.environment-card:not([data-overlay]) {
-  z-index: var(--z-sticky);
-}
-
-.environment-card[data-overlay] {
-  border-color: var(--border-l2);
-  box-shadow: var(--shadow-lv3);
 }
 
 .card-head {

@@ -9,12 +9,19 @@ const state = vi.hoisted(() => ({
   refresh: vi.fn(),
   errors: {} as Record<string, string>,
   push: vi.fn(),
+  route: {
+    name: 'external-agent',
+    params: { sessionId: 'root', delegationId: 'dlg-child' },
+  },
 }))
 vi.mock('../../sidebar/agentTree', async (original) => ({
   ...(await original<object>()),
   useAgentTree: () => state,
 }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: state.push }) }))
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: state.push }),
+  useRoute: () => state.route,
+}))
 let app: ReturnType<typeof createApp>, el: HTMLDivElement
 const agent = (
   id: string,
@@ -56,6 +63,15 @@ it('shows stable internal and external identities, canonical names, sources and 
   expect(child.textContent).toContain('task dlg-child')
   expect(child.textContent).toContain('Codex')
   expect(child.title).toContain('task sub-parent / task dlg-child')
+  expect(child.textContent).not.toContain('task sub-parent')
+  expect(child.getAttribute('aria-current')).toBe('page')
+  expect(child.querySelector('[data-agent-logo="codex"]')).not.toBeNull()
+  expect(
+    el.querySelector(
+      '[data-agent-id="sub-parent"] [data-agent-identity="sub-parent"]',
+    ),
+  ).not.toBeNull()
+  child.querySelector<HTMLElement>('[data-agent-logo]')!.click()
   child.click()
   expect(state.push).toHaveBeenLastCalledWith({
     name: 'external-agent',
@@ -150,3 +166,27 @@ it.each(['sub-child', 'dlg-child', 'dgr-one', 'draft:new'])(
     expect(state.refresh).not.toHaveBeenCalled()
   },
 )
+
+it('reveals a selected older sibling on direct child navigation, while allowing collapse afterwards', async () => {
+  state.route.params.delegationId = 'dlg-0'
+  state.trees.root = buildAgentTree(
+    'root',
+    Array.from({ length: 7 }, (_, i) => ({
+      ...agent(`dlg-${i}`),
+      updatedAt: i,
+    })),
+  )
+  el = document.createElement('div')
+  app = createApp({
+    render: () => h(EnvironmentAgents, { rootSessionId: 'root' }),
+  })
+  app.mount(el)
+  await nextTick()
+  expect(
+    el.querySelector('[data-agent-id="dlg-0"][aria-current="page"]'),
+  ).not.toBeNull()
+  el.querySelector<HTMLButtonElement>('[data-show-all-agents]')!.click()
+  await nextTick()
+  expect(el.querySelectorAll('[data-agent-id]')).toHaveLength(5)
+  state.route.params.delegationId = 'dlg-child'
+})

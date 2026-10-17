@@ -83,6 +83,20 @@ describe('unified sidebar agent tree', () => {
     ])
   })
 
+  it('limits the collapsed information list to five even when more children are active', () => {
+    const agents = Array.from({ length: 7 }, (_, i) =>
+      agent(`dlg-${i}`, 'root', { phase: 'running', updatedAt: i }),
+    )
+    expect(visibleAgentChildren(agents, false).map((a) => a.id)).toEqual([
+      'dlg-6',
+      'dlg-5',
+      'dlg-4',
+      'dlg-3',
+      'dlg-2',
+    ])
+    expect(visibleAgentChildren(agents, true)).toHaveLength(7)
+  })
+
   it('keeps active plus recent siblings, offers all, and reveals every ancestor for selection', async () => {
     const agents = Array.from({ length: 8 }, (_, i) =>
       agent(`dlg-${i}`, 'root', {

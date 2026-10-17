@@ -7,6 +7,7 @@ import {
   onActivated,
   onDeactivated,
   ref,
+  defineAsyncComponent,
   shallowRef,
   watch,
 } from 'vue'
@@ -22,6 +23,13 @@ import {
 } from '@emperor/core/runtime-contract'
 import { invokeCore, onCoreEvent } from '../../api/backend'
 import { useSession } from '../../composables/useSession'
+import { useSessionConversation } from '../../composables/useSessionConversation'
+import { EMPTY_CHAT_SNAPSHOT } from '../../conversation/chatSnapshot'
+import { PictureInPicture2 } from 'lucide-vue-next'
+import IconButton from '../ui/IconButton.vue'
+const EnvironmentCard = defineAsyncComponent(
+  () => import('./environment/EnvironmentCard.vue'),
+)
 import { agentAncestry } from './environment/environmentAgentsModel'
 import {
   owningRootAvailability,
@@ -59,6 +67,15 @@ const controlsAvailable = computed(
   () => canOpenRoot.value && availability.value === 'ready',
 )
 const sessions = useSession().sessions
+// Retain the existing shared root window for truthful plan/source context.
+// This is event-driven and never polls the root transcript.
+const rootConversation = useSessionConversation(() =>
+  canOpenRoot.value ? rootId.value : '',
+)
+const rootSnapshot = computed(
+  () => rootConversation.value?.snapshot.value ?? EMPTY_CHAT_SNAPSHOT,
+)
+const infoOpen = ref(true)
 const state = shallowRef<DelegationView | null>(null)
 const agents = shallowRef<AgentView[]>([])
 const page = shallowRef<ExternalHistoryPage>({
@@ -415,7 +432,8 @@ async function stop() {
 </script>
 <template>
   <section
-    class="child-conversation"
+    class="conversation-root child-conversation"
+    :data-env-card="(infoOpen && controlsAvailable) || undefined"
     data-external-conversation
     @click.capture="click"
   >
@@ -445,6 +463,13 @@ async function stop() {
           size="xs"
         /><span v-if="record">{{ agentSourceLabel(record.backend) }}</span
         ><span role="status">{{ phase }}</span
+        ><IconButton
+          v-if="controlsAvailable"
+          label="环境信息"
+          :active="infoOpen"
+          :aria-pressed="infoOpen"
+          @click="infoOpen = !infoOpen"
+          ><PictureInPicture2 :size="16" /></IconButton
         ><Button
           v-if="run && controlsAvailable"
           size="sm"
@@ -454,130 +479,142 @@ async function stop() {
         >
       </div>
     </header>
-    <p
-      v-if="rootAvailability === 'archived'"
-      class="child-note"
-      data-root-archived
-    >
-      主会话已归档 ·
-      可查看历史公开输出；继续派工、停止任务和本地文件访问不可用。
-    </p>
-    <p
-      v-if="!loading && availability !== 'ready' && availability !== 'error'"
-      class="child-note"
-      role="alert"
-    >
-      {{ externalConversationMessages[availability] }}
-    </p>
-    <p v-if="error" class="child-error" role="alert">
-      {{ error }} <Button size="sm" @click="feed?.refresh()">重试</Button>
-    </p>
-    <p v-if="loading" class="child-note">正在读取子智能体对话…</p>
-    <div class="child-diagnostics">
+    <div class="child-view-area">
+      <EnvironmentCard
+        v-if="infoOpen && controlsAvailable"
+        :session-id="rootId"
+        :root-session-id="rootId"
+        :agents="agents"
+        :snapshot="rootSnapshot"
+        child
+        @reveal="root"
+        @close="infoOpen = false"
+      />
       <p
-        v-for="issue in availability === 'ready'
-          ? (page.unavailable ?? [])
-          : []"
-        :key="issue.runId"
+        v-if="rootAvailability === 'archived'"
+        class="child-note"
+        data-root-archived
+      >
+        主会话已归档 ·
+        可查看历史公开输出；继续派工、停止任务和本地文件访问不可用。
+      </p>
+      <p
+        v-if="!loading && availability !== 'ready' && availability !== 'error'"
         class="child-note"
         role="alert"
       >
-        {{ issue.runId }} ·
-        {{
-          issue.reason === 'missing_public_log'
-            ? '公开记录缺失'
-            : '公开记录损坏'
-        }}。仅显示仍可读取的公开记录和已保留的任务状态。
+        {{ externalConversationMessages[availability] }}
       </p>
-      <p
-        v-if="
-          availability === 'ready' &&
-          (page.unavailableCount ?? 0) > (page.unavailable?.length ?? 0)
-        "
-        class="child-note"
-      >
-        共 {{ page.unavailableCount }} 轮公开记录不可用，以上列出前
-        {{ page.unavailable?.length }} 轮。
+      <p v-if="error" class="child-error" role="alert">
+        {{ error }} <Button size="sm" @click="feed?.refresh()">重试</Button>
       </p>
-    </div>
-    <DynamicScroller
-      v-show="availability === 'ready'"
-      ref="scroller"
-      class="child-timeline"
-      :items="rows"
-      :min-item-size="48"
-      key-field="id"
-      @scroll.passive="scroll"
-    >
-      <template #before
-        ><div v-if="page.hasBefore" class="child-more">
-          <Button size="sm" :disabled="olderLoading" @click="older">{{
-            olderLoading ? '正在读取…' : '加载更早记录'
-          }}</Button>
-        </div></template
-      >
-      <template #default="{ item, index, active }"
-        ><DynamicScrollerItem
-          :item="item"
-          :active="active"
-          :data-index="index"
-          :size-dependencies="[item.text, item.name, item.status]"
+      <p v-if="loading" class="child-note">正在读取子智能体对话…</p>
+      <div class="child-diagnostics">
+        <p
+          v-for="issue in availability === 'ready'
+            ? (page.unavailable ?? [])
+            : []"
+          :key="issue.runId"
+          class="child-note"
+          role="alert"
         >
-          <article
-            class="child-entry"
-            :data-entry-id="item.id"
-            :data-entry-type="item.type"
-            :data-tool-id="item.toolId"
-            :data-run-id="item.runId"
-          >
-            <h2 v-if="item.type === 'run'" :title="item.runId">
-              {{ item.text }}
-              <Button
-                v-if="controlsAvailable"
-                size="sm"
-                variant="outline"
-                @click="detailsRunId = item.runId"
-                >任务详情</Button
-              >
-            </h2>
-            <template v-else
-              ><p
-                v-if="item.type !== 'text' && item.type !== 'tool-detail'"
-                class="child-entry-label"
-              >
-                {{
-                  item.type === 'prompt'
-                    ? item.chronology === 'unknown'
-                      ? '已接收补充要求 · 输出先后未知'
-                      : item.status === 'accepted'
-                        ? '补充要求 · 已接收'
-                        : '任务要求'
-                    : item.type === 'question'
-                      ? '等待回答'
-                      : item.type === 'permission'
-                        ? '权限请求'
-                        : item.type === 'state'
-                          ? `轮次结果 · ${runLabel(item.status)}`
-                          : `${item.name || '工具'} · ${externalToolStatusLabel(item.status)}`
-                }}
-              </p>
-              <ConversationMarkdown v-if="item.text" :text="item.text"
-            /></template>
-          </article> </DynamicScrollerItem
-      ></template>
-      <template #after
-        ><p
+          {{ issue.runId }} ·
+          {{
+            issue.reason === 'missing_public_log'
+              ? '公开记录缺失'
+              : '公开记录损坏'
+          }}。仅显示仍可读取的公开记录和已保留的任务状态。
+        </p>
+        <p
           v-if="
             availability === 'ready' &&
-            !page.entries.length &&
-            !page.unavailable?.length
+            (page.unavailableCount ?? 0) > (page.unavailable?.length ?? 0)
           "
           class="child-note"
         >
-          尚无公开输出。
-        </p></template
+          共 {{ page.unavailableCount }} 轮公开记录不可用，以上列出前
+          {{ page.unavailable?.length }} 轮。
+        </p>
+      </div>
+      <DynamicScroller
+        v-show="availability === 'ready'"
+        ref="scroller"
+        class="child-timeline"
+        :items="rows"
+        :min-item-size="48"
+        key-field="id"
+        @scroll.passive="scroll"
       >
-    </DynamicScroller>
+        <template #before
+          ><div v-if="page.hasBefore" class="child-more">
+            <Button size="sm" :disabled="olderLoading" @click="older">{{
+              olderLoading ? '正在读取…' : '加载更早记录'
+            }}</Button>
+          </div></template
+        >
+        <template #default="{ item, index, active }"
+          ><DynamicScrollerItem
+            :item="item"
+            :active="active"
+            :data-index="index"
+            :size-dependencies="[item.text, item.name, item.status]"
+          >
+            <article
+              class="child-entry"
+              :data-entry-id="item.id"
+              :data-entry-type="item.type"
+              :data-tool-id="item.toolId"
+              :data-run-id="item.runId"
+            >
+              <h2 v-if="item.type === 'run'" :title="item.runId">
+                {{ item.text }}
+                <Button
+                  v-if="controlsAvailable"
+                  size="sm"
+                  variant="outline"
+                  @click="detailsRunId = item.runId"
+                  >任务详情</Button
+                >
+              </h2>
+              <template v-else
+                ><p
+                  v-if="item.type !== 'text' && item.type !== 'tool-detail'"
+                  class="child-entry-label"
+                >
+                  {{
+                    item.type === 'prompt'
+                      ? item.chronology === 'unknown'
+                        ? '已接收补充要求 · 输出先后未知'
+                        : item.status === 'accepted'
+                          ? '补充要求 · 已接收'
+                          : '任务要求'
+                      : item.type === 'question'
+                        ? '等待回答'
+                        : item.type === 'permission'
+                          ? '权限请求'
+                          : item.type === 'state'
+                            ? `轮次结果 · ${runLabel(item.status)}`
+                            : `${item.name || '工具'} · ${externalToolStatusLabel(item.status)}`
+                  }}
+                </p>
+                <ConversationMarkdown v-if="item.text" :text="item.text"
+              /></template>
+            </article> </DynamicScrollerItem
+        ></template>
+        <template #after
+          ><p
+            v-if="
+              availability === 'ready' &&
+              !page.entries.length &&
+              !page.unavailable?.length
+            "
+            class="child-note"
+          >
+            尚无公开输出。
+          </p></template
+        >
+      </DynamicScroller>
+    </div>
     <footer class="child-footer">
       <span>子智能体对话 · 只读</span
       ><Button
@@ -618,11 +655,24 @@ async function stop() {
 </template>
 <style scoped>
 .child-conversation {
+  container: conversation / inline-size;
+  --env-card-width: min(340px, 42cqi);
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
   color: rgb(var(--label-primary));
+}
+.child-view-area {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.child-conversation[data-env-card] .child-timeline,
+.child-conversation[data-env-card] .child-footer {
+  padding-inline-end: calc(var(--env-card-width) + var(--space-4));
 }
 .child-header {
   padding: var(--space-4) var(--space-6);

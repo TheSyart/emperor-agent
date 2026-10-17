@@ -6,7 +6,7 @@
  * (rename / pin / archive / delete, plus move up/down under manual sort).
  */
 import { computed, nextTick, ref } from 'vue'
-import { DsChevronRight, DsMore } from '../icons/ds'
+import { DsMore } from '../icons/ds'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
 import StateDot from '../ui/StateDot.vue'
@@ -21,8 +21,6 @@ const props = withDefaults(
     indicator?: SessionRuntimeIndicator
     pendingLabel?: string
     subagents?: number
-    hasChildren?: boolean
-    childrenExpanded?: boolean
     nested?: boolean
     canDelete?: boolean
     manual?: boolean
@@ -33,8 +31,6 @@ const props = withDefaults(
     indicator: null,
     pendingLabel: '',
     subagents: 0,
-    hasChildren: false,
-    childrenExpanded: false,
     nested: false,
     canDelete: true,
     manual: false,
@@ -44,7 +40,6 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   open: []
-  'toggle-children': []
   rename: [title: string]
   archive: []
   delete: []
@@ -105,17 +100,6 @@ defineExpose({ beginRename })
     @dblclick.stop="beginRename"
   >
     <div class="line">
-      <button
-        v-if="hasChildren"
-        type="button"
-        class="tree-toggle"
-        :aria-label="`${childrenExpanded ? '收起' : '展开'}子智能体`"
-        :aria-expanded="childrenExpanded"
-        @click.stop="emit('toggle-children')"
-        @dblclick.stop
-      >
-        <DsChevronRight :size="12" :class="{ expanded: childrenExpanded }" />
-      </button>
       <span class="slot" aria-hidden="true">
         <StateDot
           v-if="indicator === 'running'"
@@ -226,23 +210,6 @@ defineExpose({ beginRename })
 
 .session-row:focus-visible {
   box-shadow: inset 0 0 0 2px rgb(var(--focus-ring) / 0.5);
-}
-
-.tree-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 16px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: rgb(var(--label-tertiary));
-  cursor: pointer;
-}
-.tree-toggle .expanded {
-  transform: rotate(90deg);
 }
 
 .line {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { agentAncestry } from './environmentAgentsModel'
 import {
   agentTitle,
@@ -13,7 +13,10 @@ import {
   agentLocation,
   visibleAgentChildren,
 } from '../../sidebar/agentTree'
-const props = defineProps<{ rootSessionId: string }>()
+import SubagentAvatar from '../../ui/SubagentAvatar.vue'
+import ProviderLogo from '../../ui/ProviderLogo.vue'
+const props = defineProps<{ rootSessionId: string; agents?: AgentView[] }>()
+const route = useRoute()
 const router = useRouter()
 const model = useAgentTree()
 const all = ref(false)
@@ -26,12 +29,14 @@ const tree = computed(() =>
   readableRoot.value ? model.trees[readableRoot.value] : undefined,
 )
 const error = computed(() =>
-  readableRoot.value ? model.errors[readableRoot.value] : undefined,
+  !props.agents && readableRoot.value
+    ? model.errors[readableRoot.value]
+    : undefined,
 )
 function refreshRoot() {
   if (readableRoot.value) void model.refresh(readableRoot.value)
 }
-const agents = computed(() => tree.value?.agents ?? [])
+const agents = computed(() => props.agents ?? tree.value?.agents ?? [])
 const visible = computed(() => visibleAgentChildren(agents.value, all.value))
 const active = computed(
   () =>
@@ -42,7 +47,29 @@ watch(
   () => props.rootSessionId,
   (root) => {
     all.value = false
-    if (root) refreshRoot()
+    if (root && !props.agents) refreshRoot()
+  },
+  { immediate: true },
+)
+const currentId = computed(() =>
+  route.name === 'external-agent'
+    ? route.params.delegationId
+    : route.params.sessionId,
+)
+// Reveal direct links to older entries once; later refreshes respect manual collapse.
+watch(
+  () =>
+    agents.value.some((agent) => agent.id === currentId.value)
+      ? `${props.rootSessionId}:${currentId.value}`
+      : '',
+  (selection) => {
+    if (
+      selection &&
+      !visibleAgentChildren(agents.value, false).some(
+        (agent) => agent.id === currentId.value,
+      )
+    )
+      all.value = true
   },
   { immediate: true },
 )
@@ -66,13 +93,24 @@ function ancestry(agent: AgentView) {
       class="agent-row"
       :data-agent-id="agent.id"
       :title="ancestry(agent).text"
+      :aria-current="currentId === agent.id ? 'page' : undefined"
       @click="router.push(agentLocation(agent))"
     >
+      <SubagentAvatar
+        v-if="agent.backend === 'internal'"
+        :session-id="agent.id"
+        :size="28"
+      />
+      <ProviderLogo
+        v-else
+        :icon-id="agent.backend"
+        :label="agentSourceLabel(agent.backend)"
+        size="xs"
+        :data-agent-logo="agent.backend"
+      />
       <span class="agent-copy"
         ><strong>{{ agentTitle(agent.title, agent.backend) }}</strong
-        ><small
-          >{{ agentSourceLabel(agent.backend) }} ·
-          {{ ancestry(agent).text }}</small
+        ><small>{{ agentSourceLabel(agent.backend) }}</small
         ><small v-if="ancestry(agent).unavailable" data-unavailable-parent>{{
           ancestry(agent).unavailable
         }}</small></span
@@ -104,7 +142,7 @@ function ancestry(agent: AgentView) {
 </template>
 <style scoped>
 .agents-section {
-  padding: var(--space-2) 0;
+  padding: var(--space-1) var(--space-2);
   border-top: 1px solid var(--border-l1);
 }
 .agents-error {
@@ -125,14 +163,16 @@ h3 span {
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  padding: var(--space-1-5) 0;
+  padding: var(--space-1-5) var(--space-1);
+  border-radius: var(--radius-row);
   border: 0;
   background: transparent;
   color: rgb(var(--label-secondary));
   text-align: left;
   cursor: pointer;
 }
-.agent-row:hover {
+.agent-row:hover,
+.agent-row[aria-current='page'] {
   background: var(--interactive-bg-hover);
 }
 .agent-copy {
