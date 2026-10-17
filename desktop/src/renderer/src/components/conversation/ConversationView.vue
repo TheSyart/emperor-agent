@@ -773,6 +773,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           ref="timeline"
           :key="viewingId"
           :session-id="viewingId"
+          :root-session-id="lineage?.chain[0]?.sessionId ?? viewingId"
           @inspect="inspectCall"
           @open-subagent="openSubagent"
           @edit-message="editMessage"

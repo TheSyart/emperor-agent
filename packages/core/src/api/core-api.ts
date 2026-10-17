@@ -766,6 +766,7 @@ export class CoreApi {
     this.delegationService = new CoreDelegationService({
       root: this.paths.delegationsRoot,
       service: this.delegationRuntime,
+      cachedState: (id) => this.delegationStates.get(id),
       receipts: this.delegationReceipts,
       acceptance: this.delegationAcceptance,
       integration: this.delegationIntegration,
@@ -898,6 +899,11 @@ export class CoreApi {
         await this.workspaceGitService.ignoredPaths({ sessionId, paths }),
     })
     this.workspaceReferenceService = new WorkspaceReferenceService({
+      delegatedRoot: (sessionId, delegationId) => {
+        this.requireReadableSession(sessionId, 'references.resolve')
+        return this.delegationService.get({ id: delegationId, sessionId })
+          .record!.cwd
+      },
       resolveProject: (sessionId) => {
         const session = this.requireReadableSession(
           sessionId,
@@ -1871,16 +1877,27 @@ export class CoreApi {
           )
         return image
       }
-      const ownedRoots = [
-        this.host.sessionWorkspaceRoot(input.sessionId),
-        ...this.delegationRuntime
-          .list()
-          .flatMap((state) =>
-            state.record?.owner.rootSessionId === input.sessionId
-              ? [state.record.cwd]
-              : [],
-          ),
-      ]
+      const delegationId = this.workspaceReferenceService.delegationScope(
+        input.referenceId,
+        input.sessionId,
+      )
+      const ownedRoots = delegationId
+        ? [
+            this.delegationService.get({
+              id: delegationId,
+              sessionId: input.sessionId,
+            }).record!.cwd,
+          ]
+        : [
+            this.host.sessionWorkspaceRoot(input.sessionId),
+            ...this.delegationRuntime
+              .list()
+              .flatMap((state) =>
+                state.record?.owner.rootSessionId === input.sessionId
+                  ? [state.record.cwd]
+                  : [],
+              ),
+          ]
       for (const root of ownedRoots) {
         let cwd: string
         try {

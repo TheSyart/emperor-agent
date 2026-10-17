@@ -46,8 +46,12 @@ import {
 } from './timelineModel'
 
 const props = withDefaults(
-  defineProps<{ sessionId: string; store?: ConversationStore }>(),
-  { store: undefined },
+  defineProps<{
+    sessionId: string
+    rootSessionId?: string
+    store?: ConversationStore
+  }>(),
+  { store: undefined, rootSessionId: undefined },
 )
 const emit = defineEmits<{
   inspect: [callId: string]
@@ -64,6 +68,7 @@ provideChatContext({
   },
   expansion: createExpansionStore(),
   sessionId: () => props.sessionId,
+  rootSessionId: () => props.rootSessionId ?? props.sessionId,
 })
 
 // ── conversation handle (re-opened when the session changes) ────────────

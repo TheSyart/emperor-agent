@@ -568,6 +568,10 @@ const terminalResizeSchema = terminalIdentitySchema.extend({
 const referenceResolveSchema = z
   .object({
     sessionId: idSchema,
+    delegationId: z
+      .string()
+      .regex(/^dlg-[a-zA-Z0-9-]+$/)
+      .optional(),
     sourceMessageId: idSchema,
     href: z.string().trim().min(1).max(4_096),
     label: z.string().max(500),
@@ -818,6 +822,18 @@ export const CORE_OPERATION_REGISTRY = {
   ),
   'delegations.get': operation(z.tuple([externalRef]), (api, [input]) =>
     api.delegations.get(input),
+  ),
+  'delegations.history': operation(
+    z.tuple([
+      externalRef
+        .extend({
+          before: z.string().max(1024).optional(),
+          after: z.string().max(1024).optional(),
+          limit: z.number().int().positive().optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.delegations.history(input),
   ),
   'delegations.send': operation(
     z.tuple([

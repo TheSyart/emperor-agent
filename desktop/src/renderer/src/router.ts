@@ -33,6 +33,7 @@ const ExplorePage = () => import('./components/pages/explore/ExplorePage.vue')
 export const CONVERSATION_ROUTE_NAMES: readonly string[] = [
   'chat',
   'trajectory',
+  'external-agent',
 ]
 
 export function isConversationRoute(name: unknown): boolean {
@@ -60,6 +61,13 @@ export function settingsRedirect(
 
 export const routeRecords: RouteRecordRaw[] = [
   { path: '/', redirect: '/chat' },
+  {
+    path: '/chat/:sessionId/agents/:delegationId',
+    name: 'external-agent',
+    component: () =>
+      import('./components/conversation/ExternalAgentConversation.vue'),
+    meta: { label: '子智能体', tab: 'chat' },
+  },
   {
     path: '/chat/:sessionId/trajectory',
     name: 'trajectory',

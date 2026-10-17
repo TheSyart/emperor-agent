@@ -534,3 +534,67 @@ it('scopes verification recovery to the owning external run', async () => {
     await f.api.close()
   }
 })
+it('checks history ownership before reading and never stops a foreign run verifier', async () => {
+  const f = await fixture()
+  try {
+    const stop = vi
+      .spyOn(f.api.delegationAcceptance, 'stopRun')
+      .mockResolvedValue()
+    const other = String(
+      f.api.sessions.create({ title: 'other history owner' }).id,
+    )
+    expect(() =>
+      f.api.delegations.history({ id: f.record.id, sessionId: other }),
+    ).toThrow('PERMISSION_DENIED')
+    expect(
+      f.api.delegations
+        .history({ id: f.record.id, sessionId: f.root })
+        .entries.at(-1),
+    ).toMatchObject({
+      type: 'state',
+      status: 'completed',
+      runId: f.run.id,
+      text: 'done',
+    })
+    await expect(
+      f.api.delegations.interrupt({
+        id: f.record.id,
+        runId: 'dgr-foreign',
+        sessionId: f.root,
+      }),
+    ).rejects.toThrow('RUN_NOT_FOUND')
+    expect(stop).not.toHaveBeenCalled()
+  } finally {
+    await f.api.close()
+  }
+})
+it('serves repeated history and metadata reads from state callbacks rather than replaying control journals on output', async () => {
+  const f = await fixture()
+  try {
+    ;(
+      f.api as unknown as {
+        projectDelegation: (
+          state: DelegationState,
+          event: { type: 'run-created'; run: DelegationRunRecord },
+        ) => void
+      }
+    ).projectDelegation(f.state, { type: 'run-created', run: f.run })
+    const inspect = vi.mocked(f.api.delegationRuntime.inspect)
+    inspect.mockClear()
+    expect(
+      f.api.delegations.get({ id: f.record.id, sessionId: f.root }).record?.id,
+    ).toBe(f.record.id)
+    const first = f.api.delegations.history({
+      id: f.record.id,
+      sessionId: f.root,
+    })
+    f.api.delegations.history({
+      id: f.record.id,
+      sessionId: f.root,
+      after: first.after!,
+    })
+    expect(inspect).not.toHaveBeenCalled()
+  } finally {
+    await f.api.close()
+  }
+})

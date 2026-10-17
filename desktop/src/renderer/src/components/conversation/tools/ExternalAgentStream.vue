@@ -1,11 +1,18 @@
 <script setup lang="ts">
+import { agentTitle, agentSourceLabel } from '@emperor/core/api'
 import { computed, nextTick, ref, watch } from 'vue'
 import type { ToolExternalAgentView } from '../../../conversation/types'
-import { useExpansion } from '../chatContext'
+import { provideDelegationLinks } from '../delegationLinks'
+import { useChatContext, useExpansion } from '../chatContext'
 import ConversationMarkdown from '../parts/ConversationMarkdown.vue'
 import StateDot from '../../ui/StateDot.vue'
 import ProviderLogo from '../../ui/ProviderLogo.vue'
 const props = defineProps<{ run: ToolExternalAgentView; callId: string }>()
+const chat = useChatContext()
+const { click } = provideDelegationLinks(() => ({
+  sessionId: chat.rootSessionId?.() ?? chat.sessionId(),
+  delegationId: props.run.delegationId,
+}))
 const live = computed(() =>
   ['queued', 'preparing', 'running', 'waiting_input', 'cancelling'].includes(
     props.run.phase,
@@ -43,6 +50,7 @@ watch(
 <template>
   <section
     class="external-stream"
+    @click.capture="click"
     data-external-agent-stream
     :data-run-id="run.runId"
     :data-phase="run.phase"
@@ -62,7 +70,8 @@ watch(
       <StateDot
         :state="live ? 'ongoing' : run.phase === 'completed' ? 'ok' : 'warn'"
       />
-      <strong>{{ run.backend === 'codex' ? 'Codex' : 'Claude Code' }}</strong>
+      <strong>{{ agentTitle(run.title, run.backend) }}</strong>
+      <span>{{ agentSourceLabel(run.backend) }}</span>
       <span>{{ label }}</span
       ><span class="stream-expand">{{ open ? '收起过程' : '查看过程' }}</span>
     </button>

@@ -495,7 +495,7 @@ let activating: string | null = null
 
 async function syncRouteSession(): Promise<void> {
   if (!startupDone.value) return
-  if (route.name !== 'chat' && route.name !== 'trajectory') return
+  if (!isConversationRoute(route.name)) return
   const target = routeSessionId.value
   const active = sessionStore.activeId.value
   if (!target) {
@@ -519,7 +519,10 @@ async function syncRouteSession(): Promise<void> {
   }
 }
 
-watch([routeSessionId, startupDone], () => void syncRouteSession())
+watch(
+  [routeSessionId, () => route.name, startupDone],
+  () => void syncRouteSession(),
+)
 watch(
   () => sessionStore.activeId.value,
   (active) => {

@@ -182,6 +182,7 @@ export interface WorkflowRunView {
 
 /** `tool`: one tool call and everything attached to it. */
 export interface ToolExternalAgentView {
+  readonly title?: string
   readonly delegationId: string
   readonly runId: string
   readonly backend: 'claude-code' | 'codex'

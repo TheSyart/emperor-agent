@@ -25,6 +25,7 @@ export interface ReferenceDescriptor {
 }
 
 export interface ResolveReferenceInput {
+  delegationId?: string
   sessionId: string
   sourceMessageId: string
   href: string
@@ -32,6 +33,7 @@ export interface ResolveReferenceInput {
 }
 
 interface StoredReference {
+  delegationId?: string
   sessionId: string
   sourceMessageId: string
   descriptor: ReferenceDescriptor
@@ -40,11 +42,13 @@ interface StoredReference {
 
 export interface WorkspaceReferenceServiceOptions {
   resolveProject: ResolveWorkspaceProject
+  delegatedRoot?: (sessionId: string, delegationId: string) => string
   preferReveal?: (sessionId: string) => boolean
   maxEntries?: number
 }
 
 export class WorkspaceReferenceService {
+  private readonly delegatedRoot?: WorkspaceReferenceServiceOptions['delegatedRoot']
   private readonly resolveProject: ResolveWorkspaceProject
   private readonly maxEntries: number
   private readonly preferReveal: (sessionId: string) => boolean
@@ -52,6 +56,7 @@ export class WorkspaceReferenceService {
   private readonly cache = new Map<string, string>()
 
   constructor(options: WorkspaceReferenceServiceOptions) {
+    this.delegatedRoot = options.delegatedRoot
     this.resolveProject = options.resolveProject
     this.maxEntries = options.maxEntries ?? 2_000
     this.preferReveal = options.preferReveal ?? (() => false)
@@ -71,6 +76,8 @@ export class WorkspaceReferenceService {
         '引用目标无效。',
       )
 
+    if (input.delegationId)
+      this.delegatedRoot?.(input.sessionId, input.delegationId)
     if (/^https?:\/\//i.test(href)) return this.resolveWeb(input, href)
     if (/^[a-z][a-z0-9+.-]*:/i.test(href) && !/^file:/i.test(href))
       throw new WorkspaceOperationError(
@@ -78,7 +85,15 @@ export class WorkspaceReferenceService {
         '不支持该引用协议。',
       )
 
-    return this.resolveFile(input, href)
+    const descriptor = this.resolveFile(input, href)
+    const stored = this.references.get(descriptor.id)
+    if (stored) stored.delegationId = input.delegationId
+    return descriptor
+  }
+
+  delegationScope(referenceId: string, sessionId: string): string | undefined {
+    this.authorize(referenceId, sessionId)
+    return this.references.get(referenceId)?.delegationId
   }
 
   authorize(referenceId: string, sessionId: string): ReferenceDescriptor {
@@ -170,7 +185,11 @@ export class WorkspaceReferenceService {
   ): ReferenceDescriptor {
     const { target, line } = fileTarget(rawHref)
     const scope = resolveOwnedProject(this.resolveProject, input.sessionId)
-    const projectRoot = realpathSync(scope.projectRoot)
+    const projectRoot = realpathSync(
+      input.delegationId && this.delegatedRoot
+        ? this.delegatedRoot(input.sessionId, input.delegationId)
+        : scope.projectRoot,
+    )
     if (!isAbsolute(target) && escapesProject(target))
       throw new WorkspaceOperationError(
         'reference_outside_project',
@@ -188,6 +207,11 @@ export class WorkspaceReferenceService {
     const canonicalTarget = exists ? realpathSync(lexicalTarget) : lexicalTarget
     const canonicalWithin =
       lexicalWithin && within(projectRoot, canonicalTarget)
+    if (input.delegationId && !canonicalWithin)
+      throw new WorkspaceOperationError(
+        'reference_outside_project',
+        '子智能体引用不能指向工作区外。',
+      )
     const stats = exists ? statSync(canonicalTarget) : undefined
     const directory = stats?.isDirectory() === true
     const available = stats?.isFile() === true || directory
@@ -197,7 +221,11 @@ export class WorkspaceReferenceService {
     }
     const fallback = basename(target) || target
 
-    if (canonicalWithin && !this.preferReveal(input.sessionId)) {
+    if (
+      canonicalWithin &&
+      !input.delegationId &&
+      !this.preferReveal(input.sessionId)
+    ) {
       const relativePath = toProjectPath(relative(projectRoot, lexicalTarget))
       const descriptor: ReferenceDescriptor = {
         id: referenceId(),
@@ -231,7 +259,7 @@ export class WorkspaceReferenceService {
           actions: available ? ['reveal'] : [],
         },
         available ? canonicalTarget : undefined,
-        `external\0${input.sessionId}\0${input.sourceMessageId}\0${canonicalTarget}\0${line ?? 0}`,
+        `external\0${input.sessionId}\0${input.delegationId ?? ''}\0${input.sourceMessageId}\0${canonicalTarget}\0${line ?? 0}`,
       )
 
     if (!isAbsolute(target))
@@ -252,7 +280,7 @@ export class WorkspaceReferenceService {
         actions: available ? ['reveal'] : [],
       },
       available ? canonicalTarget : undefined,
-      `external\0${input.sessionId}\0${input.sourceMessageId}\0${canonicalTarget}\0${line ?? 0}`,
+      `external\0${input.sessionId}\0${input.delegationId ?? ''}\0${input.sourceMessageId}\0${canonicalTarget}\0${line ?? 0}`,
     )
   }
 

@@ -96,6 +96,17 @@ function applyMatch(state: ToolState, match: ConversationMatch): ToolState {
     if (backend !== 'codex' && backend !== 'claude-code') return state
     const previous =
       state.externalAgent?.runId === p.run_id ? state.externalAgent : undefined
+    let description =
+      typeof p.task?.description === 'string'
+        ? p.task.description
+        : previous?.title
+    if (!description && state.call) {
+      try {
+        description = JSON.parse(state.call.argsRaw).description
+      } catch {
+        /* incomplete arguments */
+      }
+    }
     let text = previous?.text ?? ''
     const activity = [...(previous?.activity ?? [])]
     for (const entry of p.output ?? []) {
@@ -135,6 +146,7 @@ function applyMatch(state: ToolState, match: ConversationMatch): ToolState {
       ...state,
       externalAgent: {
         delegationId: p.delegation_id,
+        ...(description ? { title: description } : {}),
         runId: p.run_id,
         backend,
         phase: String(p.task?.status ?? previous?.phase ?? 'running'),

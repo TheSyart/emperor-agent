@@ -160,30 +160,14 @@ it('retains the retry-check form for a previous failed text check', async () => 
   expect(dom.textContent).toContain('独立验证当前成果')
   expect(dom.textContent).not.toContain('生成整合预览')
 })
-it('sends a queued followup once and refreshes stale clicks without automatically resending', async () => {
-  const dom = await mount(),
-    input = dom.querySelector<HTMLTextAreaElement>('[data-followup]')!
-  input.value = 'make the correction'
-  input.dispatchEvent(new Event('input', { bubbles: true }))
-  await settle()
-  api.sendDelegationMessage.mockRejectedValue(new Error('STALE_RUN: changed'))
-  const button = dom.querySelector<HTMLButtonElement>('[data-send]')!
-  button.click()
-  button.click()
-  await settle()
-  expect(api.sendDelegationMessage).toHaveBeenCalledTimes(1)
-  expect(api.sendDelegationMessage.mock.calls[0]?.[0]).toMatchObject({
-    id: 'dlg-one',
-    delivery: 'queue',
-    text: 'make the correction',
-  })
-  expect(api.getDelegation).toHaveBeenCalledTimes(2)
-  expect(dom.textContent).toContain('STALE_RUN')
-})
-it('offers Codex steer only for the current running native turn', async () => {
+it('keeps continuation and steer inputs out of task details and routes followup through the root', async () => {
   api.getDelegation.mockResolvedValue(state('codex', 'running'))
   const dom = await mount()
-  expect(dom.querySelector('[data-steer]')).not.toBeNull()
+  expect(dom.querySelector('[data-followup]')).toBeNull()
+  expect(dom.querySelector('[data-send]')).toBeNull()
+  expect(dom.querySelector('[data-steer]')).toBeNull()
+  expect(dom.textContent).toContain('主会话')
+  expect(api.sendDelegationMessage).not.toHaveBeenCalled()
 })
 it('shows passed host evidence and preserves a conflicting integration preview without an apply action', async () => {
   api.getDelegationReceipt.mockResolvedValue({

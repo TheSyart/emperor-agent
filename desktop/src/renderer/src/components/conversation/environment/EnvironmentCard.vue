@@ -1234,6 +1234,7 @@ function openLauncher(): void {
       :session-id="sessionId"
       @close="closeExternal"
       @configure="configureExternal"
+      @root="router.push({ name: 'chat', params: { sessionId } })"
     />
 
     <TaskOutputDialog

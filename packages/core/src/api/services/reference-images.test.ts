@@ -127,3 +127,88 @@ it('previews only session-owned project or delegated raster images using referen
     await f.api.close()
   }
 })
+it('resolves delegation relative images with root ownership and rejects escaped symlinks', async () => {
+  const f = await makeApi()
+  try {
+    const sessionId = String(
+      f.api.sessions.create({ title: 'child images', mode: 'chat' }).id,
+    )
+    const cwd = join(f.root, 'child-images')
+    mkdirSync(cwd)
+    const bytes = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j98sAAAAASUVORK5CYII=',
+      'base64',
+    )
+    writeFileSync(join(cwd, 'sun.png'), bytes)
+    const record = {
+      ...fixtureDelegationRecord(),
+      cwd,
+      owner: { ...fixtureDelegationRecord().owner, rootSessionId: sessionId },
+    }
+    const state = {
+      record,
+      runs: {},
+      messages: {},
+      interactions: {},
+      outbox: {},
+      lastSeq: 0,
+    }
+    vi.spyOn(f.api.delegationRuntime, 'inspect').mockReturnValue(state)
+    vi.spyOn(f.api.delegationRuntime, 'list').mockReturnValue([state])
+    const reference = await invokeCoreOperation(f.api, 'references.resolve', [
+      {
+        sessionId,
+        delegationId: record.id,
+        sourceMessageId: 'child',
+        href: 'sun.png',
+        label: 'sun',
+      },
+    ])
+    expect(reference.available).toBe(true)
+    expect(
+      (await f.api.references.image({ sessionId, referenceId: reference.id }))
+        .dataBase64,
+    ).toBe(bytes.toString('base64'))
+    writeFileSync(join(cwd, 'large.png'), Buffer.alloc(8 * 1024 * 1024 + 1))
+    const large = await invokeCoreOperation(f.api, 'references.resolve', [
+      {
+        sessionId,
+        delegationId: record.id,
+        sourceMessageId: 'child-large',
+        href: 'large.png',
+        label: 'large',
+      },
+    ])
+    expect(
+      await f.api.references.image({ sessionId, referenceId: large.id }),
+    ).toMatchObject({ kind: 'image', truncated: true })
+    const other = String(f.api.sessions.create({ title: 'other' }).id)
+    await expect(
+      invokeCoreOperation(f.api, 'references.resolve', [
+        {
+          sessionId: other,
+          delegationId: record.id,
+          sourceMessageId: 'child',
+          href: 'sun.png',
+          label: 'sun',
+        },
+      ]),
+    ).rejects.toThrow()
+    const { symlinkSync } = await import('node:fs')
+    symlinkSync(join(f.root, 'outside.png'), join(cwd, 'escape.png'))
+    writeFileSync(join(f.root, 'outside.png'), bytes)
+    await expect(
+      invokeCoreOperation(f.api, 'references.resolve', [
+        {
+          sessionId,
+          delegationId: record.id,
+          sourceMessageId: 'child',
+          href: 'escape.png',
+          label: 'escape',
+        },
+      ]),
+    ).rejects.toThrow()
+  } finally {
+    await f.api.close()
+  }
+})

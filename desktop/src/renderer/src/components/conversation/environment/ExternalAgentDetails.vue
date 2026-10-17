@@ -4,7 +4,6 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import {
   getDelegation,
   getDelegationReceipt,
-  sendDelegationMessage,
   interruptDelegation,
   recoverDelegation,
   collectDelegation,
@@ -14,6 +13,7 @@ import {
   type DelegationView,
   type DelegationDelivery,
 } from '../../../api/delegations'
+import { agentTitle, agentSourceLabel } from '@emperor/core/api'
 import { onCoreEvent } from '../../../api/backend'
 import Modal from '../../ui/Modal.vue'
 import Button from '../../ui/Button.vue'
@@ -24,21 +24,23 @@ const props = defineProps<{
   delegationId: string
   sessionId?: string
 }>()
-const emit = defineEmits<{ close: []; configure: [] }>()
+const emit = defineEmits<{ close: []; configure: []; root: [] }>()
+function returnRoot() {
+  emit('root')
+  emit('close')
+}
 const view = shallowRef<DelegationView | null>(null),
   delivery = shallowRef<DelegationDelivery | null>(null),
   busy = ref(false),
   stopping = ref(false),
   verifying = ref(false),
   error = ref(''),
-  followup = ref(''),
   showOutput = ref(false),
   command = ref(''),
   args = ref('["test"]'),
   criterion = ref('项目测试'),
   reviewed = ref(false),
-  requiresReview = ref(false),
-  nativeHistory = ref('')
+  requiresReview = ref(false)
 let generation = 0,
   alive = true,
   timer: ReturnType<typeof setTimeout> | undefined,
@@ -82,13 +84,6 @@ const active = computed(() =>
   ['queued', 'preparing', 'running', 'waiting_input', 'cancelling'].includes(
     run.value?.phase ?? '',
   ),
-)
-const steer = computed(
-  () =>
-    record.value?.backend === 'codex' &&
-    record.value.capabilitySnapshot.steer &&
-    record.value.currentRunId === props.runId &&
-    run.value?.phase === 'running',
 )
 const mutable = computed(
   () =>
@@ -134,20 +129,6 @@ async function action(task: () => Promise<unknown>) {
       busy.value = false
     }
   }
-}
-function send(deliveryMode: 'queue' | 'steer') {
-  if (!followup.value.trim()) return
-  return action(async () => {
-    await sendDelegationMessage({
-      id: props.delegationId,
-      sessionId: props.sessionId,
-      messageId: 'dgm-' + crypto.randomUUID(),
-      text: followup.value,
-      delivery: deliveryMode,
-      ...(deliveryMode === 'steer' ? { expectedRunId: props.runId } : {}),
-    })
-    followup.value = ''
-  })
 }
 async function stop() {
   if (stopping.value) return
@@ -204,20 +185,18 @@ function verify() {
     }
   })
 }
-function recover(inspect: boolean, verificationId?: string) {
+function recover(verificationId?: string) {
   return action(async () => {
-    const result = await recoverDelegation({
+    await recoverDelegation({
       id: props.delegationId,
       sessionId: props.sessionId,
       expectedRevision:
         (record.value?.currentRunId
           ? view.value?.runs[record.value.currentRunId]?.revision
           : run.value?.revision) ?? 0,
-      inspect,
+      inspect: false,
       ...(verificationId ? { verificationId } : {}),
     })
-    if ('turns' in result)
-      nativeHistory.value = result.turns.map((turn) => turn.text).join('\n\n')
   })
 }
 function makePreview() {
@@ -266,7 +245,7 @@ onBeforeUnmount(() => {
 <template>
   <Modal
     :open="true"
-    title="外部智能体"
+    title="子智能体"
     :width="820"
     @update:open="!$event && emit('close')"
   >
@@ -274,7 +253,10 @@ onBeforeUnmount(() => {
       <header class="external-facts">
         <div>
           <strong>{{
-            record?.backend === 'codex' ? 'Codex' : 'Claude Code'
+            agentTitle(
+              record?.startSpec?.description,
+              record?.backend ?? 'codex',
+            )
           }}</strong
           ><ProviderLogo
             v-if="record"
@@ -282,7 +264,8 @@ onBeforeUnmount(() => {
             :label="record.backend"
             size="xs"
             :data-agent-logo="record.backend"
-          /><span v-if="receipt"> · {{ receipt.version }}</span>
+          /><span v-if="record">{{ agentSourceLabel(record.backend) }}</span
+          ><span v-if="receipt"> · {{ receipt.version }}</span>
           <p class="external-id">{{ delegationId }} / {{ runId }}</p>
         </div>
         <Button
@@ -347,58 +330,22 @@ onBeforeUnmount(() => {
           "
           size="sm"
           :disabled="busy"
-          @click="recover(true)"
-          >查看原生历史</Button
-        ><Button
-          v-if="
-            record?.availability === 'needs_recovery' || record?.dispatchPaused
-          "
-          size="sm"
-          :disabled="busy"
-          @click="recover(false)"
+          @click="recover()"
           >恢复调度</Button
         ><Button
           v-for="id in delivery?.verificationRecoveryIds ?? []"
           :key="id"
           size="sm"
           :disabled="busy"
-          @click="recover(false, id)"
+          @click="recover(id)"
           >确认验证进程已停止</Button
         >
       </div>
-      <pre v-if="nativeHistory" class="external-code">{{ nativeHistory }}</pre>
-      <section v-if="mutable" class="external-section">
-        <h3>继续这个外部会话</h3>
-        <textarea
-          v-model="followup"
-          data-followup
-          :disabled="busy"
-          aria-label="给外部智能体的后续消息"
-          placeholder="补充要求或请求修正"
-          maxlength="32768"
-        />
-        <div class="external-actions">
-          <Button
-            data-send
-            size="sm"
-            variant="primary"
-            :disabled="busy || !followup.trim()"
-            @click="send('queue')"
-            >{{ active ? '排队发送' : '发送后续消息' }}</Button
-          ><Button
-            v-if="steer"
-            data-steer
-            size="sm"
-            variant="outline"
-            :disabled="busy || !followup.trim()"
-            @click="send('steer')"
-            >调整当前轮次</Button
-          >
-        </div>
-        <p class="external-note">
-          排队消息在当前轮结束后执行，新轮次会生成新任务记录。
-        </p>
-      </section>
+      <p class="external-note">
+        请返回主会话回答问题或继续派工。<Button size="sm" @click="returnRoot"
+          >返回主会话</Button
+        >
+      </p>
       <p
         v-if="
           receipt &&
@@ -409,7 +356,7 @@ onBeforeUnmount(() => {
         class="external-note"
         data-text-result
       >
-        结果已返回，可继续派工或发送后续消息。
+        结果已返回，可在主会话继续派工。
       </p>
       <details
         v-if="receipt && !hasFileDelivery && receipt.excluded.length"
@@ -596,7 +543,7 @@ onBeforeUnmount(() => {
         </p>
       </section>
       <p v-if="record?.availability === 'closed'" class="external-note">
-        外部会话已关闭，成果目录保留。
+        子智能体会话已关闭，成果目录保留。
       </p>
     </div>
     <template #footer
@@ -615,7 +562,7 @@ onBeforeUnmount(() => {
             }),
           )
         "
-        >关闭外部会话</Button
+        >关闭子智能体会话</Button
       ><Button size="sm" @click="emit('close')">返回聊天</Button></template
     >
   </Modal>
@@ -623,7 +570,9 @@ onBeforeUnmount(() => {
     v-if="showOutput"
     :task-id="runId"
     :session-id="sessionId"
-    :label="record?.backend ?? '外部智能体'"
+    :label="
+      agentTitle(record?.startSpec?.description, record?.backend ?? 'codex')
+    "
     kind="external-agent"
     :live="active"
     @close="showOutput = false"

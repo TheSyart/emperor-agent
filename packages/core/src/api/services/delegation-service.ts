@@ -1,3 +1,7 @@
+import {
+  DelegationHistory,
+  type DelegationHistoryOptions,
+} from './delegation-history'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DelegationService } from '../../harness/delegation/service'
@@ -48,10 +52,19 @@ export function externalTask(state: DelegationState, run: DelegationRunRecord) {
   }
 }
 export class CoreDelegationService {
+  private historyIndex?: DelegationHistory
+  history(
+    input: { id: string; sessionId?: string | null } & DelegationHistoryOptions,
+  ) {
+    const state = this.access(input.id, input.sessionId)
+    this.historyIndex ??= new DelegationHistory(this.options.root)
+    return this.historyIndex.read(state, input)
+  }
   constructor(
     private readonly options: {
       root: string
       service: DelegationService
+      cachedState?: (id: string) => DelegationState | undefined
       receipts: DelegationReceipts
       acceptance: DelegationAcceptance
       integration: DelegationIntegration
@@ -65,7 +78,10 @@ export class CoreDelegationService {
     sessionId?: string | null,
     write = false,
   ): DelegationState {
-    const state = this.options.service.inspect(id),
+    const cached = write ? undefined : this.options.cachedState?.(id)
+    const state = cached
+        ? structuredClone(cached)
+        : this.options.service.inspect(id),
       root = String(sessionId ?? this.options.activeSession() ?? '')
     const session = this.options.session(root)
     if (!session || state.record?.owner.rootSessionId !== root)
@@ -163,7 +179,12 @@ export class CoreDelegationService {
     runId: string
     sessionId?: string | null
   }) {
-    this.access(input.id, input.sessionId, true)
+    const state = this.access(input.id, input.sessionId, true)
+    if (!state.runs[input.runId])
+      throw new DelegationError(
+        'RUN_NOT_FOUND',
+        'run does not belong to this child',
+      )
     await this.options.acceptance.stopRun(input.runId)
     return this.options.service.interrupt(input.id, input.runId)
   }
