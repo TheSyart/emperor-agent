@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { AgentView } from '@emperor/core/api'
 import type { ToolChatData } from '../../../conversation/types'
 import { REGISTERED_TOOLS, subagentStatusLabel, toolView } from './registry'
 import {
@@ -6,6 +7,7 @@ import {
   grepCard,
   hunksFromUnifiedDiff,
   mutationHunks,
+  nativeAgentTarget,
   readWindow,
   shellOutcome,
   toolRowState,
@@ -264,6 +266,63 @@ describe('tool registry titles and summaries', () => {
         }),
       ).summary,
     ).toBe('Ship it · 继续规划')
+  })
+
+  it('names native continuation cards from their matched stable shared identity and preserves external behavior', () => {
+    const child: AgentView = {
+      id: 'sub-existing',
+      kind: 'internal',
+      backend: 'internal',
+      rootSessionId: 'root',
+      parentAgentId: 'root',
+      title: 'creation task',
+      phase: 'waiting',
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    const native = tool(
+      'send_message',
+      { subagent_id: child.id, message: 'new followup' },
+      { text: 'queued', meta: { messageId: 'msg-next', subagentId: child.id } },
+    )
+    const view = toolView('send_message', child)
+    expect(view.title(native)).toBe('creation task')
+    expect(view.summary(native)).toBe('Emperor · 等待回答')
+    expect(nativeAgentTarget(native)).toBe(child.id)
+    expect(
+      view.title(
+        tool('send_message', { subagent_id: 'sub-other', message: 'other' }),
+      ),
+    ).toBe('发送消息')
+    for (const id of ['dlg-one', 'dgr-one', 'root', 'sub-'])
+      expect(
+        nativeAgentTarget(
+          tool(
+            'send_message',
+            { subagent_id: child.id },
+            { text: '', meta: { subagentId: id } },
+          ),
+        ),
+      ).toBeUndefined()
+    const external = tool(
+      'send_message',
+      { agent_id: 'dlg-one', message: 'external followup' },
+      undefined,
+      {
+        externalAgent: {
+          title: 'external creation',
+          delegationId: 'dlg-one',
+          runId: 'dgr-next',
+          backend: 'codex',
+          phase: 'running',
+          text: '',
+          activity: [],
+        },
+      },
+    )
+    expect(nativeAgentTarget(external)).toBeUndefined()
+    expect(view.title(external)).toBe('external creation')
+    expect(view.summary(external)).toBe('Codex · 运行中')
   })
 
   it('keeps continuation cards named after the creation task, with the source separate', () => {

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createRouter, createMemoryHistory, type Router } from 'vue-router'
 import { loadKernelLog, LogBuilder } from '../../conversation/testing/fixtures'
 import ChatTimeline from './ChatTimeline.vue'
+import { buildAgentTree, useAgentTree } from '../sidebar/agentTree'
 import { createFixtureStore, type FixtureStore } from './gallery/fixtureStore'
 import { showcaseScenario, streamingScenario } from './gallery/scenarios'
 import {
@@ -34,6 +35,7 @@ afterEach(() => {
   container = null
   app = null
   fixture = null
+  delete useAgentTree().trees['native-root']
 })
 
 async function settle(rounds = 20): Promise<void> {
@@ -182,6 +184,61 @@ describe('ChatTimeline over the recorded kernel log', () => {
     )
     expect(root.querySelector('[data-agent-details]')?.closest('a')).toBeNull()
   })
+  it('resolves native continuation identity and creation title from the shared root tree without a new started event', async () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.call(1, 1, 'native-followup', 'send_message', {
+      subagent_id: 'sub-existing',
+      message: 'different followup task',
+    })
+    log.result(1, 1, 'native-followup', 'queued', {
+      meta: { messageId: 'msg-next', subagentId: 'sub-existing' },
+    })
+    const opened: string[] = []
+    const root = mount(
+      'native-root',
+      [{ id: 'native-root', events: [...log.events] }],
+      { openSubagent: (id) => opened.push(id) },
+    )
+    await settle()
+    expect(root.querySelector('[data-agent-entry]')).toBeNull()
+    // Hydration can finish after the continuation card is already mounted.
+    useAgentTree().trees['native-root'] = buildAgentTree('native-root', [
+      {
+        id: 'sub-existing',
+        kind: 'internal',
+        backend: 'internal',
+        rootSessionId: 'native-root',
+        parentAgentId: 'native-root',
+        title: 'original native creation',
+        phase: 'running',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    ])
+    await settle()
+    const entry = root.querySelector<HTMLAnchorElement>('[data-agent-entry]')!
+    expect(entry?.textContent).toContain('original native creation')
+    expect(entry?.textContent).toContain('Emperor')
+    expect(entry?.getAttribute('href')).toBe('/chat/sub-existing')
+    expect(root.querySelector('.tool-row')?.textContent).toContain(
+      'original native creation',
+    )
+    expect(root.querySelector('.tool-row')?.textContent).toContain(
+      'Emperor · 运行中',
+    )
+    entry.click()
+    expect(opened).toEqual(['sub-existing'])
+    root.querySelector<HTMLButtonElement>('[data-disclosure-row]')!.click()
+    await settle()
+    expect(root.textContent).toContain('different followup task')
+    useAgentTree().trees['native-root'].byId['sub-existing'].rootSessionId =
+      'foreign-root'
+    await settle()
+    expect(root.querySelector('[data-agent-entry]')).toBeNull()
+  })
+
   it('renders every chat row kind of the fixture', async () => {
     const log = loadKernelLog()
     const root = mount('kernel', [

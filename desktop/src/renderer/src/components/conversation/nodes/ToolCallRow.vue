@@ -11,6 +11,7 @@
  * inspect(callId).
  */
 import { computed } from 'vue'
+import type { AgentView } from '@emperor/core/api'
 import type { ToolChatData } from '../../../conversation/types'
 import { DsInspect } from '../../icons/ds'
 import DisclosureRow from '../../ui/DisclosureRow.vue'
@@ -21,13 +22,13 @@ import { TOOL_BODIES } from '../tools/bodies'
 import { toolView } from '../tools/registry'
 import { argsOf, errorSummary, toolRowState } from '../tools/toolModel'
 
-const props = defineProps<{ data: ToolChatData }>()
+const props = defineProps<{ data: ToolChatData; agent?: AgentView }>()
 const { actions } = useChatContext()
 
 /** Bodies that only render result material (nothing to show while running). */
 const RESULT_ONLY = new Set(['read', 'glob', 'grep', 'web', 'job', 'skill'])
 
-const view = computed(() => toolView(props.data.name))
+const view = computed(() => toolView(props.data.name, props.agent))
 const state = computed(() => toolRowState(props.data))
 const backend = computed(
   () => props.data.externalAgent?.backend ?? argsOf(props.data).backend,

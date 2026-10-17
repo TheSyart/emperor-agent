@@ -16,7 +16,20 @@ const props = defineProps<{ rootSessionId: string }>()
 const router = useRouter()
 const model = useAgentTree()
 const all = ref(false)
-const tree = computed(() => model.trees[props.rootSessionId])
+const readableRoot = computed(() =>
+  props.rootSessionId && !/^(sub-|dlg-|dgr-|draft:)/.test(props.rootSessionId)
+    ? props.rootSessionId
+    : undefined,
+)
+const tree = computed(() =>
+  readableRoot.value ? model.trees[readableRoot.value] : undefined,
+)
+const error = computed(() =>
+  readableRoot.value ? model.errors[readableRoot.value] : undefined,
+)
+function refreshRoot() {
+  if (readableRoot.value) void model.refresh(readableRoot.value)
+}
 const agents = computed(() => tree.value?.agents ?? [])
 const visible = computed(() => visibleAgentChildren(agents.value, all.value))
 const active = computed(
@@ -28,24 +41,48 @@ watch(
   () => props.rootSessionId,
   (root) => {
     all.value = false
-    if (root) void model.refresh(root)
+    if (root) refreshRoot()
   },
   { immediate: true },
 )
-function path(agent: AgentView): string {
+function ancestry(agent: AgentView): { text: string; unavailable?: string } {
   const parts = [agentTitle(agent.title, agent.backend)]
   const seen = new Set([agent.id])
-  let parent = tree.value?.byId[agent.parentAgentId]
-  while (parent && !seen.has(parent.id)) {
-    parts.unshift(agentTitle(parent.title, parent.backend))
-    seen.add(parent.id)
-    parent = tree.value?.byId[parent.parentAgentId]
+  let current = agent
+  function broken(label: string, id: string) {
+    const unavailable = `${label} · ${id}${id !== agent.parentAgentId ? `（父级 ${agent.parentAgentId}）` : ''}`
+    return { text: [unavailable, ...parts].join(' / '), unavailable }
   }
-  return ['主会话', ...parts].join(' / ')
+  while (true) {
+    const id = current.parentAgentId
+    if (
+      ['missing_parent', 'foreign_parent', 'conflicting_parent'].includes(
+        current.unavailable ?? '',
+      )
+    )
+      return broken('父级不可用', id)
+    if (current.unavailable === 'cyclic_parent') return broken('父级循环', id)
+    if (seen.has(id)) return broken('父级循环', id)
+    if (id === props.rootSessionId) {
+      if (tree.value?.unavailable.some((row) => row.id === agent.id))
+        return broken('父级不可用', agent.parentAgentId)
+      return { text: ['主会话', ...parts].join(' / ') }
+    }
+    const parent = tree.value?.byId[id]
+    if (!parent || parent.rootSessionId !== props.rootSessionId)
+      return broken('父级不可用', id)
+    parts.unshift(agentTitle(parent.title, parent.backend))
+    seen.add(id)
+    current = parent
+  }
 }
 </script>
 <template>
-  <section v-if="agents.length" class="agents-section" data-section="subagents">
+  <section
+    v-if="agents.length || error"
+    class="agents-section"
+    data-section="subagents"
+  >
     <h3>
       子智能体 <span v-if="active">{{ active }} 个活动中</span>
     </h3>
@@ -55,17 +92,31 @@ function path(agent: AgentView): string {
       type="button"
       class="agent-row"
       :data-agent-id="agent.id"
-      :title="path(agent)"
+      :title="ancestry(agent).text"
       @click="router.push(agentLocation(agent))"
     >
       <span class="agent-copy"
         ><strong>{{ agentTitle(agent.title, agent.backend) }}</strong
         ><small
-          >{{ agentSourceLabel(agent.backend) }} · {{ path(agent) }}</small
-        ></span
+          >{{ agentSourceLabel(agent.backend) }} ·
+          {{ ancestry(agent).text }}</small
+        ><small v-if="ancestry(agent).unavailable" data-unavailable-parent>{{
+          ancestry(agent).unavailable
+        }}</small></span
       >
       <span class="agent-phase">{{ agentPhaseLabel(agent.phase) }}</span>
     </button>
+    <p v-if="error" class="agents-error" role="alert">
+      {{ error }}
+      <button
+        type="button"
+        class="agent-more"
+        data-retry-agents
+        @click="refreshRoot"
+      >
+        重试
+      </button>
+    </p>
     <button
       v-if="agents.length > 5"
       type="button"
@@ -82,6 +133,10 @@ function path(agent: AgentView): string {
 .agents-section {
   padding: var(--space-2) 0;
   border-top: 1px solid var(--border-l1);
+}
+.agents-error {
+  color: rgb(var(--label-secondary));
+  font-size: var(--fs-xs);
 }
 h3 {
   margin: 0 0 var(--space-1);

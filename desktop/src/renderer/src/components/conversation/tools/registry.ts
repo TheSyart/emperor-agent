@@ -8,6 +8,8 @@ import {
   agentTitle,
   agentSourceLabel,
   type AgentBackend,
+  type AgentView,
+  agentPhaseLabel,
 } from '@emperor/core/api'
 import {
   DsAgent,
@@ -41,6 +43,7 @@ import {
   mcpIdentity,
   memoryTargetLabel,
   metaOf,
+  nativeAgentTarget,
   numberArg,
   planOutcome,
   planTitle,
@@ -549,8 +552,8 @@ const REGISTRY: Readonly<Record<string, ToolViewSpec>> = {
 export const REGISTERED_TOOLS: readonly string[] = Object.keys(REGISTRY)
 
 /** Resolve one wire tool name. */
-export function toolView(name: string): ToolViewSpec {
-  return (
+export function toolView(name: string, agent?: AgentView): ToolViewSpec {
+  const view =
     REGISTRY[name] ??
     (name.startsWith('mcp_') ? mcp : undefined) ??
     (isComputerUseTool(name)
@@ -559,5 +562,22 @@ export function toolView(name: string): ToolViewSpec {
         : browserTool
       : undefined) ??
     generic
+  if (
+    name !== 'send_message' ||
+    agent?.kind !== 'internal' ||
+    agent.backend !== 'internal' ||
+    !agent.id.startsWith('sub-')
   )
+    return view
+  return {
+    ...view,
+    title: (data) =>
+      nativeAgentTarget(data) === agent.id
+        ? agentTitle(agent.title, agent.backend)
+        : view.title(data),
+    summary: (data) =>
+      nativeAgentTarget(data) === agent.id
+        ? join(agentSourceLabel(agent.backend), agentPhaseLabel(agent.phase))
+        : view.summary(data),
+  }
 }

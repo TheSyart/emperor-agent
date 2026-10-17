@@ -38,7 +38,7 @@ flowchart TD
 
 侧栏、父任务卡片、环境信息和独立页面使用创建任务的 description 作为名称，来源单独显示为 Emperor、Claude Code 或 Codex；缺失名称时使用对应来源加「子智能体」。继续派工不会把名称改成后续轮次提示。`sub-*` 是内部子会话，`dlg-*` 是稳定外部身份，`dgr-*` 仅表示某一轮。
 
-`agents.list({ rootSessionIds }) => { agents: AgentView[] }` 返回根会话拥有的子智能体，包含实际 `parentAgentId`、名称、来源、状态和当前 run。侧栏按实际父级嵌套所有来源，包括内部子智能体派出的外部子智能体；环境信息复用同一根范围树缓存，显示稳定身份及路径。活动项和最近项保持可见，超过五项可显示全部；完成项仍可检查。`agent_tree_changed { rootSessionId, revision }` 只使拓扑或状态失效，文字增量不触发全历史扫描。该可重建索引不替代持久日志，`sessions.children` 保持兼容。
+`agents.list({ rootSessionIds }) => { agents: AgentView[] }` 返回根会话拥有的子智能体，包含实际 `parentAgentId`、名称、来源、状态和当前 run。侧栏按实际父级嵌套所有来源，包括内部子智能体派出的外部子智能体；环境信息复用同一根范围树缓存，显示稳定身份及路径。活动项和最近项保持可见，超过五项可显示全部；完成项仍可检查。`agent_tree_changed { rootSessionId, revision }` 只使拓扑或状态失效，文字增量不触发全历史扫描。该可重建索引不替代持久日志，`sessions.children` 保持兼容。内部继续派工的 `send_message` 不会产生新的 started 事件；卡片从结果元数据 `subagentId`（派发中为 `subagent_id` 参数）匹配 owning root 的共享内部 AgentView，取回创建名称、来源和状态，后续提示仍保留在展开内容中。缺失、跨根或外部身份不会被伪装成原生子会话。环境信息在父级缺失、跨根或成环时保留已知路径和父级 ID 并明确标记不可用，不补造主会话祖先；首次树读取失败提供根范围的错误与重试入口。
 
 外部入口固定为 `/chat/:sessionId/agents/:delegationId`，其中 sessionId 是可读的 owning root，delegationId 是 `dlg-*`。内部入口仍为 `/chat/:sessionId`，使用真实 `sub-*`。路由检查内部 lineage 后保留根的 Core 活动上下文；不会将 dlg 或 dgr 作为 Emperor session 激活。父卡片的主要名称链接打开独立页，过程折叠、图片、复制和「任务详情」各自独立操作，任务详情保留当前轮的文件交付、差异、验收和整合。
 

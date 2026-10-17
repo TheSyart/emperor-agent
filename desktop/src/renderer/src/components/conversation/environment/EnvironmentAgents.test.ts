@@ -7,6 +7,7 @@ import { buildAgentTree } from '../../sidebar/agentTree'
 const state = vi.hoisted(() => ({
   trees: {} as Record<string, unknown>,
   refresh: vi.fn(),
+  errors: {} as Record<string, string>,
   push: vi.fn(),
 }))
 vi.mock('../../sidebar/agentTree', async (original) => ({
@@ -33,6 +34,7 @@ const agent = (
 afterEach(() => {
   app?.unmount()
   el?.remove()
+  state.errors = {}
   vi.clearAllMocks()
 })
 it('shows stable internal and external identities, canonical names, sources and actual parent paths', async () => {
@@ -85,3 +87,66 @@ it('shows active plus recent entries, with all entries available after expanding
   await nextTick()
   expect(el.querySelectorAll('[data-agent-id]')).toHaveLength(7)
 })
+
+it.each(['missing', 'foreign', 'cycle'] as const)(
+  'retains truthful unavailable %s ancestry instead of a fabricated root path',
+  async (kind) => {
+    const child = agent('dlg-lost', 'sub-unavailable')
+    const parent = agent('sub-unavailable', 'dlg-lost', 'internal')
+    if (kind === 'foreign') {
+      parent.rootSessionId = 'other-root'
+      child.unavailable = 'foreign_parent'
+    }
+    state.trees.root = buildAgentTree(
+      'root',
+      kind === 'missing' ? [child] : [child, parent],
+    )
+    el = document.createElement('div')
+    app = createApp({
+      render: () => h(EnvironmentAgents, { rootSessionId: 'root' }),
+    })
+    app.mount(el)
+    await nextTick()
+    const row = el.querySelector<HTMLButtonElement>(
+      '[data-agent-id="dlg-lost"]',
+    )!
+    expect(row.title).not.toContain('主会话')
+    expect(row.title).toContain(kind === 'cycle' ? '父级循环' : '父级不可用')
+    expect(row.title).toContain('sub-unavailable')
+    expect(row.querySelector('[data-unavailable-parent]')).not.toBeNull()
+    row.click()
+    expect(state.push).toHaveBeenLastCalledWith({
+      name: 'external-agent',
+      params: { sessionId: 'root', delegationId: 'dlg-lost' },
+    })
+  },
+)
+it('shows a first-load error with a root-scoped retry, without pretending the root has no children', async () => {
+  delete state.trees.root
+  state.errors.root = '子智能体暂时无法加载'
+  el = document.createElement('div')
+  app = createApp({
+    render: () => h(EnvironmentAgents, { rootSessionId: 'root' }),
+  })
+  app.mount(el)
+  await nextTick()
+  expect(el.querySelector('[role="alert"]')?.textContent).toContain(
+    '暂时无法加载',
+  )
+  state.refresh.mockClear()
+  el.querySelector<HTMLButtonElement>('[data-retry-agents]')!.click()
+  expect(state.refresh).toHaveBeenCalledTimes(1)
+  expect(state.refresh).toHaveBeenCalledWith('root')
+})
+it.each(['sub-child', 'dlg-child', 'dgr-one', 'draft:new'])(
+  'never refreshes the shared cache using child/run/draft identity %s',
+  async (id) => {
+    el = document.createElement('div')
+    app = createApp({
+      render: () => h(EnvironmentAgents, { rootSessionId: id }),
+    })
+    app.mount(el)
+    await nextTick()
+    expect(state.refresh).not.toHaveBeenCalled()
+  },
+)

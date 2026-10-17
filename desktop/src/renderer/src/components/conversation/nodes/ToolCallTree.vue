@@ -17,7 +17,8 @@ import StateDot from '../../ui/StateDot.vue'
 import type { StateDotState } from '../../ui/stateDot'
 import { useChatContext } from '../chatContext'
 import { subagentStatusLabel, toolView } from '../tools/registry'
-import { lastLine } from '../tools/toolModel'
+import { lastLine, nativeAgentTarget } from '../tools/toolModel'
+import { useAgentTree } from '../../sidebar/agentTree'
 import ToolCallRow from './ToolCallRow.vue'
 import WorkflowRunPanel from './WorkflowRunPanel.vue'
 import ExternalAgentStream from '../tools/ExternalAgentStream.vue'
@@ -28,6 +29,19 @@ const { actions } = chat
 const router = inject(routerKey, undefined)
 const data = computed(() => props.node.data)
 const owner = computed(() => chat.rootSessionId?.() ?? chat.sessionId())
+const agentTree = useAgentTree()
+const nativeAgent = computed(() => {
+  const id = nativeAgentTarget(data.value)
+  const agent = id ? agentTree.trees[owner.value]?.byId[id] : undefined
+  return agent?.kind === 'internal' &&
+    agent.backend === 'internal' &&
+    agent.rootSessionId === owner.value
+    ? agent
+    : undefined
+})
+const nativeId = computed(
+  () => data.value.subagent?.subagentId ?? nativeAgent.value?.id,
+)
 const detailsRun = ref<{ runId: string; delegationId: string } | null>(null)
 const ExternalAgentDetails = defineAsyncComponent(
   () => import('../environment/ExternalAgentDetails.vue'),
@@ -35,11 +49,13 @@ const ExternalAgentDetails = defineAsyncComponent(
 const entryBackend = computed(
   () => data.value.externalAgent?.backend ?? 'internal',
 )
-const entryTitle = computed(() => toolView(data.value.name).title(data.value))
+const entryTitle = computed(() =>
+  toolView(data.value.name, nativeAgent.value).title(data.value),
+)
 const entryHref = computed(() =>
   data.value.externalAgent
     ? `/chat/${encodeURIComponent(owner.value)}/agents/${encodeURIComponent(data.value.externalAgent.delegationId)}`
-    : `/chat/${encodeURIComponent(data.value.subagent?.subagentId ?? '')}`,
+    : `/chat/${encodeURIComponent(nativeId.value ?? '')}`,
 )
 function openAgent(event: MouseEvent) {
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
@@ -53,9 +69,9 @@ function openAgent(event: MouseEvent) {
         delegationId: data.value.externalAgent.delegationId,
       },
     })
-  } else if (data.value.subagent) {
+  } else if (nativeId.value) {
     event.preventDefault()
-    actions.openSubagent(data.value.subagent.subagentId)
+    actions.openSubagent(nativeId.value)
   }
 }
 
@@ -114,7 +130,7 @@ const hasChildren = computed(
 
 <template>
   <div class="tool-call" :data-chat-call-id="data.callId">
-    <div v-if="data.externalAgent || data.subagent" class="agent-entry-row">
+    <div v-if="data.externalAgent || nativeId" class="agent-entry-row">
       <a
         data-agent-entry
         class="agent-entry"
@@ -139,7 +155,7 @@ const hasChildren = computed(
         任务详情
       </button>
     </div>
-    <ToolCallRow :data="data" />
+    <ToolCallRow :data="data" :agent="nativeAgent" />
     <div v-if="hasChildren" class="subcalls" data-subcalls>
       <ExternalAgentStream
         v-if="data.externalAgent"

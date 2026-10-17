@@ -63,6 +63,16 @@ export function metaOf(
     : undefined
 }
 
+/** Native followups do not emit subagent/started. Resolve only their native target, never dlg/run IDs. */
+export function nativeAgentTarget(data: ToolChatData): string | undefined {
+  if (data.name !== 'send_message' || data.externalAgent) return undefined
+  const meta = metaOf(data)
+  const id = meta?.subagentId ?? stringArg(argsOf(data), 'subagent_id')
+  return typeof id === 'string' && id.startsWith('sub-') && id.length > 4
+    ? id
+    : undefined
+}
+
 /** Joined text blocks of the settled result ('' while running). */
 export function resultText(data: ToolChatData): string {
   const content = data.result?.content ?? []
