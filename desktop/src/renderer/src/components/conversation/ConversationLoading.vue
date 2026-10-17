@@ -1,0 +1,87 @@
+<script setup lang="ts">
+import { DsLoading } from '../icons/ds'
+</script>
+
+<template>
+  <div
+    class="conversation-loading"
+    role="status"
+    aria-busy="true"
+    aria-label="正在读取会话记录"
+  >
+    <div class="skeleton" aria-hidden="true">
+      <div class="question shape" />
+      <div class="answer">
+        <div class="line shape" />
+        <div class="line shape" />
+        <div class="line shape" />
+      </div>
+    </div>
+    <span class="label"
+      ><DsLoading :size="14" class="spin" />正在读取会话记录…</span
+    >
+  </div>
+</template>
+
+<style scoped>
+.conversation-loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding-block: var(--space-6);
+}
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+.shape {
+  background: var(--skeleton-bg);
+  animation: conversation-loading-pulse 1.4s ease-in-out infinite alternate;
+}
+.question {
+  width: 55%;
+  height: var(--space-10);
+  margin-inline-start: auto;
+  border-radius: var(--radius-card);
+}
+.answer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.line {
+  height: var(--space-3);
+  border-radius: var(--radius-pill);
+}
+.line:first-child {
+  width: 82%;
+}
+.line:last-child {
+  width: 58%;
+}
+.label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: rgb(var(--label-tertiary));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+}
+.spin {
+  animation: conversation-loading-spin 0.9s linear infinite;
+}
+@keyframes conversation-loading-pulse {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes conversation-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+</style>

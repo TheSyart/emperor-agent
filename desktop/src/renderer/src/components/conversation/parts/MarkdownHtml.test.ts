@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
-import { createApp, h, reactive, ref } from 'vue'
+import { createApp, h, nextTick, reactive, ref } from 'vue'
 import MarkdownHtml from './MarkdownHtml.vue'
 import {
   LINK_STATUS_KEY,
@@ -29,8 +29,11 @@ const TEXT = [
 ].join(' ')
 
 let container: HTMLDivElement | null = null
+let mountedApp: ReturnType<typeof createApp> | null = null
 
 afterEach(() => {
+  mountedApp?.unmount()
+  mountedApp = null
   container?.remove()
   container = null
 })
@@ -43,6 +46,7 @@ function mount(
   container = document.createElement('div')
   document.body.appendChild(container)
   const app = createApp({ render: () => h(MarkdownHtml, { ...state }) })
+  mountedApp = app
   if (links) app.provide(LINK_STATUS_KEY, links)
   app.mount(container)
   return { root: container, state }
@@ -58,6 +62,71 @@ function anchor(root: HTMLElement, href: string) {
 }
 
 describe('MarkdownHtml document links', () => {
+  it.each(['![太阳](sun.png)', '[sun.png](sun.png)'])(
+    'opens the resolved reply image in the attachment preview: %s',
+    async (text) => {
+      const { links } = source({})
+      Object.assign(links, { image: async () => 'data:image/png;base64,c3Vu' })
+      const { root } = mount({ text }, links)
+      await flushPromises()
+      const image = root.querySelector<HTMLImageElement>('img')!
+      image.focus()
+      image.click()
+      await nextTick()
+      const dialog = document.querySelector('[role="dialog"]')!
+      expect(dialog).not.toBeNull()
+      expect(dialog.querySelector('img')?.getAttribute('src')).toBe(
+        'data:image/png;base64,c3Vu',
+      )
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await nextTick()
+      expect(document.querySelector('[role="dialog"]')).toBeNull()
+      expect(document.activeElement).toBe(image)
+    },
+  )
+
+  it.each(['Enter', ' '])(
+    'opens a reply image with %j and closes only on the backdrop',
+    async (key) => {
+      const { links } = source({})
+      Object.assign(links, { image: async () => 'data:image/png;base64,c3Vu' })
+      const { root } = mount({ text: '![太阳](sun.png)' }, links)
+      await flushPromises()
+      const image = root.querySelector<HTMLImageElement>('img')!
+      expect(image.tabIndex).toBe(0)
+      expect(image.getAttribute('role')).toBe('button')
+      image.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
+      await nextTick()
+      document.querySelector<HTMLImageElement>('[role="dialog"] img')!.click()
+      await nextTick()
+      expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+      document.querySelector<HTMLElement>('[role="dialog"]')!.click()
+      await nextTick()
+      expect(document.querySelector('[role="dialog"]')).toBeNull()
+    },
+  )
+
+  it('closes an open image when its reply changes or its component unmounts', async () => {
+    const { links } = source({})
+    Object.assign(links, { image: async () => 'data:image/png;base64,c3Vu' })
+    const { root, state } = mount({ text: '![太阳](sun.png)' }, links)
+    await flushPromises()
+    root.querySelector<HTMLImageElement>('img')!.click()
+    await nextTick()
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+    state.text = '下一条回复'
+    await flushPromises()
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    state.text = '![太阳](sun.png)'
+    await flushPromises()
+    root.querySelector<HTMLImageElement>('img')!.click()
+    await nextTick()
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+    mountedApp!.unmount()
+    mountedApp = null
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+  })
+
   it('previews both local image syntax and ordinary image links while retaining the file link', async () => {
     const { links } = source({
       'sun.png': { state: 'file', path: '/p/sun.png' },

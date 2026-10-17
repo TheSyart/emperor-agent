@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用普通会话或项目会话的用户<br>
-> 最后核验：2026-10-17<br>
+> 最后核验：2026-10-18<br>
 > 事实源：`packages/core/src/sessions/store.ts`、`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/prompt/agent-instructions.ts`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/sidebar/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/composer/`、`desktop/src/renderer/src/components/trajectory/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/pages/pulls/`、`desktop/src/renderer/src/components/pages/github/`、`desktop/src/main/browser-view.ts`
 
 Chat（普通对话）和 Build（项目工作）是会话类型。它们决定 Agent 的工作目录和能看到哪些长期上下文，不决定权限。
@@ -43,11 +43,13 @@ Build 绑定一个本地文件夹。Agent 在该目录内读取文件、按当�
 会话头部左侧是路径导航，下方是「对话」「轨迹」两个标签；右上角是「环境信息」（只在「对话」标签显示）和「工作台」两个开关。空白的新对话只显示「工作台」开关。
 
 - **空会话**：输入框居中显示；发送后你的消息以气泡出现，Agent 的回复随即流式输出。
+- **读取历史**：打开已有会话时，保留会话头部和底部输入框，记录区域显示轻量骨架与加载提示，读完后显示历史；读取失败时显示错误，不切换到新会话界面。系统开启减弱动效时，骨架保持静止。
 - **思考**：模型的思考过程显示为可折叠的「思考」行，流式输出时只显示最新一行。
 - **工具调用**：每次调用占一行，格式为 `图标 标题 · 摘要`。点开后按工具类型展示：终端输出、Diff、读取片段、搜索结果、网页来源、待办清单、已回答的问题、最终 Plan，其他工具显示通用的 IN / OUT。
 - **运行状态**：正在进行的 turn 只显示一行状态和已用时间。每个完成的 turn 末尾有复制按钮，悬停可看到首字耗时（TTFT）和 tok/s 等信息。
 - 重试、错误、达到最大输出 token、上下文压缩等情况以单独的行插在时间线中。
 - **文档链接**：回复里提到的本地文件显示为「类型图标 + 名称」。TS、JS、Vue、Python、Swift、Go、Rust、Shell、HTML、CSS 用语言徽标；文档、PDF、数据与配置、图片、表格、压缩包、目录和网页各有图标。链接文字本身是路径时只显示文件名，悬停显示完整路径。在 Build 会话里点击，项目内的文件在「文件」面板打开（带行号时定位到该行），目录在文件树中展开，项目外的文件在访达中显示；网页链接的打开方式不变。已经不存在的文件显示删除线，点击不会打开；每轮结束后重新检查一次。
+- **图片预览**：点击回复图片，与上传图片一样打开放大预览；也可聚焦图片后按 Enter 或空格。点击关闭按钮、图片外的遮罩或按 Esc 关闭。主会话及子智能体回复共用此预览，原文件链接仍保留。
 
 悬停工具行时出现 **Inspect**：点击后切到本会话的「轨迹」标签（`/chat/:id/trajectory?call=<callId>`），选中这次调用，并在轨迹右侧的「详情」列中显示它的参数、结果、工具 Schema 与耗时。调用较早、尚未加载时会先加载更早的记录再定位。
 

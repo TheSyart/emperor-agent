@@ -242,6 +242,15 @@ const phase = computed(() =>
       Boolean(agentTree.trees[owningRootId.value]?.agents.length),
     child: child.value || unknownSession.value,
     tab: tab.value,
+    historyState:
+      viewingId.value &&
+      !viewingDraft.value &&
+      (!promptedSessions.value.has(viewingId.value) ||
+        (knownSession.value?.message_count ?? 0) > 0)
+        ? conversation.value?.sessionId === viewingId.value
+          ? conversation.value.window.value.openState
+          : 'cold'
+        : undefined,
   }),
 )
 const crumbs = computed(() =>

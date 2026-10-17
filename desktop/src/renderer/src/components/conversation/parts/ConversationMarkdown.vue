@@ -323,6 +323,15 @@ const segments = computed(() => splitMarkdownFences(props.text))
   border-radius: var(--radius-row);
 }
 
+.ds-md :deep(img[role='button']) {
+  cursor: zoom-in;
+}
+
+.ds-md :deep(img[role='button']:focus-visible) {
+  outline: 2px solid rgb(var(--accent));
+  outline-offset: var(--space-1);
+}
+
 .ds-md :deep(input[type='checkbox']) {
   margin: 0 var(--space-2) 0 0;
   accent-color: rgb(var(--label-secondary));

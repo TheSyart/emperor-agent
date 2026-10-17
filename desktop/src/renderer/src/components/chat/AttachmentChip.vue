@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import type { AttachmentRef } from '../../types'
 import { attachmentRawUrl } from '../../api/attachments'
 import { attachmentIcon } from '../../icons'
+import ImagePreview from '../ui/ImagePreview.vue'
 
 const props = defineProps<{ data: AttachmentRef; removable?: boolean }>()
 const emit = defineEmits<{ (e: 'remove'): void }>()
@@ -10,7 +11,6 @@ const emit = defineEmits<{ (e: 'remove'): void }>()
 const isImage = computed(() => props.data.kind === 'image')
 const thumbFailed = ref(false)
 const previewOpen = ref(false)
-const closeButton = ref<HTMLButtonElement | null>(null)
 const previewUrl = computed(() =>
   isImage.value && !thumbFailed.value ? attachmentRawUrl(props.data.id) : null,
 )
@@ -28,25 +28,7 @@ function formatBytes(n: number): string {
 function openPreview() {
   if (!previewUrl.value) return
   previewOpen.value = true
-  void nextTick(() => closeButton.value?.focus())
 }
-
-function closePreview() {
-  previewOpen.value = false
-}
-
-function onPreviewKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Escape') return
-  event.preventDefault()
-  closePreview()
-}
-
-watch(previewOpen, (open) => {
-  if (open) window.addEventListener('keydown', onPreviewKeydown)
-  else window.removeEventListener('keydown', onPreviewKeydown)
-})
-
-onBeforeUnmount(() => window.removeEventListener('keydown', onPreviewKeydown))
 </script>
 
 <template>
@@ -89,31 +71,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onPreviewKeydown))
     </button>
   </div>
 
-  <Teleport to="body">
-    <div
-      v-if="previewOpen && previewUrl"
-      class="attachment-preview-modal"
-      role="dialog"
-      aria-modal="true"
-      :aria-label="`图片预览：${data.name}`"
-      @click.self="closePreview"
-    >
-      <div class="attachment-preview-stage">
-        <button
-          ref="closeButton"
-          type="button"
-          class="attachment-preview-close"
-          aria-label="关闭图片预览"
-          @click="closePreview"
-        >
-          ×
-        </button>
-        <img :src="previewUrl" :alt="data.name" />
-        <div class="attachment-preview-caption">
-          <strong>{{ data.name }}</strong>
-          <span>{{ data.mime }} · {{ formatBytes(data.size) }}</span>
-        </div>
-      </div>
-    </div>
-  </Teleport>
+  <ImagePreview
+    v-if="previewOpen && previewUrl"
+    :src="previewUrl"
+    :name="data.name"
+    :caption="`${data.mime} · ${formatBytes(data.size)}`"
+    @close="previewOpen = false"
+  />
 </template>

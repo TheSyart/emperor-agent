@@ -5,6 +5,7 @@
 import { agentTitle } from '@emperor/core/runtime-contract'
 import type { SessionLineage } from '@emperor/core/runtime-contract'
 import type { ComposerPhase } from '../../conversation/composerPhase'
+import type { WindowOpenState } from '../../conversation/sessionWindow'
 import type { SessionInfo } from '../../types'
 
 export interface HeaderCrumb {
@@ -31,8 +32,15 @@ export function conversationPhase(input: {
   child: boolean
   tab: 'chat' | 'trajectory'
   externalActivity?: boolean
+  /** Initial history state for a persisted session, absent for new drafts. */
+  historyState?: WindowOpenState
 }): ConversationPhase {
-  if (input.child || input.tab !== 'chat' || input.externalActivity)
+  if (
+    input.child ||
+    input.tab !== 'chat' ||
+    input.externalActivity ||
+    (input.historyState !== undefined && input.historyState !== 'open')
+  )
     return 'active'
   return input.composer === 'active' ? 'active' : 'hero'
 }

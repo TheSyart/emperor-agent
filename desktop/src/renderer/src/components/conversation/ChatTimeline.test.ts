@@ -3,6 +3,8 @@ import { createApp, h, nextTick, ref } from 'vue'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createRouter, createMemoryHistory, type Router } from 'vue-router'
 import { loadKernelLog, LogBuilder } from '../../conversation/testing/fixtures'
+import { ConversationStore } from '../../conversation/store'
+import type { SessionHistoryPage } from '@emperor/core/runtime-contract'
 import ChatTimeline from './ChatTimeline.vue'
 import { buildAgentTree, useAgentTree } from '../sidebar/agentTree'
 import { createFixtureStore, type FixtureStore } from './gallery/fixtureStore'
@@ -27,11 +29,14 @@ let container: HTMLDivElement | null = null
 let app: ReturnType<typeof createApp> | null = null
 let fixture: FixtureStore | null = null
 let router: Router
+let delayedStore: ConversationStore | null = null
 
 afterEach(() => {
   app?.unmount()
   container?.remove()
   fixture?.dispose()
+  delayedStore?.dispose()
+  delayedStore = null
   container = null
   app = null
   fixture = null
@@ -54,11 +59,12 @@ function mount(
   sessionId: string,
   sessions: Parameters<typeof createFixtureStore>[0],
   events: Record<string, (value: string) => void> = {},
+  customStore?: ConversationStore,
 ): HTMLDivElement {
   fixture = createFixtureStore(sessions, { scheduler: immediate })
   container = document.createElement('div')
   document.body.append(container)
-  const store = fixture.store
+  const store = customStore ?? fixture.store
   app = createApp({
     render: () =>
       h(ChatTimeline, {
@@ -90,6 +96,42 @@ function mount(
 }
 
 describe('ChatTimeline over the recorded kernel log', () => {
+  it.each(['resolve', 'reject'] as const)(
+    'shows an initial loading transition until delayed history %ss',
+    async (outcome) => {
+      let resolve!: (page: SessionHistoryPage) => void
+      let reject!: (error: Error) => void
+      delayedStore = new ConversationStore({
+        api: {
+          history: () =>
+            new Promise<SessionHistoryPage>((yes, no) => {
+              resolve = yes
+              reject = no
+            }),
+        },
+        watch: async () => undefined,
+        subscribe: () => () => {},
+        scheduler: immediate,
+      })
+      const root = mount('delayed', [], {}, delayedStore)
+      await settle()
+      expect(root.querySelector('[aria-busy="true"]')).not.toBeNull()
+      if (outcome === 'resolve')
+        resolve({
+          header: { version: 0, id: 'delayed', createdAt: 0 },
+          events: [],
+          hasMore: false,
+          lastSeq: -1,
+        } as SessionHistoryPage)
+      else reject(new Error('history offline'))
+      await settle()
+      expect(root.querySelector('[aria-busy="true"]')).toBeNull()
+      expect(
+        root.querySelector('[role="alert"]')?.textContent?.trim() ?? '',
+      ).toBe(outcome === 'reject' ? '会话记录读取失败：history offline' : '')
+    },
+  )
+
   it('shows an external agents partial output and tools before native completion', async () => {
     const log = new LogBuilder()
     log.add('turn/start', { turn: 1 })

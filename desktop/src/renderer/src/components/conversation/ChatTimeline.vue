@@ -39,6 +39,7 @@ import { DsChevronDown, DsLoading } from '../icons/ds'
 import ChatNodeSeat from './ChatNodeSeat.vue'
 import { createExpansionStore, provideChatContext } from './chatContext'
 import TurnStatus from './TurnStatus.vue'
+import ConversationLoading from './ConversationLoading.vue'
 import {
   closingAssistantKeys,
   isAtBottom,
@@ -338,13 +339,12 @@ defineExpose({ scrollToBottom, scrollToKey })
             加载更早的消息
           </button>
         </div>
-        <div
-          v-if="openState === 'opening' && order.length === 0"
-          class="hint"
-          role="status"
-        >
-          正在读取会话记录…
-        </div>
+        <ConversationLoading
+          v-if="
+            (openState === 'cold' || openState === 'opening') &&
+            order.length === 0
+          "
+        />
         <div v-if="openError" class="open-error" role="alert">
           会话记录读取失败：{{ openError }}
         </div>
@@ -457,12 +457,6 @@ defineExpose({ scrollToBottom, scrollToKey })
   to {
     transform: rotate(360deg);
   }
-}
-
-.hint {
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
 }
 
 .open-error {
