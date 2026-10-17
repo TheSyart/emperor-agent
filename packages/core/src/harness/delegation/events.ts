@@ -10,6 +10,9 @@ export interface DelegationProjection {
   delegation_id: string
   run_id?: string
   journal_seq: number
+  parent_call_id?: string
+  current_run_id?: string
+  backend?: 'claude-code' | 'codex'
   task?: Record<string, unknown>
   output?: { role: string; content: string }[]
 }

@@ -15,10 +15,11 @@ import type { ToolChatData } from '../../../conversation/types'
 import { DsInspect } from '../../icons/ds'
 import DisclosureRow from '../../ui/DisclosureRow.vue'
 import StateDot from '../../ui/StateDot.vue'
+import ProviderLogo from '../../ui/ProviderLogo.vue'
 import { useChatContext, useExpansion } from '../chatContext'
 import { TOOL_BODIES } from '../tools/bodies'
 import { toolView } from '../tools/registry'
-import { errorSummary, toolRowState } from '../tools/toolModel'
+import { argsOf, errorSummary, toolRowState } from '../tools/toolModel'
 
 const props = defineProps<{ data: ToolChatData }>()
 const { actions } = useChatContext()
@@ -28,6 +29,9 @@ const RESULT_ONLY = new Set(['read', 'glob', 'grep', 'web', 'job', 'skill'])
 
 const view = computed(() => toolView(props.data.name))
 const state = computed(() => toolRowState(props.data))
+const backend = computed(
+  () => props.data.externalAgent?.backend ?? argsOf(props.data).backend,
+)
 const title = computed(() => view.value.title(props.data))
 const failure = computed(() => errorSummary(props.data))
 const summary = computed(() => failure.value ?? view.value.summary(props.data))
@@ -77,6 +81,16 @@ const stateLabel = computed(() => {
       <template #icon>
         <StateDot v-if="state === 'error'" state="error" />
         <StateDot v-else-if="state === 'stopped'" state="warn" />
+        <ProviderLogo
+          v-else-if="
+            (data.name === 'subagent' || data.name === 'subagent_fork') &&
+            (backend === 'codex' || backend === 'claude-code')
+          "
+          :icon-id="backend"
+          :label="backend"
+          size="xs"
+          :data-agent-logo="backend"
+        />
         <component :is="view.icon" v-else :size="14" />
       </template>
       <template v-if="summary" #summary>

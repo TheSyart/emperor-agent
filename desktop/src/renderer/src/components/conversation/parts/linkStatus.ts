@@ -16,10 +16,12 @@ export interface LinkStatus {
 
 /** The parts of a Core reference descriptor a status is made from. */
 export interface ResolvedLink {
+  id?: string
   kind: 'project_file' | 'external_file' | 'web'
   available: boolean
   directory?: boolean
   tooltip: string
+  relativePath?: string
 }
 
 export interface LinkStatusSource {
@@ -27,6 +29,7 @@ export interface LinkStatusSource {
   readonly version: Readonly<Ref<number>>
   /** The status of a file link; null when Core cannot tell. */
   status(href: string): Promise<LinkStatus | null>
+  image?(href: string): Promise<string | null>
 }
 
 export const LINK_STATUS_KEY: InjectionKey<LinkStatusSource> =
@@ -46,12 +49,15 @@ export function linkStatusOf(reference: ResolvedLink): LinkStatus | null {
 
 export function createLinkStatusSource(
   resolve: (href: string) => Promise<ResolvedLink>,
+  readImage?: (reference: ResolvedLink) => Promise<string | null>,
 ): LinkStatusSource & {
+  image(href: string): Promise<string | null>
   refresh(): void
   record(href: string, reference: ResolvedLink): void
 } {
   const version = ref(0)
-  let known = new Map<string, Promise<LinkStatus | null>>()
+  let known = new Map<string, Promise<ResolvedLink>>()
+  let images = new Map<string, Promise<string | null>>()
   let inFlight = 0
   const waiting: Array<() => void> = []
 
@@ -67,22 +73,50 @@ export function createLinkStatusSource(
     }
   }
 
+  function reference(href: string) {
+    let pending = known.get(href)
+    if (!pending) {
+      pending = limited(() => resolve(href))
+      known.set(href, pending)
+    }
+    return pending
+  }
   return {
     version,
     status(href) {
-      let status = known.get(href)
-      if (!status) {
-        status = limited(() => resolve(href)).then(linkStatusOf, () => null)
-        known.set(href, status)
+      return reference(href).then(linkStatusOf, () => null)
+    },
+    image(href) {
+      let pending = images.get(href)
+      if (!pending) {
+        const generation = version.value
+        pending = reference(href)
+          .then(async (value) => {
+            if (
+              generation !== version.value ||
+              !readImage ||
+              !value.available ||
+              value.directory ||
+              value.kind === 'web'
+            )
+              return null
+            const src = await limited(() => readImage(value))
+            return generation === version.value ? src : null
+          })
+          .catch(() => null)
+        images.set(href, pending)
+        while (images.size > 24) images.delete(images.keys().next().value!)
       }
-      return status
+      return pending
     },
     refresh() {
       known = new Map()
+      images = new Map()
       version.value += 1
     },
     record(href, reference) {
-      known.set(href, Promise.resolve(linkStatusOf(reference)))
+      known.set(href, Promise.resolve(reference))
+      images = new Map()
       version.value += 1
     },
   }

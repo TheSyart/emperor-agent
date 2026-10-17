@@ -5,7 +5,7 @@
  * (linkStatus): a missing file is marked, a directory gets the folder icon,
  * and the hover title shows the full path.
  */
-import { inject, onMounted, ref, toRef, watch } from 'vue'
+import { inject, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import { useMarkdown } from '../../../composables/useMarkdown'
 import { handleMarkdownChipClick } from '../../../composables/useMarkdownLinks'
 import { LINK_STATUS_KEY, type LinkStatus } from './linkStatus'
@@ -17,6 +17,10 @@ const props = withDefaults(
 const { rendered } = useMarkdown(toRef(() => props.text))
 const root = ref<HTMLElement | null>(null)
 const links = inject(LINK_STATUS_KEY, null)
+let generation = 0
+onBeforeUnmount(() => {
+  generation++
+})
 
 function onClick(event: MouseEvent): void {
   handleMarkdownChipClick(event, 'conversation')
@@ -32,15 +36,58 @@ onMounted(() => {
 })
 
 async function markLinks(): Promise<void> {
+  const current = ++generation
   const element = root.value
   if (!links || props.streaming || !element) return
+  element.querySelectorAll('[data-md-preview]').forEach((node) => node.remove())
   const anchors = element.querySelectorAll<HTMLAnchorElement>(
     'a.md-link-chip[data-md-link="file"]',
   )
   await Promise.all(
     [...anchors].map(async (anchor) => {
       const status = await links.status(anchor.getAttribute('href') ?? '')
-      if (status && anchor.isConnected) mark(anchor, status)
+      if (status && current === generation && anchor.isConnected)
+        mark(anchor, status)
+    }),
+  )
+  if (current !== generation || !links.image) return
+  const explicit = [
+    ...element.querySelectorAll<HTMLImageElement>('img[data-md-image]'),
+  ]
+  const files = [...anchors].filter((anchor) =>
+    /\.(png|jpe?g|gif|webp|svg)(?:[?#].*)?$/i.test(
+      anchor.getAttribute('href') ?? '',
+    ),
+  )
+  await Promise.all(
+    [...explicit, ...files].map(async (node) => {
+      const href =
+        node.getAttribute(
+          node instanceof HTMLImageElement ? 'data-md-image' : 'href',
+        ) ?? ''
+      if (node instanceof HTMLImageElement) node.removeAttribute('src')
+      const src = await links.image!(href)
+      if (current !== generation || !node.isConnected) return
+      if (!src) {
+        if (node instanceof HTMLImageElement) {
+          const fallback = document.createElement('a')
+          fallback.className = 'md-link-chip'
+          fallback.dataset.mdLink = 'file'
+          fallback.href = href
+          fallback.textContent = `${node.alt || '图片'}（无法预览，打开文件）`
+          node.replaceWith(fallback)
+        }
+        return
+      }
+      const image =
+        node instanceof HTMLImageElement ? node : document.createElement('img')
+      image.classList.add('md-image-preview')
+      image.alt ||= node.textContent || '图片'
+      image.src = src
+      if (!(node instanceof HTMLImageElement)) {
+        image.dataset.mdPreview = 'true'
+        node.after(image)
+      }
     }),
   )
 }

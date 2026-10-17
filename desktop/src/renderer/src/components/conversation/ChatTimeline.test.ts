@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createApp, h, nextTick, ref } from 'vue'
 import { afterEach, describe, expect, it } from 'vitest'
-import { loadKernelLog } from '../../conversation/testing/fixtures'
+import { loadKernelLog, LogBuilder } from '../../conversation/testing/fixtures'
 import ChatTimeline from './ChatTimeline.vue'
 import { createFixtureStore, type FixtureStore } from './gallery/fixtureStore'
 import { showcaseScenario, streamingScenario } from './gallery/scenarios'
@@ -69,6 +69,47 @@ function mount(
 }
 
 describe('ChatTimeline over the recorded kernel log', () => {
+  it('shows an external agents partial output and tools before native completion', async () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.call(1, 1, 'external-call', 'subagent', {
+      backend: 'codex',
+      description: 'live work',
+    })
+    const root = mount('live-external', [
+      { id: 'live-external', events: [...log.events] },
+    ])
+    await settle()
+    fixture!.emit('live-external', [
+      log.add('delegation/projection', {
+        event: 'delegation_output',
+        delegation_id: 'dlg-one',
+        run_id: 'dgr-one',
+        current_run_id: 'dgr-one',
+        parent_call_id: 'external-call',
+        backend: 'codex',
+        journal_seq: 1,
+        output: [
+          { role: 'assistant', content: '正在读取项目' },
+          {
+            role: 'tool',
+            content: JSON.stringify({
+              name: 'shell',
+              type: 'tool_started',
+              detail: 'read README',
+            }),
+          },
+        ],
+      }),
+    ])
+    await settle()
+    const live = root.querySelector('[data-external-agent-stream]')
+    expect(live?.textContent).toContain('Codex')
+    expect(live?.querySelector('[data-agent-logo="codex"]')).not.toBeNull()
+    expect(live?.textContent).toContain('正在读取项目')
+    expect(live?.textContent).toContain('shell')
+  })
   it('renders every chat row kind of the fixture', async () => {
     const log = loadKernelLog()
     const root = mount('kernel', [

@@ -5,8 +5,14 @@
  * scheduler, plugins, environment, diagnostics) on top of it.
  */
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { mergeExternalTranscript } from '../runtime/external-transcript'
 import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
 import type { MessageReference } from '../harness/host/message-references'
@@ -659,6 +665,7 @@ export class CoreApi {
               ? event.text
               : JSON.stringify({
                   type: event.type,
+                  id: event.id,
                   ...('name' in event ? { name: event.name } : {}),
                   ...('status' in event ? { status: event.status } : {}),
                   ...('detail' in event ? { detail: event.detail } : {}),
@@ -1136,13 +1143,27 @@ export class CoreApi {
       !this.host.kept.sessionStore.get(state.record.owner.rootSessionId)
     )
       return
-    this.host
-      .agentFor(state.record.owner.rootSessionId)
-      .session.append(
-        'delegation/projection',
-        JSON.parse(JSON.stringify(projection)) as DelegationProjection,
-      )
-    this.host.sessions.flush(state.record.owner.rootSessionId)
+    const owner = state.record.owner
+    const payload = JSON.parse(
+      JSON.stringify({
+        ...projection,
+        parent_call_id: owner.parentCallId,
+        current_run_id: state.record.currentRunId,
+        backend: state.record.backend,
+      }),
+    ) as DelegationProjection
+    const parent =
+      owner.parentAgentId === owner.rootSessionId
+        ? this.host.agentFor(owner.rootSessionId).session
+        : this.host.sessionLog(owner.parentAgentId)
+    if (parent) {
+      parent.append('delegation/projection', payload)
+      this.host.sessions.flush(parent.id)
+    }
+    // Child log projection streams raw events to its own timeline. Its
+    // legacy projector does not forward delegation events to the root UI.
+    if (owner.parentAgentId !== owner.rootSessionId)
+      this.host.emitHost({ ...payload, session_id: owner.rootSessionId })
   }
   private projectDelegation(
     state: DelegationState,
@@ -1759,6 +1780,69 @@ export class CoreApi {
   }
 
   readonly references = {
+    image: async (input: { sessionId: string; referenceId: string }) => {
+      this.requireReadableSession(input.sessionId, 'references.image')
+      const descriptor = this.workspaceReferenceService.authorize(
+        input.referenceId,
+        input.sessionId,
+      )
+      const target = this.workspaceReferenceService.previewPath(
+        input.referenceId,
+        input.sessionId,
+      )
+      if (!/\.(png|jpe?g|gif|webp)$/i.test(target))
+        throw new WorkspaceOperationError(
+          'reference_image_unsupported',
+          '该文件不支持图片预览。',
+        )
+      if (descriptor.kind === 'project_file' && descriptor.relativePath) {
+        const image = await this.workspaceFilesService.read({
+          sessionId: input.sessionId,
+          relativePath: descriptor.relativePath,
+        })
+        if (
+          realpathSync(resolve(image.projectRoot, image.relativePath)) !==
+          target
+        )
+          throw new WorkspaceOperationError(
+            'reference_image_stale',
+            '图片工作区已改变，请刷新。',
+          )
+        return image
+      }
+      for (const state of this.delegationRuntime.list()) {
+        if (
+          !state.record ||
+          state.record.owner.rootSessionId !== input.sessionId
+        )
+          continue
+        let cwd: string
+        try {
+          cwd = realpathSync(state.record.cwd)
+        } catch {
+          continue
+        }
+        const path = relative(cwd, target)
+        if (
+          !path ||
+          isAbsolute(path) ||
+          path === '..' ||
+          path.startsWith('..' + sep)
+        )
+          continue
+        const files = new WorkspaceFilesService({
+          resolveProject: () => ({
+            sessionId: input.sessionId,
+            projectRoot: cwd,
+          }),
+        })
+        return files.read({ sessionId: input.sessionId, relativePath: path })
+      }
+      throw new WorkspaceOperationError(
+        'reference_image_outside_workspace',
+        '图片不属于当前会话工作区。',
+      )
+    },
     resolve: (input: Parameters<WorkspaceReferenceService['resolve']>[0]) =>
       this.workspaceReferenceService.resolve(input),
     /** Electron main-only capability; returns a path only after reference ownership checks. */

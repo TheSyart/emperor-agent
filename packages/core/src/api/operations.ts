@@ -1708,6 +1708,14 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([referenceResolveSchema]),
     (api, [input]) => api.references.resolve(input),
   ),
+  'references.image': operation(
+    z.tuple([
+      z
+        .object({ sessionId: sessionLogIdSchema, referenceId: idSchema })
+        .strict(),
+    ]),
+    (api, [input]) => api.references.image(input),
+  ),
   'terminals.close': operation(
     z.tuple([terminalIdentitySchema]),
     (api, [input]) => api.terminals.close(input),

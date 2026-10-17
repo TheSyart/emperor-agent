@@ -15,6 +15,20 @@ function render(source: string): string {
 // （原样转义/拒绝成链/困在引号属性里），改造前即安全；DOMPurify 是防御纵深，
 // 防的是未来配置漂移（如误开 html:true）而不是现存漏洞。
 describe('useMarkdown rendering safety (Wave1.4)', () => {
+  it('routes local markdown images through owned previews instead of loading filesystem or bundle paths', () => {
+    for (const path of [
+      '/Users/me/sun.png',
+      'images/sun.png',
+      'file:///Users/me/sun.png',
+    ]) {
+      const html = render(`![太阳](${path})`)
+      expect(html).toContain('data-md-image=')
+      expect(html).not.toMatch(/\ssrc=/)
+    }
+    expect(render('![web](https://example.com/sun.png)')).toContain(
+      'src="https://example.com/sun.png"',
+    )
+  })
   it('renders raw HTML injection attempts as escaped text, not tags', () => {
     const html = render('<img src=x onerror=alert(1)>')
     expect(html).not.toMatch(/<img[^>]*onerror/i)

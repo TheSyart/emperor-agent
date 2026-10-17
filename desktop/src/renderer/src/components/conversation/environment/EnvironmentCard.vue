@@ -89,6 +89,7 @@ import type { RuntimeTaskRecord } from '../../../types'
 import { DsSkill } from '../../icons/ds'
 import DocumentIcon from '../../ui/DocumentIcon.vue'
 import IconButton from '../../ui/IconButton.vue'
+import ProviderLogo from '../../ui/ProviderLogo.vue'
 import Menu from '../../ui/Menu.vue'
 import MenuItem from '../../ui/MenuItem.vue'
 import { modalLayerCount } from '../../ui/modalStack'
@@ -930,6 +931,12 @@ function openLauncher(): void {
           open
         >
           <summary>
+            <ProviderLogo
+              :icon-id="group[0]!.backend"
+              :label="group[0]!.backend ?? 'Agent'"
+              size="xs"
+              :data-agent-logo="group[0]!.backend"
+            />
             {{ group[0]!.backend === 'codex' ? 'Codex' : 'Claude Code' }} ·
             {{ group.length }} 轮
           </summary>

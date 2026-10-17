@@ -296,6 +296,21 @@ const SUBAGENT_STOP_LABEL: Record<string, string> = {
 }
 
 export function subagentStatusLabel(data: ToolChatData): string {
+  if (data.externalAgent) {
+    const labels: Record<string, string> = {
+      queued: '等待调度',
+      preparing: '正在准备',
+      running: '运行中',
+      waiting_input: '等待回答',
+      cancelling: '正在停止',
+      completed: '已完成',
+      failed: '失败',
+      cancelled: '已取消',
+      interrupted: '已中断',
+      outcome_unknown: '结果待确认',
+    }
+    return labels[data.externalAgent.phase] ?? data.externalAgent.phase
+  }
   const sub = data.subagent
   if (sub === undefined)
     return data.status === 'running'
@@ -311,7 +326,17 @@ function subagentSpec(fork: boolean): ToolViewSpec {
   return {
     icon: DsSubagent,
     body: 'subagent',
-    title: () => (fork ? '分叉子代理' : '子代理'),
+    title: (data) => {
+      const backend =
+        data.externalAgent?.backend ?? stringArg(argsOf(data), 'backend')
+      return backend === 'codex'
+        ? 'Codex 子代理'
+        : backend === 'claude-code'
+          ? 'Claude Code 子代理'
+          : fork
+            ? '分叉子代理'
+            : '子代理'
+    },
     summary: (data) =>
       join(
         data.subagent?.description ?? stringArg(argsOf(data), 'description'),

@@ -181,6 +181,20 @@ export interface WorkflowRunView {
 }
 
 /** `tool`: one tool call and everything attached to it. */
+export interface ToolExternalAgentView {
+  readonly delegationId: string
+  readonly runId: string
+  readonly backend: 'claude-code' | 'codex'
+  readonly phase: string
+  readonly text: string
+  readonly activity: readonly {
+    id?: string
+    name: string
+    status: string
+    detail?: string
+  }[]
+  readonly truncated?: boolean
+}
 export interface ToolChatData {
   readonly callId: string
   readonly name: string
@@ -199,6 +213,7 @@ export interface ToolChatData {
   readonly result?: ToolResultView
   readonly job?: ToolJobView
   readonly subagent?: ToolSubagentView
+  readonly externalAgent?: ToolExternalAgentView
   readonly workflow?: WorkflowRunView
   readonly approvals: readonly ToolApprovalView[]
   /** Computer Use grant cards raised by this call. */

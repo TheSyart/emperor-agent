@@ -19,6 +19,7 @@ import type {
   ToolQuestionView,
   ToolResultView,
   ToolSubagentView,
+  ToolExternalAgentView,
 } from '../types'
 import {
   chatNode,
@@ -45,6 +46,7 @@ interface ToolState {
   readonly result: ToolResultView | undefined
   readonly job: ToolJobView | undefined
   readonly subagent: ToolSubagentView | undefined
+  readonly externalAgent?: ToolExternalAgentView
   readonly workflow: ReturnType<typeof foldWorkflow>
   readonly approvals: readonly ToolApprovalView[]
   readonly grants: readonly ToolGrantView[]
@@ -79,6 +81,71 @@ function backgroundJobId(event: WireSessionEvent): string | undefined {
 
 function applyMatch(state: ToolState, match: ConversationMatch): ToolState {
   const event = match.event
+  if (isEvent(event, 'delegation/projection')) {
+    const p = event.data
+    if (!p.run_id || (p.current_run_id && p.current_run_id !== p.run_id))
+      return state
+    let backend = p.backend ?? (p.task?.backend as string | undefined)
+    if (!backend && state.call) {
+      try {
+        backend = JSON.parse(state.call.argsRaw).backend
+      } catch {
+        /* incomplete arguments */
+      }
+    }
+    if (backend !== 'codex' && backend !== 'claude-code') return state
+    const previous =
+      state.externalAgent?.runId === p.run_id ? state.externalAgent : undefined
+    let text = previous?.text ?? ''
+    const activity = [...(previous?.activity ?? [])]
+    for (const entry of p.output ?? []) {
+      if (entry.role === 'assistant') text += entry.content
+      if (entry.role === 'tool') {
+        try {
+          const tool = JSON.parse(entry.content) as {
+            id?: string
+            name?: string
+            type?: string
+            status?: string
+            detail?: string
+          }
+          const index = tool.id
+            ? activity.findIndex((item) => item.id === tool.id)
+            : -1
+          const update = {
+            ...(tool.id ? { id: tool.id } : {}),
+            name: tool.name ?? (index >= 0 ? activity[index]!.name : 'tool'),
+            status:
+              tool.status ??
+              (tool.type === 'tool_started' ? 'running' : 'completed'),
+            ...(tool.detail ? { detail: tool.detail.slice(0, 500) } : {}),
+          }
+          if (index >= 0) activity[index] = { ...activity[index]!, ...update }
+          else activity.push(update)
+        } catch {
+          activity.push({
+            name: 'tool',
+            status: 'completed',
+            detail: entry.content.slice(0, 500),
+          })
+        }
+      }
+    }
+    return {
+      ...state,
+      externalAgent: {
+        delegationId: p.delegation_id,
+        runId: p.run_id,
+        backend,
+        phase: String(p.task?.status ?? previous?.phase ?? 'running'),
+        text: text.slice(-16000),
+        activity: activity.slice(-12),
+        ...(previous?.truncated || text.length > 16000 || activity.length > 12
+          ? { truncated: true }
+          : {}),
+      },
+    }
+  }
   if (isEvent(event, 'tool/call')) {
     return {
       ...state,
@@ -258,6 +325,34 @@ export const toolDefinition: ConversationDefinition<ToolState> = {
     const links: ConversationLink[] = []
     const callId = resultCallId(event)
     const jobId = backgroundJobId(event)
+    if (
+      isEvent(event, 'delegation/projection') &&
+      event.data.parent_call_id &&
+      event.data.run_id
+    )
+      links.push({
+        ns: 'external-run',
+        key: event.data.run_id,
+        id: event.data.parent_call_id,
+      })
+    if (isEvent(event, 'tool/result')) {
+      const meta = event.data.meta as
+        | {
+            kind?: string
+            backend?: string
+            subagentId?: string
+            runId?: string
+          }
+        | undefined
+      if (
+        meta &&
+        ['foreground', 'continuable'].includes(meta.kind ?? '') &&
+        ['codex', 'claude-code'].includes(meta.backend ?? '') &&
+        meta.runId &&
+        callId
+      )
+        links.push({ ns: 'external-run', key: meta.runId, id: callId })
+    }
     if (callId !== undefined && jobId !== undefined)
       links.push({ ns: 'job', key: jobId, id: callId })
     if (isEvent(event, 'subagent/started') && event.data.callId !== undefined)
@@ -288,6 +383,13 @@ export const toolDefinition: ConversationDefinition<ToolState> = {
     return links
   },
   match: (event) => {
+    if (isEvent(event, 'delegation/projection') && event.data.run_id)
+      return event.data.parent_call_id
+        ? { id: event.data.parent_call_id, role: 'update' }
+        : {
+            via: { ns: 'external-run', key: event.data.run_id },
+            role: 'update',
+          }
     if (isEvent(event, 'tool/call'))
       return { id: String(event.data.callId), role: 'start' }
     const callId = resultCallId(event)
@@ -361,6 +463,9 @@ export const toolDefinition: ConversationDefinition<ToolState> = {
       ...(result === undefined ? {} : { result }),
       ...(state.job === undefined ? {} : { job: state.job }),
       ...(state.subagent === undefined ? {} : { subagent: state.subagent }),
+      ...(state.externalAgent === undefined
+        ? {}
+        : { externalAgent: state.externalAgent }),
       ...(state.workflow === undefined
         ? {}
         : { workflow: state.workflow.view }),

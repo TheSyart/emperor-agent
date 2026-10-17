@@ -15,6 +15,135 @@ function expectConverges(log: LogBuilder): void {
   const streamed = stream(log.events).snapshot
   expect(deepEqual(structural(streamed), structural(replayed))).toBe(true)
 }
+describe('external agent streaming', () => {
+  it('attaches partial text and tool activity before the parent tool returns, then retains terminal state', () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.call(1, 1, 'external-call', 'subagent', {
+      backend: 'codex',
+      description: 'work',
+    })
+    const projection = (extra: Record<string, unknown>) =>
+      log.add('delegation/projection', {
+        delegation_id: 'dlg-one',
+        run_id: 'dgr-one',
+        current_run_id: 'dgr-one',
+        parent_call_id: 'external-call',
+        backend: 'codex',
+        journal_seq: 1,
+        ...extra,
+      })
+    projection({ event: 'delegation_run_changed', task: { status: 'running' } })
+    projection({
+      event: 'delegation_output',
+      output: [
+        { role: 'assistant', content: 'Hello ' },
+        {
+          role: 'tool',
+          content: JSON.stringify({
+            type: 'tool_started',
+            name: 'shell',
+            detail: 'read README.md',
+          }),
+        },
+        { role: 'assistant', content: 'world' },
+      ],
+    })
+    expect(
+      nodeOf(replay(log.events).snapshot, 'tool').data.externalAgent,
+    ).toMatchObject({
+      backend: 'codex',
+      phase: 'running',
+      text: 'Hello world',
+      activity: [expect.objectContaining({ name: 'shell', status: 'running' })],
+    })
+    projection({
+      event: 'delegation_run_changed',
+      task: { status: 'completed' },
+    })
+    expect(
+      nodeOf(replay(log.events).snapshot, 'tool').data.externalAgent?.phase,
+    ).toBe('completed')
+    expectConverges(log)
+  })
+  it('updates the named tool by native identity when parallel tools finish', () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.call(1, 1, 'external-call', 'subagent', { backend: 'codex' })
+    for (const tool of [
+      { type: 'tool_started', id: 'read', name: 'Read' },
+      { type: 'tool_started', id: 'shell', name: 'shell' },
+      { type: 'tool_finished', id: 'read', status: 'completed' },
+      { type: 'tool_finished', id: 'shell', status: 'failed' },
+    ])
+      log.add('delegation/projection', {
+        event: 'delegation_output',
+        delegation_id: 'dlg-tools',
+        run_id: 'dgr-tools',
+        parent_call_id: 'external-call',
+        backend: 'codex',
+        journal_seq: 1,
+        output: [{ role: 'tool', content: JSON.stringify(tool) }],
+      })
+    expect(
+      nodeOf(replay(log.events).snapshot, 'tool').data.externalAgent?.activity,
+    ).toEqual([
+      { id: 'read', name: 'Read', status: 'completed' },
+      { id: 'shell', name: 'shell', status: 'failed' },
+    ])
+    expectConverges(log)
+  })
+  it('reconstructs older runs from result metadata and ignores an old run after a followup starts', () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.call(1, 1, 'legacy-call', 'subagent', { backend: 'claude-code' })
+    log.add('delegation/projection', {
+      event: 'delegation_output',
+      delegation_id: 'dlg-old',
+      run_id: 'dgr-old',
+      journal_seq: 1,
+      output: [{ role: 'assistant', content: 'old output' }],
+    })
+    log.result(1, 1, 'legacy-call', 'finished', {
+      meta: {
+        kind: 'foreground',
+        backend: 'claude-code',
+        subagentId: 'dlg-old',
+        runId: 'dgr-old',
+      },
+    })
+    expect(
+      nodeOf(replay(log.events).snapshot, 'tool').data.externalAgent?.text,
+    ).toBe('old output')
+    log.add('delegation/projection', {
+      event: 'delegation_run_changed',
+      delegation_id: 'dlg-old',
+      run_id: 'dgr-new',
+      current_run_id: 'dgr-new',
+      parent_call_id: 'legacy-call',
+      backend: 'claude-code',
+      journal_seq: 2,
+      task: { status: 'running' },
+    })
+    log.add('delegation/projection', {
+      event: 'delegation_run_changed',
+      delegation_id: 'dlg-old',
+      run_id: 'dgr-old',
+      current_run_id: 'dgr-new',
+      parent_call_id: 'legacy-call',
+      backend: 'claude-code',
+      journal_seq: 3,
+      task: { status: 'completed' },
+    })
+    expect(
+      nodeOf(replay(log.events).snapshot, 'tool').data.externalAgent,
+    ).toMatchObject({ runId: 'dgr-new', phase: 'running', text: '' })
+    expectConverges(log)
+  })
+})
 
 describe('assistant streaming', () => {
   it('folds chunks into blocks and publishes deltas per frame', () => {

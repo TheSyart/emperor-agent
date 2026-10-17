@@ -58,6 +58,51 @@ function anchor(root: HTMLElement, href: string) {
 }
 
 describe('MarkdownHtml document links', () => {
+  it('previews both local image syntax and ordinary image links while retaining the file link', async () => {
+    const { links } = source({
+      'sun.png': { state: 'file', path: '/p/sun.png' },
+    })
+    Object.assign(links, { image: async () => 'data:image/png;base64,c3Vu' })
+    const { root } = mount(
+      { text: '![太阳](sun.png)\n\n图片：[sun.png](sun.png)' },
+      links,
+    )
+    await flushPromises()
+    expect(
+      root.querySelectorAll('img[src="data:image/png;base64,c3Vu"]'),
+    ).toHaveLength(2)
+    expect(anchor(root, 'sun.png')).not.toBeNull()
+  })
+  it('does not insert a stale image after the reply changes', async () => {
+    const { links } = source({
+      'sun.png': { state: 'file', path: '/p/sun.png' },
+    })
+    let resolve!: (value: string) => void
+    Object.assign(links, {
+      image: () =>
+        new Promise<string>((r) => {
+          resolve = r
+        }),
+    })
+    const { root, state } = mount({ text: '[sun](sun.png)' }, links)
+    await flushPromises()
+    state.text = 'another reply'
+    await flushPromises()
+    resolve('data:image/png;base64,c3Vu')
+    await flushPromises()
+    expect(root.querySelector('img')).toBeNull()
+    expect(root.textContent?.trim()).toBe('another reply')
+  })
+  it('keeps an unavailable image link usable without a broken local src', async () => {
+    const { links } = source({
+      'sun.png': { state: 'missing', path: '/p/sun.png' },
+    })
+    Object.assign(links, { image: async () => null })
+    const { root } = mount({ text: '[sun](sun.png)' }, links)
+    await flushPromises()
+    expect(root.querySelector('img[src]')).toBeNull()
+    expect(anchor(root, 'sun.png').dataset.mdState).toBe('missing')
+  })
   it('marks missing files and folders once Core says so', async () => {
     const { links, asked } = source({
       'docs/gone.md': { state: 'missing', path: '/p/docs/gone.md' },

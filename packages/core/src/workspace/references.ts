@@ -103,6 +103,17 @@ export class WorkspaceReferenceService {
       )
     return stored.canonicalPath
   }
+  /** Main-only image capability; callers still enforce an owned workspace. */
+  previewPath(referenceId: string, sessionId: string): string {
+    const descriptor = this.authorize(referenceId, sessionId)
+    const stored = this.references.get(referenceId)!
+    if (!descriptor.available || descriptor.directory || !stored.canonicalPath)
+      throw new WorkspaceOperationError(
+        'reference_image_unavailable',
+        '图片文件不可用。',
+      )
+    return stored.canonicalPath
+  }
 
   private resolveWeb(
     input: ResolveReferenceInput,

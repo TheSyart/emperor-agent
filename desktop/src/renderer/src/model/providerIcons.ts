@@ -1,4 +1,7 @@
 const PROVIDER_ICON_ASSETS: Readonly<Record<string, string>> = {
+  codex: new URL('../assets/provider-logos/codex.svg', import.meta.url).href,
+  claude_code: new URL('../assets/provider-logos/claude.svg', import.meta.url)
+    .href,
   openai: new URL('../assets/provider-logos/openai.svg', import.meta.url).href,
   anthropic: new URL('../assets/provider-logos/anthropic.svg', import.meta.url)
     .href,
@@ -70,6 +73,8 @@ const PROVIDER_ICON_GLYPHS: Readonly<Record<string, ProviderIconGlyph>> = {
 }
 
 const MONOCHROME_PROVIDER_ICONS = new Set([
+  'codex',
+  'claude_code',
   'anthropic',
   'groq',
   'lm_studio',

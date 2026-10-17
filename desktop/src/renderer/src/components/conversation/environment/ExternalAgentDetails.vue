@@ -17,6 +17,7 @@ import {
 import { onCoreEvent } from '../../../api/backend'
 import Modal from '../../ui/Modal.vue'
 import Button from '../../ui/Button.vue'
+import ProviderLogo from '../../ui/ProviderLogo.vue'
 import TaskOutputDialog from './TaskOutputDialog.vue'
 const props = defineProps<{
   runId: string
@@ -275,7 +276,13 @@ onBeforeUnmount(() => {
           <strong>{{
             record?.backend === 'codex' ? 'Codex' : 'Claude Code'
           }}</strong
-          ><span v-if="receipt"> · {{ receipt.version }}</span>
+          ><ProviderLogo
+            v-if="record"
+            :icon-id="record.backend"
+            :label="record.backend"
+            size="xs"
+            :data-agent-logo="record.backend"
+          /><span v-if="receipt"> · {{ receipt.version }}</span>
           <p class="external-id">{{ delegationId }} / {{ runId }}</p>
         </div>
         <Button

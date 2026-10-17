@@ -23,6 +23,7 @@ import {
   refreshAction,
 } from './ui'
 import Button from '../ui/Button.vue'
+import ProviderLogo from '../ui/ProviderLogo.vue'
 const config = ref<ExecutorConfig | null>(null),
   probes = ref<Record<string, ExecutorProbe | null>>({}),
   loading = ref(false),
@@ -169,6 +170,16 @@ onBeforeUnmount(() => {
         :key="profile.id"
         :title="`${profile.backend === 'codex' ? 'Codex' : 'Claude Code'} · ${profile.id}`"
       >
+        <template #title
+          ><ProviderLogo
+            :icon-id="profile.backend"
+            :label="profile.backend"
+            size="xs"
+            :data-agent-logo="profile.backend"
+          />
+          {{ profile.backend === 'codex' ? 'Codex' : 'Claude Code' }} ·
+          {{ profile.id }}</template
+        >
         <template #actions
           ><StatusBadge
             :tone="probes[profile.id]?.status === 'available' ? 'ok' : 'warn'"

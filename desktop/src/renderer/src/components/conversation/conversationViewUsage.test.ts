@@ -63,8 +63,10 @@ describe('ConversationView composer seat integration', () => {
     expect(source).toContain('provide(LINK_STATUS_KEY, linkStatus)')
     expect(source).toContain('linkStatus.record(detail.href, reference)')
     expect(source).toContain('directory: reference.relativePath')
-    // Statuses are checked again for a new session and after each turn.
-    expect(source.match(/linkStatus\.refresh\(\)/g)).toHaveLength(2)
+    // Background deliverables also refresh links after delegation changes.
+    expect(source).toContain("event.event === 'delegation_run_changed'")
+    expect(source).toContain("event.event === 'delegation_receipt'")
+    expect(source.match(/linkStatus\.refresh\(\)/g)).toHaveLength(3)
   })
 
   it('sends tool-row Inspect to the trajectory inspector column', () => {

@@ -18,6 +18,7 @@ import { subagentStatusLabel } from '../tools/registry'
 import { lastLine } from '../tools/toolModel'
 import ToolCallRow from './ToolCallRow.vue'
 import WorkflowRunPanel from './WorkflowRunPanel.vue'
+import ExternalAgentStream from '../tools/ExternalAgentStream.vue'
 
 const props = defineProps<{ node: ToolChatNode }>()
 const { actions } = useChatContext()
@@ -70,6 +71,7 @@ const hasChildren = computed(
   () =>
     data.value.workflow !== undefined ||
     data.value.subagent !== undefined ||
+    data.value.externalAgent !== undefined ||
     data.value.approvals.length > 0 ||
     (data.value.grants?.length ?? 0) > 0,
 )
@@ -79,6 +81,11 @@ const hasChildren = computed(
   <div class="tool-call" :data-chat-call-id="data.callId">
     <ToolCallRow :data="data" />
     <div v-if="hasChildren" class="subcalls" data-subcalls>
+      <ExternalAgentStream
+        v-if="data.externalAgent"
+        :run="data.externalAgent"
+        :call-id="data.callId"
+      />
       <div
         v-for="approval in data.approvals"
         :key="approval.id"

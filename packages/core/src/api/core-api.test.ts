@@ -168,6 +168,7 @@ const EXPECTED_OPERATIONS = [
   'pullRequests.list',
   'pullRequests.status',
   'pullRequests.view',
+  'references.image',
   'references.resolve',
   'runtime.replay',
   'scheduler.createJob',

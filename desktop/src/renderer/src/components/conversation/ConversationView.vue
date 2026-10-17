@@ -216,8 +216,14 @@ const unsubscribeExternalActivity = onCoreEvent((input) => {
   if (
     event.session_id === viewingId.value &&
     String(event.event).startsWith('delegation_')
-  )
+  ) {
     externalActivity.value = true
+    if (
+      event.event === 'delegation_run_changed' ||
+      event.event === 'delegation_receipt'
+    )
+      linkStatus.refresh()
+  }
 })
 onBeforeUnmount(() => {
   externalActivityGeneration++
@@ -398,13 +404,27 @@ const projectName = computed(() =>
 
 // ── document links in replies ──────────────────────────────────────────────
 /** What reply file links point at in the active session (MarkdownHtml). */
-const linkStatus = createLinkStatusSource((href) =>
-  core('references.resolve', {
-    sessionId: ctx.sessionId.value,
-    sourceMessageId: 'conversation',
-    href,
-    label: href,
-  }),
+const linkStatus = createLinkStatusSource(
+  (href) =>
+    core('references.resolve', {
+      sessionId: ctx.sessionId.value,
+      sourceMessageId: 'conversation',
+      href,
+      label: href,
+    }),
+  async (reference) => {
+    if (!reference.id) return null
+    const image = await core('references.image', {
+      sessionId: ctx.sessionId.value,
+      referenceId: reference.id,
+    })
+    return image.kind === 'image' &&
+      !image.truncated &&
+      image.dataBase64 &&
+      /^image\/(png|jpeg|gif|webp)$/.test(image.mimeType)
+      ? `data:${image.mimeType};base64,${image.dataBase64}`
+      : null
+  },
 )
 provide(LINK_STATUS_KEY, linkStatus)
 // Files come and go: check again for a new session and after each turn.
