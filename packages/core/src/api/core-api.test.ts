@@ -22,6 +22,7 @@ import {
 } from './test-helpers'
 
 const EXPECTED_OPERATIONS = [
+  'agents.list',
   'attachments.rawPath',
   'attachments.save',
   'bootstrap',

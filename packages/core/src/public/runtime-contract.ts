@@ -98,3 +98,10 @@ export type {
 } from '../workspace/delegation-integration'
 
 export { mergeExternalTranscript } from '../runtime/external-transcript'
+
+export {
+  agentTitle,
+  agentSourceLabel,
+  agentPhaseLabel,
+} from '../runtime/agent-view'
+export type { AgentView, AgentBackend, AgentPhase } from '../runtime/agent-view'

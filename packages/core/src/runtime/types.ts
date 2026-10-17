@@ -108,6 +108,7 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         target_turn_id?: string | null
         content?: string
       }
+    | { event: 'agent_tree_changed'; rootSessionId: string; revision: number }
     | ({ event: 'delegation_created' } & DelegationRuntimeFields)
     | ({ event: 'delegation_run_changed' } & DelegationRuntimeFields)
     | ({ event: 'delegation_output' } & DelegationRuntimeFields)

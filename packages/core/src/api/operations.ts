@@ -1502,6 +1502,12 @@ export const CORE_OPERATION_REGISTRY = {
   'sessions.activate': operation(z.tuple([idSchema]), (api, [id]) =>
     api.sessions.activate(id),
   ),
+  'agents.list': operation(
+    z.tuple([
+      z.object({ rootSessionIds: z.array(idSchema).max(500) }).strict(),
+    ]),
+    (api, [input]) => api.agents.list(input),
+  ),
   'sessions.children': operation(z.tuple([sessionRefSchema]), (api, [input]) =>
     api.sessions.children(input),
   ),

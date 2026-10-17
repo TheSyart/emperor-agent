@@ -63,6 +63,7 @@ import {
   CoreConfigService,
   type UserConfigPayload,
 } from './services/config-service'
+import { CoreAgentService } from './services/agent-service'
 import { CoreDiagnosticsService } from './services/diagnostics-service'
 import { CoreEffectiveConfigService } from './services/effective-config-service'
 import { CoreDesktopPetService } from './services/desktop-pet-service'
@@ -289,6 +290,9 @@ export class CoreApi {
   readonly delegationRuntime: DelegationService
   readonly delegationService: CoreDelegationService
   readonly delegations: CoreDelegationService
+  private readonly agentService: CoreAgentService
+  private readonly agentIndexSubscriptions: Array<() => void> = []
+  private readonly delegationStates = new Map<string, DelegationState>()
   readonly executors: CoreExecutorService
   readonly delegationReceipts: DelegationReceipts
   readonly delegationAcceptance: DelegationAcceptance
@@ -693,6 +697,25 @@ export class CoreApi {
         host.delegationInteractions.ask(question, signal),
     })
     host.delegations = this.delegationRuntime
+    this.agentService = new CoreAgentService({
+      sessions: host.sessions,
+      roots: () =>
+        host.kept.sessionStore.list({ includeArchived: true }).map((s) => s.id),
+      external: () => this.delegationRuntime.list(),
+      live: (id) => host.subagents.record(id),
+      waiting: (id) => host.pending.hasPending(id),
+      changed: (event) =>
+        host.emitHost({
+          event: 'agent_tree_changed',
+          ...event,
+          session_id: event.rootSessionId,
+        }),
+    })
+    this.agentService.list([])
+    this.agentIndexSubscriptions.push(
+      host.rawTap((id, event) => this.agentService.sessionChanged(id, event)),
+      host.pending.onChange((id) => this.agentService.sessionChanged(id)),
+    )
     const facts = (runId: string) => {
       const state = this.delegationRuntime.list().find((s) => s.runs[runId])
       if (!state?.record)
@@ -1102,6 +1125,7 @@ export class CoreApi {
     try {
       api = new CoreApi(root, host, opts)
       await api.delegationRuntime.reconcile()
+      api.agentService.rebuild()
       await api.delegationAcceptance.reconcile()
       api.delegationIntegration.reconcile()
       await api.environmentService.initialize()
@@ -1120,6 +1144,7 @@ export class CoreApi {
     this.closePromise ??= (async () => {
       this.terminalService.closeAll()
       this.onboardingService.dispose()
+      for (const unsubscribe of this.agentIndexSubscriptions) unsubscribe()
       try {
         await this.delegationAcceptance.stopRoot()
         await this.delegationRuntime.shutdown()
@@ -1137,7 +1162,7 @@ export class CoreApi {
     if (!pending) return
     clearTimeout(pending.timer)
     this.delegationOutput.delete(runId)
-    const state = this.delegationRuntime.list().find((s) => s.runs[runId])
+    const state = [...this.delegationStates.values()].find((s) => s.runs[runId])
     if (!state?.record) return
     this.appendDelegationProjection(state, {
       event: 'delegation_output',
@@ -1184,6 +1209,8 @@ export class CoreApi {
   ): void {
     const record = state.record
     if (!record) return
+    this.delegationStates.set(record.id, state)
+    this.agentService.externalChanged(state)
     const name =
       event.type === 'created'
         ? 'delegation_created'
@@ -1678,6 +1705,27 @@ export class CoreApi {
       if (result === 'active')
         throw new Error(`scheduler job is active: ${jobId}`)
       return { deleted: jobId, scheduler: this.scheduler.get() }
+    },
+  }
+
+  /** Read-only children of existing owning roots; archived roots remain inspectable. */
+  readonly agents = {
+    list: (input: { rootSessionIds: string[] }) => {
+      const roots = [
+        ...new Set(input.rootSessionIds.map((id) => String(id).trim())),
+      ]
+      for (const id of roots) {
+        if (
+          !id ||
+          id.startsWith(DRAFT_SESSION_PREFIX) ||
+          !this.host.kept.sessionStore.get(id)
+        )
+          throw new InvalidSessionError(
+            'agents.list requires a readable owning root session',
+            id,
+          )
+      }
+      return this.agentService.list(roots)
     },
   }
 
