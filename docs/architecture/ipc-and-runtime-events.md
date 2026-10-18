@@ -226,4 +226,6 @@ Payload 应有界，不包含密钥、任意绝对路径或未经筛选的工具
 
 `delegations.history` 是公开对话的有界游标分页接口，默认 tail 200、最多 500 项，保留稳定条目及 run/tool 身份；before 和 after 互斥，跨委派游标被拒绝。私有 native transcript 不经此接口返回。`references.resolve` 的可选 delegationId 把相对引用限定到该根拥有的委派 cwd，既有路径与图片 capability 检查继续生效。
 
+`executors.list` 的每个 profile 摘要增加有效 `specialties` 与 `runtime: ExecutorRuntimeFacts`，设置和父级派工读取同一 Core 存储。`executors.configure` 接受可选 `specialties`，缺省与显式空数组含义不同。归一化 `runtime_metadata` 记录带来源的模型及工具清单；`tool_finished.evidence` 仅保留原生工具类型、结果状态、受控图片引用和去掉认证参数的来源 URL。额外元数据不作为对话正文，也不改变旧日志条目的分页身份。
+
 外部路由 `/chat/:sessionId/agents/:delegationId` 的 sessionId 为根；`dlg-*` 和 `dgr-*` 均不是可激活 Emperor session。内部 `sub-*` 路由经 lineage 解析 owning root，保持 Core 控制上下文和主聊天草稿。独立页及详情中的继续/回答只导航到根，不自动发送，也不直接调用 send/steer。

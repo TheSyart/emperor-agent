@@ -984,6 +984,16 @@ async function startup(): Promise<void> {
       sessionEventBridge,
       authorizeIpc: (event) => trustedRendererPolicy.authorizeIpc(event),
       coreOptions: {
+        verifyGeneratedImage: (bytes) => {
+          const image = nativeImage.createFromBuffer(Buffer.from(bytes))
+          const size = image.getSize()
+          return (
+            !image.isEmpty() &&
+            size.width > 0 &&
+            size.height > 0 &&
+            size.width * size.height <= 16 * 1024 * 1024
+          )
+        },
         appVersion: app.getVersion(),
         ...(packagedRuntimeRevision
           ? { runtimeRevision: packagedRuntimeRevision }

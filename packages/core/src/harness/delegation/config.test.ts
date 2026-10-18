@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ExecutorConfigStore } from './config'
+import { ExecutorConfigStore, executorSpecialties } from './config'
 import { resolveRuntimePaths } from '../../runtime/paths'
 
 const roots: string[] = []
@@ -18,6 +18,47 @@ afterEach(() =>
 )
 
 describe('executor configuration', () => {
+  it('uses researched defaults and persists independent overrides or an explicit empty list', () => {
+    const store = setup(),
+      config = store.read()
+    expect(executorSpecialties(config.profiles[0]!)).toEqual([
+      '代码理解',
+      '重构调试',
+      '测试补全',
+    ])
+    expect(executorSpecialties(config.profiles[1]!)).toEqual([
+      '工程实现',
+      '代码审查',
+      '资料调研',
+    ])
+    config.profiles[0]!.specialties = ['接口设计', '排错']
+    config.profiles[1]!.specialties = []
+    store.update(0, config)
+    const loaded = new ExecutorConfigStore(store.root).read()
+    expect(executorSpecialties(loaded.profiles[0]!)).toEqual([
+      '接口设计',
+      '排错',
+    ])
+    expect(executorSpecialties(loaded.profiles[1]!)).toEqual([])
+  })
+  it('bounds specialties by six entries and twenty-four Unicode characters without rewriting invalid input', () => {
+    const store = setup()
+    for (const specialties of [
+      Array(7).fill('编码'),
+      ['字'.repeat(25)],
+      [''],
+      ['   '],
+    ]) {
+      const config = store.read()
+      config.profiles[0]!.specialties = specialties
+      expect(() => store.update(0, config)).toThrow(/EXECUTOR_CONFIG_INVALID/)
+    }
+    const config = store.read()
+    config.profiles[0]!.specialties = ['🦊'.repeat(24)]
+    expect(store.update(0, config).profiles[0]!.specialties).toEqual([
+      '🦊'.repeat(24),
+    ])
+  })
   it('keeps delegation state lazy and outside the Build workspace', () => {
     const store = setup()
     const paths = resolveRuntimePaths('/runtime', {

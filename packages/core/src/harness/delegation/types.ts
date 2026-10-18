@@ -37,6 +37,7 @@ export interface ExecutorProfile {
   executablePath: string
   expectedVersion: string
   defaultModel?: string
+  specialties?: string[]
   authRef:
     { kind: 'model-route'; routeId: string } | { kind: 'managed-cli-login' }
   stateDirectoryId: string
@@ -69,7 +70,57 @@ export interface ExecutorProbe {
   capabilities: ExecutorCapabilities
   checkedAt: number
   authVerified: boolean
+  localAuthChecked?: boolean
   diagnostic?: string
+}
+export type NativeCapabilityStatus =
+  | 'unverified'
+  | 'verifying'
+  | 'available'
+  | 'unavailable'
+  | 'unsupported'
+  | 'stale'
+export interface NativeCapabilityEvidence {
+  status: NativeCapabilityStatus
+  checkedAt?: number
+  runId?: string
+  delegationId?: string
+  model?: string | null
+  backend?: ExternalBackend
+  executorVersion?: string
+  adapterVersion?: string
+  toolPolicy?: string
+  permissionMode?: string
+  /** Non-reversible digest prefix; never a token, email or raw account ID. */
+  authIdentity?: string
+  reason?: string
+  references?: string[]
+  searchMode?: 'live' | 'cached' | 'unknown'
+}
+export interface ExecutorRuntimeFacts {
+  configuredModel: string | null
+  reportedModel: string | null
+  modelSource: string | null
+  provider: string | null
+  hostAllowedTools: string[]
+  advertisedTools: string[] | null
+  observedTools: string[]
+  searchMode: 'live' | 'cached' | 'unknown'
+  observedAt?: number
+  nativeCapabilities: {
+    search: NativeCapabilityEvidence
+    imageGeneration: NativeCapabilityEvidence
+  }
+}
+export interface NativeToolEvidence {
+  /** False when the native protocol provides activity but no affirmative result. */
+  verified?: boolean
+  kind: 'search' | 'image-generation'
+  action: 'search' | 'fetch' | 'generate'
+  success: boolean
+  references?: string[]
+  artifactPath?: string
+  searchMode?: 'live' | 'cached' | 'unknown'
 }
 export interface DelegationOwner {
   rootSessionId: string
@@ -198,11 +249,25 @@ export interface ExecutorQuestion {
   options?: string[]
 }
 export type ExecutorEventPayload =
+  | {
+      type: 'runtime_metadata'
+      source: string
+      model?: string
+      provider?: string
+      advertisedTools?: string[]
+      searchMode?: 'live' | 'cached' | 'unknown'
+    }
   | { type: 'session_bound'; sessionId: string }
   | { type: 'turn_started'; turnId: string }
   | { type: 'text_delta'; text: string }
   | { type: 'tool_started'; id: string; name: string; detail?: string }
-  | { type: 'tool_finished'; id: string; status: string; detail?: string }
+  | {
+      type: 'tool_finished'
+      id: string
+      status: string
+      detail?: string
+      evidence?: NativeToolEvidence
+    }
   | { type: 'question'; requestId: string; questions: ExecutorQuestion[] }
   | { type: 'permission_denied'; requestId?: string; reason: string }
   | {

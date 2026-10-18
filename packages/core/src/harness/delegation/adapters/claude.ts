@@ -30,6 +30,7 @@ import {
 import { redactExecutorText } from '../redaction'
 import { jsonSchema } from '../../tools/json-schema'
 import { AsyncQueue } from './async-queue'
+import { CLAUDE_HOST_TOOLS, publicReferences } from '../facts'
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -38,6 +39,7 @@ function record(value: unknown): Record<string, unknown> {
 export function normalizeClaudeMessage(
   raw: unknown,
   includeAssistantText = true,
+  toolCalls = new Map<string, { name: string; url?: string }>(),
 ): ExecutorEventPayload[] {
   const m = record(raw),
     events: ExecutorEventPayload[] = []
@@ -46,7 +48,21 @@ export function normalizeClaudeMessage(
     m.subtype === 'init' &&
     typeof m.session_id === 'string'
   )
-    return [{ type: 'session_bound', sessionId: m.session_id }]
+    return [
+      { type: 'session_bound', sessionId: m.session_id },
+      {
+        type: 'runtime_metadata',
+        source: 'initialization',
+        ...(typeof m.model === 'string' ? { model: m.model } : {}),
+        ...(Array.isArray(m.tools)
+          ? {
+              advertisedTools: m.tools.filter(
+                (t): t is string => typeof t === 'string',
+              ),
+            }
+          : {}),
+      },
+    ]
   if (m.type === 'stream_event') {
     const e = record(m.event),
       delta = record(e.delta),
@@ -62,10 +78,18 @@ export function normalizeClaudeMessage(
       block.type === 'tool_use' &&
       typeof block.id === 'string' &&
       typeof block.name === 'string'
-    )
+    ) {
+      toolCalls.set(block.id, { name: block.name })
       events.push({ type: 'tool_started', id: block.id, name: block.name })
+    }
   }
   if (m.type === 'assistant' || m.type === 'user') {
+    if (m.type === 'assistant' && typeof record(m.message).model === 'string')
+      events.push({
+        type: 'runtime_metadata',
+        source: 'provider-response',
+        model: record(m.message).model as string,
+      })
     const content = record(m.message).content
     if (Array.isArray(content))
       for (const value of content) {
@@ -74,13 +98,75 @@ export function normalizeClaudeMessage(
           b.type === 'tool_use' &&
           typeof b.id === 'string' &&
           typeof b.name === 'string'
-        )
+        ) {
+          toolCalls.set(b.id, {
+            name: b.name,
+            ...(typeof record(b.input).url === 'string'
+              ? { url: record(b.input).url as string }
+              : {}),
+          })
           events.push({ type: 'tool_started', id: b.id, name: b.name })
+        }
         if (b.type === 'tool_result' && typeof b.tool_use_id === 'string')
           events.push({
             type: 'tool_finished',
             id: b.tool_use_id,
             status: b.is_error ? 'failed' : 'completed',
+            ...(() => {
+              const call = toolCalls.get(String(b.tool_use_id))
+              if (!call || !['WebSearch', 'WebFetch'].includes(call.name))
+                return {}
+              const output = record(m.tool_use_result)
+              const hits = (
+                Array.isArray(output.results) ? output.results : []
+              ).flatMap((r) =>
+                Array.isArray(record(r).content)
+                  ? (record(r).content as unknown[]).map(record)
+                  : [],
+              )
+              const searchRefs = publicReferences(
+                hits
+                  .filter(
+                    (h) => typeof h.title === 'string' && h.title.length > 0,
+                  )
+                  .map((h) => h.url),
+              )
+              const fetchShape =
+                typeof output.code === 'number' &&
+                typeof output.bytes === 'number' &&
+                typeof output.result === 'string'
+              const verified =
+                call.name === 'WebFetch'
+                  ? fetchShape
+                  : Array.isArray(output.results) || b.is_error === true
+              const success =
+                b.is_error !== true &&
+                (call.name === 'WebFetch'
+                  ? fetchShape &&
+                    Number(output.code) >= 200 &&
+                    Number(output.code) < 300 &&
+                    Number(output.bytes) > 0 &&
+                    String(output.result).trim().length > 0
+                  : searchRefs.length > 0)
+              return {
+                evidence: {
+                  kind: 'search' as const,
+                  action:
+                    call.name === 'WebFetch'
+                      ? ('fetch' as const)
+                      : ('search' as const),
+                  success,
+                  verified,
+                  references:
+                    call.name === 'WebSearch'
+                      ? searchRefs
+                      : success
+                        ? publicReferences([output.url])
+                        : [],
+                  searchMode: 'live' as const,
+                },
+              }
+            })(),
           })
         if (
           m.type === 'assistant' &&
@@ -146,15 +232,7 @@ export function normalizeClaudeMessage(
   }
   return events
 }
-const tools = [
-  'Read',
-  'Glob',
-  'Grep',
-  'Write',
-  'Edit',
-  'Bash',
-  'AskUserQuestion',
-]
+const tools = CLAUDE_HOST_TOOLS
 const forbidden = [
   'Agent',
   'Task',
@@ -558,6 +636,7 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
           'Claude did not apply required tool hooks',
         )
       const seenTools = new Set<string>()
+      const nativeCalls = new Map<string, { name: string; url?: string }>()
       let sawText = false
       void (async () => {
         try {
@@ -599,7 +678,22 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
               initialized = true
               if (active) acknowledge({ providerTurnId: active.messageId })
             }
-            for (let event of normalizeClaudeMessage(message, !sawText)) {
+            for (let event of normalizeClaudeMessage(
+              message,
+              !sawText,
+              nativeCalls,
+            )) {
+              if (event.type === 'runtime_metadata') {
+                let provider = 'anthropic'
+                try {
+                  if (input.environment.ANTHROPIC_BASE_URL)
+                    provider = new URL(input.environment.ANTHROPIC_BASE_URL)
+                      .hostname
+                } catch {
+                  provider = 'custom-provider'
+                }
+                event = { ...event, provider }
+              }
               if (event.type === 'text_delta') sawText = true
               if (event.type === 'tool_started') {
                 if (seenTools.has(event.id)) continue

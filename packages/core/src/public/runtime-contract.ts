@@ -80,9 +80,13 @@ export type {
   ExecutorProfile,
   ExecutorProbe,
   ExecutorCapabilities,
+  ExecutorRuntimeFacts,
+  NativeCapabilityStatus,
+  NativeCapabilityEvidence,
   DelegationRecord,
   DelegationRunRecord,
 } from '../harness/delegation/types'
+export { executorSpecialties } from '../harness/delegation/specialties'
 export type {
   DelegationProjection,
   DelegationRuntimeName,

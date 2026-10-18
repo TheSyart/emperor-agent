@@ -7,7 +7,10 @@ it('maps pinned init, streamed text, tool call and result without reasoning', ()
       subtype: 'init',
       session_id: 'session',
     }),
-  ).toEqual([{ type: 'session_bound', sessionId: 'session' }])
+  ).toEqual([
+    { type: 'session_bound', sessionId: 'session' },
+    { type: 'runtime_metadata', source: 'initialization' },
+  ])
   expect(
     normalizeClaudeMessage({
       type: 'stream_event',

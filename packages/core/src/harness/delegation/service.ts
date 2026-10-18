@@ -16,6 +16,8 @@ import {
   type ExecutorProbe,
 } from './types'
 import { defaultExecutorConfig } from './config'
+import { ExecutorFactsStore } from './facts'
+import { executorSpecialties } from './specialties'
 import { DelegationPolicy, type DelegationParentContext } from './policy'
 import { DelegationBudget, type BudgetLease } from './budget'
 import { DelegationJournal } from './journal'
@@ -47,6 +49,7 @@ import {
 import { terminateRecordedProcess } from './process'
 import { durableReplaceSync } from '../../store/persistence'
 export interface DelegationServiceOptions {
+  facts?: ExecutorFactsStore
   root: string
   config: () => ExecutorConfig
   registry: Pick<ExecutorRegistry, 'requireAvailable' | 'capabilities'>
@@ -112,15 +115,13 @@ export class DelegationService {
   >()
   private readonly rootEpochs = new Map<string, number>()
   private readonly goalProofs = new Map<string, string>()
-  private readonly probes = new Map<
-    string,
-    { key: string; probe: ExecutorProbe }
-  >()
+  readonly facts: ExecutorFactsStore
   private shutdownPromise?: Promise<void>
   private disposed = false
   private reconciled = false
   recoveryReport: RecoveryReport = { loaded: [], issues: [] }
   constructor(private readonly options: DelegationServiceOptions) {
+    this.facts = options.facts ?? new ExecutorFactsStore(options.root)
     let config: ExecutorConfig
     try {
       config = options.config()
@@ -546,7 +547,7 @@ export class DelegationService {
               diagnostic: 'executor preflight failed',
             }
           }
-          this.probes.set(profile.id, { key: JSON.stringify(profile), probe })
+          this.facts.setProbe(profile, probe)
         }),
     )
   }
@@ -709,10 +710,9 @@ export class DelegationService {
     return [
       'External executor profiles (internal remains the default):',
       'Use enabled local CLIs directly for ordinary delegation. Local availability and login are checked automatically on dispatch; an unchecked profile is not a request for user approval. Reuse sessions for follow-up. Collect successful text results directly; check file deliverables before final delivery or integration. Do not require manual artifact acceptance for text-only work.',
+      'Follow an explicit user backend choice first; otherwise reuse the existing child for the same task. Specialties are editable preferences, not rankings, tool grants or guarantees. Consider both external backends for coding. Choose using the reported model (including its source/provider), host-allowed tools, advertised inventory, observed calls and native capability evidence. Unknown models remain unknown; a gateway model label is provider-reported, not an independently verified model identity. Only available native evidence proves prior successful tool use; unverified, verifying, stale and unavailable never mean ready. An unknown capability may be tried as ordinary authorized work without demanding a separate user approval or paid preflight. On native tool failure report the limitation and choose an appropriate alternative; do not silently run CLIs through Bash to bypass managed delegation, or substitute script-drawn pictures for native image generation.',
       ...config.profiles.map((profile) => {
-        const cached = this.probes.get(profile.id),
-          probe =
-            cached?.key === JSON.stringify(profile) ? cached.probe : undefined
+        const probe = this.facts.probe(profile)
         return (
           profile.id +
           ' backend=' +
@@ -720,7 +720,11 @@ export class DelegationService {
           ' status=' +
           (!profile.enabled ? 'disabled' : (probe?.status ?? 'unchecked')) +
           ' persistentSession=true queuedFollowup=true steer=' +
-          (profile.backend === 'codex')
+          (profile.backend === 'codex') +
+          ' specialties=' +
+          JSON.stringify(executorSpecialties(profile)) +
+          ' runtime=' +
+          JSON.stringify(this.facts.view(profile))
         )
       }),
     ].join('\n')
@@ -916,7 +920,7 @@ export class DelegationService {
         'ABORTED',
         'root session stopped before delegation was accepted',
       )
-    this.probes.set(profile.id, { key: JSON.stringify(profile), probe })
+    this.facts.setProbe(profile, probe)
     if (!this.options.adapters.has(spec.backend))
       throw new DelegationError(
         'EXECUTOR_UNAVAILABLE',
@@ -1304,6 +1308,11 @@ export class DelegationService {
           controller.signal,
         )
       const runtime = await this.options.runtime(profile, id)
+      const effectiveProfile = {
+        ...profile,
+        defaultModel: spec.model ?? profile.defaultModel,
+      }
+      this.facts.bind(effectiveProfile, runtime.environment, activeRunId)
       if (e.stop || controller.signal.aborted)
         throw new DelegationError('ABORTED', 'cancelled before process open')
       await this.options.registry.requireAvailable(profile, controller.signal)
@@ -1484,6 +1493,16 @@ export class DelegationService {
           ),
           text + '\n',
           { mode: 0o600 },
+        )
+        this.facts.observe(
+          effectiveProfile,
+          {
+            cwd: record.cwd,
+            runId: activeRunId,
+            delegationId: id,
+            permissionMode: record.effectivePermission,
+          },
+          event,
         )
         if (event.type === 'text_delta')
           summary = boundText(summary + event.text, 8192)

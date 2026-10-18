@@ -204,6 +204,7 @@ it('interrupt acknowledgement leaves the turn open until turn/completed', async 
   await session.interrupt('turn-fixture')
   const iterator = session.events[Symbol.asyncIterator]()
   expect((await iterator.next()).value.type).toBe('turn_started')
+  expect((await iterator.next()).value.type).toBe('runtime_metadata')
   let done = false
   const terminal = iterator.next().then((result) => {
     done = true

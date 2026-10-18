@@ -3,20 +3,18 @@ import {
   parseExecutorConfig,
 } from '../../harness/delegation/config'
 import type { ExecutorRegistry } from '../../harness/delegation/registry'
+import type { ExecutorFactsStore } from '../../harness/delegation/facts'
+import { executorSpecialties } from '../../harness/delegation/specialties'
 import {
   DelegationError,
-  type ExecutorProbe,
   type ExecutorProfile,
 } from '../../harness/delegation/types'
 export class CoreExecutorService {
-  private readonly probes = new Map<
-    string,
-    { key: string; value: ExecutorProbe }
-  >()
   constructor(
     private readonly options: {
       store: ExecutorConfigStore
       registry: ExecutorRegistry
+      facts: ExecutorFactsStore
       assertConfigure: () => void
       refresh: () => Promise<void>
       checkAuth?: (profile: ExecutorProfile) => Promise<void>
@@ -30,10 +28,9 @@ export class CoreExecutorService {
         diagnostic: null,
         profiles: config.profiles.map((profile) => ({
           profile,
-          probe:
-            this.probes.get(profile.id)?.key === JSON.stringify(profile)
-              ? this.probes.get(profile.id)!.value
-              : null,
+          probe: this.options.facts.probe(profile),
+          specialties: executorSpecialties(profile),
+          runtime: this.options.facts.view(profile),
         })),
       }
     } catch {
@@ -57,7 +54,9 @@ export class CoreExecutorService {
     if (value.status === 'available' && this.options.checkAuth) {
       try {
         await this.options.checkAuth(profile)
+        value.localAuthChecked = true
       } catch (error) {
+        value.localAuthChecked = false
         value.status =
           error instanceof DelegationError && error.code === 'AUTH_REQUIRED'
             ? 'needs_auth'
@@ -68,14 +67,13 @@ export class CoreExecutorService {
             : 'AUTH_ROUTE_UNAVAILABLE'
       }
     }
-    this.probes.set(profile.id, { key: JSON.stringify(profile), value })
+    this.options.facts.setProbe(profile, value)
     return value
   }
   async configure(input: { expectedRevision: number; config: unknown }) {
     this.options.assertConfigure()
     const parsed = parseExecutorConfig(input.config),
       config = this.options.store.update(input.expectedRevision, parsed)
-    this.probes.clear()
     await this.options.refresh()
     return config
   }

@@ -3,6 +3,7 @@ import { isAbsolute, join } from 'node:path'
 import { z } from 'zod'
 import { DelegationError, type ExecutorConfig } from './types'
 import { durableReplaceSync } from '../../store/persistence'
+export { executorSpecialties } from './specialties'
 const segment = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
 const profile = z
   .object({
@@ -15,6 +16,16 @@ const profile = z
       .refine((p) => isAbsolute(p) || p === 'claude' || p === 'codex'),
     expectedVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
     defaultModel: z.string().min(1).max(256).optional(),
+    specialties: z
+      .array(
+        z
+          .string()
+          .trim()
+          .min(1)
+          .refine((s) => [...s].length <= 24),
+      )
+      .max(6)
+      .optional(),
     authRef: z.discriminatedUnion('kind', [
       z
         .object({

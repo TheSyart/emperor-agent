@@ -18,6 +18,7 @@ import { CodexRpc, type CodexRpcOptions, type RpcId } from './codex-rpc'
 import { AsyncQueue } from './async-queue'
 import { redactExecutorText } from '../redaction'
 import { jsonSchema } from '../../tools/json-schema'
+import { publicReferences } from '../facts'
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -56,6 +57,8 @@ const featureConfig = Object.fromEntries([
   ['features.default_mode_request_user_input', true],
   ['features.skip_host_skill_discovery', true],
   ['features.code_mode_host', true],
+  ['features.standalone_web_search', true],
+  ['features.image_generation', true],
 ])
 export function codexThreadParams(
   input: ExecutorOpenInput,
@@ -74,6 +77,7 @@ export function codexThreadParams(
       : {}),
     config: {
       ...featureConfig,
+      web_search: 'live',
       mcp_servers: {},
       'shell_environment_policy.inherit': 'none',
       'shell_environment_policy.set': shellEnvironment,
@@ -93,6 +97,14 @@ export function normalizeCodexNotification(
   method: string,
   params: Record<string, unknown>,
 ): ExecutorEventPayload[] {
+  if (method === 'model/rerouted' && typeof params.toModel === 'string')
+    return [
+      {
+        type: 'runtime_metadata',
+        source: 'model-rerouted',
+        model: params.toModel,
+      },
+    ]
   if (method === 'item/agentMessage/delta' && typeof params.delta === 'string')
     return [{ type: 'text_delta', text: params.delta }]
   if (method === 'thread/tokenUsage/updated') {
@@ -150,7 +162,39 @@ export function normalizeCodexNotification(
       typeof item.exitCode === 'number' && item.exitCode !== 0
         ? 'failed'
         : (string(item.status) ?? 'completed')
-    return [{ type: 'tool_finished', id, status }]
+    return [
+      {
+        type: 'tool_finished',
+        id,
+        status,
+        ...(name === 'webSearch'
+          ? {
+              evidence: {
+                kind: 'search' as const,
+                action: ['openPage', 'findInPage'].includes(
+                  String(record(item.action).type),
+                )
+                  ? ('fetch' as const)
+                  : ('search' as const),
+                ...codexSearchResult(item),
+                searchMode: 'live' as const,
+              },
+            }
+          : {}),
+        ...(name === 'imageGeneration'
+          ? {
+              evidence: {
+                kind: 'image-generation' as const,
+                action: 'generate' as const,
+                success: status === 'completed' && !item.failure,
+                ...(typeof item.savedPath === 'string'
+                  ? { artifactPath: item.savedPath }
+                  : {}),
+              },
+            }
+          : {}),
+      },
+    ]
   }
   if (method === 'turn/completed') {
     const turn = record(params.turn),
@@ -178,6 +222,42 @@ export function normalizeCodexNotification(
     ]
   }
   return []
+}
+function codexSearchResult(item: Record<string, unknown>) {
+  const fetch = ['openPage', 'findInPage'].includes(
+    String(record(item.action).type),
+  )
+  const rows = (Array.isArray(item.results) ? item.results : []).map(record)
+  const hasBody = (r: Record<string, unknown>) =>
+    [r.text, r.content, r.result, r.markdown].some(
+      (v) => typeof v === 'string' && v.trim().length > 0,
+    )
+  const failed =
+    !!item.error ||
+    rows.some(
+      (r) =>
+        r.error ||
+        ['failed', 'error', 'denied'].includes(String(r.status)) ||
+        Number(r.code ?? r.statusCode ?? 0) >= 400,
+    )
+  // Opaque text may itself be an error. Only a structured HTTP response proves
+  // page retrieval; the requested URL is not evidence of a returned page.
+  const affirmative = rows.some((r) =>
+    fetch
+      ? typeof (r.code ?? r.statusCode) === 'number' &&
+        Number(r.code ?? r.statusCode) >= 200 &&
+        Number(r.code ?? r.statusCode) < 300 &&
+        hasBody(r) &&
+        publicReferences([r.url]).length > 0
+      : typeof r.title === 'string' &&
+        r.title.length > 0 &&
+        publicReferences([r.url]).length > 0,
+  )
+  return {
+    verified: failed || affirmative,
+    success: !failed && affirmative,
+    references: affirmative ? publicReferences(rows.map((r) => r.url)) : [],
+  }
 }
 export class CodexExecutorAdapter implements ExecutorAdapter {
   readonly backend = 'codex' as const
@@ -231,6 +311,11 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
       summary = '',
       startFailure: DelegationError | undefined
     let closePromise: Promise<{ quiescent: boolean }> | undefined
+    let runtimeMetadata: ExecutorEventPayload = {
+      type: 'runtime_metadata',
+      source: 'thread-configuration',
+      searchMode: 'live',
+    }
     const earlyNotifications: [string, Record<string, unknown>][] = []
     const earlyRequests: [RpcId, string, Record<string, unknown>][] = []
     let earlyBytes = 0
@@ -545,6 +630,17 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
           'Codex resumed a different thread',
         )
       providerSessionId = thread.id
+      runtimeMetadata = {
+        type: 'runtime_metadata',
+        source: 'thread-configuration',
+        ...(typeof response.model === 'string'
+          ? { model: response.model }
+          : {}),
+        ...(typeof response.modelProvider === 'string'
+          ? { provider: response.modelProvider }
+          : {}),
+        searchMode: 'live',
+      }
     } catch (error) {
       const receipt = await close()
       if (handle && !receipt.quiescent)
@@ -648,6 +744,7 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
           )
         providerTurnId = turnId
         emit({ type: 'turn_started', turnId })
+        emit(runtimeMetadata)
         for (const [method, params] of earlyNotifications.splice(0))
           notification(method, params)
         for (const [id, method, params] of earlyRequests.splice(0))

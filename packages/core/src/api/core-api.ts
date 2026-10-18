@@ -128,6 +128,7 @@ import { TurnSnapshots } from '../workspace/turn-snapshots'
 import { DelegationWorkspaceService } from '../workspace/delegation-workspaces'
 import { SnapshotService } from '../workspace/delegation-snapshot'
 import { ExecutorConfigStore } from '../harness/delegation/config'
+import { ExecutorFactsStore } from '../harness/delegation/facts'
 import { CoreExecutorService } from './services/executor-service'
 import {
   CoreDelegationService,
@@ -181,6 +182,8 @@ import type {
 type Dict = Record<string, unknown>
 
 export interface CoreApiCreateOptions extends HarnessHostOptions {
+  /** Host decoder validates native image deliverables after path/size checks. */
+  verifyGeneratedImage?: (bytes: Uint8Array) => boolean
   /** Test hook: use an existing host instead of creating one. */
   host?: HarnessHost | null
   appVersion?: string
@@ -286,6 +289,7 @@ export class CoreApi {
   readonly workspaceBindings: WorkspaceBindingStore
   readonly workspaceMutations = new WorkspaceMutationCoordinator()
   readonly executorConfig: ExecutorConfigStore
+  readonly executorFacts: ExecutorFactsStore
   readonly executorRegistry = new ExecutorRegistry()
   readonly delegationRuntime: DelegationService
   readonly delegationService: CoreDelegationService
@@ -583,6 +587,10 @@ export class CoreApi {
       privateHome: resolve(this.paths.stateRoot, 'git', 'runtime-home'),
     })
     this.executorConfig = new ExecutorConfigStore(this.paths.delegationsRoot)
+    this.executorFacts = new ExecutorFactsStore(
+      this.paths.delegationsRoot,
+      opts.verifyGeneratedImage,
+    )
     const executorRuntime = new ExecutorRuntimeService({
       root: this.paths.delegationsRoot,
       resolveRoute: async (id, backend) => {
@@ -617,6 +625,15 @@ export class CoreApi {
     const executorProcesses = new ManagedAgentProcess({
       sandbox: host.sandboxBackend,
     })
+    const checkExecutorAuth = async (
+      profile: Parameters<typeof executorRuntime.prepare>[0],
+    ) => {
+      const runtime = await executorRuntime.prepare(
+        profile,
+        'dlg-probe-' + randomUUID(),
+      )
+      this.executorFacts.bind(profile, runtime.environment)
+    }
     const externalWorkspaces = new DelegationWorkspaceService({
       root: this.paths.delegationsRoot,
       runner: turnGit,
@@ -628,6 +645,7 @@ export class CoreApi {
       }),
     })
     this.delegationRuntime = new DelegationService({
+      facts: this.executorFacts,
       root: this.paths.delegationsRoot,
       config: () => this.executorConfig.read(),
       registry: this.executorRegistry,
@@ -783,13 +801,12 @@ export class CoreApi {
     })
     this.delegations = this.delegationService
     this.executors = new CoreExecutorService({
+      facts: this.executorFacts,
       store: this.executorConfig,
       registry: this.executorRegistry,
       assertConfigure: () => this.assertMutation('executors', 'configure'),
       refresh: () => this.delegationRuntime.probeProfiles(),
-      checkAuth: async (profile) => {
-        await executorRuntime.prepare(profile, 'dlg-probe-' + randomUUID())
-      },
+      checkAuth: checkExecutorAuth,
     })
     host.delegationQuestionTimeoutMs = () => {
       try {

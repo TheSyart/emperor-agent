@@ -35,6 +35,76 @@ it('lists local-login executor defaults and revision-fences configuration withou
     await api.close()
   }
 })
+it('uses one runtime fact store for settings and parent routing, preserving evidence on specialty edits', async () => {
+  const { api } = await makeApi()
+  try {
+    const profile = api.executorConfig.read().profiles[1]!
+    api.executorFacts.bind(profile, { OPENAI_API_KEY: 'private-fixture-key' })
+    const ctx = {
+      cwd: api.paths.stateRoot,
+      runId: 'dgr-proof',
+      delegationId: 'dlg-proof',
+    }
+    for (const event of [
+      {
+        type: 'runtime_metadata',
+        source: 'provider-response',
+        model: 'observed-real-model',
+      },
+      {
+        type: 'tool_finished',
+        id: 's',
+        status: 'completed',
+        evidence: {
+          kind: 'search',
+          action: 'search',
+          success: true,
+          searchMode: 'live',
+        },
+      },
+      {
+        type: 'tool_finished',
+        id: 'f',
+        status: 'completed',
+        evidence: {
+          kind: 'search',
+          action: 'fetch',
+          success: true,
+          references: ['https://example.com/docs'],
+          searchMode: 'live',
+        },
+      },
+    ])
+      api.executorFacts.observe(profile, ctx, {
+        ...event,
+        ...ctx,
+        generation: 1,
+      } as any)
+    const view = api.executors
+      .list()
+      .profiles.find((p) => p.profile.id === profile.id)!
+    expect(view.runtime).toMatchObject({
+      reportedModel: 'observed-real-model',
+      nativeCapabilities: { search: { status: 'available' } },
+    })
+    expect(api.delegationRuntime.executorContext()).toContain(
+      JSON.stringify(view.runtime),
+    )
+    const config = api.executorConfig.read()
+    config.profiles[1]!.specialties = ['自定义调研']
+    await api.executors.configure({ expectedRevision: config.revision, config })
+    expect(
+      api.executors.list().profiles[1]!.runtime.nativeCapabilities.search
+        .status,
+    ).toBe('available')
+    expect(api.delegationRuntime.executorContext()).toContain('自定义调研')
+    expect(JSON.stringify(api.executors.list())).not.toContain(
+      'private-fixture-key',
+    )
+  } finally {
+    await api.close()
+  }
+})
 it('keeps invalid optional executor config intact and the ordinary chat API usable', async () => {
   const f = await makeApi()
   const path = f.api.executorConfig.file

@@ -51,7 +51,11 @@ function payload() {
     diagnostic: null,
     profiles: profiles.map((profile) => ({
       profile,
-      probe: { status: 'available', authVerified: false },
+      probe: {
+        status: 'available',
+        authVerified: false,
+        localAuthChecked: true,
+      },
     })),
   }
 }
@@ -119,6 +123,86 @@ it('renders exactly local and two vendor rows, minimal controls and truthful loc
     /已登录|可直接派工|调度配额|默认模型|认证方式/,
   )
 })
+it('edits, clears and restores independent specialty defaults without changing hidden model configuration', async () => {
+  await mount()
+  expect(row('claude-code').textContent).toContain('代码理解')
+  expect(row('codex').textContent).toContain('资料调研')
+  row('claude-code')
+    .querySelector<HTMLButtonElement>('[data-edit-specialties]')!
+    .click()
+  await settle()
+  const input = row('claude-code').querySelector<HTMLInputElement>(
+    '[data-specialty-input]',
+  )!
+  input.value = '接口设计，定位故障'
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
+  await action('save-executors').onClick!()
+  await settle()
+  expect(configureExecutors.mock.calls[0]![0].config.profiles[0]).toMatchObject(
+    { specialties: ['接口设计', '定位故障'], defaultModel: 'kept-model-0' },
+  )
+  input.value = ''
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
+  await action('save-executors').onClick!()
+  await settle()
+  expect(
+    configureExecutors.mock.calls[1]![0].config.profiles[0].specialties,
+  ).toEqual([])
+  row('claude-code')
+    .querySelector<HTMLButtonElement>('[data-reset-specialties]')!
+    .click()
+  await settle()
+  expect(row('claude-code').textContent).toContain('代码理解')
+})
+it('rejects oversized specialty drafts and never upgrades unknown tool facts because CLI is ready', async () => {
+  await mount()
+  expect(
+    row('codex').querySelector('[data-native-capability="search"]')
+      ?.textContent,
+  ).toContain('未验证')
+  row('codex')
+    .querySelector<HTMLButtonElement>('[data-edit-specialties]')!
+    .click()
+  await settle()
+  const input = row('codex').querySelector<HTMLInputElement>(
+    '[data-specialty-input]',
+  )!
+  input.value = '字'.repeat(25)
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
+  expect(action('save-executors').disabled).toBe(true)
+  expect(row('codex').textContent).toContain('每项最多 24 字')
+})
+it('shows reported model provenance and exact capability verification status from Core', async () => {
+  const result = payload() as any
+  result.profiles[1].runtime = {
+    reportedModel: 'real-model',
+    modelSource: 'provider-response',
+    provider: 'gateway.example',
+    advertisedTools: null,
+    hostAllowedTools: [],
+    observedTools: ['webSearch'],
+    searchMode: 'live',
+    nativeCapabilities: {
+      search: { status: 'available', checkedAt: 1000 },
+      imageGeneration: { status: 'stale' },
+    },
+  }
+  listExecutors.mockResolvedValue(result)
+  await mount()
+  expect(row('codex').textContent).toContain('real-model')
+  expect(row('codex').textContent).toContain('gateway.example')
+  expect(
+    row('codex').querySelector('[data-native-capability="search"]')
+      ?.textContent,
+  ).toContain('已验证可用')
+  expect(
+    row('codex').querySelector('[data-native-capability="imageGeneration"]')
+      ?.textContent,
+  ).toContain('验证已失效')
+})
 it('saves only explicit selected profile edits and preserves every hidden field and limit', async () => {
   await mount()
   await toggle()
@@ -162,7 +246,8 @@ it('retains dirty edits on refresh until explicit discard and reload', async () 
     .querySelector<HTMLButtonElement>('[data-discard-executor-edits]')!
     .click()
   await settle()
-  expect(listExecutors).toHaveBeenCalledTimes(2)
+  // Refresh runtime facts after the lightweight credential probe as well.
+  expect(listExecutors).toHaveBeenCalledTimes(3)
   expect(
     row('claude-code').querySelector('[aria-checked="false"]'),
   ).toBeTruthy()
