@@ -42,7 +42,7 @@ import {
   withContentSecurityPolicy,
 } from './protocol'
 import { rendererContentSecurityPolicy } from '../shared/content-security-policy'
-import { applicationMenuTemplate } from './app-menu'
+import { applicationMenuTemplate, menuRoles } from './app-menu'
 import { defaultSessionPermission } from './renderer-permissions'
 import { hardenSession } from './computer-use/session-hardening'
 import { registerOpenPathIpc } from './open-path-ipc'
@@ -1379,6 +1379,10 @@ async function startup(): Promise<void> {
             chromiumSandboxDisabledForTest:
               process.argv.includes('--no-sandbox'),
             webPreferences,
+            security: {
+              expectedCsp: RENDERER_CSP,
+              applicationMenuRoles: () => menuRoles(Menu.getApplicationMenu()),
+            },
             releaseWindow: () => {
               mainWindow = null
             },

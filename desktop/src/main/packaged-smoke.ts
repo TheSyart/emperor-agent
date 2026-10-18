@@ -497,7 +497,15 @@ function assertRendererReceipt(
     value.webPreferences?.sandbox === true &&
     value.webPreferences.contextIsolation === true &&
     value.webPreferences.nodeIntegration === false &&
-    ['enabled', 'disabled-for-linux-test'].includes(value.chromiumSandbox)
+    ['enabled', 'disabled-for-linux-test'].includes(value.chromiumSandbox) &&
+    // SEC-05: CSP header and meta, no eval, no microphone, no DevTools, no
+    // reload or DevTools in the app menu.
+    value.security?.cspHeader === true &&
+    value.security.cspMeta === true &&
+    value.security.evalBlocked === true &&
+    value.security.microphoneDenied === true &&
+    value.security.devToolsDisabled === true &&
+    value.security.productionMenu === true
   if (!valid) throw new Error('packaged renderer sandbox receipt is invalid')
   if (
     value.chromiumSandbox === 'disabled-for-linux-test' &&
@@ -519,6 +527,14 @@ function assertRendererReceipt(
       nodeIntegration: false,
     },
     chromiumSandbox: value.chromiumSandbox,
+    security: {
+      cspHeader: true,
+      cspMeta: true,
+      evalBlocked: true,
+      microphoneDenied: true,
+      devToolsDisabled: true,
+      productionMenu: true,
+    },
   }
 }
 
@@ -536,6 +552,14 @@ function failedRendererReceipt(): PackagedRendererSmokeReceipt {
       nodeIntegration: false,
     },
     chromiumSandbox: 'unknown',
+    security: {
+      cspHeader: false,
+      cspMeta: false,
+      evalBlocked: false,
+      microphoneDenied: false,
+      devToolsDisabled: false,
+      productionMenu: false,
+    },
   }
 }
 

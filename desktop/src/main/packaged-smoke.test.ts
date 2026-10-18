@@ -22,6 +22,14 @@ function rendererReceipt() {
       nodeIntegration: false,
     },
     chromiumSandbox: 'enabled' as const,
+    security: {
+      cspHeader: true,
+      cspMeta: true,
+      evalBlocked: true,
+      microphoneDenied: true,
+      devToolsDisabled: true,
+      productionMenu: true,
+    },
   }
 }
 
@@ -247,6 +255,35 @@ describe('packaged smoke contract', () => {
     expect(
       JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8')),
     ).toMatchObject({ exitCode: 1, error: { code: 'smoke_failed' } })
+  })
+
+  it('fails closed when the packaged main window lacks a renderer defense (SEC-05)', async () => {
+    const fixture = smokeFixture()
+    const { core } = makeCore()
+    const receipt = rendererReceipt()
+    await expect(
+      runPackagedSmoke({
+        core,
+        runtimeRoot: fixture.runtimeRoot,
+        stateRoot: fixture.stateRoot,
+        receiptPath: fixture.receiptPath,
+        appVersion: '0.1.0',
+        runtimeRevision: 'a'.repeat(64),
+        commit: 'b'.repeat(40),
+        platform: 'darwin',
+        arch: 'arm64',
+        verifySeatbelt: async () => ({
+          ok: true as const,
+          mode: 'workspace-write' as const,
+          commands: 18,
+          protectedStateDenied: true as const,
+        }),
+        verifyRenderer: async () => ({
+          ...receipt,
+          security: { ...receipt.security, cspHeader: false },
+        }),
+      }),
+    ).rejects.toThrow(/renderer sandbox receipt/i)
   })
 
   it('fails closed when bootstrap exposes anything beyond the built-in skills', async () => {

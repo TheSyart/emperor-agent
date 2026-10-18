@@ -103,3 +103,19 @@ export function applicationMenuTemplate(
   }
   return [appMenu, editMenu, viewMenu, windowMenu, helpMenu]
 }
+
+interface MenuLike {
+  readonly items: ReadonlyArray<{
+    readonly role?: string | null
+    readonly submenu?: MenuLike | null
+  }>
+}
+
+/** Every item's role in an installed menu (packaged smoke). */
+export function menuRoles(menu: MenuLike | null): string[] {
+  if (!menu) return []
+  return menu.items.flatMap((item) => [
+    ...(item.role ? [String(item.role)] : []),
+    ...menuRoles(item.submenu ?? null),
+  ])
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { MenuItemConstructorOptions } from 'electron'
-import { applicationMenuTemplate } from './app-menu'
+import { applicationMenuTemplate, menuRoles } from './app-menu'
 
 function flatten(
   items: readonly MenuItemConstructorOptions[],
@@ -91,5 +91,19 @@ describe('application menu (MAIN-20)', () => {
   it('keeps reload and DevTools for development builds', () => {
     const roles = flatten(template(false)).map((item) => item.role)
     for (const role of DEV_ONLY) expect(roles).toContain(role)
+  })
+})
+
+describe('menuRoles', () => {
+  it('lists the roles of an installed menu, submenus included', () => {
+    expect(
+      menuRoles({
+        items: [
+          { role: 'appmenu', submenu: { items: [{ role: 'about' }, {}] } },
+          { submenu: { items: [{ role: 'copy', submenu: null }] } },
+        ],
+      }),
+    ).toEqual(['appmenu', 'about', 'copy'])
+    expect(menuRoles(null)).toEqual([])
   })
 })
