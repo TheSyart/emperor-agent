@@ -8,7 +8,11 @@ import type {
   TrajectoryRequestView,
   TrajectoryToolCallBlock,
 } from './contract'
-import { appendTrajectoryPartialLayout, deriveTrajectoryLayout } from './layout'
+import {
+  appendTrajectoryPartialLayout,
+  deriveTrajectoryLayout,
+  safeImageSource,
+} from './layout'
 
 const nodesOf = (nodes: unknown[]): TrajectoryEventNode[] =>
   nodes as unknown as TrajectoryEventNode[]
@@ -922,5 +926,17 @@ describe('child call cells (jobs, workflow members)', () => {
       'p1:member:1:member:1',
     ])
     expect(cells.map((cell) => cell.index)).toEqual([1, 2, 3, 4])
+  })
+})
+
+describe('trajectory image sources (UI-38)', () => {
+  it('shows only images that are already on this machine', () => {
+    expect(safeImageSource('data:image/png;base64,iVBORw0KGgo=')).toBe(
+      'data:image/png;base64,iVBORw0KGgo=',
+    )
+    expect(safeImageSource('blob:app://bundle/1')).toBe('blob:app://bundle/1')
+    expect(safeImageSource('https://tracker.example/p.png')).toBeUndefined()
+    expect(safeImageSource('http://192.168.1.1/a.png')).toBeUndefined()
+    expect(safeImageSource('javascript:alert(1)')).toBeUndefined()
   })
 })

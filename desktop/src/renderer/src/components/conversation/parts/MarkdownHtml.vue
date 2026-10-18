@@ -9,7 +9,12 @@
  */
 import { inject, onMounted, onBeforeUnmount, ref, toRef, watch } from 'vue'
 import { useMarkdown } from '../../../composables/useMarkdown'
-import { handleMarkdownChipClick } from '../../../composables/useMarkdownLinks'
+import {
+  handleMarkdownClick,
+  handleMarkdownKeydown,
+  restoreRemoteImages,
+} from '../../../composables/useMarkdownLinks'
+import { APP_CONTEXT_KEY } from '../../../composables/useAppContext'
 import { LINK_STATUS_KEY, type LinkStatus } from './linkStatus'
 import { documentIcon } from '../../../documentIcons'
 import { hydrateMarkdownSiteIcons } from '../resources/siteIcons'
@@ -27,6 +32,8 @@ const props = withDefaults(
 const { rendered } = useMarkdown(toRef(() => props.text))
 const root = ref<HTMLElement | null>(null)
 const links = inject(LINK_STATUS_KEY, null)
+const app = inject(APP_CONTEXT_KEY, null)
+const linkOptions = { notify: (message: string) => app?.showToast(message) }
 const chat = useChatContext()
 let stopSiteIcons = () => {}
 function markSiteIcons() {
@@ -47,11 +54,12 @@ onBeforeUnmount(() => {
 
 function onClick(event: MouseEvent): void {
   if (openImage(event)) return
-  handleMarkdownChipClick(event, props.sourceMessageId)
+  handleMarkdownClick(event, props.sourceMessageId, linkOptions)
 }
 
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Enter' || event.key === ' ') openImage(event)
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  if (!openImage(event)) handleMarkdownKeydown(event, linkOptions)
 }
 
 function openImage(event: MouseEvent | KeyboardEvent): boolean {
@@ -106,6 +114,7 @@ async function markLinks(): Promise<void> {
   const current = ++generation
   const element = root.value
   if (!element) return
+  restoreRemoteImages(element)
   element.querySelectorAll<HTMLImageElement>('img[src]').forEach(enablePreview)
   if (!links || props.streaming) return
   element.querySelectorAll('[data-md-preview]').forEach((node) => node.remove())

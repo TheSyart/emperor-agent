@@ -667,6 +667,40 @@ describe('desktop capability IPC', () => {
     expect(openExternal).not.toHaveBeenCalled()
   })
 
+  it('hands mailto: and tel: links to the system, and no other scheme (SEC-05)', async () => {
+    const ipc = new FakeIpcMain()
+    const openExternal = vi.fn(async () => undefined)
+    registerDesktopCapabilityIpc({
+      ipcMain: ipc,
+      authorize: vi.fn(),
+      browser: fakeBrowser(),
+      references: { revealPath: vi.fn() },
+      showItemInFolder: vi.fn(),
+      openExternal,
+    })
+
+    await ipc.invoke(
+      EXTERNAL_OPEN_CHANNEL,
+      'mailto:someone@example.com?subject=hi',
+    )
+    await ipc.invoke(EXTERNAL_OPEN_CHANNEL, 'tel:+86-10-1234')
+    expect(openExternal.mock.calls).toEqual([
+      ['mailto:someone@example.com?subject=hi'],
+      ['tel:+86-10-1234'],
+    ])
+    for (const url of [
+      'sms:10086',
+      'facetime:someone@example.com',
+      'x-apple.systempreferences:com.apple.preference.security',
+      `mailto:${'a'.repeat(2100)}@example.com`,
+      'mailto:a@example.com\n',
+    ])
+      await expect(ipc.invoke(EXTERNAL_OPEN_CHANNEL, url)).rejects.toThrow(
+        /external url/i,
+      )
+    expect(openExternal).toHaveBeenCalledTimes(2)
+  })
+
   it('opens Skills folders and picks files through validated main-only capabilities', async () => {
     const ipc = new FakeIpcMain()
     const authorize = vi.fn()

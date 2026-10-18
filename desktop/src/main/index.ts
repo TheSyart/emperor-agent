@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  Menu,
   nativeImage,
   protocol,
   net,
@@ -38,7 +39,14 @@ import {
   resolveAttachmentRawPath,
   resolveMediaRawPath,
   resolveStaticAssetPath,
+  withContentSecurityPolicy,
 } from './protocol'
+import { rendererContentSecurityPolicy } from '../shared/content-security-policy'
+import { applicationMenuTemplate, menuRoles } from './app-menu'
+import { defaultSessionPermission } from './renderer-permissions'
+import { hardenSession } from './computer-use/session-hardening'
+import { registerOpenPathIpc } from './open-path-ipc'
+import { registerRemoteImageIpc } from './remote-image-ipc'
 import { pluginAssetResponse } from './plugin-assets'
 import { createCoreHost } from './core-host'
 import { CoreEventBridge, SessionEventBridge } from './event-bridge'
@@ -125,11 +133,19 @@ import {
 import {
   AGENT_PREVIEW_FRAME_CHANNEL,
   AGENT_PREVIEW_POINTER_CHANNEL,
+  APP_MENU_COMMAND_CHANNEL,
   BROWSER_DOWNLOAD_EVENT_CHANNEL,
   BROWSER_PAIRING_REQUEST_CHANNEL,
   BROWSER_REVEAL_CHANNEL,
+  PET_CLOSE_CHANNEL,
+  PET_OPEN_CHANNEL,
+  PET_RENDERER_BOOTSTRAP_CHANNEL,
+  PET_RENDERER_CLOSE_CHANNEL,
   PET_STATUS_CHANNEL,
+  PET_STATUS_REQUEST_CHANNEL,
+  SELECT_DIRECTORY_CHANNEL,
   TERMINAL_SUBSCRIPTION_CHANNEL,
+  type AppMenuCommand,
 } from '../shared/ipc-contract'
 
 const mainDir = moduleDirFromUrl(import.meta.url)
@@ -198,6 +214,15 @@ const trustedRendererPolicy = createTrustedRendererPolicy({
   onExternalOpenError: (error, url) => {
     console.error(`failed to open external URL ${url}: ${errMessage(error)}`)
   },
+})
+// SEC-05: the app://bundle header; index.html carries the same meta.
+const RENDERER_CSP = rendererContentSecurityPolicy()
+const HELP_URL = 'https://github.com/TheSyart/emperor-agent#readme'
+// Core's web_fetch and the remote markdown images (UI-38) share one public
+// HTTP client: no cookies, no local or private addresses.
+const webFetchClient = createDesktopWebFetchClient({
+  resolveProxy: async (url) => await app.resolveProxy(url),
+  request: (options) => net.request(options) as unknown as ElectronRequestLike,
 })
 const trustedPetPolicy = createTrustedRendererPolicy({
   productionUrl: 'app://pet/renderer.html',
@@ -294,7 +319,7 @@ protocol.registerSchemesAsPrivileged([
   },
 ])
 
-ipcMain.handle('emperor:select-directory', async (event) => {
+ipcMain.handle(SELECT_DIRECTORY_CHANNEL, async (event) => {
   trustedRendererPolicy.authorizeIpc(event)
   const options: OpenDialogOptions = {
     properties: ['openDirectory'],
@@ -306,15 +331,48 @@ ipcMain.handle('emperor:select-directory', async (event) => {
   return result.filePaths[0]
 })
 
-ipcMain.handle('emperor:open-path', async (event, target: unknown) => {
-  trustedRendererPolicy.authorizeIpc(event)
-  const pathValue = typeof target === 'string' ? target.trim() : ''
-  if (!pathValue) return { ok: false, error: 'path is required' }
-  const error = await shell.openPath(pathValue)
-  return error ? { ok: false, error } : { ok: true }
+// MAIN-27: only folders Core vouches for, never a renderer-chosen path.
+registerOpenPathIpc({
+  ipcMain,
+  authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
+  sources: {
+    emperorHome: () => config.stateRoot,
+    activeProject: () => {
+      const host = coreApi?.host
+      return host?.activeSession()?.project_path
+        ? host.activeWorkspaceRoot()
+        : null
+    },
+    skillFolder: (name, sessionId) => {
+      try {
+        return coreApi?.skills.get(name, { sessionId }).root ?? null
+      } catch {
+        return null
+      }
+    },
+    invalidSkillPaths: (sessionId) =>
+      coreApi?.skills.list({ sessionId }).invalid.map((item) => item.path) ??
+      [],
+  },
+  isDirectory: (target) => {
+    try {
+      return fs.statSync(target).isDirectory()
+    } catch {
+      return false
+    }
+  },
+  openPath: (target) => shell.openPath(target),
+  showItemInFolder: (target) => shell.showItemInFolder(target),
 })
 
-ipcMain.handle('emperor:pet:open', async (event) => {
+// UI-38: a remote markdown image the user clicked, fetched here.
+registerRemoteImageIpc({
+  ipcMain,
+  authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
+  client: webFetchClient,
+})
+
+ipcMain.handle(PET_OPEN_CHANNEL, async (event) => {
   trustedRendererPolicy.authorizeIpc(event)
   if (petWindow && !petWindow.isDestroyed()) {
     petWindow.showInactive()
@@ -332,7 +390,7 @@ ipcMain.handle('emperor:pet:open', async (event) => {
   }
 })
 
-ipcMain.handle('emperor:pet:close', async (event) => {
+ipcMain.handle(PET_CLOSE_CHANNEL, async (event) => {
   trustedRendererPolicy.authorizeIpc(event)
   petLastError = null
   if (petWindow && !petWindow.isDestroyed()) {
@@ -341,17 +399,17 @@ ipcMain.handle('emperor:pet:close', async (event) => {
   return petStatus()
 })
 
-ipcMain.handle('emperor:pet:status', async (event) => {
+ipcMain.handle(PET_STATUS_REQUEST_CHANNEL, async (event) => {
   trustedRendererPolicy.authorizeIpc(event)
   return petStatus()
 })
 
-ipcMain.handle('emperor:pet:renderer-bootstrap', async (event) => {
+ipcMain.handle(PET_RENDERER_BOOTSTRAP_CHANNEL, async (event) => {
   trustedPetPolicy.authorizeIpc(event)
   return { event: { type: 'connection', online: runtimeReady } }
 })
 
-ipcMain.handle('emperor:pet:renderer-close', async (event) => {
+ipcMain.handle(PET_RENDERER_CLOSE_CHANNEL, async (event) => {
   trustedPetPolicy.authorizeIpc(event)
   petLastError = null
   if (petWindow && !petWindow.isDestroyed()) petWindow.close()
@@ -703,7 +761,14 @@ function registerAppProtocol(): void {
     }
     let filePath: string | null = null
     if (url.host === 'bundle')
-      filePath = resolveAssetPath(url.pathname, rendererRoot)
+      return withContentSecurityPolicy(
+        await net.fetch(
+          pathToFileURL(
+            resolveAssetPath(url.pathname, rendererRoot),
+          ).toString(),
+        ),
+        RENDERER_CSP,
+      )
     else if (url.host === 'pet')
       filePath = resolveStaticAssetPath(url.pathname, petRendererRoot())
     else if (url.host === 'pet-assets')
@@ -723,19 +788,78 @@ function loadRenderer(): void {
   else mainWindow.loadURL('app://bundle/index.html')
 }
 
+/**
+ * No link moves a window off its document (UI-4): will-navigate passes only
+ * a reload of the current page, subframes never navigate, popups are denied
+ * (http(s) opens as a user link), and untrusted redirects stop.
+ */
 function secureWindowNavigation(
   win: BrowserWindow,
   policy: TrustedRendererPolicy,
 ): void {
-  win.webContents.on('will-navigate', (event, targetUrl) =>
+  const contents = win.webContents
+  contents.on('will-navigate', (event, targetUrl) =>
+    policy.handleNavigation(event, targetUrl, contents.getURL()),
+  )
+  contents.on('will-frame-navigate', (details) =>
+    policy.handleFrameNavigation(details),
+  )
+  contents.on('will-redirect', (event, targetUrl) =>
     policy.handleNavigation(event, targetUrl),
   )
-  win.webContents.on('will-redirect', (event, targetUrl) =>
-    policy.handleNavigation(event, targetUrl),
+  contents.setWindowOpenHandler((details) => policy.handleWindowOpen(details))
+}
+
+/**
+ * MAIN-3: the default session (main window, pet, pointer overlay, recovery)
+ * grants nothing — no microphone, camera, screen, notifications or devices,
+ * no downloads — except clipboard writes from the main window's own page.
+ */
+function secureDefaultSession(): void {
+  hardenSession(session.defaultSession, {
+    allowPermission: defaultSessionPermission({
+      isTrustedMainRenderer: (contents) => {
+        const main = mainWindow
+        return (
+          main !== null &&
+          !main.isDestroyed() &&
+          contents === main.webContents &&
+          trustedRendererPolicy.isTrustedUrl(main.webContents.getURL())
+        )
+      },
+    }),
+  })
+}
+
+/** MAIN-20: Emperor's own menu; packaged builds: no reload, no DevTools. */
+function installApplicationMenu(): void {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      applicationMenuTemplate({
+        appName: 'Emperor Agent',
+        packaged: app.isPackaged,
+        platform: process.platform,
+        openSettings: () => sendMenuCommand('open-settings'),
+        openHelp: () => {
+          void shell.openExternal(HELP_URL).catch(() => undefined)
+        },
+      }),
+    ),
   )
-  win.webContents.setWindowOpenHandler((details) =>
-    policy.handleWindowOpen(details),
-  )
+}
+
+function sendMenuCommand(command: AppMenuCommand): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    if (!runtimeReady) return
+    createWindow()
+    mainWindow?.webContents.once('did-finish-load', () =>
+      mainWindow?.webContents.send(APP_MENU_COMMAND_CHANNEL, command),
+    )
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.webContents.send(APP_MENU_COMMAND_CHANNEL, command)
 }
 
 function createWindow(): void {
@@ -746,7 +870,9 @@ function createWindow(): void {
     icon: appIconPath,
     backgroundColor: '#1a1410',
     show: false,
-    webPreferences: mainWindowWebPreferences(mainDir),
+    webPreferences: mainWindowWebPreferences(mainDir, {
+      packaged: app.isPackaged,
+    }),
   })
   pointerOverlay ??= new PointerOverlay()
   syncControlIndicators()
@@ -891,6 +1017,7 @@ function createPetWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      devTools: !app.isPackaged,
       additionalArguments: [`--emperor-asset-base-url=${assetBaseUrl}`],
     },
   })
@@ -1027,11 +1154,7 @@ async function startup(): Promise<void> {
           : {}),
         terminalHost: new NodePtyHost(),
         terminalEventSink: terminalEventBridge.sink(),
-        webFetchClient: createDesktopWebFetchClient({
-          resolveProxy: async (url) => await app.resolveProxy(url),
-          request: (options) =>
-            net.request(options) as unknown as ElectronRequestLike,
-        }),
+        webFetchClient,
       },
     })
     const core = coreApi
@@ -1237,7 +1360,9 @@ async function startup(): Promise<void> {
         arch: process.arch,
         verifySeatbelt: verifyPackagedSeatbelt,
         verifyRenderer: () => {
-          const webPreferences = mainWindowWebPreferences(mainDir)
+          const webPreferences = mainWindowWebPreferences(mainDir, {
+            packaged: app.isPackaged,
+          })
           return verifyPackagedRenderer({
             createWindow: () => {
               const win = new BrowserWindow({
@@ -1254,6 +1379,10 @@ async function startup(): Promise<void> {
             chromiumSandboxDisabledForTest:
               process.argv.includes('--no-sandbox'),
             webPreferences,
+            security: {
+              expectedCsp: RENDERER_CSP,
+              applicationMenuRoles: () => menuRoles(Menu.getApplicationMenu()),
+            },
             releaseWindow: () => {
               mainWindow = null
             },
@@ -1289,7 +1418,11 @@ function startRuntime(): Promise<void> {
   return startupTask
 }
 
-app.whenReady().then(startRuntime)
+app.whenReady().then(() => {
+  secureDefaultSession()
+  installApplicationMenu()
+  return startRuntime()
+})
 
 app.on('activate', () => {
   if (recoveryWindow && !recoveryWindow.isDestroyed()) {

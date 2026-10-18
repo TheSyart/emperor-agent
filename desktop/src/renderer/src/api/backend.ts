@@ -1,3 +1,4 @@
+import type { OpenPathTarget } from '../../../shared/ipc-contract'
 // Electron desktop talks to CoreApi over preload IPC. Browser-only tests inject
 // this same bridge surface; the product no longer supports HTTP/WS fallback.
 
@@ -96,7 +97,7 @@ interface EmperorBridge {
   selectDirectory?: () => Promise<string | null>
   getPathForFile?: (file: File) => string
   openPath?: (
-    target: string,
+    target: OpenPathTarget,
   ) => Promise<{ ok?: boolean; error?: string } | void>
   revealReference?: (input: {
     sessionId: string
@@ -108,6 +109,7 @@ interface EmperorBridge {
   openLink?: (
     url: string,
   ) => Promise<{ ok?: boolean; opened?: 'builtin' | 'system' | 'refused' }>
+  loadRemoteImage?: (url: string) => Promise<RemoteImageResult>
   onBrowserReveal?: (listener: (payload: { url: string }) => void) => () => void
   openSkillsFolder?: (input: {
     scope: SkillFolderScope
@@ -172,6 +174,8 @@ interface EmperorBridge {
   revealBrowserExtension?: () => Promise<{ ok: boolean }>
   removeBrowserExtension?: () => Promise<BrowserExtensionRemoveResult>
   onBrowserPairingRequest?: (listener: () => void) => () => void
+  /** App menu items that act in the window (偏好设置… → 设置). */
+  onMenuCommand?: (listener: (command: 'open-settings') => void) => () => void
   onAgentPreviewFrame?: (
     listener: (frame: AgentPreviewUpdate) => void,
   ) => () => void
@@ -296,7 +300,12 @@ export function getPathForFile(file: File): string {
   return path
 }
 
-export async function openPath(target: string): Promise<void> {
+/**
+ * Open a folder in Finder: one Core vouches for (设置 › 诊断's Emperor Home or
+ * project, a Skill's folder). Main resolves the path; the renderer cannot
+ * name one (SEC-05).
+ */
+export async function openPath(target: OpenPathTarget): Promise<void> {
   const opener = bridge()?.openPath
   if (typeof opener !== 'function')
     throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
@@ -357,6 +366,30 @@ export async function openLink(url: string): Promise<'builtin' | 'system'> {
   if (result?.opened === 'builtin' || result?.opened === 'system')
     return result.opened
   throw new Error(LINK_REFUSED_MESSAGE)
+}
+
+export type RemoteImageResult =
+  { ok: true; dataUrl: string } | { ok: false; error: string }
+
+/**
+ * A remote image in rendered markdown, on the user's request (UI-38): main
+ * fetches it through the public HTTP client (no cookies, no local or
+ * private addresses) and returns it as a data: URL; the renderer itself
+ * never requests a remote address (CSP img-src has no http(s)).
+ */
+export async function loadRemoteImage(url: string): Promise<RemoteImageResult> {
+  const load = bridge()?.loadRemoteImage
+  if (typeof load !== 'function')
+    return { ok: false, error: CORE_BRIDGE_UNAVAILABLE_MESSAGE }
+  const result = await load(url)
+  if (result?.ok === true && typeof result.dataUrl === 'string') return result
+  return {
+    ok: false,
+    error:
+      result && result.ok === false && typeof result.error === 'string'
+        ? result.error
+        : '图片加载失败',
+  }
 }
 
 /** Main opened a clicked link in the built-in browser. */
@@ -802,6 +835,13 @@ export async function removeBrowserExtension(): Promise<BrowserExtensionRemoveRe
 /** An extension asked to pair (main sends nothing else). */
 export function onBrowserPairingRequest(listener: () => void): () => void {
   return bridge()?.onBrowserPairingRequest?.(listener) ?? (() => {})
+}
+
+/** The app menu asked the window to act (偏好设置… ⌘, opens 设置). */
+export function onMenuCommand(
+  listener: (command: 'open-settings') => void,
+): () => void {
+  return bridge()?.onMenuCommand?.(listener) ?? (() => {})
 }
 
 export async function approveBrowserPairing(

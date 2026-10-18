@@ -32,6 +32,7 @@ import {
 } from 'lucide-vue-next'
 import {
   computed,
+  inject,
   markRaw,
   nextTick,
   onBeforeUnmount,
@@ -45,7 +46,11 @@ import type { WorkspaceFileRequest } from './workspaceState'
 import { revealReference } from '../../api/backend'
 import { openImageViewer } from '../ui/imageViewer'
 import { useMarkdown } from '../../composables/useMarkdown'
-import { handleMarkdownChipClick } from '../../composables/useMarkdownLinks'
+import {
+  handleMarkdownClick as routeMarkdownClick,
+  handleMarkdownKeydown,
+} from '../../composables/useMarkdownLinks'
+import { APP_CONTEXT_KEY } from '../../composables/useAppContext'
 import { useResizable } from '../../composables/useResizable'
 import { detectShortcutPlatform } from '../../shortcuts'
 import IconButton from '../ui/IconButton.vue'
@@ -511,10 +516,16 @@ async function revealActiveLine(): Promise<void> {
     ?.scrollIntoView?.({ block: 'center' })
 }
 
+const appContext = inject(APP_CONTEXT_KEY, null)
+const markdownLinkOptions = {
+  notify: (message: string) => appContext?.showToast(message),
+}
+
 function handleMarkdownClick(event: MouseEvent): void {
-  handleMarkdownChipClick(
+  routeMarkdownClick(
     event,
     `file-preview:${activeTab.value?.path || 'unknown'}`,
+    markdownLinkOptions,
   )
 }
 
@@ -772,6 +783,7 @@ function message(value: unknown): string {
             class="markdown-body file-markdown-preview"
             v-html="renderedMarkdown"
             @click="handleMarkdownClick"
+            @keydown="handleMarkdownKeydown($event, markdownLinkOptions)"
           ></div>
           <div
             v-else-if="activeTab.preview.kind === 'text'"

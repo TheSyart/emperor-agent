@@ -159,6 +159,12 @@
 
 ### Security
 
+- 主窗口有了严格的内容安全策略（响应头与页面同一份）：只运行应用自带的脚本，禁止 `eval` 和内联脚本，不能向任何网络地址发请求或嵌入框架；内联样式照旧可用。
+- Emperor 自己的窗口不再授予网页权限：麦克风、摄像头、屏幕、通知和设备一律拒绝，也不能下载；主窗口的复制按钮照常可用。听写在独立 Helper 里录音，不受影响。
+- 打包版使用 Emperor 自己的应用菜单（关于、偏好设置… ⌘,、编辑、显示、窗口、帮助），不再提供「重新载入」和「开发者工具」，主窗口与桌宠的 DevTools 关闭；以前误按 ⌘R 会重载界面并暂停电脑操作。
+- 回复里的任何链接都不会让主窗口跳转或重新加载：没有扩展名的相对路径（如 `packages/core`）以前会重载整个界面、丢掉草稿，现在交给引用解析；`mailto:`、`tel:` 交给系统；其他协议不打开并提示。
+- 回复与 Markdown 预览不再自动加载远程图片（可被用作追踪像素），改为「点击加载图片 · 域名」，点击后由 Emperor 代为下载：不带 Cookie，拒绝本机和内网地址。
+- 「打开文件夹」类操作（诊断、Skills）只能打开 Core 提供的文件夹，渲染层不能再让主进程打开任意路径；所有桌面 IPC 通道名集中在共享契约里。
 - Git、Files 和 Terminal 由 Core 按 Build session 所有权授权；Renderer 不获得 Node/fs/shell，Git mutation 使用 revision/确认，Files 拒绝 traversal/symlink escape，Terminal 高频字节流不进入聊天或持久事件。
 - Electron 主界面与桌宠现在显式运行在 renderer sandbox 中；preload 改为受构建/打包审计的最小 CommonJS，桌宠不再直接读取文件系统，packaged smoke 会真实验证 Core bridge 与受管附件协议。
 - 明确 MCP、Web 与外部消息是不可信输入，Goal 完成态只能由 Core Completion Gate 提交。

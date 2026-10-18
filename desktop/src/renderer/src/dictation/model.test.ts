@@ -126,6 +126,8 @@ describe('dictation shortcut', () => {
     expect(shortcutConflict('Command+K', context)).toMatch(/搜索/)
     expect(shortcutConflict('Control+`', context)).toMatch(/终端/)
     expect(shortcutConflict('Command+Q', context)).toMatch(/退出/)
+    // The app menu's 偏好设置… (SEC-05).
+    expect(shortcutConflict('Command+,', context)).toMatch(/偏好设置/)
     expect(shortcutConflict('Command+Space', context)).toMatch(/聚焦/)
     expect(shortcutConflict('Control+Space', context)).toMatch(/输入法/)
     expect(shortcutConflict('Shift+D', context)).toMatch(/⌃|⌥|⌘/)

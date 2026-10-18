@@ -5,14 +5,20 @@
  *
  * Props: text; preview? (tighter padding for Summary sections).
  */
-import { handleMarkdownChipClick } from '../../../composables/useMarkdownLinks'
-import { toRef } from 'vue'
+import {
+  handleMarkdownClick,
+  handleMarkdownKeydown,
+} from '../../../composables/useMarkdownLinks'
+import { APP_CONTEXT_KEY } from '../../../composables/useAppContext'
+import { inject, toRef } from 'vue'
 import { useMarkdown } from '../../../composables/useMarkdown'
 
 const props = withDefaults(defineProps<{ text: string; preview?: boolean }>(), {
   preview: false,
 })
 const { rendered } = useMarkdown(toRef(() => props.text))
+const app = inject(APP_CONTEXT_KEY, null)
+const linkOptions = { notify: (message: string) => app?.showToast(message) }
 </script>
 
 <template>
@@ -21,7 +27,8 @@ const { rendered } = useMarkdown(toRef(() => props.text))
     class="traj-md"
     :data-preview="preview || undefined"
     v-html="rendered"
-    @click="handleMarkdownChipClick($event, 'trajectory-markdown')"
+    @click="handleMarkdownClick($event, 'trajectory-markdown', linkOptions)"
+    @keydown="handleMarkdownKeydown($event, linkOptions)"
   />
 </template>
 

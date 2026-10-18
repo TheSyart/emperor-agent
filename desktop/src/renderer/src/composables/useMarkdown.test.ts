@@ -25,8 +25,15 @@ describe('useMarkdown rendering safety (Wave1.4)', () => {
       expect(html).toContain('data-md-image=')
       expect(html).not.toMatch(/\ssrc=/)
     }
-    expect(render('![web](https://example.com/sun.png)')).toContain(
-      'src="https://example.com/sun.png"',
+  })
+  it('never loads a remote image: a placeholder asks first (UI-38)', () => {
+    const html = render('![太阳](https://example.com/sun.png "t")')
+    expect(html).not.toMatch(/<img/)
+    expect(html).toContain('data-md-remote-image="https://example.com/sun.png"')
+    expect(html).toContain('data-md-remote-alt="太阳"')
+    expect(html).toContain('点击加载图片 · example.com')
+    expect(render('![x](http://tracker.example/p.gif)')).toContain(
+      '点击加载图片 · tracker.example',
     )
   })
   it('renders raw HTML injection attempts as escaped text, not tags', () => {
@@ -51,6 +58,24 @@ describe('sanitizeHtml hardening layer (Wave1.4)', () => {
   it('strips event handlers from raw HTML', () => {
     const clean = sanitizeHtml('<img src="x" onerror="alert(1)">')
     expect(clean).not.toContain('onerror')
+  })
+
+  it('keeps only local image sources (data:, blob:, app:) (UI-38)', () => {
+    expect(
+      sanitizeHtml('<img src="https://tracker.example/p.png" alt="p">'),
+    ).not.toContain('src=')
+    expect(sanitizeHtml('<img src="//tracker.example/p.png">')).not.toContain(
+      'src=',
+    )
+    expect(
+      sanitizeHtml('<img srcset="https://tracker.example/p.png 2x">'),
+    ).not.toContain('srcset')
+    for (const src of [
+      'data:image/png;base64,iVBORw0KGgo=',
+      'blob:app://bundle/0f3c',
+      'app://attachments/att_2026-10_abcdef12/raw',
+    ])
+      expect(sanitizeHtml(`<img src="${src}">`)).toContain(`src="${src}"`)
   })
 
   it('strips script tags entirely', () => {

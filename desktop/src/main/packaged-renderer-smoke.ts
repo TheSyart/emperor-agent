@@ -13,8 +13,28 @@ export interface PackagedSmokeWindowLike {
   destroy(): void
   webContents: {
     executeJavaScript(source: string): Promise<unknown>
+    openDevTools(options?: { mode: 'detach' }): void
+    isDevToolsOpened(): boolean
   }
 }
+
+/** SEC-05 defenses of the packaged main window. */
+export interface PackagedRendererSecurity {
+  /** `app://bundle` sends the CSP header (content-security-policy.ts). */
+  cspHeader: boolean
+  /** index.html carries the same policy as a meta tag. */
+  cspMeta: boolean
+  /** `eval` throws an EvalError (script-src has no 'unsafe-eval'). */
+  evalBlocked: boolean
+  /** getUserMedia is refused by the default session's permission handler. */
+  microphoneDenied: boolean
+  /** `webPreferences.devTools` is off: opening DevTools does nothing. */
+  devToolsDisabled: boolean
+  /** The app menu has no reload, force reload or DevTools item. */
+  productionMenu: boolean
+}
+
+const DEVELOPMENT_MENU_ROLES = ['reload', 'forcereload', 'toggledevtools']
 
 export interface PackagedRendererSmokeReceipt {
   ok: boolean
@@ -29,6 +49,7 @@ export interface PackagedRendererSmokeReceipt {
     nodeIntegration: boolean
   }
   chromiumSandbox: 'enabled' | 'disabled-for-linux-test' | 'unknown'
+  security: PackagedRendererSecurity
 }
 
 export async function createPackagedSmokeAttachment(
@@ -70,6 +91,13 @@ export async function verifyPackagedRenderer(opts: {
   }
   timeoutMs?: number
   releaseWindow?: (window: PackagedSmokeWindowLike) => void
+  security: {
+    expectedCsp: string
+    /** Roles of every item of the installed application menu. */
+    applicationMenuRoles: () => readonly string[]
+    /** How long to give DevTools to open (default 500 ms). */
+    devToolsSettleMs?: number
+  }
 }): Promise<PackagedRendererSmokeReceipt> {
   const win = opts.createWindow()
   const timeoutMs = Math.max(1, opts.timeoutMs ?? 15_000)
@@ -92,6 +120,23 @@ export async function verifyPackagedRenderer(opts: {
         timeoutMs,
       ),
     )
+    win.webContents.openDevTools({ mode: 'detach' })
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.max(0, opts.security.devToolsSettleMs ?? 500)),
+    )
+    const roles = opts.security
+      .applicationMenuRoles()
+      .map((role) => String(role).toLowerCase())
+    const security: PackagedRendererSecurity = {
+      cspHeader: probe.cspHeader === opts.security.expectedCsp,
+      cspMeta: probe.cspMeta === opts.security.expectedCsp,
+      evalBlocked: probe.evalBlocked === true,
+      microphoneDenied: probe.microphoneDenied === true,
+      devToolsDisabled: !win.webContents.isDevToolsOpened(),
+      productionMenu:
+        roles.length > 0 &&
+        !roles.some((role) => DEVELOPMENT_MENU_ROLES.includes(role)),
+    }
     const preferences = opts.webPreferences
     const receipt: PackagedRendererSmokeReceipt = {
       ok: true,
@@ -113,6 +158,7 @@ export async function verifyPackagedRenderer(opts: {
       chromiumSandbox: opts.chromiumSandboxDisabledForTest
         ? 'disabled-for-linux-test'
         : 'enabled',
+      security,
     }
     const expectedBytes = Buffer.byteLength(opts.attachmentContent)
     const failed = [
@@ -125,6 +171,12 @@ export async function verifyPackagedRenderer(opts: {
       !receipt.webPreferences.sandbox && 'sandbox-preference',
       !receipt.webPreferences.contextIsolation && 'context-isolation',
       receipt.webPreferences.nodeIntegration && 'node-integration',
+      !security.cspHeader && 'csp-header',
+      !security.cspMeta && 'csp-meta',
+      !security.evalBlocked && 'eval',
+      !security.microphoneDenied && 'microphone',
+      !security.devToolsDisabled && 'devtools',
+      !security.productionMenu && 'menu',
     ].filter(Boolean)
     if (failed.length)
       throw new Error(
@@ -176,6 +228,36 @@ export function rendererProbeSource(
       throw new Error('renderer attachment fetch failed after Core bootstrap')
     }
     const body = await response.text()
+    // SEC-05: the document's CSP (header and meta), eval, the microphone.
+    let cspHeader = null
+    try {
+      const page = await fetch(location.href, { cache: 'no-store' })
+      cspHeader = page.headers.get('content-security-policy')
+    } catch {}
+    const cspMeta =
+      document
+        .querySelector('meta[http-equiv="Content-Security-Policy"]')
+        ?.getAttribute('content') ?? null
+    const evalBlocked = await new Promise((resolve) => {
+      setTimeout(() => {
+        try {
+          ;(0, eval)('1')
+          resolve(false)
+        } catch (error) {
+          resolve(error instanceof EvalError)
+        }
+      }, 0)
+    })
+    const microphoneDenied = await Promise.race([
+      navigator.mediaDevices
+        .getUserMedia({ audio: true })
+        .then((stream) => {
+          stream.getTracks().forEach((track) => track.stop())
+          return false
+        })
+        .catch((error) => Boolean(error) && error.name === 'NotAllowedError'),
+      new Promise((resolve) => setTimeout(() => resolve(false), 3000)),
+    ])
     return {
       nodeGlobalsAbsent,
       bridgeExposed,
@@ -184,6 +266,10 @@ export function rendererProbeSource(
       bootstrapOk,
       attachmentOk: response.ok && body === ${content},
       attachmentBytes: new TextEncoder().encode(body).byteLength,
+      cspHeader,
+      cspMeta,
+      evalBlocked,
+      microphoneDenied,
     }
   })()`
 }

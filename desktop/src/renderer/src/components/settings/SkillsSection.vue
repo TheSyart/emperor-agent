@@ -58,7 +58,6 @@ import {
   filterInvalidSkills,
   filterSkills,
   invalidSkillDeleteTarget,
-  invalidSkillFolder,
   SKILL_SCOPE_HINTS,
   SKILL_SOURCE_FILTERS,
   skillCountText,
@@ -249,7 +248,14 @@ function onImported(summary: SkillImportSummary, fromPaste = false) {
 }
 
 function revealInvalid(item: InvalidSkillInfo) {
-  return ctx.runSafely(() => openPath(invalidSkillFolder(item)))
+  // Main opens the folder only if Core lists this rejected Skill.
+  return ctx.runSafely(() =>
+    openPath({
+      kind: 'invalid-skill',
+      path: item.path,
+      sessionId: sessionId.value,
+    }),
+  )
 }
 
 async function confirmDeleteInvalid() {

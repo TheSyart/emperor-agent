@@ -63,6 +63,14 @@ export function packagedSmokeFixture(
           nodeIntegration: false,
         },
         chromiumSandbox: 'enabled',
+        security: {
+          cspHeader: true,
+          cspMeta: true,
+          evalBlocked: true,
+          microphoneDenied: true,
+          devToolsDisabled: true,
+          productionMenu: true,
+        },
       },
     },
   }

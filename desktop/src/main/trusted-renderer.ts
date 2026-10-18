@@ -12,9 +12,28 @@ export interface NavigationEventLike {
   preventDefault(): void
 }
 
+/** `will-frame-navigate` details (Electron passes them as the event). */
+export interface FrameNavigationEventLike extends NavigationEventLike {
+  readonly url: string
+  readonly isMainFrame: boolean
+}
+
 export interface TrustedRendererPolicy {
   isTrustedUrl(value: string): boolean
-  handleNavigation(event: NavigationEventLike, targetUrl: string): void
+  /**
+   * `will-navigate` / `will-redirect`. With `currentUrl` (will-navigate),
+   * the window stays on its document: only a reload of it (same URL, the
+   * hash aside) passes, so no link in a reply can reload the app (UI-4).
+   * An untrusted target is stopped and, when it is http(s), opened as a
+   * user link.
+   */
+  handleNavigation(
+    event: NavigationEventLike,
+    targetUrl: string,
+    currentUrl?: string,
+  ): void
+  /** `will-frame-navigate`: subframes never navigate (frame-src 'none'). */
+  handleFrameNavigation(event: FrameNavigationEventLike): void
   handleWindowOpen(details: { url: string }): { action: 'deny' }
   authorizeIpc(event: unknown): void
 }
@@ -76,10 +95,17 @@ export function createTrustedRendererPolicy(opts: {
 
   return {
     isTrustedUrl,
-    handleNavigation(event, targetUrl) {
-      if (isTrustedUrl(targetUrl)) return
+    handleNavigation(event, targetUrl, currentUrl) {
+      if (isTrustedUrl(targetUrl)) {
+        if (currentUrl !== undefined && !sameDocument(targetUrl, currentUrl))
+          event.preventDefault()
+        return
+      }
       event.preventDefault()
       openEligibleExternal(targetUrl)
+    },
+    handleFrameNavigation(event) {
+      if (!event.isMainFrame) event.preventDefault()
     },
     handleWindowOpen(details) {
       if (!isTrustedUrl(details.url)) openEligibleExternal(details.url)
@@ -107,6 +133,16 @@ function parseUrl(value: string | null | undefined): URL | null {
   } catch {
     return null
   }
+}
+
+/** The same document, the fragment aside (a reload). */
+function sameDocument(target: string, current: string): boolean {
+  const a = parseUrl(target)
+  const b = parseUrl(current)
+  if (!a || !b) return false
+  a.hash = ''
+  b.hash = ''
+  return a.href === b.href
 }
 
 function parseDevelopmentOrigin(

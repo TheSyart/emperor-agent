@@ -573,3 +573,56 @@ export interface DictationStartRequest {
 export type DictationStartResult =
   | { ok: true; session: string }
   | { ok: false; code: DictationErrorCode; message: string }
+
+// ── Main window and pet windows (SEC-05: main and preload use these
+// constants, no channel name is a string literal there) ──────────────────
+
+/** Renderer → main: the native folder picker; answers the path or null. */
+export const SELECT_DIRECTORY_CHANNEL = 'emperor:select-directory'
+/**
+ * Renderer → main {@link OpenPathTarget}: open a folder Core vouches for in
+ * Finder. Never a path of the renderer's choosing (SEC-05); answers
+ * `{ ok: true } | { ok: false, error }`.
+ */
+export const OPEN_PATH_CHANNEL = 'emperor:open-path'
+/** Main window → main: open, close or ask about the desktop pet. */
+export const PET_OPEN_CHANNEL = 'emperor:pet:open'
+export const PET_CLOSE_CHANNEL = 'emperor:pet:close'
+export const PET_STATUS_REQUEST_CHANNEL = 'emperor:pet:status'
+/**
+ * Pet window → main (src/pet/preload.js keeps these strings literally: it is
+ * plain sandboxed JS; pet-sandbox.test.ts checks they match).
+ */
+export const PET_RENDERER_BOOTSTRAP_CHANNEL = 'emperor:pet:renderer-bootstrap'
+export const PET_RENDERER_CLOSE_CHANNEL = 'emperor:pet:renderer-close'
+
+/**
+ * What `emperor:open-path` may open — names Core resolves, never a path the
+ * renderer picked:
+ * - diagnostic: 设置 › 诊断's Emperor Home or the current project;
+ * - skill: an installed Skill's folder (by name, in a session's scope);
+ * - invalid-skill: a rejected Skill folder Core lists for that scope.
+ */
+export type OpenPathTarget =
+  | {
+      kind: 'diagnostic'
+      rowId: 'global-state-root' | 'active-project-path'
+    }
+  | { kind: 'skill'; name: string; sessionId?: string | null }
+  | { kind: 'invalid-skill'; path: string; sessionId?: string | null }
+
+/**
+ * Renderer → main `{ url }`: a remote image in rendered markdown the user
+ * asked to see (UI-38). Main fetches it through the public HTTP client (no
+ * cookies, no local or private addresses) and answers
+ * {@link RemoteImageResult}; the renderer never requests remote images.
+ */
+export const MARKDOWN_REMOTE_IMAGE_CHANNEL = 'emperor:markdown:remote-image'
+
+export type RemoteImageResult =
+  { ok: true; dataUrl: string } | { ok: false; error: string }
+
+/** Main → renderer {@link AppMenuCommand}: an app menu item was chosen. */
+export const APP_MENU_COMMAND_CHANNEL = 'emperor:menu:command'
+
+export type AppMenuCommand = 'open-settings'
