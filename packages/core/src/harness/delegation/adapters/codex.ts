@@ -20,6 +20,14 @@ import { redactExecutorText } from '../redaction'
 import { jsonSchema } from '../../tools/json-schema'
 import { publicReferences } from '../facts'
 import { codexUserAgentIssue } from '../compatibility'
+import {
+  acquireCodexAuth,
+  CODEX_FILE_CREDENTIALS,
+  type CodexAuthLease,
+} from '../codex-auth'
+/** History pages stay well under the 4 MiB protocol frame limit. */
+const HISTORY_PAGE_BYTES = 1024 * 1024
+const HISTORY_TURNS = 20
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -283,15 +291,18 @@ function codexSearchResult(item: Record<string, unknown>) {
     references: affirmative ? publicReferences(rows.map((r) => r.url)) : [],
   }
 }
+type CodexTransport = Pick<
+  CodexRpc,
+  'request' | 'notify' | 'respond' | 'reject' | 'close'
+> &
+  Partial<Pick<CodexRpc, 'hold'>>
 export class CodexExecutorAdapter implements ExecutorAdapter {
   readonly backend = 'codex' as const
   private readonly processes: ManagedAgentProcess
   constructor(
     private readonly options: {
       processes?: ManagedAgentProcess
-      rpc?: (
-        options: CodexRpcOptions,
-      ) => Pick<CodexRpc, 'request' | 'notify' | 'respond' | 'reject' | 'close'>
+      rpc?: (options: CodexRpcOptions) => CodexTransport
     } = {},
   ) {
     this.processes = options.processes ?? new ManagedAgentProcess()
@@ -325,9 +336,9 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
     const events = new AsyncQueue<NormalizedExecutorEvent>(),
       pending = new Map<string, { rpcId: RpcId; questions: string[] }>()
     let handle: ManagedProcessHandle | undefined,
-      rpc:
-        | Pick<CodexRpc, 'request' | 'notify' | 'respond' | 'reject' | 'close'>
-        | undefined,
+      rpc: CodexTransport | undefined,
+      authLease: CodexAuthLease | undefined,
+      releaseTurn: (() => void) | undefined,
       providerSessionId = '',
       active: ExecutorTurnInput | undefined,
       providerTurnId: string | undefined,
@@ -359,6 +370,7 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
       if (closePromise) return closePromise
       closePromise = (async () => {
         closed = true
+        releaseTurn?.()
         await handle?.captureDescendants()
         if (rpc) {
           await Promise.allSettled(
@@ -403,6 +415,13 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
           }
         }
         events.end()
+        // Only after the process is gone may another one refresh the login.
+        if (authLease)
+          try {
+            await authLease.release()
+          } catch {
+            /* The lock file is reclaimed once this process ends. */
+          }
         return { quiescent }
       })()
       return closePromise
@@ -439,6 +458,7 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
             active.outputSchema ? 4 * 1024 * 1024 : 8192,
           )
         if (event.type === 'turn_finished') {
+          releaseTurn?.()
           event = { ...event, text: event.text ?? summary }
           if (active.outputSchema && event.status === 'completed') {
             let structured: unknown
@@ -580,7 +600,14 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
         ]),
         '-c',
         'mcp_servers={}',
+        ...CODEX_FILE_CREDENTIALS,
       ]
+      // One isolated Codex process per login at a time: it may refresh the
+      // shared token (codex-auth.ts).
+      if (input.codexAuth)
+        authLease = await acquireCodexAuth(input.codexAuth, {
+          signal: input.signal,
+        })
       handle = this.processes.spawn({
         executable: input.profile.executablePath,
         args,
@@ -635,7 +662,11 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
         input.resumeSessionId ? 'thread/resume' : 'thread/start',
         {
           ...params,
-          ...(input.resumeSessionId ? { threadId: input.resumeSessionId } : {}),
+          // A resumed thread's history can outgrow the 4 MiB frame limit;
+          // inspect pages it with thread/turns/list instead.
+          ...(input.resumeSessionId
+            ? { threadId: input.resumeSessionId, excludeTurns: true }
+            : {}),
         },
         input.signal,
       )
@@ -689,7 +720,7 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
           )
         const response = await rpc!.request('thread/read', {
           threadId: providerSessionId,
-          includeTurns: true,
+          includeTurns: false,
         })
         const thread = record(response.thread)
         if (thread.id !== providerSessionId)
@@ -697,11 +728,58 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
             'PROVIDER_SESSION_CHANGED',
             'history returned another thread',
           )
-        const turns = (Array.isArray(thread.turns) ? thread.turns : [])
-          .slice(-20)
-          .map((value) => {
-            const turn = record(value),
-              items = Array.isArray(turn.items) ? turn.items : []
+        // Newest first, in pages of at most 1 MiB: a page that is too large
+        // is asked again with half as many turns.
+        const newest: Record<string, unknown>[] = [],
+          cursors = new Set<string>()
+        let cursor: string | undefined,
+          limit = 8
+        for (let page = 0; page < 64 && newest.length < HISTORY_TURNS;) {
+          let result: Record<string, unknown>
+          try {
+            result = await rpc!.request(
+              'thread/turns/list',
+              {
+                threadId: providerSessionId,
+                limit: Math.min(limit, HISTORY_TURNS - newest.length),
+                sortDirection: 'desc',
+                itemsView: 'summary',
+                ...(cursor ? { cursor } : {}),
+              },
+              undefined,
+              { maxResultBytes: HISTORY_PAGE_BYTES },
+            )
+          } catch (error) {
+            if (
+              error instanceof DelegationError &&
+              error.code === 'OUTPUT_LIMIT' &&
+              limit > 1
+            ) {
+              limit = Math.max(1, Math.floor(limit / 2))
+              continue
+            }
+            // A single turn larger than a page: show what was read.
+            if (
+              error instanceof DelegationError &&
+              error.code === 'OUTPUT_LIMIT'
+            )
+              break
+            throw error
+          }
+          page++
+          newest.push(
+            ...(Array.isArray(result.data) ? result.data : []).map(record),
+          )
+          const next = string(result.nextCursor)
+          if (!next || cursors.has(next)) break
+          cursors.add(next)
+          cursor = next
+        }
+        const turns = newest
+          .slice(0, HISTORY_TURNS)
+          .reverse()
+          .map((turn) => {
+            const items = Array.isArray(turn.items) ? turn.items : []
             return {
               ...(typeof turn.id === 'string' ? { id: turn.id } : {}),
               ...(typeof turn.status === 'string'
@@ -736,6 +814,9 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
             'one turn per managed Codex process',
           )
         active = turn
+        // A running turn may be silent for long (a build, a question): only
+        // the delegation's run limit bounds it, not the idle timer.
+        releaseTurn = rpc!.hold?.()
         const response = await rpc!.request(
           'turn/start',
           {

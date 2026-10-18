@@ -86,3 +86,88 @@ it('invalid JSON closes the transport with a bounded diagnostic', async () => {
   expect(String(error)).not.toContain('fixture-secret')
   f.rpc.close()
 })
+
+function idleFixture() {
+  const input = new PassThrough(),
+    output = new PassThrough()
+  const writes: Record<string, unknown>[] = []
+  output.on('data', (data) => {
+    for (const line of String(data).trim().split('\n'))
+      writes.push(JSON.parse(line))
+  })
+  let closed: Error | undefined
+  const rpc = new CodexRpc({
+    input,
+    output,
+    generation: 1,
+    onRequest: () => undefined,
+    onClose: (error) => {
+      closed = error
+    },
+  })
+  return {
+    rpc,
+    writes,
+    closed: () => closed,
+    receive: (frame: unknown) => input.write(JSON.stringify(frame) + '\n'),
+  }
+}
+const flush = async () => {
+  for (let i = 0; i < 5; i++) await Promise.resolve()
+  await new Promise((resolve) => setImmediate(resolve))
+}
+
+it('stays open while a question waits three minutes for the user, then idles normally', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    const f = idleFixture()
+    f.receive({
+      id: 9,
+      method: 'item/tool/requestUserInput',
+      params: { questions: [{ id: 'q', question: 'Which?' }] },
+    })
+    await flush()
+    await vi.advanceTimersByTimeAsync(3 * 60_000)
+    expect(f.closed()).toBeUndefined()
+    await f.rpc.respond(9, { answers: {} }, 1)
+    await vi.advanceTimersByTimeAsync(119_000)
+    expect(f.closed()).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(String(f.closed())).toContain('IDLE_TIMEOUT')
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it('a running turn holds the idle timer: a silent five-minute command is not killed', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    const f = idleFixture()
+    const release = f.rpc.hold()
+    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    expect(f.closed()).toBeUndefined()
+    release()
+    release()
+    await vi.advanceTimersByTimeAsync(121_000)
+    expect(String(f.closed())).toContain('IDLE_TIMEOUT')
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it('rejects a result larger than the caller page limit without closing the transport', async () => {
+  const f = fixture()
+  const page = f.rpc.request('thread/turns/list', {}, undefined, {
+    maxResultBytes: 1024,
+  })
+  await vi.waitFor(() => expect(f.writes.length).toBe(1))
+  f.receive({ id: f.writes[0]!.id, result: { data: ['x'.repeat(4096)] } })
+  await expect(page).rejects.toThrow('OUTPUT_LIMIT')
+  const next = f.rpc.request('thread/turns/list', {}, undefined, {
+    maxResultBytes: 1024,
+  })
+  await vi.waitFor(() => expect(f.writes.length).toBe(2))
+  f.receive({ id: f.writes[1]!.id, result: { data: [] } })
+  expect(await next).toEqual({ data: [] })
+  f.rpc.close()
+})

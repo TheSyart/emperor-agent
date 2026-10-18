@@ -45,6 +45,12 @@ export interface SandboxExecutionPolicy {
   /** Unforgeable host nonce carried by inherited macOS Seatbelt policy. */
   processBoundaryTag?: string
   readOnlyRoots?: readonly string[]
+  /**
+   * Host-only: single existing files an external runtime may rewrite in place
+   * (the user's Codex auth.json behind the isolated home's link, AGT-03).
+   * Never a directory, never from model or IPC arguments.
+   */
+  writableFiles?: readonly string[]
 }
 
 export interface SandboxPolicy extends SandboxExecutionPolicy {

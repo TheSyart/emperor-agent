@@ -4,7 +4,6 @@
  * adds the operation surface (sessions, config, workspace, git, terminals,
  * scheduler, plugins, environment, diagnostics) on top of it.
  */
-import { randomUUID } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
@@ -167,6 +166,7 @@ import type { DelegationProjection } from '../harness/delegation/events'
 import { ExecutorRegistry } from '../harness/delegation/registry'
 import { DelegationService } from '../harness/delegation/service'
 import { ExecutorRuntimeService } from '../harness/delegation/runtime'
+import { createLoginShellEnvironment } from '../harness/delegation/login-shell'
 import { ExecutorModelCatalogService } from '../harness/delegation/models'
 import { nativeGeneratedImageRoot } from '../harness/delegation/image-proof'
 import { ClaudeExecutorAdapter } from '../harness/delegation/adapters/claude'
@@ -658,6 +658,7 @@ export class CoreApi {
     )
     const executorRuntime = new ExecutorRuntimeService({
       root: this.paths.delegationsRoot,
+      loginShell: createLoginShellEnvironment(),
       resolveRoute: async (id, backend) => {
         const config = await loadModelConfig(this.paths.modelConfigFile)
         const entry = config.raw.models.find((entry) => entry.entryId === id)
@@ -693,10 +694,7 @@ export class CoreApi {
     const checkExecutorAuth = async (
       profile: Parameters<typeof executorRuntime.prepare>[0],
     ) => {
-      const runtime = await executorRuntime.prepare(
-        profile,
-        'dlg-probe-' + randomUUID(),
-      )
+      const runtime = await executorRuntime.probe(profile)
       this.executorFacts.bind(profile, runtime.environment)
     }
     const externalWorkspaces = new DelegationWorkspaceService({

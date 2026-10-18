@@ -68,3 +68,20 @@ it('pinned generated schemas require expectedTurnId and distinct question answer
     'answers',
   ])
 })
+it('the pinned protocol supports metadata-only resume and paged turn history', () => {
+  const root = join(__dirname, '..', 'protocol', 'codex-0.153.4')
+  const resume = JSON.parse(
+    readFileSync(join(root, 'v2', 'ThreadResumeParams.json'), 'utf8'),
+  )
+  expect(resume.properties.excludeTurns.type).toBe('boolean')
+  const client = JSON.parse(
+    readFileSync(join(root, 'ClientRequest.json'), 'utf8'),
+  )
+  expect(JSON.stringify(client)).toContain('"thread/turns/list"')
+  const list = client.definitions.ThreadTurnsListParams
+  expect(list.required).toEqual(['threadId'])
+  expect(Object.keys(list.properties)).toEqual(
+    expect.arrayContaining(['cursor', 'limit', 'sortDirection', 'itemsView']),
+  )
+  expect(JSON.stringify(client.definitions.TurnItemsView)).toContain('summary')
+})

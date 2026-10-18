@@ -242,6 +242,18 @@ export interface ExecutorOpenInput {
   resumeSessionId?: string
   generation: number
   signal: AbortSignal
+  /**
+   * Codex ChatGPT login: the isolated auth.json links to the user's file.
+   * The adapter holds the login lock for the process lifetime (AGT-03).
+   */
+  codexAuth?: CodexAuthLink
+}
+/** The isolated CODEX_HOME's auth.json is a symlink to the user's own file. */
+export interface CodexAuthLink {
+  /** The user's own auth.json (their CODEX_HOME or ~/.codex). */
+  source: string
+  /** `auth.json` of an isolated CODEX_HOME: a symlink to `source`. */
+  isolated: string
 }
 export interface ExecutorTurnInput {
   runId: string

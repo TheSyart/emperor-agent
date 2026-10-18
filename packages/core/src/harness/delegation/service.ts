@@ -49,6 +49,7 @@ import {
 } from './ownership'
 import { terminateRecordedProcess } from './process'
 import { durableReplaceSync } from '../../store/persistence'
+import { codexAuthWritableFile, type CodexAuthLink } from './codex-auth'
 export interface DelegationServiceOptions {
   facts?: ExecutorFactsStore
   root: string
@@ -69,6 +70,7 @@ export interface DelegationServiceOptions {
     runtimeRoot: string
     tempRoot: string
     secretValues?: string[]
+    codexAuth?: CodexAuthLink
   }>
   notices?: {
     parent: (
@@ -103,6 +105,8 @@ interface Entry {
   closing?: Promise<{ quiescent: boolean }>
   held?: { workspace?: ResourceLease; budget?: BudgetLease; quiescent: boolean }
   stop: boolean
+  /** The run limit (runTimeoutMs) stopped the current run. */
+  timedOut?: boolean
   inputFailure?: string
   waiters: Set<() => void>
 }
@@ -329,11 +333,16 @@ export class DelegationService {
           generation: run.generation,
           boundaryReceiptId,
           signal: controller.signal,
+          ...(runtime.codexAuth ? { codexAuth: runtime.codexAuth } : {}),
           policy: {
             mode: 'read-only',
             workspaceRoot: record.cwd,
             runtimeStateRoots: [runtime.runtimeRoot],
             privateTempRoot: runtime.tempRoot,
+            // Opening the thread may refresh the shared Codex login too.
+            ...(runtime.codexAuth
+              ? { writableFiles: [codexAuthWritableFile(runtime.codexAuth)] }
+              : {}),
           },
           onProcessStarted: async (identity) => {
             ownership = {
@@ -1241,6 +1250,7 @@ export class DelegationService {
     const controller = new AbortController()
     e.controller = controller
     e.inputFailure = undefined
+    e.timedOut = false
     e.closing = undefined
     let budget: BudgetLease | undefined,
       workspace: ResourceLease | undefined,
@@ -1429,6 +1439,7 @@ export class DelegationService {
         signal: controller.signal,
         runtimeRoot: runtime.runtimeRoot,
         secretValues: runtime.secretValues,
+        ...(runtime.codexAuth ? { codexAuth: runtime.codexAuth } : {}),
         policy: {
           mode: record.effectivePermission,
           workspaceRoot: record.cwd,
@@ -1437,6 +1448,11 @@ export class DelegationService {
           readOnlyRoots: lease?.snapshot
             ? [lease.snapshot.commonDir, join(lease.path, '.git')]
             : [],
+          // A token refresh rewrites the user's Codex login in place through
+          // the isolated home's link; nothing beside that one file.
+          ...(runtime.codexAuth
+            ? { writableFiles: [codexAuthWritableFile(runtime.codexAuth)] }
+            : {}),
         },
       })
       e.session = session
@@ -1476,10 +1492,12 @@ export class DelegationService {
             patch: { phase: 'running' },
           })
       })
-      timer = setTimeout(
-        () => void this.interrupt(id, activeRunId).catch(() => undefined),
-        config.limits.runTimeoutMs,
-      )
+      // The only backstop for a long turn: the protocol's idle timer pauses
+      // while a turn runs or a question waits for the user.
+      timer = setTimeout(() => {
+        e.timedOut = true
+        void this.interrupt(id, activeRunId).catch(() => undefined)
+      }, config.limits.runTimeoutMs)
       timer.unref()
       let bytes = 0
       for await (const raw of session.events) {
@@ -1659,6 +1677,7 @@ export class DelegationService {
       }
       if (current.phase === 'cancelling' && phase === 'failed')
         failureCode = 'OUTCOME_UNKNOWN'
+      if (e.timedOut && phase === 'cancelled') failureCode = 'RUN_TIMEOUT'
       const finalPhase =
         current.phase === 'cancelling' && phase === 'failed'
           ? 'outcome_unknown'
