@@ -69,7 +69,7 @@ Chat 会话的 workspace 是 `stateRoot/workspace/` 下的可写目录；Build �
 - 进入：`/plan` 或 `/plan <message>`（同时提交该消息），或 `control.setMode('plan')`。离开：`/plan off`，或 `exit_plan_mode` 获得批准。
 - 进入后系统提示词加入 `plan:policy` 章节：先只读探索，不修改文件、不改配置、不提交；只对用户拥有的选择使用 `ask_user_question`；最终以 `exit_plan_mode` 提交以 `#` 标题开头的完整计划。
 - 工具目录在 Plan 模式下保持不变，以维持请求缓存；普通文件与 Shell 工具没有统一的 Plan guard，实际写入仍受当前沙箱模式约束。电脑操作工具另有硬性 Plan guard：观察可用，交互、跳转、传输和高影响动作拒绝。
-- `exit_plan_mode` 通过问题服务发起审阅，选项为 **Approve** 与 **Keep planning**。Approve 离开 Plan 模式，从下一步开始执行计划；Keep planning 保留 Plan 模式，并把用户的反馈（`control.commentPlan`）作为工具结果返回给模型。审阅通道不可用或被取消时保持 Plan 模式。
+- `exit_plan_mode` 通过问题服务发起审阅，选项为 **Approve** 与 **Keep planning**。Approve 离开 Plan 模式，从下一步开始执行计划；Keep planning 保留 Plan 模式，并把用户的反馈（`control.commentPlan`）作为工具结果返回给模型。用户关闭审阅（改为输入自己的话）时保持 Plan 模式，工具返回成功结果并直接结束本轮（`turn/end` 原因为 `plan-dismissed`），不再为“等待用户”多请求一次模型；审阅通道不可用时同样保持 Plan 模式，原因作为工具错误返回给模型。
 - turn 运行中请求的切换会排队，在下一个 step 边界以一条 `plan/mode` 事件生效；用户发起的切换会以通知告知模型。
 
 Plan 模式与权限预设相互独立：在 Plan 模式中切换预设，只改变之后的写入范围。

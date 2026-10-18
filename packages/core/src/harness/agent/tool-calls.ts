@@ -7,6 +7,9 @@
  * in model order; only bodies overlap; post-execute and `tool/result`
  * commit strictly in model order. On abort, calls that never started get
  * synthetic `ABORTED_BEFORE_DISPATCH` results so every call has a result.
+ * A scheduler failure (e.g. a result the log cannot hold) drains started
+ * calls and rejects; the owning step then answers every call still open
+ * with `TOOL_OUTCOME_UNKNOWN` / `TOOL_NOT_STARTED` before `step/end`.
  */
 
 import { createToolResultMessage, type UserMessage } from '../../llm/message'
@@ -16,6 +19,7 @@ import {
   toolAbortedResult,
   type ToolExecutionResult,
   type ToolRunContext,
+  type ToolTurnConclusion,
 } from '../tools/definition'
 import type { ToolRegistry } from '../tools/registry'
 import type { Agent } from './agent'
@@ -51,16 +55,24 @@ function parseArguments(raw: string): unknown {
   }
 }
 
+export interface ToolCallsOutcome {
+  /** A committed result asked to end the turn after this step. */
+  concluded: boolean
+  /** The first non-default conclusion a result named, if any. */
+  conclusion?: ToolTurnConclusion
+}
+
 export async function executeToolCalls(
   batch: ToolCallBatch,
   toolCalls: ToolCallBlock[],
-): Promise<{ concluded: boolean }> {
+): Promise<ToolCallsOutcome> {
   const planned: PlannedCall[] = toolCalls.map((block) => ({
     block,
     rawArguments: parseArguments(block.arguments),
   }))
   let next = 0
   let concluded = false
+  let conclusion: ToolTurnConclusion | undefined
   while (next < planned.length) {
     const first = planned[next]!
     const mode = batch.tools.executionMode(
@@ -72,20 +84,21 @@ export async function executeToolCalls(
     const outcome = await runGroup(batch, group, mode)
     next += outcome.consumed
     concluded ||= outcome.concluded
+    conclusion ??= outcome.conclusion
     if (outcome.aborted) {
       for (const call of planned.slice(next))
         appendSkippedToolCall(batch, call.block)
-      return { concluded }
+      break
     }
   }
-  return { concluded }
+  return { concluded, ...(conclusion === undefined ? {} : { conclusion }) }
 }
 
 async function runGroup(
   batch: ToolCallBatch,
   group: PlannedCall[],
   mode: 'parallel' | 'exclusive',
-): Promise<{ consumed: number; aborted: boolean; concluded: boolean }> {
+): Promise<ToolCallsOutcome & { consumed: number; aborted: boolean }> {
   const { agent, tools, signal } = batch
   const session = agent.session
   const slots: (Slot | undefined)[] = group.map(() => undefined)
@@ -95,6 +108,7 @@ async function runGroup(
   let started = 0
   let aborted = signal.aborted
   let concluded = false
+  let conclusion: ToolTurnConclusion | undefined
   let failure: { error: unknown } | undefined
   const throwFailure = (): void => {
     if (failure !== undefined) throw failure.error
@@ -117,6 +131,7 @@ async function runGroup(
       for (const context of result.additionalContexts ?? [])
         batch.acceptContext(context)
       concluded ||= result.concludesTurn === true
+      if (result.concludesTurn === true) conclusion ??= result.turnConclusion
       committed++
     }
   }
@@ -213,14 +228,18 @@ async function runGroup(
     throw failure.error
   }
 
+  const concludedWith = {
+    concluded,
+    ...(conclusion === undefined ? {} : { conclusion }),
+  }
   if (aborted) {
     for (const call of group.slice(started))
       appendSkippedToolCall(batch, call.block)
-    return { consumed: group.length, aborted: true, concluded }
+    return { consumed: group.length, aborted: true, ...concludedWith }
   }
   if (committed !== started)
     throw new Error('tool-call scheduler: uncommitted settled calls')
-  return { consumed: started, aborted: false, concluded }
+  return { consumed: started, aborted: false, ...concludedWith }
 }
 
 function appendSkippedToolCall(

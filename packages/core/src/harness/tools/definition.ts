@@ -25,9 +25,16 @@ export interface ToolRunContext {
   readonly retainWorkspaceLease?: () => { release(): void }
   /** Queue a context message to enter the very next step. */
   deferContext(context: UserMessage): void
-  /** End the turn after this step's tool results are committed. */
-  concludeTurn(): void
+  /**
+   * End the turn after this step's tool results are committed (only when
+   * this call succeeds). `reason` names a conclusion other than a plain
+   * completion; the turn ends with that `turn/end` reason.
+   */
+  concludeTurn(reason?: ToolTurnConclusion): void
 }
+
+/** A non-default way a tool can conclude the turn. */
+export type ToolTurnConclusion = 'plan-dismissed'
 
 /** What a tool body returns: plain text, blocks, or a full result. */
 export type ToolReturn =
@@ -96,6 +103,8 @@ export interface ToolExecutionResult {
   readonly error?: ToolFailure
   readonly additionalContexts?: UserMessage[]
   readonly concludesTurn?: true
+  /** Set with `concludesTurn` when the tool named a non-default conclusion. */
+  readonly turnConclusion?: ToolTurnConclusion
 }
 
 export const TOOL_ABORTED = 'ABORTED'

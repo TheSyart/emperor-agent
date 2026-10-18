@@ -23,8 +23,13 @@ import type { LlmCallConfig } from '../../llm/call-config'
 import type { LlmClient, PreparedLlmCall } from '../../llm/client'
 import { errorChain, LlmError } from '../../llm/error'
 import { deepFreeze } from '../../llm/freeze'
-import { createAssistantMessage, type UserMessage } from '../../llm/message'
-import type { GenerateOptions, Message, ToolSchema } from '../../llm/types'
+import {
+  contextMessage,
+  createAssistantMessage,
+  type UserMessage,
+} from '../../llm/message'
+import type { GenerateOptions, ToolSchema } from '../../llm/types'
+import { ToolCallRecovery } from '../../session-log/repair'
 import { canonicalHeader, headerEquals } from '../../session-log/request-header'
 import type { Session } from '../../session-log/session'
 import type {
@@ -101,12 +106,48 @@ type Phase =
 
 type StepEndReason = Extract<
   TurnEndReason,
-  { kind: 'completed' | 'max-tokens' }
+  { kind: 'completed' | 'max-tokens' | 'plan-dismissed' }
 >
 
 type PreparedStep =
   | { kind: 'reject' }
   | { kind: 'enter'; messages: UserMessage[]; assembly: PromptAssembly }
+
+/**
+ * The cause `cancel()` passed when it aborted a signal this agent owns,
+ * copied field by field. The live reason stays the caller's object, which a
+ * transport may decorate once it sees the abort (Node's fetch assigns an
+ * enumerable `stack`), and `turn/end` must record only the cause itself.
+ * Returns undefined while the signal is live.
+ */
+function abortedCancelCause(signal: AbortSignal): AgentCancelCause | undefined {
+  if (!signal.aborted) return undefined
+  // `cancel()` is the only aborter of these signals; anything else reads as the user's stop.
+  const cause = signal.reason as Partial<AgentCancelCause> | undefined
+  switch (cause?.kind) {
+    case 'parent':
+    case 'disposed':
+      return { kind: cause.kind }
+    case 'hook':
+      return {
+        kind: 'hook',
+        reason: typeof cause.reason === 'string' ? cause.reason : '',
+      }
+    default:
+      return { kind: 'user' }
+  }
+}
+
+/** Producer of the context notice logged when another model takes over. */
+export const MODEL_SWITCH_PRODUCER = 'model-switch'
+
+function modelSwitchNotice(from: string, to: string): UserMessage {
+  return contextMessage(
+    MODEL_SWITCH_PRODUCER,
+    `From this step on, the ${to} model continues this conversation (earlier replies came from ${from}).`,
+    { form: 'notice', summary: `本步起由 ${to} 继续` },
+  )
+}
 
 /** Strip adapter-materialized defaults so a changed route can re-default them. */
 function requestProposal(header: EpochHeader): LlmCallConfig {
@@ -162,6 +203,15 @@ export class Agent {
     return this.phase.kind === 'running'
       ? { turn: this.phase.turn, step: this.phase.step }
       : { turn: this.phase.lastTurn, step: 0 }
+  }
+
+  /**
+   * The call config this agent's next request starts from: its own route
+   * when it has one, else the active route (throws when none is configured).
+   * Request-config middleware (e.g. a turn's fallback) may still replace it.
+   */
+  proposedCallConfig(): LlmCallConfig {
+    return this.options.callConfig?.() ?? this.deps.llm.defaultCallConfig()
   }
 
   /** Delegation depth: 0 for a root agent. */
@@ -276,8 +326,7 @@ export class Agent {
 
   private wakeDriver(wakeAfterAbort = false): void {
     if (this.phase.kind !== 'idle') {
-      const reason = this.phase.abort.signal.reason as
-        AgentCancelCause | undefined
+      const reason = abortedCancelCause(this.phase.abort.signal)
       if (
         reason?.kind !== 'disposed' &&
         (this.phase.kind === 'maintenance' || wakeAfterAbort)
@@ -392,7 +441,10 @@ export class Agent {
           return false
         }
         signal.throwIfAborted()
-        this.session.append('step/start', { turn, step })
+        const stepStartSeq = this.session.append('step/start', {
+          turn,
+          step,
+        }).seq
         phase.step = step
         try {
           for (const message of decision.messages) {
@@ -404,6 +456,9 @@ export class Agent {
           // max-tokens is sticky: later steps cannot downgrade the turn result.
           if (turnEnds === null || turnEnds.kind !== 'max-tokens')
             turnEnds = stepEnd
+        } catch (error: unknown) {
+          this.answerOpenToolCalls(stepStartSeq, error)
+          throw error
         } finally {
           this.session.append('step/end', { turn, step })
         }
@@ -418,11 +473,9 @@ export class Agent {
         target = 'next-step'
       }
     } catch (error: unknown) {
-      if (signal.aborted) {
-        turnEnds = {
-          kind: 'aborted',
-          reason: signal.reason as AgentCancelCause,
-        }
+      const cause = abortedCancelCause(signal)
+      if (cause !== undefined) {
+        turnEnds = { kind: 'aborted', reason: cause }
         throw error
       }
       turnEnds = {
@@ -447,6 +500,34 @@ export class Agent {
     return true
   }
 
+  /**
+   * A step that throws must not leave assistant tool calls without results:
+   * the next request would replay them dangling and strict providers reject
+   * the whole transcript. Calls that never got a `tool/call` are answered as
+   * not started; started ones as outcome unknown (the crash-repair results).
+   */
+  private answerOpenToolCalls(stepStartSeq: number, cause: unknown): void {
+    const recovery = new ToolCallRecovery()
+    for (const event of this.session.events.slice(stepStartSeq))
+      recovery.observe(event)
+    try {
+      for (const result of recovery.results(this.session.seq, Date.now())) {
+        this.session.append('tool/result', result.data, {
+          surfaceOp: 'append',
+          ...(result.sourceEventSeqs === undefined
+            ? {}
+            : { sourceEventSeqs: result.sourceEventSeqs }),
+        })
+      }
+    } catch (recoveryError: unknown) {
+      throw new AggregateError(
+        [cause, recoveryError],
+        'step failed and its open tool calls could not be answered',
+        { cause },
+      )
+    }
+  }
+
   private async step(assembly: PromptAssembly): Promise<StepEndReason | null> {
     if (this.phase.kind !== 'running')
       throw new Error(`agent "${this.id}": step outside running phase`)
@@ -463,7 +544,6 @@ export class Agent {
         step,
         assembly.tools,
         system,
-        this.session.deriveMessages(),
         signal,
       )
       const assembler = new BlockAssembler()
@@ -561,7 +641,7 @@ export class Agent {
           block.type === 'tool-call',
       )
       if (toolCalls.length === 0) return { kind: 'completed' }
-      const { concluded } = await executeToolCalls(
+      const { concluded, conclusion } = await executeToolCalls(
         {
           agent: this,
           tools: this.deps.tools,
@@ -577,7 +657,8 @@ export class Agent {
         },
         toolCalls,
       )
-      return concluded ? { kind: 'completed' } : null
+      if (!concluded) return null
+      return { kind: conclusion ?? 'completed' }
     }
   }
 
@@ -586,13 +667,11 @@ export class Agent {
     step: number,
     tools: ToolSchema[],
     system: string,
-    messages: Message[],
     signal: AbortSignal,
   ): { request: GenerateOptions; prepared?: PreparedLlmCall } {
     const session = this.session
     const persisted = session.requestHeader()
-    const base =
-      this.options.callConfig?.() ?? this.deps.llm.defaultCallConfig()
+    const base = this.proposedCallConfig()
     // A resumed session keeps its explicitly chosen effort while the route is unchanged.
     const reasoningEffort =
       persisted?.config.provider === base.provider &&
@@ -654,6 +733,16 @@ export class Agent {
       ...(contextWindow === undefined ? {} : { contextWindow }),
     }
     const previous = session.requestContext()
+    // A different model takes over from here (the user switched, or a
+    // fallback): say so in the log, so the model knows earlier replies were
+    // another model's. The first request of a session has nothing to compare.
+    if (previous !== undefined && previous.model !== requestContext.model) {
+      session.append(
+        'user/message',
+        modelSwitchNotice(previous.model, requestContext.model),
+        { surfaceOp: 'append' },
+      )
+    }
     if (
       previous?.provider !== requestContext.provider ||
       previous.model !== requestContext.model ||
@@ -664,7 +753,7 @@ export class Agent {
     signal.throwIfAborted()
     const request: GenerateOptions = {
       ...header.config,
-      messages,
+      messages: session.deriveMessages(),
       ...(header.system !== undefined ? { system: header.system } : {}),
       ...(header.tools !== undefined ? { tools: header.tools } : {}),
       sessionId: session.id,

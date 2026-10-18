@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：希望扩展 Agent 能力的用户<br>
-> 最后核验：2026-09-30<br>
+> 最后核验：2026-10-19<br>
 > 事实源：`packages/core/src/harness/host/host.ts`（`compose()`）、`packages/core/src/harness/tools/builtin/`（含 `skill-manage.ts`、`mcp-config.ts`）、`packages/core/src/harness/workflow/`、`packages/core/src/skills/`、`packages/core/src/plugins/`、`packages/core/src/mcp/`、`desktop/src/renderer/src/components/pages/capabilities/`、`desktop/src/renderer/src/components/pages/explore/`、`desktop/src/renderer/src/components/settings/`（插件 / Skills / MCP / 工具分区组件）
 
 Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资源包；Plugin 是带来源、版本和启用状态的 Skill 分发单元；MCP 把外部 server 暴露的工具接入 Agent。
@@ -28,7 +28,7 @@ Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资�
 
 - **文件**：`write` 与 `edit` 受当前权限预设的写入范围约束，超出范围时可以为单次调用请求批准。`read` 不受写入沙箱限制。
 - **搜索**：`grep` 优先使用受管执行环境中的 ripgrep，找不到时使用内置的纯 JS 实现；`glob` 与 `grep` 的超大结果会把完整结果保存到本地。
-- **命令**：`bash` 在 macOS / Linux 的系统沙箱中执行，工作目录固定为当前 workspace；有默认超时，`run_in_background: true` 时立即返回 job id，由 `job_*` 工具读取输出或停止。没有沙箱后端的平台只有 `danger-full-access` 才能运行 `bash`。
+- **命令**：`bash` 在 macOS / Linux 的系统沙箱中执行，工作目录固定为当前 workspace；有默认超时，`run_in_background: true` 时立即返回 job id，由 `job_*` 工具读取输出或停止。工具说明要求模型先写一句命令用途（`description`）再写命令，界面因此能在命令生成时就显示它要做什么；删除或移动文件前，模型会被要求先核对解析后的绝对路径，变量写成 `${VAR:?}`，避免空变量把路径变成上级目录。没有沙箱后端的平台只有 `danger-full-access` 才能运行 `bash`。
 - **子代理**：`subagent` 在独立上下文中完成一个自足的子任务；`subagent_fork` 的子代理继承当前对话已完成的部分。两者默认在后台运行，完成时通知主 Agent；子代理最多嵌套 3 层，不能请求提权。
 - **编排**：只在明确要求工作流或 Ralph 循环时使用。`workflow` 运行模型编写的 JavaScript 编排脚本，脚本里的 `agent()` 会启动真实子代理（在对话的工具卡片下流式显示）；`ralph` 以同一目标反复启动全新子代理，每轮只传递一份有界的结构化交接，默认最多 64 轮。两者都在前台运行，调用返回时整个运行已结束；运行期间环境信息卡的「后台任务」行显示运行数量，展开后可以查看运行记录或单独停止它（会先确认）；停止当前 turn 也会同时取消运行。
 - **记忆**：`memory_edit` 修改用户档案、全局长期记忆或当前项目的私有记忆，不需要审批。

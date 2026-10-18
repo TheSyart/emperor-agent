@@ -1198,7 +1198,10 @@ export function useRuntime(options: {
       case 'turn_phase':
         if (data.phase === 'started') busy.value = true
         return true
+      // assistant_reset: a retried request dropped its partial reply; the
+      // transcript already discards it from the raw log (nodes/assistant.ts).
       case 'message_delta':
+      case 'assistant_reset':
       case 'agent_thought':
       case 'tool_call':
       case 'tool_run_started':

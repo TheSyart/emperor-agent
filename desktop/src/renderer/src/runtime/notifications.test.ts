@@ -227,7 +227,8 @@ describe('runtime events → notices', () => {
         1,
       ),
     ).toMatchObject({ outcome: 'error' })
-    for (const reason of ['aborted', 'interrupted'])
+    // The user stopped it, or dismissed the plan review to speak: not news.
+    for (const reason of ['aborted', 'interrupted', 'plan-dismissed'])
       expect(
         runtimeNoticeFromEvent(
           { event: 'assistant_done', seq: 1, stop_reason: reason } as WsEvent,

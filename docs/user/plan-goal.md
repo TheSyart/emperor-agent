@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：需要控制权限、审阅方案或持续推进任务的用户<br>
-> 最后核验：2026-09-22<br>
+> 最后核验：2026-10-19<br>
 > 事实源：`packages/core/src/harness/approval/presets.ts`、`packages/core/src/harness/sandbox/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/goal/`、`packages/core/src/commands/builtins.ts`
 
 权限预设决定 Agent 能写哪里；Plan（规划模式）决定 Agent 先提方案还是直接动手；Goal（目标）让 Agent 在你不再输入时继续推进同一个目标。三者可以组合使用。
@@ -37,7 +37,7 @@
 - 计划出现在底部审阅面板，有两个选择：
   - **Approve**：退出 Plan 模式，Agent 从下一步开始执行计划；
   - **Keep planning**：留在 Plan 模式，你写下的意见会交给 Agent 修改计划后重新提交。
-- 取消审阅或审阅不可用时仍停留在 Plan 模式。
+- 取消审阅时仍停留在 Plan 模式，本轮随即结束，等你输入自己的意见；审阅不可用时同样停留在 Plan 模式。
 - Plan 模式通过提示词约束 Agent，工具列表不变；实际能否写入仍由当前权限预设决定。想确保规划阶段不会改动文件，可以同时切换到 `read-only`。
 - Agent 运行中切换 Plan 模式时，切换会在下一个步骤边界生效。
 

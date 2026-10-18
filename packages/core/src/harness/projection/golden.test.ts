@@ -1,7 +1,7 @@
 /**
  * Projection golden: one real HarnessHost turn (reasoning, text, a shell tool
- * call, an answered ask_user_question, final text) projected from the session
- * log. The normalized events are the shared fixture the renderer's
+ * call, an answered ask_user_question, a final answer whose first attempt
+ * fails mid-stream and is retried) projected from the session log. The normalized events are the shared fixture the renderer's
  * chatProjection golden test consumes, so a projector change that the
  * renderer has not absorbed fails on one side or the other.
  *
@@ -107,6 +107,19 @@ describe('projection golden', () => {
           },
         ],
       },
+      // The final answer's first attempt breaks off mid-stream: its text is
+      // dropped (assistant_reset) and the retry streams the real answer.
+      [
+        { type: 'block-start', index: 0, blockType: 'text' },
+        { type: 'text-delta', index: 0, text: 'Blu' },
+        {
+          type: 'finish',
+          reason: {
+            kind: 'error',
+            failure: { message: 'socket closed', code: 'TRANSPORT' },
+          },
+        },
+      ],
       () => replyChunks({ text: 'Blue it is.' }),
     ])
     const ref: { host?: HarnessHost } = {}

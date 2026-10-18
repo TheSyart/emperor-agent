@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、维护者<br>
-> 最后核验：2026-09-22<br>
+> 最后核验：2026-10-19<br>
 > 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/agent/`、`packages/core/src/session-log/`、`packages/core/src/llm/`、`packages/core/src/harness/compaction/`、`packages/core/src/mcp/`、`packages/core/src/skills/`
 
 Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript 实现，采用 deepseek-harness standard 模式的语义，但不含插件框架：各子系统在 `HarnessHost.compose()` 中把自己的处理函数压入有序的 middleware 数组。`HarnessHost` 是唯一组合根，每个 session 持有一个 `Agent`。
@@ -31,7 +31,7 @@ Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript �
 | MCP 工具桥                        | `harness/host/mcp-tools.ts`    |
 | Scheduler 执行器                  | `harness/host/scheduler.ts`    |
 
-系统提示词由 `templates/agent/persona.md` 与各子系统登记的 prompt section 组成；persona 之后固定有一段文件链接说明（`links`），让模型把希望用户点开的文件写成 Markdown 链接（可读名称加路径），对话里显示为带类型图标的链接。提示词本身保持稳定，以维持 provider 前缀缓存；会变化的运行时信息（沙箱与审批策略、Plan 模式、Goal、委派说明）以 `form: 'snapshot'` 的上下文消息进入 log，只在内容变化时追加。
+系统提示词由 `templates/agent/persona.md` 与各子系统登记的 prompt section 组成；persona 之后固定有一段文件链接说明（`links`），让模型把希望用户点开的文件写成 Markdown 链接（可读名称加路径），对话里显示为带类型图标的链接。提示词本身保持稳定，以维持 provider 前缀缓存；persona 不写当前模型和工作目录，这两项与其他会变化的运行时信息（沙箱与审批策略、Plan 模式、Goal、委派说明）一起以 `form: 'snapshot'` 的上下文消息进入 log，只在内容变化时追加，所以切换模型不会改写提示词前缀。
 
 Pre-step middleware 的顺序是：工作区说明（AGENTS.md / CLAUDE.md）、长期记忆、Skill 目录、插件引用、压缩、重复调用提醒、Hooks，Plan 模式与 Goal 在各自 install 时加入。请求失败时 `retryMiddleware()` 负责按 route 的重试策略重试。
 
@@ -50,7 +50,8 @@ turn/end
 - **Followup / steer**：普通提交是 followup（排队到 `next-turn`）；运行中的插话是 steer（进入 `next-step`）。`chat.manageQueuedPrompt` 的 `interject` 把排队项提升到 `next-step`，`cancel` 移除尚未开始的项。
 - **没有最大步数**：内核不限制 step 数。turn-stopping middleware（例如 Hooks 的 Stop）可以追加一步。
 - **回合改动记录**：根会话的 turn 改过文件时，宿主在 `turn/end` 之后追加一条 `turn/files`；撤销这一轮时追加 `turn/files-reverted`。两者都不进入模型请求，做法见 [IPC 与运行时事件](ipc-and-runtime-events.md#项目工作台-ipc)。
-- **取消**：`chat.stopRuntime` 或 `/stop` 取消当前 turn，并清理该 session 的待处理交互和子代理；由提交方 AbortSignal 触发的取消会保留 inbox。
+- **取消**：`chat.stopRuntime` 或 `/stop` 取消当前 turn，并清理该 session 的待处理交互和子代理；由提交方 AbortSignal 触发的取消会保留 inbox。`turn/end` 只记录取消原因本身的字段（`kind`，Hook 取消另带 `reason`），传输层事后附加在 abort reason 上的内容（例如 Node fetch 写入的 `stack`）不会进入 log。
+- **`turn/end` 原因**：`completed`、`aborted`、`blocked`、`error`、`max-tokens`、`interrupted`（崩溃修复补写）、`plan-dismissed`（用户关闭 Plan 审阅）。
 
 ## 模型调用
 
@@ -58,15 +59,16 @@ turn/end
 
 - `llm/catalog.ts` 是 Provider catalog，只描述访问方式（协议、默认 API Base、模型发现、reasoning 适配），不内嵌模型清单。
 - `llm/route.ts` 的 `routeFromEntry()` 把条目解析为 `RouteSpec`。Provider 为 `deepseek` 时使用内置 fetch + SSE 适配器，其余 `openai` / `anthropic` 协议使用 pi-ai 适配器。
+- 流式工具调用的 `id` 与 `name` 只取第一次出现的非空值：部分 OpenAI 兼容网关会在后续 delta 里重复发送空串或 `null`，DeepSeek 适配器、pi-ai 适配层、`BlockAssembler` 以及 renderer 的 Chat 与 Trajectory 折叠都不会用它们覆盖已有的值。
 - `llm/retry-policy.ts`：默认对 `EMPTY_RESPONSE`、`RATE_LIMIT`、`SERVER`、`TIMEOUT`、`TRANSPORT` 最多重试 5 次，指数退避 500 ms 到 10 s、±10% 抖动；不大于上限的 provider Retry-After 会替换本地延迟。每次重试写入 `llm/retry` 事件。
 
-全局只激活一个模型。`model_config.json` 中默认关闭的执行策略由 `harness/agent/model-policy.ts` 执行：备用模型是排在重试 middleware 之后的 request-error handler，重试用尽且错误类型命中触发条件时写入 `llm/fallback`，本轮剩余请求改用备用条目，下一轮回到主模型；每轮成本上限是 pre-step handler，累计本轮已计价用量达到上限后拒绝下一个 step（`llm/cost-cap`）。
+全局只激活一个模型。`model_config.json` 中默认关闭的执行策略由 `harness/agent/model-policy.ts` 执行：备用模型是排在重试 middleware 之后的 request-error handler，重试用尽且错误类型命中触发条件时写入 `llm/fallback`，本轮剩余请求改用备用条目，下一轮回到主模型；每轮成本上限是 pre-step handler，累计本轮已计价用量达到上限后拒绝下一个 step（`llm/cost-cap`）。请求的模型与上一次请求不同（用户切换了模型、备用模型接手或下一轮回到主模型）时，Agent 在这次请求之前写入一条 `model-switch` 上下文通知，告诉模型“本步起由 X 模型继续，之前的回复来自 Y”；会话的第一次请求不写。
 
 ## 工具执行
 
-`ToolRegistry.prepare()` 对单次调用依次执行：参数校验 → pre-execute middleware（取最严格的 allow / ask / deny）→ 需要时审批 → guard → 在超时内执行工具体 → post-execute middleware → 结果观察者。任何失败都变成模型可读的错误结果，不会抛到循环外。
+`ToolRegistry.prepare()` 对单次调用依次执行：参数校验 → pre-execute middleware（取最严格的 allow / ask / deny）→ 需要时审批 → guard → 在超时内执行工具体 → post-execute middleware → 结果观察者。任何失败都变成模型可读的错误结果，不会抛到循环外。工具体无论有没有超时都与调用的取消信号竞速：Stop 之后即使工具体不理会取消，调用也立即得到 `ABORTED` 结果；工具体真正结束之前，它持有的工作区租约不会释放。
 
-`harness/agent/tool-calls.ts` 按模型顺序分组：连续的并发安全调用共享一个滚动池（默认最多 10 个并行），非并发安全调用单独执行并形成屏障；`tool/call` 事件和 pre-execute 按模型顺序发生，只有工具体重叠，post-execute 与 `tool/result` 严格按模型顺序提交。中止时尚未开始的调用得到合成的 `ABORTED_BEFORE_DISPATCH` 结果，保证每个调用都有结果。
+`harness/agent/tool-calls.ts` 按模型顺序分组：连续的并发安全调用共享一个滚动池（默认最多 10 个并行），非并发安全调用单独执行并形成屏障；`tool/call` 事件和 pre-execute 按模型顺序发生，只有工具体重叠，post-execute 与 `tool/result` 严格按模型顺序提交。中止时尚未开始的调用得到合成的 `ABORTED_BEFORE_DISPATCH` 结果，保证每个调用都有结果。step 因内部故障抛错时（例如结果无法写入 log），所有还没有结果的调用在 `step/end` 之前补写错误结果：已记录 `tool/call` 的写 `TOOL_OUTCOME_UNKNOWN`（结果未知，只有只读或幂等的操作才应重试），从未开始的写 `TOOL_NOT_STARTED`；这与崩溃修复使用同一组结果（`session-log/repair.ts` 的 `ToolCallRecovery`），下一次请求因此不会带着悬空的工具调用。
 
 Post-execute 固定包含重复调用提醒（相同工具与参数连续出现时追加提示，不否决调用）、Hooks 的 PostToolUse，以及最后执行的大结果落盘：纯文本结果超过 50,000 字节时，完整文本写入 `stateRoot/spill/`，模型只看到首尾预览和文件路径。`read` 不参与落盘；界面可以通过 `tools.readResult` 读取落盘全文。
 
@@ -74,7 +76,7 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 
 ## 交互阻塞在工具调用内
 
-`ask_user_question`、`exit_plan_mode` 的审阅和一次性提权审批都在工具调用内部等待，没有“暂停 turn 再恢复”的机制。`PendingInteractions` 把等待中的请求投影到 `control.pending`，renderer 通过 `control.answerInteraction`、`control.approvePlan`、`control.commentPlan` 或 `control.cancelInteraction` 回答。turn 被中止时等待自动以 `cancelled` 结束；应答通道不可用时以 `unavailable` 结束（fail closed）。
+`ask_user_question`、`exit_plan_mode` 的审阅和一次性提权审批都在工具调用内部等待，没有“暂停 turn 再恢复”的机制。`PendingInteractions` 把等待中的请求投影到 `control.pending`，renderer 通过 `control.answerInteraction`、`control.approvePlan`、`control.commentPlan` 或 `control.cancelInteraction` 回答。turn 被中止时等待自动以 `cancelled` 结束；应答通道不可用时以 `unavailable` 结束（fail closed）。用户关闭 Plan 审阅（改为自己输入）时，`exit_plan_mode` 返回成功结果并声明结束本 turn，`turn/end` 原因为 `plan-dismissed`，不再为等待用户多请求一次模型。
 
 ## 压缩
 

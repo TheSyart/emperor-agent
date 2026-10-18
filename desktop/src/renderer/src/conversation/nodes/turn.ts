@@ -196,7 +196,9 @@ function sumUsage(readings: Iterable<StepReading>): TurnUsage {
 function tailData(state: TurnTailState): TurnTailChatData | null {
   const end = state.end?.event
   if (end === undefined || !isEvent(end, 'turn/end')) return null
-  if (end.data.reason.kind !== 'completed') return null
+  // A turn the user ended by dismissing the plan review finished its steps normally.
+  const kind = end.data.reason.kind
+  if (kind !== 'completed' && kind !== 'plan-dismissed') return null
   // No settled assistant step in the window: nothing to summarize.
   if (![...state.steps.values()].some((step) => step.completedTime !== null))
     return null

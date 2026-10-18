@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：桌面端与 Core 开发者<br>
-> 最后核验：2026-10-15<br>
+> 最后核验：2026-10-19<br>
 > 事实源：`packages/core/src/api/operations.ts`、`desktop/src/main/core-host.ts`、`desktop/src/main/ipc.ts`、`desktop/src/preload/`、`packages/core/src/harness/projection/`、`packages/core/src/session-log/history.ts`、`packages/core/src/harness/host/session-views.ts`、`packages/core/src/public/runtime-contract.ts`、`desktop/src/shared/ipc-contract.ts`、`desktop/src/main/desktop-capability-ipc.ts`、`desktop/src/main/browser-view.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/preload/desktop-capabilities.ts`、`desktop/src/main/event-bridge.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/conversation/`、`desktop/src/renderer/src/runtime/`
 
 Electron renderer 不直接导入 Core，也不访问本地文件。同步请求走 preload 的 Core IPC contract；异步过程分两条管线：Chat 与 Trajectory 渲染所需的原始 session 事件走独立的 session event 通道，其余状态走 runtime events（UiEvent）。
@@ -131,6 +131,8 @@ Trajectory（`desktop/src/renderer/src/trajectory/model/`）复用同一个 asse
 2. Host 另外发送不来自 log 的事件（Scheduler、MCP、环境、Skill 目录、会话创建与标题、Git receipt、子代理转发等），这些事件 `seq` 为 0，不参与重放。例如 `SkillChangeDetector` 发现 Skill 文件夹变化后发送 `skill_catalog_changed`（带 `catalog_version`），renderer 随之重新拉取 `skills.list`。
 3. Main 的 event bridge 把事件推给 renderer；renderer 在边界用 `isRuntimeEventWire` 拒绝名单外的事件。
 4. 刷新或重启时，bootstrap 与 `runtime.replay`（`format: 'projection'`，可带 `afterSeq` 与 `limit`）用同一折叠重放整份 log，因此 live 与 replay 的时间线一致，renderer 按 session + seq 去重。
+
+流式文本以 `message_delta` 逐段发出，turn 结束时 `assistant_done.content` 给出本 turn 的完整回复。一次请求中途失败并被重新请求（log 中出现 `llm/retry` 或 `llm/fallback`）时，这次尝试已发出的文本不属于最终回复：投影丢弃它，并在有文本被丢弃时发出 `assistant_reset { content }`，`content` 是丢弃后本 turn 已有的回复文本；之后的 `message_delta` 接在它后面，`assistant_done.content` 不含失败尝试的文本。Renderer 的 Chat 时间线本来就从原始 log 渲染并在重试时丢弃失败尝试，`assistant_reset` 在 UiEvent 管线里只算作运行中的事件；ACP 没有撤回已发文本的手段，客户端会先看到失败尝试的片段和一条重试提示，再看到新的回复。
 
 在 UiEvent 管线中，子代理 session 的事件不直接推给界面，而是转发到根 session，成为 `subagent_*` 事件。打开子会话的 Chat 视图时，renderer 通过 `sessions.watch` 直接订阅该子会话的原始事件。
 

@@ -627,6 +627,45 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(runtime.pendingInteractionsBySession.s1?.id).toBe('ask_q1')
   })
 
+  it('keeps the turn busy, without an error, when a retried request resets the streamed reply', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        if (args[0] === 'chat.submit') {
+          for (const event of [
+            { event: 'turn_phase', seq: 17, phase: 'started' },
+            { event: 'message_delta', seq: 33, delta: 'Half an ans' },
+            { event: 'assistant_reset', seq: 49, content: '' },
+          ])
+            emitCoreEvent(listener, {
+              ...event,
+              session_id: 's1',
+              turn_id: 's1:1',
+            })
+          return new Promise(() => {})
+        }
+        return { ok: true }
+      },
+      onCoreEvent: (cb: (event: unknown) => void) => {
+        listener = cb
+        return () => {
+          listener = null
+        }
+      },
+    })
+    const options = testOptions()
+    const runtime = useRuntime(options)
+
+    runtime.switchSession('s1')
+    expect(runtime.sendMessage('go')).toBeInstanceOf(Promise)
+    await flushPromises()
+
+    expect(options.showToast).not.toHaveBeenCalledWith(
+      expect.stringContaining('出错了'),
+    )
+    expect(runtime.busy.value).toBe(true)
+  })
+
   it('does not surface an error when a stopped chat turn rejects as cancelled', async () => {
     g.window = fakeWindow({
       invokeCore: async (...args: unknown[]) => {

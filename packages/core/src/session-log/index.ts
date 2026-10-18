@@ -18,6 +18,7 @@ export {
 } from './request-header'
 export {
   interruptedTurnClosers,
+  ToolCallRecovery,
   TOOL_NOT_STARTED,
   TOOL_OUTCOME_UNKNOWN,
 } from './repair'

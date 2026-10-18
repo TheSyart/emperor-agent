@@ -109,6 +109,8 @@ export class SessionProjector {
   private readonly questions = new Map<string, InteractionPayload>()
   private readonly grants = new Map<string, InteractionPayload>()
   private turnText = ''
+  /** `turnText` length when the current request attempt started. */
+  private attemptTextStart = 0
   private contextWindow: number | undefined
   private model: string | undefined
   private provider: string | undefined
@@ -172,6 +174,7 @@ export class SessionProjector {
       case 'step/start':
         this.step = event.data.step
         this.reasoning.clear()
+        this.attemptTextStart = this.turnText.length
         break
       case 'user/message': {
         // Admitted goal rounds advance `roundsStarted`; later goal changes are validated against it.
@@ -433,6 +436,7 @@ export class SessionProjector {
         })
         break
       case 'llm/retry':
+        this.discardAttempt(emit)
         emit('agent_thought', {
           thought_id: `retry:${event.data.retryId}`,
           stage: 'retry',
@@ -452,6 +456,7 @@ export class SessionProjector {
         })
         break
       case 'llm/fallback':
+        this.discardAttempt(emit)
         emit('agent_thought', {
           thought_id: `fallback:${event.data.fallbackId}`,
           stage: 'retry',
@@ -613,6 +618,20 @@ export class SessionProjector {
         break
     }
     return out
+  }
+
+  /**
+   * A failed request attempt is re-requested (retry or fallback): the text it
+   * streamed never becomes part of the reply. Drop it from the turn text and
+   * tell consumers (`assistant_reset` carries the turn's text so far).
+   */
+  private discardAttempt(
+    emit: (name: string, payload?: Record<string, unknown>) => void,
+  ): void {
+    this.reasoning.clear()
+    if (this.turnText.length <= this.attemptTextStart) return
+    this.turnText = this.turnText.slice(0, this.attemptTextStart)
+    emit('assistant_reset', { content: this.turnText })
   }
 
   /** Current goal snapshot for the UI (null when none). */

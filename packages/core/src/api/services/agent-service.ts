@@ -237,7 +237,11 @@ export class CoreAgentService {
         }
         if (e.type === 'turn/end') {
           stopReason =
-            e.data.reason.kind === 'blocked' ? 'refusal' : e.data.reason.kind
+            e.data.reason.kind === 'blocked'
+              ? 'refusal'
+              : e.data.reason.kind === 'plan-dismissed'
+                ? 'completed'
+                : e.data.reason.kind
           phase = settledPhase(stopReason)
         }
       }

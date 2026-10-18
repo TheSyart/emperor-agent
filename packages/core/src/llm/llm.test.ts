@@ -281,6 +281,67 @@ describe('pi-ai toStreamChunks', () => {
     })
   })
 
+  it('carries a tool call identity that arrives after toolcall_start, and never blanks it', async () => {
+    // OpenAI-compatible gateways may open a call before its id/name arrive;
+    // pi-ai fills them into the partial on a later delta.
+    const opening = piMessage({
+      content: [{ type: 'toolCall', id: '', name: '', arguments: {} }],
+    })
+    const identified = piMessage({
+      content: [{ type: 'toolCall', id: 't9', name: 'read', arguments: {} }],
+    })
+    const chunks = await collect(
+      toStreamChunks(
+        piEvents(
+          { type: 'toolcall_start', contentIndex: 0, partial: opening },
+          {
+            type: 'toolcall_delta',
+            contentIndex: 0,
+            delta: '{"path":',
+            partial: identified,
+          },
+          {
+            type: 'toolcall_delta',
+            contentIndex: 0,
+            delta: '"a"}',
+            partial: opening,
+          },
+          {
+            type: 'toolcall_end',
+            contentIndex: 0,
+            toolCall: {
+              type: 'toolCall',
+              id: '',
+              name: '',
+              arguments: { path: 'a' },
+            },
+            partial: opening,
+          },
+          {
+            type: 'done',
+            reason: 'toolUse',
+            message: piMessage({ content: [], stopReason: 'toolUse' }),
+          },
+        ),
+      ),
+    )
+    const deltas = chunks.filter((chunk) => chunk.type === 'tool-call-delta')
+    expect(deltas.map((chunk) => [chunk.id, chunk.name])).toEqual([
+      ['t9', 'read'],
+      ['t9', 'read'],
+    ])
+    expect(chunks.find((chunk) => chunk.type === 'block-end')).toEqual({
+      type: 'block-end',
+      index: 0,
+      block: {
+        type: 'tool-call',
+        id: 't9',
+        name: 'read',
+        arguments: '{"path":"a"}',
+      },
+    })
+  })
+
   it('classifies in-stream errors', async () => {
     const chunks = await collect(
       toStreamChunks(

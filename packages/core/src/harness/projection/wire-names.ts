@@ -12,6 +12,7 @@ export const RUNTIME_EVENT_NAMES = [
   'ask_answered',
   'ask_request',
   'assistant_done',
+  'assistant_reset',
   'context_usage',
   'delegation_created',
   'delegation_run_changed',

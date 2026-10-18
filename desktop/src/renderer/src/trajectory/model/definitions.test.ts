@@ -174,6 +174,38 @@ describe('Trajectory conversation Definitions', () => {
     ])
   })
 
+  it('keeps a streaming tool call name when a later delta carries an empty one', () => {
+    const chunk = (seq: number, value: unknown) =>
+      at(seq, 'assistant/chunk', { turn: 1, step: 1, chunk: value })
+    const value = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'step/start', { turn: 1, step: 1 }),
+      chunk(3, { type: 'block-start', index: 0, blockType: 'tool-call' }),
+      chunk(4, {
+        type: 'tool-call-delta',
+        index: 0,
+        id: 'c1',
+        name: 'bash',
+        argumentsDelta: '{"command":',
+      }),
+      chunk(5, {
+        type: 'tool-call-delta',
+        index: 0,
+        id: '',
+        name: '',
+        argumentsDelta: '"ls"}',
+      }),
+    ])
+    expect(snapshot(value).partial?.blocks).toEqual([
+      {
+        kind: 'tool-call',
+        callId: 'c1',
+        name: 'bash',
+        argsRaw: '{"command":"ls"}',
+      },
+    ])
+  })
+
   it('classifies a cancellation-finalized prefix as an interrupted request result', () => {
     const current = snapshot(
       assembler([

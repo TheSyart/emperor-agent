@@ -7,6 +7,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { LlmClient } from '../../llm/client'
+import { messageText } from '../../llm/message'
+import type { RouteSpec } from '../../llm/route'
 import type { GenerateOptions } from '../../llm/types'
 import type { SandboxBackend } from '../sandbox/backend'
 import {
@@ -34,7 +36,10 @@ const passthroughBackend: SandboxBackend = {
   }),
 }
 
-async function makeHost(replies: ScriptedReply[] = []): Promise<{
+async function makeHost(
+  replies: ScriptedReply[] = [],
+  options: { templatesDir?: string; route?: Partial<RouteSpec> } = {},
+): Promise<{
   host: HarnessHost
   adapter: ScriptedAdapter
   events: Array<Record<string, unknown>>
@@ -48,10 +53,13 @@ async function makeHost(replies: ScriptedReply[] = []): Promise<{
       assertRequestInvariant(request, (id) => ref.host?.sessionLog(id))
     },
   })
-  llm.setRoutes([testRoute()], 'test-route')
+  llm.setRoutes([testRoute(options.route)], 'test-route')
   const events: Array<Record<string, unknown>> = []
   const host = await HarnessHost.create({
     root,
+    ...(options.templatesDir === undefined
+      ? {}
+      : { templatesDir: options.templatesDir }),
     stateRoot: join(root, 'home'),
     stateRootSource: 'explicit',
     emperorHomePrepared: false,
@@ -75,7 +83,61 @@ async function waitFor(check: () => boolean, timeoutMs = 3000): Promise<void> {
   }
 }
 
+/** The repository's shipped prompt templates (persona.md). */
+const REPO_TEMPLATES = join(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  '..',
+  '..',
+  'templates',
+)
+
 describe('HarnessHost', () => {
+  it('keeps the model and working directory out of the system prompt prefix', async () => {
+    const one = await makeHost([{ text: 'one' }], {
+      templatesDir: REPO_TEMPLATES,
+    })
+    const two = await makeHost([{ text: 'two' }], {
+      templatesDir: REPO_TEMPLATES,
+      route: { modelId: 'other-model' },
+    })
+    const fallback = await makeHost([{ text: 'three' }])
+    const requests: GenerateOptions[] = []
+    for (const { host, adapter } of [one, two, fallback]) {
+      const entry = host.kept.sessionStore.create('t', { mode: 'chat' })
+      await host.submit({ sessionId: entry.id, content: 'hi' })
+      requests.push(adapter.requests[0]!)
+    }
+    const [a, b, c] = requests as [
+      GenerateOptions,
+      GenerateOptions,
+      GenerateOptions,
+    ]
+    const prefix = (request: GenerateOptions) =>
+      Buffer.from(request.system ?? '').subarray(0, 200)
+    expect(a.system).toMatch(/^You are Emperor Agent/)
+    expect(prefix(a).equals(prefix(b))).toBe(true)
+    for (const [request, model, host] of [
+      [a, 'test-model', one.host],
+      [b, 'other-model', two.host],
+      [c, 'test-model', fallback.host],
+    ] as const) {
+      const cwd = host.chatWorkspace()
+      expect(request.system).not.toContain(cwd)
+      expect(request.system).not.toContain(model)
+      // Both facts reach the model through the runtime-context snapshot.
+      const context = request.messages.find(
+        (message) =>
+          message.source.kind === 'context' &&
+          message.source.producer === 'runtime-context',
+      )
+      expect(context && messageText(context)).toContain(JSON.stringify(cwd))
+      expect(context && messageText(context)).toContain(model)
+    }
+  })
+
   it('runs a turn and streams the projected timeline', async () => {
     const { host, adapter, events } = await makeHost([
       { text: 'Hello from Emperor' },
@@ -249,6 +311,50 @@ describe('HarnessHost', () => {
     await second
     expect(events.some((event) => event.event === 'plan_approved')).toBe(true)
     expect(host.controlPayload(entry.id).plan).toBe(false)
+  })
+
+  it('ends the turn when the user dismisses the plan review, without another model request', async () => {
+    const { host, adapter, events } = await makeHost([
+      {
+        tools: [
+          {
+            id: 'p1',
+            name: 'exit_plan_mode',
+            args: { plan: '# Do the thing\n- step' },
+          },
+        ],
+      },
+      // Consumed only if the dismissal regresses to another model request.
+      { text: 'Waiting for your message.' },
+    ])
+    const entry = host.kept.sessionStore.create('t', { mode: 'chat' })
+    host.setPlanMode(entry.id, true)
+    const submitted = host.submit({ sessionId: entry.id, content: 'plan it' })
+    await waitFor(() => events.some((event) => event.event === 'plan_draft'))
+    const plan = events.find((event) => event.event === 'plan_draft')!
+      .interaction as { id: string }
+    host.cancelInteraction(plan.id)
+    await submitted
+    expect(adapter.requests).toHaveLength(1)
+    const log = host.sessionLog(entry.id)!
+    expect(log.lastOf('turn/end')?.data.reason).toEqual({
+      kind: 'plan-dismissed',
+    })
+    const result = log.lastOf('tool/result')!
+    expect(result.data.message.content[0]).toMatchObject({
+      isError: false,
+      content: [
+        {
+          type: 'text',
+          text: 'The user dismissed the plan review to reply in their own words; plan mode remains active.',
+        },
+      ],
+    })
+    expect(result.data.meta).toMatchObject({ approved: false, dismissed: true })
+    expect(host.controlPayload(entry.id).plan).toBe(true)
+    expect(
+      events.find((event) => event.event === 'assistant_done'),
+    ).toMatchObject({ stop_reason: 'plan-dismissed' })
   })
 
   it('announces queued prompts entering and leaving the inbox', async () => {

@@ -317,7 +317,7 @@
     "turn_id": "<session>:1"
   },
   {
-    "delta": "Blue",
+    "delta": "Blu",
     "event": "message_delta",
     "seq": 737,
     "ts": 0,
@@ -325,9 +325,50 @@
     "turn_id": "<session>:1"
   },
   {
+    "content": "Checking.",
+    "event": "assistant_reset",
+    "seq": 769,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "thought_id": "retry:<id3>",
+    "stage": "retry",
+    "label": "模型请求重试",
+    "status": "running",
+    "source": "core",
+    "summary": "socket closed（第 1/2 次，1ms 后）",
+    "event": "agent_thought",
+    "seq": 770,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "thought_id": "retry:<id3>",
+    "stage": "retry",
+    "label": "模型请求重试",
+    "status": "done",
+    "source": "core",
+    "event": "agent_thought",
+    "seq": 785,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
+    "delta": "Blue",
+    "event": "message_delta",
+    "seq": 817,
+    "ts": 0,
+    "session_id": "<session>",
+    "turn_id": "<session>:1"
+  },
+  {
     "delta": " it ",
     "event": "message_delta",
-    "seq": 753,
+    "seq": 833,
     "ts": 0,
     "session_id": "<session>",
     "turn_id": "<session>:1"
@@ -335,7 +376,7 @@
   {
     "delta": "is.",
     "event": "message_delta",
-    "seq": 769,
+    "seq": 849,
     "ts": 0,
     "session_id": "<session>",
     "turn_id": "<session>:1"
@@ -349,7 +390,7 @@
     "model": "test-model",
     "model_entry_id": "test-route",
     "event": "context_usage",
-    "seq": 833,
+    "seq": 913,
     "ts": 0,
     "session_id": "<session>",
     "turn_id": "<session>:1"
@@ -358,7 +399,7 @@
     "content": "Checking.Blue it is.",
     "stop_reason": "completed",
     "event": "assistant_done",
-    "seq": 865,
+    "seq": 945,
     "ts": 0,
     "session_id": "<session>",
     "turn_id": "<session>:1"
