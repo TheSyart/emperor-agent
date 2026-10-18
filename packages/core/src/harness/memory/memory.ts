@@ -14,12 +14,15 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { contextMessage } from '../../llm/message'
+import { containsPromptInjection, containsSecret } from '../../memory/patch'
 import type { MemoryStore } from '../../memory/store'
 import type { ProjectStore } from '../../projects/store'
 import type { Session } from '../../session-log/session'
 import type { SessionEntry } from '../../sessions/store'
 import type { Agent } from '../agent/agent'
 import type { PreStepMiddleware } from '../agent/middleware'
+import type { ApprovalService } from '../approval/service'
+import type { SandboxMode } from '../sandbox/policy'
 import { defineTool, ToolError, type ToolDefinition } from '../tools/definition'
 
 export const MEMORY_PRODUCER = 'memory'
@@ -37,6 +40,10 @@ export interface MemoryDeps {
   projects: ProjectStore
   /** Session index entry for an agent (mode/project binding). */
   sessionEntry(agent: Agent): SessionEntry | null
+  /** The calling agent's permission mode (danger-full-access skips the ask). */
+  permissionMode?(agent: Agent): SandboxMode
+  /** Asks the user before the first long-term memory write of a session. */
+  approval?: Pick<ApprovalService, 'request'>
 }
 
 function clip(text: string): string {
@@ -136,6 +143,33 @@ export function memoryMiddleware(deps: MemoryDeps): PreStepMiddleware {
 
 /** `memory_edit`: edit MEMORY.md, USER.md, or the Build project's memory. */
 export function createMemoryTool(deps: MemoryDeps): ToolDefinition {
+  /** Sessions whose user already allowed long-term memory writes. */
+  const allowed = new Set<string>()
+  const confirmFirstWrite = async (
+    agent: Agent,
+    context: { callId: string; signal: AbortSignal },
+  ): Promise<void> => {
+    if (deps.approval === undefined || deps.permissionMode === undefined) return
+    if (deps.permissionMode(agent) === 'danger-full-access') return
+    if (allowed.has(agent.session.id)) return
+    const outcome = await deps.approval.request({
+      agent,
+      toolName: 'memory_edit',
+      callId: context.callId,
+      reason: 'write to long-term memory (asked once per session)',
+      signal: context.signal,
+    })
+    if (outcome === 'allowed-once') {
+      allowed.add(agent.session.id)
+      return
+    }
+    throw new ToolError(
+      outcome === 'rejected'
+        ? 'the user declined the long-term memory write'
+        : `the long-term memory write was not approved (${outcome})`,
+      'APPROVAL_REJECTED',
+    )
+  }
   return defineTool({
     name: 'memory_edit',
     category: 'config',
@@ -160,6 +194,17 @@ export function createMemoryTool(deps: MemoryDeps): ToolDefinition {
         throw new ToolError(
           'delegated subagents cannot edit long-term memory; report the fact to your parent instead',
         )
+      if (containsSecret(args.new_string))
+        throw new ToolError(
+          'new_string looks like a secret (API key, token or private key); long-term memory never stores secrets',
+          'MEMORY_SECRET',
+        )
+      if (containsPromptInjection(args.new_string))
+        throw new ToolError(
+          'new_string reads as instructions to override earlier instructions or reveal hidden prompts; memory only stores facts',
+          'MEMORY_INJECTION',
+        )
+      await confirmFirstWrite(agent, context)
       const edit = (current: string): string => {
         if (args.old_string === undefined || args.old_string === '') {
           return current.trim() === ''
@@ -175,7 +220,8 @@ export function createMemoryTool(deps: MemoryDeps): ToolDefinition {
           throw new ToolError(
             `old_string occurs ${count} times in ${args.target} memory; include more context to make it unique`,
           )
-        return current.replace(args.old_string, args.new_string)
+        // Verbatim: String.replace would expand $&, $' and $$ in new_string.
+        return current.split(args.old_string).join(args.new_string)
       }
       if (args.target === 'memory') {
         deps.memory.writeMemory(edit(deps.memory.readMemory()))

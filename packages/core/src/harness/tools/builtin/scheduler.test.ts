@@ -79,6 +79,30 @@ describe('scheduler tool', () => {
       every_seconds: 60,
     })
     expect(result.isError).toBe(true)
-    expect(result.text).toContain('while running')
+    expect(result.text).toContain('scheduled run')
+  })
+
+  it('refuses every change to scheduler jobs from inside a scheduled run', async () => {
+    const outside = setup()
+    await outside.call({ action: 'add', message: 'Daily', every_seconds: 60 })
+    const job = outside.service
+      .listJobs({ includeDisabled: true })
+      .find((item) => !item.protected)!
+    const nested = setup({ nested: true })
+    // Same store directory is not shared; reuse the first service's job id
+    // only to give each action a target.
+    for (const args of [
+      { action: 'update', job_id: job.id, message: 'changed' },
+      { action: 'resume', job_id: job.id },
+      { action: 'pause', job_id: job.id },
+      { action: 'run', job_id: job.id },
+      { action: 'remove', job_id: job.id },
+      { action: 'add', message: 'x', every_seconds: 60 },
+    ]) {
+      const result = await nested.call(args)
+      expect(result.isError, String(args.action)).toBe(true)
+      expect(result.text).toContain('scheduled run')
+    }
+    expect((await nested.call({ action: 'list' })).isError).toBe(false)
   })
 })

@@ -512,6 +512,9 @@ export class HarnessHost {
         memory: this.kept.sharedMemory,
         projects: this.kept.projectStore,
         sessionEntry: (agent) => this.entryFor(agent),
+        permissionMode: (agent) =>
+          this.sandbox.resolve({ session: agent.session }).mode,
+        approval: this.approval,
       }),
     )
     tools.register(

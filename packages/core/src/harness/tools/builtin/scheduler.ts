@@ -89,15 +89,17 @@ export function createSchedulerTool(
           )
         return jobId
       }
+      // A scheduled run may look at jobs but never change them: add, update,
+      // resume, run or remove would let it re-arm itself or others.
+      if (args.action !== 'list' && deps.inSchedulerRun(context.agent))
+        throw new ToolError(
+          `scheduler jobs cannot be changed from inside a scheduled run (action=${args.action})`,
+          'SCHEDULER_NESTED',
+        )
       switch (args.action) {
         case 'list':
           return formatJobs(service.listJobs({ includeDisabled: true }))
         case 'add': {
-          if (deps.inSchedulerRun(context.agent))
-            throw new ToolError(
-              'scheduler jobs cannot create new scheduler jobs while running',
-              'SCHEDULER_NESTED',
-            )
           const payload = withSchedulerPayloadSession(
             payloadFromFields(args),
             deps.sessionIdOf(context.agent),

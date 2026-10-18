@@ -17,7 +17,6 @@ import type { GrantAnswerer } from '../computer-use/grants/ask'
 import type { UiGrantScope } from '../computer-use/types'
 import {
   PERMISSION_ALLOW,
-  PERMISSION_DENY,
   PERMISSION_QUESTION_ID,
   PLAN_APPROVE_LABEL,
   PLAN_KEEP_LABEL,
@@ -260,14 +259,10 @@ export class PendingInteractions {
       const answer = uiAnswer(
         answers[PERMISSION_QUESTION_ID] ?? Object.values(answers)[0],
       )
-      const allowed =
-        answer.optionId === PERMISSION_ALLOW ||
-        (answer.optionId === undefined && /允许|allow/i.test(answer.choice))
+      // Only the allow option id allows: free text like 「不允许」 never does.
       this.take(wireId)
       entry.resolve(
-        allowed && answer.optionId !== PERMISSION_DENY
-          ? 'allowed-once'
-          : 'rejected',
+        answer.optionId === PERMISSION_ALLOW ? 'allowed-once' : 'rejected',
       )
       return
     }
