@@ -127,3 +127,21 @@ describe('protected Emperor state', () => {
     )
   })
 })
+
+describe('git control paths', () => {
+  it('names config, hooks and info attributes, not samples or tracked files', async () => {
+    const { isGitControlPath } = await import('./policy')
+    expect(isGitControlPath('/w/repo/.git/config')).toBe(true)
+    expect(isGitControlPath('/w/repo/.git/config.worktree')).toBe(true)
+    expect(isGitControlPath('/w/repo/.git/hooks/pre-commit')).toBe(true)
+    expect(isGitControlPath('/w/repo/.git/info/attributes')).toBe(true)
+    expect(isGitControlPath('/w/repo/.git/modules/lib/config')).toBe(true)
+    expect(
+      isGitControlPath('/w/repo/.git/modules/lib/hooks/post-checkout'),
+    ).toBe(true)
+    expect(isGitControlPath('/w/repo/.git/hooks/pre-commit.sample')).toBe(false)
+    expect(isGitControlPath('/w/repo/.gitattributes')).toBe(false)
+    expect(isGitControlPath('/w/repo/src/config')).toBe(false)
+    expect(isGitControlPath('/w/repo/.git/HEAD')).toBe(false)
+  })
+})

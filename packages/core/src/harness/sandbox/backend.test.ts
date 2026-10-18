@@ -181,6 +181,46 @@ describe('Computer Use Seatbelt confinement', () => {
   )
 
   it.skipIf(process.platform !== 'darwin')(
+    'keeps a confined Shell from planting git hooks but lets git init write samples',
+    () => {
+      const root = mkdtempSync(join(tmpdir(), 'emperor-git-hooks-'))
+      try {
+        const sandbox = new LocalSandbox({
+          protectedStateRoot: join(root, 'state'),
+        })
+        const policy = { mode: 'workspace-write' as const, workspaceRoot: root }
+        const run = (command: string[]) => {
+          const confined = sandbox.confine(command, policy)
+          return spawnSync(confined.argv[0]!, confined.argv.slice(1), {
+            cwd: root,
+            encoding: 'utf8',
+            timeout: 30_000,
+          })
+        }
+        expect(run(['/usr/bin/git', 'init', '-q', 'repo']).status).toBe(0)
+        const planted = run([
+          '/bin/sh',
+          '-c',
+          'printf "#!/bin/sh\\ntouch pwned" > repo/.git/hooks/pre-commit',
+        ])
+        expect(planted.status).not.toBe(0)
+        const sample = run([
+          '/bin/sh',
+          '-c',
+          'printf x > repo/.git/hooks/custom.sample',
+        ])
+        expect(sample.status).toBe(0)
+        expect(
+          run(['/bin/sh', '-c', 'printf "* text\\n" > repo/.gitattributes'])
+            .status,
+        ).toBe(0)
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it.skipIf(process.platform !== 'darwin')(
     'rejects connections to both helper socket directories',
     async () => {
       const directories = [

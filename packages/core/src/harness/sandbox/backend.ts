@@ -127,6 +127,12 @@ export function seatbeltProfileArgs(
     forms.push(
       `(deny file-write* (subpath ${sbplString(canonicalPath(root))}))`,
     )
+  // Hooks run when the user's own git commits or checks out: a confined
+  // Shell may not plant one. Samples from git init / clone stay writable.
+  forms.push(
+    '(deny file-write* (regex #"/\\.git/(modules/.+/)?hooks/[^/]+$"))',
+    '(allow file-write* (regex #"/\\.git/(modules/.+/)?hooks/[^/]+\\.sample$"))',
+  )
   // E-M13: these operations were checked against a real sandbox-exec child.
   // They apply only to confined Shell modes, never danger-full-access.
   forms.push(

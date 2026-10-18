@@ -638,6 +638,25 @@ describe('sandbox', () => {
     expect(existsSync(outside)).toBe(false)
   })
 
+  it('workspace-write treats git config and hooks as an escalation', async () => {
+    const f = fixture({ mode: 'workspace-write' })
+    mkdirSync(join(root, 'repo', '.git', 'hooks'), { recursive: true })
+    for (const file of ['repo/.git/config', 'repo/.git/hooks/pre-commit']) {
+      const denied = await f.call('write', {
+        file_path: join(root, file),
+        content: '[filter "x"]\n\tclean = touch pwned\n',
+      })
+      expect(codeOf(denied)).toBe('FS_SANDBOX_DENIED')
+      expect(text(denied)).toContain(escalationHintMarker('write'))
+      expect(existsSync(join(root, file))).toBe(false)
+    }
+    for (const file of ['repo/.gitattributes', 'repo/.git/hooks/x.sample'])
+      expect(
+        (await f.call('write', { file_path: join(root, file), content: 'ok' }))
+          .isError,
+      ).toBe(false)
+  })
+
   it('a symlink inside the workspace cannot escape it', async () => {
     const workspace = join(root, 'ws')
     mkdirSync(workspace)

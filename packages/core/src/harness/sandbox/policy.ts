@@ -87,6 +87,24 @@ export function canonicalPath(path: string): string {
 }
 
 /** Writable roots for one policy (workspace + temp under workspace-write; none otherwise). */
+/**
+ * Git control files a repository can use to run programs on the user's
+ * machine (config with filters or credential helpers, hooks, info
+ * attributes). Under workspace-write the file tools treat them as outside
+ * the writable roots, so changing one needs a one-time approval; Shell is
+ * kept from writing hooks (see backend.ts). Hook samples written by
+ * `git init` / `git clone` do not run and stay writable.
+ */
+export function isGitControlPath(path: string): boolean {
+  const posix = path.split('\\').join('/')
+  return (
+    /\/\.git\/(config|config\.worktree|info\/attributes)$/i.test(posix) ||
+    /\/\.git\/(modules\/.+\/)?config$/i.test(posix) ||
+    (/\/\.git\/(modules\/.+\/)?hooks\/[^/]+$/i.test(posix) &&
+      !/\.sample$/i.test(posix))
+  )
+}
+
 export function writableRoots(policy: SandboxExecutionPolicy): string[] {
   if (policy.privateTempRoot !== undefined) {
     return [

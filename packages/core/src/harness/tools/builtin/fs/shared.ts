@@ -8,6 +8,7 @@
 import {
   canonicalPath,
   escalationHintMarker,
+  isGitControlPath,
   sandboxDenialMarker,
   validateEscalationArgs,
   writableRoots,
@@ -144,6 +145,10 @@ export async function fenceTarget(
   if (policy.mode === 'danger-full-access') return target
   if (policy.mode === 'read-only') throw sandboxDenied(policy, toolName, target)
   const fresh = await resolveTarget(policy.workspaceRoot, target.displayPath)
+  // Git config and hooks can make the user's own git run programs: changing
+  // one is an escalation even inside the workspace.
+  if (isGitControlPath(fresh.targetKey))
+    throw sandboxDenied(policy, toolName, target)
   for (const root of writableRoots(policy)) {
     if (await isPathUnder(fresh.targetKey, root)) return fresh
   }

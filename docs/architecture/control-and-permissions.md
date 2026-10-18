@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、安全审查者、维护者<br>
-> 最后核验：2026-09-24<br>
-> 事实源：`packages/core/src/harness/sandbox/`、`packages/core/src/harness/approval/`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/questions/`、`packages/core/src/harness/host/interactions.ts`、`packages/core/src/harness/computer-use/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/api/mutation-guard.ts`
+> 最后核验：2026-10-19<br>
+> 事实源：`packages/core/src/harness/sandbox/`、`packages/core/src/harness/approval/`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/questions/`、`packages/core/src/harness/host/interactions.ts`、`packages/core/src/harness/computer-use/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/api/mutation-guard.ts`、`packages/core/src/workspace/git-runner.ts`
 
 Agent 能做什么由两个独立旋钮决定：**沙箱模式**限制文件写入范围，**审批策略**决定需要批准的操作是否询问用户。用户看到的是把两者打包在一起的**权限预设**。Plan 模式是独立的会话状态，不是第四种权限。
 
@@ -44,6 +44,15 @@ Chat 会话的 workspace 是 `stateRoot/workspace/` 下的可写目录；Build �
 审批策略为 `never` 时，需要审批的请求被确定性地拒绝，系统提示词也会告诉模型不要请求提权。子代理的审批策略固定为 `never`，因此子代理内的提权总是被拒绝。
 
 每次询问在 session log 中记录为 `approval/asked` 与 `approval/decided`。结果只可能是 `allowed-once`、`rejected`、`cancelled` 或 `unavailable`；应答方缺失或出错时 fail closed 为 `unavailable`，崩溃修复会把没有决定的询问关闭为 `unavailable`。
+
+## Git 控制文件与 Emperor 内部 Git
+
+仓库自己的 Git 配置可以让 git 运行任意程序（filter、diff textconv 与外部 diff、merge driver、credential helper、gpg 签名程序、sshCommand、hooks 等）。Emperor 有两道约束：
+
+- **Emperor 自己执行的 git**（回合快照、审查面板、worktree、委派快照与整合、PR 浏览）都经过 `HardenedGitRunner`：不读系统与全局配置（`GIT_CONFIG_NOSYSTEM`、`GIT_CONFIG_GLOBAL=/dev/null`），hooks 指向 `/dev/null`，禁用 fsmonitor 与 `ext::` 协议；执行前列出仓库生效配置（含 include）里所有会执行程序的键，逐个用 `-c` 换成中性值（textconv 换成 `cat`，签名开关换成 `false`，其余置空）；diff、log、show 一律带 `--no-ext-diff`。仓库配置因此不能借 Emperor 的 git 在沙箱外运行程序。
+- **Agent 修改 Git 控制文件**：workspace-write 下，`write` / `edit` 把 `.git/config`、`.git/config.worktree`、`.git/info/attributes`、`.git/hooks/*`（含子模块）视为可写范围之外，改动需要一次性提权批准；受限 Shell 的 Seatbelt profile 拒绝写 `.git/hooks/` 下的文件，`git init` / `git clone` 生成的 `*.sample` 不受影响。
+
+已知限制：受限 Shell 仍可直接改写 `.git/config`（`git clone`、`git remote add`、`git config` 都要写它），这类改动只会影响用户自己在终端里运行的 git，不影响 Emperor 内部的 git。
 
 ## 工具执行管线中的决策
 
