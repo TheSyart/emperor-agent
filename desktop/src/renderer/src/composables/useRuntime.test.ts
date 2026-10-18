@@ -249,7 +249,9 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     runtime.connectSocket()
     expect(runtime.status.value).toBe('ready')
     runtime.switchSession('s1')
-    expect(runtime.sendMessage('hello')).toBe(true)
+    const outcome = runtime.sendMessage('hello')
+    // Taken once the host's user message (or the submit result) arrives.
+    await expect(outcome).resolves.toBe(true)
     // No optimistic chat bubble: the transcript renders from the raw log.
     expect(runtime).not.toHaveProperty('messages')
     await Promise.resolve()
@@ -317,11 +319,13 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(testOptions())
 
     runtime.switchSession('s1')
-    expect(runtime.sendMessage('original')).toBe(true)
-    expect(
-      runtime.sendMessage({ content: 'interrupt now', delivery: 'interject' }),
-    ).toBe(true)
+    expect(runtime.sendMessage('original')).toBeInstanceOf(Promise)
+    const interjected = runtime.sendMessage({
+      content: 'interrupt now',
+      delivery: 'interject',
+    })
     await flushPromises()
+    await expect(interjected).resolves.toBe(true)
 
     const submits = calls.filter((call) => call[0] === 'chat.submit')
     expect(submits).toHaveLength(2)
@@ -380,7 +384,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(showToast).not.toHaveBeenCalled()
   })
 
-  it('publishes the rejected payload for Composer recovery when the Core queue slot is full', async () => {
+  it('reports a submission the full Core queue slot refused, so the composer restores it', async () => {
     const showToast = vi.fn()
     g.window = fakeWindow({
       invokeCore: (...args: unknown[]) => {
@@ -395,41 +399,69 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     runtime.switchSession('s1')
     await flushPromises()
     runtime.busy.value = true
-    const attachment = {
-      id: 'att_recover',
-      name: 'recover.txt',
-      mime: 'text/plain',
-      size: 7,
-      kind: 'text' as const,
-      hasText: true,
-      hasImage: false,
-      path: '/tmp/recover.txt',
-    }
 
-    expect(
+    await expect(
       runtime.sendMessage({
         content: 'recover this submission',
-        displayContent: '@skill(review) recover this submission',
         delivery: 'queue',
-        requestedSkills: [{ name: 'review', source: 'slash' }],
-        attachments: [attachment],
       }),
-    ).toBe(true)
-    await flushPromises(10)
-
-    expect(runtime.queueDraftRecovery.value).toEqual({
-      sessionId: 's1',
-      payload: {
-        content: 'recover this submission',
-        displayContent: '@skill(review) recover this submission',
-        delivery: 'queue',
-        requestedSkills: [{ name: 'review', source: 'slash' }],
-        attachments: [attachment],
-      },
-    })
+    ).resolves.toBe(false)
+    expect(runtime.queuedPrompts.value).toEqual([])
     expect(showToast).toHaveBeenCalledWith(
       '已有一条消息排队，请先编辑、插入或删除后再发送。',
     )
+  })
+
+  it('reports a direct send refused before the host took it', async () => {
+    g.window = fakeWindow({
+      invokeCore: (...args: unknown[]) => {
+        if (args[0] === 'chat.submit')
+          return Promise.reject({ code: 'session_not_found', message: 'gone' })
+        return Promise.resolve({ ok: true })
+      },
+      onCoreEvent: () => () => {},
+    })
+    const runtime = useRuntime({ ...testOptions(), showToast: vi.fn() })
+    runtime.switchSession('s1')
+    await expect(runtime.sendMessage('hello')).resolves.toBe(false)
+  })
+
+  it('keeps a message sent once its user message arrived, even if the turn fails later', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    let rejectSubmit!: (error: unknown) => void
+    let clientMessageId = ''
+    g.window = fakeWindow({
+      invokeCore: (...args: unknown[]) => {
+        if (args[0] === 'chat.submit') {
+          clientMessageId = String(
+            (args[1] as { clientMessageId?: string }).clientMessageId,
+          )
+          return new Promise((_resolve, reject) => {
+            rejectSubmit = reject
+          })
+        }
+        return Promise.resolve({ ok: true })
+      },
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => undefined
+      },
+    })
+    const runtime = useRuntime({ ...testOptions(), showToast: vi.fn() })
+    runtime.connectSocket()
+    runtime.switchSession('s1')
+    const outcome = runtime.sendMessage('hello')
+    await flushPromises()
+    emitCoreEvent(listener, {
+      event: 'user_message',
+      seq: 1,
+      session_id: 's1',
+      turn_id: 's1:1',
+      client_message_id: clientMessageId,
+      content: 'hello',
+    })
+    rejectSubmit(new Error('model failed'))
+    await expect(outcome).resolves.toBe(true)
   })
 
   it('queues attachments and requested Skills while a turn is busy', async () => {
@@ -466,7 +498,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
           },
         ],
       }),
-    ).toBe(true)
+    ).toBeInstanceOf(Promise)
     await flushPromises()
 
     expect(calls.find((call) => call[0] === 'chat.submit')?.[1]).toMatchObject({
@@ -483,6 +515,64 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
         supportsInterjection: false,
       }),
     ])
+  })
+
+  it('keeps the whole queued message across a queue refresh, for 编辑', async () => {
+    let clientMessageId = ''
+    const attachment = {
+      id: 'att_q',
+      name: 'chart.png',
+      mime: 'image/png',
+      size: 9,
+      kind: 'image' as const,
+      hasText: false,
+      hasImage: true,
+      path: '/tmp/chart.png',
+    }
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        if (args[0] === 'chat.submit') {
+          clientMessageId = String(
+            (args[1] as { clientMessageId: string }).clientMessageId,
+          )
+          return new Promise(() => undefined)
+        }
+        if (args[0] === 'chat.listQueuedPrompts')
+          return clientMessageId
+            ? [
+                {
+                  id: 'host-1',
+                  turnId: '',
+                  clientMessageId,
+                  content: 'look',
+                  displayContent: 'look',
+                  delivery: 'queue',
+                  supportsInterjection: false,
+                  createdOrder: 1,
+                  attachmentIds: ['att_q'],
+                  requestedSkills: [],
+                },
+              ]
+            : []
+        return { ok: true }
+      },
+      onCoreEvent: () => () => {},
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.switchSession('s1')
+    await flushPromises()
+    runtime.busy.value = true
+    void runtime.sendMessage({
+      content: 'look',
+      delivery: 'queue',
+      attachments: [attachment],
+    })
+    await flushPromises()
+    await runtime.refreshQueuedPrompts('s1')
+    expect(runtime.queuedPrompts.value[0]).toMatchObject({
+      id: 'host-1',
+      payload: { content: 'look', attachments: [attachment] },
+    })
   })
 
   it('keeps the turn busy while an ask waits inside the running turn', async () => {
@@ -526,7 +616,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(options)
 
     runtime.switchSession('s1')
-    expect(runtime.sendMessage('需要澄清')).toBe(true)
+    expect(runtime.sendMessage('需要澄清')).toBeInstanceOf(Promise)
     await flushPromises()
 
     expect(options.showToast).not.toHaveBeenCalledWith(
@@ -553,7 +643,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(options)
 
     runtime.switchSession('s1')
-    expect(runtime.sendMessage('停止我')).toBe(true)
+    expect(runtime.sendMessage('停止我')).toBeInstanceOf(Promise)
     await flushPromises()
 
     expect(options.showToast).not.toHaveBeenCalledWith(
@@ -582,7 +672,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(options)
 
     runtime.switchSession('s1')
-    expect(runtime.sendMessage('第二条')).toBe(true)
+    expect(runtime.sendMessage('第二条')).toBeInstanceOf(Promise)
     await flushPromises()
 
     expect(options.showToast).not.toHaveBeenCalledWith(
@@ -628,7 +718,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(options)
 
     runtime.switchSession('s1')
-    expect(runtime.sendMessage('hi')).toBe(true)
+    expect(runtime.sendMessage('hi')).toBeInstanceOf(Promise)
     await flushPromises()
 
     expect(runtime.busy.value).toBe(false)
@@ -688,7 +778,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(options)
 
     runtime.switchSession('s1')
-    expect(runtime.sendMessage('hi')).toBe(true)
+    expect(runtime.sendMessage('hi')).toBeInstanceOf(Promise)
     await flushPromises()
 
     // The turn error renders as a log row; the matching rejection stays quiet.
@@ -1124,7 +1214,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     const runtime = useRuntime(options)
     runtime.switchSession('s1')
 
-    expect(runtime.sendMessage('hello')).toBe(true)
+    expect(runtime.sendMessage('hello')).toBeInstanceOf(Promise)
     await Promise.resolve()
     await expect(runtime.stopActive()).resolves.toBe(true)
     invokeCallback(rejectSubmit, new Error('active task cancelled: turn:1'))
@@ -1622,7 +1712,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
 
     runtime.connectSocket()
     runtime.switchSession('draft:local-1')
-    expect(runtime.sendMessage('第一条消息')).toBe(true)
+    expect(runtime.sendMessage('第一条消息')).toBeInstanceOf(Promise)
     await flushPromises()
 
     const submit = calls.find((call) => call[0] === 'chat.submit')

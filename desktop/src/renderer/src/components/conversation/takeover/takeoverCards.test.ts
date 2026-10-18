@@ -8,6 +8,11 @@ import PlanReviewPanel from './PlanReviewPanel.vue'
 import QuestionComposer from './QuestionComposer.vue'
 import TakeoverSeat from './TakeoverSeat.vue'
 import { approvalActions, approvalPresentation } from './approvalModel'
+import {
+  isTakeoverMinimized,
+  minimizeTakeover,
+  resetTakeoverMinimized,
+} from './takeoverModel'
 
 let container: HTMLDivElement | null = null
 let unmount: (() => void) | null = null
@@ -15,6 +20,7 @@ let unmount: (() => void) | null = null
 afterEach(() => {
   unmount?.()
   unmount = null
+  resetTakeoverMinimized()
   container?.remove()
   container = null
 })
@@ -197,8 +203,13 @@ describe('QuestionComposer', () => {
     root.querySelector<HTMLButtonElement>('[aria-label="上一题"]')!.click()
     await nextTick()
     expect(root.querySelector('.title')?.textContent).toBe('选择风格？')
+    // Esc confirming an input-method candidate does nothing; Esc itself only
+    // folds the card away: the question stays open.
+    key(card, 'Escape', { isComposing: true })
+    expect(isTakeoverMinimized('ask-1')).toBe(false)
     key(card, 'Escape')
-    expect(ctx.cancelInteraction).toHaveBeenCalledWith('ask-1')
+    expect(ctx.cancelInteraction).not.toHaveBeenCalled()
+    expect(isTakeoverMinimized('ask-1')).toBe(true)
   })
 
   it('accepts a free-form answer in the custom row', async () => {
@@ -266,7 +277,7 @@ describe('ApprovalPanel', () => {
     expect(ctx.sendInteractionAnswer).toHaveBeenCalledTimes(1)
   })
 
-  it('re-arms after a rejected send and supports Esc to cancel', async () => {
+  it('re-arms after a rejected send; Esc folds the card instead of cancelling', async () => {
     const ctx = fakeContext({ sendInteractionAnswer: vi.fn(() => false) })
     const { root } = await mount(
       ApprovalPanel,
@@ -280,7 +291,8 @@ describe('ApprovalPanel', () => {
     })
     expect(button(root, '拒绝').disabled).toBe(false)
     key(root.querySelector('.card')!, 'Escape')
-    expect(ctx.cancelInteraction).toHaveBeenCalledWith('approval_1')
+    expect(ctx.cancelInteraction).not.toHaveBeenCalled()
+    expect(isTakeoverMinimized('approval_1')).toBe(true)
   })
 
   it('derives outline/primary from several allow options', () => {
@@ -351,8 +363,11 @@ describe('PlanReviewPanel', () => {
     await nextTick()
     expect(ctx.sendPlanComment).toHaveBeenCalledWith('plan-1', '拆小一点')
     expect(field.value).toBe('')
+    key(root.querySelector('.card')!, 'Escape', { keyCode: 229 })
+    expect(isTakeoverMinimized('plan-1')).toBe(false)
     key(root.querySelector('.card')!, 'Escape')
-    expect(ctx.cancelInteraction).toHaveBeenCalledWith('plan-1')
+    expect(ctx.cancelInteraction).not.toHaveBeenCalled()
+    expect(isTakeoverMinimized('plan-1')).toBe(true)
   })
 
   it('stays hidden for provisional or resolved plans', async () => {
@@ -382,5 +397,21 @@ describe('TakeoverSeat', () => {
       container?.remove()
       container = null
     }
+  })
+})
+
+describe('folded takeover', () => {
+  it('shows one line above the composer and unfolds on 展开', async () => {
+    minimizeTakeover('ask-1')
+    const { root } = await mount(TakeoverSeat, { interaction: ask() })
+    expect(root.querySelector('.card')).toBeNull()
+    expect(root.textContent).toContain('等待你回答')
+    button(root, '展开').click()
+    await nextTick()
+    expect(isTakeoverMinimized('ask-1')).toBe(false)
+    // The seat's transition is out-in: the card enters after the line leaves.
+    for (let i = 0; i < 50 && !root.querySelector('.card'); i++)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(root.querySelector('.card')).not.toBeNull()
   })
 })

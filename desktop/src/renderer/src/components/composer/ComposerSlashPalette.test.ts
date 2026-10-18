@@ -47,6 +47,7 @@ describe('Composer slash palette refresh', () => {
       providerOptions: [],
     }).mount(container) as unknown as {
       setDraft: (text: string) => void
+      applySnapshot: (draft: null) => void
     }
 
     const view = composerView(container)
@@ -66,9 +67,12 @@ describe('Composer slash palette refresh', () => {
     expect(container.textContent).not.toContain('/skill ')
 
     // A draft names a known skill: it becomes a chip; unknown names stay.
+    // (setDraft adds to a non-empty composer, so start from an empty one.)
+    component.applySnapshot(null)
     component.setDraft('/agent-reach research query')
     await nextTick()
     expect(container.querySelectorAll('.composer-chip')).toHaveLength(1)
+    component.applySnapshot(null)
     component.setDraft('/unknown research query')
     await nextTick()
     expect(container.querySelector('.composer-chip')).toBeNull()

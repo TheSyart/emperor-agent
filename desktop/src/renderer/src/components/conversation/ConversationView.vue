@@ -89,7 +89,12 @@ import { TrajectoryViewAsync } from '../trajectory/lazy'
 import { previewShownTargets } from './computer-use/computerUsePreviewState'
 import { createLinkStatusSource, LINK_STATUS_KEY } from './parts/linkStatus'
 import TakeoverSeat from './takeover/TakeoverSeat.vue'
-import { activeTakeover } from './takeover/takeoverModel'
+import type { ComposerDraft } from '../chat/composerDraft'
+import {
+  saveComposerDraft,
+  takeComposerDraft,
+} from '../../composables/useComposerDrafts'
+import { activeTakeover, isTakeoverMinimized } from './takeover/takeoverModel'
 import { activeTurnTick, turnTicks } from './timelineModel'
 import {
   PROVENANCE_LABEL,
@@ -129,6 +134,8 @@ const composer = ref<{
   setDraft: (text: string) => void
   focusInput: () => void
   restoreDraft: (payload: ChatSendPayload) => void
+  takeSnapshot: () => ComposerDraft
+  applySnapshot: (draft: ComposerDraft | null) => void
 } | null>(null)
 const timeline = ref<{ scrollToKey: (key: string) => boolean } | null>(null)
 
@@ -403,6 +410,12 @@ const pendingInteraction = computed(
   () => ctx.pendingInteractionsBySession[ctx.sessionId.value] || null,
 )
 const takeover = computed(() => activeTakeover(pendingInteraction.value))
+/** A takeover card in the composer seat (folded with Esc, it gives the seat back). */
+const takeoverOpen = computed(
+  () =>
+    takeover.value !== null &&
+    !isTakeoverMinimized(takeover.value.interaction.id),
+)
 const showProfileOnboardingPrompt = computed(
   () =>
     ctx.boot.value?.profileOnboarding?.status === 'pending' &&
@@ -682,18 +695,6 @@ watch(
   { flush: 'post', immediate: true },
 )
 
-watch(
-  [() => ctx.queueDraftRecovery.value, () => ctx.sessionId.value],
-  ([recovery, ownerSessionId]) => {
-    if (!recovery || recovery.sessionId !== ownerSessionId) return
-    void nextTick(() => {
-      composer.value?.restoreDraft(recovery.payload)
-      ctx.clearQueueDraftRecovery(recovery.sessionId)
-    })
-  },
-  { flush: 'post' },
-)
-
 // ── timeline actions ──────────────────────────────────────────────────────
 /** Tool-row Inspect: the trajectory's inspector column shows the call. */
 function inspectCall(callId: string): void {
@@ -717,12 +718,35 @@ function editMessage(text: string): void {
   void nextTick(() => composer.value?.focusInput())
 }
 
-function sendFromComposer(payload: ChatSendPayload): void {
+/**
+ * The composer's send. While the window is still switching to the chat on
+ * screen (route ahead of the runtime) nothing is sent: the message would
+ * land in the previous chat. `false` puts the draft back.
+ */
+function sendFromComposer(
+  payload: ChatSendPayload,
+): boolean | Promise<boolean> {
   const owner = ctx.sessionId.value
+  if (routeSessionId.value && routeSessionId.value !== owner) {
+    ctx.showToast('正在切换会话，稍后再发送')
+    return false
+  }
   if (owner && !promptedSessions.value.has(owner))
     promptedSessions.value = new Set([...promptedSessions.value, owner])
-  ctx.submitFromComposer(payload)
+  return ctx.submitFromComposer(payload)
 }
+
+// Each chat keeps its own unsent draft (text, chips, uploaded files).
+watch(
+  viewingId,
+  (next, previous) => {
+    const handle = composer.value
+    if (!handle || next === previous) return
+    if (previous) saveComposerDraft(previous, handle.takeSnapshot())
+    handle.applySnapshot(takeComposerDraft(next))
+  },
+  { flush: 'pre' },
+)
 
 // ── trajectory tab ──────────────────────────────────────────────────────
 /** Chat Inspect deep link (`?call=`): the ledger selects and reveals it. */
@@ -850,8 +874,14 @@ function setReasoningEffort(level: string | null): void {
 }
 
 async function editQueuedPrompt(item: QueuedPromptItem): Promise<void> {
-  if (await ctx.manageQueuedPrompt(item.id, 'cancel'))
-    composer.value?.setDraft(item.content)
+  if (!(await ctx.manageQueuedPrompt(item.id, 'cancel'))) return
+  composer.value?.restoreDraft(
+    item.payload ?? {
+      content: item.content,
+      attachments: [],
+      ...(item.references ? { references: item.references } : {}),
+    },
+  )
 }
 
 async function interjectQueuedPrompt(item: QueuedPromptItem): Promise<void> {
@@ -988,11 +1018,11 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           >
         </div>
         <ChangesPill
-          v-if="!takeover && viewingId"
+          v-if="!takeoverOpen && viewingId"
           :session-id="viewingId"
           :build="buildSession"
         />
-        <TodoDock v-if="!takeover" :todos="latestTodos" />
+        <TodoDock v-if="!takeoverOpen" :todos="latestTodos" />
         <GoalBar
           v-if="activeGoal"
           :goal="activeGoal"
@@ -1001,14 +1031,14 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         />
         <TakeoverSeat v-if="takeover" :interaction="pendingInteraction" />
         <QueueDock
-          v-if="!takeover"
+          v-if="!takeoverOpen"
           :items="ctx.queuedPrompts.value"
           @edit="editQueuedPrompt"
           @interject="interjectQueuedPrompt"
           @cancel="cancelQueuedPrompt"
         />
         <ComposerCard
-          v-show="!takeover"
+          v-show="!takeoverOpen"
           ref="composer"
           :dictation-chat="ctx.sessionId.value"
           :hero="phase === 'hero'"

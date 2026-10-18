@@ -6,8 +6,10 @@
  * right-aligned action row derived from the permission question's options
  * (deny = danger, last allow = primary). The body scrolls; the action row
  * stays reachable. One-shot: buttons latch after a click until the
- * interaction resolves (re-armed if the send is rejected). Esc cancels.
+ * interaction resolves (re-armed if the send is rejected). Esc folds the
+ * card to one line (takeoverModel); it never cancels.
  */
+import { foldOnEscape } from './takeoverModel'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { ControlInteraction } from '../../../types'
 import { useAppContext } from '../../../composables/useAppContext'
@@ -49,10 +51,6 @@ function decide(action: ApprovalAction) {
   )
   if (!ok) answered.value = false
 }
-
-function cancel() {
-  ctx.cancelInteraction(props.interaction.id)
-}
 </script>
 
 <template>
@@ -62,7 +60,7 @@ function cancel() {
       class="card"
       tabindex="-1"
       aria-label="需要你的授权"
-      @keydown.esc.prevent="cancel"
+      @keydown="foldOnEscape($event, props.interaction.id)"
     >
       <div class="strip">
         <span class="dot" aria-hidden="true" />

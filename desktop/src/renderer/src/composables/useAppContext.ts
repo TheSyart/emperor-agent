@@ -13,7 +13,6 @@ import type {
   MemoryVersionDetail,
   DesktopPetPayload,
   PendingState,
-  QueueDraftRecovery,
   QueuedPromptItem,
   RuntimeStatus,
   GoalProjectionState,
@@ -35,8 +34,6 @@ export interface AppContext {
   configContent: Ref<string>
 
   queuedPrompts: Ref<QueuedPromptItem[]>
-  queueDraftRecovery: Ref<QueueDraftRecovery | null>
-  clearQueueDraftRecovery: (sessionId?: string) => void
   pendingInteractionsBySession: Record<string, ControlInteraction>
   busy: Ref<boolean>
   status: Ref<RuntimeStatus>
@@ -85,7 +82,7 @@ export interface AppContext {
   activateGoalCapture: () => Promise<LifecycleTransitionResult>
   startGoalWithLifecycle: (outcome: string) => Promise<GoalOperationResult>
   dismissLifecycle: () => Promise<LifecycleTransitionResult>
-  sendMessage: (payload: string | ChatSendPayload) => boolean
+  sendMessage: (payload: string | ChatSendPayload) => boolean | Promise<boolean>
   manageQueuedPrompt: (
     promptId: string,
     action: 'cancel' | 'interject',
@@ -104,7 +101,8 @@ export interface AppContext {
     reason?: string,
   ) => Promise<GoalOperationResult>
   startGoal: (outcome: string) => Promise<GoalOperationResult>
-  submitFromComposer: (payload: string | ChatSendPayload) => void
+  /** Resolves `true` once the message or command was accepted. */
+  submitFromComposer: (payload: string | ChatSendPayload) => Promise<boolean>
 
   showToast: (message: string) => void
   runSafely: (task: () => Promise<void>) => Promise<void>

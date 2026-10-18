@@ -34,7 +34,7 @@ commands.invoke({
 
 `commands.list` 每次从内置目录和当前 active Skill 重新构造注册表，按 session 是否存在与调用来源计算可用性。`commands.invoke` 同时校验稳定 `commandId` 与输入中的名称。
 
-解析器是确定性的 tokenizer，支持单引号、双引号、反斜杠、`--key=value` 和 `--`，不做任何 Shell 展开。参数先通过命令声明的 schema 才能产生副作用。未知命令返回本地错误，不会降级成普通模型请求。只有 `agent_prompt` 命令可以携带附件。
+解析器是确定性的 tokenizer，支持单引号、双引号、反斜杠、`--key=value` 和 `--`，不做任何 Shell 展开。参数先通过命令声明的 schema 才能产生副作用。未知命令返回本地错误，不会降级成普通模型请求。桌面输入框在调用 Core 之前就把不是任何命令的 `/词` 当作普通消息发送（输入时已提示），所以它们不会到达 `commands.invoke`；命令列表为空时先等待加载，最多 2 秒。只有 `agent_prompt` 命令可以携带附件。
 
 `invocationId` 是一次调用的幂等键。`stateRoot/control/command-invocations.json` 只保存 session、命令 ID、来源、输入摘要和结果；重复 IPC、双击或重试返回第一次的结果。
 

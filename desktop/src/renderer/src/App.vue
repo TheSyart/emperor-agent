@@ -143,8 +143,6 @@ const runtime = useRuntime({
 })
 const {
   queuedPrompts,
-  queueDraftRecovery,
-  clearQueueDraftRecovery,
   pendingInteractionsBySession,
   busy,
   status,
@@ -463,6 +461,13 @@ const {
   resolveSessionId: resolveCommandSessionId,
   controlSessionId: () => sessionStore.backendSessionId() || null,
   sendMessage,
+  ensureCommands: (timeoutMs) =>
+    commandDescriptors.value.length
+      ? Promise.resolve()
+      : Promise.race([
+          loadCommands(),
+          new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+        ]),
   refreshAll,
   openCommandSurface,
   activateTransitionedSession,
@@ -688,8 +693,6 @@ provideAppContext({
   configContent,
   mcpContent,
   queuedPrompts,
-  queueDraftRecovery,
-  clearQueueDraftRecovery,
   pendingInteractionsBySession,
   busy,
   status,

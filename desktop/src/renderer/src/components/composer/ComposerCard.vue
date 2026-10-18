@@ -78,6 +78,11 @@ const {
   onDragLeave,
   onDrop,
   removeDraft,
+  handleFiles,
+  onPaste,
+  unknownSlashHint,
+  secretPrompt,
+  resolveSecretPrompt,
   paletteMode,
   paletteGroups,
   activePaletteItem,
@@ -256,8 +261,8 @@ defineExpose(controller.expose)
           @remove="removeDraft(index)"
         />
         <div
-          v-for="name in Array.from(uploading)"
-          :key="name"
+          v-for="[uploadId, name] in Array.from(uploading)"
+          :key="uploadId"
           class="uploading"
           :title="name"
         >
@@ -292,6 +297,46 @@ defineExpose(controller.expose)
         </button>
       </div>
 
+      <div
+        v-if="secretPrompt"
+        class="accessory composer-notice"
+        role="alertdialog"
+        aria-label="消息里可能包含密钥"
+      >
+        <span class="composer-notice-text"
+          >消息里可能包含密钥（API Key、令牌或私钥）</span
+        >
+        <button
+          type="button"
+          class="composer-notice-action"
+          data-primary
+          @click="resolveSecretPrompt('mask')"
+        >
+          遮掩后发送
+        </button>
+        <button
+          type="button"
+          class="composer-notice-action"
+          @click="resolveSecretPrompt('send')"
+        >
+          仍然发送
+        </button>
+        <button
+          type="button"
+          class="composer-notice-action"
+          @click="resolveSecretPrompt('cancel')"
+        >
+          取消
+        </button>
+      </div>
+      <div
+        v-else-if="unknownSlashHint"
+        class="accessory composer-notice"
+        role="status"
+      >
+        <span class="composer-notice-text">{{ unknownSlashHint }}</span>
+      </div>
+
       <ComposerEditor
         v-if="richInput"
         ref="editor"
@@ -304,6 +349,7 @@ defineExpose(controller.expose)
         @change="onEditorChange"
         @trigger="onEditorTrigger"
         @focus="closeComposerMenus"
+        @files="handleFiles"
       />
       <div v-else class="scroll">
         <div
@@ -344,6 +390,7 @@ defineExpose(controller.expose)
           @input="resize"
           @scroll="syncHighlightScroll"
           @keydown="handleKeydown"
+          @paste="onPaste"
         />
       </div>
 
@@ -589,6 +636,41 @@ defineExpose(controller.expose)
 }
 
 .dictation-kept-action:hover {
+  background: rgb(var(--interactive-bg-hover-solid));
+}
+
+/* One line above the input: a /word that will go out as text, or the key prompt. */
+.composer-notice {
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+  padding: 0 var(--space-4);
+  color: rgb(var(--label-secondary));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+}
+
+.composer-notice-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.composer-notice-action {
+  flex: none;
+  padding: var(--space-0-5) var(--space-2);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--selector-fill));
+  color: rgb(var(--label-primary));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  cursor: pointer;
+}
+
+.composer-notice-action[data-primary] {
+  font-weight: 600;
+}
+
+.composer-notice-action:hover {
   background: rgb(var(--interactive-bg-hover-solid));
 }
 

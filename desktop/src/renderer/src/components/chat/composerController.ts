@@ -58,7 +58,14 @@ import {
   currentComposerPermission,
   type ControlModeValue,
 } from './composerControls'
+import {
+  EMPTY_DRAFT,
+  isEmptyDraft,
+  mergeDrafts,
+  type ComposerDraft,
+} from './composerDraft'
 import { useFloatingMenu } from './floatingMenu'
+import { findSecrets, maskSecrets } from './secretScan'
 
 export interface ComposerControllerProps {
   busy: boolean
@@ -87,10 +94,14 @@ export interface ComposerControllerProps {
     cursor: number,
   ) => Promise<CommandCompletion[]>
   refreshCommands?: () => Promise<void>
+  /**
+   * Send one message. `false` (or a promise of it) means it was refused:
+   * the composer puts the draft back, after anything typed since.
+   */
+  onSend?: (payload: ChatSendPayload) => boolean | Promise<boolean> | void
 }
 
 export interface ComposerEmit {
-  (event: 'send', payload: ChatSendPayload): void
   (event: 'stop'): void
   (event: 'error', message: string): void
   (event: 'set-permission', mode: ControlModeValue): void
@@ -110,6 +121,7 @@ export const COMPOSER_ACCEPT_LIST =
 export const COMPOSER_TEXT_MAX_HEIGHT = 336
 export const COMPOSER_QUEUE_FULL_MESSAGE =
   '已有一条消息排队，请先编辑、插入或删除后再发送。'
+export const COMPOSER_UPLOADING_MESSAGE = '附件还在上传，上传完成后再发送。'
 
 /**
  * Until the rich editor is accepted (RF-02), setting
@@ -182,7 +194,10 @@ export function useComposerController(
     removeDraft,
     takeDrafts,
     restoreDrafts,
+    handleFiles,
   } = attachments
+  /** A message that looks like it holds a key, waiting for the user's choice. */
+  const secretPrompt = ref<ChatSendPayload | null>(null)
 
   const addMenuOpen = ref(false)
   const modelMenuOpen = ref(false)
@@ -365,6 +380,20 @@ export function useComposerController(
   const hasInlineTokens = computed(() =>
     hasComposerCapabilityTokens(value.value),
   )
+  /** A typed `/word` that names no command or skill: it goes out as text. */
+  const unknownSlashHint = computed(() => {
+    const text = value.value
+    const token = text.match(/^\/\S+/)?.[0]
+    if (!token || token === '/' || isPathLikeSlashToken(token)) return ''
+    if (!props.commands.length || paletteMode.value !== null) return ''
+    const normalized = token.toLowerCase()
+    const known = props.commands.some(
+      (item) =>
+        item.name.toLowerCase() === normalized ||
+        item.aliases?.some((alias) => alias.toLowerCase() === normalized),
+    )
+    return known ? '' : `${token} 不是命令，将作为普通消息发送`
+  })
   const composerSlashParts = computed(() => {
     const text = value.value
     if (!text.startsWith('/')) return null
@@ -541,6 +570,7 @@ export function useComposerController(
     () =>
       goalCaptureStarting.value ||
       props.interactionBlocked ||
+      uploading.value.size > 0 ||
       composerSendDisabled({
         busy: props.busy,
         content: value.value,
@@ -625,27 +655,15 @@ export function useComposerController(
         emit('error', COMPOSER_QUEUE_FULL_MESSAGE)
         return
       }
-      if (uploading.value.size > 0) {
-        emit('error', '附件仍在处理中，请等待完成后再排队。')
-        return
-      }
-      emit('send', {
-        content,
-        attachments: takeDrafts(),
-        requestedSkills: normalized.requestedSkills,
-        displayContent: normalized.displayContent,
-        ...sentReferences,
-        delivery: delivery || 'queue',
-      })
-      setText('')
-      closeComposerMenus()
-      void nextTick(resize)
+    }
+    // An attachment still uploading would land in the next message.
+    if (uploading.value.size > 0) {
+      emit('error', COMPOSER_UPLOADING_MESSAGE)
       return
     }
-    if (goalCaptureActive.value) {
+    if (!props.busy && goalCaptureActive.value) {
       if (
         drafts.value.length > 0 ||
-        uploading.value.size > 0 ||
         normalized.requestedSkills.length > 0 ||
         normalized.references.length > 0 ||
         hasInlineTokens.value
@@ -664,16 +682,111 @@ export function useComposerController(
       return
     }
     if (!content && drafts.value.length === 0) return
-    emit('send', {
+    const payload: ChatSendPayload = {
       content,
-      attachments: takeDrafts(),
+      attachments: [...drafts.value],
       requestedSkills: normalized.requestedSkills,
       displayContent: normalized.displayContent,
       ...sentReferences,
+      ...(props.busy ? { delivery: delivery || 'queue' } : {}),
+    }
+    if (findSecrets(content).length > 0) {
+      secretPrompt.value = payload
+      return
+    }
+    dispatch(payload)
+  }
+
+  /** The key prompt's answer: mask and send, send as is, or keep editing. */
+  function resolveSecretPrompt(choice: 'mask' | 'send' | 'cancel'): void {
+    const payload = secretPrompt.value
+    secretPrompt.value = null
+    if (!payload || choice === 'cancel') {
+      focusInput()
+      return
+    }
+    if (choice === 'send') {
+      dispatch(payload)
+      return
+    }
+    const masked = maskSecrets(payload.content, payload.references ?? [])
+    const { references: _references, ...rest } = payload
+    dispatch({
+      ...rest,
+      content: masked.content,
+      displayContent: masked.content,
+      ...(masked.references.length ? { references: masked.references } : {}),
+      requestedSkills: [
+        ...new Set(
+          masked.references
+            .filter((reference) => reference.kind === 'skill')
+            .map((reference) => reference.id),
+        ),
+      ].map((name) => ({ name, source: 'slash' as const })),
     })
+  }
+
+  /**
+   * Clear the composer and hand the message over. If it is refused, the
+   * draft as it was (unmasked text, chips, attachments) comes back, after
+   * anything typed since.
+   */
+  function dispatch(payload: ChatSendPayload): void {
+    const sent: ComposerDraft = {
+      text: value.value,
+      references: references.value.map((reference) => ({ ...reference })),
+      attachments: takeDrafts(),
+    }
     setText('')
     closeComposerMenus()
     void nextTick(resize)
+    let outcome: boolean | Promise<boolean> | void
+    try {
+      outcome = props.onSend?.({ ...payload, attachments: sent.attachments })
+    } catch (error) {
+      emit('error', error instanceof Error ? error.message : String(error))
+      outcome = false
+    }
+    void Promise.resolve(outcome).then(
+      (accepted) => {
+        if (accepted === false) putBack(sent)
+      },
+      (error: unknown) => {
+        emit('error', error instanceof Error ? error.message : String(error))
+        putBack(sent)
+      },
+    )
+  }
+
+  /** Everything the composer holds now. */
+  function takeSnapshot(): ComposerDraft {
+    return {
+      text: value.value,
+      references: references.value.map((reference) => ({ ...reference })),
+      attachments: [...drafts.value],
+    }
+  }
+
+  /** Replace the whole draft (another chat's, or none). */
+  function applySnapshot(draft: ComposerDraft | null): void {
+    secretPrompt.value = null
+    const next = draft ?? EMPTY_DRAFT
+    setText(next.text, next.references)
+    drafts.value = [...next.attachments]
+    void nextTick(resize)
+  }
+
+  /** Bring a draft back without overwriting what is in the composer. */
+  function putBack(draft: ComposerDraft): void {
+    applySnapshot(mergeDrafts(takeSnapshot(), draft))
+    void nextTick(focusInput)
+  }
+
+  function onPaste(event: ClipboardEvent): void {
+    const files = event.clipboardData?.files
+    if (!files?.length) return
+    event.preventDefault()
+    void handleFiles(Array.from(files))
   }
 
   function handleKeydown(event: KeyboardEvent): void {
@@ -764,8 +877,21 @@ export function useComposerController(
     if (instance && value.value) instance.setContent(value.value)
   })
 
+  /**
+   * Put text in the composer (an edited or queued message, a handed-over
+   * draft). Text already there stays; the new text goes after it.
+   */
   function setDraft(text: string, refs?: readonly MessageReference[]): void {
-    setText(text, refs)
+    if (isEmptyDraft(takeSnapshot())) setText(text, refs)
+    else {
+      const merged = mergeDrafts(takeSnapshot(), {
+        text,
+        references: [...(refs ?? [])],
+        attachments: [],
+      })
+      // Without chip data the editor rebuilds chips from known names.
+      setText(merged.text, refs === undefined ? undefined : merged.references)
+    }
     void nextTick(() => {
       resize()
       focusInput()
@@ -777,12 +903,20 @@ export function useComposerController(
     else input.value?.focus()
   }
 
+  /** A message that came back (an edited queued prompt): text, chips, files. */
   function restoreDraft(payload: ChatSendPayload): void {
-    setText(
-      String(payload.displayContent || payload.content || ''),
-      payload.references,
-    )
-    restoreDrafts(payload.attachments || [])
+    const text = String(payload.displayContent || payload.content || '')
+    if (isEmptyDraft(takeSnapshot())) {
+      setText(text, payload.references)
+      restoreDrafts(payload.attachments || [])
+    } else
+      applySnapshot(
+        mergeDrafts(takeSnapshot(), {
+          text,
+          references: [...(payload.references ?? [])],
+          attachments: [...(payload.attachments ?? [])],
+        }),
+      )
     void nextTick(() => {
       resize()
       focusInput()
@@ -1071,6 +1205,11 @@ export function useComposerController(
     onDragLeave,
     onDrop,
     removeDraft,
+    handleFiles,
+    onPaste,
+    unknownSlashHint,
+    secretPrompt,
+    resolveSecretPrompt,
     addMenuOpen,
     modelMenuOpen,
     modeMenuOpen,
@@ -1135,7 +1274,13 @@ export function useComposerController(
     providerIcon,
     providerFallback,
     protocolLabel,
-    expose: { setDraft, focusInput, restoreDraft },
+    expose: {
+      setDraft,
+      focusInput,
+      restoreDraft,
+      takeSnapshot,
+      applySnapshot,
+    },
   }
 }
 

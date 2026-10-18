@@ -12,8 +12,10 @@ export function useAttachments(options: {
   onError: (message: string) => void
 }) {
   const drafts = ref<AttachmentRef[]>([])
-  const uploading = ref<Set<string>>(new Set())
+  /** Uploads in flight: a unique id per file → its name (names repeat). */
+  const uploading = ref<Map<string, string>>(new Map())
   const dragActive = ref(false)
+  let uploadSeq = 0
 
   async function handleFiles(files: FileList | File[] | null) {
     if (!files) return
@@ -26,14 +28,15 @@ export function useAttachments(options: {
     }
     const list = Array.from(files).slice(0, slots)
     for (const f of list) {
-      uploading.value.add(f.name)
+      const id = `upload-${++uploadSeq}`
+      uploading.value.set(id, f.name || '附件')
       try {
         const ref = await uploadAttachment(f)
         drafts.value.push(ref)
       } catch (err) {
         options.onError(err instanceof Error ? err.message : String(err))
       } finally {
-        uploading.value.delete(f.name)
+        uploading.value.delete(id)
       }
     }
   }

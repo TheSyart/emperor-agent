@@ -52,7 +52,7 @@ function setup() {
     busy: ref(false),
     commandDescriptors,
     resolveSessionId: async () => 'session-1',
-    sendMessage: vi.fn(() => true),
+    sendMessage: vi.fn((): boolean | Promise<boolean> => true),
     showToast: vi.fn(),
     refreshAll: vi.fn(async () => undefined),
     openCommandSurface: vi.fn(async () => undefined),
@@ -86,13 +86,43 @@ describe('Core-owned slash command dispatch', () => {
     expect(core).not.toHaveBeenCalled()
   })
 
-  it('never sends unknown slash commands to the model', () => {
+  it('sends an unknown /word as an ordinary message once commands are loaded', async () => {
     const ctx = setup()
-    ctx.submitFromComposer('/hep')
+    await expect(ctx.submitFromComposer('/tmp 下有什么')).resolves.toBe(true)
+    expect(ctx.deps.sendMessage).toHaveBeenCalledWith({
+      content: '/tmp 下有什么',
+      attachments: [],
+    })
+    expect(core).not.toHaveBeenCalled()
+  })
+
+  it('waits for the command list before deciding a typed /compact', async () => {
+    const ctx = setup()
+    ctx.commandDescriptors.value = []
+    ctx.deps.ensureCommands = vi.fn(async () => {
+      ctx.commandDescriptors.value = [descriptor('compact')]
+    })
+    vi.mocked(core).mockResolvedValueOnce({
+      status: 'completed',
+      effects: [],
+    } as unknown as CommandInvocationResult)
+    await expect(ctx.submitFromComposer('/compact')).resolves.toBe(true)
+    expect(ctx.deps.ensureCommands).toHaveBeenCalledWith(2000)
     expect(ctx.deps.sendMessage).not.toHaveBeenCalled()
-    expect(ctx.deps.showToast).toHaveBeenCalledWith(
-      '未知命令 /hep。输入 / 查看可用命令。',
+    expect(core).toHaveBeenCalledWith(
+      'commands.invoke',
+      expect.objectContaining({ commandId: 'builtin.compact' }),
     )
+  })
+
+  it('reports whether the send was accepted', async () => {
+    const ctx = setup()
+    vi.mocked(ctx.deps.sendMessage).mockReturnValueOnce(false)
+    await expect(ctx.submitFromComposer('hello')).resolves.toBe(false)
+    vi.mocked(ctx.deps.sendMessage).mockReturnValueOnce(Promise.resolve(true))
+    await expect(ctx.submitFromComposer('hello')).resolves.toBe(true)
+    vi.mocked(core).mockRejectedValueOnce(new Error('command failed'))
+    await expect(ctx.submitFromComposer('/new')).resolves.toBe(false)
   })
 
   it('invokes Core with a stable command id and opens local UI from the result', async () => {

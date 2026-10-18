@@ -8,7 +8,7 @@ describe('ConversationView composer seat integration', () => {
   it('replaces the composer with the takeover card and keeps the goal bar visible', () => {
     expect(source).toContain('activeTakeover(pendingInteraction.value)')
     expect(source).toContain('<TakeoverSeat v-if="takeover"')
-    expect(source).toContain('v-show="!takeover"')
+    expect(source).toContain('v-show="!takeoverOpen"')
     expect(source).toContain('<GoalBar')
     expect(source).toContain('@action="runGoalStatusAction"')
     expect(source).toContain(
@@ -23,10 +23,17 @@ describe('ConversationView composer seat integration', () => {
     )
   })
 
-  it('restores a queue submission rejected by the Core single-slot guard', () => {
-    expect(source).toContain('ctx.queueDraftRecovery.value')
-    expect(source).toContain('composer.value?.restoreDraft(recovery.payload)')
-    expect(source).toContain('ctx.clearQueueDraftRecovery(recovery.sessionId)')
+  it('returns the send outcome to the composer, which restores a refused draft', () => {
+    expect(source).toContain('@send="sendFromComposer"')
+    expect(source).toContain('return ctx.submitFromComposer(payload)')
+    expect(source).toContain("ctx.showToast('正在切换会话，稍后再发送')")
+  })
+
+  it('keeps one unsent draft per chat', () => {
+    expect(source).toContain(
+      'saveComposerDraft(previous, handle.takeSnapshot())',
+    )
+    expect(source).toContain('handle.applySnapshot(takeComposerDraft(next))')
   })
 
   it('passes full control and Provider metadata to the composer', () => {

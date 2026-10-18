@@ -528,11 +528,6 @@ export interface ChatSendPayload {
   delivery?: 'queue' | 'interject'
 }
 
-export interface QueueDraftRecovery {
-  sessionId: string
-  payload: ChatSendPayload
-}
-
 export interface ModelTestResult {
   ok: boolean
   kind: 'text' | 'vision'
@@ -1198,6 +1193,8 @@ export interface QueuedPromptItem {
   hasCapabilityRefs: boolean
   /** Chips in `content`, when it was sent from the rich composer. */
   references?: MessageReference[]
+  /** The whole message as this window sent it (attachments included), for 编辑. */
+  payload?: ChatSendPayload
 }
 
 export interface PendingState {

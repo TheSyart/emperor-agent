@@ -91,6 +91,8 @@ const emit = defineEmits<{
   change: [output: ComposerOutput]
   trigger: [trigger: ComposerTrigger | null]
   focus: []
+  /** Files pasted from the clipboard (a screenshot, copied files). */
+  files: [files: File[]]
 }>()
 
 const host = ref<HTMLElement | null>(null)
@@ -289,7 +291,11 @@ onMounted(() => {
       return true
     },
     handlePaste: (_view, event) => {
-      if (event.clipboardData?.files.length) return false
+      const files = event.clipboardData?.files
+      if (files?.length) {
+        emit('files', Array.from(files))
+        return true
+      }
       const text = event.clipboardData?.getData('text/plain')
       if (!text) return false
       return pasteText(text)

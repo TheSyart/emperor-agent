@@ -7,7 +7,6 @@ import type {
   ControlInteraction,
   MessageReference,
   PendingState,
-  QueueDraftRecovery,
   QueuedPromptItem,
   RequestedSkill,
   RuntimeEventEnvelope,
@@ -128,7 +127,8 @@ export function useRuntime(options: {
   onNotify?: (notice: RuntimeNotice) => void
 }) {
   const queuedPrompts = ref<QueuedPromptItem[]>([])
-  const queueDraftRecovery = ref<QueueDraftRecovery | null>(null)
+  /** Sends waiting for the host to take them, by client message id. */
+  const admissions = new Map<string, (accepted: boolean) => void>()
   const pendingInteractionsBySession = reactive<
     Record<string, ControlInteraction>
   >({})
@@ -274,7 +274,15 @@ export function useRuntime(options: {
     }
   }
 
-  function sendMessage(payload: string | ChatSendPayload) {
+  /**
+   * Submit one message. `false` when it was refused here; otherwise a
+   * promise that turns `true` once the host takes it (its user message or
+   * interjection arrives, or the submit resolves) and `false` if the submit
+   * fails first. The composer restores the draft on `false`.
+   */
+  function sendMessage(
+    payload: string | ChatSendPayload,
+  ): boolean | Promise<boolean> {
     const normalized =
       typeof payload === 'string'
         ? {
@@ -352,6 +360,7 @@ export function useRuntime(options: {
     requestedSkills: RequestedSkill[],
     hasCapabilityRefs: boolean,
     references: MessageReference[] = [],
+    payload?: ChatSendPayload,
   ): QueuedPromptItem {
     const id = nextId('prompt')
     const prompt: QueuedPromptItem = {
@@ -370,6 +379,7 @@ export function useRuntime(options: {
       requestedSkillNames: requestedSkills.map((skill) => skill.name),
       hasCapabilityRefs: hasCapabilityRefs || references.length > 0,
       ...(references.length ? { references } : {}),
+      ...(payload ? { payload } : {}),
     }
     queuedPrompts.value.push(prompt)
     return prompt
@@ -392,7 +402,7 @@ export function useRuntime(options: {
     const draftPayload = isDraftSessionId(activeSessionId)
       ? draftSubmitPayload(activeSessionId)
       : null
-    const userMsg = opts.delivery
+    const userMsg: { id: string } = opts.delivery
       ? enqueueLocalPrompt(
           opts.displayText || opts.text,
           opts.delivery,
@@ -400,9 +410,21 @@ export function useRuntime(options: {
           opts.requestedSkills,
           opts.displayText !== opts.text,
           opts.references,
+          {
+            content: opts.text,
+            displayContent: opts.displayText || opts.text,
+            attachments: [...opts.attachments],
+            requestedSkills: [...opts.requestedSkills],
+            ...(opts.references.length
+              ? { references: [...opts.references] }
+              : {}),
+          },
         )
       : beginLocalTurn()
     status.value = 'ready'
+    const admitted = new Promise<boolean>((resolve) => {
+      admissions.set(userMsg.id, resolve)
+    })
     void invokeCore('chat.submit', {
       content: opts.text,
       displayContent: opts.displayText || opts.text,
@@ -413,36 +435,33 @@ export function useRuntime(options: {
       sessionId: activeSessionId,
       ...(opts.delivery ? { delivery: opts.delivery } : {}),
       ...(draftPayload ?? {}),
-    }).catch((err) => {
-      if (opts.delivery) {
-        queuedPrompts.value = queuedPrompts.value.filter(
-          (prompt) => prompt.id !== userMsg.id,
-        )
-        if (queuedPromptCancellationCode(err)) return
-        if (promptQueueFullCode(err)) {
-          queueDraftRecovery.value = {
-            sessionId: activeSessionId,
-            payload: {
-              content: opts.text,
-              displayContent: opts.displayText,
-              delivery: opts.delivery,
-              requestedSkills: [...opts.requestedSkills],
-              attachments: [...opts.attachments],
-              ...(opts.references.length
-                ? { references: [...opts.references] }
-                : {}),
-            },
+    })
+      .then(() => settleAdmission(userMsg.id, true))
+      .catch((err) => {
+        if (opts.delivery) {
+          queuedPrompts.value = queuedPrompts.value.filter(
+            (prompt) => prompt.id !== userMsg.id,
+          )
+          // The user cancelled (or took back to edit) a prompt the queue had
+          // already taken: nothing to restore.
+          if (queuedPromptCancellationCode(err)) {
+            settleAdmission(userMsg.id, true)
+            return
           }
-          options.showToast(PROMPT_QUEUE_FULL_MESSAGE)
-          void refreshQueuedPrompts(activeSessionId)
+          settleAdmission(userMsg.id, false)
+          if (promptQueueFullCode(err)) {
+            options.showToast(PROMPT_QUEUE_FULL_MESSAGE)
+            void refreshQueuedPrompts(activeSessionId)
+            return
+          }
+          options.showToast(displayError(err))
           return
         }
-        options.showToast(displayError(err))
-        return
-      }
-      handleChatSubmitError(err)
-    })
-    return true
+        // A turn that failed after its message was taken stays sent.
+        settleAdmission(userMsg.id, false)
+        handleChatSubmitError(err)
+      })
+    return admitted
   }
 
   function draftSubmitPayload(draftId: string): Record<string, unknown> {
@@ -474,6 +493,14 @@ export function useRuntime(options: {
         sessionId: ownerSessionId,
       })
       if (ownerSessionId !== sessionId.value) return
+      // Keep the full message this window sent, so 编辑 brings its files back.
+      const sent = new Map(
+        queuedPrompts.value.flatMap((prompt) =>
+          prompt.payload
+            ? [[prompt.clientMessageId, prompt.payload] as const]
+            : [],
+        ),
+      )
       queuedPrompts.value = records.map((record) => ({
         id: record.id,
         turnId: record.turnId,
@@ -491,6 +518,9 @@ export function useRuntime(options: {
           (Boolean(record.displayContent) &&
             record.displayContent !== record.content),
         ...(record.references?.length ? { references: record.references } : {}),
+        ...(sent.has(record.clientMessageId)
+          ? { payload: sent.get(record.clientMessageId) }
+          : {}),
       }))
     } catch (error) {
       options.showToast(displayError(error))
@@ -726,11 +756,11 @@ export function useRuntime(options: {
     )
   }
 
-  function clearQueueDraftRecovery(ownerSessionId?: string): void {
-    const recovery = queueDraftRecovery.value
-    if (!recovery) return
-    if (ownerSessionId && recovery.sessionId !== ownerSessionId) return
-    queueDraftRecovery.value = null
+  function settleAdmission(clientMessageId: string, accepted: boolean): void {
+    const resolve = admissions.get(clientMessageId)
+    if (!resolve) return
+    admissions.delete(clientMessageId)
+    resolve(accepted)
   }
 
   function syncSessionProjection(state: SessionProjectionState): void {
@@ -972,6 +1002,13 @@ export function useRuntime(options: {
       return
     }
     const data = parsed as WsEvent
+    const admittedId =
+      data.event === 'user_message'
+        ? data.client_message_id
+        : data.event === 'prompt_interjected'
+          ? data.prompt_id
+          : undefined
+    if (admittedId) settleAdmission(String(admittedId), true)
     if (data.event === 'agent_tree_changed') options.onAgentTreeChanged?.(data)
     if (data.event === 'session_log_state') {
       const notice = sessionLogNotice(data)
@@ -1337,8 +1374,6 @@ export function useRuntime(options: {
 
   return {
     queuedPrompts,
-    queueDraftRecovery,
-    clearQueueDraftRecovery,
     pendingInteractionsBySession,
     busy,
     status,

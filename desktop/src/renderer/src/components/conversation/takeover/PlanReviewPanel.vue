@@ -5,8 +5,9 @@
  * a footer with an adjustment comment field plus the decision actions:
  * 继续规划 (sends the comment, enabled once it is non-empty) and 批准并执行.
  * Enter in the comment field sends it (Shift+Enter breaks a line); Esc
- * cancels the interaction.
+ * folds the card (忽略 still dismisses the plan).
  */
+import { foldOnEscape } from './takeoverModel'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { ControlInteraction } from '../../../types'
 import { useAppContext } from '../../../composables/useAppContext'
@@ -79,7 +80,7 @@ function onCommentKeydown(event: KeyboardEvent) {
       class="card"
       tabindex="-1"
       :aria-label="title || '计划待确认'"
-      @keydown.esc.prevent="cancel"
+      @keydown="foldOnEscape($event, props.interaction.id)"
     >
       <div class="strip">
         <span class="dot" aria-hidden="true" />

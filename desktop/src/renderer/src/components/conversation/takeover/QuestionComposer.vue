@@ -7,8 +7,10 @@
  * onboarding ask swaps "忽略" for "稍后再说" and adds "不再提醒".
  *
  * Keyboard: 1-9 pick an option (outside the text field), Enter continues or
- * submits, Shift+Enter breaks a line in the text field, Esc cancels.
+ * submits, Shift+Enter breaks a line in the text field, Esc folds the card
+ * (cancelling needs the explicit button).
  */
+import { foldOnEscape } from './takeoverModel'
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import type { ControlInteraction, ControlQuestion } from '../../../types'
 import { useAppContext } from '../../../composables/useAppContext'
@@ -150,8 +152,7 @@ function isComposing(event: KeyboardEvent): boolean {
 
 function onKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') {
-    event.preventDefault()
-    cancel()
+    foldOnEscape(event, props.interaction.id)
     return
   }
   const target = event.target as HTMLElement | null

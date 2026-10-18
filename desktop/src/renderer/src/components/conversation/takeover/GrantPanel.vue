@@ -7,9 +7,10 @@
  * unverified, and allows or refuses this one action (Core offers only
  * 「本次」: the AI drives continuously and only high-impact actions and
  * credential fills ask, 2026-09-29). A scope picker appears only if Core
- * ever offers more than one. One-shot like ApprovalPanel; Esc dismisses
- * (Core records a denial).
+ * ever offers more than one. One-shot like ApprovalPanel; Esc folds the
+ * card, it never denies.
  */
+import { foldOnEscape } from './takeoverModel'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { ControlInteraction } from '../../../types'
 import { useAppContext } from '../../../composables/useAppContext'
@@ -46,10 +47,6 @@ function send(optionId: string) {
   )
   if (!ok) answered.value = false
 }
-
-function cancel() {
-  ctx.cancelInteraction(props.interaction.id)
-}
 </script>
 
 <template>
@@ -59,7 +56,7 @@ function cancel() {
       class="card"
       tabindex="-1"
       aria-label="电脑操作授权"
-      @keydown.esc.prevent="cancel"
+      @keydown="foldOnEscape($event, props.interaction.id)"
     >
       <div class="strip">
         <span class="dot" aria-hidden="true" />

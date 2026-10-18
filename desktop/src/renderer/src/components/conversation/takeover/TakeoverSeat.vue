@@ -12,16 +12,42 @@ import ApprovalPanel from './ApprovalPanel.vue'
 import GrantPanel from './GrantPanel.vue'
 import PlanReviewPanel from './PlanReviewPanel.vue'
 import QuestionComposer from './QuestionComposer.vue'
-import { activeTakeover } from './takeoverModel'
+import {
+  activeTakeover,
+  isTakeoverMinimized,
+  restoreTakeover,
+  TAKEOVER_WAITING_LABEL,
+} from './takeoverModel'
 
 const props = defineProps<{ interaction: ControlInteraction | null }>()
 const takeover = computed(() => activeTakeover(props.interaction))
+/** Folded with Esc: one line above the composer until 展开. */
+const folded = computed(() =>
+  takeover.value ? isTakeoverMinimized(takeover.value.interaction.id) : false,
+)
 </script>
 
 <template>
   <AppTransition preset="materialize" origin="50% 100%" appear>
+    <div
+      v-if="takeover && folded"
+      :key="`folded:${takeover.interaction.id}`"
+      class="takeover-folded"
+      role="status"
+    >
+      <span class="takeover-folded-label">{{
+        TAKEOVER_WAITING_LABEL[takeover.kind]
+      }}</span>
+      <button
+        type="button"
+        class="takeover-folded-action"
+        @click="restoreTakeover(takeover.interaction.id)"
+      >
+        展开
+      </button>
+    </div>
     <ApprovalPanel
-      v-if="takeover?.kind === 'approval'"
+      v-else-if="takeover?.kind === 'approval'"
       :key="`approval:${takeover.interaction.id}`"
       :interaction="takeover.interaction"
     />
@@ -42,3 +68,38 @@ const takeover = computed(() => activeTakeover(props.interaction))
     />
   </AppTransition>
 </template>
+
+<style scoped>
+.takeover-folded {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 780px;
+  margin: 0 auto var(--space-1-5);
+  padding: var(--space-1) var(--space-4);
+  color: rgb(var(--label-secondary));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+}
+
+.takeover-folded-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.takeover-folded-action {
+  flex: none;
+  padding: var(--space-0-5) var(--space-2);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--selector-fill));
+  color: rgb(var(--label-primary));
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  cursor: pointer;
+}
+
+.takeover-folded-action:hover {
+  background: rgb(var(--interactive-bg-hover-solid));
+}
+</style>
