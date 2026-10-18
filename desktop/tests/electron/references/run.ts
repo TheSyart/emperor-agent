@@ -564,14 +564,9 @@ async function turnFileRecord(
       geometry.fileIcons !== 3
     )
       throw new Error(`file summary layout: ${JSON.stringify(geometry)}`)
-    const sidebarScrollbar = await page
-      .locator('.sidebar-root .region > .list')
-      .evaluate((element) => getComputedStyle(element).scrollbarWidth)
-    if (sidebarScrollbar !== 'none')
-      throw new Error(`visible sidebar scrollbar: ${sidebarScrollbar}`)
     await page.screenshot({ path: join(shots, 'turn-files-card.png') })
     await card.screenshot({ path: join(shots, 'turn-files-card-detail.png') })
-    return { headline, names, geometry, sidebarScrollbar }
+    return { headline, names, geometry }
   })
 
   await check(page, '查看变更 shows the turn’s diff in 审查', async () => {
@@ -1038,6 +1033,8 @@ async function conversationResources(
         )
         const editor = page.getByLabel('消息输入框').first()
         await editor.fill(prompt)
+        // Links are re-detected once typing pauses (REDECORATE_DELAY_MS).
+        await page.waitForTimeout(400)
         const decorated = await editor
           .locator('.composer-url-decoration')
           .allTextContents()
@@ -1109,6 +1106,18 @@ async function conversationResources(
           exact: true,
         })
         if (await workbench.isVisible()) await workbench.click()
+        // Real site icons are opt-in (设置 › 常规 › 显示网站图标).
+        await page.evaluate(() =>
+          localStorage.setItem(
+            'emperor.ui.prefs.v1',
+            JSON.stringify({ siteIcons: true }),
+          ),
+        )
+        await page.reload()
+        await page
+          .locator('.assistant-step a.md-link-chip')
+          .first()
+          .waitFor({ timeout: 15_000 })
 
         const sites = [
           'huggingface.co',

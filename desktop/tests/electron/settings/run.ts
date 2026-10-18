@@ -29,6 +29,7 @@ const SUITE = 'settings'
 const SECTIONS: ReadonlyArray<readonly [string, string]> = [
   ['general', '常规'],
   ['model', '模型'],
+  ['executors', '子智能体'],
   ['hooks', 'Hooks'],
   ['computer', '电脑操作'],
   ['browser', '浏览器'],
@@ -218,7 +219,7 @@ function until(
 async function settings(page: Page): Promise<void> {
   await check(
     page,
-    'the nav lists the ten sections in order',
+    'the nav lists the eleven sections in order',
     async () => {
       const dialog = await openSettings(page)
       const keys = await dialog

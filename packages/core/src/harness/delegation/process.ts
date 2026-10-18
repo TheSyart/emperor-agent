@@ -208,7 +208,10 @@ function boundaryScanner(): string {
           ),
         ]
       : []),
-    resolve(dirname(fileURLToPath(import.meta.url)), '../../../', suffix),
+    // CommonJS bundles (the Electron e2e harness) have no import.meta.url.
+    ...(import.meta.url
+      ? [resolve(dirname(fileURLToPath(import.meta.url)), '../../../', suffix)]
+      : []),
     resolve(process.cwd(), 'packages/core', suffix),
     resolve(process.cwd(), '../packages/core', suffix),
     resolve(process.cwd(), suffix),

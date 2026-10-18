@@ -72,7 +72,9 @@ await build({
   format: 'cjs',
   target: 'node22',
   outfile: bundle,
-  external: ['electron', 'playwright-core'],
+  // The Claude Agent SDK is ESM-only and reads import.meta at load; the app
+  // loads it unbundled too (app.asar.unpacked), so keep it external here.
+  external: ['electron', 'playwright-core', '@anthropic-ai/claude-agent-sdk'],
   sourcemap: 'inline',
   logLevel: 'warning',
 })
