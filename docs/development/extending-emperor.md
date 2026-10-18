@@ -64,6 +64,7 @@ MCP 工具不需要注册代码：`McpToolBridge` 会把每个已连接 server �
 ## 新 Provider 或模型字段
 
 - Provider 访问方式登记在 `packages/core/src/llm/catalog.ts`：协议、默认 API Base、模型发现与 reasoning 适配。catalog 不内嵌模型清单。
+- 新 Provider 还要在 `packages/core/src/model/metadata/providers.ts` 映射到 models.dev provider（或列入 `UNMAPPED_CATALOG_PROVIDERS`），`metadata/lookup.test.ts` 会检查。模型的上下文、能力与单价来自随包目录，见[模型元数据规范](../design/model-metadata.md)。
 - `packages/core/src/llm/route.ts` 的 `routeFromEntry()` 把 `model_config.json` 条目解析为 `RouteSpec`；选择传输适配器（`deepseek` 或 `pi-ai`）也在这里。新的线协议在 `llm/adapters/` 下实现。
 - 模型配置契约是 schemaVersion 2：可以保存多个条目，但只有一个 `activeModelId`。修改 schema 时同步 `config/model-config.ts`、`api/services/model-service.ts`、`operations.ts` 中的 `model.*` schema 和 renderer 模型面板。
 - 重试策略在 `llm/retry-policy.ts`，由 `harness/agent/retry.ts` 消费；适配器内部不做隐藏重试。

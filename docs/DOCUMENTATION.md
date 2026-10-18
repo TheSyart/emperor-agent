@@ -9,16 +9,16 @@
 
 ## 分类与职责
 
-| 目录或文件                  | 内容                                             | 不应包含                                                   |
-| --------------------------- | ------------------------------------------------ | ---------------------------------------------------------- |
-| `README.md`                 | 产品定位、下载入口、核心路径、能力边界           | 完整 API、内部 store 细节、固定 Preview 版本、设计规范正文 |
-| `docs/user/`                | 用户可以执行的操作、结果和限制                   | 未开放入口、内部类名堆砌                                   |
-| `docs/architecture/`        | 当前系统边界、状态机、数据流和恢复语义           | 按日期写的实施进度                                         |
-| `docs/development/`         | 本地开发、扩展路径和同步清单                     | 用户安装步骤的重复副本                                     |
-| `docs/design/`              | 品牌与图形资源、主题与样式、插件 Logo 等设计规范 | 系统架构、开发流程、实施计划                               |
-| `docs/release/`             | 当前或明确冻结的发布流程、安全提示               | 与某次发布绑定的临时 receipt                               |
-| `.github/SECURITY.md`       | 支持范围、漏洞报告和安全处理规则                 | 普通故障排查                                               |
-| `docs/release/CHANGELOG.md` | 用户可感知的版本变化                             | 提交日志、测试数量、内部过程记录                           |
+| 目录或文件                  | 内容                                                        | 不应包含                                                   |
+| --------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------- |
+| `README.md`                 | 产品定位、下载入口、核心路径、能力边界                      | 完整 API、内部 store 细节、固定 Preview 版本、设计规范正文 |
+| `docs/user/`                | 用户可以执行的操作、结果和限制                              | 未开放入口、内部类名堆砌                                   |
+| `docs/architecture/`        | 当前系统边界、状态机、数据流和恢复语义                      | 按日期写的实施进度                                         |
+| `docs/development/`         | 本地开发、扩展路径和同步清单                                | 用户安装步骤的重复副本                                     |
+| `docs/design/`              | 品牌与图形资源、主题与样式、插件 Logo、模型元数据目录等规范 | 系统架构、开发流程、实施计划                               |
+| `docs/release/`             | 当前或明确冻结的发布流程、安全提示                          | 与某次发布绑定的临时 receipt                               |
+| `.github/SECURITY.md`       | 支持范围、漏洞报告和安全处理规则                            | 普通故障排查                                               |
+| `docs/release/CHANGELOG.md` | 用户可感知的版本变化                                        | 提交日志、测试数量、内部过程记录                           |
 
 ## 状态头
 
@@ -49,6 +49,7 @@ Active 文档使用下面的四行状态头：
 | 压缩或长期上下文注入                 | `harness/compaction/`、`harness/memory/memory.ts`、`harness/prompt/agent-instructions.ts`                                               | 模型记忆手册、Chat/Build、Agent 执行链路                                           |
 | 工具新增或语义变化                   | `harness/tools/builtin/`、`HarnessHost.compose()`                                                                                       | README、工具手册、Agent 执行链路、扩展指南                                         |
 | 模型 schema 或 Provider              | `config/model-config.ts`、`llm/catalog.ts`、`llm/route.ts`、模型面板                                                                    | 首次使用、模型手册、示例配置、扩展指南                                             |
+| 模型元数据目录                       | `model/metadata/`（快照、覆盖层、家族规则、匹配）、`scripts/sync-model-metadata.ts`                                                     | 模型元数据规范、扩展指南                                                           |
 | CoreApi operation                    | `api/operations.ts`、`api/core-api.ts`、IPC contract、renderer API                                                                      | 架构总览、IPC 文档、开发扩展指南                                                   |
 | Core package 导出                    | `packages/core/src/public/`、`packages/core/package.json`                                                                               | 架构总览、开发指南                                                                 |
 | ACP method / capability              | `packages/core/src/acp/`、官方 ACP schema、wire test                                                                                    | README、架构总览、Headless ACP 指南                                                |
