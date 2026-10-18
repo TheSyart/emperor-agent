@@ -308,16 +308,24 @@ describe('SessionLogStore durability', () => {
   it('still lets repair contributors close interactions after a salvage', () => {
     const { s, log } = setup({
       repairContributors: [
-        (events) =>
-          events.some((event) => (event.type as string) === 'approval/asked') &&
-          !events.some((event) => (event.type as string) === 'approval/decided')
-            ? [
-                {
-                  type: 'approval/decided',
-                  data: { id: 'p1', outcome: 'cancelled' },
-                } as never,
-              ]
-            : [],
+        {
+          id: 'approval-test',
+          pairs: [['approval/asked', 'approval/decided']],
+          repair: (events) =>
+            events.some(
+              (event) => (event.type as string) === 'approval/asked',
+            ) &&
+            !events.some(
+              (event) => (event.type as string) === 'approval/decided',
+            )
+              ? [
+                  {
+                    type: 'approval/decided',
+                    data: { id: 'p1', outcome: 'cancelled' },
+                  } as never,
+                ]
+              : [],
+        },
       ],
     })
     const session = s.create({ id: 'k' })

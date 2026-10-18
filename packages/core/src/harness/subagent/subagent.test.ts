@@ -1,6 +1,9 @@
 // Delegated subagents: background spawn + settlement notice to the parent,
 // foreground wait, fork seeding (completed turns only), fixed permission
 // scope, depth limit, send_message, interrupt authority, and report.
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { messageText, userText } from '../../llm/message'
 import type { GenerateOptions } from '../../llm/types'
@@ -12,13 +15,16 @@ import { createTestHarness, replyChunks, type TestHarness } from '../testing'
 import { SubagentManager } from './manager'
 import { installSubagents } from './tools'
 
-function setup(maxDepth?: number): {
+function setup(
+  maxDepth?: number,
+  logRoot?: string,
+): {
   h: TestHarness
   manager: SubagentManager
   agents: Map<string, Agent>
   root: Agent
 } {
-  const h = createTestHarness()
+  const h = createTestHarness(logRoot === undefined ? {} : { root: logRoot })
   const agents = new Map<string, Agent>()
   const sandbox = new SandboxPolicyService({
     defaultMode: 'workspace-write',
@@ -297,5 +303,53 @@ describe('SubagentManager', () => {
     expect(() =>
       manager.interrupt(childId, { kind: 'ancestor', agent: root }),
     ).not.toThrow()
+  })
+
+  it('lets a disposed child write its closing events before its log closes', async () => {
+    const logRoot = mkdtempSync(join(tmpdir(), 'subagent-dispose-'))
+    const { h, agents, root, manager } = setup(undefined, logRoot)
+    const hang = (request: GenerateOptions) =>
+      new Promise<never>((_resolve, reject) => {
+        request.signal?.addEventListener('abort', () =>
+          reject(request.signal?.reason),
+        )
+      })
+    const byOwner =
+      (rootReply: Parameters<typeof replyChunks>[0]) =>
+      (request: GenerateOptions) =>
+        request.sessionId === 'root' ? replyChunks(rootReply) : hang(request)
+    h.adapter.push(
+      byOwner({
+        tools: [
+          {
+            id: 'd1',
+            name: 'subagent',
+            args: { description: 'worker', prompt: 'start' },
+          },
+        ],
+      }),
+      byOwner({ text: 'started' }),
+      byOwner({ text: 'started' }),
+    )
+    root.followup(userText('go'))
+    const until = Date.now() + 3000
+    while (!h.adapter.requests.some((r) => r.sessionId !== 'root')) {
+      if (Date.now() > until) throw new Error('child never asked the model')
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    const childId = root.session.lastOf('subagent/started')!.data.subagentId
+    const child = agents.get(childId)!
+    manager.dispose(childId)
+    await child.whenIdle()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const lines = readFileSync(join(logRoot, childId, 'log.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { type: string; data?: unknown })
+    expect(lines.at(-1)).toMatchObject({
+      type: 'turn/end',
+      data: { reason: { kind: 'aborted', reason: { kind: 'disposed' } } },
+    })
+    await settleAll(agents)
   })
 })

@@ -25,6 +25,7 @@ import { boundContextSummary, contextMessage } from '../../llm/message'
 import { deadline, timeoutOf } from '../../util/timeout'
 import { logger } from '../../util/log'
 import type { Agent } from '../agent/agent'
+import type { RepairContributor, RepairStep } from '../../session-log/store'
 
 export type JobStatus =
   'running' | 'stopping' | 'completed' | 'killed' | 'failed'
@@ -47,8 +48,46 @@ declare module '../../session-log/types' {
       status: 'completed' | 'killed' | 'failed'
       exitCode?: number
       detail?: string
+      /** Written by crash repair: the app stopped before the job settled. */
+      repaired?: true
     }
   }
+}
+
+/** Crash repair: a job the dead process never settled ends `killed` / `interrupted`. */
+export const jobRepair: RepairContributor = {
+  id: 'job',
+  pairs: [['job/started', 'job/finished']],
+  repair(events) {
+    const open = new Map<
+      string,
+      { openedAt: number; kind: string; command: string }
+    >()
+    for (const event of events) {
+      if (event.type === 'job/started')
+        open.set(event.data.jobId, {
+          openedAt: event.seq,
+          kind: event.data.kind,
+          command: event.data.command,
+        })
+      else if (event.type === 'job/finished') open.delete(event.data.jobId)
+    }
+    return [...open].map(
+      ([jobId, { openedAt, kind, command }]) =>
+        ({
+          type: 'job/finished',
+          data: {
+            jobId,
+            kind,
+            command,
+            status: 'killed',
+            detail: 'interrupted',
+            repaired: true,
+          },
+          openedAt,
+        }) as RepairStep,
+    )
+  },
 }
 
 export interface JobOutcome {

@@ -12,8 +12,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { HarnessError } from '../../llm/error'
-import type { RepairContributor } from '../../session-log/store'
-import type { SessionEvent } from '../../session-log/types'
+import type { RepairContributor, RepairStep } from '../../session-log/store'
 import type { Agent } from '../agent/agent'
 
 /** One selectable answer offered to the user. */
@@ -103,19 +102,24 @@ export const DELEGATED_CALLER_MESSAGE =
   "include the unresolved question or decision in the child agent's final result"
 
 /** Crash repair: an ask without an answer is closed as `unavailable`. */
-export const questionRepair: RepairContributor = (events) => {
-  const open = new Map<string, true>()
-  for (const event of events) {
-    if (event.type === 'question/asked') open.set(event.data.id, true)
-    else if (event.type === 'question/answered') open.delete(event.data.id)
-  }
-  return [...open.keys()].map(
-    (id) =>
-      ({
-        type: 'question/answered',
-        data: { id, outcome: 'unavailable' },
-      }) as Omit<SessionEvent, 'seq' | 'time'>,
-  )
+export const questionRepair: RepairContributor = {
+  id: 'question',
+  pairs: [['question/asked', 'question/answered']],
+  repair(events) {
+    const open = new Map<string, number>()
+    for (const event of events) {
+      if (event.type === 'question/asked') open.set(event.data.id, event.seq)
+      else if (event.type === 'question/answered') open.delete(event.data.id)
+    }
+    return [...open].map(
+      ([id, openedAt]) =>
+        ({
+          type: 'question/answered',
+          data: { id, outcome: 'unavailable' },
+          openedAt,
+        }) as RepairStep,
+    )
+  },
 }
 
 function copyQuestion(question: UserQuestionItem): UserQuestionItem {

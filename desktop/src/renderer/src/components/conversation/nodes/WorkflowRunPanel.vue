@@ -53,6 +53,8 @@ const runStatus = computed<MemberStatus>(() => {
       return 'completed'
     case 'cancelled':
       return 'cancelled'
+    case 'interrupted':
+      return 'interrupted'
     default:
       return 'failed'
   }

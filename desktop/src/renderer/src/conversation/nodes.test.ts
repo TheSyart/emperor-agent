@@ -809,4 +809,32 @@ describe('turn files', () => {
       describeNodes(snapshot).filter((line) => line.startsWith('turnFiles')),
     ).toHaveLength(2)
   })
+
+  it('shows a standalone run closed by crash repair as interrupted', () => {
+    const log = new LogBuilder()
+    log.add('tool-workflow/run-start', { runId: 'run-3', name: 'nightly' })
+    log.add('tool-workflow/agent-start', {
+      runId: 'run-3',
+      seq: 1,
+      label: 'scout',
+      childId: 'sub-c',
+    })
+    log.add('tool-workflow/agent-end', {
+      runId: 'run-3',
+      seq: 1,
+      outcome: 'cancelled',
+      repaired: true,
+    })
+    log.add('tool-workflow/run-end', {
+      runId: 'run-3',
+      stopReason: 'interrupted',
+      error: 'interrupted',
+      repaired: true,
+    })
+    const { snapshot } = replay(log.events)
+    expect(describeNodes(snapshot)).toEqual([
+      'workflowRun[interrupted]: nightly',
+    ])
+    expectConverges(log)
+  })
 })

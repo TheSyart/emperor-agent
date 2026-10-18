@@ -126,10 +126,31 @@ export class SessionForkError extends Error {
   }
 }
 
-/** Additional repair steps domains contribute (e.g. closing pending approvals). */
-export type RepairContributor = (
-  events: readonly SessionEvent[],
-) => Array<Omit<SessionEvent, 'seq' | 'time'>>
+/** One event crash repair appends; `openedAt` is the seq of the marker it closes. */
+export type RepairStep = Omit<SessionEvent, 'seq' | 'time'> & {
+  openedAt?: number
+}
+
+/**
+ * Closes one domain's start/end marker pairs a dead process left open
+ * (e.g. pending approvals). Repair only appends; `pairs` names what it
+ * closes so the repair matrix can prove every pair has a closer.
+ */
+export interface RepairContributor {
+  readonly id: string
+  readonly pairs: ReadonlyArray<readonly [start: string, end: string]>
+  repair(events: readonly SessionEvent[]): RepairStep[]
+}
+
+/** The pairs the built-in turn closer (`repair.ts`) closes after every contributor. */
+export const TURN_REPAIR: Pick<RepairContributor, 'id' | 'pairs'> = {
+  id: 'turn',
+  pairs: [
+    ['turn/start', 'turn/end'],
+    ['step/start', 'step/end'],
+    ['tool/call', 'tool/result'],
+  ],
+}
 
 interface HeaderLine extends Omit<SessionHeader, 'version' | 'id'> {
   type: 'session'
@@ -520,13 +541,20 @@ export class SessionLogStore {
 
   private repair(session: Session): void {
     const events = session.events
-    const extra = this.repairContributors.flatMap((contributor) =>
-      contributor(events),
-    )
-    for (const event of extra) {
+    // Every contributor reads the same log; their closers go in the order
+    // the markers were opened (stable within a contributor).
+    const extra = this.repairContributors
+      .flatMap((contributor) => contributor.repair(events))
+      .map((step, index) => ({ step, index }))
+      .sort(
+        (a, b) =>
+          (a.step.openedAt ?? Number.MAX_SAFE_INTEGER) -
+            (b.step.openedAt ?? Number.MAX_SAFE_INTEGER) || a.index - b.index,
+      )
+    for (const { step } of extra) {
       ;(
         session.append as (type: string, data: unknown, opts?: unknown) => void
-      )(event.type, event.data)
+      )(step.type, step.data)
     }
     for (const closer of interruptedTurnClosers(session.events)) {
       const intent =

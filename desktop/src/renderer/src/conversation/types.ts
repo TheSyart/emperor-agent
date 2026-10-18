@@ -171,7 +171,8 @@ export interface WorkflowRunView {
   readonly description?: string
   readonly tool?: 'workflow' | 'ralph'
   readonly callId?: string
-  readonly status: 'running' | 'completed' | 'cancelled' | 'error'
+  readonly status:
+    'running' | 'completed' | 'cancelled' | 'error' | 'interrupted'
   readonly phases: readonly WorkflowPhaseView[]
   /** Latest narration lines (bounded). */
   readonly logs: readonly string[]

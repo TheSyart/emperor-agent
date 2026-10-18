@@ -57,11 +57,7 @@ import {
   type ModelPolicySource,
 } from '../agent/model-policy'
 import { PermissionPresetService } from '../approval/presets'
-import {
-  ApprovalService,
-  approvalRepair,
-  type ApprovalPolicy,
-} from '../approval/service'
+import { ApprovalService, type ApprovalPolicy } from '../approval/service'
 import { CompactionEngine } from '../compaction/engine'
 import { ToolResultPruner } from '../compaction/pruner'
 import {
@@ -73,7 +69,6 @@ import {
 import { ClaudeCodeHooks, defaultHookConfigPaths } from '../hooks'
 import { createJobTools, installJobsPromptSection, JobRegistry } from '../jobs'
 import { ComputerUseConfigStore } from '../computer-use/config'
-import { computerUseRepair } from '../computer-use/events'
 import {
   browserStateDir,
   computerUseStateDir,
@@ -91,11 +86,7 @@ import { PlanModeController } from '../plan/plan-mode'
 import { agentInstructionsMiddleware } from '../prompt/agent-instructions'
 import { SystemPromptAssembler } from '../prompt/assembler'
 import { SessionProjector, type UiEvent } from '../projection/projector'
-import {
-  createAskUserQuestionTool,
-  UserQuestionService,
-  questionRepair,
-} from '../questions'
+import { createAskUserQuestionTool, UserQuestionService } from '../questions'
 import { LocalSandbox, type SandboxBackend } from '../sandbox/backend'
 import { SandboxPolicyService, type SandboxMode } from '../sandbox/policy'
 import { SubagentManager } from '../subagent/manager'
@@ -162,6 +153,7 @@ import {
   type SessionLineage,
   type SubagentChildView,
 } from './session-views'
+import { REPAIR_CONTRIBUTORS } from './repair-contributors'
 import { generateSessionTitle } from './title'
 
 export type HostEventSink = (
@@ -314,7 +306,7 @@ export class HarnessHost {
     })
     this.sessions = new SessionLogStore({
       root: kept.paths.sessionsRoot,
-      repairContributors: [approvalRepair, questionRepair, computerUseRepair],
+      repairContributors: [...REPAIR_CONTRIBUTORS],
       onLogState: (state) => this.emitHost(sessionLogStateEvent(state)),
     })
     this.sandbox = new SandboxPolicyService({

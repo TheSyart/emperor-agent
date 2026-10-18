@@ -138,7 +138,15 @@ Emperor Home 根目录及其主要子目录以 `0700` 创建，其他系统用�
 
   截掉半行和保留前缀两种修复会通过 `session_log_state` 事件提示界面（补换行不提示）。备份文件同名时追加 `-1`、`-2`……，永不覆盖。只读快照（`readSnapshot`，会话列表用）跳过损坏部分但从不写文件。
 
-- 崩溃修复对中断的 turn 合成缺失的工具结果和 turn 收尾，把未决的审批与问题关闭为 `unavailable`。修复不会重放副作用。
+- 崩溃修复只追加、不改写，也不重放副作用。每一对「开始／结束」标记都有收尾步骤（`harness/host/repair-contributors.ts`），按开始标记的先后补写，turn 收尾最后：
+  - 审批、提问 → `unavailable`；Computer Use 动作、授权、标签页 → 取消／结果未知／拒绝／关闭；
+  - `compaction/start` → `compaction/end{error:'interrupted'}`（摘要已写入时不带 error），之后可以再次压缩；
+  - 工作流 run 与成员 → 成员 `agent-end{outcome:'cancelled'}`，run `run-end{stopReason:'interrupted'}`；
+  - 后台 job → `job/finished{status:'killed', detail:'interrupted'}`；子代理 → 父会话 `subagent/settled{stopReason:'interrupted'}`；
+  - 中断的 turn → 合成缺失的工具结果、step 与 turn 收尾。
+
+  这些新增的收尾事件带 `repaired: true`。`repair-matrix.test.ts` 读取源码里全部 `SessionEventMap` 声明，新增的开始标记没有收尾步骤（也不在 `EXEMPT_OPENERS` 里）时测试失败。子代理被销毁时，日志等它的运行真正结束、写完收尾事件后才关闭。
+
 - 子代理是独立的子 session，同样位于 `sessions/<child-id>/log.jsonl`，第一条事件记录父 session 与委派信息。
 
 **旧会话归档**：当前内核不读取旧的 `history.jsonl`、`_checkpoint.json`、`message_graph.v2.jsonl` 或 `runtime/events.jsonl`。首次启动时，如果 `sessions/` 没有 `.harness-kernel-v1` 标记且不为空，整个目录会被移到同级的 `sessions.legacy-<时间戳>/`，然后创建新的空目录和标记。旧数据不会删除；Diagnostics 的 `kernel.archivedLegacySessions` 显示本次移动的位置。

@@ -24,7 +24,11 @@ import {
   type UserMessage,
 } from '../../llm/message'
 import type { Session } from '../../session-log/session'
-import type { SessionLogStore } from '../../session-log/store'
+import type {
+  RepairContributor,
+  RepairStep,
+  SessionLogStore,
+} from '../../session-log/store'
 import type { SessionEvent, TurnEndReason } from '../../session-log/types'
 import { logger } from '../../util/log'
 import type { Agent, AgentOptions } from '../agent/agent'
@@ -53,6 +57,8 @@ declare module '../../session-log/types' {
       /** Exact own child turn/end position; absent in older persisted logs. */
       childTurnEndSeq?: number
       text?: string
+      /** Written by crash repair: the app stopped before the child settled. */
+      repaired?: true
     }
     /** Log-only on the CHILD: its creation facts (first event). */
     'subagent/descriptor': {
@@ -62,6 +68,29 @@ declare module '../../session-log/types' {
       parentCallId?: string
     }
   }
+}
+
+/** Crash repair (parent log): a child started but never settled was cut short. */
+export const subagentRepair: RepairContributor = {
+  id: 'subagent',
+  pairs: [['subagent/started', 'subagent/settled']],
+  repair(events) {
+    const open = new Map<string, number>()
+    for (const event of events) {
+      if (event.type === 'subagent/started')
+        open.set(event.data.subagentId, event.seq)
+      else if (event.type === 'subagent/settled')
+        open.delete(event.data.subagentId)
+    }
+    return [...open].map(
+      ([subagentId, openedAt]) =>
+        ({
+          type: 'subagent/settled',
+          data: { subagentId, stopReason: 'interrupted', repaired: true },
+          openedAt,
+        }) as RepairStep,
+    )
+  },
 }
 
 export type SubagentStopReason =
@@ -565,12 +594,20 @@ export class SubagentManager {
   }
 
   private disposeEntry(entry: ChildEntry): void {
-    this.disposeChildrenOf(entry.record.id)
+    const childId = entry.record.id
+    this.disposeChildrenOf(childId)
     entry.unobserve()
     entry.agent.dispose()
-    this.deps.sessions.close(entry.record.id)
-    this.children.delete(entry.record.id)
-    this.structured.delete(entry.record.id)
+    this.children.delete(childId)
+    this.structured.delete(childId)
+    // The cancelled run appends its closing events on a later tick: keep the
+    // log attached until the driver is idle, then flush and close it.
+    void entry.agent
+      .whenIdle()
+      .catch(() => undefined)
+      .then(() => {
+        this.deps.sessions.close(childId)
+      })
   }
 
   // ── structured output (dsh subagent-in-process-driver `structured.ts`) ──

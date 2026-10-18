@@ -163,8 +163,12 @@ describe('UserQuestionService', () => {
         data: { id: 'q1', answers: {} },
       },
     ] as SessionEvent[]
-    expect(questionRepair(events)).toEqual([
-      { type: 'question/answered', data: { id: 'q2', outcome: 'unavailable' } },
+    expect(questionRepair.repair(events)).toEqual([
+      {
+        type: 'question/answered',
+        data: { id: 'q2', outcome: 'unavailable' },
+        openedAt: expect.any(Number),
+      },
     ])
   })
 })

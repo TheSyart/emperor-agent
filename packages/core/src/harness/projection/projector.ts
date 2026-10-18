@@ -427,7 +427,9 @@ export class SessionProjector {
           source: 'core',
           ...(event.data.error === undefined
             ? { summary: '已压缩较早的对话' }
-            : { summary: event.data.error }),
+            : event.data.repaired === true
+              ? { summary: '应用中断，压缩未完成' }
+              : { summary: event.data.error }),
         })
         break
       case 'llm/retry':
