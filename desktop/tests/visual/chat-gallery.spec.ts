@@ -157,7 +157,7 @@ test('long history loads older pages at the top', async ({ page }) => {
   await shot(page, 'chat-long-light')
 })
 
-// RF-04: document links in a reply — type icons, language badges, file
+// RF-04: document links in a reply — individual SVG type icons, file
 // names for path labels, a missing file struck through (fixture statuses).
 for (const theme of ['light', 'dark'] as const) {
   test(`document links (${theme})`, async ({ page }) => {
@@ -170,20 +170,32 @@ for (const theme of ['light', 'dark'] as const) {
         return {
           content: style.content,
           mask: style.maskImage || style.webkitMaskImage,
+          image: style.backgroundImage,
         }
       })
-    // A path label shows only the file name, with the language badge.
+    // A path label shows only the file name, with its hand-drawn SVG.
     await expect(link('src/pages/Login.vue')).toHaveText('Login.vue')
-    expect((await before('src/pages/Login.vue')).content).toContain('VUE')
+    await expect(link('src/pages/Login.vue')).toHaveAttribute(
+      'data-md-custom-icon',
+      'vue',
+    )
+    expect((await before('src/pages/Login.vue')).image).toContain(
+      'data:image/svg+xml',
+    )
     await expect(link('src/api/login.ts#L42')).toHaveText('login.ts:42')
-    expect((await before('src/api/login.ts#L42')).content).toContain('TS')
+    await expect(link('src/api/login.ts#L42')).toHaveAttribute(
+      'data-md-custom-icon',
+      'typescript',
+    )
+    expect((await before('src/api/login.ts#L42')).image).toContain(
+      'data:image/svg+xml',
+    )
     // Icons: a document, a folder, the web.
-    for (const href of [
-      'docs/login-layout.md',
-      'src/components/',
-      'https://developer.mozilla.org/zh-CN/docs/Web/CSS/Media_Queries',
-    ])
+    for (const href of ['docs/login-layout.md', 'src/components/'])
       expect((await before(href)).mask, href).toContain('data:image/svg+xml')
+    await expect(
+      link('https://developer.mozilla.org/zh-CN/docs/Web/CSS/Media_Queries'),
+    ).toHaveAttribute('data-site-letter', 'D')
     await expect(link('src/components/')).toHaveText('components')
     await expect(link('src/components/')).toHaveAttribute(
       'data-md-icon',
@@ -217,6 +229,53 @@ for (const theme of ['light', 'dark'] as const) {
 // RF-06: the 「已编辑 N 个文件」 card — recorded, undone and unrecorded turns,
 // expanding the list and the undo confirmation.
 for (const theme of ['light', 'dark'] as const) {
+  for (const width of [1000, 500]) {
+    test(`turn files summary layout (${theme}, ${width})`, async ({ page }) => {
+      await open(page, 'turn-files', theme, { width, height: 1100 })
+      await toTop(page)
+      const card = page.locator('[data-turn-files="1"]')
+      await expect(card.locator('.file')).toHaveCount(3)
+      const title = (await card.locator('.headline').boundingBox())!
+      const totals = (await card.locator('.totals').boundingBox())!
+      expect(totals.y).toBeGreaterThanOrEqual(title.y + title.height)
+      const badge = (await card.locator('.icon-badge').boundingBox())!
+      expect(badge.width).toBeGreaterThanOrEqual(40)
+      expect(badge.height).toBeGreaterThanOrEqual(40)
+      await expect(card.getByRole('button', { name: '查看变更' })).toBeVisible()
+      const path = card.locator('.path').last()
+      expect(await path.evaluate((el) => getComputedStyle(el).whiteSpace)).toBe(
+        'normal',
+      )
+      if (width === 500)
+        expect((await path.boundingBox())!.height).toBeGreaterThan(22)
+      expect(
+        await card.evaluate((el) => el.scrollWidth <= el.clientWidth),
+      ).toBe(true)
+      await card.screenshot({
+        path: resolve(
+          screenshotDir,
+          `turn-files-summary-${theme}-${width}.png`,
+        ),
+        animations: 'disabled',
+      })
+      const more = card.getByRole('button', { name: '再显示 4 个文件' })
+      await more.focus()
+      await page.keyboard.press('Enter')
+      await expect(card.locator('.file')).toHaveCount(7)
+      await expect(
+        card.getByRole('button', { name: '收起文件列表' }),
+      ).toBeVisible()
+      await card
+        .getByRole('img', { name: '按本轮开始与结束时的项目对比' })
+        .focus()
+      await expect(page.getByRole('tooltip')).toContainText(
+        '按本轮开始与结束时的项目对比',
+      )
+    })
+  }
+}
+
+for (const theme of ['light', 'dark'] as const) {
   test(`turn files card (${theme})`, async ({ page }) => {
     await open(page, 'turn-files', theme, { width: 1000, height: 1300 })
     await toTop(page)
@@ -224,8 +283,8 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(cards).toHaveCount(3)
     const first = page.locator('[data-turn-files="1"]')
     await expect(first.locator('.headline')).toHaveText('已编辑 7 个文件')
-    await expect(first.locator('.file')).toHaveCount(5)
-    await first.getByRole('button', { name: '展开其余 2 个' }).click()
+    await expect(first.locator('.file')).toHaveCount(3)
+    await first.getByRole('button', { name: '再显示 4 个文件' }).click()
     await expect(first.locator('.file')).toHaveCount(7)
     await expect(page.locator('[data-turn-files="2"] .reverted')).toHaveText(
       '已撤销，跳过 1 个',

@@ -1,8 +1,13 @@
 import DOMPurify from 'isomorphic-dompurify'
 import MarkdownIt from 'markdown-it'
-import type Token from 'markdown-it/lib/token.mjs'
+import Token from 'markdown-it/lib/token.mjs'
 import { computed, type Ref } from 'vue'
 import { documentGlyph, pathLinkLabel } from '../documentKind'
+import { documentIcon } from '../documentIcons'
+import {
+  displayResource,
+  trimAutoUrl,
+} from '../components/conversation/resources/resourceModel'
 
 const md = new MarkdownIt({
   html: false,
@@ -54,9 +59,9 @@ export function classifyMdLink(href: string): MdLinkKind | null {
   if (/^file:\/\//i.test(href)) return 'file'
   if (href.startsWith('/')) return 'file'
   if (/^[a-zA-Z]:[\\/]/.test(href)) return 'file'
-  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return null
-  if (/^(?:\.\.?\/)?[^?#]+\.[a-z0-9]{1,12}(?:#L\d+)?$/i.test(href))
-    return 'file'
+  const candidate = href.replace(/(?::[1-9]\d*(?::[1-9]\d*)?|#L[1-9]\d*)$/i, '')
+  if (/^[a-z][a-z0-9+.-]*:/i.test(candidate)) return null
+  if (/^(?:\.\.?\/)?[^?#]+\.[a-z0-9]{1,12}$/i.test(candidate)) return 'file'
   if (/^(?:\.\.?\/)?[^?#\s]+\/$/.test(href)) return 'file'
   return null
 }
@@ -98,7 +103,7 @@ md.validateLink = (url: string) =>
  * 以及类型图标 data-md-icon（语言另有 data-md-badge 徽标文字与 data-md-tone 色调）。
  * 纯 HTML 属性，全部在 sanitize 白名单内；图标交给外部 CSS。
  * 本地文件链接的文字本身就是路径时，只显示文件名（完整路径留在 title）。
- * 裸 URL（linkify 自动链）把可见文本缩短为「域名+路径」，给出域名感而无需 favicon。
+ * 裸 URL（linkify 自动链）完整显示域名、路径、参数与锚点，不截断长名称。
  * 注意：markdown-it 会把 Windows 反斜杠 percent-encode 成 %5C，所以分类前先解码，
  * 才能识别出 `C:\…` 这种盘符形式。
  */
@@ -109,7 +114,23 @@ md.core.ruler.push('md_link_chips', (state) => {
     for (let index = 0; index < children.length; index += 1) {
       const child = children[index]
       if (!child || child.type !== 'link_open') continue
-      const href = child.attrGet('href') ?? ''
+      let href = child.attrGet('href') ?? ''
+      const labelToken = children[index + 1]
+      if (
+        child.markup === 'linkify' &&
+        labelToken?.type === 'text' &&
+        children[index + 2]?.type === 'link_close'
+      ) {
+        const trimmed = trimAutoUrl(labelToken.content)
+        if (trimmed.length < labelToken.content.length) {
+          const trailing = new Token('text', '', 0)
+          trailing.content = labelToken.content.slice(trimmed.length)
+          labelToken.content = trimmed
+          children.splice(index + 3, 0, trailing)
+          href = md.normalizeLink(trimmed)
+          child.attrSet('href', href)
+        }
+      }
       let decoded = href
       try {
         decoded = decodeURIComponent(href)
@@ -131,15 +152,39 @@ md.core.ruler.push('md_link_chips', (state) => {
       child.attrSet('data-md-icon', glyph.kind)
       if (glyph.badge) child.attrSet('data-md-badge', glyph.badge)
       if (glyph.tone) child.attrSet('data-md-tone', glyph.tone)
+      const asset = documentIcon(decoded)
+      if (kind === 'file') {
+        child.attrSet('data-md-custom-icon', asset.id)
+        child.attrSet('style', `--md-link-ico: url("${asset.mask}")`)
+        if (asset.image) {
+          child.attrSet('data-md-color', 'true')
+          child.attrSet('style', `--md-link-image: url("${asset.image}")`)
+        }
+        if (asset.tone) child.attrSet('data-md-tone', asset.tone)
+      }
+      const resource = displayResource(href, '', 'markdown')
+      if (resource) child.attrSet('data-resource-kind', resource.kind)
+      if (resource?.kind === 'web')
+        child.attrSet(
+          'data-site-letter',
+          new URL(href).hostname
+            .replace(/^www\./, '')
+            .slice(0, 1)
+            .toUpperCase(),
+        )
+      if (resource?.github)
+        child.attrSet('data-resource-type', resource.github.type)
       if (kind === 'file') showFileName(children, index, decoded)
       if (child.markup === 'linkify') {
         const textToken = children[index + 1]
         if (textToken?.type === 'text') {
           try {
             const url = new URL(href)
-            const label = url.host + (url.pathname === '/' ? '' : url.pathname)
             textToken.content =
-              label.length > 48 ? `${label.slice(0, 47)}…` : label
+              url.host +
+              (url.pathname === '/' ? '' : url.pathname) +
+              url.search +
+              url.hash
           } catch {
             /* 保留原文本 */
           }

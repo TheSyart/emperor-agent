@@ -87,7 +87,11 @@ function fakeCore(operation: string, payload?: Record<string, unknown>) {
         entries: [],
       })
     case 'files.read':
+    case 'files.preview':
       return Promise.resolve({
+        id: 'file:/tmp/demo/src/a.ts',
+        path: '/tmp/demo/src/a.ts',
+        mimeType: 'text/plain',
         kind: 'text',
         name: 'a.ts',
         content: 'const a = 1\n',
@@ -212,12 +216,13 @@ describe('WorkspacePanel', () => {
     projectPath.value = ''
     const root = mount()
     await flush()
-    for (const pane of ['review', 'terminal', 'files']) {
+    for (const pane of ['review', 'terminal']) {
       expect(row(root, pane).disabled).toBe(true)
       expect(row(root, pane).textContent).toContain('当前会话未绑定项目')
       expect(segment(root, pane).disabled).toBe(true)
     }
     expect(row(root, 'browser').disabled).toBe(false)
+    expect(row(root, 'files').disabled).toBe(false)
     expect(core).not.toHaveBeenCalledWith(
       'workspace.snapshot',
       expect.anything(),
@@ -288,9 +293,10 @@ describe('WorkspacePanel', () => {
     await flush()
     requestWorkspace({ pane: 'files', file: { path: './src/a.ts', line: 1 } })
     await vi.waitFor(() =>
-      expect(core).toHaveBeenCalledWith('files.read', {
+      expect(core).toHaveBeenCalledWith('files.preview', {
+        source: 'project',
         sessionId: 's1',
-        relativePath: 'src/a.ts',
+        path: 'src/a.ts',
       }),
     )
     expect(useFrameState().workspacePane).toBe('files')

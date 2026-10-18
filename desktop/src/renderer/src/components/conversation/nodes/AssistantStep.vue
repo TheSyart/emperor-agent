@@ -9,6 +9,9 @@
  * Props: node (assistant), closing (the turn tail follows this row).
  */
 import { computed } from 'vue'
+import { useChatContext } from '../chatContext'
+import { openImageViewer } from '../../ui/imageViewer'
+import { requestWorkspace } from '../../workspace/workspaceState'
 import { attachmentRawUrl } from '../../../api/attachments'
 import type {
   AssistantBlock,
@@ -23,6 +26,42 @@ const props = withDefaults(
   defineProps<{ node: AssistantChatNode; closing?: boolean }>(),
   { closing: false },
 )
+
+const { sessionId } = useChatContext()
+function enlargeAttachment(id: string) {
+  const images = props.node.data.blocks.flatMap((block) =>
+    block.kind === 'image' ? [block.attachment] : [],
+  )
+  const owner = sessionId()
+  openImageViewer({
+    owner,
+    index: Math.max(
+      0,
+      images.findIndex((image) => image.attachmentId === id),
+    ),
+    items: images.map((image) => ({
+      id: image.attachmentId,
+      name: '生成的图片',
+      src: attachmentRawUrl(image.attachmentId),
+      file: {
+        owner,
+        target: {
+          source: 'attachment' as const,
+          attachmentId: image.attachmentId,
+        },
+      },
+    })),
+  })
+}
+function openAttachmentFile(id: string) {
+  requestWorkspace({
+    pane: 'files',
+    file: {
+      owner: sessionId(),
+      target: { source: 'attachment', attachmentId: id },
+    },
+  })
+}
 
 type Rendered =
   | { kind: 'text'; key: string; text: string; last: boolean }
@@ -114,6 +153,7 @@ const showActions = computed(
           v-if="item.kind === 'text'"
           :text="item.text"
           :streaming="streaming && item.last"
+          :source-message-id="node.data.messageId || node.key"
         />
         <ReasoningRow
           v-else-if="item.kind === 'reasoning'"
@@ -122,14 +162,34 @@ const showActions = computed(
           :expansion-key="`${node.key}:${item.key}`"
         />
         <div v-else-if="item.kind === 'images'" class="images">
-          <img
+          <figure
             v-for="image in item.images"
             :key="image.attachmentId"
-            class="image"
-            :src="attachmentRawUrl(image.attachmentId)"
-            alt=""
-            loading="lazy"
-          />
+            class="image-item"
+          >
+            <button
+              class="image-open"
+              type="button"
+              aria-label="放大生成的图片"
+              @click="enlargeAttachment(image.attachmentId)"
+            >
+              <img
+                class="image"
+                :src="attachmentRawUrl(image.attachmentId)"
+                alt="生成的图片"
+                loading="lazy"
+              />
+            </button>
+            <figcaption>
+              <button
+                type="button"
+                class="image-file-name"
+                @click="openAttachmentFile(image.attachmentId)"
+              >
+                生成的图片
+              </button>
+            </figcaption>
+          </figure>
         </div>
         <div v-else class="other">
           <JsonTree :value="item.block" />
@@ -148,6 +208,25 @@ const showActions = computed(
 </template>
 
 <style scoped>
+.image-item {
+  margin: 0;
+  min-width: 0;
+}
+.image-open,
+.image-file-name {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgb(var(--label-secondary));
+  cursor: pointer;
+}
+.image-open {
+  cursor: zoom-in;
+}
+.image-file-name {
+  font: var(--font-xs);
+  margin-top: var(--space-2);
+}
 .assistant-step {
   display: flex;
   flex-direction: column;

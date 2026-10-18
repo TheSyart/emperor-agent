@@ -257,6 +257,17 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(envCard.locator('[data-row="plan"]')).toContainText('2/4')
     const agents = envCard.locator('[data-section="subagents"] .row.agent')
     await expect(agents).toHaveCount(3)
+    const portrait = agents.first().locator('.subagent-avatar')
+    await expect(portrait).toHaveAttribute('data-avatar', /^[ABCD]0[1-9]$/)
+    await expect(portrait.locator('image')).toHaveAttribute(
+      'href',
+      /-sheet\.webp/,
+    )
+    await expect(portrait.locator('image')).toHaveAttribute(
+      'clip-path',
+      /^url\(#portrait-/,
+    )
+    await expect(portrait.locator('clipPath rect')).toHaveCount(1)
     await expect(
       envCard.getByRole('button', { name: '再显示 2 个' }),
     ).toBeVisible()
@@ -431,7 +442,7 @@ test('card rows open the plan row, subagents, branches and all sources', async (
   await envCard.getByText('查看全部 · 5').click()
   const sourcesMenu = page.getByRole('menu', { name: '全部来源' })
   await expect(sourcesMenu).toBeVisible()
-  await expect(sourcesMenu).toContainText('网页搜索')
+  await expect(sourcesMenu).toContainText('example.com/agent-desktop')
   await expect(sourcesMenu).toContainText('github')
   await expect(sourcesMenu).toContainText('codex-environment-notes.md')
   // An image attachment as a thumbnail, a file by its type icon.
@@ -439,7 +450,9 @@ test('card rows open the plan row, subagents, branches and all sources', async (
     'src',
     'app://attachments/att-card-mock/raw',
   )
-  await expect(sourcesMenu.locator('svg[data-kind="document"]')).toHaveCount(1)
+  await expect(
+    sourcesMenu.locator('.document-icon[data-kind="document"]'),
+  ).toHaveCount(1)
   await shot(page, 'card-sources-menu')
   await page.keyboard.press('Escape')
 

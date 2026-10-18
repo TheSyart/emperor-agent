@@ -67,6 +67,7 @@ import {
   showDictationPartial,
 } from './dictationDraft'
 import { trackEditorView } from './editorViews'
+import { resourceDecorationPlugin } from './resourceDecorations'
 
 const props = withDefaults(
   defineProps<{
@@ -207,6 +208,7 @@ function createState(doc?: PMNode): EditorState {
     plugins: [
       placeholderPlugin,
       dictationDraftPlugin,
+      resourceDecorationPlugin,
       history(),
       keymap({
         'Mod-z': undo,
@@ -457,8 +459,47 @@ defineExpose({
 </template>
 
 <style scoped>
+.composer-editor :deep(.composer-url-decoration) {
+  color: rgb(var(--accent-strong));
+  text-decoration: underline;
+  text-decoration-color: rgb(var(--accent-fill) / 0.3);
+  text-underline-offset: 4px;
+  border-radius: var(--radius-xs);
+  background: transparent;
+}
+.composer-editor :deep(.composer-url-decoration::before) {
+  content: '';
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-inline: var(--space-1) var(--space-1-5);
+  vertical-align: -0.1em;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M3 12h18M12 3a17 17 0 0 1 0 18 17 17 0 0 1 0-18'/%3E%3C/svg%3E")
+    center/contain no-repeat;
+}
+.composer-editor :deep(.composer-url-decoration[data-site-letter]::before) {
+  content: attr(data-site-letter) / '';
+  mask: none;
+  background: rgb(var(--accent-fill) / 0.14);
+  border-radius: var(--radius-xs);
+  font: 600 0.7em/1.4 var(--font-sans);
+  text-align: center;
+}
+.composer-editor
+  :deep(.composer-url-decoration[data-resource-kind='github']::before) {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7'%3E%3Cpath d='M9 19c-4 1-4-2-6-3m12 6v-4c0-1-.3-2-1-2.6 3-.3 6-1.4 6-6.5 0-1.4-.5-2.7-1.4-3.7.3-1.2.3-2.4-.2-3.6 0 0-1.2-.4-3.6 1.4a13 13 0 0 0-7 0C5.4 1.2 4.2 1.6 4.2 1.6c-.5 1.2-.5 2.4-.2 3.6a5.5 5.5 0 0 0-1.4 3.7c0 5.1 3 6.2 6 6.5-.7.6-1 1.6-1 2.6v4'/%3E%3C/svg%3E");
+}
 .composer-editor {
   min-width: 0;
+}
+.composer-editor
+  :deep(.composer-url-decoration[data-site-icon='ready']::before) {
+  content: '';
+  mask: none;
+  background: rgb(var(--nb-00)) var(--composer-site-icon) center / contain
+    no-repeat;
+  border-radius: var(--radius-xs);
 }
 
 .composer-editor :deep(.composer-editor-input) {

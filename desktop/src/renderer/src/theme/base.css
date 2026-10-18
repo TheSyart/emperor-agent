@@ -20,3 +20,20 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
+
+/* Image lightboxes use a constant dark viewing surface in both themes. */
+:root {
+  /* Warm neutral of the local generated portrait sheets, invariant by theme. */
+  --avatar-surface: 233 230 223;
+  --image-viewer-bg: 9 10 12;
+  --image-viewer-ink: 243 243 244;
+  --image-viewer-muted: 169 171 177;
+  --image-viewer-control-ink: 227 228 232;
+  --image-viewer-control: 36 38 45;
+  --image-viewer-toolbar: 41 43 50;
+  --image-viewer-secondary: 212 213 218;
+  --image-viewer-subtle: 151 154 164;
+  --image-viewer-counter: 197 199 206;
+  --image-viewer-white: 255 255 255;
+  --image-viewer-shadow: 0 0 0;
+}

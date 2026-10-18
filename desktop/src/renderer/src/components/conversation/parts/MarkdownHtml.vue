@@ -5,24 +5,54 @@
  * (linkStatus): a missing file is marked, a directory gets the folder icon,
  * and the hover title shows the full path.
  */
-import { inject, onMounted, ref, toRef, watch } from 'vue'
+import { inject, onMounted, onBeforeUnmount, ref, toRef, watch } from 'vue'
 import { useMarkdown } from '../../../composables/useMarkdown'
 import { handleMarkdownChipClick } from '../../../composables/useMarkdownLinks'
 import { LINK_STATUS_KEY, type LinkStatus } from './linkStatus'
+import { documentIcon } from '../../../documentIcons'
+import { hydrateMarkdownSiteIcons } from '../resources/siteIcons'
+import { useChatContext } from '../chatContext'
 
 const props = withDefaults(
-  defineProps<{ text: string; streaming?: boolean }>(),
-  { streaming: false },
+  defineProps<{
+    text: string
+    streaming?: boolean
+    sourceMessageId?: string
+  }>(),
+  { streaming: false, sourceMessageId: 'markdown' },
 )
 const { rendered } = useMarkdown(toRef(() => props.text))
 const root = ref<HTMLElement | null>(null)
 const links = inject(LINK_STATUS_KEY, null)
+const chat = useChatContext()
+let stopSiteIcons = () => {}
+function markSiteIcons() {
+  stopSiteIcons()
+  if (root.value && !props.streaming)
+    stopSiteIcons = hydrateMarkdownSiteIcons(
+      root.value,
+      chat.sessionId(),
+      props.sourceMessageId,
+    )
+}
+onBeforeUnmount(() => stopSiteIcons())
 
 function onClick(event: MouseEvent): void {
-  handleMarkdownChipClick(event, 'conversation')
+  handleMarkdownChipClick(event, props.sourceMessageId)
 }
 
 onMounted(() => {
+  markSiteIcons()
+  watch(
+    [
+      rendered,
+      () => props.streaming,
+      () => props.sourceMessageId,
+      () => chat.sessionId(),
+    ],
+    markSiteIcons,
+    { flush: 'post' },
+  )
   void markLinks()
   watch(
     [rendered, () => props.streaming, () => links?.version.value],
@@ -33,13 +63,17 @@ onMounted(() => {
 
 async function markLinks(): Promise<void> {
   const element = root.value
-  if (!links || props.streaming || !element) return
+  if (props.streaming || !element) return
+  if (!links) return
   const anchors = element.querySelectorAll<HTMLAnchorElement>(
     'a.md-link-chip[data-md-link="file"]',
   )
   await Promise.all(
     [...anchors].map(async (anchor) => {
-      const status = await links.status(anchor.getAttribute('href') ?? '')
+      const status = await links.status(
+        anchor.getAttribute('href') ?? '',
+        props.sourceMessageId,
+      )
       if (status && anchor.isConnected) mark(anchor, status)
     }),
   )
@@ -59,6 +93,13 @@ function mark(anchor: HTMLAnchorElement, status: LinkStatus): void {
     anchor.dataset.mdIcon = 'folder'
     delete anchor.dataset.mdBadge
     delete anchor.dataset.mdTone
+    anchor.dataset.mdCustomIcon = 'folder'
+    delete anchor.dataset.mdColor
+    anchor.style.removeProperty('--md-link-image')
+    anchor.style.setProperty(
+      '--md-link-ico',
+      `url("${documentIcon(status.path, { directory: true }).mask}")`,
+    )
   }
 }
 </script>

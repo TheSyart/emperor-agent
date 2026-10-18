@@ -36,7 +36,7 @@ export function workspacePaneDisabledReason(
   pane: WorkspaceContentPane,
   availability: WorkspaceAvailability,
 ): string {
-  if (pane === 'browser') return ''
+  if (pane === 'browser' || pane === 'files') return ''
   if (!availability.hasProject) return NO_PROJECT_REASON
   // Unknown until the first snapshot lands: keep review reachable meanwhile.
   if (pane === 'review' && availability.snapshotLoaded && !availability.hasGit)

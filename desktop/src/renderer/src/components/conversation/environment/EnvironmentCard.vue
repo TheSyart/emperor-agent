@@ -21,7 +21,7 @@
  * - 计划: the latest `exit_plan_mode` call (conversation/planSummary.ts);
  *   click reveals its row.
  * - 子智能体: `tasks.list` of the session, active first; deterministic
- *   `--avatar-*` colors; three shown, 「再显示 n 个」 for the rest; click opens
+ *   stable SVG character portraits and `--avatar-*` colors; three shown, 「再显示 n 个」 for the rest; click opens
  *   the child session.
  * - 后台任务: background jobs / workflow runs, only when there are any;
  *   expands to one line each (live first) with 「输出」 (TaskOutputDialog,
@@ -50,13 +50,9 @@ import {
   GitBranch,
   GitCommitHorizontal,
   GitCompareArrows,
-  Globe,
-  Image,
   Laptop,
   ListChecks,
   PanelRight,
-  Paperclip,
-  Plug,
   Plus,
   TriangleAlert,
   Workflow,
@@ -72,12 +68,11 @@ import {
   ref,
   shallowRef,
   watch,
-  type Component,
 } from 'vue'
 import { useRouter } from 'vue-router'
-import { attachmentRawUrl } from '../../../api/attachments'
 import { openLink } from '../../../api/backend'
 import { core } from '../../../api/http'
+import { attachmentRawUrl } from '../../../api/attachments'
 import { useAppContext } from '../../../composables/useAppContext'
 import {
   PLAN_STATUS_LABEL,
@@ -86,14 +81,12 @@ import {
 } from '../../../conversation/planSummary'
 import type { ChatSnapshot } from '../../../conversation/types'
 import type { RuntimeTaskRecord } from '../../../types'
-import { DsSkill } from '../../icons/ds'
-import DocumentIcon from '../../ui/DocumentIcon.vue'
 import IconButton from '../../ui/IconButton.vue'
 import Menu from '../../ui/Menu.vue'
 import MenuItem from '../../ui/MenuItem.vue'
+import SubagentAvatar from '../../ui/SubagentAvatar.vue'
 import { modalLayerCount } from '../../ui/modalStack'
 import {
-  avatarToken,
   backgroundTaskLines,
   backgroundTaskSummary,
   backgroundTaskTime,
@@ -108,18 +101,21 @@ import {
 } from '../../workspace/environmentModel'
 import { useWorkspaceSnapshot } from '../../workspace/useWorkspaceSnapshot'
 import { gitTransientLabel } from '../../workspace/workspaceModel'
-import {
-  sourcesFromSnapshot,
-  type EnvironmentSource,
-  type EnvironmentSourceKind,
-  type SourceToolInfo,
-} from '../../workspace/workspaceSources'
+import { type SourceToolInfo } from '../../workspace/workspaceSources'
 import {
   openWorkspacePane,
   requestWorkspace,
 } from '../../workspace/workspaceState'
 import { previewLayout } from '../computer-use/computerUsePreviewState'
 import { isGitStatus } from '../../workspace/workspaceTypes'
+import { resourcesFromSnapshot } from '../resources/resourceIndex'
+import {
+  PROVENANCE_LABEL,
+  type DisplayResource,
+} from '../resources/resourceModel'
+import { requestResourceDetail } from '../resources/resourceEvents'
+import ResourceRow from '../resources/ResourceRow.vue'
+import ResourceIcon from '../resources/ResourceIcon.vue'
 
 /**
  * Conversation column width from which the card sits beside the chat
@@ -142,8 +138,9 @@ const props = withDefaults(
     agentBusy?: boolean
     child?: boolean
     title?: string
+    hasMore?: boolean
   }>(),
-  { build: false, agentBusy: false, child: false, title: '' },
+  { build: false, agentBusy: false, child: false, title: '', hasMore: false },
 )
 
 const emit = defineEmits<{
@@ -556,7 +553,6 @@ const subagents = computed(() =>
         status: subagentTaskStatus(task),
         started_at: task.started_at,
         ended_at: task.finished_at ?? task.started_at,
-        avatar: avatarToken(task.id),
       })),
   ),
 )
@@ -666,9 +662,12 @@ let toolsRequested = false
 const toolCatalog = computed<readonly SourceToolInfo[]>(
   () => fetchedTools.value ?? ctx.boot.value?.tools ?? [],
 )
-const sources = computed(() =>
-  sourcesFromSnapshot(props.snapshot, { tools: toolCatalog.value }),
+const resources = computed(() =>
+  resourcesFromSnapshot(props.snapshot, { tools: toolCatalog.value }),
 )
+const sources = computed(() => resources.value.sources)
+const outputs = computed(() => resources.value.outputs)
+const allOutputs = ref(false)
 // Tool names never change once a row exists: rescan only for new rows.
 watch(
   () => props.snapshot.order.length,
@@ -697,39 +696,11 @@ watch(
 const sourcesButton = ref<HTMLElement | null>(null)
 const sourcesMenu = ref(false)
 
-const SOURCE_ICON: Record<EnvironmentSourceKind, Component> = {
-  attachment: Paperclip,
-  media: Image,
-  web: Globe,
-  mcp: Plug,
-  skill: DsSkill,
+function sourceCount(source: DisplayResource): string {
+  return source.uses && source.uses.length > 1 ? `×${source.uses.length}` : ''
 }
-
-const SOURCE_KIND_LABEL: Record<EnvironmentSourceKind, string> = {
-  attachment: '附件',
-  media: '图片',
-  web: '网页',
-  mcp: 'MCP',
-  skill: 'Skill',
-}
-
-function sourceCount(source: EnvironmentSource): string {
-  return source.count > 1 ? `×${source.count}` : ''
-}
-
-function openSource(source: EnvironmentSource): void {
-  if (source.kind === 'mcp')
-    void router
-      .push({ name: 'capabilities', params: { tab: 'mcp' } })
-      .catch(() => undefined)
-  else if (source.kind === 'skill' && source.name !== 'Skill')
-    void router
-      .push({
-        name: 'capabilities',
-        params: { tab: 'skills' },
-        query: { skill: source.name },
-      })
-      .catch(() => undefined)
+function openSource(source: DisplayResource): void {
+  requestResourceDetail(source, props.sessionId)
 }
 
 function connectSource(): void {
@@ -842,12 +813,7 @@ function openLauncher(): void {
           :title="agent.name"
           @click="emit('open-subagent', agent.id)"
         >
-          <span
-            class="avatar"
-            :data-status="agent.status"
-            :style="{ background: `rgb(var(${agent.avatar}))` }"
-            aria-hidden="true"
-          />
+          <SubagentAvatar :id="agent.id" :status="agent.status" />
           <span class="row-label">{{ agent.name }}</span>
           <span class="row-value" :data-status="agent.status">{{
             SUBAGENT_STATUS_LABEL[agent.status] ?? agent.status
@@ -945,9 +911,35 @@ function openLauncher(): void {
         </ul>
       </section>
 
+      <section v-if="outputs.length" class="section" data-section="outputs">
+        <h3 class="section-head">
+          输出内容<span class="row-value">{{ outputs.length }}</span>
+        </h3>
+        <ResourceRow
+          :group="[...sources, ...outputs]"
+          v-for="output in outputs.slice(
+            0,
+            allOutputs ? outputs.length : VISIBLE_ROWS,
+          )"
+          :key="output.id"
+          :resource="output"
+          :session-id="sessionId"
+        />
+        <button
+          v-if="outputs.length > VISIBLE_ROWS"
+          type="button"
+          class="more"
+          :aria-expanded="allOutputs"
+          @click="allOutputs = !allOutputs"
+        >
+          {{
+            allOutputs ? '收起' : `再显示 ${outputs.length - VISIBLE_ROWS} 个`
+          }}
+        </button>
+      </section>
       <section v-if="sources.length" class="section" data-section="sources">
         <h3 class="section-head">
-          来源
+          来源<span class="row-value">{{ sources.length }}</span>
           <button
             type="button"
             class="section-action"
@@ -958,38 +950,13 @@ function openLauncher(): void {
             <Plus :size="13" />
           </button>
         </h3>
-        <button
+        <ResourceRow
+          :group="[...sources, ...outputs]"
           v-for="source in sources.slice(0, VISIBLE_ROWS)"
           :key="source.id"
-          type="button"
-          class="row"
-          :data-kind="source.kind"
-          :title="`${SOURCE_KIND_LABEL[source.kind]} · ${source.name}`"
-          @click="openSource(source)"
-        >
-          <img
-            v-if="source.image && source.attachmentId"
-            class="row-thumb"
-            :src="attachmentRawUrl(source.attachmentId)"
-            alt=""
-            loading="lazy"
-          />
-          <DocumentIcon
-            v-else-if="source.kind === 'attachment'"
-            :path="source.name"
-            class="row-icon"
-          />
-          <component
-            :is="SOURCE_ICON[source.kind]"
-            v-else
-            :size="15"
-            class="row-icon"
-          />
-          <span class="row-label">{{ source.name }}</span>
-          <span v-if="source.count > 1" class="row-value">{{
-            sourceCount(source)
-          }}</span>
-        </button>
+          :resource="source"
+          :session-id="sessionId"
+        />
         <button
           v-if="sources.length > VISIBLE_ROWS"
           ref="sourcesButton"
@@ -1002,6 +969,9 @@ function openLauncher(): void {
           查看全部 · {{ sources.length }}
         </button>
       </section>
+      <p v-if="sources.length || outputs.length" class="resource-scope">
+        {{ hasMore ? '已加载的会话资源 · 更早资源随历史加载' : '当前会话资源' }}
+      </p>
     </div>
 
     <Menu
@@ -1150,37 +1120,61 @@ function openLauncher(): void {
       dense
       label="全部来源"
     >
-      <MenuItem variant="label">全部来源 · {{ sources.length }}</MenuItem>
+      <MenuItem variant="label"
+        >{{ hasMore ? '已加载来源' : '全部来源' }} ·
+        {{ sources.length }}</MenuItem
+      >
       <MenuItem
         v-for="source in sources"
         :key="source.id"
-        :description="SOURCE_KIND_LABEL[source.kind]"
+        class="resource-menu-item"
         @select="openSource(source)"
       >
-        {{ source.name }}
         <template #icon>
           <img
-            v-if="source.image && source.attachmentId"
+            v-if="source.kind === 'image' && source.attachmentId"
             class="menu-thumb"
             :src="attachmentRawUrl(source.attachmentId)"
             alt=""
             loading="lazy"
           />
-          <DocumentIcon
-            v-else-if="source.kind === 'attachment'"
-            :path="source.name"
+          <ResourceIcon
+            v-else
+            :resource="source"
+            :session-id="sessionId"
+            :size="16"
           />
-          <component :is="SOURCE_ICON[source.kind]" v-else :size="15" />
         </template>
-        <template #trailing>
-          <span class="menu-count">{{ source.count }}</span>
-        </template>
+        <span class="resource-menu-name">{{ source.label }}</span
+        ><span class="source-menu-kind"
+          >{{ PROVENANCE_LABEL[source.provenance] }}
+          {{ sourceCount(source) }}</span
+        >
       </MenuItem>
     </Menu>
   </aside>
 </template>
 
 <style scoped>
+.resource-menu-item :deep(.item-label) {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+.resource-menu-name {
+  display: block;
+}
+.source-menu-kind {
+  display: block;
+  font: var(--font-xxxs);
+  color: rgb(var(--label-tertiary));
+}
+.resource-scope {
+  margin: var(--space-2) 0 0 var(--space-7);
+  font: var(--font-xxxs);
+  color: rgb(var(--label-tertiary));
+}
 .environment-card {
   position: absolute;
   top: var(--space-3);
@@ -1351,6 +1345,11 @@ button.row[aria-disabled='true'] .row-label {
 .row-label.mono {
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
+}
+.agent .row-label {
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .row-tag,
@@ -1548,36 +1547,6 @@ button.row[aria-disabled='true'] .row-label {
   font-style: normal;
 }
 
-.avatar {
-  position: relative;
-  flex: none;
-  width: var(--space-4);
-  height: var(--space-4);
-  margin: 0 calc(var(--space-0-5) / 2);
-  border-radius: var(--radius-pill);
-  box-shadow: inset 0 0 0 1px var(--border-l2);
-}
-
-.avatar[data-status='running']::after {
-  content: '';
-  position: absolute;
-  inset: calc(1px - var(--space-1));
-  border: 1.5px solid rgb(var(--accent-strong) / 0.8);
-  border-radius: var(--radius-pill);
-  animation: env-card-pulse 1.6s ease-in-out infinite;
-}
-
-.avatar[data-status='failed'],
-.avatar[data-status='cancelled'] {
-  opacity: 0.55;
-}
-
-@keyframes env-card-pulse {
-  50% {
-    opacity: 0.35;
-  }
-}
-
 .more {
   align-self: flex-start;
   margin: var(--space-0-5) 0 0 var(--space-8);
@@ -1618,5 +1587,10 @@ button.row[aria-disabled='true'] .row-label {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-variant-numeric: tabular-nums;
+}
+@keyframes env-card-pulse {
+  50% {
+    opacity: 0.35;
+  }
 }
 </style>

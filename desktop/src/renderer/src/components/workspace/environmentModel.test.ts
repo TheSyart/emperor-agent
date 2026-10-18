@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   AVATAR_COLORS,
   avatarIndex,
-  avatarToken,
   backgroundTaskDetail,
   backgroundTaskLines,
   backgroundTaskSummary,
@@ -76,7 +75,6 @@ describe('Environment subagent projection', () => {
 describe('avatar colors', () => {
   it('hashes an id to a stable slot', () => {
     expect(avatarIndex('sub-a')).toBe(avatarIndex('sub-a'))
-    expect(avatarToken('sub-a')).toBe(`--avatar-${avatarIndex('sub-a') + 1}`)
     for (const id of ['', 'a', 'sub-123', '子代理'])
       expect(avatarIndex(id)).toBeGreaterThanOrEqual(0)
   })

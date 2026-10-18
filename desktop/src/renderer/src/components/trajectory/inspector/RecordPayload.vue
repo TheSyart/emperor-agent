@@ -8,6 +8,9 @@
  * Props: record; direction ('input' | 'output'); preview?.
  */
 import { computed } from 'vue'
+import { imageClickTarget, openImageViewer } from '../../ui/imageViewer'
+import { openLink } from '../../../api/backend'
+import { useWorkspaceSnapshot } from '../../workspace/useWorkspaceSnapshot'
 import type { TrajectoryLedgerRecord } from '../../../trajectory/model'
 import JsonTree from '../../ui/JsonTree.vue'
 import { parseJsonContainer } from '../trajectoryFormat'
@@ -22,6 +25,36 @@ const props = withDefaults(
   { preview: false },
 )
 
+const { sessionId } = useWorkspaceSnapshot({ active: false })
+function enlarge(index: number) {
+  const src = blocks.value?.[index]?.imageSrc ?? ''
+  const target = imageClickTarget(src)
+  if (target !== 'viewer') {
+    // Remote and SVG images cannot enter the in-app viewer; open them outside
+    // Emperor (the pre-viewer behaviour) instead of doing nothing.
+    if (target === 'external') void openLink(src).catch(() => {})
+    return
+  }
+  const images = (blocks.value || []).flatMap((block, i) =>
+    block.imageSrc
+      ? [
+          {
+            id: String(i),
+            src: block.imageSrc,
+            name: block.imageAlt || '工具图片',
+          },
+        ]
+      : [],
+  )
+  openImageViewer({
+    owner: sessionId.value,
+    items: images,
+    index: Math.max(
+      0,
+      images.findIndex((item) => item.id === String(index)),
+    ),
+  })
+}
 const cell = computed(() => props.record.cell)
 const value = computed(() =>
   props.direction === 'input'
@@ -70,15 +103,15 @@ const markdown = computed(
     :data-error="error || undefined"
   >
     <template v-for="(block, index) in blocks" :key="index">
-      <a
+      <button
+        type="button"
         v-if="block.imageSrc !== undefined"
         class="image-link"
-        :href="block.imageSrc"
-        target="_blank"
-        rel="noopener noreferrer"
+        aria-label="放大工具图片"
+        @click="enlarge(index)"
       >
         <img class="image" :src="block.imageSrc" :alt="block.imageAlt ?? ''" />
-      </a>
+      </button>
       <pre v-else-if="block.content !== ''" class="block-text">{{
         block.content
       }}</pre>
@@ -100,6 +133,12 @@ const markdown = computed(
 </template>
 
 <style scoped>
+button.image-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
 .no-payload {
   margin: 0;
   padding: var(--space-4) var(--space-3-5);

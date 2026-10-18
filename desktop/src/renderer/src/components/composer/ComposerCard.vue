@@ -250,6 +250,8 @@ defineExpose(controller.expose)
           v-for="(draft, index) in drafts"
           :key="draft.id"
           :data="draft"
+          :owner="dictationChat || ''"
+          :group="drafts"
           removable
           @remove="removeDraft(index)"
         />

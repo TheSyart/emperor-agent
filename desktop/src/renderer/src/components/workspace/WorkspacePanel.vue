@@ -67,6 +67,7 @@ import {
   workspaceRequest,
   type TurnReviewRequest,
   type WorkspaceRequest,
+  type WorkspaceFileRequest,
 } from './workspaceState'
 
 // Every pane is its own async chunk (xterm, highlighter, diff views).
@@ -88,13 +89,12 @@ const reviewFilterPaths = ref<string[]>([])
 const filesTreeWidth = ref(FILES_TREE_DEFAULT)
 const filesPane = ref<{
   openPath: (path: string, line?: number) => Promise<void>
+  openPreview: (request: WorkspaceFileRequest) => Promise<void>
   openDirectory: (path: string) => Promise<void>
 } | null>(null)
-const pendingFile = ref<{
-  path: string
-  line?: number
-  directory?: boolean
-} | null>(null)
+const pendingFile = ref<
+  WorkspaceFileRequest | { path: string; directory: true } | null
+>(null)
 /** Address a request asked to prefill (BrowserPane never auto-loads it). */
 const browserPrefill = ref<{ url: string; nonce: number } | null>(null)
 /** Nonce of a pending review commit-box focus request (0 = none). */
@@ -163,11 +163,22 @@ function handleRequest(request: WorkspaceRequest): void {
     ]
     commitFocus.value = request.focus === 'commit' ? request.nonce : 0
   }
-  if (request.pane === 'files' && request.file?.path)
-    pendingFile.value = {
-      path: request.file.path,
-      ...(request.file.line ? { line: request.file.line } : {}),
-    }
+  if (request.pane === 'files' && request.file) {
+    const file = request.file
+    const next =
+      'target' in file
+        ? file
+        : {
+            owner: sessionId.value,
+            target: {
+              source: 'project' as const,
+              sessionId: sessionId.value,
+              path: file.path.replace(/^\.\//, ''),
+            },
+            line: file.line,
+          }
+    if (next.owner === sessionId.value) pendingFile.value = next
+  }
   if (request.pane === 'files' && request.directory !== undefined)
     pendingFile.value = { path: request.directory, directory: true }
   if (request.pane === 'browser' && request.url)
@@ -180,8 +191,9 @@ async function flushPendingFile(): Promise<void> {
   const request = pendingFile.value
   if (!request || !filesPane.value) return
   pendingFile.value = null
-  if (request.directory) await filesPane.value.openDirectory(request.path)
-  else await filesPane.value.openPath(request.path, request.line)
+  if ('directory' in request) await filesPane.value.openDirectory(request.path)
+  else if (request.owner === sessionId.value)
+    await filesPane.value.openPreview(request)
 }
 
 function selectPane(target: WorkspaceContentPane): void {
@@ -267,14 +279,12 @@ async function persistFilesTreeWidth(): Promise<void> {
       </template>
       <template v-else-if="pane === 'files'">
         <FilesPane
-          v-if="hasProject"
           ref="filesPane"
           :session-id="sessionId"
           :project-path="projectPath"
           :tree-width="filesTreeWidth"
           @tree-width="setFilesTreeWidth"
         />
-        <p v-else class="workspace-empty">{{ NO_PROJECT_REASON }}</p>
       </template>
       <template v-else-if="pane === 'terminal'">
         <TerminalPane v-if="hasProject" :session-id="sessionId" />

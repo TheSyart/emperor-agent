@@ -61,6 +61,42 @@ const row = (data: ToolChatData) => {
 }
 
 describe('tool registry titles and summaries', () => {
+  it('routes fetch and structured MCP resources while preserving unknown MCP results', () => {
+    expect(toolView('web_fetch').body).toBe('resource')
+    const github = tool(
+      'mcp_github_pull_request_read',
+      { number: 12 },
+      {
+        text: '{"html_url":"https://github.com/a/b/pull/12","title":"Fix"}',
+        meta: { server: 'github', tool: 'pull_request_read' },
+      },
+    )
+    expect(toolView(github.name, github).body).toBe('resource')
+    const unknown = tool(
+      'mcp_docs_logs',
+      {},
+      { text: 'Log https://github.com/a/b/pull/12' },
+    )
+    expect(toolView(unknown.name, unknown).body).toBe('mcp')
+    const imageOnly = {
+      ...unknown,
+      result: {
+        ...unknown.result!,
+        content: [
+          {
+            type: 'image' as const,
+            attachment: {
+              attachmentId: 'screen-1',
+              mediaType: 'image/png',
+              bytes: 42,
+            },
+          },
+        ],
+      },
+    }
+    expect(toolView(imageOnly.name, imageOnly).body).toBe('mcp')
+  })
+
   it('bash: description, background job status', () => {
     expect(
       row(tool('bash', { command: 'ls -la', description: 'List files' })),

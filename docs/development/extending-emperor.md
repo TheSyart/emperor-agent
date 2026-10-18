@@ -51,6 +51,8 @@ MCP 工具不需要注册代码：`McpToolBridge` 会把每个已连接 server �
 - 只读动作不询问，并用 `isConcurrencySafe` 放行；写入后触发对应刷新（Skill 目录变更通知、MCP 重载），让新状态从下一步起生效。
 - 用 `prompt.section({ name: 'tool:<name>', ... })` 告诉模型只通过该工具修改这类配置，不要用文件或 Shell 工具绕过。
 
+工具要展示网页、文件或明确生成的产物时，使用[对话资源展示契约](conversation-resources.md)中的结构化字段；保留原始结果，不从日志字符串猜测产物。
+
 ## 新 middleware 或内核子系统
 
 - 扩展点定义在 `harness/agent/middleware.ts`（`preStep`、`requestConfig`、`requestError`、`turnStopping`）和 `ToolRegistry` 的 `preExecute` / `postExecute` / guard 数组。

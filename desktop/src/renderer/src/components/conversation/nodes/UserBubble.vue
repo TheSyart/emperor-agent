@@ -13,14 +13,17 @@
 import { computed } from 'vue'
 import { attachmentRawUrl } from '../../../api/attachments'
 import type { UserChatNode } from '../../../conversation/types'
-import { DsPaperclip } from '../../icons/ds'
 import { useChatContext } from '../chatContext'
 import { formatBytes } from '../chatFormat'
 import MessageIconActions from '../parts/MessageIconActions.vue'
 import ReferencedText from '../parts/ReferencedText.vue'
+import DocumentIcon from '../../ui/DocumentIcon.vue'
+import { openResourceImages } from '../resources/resourceImages'
+import { requestResourceDetail } from '../resources/resourceEvents'
+import type { DisplayResource } from '../resources/resourceModel'
 
 const props = defineProps<{ node: UserChatNode }>()
-const { actions } = useChatContext()
+const { actions, sessionId } = useChatContext()
 
 interface AttachmentView {
   id: string
@@ -64,34 +67,79 @@ const sourceLabel = computed(() => {
   if (props.node.data.source === 'scheduler') return '定时任务'
   return props.node.data.source ?? ''
 })
+function enlarge(id: string): void {
+  const group = images.value.map((id) =>
+    attachmentResource(id, attachments.value.find((a) => a.id === id)?.name),
+  )
+  const resource = group.find((item) => item.attachmentId === id)
+  if (resource) openResourceImages(resource, sessionId(), group)
+}
+function attachmentResource(
+  id: string,
+  name = id,
+  image = true,
+): DisplayResource {
+  const attachment = attachments.value.find((item) => item.id === id)
+  return {
+    id: `attachment:${id}`,
+    kind: image ? 'image' : 'attachment',
+    href: `attachment:${id}`,
+    attachmentId: id,
+    label: name,
+    subtitle: '附件',
+    sourceMessageId: props.node.data.messageId,
+    role: 'source',
+    provenance: 'provided',
+    ...(attachment?.size !== undefined ? { bytes: attachment.size } : {}),
+  }
+}
 </script>
 
 <template>
   <div class="user-row" data-time-hover-root>
     <div class="stack">
       <div v-if="images.length" class="images">
-        <img
-          v-for="id in images"
-          :key="id"
-          class="thumb"
-          :src="attachmentRawUrl(id)"
-          alt=""
-          loading="lazy"
-        />
+        <figure v-for="id in images" :key="id" class="image-item">
+          <button
+            type="button"
+            class="image-open"
+            :aria-label="`预览图片：${attachments.find((a) => a.id === id)?.name || '图片'}`"
+            @click="enlarge(id)"
+          >
+            <img
+              class="thumb"
+              :src="attachmentRawUrl(id)"
+              alt=""
+              loading="lazy"
+            />
+          </button>
+        </figure>
       </div>
       <div v-if="files.length" class="files">
-        <span v-for="file in files" :key="file.id" class="file-chip">
-          <DsPaperclip :size="14" class="file-icon" />
+        <button
+          v-for="file in files"
+          :key="file.id"
+          type="button"
+          class="file-chip"
+          @click="
+            requestResourceDetail(
+              attachmentResource(file.id, file.name, false),
+              sessionId(),
+            )
+          "
+        >
+          <DocumentIcon :path="file.name" :size="18" class="file-icon" />
           <span class="file-name">{{ file.name }}</span>
           <span v-if="file.size !== undefined" class="file-size">{{
             formatBytes(file.size)
           }}</span>
-        </span>
+        </button>
       </div>
       <div v-if="node.data.text" class="user-bubble">
         <ReferencedText
           :text="node.data.text"
           :references="node.data.references"
+          :source-message-id="node.data.messageId"
         />
       </div>
       <span v-if="sourceLabel" class="source">{{ sourceLabel }}</span>
@@ -108,6 +156,10 @@ const sourceLabel = computed(() => {
 </template>
 
 <style scoped>
+.image-item {
+  margin: 0;
+  width: 120px;
+}
 .user-row {
   display: flex;
   flex-direction: column;
@@ -142,6 +194,18 @@ const sourceLabel = computed(() => {
   justify-content: flex-end;
   gap: var(--space-2);
 }
+.image-open {
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-card);
+  background: none;
+  cursor: pointer;
+}
+.image-open:focus-visible,
+.file-chip:focus-visible {
+  outline: 2px solid rgb(var(--focus-ring));
+  outline-offset: 2px;
+}
 
 .thumb {
   width: 120px;
@@ -164,14 +228,15 @@ const sourceLabel = computed(() => {
   align-items: center;
   gap: var(--space-1-5);
   max-width: 260px;
-  height: var(--space-8);
-  padding: 0 var(--space-3);
+  min-height: var(--space-8);
+  padding: var(--space-1-5) var(--space-3);
   border: 1px solid var(--border-l2);
   border-radius: var(--radius-cell);
   background: rgb(var(--bg-layer-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   color: rgb(var(--label-secondary));
+  cursor: pointer;
 }
 
 .file-icon {
@@ -181,9 +246,8 @@ const sourceLabel = computed(() => {
 
 .file-name {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .file-size {

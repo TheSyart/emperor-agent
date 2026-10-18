@@ -77,6 +77,19 @@
 
 .markdown-body a.md-link-chip[data-md-link='web'] {
   --md-link-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20'/%3E%3Cpath d='M2 12h20'/%3E%3C/svg%3E");
+  gap: var(--space-1-5);
+  padding: 0 var(--space-0-5);
+  margin-inline: var(--space-1);
+  border: 0;
+  background: transparent;
+  color: rgb(var(--accent-strong));
+  line-height: 1.85;
+}
+
+.markdown-body a.md-link-chip[data-md-link='web']:hover {
+  background: var(--interactive-bg-hover);
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 
 .markdown-body a.md-link-chip[data-md-link='file'] {
@@ -128,4 +141,11 @@
 .markdown-body td {
   @apply border-b px-3 py-2 text-left;
   border-color: rgb(var(--border));
+}
+
+/* Filled color artwork must not become a solid monochrome mask. */
+.markdown-body a.md-link-chip[data-md-color]::before {
+  background: var(--md-link-image) center / contain no-repeat;
+  -webkit-mask: none;
+  mask: none;
 }

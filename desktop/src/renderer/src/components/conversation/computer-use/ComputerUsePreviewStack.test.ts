@@ -6,6 +6,7 @@ import type {
   UiTargetView,
 } from '@emperor/core/runtime-contract'
 import type { AgentPreviewUpdate } from '../../../../../shared/ipc-contract'
+import { imageViewer, closeImageViewer } from '../../ui/imageViewer'
 import ComputerUsePreviewStack from './ComputerUsePreviewStack.vue'
 import {
   previewLayout,
@@ -560,7 +561,16 @@ describe('ComputerUsePreviewStack', () => {
 
   it('brings a target forward and enlarges it on a tool row request', async () => {
     setTargets([
-      target({ targetId: 't-a', title: '访达' }),
+      target({
+        targetId: 't-a',
+        title: '访达',
+        lastScreenshot: {
+          attachmentId: 'att_2026-10_12345678',
+          takenAt: '2026-09-29T10:00:00.000Z',
+          width: 800,
+          height: 600,
+        },
+      }),
       target({ targetId: 't-b', lastActiveAt: '2026-09-29T10:00:05Z' }),
     ])
     const root = await mount()
@@ -569,13 +579,10 @@ describe('ComputerUsePreviewStack', () => {
     expect(card(root)?.querySelector('.cu-card-title')?.textContent).toBe(
       '访达',
     )
-    const dialog = document.body.querySelector('[role="dialog"]')
-    expect(dialog?.getAttribute('aria-label')).toBe('访达')
-    document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }),
-    )
-    await flush()
-    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+    expect(imageViewer.value?.items[0]?.name).toBe('访达')
+    expect(imageViewer.value?.items[0]?.src).toContain('app://attachments/')
+    closeImageViewer()
+    expect(imageViewer.value).toBeNull()
   })
 
   it('draws the Agent’s pointer where its action landed on the live picture, then fades it out', async () => {
@@ -615,7 +622,16 @@ describe('ComputerUsePreviewStack', () => {
 
   it('draws the pointer only on its own target’s live picture', async () => {
     setTargets([
-      target({ targetId: 't-a', title: '访达' }),
+      target({
+        targetId: 't-a',
+        title: '访达',
+        lastScreenshot: {
+          attachmentId: 'att_2026-10_12345678',
+          takenAt: '2026-09-29T10:00:00.000Z',
+          width: 800,
+          height: 600,
+        },
+      }),
       target({ targetId: 't-b', lastActiveAt: '2026-09-29T10:00:05Z' }),
     ])
     const root = await mount()

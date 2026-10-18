@@ -108,7 +108,7 @@ for (const theme of ['dark', 'light'] as const) {
   test(`launcher without a project (${theme})`, async ({ page }) => {
     await open(page, '/chat/chat-main', theme, 'launcher')
     const list = page.locator('.launcher-list')
-    for (const pane of ['review', 'terminal', 'files']) {
+    for (const pane of ['review', 'terminal']) {
       const row = list.locator(`.launcher-row[data-pane="${pane}"]`)
       await expect(row).toBeDisabled()
       await expect(row).toContainText('当前会话未绑定项目')
@@ -116,6 +116,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(
       list.locator('.launcher-row[data-pane="browser"]'),
     ).toBeEnabled()
+    await expect(list.locator('.launcher-row[data-pane="files"]')).toBeEnabled()
     await shot(page, `launcher-no-project-${theme}`)
   })
 

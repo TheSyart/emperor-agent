@@ -66,6 +66,18 @@ describe('sanitizeHtml hardening layer (Wave1.4)', () => {
 })
 
 describe('link chips', () => {
+  it('identifies GitHub objects and uses the individually drawn file vectors', () => {
+    expect(render('[PR](https://github.com/a/b/pull/42)')).toContain(
+      'data-resource-type="pull_request"',
+    )
+    expect(render('[config](a.yaml)')).toContain('data-md-custom-icon="yaml"')
+    expect(render('[markdown](README.md)')).toContain(
+      'data-md-custom-icon="markdown"',
+    )
+    expect(render('[config](a.yaml)')).toContain('--md-link-image:')
+    expect(render('[config](a.yaml)')).toContain('data-md-color="true"')
+    expect(render('[README](README.md)')).toContain('--md-link-ico:')
+  })
   it('marks http(s) links as web chips with safe-open attrs', () => {
     const html = render('[t](https://example.com/p)')
     expect(html).toContain('class="md-link-chip"')
@@ -102,11 +114,14 @@ describe('link chips', () => {
     expect(html).toContain('data-md-link="web"')
   })
 
-  it('truncates very long autolinked URLs', () => {
-    const html = render(
-      'https://example.com/very/long/path/that/goes/on/and/on/and/on/forever/xyz',
+  it('keeps long URLs, queries and fragments complete', () => {
+    const url =
+      'https://example.com/very/long/path/that/goes/on/and/on/and/on/forever/xyz?view=full#section'
+    const html = render(url)
+    expect(html).toContain(
+      `>example.com${url.slice('https://example.com'.length)}</a>`,
     )
-    expect(html).toContain('…</a>')
+    expect(html).not.toContain('…</a>')
   })
 
   it('does not chip links inside code spans', () => {
@@ -169,7 +184,15 @@ describe('classifyMdLink', () => {
     expect(classifyMdLink('#anchor')).toBeNull()
     expect(classifyMdLink('relative/path.md')).toBe('file')
     expect(classifyMdLink('./src/main.ts#L42')).toBe('file')
+    expect(classifyMdLink('README.md:12:3')).toBe('file')
+    expect(classifyMdLink('javascript:12')).toBeNull()
   })
+})
+
+it('keeps CJK punctuation outside automatically linked URLs', () => {
+  const html = render('参考 https://example.com/guide，再看说明。')
+  expect(html).toContain('href="https://example.com/guide"')
+  expect(html).toContain('</a>，再看说明。')
 })
 
 describe('hrefToFilePath', () => {

@@ -8,6 +8,8 @@
  * brings it to the front of the preview and enlarges it.
  */
 import { computed, ref } from 'vue'
+import { openImageViewer } from '../../ui/imageViewer'
+import { useChatContext } from '../chatContext'
 import { attachmentRawUrl } from '../../../api/attachments'
 import {
   moveAgentDownload,
@@ -33,6 +35,22 @@ import {
 } from './computerUseModel'
 
 const props = defineProps<{ data: ToolChatData }>()
+const { sessionId } = useChatContext()
+function enlargeShot() {
+  const value = shot.value
+  if (value)
+    openImageViewer({
+      owner: sessionId(),
+      items: [
+        {
+          id: value.attachmentId,
+          name: `截图 ${value.width}×${value.height}`,
+          src: attachmentRawUrl(value.attachmentId),
+          caption: '工具观察截图',
+        },
+      ],
+    })
+}
 const meta = computed(() => computerUseMeta(props.data))
 const unknown = computed(() => computerUseUnknown(meta.value))
 const shot = computed(() => meta.value?.screenshot)
@@ -203,12 +221,12 @@ async function moveDownload(): Promise<void> {
         ></span
       >
     </div>
-    <a
+    <button
+      type="button"
       v-if="shot"
       class="shot"
-      :href="attachmentRawUrl(shot.attachmentId)"
-      target="_blank"
-      rel="noreferrer"
+      @click="enlargeShot"
+      aria-label="放大工具截图"
       :title="`截图 ${shot.width}×${shot.height}`"
     >
       <img
@@ -216,12 +234,19 @@ async function moveDownload(): Promise<void> {
         :alt="`页面截图 ${shot.width}×${shot.height}`"
         loading="lazy"
       />
-    </a>
+    </button>
     <GenericToolCard :data="data" />
   </div>
 </template>
 
 <style scoped>
+button.shot {
+  border: 0;
+  padding: 0;
+  text-align: left;
+  background: transparent;
+  cursor: zoom-in;
+}
 .cu-view {
   display: flex;
   flex-direction: column;

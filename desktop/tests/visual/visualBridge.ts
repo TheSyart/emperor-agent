@@ -4617,7 +4617,69 @@ export async function installVisualCoreBridge(
           return () => sessionEventListeners.delete(listener)
         },
         invokeCore: async (operationKey: string, ...args: unknown[]) => {
+          if (
+            operationKey === 'references.resolve' ||
+            operationKey === 'references.preview' ||
+            operationKey === 'references.siteIcon'
+          ) {
+            const state = window as unknown as {
+              __visualResourceOps?: Array<{ operation: string; input: unknown }>
+            }
+            state.__visualResourceOps ??= []
+            state.__visualResourceOps.push({
+              operation: operationKey,
+              input: args[0],
+            })
+          }
           switch (operationKey) {
+            case 'references.siteIcon': {
+              const input = args[0] as { referenceId: string }
+              return input.referenceId.includes('offline')
+                ? { state: 'unavailable', updatedAt: Date.now() }
+                : {
+                    state: 'ready',
+                    dataUrl:
+                      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlS8AAAAASUVORK5CYII=',
+                    updatedAt: Date.now(),
+                  }
+            }
+            case 'references.resolve': {
+              const input = args[0] as {
+                href: string
+                label: string
+                sourceMessageId: string
+                sessionId: string
+              }
+              const web = /^https?:/.test(input.href)
+              const path = input.href.replace(/#L\d+$/, '')
+              return {
+                id: `ref:${input.href}`,
+                kind: web ? 'web' : 'project_file',
+                label: input.label,
+                tooltip: web ? input.href : `${projectDir}/${path}`,
+                available: !path.includes('gone'),
+                actions: web ? ['open_external'] : ['open_files'],
+                ...(!web ? { relativePath: path } : {}),
+                ...(path.endsWith('/') ? { directory: true } : {}),
+              }
+            }
+            case 'references.preview': {
+              const input = args[0] as { referenceId: string }
+              if (input.referenceId.includes('offline'))
+                return {
+                  state: 'error',
+                  reason: '网络不可用，原始链接仍可使用。',
+                  updatedAt: Date.now(),
+                }
+              return {
+                state: 'ready',
+                title: input.referenceId.includes('github.com')
+                  ? 'Emperor GitHub 资源'
+                  : '网页指南',
+                description: '这是视觉夹具返回的页面摘要，未进行实际联网。',
+                updatedAt: Date.now(),
+              }
+            }
             case 'bootstrap':
               return boot
             case 'commands.list':
@@ -4910,20 +4972,26 @@ export async function installVisualCoreBridge(
                 truncated: false,
               }
             case 'files.read':
+            case 'files.preview': {
+              const input = (args[0] || {}) as {
+                path?: string
+                relativePath?: string
+              }
+              const path = input.path || input.relativePath || 'README.md'
               return {
+                id: `file:${projectDir}/${path}`,
+                path: `${projectDir}/${path}`,
                 projectRoot: projectDir,
-                relativePath: String(
-                  ((args[0] || {}) as { relativePath?: string }).relativePath ||
-                    'README.md',
-                ),
-                name: 'README.md',
+                relativePath: path,
+                name: path.split('/').pop(),
                 kind: 'text',
-                mimeType: 'text/markdown',
+                mimeType: path.endsWith('.md') ? 'text/markdown' : 'text/plain',
                 bytes: 68,
                 truncated: false,
                 content:
                   '# Visual Build Project\n\nA project workspace visual fixture.\n',
               }
+            }
             case 'terminals.list':
               return [visualTerminal]
             case 'terminals.create':

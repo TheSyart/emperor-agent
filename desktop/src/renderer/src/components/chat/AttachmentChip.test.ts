@@ -2,10 +2,11 @@
 import { createApp, h, nextTick } from 'vue'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { AttachmentRef } from '../../types'
+import { imageViewer, closeImageViewer } from '../ui/imageViewer'
 import AttachmentChip from './AttachmentChip.vue'
 
 const image: AttachmentRef = {
-  id: 'att_preview',
+  id: 'att_2026-10_12345678',
   name: 'reference.png',
   mime: 'image/png',
   size: 2048,
@@ -20,18 +21,21 @@ let app: ReturnType<typeof createApp> | null = null
 
 afterEach(() => {
   app?.unmount()
-  document.querySelector('.attachment-preview-modal')?.remove()
+  closeImageViewer()
   container?.remove()
   container = null
   app = null
 })
 
 describe('AttachmentChip image preview', () => {
-  it('opens a full-size preview and closes it with Escape', async () => {
+  it('opens the shared lightbox for the draft owner', async () => {
     container = document.createElement('div')
     document.body.append(container)
-    app = createApp(() => h(AttachmentChip, { data: image }))
+    app = createApp(() => h(AttachmentChip, { data: image, owner: 'draft:1' }))
     app.mount(container)
+
+    expect(container.textContent).not.toContain(image.name)
+    expect(container.querySelector('.attach-meta')).toBeNull()
 
     const trigger = container.querySelector<HTMLButtonElement>(
       '.attach-preview-trigger',
@@ -40,20 +44,15 @@ describe('AttachmentChip image preview', () => {
     trigger.click()
     await nextTick()
 
-    const dialog = document.querySelector<HTMLElement>(
-      '.attachment-preview-modal',
-    )!
-    expect(dialog).not.toBeNull()
-    expect(dialog.querySelector('img')?.getAttribute('src')).toBe(
-      'app://attachments/att_preview/raw',
+    expect(imageViewer.value?.items[0]?.src).toBe(
+      'app://attachments/att_2026-10_12345678/raw',
     )
-
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-    await nextTick()
-    expect(document.querySelector('.attachment-preview-modal')).toBeNull()
+    expect(imageViewer.value?.owner).toBe('draft:1')
+    closeImageViewer()
+    expect(imageViewer.value).toBeNull()
   })
 
-  it('keeps non-image attachments as non-previewable chips', () => {
+  it('keeps non-image attachments available through their file name', () => {
     container = document.createElement('div')
     document.body.append(container)
     const documentAttachment: AttachmentRef = {
@@ -65,5 +64,8 @@ describe('AttachmentChip image preview', () => {
     app.mount(container)
 
     expect(container.querySelector('.attach-preview-trigger')).toBeNull()
+    expect(container.querySelector('.attach-meta')?.textContent).toContain(
+      documentAttachment.name,
+    )
   })
 })

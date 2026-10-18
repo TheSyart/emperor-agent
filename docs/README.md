@@ -55,6 +55,7 @@
 - [可选能力生命周期](architecture/optional-capabilities.md)
 - [开发指南](development/README.md)
 - [扩展 Emperor Agent](development/extending-emperor.md)
+- [对话资源展示契约](development/conversation-resources.md)
 - [Headless ACP operator preview](development/headless-acp.md)
 
 ### 设计规范

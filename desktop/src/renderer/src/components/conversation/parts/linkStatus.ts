@@ -26,7 +26,7 @@ export interface LinkStatusSource {
   /** Bumps when statuses may have changed: rendered links check again. */
   readonly version: Readonly<Ref<number>>
   /** The status of a file link; null when Core cannot tell. */
-  status(href: string): Promise<LinkStatus | null>
+  status(href: string, sourceMessageId?: string): Promise<LinkStatus | null>
 }
 
 export const LINK_STATUS_KEY: InjectionKey<LinkStatusSource> =
@@ -45,10 +45,10 @@ export function linkStatusOf(reference: ResolvedLink): LinkStatus | null {
 }
 
 export function createLinkStatusSource(
-  resolve: (href: string) => Promise<ResolvedLink>,
+  resolve: (href: string, sourceMessageId?: string) => Promise<ResolvedLink>,
 ): LinkStatusSource & {
   refresh(): void
-  record(href: string, reference: ResolvedLink): void
+  record(href: string, reference: ResolvedLink, sourceMessageId?: string): void
 } {
   const version = ref(0)
   let known = new Map<string, Promise<LinkStatus | null>>()
@@ -69,11 +69,15 @@ export function createLinkStatusSource(
 
   return {
     version,
-    status(href) {
-      let status = known.get(href)
+    status(href, sourceMessageId) {
+      const key = `${sourceMessageId ?? ''}\0${href}`
+      let status = known.get(key)
       if (!status) {
-        status = limited(() => resolve(href)).then(linkStatusOf, () => null)
-        known.set(href, status)
+        status = limited(() => resolve(href, sourceMessageId)).then(
+          linkStatusOf,
+          () => null,
+        )
+        known.set(key, status)
       }
       return status
     },
@@ -81,8 +85,11 @@ export function createLinkStatusSource(
       known = new Map()
       version.value += 1
     },
-    record(href, reference) {
-      known.set(href, Promise.resolve(linkStatusOf(reference)))
+    record(href, reference, sourceMessageId) {
+      known.set(
+        `${sourceMessageId ?? ''}\0${href}`,
+        Promise.resolve(linkStatusOf(reference)),
+      )
       version.value += 1
     },
   }

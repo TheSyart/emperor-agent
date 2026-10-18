@@ -1108,7 +1108,7 @@ export function turnFilesScenario(now = Date.now()): Scenario {
       deletions: 0,
     },
     {
-      path: 'src/styles/login-old.css',
+      path: 'src/styles/很长的中文目录/with spaces/desktop-styles-and-resource-presentation-compatibility/login-old.css',
       status: 'deleted',
       additions: 0,
       deletions: 31,

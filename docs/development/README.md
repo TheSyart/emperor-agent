@@ -51,6 +51,8 @@ npm --prefix desktop run package:verify
 - 修改 Terminal 时还要运行 `npm --prefix desktop run terminal:smoke`，并在目标 Electron ABI 下创建真实 PTY；afterPack 必须验证目标 platform/arch 对应的 `pty.node`（Unix 还包括可执行 `spawn-helper`），三平台 Preview candidate 必须完成 native rebuild/package smoke。
 - 文档改动至少运行 `npm run format:check`、`git diff --check` 和相关 contract test。
 
+对话里的资源身份、工具展示元数据、SVG 图标与按需详情接口见[对话资源展示契约](conversation-resources.md)。
+
 ## 修改从哪里开始
 
 | 目标                       | 入口                                                                                                                                          |

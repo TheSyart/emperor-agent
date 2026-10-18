@@ -58,7 +58,7 @@ import {
   onCoreEvent,
 } from '../../../api/backend'
 import { useReducedMotion } from '../../../composables/useReducedMotion'
-import Modal from '../../ui/Modal.vue'
+import { openImageViewer } from '../../ui/imageViewer'
 import { modalLayerCount } from '../../ui/modalStack'
 import {
   POINTER_FADE_MS,
@@ -99,7 +99,6 @@ const compact = ref(false)
 /** The column width is known (no frames stream before it is). */
 const measured = ref(false)
 const expanded = ref(false)
-const enlargedId = ref<string | null>(null)
 const pageVisible = ref(
   typeof document === 'undefined' || document.visibilityState !== 'hidden',
 )
@@ -107,7 +106,6 @@ const activated = ref(true)
 const now = ref(new Date())
 const root = ref<HTMLElement | null>(null)
 const stack = ref<HTMLElement | null>(null)
-let enlargeOpener: HTMLElement | null = null
 
 const targets = computed(() =>
   previewTargetsFor(status.value?.targets, props.sessionId),
@@ -121,23 +119,11 @@ const onScreen = computed(
     measured.value &&
     pageVisible.value &&
     activated.value &&
-    (!compact.value || expanded.value || enlargedId.value !== null),
+    (!compact.value || expanded.value),
 )
 const liveIds = computed(() =>
   liveTargetIds(ordered.value, { onScreen: onScreen.value }),
 )
-const enlarged = computed(
-  () =>
-    ordered.value.find((target) => target.targetId === enlargedId.value) ??
-    null,
-)
-const enlargedOpen = computed({
-  get: () => enlarged.value !== null,
-  set: (open: boolean) => {
-    if (!open) closeEnlarged()
-  },
-})
-
 function statusOf(target: UiTargetView) {
   return previewStatus(target, { awaiting: props.awaiting })
 }
@@ -358,18 +344,40 @@ function cycle(step: 1 | -1): void {
   if (next) bringForward(next.targetId)
 }
 
-function enlarge(targetId: string, event?: Event): void {
-  enlargeOpener =
-    (event?.currentTarget as HTMLElement | null) ??
-    (document.activeElement as HTMLElement | null)
-  enlargedId.value = targetId
-}
-
-function closeEnlarged(): void {
-  enlargedId.value = null
-  void nextTick(() => {
-    if (enlargeOpener?.isConnected) enlargeOpener.focus()
-    enlargeOpener = null
+async function enlarge(targetId: string): Promise<void> {
+  const target = ordered.value.find((target) => target.targetId === targetId)
+  if (!target) return
+  const frame = frameOf(target)
+  const src = frameSrc(frame)
+  if (!src) return
+  const owner = props.sessionId
+  // Clone the already received frame: live preview URLs are revoked on the next frame.
+  let snapshot = src
+  let dispose: (() => void) | undefined
+  if (src.startsWith('blob:')) {
+    try {
+      const blob = await (await fetch(src)).blob()
+      snapshot = URL.createObjectURL(blob)
+      dispose = () => URL.revokeObjectURL(snapshot)
+    } catch {
+      return
+    }
+  }
+  if (owner !== props.sessionId || !activated.value) {
+    dispose?.()
+    return
+  }
+  openImageViewer({
+    owner,
+    dispose,
+    items: [
+      {
+        id: targetId,
+        src: snapshot,
+        name: previewTitle(target),
+        caption: `${statusOf(target).label} · ${frame.note}`,
+      },
+    ],
   })
 }
 
@@ -449,8 +457,6 @@ watch(
     const listed = new Set(targetIds)
     for (const targetId of Object.keys(frames.value))
       if (!listed.has(targetId)) dropFrame(targetId)
-    if (enlargedId.value !== null && !listed.has(enlargedId.value))
-      closeEnlarged()
     void nextTick(() => {
       observeHost()
       observeStack()
@@ -499,7 +505,6 @@ onActivated(() => {
 onDeactivated(() => {
   activated.value = false
   expanded.value = false
-  enlargedId.value = null
   stopAllLive()
   forgetPointers()
   setPreviewShownTargets([])
@@ -590,7 +595,7 @@ onBeforeUnmount(() => {
           type="button"
           class="cu-card-frame"
           :aria-label="`放大查看 ${previewTitle(front)}`"
-          @click="enlarge(front.targetId, $event)"
+          @click="enlarge(front.targetId)"
         >
           <img
             :src="frameSrc(frameOf(front))"
@@ -632,23 +637,6 @@ onBeforeUnmount(() => {
         </p>
       </article>
     </div>
-    <Modal
-      v-model:open="enlargedOpen"
-      :title="enlarged ? previewTitle(enlarged) : ''"
-      :width="960"
-    >
-      <template v-if="enlarged">
-        <img
-          v-if="frameSrc(frameOf(enlarged))"
-          class="cu-enlarged"
-          :src="frameSrc(frameOf(enlarged))"
-          :alt="`${previewTitle(enlarged)}的${frameOf(enlarged).kind === 'shot' ? '最近截图' : '画面'}`"
-        />
-        <p class="cu-enlarged-note">
-          {{ statusOf(enlarged).label }} · {{ frameOf(enlarged).note }}
-        </p>
-      </template>
-    </Modal>
   </section>
 </template>
 

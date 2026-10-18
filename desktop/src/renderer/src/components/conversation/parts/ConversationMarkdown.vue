@@ -14,13 +14,30 @@ import { computed } from 'vue'
 import CodeBlock from '../../ui/CodeBlock.vue'
 import { splitMarkdownFences } from '../timelineModel'
 import MarkdownHtml from './MarkdownHtml.vue'
+import ResourceCard from '../resources/ResourceCard.vue'
+import {
+  resourceMarkdownSegments,
+  type ResourceMarkdownSegment,
+} from '../resources/resourceModel'
 
 const props = withDefaults(
-  defineProps<{ text: string; streaming?: boolean }>(),
-  { streaming: false },
+  defineProps<{
+    text: string
+    streaming?: boolean
+    sourceMessageId?: string
+  }>(),
+  { streaming: false, sourceMessageId: 'markdown' },
 )
 
-const segments = computed(() => splitMarkdownFences(props.text))
+type Segment =
+  ReturnType<typeof splitMarkdownFences>[number] | ResourceMarkdownSegment
+const segments = computed<Segment[]>(() =>
+  splitMarkdownFences(props.text).flatMap<Segment>((segment) =>
+    segment.kind === 'markdown' && !props.streaming
+      ? resourceMarkdownSegments(segment.text, props.sourceMessageId)
+      : [segment],
+  ),
+)
 </script>
 
 <template>
@@ -30,6 +47,11 @@ const segments = computed(() => splitMarkdownFences(props.text))
         v-if="segment.kind === 'markdown'"
         :text="segment.text"
         :streaming="streaming"
+        :source-message-id="sourceMessageId"
+      />
+      <ResourceCard
+        v-else-if="segment.kind === 'resource'"
+        :resource="segment.resource"
       />
       <CodeBlock
         v-else
@@ -50,6 +72,9 @@ const segments = computed(() => splitMarkdownFences(props.text))
   overflow-wrap: anywhere;
   font: var(--font-md);
   color: rgb(var(--label-primary));
+}
+.ds-md > :deep(.resource-card) {
+  margin: 0;
 }
 
 .ds-md :deep(.ds-md-html > *:first-child) {
@@ -123,7 +148,7 @@ const segments = computed(() => splitMarkdownFences(props.text))
 }
 
 /* Language and PDF badges: short text on a tint of the language's tone. */
-.ds-md :deep(a.md-link-chip[data-md-badge]::before) {
+.ds-md :deep(a.md-link-chip[data-md-badge]:not([data-md-custom-icon])::before) {
   content: attr(data-md-badge) / '';
   width: auto;
   min-width: 1.6em;
@@ -165,6 +190,9 @@ const segments = computed(() => splitMarkdownFences(props.text))
 
 .ds-md :deep(a.md-link-chip[data-md-tone='danger']) {
   --md-badge-tone: var(--danger);
+}
+.ds-md :deep(a.md-link-chip[data-md-custom-icon][data-md-tone]) {
+  --md-link-ink: var(--md-badge-tone);
 }
 
 /* A file Core cannot find: struck through and dimmed, icon included. */
@@ -210,6 +238,57 @@ const segments = computed(() => splitMarkdownFences(props.text))
 
 .ds-md :deep(a.md-link-chip[data-md-icon='web']) {
   --md-link-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20'/%3E%3Cpath d='M2 12h20'/%3E%3C/svg%3E");
+}
+
+.ds-md :deep(a.md-link-chip[data-md-link='web']) {
+  max-width: calc(100% - var(--space-2));
+  padding: 0 var(--space-0-5);
+  margin-inline: var(--space-1);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  line-height: 1.85;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  transition: background var(--duration-fast) ease;
+}
+.ds-md :deep(a.md-link-chip[data-md-link='web']:hover) {
+  background: var(--interactive-bg-hover);
+}
+.ds-md :deep(a.md-link-chip[data-md-link='web']:focus-visible) {
+  outline: 2px solid rgb(var(--focus-ring));
+  outline-offset: 3px;
+}
+.ds-md :deep(a.md-link-chip[data-md-link='web']::before) {
+  width: var(--space-4);
+  height: var(--space-4);
+  margin-inline-end: var(--space-1-5);
+}
+.ds-md :deep(a.md-link-chip[data-resource-kind='github']::before) {
+  --md-link-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7'%3E%3Cpath d='M9 19c-4 1-4-2-6-3m12 6v-4c0-1-.3-2-1-2.6 3-.3 6-1.4 6-6.5 0-1.4-.5-2.7-1.4-3.7.3-1.2.3-2.4-.2-3.6 0 0-1.2-.4-3.6 1.4a13 13 0 0 0-7 0C5.4 1.2 4.2 1.6 4.2 1.6c-.5 1.2-.5 2.4-.2 3.6a5.5 5.5 0 0 0-1.4 3.7c0 5.1 3 6.2 6 6.5-.7.6-1 1.6-1 2.6v4'/%3E%3C/svg%3E");
+}
+.ds-md :deep(a.md-link-chip[data-site-letter]::before) {
+  content: attr(data-site-letter) / '';
+  mask: none;
+  background: rgb(var(--accent-fill) / 0.14);
+  color: rgb(var(--accent-strong));
+  border-radius: var(--radius-xs);
+  font: 600 0.7em/1.4 var(--font-sans);
+  text-align: center;
+  vertical-align: 0;
+}
+.ds-md :deep(a.md-link-chip[data-site-icon='ready']::before) {
+  display: none;
+}
+.ds-md :deep(img.site-icon) {
+  display: inline-block;
+  flex: none;
+  width: var(--space-4);
+  height: var(--space-4);
+  margin: 0 var(--space-1-5) 0 0;
+  vertical-align: -0.125em;
+  object-fit: contain;
+  border-radius: var(--radius-xs);
+  background: rgb(var(--nb-00));
 }
 
 .ds-md :deep(:is(ul, ol)) {
@@ -318,5 +397,12 @@ const segments = computed(() => splitMarkdownFences(props.text))
 .ds-md :deep(input[type='checkbox']) {
   margin: 0 var(--space-2) 0 0;
   accent-color: rgb(var(--label-secondary));
+}
+
+/* Filled color artwork must not become a solid monochrome mask. */
+.ds-md :deep(a.md-link-chip[data-md-color]::before) {
+  background: var(--md-link-image) center / contain no-repeat;
+  -webkit-mask: none;
+  mask: none;
 }
 </style>

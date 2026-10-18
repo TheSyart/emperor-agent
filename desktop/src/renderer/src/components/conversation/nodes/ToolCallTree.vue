@@ -11,8 +11,7 @@
 import { computed } from 'vue'
 import type { ToolChatNode, ToolGrantView } from '../../../conversation/types'
 import { DsChevronRight, DsShieldAlert } from '../../icons/ds'
-import StateDot from '../../ui/StateDot.vue'
-import type { StateDotState } from '../../ui/stateDot'
+import SubagentAvatar from '../../ui/SubagentAvatar.vue'
 import { useChatContext } from '../chatContext'
 import { subagentStatusLabel } from '../tools/registry'
 import { lastLine } from '../tools/toolModel'
@@ -23,18 +22,18 @@ const props = defineProps<{ node: ToolChatNode }>()
 const { actions } = useChatContext()
 const data = computed(() => props.node.data)
 
-const subagentDot = computed<StateDotState>(() => {
+const subagentStatus = computed(() => {
   const sub = data.value.subagent
-  if (sub === undefined || sub.status === 'running') return 'ongoing'
+  if (sub === undefined || sub.status === 'running') return 'running'
   switch (sub.stopReason) {
     case 'completed':
     case undefined:
-      return 'ok'
+      return 'completed'
     case 'error':
     case 'refusal':
-      return 'error'
+      return 'failed'
     default:
-      return 'warn'
+      return 'cancelled'
   }
 })
 const subagentLine = computed(() => {
@@ -124,7 +123,12 @@ const hasChildren = computed(
         data-subagent-line
         :data-status="data.subagent.status"
       >
-        <span class="sub-leading"><StateDot :state="subagentDot" /></span>
+        <span class="sub-leading agent-leading"
+          ><SubagentAvatar
+            :id="data.subagent.subagentId"
+            :status="subagentStatus"
+            :size="22"
+        /></span>
         <span class="sub-title">{{ subagentStatusLabel(data) }}</span>
         <template v-if="subagentLine">
           <span class="sep" aria-hidden="true" />
@@ -183,6 +187,10 @@ const hasChildren = computed(
   height: var(--space-4);
   margin-right: var(--space-1-5);
   color: rgb(var(--label-tertiary));
+}
+.agent-leading {
+  width: 24px;
+  height: 24px;
 }
 
 [data-outcome='pending'] .sub-leading {

@@ -26,7 +26,7 @@ const { actions } = useChatContext()
 /** Bodies that only render result material (nothing to show while running). */
 const RESULT_ONLY = new Set(['read', 'glob', 'grep', 'web', 'job', 'skill'])
 
-const view = computed(() => toolView(props.data.name))
+const view = computed(() => toolView(props.data.name, props.data))
 const state = computed(() => toolRowState(props.data))
 const title = computed(() => view.value.title(props.data))
 const failure = computed(() => errorSummary(props.data))

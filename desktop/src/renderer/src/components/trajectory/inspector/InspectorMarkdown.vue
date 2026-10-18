@@ -5,6 +5,7 @@
  *
  * Props: text; preview? (tighter padding for Summary sections).
  */
+import { handleMarkdownChipClick } from '../../../composables/useMarkdownLinks'
 import { toRef } from 'vue'
 import { useMarkdown } from '../../../composables/useMarkdown'
 
@@ -16,7 +17,12 @@ const { rendered } = useMarkdown(toRef(() => props.text))
 
 <template>
   <!-- sanitized by useMarkdown (DOMPurify) -->
-  <div class="traj-md" :data-preview="preview || undefined" v-html="rendered" />
+  <div
+    class="traj-md"
+    :data-preview="preview || undefined"
+    v-html="rendered"
+    @click="handleMarkdownChipClick($event, 'trajectory-markdown')"
+  />
 </template>
 
 <style scoped>

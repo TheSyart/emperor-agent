@@ -24,6 +24,7 @@ import {
   DsWorkflow,
 } from '../../icons/ds'
 import type { ToolChatData } from '../../../conversation/types'
+import { toolResources } from '../resources/resourceIndex'
 import {
   JOB_STATUS_LABEL,
   PLAN_OUTCOME_LABEL,
@@ -62,6 +63,7 @@ export type ToolBodyKind =
   | 'glob'
   | 'grep'
   | 'web'
+  | 'resource'
   | 'todo'
   | 'ask'
   | 'plan'
@@ -233,6 +235,16 @@ const webSearch: ToolViewSpec = {
       list.join('、'),
       card !== null && `${card.sources.length} 个来源`,
     )
+  },
+}
+
+const webFetch: ToolViewSpec = {
+  icon: DsGlobe,
+  body: 'resource',
+  title: () => '查看网页',
+  summary: (data) => {
+    const resource = toolResources(data)[0]
+    return resource?.label ?? stringArg(argsOf(data), 'url') ?? ''
   },
 }
 
@@ -486,6 +498,7 @@ const REGISTRY: Readonly<Record<string, ToolViewSpec>> = {
   glob,
   grep,
   web_search: webSearch,
+  web_fetch: webFetch,
   todo_write: todoWrite,
   ask_user_question: askUserQuestion,
   exit_plan_mode: exitPlanMode,
@@ -512,7 +525,14 @@ const REGISTRY: Readonly<Record<string, ToolViewSpec>> = {
 export const REGISTERED_TOOLS: readonly string[] = Object.keys(REGISTRY)
 
 /** Resolve one wire tool name. */
-export function toolView(name: string): ToolViewSpec {
+export function toolView(name: string, data?: ToolChatData): ToolViewSpec {
+  if (
+    name.startsWith('mcp_') &&
+    name !== 'mcp_config' &&
+    data &&
+    toolResources(data).some((resource) => resource.role !== 'observation')
+  )
+    return { ...mcp, body: 'resource' }
   return (
     REGISTRY[name] ??
     (name.startsWith('mcp_') ? mcp : undefined) ??

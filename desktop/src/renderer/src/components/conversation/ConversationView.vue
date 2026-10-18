@@ -35,10 +35,12 @@ import {
   defineAsyncComponent,
   nextTick,
   onActivated,
+  onDeactivated,
   onBeforeUnmount,
   onMounted,
   provide,
   ref,
+  shallowRef,
   watch,
 } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -88,6 +90,23 @@ import { createLinkStatusSource, LINK_STATUS_KEY } from './parts/linkStatus'
 import TakeoverSeat from './takeover/TakeoverSeat.vue'
 import { activeTakeover } from './takeover/takeoverModel'
 import { activeTurnTick, turnTicks } from './timelineModel'
+import {
+  PROVENANCE_LABEL,
+  type DisplayResource,
+} from './resources/resourceModel'
+import type { ResourceRequest } from './resources/resourceEvents'
+const ResourceDetails = defineAsyncComponent(
+  () => import('./resources/ResourceDetails.vue'),
+)
+const selectedResource = shallowRef<DisplayResource | null>(null)
+const resourceViewActive = ref(true)
+onActivated(() => {
+  resourceViewActive.value = true
+})
+onDeactivated(() => {
+  resourceViewActive.value = false
+  selectedResource.value = null
+})
 
 const EnvironmentCard = defineAsyncComponent(
   () => import('./environment/EnvironmentCard.vue'),
@@ -363,20 +382,17 @@ const projectName = computed(() =>
 
 // ── document links in replies ──────────────────────────────────────────────
 /** What reply file links point at in the active session (MarkdownHtml). */
-const linkStatus = createLinkStatusSource((href) =>
+const linkStatus = createLinkStatusSource((href, sourceMessageId) =>
   core('references.resolve', {
-    sessionId: ctx.sessionId.value,
-    sourceMessageId: 'conversation',
+    sessionId: viewingId.value,
+    sourceMessageId: sourceMessageId || viewingId.value,
     href,
     label: href,
   }),
 )
 provide(LINK_STATUS_KEY, linkStatus)
 // Files come and go: check again for a new session and after each turn.
-watch(
-  () => ctx.sessionId.value,
-  () => linkStatus.refresh(),
-)
+watch(viewingId, () => linkStatus.refresh())
 watch(
   () => ctx.busy.value,
   (busy, wasBusy) => {
@@ -391,21 +407,25 @@ async function resolveMarkdownReference(event: Event): Promise<void> {
       href?: string
       label?: string
       sourceMessageId?: string
+      uses?: { nodeKey: string; label: string }[]
     }>
   ).detail
-  if (!detail?.href || !ctx.sessionId.value) return
+  if (!detail?.href || !viewingId.value || !resourceViewActive.value) return
+  const owner = viewingId.value
   try {
     const reference = await core('references.resolve', {
-      sessionId: ctx.sessionId.value,
+      sessionId: owner,
       sourceMessageId: detail.sourceMessageId || 'markdown',
       href: detail.href,
       label: detail.label || detail.href,
     })
-    linkStatus.record(detail.href, reference)
+    if (owner !== viewingId.value || !resourceViewActive.value) return
+    linkStatus.record(detail.href, reference, detail.sourceMessageId)
     if (!reference.available) return
     if (
       reference.kind === 'project_file' &&
       reference.directory &&
+      knownSession.value?.mode === 'build' &&
       reference.actions.includes('open_files')
     ) {
       requestWorkspace({
@@ -414,27 +434,27 @@ async function resolveMarkdownReference(event: Event): Promise<void> {
       })
       return
     }
-    if (
-      reference.kind === 'project_file' &&
-      reference.relativePath &&
-      reference.actions.includes('open_files')
-    ) {
+    if (reference.kind !== 'web' && !reference.actions.includes('preview')) {
+      // Files outside the session's root are never read into Emperor; they
+      // can only be shown in Finder.
+      if (reference.actions.includes('reveal'))
+        await revealReference({ sessionId: owner, referenceId: reference.id })
+      return
+    }
+    if (reference.kind !== 'web') {
       requestWorkspace({
         pane: 'files',
         file: {
-          path: reference.relativePath,
+          owner,
+          target: {
+            source: 'reference',
+            sessionId: owner,
+            referenceId: reference.id,
+          },
+          label: reference.label,
+          uses: detail.uses,
           ...(reference.line ? { line: reference.line } : {}),
         },
-      })
-      return
-    }
-    if (
-      reference.kind === 'external_file' &&
-      reference.actions.includes('reveal')
-    ) {
-      await revealReference({
-        sessionId: ctx.sessionId.value,
-        referenceId: reference.id,
       })
       return
     }
@@ -453,8 +473,103 @@ function setComposerDraftFromCommand(event: Event): void {
   void nextTick(() => composer.value?.setDraft(text))
 }
 
+function resourceRequest(event: Event): ResourceRequest | null {
+  const detail = (event as CustomEvent<ResourceRequest>).detail
+  if (
+    !resourceViewActive.value ||
+    !viewingId.value ||
+    !detail?.resource ||
+    (detail.sessionId && detail.sessionId !== viewingId.value)
+  )
+    return null
+  return detail
+}
+function showResourceDetails(event: Event) {
+  const detail = resourceRequest(event)
+  if (!detail) return
+  if (['file', 'folder', 'image', 'attachment'].includes(detail.resource.kind))
+    void openDisplayResource(detail.resource)
+  else selectedResource.value = detail.resource
+}
+async function openDisplayResource(resource: DisplayResource): Promise<void> {
+  if (['skill', 'plugin', 'mcp'].includes(resource.kind)) {
+    const id = resource.href.slice(resource.href.indexOf(':') + 1)
+    selectedResource.value = null
+    await router.push(
+      resource.kind === 'skill'
+        ? { path: '/capabilities/skills', query: { skill: id } }
+        : resource.kind === 'plugin'
+          ? { path: '/capabilities/plugins', query: { plugin: id } }
+          : { path: '/capabilities/mcp' },
+    )
+    return
+  }
+  const uses = resource.uses?.map((use) => ({
+    nodeKey: use.nodeKey,
+    label: PROVENANCE_LABEL[use.provenance],
+  }))
+  if (resource.attachmentId) {
+    selectedResource.value = null
+    requestWorkspace({
+      pane: 'files',
+      file: {
+        owner: viewingId.value,
+        target: { source: 'attachment', attachmentId: resource.attachmentId },
+        uses,
+      },
+    })
+    return
+  }
+  await resolveMarkdownReference(
+    new CustomEvent('emperor:resolve-reference', {
+      detail: {
+        href: resource.href,
+        label: resource.label,
+        sourceMessageId: resource.sourceMessageId,
+        uses,
+      },
+    }),
+  )
+}
+function openResourceRequest(event: Event) {
+  const detail = resourceRequest(event)
+  if (detail) void openDisplayResource(detail.resource)
+}
+function openInternalResource() {
+  const github = selectedResource.value?.github
+  if (!github?.repo) return
+  const [owner, repo] = github.repo.split('/')
+  const base =
+    github.type === 'pull_request'
+      ? '/pulls'
+      : github.type === 'issue'
+        ? '/github/issues'
+        : '/github/ci'
+  const id = github.number ?? github.runId
+  selectedResource.value = null
+  void router.push(
+    `${base}/${encodeURIComponent(owner!)}/${encodeURIComponent(repo!)}/${id}`,
+  )
+}
+function revealFileSource(event: Event) {
+  const detail = (event as CustomEvent<{ owner: string; nodeKey: string }>)
+    .detail
+  if (resourceViewActive.value && detail.owner === viewingId.value)
+    revealRow(detail.nodeKey)
+}
+function revealResource(nodeKey: string) {
+  selectedResource.value = null
+  revealRow(nodeKey)
+}
+watch(viewingId, () => {
+  selectedResource.value = null
+})
+
 onMounted(() => {
   window.addEventListener('emperor:resolve-reference', resolveMarkdownReference)
+  window.addEventListener('emperor:file-source', revealFileSource)
+  window.addEventListener('emperor:resource-detail', showResourceDetails)
+  window.addEventListener('emperor:resource-open', openResourceRequest)
   window.addEventListener(
     'emperor:set-composer-draft',
     setComposerDraftFromCommand,
@@ -462,6 +577,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('emperor:file-source', revealFileSource)
+  window.removeEventListener('emperor:resource-detail', showResourceDetails)
+  window.removeEventListener('emperor:resource-open', openResourceRequest)
   window.removeEventListener(
     'emperor:resolve-reference',
     resolveMarkdownReference,
@@ -741,12 +859,24 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         :agent-busy="agentBusyHere"
         :child="child"
         :title="projectName"
+        :has-more="conversation?.window.value.hasMore ?? false"
         @reveal="revealRow"
         @open-subagent="openSubagent"
         @close="closeEnvCard"
       />
 
       <!-- Computer-use preview seat (Chat tab): bottom right, read-only. -->
+      <ResourceDetails
+        v-if="selectedResource"
+        :key="`${viewingId}:${selectedResource.id}`"
+        :resource="selectedResource"
+        :session-id="viewingId"
+        @close="selectedResource = null"
+        @open="openDisplayResource(selectedResource)"
+        @open-internal="openInternalResource"
+        @reveal="revealResource"
+      />
+
       <ComputerUsePreviewStack
         v-if="cuPreviewSeat && viewingId"
         :key="viewingId"

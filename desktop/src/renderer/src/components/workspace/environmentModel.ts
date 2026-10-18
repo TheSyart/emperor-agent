@@ -105,19 +105,19 @@ export const SUBAGENT_STATUS_LABEL: Record<string, string> = {
 /** Number of `--avatar-*` theme tokens. */
 export const AVATAR_COLORS = 6
 
-/** Deterministic avatar slot (0-based) for an id: FNV-1a 32-bit hash. */
-export function avatarIndex(id: string): number {
+/** Stable seed shared by avatar color and character, independent of rendering order. */
+export function avatarSeed(id: string): number {
   let hash = 0x811c9dc5
   for (let index = 0; index < id.length; index++) {
     hash ^= id.charCodeAt(index)
     hash = Math.imul(hash, 0x01000193) >>> 0
   }
-  return hash % AVATAR_COLORS
+  return hash
 }
 
-/** The avatar color token of an id (`--avatar-1` … `--avatar-6`). */
-export function avatarToken(id: string): string {
-  return `--avatar-${avatarIndex(id) + 1}`
+/** Deterministic avatar color slot (0-based) for an id. */
+export function avatarIndex(id: string): number {
+  return avatarSeed(id) % AVATAR_COLORS
 }
 
 export interface RemoteInfo {

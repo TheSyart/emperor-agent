@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createApp, h, nextTick, type App } from 'vue'
+import { createApp, h, nextTick, ref, isProxy, type App } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { core } = vi.hoisted(() => ({ core: vi.fn() }))
@@ -26,9 +26,14 @@ function fakeCore(operation: string, payload?: Record<string, unknown>) {
         projectRoot: '/tmp/demo',
         entries: [{ name: 'deep.ts', path: 'src/lib/deep.ts', kind: 'file' }],
       })
-    case 'files.read': {
-      const path = String(payload?.relativePath)
+    case 'files.read':
+    case 'files.preview': {
+      const path = String(payload?.path ?? payload?.relativePath ?? 'draft.txt')
       return Promise.resolve({
+        id: `file:/tmp/demo/${path}`,
+        path: `/tmp/demo/${path}`,
+        relativePath: path,
+        mimeType: 'text/plain',
         kind: 'text',
         name: path.split('/').pop(),
         content: 'const a = 1\nconst b = 2\n',
@@ -46,8 +51,12 @@ let container: HTMLDivElement | null = null
 let exposed: {
   openPath: (path: string, line?: number) => Promise<void>
   openDirectory: (path: string) => Promise<void>
+  openPreview: (
+    request: import('./workspaceState').WorkspaceFileRequest,
+  ) => Promise<void>
 }
 const treeWidths: number[] = []
+const owner = ref('s1')
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 6; i += 1) {
@@ -56,7 +65,7 @@ async function flush(): Promise<void> {
   }
 }
 
-function mount(): HTMLDivElement {
+function mount(projectPath = '/tmp/demo'): HTMLDivElement {
   container = document.createElement('div')
   document.body.append(container)
   app = createApp({
@@ -65,8 +74,8 @@ function mount(): HTMLDivElement {
         ref: (instance: unknown) => {
           if (instance) exposed = instance as typeof exposed
         },
-        sessionId: 's1',
-        projectPath: '/tmp/demo',
+        sessionId: owner.value,
+        projectPath,
         treeWidth: 300,
         onTreeWidth: (width: number) => treeWidths.push(width),
       }),
@@ -103,6 +112,7 @@ function pressCloseTab(target: EventTarget): KeyboardEvent {
 }
 
 beforeEach(() => {
+  owner.value = 's1'
   core.mockImplementation(fakeCore)
   treeWidths.length = 0
 })
@@ -117,6 +127,129 @@ afterEach(() => {
 })
 
 describe('FilesPane', () => {
+  it('opens Chat and unsent attachment previews in tabs without listing a workspace', async () => {
+    const root = mount('')
+    await flush()
+    expect(core).not.toHaveBeenCalledWith('files.list', expect.anything())
+    expect(root.querySelector('.file-tree-column')).toBeNull()
+    const request = {
+      owner: 's1',
+      target: {
+        source: 'attachment' as const,
+        attachmentId: 'att_2026-10_12345678',
+      },
+    }
+    await exposed.openPreview(request)
+    await exposed.openPreview(request)
+    await flush()
+    expect(tabLabels(root)).toEqual(['draft.txt'])
+    expect(root.querySelector('[role="dialog"]')).toBeNull()
+    expect(root.querySelector('.file-code-view')?.textContent).toContain(
+      'const a = 1',
+    )
+    root.querySelector<HTMLButtonElement>('[aria-label="刷新文件"]')!.click()
+    await flush()
+    expect(
+      core.mock.calls.filter(([op]) => op === 'files.preview'),
+    ).toHaveLength(2)
+    await exposed.openPreview({ ...request, owner: 'other' })
+    expect(
+      core.mock.calls.filter(([op]) => op === 'files.preview'),
+    ).toHaveLength(2)
+  })
+
+  it('sends plain cloneable preview inputs across the Electron boundary', async () => {
+    core.mockImplementation((op: string, payload?: Record<string, unknown>) => {
+      if (op === 'files.preview' && isProxy(payload))
+        return Promise.reject(new Error('IPC cannot clone a Vue proxy'))
+      return fakeCore(op, payload)
+    })
+    const root = mount('')
+    await exposed.openPreview({
+      owner: 's1',
+      target: { source: 'attachment', attachmentId: 'att_2026-10_12345678' },
+    })
+    await flush()
+    root.querySelector<HTMLButtonElement>('[aria-label="刷新文件"]')!.click()
+    await flush()
+    expect(root.querySelector('[role="alert"]')).toBeNull()
+    expect(root.querySelector('.file-code-view')?.textContent).toContain(
+      'const a = 1',
+    )
+  })
+
+  it('refreshes the visible file after closing the active tab', async () => {
+    const root = mount('')
+    await exposed.openPreview({
+      owner: 's1',
+      target: { source: 'project', sessionId: 's1', path: 'a.ts' },
+    })
+    await exposed.openPreview({
+      owner: 's1',
+      target: { source: 'project', sessionId: 's1', path: 'b.ts' },
+    })
+    await flush()
+    root.querySelector<HTMLButtonElement>('[aria-label="关闭 b.ts"]')!.click()
+    await flush()
+    root.querySelector<HTMLButtonElement>('[aria-label="刷新文件"]')!.click()
+    await flush()
+    expect(core).toHaveBeenLastCalledWith('files.preview', {
+      source: 'project',
+      sessionId: 's1',
+      path: 'a.ts',
+    })
+    expect(tabLabels(root)).toEqual(['a.ts'])
+  })
+
+  it('keeps at most twelve file tabs, dropping the oldest', async () => {
+    const root = mount('')
+    for (let i = 1; i <= 13; i++)
+      await exposed.openPreview({
+        owner: 's1',
+        target: { source: 'project', sessionId: 's1', path: `f${i}.ts` },
+      })
+    await flush()
+    const labels = tabLabels(root)
+    expect(labels).toHaveLength(12)
+    expect(labels[0]).toBe('f2.ts')
+    expect(labels.at(-1)).toBe('f13.ts')
+    expect(root.querySelector('.file-tab.active')?.textContent).toContain(
+      'f13.ts',
+    )
+  })
+
+  it('drops a file response after the viewed session changes', async () => {
+    let resolveRead!: (value: unknown) => void
+    core.mockImplementation((op: string, payload?: Record<string, unknown>) =>
+      op === 'files.preview'
+        ? new Promise((resolve) => {
+            resolveRead = resolve
+          })
+        : fakeCore(op, payload),
+    )
+    const root = mount('')
+    const opening = exposed.openPreview({
+      owner: 's1',
+      target: { source: 'attachment', attachmentId: 'att_2026-10_12345678' },
+    })
+    owner.value = 's2'
+    await flush()
+    resolveRead({
+      id: 'old',
+      path: '/old.txt',
+      name: 'old.txt',
+      mimeType: 'text/plain',
+      kind: 'text',
+      content: 'old session secret',
+      bytes: 18,
+      truncated: false,
+    })
+    await opening
+    await flush()
+    expect(root.textContent).not.toContain('old session secret')
+    expect(root.querySelectorAll('.file-tab')).toHaveLength(0)
+  })
+
   it('puts the tree in a right column and shows the 打开文件 draft', async () => {
     const root = mount()
     await flush()

@@ -30,6 +30,17 @@ describe('linkStatusOf', () => {
 })
 
 describe('createLinkStatusSource', () => {
+  it('retains each real message identity when the same path occurs twice', async () => {
+    const sources: Array<string | undefined> = []
+    const source = createLinkStatusSource(async (href, messageId) => {
+      sources.push(messageId)
+      return file(href)
+    })
+    await source.status('a.ts', 'm1')
+    await source.status('a.ts', 'm2')
+    await source.status('a.ts', 'm1')
+    expect(sources).toEqual(['m1', 'm2'])
+  })
   it('resolves each link once until refreshed', async () => {
     const asked: string[] = []
     const source = createLinkStatusSource(async (href) => {

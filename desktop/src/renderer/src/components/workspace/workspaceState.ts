@@ -5,6 +5,7 @@
  * column on the requested pane, and WorkspacePanel consumes the payload.
  */
 import { shallowRef } from 'vue'
+import type { FilePreviewInput } from '@emperor/core/api'
 import type { TurnFileEntry } from '@emperor/core/runtime-contract'
 import {
   frameActions,
@@ -21,12 +22,20 @@ export interface TurnReviewRequest {
   path?: string
 }
 
+export interface WorkspaceFileRequest {
+  owner: string
+  target: FilePreviewInput
+  label?: string
+  uses?: { nodeKey: string; label: string }[]
+  line?: number
+}
+
 export interface WorkspaceRequest {
   pane: WorkspacePane
   /** Review filter paths (pane 'review'). */
   paths?: string[]
   /** Project-relative file to open (pane 'files'). */
-  file?: { path: string; line?: number }
+  file?: WorkspaceFileRequest | { path: string; line?: number }
   /** Project-relative directory to show opened in the tree ('' = root). */
   directory?: string
   /** Address to prefill (pane 'browser'); never opened without a user submit. */

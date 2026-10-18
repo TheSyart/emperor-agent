@@ -15,16 +15,59 @@ import { DsSkill } from '../../icons/ds'
 import { useReferenceCatalog } from '../../composer/editor/referenceCatalog'
 import { messageSegments } from '../../composer/editor/referenceText'
 import PluginLogo from '../../settings/plugins/PluginLogo.vue'
+import ResourceLink from '../resources/ResourceLink.vue'
+import ResourceCard from '../resources/ResourceCard.vue'
+import {
+  resourceUrlSpans,
+  standaloneResource,
+  type DisplayResource,
+} from '../resources/resourceModel'
 
 const props = defineProps<{
   text: string
   references?: readonly MessageReference[]
+  sourceMessageId?: string
 }>()
 
 const catalog = useReferenceCatalog()
-const segments = computed(() =>
-  messageSegments(props.text, props.references, catalog),
-)
+type RenderSegment =
+  | ReturnType<typeof messageSegments>[number]
+  | { kind: 'resource'; resource: DisplayResource; card: boolean }
+const segments = computed<RenderSegment[]>(() => {
+  const source = props.sourceMessageId || 'user'
+  const urls = resourceUrlSpans(props.text, source)
+  let cursor = 0
+  return messageSegments(props.text, props.references, catalog).flatMap(
+    (segment): RenderSegment[] => {
+      if (segment.kind === 'chip') return [segment]
+      const offset = props.text.indexOf(segment.text, cursor)
+      if (offset >= 0) cursor = offset + segment.text.length
+      const spans =
+        offset < 0
+          ? []
+          : urls.filter((span) => span.start >= offset && span.end <= cursor)
+      const card = standaloneResource(segment.text, source)
+      if (
+        card &&
+        (segment.text === props.text ||
+          spans.some((span) => span.resource.href === card.href))
+      )
+        return [{ kind: 'resource', resource: card, card: true }]
+      const out: RenderSegment[] = []
+      let last = 0
+      for (const span of spans) {
+        const start = span.start - offset
+        if (start > last)
+          out.push({ kind: 'text', text: segment.text.slice(last, start) })
+        out.push({ kind: 'resource', resource: span.resource, card: false })
+        last = span.end - offset
+      }
+      if (last < segment.text.length)
+        out.push({ kind: 'text', text: segment.text.slice(last) })
+      return out
+    },
+  )
+})
 const pluginGlyph = navIcon('plugins')
 
 function chipName(kind: string, label: string): string {
@@ -60,7 +103,14 @@ function chipName(kind: string, label: string): string {
       /><DsSkill v-else :size="14" class="reference-chip-icon" />{{
         segment.chip.label
       }}</span
-    ><template v-else>{{ segment.text }}</template></template
+    ><ResourceCard
+      v-else-if="segment.kind === 'resource' && segment.card"
+      :resource="segment.resource"
+      compact
+    /><ResourceLink
+      v-else-if="segment.kind === 'resource'"
+      :resource="segment.resource"
+    /><template v-else>{{ segment.text }}</template></template
   >
 </template>
 

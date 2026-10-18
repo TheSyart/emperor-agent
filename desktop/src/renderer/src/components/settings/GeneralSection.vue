@@ -15,16 +15,19 @@ import {
   SettingsRow,
   SettingsSection,
   StatusBadge,
+  Switch,
 } from './ui'
 import { refreshAction, useSettingsHeader } from './settingsHeader'
 import { useAppContext } from '../../composables/useAppContext'
 import { useSession } from '../../composables/useSession'
 import { useTheme, type ThemePreference } from '../../composables/useTheme'
+import { useUiPreferences } from '../../composables/useUiPreferences'
 import type { SessionInfo } from '../../types'
 
 const ctx = useAppContext()
 const sessions = useSession()
 const theme = useTheme()
+const { preferences: uiPrefs, setUiPreference } = useUiPreferences()
 
 const archivedSessions = ref<SessionInfo[]>([])
 const archivedLoading = ref(false)
@@ -144,6 +147,22 @@ function archivedMeta(session: SessionInfo) {
             {{ item.label }}
           </button>
         </div>
+      </SettingsRow>
+    </SettingsGroup>
+
+    <SettingsGroup title="会话">
+      <SettingsRow
+        title="显示网站图标"
+        description="在回复里的网页链接前显示网站自己的图标；打开后会联网访问这些网站"
+      >
+        <Switch
+          id="general-site-icons"
+          :model-value="uiPrefs.siteIcons"
+          aria-label="显示网站图标"
+          @update:model-value="
+            (on: boolean) => setUiPreference('siteIcons', on)
+          "
+        />
       </SettingsRow>
     </SettingsGroup>
 

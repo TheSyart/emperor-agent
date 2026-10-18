@@ -53,6 +53,27 @@ function mount(text: string, references?: MessageReference[]) {
 }
 
 describe('ReferencedText plugin chips', () => {
+  it('keeps a URL inside a fence plain even when a plugin splits its text segment', async () => {
+    const root = mount(
+      'https://visible.test\n```txt\n@github\nhttps://hidden.test\n```',
+    )
+    await nextTick()
+    expect(
+      [...root.querySelectorAll('a')].map((link) => link.getAttribute('href')),
+    ).toEqual(['https://visible.test'])
+  })
+  it('adds URL identity alongside plugins without rewriting user text or code', async () => {
+    const root = mount(
+      '用 @github 看 https://github.com/a/b 和 `https://hidden.test`',
+    )
+    await nextTick()
+    expect(root.querySelector('.reference-chip')).not.toBeNull()
+    expect(root.querySelector('a')?.getAttribute('href')).toBe(
+      'https://github.com/a/b',
+    )
+    expect(root.querySelectorAll('a')).toHaveLength(1)
+    expect(root.textContent).toContain('https://hidden.test')
+  })
   it('shows a usable plugin with its logo, and one that is gone greyed', async () => {
     const root = mount('看看 @github 和 @hello-kit 还有 @old-kit', [
       { kind: 'plugin', id: 'github', label: 'GitHub', start: 3, end: 10 },

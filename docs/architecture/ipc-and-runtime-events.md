@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：桌面端与 Core 开发者<br>
-> 最后核验：2026-09-24<br>
+> 最后核验：2026-10-15<br>
 > 事实源：`packages/core/src/api/operations.ts`、`desktop/src/main/core-host.ts`、`desktop/src/main/ipc.ts`、`desktop/src/preload/`、`packages/core/src/harness/projection/`、`packages/core/src/session-log/history.ts`、`packages/core/src/harness/host/session-views.ts`、`packages/core/src/public/runtime-contract.ts`、`desktop/src/shared/ipc-contract.ts`、`desktop/src/main/desktop-capability-ipc.ts`、`desktop/src/main/browser-view.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/preload/desktop-capabilities.ts`、`desktop/src/main/event-bridge.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/conversation/`、`desktop/src/renderer/src/runtime/`
 
 Electron renderer 不直接导入 Core，也不访问本地文件。同步请求走 preload 的 Core IPC contract；异步过程分两条管线：Chat 与 Trajectory 渲染所需的原始 session 事件走独立的 session event 通道，其余状态走 runtime events（UiEvent）。
@@ -76,6 +76,10 @@ Operation 的名称与参数 schema 定义在 `packages/core/src/api/operations.
 - `terminals.*` 以 session owner 和 terminal ID 双重授权，PTY 初始 cwd 来自受信 Build session 的项目路径。
 
 Terminal 高频输出不进入 runtime event，而使用独立的 `emperor:terminal:event` 主窗口通道，事件只有 owner `sessionId`、`terminalId`、单调 `seq` 和输出或退出信息，按 16 ms / 256 KiB 有界批次发送。Core 保留有界的内存滚动缓冲，renderer 可用 `afterSeq` 补读；应用重启后没有终端可恢复。
+
+### 资源详情
+
+`references.resolve` 接收真实消息来源并建立会话绑定的引用；文件、目录与已保存附件（`attachment:<id>`）沿用 Files 或 main-only Finder 定位。只读 `references.preview({sessionId, referenceId})` 先校验根／子日志会话和引用归属，再读取公共网页元数据或现有 GitHub 只读详情；不会读取浏览器 Cookie 或执行页面脚本。图标和预览图由 Core 校验后返回栅格 data URL。UI 只在主动打开详情时调用，换会话后忽略旧响应。限制、缓存与工具生产方字段见[对话资源展示契约](../development/conversation-resources.md)。
 
 ## 原始 session 事件通道
 
@@ -248,3 +252,7 @@ Packaged smoke 会创建隐藏的生产 BrowserWindow、加载 ASAR 内的 `app:
 只影响 Chat 或 Trajectory 显示的内容不需要新增 runtime event：直接从原始 `SessionEvent` 在 `conversation/assembler.ts` / `nodes/*`（或 Trajectory model）中折叠。
 
 Payload 应有界，不包含密钥、任意绝对路径或未经筛选的工具原始输出。
+
+网页图标使用只读 `references.siteIcon({ sessionId, referenceId })`；归属验证与 `references.preview` 相同，返回受限栅格 data URL。只有用户打开「显示网站图标」（默认关闭）后，可见引用才触发图标请求；完整网页预览仍由详情操作触发。
+
+文件预览统一使用只读 `files.preview`：项目来源传 sessionId/path，回合来源增加 turn 并验证持久化的确切文件记录，引用来源使用 sessionId/referenceId，附件来源仅使用受管 attachmentId。只有带 `preview` 动作的引用（会话根内的文件、已保存附件）可读内容，会话根之外的文件只能在 Finder 中显示；禁止替换符号链接和任意绝对路径输入；普通 Chat、子日志与草稿均可进入 Files，但没有项目时不提供目录树。草稿预览不创建会话。文本上限 1 MiB、图片 8 MiB，PDF 仅复用现成提取文本；旧 `files.read({sessionId, relativePath, turn?})` 保持兼容。Renderer 请求在 IPC 前转为普通数据对象，避免 Vue Proxy 不可复制；预览和灯箱的 owner 使用正在查看的会话，切换后清理并忽略旧响应；工作台快照（浏览器、终端、Files 标签）仍跟随活动会话。不写会话日志，不新增模型工具。

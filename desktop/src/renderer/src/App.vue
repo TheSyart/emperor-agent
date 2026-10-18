@@ -14,6 +14,7 @@ import type {
   CommandSurface,
 } from '@emperor/core/api'
 import AppFrame from './components/shell/AppFrame.vue'
+import ImageViewerHost from './components/ui/ImageViewerHost.vue'
 import {
   CENTER_MIN_CHAT,
   CENTER_MIN_TRAJECTORY,
@@ -554,10 +555,6 @@ watch(
   },
 )
 
-const activeSessionInfo = computed(() =>
-  sessionStore.getSession(sessionId.value),
-)
-
 // ── notifications (sidebar bell) ────────────────────────────────────────
 // The session on screen: the routed one on Chat / Trajectory, none on full
 // pages or while the window is hidden. Its questions and finished turns are
@@ -601,12 +598,15 @@ onBeforeUnmount(() =>
 )
 
 // ── shell: workspace snapshot, columns, shortcuts ───────────────────────
-// The shared workspace snapshot follows the active session; it refreshes as
-// the active transcript grows (the agent may have touched the project).
+// The shared workspace snapshot follows the active session, so leaving the
+// chat for a full page or opening a read-only child log keeps the browser,
+// terminal and Files tabs. A file preview carries its own owner session in the
+// open request, so it does not depend on this binding.
 const activeConversation = useLazySessionConversation(() => sessionId.value)
 bindWorkspaceSnapshotSource({
   sessionId: () => sessionId.value,
-  projectPath: () => activeSessionInfo.value?.project_path || '',
+  projectPath: () =>
+    sessionStore.getSession(sessionId.value)?.project_path || '',
   refreshKey: () => activeConversation.value?.order.value.length ?? 0,
 })
 
@@ -761,6 +761,7 @@ provideAppContext({
         <WorkspacePanel :open="open" :agent-busy="busy" />
       </template>
     </AppFrame>
+    <ImageViewerHost :owner="viewedSessionId" />
     <SettingsModal />
     <ModelSetupRequiredDialog
       :open="modelSetupPromptOpen"
