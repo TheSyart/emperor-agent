@@ -86,7 +86,18 @@ macOS 使用 Seatbelt；Linux 实现使用 bubblewrap PID namespace。受管进�
 
 Windows 没有完整的受限执行/进程树停止证明：能力声明为 none，不能把未证明的停止标记为 quiescent。Linux 有实现及协议测试；真实 Linux/Windows 验收需要在对应目标机执行，macOS 证据不能替代。
 
-每个会话有私有 HOME/config/temp。默认从本机 CLI 设置和凭据文件读取窄认证配置，支持显式 CLAUDE_CONFIG_DIR / CODEX_HOME；也可选择模型凭据引用。Claude 仅 Keychain OAuth 不读取，返回 AUTH_REQUIRED。Codex managed CLI 登录选择性复制 ChatGPT token 到私有 CODEX_HOME，并保留其本地刷新版本。认证不传到 renderer、日志摘要或公共 receipt。运行环境不继承宿主全部密钥，也不导入本机插件或 hooks。设置页的检测只确认本地可用条件，真实调用失败时单独报告认证错误。
+每个会话有私有 HOME/config/temp。默认从本机 CLI 设置和凭据文件读取窄认证配置，支持显式 CLAUDE_CONFIG_DIR / CODEX_HOME；也可选择模型凭据引用。Claude 仅 Keychain OAuth 不读取，返回 AUTH_REQUIRED。认证不传到 renderer、日志摘要或公共 receipt。运行环境不继承宿主全部密钥，也不导入本机插件或 hooks。设置页的检测只确认本地可用条件，真实调用失败时单独报告认证错误。
+
+Codex 的 ChatGPT 登录不复制 refresh token（`codex-auth.ts`）。私有 CODEX_HOME 里的 `auth.json` 是指向用户 `auth.json`（`$CODEX_HOME` 或 `~/.codex`）的符号链接，隔离进程刷新令牌时写回用户的同一份文件，用户自己的 Codex 不会拿着已作废的旧令牌被登出：
+
+- Codex 0.153 原地写 `auth.json` 并跟随链接（用假 CODEX_HOME 与 `codex login --with-api-key` 在断网沙箱中验证过）。Seatbelt 为此只放行这一个文件的 `literal` 写入（`SandboxExecutionPolicy.writableFiles`，取真实路径），不放行 `~/.codex` 目录，进程不能在旁边新建、改名或删除文件。
+- 若将来的 Codex 改为「写临时文件再改名」覆盖链接，宿主每 2 秒和进程结束时检查：隔离副本与用户文件同一账号、refresh token 不同、且用户文件自进程启动以来未变时，在锁内把副本写回用户文件，再恢复链接；用户文件在此期间被用户自己的 Codex 改过时以用户的为准，丢弃副本；用户已登出时不恢复登录。
+- 每个隔离 Codex 进程（任务、恢复检查、模型列表）在整个生命周期持有 `<用户 auth.json>.lock`，同一时刻只有一个隔离进程可能刷新令牌；任务排队等待且可取消，模型列表不等待（锁被占用时保留缓存候选）。持有者进程不存在或锁超过 3 小时即视为失效。用户自己终端里的 Codex 不认这把锁，与同时开两个终端相同。
+- 旧版本留在私有目录里的令牌副本在下一次启动 Codex 进程前于锁内处理：比用户文件更新（`last_refresh` 更晚、同一账号）则写回，否则丢弃，然后改为链接。
+- API Key 模式只传 `OPENAI_API_KEY` 环境变量，私有目录不放 `auth.json`；凭据引用与自定义提供方模式同样删除私有目录中的 `auth.json`。app-server 一律带 `-c cli_auth_credentials_store="file"`，不使用钥匙串。
+- 设置页的登录检测复用每个 profile 唯一的长期目录 `runtime/<profile>/probe`，不再每次新建 `dlg-probe-<uuid>`；旧目录在首次检测时删除。
+
+Codex 自定义提供方继承 `query_params`（如 Azure 的 `api-version`，键名像密钥的值按秘密脱敏）。提供方 `env_key` 与 `env_http_headers` 指向的变量先从登录 shell 读取（`login-shell.ts`：`$SHELL` 为 zsh/bash 时用它，否则 `/bin/zsh`，`-ilc` 运行一次，3 秒超时，只取所需变量名），再回退到进程环境，因此从 Dock 启动也能读到 `~/.zshrc` 里导出的密钥。`OPENAI_API_KEY` 不从登录 shell 读取，避免把 ChatGPT 订阅登录意外改成 API 计费。
 
 执行器探测与私有运行环境共用应用的有效 PATH，补全 Homebrew、Volta 和用户本地工具目录，避免从 Finder 启动时丢失终端中可用的 CLI 或 Node 解释器。显式可执行文件路径仍按原值执行，错误路径不会被自动替换。预检失败发生在委派身份创建前；通过终端直接运行的 CLI 属于后台任务，不会被补造为受管子智能体记录。
 
@@ -109,6 +120,8 @@ Windows 没有完整的受限执行/进程树停止证明：能力声明为 none
 Scheduler 与普通调用使用同一服务、权限与配额。无人工 answerer 的提问明确结束为 needs_user。根 stop 立即解除 Goal 自动续跑并取消全部受管后代；恢复通知不会自动恢复队列推理。
 
 默认 global concurrency=2、profile concurrency=1、queue=16、每任务32轮、深度3、运行30分钟（最多120分钟）、提问15分钟、已知估算预算10美元。未知成本保持 unknown，不按0处理；这些估算不是厂商账单。
+
+Codex 协议的 120 秒空闲计时只约束两轮之间与启动阶段：轮次进行中（`CodexRpc.hold()`）或有待回答的 server request（提问）时暂停，长时间没有输出的命令或几分钟后才回答的问题不会被判空闲。运行时限（`runTimeoutMs`）是长轮次的唯一兜底，到时中断并以 `cancelled` + `RUN_TIMEOUT` 结束。续聊的 `thread/resume` 带 `excludeTurns: true`，不再把整段历史放进一个响应帧；恢复检查改用 `thread/read`（不含轮次）取状态，再按新到旧分页调用 `thread/turns/list`（`itemsView: summary`），单页结果超过 1 MiB 时减半重取，最多取最近 20 轮。
 
 设置 renderer 通过 `executors.list/configure/probe` 读写真实配置。保存携带 `expectedRevision`，完整保留未编辑字段；版本冲突保留草稿且不自动重放。刷新遇到草稿先要求明确丢弃，异步读取和 probe 受页面 generation 与 profile 内容约束。`available` 只说明本机 CLI 与认证配置可读，`authVerified=false`；认证诊断即使映射为 incompatible 也按诊断给出恢复帮助。
 

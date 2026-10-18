@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：贡献者、发布维护者<br>
 > 最后核验：2026-10-19<br>
-> 事实源：`packages/core/src/harness/delegation/adapters/`、`packages/core/src/harness/delegation/compatibility.ts`、`packages/core/src/harness/delegation/executable.ts`、`packages/core/src/harness/delegation/protocol/`、`scripts/codex-protocol-digest.mjs`、`scripts/smoke-external-agents.mjs`、`desktop/tests/external-agents.e2e.mjs`、`desktop/electron-builder.yml`、`desktop/scripts/after-pack.cjs`
+> 事实源：`packages/core/src/harness/delegation/adapters/`、`packages/core/src/harness/delegation/codex-auth.ts`、`packages/core/src/harness/delegation/login-shell.ts`、`packages/core/src/harness/delegation/compatibility.ts`、`packages/core/src/harness/delegation/executable.ts`、`packages/core/src/harness/delegation/protocol/`、`scripts/codex-protocol-digest.mjs`、`scripts/smoke-external-agents.mjs`、`desktop/tests/external-agents.e2e.mjs`、`desktop/electron-builder.yml`、`desktop/scripts/after-pack.cjs`
 
 ## 版本兼容：能力握手
 
@@ -17,6 +17,16 @@
 Claude 使用 SDK startup 与自定义 managed spawn，业务问题经过权限回调转换，内部 Agent/Task/MCP/后台调度被关闭。Codex 使用应用独占 stdio app-server：initialize、initialized、thread/start 或 resume、turn/start；没有共享桌面 daemon 或 exec fallback。收到中断 ACK 后仍要等待原生终态及进程静止；未知协议请求默认拒绝。
 
 源码运行 macOS helper 先执行 `node scripts/build-delegation-scanner.mjs`；Core pretest 与 desktop native build 会执行同一脚本。安装包携带已编译 helper，无需用户编译器。默认原生构建和 Preview 打包不执行 codesign 重签，Preview 的 afterSign 已禁用；可选的正式发布签名流程独立保留。SDK 作为 main external 依赖，打包包含 SDK 和**当前构建架构**的 Claude binary：`electron-builder.yml` 的 `files` 与 `asarUnpack` 用 `${arch}` 只选 `claude-agent-sdk-darwin-${arch}`，binary 在 asar 外；after-pack 要求 SDK 与本架构 binary 存在且可执行，发现其他架构的 binary 即构建失败。跨架构打包（例如在 arm64 机器上打 x64）需要先安装对应架构的 SDK 平台包，否则 after-pack 报缺失。Codex 不由应用安装，需要本机 CLI 在支持范围内。
+
+## Codex 登录、长等待与续聊
+
+- **登录不分叉**：`runtime.ts` 在 ChatGPT 登录下把私有 `CODEX_HOME/auth.json` 做成指向用户 `auth.json` 的符号链接（`codex-auth.ts` 的 `linkCodexAuth`），不复制任何令牌；`prepare` 返回 `codexAuth`。启动 Codex 进程的三处（`adapters/codex.ts` 的 `open`、恢复检查 `inspect`、`native-models.ts` 的模型列表）都先 `acquireCodexAuth`，在进程退出后才 `release`；服务层与模型列表把用户文件的真实路径放进 `policy.writableFiles`，Seatbelt 生成 `(allow file-write* (literal …))`。缺了这条放行，Codex 刷新时写回失败，服务器上的旧 refresh token 已作废，用户会被登出（断网沙箱实验中写入被拒，`codex login` 报 `Operation not permitted`）。
+- **改名写入的兜底**：租约每 2 秒与释放时调用 `check()`：链接被普通文件替换且是同一账号的后继令牌（用户文件自启动后未变）时写回用户文件并恢复链接，否则丢弃；见 `codex-auth.test.ts`。真实刷新（会轮换服务器上的令牌）只能在维护者自己的账号上人工观察，不进自动测试。
+- **锁**：`<用户 auth.json>.lock`，内容为 `{pid, token, createdAt}`；进程内用集合防止重入，跨进程靠独占创建，持有者不存在、属于本进程旧租约或超过 3 小时即回收。等待每 250 ms 轮询一次，可用 `AbortSignal` 取消；`wait: false` 立即返回。
+- **只用文件存储**：app-server 参数带 `CODEX_FILE_CREDENTIALS`（`-c cli_auth_credentials_store="file"`），即使用户配置了 keyring 也不会触碰钥匙串。
+- **空闲计时**：`CodexRpc` 的 120 秒空闲计时在 `hold()` 未释放或有未回答的 server request 时暂停；适配器在 `turn/start` 前 `hold()`，在 `turn/completed` 或关闭时释放。长轮次由 `DelegationService` 的 `runTimeoutMs` 兜底（`RUN_TIMEOUT`）。
+- **续聊与历史**：`thread/resume` 带 `excludeTurns: true`；`inspect` 先 `thread/read`（`includeTurns: false`），再以 `request(..., { maxResultBytes: 1 MiB })` 分页 `thread/turns/list`（`sortDirection: desc`、`itemsView: summary`），超限减半重取。两个参数都在已签入的 `ClientRequest.json` 中（`codex-contract.test.ts` 核对），因此协议摘要不变。
+- **提供方继承**：`local-model-config.ts` 白名单含 `query_params`；`codexProviderVariables` 列出 `env_key` 与 `env_http_headers` 的变量名，`ExecutorRuntimeService` 的 `loginShell`（生产由 `createLoginShellEnvironment()` 提供，测试不传即不运行 shell）先从登录 shell 取值再回退进程环境。AGT-02 的 Claude 令牌导入复用同一模块。
 
 ## 真实验收
 
