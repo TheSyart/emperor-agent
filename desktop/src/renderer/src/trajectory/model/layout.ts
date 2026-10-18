@@ -997,14 +997,14 @@ function sourceImage(block: Record<string, unknown>): string | undefined {
   return safeImageSource(`data:${mediaType};base64,${source.data}`)
 }
 
-function safeImageSource(value: string): string | undefined {
+/**
+ * Only images already on this machine show inline (UI-38): a remote address
+ * would be a request on sight (and CSP img-src blocks it anyway), so the
+ * record shows the block's JSON, address included, instead.
+ */
+export function safeImageSource(value: string): string | undefined {
   if (value.startsWith('data:image/') || value.startsWith('blob:')) return value
-  try {
-    const protocol = new URL(value).protocol
-    return protocol === 'http:' || protocol === 'https:' ? value : undefined
-  } catch {
-    return undefined
-  }
+  return undefined
 }
 
 function stringifySourceValue(value: unknown): string {

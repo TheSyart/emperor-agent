@@ -573,3 +573,14 @@ export interface DictationStartRequest {
 export type DictationStartResult =
   | { ok: true; session: string }
   | { ok: false; code: DictationErrorCode; message: string }
+
+/**
+ * Renderer → main `{ url }`: a remote image in rendered markdown the user
+ * asked to see (UI-38). Main fetches it through the public HTTP client (no
+ * cookies, no local or private addresses) and answers
+ * {@link RemoteImageResult}; the renderer never requests remote images.
+ */
+export const MARKDOWN_REMOTE_IMAGE_CHANNEL = 'emperor:markdown:remote-image'
+
+export type RemoteImageResult =
+  { ok: true; dataUrl: string } | { ok: false; error: string }

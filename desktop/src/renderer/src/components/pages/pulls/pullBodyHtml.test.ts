@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
+import { ref } from 'vue'
+import { useMarkdown } from '../../../composables/useMarkdown'
 import { externalHref, neutralizeRemoteImages } from './pullBodyHtml'
 
 describe('neutralizeRemoteImages', () => {
@@ -13,6 +15,21 @@ describe('neutralizeRemoteImages', () => {
       '<a href="https://example.com/a.png" data-pr-image="" class="pr-md-image">图片：截图</a>',
     )
     expect(out).toContain('<span class="pr-md-image">图片：未命名</span>')
+    expect(out).not.toContain('tracker.test')
+  })
+
+  it('turns the markdown remote image placeholder into the same link', () => {
+    const html = useMarkdown(
+      ref(
+        '![设置页截图](https://example.com/s.png) ![p](http://tracker.test/p.gif)',
+      ),
+    ).rendered.value
+    const out = neutralizeRemoteImages(html)
+    expect(out).not.toContain('data-md-remote-image')
+    expect(out).toContain(
+      '<a href="https://example.com/s.png" data-pr-image="" class="pr-md-image">图片：设置页截图</a>',
+    )
+    expect(out).toContain('<span class="pr-md-image">图片：p</span>')
     expect(out).not.toContain('tracker.test')
   })
 

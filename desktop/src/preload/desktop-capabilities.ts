@@ -34,6 +34,7 @@ import {
   BROWSER_STATE_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
   LINK_OPEN_CHANNEL,
+  MARKDOWN_REMOTE_IMAGE_CHANNEL,
   MAC_HELPER_PERMISSION_CHANNEL,
   MAC_HELPER_RECONNECT_CHANNEL,
   MAC_HELPER_RESET_CHANNEL,
@@ -80,6 +81,9 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
       ipcRenderer.invoke(EXTERNAL_OPEN_CHANNEL, url),
     /** A clicked web link: main picks the system or the built-in browser. */
     openLink: (url: string) => ipcRenderer.invoke(LINK_OPEN_CHANNEL, url),
+    /** A remote markdown image the user asked to see: main fetches it. */
+    loadRemoteImage: (url: string) =>
+      ipcRenderer.invoke(MARKDOWN_REMOTE_IMAGE_CHANNEL, { url }),
     openSkillsFolder: (input: {
       scope: 'user' | 'project'
       sessionId?: string | null

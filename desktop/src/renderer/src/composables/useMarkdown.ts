@@ -24,6 +24,11 @@ const CHIP_URI_REGEXP =
 // 命中默认白名单之外的 file: href 时保留该属性；javascript:/data:/vbscript: 等
 // 危险协议不在 CHIP_URI_REGEXP 里，仍被默认剥离。模块加载时注册一次（sanitize 期间
 // 配置被冻结，无法对单次调用局部加 hook，故挂在共享实例上）。
+// 图片与媒体只从本机来（UI-38）：data:image、blob:、app:；远程图片由
+// md.renderer.rules.image 换成占位卡，点击后经主进程代理拉取
+// （useMarkdownLinks.ts → remote-image-ipc.ts），渲染层自己从不请求远程地址。
+const LOCAL_MEDIA_SRC = /^(?:data:image\/|blob:|app:\/\/)/i
+
 DOMPurify.addHook('uponSanitizeAttribute', (_node, data) => {
   if (
     data.attrName === 'href' &&
@@ -32,6 +37,11 @@ DOMPurify.addHook('uponSanitizeAttribute', (_node, data) => {
   ) {
     data.forceKeepAttr = true
   }
+  if (data.attrName === 'src' || data.attrName === 'poster') {
+    if (LOCAL_MEDIA_SRC.test(data.attrValue.trim())) data.forceKeepAttr = true
+    else data.keepAttr = false
+  }
+  if (data.attrName === 'srcset') data.keepAttr = false
 })
 
 /**
@@ -102,11 +112,36 @@ const renderImage = md.renderer.rules.image!
 md.renderer.rules.image = (tokens, index, options, env, self) => {
   const token = tokens[index]!,
     src = token.attrGet('src') ?? ''
+  const remote = remoteImageHost(src)
+  if (remote !== null) {
+    const alt = self.renderInlineAsText(token.children ?? [], options, env)
+    const escape = md.utils.escapeHtml
+    return (
+      `<span class="md-remote-image" role="button" tabindex="0"` +
+      ` data-md-remote-image="${escape(src)}" data-md-remote-alt="${escape(alt)}"` +
+      ` title="${escape(src)}">${escape(remoteImageLabel(remote))}</span>`
+    )
+  }
   if (classifyMdLink(src) === 'file') {
     token.attrSet('data-md-image', src)
     token.attrs = token.attrs?.filter(([name]) => name !== 'src') ?? null
   }
   return renderImage(tokens, index, options, env, self)
+}
+
+/** The host of an http(s) image address, or null for anything else. */
+export function remoteImageHost(src: string): string | null {
+  if (!/^https?:\/\//i.test(src)) return null
+  try {
+    return new URL(src).host || null
+  } catch {
+    return null
+  }
+}
+
+/** The remote image placeholder's text (also its idle state after an error). */
+export function remoteImageLabel(host: string): string {
+  return `点击加载图片 · ${host}`
 }
 
 /**

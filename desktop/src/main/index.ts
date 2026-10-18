@@ -41,6 +41,7 @@ import {
   withContentSecurityPolicy,
 } from './protocol'
 import { rendererContentSecurityPolicy } from '../shared/content-security-policy'
+import { registerRemoteImageIpc } from './remote-image-ipc'
 import { pluginAssetResponse } from './plugin-assets'
 import { createCoreHost } from './core-host'
 import { CoreEventBridge, SessionEventBridge } from './event-bridge'
@@ -203,6 +204,12 @@ const trustedRendererPolicy = createTrustedRendererPolicy({
 })
 // SEC-05: the app://bundle header; index.html carries the same meta.
 const RENDERER_CSP = rendererContentSecurityPolicy()
+// Core's web_fetch and the remote markdown images (UI-38) share one public
+// HTTP client: no cookies, no local or private addresses.
+const webFetchClient = createDesktopWebFetchClient({
+  resolveProxy: async (url) => await app.resolveProxy(url),
+  request: (options) => net.request(options) as unknown as ElectronRequestLike,
+})
 const trustedPetPolicy = createTrustedRendererPolicy({
   productionUrl: 'app://pet/renderer.html',
   mainWebContents: () => petWindow?.webContents ?? null,
@@ -316,6 +323,13 @@ ipcMain.handle('emperor:open-path', async (event, target: unknown) => {
   if (!pathValue) return { ok: false, error: 'path is required' }
   const error = await shell.openPath(pathValue)
   return error ? { ok: false, error } : { ok: true }
+})
+
+// UI-38: a remote markdown image the user clicked, fetched here.
+registerRemoteImageIpc({
+  ipcMain,
+  authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
+  client: webFetchClient,
 })
 
 ipcMain.handle('emperor:pet:open', async (event) => {
@@ -1038,11 +1052,7 @@ async function startup(): Promise<void> {
           : {}),
         terminalHost: new NodePtyHost(),
         terminalEventSink: terminalEventBridge.sink(),
-        webFetchClient: createDesktopWebFetchClient({
-          resolveProxy: async (url) => await app.resolveProxy(url),
-          request: (options) =>
-            net.request(options) as unknown as ElectronRequestLike,
-        }),
+        webFetchClient,
       },
     })
     const core = coreApi
