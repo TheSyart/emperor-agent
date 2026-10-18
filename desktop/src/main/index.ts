@@ -1305,6 +1305,7 @@ app.on('window-all-closed', () => {
 })
 
 const coordinateQuit = createQuitCoordinator({
+  flush: () => coreApi?.flushAll(),
   close: async () => {
     await startupTask
     await closeCoreHost()

@@ -2,7 +2,7 @@
 // a full turn streamed to the UI sink, sandbox escalation through the
 // approval interaction, ask_user_question answered from control, plan mode
 // review, stop, and replay equal to the live projection.
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -448,6 +448,26 @@ describe('HarnessHost', () => {
     ).toBe(true)
     expect(JSON.stringify(page.events)).not.toContain('first answer')
     expect(JSON.stringify(page.events)).toContain('fork child answer')
+  })
+
+  it('tells the UI when opening a session repaired its log', async () => {
+    const { host, events } = await makeHost([{ text: 'ok' }])
+    const entry = host.kept.sessionStore.create('t', { mode: 'chat' })
+    await host.submit({ sessionId: entry.id, content: 'hi' })
+    host.sessions.close(entry.id)
+    appendFileSync(
+      join(host.sessions.root, entry.id, 'log.jsonl'),
+      '{"type":"tu',
+    )
+    expect(host.sessions.open(entry.id).hasOpenTurn()).toBe(false)
+    await waitFor(() => events.some((e) => e.event === 'session_log_state'))
+    expect(events.find((e) => e.event === 'session_log_state')).toMatchObject({
+      session_id: entry.id,
+      state: 'repaired',
+      kind: 'tail',
+      dropped_bytes: 11,
+      seq: 0,
+    })
   })
 })
 

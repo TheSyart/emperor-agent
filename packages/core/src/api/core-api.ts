@@ -1249,8 +1249,17 @@ export class CoreApi {
     }
   }
 
+  /**
+   * Write and sync every session's pending log events now. Synchronous, so
+   * quit can call it before anything that might hang or be cut short.
+   */
+  flushAll(): void {
+    this.host.sessions.flush(undefined, { sync: true })
+  }
+
   close(): Promise<void> {
     this.closePromise ??= (async () => {
+      this.flushAll()
       await this.executors.close()
       this.terminalService.closeAll()
       this.onboardingService.dispose()

@@ -67,6 +67,7 @@ export const RUNTIME_EVENT_NAMES = [
   'scheduler_run_skipped',
   'scheduler_run_start',
   'session_created',
+  'session_log_state',
   'session_title_updated',
   'skill_catalog_changed',
   'subagent_delta',

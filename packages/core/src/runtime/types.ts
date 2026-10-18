@@ -300,6 +300,18 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         event: 'computer_use_changed'
         reason: 'state' | 'targets' | 'grants'
       }
+    | {
+        /** A session log was repaired, cannot be read, or stopped/resumed writing (host-only). */
+        event: 'session_log_state'
+        state: 'repaired' | 'unrecoverable' | 'write_paused' | 'write_resumed'
+        kind?: 'tail' | 'corrupt'
+        dropped_bytes?: number
+        line?: number
+        backup_path?: string
+        reason?: string
+        error?: string
+        pending_events?: number
+      }
     | (EnvironmentRuntimeEventFields & {
         event: 'environment_install_started'
       })

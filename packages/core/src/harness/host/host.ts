@@ -41,7 +41,7 @@ import {
   type SessionHistoryPage,
 } from '../../session-log/history'
 import type { Session } from '../../session-log/session'
-import { SessionLogStore } from '../../session-log/store'
+import { SessionLogStore, type SessionLogState } from '../../session-log/store'
 import type { SessionEvent } from '../../session-log/types'
 import type { SessionEntry } from '../../sessions/store'
 import type { FileSkillsLoader } from '../../skills/file-loader'
@@ -315,6 +315,7 @@ export class HarnessHost {
     this.sessions = new SessionLogStore({
       root: kept.paths.sessionsRoot,
       repairContributors: [approvalRepair, questionRepair, computerUseRepair],
+      onLogState: (state) => this.emitHost(sessionLogStateEvent(state)),
     })
     this.sandbox = new SandboxPolicyService({
       defaultMode: 'workspace-write',
@@ -1777,6 +1778,35 @@ export class HarnessHost {
     await this.kept.skillChangeDetector.close().catch(() => {})
     await this.kept.mcpClient.close().catch(() => {})
     await this.kept.processRuntime.shutdown?.('host closing').catch?.(() => {})
+  }
+}
+
+/** The renderer wire form of a store health report. */
+export function sessionLogStateEvent(
+  state: SessionLogState,
+): Record<string, unknown> {
+  const base = { event: 'session_log_state', session_id: state.sessionId }
+  switch (state.state) {
+    case 'repaired':
+      return {
+        ...base,
+        state: state.state,
+        kind: state.kind,
+        dropped_bytes: state.droppedBytes,
+        ...(state.line === undefined ? {} : { line: state.line }),
+        backup_path: state.backupPath,
+      }
+    case 'unrecoverable':
+      return { ...base, state: state.state, reason: state.reason }
+    case 'write_paused':
+      return {
+        ...base,
+        state: state.state,
+        error: state.error,
+        pending_events: state.pendingEvents,
+      }
+    case 'write_resumed':
+      return { ...base, state: state.state }
   }
 }
 

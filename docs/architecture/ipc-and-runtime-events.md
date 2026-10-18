@@ -119,7 +119,7 @@ Trajectory（`desktop/src/renderer/src/trajectory/model/`）复用同一个 asse
 ### 两条管线的分工
 
 - **原始 session 事件**：Chat 时间线与 Trajectory 的唯一数据源。
-- **UiEvent（runtime events）**：`onCoreEvent`、`packages/core/src/runtime/events.ts` 与 `useRuntime.ts` 这一条管线继续负责控制状态与待处理交互、Goal、后台任务、排队消息、会话创建与标题、onboarding、Scheduler、MCP、桌宠、侧栏运行标记以及 busy / stop 状态。它同时是侧栏通知的来源：`runtime/notifications.ts` 从 `scheduler_run_done` / `scheduler_run_error`、`ask_request` / `plan_draft`、`assistant_done` 和 host-only 的 `git_operation_completed` 推导通知，renderer 对 `git_operation_completed` 只做这一件事（`runtime/handlers/git.ts`），不投影到其他视图状态。
+- **UiEvent（runtime events）**：`onCoreEvent`、`packages/core/src/runtime/events.ts` 与 `useRuntime.ts` 这一条管线继续负责控制状态与待处理交互、Goal、后台任务、排队消息、会话创建与标题、onboarding、Scheduler、MCP、桌宠、侧栏运行标记以及 busy / stop 状态。它同时是侧栏通知的来源：`runtime/notifications.ts` 从 `scheduler_run_done` / `scheduler_run_error`、`ask_request` / `plan_draft`、`assistant_done` 和 host-only 的 `git_operation_completed` 推导通知，renderer 对 `git_operation_completed` 只做这一件事（`runtime/handlers/git.ts`），不投影到其他视图状态。host-only 的 `session_log_state`（会话记录被修复、无法读取、暂停或恢复写入，字段 `state`、`kind`、`line`、`backup_path`、`error` 等）同样只变成一条提示（`runtime/handlers/sessionLog.ts`），不论属于哪个会话，也不进入投影。
 
 两条管线只通过 `sessionId` 关联，各自的 `seq` 不共享、不可互相比较。
 

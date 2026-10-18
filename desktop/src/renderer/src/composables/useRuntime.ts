@@ -26,6 +26,7 @@ import {
 } from '../runtime/handlers/goals'
 import { applySchedulerEventToBootstrap } from '../runtime/handlers/scheduler'
 import { isGitOperationCompletedEvent } from '../runtime/handlers/git'
+import { sessionLogNotice } from '../runtime/handlers/sessionLog'
 import {
   runtimeNoticeFromEvent,
   type RuntimeNotice,
@@ -972,6 +973,11 @@ export function useRuntime(options: {
     }
     const data = parsed as WsEvent
     if (data.event === 'agent_tree_changed') options.onAgentTreeChanged?.(data)
+    if (data.event === 'session_log_state') {
+      const notice = sessionLogNotice(data)
+      if (notice) options.showToast(notice)
+      return
+    }
 
     const sessionTransition = sessionStore.dispatch({
       type: 'runtime_event_received',

@@ -42,6 +42,31 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(onAgentTreeChanged).toHaveBeenCalledWith(changed)
   })
 
+  it('shows a toast for a session log health report of any session', () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => undefined
+      },
+    })
+    const showToast = vi.fn()
+    const runtime = useRuntime({ ...testOptions(), showToast })
+    runtime.connectSocket()
+    runtime.switchSession('other')
+    emitCoreEvent(listener, {
+      event: 'session_log_state',
+      session_id: 'damaged',
+      state: 'write_paused',
+      error: 'ENOSPC',
+      seq: 0,
+    })
+    expect(showToast).toHaveBeenCalledWith(
+      '磁盘已满，会话暂停保存；内容先留在内存里，腾出空间后会自动补写',
+    )
+  })
+
   it('refreshes memory and slash Skills after a live assistant completes', async () => {
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({

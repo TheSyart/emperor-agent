@@ -68,4 +68,71 @@ describe('graceful App quit', () => {
     await done
     expect(events).toEqual(['reported', 'quit'])
   })
+
+  it('writes session logs synchronously before any async shutdown starts', () => {
+    const events: string[] = []
+    const handler = createQuitCoordinator({
+      flush: () => {
+        events.push('flushed')
+      },
+      close: async () => {
+        events.push('closing')
+      },
+      onError: () => {},
+      quit: () => {},
+    })
+    handler({ preventDefault: () => events.push('prevented') })
+    expect(events).toEqual(['prevented', 'flushed'])
+  })
+
+  it('quits anyway when shutdown hangs past the deadline', async () => {
+    const events: string[] = []
+    let finished!: () => void
+    const done = new Promise<void>((resolve) => {
+      finished = resolve
+    })
+    const handler = createQuitCoordinator({
+      close: () => new Promise<void>(() => {}),
+      timeoutMs: 20,
+      onError: (error) => {
+        events.push(String(error))
+      },
+      quit: () => {
+        events.push('quit')
+        finished()
+      },
+    })
+    handler({ preventDefault() {} })
+    await done
+    expect(events).toEqual([
+      'Error: shutdown did not finish within 20ms',
+      'quit',
+    ])
+  })
+
+  it('still closes when the flush throws', async () => {
+    const events: string[] = []
+    let finished!: () => void
+    const done = new Promise<void>((resolve) => {
+      finished = resolve
+    })
+    const handler = createQuitCoordinator({
+      flush: () => {
+        throw new Error('disk gone')
+      },
+      close: async () => {
+        events.push('closing')
+      },
+      onError: (error) => {
+        events.push(String(error))
+      },
+      quit: () => {
+        events.push('quit')
+        finished()
+      },
+    })
+    handler({ preventDefault() {} })
+    await done
+    expect(events).toEqual(['Error: disk gone', 'closing', 'quit'])
+  })
 })
