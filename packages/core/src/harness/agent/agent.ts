@@ -109,6 +109,31 @@ type PreparedStep =
   | { kind: 'reject' }
   | { kind: 'enter'; messages: UserMessage[]; assembly: PromptAssembly }
 
+/**
+ * The cause `cancel()` passed when it aborted a signal this agent owns,
+ * copied field by field. The live reason stays the caller's object, which a
+ * transport may decorate once it sees the abort (Node's fetch assigns an
+ * enumerable `stack`), and `turn/end` must record only the cause itself.
+ * Returns undefined while the signal is live.
+ */
+function abortedCancelCause(signal: AbortSignal): AgentCancelCause | undefined {
+  if (!signal.aborted) return undefined
+  // `cancel()` is the only aborter of these signals; anything else reads as the user's stop.
+  const cause = signal.reason as Partial<AgentCancelCause> | undefined
+  switch (cause?.kind) {
+    case 'parent':
+    case 'disposed':
+      return { kind: cause.kind }
+    case 'hook':
+      return {
+        kind: 'hook',
+        reason: typeof cause.reason === 'string' ? cause.reason : '',
+      }
+    default:
+      return { kind: 'user' }
+  }
+}
+
 /** Strip adapter-materialized defaults so a changed route can re-default them. */
 function requestProposal(header: EpochHeader): LlmCallConfig {
   if (header.adapterDefaults === undefined) return header.config
@@ -277,8 +302,7 @@ export class Agent {
 
   private wakeDriver(wakeAfterAbort = false): void {
     if (this.phase.kind !== 'idle') {
-      const reason = this.phase.abort.signal.reason as
-        AgentCancelCause | undefined
+      const reason = abortedCancelCause(this.phase.abort.signal)
       if (
         reason?.kind !== 'disposed' &&
         (this.phase.kind === 'maintenance' || wakeAfterAbort)
@@ -425,11 +449,9 @@ export class Agent {
         target = 'next-step'
       }
     } catch (error: unknown) {
-      if (signal.aborted) {
-        turnEnds = {
-          kind: 'aborted',
-          reason: signal.reason as AgentCancelCause,
-        }
+      const cause = abortedCancelCause(signal)
+      if (cause !== undefined) {
+        turnEnds = { kind: 'aborted', reason: cause }
         throw error
       }
       turnEnds = {

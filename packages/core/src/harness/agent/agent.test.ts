@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { userText, type Message } from '../../llm/message'
 import type { ContentBlock } from '../../llm/types'
-import type { SessionEvent } from '../../session-log/types'
+import type { AgentCancelCause, SessionEvent } from '../../session-log/types'
 import { createTestHarness, replyChunks } from '../testing'
 import { defineTool } from '../tools/definition'
 
@@ -279,6 +279,37 @@ describe('Agent loop', () => {
       reason: { kind: 'user' },
     })
   })
+
+  it.each<AgentCancelCause>([
+    { kind: 'user' },
+    { kind: 'hook', reason: 'policy stopped this turn' },
+  ])(
+    'records only the $kind cancel fields, not what a transport added to the abort reason',
+    async (cause) => {
+      const expected = { ...cause }
+      const h = createTestHarness({ replies: [{ hang: true }] })
+      const agent = h.agent()
+      agent.followup(userText('go'))
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      // Node's fetch assigns an enumerable `stack` onto the abort reason it receives.
+      h.adapter.requests[0]!.signal!.addEventListener(
+        'abort',
+        () => {
+          Object.assign(cause, {
+            stack: 'Error\n    at node:internal/deps/undici/undici',
+            extra: { nested: true },
+          })
+        },
+        { once: true },
+      )
+      agent.cancel(cause)
+      await agent.whenIdle()
+      expect(agent.session.lastOf('turn/end')?.data.reason).toEqual({
+        kind: 'aborted',
+        reason: expected,
+      })
+    },
+  )
 
   it('gives never-started calls ABORTED_BEFORE_DISPATCH results on cancel', async () => {
     const h = createTestHarness({
