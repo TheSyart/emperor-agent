@@ -40,6 +40,8 @@ const config = ref<ExecutorConfig | null>(null),
   specialtyText = ref<Record<string, string>>({}),
   specialtyErrors = ref<Record<string, string>>({}),
   probes = ref<Record<string, ExecutorProbe | null>>({}),
+  /** 以后都允许 chosen in a conversation's consent card (AGT-05). */
+  consents = ref<Record<string, 'always' | null>>({}),
   probeErrors = ref<Record<string, string>>({}),
   selected = ref<Record<string, string>>({}),
   recovery = ref<Record<string, boolean>>({}),
@@ -217,6 +219,7 @@ async function refreshFacts() {
     probes.value = Object.fromEntries(
       result.profiles.map((entry) => [entry.profile.id, entry.probe]),
     )
+    rememberConsents(result.profiles)
     if (
       result.config &&
       config.value &&
@@ -403,6 +406,50 @@ function hasIssue(profile: ExecutorProfile) {
       probes.value[profile.id]!.status !== 'available')
   )
 }
+function rememberConsents(
+  profiles: { profile: ExecutorProfile; consent?: 'always' | null }[],
+) {
+  consents.value = Object.fromEntries(
+    profiles.map((entry) => [entry.profile.id, entry.consent ?? null]),
+  )
+}
+function consentText(profile: ExecutorProfile) {
+  return consents.value[profile.id] === 'always'
+    ? '已选择「以后都允许」：派工前不再询问。关闭后再打开会恢复询问。'
+    : '首次派工前会在对话中征得你的同意（本次允许 / 以后都允许 / 不允许）。'
+}
+/** Acknowledge the upgrade notice by saving the last saved config as is. */
+async function dismissNotice() {
+  if (busy.value || loading.value || !saved.value) return
+  const current = ++generation,
+    base = JSON.parse(saved.value) as ExecutorConfig
+  delete base.upgradeNotice
+  busy.value = true
+  error.value = ''
+  try {
+    const result = await configureExecutors({
+      expectedRevision: base.revision,
+      config: base,
+    })
+    if (current !== generation) return
+    const draft = config.value
+    if (dirty.value && draft) {
+      // Keep the unsaved edits on top of the new revision.
+      draft.revision = result.revision
+      delete draft.upgradeNotice
+      if (result.touchedAt !== undefined) draft.touchedAt = result.touchedAt
+      saved.value = JSON.stringify(result)
+    } else {
+      config.value = clone(result)
+      saved.value = JSON.stringify(config.value)
+    }
+  } catch (cause) {
+    if (current !== generation) return
+    error.value = message(cause)
+  } finally {
+    if (current === generation) busy.value = false
+  }
+}
 async function load(forceProbe = false, discard = false) {
   if (loading.value || busy.value) return
   if (dirty.value && !discard) {
@@ -430,6 +477,7 @@ async function load(forceProbe = false, discard = false) {
     probes.value = Object.fromEntries(
       result.profiles.map((entry) => [entry.profile.id, entry.probe]),
     )
+    rememberConsents(result.profiles)
     probeErrors.value = {}
     if (result.diagnostic)
       error.value = `${result.diagnostic}；请检查原配置后重新检测。`
@@ -517,6 +565,7 @@ async function save() {
     probes.value = Object.fromEntries(
       refreshed.profiles.map((entry) => [entry.profile.id, entry.probe]),
     )
+    rememberConsents(refreshed.profiles)
     runtimes.value = Object.fromEntries(
       refreshed.profiles.map((entry) => [entry.profile.id, entry.runtime]),
     )
@@ -586,6 +635,25 @@ onBeforeUnmount(() => {
         >丢弃修改并重新读取</Button
       >
     </div>
+    <div
+      v-if="config?.upgradeNotice === 'external-default-off'"
+      class="upgrade-notice message"
+      role="status"
+      data-executor-upgrade-notice
+    >
+      <span
+        >Claude Code 和 Codex
+        子智能体现在默认关闭，因为它们会使用你自己的订阅额度或 API
+        计费。升级前它们按旧版默认开启，你没有改过这项设置，所以已关闭；需要时在下面打开，首次派工前会在对话中征得你的同意。</span
+      ><Button
+        size="sm"
+        variant="outline"
+        data-dismiss-upgrade-notice
+        :disabled="busy || loading"
+        @click="dismissNotice"
+        >知道了</Button
+      >
+    </div>
     <div class="agent-cards">
       <SettingsCard class="agent-card local-card" data-settings-agent="local">
         <template #leading><SubagentAvatarPreview /></template
@@ -641,6 +709,13 @@ onBeforeUnmount(() => {
             :aria-label="`启用 ${row.name}`"
         /></template>
         <template v-if="row.profile">
+          <p
+            v-if="row.profile.enabled"
+            class="field-hint consent-hint"
+            data-executor-consent
+          >
+            {{ consentText(row.profile) }}
+          </p>
           <div v-if="row.profiles.length > 1" class="profile-choice">
             <span>使用配置</span
             ><Select
@@ -1429,12 +1504,19 @@ onBeforeUnmount(() => {
   color: rgb(var(--label-tertiary));
   font-size: var(--fs-xxs);
 }
-.reload-notice {
+.reload-notice,
+.upgrade-notice {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2-5);
   background: var(--interactive-bg-hover);
+}
+.upgrade-notice > span {
+  flex: 1 1 280px;
+}
+.consent-hint {
+  margin: 0;
 }
 .default-model-block > .ds-select {
   width: 100%;

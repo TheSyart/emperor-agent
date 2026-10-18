@@ -54,26 +54,42 @@ export function createRoutingChildProvider(options: {
               ? ('scheduler' as const)
               : ('workflow' as const),
         }
-      const record = await service.start(
-        owner,
-        {
-          backend: request.backend,
-          profileId: request.profileId,
-          description: request.label ?? 'workflow agent',
-          prompt: request.prompt,
-          context: 'isolated',
-          workspace: options.readOnly(request.parent)
-            ? 'shared-readonly'
-            : 'isolated-worktree',
-          base: 'committed',
-          model: request.model,
-          outputSchema: request.outputSchema,
-          runInBackground: false,
-          clientRequestId:
-            request.clientRequestId ?? 'workflow-' + randomUUID(),
-        },
-        request.signal,
-      )
+      let record: Awaited<ReturnType<DelegationService['start']>>
+      try {
+        record = await service.start(
+          owner,
+          {
+            backend: request.backend,
+            profileId: request.profileId,
+            description: request.label ?? 'workflow agent',
+            prompt: request.prompt,
+            context: 'isolated',
+            workspace: options.readOnly(request.parent)
+              ? 'shared-readonly'
+              : 'isolated-worktree',
+            base: 'committed',
+            model: request.model,
+            outputSchema: request.outputSchema,
+            runInBackground: false,
+            clientRequestId:
+              request.clientRequestId ?? 'workflow-' + randomUUID(),
+          },
+          request.signal,
+        )
+      } catch (error) {
+        // The user kept their quota (AGT-05): the step runs as an internal
+        // subagent instead.
+        if (
+          error instanceof DelegationError &&
+          error.code === 'EXECUTOR_CONSENT_DENIED'
+        )
+          return options.internal.start({
+            ...request,
+            backend: 'internal',
+            profileId: undefined,
+          })
+        throw error
+      }
       const runId = record.currentRunId!
       const result = service.wait(record.id, runId).then((run): ChildResult => {
         let stopReason = run.phase

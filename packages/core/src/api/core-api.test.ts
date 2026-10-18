@@ -871,12 +871,13 @@ describe('CoreApi tasks and tools', () => {
     const id = session(api)
     api.host.agentFor(id)
     expect(api.host.delegations).toBe(api.delegationRuntime)
+    // External executors are opt-in (AGT-05) and reuse the local CLI login.
     expect(
       api.executorConfig
         .read()
         .profiles.every(
           (profile) =>
-            profile.enabled && profile.authRef.kind === 'managed-cli-login',
+            !profile.enabled && profile.authRef.kind === 'managed-cli-login',
         ),
     ).toBe(true)
     const schema = api.host.tools

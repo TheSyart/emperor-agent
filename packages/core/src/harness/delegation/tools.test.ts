@@ -7,6 +7,7 @@ import { ApprovalService } from '../approval/service'
 import { createDelegationTools, type DelegationToolService } from './tools'
 import { fixture as serviceFixture } from './service-test-fixture'
 import { fixtureDelegationRecord, fixtureDelegationRun } from './testing'
+import { DelegationError } from './types'
 function fixture(externalService?: DelegationToolService) {
   const h = createTestHarness(),
     agents = new Map<string, Agent>()
@@ -164,7 +165,7 @@ it('external backend resolves trusted owner and profile; queue returns original 
     expect.objectContaining({ text: 'continue', delivery: 'queue' }),
   )
 })
-it('external fork and provider option fail explicitly before any external call', async () => {
+it('external fork fails explicitly before any external call', async () => {
   const f = fixture()
   const fork = await f.call('subagent_fork', {
     backend: 'claude-code',
@@ -172,14 +173,31 @@ it('external fork and provider option fail explicitly before any external call',
     prompt: 'work',
   })
   expect(JSON.stringify(fork)).toContain('UNSUPPORTED_CONTEXT_MODE')
-  const provider = await f.call('subagent', {
-    backend: 'codex',
-    provider: 'main-llm',
-    description: 'work',
-    prompt: 'work',
-  })
-  expect(JSON.stringify(provider)).toContain('UNSUPPORTED_OPTION')
   expect(f.service.start).not.toHaveBeenCalled()
+})
+it('when the user does not allow the external executor, the task runs as a local subagent', async () => {
+  const f = fixture()
+  vi.mocked(f.service.start).mockRejectedValueOnce(
+    new DelegationError('EXECUTOR_CONSENT_DENIED', 'the user said no'),
+  )
+  f.h.adapter.push(replyChunks({ text: 'local child done' }))
+  f.h.adapter.push(replyChunks({ text: 'parent saw it' }))
+  const result = await f.call('subagent', {
+    backend: 'codex',
+    description: 'review parser',
+    prompt: 'review parser.ts',
+  })
+  expect(result.isError).toBe(false)
+  const meta = result.meta as {
+    subagentId: string
+    requestedBackend: string
+    consent: string
+  }
+  expect(meta.subagentId).toMatch(/^sub-/)
+  expect(meta).toMatchObject({ requestedBackend: 'codex', consent: 'denied' })
+  expect(JSON.stringify(result.content)).toMatch(/did not allow Codex/)
+  await f.manager.get(meta.subagentId)?.whenIdle()
+  await f.root.whenIdle()
 })
 it('cross-owner control is denied and list exposes only held descendants', async () => {
   const f = fixture()
@@ -208,13 +226,18 @@ it('collect exposes execution and acceptance separately and unknown IDs are reje
     JSON.stringify(await f.call('inspect_agent', { agent_id: 'other-task' })),
   ).toContain('INVALID_ID')
 })
-it('describes direct dispatch and defers file checks to delivery instead of requiring acceptance for all tasks', () => {
+it('describes external dispatch under backend: consent first, file checks at delivery, no blanket acceptance', () => {
   const f = fixture()
   const start = f.h.tools.get('subagent')!
-  expect(start.description).not.toContain(
+  const backend = JSON.stringify(
+    (start.parameters as { properties: Record<string, unknown> }).properties
+      .backend,
+  )
+  expect(backend).not.toContain(
     'Completed execution still requires artifact acceptance',
   )
-  expect(start.description).toContain('delivery')
+  expect(backend).toContain('asks the user once')
+  expect(f.h.tools.get('collect_agent')!.description).toContain('delivery')
 })
 it('foreground and collect expose host identities and current workspace in model-visible content', async () => {
   const f = fixture()
@@ -255,9 +278,8 @@ it('dispatches one task envelope through the real tool and service and formats c
       delivery: 'queue',
     })
     await vi.waitFor(() => expect(runtime.adapter.submitted).toHaveLength(2))
-    expect(runtime.adapter.submitted[1]!.text).toBe(
-      'Task: Review parser\n\nInspect tests too',
-    )
+    // A follow-up is a new instruction: it is delivered as written.
+    expect(runtime.adapter.submitted[1]!.text).toBe('Inspect tests too')
   } finally {
     await runtime.service.shutdown()
     runtime.cleanup()

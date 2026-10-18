@@ -10,6 +10,7 @@ import type {
 import { createRoutingChildProvider } from './workflow-provider'
 import { fixture } from './service-test-fixture'
 import { FakeExecutorAdapter } from './testing'
+import { DelegationError } from './types'
 function setup() {
   const f = fixture(),
     parent = createTestHarness().agent('root'),
@@ -299,4 +300,23 @@ it('keeps workflow concurrency inside the global/profile limits and records nati
     await run.dispose()
     f.cleanup()
   }
+})
+
+it('a workflow step whose external executor the user did not allow runs as an internal subagent', async () => {
+  const f = setup()
+  vi.spyOn(f.service, 'start').mockRejectedValueOnce(
+    new DelegationError('EXECUTOR_CONSENT_DENIED', 'the user said no'),
+  )
+  const child = await f.provider.start({
+    parent: f.parent,
+    prompt: 'review',
+    label: 'review',
+    backend: 'codex',
+    callId: 'call-consent',
+  } as ChildProviderStartRequest)
+  expect(child.id).toBe('sub-internal')
+  expect(f.internalStart).toHaveBeenCalledWith(
+    expect.objectContaining({ backend: 'internal', prompt: 'review' }),
+  )
+  f.cleanup()
 })

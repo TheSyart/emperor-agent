@@ -1,5 +1,6 @@
 import { createRoutingChildProvider } from '../delegation/workflow-provider'
 import { DelegationInteractionBridge } from '../delegation/interactions'
+import { ExecutorConsentBridge } from '../delegation/consent'
 /**
  * `HarnessHost`: the single composition root of Emperor's agent kernel.
  *
@@ -249,6 +250,8 @@ export class HarnessHost {
   delegations: DelegationService | null = null
   delegationQuestionTimeoutMs = () => 15 * 60 * 1000
   readonly delegationInteractions: DelegationInteractionBridge
+  /** First-dispatch consent cards for external executors (AGT-05). */
+  readonly delegationConsent: ExecutorConsentBridge
   /** Dynamic workflows (`workflow` / `ralph` tools) over in-process subagents. */
   readonly workflows: WorkflowEngine
   readonly workflowRuns = new WorkflowRunRegistry()
@@ -348,6 +351,19 @@ export class HarnessHost {
     this.mcpTools = new McpToolBridge(kept.mcpClient, this.tools)
     kept.mcpClient.setReservedToolNames(() => this.mcpTools.reservedNames())
     this.delegationInteractions = new DelegationInteractionBridge({
+      pending: this.pending,
+      root: (id) => {
+        try {
+          return this.agentFor(id)
+        } catch {
+          return undefined
+        }
+      },
+      available: (owner) =>
+        this.eventSink !== null && owner.source !== 'scheduler',
+      timeoutMs: () => this.delegationQuestionTimeoutMs(),
+    })
+    this.delegationConsent = new ExecutorConsentBridge({
       pending: this.pending,
       root: (id) => {
         try {
@@ -536,8 +552,10 @@ export class HarnessHost {
         delegations: () => this.delegations ?? undefined,
         ownerResolver: (agent, callId) => this.delegationOwner(agent, callId),
         canControl: (agent, owner) => this.canControlDelegation(agent, owner),
+        // Plan mode explores read-only: external children default to review.
         parentReadOnly: (agent) =>
-          this.sandbox.resolve({ session: agent.session }).mode === 'read-only',
+          this.sandbox.resolve({ session: agent.session }).mode ===
+            'read-only' || this.planMode.get(this.rootOf(agent).session).active,
         briefContext: (agent) => {
           const cwd = this.sandbox.resolve({
               session: agent.session,
@@ -582,9 +600,8 @@ export class HarnessHost {
     prompt.context({
       name: 'external-executors',
       order: 121,
-      text: () =>
-        this.delegations?.executorContext() ??
-        'External executors are not composed; internal subagents remain available.',
+      // Nothing when no external executor is enabled (AGT-05).
+      text: () => this.delegations?.executorContext() ?? '',
     })
     installWorkflow(tools, prompt, {
       engine: this.workflows,
@@ -1152,6 +1169,7 @@ export class HarnessHost {
         if (this.delegations?.parentPermissionsRevoked(root.id)) {
           this.goals.disarm(root)
           this.delegationInteractions.cancelRoot(root.id)
+          this.delegationConsent.cancelRoot(root.id)
           void this.delegations.stopRoot(root.id).catch((error) =>
             logger.warn('external permission revocation needs recovery', {
               error: String(error),
@@ -1434,6 +1452,7 @@ export class HarnessHost {
 
   stop(sessionId: string): boolean {
     this.delegationInteractions.cancelRoot(sessionId)
+    this.delegationConsent.cancelRoot(sessionId)
     const externalActive =
       this.delegations
         ?.list()
@@ -1749,6 +1768,7 @@ export class HarnessHost {
     if (this.closed) return
     this.closed = true
     this.delegationInteractions.cancelRoot()
+    this.delegationConsent.cancelRoot()
     await this.delegations?.shutdown().catch((error) =>
       logger.warn('external delegation shutdown requires recovery', {
         error: String(error),

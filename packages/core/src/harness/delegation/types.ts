@@ -63,6 +63,13 @@ export interface ExecutorConfig {
   revision: number
   profiles: ExecutorProfile[]
   limits: ExecutorLimits
+  /** When the user last saved these settings (absent: never saved). */
+  touchedAt?: number
+  /**
+   * Shown once on the settings page: an upgrade turned off external
+   * executors the user had never chosen (AGT-05).
+   */
+  upgradeNotice?: 'external-default-off'
 }
 export interface ExecutorProbe {
   status:
@@ -380,7 +387,7 @@ export class DelegationError extends Error {
         'review_task_permission',
       ],
       PLAN_MODE_UNSUPPORTED: [
-        'Plan 模式不支持启动外部执行，请先完成计划确认。',
+        'Plan 模式下子智能体只能做只读审查；需要修改文件时请先完成计划确认。',
         'review_task_permission',
       ],
       OUTCOME_UNKNOWN: [

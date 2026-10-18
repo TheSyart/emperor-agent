@@ -166,6 +166,7 @@ import type { DelegationProjection } from '../harness/delegation/events'
 import { ExecutorRegistry } from '../harness/delegation/registry'
 import { DelegationService } from '../harness/delegation/service'
 import { ExecutorRuntimeService } from '../harness/delegation/runtime'
+import { ExecutorConsentStore } from '../harness/delegation/consent'
 import { createLoginShellEnvironment } from '../harness/delegation/login-shell'
 import { ExecutorModelCatalogService } from '../harness/delegation/models'
 import { nativeGeneratedImageRoot } from '../harness/delegation/image-proof'
@@ -652,6 +653,8 @@ export class CoreApi {
       privateHome: resolve(this.paths.stateRoot, 'git', 'runtime-home'),
     })
     this.executorConfig = new ExecutorConfigStore(this.paths.delegationsRoot)
+    const executorConsent = new ExecutorConsentStore(this.paths.delegationsRoot)
+    host.delegationConsent.store = executorConsent
     this.executorFacts = new ExecutorFactsStore(
       this.paths.delegationsRoot,
       opts.verifyGeneratedImage,
@@ -776,6 +779,14 @@ export class CoreApi {
       onStopRoot: (id) => this.delegationAcceptance.stopRoot(id),
       onQuestion: (question, signal) =>
         host.delegationInteractions.ask(question, signal),
+      consent: (owner, profile, spec, signal) =>
+        host.delegationConsent.decide({
+          owner,
+          profile,
+          description: spec.description,
+          ...(owner.parentCallId ? { callId: owner.parentCallId } : {}),
+          ...(signal ? { signal } : {}),
+        }),
     })
     host.delegations = this.delegationRuntime
     this.agentService = new CoreAgentService({
@@ -877,6 +888,7 @@ export class CoreApi {
       assertConfigure: () => this.assertMutation('executors', 'configure'),
       refresh: () => this.delegationRuntime.probeProfiles(),
       checkAuth: checkExecutorAuth,
+      consent: executorConsent,
     })
     host.delegationQuestionTimeoutMs = () => {
       try {
