@@ -149,6 +149,7 @@ import type { DelegationProjection } from '../harness/delegation/events'
 import { ExecutorRegistry } from '../harness/delegation/registry'
 import { DelegationService } from '../harness/delegation/service'
 import { ExecutorRuntimeService } from '../harness/delegation/runtime'
+import { nativeGeneratedImageRoot } from '../harness/delegation/image-proof'
 import { ClaudeExecutorAdapter } from '../harness/delegation/adapters/claude'
 import { CodexExecutorAdapter } from '../harness/delegation/adapters/codex'
 import {
@@ -916,6 +917,10 @@ export class CoreApi {
         await this.workspaceGitService.ignoredPaths({ sessionId, paths }),
     })
     this.workspaceReferenceService = new WorkspaceReferenceService({
+      delegatedImageRoots: (sessionId, delegationId) =>
+        this.delegationImageRoots(
+          this.delegationService.get({ id: delegationId, sessionId }).record!,
+        ),
       delegatedRoot: (sessionId, delegationId) => {
         this.requireReadableSession(sessionId, 'references.resolve')
         return this.delegationService.get({ id: delegationId, sessionId })
@@ -1863,6 +1868,32 @@ export class CoreApi {
     return this.watchedSessions.has(sessionId)
   }
 
+  private delegationImageRoots(record: {
+    id: string
+    backend: string
+    profileId: string
+  }): string[] {
+    if (record.backend !== 'codex') return []
+    try {
+      const profile = this.executorConfig
+        .read()
+        .profiles.find((p) => p.id === record.profileId)
+      if (!profile) return []
+      const root = nativeGeneratedImageRoot(
+        join(
+          this.paths.delegationsRoot,
+          'runtime',
+          profile.stateDirectoryId,
+          record.id,
+        ),
+        this.paths.delegationsRoot,
+      )
+      return root ? [root] : []
+    } catch {
+      return []
+    }
+  }
+
   readonly references = {
     image: async (input: { sessionId: string; referenceId: string }) => {
       this.requireReadableSession(input.sessionId, 'references.image')
@@ -1898,20 +1929,24 @@ export class CoreApi {
         input.referenceId,
         input.sessionId,
       )
-      const ownedRoots = delegationId
-        ? [
-            this.delegationService.get({
-              id: delegationId,
-              sessionId: input.sessionId,
-            }).record!.cwd,
-          ]
+      const ownedRecord = delegationId
+        ? this.delegationService.get({
+            id: delegationId,
+            sessionId: input.sessionId,
+          }).record!
+        : undefined
+      const ownedRoots = ownedRecord
+        ? [ownedRecord.cwd, ...this.delegationImageRoots(ownedRecord)]
         : [
             this.host.sessionWorkspaceRoot(input.sessionId),
             ...this.delegationRuntime
               .list()
               .flatMap((state) =>
                 state.record?.owner.rootSessionId === input.sessionId
-                  ? [state.record.cwd]
+                  ? [
+                      state.record.cwd,
+                      ...this.delegationImageRoots(state.record),
+                    ]
                   : [],
               ),
           ]

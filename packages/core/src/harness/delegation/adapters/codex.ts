@@ -171,9 +171,7 @@ export function normalizeCodexNotification(
           ? {
               evidence: {
                 kind: 'search' as const,
-                action: ['openPage', 'findInPage'].includes(
-                  String(record(item.action).type),
-                )
+                action: codexFetchItem(item)
                   ? ('fetch' as const)
                   : ('search' as const),
                 ...codexSearchResult(item),
@@ -223,10 +221,32 @@ export function normalizeCodexNotification(
   }
   return []
 }
-function codexSearchResult(item: Record<string, unknown>) {
-  const fetch = ['openPage', 'findInPage'].includes(
-    String(record(item.action).type),
+// Pinned standalone_web_search publishes page metadata rather than an HTTP
+// body. This exact shape was observed with native web.run.open in CLI 0.153.4.
+function standalonePage(r: Record<string, unknown>) {
+  return (
+    r.type === 'text_result' &&
+    typeof r.ref_id === 'string' &&
+    /^turn\d+view\d+$/.test(r.ref_id) &&
+    typeof r.snippet === 'string' &&
+    /^Total lines: [1-9]\d*$/.test(r.snippet) &&
+    typeof r.title === 'string' &&
+    r.title.trim().length > 0 &&
+    publicReferences([r.url]).length > 0
   )
+}
+function codexFetchItem(item: Record<string, unknown>) {
+  const action = record(item.action).type
+  return (
+    ['openPage', 'findInPage'].includes(String(action)) ||
+    (action === 'other' &&
+      item.query === '' &&
+      Array.isArray(item.results) &&
+      item.results.some((r) => standalonePage(record(r))))
+  )
+}
+function codexSearchResult(item: Record<string, unknown>) {
+  const fetch = codexFetchItem(item)
   const rows = (Array.isArray(item.results) ? item.results : []).map(record)
   const hasBody = (r: Record<string, unknown>) =>
     [r.text, r.content, r.result, r.markdown].some(
@@ -234,6 +254,7 @@ function codexSearchResult(item: Record<string, unknown>) {
     )
   const failed =
     !!item.error ||
+    ['failed', 'error', 'denied'].includes(String(item.status)) ||
     rows.some(
       (r) =>
         r.error ||
@@ -244,12 +265,14 @@ function codexSearchResult(item: Record<string, unknown>) {
   // page retrieval; the requested URL is not evidence of a returned page.
   const affirmative = rows.some((r) =>
     fetch
-      ? typeof (r.code ?? r.statusCode) === 'number' &&
-        Number(r.code ?? r.statusCode) >= 200 &&
-        Number(r.code ?? r.statusCode) < 300 &&
-        hasBody(r) &&
-        publicReferences([r.url]).length > 0
-      : typeof r.title === 'string' &&
+      ? standalonePage(r) ||
+        (typeof (r.code ?? r.statusCode) === 'number' &&
+          Number(r.code ?? r.statusCode) >= 200 &&
+          Number(r.code ?? r.statusCode) < 300 &&
+          hasBody(r) &&
+          publicReferences([r.url]).length > 0)
+      : record(item.action).type === 'search' &&
+        typeof r.title === 'string' &&
         r.title.length > 0 &&
         publicReferences([r.url]).length > 0,
   )

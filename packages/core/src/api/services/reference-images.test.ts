@@ -212,3 +212,89 @@ it('resolves delegation relative images with root ownership and rejects escaped 
     await f.api.close()
   }
 })
+
+it('previews native Codex generated images only for the owning root and child', async () => {
+  const f = await makeApi()
+  try {
+    const sessionId = String(
+      f.api.sessions.create({ title: 'native image', mode: 'chat' }).id,
+    )
+    const record = {
+      ...fixtureDelegationRecord(),
+      cwd: join(f.root, 'project'),
+      owner: { ...fixtureDelegationRecord().owner, rootSessionId: sessionId },
+    }
+    mkdirSync(record.cwd)
+    const base = join(
+        f.api.paths.delegationsRoot,
+        'runtime',
+        'codex-default',
+        record.id,
+        'codex',
+      ),
+      generated = join(base, 'generated_images')
+    mkdirSync(generated, { recursive: true })
+    const bytes = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j98sAAAAASUVORK5CYII=',
+      'base64',
+    )
+    const file = join(generated, 'native.png')
+    writeFileSync(file, bytes)
+    writeFileSync(join(base, 'private.png'), bytes)
+    const state = {
+      record,
+      runs: {},
+      messages: {},
+      interactions: {},
+      outbox: {},
+      lastSeq: 0,
+    }
+    vi.spyOn(f.api.delegationRuntime, 'inspect').mockReturnValue(state)
+    vi.spyOn(f.api.delegationRuntime, 'list').mockReturnValue([state])
+    for (const delegationId of [undefined, record.id]) {
+      const r = f.api.references.resolve({
+        sessionId,
+        delegationId,
+        sourceMessageId: 'native',
+        href: file,
+        label: 'native',
+      })
+      expect(
+        (await f.api.references.image({ sessionId, referenceId: r.id }))
+          .dataBase64,
+      ).toBe(bytes.toString('base64'))
+    }
+    expect(() =>
+      f.api.references.resolve({
+        sessionId,
+        delegationId: record.id,
+        sourceMessageId: 'private',
+        href: join(base, 'private.png'),
+        label: 'private',
+      }),
+    ).toThrow()
+    const other = String(f.api.sessions.create({ title: 'other' }).id),
+      r = f.api.references.resolve({
+        sessionId: other,
+        sourceMessageId: 'cross',
+        href: file,
+        label: 'cross',
+      })
+    await expect(
+      f.api.references.image({ sessionId: other, referenceId: r.id }),
+    ).rejects.toThrow()
+    const { symlinkSync } = await import('node:fs')
+    symlinkSync(join(base, 'private.png'), join(generated, 'escape.png'))
+    expect(() =>
+      f.api.references.resolve({
+        sessionId,
+        delegationId: record.id,
+        sourceMessageId: 'escape',
+        href: join(generated, 'escape.png'),
+        label: 'escape',
+      }),
+    ).toThrow()
+  } finally {
+    await f.api.close()
+  }
+})

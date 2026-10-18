@@ -43,12 +43,14 @@ interface StoredReference {
 export interface WorkspaceReferenceServiceOptions {
   resolveProject: ResolveWorkspaceProject
   delegatedRoot?: (sessionId: string, delegationId: string) => string
+  delegatedImageRoots?: (sessionId: string, delegationId: string) => string[]
   preferReveal?: (sessionId: string) => boolean
   maxEntries?: number
 }
 
 export class WorkspaceReferenceService {
   private readonly delegatedRoot?: WorkspaceReferenceServiceOptions['delegatedRoot']
+  private readonly delegatedImageRoots?: WorkspaceReferenceServiceOptions['delegatedImageRoots']
   private readonly resolveProject: ResolveWorkspaceProject
   private readonly maxEntries: number
   private readonly preferReveal: (sessionId: string) => boolean
@@ -57,6 +59,7 @@ export class WorkspaceReferenceService {
 
   constructor(options: WorkspaceReferenceServiceOptions) {
     this.delegatedRoot = options.delegatedRoot
+    this.delegatedImageRoots = options.delegatedImageRoots
     this.resolveProject = options.resolveProject
     this.maxEntries = options.maxEntries ?? 2_000
     this.preferReveal = options.preferReveal ?? (() => false)
@@ -205,8 +208,16 @@ export class WorkspaceReferenceService {
     const lexicalWithin = within(projectRoot, lexicalTarget)
     const exists = existsSync(lexicalTarget)
     const canonicalTarget = exists ? realpathSync(lexicalTarget) : lexicalTarget
+    const nativeImageWithin =
+      !!input.delegationId &&
+      isAbsolute(target) &&
+      /\.(png|jpe?g|gif|webp)$/i.test(canonicalTarget) &&
+      (
+        this.delegatedImageRoots?.(input.sessionId, input.delegationId) ?? []
+      ).some((root) => within(root, canonicalTarget))
     const canonicalWithin =
-      lexicalWithin && within(projectRoot, canonicalTarget)
+      (lexicalWithin && within(projectRoot, canonicalTarget)) ||
+      nativeImageWithin
     if (input.delegationId && !canonicalWithin)
       throw new WorkspaceOperationError(
         'reference_outside_project',

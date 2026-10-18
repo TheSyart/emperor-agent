@@ -97,10 +97,21 @@ beforeEach(() => {
     value: async () => {},
   })
   listExecutors.mockResolvedValue(payload())
-  configureExecutors.mockImplementation(async (input) => ({
-    ...input.config,
-    revision: 8,
-  }))
+  configureExecutors.mockImplementation(async (input) => {
+    const config = { ...input.config, revision: input.expectedRevision + 1 }
+    const refreshed = payload() as any
+    refreshed.config = config
+    refreshed.profiles = config.profiles.map((profile: any) => ({
+      profile,
+      probe: {
+        status: 'available',
+        localAuthChecked: true,
+        authVerified: false,
+      },
+    }))
+    listExecutors.mockResolvedValue(refreshed)
+    return config
+  })
   probeExecutor.mockResolvedValue({ status: 'available', authVerified: false })
 })
 afterEach(() => {
@@ -142,6 +153,8 @@ it('edits, clears and restores independent specialty defaults without changing h
   expect(configureExecutors.mock.calls[0]![0].config.profiles[0]).toMatchObject(
     { specialties: ['接口设计', '定位故障'], defaultModel: 'kept-model-0' },
   )
+  expect(row('claude-code').textContent).toContain('执行器就绪')
+  expect(row('claude-code').textContent).toContain('本机登录配置可读')
   input.value = ''
   input.dispatchEvent(new Event('input', { bubbles: true }))
   await settle()
@@ -430,3 +443,16 @@ it.each([
     expect(configureExecutors).not.toHaveBeenCalled()
   },
 )
+
+it('does not attach another revision runtime facts after saving a specialty draft', async () => {
+  const current = payload(),
+    newer = payload()
+  newer.config.revision = 9
+  listExecutors.mockResolvedValueOnce(current).mockResolvedValueOnce(newer)
+  await mount()
+  await toggle()
+  await action('save-executors').onClick!()
+  await settle()
+  expect(action('save-executors').disabled).toBe(true)
+  expect(root.textContent).toContain('配置已在其他位置更新')
+})

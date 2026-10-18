@@ -1,4 +1,29 @@
 import { inflateSync } from 'node:zlib'
+import { realpathSync } from 'node:fs'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+
+/** Only the managed native image directory; never all of CODEX_HOME. */
+export function nativeGeneratedImageRoot(
+  runtimeRoot: string,
+  trustedRoot: string,
+): string | undefined {
+  try {
+    const local = relative(resolve(trustedRoot), resolve(runtimeRoot))
+    if (
+      !local ||
+      isAbsolute(local) ||
+      local === '..' ||
+      local.startsWith('..' + sep)
+    )
+      return
+    const expectedRuntime = resolve(realpathSync(trustedRoot), local)
+    if (realpathSync(runtimeRoot) !== expectedRuntime) return
+    const expected = join(expectedRuntime, 'codex', 'generated_images')
+    return realpathSync(expected) === expected ? expected : undefined
+  } catch {
+    return undefined
+  }
+}
 function crc32(b: Buffer) {
   let crc = 0xffffffff
   for (const byte of b) {

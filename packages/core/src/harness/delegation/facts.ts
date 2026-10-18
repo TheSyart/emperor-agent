@@ -46,6 +46,7 @@ export interface FactContext {
   runId: string
   delegationId: string
   permissionMode?: string
+  nativeImageRoot?: string
 }
 const empty = (p: ExecutorProfile): ExecutorRuntimeFacts => ({
   configuredModel: p.defaultModel ?? null,
@@ -96,17 +97,24 @@ export function publicReferences(values: unknown): string[] {
 }
 function imageReference(
   path: string,
-  cwd: string,
+  roots: string[],
   verify: (bytes: Buffer) => boolean,
 ): string | undefined {
   try {
-    const actual = realpathSync(path),
-      scope = realpathSync(cwd),
-      local = relative(scope, actual)
+    const actual = realpathSync(path)
     if (
-      isAbsolute(local) ||
-      local === '..' ||
-      local.startsWith('..' + sep) ||
+      !roots.some((root) => {
+        try {
+          const local = relative(realpathSync(root), actual)
+          return (
+            !isAbsolute(local) &&
+            local !== '..' &&
+            !local.startsWith('..' + sep)
+          )
+        } catch {
+          return false
+        }
+      }) ||
       !statSync(actual).isFile() ||
       statSync(actual).size > 32 * 1024 * 1024
     )
@@ -300,14 +308,24 @@ export class ExecutorFactsStore {
         this.rounds.delete(context.runId)
         binding.model = reported
       }
-      if (event.model && f.reportedModel && f.reportedModel !== event.model) {
+      const lowerPriority =
+        event.source === 'initialization' &&
+        f.modelSource === 'provider-response'
+      if (
+        !lowerPriority &&
+        event.model &&
+        f.reportedModel &&
+        f.reportedModel !== event.model
+      ) {
         for (const c of Object.values(f.nativeCapabilities))
           if (c.status !== 'unsupported' && c.status !== 'unverified')
             c.status = 'stale'
         this.rounds.delete(context.runId)
       }
-      f.reportedModel = clean(event.model) ?? f.reportedModel
-      f.modelSource = clean(event.source)
+      if (!lowerPriority) {
+        f.reportedModel = clean(event.model) ?? f.reportedModel
+        f.modelSource = clean(event.source)
+      }
       f.provider = clean(event.provider) ?? f.provider
       if (event.advertisedTools)
         f.advertisedTools = event.advertisedTools
@@ -353,7 +371,10 @@ export class ExecutorFactsStore {
       } else if (e.kind === 'image-generation' && e.success && e.artifactPath) {
         const path = imageReference(
           e.artifactPath,
-          context.cwd,
+          [
+            context.cwd,
+            ...(context.nativeImageRoot ? [context.nativeImageRoot] : []),
+          ],
           this.verifyImage,
         )
         if (path) {

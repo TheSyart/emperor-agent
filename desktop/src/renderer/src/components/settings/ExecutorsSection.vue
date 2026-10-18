@@ -271,7 +271,20 @@ async function save() {
     if (current !== generation) return
     config.value = clone(result)
     saved.value = JSON.stringify(config.value)
-    probes.value = {}
+    const refreshed = await listExecutors()
+    if (current !== generation) return
+    if (refreshed.config?.revision !== result.revision) {
+      stale.value = true
+      reloadRequested.value = true
+      error.value = '配置已在其他位置更新，请重新读取。'
+      return
+    }
+    probes.value = Object.fromEntries(
+      refreshed.profiles.map((entry) => [entry.profile.id, entry.probe]),
+    )
+    runtimes.value = Object.fromEntries(
+      refreshed.profiles.map((entry) => [entry.profile.id, entry.runtime]),
+    )
     probeErrors.value = {}
     reloadRequested.value = false
   } catch (cause) {

@@ -293,3 +293,53 @@ it('rejects opaque Codex failure text and does not certify an undocumented text-
     )
   }
 })
+
+it('recognizes pinned standalone Codex page metadata but rejects missing fields and failures', () => {
+  const row = {
+    type: 'text_result',
+    domain: 'www.electronjs.org',
+    ref_id: 'turn1view0',
+    snippet: 'Total lines: 261',
+    title: 'Process Model | Electron',
+    url: 'https://www.electronjs.org/docs/latest/tutorial/process-model',
+  }
+  const item = {
+    id: 'open-native',
+    type: 'webSearch',
+    query: '',
+    action: { type: 'other' },
+    results: [row],
+  }
+  expect(normalizeCodexNotification('item/completed', { item })).toContainEqual(
+    expect.objectContaining({
+      evidence: expect.objectContaining({
+        action: 'fetch',
+        verified: true,
+        success: true,
+        references: [row.url],
+      }),
+    }),
+  )
+  const rows = [
+    { ...row, snippet: 'Total lines: 0' },
+    { ...row, snippet: 'The page could not be fetched.' },
+    { ...row, ref_id: 'turn1search0' },
+    { ...row, type: 'unknown' },
+    { ...row, title: '' },
+    { ...row, url: undefined },
+    { ...row, status: 'failed' },
+  ]
+  const invalidItems = [
+    { ...item, status: 'failed' },
+    { ...item, query: 'search' },
+    ...rows.map((row) => ({ ...item, results: [row] })),
+  ]
+  for (const invalid of invalidItems)
+    expect(
+      normalizeCodexNotification('item/completed', { item: invalid }),
+    ).not.toContainEqual(
+      expect.objectContaining({
+        evidence: expect.objectContaining({ success: true }),
+      }),
+    )
+})

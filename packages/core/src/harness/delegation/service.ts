@@ -17,6 +17,7 @@ import {
 } from './types'
 import { defaultExecutorConfig } from './config'
 import { ExecutorFactsStore } from './facts'
+import { nativeGeneratedImageRoot } from './image-proof'
 import { executorSpecialties } from './specialties'
 import { DelegationPolicy, type DelegationParentContext } from './policy'
 import { DelegationBudget, type BudgetLease } from './budget'
@@ -1501,6 +1502,14 @@ export class DelegationService {
             runId: activeRunId,
             delegationId: id,
             permissionMode: record.effectivePermission,
+            ...(record.backend === 'codex'
+              ? {
+                  nativeImageRoot: nativeGeneratedImageRoot(
+                    runtime.runtimeRoot,
+                    this.options.root,
+                  ),
+                }
+              : {}),
           },
           event,
         )

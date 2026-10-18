@@ -349,3 +349,84 @@ it('retains non-secret execution provenance with capability evidence', () => {
     authIdentity: expect.stringMatching(/^[a-f0-9]{12}$/),
   })
 })
+
+it('does not invalidate provider-model evidence for an initialization alias on the next run', () => {
+  const f = fixture('claude-code')
+  f.emit({
+    type: 'runtime_metadata',
+    source: 'provider-response',
+    model: 'actual-model',
+  })
+  search(f, 'search')
+  search(f, 'fetch')
+  const context = { ...f.context, runId: 'dgr-next' }
+  f.store.bind(f.profile, f.environment, context.runId)
+  for (const event of [
+    {
+      type: 'runtime_metadata',
+      source: 'initialization',
+      model: 'actual-model[1M]',
+    },
+    {
+      type: 'runtime_metadata',
+      source: 'provider-response',
+      model: 'actual-model',
+    },
+  ])
+    f.store.observe(f.profile, context, {
+      ...context,
+      generation: 2,
+      ...event,
+    } as NormalizedExecutorEvent)
+  expect(f.store.view(f.profile).nativeCapabilities.search.status).toBe(
+    'available',
+  )
+})
+it('verifies native images in the managed generated directory without admitting other runtime files', async () => {
+  const f = fixture()
+  metadata(f)
+  const { mkdirSync } = await import('node:fs')
+  const generated = join(f.root, 'runtime', 'codex', 'generated_images')
+  mkdirSync(generated, { recursive: true })
+  const bytes = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==',
+    'base64',
+  )
+  writeFileSync(join(generated, 'native.png'), bytes)
+  const context = {
+    ...f.context,
+    cwd: join(f.root, 'workspace'),
+    nativeImageRoot: generated,
+  }
+  mkdirSync(context.cwd)
+  const event = {
+    ...context,
+    generation: 1,
+    type: 'tool_finished',
+    id: 'native',
+    status: 'completed',
+    evidence: {
+      kind: 'image-generation',
+      action: 'generate',
+      success: true,
+      artifactPath: join(generated, 'native.png'),
+    },
+  } as NormalizedExecutorEvent
+  f.store.observe(f.profile, context, event)
+  expect(
+    f.store.view(f.profile).nativeCapabilities.imageGeneration.status,
+  ).toBe('available')
+  writeFileSync(join(f.root, 'runtime', 'codex', 'secret.png'), bytes)
+  f.store.observe(f.profile, context, {
+    ...event,
+    evidence: {
+      kind: 'image-generation',
+      action: 'generate',
+      success: true,
+      artifactPath: join(f.root, 'runtime', 'codex', 'secret.png'),
+    },
+  } as NormalizedExecutorEvent)
+  expect(
+    f.store.view(f.profile).nativeCapabilities.imageGeneration.status,
+  ).not.toBe('available')
+})
