@@ -77,6 +77,8 @@ export {
 
 export type {
   ExecutorConfig,
+  ExecutorModelCatalog,
+  ExecutorModelCandidate,
   ExecutorProfile,
   ExecutorProbe,
   ExecutorCapabilities,

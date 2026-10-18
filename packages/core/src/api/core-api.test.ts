@@ -76,6 +76,7 @@ const EXPECTED_OPERATIONS = [
   'environment.install',
   'executors.configure',
   'executors.list',
+  'executors.models',
   'executors.probe',
   'files.list',
   'files.read',

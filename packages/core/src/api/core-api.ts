@@ -149,6 +149,7 @@ import type { DelegationProjection } from '../harness/delegation/events'
 import { ExecutorRegistry } from '../harness/delegation/registry'
 import { DelegationService } from '../harness/delegation/service'
 import { ExecutorRuntimeService } from '../harness/delegation/runtime'
+import { ExecutorModelCatalogService } from '../harness/delegation/models'
 import { nativeGeneratedImageRoot } from '../harness/delegation/image-proof'
 import { ClaudeExecutorAdapter } from '../harness/delegation/adapters/claude'
 import { CodexExecutorAdapter } from '../harness/delegation/adapters/codex'
@@ -802,6 +803,13 @@ export class CoreApi {
     })
     this.delegations = this.delegationService
     this.executors = new CoreExecutorService({
+      modelCatalog: new ExecutorModelCatalogService({
+        root: this.paths.delegationsRoot,
+        runtime: executorRuntime,
+        processes: executorProcesses,
+        onPrepared: (profile, runtime) =>
+          this.executorFacts.bind(profile, runtime.environment),
+      }),
       facts: this.executorFacts,
       store: this.executorConfig,
       registry: this.executorRegistry,
@@ -1170,6 +1178,7 @@ export class CoreApi {
 
   close(): Promise<void> {
     this.closePromise ??= (async () => {
+      await this.executors.close()
       this.terminalService.closeAll()
       this.onboardingService.dispose()
       for (const unsubscribe of this.agentIndexSubscriptions) unsubscribe()

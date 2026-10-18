@@ -3,18 +3,25 @@ import { createApp, h, nextTick, type App } from 'vue'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import ExecutorsSection from './ExecutorsSection.vue'
 import { createSettingsHeader, SETTINGS_HEADER_KEY } from './settingsHeader'
-const { listExecutors, configureExecutors, probeExecutor, openExternal } =
-  vi.hoisted(() => ({
-    listExecutors: vi.fn(),
-    configureExecutors: vi.fn(),
-    probeExecutor: vi.fn(),
-    openExternal: vi.fn(),
-  }))
+const {
+  listExecutors,
+  configureExecutors,
+  probeExecutor,
+  listExecutorModels,
+  openExternal,
+} = vi.hoisted(() => ({
+  listExecutors: vi.fn(),
+  configureExecutors: vi.fn(),
+  probeExecutor: vi.fn(),
+  listExecutorModels: vi.fn(),
+  openExternal: vi.fn(),
+}))
 vi.mock('../../api/backend', () => ({ openExternal }))
 vi.mock('../../api/delegations', () => ({
   listExecutors,
   configureExecutors,
   probeExecutor,
+  listExecutorModels,
 }))
 function payload() {
   const profiles = ['claude-code', 'codex', 'claude-code'].map(
@@ -96,6 +103,14 @@ beforeEach(() => {
     configurable: true,
     value: async () => {},
   })
+  listExecutorModels.mockImplementation(async ({ profileId }) => ({
+    profileId,
+    models: [{ id: 'discovered-model', name: 'Discovered', source: 'cli' }],
+    configuredModel: 'configured',
+    provider: 'fixture',
+    checkedAt: 1000,
+    diagnostic: null,
+  }))
   listExecutors.mockResolvedValue(payload())
   configureExecutors.mockImplementation(async (input) => {
     const config = { ...input.config, revision: input.expectedRevision + 1 }
@@ -130,9 +145,7 @@ it('renders exactly local and two vendor rows, minimal controls and truthful loc
   expect(root.querySelectorAll('[data-executor-profile]')).toHaveLength(1)
   expect(root.querySelectorAll('input')).toHaveLength(0)
   expect(root.textContent).toContain('本机登录配置可读')
-  expect(root.textContent).not.toMatch(
-    /已登录|可直接派工|调度配额|默认模型|认证方式/,
-  )
+  expect(root.textContent).not.toMatch(/已登录|可直接派工|调度配额|认证方式/)
 })
 it('edits, clears and restores independent specialty defaults without changing hidden model configuration', async () => {
   await mount()
@@ -153,7 +166,7 @@ it('edits, clears and restores independent specialty defaults without changing h
   expect(configureExecutors.mock.calls[0]![0].config.profiles[0]).toMatchObject(
     { specialties: ['接口设计', '定位故障'], defaultModel: 'kept-model-0' },
   )
-  expect(row('claude-code').textContent).toContain('执行器就绪')
+  expect(row('claude-code').textContent).toContain('已停用')
   expect(row('claude-code').textContent).toContain('本机登录配置可读')
   input.value = ''
   input.dispatchEvent(new Event('input', { bubbles: true }))
@@ -291,7 +304,7 @@ it('reads and probes saved profiles through the real API, shows loading and keep
   await settle()
   expect(listExecutors).toHaveBeenCalledTimes(2)
   expect(probeExecutor).toHaveBeenCalledTimes(3)
-  expect(root.textContent).toContain('检测中')
+  expect(action('detect-executors').label).toContain('检测中')
   expect(action('save-executors').disabled).toBe(true)
   // Resolve all requests via a fresh implementation in other tests; teardown must fence these pending results.
   app!.unmount()
@@ -455,4 +468,68 @@ it('does not attach another revision runtime facts after saving a specialty draf
   await settle()
   expect(action('save-executors').disabled).toBe(true)
   expect(root.textContent).toContain('配置已在其他位置更新')
+})
+
+it('uses light cards, a local introduction and a persistent custom model picker without rewriting the reported model', async () => {
+  await mount()
+  expect(row('local').textContent).toContain('在主会话允许的工具与权限范围')
+  expect(root.querySelectorAll('.ds-settings-card')).toHaveLength(3)
+  expect(
+    root.querySelector(
+      '[data-native-capability="imageGeneration"][data-status="unsupported"]',
+    ),
+  ).toBeNull()
+  const choice = row('claude-code').querySelector<HTMLButtonElement>(
+    '[data-default-model]',
+  )!
+  expect(choice).toBeTruthy()
+  choice.click()
+  await settle()
+  document
+    .querySelector<HTMLButtonElement>('[data-value="__add_custom_model__"]')!
+    .click()
+  await settle()
+  const input = row('claude-code').querySelector<HTMLInputElement>(
+    '[data-custom-model-input]',
+  )!
+  input.value = 'gateway/team-coder'
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
+  row('claude-code')
+    .querySelector<HTMLButtonElement>('[data-add-custom-model]')!
+    .click()
+  await settle()
+  await action('save-executors').onClick!()
+  await settle()
+  expect(configureExecutors.mock.calls[0]![0].config.profiles[0]).toMatchObject(
+    {
+      defaultModel: 'gateway/team-coder',
+      customModels: ['gateway/team-coder'],
+    },
+  )
+  expect(
+    row('claude-code').querySelector('[data-reported-model]')!.textContent,
+  ).toContain('未知')
+})
+it('refreshes model candidates independently and preserves unsaved specialty and model drafts', async () => {
+  await mount()
+  row('codex').querySelector<HTMLButtonElement>('[data-default-model]')!.click()
+  await settle()
+  document
+    .querySelector<HTMLButtonElement>('[data-value="discovered-model"]')!
+    .click()
+  await settle()
+  await row('codex')
+    .querySelector<HTMLButtonElement>('[data-refresh-models]')!
+    .click()
+  await settle()
+  await action('save-executors').onClick!()
+  await settle()
+  expect(
+    configureExecutors.mock.calls[0]![0].config.profiles[1].defaultModel,
+  ).toBe('discovered-model')
+  expect(listExecutorModels).toHaveBeenCalledWith({
+    profileId: 'profile-1',
+    refresh: true,
+  })
 })

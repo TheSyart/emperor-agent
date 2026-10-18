@@ -207,7 +207,12 @@ export class ExecutorFactsStore {
         environment.ANTHROPIC_BASE_URL ??
         environment.OPENAI_BASE_URL ??
         'native',
-      model: profile.defaultModel ?? environment.ANTHROPIC_MODEL ?? null,
+      model:
+        profile.defaultModel ??
+        environment.ANTHROPIC_MODEL ??
+        environment.EMPEROR_EXECUTOR_MODEL ??
+        null,
+      localConfig: environment.EMPEROR_EXECUTOR_CONFIG_FINGERPRINT ?? null,
     })
     this.identities.set(key(profile), identity)
     if (runId && !this.runs.has(runId))
@@ -215,14 +220,20 @@ export class ExecutorFactsStore {
     const row = this.rows[key(profile)]
     if (row && row.identity === identity)
       row.facts.configuredModel =
-        profile.defaultModel ?? environment.ANTHROPIC_MODEL ?? null
+        profile.defaultModel ??
+        environment.ANTHROPIC_MODEL ??
+        environment.EMPEROR_EXECUTOR_MODEL ??
+        null
     if (!row) {
       const prior = Object.values(this.rows)
           .filter((r) => r.profileId === profile.id)
           .at(-1),
         facts = empty(profile)
       facts.configuredModel =
-        profile.defaultModel ?? environment.ANTHROPIC_MODEL ?? null
+        profile.defaultModel ??
+        environment.ANTHROPIC_MODEL ??
+        environment.EMPEROR_EXECUTOR_MODEL ??
+        null
       if (prior)
         for (const kind of ['search', 'imageGeneration'] as const)
           if (

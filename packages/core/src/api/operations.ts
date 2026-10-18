@@ -805,6 +805,17 @@ function operation<Schema extends AnyArgsSchema, Result>(
 
 export const CORE_OPERATION_REGISTRY = {
   'executors.list': operation(z.tuple([]), (api) => api.executors.list()),
+  'executors.models': operation(
+    z.tuple([
+      z
+        .object({
+          profileId: z.string().min(1).max(64),
+          refresh: z.boolean().optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.executors.models(input),
+  ),
   'executors.probe': operation(
     z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),
     (api, [input]) => api.executors.probe(input),

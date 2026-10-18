@@ -42,3 +42,5 @@ scenario receipt 分别记录真实父调用、两个后端的身份映射、固
 公共入口集中在 `api/operations.ts` 的严格 schema；renderer 只调用已有通用 IPC。不要添加任意 argv/env/owner 的启动接口，也不要让子代理控制宿主验收或 Git 应用。验证命令是单独的人工授权 criteria，不是原生启动参数。
 
 当前桌面主进程使用 `LocalSecretStorage`，密钥在状态目录 `secret-storage/key`，不导入 Electron safeStorage。packaged smoke 必须真实验证本地密钥、凭据库重载、主密码 KDF 和 macOS 浏览器配对重载，并在 `operations.secretStorage` 保存结果。不能只删除原钥匙串检查而省略存储验收。
+
+模型列表由 `ExecutorModelCatalogService` 经实际隔离运行时发现，Codex 的配置导入和 Claude 的模型/别名策略在 `local-model-config.ts`、`runtime.ts` 维护。新增提供方兼容须同时验证发现与执行一致，覆盖刷新失败保留缓存、认证/提供方变化隔离、下拉草稿及默认模型的修订冲突。候选 API 只执行初始化与控制查询，不发送推理提示；不得由返回目录推断原生工具可用。

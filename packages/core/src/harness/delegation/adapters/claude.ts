@@ -11,6 +11,9 @@ import {
   type SDKUserMessage,
   type PermissionResult,
 } from '@anthropic-ai/claude-agent-sdk'
+import { readFileSync, existsSync } from 'node:fs'
+import { claudeModelSettings } from '../local-model-config'
+import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import {
@@ -493,6 +496,17 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
         allowedTools: [],
         disallowedTools: forbidden,
         settings: {
+          ...(input.environment.CLAUDE_CONFIG_DIR &&
+          existsSync(join(input.environment.CLAUDE_CONFIG_DIR, 'settings.json'))
+            ? claudeModelSettings(
+                JSON.parse(
+                  readFileSync(
+                    join(input.environment.CLAUDE_CONFIG_DIR, 'settings.json'),
+                    'utf8',
+                  ),
+                ),
+              )
+            : {}),
           enabledPlugins: {
             'agents-md@builtin': false,
             'telemetry@builtin': false,

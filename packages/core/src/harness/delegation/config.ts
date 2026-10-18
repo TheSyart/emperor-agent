@@ -15,6 +15,23 @@ const profile = z
       .min(1)
       .refine((p) => isAbsolute(p) || p === 'claude' || p === 'codex'),
     expectedVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+    customModels: z
+      .array(
+        z
+          .string()
+          .trim()
+          .min(1)
+          .max(256)
+          .refine(
+            (s) =>
+              ![...s].some(
+                (c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127,
+              ),
+          ),
+      )
+      .max(64)
+      .transform((xs) => [...new Set(xs)])
+      .optional(),
     defaultModel: z.string().min(1).max(256).optional(),
     specialties: z
       .array(

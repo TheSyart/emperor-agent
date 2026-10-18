@@ -1,10 +1,12 @@
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { DelegationError, type ExecutorProfile } from './types'
 import { safeDelegationKey } from './fold'
 import { durableReplaceSync } from '../../store/persistence'
 import { executorEnvironment } from './environment'
+import { inheritCodexModels, claudeModelSettings } from './local-model-config'
 export interface ExecutorCredential {
   apiKey: string
   baseUrl?: string
@@ -82,6 +84,12 @@ export class ExecutorRuntimeService {
       TMP: tempRoot,
       TEMP: tempRoot,
     })
+    // These are host-generated, per-child files; never retain a prior provider after configuration changes.
+    for (const path of [
+      join(environment.CODEX_HOME!, 'config.toml'),
+      join(environment.CLAUDE_CONFIG_DIR!, 'settings.json'),
+    ])
+      if (existsSync(path)) unlinkSync(path)
     if (profile.authRef.kind === 'model-route') {
       if (!profile.authRef.routeId || !this.options.resolveRoute)
         throw new DelegationError(
@@ -104,21 +112,31 @@ export class ExecutorRuntimeService {
         if (credential.model) environment.ANTHROPIC_MODEL = credential.model
       } else {
         environment.OPENAI_API_KEY = credential.apiKey
-        if (credential.baseUrl) environment.OPENAI_BASE_URL = credential.baseUrl
+        {
+          environment.OPENAI_BASE_URL =
+            credential.baseUrl ?? 'https://api.openai.com/v1'
+          durableReplaceSync(
+            join(environment.CODEX_HOME!, 'config.toml'),
+            'model_provider = "emperor-route"\n[model_providers.emperor-route]\nname = "Emperor route"\nwire_api = "responses"\nrequires_openai_auth = false\nenv_key = "OPENAI_API_KEY"\nbase_url = ' +
+              JSON.stringify(environment.OPENAI_BASE_URL) +
+              '\n',
+          )
+        }
       }
     } else if (profile.backend === 'claude-code') {
       const home = this.options.home ?? homedir(),
         sourceDirectory = ambient.CLAUDE_CONFIG_DIR || join(home, '.claude'),
         settings = join(sourceDirectory, 'settings.json')
-      let configured: Record<string, unknown> = {}
+      let configured: Record<string, unknown> = {},
+        modelSettings: Record<string, unknown> = {}
       if (existsSync(settings)) {
         try {
-          configured =
-            (
-              JSON.parse(readFileSync(settings, 'utf8')) as {
-                env?: Record<string, unknown>
-              }
-            ).env ?? {}
+          const source = JSON.parse(readFileSync(settings, 'utf8')) as Record<
+            string,
+            unknown
+          >
+          configured = (source.env as Record<string, unknown>) ?? {}
+          modelSettings = claudeModelSettings(source)
         } catch {
           throw new DelegationError(
             'AUTH_REQUIRED',
@@ -131,8 +149,10 @@ export class ExecutorRuntimeService {
         'ANTHROPIC_AUTH_TOKEN',
         'ANTHROPIC_BASE_URL',
         'ANTHROPIC_MODEL',
+        'ANTHROPIC_DEFAULT_MODEL',
         'CLAUDE_CODE_OAUTH_TOKEN',
-        ...Object.keys(configured).filter((k) =>
+        'ANTHROPIC_CUSTOM_MODEL_OPTION',
+        ...[...Object.keys(configured), ...Object.keys(ambient)].filter((k) =>
           /^ANTHROPIC_DEFAULT_[A-Z0-9_]+_MODEL(?:_NAME)?$/.test(k),
         ),
       ])
@@ -140,6 +160,30 @@ export class ExecutorRuntimeService {
         const value = ambient[key] ?? configured[key]
         if (typeof value === 'string' && value) environment[key] = value
       }
+      const model =
+        profile.defaultModel ??
+        environment.ANTHROPIC_MODEL ??
+        (modelSettings.model as string | undefined) ??
+        environment.ANTHROPIC_DEFAULT_MODEL
+      if (model) environment.ANTHROPIC_MODEL = model
+      environment.EMPEROR_EXECUTOR_CONFIG_FINGERPRINT = createHash('sha256')
+        .update(
+          JSON.stringify({
+            modelSettings,
+            model,
+            mapping: Object.fromEntries(
+              Object.entries(environment).filter(([key]) =>
+                key.startsWith('ANTHROPIC_DEFAULT_'),
+              ),
+            ),
+          }),
+        )
+        .digest('hex')
+      if (Object.keys(modelSettings).length)
+        durableReplaceSync(
+          join(environment.CLAUDE_CONFIG_DIR!, 'settings.json'),
+          JSON.stringify(modelSettings),
+        )
       if (
         !environment.ANTHROPIC_API_KEY &&
         !environment.ANTHROPIC_AUTH_TOKEN &&
@@ -171,6 +215,17 @@ export class ExecutorRuntimeService {
           'managed Claude login has no resolvable credential',
         )
     } else {
+      const sourceDirectory =
+        ambient.CODEX_HOME || join(this.options.home ?? homedir(), '.codex')
+      const customProvider = inheritCodexModels(
+        sourceDirectory,
+        environment.CODEX_HOME!,
+        ambient,
+        environment,
+        credentialSecrets,
+      )
+      if (ambient.OPENAI_API_KEY)
+        environment.OPENAI_API_KEY = ambient.OPENAI_API_KEY
       const local = join(environment.CODEX_HOME!, 'auth.json')
       const path = existsSync(local)
         ? local
@@ -179,23 +234,29 @@ export class ExecutorRuntimeService {
               join(this.options.home ?? homedir(), '.codex'),
             'auth.json',
           )
-      if (!existsSync(path))
+      if (!existsSync(path) && !customProvider && !environment.OPENAI_API_KEY)
         throw new DelegationError(
           'AUTH_REQUIRED',
           'managed Codex login file is missing',
         )
       let auth: Record<string, unknown>
       try {
-        auth = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+        auth = existsSync(path)
+          ? (JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>)
+          : {}
       } catch {
         throw new DelegationError(
           'AUTH_REQUIRED',
           'managed Codex authentication file is invalid',
         )
       }
-      if (typeof auth.OPENAI_API_KEY === 'string' && auth.OPENAI_API_KEY) {
+      if (
+        !environment.OPENAI_API_KEY &&
+        typeof auth.OPENAI_API_KEY === 'string' &&
+        auth.OPENAI_API_KEY
+      ) {
         environment.OPENAI_API_KEY = auth.OPENAI_API_KEY
-      } else {
+      } else if (!customProvider && !environment.OPENAI_API_KEY) {
         const source = auth.tokens as Record<string, unknown> | undefined
         if (
           auth.auth_mode !== 'chatgpt' ||

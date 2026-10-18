@@ -1,12 +1,18 @@
 import { expect, it } from 'vitest'
-import { mkdirSync, writeFileSync, existsSync, symlinkSync } from 'node:fs'
+import {
+  mkdirSync,
+  writeFileSync,
+  existsSync,
+  symlinkSync,
+  readFileSync,
+} from 'node:fs'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { join } from 'node:path'
 import { ExecutorRuntimeService } from './runtime'
 import { delegationTestDirectory } from './testing'
 import { defaultExecutorConfig } from './config'
-import { readFileSync, statSync } from 'node:fs'
+import { statSync } from 'node:fs'
 it('runs an env-node CLI from a GUI PATH while keeping the isolated HOME and auth allowlist', async () => {
   const f = delegationTestDirectory()
   try {
@@ -220,4 +226,204 @@ it('model-route credential resolution does not silently use ambient login', asyn
     ),
   ).rejects.toThrow('AUTH_REQUIRED')
   f.cleanup()
+})
+
+it('inherits the selected Codex model/provider without importing hooks, MCP, permissions or credential commands', async () => {
+  const f = delegationTestDirectory(),
+    home = join(f.root, 'host-home')
+  mkdirSync(join(home, '.codex'), { recursive: true })
+  writeFileSync(
+    join(home, '.codex', 'config.toml'),
+    `model = "gateway-coder"\nmodel_provider = "gateway"\nnotify = ["do-not-run"]\napproval_policy = "never"\n[model_providers.gateway]\nname = "Team gateway"\nbase_url = "https://gateway.example/v1"\nwire_api = "responses"\nenv_key = "TEAM_TOKEN"\nrequires_openai_auth = false\n[mcp_servers.bad]\ncommand = "do-not-run"\n`,
+  )
+  try {
+    const service = new ExecutorRuntimeService({
+      root: f.root,
+      home,
+      environment: { PATH: '/fixture', TEAM_TOKEN: 'fixture-private-token' },
+    })
+    const runtime = await service.prepare(
+      defaultExecutorConfig().profiles[1]!,
+      'dlg-provider-config',
+    )
+    const { parse } = await import('smol-toml')
+    const config = parse(
+      readFileSync(
+        join(runtime.environment.CODEX_HOME!, 'config.toml'),
+        'utf8',
+      ),
+    ) as any
+    expect(config).toMatchObject({
+      model: 'gateway-coder',
+      model_provider: 'gateway',
+      model_providers: {
+        gateway: {
+          base_url: 'https://gateway.example/v1',
+          wire_api: 'responses',
+          requires_openai_auth: false,
+        },
+      },
+    })
+    expect(runtime.environment[config.model_providers.gateway.env_key]).toBe(
+      'fixture-private-token',
+    )
+    expect(runtime.secretValues).toContain('fixture-private-token')
+    expect(config.notify).toBeUndefined()
+    expect(config.approval_policy).toBeUndefined()
+    expect(config.mcp_servers).toBeUndefined()
+    expect(readFileSync(join(home, '.codex', 'config.toml'), 'utf8')).toContain(
+      'do-not-run',
+    )
+  } finally {
+    f.cleanup()
+  }
+})
+it('inherits Claude model selections and restrictions, while explicit profile model wins and hooks stay excluded', async () => {
+  const f = delegationTestDirectory(),
+    home = join(f.root, 'host-home')
+  mkdirSync(join(home, '.claude'), { recursive: true })
+  writeFileSync(
+    join(home, '.claude', 'settings.json'),
+    JSON.stringify({
+      model: 'team-coder',
+      availableModels: ['team-coder', 'sonnet'],
+      hooks: { bad: ['do-not-run'] },
+      env: {
+        ANTHROPIC_AUTH_TOKEN: 'fixture-key',
+        ANTHROPIC_BASE_URL: 'https://gateway.example',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'team-coder',
+      },
+    }),
+  )
+  try {
+    const service = new ExecutorRuntimeService({
+      root: f.root,
+      home,
+      environment: { PATH: '/fixture' },
+    })
+    const runtime = await service.prepare(
+      defaultExecutorConfig().profiles[0]!,
+      'dlg-claude-model',
+    )
+    expect(runtime.environment.ANTHROPIC_MODEL).toBe('team-coder')
+    expect(runtime.environment.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe(
+      'team-coder',
+    )
+    const config = JSON.parse(
+      readFileSync(
+        join(runtime.environment.CLAUDE_CONFIG_DIR!, 'settings.json'),
+        'utf8',
+      ),
+    )
+    expect(config).toEqual({
+      model: 'team-coder',
+      availableModels: ['team-coder', 'sonnet'],
+    })
+    const overridden = await service.prepare(
+      {
+        ...defaultExecutorConfig().profiles[0]!,
+        defaultModel: 'explicit-coder',
+      },
+      'dlg-claude-explicit',
+    )
+    expect(overridden.environment.ANTHROPIC_MODEL).toBe('explicit-coder')
+  } finally {
+    f.cleanup()
+  }
+})
+it('keeps an environment-configured Codex endpoint paired with its API key', async () => {
+  const f = delegationTestDirectory()
+  try {
+    const runtime = await new ExecutorRuntimeService({
+      root: f.root,
+      home: join(f.root, 'empty'),
+      environment: {
+        PATH: '/fixture',
+        OPENAI_API_KEY: 'fixture-gateway-key',
+        OPENAI_BASE_URL: 'https://gateway.example/v1',
+      },
+    }).prepare(defaultExecutorConfig().profiles[1]!, 'dlg-env-provider')
+    expect(runtime.environment.OPENAI_BASE_URL).toBe(
+      'https://gateway.example/v1',
+    )
+    const { parse } = await import('smol-toml')
+    const config = parse(
+      readFileSync(
+        join(runtime.environment.CODEX_HOME!, 'config.toml'),
+        'utf8',
+      ),
+    ) as any
+    expect(config.model_providers[config.model_provider].base_url).toBe(
+      'https://gateway.example/v1',
+    )
+  } finally {
+    f.cleanup()
+  }
+})
+it('preserves Claude model picker and provider model ID mappings without unrelated settings', async () => {
+  const f = delegationTestDirectory(),
+    home = join(f.root, 'home')
+  mkdirSync(join(home, '.claude'), { recursive: true })
+  const fields = {
+    modelOverrides: { 'claude-sonnet': 'gateway/coder' },
+    modelPicker: {
+      replaceBuiltInOptions: true,
+      options: [
+        {
+          model: 'gateway/coder',
+          label: 'Team Coder',
+          behavesAs: 'claude-sonnet',
+        },
+      ],
+    },
+  }
+  writeFileSync(
+    join(home, '.claude', 'settings.json'),
+    JSON.stringify({
+      ...fields,
+      hooks: { bad: 'do-not-import' },
+      env: { ANTHROPIC_API_KEY: 'fixture-key' },
+    }),
+  )
+  try {
+    const runtime = await new ExecutorRuntimeService({
+      root: f.root,
+      home,
+      environment: { PATH: '/fixture' },
+    }).prepare(defaultExecutorConfig().profiles[0]!, 'dlg-picker')
+    expect(
+      JSON.parse(
+        readFileSync(
+          join(runtime.environment.CLAUDE_CONFIG_DIR!, 'settings.json'),
+          'utf8',
+        ),
+      ),
+    ).toEqual(fields)
+  } finally {
+    f.cleanup()
+  }
+})
+
+it('inherits Claude model alias mappings from the process environment', async () => {
+  const f = delegationTestDirectory()
+  try {
+    const runtime = await new ExecutorRuntimeService({
+      root: f.root,
+      home: join(f.root, 'empty'),
+      environment: {
+        PATH: '/fixture',
+        ANTHROPIC_API_KEY: 'fixture-key',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'team-coder',
+        ANTHROPIC_CUSTOM_MODEL_OPTION: 'team-custom',
+      },
+    }).prepare(defaultExecutorConfig().profiles[0]!, 'dlg-env-aliases')
+    expect(runtime.environment.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe(
+      'team-coder',
+    )
+    expect(runtime.environment.ANTHROPIC_CUSTOM_MODEL_OPTION).toBe(
+      'team-custom',
+    )
+  } finally {
+    f.cleanup()
+  }
 })

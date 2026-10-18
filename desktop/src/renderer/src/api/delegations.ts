@@ -1,5 +1,8 @@
 import type { CoreOperationArgs, CoreOperationResult } from '@emperor/core/api'
 import { invokeCore } from './backend'
+export const listExecutorModels = (
+  input: CoreOperationArgs<'executors.models'>[0],
+) => invokeCore('executors.models', input)
 export const listExecutors = () => invokeCore('executors.list')
 export const configureExecutors = (
   input: CoreOperationArgs<'executors.configure'>[0],

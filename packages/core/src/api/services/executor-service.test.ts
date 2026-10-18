@@ -177,3 +177,37 @@ it('resolves model credential references from the private state config rather th
     await api.close()
   }
 })
+it('persists bounded custom models with the executor revision and exposes model discovery without claiming tool availability', async () => {
+  const { api } = await makeApi()
+  try {
+    const config = api.executorConfig.read()
+    config.profiles[0]!.customModels = ['gateway/team-coder', 'gateway/backup']
+    const updated = await api.executors.configure({
+      expectedRevision: config.revision,
+      config,
+    })
+    expect(api.executorConfig.read().profiles[0]!.customModels).toEqual([
+      'gateway/team-coder',
+      'gateway/backup',
+    ])
+    expect(typeof api.executors.models).toBe('function')
+    const result = await invokeCoreOperation(api, 'executors.models', [
+      { profileId: updated.profiles[0]!.id },
+    ])
+    expect(result).toMatchObject({ profileId: updated.profiles[0]!.id })
+    expect(result.models).toContainEqual(
+      expect.objectContaining({ id: 'gateway/team-coder', source: 'custom' }),
+    )
+    expect(
+      api.executors.list().profiles[0]!.runtime.nativeCapabilities.search
+        .status,
+    ).not.toBe('available')
+    await expect(
+      invokeCoreOperation(api, 'executors.models', [
+        { profileId: updated.profiles[0]!.id, cwd: '/injected' },
+      ]),
+    ).rejects.toThrow()
+  } finally {
+    await api.close()
+  }
+})

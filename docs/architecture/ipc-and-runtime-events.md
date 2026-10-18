@@ -220,11 +220,13 @@ Payload 应有界，不包含密钥、任意绝对路径或未经筛选的工具
 
 ## 外部执行器操作与投影
 
-严格受控操作为 executors.list/probe/configure 和 delegations.get/history/send/interrupt/recover/collect/receipt/validate/integrate/close。归档根可读不可写，跨根拒绝。external-agent task 每轮一行；created/run_changed/output/interaction/receipt 五种 delegation 投影由 owning session 的日志重放，输出合并不改变原始分页偏移。[状态约定](external-agent-delegation.md)。
+严格受控操作为 executors.list/probe/models/configure 和 delegations.get/history/send/interrupt/recover/collect/receipt/validate/integrate/close。归档根可读不可写，跨根拒绝。external-agent task 每轮一行；created/run_changed/output/interaction/receipt 五种 delegation 投影由 owning session 的日志重放，输出合并不改变原始分页偏移。[状态约定](external-agent-delegation.md)。
 
 `agents.list({ rootSessionIds })` 提供统一子智能体树的浏览安全 DTO；`AgentView` 和 `agentTitle` / `agentSourceLabel` / `agentPhaseLabel` 从 `@emperor/core/api` 与 `@emperor/core/runtime-contract` 导出。`agent_tree_changed { rootSessionId, revision }` 仅通知树拓扑或状态变化，renderer 的共享缓存按根失效；聊天文字输出不使树全量重读。原有 `sessions.children` 保持兼容。
 
 `delegations.history` 是公开对话的有界游标分页接口，默认 tail 200、最多 500 项，保留稳定条目及 run/tool 身份；before 和 after 互斥，跨委派游标被拒绝。私有 native transcript 不经此接口返回。`references.resolve` 的可选 delegationId 把相对引用限定到该根拥有的委派 cwd，既有路径与图片 capability 检查继续生效。
+
+`executors.models({ profileId, refresh? })` 读取指定执行器的模型候选，返回 `models`、`configuredModel`、`provider`、`checkedAt` 与诊断。候选来源为 CLI、本机配置、缓存、内置参考或自定义；不是推理权限或工具可用证明。刷新不会提交任务或修改选择。`executors.configure` 同时保存可选 `customModels` 与默认模型，沿用 `expectedRevision`，冲突保留草稿。
 
 `executors.list` 的每个 profile 摘要增加有效 `specialties` 与 `runtime: ExecutorRuntimeFacts`，设置和父级派工读取同一 Core 存储。`executors.configure` 接受可选 `specialties`，缺省与显式空数组含义不同。归一化 `runtime_metadata` 记录带来源的模型及工具清单；`tool_finished.evidence` 仅保留原生工具类型、结果状态、受控图片引用和去掉认证参数的来源 URL。额外元数据不作为对话正文，也不改变旧日志条目的分页身份。
 

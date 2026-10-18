@@ -5,6 +5,7 @@ import {
 import type { ExecutorRegistry } from '../../harness/delegation/registry'
 import type { ExecutorFactsStore } from '../../harness/delegation/facts'
 import { executorSpecialties } from '../../harness/delegation/specialties'
+import type { ExecutorModelCatalogService } from '../../harness/delegation/models'
 import {
   DelegationError,
   type ExecutorProfile,
@@ -15,11 +16,26 @@ export class CoreExecutorService {
       store: ExecutorConfigStore
       registry: ExecutorRegistry
       facts: ExecutorFactsStore
+      modelCatalog: ExecutorModelCatalogService
       assertConfigure: () => void
       refresh: () => Promise<void>
       checkAuth?: (profile: ExecutorProfile) => Promise<void>
     },
   ) {}
+  close() {
+    return this.options.modelCatalog.close()
+  }
+  async models(input: { profileId: string; refresh?: boolean }) {
+    const profile = this.options.store
+      .read()
+      .profiles.find((p) => p.id === input.profileId)
+    if (!profile)
+      throw new DelegationError(
+        'EXECUTOR_NOT_FOUND',
+        'unknown executor profile',
+      )
+    return this.options.modelCatalog.list(profile, input.refresh)
+  }
   list() {
     try {
       const config = this.options.store.read()

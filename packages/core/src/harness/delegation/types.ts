@@ -36,6 +36,7 @@ export interface ExecutorProfile {
   enabled: boolean
   executablePath: string
   expectedVersion: string
+  customModels?: string[]
   defaultModel?: string
   specialties?: string[]
   authRef:
@@ -387,4 +388,18 @@ export class DelegationError extends Error {
     ]
     return { code, message, action }
   }
+}
+
+export interface ExecutorModelCandidate {
+  id: string
+  name: string
+  source: 'cli' | 'configuration' | 'cache' | 'builtin' | 'custom'
+}
+export interface ExecutorModelCatalog {
+  profileId: string
+  models: ExecutorModelCandidate[]
+  configuredModel: string | null
+  provider: string | null
+  checkedAt: number | null
+  diagnostic: string | null
 }
