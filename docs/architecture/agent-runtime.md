@@ -74,7 +74,7 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 
 ## 交互阻塞在工具调用内
 
-`ask_user_question`、`exit_plan_mode` 的审阅和一次性提权审批都在工具调用内部等待，没有“暂停 turn 再恢复”的机制。`PendingInteractions` 把等待中的请求投影到 `control.pending`，renderer 通过 `control.answerInteraction`、`control.approvePlan`、`control.commentPlan` 或 `control.cancelInteraction` 回答。turn 被中止时等待自动以 `cancelled` 结束；应答通道不可用时以 `unavailable` 结束（fail closed）。
+`ask_user_question`、`exit_plan_mode` 的审阅和一次性提权审批都在工具调用内部等待，没有“暂停 turn 再恢复”的机制。`PendingInteractions` 把等待中的请求投影到 `control.pending`，renderer 通过 `control.answerInteraction`、`control.approvePlan`、`control.commentPlan` 或 `control.cancelInteraction` 回答。turn 被中止时等待自动以 `cancelled` 结束；应答通道不可用时以 `unavailable` 结束（fail closed）。用户关闭 Plan 审阅（改为自己输入）时，`exit_plan_mode` 返回成功结果并声明结束本 turn，`turn/end` 原因为 `plan-dismissed`，不再为等待用户多请求一次模型。
 
 ## 压缩
 

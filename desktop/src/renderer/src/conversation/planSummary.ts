@@ -12,7 +12,7 @@ export const EXIT_PLAN_MODE_TOOL = 'exit_plan_mode'
  * - executing: approved, todos in progress.
  * - done: approved and every todo completed.
  * - revising: the user asked to keep planning.
- * - stopped: interrupted, cancelled, unavailable or failed.
+ * - stopped: interrupted, dismissed, cancelled, unavailable or failed.
  */
 export type PlanSummaryStatus =
   'reviewing' | 'approved' | 'executing' | 'done' | 'revising' | 'stopped'
@@ -84,6 +84,7 @@ function reviewStatus(
   if (data.status === 'running') return 'reviewing'
   if (data.status === 'interrupted') return 'stopped'
   if (resultMeta(data)?.approved === true) return 'approved'
+  if (resultMeta(data)?.dismissed === true) return 'stopped'
   if (data.result?.error?.code === 'PLAN_REJECTED') return 'revising'
   if (data.result?.isError === true) return 'stopped'
   return 'approved'

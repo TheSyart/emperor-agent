@@ -732,6 +732,21 @@ describe('messages and notices', () => {
   })
 })
 
+describe('turn footer', () => {
+  it('summarizes a turn the user ended by dismissing the plan review', () => {
+    const log = new LogBuilder()
+    log.user('u1', 'plan it')
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.message(1, 1, [{ type: 'text', text: 'Here is the plan.' }])
+    log.add('step/end', { turn: 1, step: 1 })
+    log.add('turn/end', { turn: 1, reason: { kind: 'plan-dismissed' } })
+    const { snapshot } = replay(log.events)
+    expect(describeNodes(snapshot).at(-1)).toBe('turnTail: turn 1 steps=1')
+    expectConverges(log)
+  })
+})
+
 describe('turn files', () => {
   const record = {
     turn: 1,

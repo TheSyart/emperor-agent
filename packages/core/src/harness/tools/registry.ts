@@ -26,6 +26,7 @@ import {
   type ToolDefinition,
   type ToolExecutionResult,
   type ToolRunContext,
+  type ToolTurnConclusion,
 } from './definition'
 
 export type PreToolDecision =
@@ -111,6 +112,7 @@ interface CallState {
   definition: ToolDefinition | undefined
   deferred: UserMessage[]
   concludes: boolean
+  conclusion?: ToolTurnConclusion
   bodyInvoked: boolean
 }
 
@@ -268,8 +270,9 @@ export class ToolRegistry {
         deferContext: (message: UserMessage) => {
           state.deferred.push(message)
         },
-        concludeTurn: () => {
+        concludeTurn: (reason?: ToolTurnConclusion) => {
           state.concludes = true
+          if (reason !== undefined) state.conclusion = reason
         },
       }
       this.states.set(context, state)
@@ -534,7 +537,12 @@ export class ToolRegistry {
         ...result,
         ...(contexts.length > 0 ? { additionalContexts: contexts } : {}),
         ...(state.concludes && !result.isError
-          ? { concludesTurn: true as const }
+          ? {
+              concludesTurn: true as const,
+              ...(state.conclusion === undefined
+                ? {}
+                : { turnConclusion: state.conclusion }),
+            }
           : {}),
       }
       try {

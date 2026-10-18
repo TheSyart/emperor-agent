@@ -478,6 +478,8 @@ export function planOutcome(data: ToolChatData): {
   if (data.status === 'interrupted') return { outcome: 'stopped' }
   const meta = metaOf(data)
   if (meta?.approved === true) return { outcome: 'approved' }
+  // Dismissed to reply: a successful, turn-ending result (older logs used PLAN_REVIEW_CANCELLED).
+  if (meta?.dismissed === true) return { outcome: 'cancelled' }
   const code = data.result?.error?.code
   const text = resultText(data)
   if (code === 'PLAN_REJECTED') {

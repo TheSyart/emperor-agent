@@ -102,7 +102,7 @@ type Phase =
 
 type StepEndReason = Extract<
   TurnEndReason,
-  { kind: 'completed' | 'max-tokens' }
+  { kind: 'completed' | 'max-tokens' | 'plan-dismissed' }
 >
 
 type PreparedStep =
@@ -627,7 +627,7 @@ export class Agent {
           block.type === 'tool-call',
       )
       if (toolCalls.length === 0) return { kind: 'completed' }
-      const { concluded } = await executeToolCalls(
+      const { concluded, conclusion } = await executeToolCalls(
         {
           agent: this,
           tools: this.deps.tools,
@@ -643,7 +643,8 @@ export class Agent {
         },
         toolCalls,
       )
-      return concluded ? { kind: 'completed' } : null
+      if (!concluded) return null
+      return { kind: conclusion ?? 'completed' }
     }
   }
 

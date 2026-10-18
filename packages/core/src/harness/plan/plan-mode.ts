@@ -6,7 +6,8 @@
  * Enter with `/plan [message]`, leave with `/plan off` or an approved
  * `exit_plan_mode`. A switch requested inside an open turn is queued and
  * lands as one `plan/mode` event at the next step boundary; the model is
- * told of user-initiated switches by a notice.
+ * told of user-initiated switches by a notice. Dismissing the review keeps
+ * plan mode and ends the turn (`turn/end` reason `plan-dismissed`).
  */
 
 import { z } from 'zod'
@@ -44,6 +45,10 @@ const EXIT_DESCRIPTION =
   'Send the COMPLETE plan as markdown, starting with a # heading that names it. ' +
   'The user may approve (carry out the plan from your next step) or keep ' +
   'planning — their feedback comes back in the tool result; revise and present again.'
+
+/** Tool result of a dismissed review (a success that ends the turn). */
+export const PLAN_DISMISSED_TEXT =
+  'The user dismissed the plan review to reply in their own words; plan mode remains active.'
 
 export type PlanReviewOutcome =
   | { kind: 'approved' }
@@ -236,10 +241,21 @@ export class PlanModeController {
               'PLAN_REJECTED',
             )
           case 'cancelled':
-            throw new ToolError(
-              'The user dismissed the plan review to speak instead; stay in plan mode, stop here, and wait for their message.',
-              'PLAN_REVIEW_CANCELLED',
-            )
+            // A turn abort cancels the review too: keep its failure (the
+            // registry reports it as aborted).
+            if (context.signal.aborted)
+              throw new ToolError(
+                'The plan review was cancelled with the turn.',
+                'PLAN_REVIEW_CANCELLED',
+              )
+            // The user took the turn back to say something the two options
+            // do not cover: end the turn here instead of spending another
+            // model request on waiting for them.
+            context.concludeTurn('plan-dismissed')
+            return {
+              content: PLAN_DISMISSED_TEXT,
+              meta: { approved: false, dismissed: true, title: title ?? null },
+            }
           case 'unavailable':
             throw new ToolError(
               'no review channel is available to review the plan; ask the user to switch the session mode instead',

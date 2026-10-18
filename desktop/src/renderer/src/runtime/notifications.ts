@@ -282,8 +282,14 @@ export function runtimeNoticeFromEvent(
     case 'assistant_done': {
       if (!owner) return null
       const reason = text(event.stop_reason)
-      // A stopped or crash-closed turn is not news; everything else is.
-      if (reason === 'aborted' || reason === 'interrupted') return null
+      // A stopped or crash-closed turn, or one the user ended by dismissing
+      // the plan review to reply, is not news; everything else is.
+      if (
+        reason === 'aborted' ||
+        reason === 'interrupted' ||
+        reason === 'plan-dismissed'
+      )
+        return null
       const turn = seq > 0 ? String(seq) : text(event.turn_id) || String(at)
       return {
         kind: 'turn',

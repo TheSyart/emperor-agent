@@ -302,6 +302,15 @@ describe('tool registry titles and summaries', () => {
         }),
       ).summary,
     ).toBe('Ship it · 继续规划')
+    // A dismissed review is a successful, turn-ending result, never an approval.
+    expect(
+      row(
+        tool('exit_plan_mode', plan, {
+          text: 'The user dismissed the plan review to reply in their own words; plan mode remains active.',
+          meta: { approved: false, dismissed: true },
+        }),
+      ).summary,
+    ).toBe('Ship it · 已取消')
   })
 
   it('names native continuation cards from their matched stable shared identity and preserves external behavior', () => {

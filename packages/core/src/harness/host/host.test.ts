@@ -313,6 +313,50 @@ describe('HarnessHost', () => {
     expect(host.controlPayload(entry.id).plan).toBe(false)
   })
 
+  it('ends the turn when the user dismisses the plan review, without another model request', async () => {
+    const { host, adapter, events } = await makeHost([
+      {
+        tools: [
+          {
+            id: 'p1',
+            name: 'exit_plan_mode',
+            args: { plan: '# Do the thing\n- step' },
+          },
+        ],
+      },
+      // Consumed only if the dismissal regresses to another model request.
+      { text: 'Waiting for your message.' },
+    ])
+    const entry = host.kept.sessionStore.create('t', { mode: 'chat' })
+    host.setPlanMode(entry.id, true)
+    const submitted = host.submit({ sessionId: entry.id, content: 'plan it' })
+    await waitFor(() => events.some((event) => event.event === 'plan_draft'))
+    const plan = events.find((event) => event.event === 'plan_draft')!
+      .interaction as { id: string }
+    host.cancelInteraction(plan.id)
+    await submitted
+    expect(adapter.requests).toHaveLength(1)
+    const log = host.sessionLog(entry.id)!
+    expect(log.lastOf('turn/end')?.data.reason).toEqual({
+      kind: 'plan-dismissed',
+    })
+    const result = log.lastOf('tool/result')!
+    expect(result.data.message.content[0]).toMatchObject({
+      isError: false,
+      content: [
+        {
+          type: 'text',
+          text: 'The user dismissed the plan review to reply in their own words; plan mode remains active.',
+        },
+      ],
+    })
+    expect(result.data.meta).toMatchObject({ approved: false, dismissed: true })
+    expect(host.controlPayload(entry.id).plan).toBe(true)
+    expect(
+      events.find((event) => event.event === 'assistant_done'),
+    ).toMatchObject({ stop_reason: 'plan-dismissed' })
+  })
+
   it('announces queued prompts entering and leaving the inbox', async () => {
     const { host, events } = await makeHost([{ hang: true }, { text: 'two' }])
     const entry = host.kept.sessionStore.create('t', { mode: 'chat' })

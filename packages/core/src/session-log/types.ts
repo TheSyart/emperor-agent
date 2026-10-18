@@ -64,6 +64,8 @@ export type TurnEndReason =
   | { kind: 'max-tokens' }
   /** Closed by crash repair: the process died inside this turn. */
   | { kind: 'interrupted' }
+  /** The user dismissed the plan review to reply; the turn ends without another request. */
+  | { kind: 'plan-dismissed' }
 
 export interface TodoItem {
   content: string

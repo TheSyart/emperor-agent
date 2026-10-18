@@ -148,6 +148,8 @@ function stopReasonOf(reason: TurnEndReason | undefined): SubagentStopReason {
       return 'refusal'
     case 'interrupted':
       return 'interrupted'
+    case 'plan-dismissed':
+      return 'completed'
     default:
       return 'completed'
   }

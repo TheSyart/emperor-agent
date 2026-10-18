@@ -50,7 +50,7 @@ EMPEROR_CONFIG_DIR=/absolute/private/state \
 - 请求正文、单条 NDJSON 和投影输出都有硬上限。超限或非法 UTF-8 / JSON 会关闭连接，防止无界缓冲。
 - JSON-RPC 请求 ID 的精确重试共享同一结果和副作用；同一 method 与 ID 若改用不同参数会被拒绝。终态 ledger 有界，不是永久幂等存储。
 - ACP 的工具状态没有 `cancelled` 枚举，因此 Emperor 的工具取消投影为 `failed`，并在 `_meta.emperor.terminalReason` 保留 `cancelled`。prompt 取消使用标准 `stopReason: "cancelled"`。
-- ACP 不能回答交互。turn 中出现问题、提权审批或 Plan 审阅时，adapter 立即取消该交互（对应工具调用得到 `cancelled` 结果），本次 prompt 最终返回 `stopReason: "refusal"`，并在 `_meta.emperor.interactionRequired` 与 `interactionId` 标记需要回到 Emperor 桌面处理。默认权限预设 `workspace-write` 下，workspace 外的写入因此无法在 ACP 中完成。
+- ACP 不能回答交互。turn 中出现问题、提权审批或 Plan 审阅时，adapter 立即取消该交互（问题与审批的工具调用得到 `cancelled` 结果，Plan 审阅按用户关闭审阅处理，本轮直接结束），本次 prompt 最终返回 `stopReason: "refusal"`，并在 `_meta.emperor.interactionRequired` 与 `interactionId` 标记需要回到 Emperor 桌面处理。默认权限预设 `workspace-write` 下，workspace 外的写入因此无法在 ACP 中完成。
 - 当前没有 ACP client 文件系统、terminal、权限请求或会话模式切换能力，也没有桌面设置页中的启用开关。
 
 ## 开发与验证
