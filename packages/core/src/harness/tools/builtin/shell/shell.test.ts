@@ -328,13 +328,53 @@ describe.skipIf(!posix)('bash tool', () => {
     )
   })
 
-  it('installs the order-105 prompt section', () => {
+  it('installs the order-105 prompt section without repeating the tool description', () => {
     const prompt = new SystemPromptAssembler()
     installShellPromptSection(prompt, { platform: 'linux' })
     const section = prompt.assemble().sections[0]!
     expect(section.name).toBe('tool:bash')
     expect(section.text).toContain('[exit code: N] marker on every bash result')
-    expect(section.text).toContain('`workdir`')
+    const tool = createShellTool(services('danger-full-access'), {
+      platform: 'linux',
+      jobs: {} as never,
+    })
+    // Each fact is stated once: the fresh-shell rule lives in the description.
+    const combined = `${tool.description}\n${section.text}`
+    expect(combined.split('fresh shell').length - 1).toBe(1)
+    expect(combined.split('job_output').length - 1).toBeLessThanOrEqual(1)
+  })
+
+  it('asks for description before command, in properties and required alike', () => {
+    const tool = createShellTool(services('danger-full-access'), {
+      platform: 'linux',
+    })
+    const parameters = tool.parameters as {
+      properties: Record<string, unknown>
+      required: string[]
+    }
+    expect(Object.keys(parameters.properties).slice(0, 2)).toEqual([
+      'description',
+      'command',
+    ])
+    expect(parameters.required.slice(0, 2)).toEqual(['description', 'command'])
+    expect(tool.description).toContain(
+      'Provide `description` before `command` in the arguments.',
+    )
+  })
+
+  it('tells the model to check the absolute path before deleting or moving', () => {
+    for (const platform of ['linux', 'win32'] as const) {
+      const tool = createShellTool(services('danger-full-access'), {
+        platform,
+      })
+      expect(tool.description).toContain(
+        'Before any delete or move, verify that the resolved absolute target path is the intended one',
+      )
+    }
+    const bash = createShellTool(services('danger-full-access'), {
+      platform: 'linux',
+    })
+    expect(bash.description).toContain('`${VAR:?}`')
   })
 
   it('names the tool pwsh on win32', () => {

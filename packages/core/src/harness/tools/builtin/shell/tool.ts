@@ -79,8 +79,7 @@ function shellArgv(platform: NodeJS.Platform, command: string): string[] {
 }
 
 export const SHELL_PROMPT_SECTION =
-  'Check the [exit code: N] marker on every {shell} result; investigate failures before moving on. ' +
-  'Each call runs in a fresh shell: pass `workdir` instead of using `cd`, and do not rely on variables or functions from earlier calls.'
+  'Check the [exit code: N] marker on every {shell} result; investigate failures before moving on.'
 
 /** Contribute the cross-call shell guidance (order 105). */
 export function installShellPromptSection(
@@ -103,33 +102,36 @@ function shellDescription(
     platform === 'win32'
       ? 'Execute a PowerShell command (`pwsh -NoProfile -Command`) and return its stdout/stderr. '
       : 'Execute a bash command (`bash -c`) and return its stdout/stderr. '
-  const backgroundText = background
-    ? 'Set `run_in_background: true` for long-running commands: the call returns a job id immediately; read its output with `job_output` and stop it with `job_kill`.'
-    : 'Background execution is not available; long-running commands must finish within the timeout.'
+  const unsetVariables =
+    platform === 'win32'
+      ? ''
+      : 'An unset variable expands to an empty string, so guard variables in such paths with `${VAR:?}`. '
   return (
     invocation +
-    'Each call runs in a fresh shell: no state (cwd, variables, functions) persists between calls — ' +
-    'pass `workdir` instead of using `cd`. Non-zero exits are reported as `[exit code: N]`. ' +
-    `Current harness environment facts are exposed through managed \`$${EMPEROR_ENV_PREFIX}*\` variables; inspect them when needed. ` +
-    'Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a bug in the command; do not retry another way. ' +
+    'Provide `description` before `command` in the arguments. ' +
+    'Each call runs in a fresh shell: no cwd, variables or functions persist between calls; pass `workdir` instead of using `cd`. ' +
+    'Non-zero exits are reported as `[exit code: N]`. ' +
+    'Before any delete or move, verify that the resolved absolute target path is the intended one; never run it against a computed path you have not checked. ' +
+    unsetVariables +
+    `Managed \`$${EMPEROR_ENV_PREFIX}*\` variables expose current harness environment facts. ` +
     'Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. ' +
-    backgroundText +
-    ' Attempting a command the sandbox may deny is safe and expected: run it and read the ' +
-    'marker rather than assuming the denial. When a command is denied and a wider mode would let it ' +
-    'succeed, escalate immediately in the same turn — the one sanctioned exception to a denial: retry ' +
-    'the exact same command once with `sandbox_permissions` (the narrowest wider mode that suffices) ' +
-    'plus a one-sentence `justification`. Do not detour through chat to ask permission first — the ' +
-    'approval prompt raised by that retry is how the user consents. If the session states approval ' +
-    'prompts are disabled, there is no exception: a denial is final — do not set `sandbox_permissions`. ' +
-    'Never escalate speculatively: ground the request in a real denial — normally the one this command ' +
-    'just hit; escalating up front is fine only when this session already denied the same access. ' +
-    'A rejected escalation is final for that command — stop and explain, never work around ' +
-    'it — but it does not forbid attempting or escalating other commands later.'
+    (background
+      ? 'Use `run_in_background` for long-running commands. '
+      : 'Background execution is not available; long-running commands must finish within the timeout. ') +
+    'Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]`, a policy denial rather than a bug in the command: do not retry it another way. ' +
+    'Attempting a command the sandbox may deny is safe: run it and read the marker. ' +
+    'When a denial would succeed in a wider mode, escalate in the same turn, the one sanctioned exception to a denial: retry the exact same command once with `sandbox_permissions` (the narrowest wider mode that suffices) plus a one-sentence `justification`. ' +
+    'The approval prompt raised by that retry is how the user consents; do not ask in chat first. ' +
+    'If the session states approval prompts are disabled, a denial is final: do not set `sandbox_permissions`. ' +
+    'Never escalate speculatively: ground the request in a real denial, normally the one this command just hit, or the same access already denied in this session. ' +
+    'A rejected escalation is final for that command (stop and explain, never work around it), but it does not forbid other commands later.'
   )
 }
 
+// Declaration order is generation order: `description` and `command` lead both
+// `properties` and `required`, so the UI can show what a command does while
+// the command still streams (DeepSeek V4 follows `required`, not `properties`).
 const shellInput = z.object({
-  command: z.string().describe('The command to execute.'),
   description: z
     .string()
     .describe(
@@ -137,6 +139,7 @@ const shellInput = z.object({
         '5-10 words (shown in the UI). Examples: "ls" → "List files in current directory"; ' +
         '"git status" → "Show working tree status"; "npm install" → "Install package dependencies".',
     ),
+  command: z.string().describe('The command to execute.'),
   timeoutMs: z
     .number()
     .optional()
