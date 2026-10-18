@@ -5,13 +5,14 @@
 > 最后核验：2026-09-29<br>
 > 事实源：`desktop/src/renderer/src/theme/`、`desktop/src/renderer/src/style-audit.test.ts`、`desktop/src/renderer/src/feature-style-owners.json`、`assets/generated/`
 
-本目录集中维护 Emperor Agent 的设计规范，包括品牌与图形资源、界面主题与样式、插件 Logo 等。系统怎样运转见[架构文档](../architecture/overview.md)，怎样开发和扩展见[开发指南](../development/README.md)；根目录 README 只链接到这里，不复制规范正文。
+本目录集中维护 Emperor Agent 的设计规范，包括品牌与图形资源、界面主题与样式、插件 Logo、模型元数据目录等。系统怎样运转见[架构文档](../architecture/overview.md)，怎样开发和扩展见[开发指南](../development/README.md)；根目录 README 只链接到这里，不复制规范正文。
 
 ## 规范列表
 
-| 规范                                  | 内容                                                       |
-| ------------------------------------- | ---------------------------------------------------------- |
-| [插件 Logo 设计规范](plugin-logos.md) | 受管插件 Logo 的方框材质、渐变与光照、透明边界、尺寸和验收 |
+| 规范                                  | 内容                                                               |
+| ------------------------------------- | ------------------------------------------------------------------ |
+| [插件 Logo 设计规范](plugin-logos.md) | 受管插件 Logo 的方框材质、渐变与光照、透明边界、尺寸和验收         |
+| [模型元数据规范](model-metadata.md)   | 随包模型目录的数据来源与许可、匹配规则、覆盖层与家族规则、刷新流程 |
 
 ## 现有的设计事实源
 
