@@ -28,6 +28,13 @@ Claude 使用 SDK startup 与自定义 managed spawn，业务问题经过权限�
 - **续聊与历史**：`thread/resume` 带 `excludeTurns: true`；`inspect` 先 `thread/read`（`includeTurns: false`），再以 `request(..., { maxResultBytes: 1 MiB })` 分页 `thread/turns/list`（`sortDirection: desc`、`itemsView: summary`），超限减半重取。两个参数都在已签入的 `ClientRequest.json` 中（`codex-contract.test.ts` 核对），因此协议摘要不变。
 - **提供方继承**：`local-model-config.ts` 白名单含 `query_params`；`codexProviderVariables` 列出 `env_key` 与 `env_http_headers` 的变量名，`ExecutorRuntimeService` 的 `loginShell`（生产由 `createLoginShellEnvironment()` 提供，测试不传即不运行 shell）先从登录 shell 取值再回退进程环境。AGT-02 的 Claude 令牌导入复用同一模块。
 
+## 默认关闭、首次同意与工具描述
+
+- 新增或修改本地子智能体工具（`subagent/tools.ts` 的 `createSubagentTools`）时，`delegation/tool-descriptions.test.ts` 会对照 `delegation/__golden__/local-subagent-tools.json`；有意修改后用 `UPDATE_GOLDEN=1 npx vitest run src/harness/delegation/tool-descriptions.test.ts` 刷新。组合工具（`delegation/tools.ts`）复用导出的本地 schema（`subagentInput`、`SEND_MESSAGE_INPUT` 等），外部字段一律写明 "External … only"。
+- `DelegationServiceOptions.consent` 返回 false 时 `start` 抛 `EXECUTOR_CONSENT_DENIED`，不建记录；调用方（工具、工作流）应改走本地子智能体。宿主实现见 `ExecutorConsentBridge.decide`，「以后都允许」存于 `delegations/consent.json`（`ExecutorConsentStore`），`CoreExecutorService.configure` 在 profile 由开变关时清除，`executors.list` 的每行带 `consent: 'always' | null`。
+- 真实验收脚本 `external-agent-scenario.mjs` 在全新状态目录里预先写入两个默认 profile 的 `consent.json`（该运行由 `--real` 明确授权）；`smoke-external-controls.mjs` 以 `source: 'human'` 直接启动，不需要同意卡。
+- 父模型的执行器上下文必须在没有启用任何外部执行器时为空，启用时保持在 600 token 以内（`service-consent.test.ts` 按 ASCII 4 字符/token、其余 1.5 token/字符估算）。
+
 ## 真实验收
 
 下面两个入口会实际调用配置的父模型及启用的外部 CLI，消耗真实额度。必须显式 `--real`，state/workspace 必须为空；不得指向开发工作区或用户的真实 Emperor Home。认证从既有配置引用读取，原配置不修改；只把活动父模型复制到0600私有状态。失败保留目录，下一次使用新的目录。

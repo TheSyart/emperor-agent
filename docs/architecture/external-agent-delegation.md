@@ -3,9 +3,9 @@
 > 文档状态：Active<br>
 > 面向读者：开发者、维护者<br>
 > 最后核验：2026-10-19<br>
-> 事实源：`packages/core/src/harness/delegation/`、`packages/core/src/workspace/delegation-*.ts`、`packages/core/src/api/services/delegation-service.ts`、`packages/core/src/runtime/agent-view.ts`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/sidebar/agentTree.ts`
+> 事实源：`packages/core/src/harness/delegation/`（含 `consent.ts`）、`packages/core/src/workspace/delegation-*.ts`、`packages/core/src/api/services/delegation-service.ts`、`packages/core/src/runtime/agent-view.ts`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/sidebar/agentTree.ts`
 
-Emperor 的父 Agent 可以通过原有子智能体工具选择 `internal`、`claude-code` 或 `codex`。未指定 backend 时仍用 internal；两个外部 profile 默认启用并复用本机 CLI 登录，主代理可直接派工。设置「子智能体」统一展示本地、Claude Code 与 Codex；外部来源可切换启用状态，通过全局检测读取 CLI 与本地登录可用条件，异常时按需更正可执行文件路径。多份 profile 以来源内选择器切换，不合并或覆盖其他 profile。设置保留既有认证及调度限制；默认模型支持跟随 CLI、候选选择和自定义，修改后仅用于后续派工。已有配置中的开关、路径和有效凭据引用保持不变；旧版空引用按本机登录解析，不自动覆写文件。backend 与内部 provider/model 路由是不同维度。
+Emperor 的父 Agent 可以通过原有子智能体工具选择 `internal`、`claude-code` 或 `codex`。未指定 backend 时仍用 internal。两个外部 profile 复用本机 CLI 登录，但默认关闭：它们使用用户自己的订阅额度或 API 计费，需要用户在设置里打开，并在首次派工时于对话中确认（见下文「默认关闭与首次同意」）。设置「子智能体」统一展示本地、Claude Code 与 Codex；外部来源可切换启用状态，通过全局检测读取 CLI 与本地登录可用条件，异常时按需更正可执行文件路径。多份 profile 以来源内选择器切换，不合并或覆盖其他 profile。设置保留既有认证及调度限制；默认模型支持跟随 CLI、候选选择和自定义，修改后仅用于后续派工。已有配置中的开关、路径和有效凭据引用保持不变；旧版空引用按本机登录解析，不自动覆写文件。backend 与内部 provider/model 路由是不同维度。
 
 ```mermaid
 flowchart TD
@@ -21,6 +21,14 @@ flowchart TD
   Verify --> Preview[保留的 Git 整合预览工作区]
   Preview --> Apply[精确 revision/digest 的人工应用]
 ```
+
+## 默认关闭与首次同意
+
+- `defaultExecutorConfig()` 两个外部 profile 均为 `enabled:false`。`ExecutorConfigStore.update`（设置页保存）写入 `touchedAt`。读到没有 `touchedAt`、却有 `enabled:true` 的旧文件（外部执行器分支的默认值，用户从未保存过）时，改为关闭并写入 `upgradeNotice: 'external-default-off'`（修订号不变）；没有配置文件但 `conversations/` 下有 `dlg-*` 记录时同样带上提示。设置页显示一次说明，「知道了」保存上次保存的配置（清除提示、写入 `touchedAt`），不连带保存页面上未保存的修改。
+- 首次向某个外部 profile 派工时，`DelegationService.create` 在探测之后、建立任何记录之前调用 `consent(owner, profile, spec, signal)`。宿主的 `ExecutorConsentBridge`（`delegation/consent.ts`）复用待回答交互：发一个 `question/asked`（带 `consent: { backend, profileId, description }`），投影为 `interaction_type: 'permission'` 的授权卡（不允许 / 本次允许 / 以后都允许，风险标签「使用额度」），回答仍按选项文字走普通问题通道。
+- 「本次允许」在当前根回合内有效，同一回合里并行的派工共用同一张卡；「以后都允许」写入 `delegations/consent.json`，该 profile 以后不再询问，在设置里关闭该执行器即清除；「不允许」、关闭卡片、超时（与执行器提问相同的 15 分钟）或取消都视为不允许，`start` 以 `EXECUTOR_CONSENT_DENIED` 失败。`subagent` 工具与工作流收到该错误后改由本地子智能体执行同一任务，工具结果写明用户没有允许。Scheduler 回合或没有窗口时无法询问，除非已选「以后都允许」，一律不使用外部执行器；`owner.source === 'human'`（用户自己发起）不再询问。
+- 父模型的运行时上下文：没有启用任何外部执行器时不注入任何内容；启用时只有一段简短说明与每个已启用 profile 一行摘要（两个都启用时也在 600 token 以内，测试按保守估算核对）（状态、模型、专长、搜索与生图验证状态、能否 steer），不再附带产品介绍与 runtime JSON，也不再有「无需另外征得用户同意」之类的鼓励语句。
+- 工具描述：`subagent`、`subagent_fork`、`send_message`、`interrupt_agent`、`list_agents` 的描述与参数说明与 main 一致（`delegation/__golden__/local-subagent-tools.json` 与 `tool-descriptions.test.ts` 守护）；外部执行器的说明集中在 `backend` 字段，其余外部参数（`profile_id`、`context`、`workspace`、`base`、`model`、`output_schema`、`delivery`、`expected_run_id`）各自标明只用于外部执行器；原来无作用的 `provider` 参数已移除。
 
 ## 版本兼容
 
@@ -52,7 +60,7 @@ Codex 只导入所选模型、所选提供方的连接/认证字段和显式模�
 
 本地运行时注入共用身份，并使用 `report` 发送重要发现和最终交接；Claude 在原有 `claude_code` 系统预设后追加共用规则，保留厂商预设；Codex 将同一规则放入 developer instructions。外部最终公开回复由宿主转交父级，原生再派工、插件和 MCP 仍禁用。本地保留内部 fork 和权限范围内的再派工；Claude 排队续聊、Codex 排队与 steer 的能力差异保持不变。
 
-首次派工及普通后续轮次使用同一 `Task: <创建任务名>` 交接格式。工具层只准备明确任务与选取的规则、Goal 目标，外部服务层统一包裹一次任务，避免重复标题；运行时工作区基线再由宿主补充。不自动复制私有父会话或推理；完整汇报依赖模型遵守提示，执行状态和成果验证仍由宿主记录，不能仅凭模型自述判定通过。
+首次派工使用 `Task: <创建任务名>` 交接格式；后续轮次（`send_message`）是新的指示，按原文送达，不再加 `Task:` 标题（本地与外部相同）。工具层只准备明确任务与选取的规则、Goal 目标，外部服务层统一包裹一次任务，避免重复标题；运行时工作区基线再由宿主补充。不自动复制私有父会话或推理；完整汇报依赖模型遵守提示，执行状态和成果验证仍由宿主记录，不能仅凭模型自述判定通过。
 
 外部会话使用 `dlg-*`，每一轮使用 `dgr-*`，消息使用 `dgm-*`。task.id 就是 runId；后续轮次创建新任务记录，旧任务不会重新变为运行中。原生 session/thread 和 turn ID 单独记录。每轮结束后关闭 CLI 进程；继续时恢复同一原生会话。Claude 支持排队，Codex 还支持绑定当前 turn 的 steer。两者均不支持复制 Emperor 私有对话来实现外部 fork。
 
@@ -62,7 +70,7 @@ Codex 只导入所选模型、所选提供方的连接/认证字段和显式模�
 
 图片引用通过 `references.image` 读取，输入只有会话 ID 和已解析的引用 capability；Core 限定当前普通聊天工作区、Build 项目或该根会话拥有的外部工作区，再由有尺寸上限的 Files 读取器返回栅格图片。renderer 不直接读取任意本地路径。
 
-每个控制动作都重新核验根会话所有权、当前 run 与权限。根 Agent 和所有活动祖先权限取交集；Plan 下拒绝启动外部执行。祖先收窄权限会停止根任务已有外部执行并解除 Goal 自动续跑。关闭外部会话保留原生历史、文件、工作区和凭据。
+每个控制动作都重新核验根会话所有权、当前 run 与权限。根 Agent 和所有活动祖先权限取交集；Plan 模式下只允许 `shared-readonly` 的只读委派（审查），其余工作区返回 `PLAN_MODE_UNSUPPORTED`，Plan 模式下未指定工作区时默认只读；进入 Plan 模式不会停止已有的只读委派。祖先收窄权限会停止根任务已有的写入型外部执行并解除 Goal 自动续跑。关闭外部会话保留原生历史、文件、工作区和凭据。
 
 ## 统一子智能体入口与公开对话
 
