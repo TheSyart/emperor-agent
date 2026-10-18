@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：希望扩展 Agent 能力的用户<br>
-> 最后核验：2026-09-30<br>
+> 最后核验：2026-10-19<br>
 > 事实源：`packages/core/src/harness/host/host.ts`（`compose()`）、`packages/core/src/harness/tools/builtin/`（含 `skill-manage.ts`、`mcp-config.ts`）、`packages/core/src/harness/workflow/`、`packages/core/src/skills/`、`packages/core/src/plugins/`、`packages/core/src/mcp/`、`desktop/src/renderer/src/components/pages/capabilities/`、`desktop/src/renderer/src/components/pages/explore/`、`desktop/src/renderer/src/components/settings/`（插件 / Skills / MCP / 工具分区组件）
 
 Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资源包；Plugin 是带来源、版本和启用状态的 Skill 分发单元；MCP 把外部 server 暴露的工具接入 Agent。

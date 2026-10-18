@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：源码维护者、ACP 客户端开发者、自动化操作者<br>
-> 最后核验：2026-09-22<br>
+> 最后核验：2026-10-19<br>
 > 事实源：`packages/core/src/acp/`、`packages/core/src/api/core-api.ts`、`scripts/build-acp.mjs`、`scripts/test-acp-bundle.mjs`
 
 Emperor Agent 提供一个源码级、默认不随桌面安装包开放的 ACP V1 stdio 入口。它不是旧 Python CLI、HTTP server 或 WebSocket backend 的恢复，而是与 Electron host 并列地创建同一个 TypeScript `CoreApi`，复用同一个 `HarnessHost` 内核、session log、权限预设、模型配置、记忆和 `stateRoot`。

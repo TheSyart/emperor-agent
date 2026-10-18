@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：需要控制权限、审阅方案或持续推进任务的用户<br>
-> 最后核验：2026-09-22<br>
+> 最后核验：2026-10-19<br>
 > 事实源：`packages/core/src/harness/approval/presets.ts`、`packages/core/src/harness/sandbox/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/goal/`、`packages/core/src/commands/builtins.ts`
 
 权限预设决定 Agent 能写哪里；Plan（规划模式）决定 Agent 先提方案还是直接动手；Goal（目标）让 Agent 在你不再输入时继续推进同一个目标。三者可以组合使用。
