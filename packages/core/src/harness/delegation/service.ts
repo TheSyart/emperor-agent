@@ -18,7 +18,7 @@ import {
 import { defaultExecutorConfig } from './config'
 import { ExecutorFactsStore } from './facts'
 import { nativeGeneratedImageRoot } from './image-proof'
-import { executorSpecialties } from './specialties'
+import { executorIntroduction, executorSpecialties } from './specialties'
 import { DelegationPolicy, type DelegationParentContext } from './policy'
 import { DelegationBudget, type BudgetLease } from './budget'
 import { DelegationJournal } from './journal'
@@ -711,7 +711,7 @@ export class DelegationService {
     return [
       'External executor profiles (internal remains the default):',
       'Use enabled local CLIs directly for ordinary delegation. Local availability and login are checked automatically on dispatch; an unchecked profile is not a request for user approval. Reuse sessions for follow-up. Collect successful text results directly; check file deliverables before final delivery or integration. Do not require manual artifact acceptance for text-only work.',
-      'Follow an explicit user backend choice first; otherwise reuse the existing child for the same task. Specialties are editable preferences, not rankings, tool grants or guarantees. Consider both external backends for coding. Choose using the reported model (including its source/provider), host-allowed tools, advertised inventory, observed calls and native capability evidence. Unknown models remain unknown; a gateway model label is provider-reported, not an independently verified model identity. Only available native evidence proves prior successful tool use; unverified, verifying, stale and unavailable never mean ready. An unknown capability may be tried as ordinary authorized work without demanding a separate user approval or paid preflight. On native tool failure report the limitation and choose an appropriate alternative; do not silently run CLIs through Bash to bypass managed delegation, or substitute script-drawn pictures for native image generation.',
+      'Follow an explicit user backend choice first; otherwise reuse the existing child for the same task. Specialties are editable preferences, not rankings, tool grants or guarantees. Product introductions describe official product features, not enabled tools or verified availability for this profile. Consider both external backends for coding. Choose using the reported model (including its source/provider), host-allowed tools, advertised inventory, observed calls and native capability evidence. Unknown models remain unknown; a gateway model label is provider-reported, not an independently verified model identity. Only available native evidence proves prior successful tool use; unverified, verifying, stale and unavailable never mean ready. An unknown capability may be tried as ordinary authorized work without demanding a separate user approval or paid preflight. On native tool failure report the limitation and choose an appropriate alternative; do not silently run CLIs through Bash to bypass managed delegation, or substitute script-drawn pictures for native image generation.',
       ...config.profiles.map((profile) => {
         const probe = this.facts.probe(profile)
         return (
@@ -722,6 +722,8 @@ export class DelegationService {
           (!profile.enabled ? 'disabled' : (probe?.status ?? 'unchecked')) +
           ' persistentSession=true queuedFollowup=true steer=' +
           (profile.backend === 'codex') +
+          ' productIntroduction=' +
+          JSON.stringify(executorIntroduction(profile.backend)) +
           ' specialties=' +
           JSON.stringify(executorSpecialties(profile)) +
           ' runtime=' +

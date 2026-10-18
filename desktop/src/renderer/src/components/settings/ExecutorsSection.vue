@@ -9,7 +9,10 @@ import type {
   NativeCapabilityStatus,
   NativeCapabilityEvidence,
 } from '@emperor/core/runtime-contract'
-import { executorSpecialties } from '@emperor/core/runtime-contract'
+import {
+  executorIntroduction,
+  executorSpecialties,
+} from '@emperor/core/runtime-contract'
 import { openExternal } from '../../api/backend'
 import {
   listExecutors,
@@ -328,7 +331,9 @@ onBeforeUnmount(() => {
 })
 </script>
 <template>
-  <SettingsSection intro="由主会话统一派工。">
+  <SettingsSection
+    intro="由主会话统一派工；实际能力取决于当前模型、工具与验证状态。"
+  >
     <p v-if="error" class="executor-error" role="alert">{{ error }}</p>
     <p v-if="loading && !config" class="executor-note" role="status">
       正在读取子智能体配置…
@@ -371,6 +376,9 @@ onBeforeUnmount(() => {
           />
           <div class="source-copy">
             <h3>{{ row.name }}</h3>
+            <p data-executor-introduction>
+              {{ executorIntroduction(row.backend) }}
+            </p>
             <p v-if="row.profile">
               {{
                 row.profile.authRef.kind === 'managed-cli-login'
@@ -413,7 +421,9 @@ onBeforeUnmount(() => {
         </div>
         <div v-if="row.profile" class="source-help source-facts">
           <p data-specialties>
-            {{ executorSpecialties(row.profile).join(' · ') || '未设置专长' }}
+            派工专长：{{
+              executorSpecialties(row.profile).join(' · ') || '未设置专长'
+            }}
           </p>
           <p :title="runtimes[row.profile.id]?.modelSource ?? ''">
             运行时报告模型：{{

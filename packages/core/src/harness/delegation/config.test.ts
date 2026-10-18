@@ -22,14 +22,18 @@ describe('executor configuration', () => {
     const store = setup(),
       config = store.read()
     expect(executorSpecialties(config.profiles[0]!)).toEqual([
-      '代码理解',
-      '重构调试',
+      '代码库理解',
+      '功能开发',
+      '重构排错',
       '测试补全',
+      '文档检索',
     ])
     expect(executorSpecialties(config.profiles[1]!)).toEqual([
-      '工程实现',
+      '功能开发',
       '代码审查',
-      '资料调研',
+      '测试排错',
+      '联网调研',
+      '图像生成',
     ])
     config.profiles[0]!.specialties = ['接口设计', '排错']
     config.profiles[1]!.specialties = []

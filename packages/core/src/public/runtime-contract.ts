@@ -86,7 +86,10 @@ export type {
   DelegationRecord,
   DelegationRunRecord,
 } from '../harness/delegation/types'
-export { executorSpecialties } from '../harness/delegation/specialties'
+export {
+  executorIntroduction,
+  executorSpecialties,
+} from '../harness/delegation/specialties'
 export type {
   DelegationProjection,
   DelegationRuntimeName,

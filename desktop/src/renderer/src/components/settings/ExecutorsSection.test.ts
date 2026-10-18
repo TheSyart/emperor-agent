@@ -136,8 +136,8 @@ it('renders exactly local and two vendor rows, minimal controls and truthful loc
 })
 it('edits, clears and restores independent specialty defaults without changing hidden model configuration', async () => {
   await mount()
-  expect(row('claude-code').textContent).toContain('代码理解')
-  expect(row('codex').textContent).toContain('资料调研')
+  expect(row('claude-code').textContent).toContain('代码库理解')
+  expect(row('codex').textContent).toContain('联网调研')
   row('claude-code')
     .querySelector<HTMLButtonElement>('[data-edit-specialties]')!
     .click()
@@ -167,7 +167,7 @@ it('edits, clears and restores independent specialty defaults without changing h
     .querySelector<HTMLButtonElement>('[data-reset-specialties]')!
     .click()
   await settle()
-  expect(row('claude-code').textContent).toContain('代码理解')
+  expect(row('claude-code').textContent).toContain('代码库理解')
 })
 it('rejects oversized specialty drafts and never upgrades unknown tool facts because CLI is ready', async () => {
   await mount()
