@@ -17,6 +17,12 @@ export type {
 } from '../commands/types'
 export type { MemoryScope } from '../memory/patch'
 export type {
+  ModelFacts,
+  ModelFactsSource,
+  ModelKind,
+  ReasoningControl,
+} from '../model/metadata/lookup'
+export type {
   CompactionDecision,
   DiscardedItem,
 } from '../memory/compaction-models'
