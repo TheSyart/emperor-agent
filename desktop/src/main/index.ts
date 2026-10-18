@@ -41,6 +41,8 @@ import {
   withContentSecurityPolicy,
 } from './protocol'
 import { rendererContentSecurityPolicy } from '../shared/content-security-policy'
+import { defaultSessionPermission } from './renderer-permissions'
+import { hardenSession } from './computer-use/session-hardening'
 import { registerOpenPathIpc } from './open-path-ipc'
 import { registerRemoteImageIpc } from './remote-image-ipc'
 import { pluginAssetResponse } from './plugin-assets'
@@ -796,6 +798,27 @@ function secureWindowNavigation(
   )
 }
 
+/**
+ * MAIN-3: the default session (main window, pet, pointer overlay, recovery)
+ * grants nothing — no microphone, camera, screen, notifications or devices,
+ * no downloads — except clipboard writes from the main window's own page.
+ */
+function secureDefaultSession(): void {
+  hardenSession(session.defaultSession, {
+    allowPermission: defaultSessionPermission({
+      isTrustedMainRenderer: (contents) => {
+        const main = mainWindow
+        return (
+          main !== null &&
+          !main.isDestroyed() &&
+          contents === main.webContents &&
+          trustedRendererPolicy.isTrustedUrl(main.webContents.getURL())
+        )
+      },
+    }),
+  })
+}
+
 function createWindow(): void {
   const boundsPath = mainBoundsPath()
   mainWindow = new BrowserWindow({
@@ -1343,7 +1366,10 @@ function startRuntime(): Promise<void> {
   return startupTask
 }
 
-app.whenReady().then(startRuntime)
+app.whenReady().then(() => {
+  secureDefaultSession()
+  return startRuntime()
+})
 
 app.on('activate', () => {
   if (recoveryWindow && !recoveryWindow.isDestroyed()) {
