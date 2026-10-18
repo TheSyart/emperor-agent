@@ -23,9 +23,24 @@ interface OpenBlock {
   index: number
   kind: 'text' | 'reasoning' | 'tool-call'
   text: string
-  /** tool-call only */
+  /** tool-call only; absent until a delta carries a non-empty value. */
   callId?: string
   name?: string
+}
+
+/**
+ * Accept one streamed identity field of a tool call. `id` and `name` are
+ * identity, not accumulation: the wire sends each on the call's first delta.
+ * A continuation delta that repeats the field empty, or `null` (as some
+ * OpenAI-compatible gateways do), means "unchanged", never "clear".
+ */
+function acceptIdentity(
+  current: string | undefined,
+  incoming: unknown,
+): string | undefined {
+  return typeof incoming === 'string' && incoming.length > 0
+    ? incoming
+    : current
 }
 
 /**
@@ -201,8 +216,8 @@ export async function* translate(
             blockType: 'tool-call',
           }
         }
-        if (call.id !== undefined) block.callId = call.id
-        if (call.function?.name !== undefined) block.name = call.function.name
+        block.callId = acceptIdentity(block.callId, call.id)
+        block.name = acceptIdentity(block.name, call.function?.name)
         const fragment = call.function?.arguments ?? ''
         block.text += fragment
         yield {

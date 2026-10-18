@@ -176,7 +176,8 @@ export function foldTrajectoryChunk(
       next[chunk.index] = {
         kind: 'tool-call',
         callId: base.callId || String(chunk.id),
-        name: chunk.name ?? base.name,
+        // An empty name on a later delta (older logs) never clears the established one.
+        name: chunk.name || base.name,
         argsRaw: base.argsRaw + chunk.argumentsDelta,
       }
       return next

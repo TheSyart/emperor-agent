@@ -209,6 +209,34 @@ describe('assistant streaming', () => {
     expect(settled.anchorSeq).toBe(log.events.at(-1)?.seq)
   })
 
+  it('keeps a running tool call name when a later delta from an older log carries an empty one', () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.chunk(1, 1, { type: 'block-start', index: 0, blockType: 'text' })
+    log.chunk(1, 1, { type: 'text-delta', index: 0, text: 'Listing.' })
+    log.chunk(1, 1, { type: 'block-start', index: 1, blockType: 'tool-call' })
+    log.chunk(1, 1, {
+      type: 'tool-call-delta',
+      index: 1,
+      id: 'c1',
+      name: 'bash',
+      argumentsDelta: '{"co',
+    })
+    log.chunk(1, 1, {
+      type: 'tool-call-delta',
+      index: 1,
+      id: '',
+      name: '',
+      argumentsDelta: 'mmand":"ls"}',
+    })
+    const running = nodeOf(replay(log.events).snapshot, 'assistant')
+    expect(running.data.blocks).toEqual([
+      { kind: 'text', text: 'Listing.' },
+      { kind: 'tool-call', callId: 'c1', name: 'bash' },
+    ])
+  })
+
   it('discards the failed attempt on llm/retry and shows the retry row', () => {
     const log = new LogBuilder()
     log.add('turn/start', { turn: 1 })

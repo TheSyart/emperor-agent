@@ -151,6 +151,23 @@ export function mapStopReason(
 }
 
 /**
+ * Merge the identity carried by one pi-ai content block into what earlier
+ * events established: a non-empty id or name wins, an empty one is ignored.
+ */
+function acceptToolIdentity(
+  known: { id: string; name: string } | undefined,
+  block: AssistantMessage['content'][number] | undefined,
+): { id: string; name: string } {
+  const id = block?.type === 'toolCall' ? block.id : undefined
+  const name = block?.type === 'toolCall' ? block.name : undefined
+  return {
+    id: typeof id === 'string' && id.length > 0 ? id : (known?.id ?? ''),
+    name:
+      typeof name === 'string' && name.length > 0 ? name : (known?.name ?? ''),
+  }
+}
+
+/**
  * Translate the pi-ai event stream into StreamChunks. pi-ai never throws
  * mid-stream — failures arrive as `error` events, which become error/aborted
  * `finish` chunks (the harness protocol's other error-delivery style).
@@ -214,11 +231,14 @@ export async function* toStreamChunks(
         }
         break
       case 'toolcall_start': {
-        // The id/name live on the partial's content at this index.
-        const partial = event.partial.content[event.contentIndex]
-        const id = partial?.type === 'toolCall' ? partial.id : ''
-        const name = partial?.type === 'toolCall' ? partial.name : ''
-        toolIds.set(event.contentIndex, { id, name })
+        // The id/name live on the partial's content at this index (may still be empty).
+        toolIds.set(
+          event.contentIndex,
+          acceptToolIdentity(
+            undefined,
+            event.partial.content[event.contentIndex],
+          ),
+        )
         yield {
           type: 'block-start',
           index: event.contentIndex,
@@ -227,7 +247,13 @@ export async function* toStreamChunks(
         break
       }
       case 'toolcall_delta': {
-        const known = toolIds.get(event.contentIndex)
+        // A gateway may send the id/name after the call opened: take them
+        // from the partial once non-empty, and never let an empty one clear them.
+        const known = acceptToolIdentity(
+          toolIds.get(event.contentIndex),
+          event.partial.content[event.contentIndex],
+        )
+        toolIds.set(event.contentIndex, known)
         yield {
           type: 'tool-call-delta',
           index: event.contentIndex,
@@ -239,20 +265,25 @@ export async function* toStreamChunks(
         }
         break
       }
-      case 'toolcall_end':
+      case 'toolcall_end': {
+        const known = acceptToolIdentity(
+          toolIds.get(event.contentIndex),
+          event.toolCall,
+        )
         yield {
           type: 'block-end',
           index: event.contentIndex,
           block: {
             type: 'tool-call',
-            id: event.toolCall.id,
-            name: event.toolCall.name,
+            id: known.id,
+            name: known.name,
             // pi-ai hands back the PARSED arguments; the harness vocabulary
             // keeps the raw string.
             arguments: JSON.stringify(event.toolCall.arguments),
           },
         }
         break
+      }
       case 'done':
         yield { type: 'usage', usage: mapUsage(event.message.usage) }
         yield {
