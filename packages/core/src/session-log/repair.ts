@@ -1,7 +1,9 @@
 /**
- * Crash-recovery repair for an interrupted session log. It preserves a fully
- * written final turn and supplies the missing tool, step, and turn boundaries
- * needed to resume with a provider-valid transcript.
+ * Pending tool-result recovery, shared by crash repair of an interrupted
+ * session log and by a live step that fails: both supply the missing tool
+ * results (and, for crash repair, the step and turn boundaries) needed to
+ * resume with a provider-valid transcript, and preserve every fully written
+ * event.
  * @module @deepseek-ai/dsh-session/repair
  */
 
@@ -29,47 +31,24 @@ export function interruptedTurnClosers(
 ): SessionEvent[] {
   let openTurn: number | null = null
   let openStep: number | null = null
-  // Reset at each turn boundary so earlier calls cannot leak into tail repair.
-  // Assistant blocks register calls; later `tool/call` events add their seqs to `sourceEventSeqs`.
-  const pendingCalls = new Map<string, { step: number; callSeq?: number }>()
+  // Reset at each turn and step boundary so earlier calls cannot leak into tail repair.
+  const recovery = new ToolCallRecovery()
   for (const event of events) {
+    recovery.observe(event)
     switch (event.type) {
       case 'turn/start':
         openTurn = event.data.turn
         openStep = null
-        pendingCalls.clear()
         break
       case 'turn/end':
         openTurn = null
         openStep = null
-        pendingCalls.clear()
         break
       case 'step/start':
         openStep = event.data.step
         break
       case 'step/end':
-        pendingCalls.clear()
         openStep = null
-        break
-      case 'assistant/message':
-        // The assistant message carries the tool-call blocks; each is pending
-        // until a tool/result event with the same callId is logged.
-        for (const block of event.data.message.content) {
-          if (block.type === 'tool-call')
-            pendingCalls.set(block.id, { step: event.data.step })
-        }
-        break
-      case 'tool/call':
-        // Cite the `tool/call` seq from the synthetic result.
-        {
-          const entry = pendingCalls.get(event.data.callId)
-          if (entry) {
-            entry.callSeq = event.seq
-          }
-        }
-        break
-      case 'tool/result':
-        pendingCalls.delete(event.data.message.source.callId)
         break
       // Other event types do not move the turn/step boundary cursor.
       default:
@@ -85,50 +64,10 @@ export function interruptedTurnClosers(
   // The last real event supplies the seq base and the timestamp for the
   // synthetic closers (reusing the last timestamp keeps them deterministic and
   // never invents a "future" time).
-  let seq = last.seq + 1
   const time = last.time
-  const closers: SessionEvent[] = []
-
-  // Close calls before their step: providers reject dangling assistant calls,
-  // and Map insertion order preserves their transcript order.
-  for (const [callId, { step, callSeq }] of pendingCalls) {
-    const started = callSeq !== undefined
-    const message: ToolResultMessage = freezeMessage({
-      id: `interrupted-tool-result-${callId}-${seq}`,
-      role: 'user',
-      source: { kind: 'tool', callId },
-      content: [
-        {
-          type: 'tool-result',
-          toolCallId: callId,
-          isError: true,
-          content: [
-            {
-              type: 'text',
-              text: started
-                ? 'The tool call was interrupted after it was recorded, but no result was durably recorded. Its outcome is unknown. Decide whether to retry from the tool semantics: retry only if the operation is read-only or idempotent; if it may have side effects, first verify external state or ask the user. Do not retry blindly.'
-                : 'The tool call was interrupted before the Harness recorded it as started. Retry it if it is still needed.',
-            },
-          ],
-        },
-      ],
-    })
-    closers.push({
-      type: 'tool/result',
-      seq: seq++,
-      time,
-      data: {
-        turn: openTurn,
-        step,
-        message,
-        error: started
-          ? { name: 'ToolOutcomeUnknownError', code: TOOL_OUTCOME_UNKNOWN }
-          : { name: 'ToolNotStartedError', code: TOOL_NOT_STARTED },
-      },
-      surfaceOp: 'append',
-      ...(started ? { sourceEventSeqs: [callSeq] } : {}),
-    })
-  }
+  // Close calls before their step: providers reject dangling assistant calls.
+  const closers: SessionEvent[] = recovery.results(last.seq + 1, time)
+  let seq = last.seq + 1 + closers.length
 
   // Close an open step next — a turn/end while a step is open is an invariant
   // violation, so the step's boundary must be synthesized before the turn's.
@@ -147,4 +86,97 @@ export function interruptedTurnClosers(
     data: { turn: openTurn, reason: { kind: 'interrupted' } },
   })
   return closers
+}
+
+/**
+ * Tracks the assistant tool requests of one session that have no
+ * `tool/result` yet. Feed it the events of the open step (or the whole log)
+ * in order; turn and step boundaries discard what earlier steps left open.
+ */
+export class ToolCallRecovery {
+  // Assistant blocks register calls; a later `tool/call` adds its seq for `sourceEventSeqs`.
+  private readonly pending = new Map<
+    string,
+    { turn: number; step: number; callSeq?: number }
+  >()
+
+  observe(event: SessionEvent): void {
+    switch (event.type) {
+      case 'turn/start':
+      case 'turn/end':
+      case 'step/end':
+        this.pending.clear()
+        break
+      case 'assistant/message':
+        // Each tool-call block is pending until a tool/result with its callId.
+        for (const block of event.data.message.content) {
+          if (block.type === 'tool-call')
+            this.pending.set(block.id, {
+              turn: event.data.turn,
+              step: event.data.step,
+            })
+        }
+        break
+      case 'tool/call': {
+        const entry = this.pending.get(event.data.callId)
+        if (entry) entry.callSeq = event.seq
+        break
+      }
+      case 'tool/result':
+        this.pending.delete(event.data.message.source.callId)
+        break
+      // Other event types do not answer or open tool requests.
+      default:
+        break
+    }
+  }
+
+  /**
+   * Conservative error results for every unanswered request, in transcript
+   * order. Sequences start at `seq`, timestamps are `time`; callers append
+   * them in this order so the seq inside each message id stays exact.
+   */
+  results(seq: number, time: number): SessionEvent<'tool/result'>[] {
+    const results: SessionEvent<'tool/result'>[] = []
+    // Map insertion order preserves the calls' transcript order.
+    for (const [callId, { turn, step, callSeq }] of this.pending) {
+      const started = callSeq !== undefined
+      const message: ToolResultMessage = freezeMessage({
+        id: `interrupted-tool-result-${callId}-${seq}`,
+        role: 'user',
+        source: { kind: 'tool', callId },
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: callId,
+            isError: true,
+            content: [
+              {
+                type: 'text',
+                text: started
+                  ? 'The tool call was interrupted after it was recorded, but no result was durably recorded. Its outcome is unknown. Decide whether to retry from the tool semantics: retry only if the operation is read-only or idempotent; if it may have side effects, first verify external state or ask the user. Do not retry blindly.'
+                  : 'The tool call was interrupted before the Harness recorded it as started. Retry it if it is still needed.',
+              },
+            ],
+          },
+        ],
+      })
+      results.push({
+        type: 'tool/result',
+        seq: seq++,
+        time,
+        data: {
+          turn,
+          step,
+          message,
+          error: started
+            ? { name: 'ToolOutcomeUnknownError', code: TOOL_OUTCOME_UNKNOWN }
+            : { name: 'ToolNotStartedError', code: TOOL_NOT_STARTED },
+        },
+        surfaceOp: 'append',
+        ...(started ? { sourceEventSeqs: [callSeq] } : {}),
+      })
+    }
+    return results
+  }
 }

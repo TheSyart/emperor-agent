@@ -6,9 +6,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { userText } from '../../llm/message'
+import { userText, type Message } from '../../llm/message'
+import type { ContentBlock } from '../../llm/types'
 import type { SessionEvent } from '../../session-log/types'
-import { createTestHarness } from '../testing'
+import { createTestHarness, replyChunks } from '../testing'
 import { defineTool } from '../tools/definition'
 
 function types(
@@ -52,6 +53,50 @@ function echoTool(
       return `echo:${args.value}`
     },
   })
+}
+
+/** A tool whose result the session log cannot hold, so committing it throws. */
+function brokenTool() {
+  return defineTool({
+    name: 'broken',
+    description: 'Return content that is not JSON.',
+    input: z.object({}),
+    execute: () =>
+      Promise.resolve([
+        { type: 'text', text: 'big', size: 10n } as unknown as ContentBlock,
+      ]),
+  })
+}
+
+/**
+ * What strict providers enforce: every assistant tool call is answered by a
+ * tool result before the next assistant message, and every tool result
+ * answers a call of the assistant message right before it.
+ */
+function assertStrictToolPairing(messages: readonly Message[]): void {
+  let open = new Set<string>()
+  let answerable = new Set<string>()
+  for (const message of messages) {
+    if (message.role === 'assistant') {
+      if (open.size > 0)
+        throw new Error(`unanswered tool calls: ${[...open].join(', ')}`)
+      open = new Set(
+        message.content.flatMap((block) =>
+          block.type === 'tool-call' ? [block.id] : [],
+        ),
+      )
+      answerable = new Set(open)
+      continue
+    }
+    for (const block of message.content) {
+      if (block.type !== 'tool-result') continue
+      if (!answerable.has(block.toolCallId))
+        throw new Error(`orphan tool result: ${block.toolCallId}`)
+      open.delete(block.toolCallId)
+    }
+  }
+  if (open.size > 0)
+    throw new Error(`unanswered tool calls: ${[...open].join(', ')}`)
 }
 
 describe('Agent loop', () => {
@@ -469,6 +514,82 @@ describe('Agent loop', () => {
     expect(agent.session.lastOf('tool/result')?.data.error?.code).toBe(
       'TOOL_TIMEOUT',
     )
+  })
+
+  it('a failed step answers every tool call it left open before step/end', async () => {
+    const h = createTestHarness({
+      replies: [
+        {
+          tools: [
+            { id: 'a', name: 'broken' },
+            { id: 'b', name: 'echo', args: { value: 'b' } },
+          ],
+        },
+      ],
+    })
+    h.tools.register(brokenTool())
+    h.tools.register(echoTool())
+    const agent = h.agent()
+    agent.followup(userText('go'))
+    await agent.whenIdle()
+    const events = agent.session.events
+    // `a` started (its result could not be logged); `b` never started.
+    expect(types(events).slice(-6)).toEqual([
+      'assistant/message',
+      'tool/call',
+      'tool/result',
+      'tool/result',
+      'step/end',
+      'turn/end',
+    ])
+    const results = events.filter(
+      (e): e is SessionEvent<'tool/result'> => e.type === 'tool/result',
+    )
+    expect(results.map((r) => r.data.message.source.callId)).toEqual(['a', 'b'])
+    expect(results.map((r) => r.data.error?.code)).toEqual([
+      'TOOL_OUTCOME_UNKNOWN',
+      'TOOL_NOT_STARTED',
+    ])
+    expect(results[0]!.sourceEventSeqs).toEqual([
+      events.find((e) => e.type === 'tool/call')!.seq,
+    ])
+    expect(results.every((r) => r.data.turn === 1 && r.data.step === 1)).toBe(
+      true,
+    )
+    expect(agent.session.lastOf('turn/end')?.data.reason).toMatchObject({
+      kind: 'error',
+    })
+    expect(agent.session.hasOpenTurn()).toBe(false)
+  })
+
+  it('history after a failed step passes a provider that checks strict call/result pairing', async () => {
+    const seen: string[] = []
+    const h = createTestHarness({
+      replies: [
+        {
+          tools: [
+            { id: 'a', name: 'broken' },
+            { id: 'b', name: 'echo', args: { value: 'b' } },
+          ],
+        },
+        (request) => {
+          assertStrictToolPairing(request.messages)
+          seen.push('checked')
+          return replyChunks({ text: 'recovered' })
+        },
+      ],
+    })
+    h.tools.register(brokenTool())
+    h.tools.register(echoTool())
+    const agent = h.agent()
+    agent.followup(userText('go'))
+    await agent.whenIdle()
+    agent.followup(userText('again'))
+    await agent.whenIdle()
+    expect(seen).toEqual(['checked'])
+    expect(agent.session.lastOf('turn/end')?.data.reason).toEqual({
+      kind: 'completed',
+    })
   })
 
   it('resumes from the persisted log: header reason, turn numbering, and inbox', async () => {

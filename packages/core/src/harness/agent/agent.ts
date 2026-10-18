@@ -25,6 +25,7 @@ import { errorChain, LlmError } from '../../llm/error'
 import { deepFreeze } from '../../llm/freeze'
 import { createAssistantMessage, type UserMessage } from '../../llm/message'
 import type { GenerateOptions, Message, ToolSchema } from '../../llm/types'
+import { ToolCallRecovery } from '../../session-log/repair'
 import { canonicalHeader, headerEquals } from '../../session-log/request-header'
 import type { Session } from '../../session-log/session'
 import type {
@@ -392,7 +393,10 @@ export class Agent {
           return false
         }
         signal.throwIfAborted()
-        this.session.append('step/start', { turn, step })
+        const stepStartSeq = this.session.append('step/start', {
+          turn,
+          step,
+        }).seq
         phase.step = step
         try {
           for (const message of decision.messages) {
@@ -404,6 +408,9 @@ export class Agent {
           // max-tokens is sticky: later steps cannot downgrade the turn result.
           if (turnEnds === null || turnEnds.kind !== 'max-tokens')
             turnEnds = stepEnd
+        } catch (error: unknown) {
+          this.answerOpenToolCalls(stepStartSeq, error)
+          throw error
         } finally {
           this.session.append('step/end', { turn, step })
         }
@@ -445,6 +452,34 @@ export class Agent {
     phase.wakeRequested = false
     phase.step = 0
     return true
+  }
+
+  /**
+   * A step that throws must not leave assistant tool calls without results:
+   * the next request would replay them dangling and strict providers reject
+   * the whole transcript. Calls that never got a `tool/call` are answered as
+   * not started; started ones as outcome unknown (the crash-repair results).
+   */
+  private answerOpenToolCalls(stepStartSeq: number, cause: unknown): void {
+    const recovery = new ToolCallRecovery()
+    for (const event of this.session.events.slice(stepStartSeq))
+      recovery.observe(event)
+    try {
+      for (const result of recovery.results(this.session.seq, Date.now())) {
+        this.session.append('tool/result', result.data, {
+          surfaceOp: 'append',
+          ...(result.sourceEventSeqs === undefined
+            ? {}
+            : { sourceEventSeqs: result.sourceEventSeqs }),
+        })
+      }
+    } catch (recoveryError: unknown) {
+      throw new AggregateError(
+        [cause, recoveryError],
+        'step failed and its open tool calls could not be answered',
+        { cause },
+      )
+    }
   }
 
   private async step(assembly: PromptAssembly): Promise<StepEndReason | null> {

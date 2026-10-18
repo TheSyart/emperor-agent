@@ -7,6 +7,9 @@
  * in model order; only bodies overlap; post-execute and `tool/result`
  * commit strictly in model order. On abort, calls that never started get
  * synthetic `ABORTED_BEFORE_DISPATCH` results so every call has a result.
+ * A scheduler failure (e.g. a result the log cannot hold) drains started
+ * calls and rejects; the owning step then answers every call still open
+ * with `TOOL_OUTCOME_UNKNOWN` / `TOOL_NOT_STARTED` before `step/end`.
  */
 
 import { createToolResultMessage, type UserMessage } from '../../llm/message'
