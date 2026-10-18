@@ -348,7 +348,11 @@ export class WorkspaceFilesService {
         dataBase64: readFileSync(target).toString('base64'),
       }
     }
-    const bounded = readBounded(target, this.maxTextBytes)
+    const read = readBounded(target, this.maxTextBytes)
+    // A cut at the byte limit can split a multi-byte character; drop the
+    // partial tail so UTF-8 text is not mistaken for binary.
+    const bounded =
+      metadata.size > read.byteLength ? trimPartialUtf8(read) : read
     if (looksBinary(bounded))
       return { ...common, kind: 'binary', truncated: metadata.size > 0 }
     return {
@@ -487,6 +491,20 @@ function isPreviewableImageMime(mimeType: string): boolean {
   return new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']).has(
     mimeType,
   )
+}
+
+/** Drop an incomplete UTF-8 sequence at the end of a truncated buffer. */
+export function trimPartialUtf8(buffer: Buffer): Buffer {
+  let lead = buffer.length - 1
+  let continuation = 0
+  while (lead >= 0 && continuation < 3 && (buffer[lead]! & 0xc0) === 0x80) {
+    lead -= 1
+    continuation += 1
+  }
+  if (lead < 0) return buffer
+  const byte = buffer[lead]!
+  const width = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 1
+  return buffer.length - lead < width ? buffer.subarray(0, lead) : buffer
 }
 
 function looksBinary(buffer: Buffer): boolean {

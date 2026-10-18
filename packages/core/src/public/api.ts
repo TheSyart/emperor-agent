@@ -55,6 +55,10 @@ export type {
   WorkspaceFileReadResult,
 } from '../workspace/files'
 export type { WorkspaceSnapshot } from '../workspace/snapshot'
+export type {
+  FilePreviewInput,
+  FilePreviewResult,
+} from '../workspace/file-preview'
 export type { TerminalEvent, TerminalSummary } from '../workspace/terminal'
 export type {
   CoreHookAuditRecordPayload,
@@ -94,3 +98,6 @@ export type {
   SessionLineage,
   SubagentChildView,
 } from '../harness/host/session-views'
+
+export type { ReferencePreview } from '../workspace/reference-preview'
+export type { ReferenceSiteIcon } from '../workspace/reference-site-icon'

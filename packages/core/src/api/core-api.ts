@@ -4,11 +4,23 @@
  * adds the operation surface (sessions, config, workspace, git, terminals,
  * scheduler, plugins, environment, diagnostics) on top of it.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
 import type { MessageReference } from '../harness/host/message-references'
 import type { AttachmentStore } from '../attachments/store'
+import {
+  filePreviewResult,
+  previewCanonicalFile,
+  type FilePreviewInput,
+  type FilePreviewResult,
+} from '../workspace/file-preview'
 import type { RuntimePaths } from '../runtime/paths'
 import { HarnessHost, type HarnessHostOptions } from '../harness/host/host'
 import type { UiAnswers } from '../harness/host/interactions'
@@ -139,6 +151,10 @@ import {
 } from '../workspace/terminal'
 import { WorkspaceOperationError } from '../workspace/common'
 import { WorkspaceReferenceService } from '../workspace/references'
+import type {
+  GitHubPreviewTarget,
+  ReferencePreview,
+} from '../workspace/reference-preview'
 import type { WorkspaceSnapshot } from '../workspace/snapshot'
 import { CommandPlatform } from '../commands/platform'
 import { SessionTransitionService } from '../commands/session-transition'
@@ -158,7 +174,7 @@ export interface CoreApiCreateOptions extends HarnessHostOptions {
   runtimeRevision?: string
   terminalHost?: PtyHost | null
   terminalEventSink?: ((event: TerminalEvent) => void) | null
-  /** Host HTTP client used by plugin installs. */
+  /** Host public HTTP client used by plugin installs and lazy reference previews. */
   webFetchClient?: WebFetchClient | null
   /** Start the first-run profile interview after a model is configured. */
   enableFirstRunOnboarding?: boolean
@@ -640,6 +656,29 @@ export class CoreApi {
     })
     this.workspaceReferenceService = new WorkspaceReferenceService({
       resolveProject: resolveWorkspaceProject,
+      resolveFileRoot: (sessionId) =>
+        this.host.sessionWorkspaceRoot(
+          this.requireReadableLogSession(sessionId, 'references.resolve'),
+        ),
+      authorizeSession: (sessionId) => {
+        this.requireReadableLogSession(sessionId, 'references.preview')
+      },
+      webFetchClient: opts.webFetchClient ?? null,
+      resolveAttachment: (attachmentId) => {
+        const attachment = this.attachmentStore.get(attachmentId)
+        return attachment
+          ? {
+              root: this.attachmentStore.base,
+              relativePath: relative(
+                this.attachmentStore.base,
+                resolve(this.attachmentStore.root, attachment.rel_path),
+              ),
+              label: attachment.name,
+            }
+          : null
+      },
+      githubPreview: (target, signal) =>
+        this.readGitHubReferencePreview(target, signal),
     })
     this.terminalService = new TerminalService({
       host: opts.terminalHost ?? unavailablePtyHost(),
@@ -1454,6 +1493,10 @@ export class CoreApi {
   }
 
   readonly references = {
+    siteIcon: (input: Parameters<WorkspaceReferenceService['siteIcon']>[0]) =>
+      this.workspaceReferenceService.siteIcon(input),
+    preview: (input: Parameters<WorkspaceReferenceService['preview']>[0]) =>
+      this.workspaceReferenceService.preview(input),
     resolve: (input: Parameters<WorkspaceReferenceService['resolve']>[0]) =>
       this.workspaceReferenceService.resolve(input),
     /** Electron main-only capability; returns a path only after reference ownership checks. */
@@ -1619,13 +1662,69 @@ export class CoreApi {
     status: () => this.pullRequestBrowser.status(),
     list: (input: Parameters<PullRequestBrowserService['list']>[0] = {}) =>
       this.pullRequestBrowser.list(input),
-    view: (input: Parameters<PullRequestBrowserService['view']>[0]) =>
-      this.pullRequestBrowser.view(input),
+    view: (
+      input: Parameters<PullRequestBrowserService['view']>[0],
+      options?: Parameters<PullRequestBrowserService['view']>[1],
+    ) => this.pullRequestBrowser.view(input, options),
     diff: (input: Parameters<PullRequestBrowserService['diff']>[0]) =>
       this.pullRequestBrowser.diff(input),
   }
 
   readonly files = {
+    preview: async (input: FilePreviewInput): Promise<FilePreviewResult> => {
+      if (input.source === 'reference')
+        return this.workspaceReferenceService.previewFile(input)
+      if (input.source === 'attachment') {
+        const ref = this.attachmentStore.get(input.attachmentId)
+        if (!ref)
+          throw new WorkspaceOperationError(
+            'reference_attachment_unknown',
+            '附件不存在或已被移除。',
+          )
+        // Managed attachments have the same global access as attachments.rawPath.
+        const root = realpathSync(this.attachmentStore.root)
+        const path = resolve(root, ref.rel_path)
+        const canonical = realpathSync(path)
+        const fromRoot = relative(root, canonical)
+        if (
+          fromRoot.startsWith('..') ||
+          isAbsolute(fromRoot) ||
+          canonical !== path
+        )
+          throw new WorkspaceOperationError(
+            'reference_attachment_invalid',
+            '附件路径超出存储范围。',
+          )
+        const value = await previewCanonicalFile(canonical)
+        const extracted =
+          ref.mime === 'application/pdf' && ref.has_text
+            ? this.attachmentStore.readText(ref, 1024 * 1024)
+            : ''
+        return {
+          ...value,
+          name: ref.name,
+          mimeType: ref.mime,
+          revealable: true,
+          ...(extracted
+            ? {
+                kind: 'text' as const,
+                content: Buffer.from(extracted)
+                  .subarray(0, 1024 * 1024)
+                  .toString('utf8'),
+                extractedText: true,
+                truncated: Buffer.byteLength(extracted) >= 1024 * 1024,
+              }
+            : {}),
+        }
+      }
+      return filePreviewResult(
+        await this.files.read({
+          sessionId: input.sessionId,
+          relativePath: input.path,
+          ...(input.source === 'turn' ? { turn: input.turn } : {}),
+        }),
+      )
+    },
     list: (
       input: Parameters<WorkspaceFilesService['list']>[0],
     ): Promise<WorkspaceFileListResult> =>
@@ -1634,10 +1733,38 @@ export class CoreApi {
       input: Parameters<WorkspaceFilesService['search']>[0],
     ): Promise<WorkspaceFileListResult> =>
       this.workspaceFilesService.search(input),
-    read: (
-      input: Parameters<WorkspaceFilesService['read']>[0],
-    ): Promise<WorkspaceFileReadResult> =>
-      this.workspaceFilesService.read(input),
+    read: async (
+      input: Parameters<WorkspaceFilesService['read']>[0] & { turn?: number },
+    ): Promise<WorkspaceFileReadResult> => {
+      if (input.turn === undefined)
+        return this.workspaceFilesService.read(input)
+      const sessionId = this.requireReadableLogSession(
+        input.sessionId,
+        'files.read',
+      )
+      const recorded = this.host
+        .sessionLog(sessionId)
+        ?.events.some(
+          (event) =>
+            event.type === 'turn/files' &&
+            event.data.turn === input.turn &&
+            event.data.status === 'recorded' &&
+            event.data.files.some((file) => file.path === input.relativePath),
+        )
+      if (!recorded)
+        throw new WorkspaceOperationError(
+          'turn_file_not_recorded',
+          '这一轮没有该文件的改动记录。',
+        )
+      // The persisted record authorizes this exact path, not the whole Chat workspace.
+      // Reuse the existing bounded reader and canonical path / symlink checks.
+      return new WorkspaceFilesService({
+        resolveProject: () => ({
+          sessionId,
+          projectRoot: this.host.sessionWorkspaceRoot(sessionId),
+        }),
+      }).read({ sessionId, relativePath: input.relativePath })
+    },
   }
 
   readonly terminals = {
@@ -1808,9 +1935,10 @@ export class CoreApi {
     },
     viewIssue: async (
       input: Parameters<PullRequestBrowserService['viewIssue']>[0],
+      options?: Parameters<PullRequestBrowserService['viewIssue']>[1],
     ) => {
       this.requireGitHubPlugin()
-      return await this.pullRequestBrowser.viewIssue(input)
+      return await this.pullRequestBrowser.viewIssue(input, options)
     },
     listRuns: async (
       input: Parameters<PullRequestBrowserService['listRuns']>[0],
@@ -1820,9 +1948,10 @@ export class CoreApi {
     },
     viewRun: async (
       input: Parameters<PullRequestBrowserService['viewRun']>[0],
+      options?: Parameters<PullRequestBrowserService['viewRun']>[1],
     ) => {
       this.requireGitHubPlugin()
-      return await this.pullRequestBrowser.viewRun(input)
+      return await this.pullRequestBrowser.viewRun(input, options)
     },
   }
 
@@ -2216,6 +2345,66 @@ export class CoreApi {
       this.emitPluginsChanged('project')
     }
     return entry
+  }
+
+  private async readGitHubReferencePreview(
+    target: GitHubPreviewTarget,
+    signal: AbortSignal,
+  ): Promise<ReferencePreview> {
+    try {
+      this.requireGitHubPlugin()
+      const options = { signal }
+      let metadata: Pick<ReferencePreview, 'title' | 'description' | 'status'>
+      if (target.kind === 'pull_request') {
+        const pull = await this.pullRequests.view(
+          { repo: target.repo, number: target.number },
+          options,
+        )
+        metadata = {
+          title: pull.title,
+          description: `${pull.repo} #${pull.number} · ${pull.author}`,
+          status: pull.isDraft ? 'DRAFT' : pull.state,
+        }
+      } else if (target.kind === 'issue') {
+        const issue = await this.github.viewIssue(
+          { repo: target.repo, number: target.number },
+          options,
+        )
+        metadata = {
+          title: issue.title,
+          description: `${issue.repo} #${issue.number} · ${issue.author}`,
+          status: issue.state,
+        }
+      } else {
+        const { run } = await this.github.viewRun(
+          { repo: target.repo, runId: target.number },
+          options,
+        )
+        metadata = {
+          title: run.title || run.name,
+          description: `${target.repo} · ${run.name}`,
+          status: run.conclusion ?? run.status,
+        }
+      }
+      this.requireGitHubPlugin()
+      if (signal.aborted)
+        return { state: 'error', reason: 'cancelled', updatedAt: Date.now() }
+      return { state: 'ready', ...metadata, updatedAt: Date.now() }
+    } catch (error) {
+      const code =
+        error && typeof error === 'object' && 'code' in error
+          ? String(error.code)
+          : ''
+      const reason =
+        code === 'github_plugin_disabled'
+          ? code
+          : code.endsWith('_not_found')
+            ? 'not_found'
+            : code === 'pull_request_gh_unauthenticated'
+              ? 'github_unauthenticated'
+              : 'github_unavailable'
+      return { state: 'unavailable', reason, updatedAt: Date.now() }
+    }
   }
 
   private requireGitHubPlugin(): void {

@@ -1,4 +1,11 @@
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  mkdtempSync,
+  mkdirSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -38,9 +45,80 @@ describe('WorkspaceReferenceService', () => {
       available: true,
       relativePath: 'docs/设计.md',
       line: 42,
-      actions: ['open_files'],
+      actions: ['open_files', 'preview'],
     })
     expect(result.id).toMatch(/^ref_[a-f0-9]{24}$/)
+  })
+
+  it.each([
+    'relative-line',
+    'relative-column',
+    'absolute-line',
+    'absolute-column',
+    'file-fragment',
+    'file-column',
+    'file-encoded-name',
+    'bare-file',
+  ])(
+    'parses positioned local references with Chinese names and spaces: %s',
+    (form) => {
+      const { projectRoot, service } = fixture()
+      const path = join(projectRoot, 'docs', '设计 文档.md')
+      writeFileSync(path, '# guide')
+      writeFileSync(join(projectRoot, 'README.md'), '# readme')
+      writeFileSync(
+        join(projectRoot, 'docs', '设计 #L2 文档.md'),
+        '# encoded name',
+      )
+      const targets: Record<string, string> = {
+        'relative-line': 'docs/设计 文档.md:17',
+        'relative-column': 'docs/设计 文档.md:17:9',
+        'absolute-line': `${path}:17`,
+        'absolute-column': `${path}:17:9`,
+        'file-fragment': `${pathToFileURL(path).href}#L17`,
+        'file-column': `${pathToFileURL(path).href}:17:9`,
+        'file-encoded-name': `${pathToFileURL(join(projectRoot, 'docs', '设计 #L2 文档.md')).href}#L17`,
+        'bare-file': 'README.md:17:9',
+      }
+      expect(
+        service.resolve({
+          sessionId: 'session-1',
+          sourceMessageId: 'message-1',
+          href: targets[form]!,
+          label: 'Guide',
+        }),
+      ).toMatchObject({
+        kind: 'project_file',
+        available: true,
+        relativePath:
+          form === 'bare-file'
+            ? 'README.md'
+            : form === 'file-encoded-name'
+              ? 'docs/设计 #L2 文档.md'
+              : 'docs/设计 文档.md',
+        line: 17,
+        actions: ['open_files', 'preview'],
+      })
+    },
+  )
+
+  it.each([
+    'javascript:12',
+    'data:text/plain,hello:12',
+    'vbscript:alert(1)',
+    'mailto:user@example.com:12',
+    'file://remote-host/tmp/report.md#L3',
+    'file:///tmp/a%00b#L3',
+  ])('rejects unsafe positioned references: %s', (href) => {
+    const { service } = fixture()
+    expect(() =>
+      service.resolve({
+        sessionId: 'session-1',
+        sourceMessageId: 'message-1',
+        href,
+        label: 'Unsafe',
+      }),
+    ).toThrow()
   })
 
   it('resolves a project-relative path without granting access outside the project', () => {
@@ -84,6 +162,56 @@ describe('WorkspaceReferenceService', () => {
       actions: ['reveal'],
     })
     expect(result).not.toHaveProperty('relativePath')
+  })
+
+  it('never previews a file outside the session root, only reveals it', async () => {
+    const { outsideRoot, service } = fixture()
+    const result = service.resolve({
+      sessionId: 'session-1',
+      sourceMessageId: 'message-1',
+      href: join(outsideRoot, 'secret.md'),
+      label: 'secret',
+    })
+    expect(result).toMatchObject({
+      kind: 'external_file',
+      available: true,
+      actions: ['reveal'],
+    })
+    expect(() =>
+      service.previewFile({ sessionId: 'session-1', referenceId: result.id }),
+    ).toThrow(/无法预览/)
+    expect(service.revealPath(result.id, 'session-1')).toBe(
+      join(realpathSync(outsideRoot), 'secret.md'),
+    )
+  })
+
+  it('does not preview a symlink that escapes the project', () => {
+    const { service } = fixture()
+    const result = service.resolve({
+      sessionId: 'session-1',
+      sourceMessageId: 'message-1',
+      href: 'docs/escape.md',
+      label: 'escape',
+    })
+    expect(() =>
+      service.previewFile({ sessionId: 'session-1', referenceId: result.id }),
+    ).toThrow(/无法预览/)
+  })
+
+  it('previews a project file through its reference', async () => {
+    const { service } = fixture()
+    const result = service.resolve({
+      sessionId: 'session-1',
+      sourceMessageId: 'message-1',
+      href: 'docs/设计.md',
+      label: '',
+    })
+    const preview = await service.previewFile({
+      sessionId: 'session-1',
+      referenceId: result.id,
+    })
+    expect(preview).toMatchObject({ kind: 'text', revealable: false })
+    expect(preview.content).toContain('# 设计')
   })
 
   it('classifies HTTPS links without accepting unsafe protocols or URL credentials', () => {
@@ -174,7 +302,7 @@ describe('WorkspaceReferenceService', () => {
         available: true,
         directory: true,
         relativePath: 'docs',
-        actions: ['open_files'],
+        actions: ['open_files', 'preview'],
       })
     expect(
       service.resolve({
@@ -216,7 +344,10 @@ describe('WorkspaceReferenceService', () => {
     })
     writeFileSync(join(projectRoot, 'docs', 'later.md'), 'now\n', 'utf8')
     const found = service.resolve(input)
-    expect(found).toMatchObject({ available: true, actions: ['open_files'] })
+    expect(found).toMatchObject({
+      available: true,
+      actions: ['open_files', 'preview'],
+    })
     expect(found.id).toBe(missing.id)
     expect(service.authorize(found.id, 'session-1').available).toBe(true)
   })

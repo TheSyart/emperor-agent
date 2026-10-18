@@ -33,6 +33,7 @@ export interface PullRequestContext {
 }
 
 export interface GhCommandRequest {
+  signal?: AbortSignal
   executable: string
   args: string[]
   cwd: string

@@ -41,6 +41,7 @@
     "eventsource-parser": "^3.1.1",
     "jsonrepair": "^3.14.1",
     "openai": "^6.45.0",
+    "parse5": "8.0.1",
     "smol-toml": "^1.7.0",
     "turndown": "^7.2.1",
     "typescript": "5.9.3",

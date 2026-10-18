@@ -202,6 +202,10 @@ export interface GitHubRunDetail {
   jobs: GitHubRunJob[]
 }
 
+export interface GitHubReadOptions {
+  signal?: AbortSignal
+}
+
 export interface PullRequestBrowserOptions {
   /** Directory gh runs in; the Emperor Home, never a project. */
   cwd: string
@@ -447,25 +451,32 @@ export class PullRequestBrowserService {
     return { items, total: Math.max(total, items.length) }
   }
 
-  async view(input: {
-    repo: string
-    number: number
-  }): Promise<PullRequestDetail> {
+  async view(
+    input: {
+      repo: string
+      number: number
+    },
+    options: GitHubReadOptions = {},
+  ): Promise<PullRequestDetail> {
     const { owner, name } = splitRepo(validRepo(input.repo))
     const number = validNumber(input.number)
     const runtime = await this.requireRuntime()
-    const result = await this.gh(runtime, [
-      'api',
-      'graphql',
-      '-f',
-      `query=${PULL_REQUEST_VIEW_QUERY}`,
-      '-f',
-      `owner=${owner}`,
-      '-f',
-      `name=${name}`,
-      '-F',
-      `number=${number}`,
-    ])
+    const result = await this.gh(
+      runtime,
+      [
+        'api',
+        'graphql',
+        '-f',
+        `query=${PULL_REQUEST_VIEW_QUERY}`,
+        '-f',
+        `owner=${owner}`,
+        '-f',
+        `name=${name}`,
+        '-F',
+        `number=${number}`,
+      ],
+      options,
+    )
     const data = graphqlData(result)
     const pullRequest = record(record(data.repository).pullRequest)
     const detail = pullRequestDetail(pullRequest)
@@ -539,10 +550,13 @@ export class PullRequestBrowserService {
     return { items, total: Math.max(total, items.length) }
   }
 
-  async viewIssue(input: {
-    repo: string
-    number: number
-  }): Promise<GitHubIssueDetail> {
+  async viewIssue(
+    input: {
+      repo: string
+      number: number
+    },
+    options: GitHubReadOptions = {},
+  ): Promise<GitHubIssueDetail> {
     const { owner, name } = splitRepo(validRepo(input.repo))
     const number = validNumber(input.number, 'Issue 编号不合法。')
     const runtime = await this.requireRuntime()
@@ -560,7 +574,7 @@ export class PullRequestBrowserService {
         '-F',
         `number=${number}`,
       ],
-      { subject: 'issue' },
+      { subject: 'issue', ...options },
     )
     const issue = issueDetail(
       record(record(graphqlData(result, 'issue').repository).issue),
@@ -606,10 +620,13 @@ export class PullRequestBrowserService {
     return { items, total: Math.max(total, items.length) }
   }
 
-  async viewRun(input: {
-    repo: string
-    runId: number
-  }): Promise<GitHubRunDetail> {
+  async viewRun(
+    input: {
+      repo: string
+      runId: number
+    },
+    options: GitHubReadOptions = {},
+  ): Promise<GitHubRunDetail> {
     const repo = validRepo(input.repo)
     const runId = input.runId
     if (
@@ -623,7 +640,7 @@ export class PullRequestBrowserService {
     const runResult = await this.gh(
       runtime,
       ['api', '--method', 'GET', `repos/${repo}/actions/runs/${runId}`],
-      { subject: 'run' },
+      { subject: 'run', ...options },
     )
     const run = runListItem(restData(runResult))
     if (!run) notFound('run')
@@ -637,7 +654,7 @@ export class PullRequestBrowserService {
         '-F',
         'per_page=100',
       ],
-      { subject: 'run' },
+      { subject: 'run', ...options },
     )
     const jobs = records(restData(jobsResult).jobs)
       .map(runJob)
@@ -669,13 +686,20 @@ export class PullRequestBrowserService {
   private async gh(
     runtime: GhRuntime,
     args: string[],
-    options: { allowTruncated?: boolean; subject?: GhSubject } = {},
+    options: {
+      allowTruncated?: boolean
+      subject?: GhSubject
+      signal?: AbortSignal
+    } = {},
   ): Promise<GhCommandResult> {
+    if (options.signal?.aborted)
+      throw new WorkspaceOperationError('cancelled', 'GitHub 读取已取消。')
     const result = await this.options.run({
       executable: runtime.executable,
       args,
       cwd: this.options.cwd,
       env: ghProcessEnvironment(runtime.env),
+      ...(options.signal ? { signal: options.signal } : {}),
     })
     if (result.exitCode !== 0)
       throw ghFailure(result, options.subject ?? 'pull_request')
@@ -705,6 +729,7 @@ export function createGhCommandRunner(
       cwd: request.cwd,
       env: request.env,
       timeoutMs: limits.timeoutMs ?? 60_000,
+      ...(request.signal ? { signal: request.signal } : {}),
       maxOutputBytes: limits.maxOutputBytes ?? PULL_REQUEST_DIFF_MAX_BYTES,
     })
     const stdoutCapped =

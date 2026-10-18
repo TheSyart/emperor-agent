@@ -362,8 +362,39 @@ const workspaceFileSearchSchema = workspaceFilePageSchema
   .extend({ query: z.string().trim().min(1).max(500) })
   .strict()
 const workspaceFileReadSchema = z
-  .object({ sessionId: idSchema, relativePath: workspaceRelativePathSchema })
+  .object({
+    sessionId: idSchema,
+    relativePath: workspaceRelativePathSchema,
+    turn: z.number().int().nonnegative().optional(),
+  })
   .strict()
+const filePreviewSchema = z.discriminatedUnion('source', [
+  z
+    .object({
+      source: z.literal('project'),
+      sessionId: idSchema,
+      path: workspaceRelativePathSchema,
+    })
+    .strict(),
+  z
+    .object({
+      source: z.literal('turn'),
+      sessionId: idSchema,
+      path: workspaceRelativePathSchema,
+      turn: z.number().int().nonnegative(),
+    })
+    .strict(),
+  z
+    .object({
+      source: z.literal('reference'),
+      sessionId: idSchema,
+      referenceId: idSchema,
+    })
+    .strict(),
+  z
+    .object({ source: z.literal('attachment'), attachmentId: idSchema })
+    .strict(),
+])
 const gitStatusSchema = workspaceSessionSchema
 const gitDiffSchema = z
   .object({
@@ -1073,6 +1104,9 @@ export const CORE_OPERATION_REGISTRY = {
   'files.read': operation(z.tuple([workspaceFileReadSchema]), (api, [input]) =>
     api.files.read(input),
   ),
+  'files.preview': operation(z.tuple([filePreviewSchema]), (api, [input]) =>
+    api.files.preview(input),
+  ),
   'files.search': operation(
     z.tuple([workspaceFileSearchSchema]),
     (api, [input]) => api.files.search(input),
@@ -1575,6 +1609,18 @@ export const CORE_OPERATION_REGISTRY = {
         .strict(),
     ]),
     (api, [id, options]) => api.processes.reparent(id, options),
+  ),
+  'references.preview': operation(
+    z.tuple([
+      z.object({ sessionId: idSchema, referenceId: idSchema }).strict(),
+    ]),
+    (api, [input]) => api.references.preview(input),
+  ),
+  'references.siteIcon': operation(
+    z.tuple([
+      z.object({ sessionId: idSchema, referenceId: idSchema }).strict(),
+    ]),
+    (api, [input]) => api.references.siteIcon(input),
   ),
   'references.resolve': operation(
     z.tuple([referenceResolveSchema]),
