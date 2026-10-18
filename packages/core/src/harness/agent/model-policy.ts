@@ -25,6 +25,7 @@ import { EMPTY_RESPONSE_CODE } from '../../llm/error'
 import type { LlmFailure } from '../../llm/types'
 import { calculateUsageCost, usdToNanos } from '../../model/execution-policy'
 import type { Session } from '../../session-log/session'
+import type { Agent } from './agent'
 import type {
   PreStepMiddleware,
   RequestConfigMiddleware,
@@ -92,6 +93,21 @@ export function turnFallback(
       return { to: event.data.to }
   }
   return undefined
+}
+
+/**
+ * The model an agent is on right now: inside a turn that fell back, the
+ * fallback route's (it carries the rest of the turn); otherwise the route
+ * its next request proposes. Throws when no route is configured.
+ */
+export function currentModel(agent: Agent, llm: LlmClient): string {
+  const fallback =
+    agent.status === 'running'
+      ? turnFallback(agent.session, agent.position.turn)
+      : undefined
+  return fallback === undefined
+    ? agent.proposedCallConfig().model
+    : llm.route(fallback.to).modelId
 }
 
 /** Priced cost (nano-USD) of one turn's assistant messages so far. */

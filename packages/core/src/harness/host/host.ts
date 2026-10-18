@@ -52,6 +52,7 @@ import { createMiddleware, type AgentMiddleware } from '../agent/middleware'
 import { retryMiddleware } from '../agent/retry'
 import {
   costCapMiddleware,
+  currentModel,
   fallbackConfigMiddleware,
   fallbackErrorMiddleware,
   type ModelPolicySource,
@@ -917,11 +918,11 @@ export class HarnessHost {
     return 'You are Emperor Agent, a coding agent. The runtime context names the model you run on and your working directory.'
   }
 
-  /** The model an agent's next request proposes (a child may run on its own route). */
+  /** The model an agent is on (its own route, or this turn's fallback). */
   private modelLabel(agent?: Agent): string {
     if (agent !== undefined) {
       try {
-        return agent.proposedCallConfig().model
+        return currentModel(agent, this.llm)
       } catch {
         // no route configured yet
       }

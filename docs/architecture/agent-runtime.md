@@ -60,7 +60,7 @@ turn/end
 - `llm/route.ts` 的 `routeFromEntry()` 把条目解析为 `RouteSpec`。Provider 为 `deepseek` 时使用内置 fetch + SSE 适配器，其余 `openai` / `anthropic` 协议使用 pi-ai 适配器。
 - `llm/retry-policy.ts`：默认对 `EMPTY_RESPONSE`、`RATE_LIMIT`、`SERVER`、`TIMEOUT`、`TRANSPORT` 最多重试 5 次，指数退避 500 ms 到 10 s、±10% 抖动；不大于上限的 provider Retry-After 会替换本地延迟。每次重试写入 `llm/retry` 事件。
 
-全局只激活一个模型。`model_config.json` 中默认关闭的执行策略由 `harness/agent/model-policy.ts` 执行：备用模型是排在重试 middleware 之后的 request-error handler，重试用尽且错误类型命中触发条件时写入 `llm/fallback`，本轮剩余请求改用备用条目，下一轮回到主模型；每轮成本上限是 pre-step handler，累计本轮已计价用量达到上限后拒绝下一个 step（`llm/cost-cap`）。
+全局只激活一个模型。`model_config.json` 中默认关闭的执行策略由 `harness/agent/model-policy.ts` 执行：备用模型是排在重试 middleware 之后的 request-error handler，重试用尽且错误类型命中触发条件时写入 `llm/fallback`，本轮剩余请求改用备用条目，下一轮回到主模型；每轮成本上限是 pre-step handler，累计本轮已计价用量达到上限后拒绝下一个 step（`llm/cost-cap`）。请求的模型与上一次请求不同（用户切换了模型、备用模型接手或下一轮回到主模型）时，Agent 在这次请求之前写入一条 `model-switch` 上下文通知，告诉模型“本步起由 X 模型继续，之前的回复来自 Y”；会话的第一次请求不写。
 
 ## 工具执行
 

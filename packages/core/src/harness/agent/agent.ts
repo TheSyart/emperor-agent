@@ -23,8 +23,12 @@ import type { LlmCallConfig } from '../../llm/call-config'
 import type { LlmClient, PreparedLlmCall } from '../../llm/client'
 import { errorChain, LlmError } from '../../llm/error'
 import { deepFreeze } from '../../llm/freeze'
-import { createAssistantMessage, type UserMessage } from '../../llm/message'
-import type { GenerateOptions, Message, ToolSchema } from '../../llm/types'
+import {
+  contextMessage,
+  createAssistantMessage,
+  type UserMessage,
+} from '../../llm/message'
+import type { GenerateOptions, ToolSchema } from '../../llm/types'
 import { ToolCallRecovery } from '../../session-log/repair'
 import { canonicalHeader, headerEquals } from '../../session-log/request-header'
 import type { Session } from '../../session-log/session'
@@ -132,6 +136,17 @@ function abortedCancelCause(signal: AbortSignal): AgentCancelCause | undefined {
     default:
       return { kind: 'user' }
   }
+}
+
+/** Producer of the context notice logged when another model takes over. */
+export const MODEL_SWITCH_PRODUCER = 'model-switch'
+
+function modelSwitchNotice(from: string, to: string): UserMessage {
+  return contextMessage(
+    MODEL_SWITCH_PRODUCER,
+    `From this step on, the ${to} model continues this conversation (earlier replies came from ${from}).`,
+    { form: 'notice', summary: `本步起由 ${to} 继续` },
+  )
 }
 
 /** Strip adapter-materialized defaults so a changed route can re-default them. */
@@ -529,7 +544,6 @@ export class Agent {
         step,
         assembly.tools,
         system,
-        this.session.deriveMessages(),
         signal,
       )
       const assembler = new BlockAssembler()
@@ -653,7 +667,6 @@ export class Agent {
     step: number,
     tools: ToolSchema[],
     system: string,
-    messages: Message[],
     signal: AbortSignal,
   ): { request: GenerateOptions; prepared?: PreparedLlmCall } {
     const session = this.session
@@ -720,6 +733,16 @@ export class Agent {
       ...(contextWindow === undefined ? {} : { contextWindow }),
     }
     const previous = session.requestContext()
+    // A different model takes over from here (the user switched, or a
+    // fallback): say so in the log, so the model knows earlier replies were
+    // another model's. The first request of a session has nothing to compare.
+    if (previous !== undefined && previous.model !== requestContext.model) {
+      session.append(
+        'user/message',
+        modelSwitchNotice(previous.model, requestContext.model),
+        { surfaceOp: 'append' },
+      )
+    }
     if (
       previous?.provider !== requestContext.provider ||
       previous.model !== requestContext.model ||
@@ -730,7 +753,7 @@ export class Agent {
     signal.throwIfAborted()
     const request: GenerateOptions = {
       ...header.config,
-      messages,
+      messages: session.deriveMessages(),
       ...(header.system !== undefined ? { system: header.system } : {}),
       ...(header.tools !== undefined ? { tools: header.tools } : {}),
       sessionId: session.id,
