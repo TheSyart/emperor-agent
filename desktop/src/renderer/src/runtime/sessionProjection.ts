@@ -82,6 +82,7 @@ export const RUNNING_EVENTS: ReadonlySet<string> = new Set<string>([
   'user_message',
   'prompt_interjected',
   'message_delta',
+  'assistant_reset',
   'agent_thought',
   'tool_call',
   'tool_run_started',

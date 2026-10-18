@@ -139,6 +139,11 @@ export type RuntimeEvent = RuntimeEventEnvelope &
     | ({ event: 'delegation_interaction' } & DelegationRuntimeFields)
     | ({ event: 'delegation_receipt' } & DelegationRuntimeFields)
     | { event: 'message_delta'; delta?: string }
+    /**
+     * A failed request attempt was re-requested: drop the text streamed since
+     * the attempt began. `content` is the turn's assistant text so far.
+     */
+    | { event: 'assistant_reset'; content: string }
     | {
         event: 'agent_thought'
         /** Stable id: running/done updates of one thought share it. */

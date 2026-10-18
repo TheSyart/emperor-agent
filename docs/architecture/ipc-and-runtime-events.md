@@ -132,6 +132,8 @@ Trajectory（`desktop/src/renderer/src/trajectory/model/`）复用同一个 asse
 3. Main 的 event bridge 把事件推给 renderer；renderer 在边界用 `isRuntimeEventWire` 拒绝名单外的事件。
 4. 刷新或重启时，bootstrap 与 `runtime.replay`（`format: 'projection'`，可带 `afterSeq` 与 `limit`）用同一折叠重放整份 log，因此 live 与 replay 的时间线一致，renderer 按 session + seq 去重。
 
+流式文本以 `message_delta` 逐段发出，turn 结束时 `assistant_done.content` 给出本 turn 的完整回复。一次请求中途失败并被重新请求（log 中出现 `llm/retry` 或 `llm/fallback`）时，这次尝试已发出的文本不属于最终回复：投影丢弃它，并在有文本被丢弃时发出 `assistant_reset { content }`，`content` 是丢弃后本 turn 已有的回复文本；之后的 `message_delta` 接在它后面，`assistant_done.content` 不含失败尝试的文本。Renderer 的 Chat 时间线本来就从原始 log 渲染并在重试时丢弃失败尝试，`assistant_reset` 在 UiEvent 管线里只算作运行中的事件；ACP 没有撤回已发文本的手段，客户端会先看到失败尝试的片段和一条重试提示，再看到新的回复。
+
 在 UiEvent 管线中，子代理 session 的事件不直接推给界面，而是转发到根 session，成为 `subagent_*` 事件。打开子会话的 Chat 视图时，renderer 通过 `sessions.watch` 直接订阅该子会话的原始事件。
 
 完整事件名单以 `packages/core/src/harness/projection/wire-names.ts` 为准，通过 `packages/core/src/public/runtime-contract.ts` 以 browser-safe 形式导出给 renderer。
