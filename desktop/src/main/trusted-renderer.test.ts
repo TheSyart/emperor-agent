@@ -59,6 +59,70 @@ describe('trusted renderer policy', () => {
     expect(openExternal).not.toHaveBeenCalled()
   })
 
+  it('keeps the window on its document: an in-app link never reloads it (UI-4)', async () => {
+    const openExternal = vi.fn(async () => undefined)
+    const policy = makePolicy({ openExternal })
+    const current = 'app://bundle/chat/session-1'
+
+    // `[packages/core](packages/core)` resolved against the chat route.
+    const relative = { preventDefault: vi.fn() }
+    policy.handleNavigation(
+      relative,
+      'app://bundle/chat/packages/core',
+      current,
+    )
+    const root = { preventDefault: vi.fn() }
+    policy.handleNavigation(root, 'app://bundle/index.html', current)
+    await Promise.resolve()
+
+    expect(relative.preventDefault).toHaveBeenCalledOnce()
+    expect(root.preventDefault).toHaveBeenCalledOnce()
+    expect(openExternal).not.toHaveBeenCalled()
+  })
+
+  it('still lets the document reload itself (dev server full reload)', () => {
+    const policy = makePolicy({ developmentUrl: 'http://127.0.0.1:5173/' })
+    const reload = { preventDefault: vi.fn() }
+    const hashOnly = { preventDefault: vi.fn() }
+
+    policy.handleNavigation(
+      reload,
+      'http://127.0.0.1:5173/chat/a',
+      'http://127.0.0.1:5173/chat/a',
+    )
+    policy.handleNavigation(
+      hashOnly,
+      'app://bundle/chat/a#top',
+      'app://bundle/chat/a',
+    )
+
+    expect(reload.preventDefault).not.toHaveBeenCalled()
+    expect(hashOnly.preventDefault).not.toHaveBeenCalled()
+  })
+
+  it('blocks every subframe navigation and leaves the main frame to will-navigate', async () => {
+    const openExternal = vi.fn(async () => undefined)
+    const policy = makePolicy({ openExternal })
+    const frame = { preventDefault: vi.fn() }
+    const main = { preventDefault: vi.fn() }
+
+    policy.handleFrameNavigation({
+      ...frame,
+      url: 'app://bundle/index.html',
+      isMainFrame: false,
+    })
+    policy.handleFrameNavigation({
+      ...main,
+      url: 'https://example.com',
+      isMainFrame: true,
+    })
+    await Promise.resolve()
+
+    expect(frame.preventDefault).toHaveBeenCalledOnce()
+    expect(main.preventDefault).not.toHaveBeenCalled()
+    expect(openExternal).not.toHaveBeenCalled()
+  })
+
   it('always denies popup creation while forwarding eligible external URLs', async () => {
     const openExternal = vi.fn(async () => undefined)
     const policy = makePolicy({ openExternal })

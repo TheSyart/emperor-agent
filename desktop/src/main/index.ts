@@ -783,19 +783,26 @@ function loadRenderer(): void {
   else mainWindow.loadURL('app://bundle/index.html')
 }
 
+/**
+ * No link moves a window off its document (UI-4): will-navigate passes only
+ * a reload of the current page, subframes never navigate, popups are denied
+ * (http(s) opens as a user link), and untrusted redirects stop.
+ */
 function secureWindowNavigation(
   win: BrowserWindow,
   policy: TrustedRendererPolicy,
 ): void {
-  win.webContents.on('will-navigate', (event, targetUrl) =>
+  const contents = win.webContents
+  contents.on('will-navigate', (event, targetUrl) =>
+    policy.handleNavigation(event, targetUrl, contents.getURL()),
+  )
+  contents.on('will-frame-navigate', (details) =>
+    policy.handleFrameNavigation(details),
+  )
+  contents.on('will-redirect', (event, targetUrl) =>
     policy.handleNavigation(event, targetUrl),
   )
-  win.webContents.on('will-redirect', (event, targetUrl) =>
-    policy.handleNavigation(event, targetUrl),
-  )
-  win.webContents.setWindowOpenHandler((details) =>
-    policy.handleWindowOpen(details),
-  )
+  contents.setWindowOpenHandler((details) => policy.handleWindowOpen(details))
 }
 
 /**

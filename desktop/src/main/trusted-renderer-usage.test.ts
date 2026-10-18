@@ -16,10 +16,11 @@ function rendererSources(dir: string = rendererRoot): string[] {
 }
 
 describe('trusted renderer policy wiring', () => {
-  it('guards navigation, redirects and popups', () => {
-    expect(source).toContain("webContents.on('will-navigate'")
-    expect(source).toContain("webContents.on('will-redirect'")
-    expect(source).toContain('webContents.setWindowOpenHandler')
+  it('guards navigation, redirects, frames and popups', () => {
+    expect(source).toContain("contents.on('will-navigate'")
+    expect(source).toContain("contents.on('will-frame-navigate'")
+    expect(source).toContain("contents.on('will-redirect'")
+    expect(source).toContain('contents.setWindowOpenHandler')
   })
 
   it('authorizes Core IPC and every desktop channel, named by contract constants', () => {
