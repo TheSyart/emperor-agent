@@ -545,7 +545,10 @@ export class DelegationService {
               capabilities: this.options.registry.capabilities(profile.backend),
               checkedAt: Date.now(),
               authVerified: false,
-              diagnostic: 'executor preflight failed',
+              diagnostic:
+                error instanceof DelegationError
+                  ? error.message.replace(/^[A-Z_]+: /, '').slice(0, 512)
+                  : 'executor preflight failed',
             }
           }
           this.facts.setProbe(profile, probe)
@@ -720,6 +723,9 @@ export class DelegationService {
           profile.backend +
           ' status=' +
           (!profile.enabled ? 'disabled' : (probe?.status ?? 'unchecked')) +
+          (profile.enabled && probe?.compatibility === 'unverified'
+            ? ' compatibility=unverified(may be incompatible; a failure may be the version)'
+            : '') +
           ' persistentSession=true queuedFollowup=true steer=' +
           (profile.backend === 'codex') +
           ' productIntroduction=' +
@@ -942,6 +948,9 @@ export class DelegationService {
       workspaceLeaseId: '',
       effectivePermission: effective.mode,
       capabilitySnapshot: probe.capabilities,
+      ...(probe.executableVersion
+        ? { executorVersion: probe.executableVersion }
+        : {}),
       availability: 'idle',
       createdAt: Date.now(),
       clientRequestId: spec.clientRequestId,
@@ -1243,7 +1252,9 @@ export class DelegationService {
       status: 'completed' | 'failed' | 'interrupted' | undefined,
       summary = '',
       failureCode: string | undefined,
-      usage: DelegationRunRecord['usage']
+      usage: DelegationRunRecord['usage'],
+      /** Set when the CLI's protocol only matched by minor (AGT-01). */
+      protocolNote: string | undefined
     let structured: unknown
     try {
       if (e.stop) controller.abort()
@@ -1318,7 +1329,14 @@ export class DelegationService {
       this.facts.bind(effectiveProfile, runtime.environment, activeRunId)
       if (e.stop || controller.signal.aborted)
         throw new DelegationError('ABORTED', 'cancelled before process open')
-      await this.options.registry.requireAvailable(profile, controller.signal)
+      const preflight = await this.options.registry.requireAvailable(
+        profile,
+        controller.signal,
+      )
+      if (preflight.compatibility === 'unverified')
+        protocolNote =
+          preflight.diagnostic ??
+          'the executor protocol is not a verified one; it may be incompatible'
       state = e.journal.load()
       const run = state.runs[activeRunId]!
       const lease = record.workspaceLeaseId
@@ -1645,6 +1663,16 @@ export class DelegationService {
         current.phase === 'cancelling' && phase === 'failed'
           ? 'outcome_unknown'
           : phase
+      // A failure on an unverified protocol says so first (the summary is
+      // bounded from its start), so the user can tell a version problem from
+      // an ordinary task failure.
+      if (finalPhase === 'failed' && protocolNote)
+        summary = boundText(
+          protocolNote +
+            '. Install a verified version or update Emperor if this keeps failing.' +
+            (summary ? '\n\n' + summary : ''),
+          8192,
+        )
       if (!accepted && sent)
         await this.serial(e, () =>
           this.append(e, {

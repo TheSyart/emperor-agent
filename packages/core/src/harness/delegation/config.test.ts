@@ -152,6 +152,42 @@ describe('executor configuration', () => {
       expect(() => store.update(0, config)).toThrow(/EXECUTOR_CONFIG_INVALID/)
     }
   })
+  it('7. ignores and clears the legacy pinned expectedVersion when reading', () => {
+    const store = setup()
+    const legacy = store.read() as unknown as {
+      revision: number
+      profiles: Record<string, unknown>[]
+    }
+    legacy.revision = 4
+    legacy.profiles[0]!.expectedVersion = '2.1.281'
+    legacy.profiles[0]!.executablePath = '/opt/homebrew/bin/claude'
+    legacy.profiles[1]!.expectedVersion = '0.153.4'
+    writeFileSync(store.file, JSON.stringify(legacy))
+    const loaded = store.read()
+    for (const profile of loaded.profiles)
+      expect(profile).not.toHaveProperty('expectedVersion')
+    expect(loaded.revision).toBe(4)
+    expect(loaded.profiles[0]!.executablePath).toBe('/opt/homebrew/bin/claude')
+    const onDisk = readFileSync(store.file, 'utf8')
+    expect(onDisk).not.toContain('expectedVersion')
+    expect(JSON.parse(onDisk).revision).toBe(4)
+    // A renderer still holding the legacy field can save it once more.
+    expect(store.update(4, legacy).profiles[1]).not.toHaveProperty(
+      'expectedVersion',
+    )
+  })
+  it('defaults Claude Code to the bundled binary and keeps Codex on the installed CLI', () => {
+    const store = setup()
+    const [claude, codex] = store.read().profiles
+    expect(claude!.executableSource).toBe('bundled')
+    expect(codex!.executableSource).toBeUndefined()
+    const config = store.read()
+    config.profiles[1]!.executableSource = 'bundled'
+    expect(() => store.update(0, config)).toThrow(/EXECUTOR_CONFIG_INVALID/)
+    const local = store.read()
+    local.profiles[0]!.executableSource = 'system'
+    expect(store.update(0, local).profiles[0]!.executableSource).toBe('system')
+  })
   it('rejects quotas that exceed the architectural bounds', () => {
     const store = setup()
     const config = store.read()

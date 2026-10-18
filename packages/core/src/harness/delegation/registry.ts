@@ -1,6 +1,26 @@
 import { execFile } from 'node:child_process'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { executorEnvironment } from './environment'
+import {
+  CLAUDE_REQUIRED_RANGE,
+  CLAUDE_SDK_VERSION,
+  KNOWN_CODEX_PROTOCOLS,
+  claudeVersionSupported,
+  codexProtocolDigest,
+  codexProtocolsFor,
+  codexRequiredRange,
+  formatVersion,
+  parseVersion,
+  type CodexProtocol,
+} from './compatibility'
+import {
+  bundledClaudeExecutable,
+  claudeExecutableSource,
+  executorExecutable,
+} from './executable'
 import {
   DelegationError,
   type ExecutorProfile,
@@ -10,10 +30,16 @@ import {
 } from './types'
 const run = promisify(execFile)
 export class ExecutorRegistry {
+  /** Protocol digests by binary identity; generating a schema is not free. */
+  private readonly digests = new Map<string, string | undefined>()
   constructor(
     private readonly options: {
       home?: string
       environment?: NodeJS.ProcessEnv
+      /** Test hook: where the SDK-bundled claude lives. */
+      bundledClaude?: () => string | undefined
+      /** Test hook: the verified Codex protocols. */
+      codexProtocols?: readonly CodexProtocol[]
     } = {},
   ) {}
   capabilities(backend: ExternalBackend): ExecutorCapabilities {
@@ -28,42 +54,44 @@ export class ExecutorRegistry {
       usage: backend === 'claude-code' ? 'tokens-and-estimate' : 'tokens',
     }
   }
+  private environment(): NodeJS.ProcessEnv {
+    return executorEnvironment(this.options.environment, this.options.home)
+  }
   async probe(
     profile: ExecutorProfile,
     signal?: AbortSignal,
   ): Promise<ExecutorProbe> {
+    const source = claudeExecutableSource(profile)
     const base = {
       capabilities: this.capabilities(profile.backend),
       checkedAt: Date.now(),
       authVerified: false,
+      ...(source ? { executableSource: source } : {}),
     }
+    let executable: string
     try {
-      const { stdout } = await run(profile.executablePath, ['--version'], {
-        timeout: 5000,
-        maxBuffer: 4096,
-        signal,
-        shell: false,
-        env: executorEnvironment(this.options.environment, this.options.home),
-      })
-      const version = stdout.match(/\b(\d+\.\d+\.\d+)\b/)?.[1]
-      const supported = profile.backend === 'codex' ? '0.153.4' : '2.1.281'
-      if (
-        !version ||
-        version !== profile.expectedVersion ||
-        profile.expectedVersion !== supported
+      executable = executorExecutable(
+        profile,
+        this.options.bundledClaude ?? bundledClaudeExecutable,
       )
-        return {
-          ...base,
-          status: 'incompatible',
-          ...(version ? { executableVersion: version } : {}),
-          diagnostic: 'binary version is outside the pinned protocol baseline',
-        }
+    } catch (error) {
       return {
         ...base,
-        status: 'available',
-        executableVersion: version,
-        ...(profile.backend === 'claude-code' ? { sdkVersion: '0.3.281' } : {}),
+        status: 'missing',
+        diagnostic: (error as Error).message.replace(/^EXECUTOR_MISSING: /, ''),
       }
+    }
+    let stdout: string
+    try {
+      stdout = (
+        await run(executable, ['--version'], {
+          timeout: 5000,
+          maxBuffer: 4096,
+          signal,
+          shell: false,
+          env: this.environment(),
+        })
+      ).stdout
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code
       return {
@@ -74,6 +102,128 @@ export class ExecutorRegistry {
             ? 'executor binary not found'
             : 'executor version probe failed',
       }
+    }
+    const version = parseVersion(stdout)
+    if (!version)
+      return {
+        ...base,
+        status: 'incompatible',
+        diagnostic: 'executor did not report a version',
+      }
+    const executableVersion = formatVersion(version)
+    if (profile.backend === 'claude-code') {
+      if (!claudeVersionSupported(version))
+        return {
+          ...base,
+          status: 'incompatible',
+          executableVersion,
+          requiredVersion: CLAUDE_REQUIRED_RANGE,
+          diagnostic: `Claude Code ${executableVersion} is older than the supported ${CLAUDE_REQUIRED_RANGE}`,
+        }
+      return {
+        ...base,
+        status: 'available',
+        executableVersion,
+        sdkVersion: CLAUDE_SDK_VERSION,
+        requiredVersion: CLAUDE_REQUIRED_RANGE,
+      }
+    }
+    const protocols = this.options.codexProtocols ?? KNOWN_CODEX_PROTOCOLS
+    const requiredVersion = codexRequiredRange(protocols)
+    const candidates = codexProtocolsFor(version, protocols)
+    if (!candidates.length)
+      return {
+        ...base,
+        status: 'incompatible',
+        executableVersion,
+        requiredVersion,
+        diagnostic: `Codex ${executableVersion} is outside the supported ${requiredVersion}`,
+      }
+    const digests = await this.codexDigests(
+      executable,
+      executableVersion,
+      candidates,
+      signal,
+    )
+    const verified = candidates.find((p, i) => {
+      const digest = digests?.[i]
+      return digest !== undefined && p.digests.includes(digest)
+    })
+    if (verified)
+      return {
+        ...base,
+        status: 'available',
+        executableVersion,
+        requiredVersion,
+        compatibility: 'verified',
+        protocolVersion: verified.version,
+      }
+    const nearest = candidates[0]!
+    return {
+      ...base,
+      status: 'available',
+      executableVersion,
+      requiredVersion,
+      compatibility: 'unverified',
+      protocolVersion: nearest.version,
+      diagnostic: `Codex ${executableVersion} speaks a protocol that differs from the verified Codex ${nearest.version}; it may be incompatible`,
+    }
+  }
+  /**
+   * The generated schema's digest over each candidate's file list (aligned
+   * with `candidates`); undefined when the schema cannot be generated.
+   */
+  private async codexDigests(
+    executable: string,
+    version: string,
+    candidates: CodexProtocol[],
+    signal?: AbortSignal,
+  ): Promise<(string | undefined)[] | undefined> {
+    let identity: string
+    try {
+      const stat = statSync(executable)
+      identity = [executable, stat.ino, stat.size, stat.mtimeMs].join('\0')
+    } catch {
+      // A bare command name resolved through PATH: the version still counts.
+      identity = executable
+    }
+    const keys = candidates.map((p) =>
+      [identity, version, ...p.files].join('\0'),
+    )
+    if (keys.every((key) => this.digests.has(key)))
+      return keys.map((key) => this.digests.get(key))
+    const root = mkdtempSync(join(tmpdir(), 'emperor-codex-schema-'))
+    try {
+      // A private CODEX_HOME: generating the schema reads no user config and
+      // makes no model call.
+      mkdirSync(join(root, 'home'))
+      await run(
+        executable,
+        ['app-server', 'generate-json-schema', '--out', join(root, 'out')],
+        {
+          timeout: 15_000,
+          maxBuffer: 64 * 1024,
+          signal,
+          shell: false,
+          env: { ...this.environment(), CODEX_HOME: join(root, 'home') },
+        },
+      )
+      const read = (file: string) => {
+        try {
+          return readFileSync(join(root, 'out', file), 'utf8')
+        } catch {
+          return undefined
+        }
+      }
+      return candidates.map((p, i) => {
+        const digest = codexProtocolDigest(read, p.files)
+        this.digests.set(keys[i]!, digest)
+        return digest
+      })
+    } catch {
+      return undefined
+    } finally {
+      rmSync(root, { recursive: true, force: true })
     }
   }
   async requireAvailable(

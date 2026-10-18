@@ -10,11 +10,13 @@ const profile = z
     id: segment,
     backend: z.enum(['claude-code', 'codex']),
     enabled: z.boolean(),
+    executableSource: z.enum(['bundled', 'system']).optional(),
     executablePath: z
       .string()
       .min(1)
       .refine((p) => isAbsolute(p) || p === 'claude' || p === 'codex'),
-    expectedVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+    // Legacy exact-version pin (AGT-01): accepted, ignored and dropped.
+    expectedVersion: z.string().max(64).optional(),
     customModels: z
       .array(
         z
@@ -83,6 +85,15 @@ export const executorConfigSchema = z
   })
   .strict()
   .superRefine((c, ctx) => {
+    if (
+      c.profiles.some(
+        (p) => p.backend === 'codex' && p.executableSource === 'bundled',
+      )
+    )
+      ctx.addIssue({
+        code: 'custom',
+        message: 'only Claude Code ships a bundled binary',
+      })
     for (const ids of [
       c.profiles.map((p) => p.id),
       c.profiles.map((p) => p.stateDirectoryId),
@@ -102,10 +113,19 @@ export function parseExecutorConfig(value: unknown): ExecutorConfig {
     )
   // Older defaults referenced no model at all. Reuse the local login without
   // changing saved enable/path/model choices or rewriting the source file.
-  for (const profile of result.data.profiles)
+  for (const profile of result.data.profiles) {
     if (profile.authRef.kind === 'model-route' && !profile.authRef.routeId)
       profile.authRef = { kind: 'managed-cli-login' }
+    delete profile.expectedVersion
+  }
   return result.data
+}
+function hasLegacyVersionPin(value: unknown): boolean {
+  const profiles = (value as { profiles?: unknown } | null)?.profiles
+  return (
+    Array.isArray(profiles) &&
+    profiles.some((p) => !!p && typeof p === 'object' && 'expectedVersion' in p)
+  )
 }
 export function defaultExecutorConfig(): ExecutorConfig {
   return {
@@ -116,8 +136,8 @@ export function defaultExecutorConfig(): ExecutorConfig {
         id: 'claude-default',
         backend: 'claude-code',
         enabled: true,
+        executableSource: 'bundled',
         executablePath: 'claude',
-        expectedVersion: '2.1.281',
         authRef: { kind: 'managed-cli-login' },
         stateDirectoryId: 'claude-default',
         concurrencyLimit: 1,
@@ -127,7 +147,6 @@ export function defaultExecutorConfig(): ExecutorConfig {
         backend: 'codex',
         enabled: true,
         executablePath: 'codex',
-        expectedVersion: '0.153.4',
         authRef: { kind: 'managed-cli-login' },
         stateDirectoryId: 'codex-default',
         concurrencyLimit: 1,
@@ -151,14 +170,26 @@ export class ExecutorConfigStore {
   }
   read(): ExecutorConfig {
     if (!existsSync(this.file)) return defaultExecutorConfig()
+    let raw: unknown, config: ExecutorConfig
     try {
-      return parseExecutorConfig(JSON.parse(readFileSync(this.file, 'utf8')))
+      raw = JSON.parse(readFileSync(this.file, 'utf8'))
+      config = parseExecutorConfig(raw)
     } catch {
       throw new DelegationError(
         'EXECUTOR_CONFIG_INVALID',
         'invalid or unsupported configuration; original file retained',
       )
     }
+    // Compatibility is a handshake now (AGT-01). Drop the old exact-version
+    // pin from the file once; the revision is unchanged because nothing the
+    // user chose changed.
+    if (hasLegacyVersionPin(raw))
+      try {
+        durableReplaceSync(this.file, JSON.stringify(config, null, 2) + '\n')
+      } catch {
+        /* Still ignored in memory; the next save drops it. */
+      }
+    return config
   }
   update(expectedRevision: number, value: unknown): ExecutorConfig {
     const current = this.read()

@@ -16,6 +16,10 @@ function fixture(
   ask = false,
   processes?: ManagedAgentProcess,
   keepAlive = false,
+  extra: {
+    init?: Record<string, unknown>
+    bundledClaude?: () => string | undefined
+  } = {},
 ) {
   const f = delegationTestDirectory(),
     runtimeRoot = join(f.root, 'runtime')
@@ -51,6 +55,7 @@ function fixture(
                 tools: ['Read'],
                 plugins: [],
                 mcp_servers: [],
+                ...extra.init,
               }
               if (ask) {
                 const decision = await opts.canUseTool!(
@@ -127,7 +132,11 @@ function fixture(
     getOptions: () => options!,
     wasAnswered: () => answered,
     wasInterrupted: () => interrupted,
-    adapter: new ClaudeExecutorAdapter({ startup: start, processes }),
+    adapter: new ClaudeExecutorAdapter({
+      startup: start,
+      processes,
+      ...(extra.bundledClaude ? { bundledClaude: extra.bundledClaude } : {}),
+    }),
   }
 }
 it('uses managed spawn, isolated settings and exact resume; steer is unsupported', async () => {
@@ -287,3 +296,65 @@ it('pre-tool guard denies native delegation even if the model invents a hidden t
   await session.close()
   f.cleanup()
 })
+
+it('launches the bundled Claude by default and the installed claude only when chosen', async () => {
+  const bundled = fixture(false, undefined, false, {
+    bundledClaude: () => '/Emperor.app/claude-sdk/claude',
+  })
+  await (await bundled.adapter.open(bundled.input)).close()
+  expect(bundled.getOptions().pathToClaudeCodeExecutable).toBe(
+    '/Emperor.app/claude-sdk/claude',
+  )
+  bundled.cleanup()
+  const installed = fixture(false, undefined, false, {
+    bundledClaude: () => '/Emperor.app/claude-sdk/claude',
+    init: { claude_code_version: '2.1.290' },
+  })
+  await (
+    await installed.adapter.open({
+      ...installed.input,
+      profile: {
+        ...installed.input.profile,
+        executableSource: 'system',
+        executablePath: '/opt/homebrew/bin/claude',
+      },
+    })
+  ).close()
+  expect(installed.getOptions().pathToClaudeCodeExecutable).toBe(
+    '/opt/homebrew/bin/claude',
+  )
+  installed.cleanup()
+})
+it.each([
+  [{ claude_code_version: '2.0.9' }, />= 2\.1/],
+  [{}, /did not report its version/],
+  [
+    { claude_code_version: '2.1.290', permissionMode: 'bypassPermissions' },
+    /permission mode/,
+  ],
+])(
+  'checks an installed claude against the init capabilities %j',
+  async (init, reason) => {
+    const f = fixture(false, undefined, false, {
+      bundledClaude: () => '/Emperor.app/claude-sdk/claude',
+      init,
+    })
+    const session = await f.adapter.open({
+      ...f.input,
+      profile: {
+        ...f.input.profile,
+        executableSource: 'system',
+        executablePath: '/opt/homebrew/bin/claude',
+      },
+    })
+    const submit = session.submit({
+      runId: 'dgr-init',
+      messageId: 'dgm-init',
+      text: 'fixture',
+    })
+    await expect(submit).rejects.toThrow(/EXECUTOR_INCOMPATIBLE/)
+    await expect(submit).rejects.toThrow(reason)
+    await session.close()
+    f.cleanup()
+  },
+)

@@ -12,6 +12,7 @@ import { AsyncQueue } from './adapters/async-queue'
 import type { ExecutorProfile } from './types'
 import type { ExecutorRuntimeService } from './runtime'
 import { claudeModelSettings } from './local-model-config'
+import { executorExecutable } from './executable'
 export interface NativeModel {
   id: string
   name?: string
@@ -139,7 +140,7 @@ export async function readNativeModels(
     }
     const options: Options = {
       cwd: runtime.runtimeRoot,
-      pathToClaudeCodeExecutable: profile.executablePath,
+      pathToClaudeCodeExecutable: executorExecutable(profile),
       env: runtime.environment,
       abortController: controller,
       settingSources: [],

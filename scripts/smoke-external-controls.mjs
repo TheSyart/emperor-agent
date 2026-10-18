@@ -105,8 +105,9 @@ try {
   for (const profile of config.profiles) {
     profile.enabled = true
     profile.authRef = { kind: 'managed-cli-login' }
-    profile.executablePath =
-      '/opt/homebrew/bin/' + (profile.backend === 'codex' ? 'codex' : 'claude')
+    // Claude Code runs the binary bundled with Emperor (AGT-01).
+    if (profile.backend === 'codex')
+      profile.executablePath = '/opt/homebrew/bin/codex'
   }
   await api.executors.configure({ expectedRevision: config.revision, config })
   for (const backend of ['claude-code', 'codex']) {

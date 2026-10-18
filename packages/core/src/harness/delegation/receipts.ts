@@ -441,12 +441,8 @@ export class DelegationReceipts {
           runId,
           delegationId: record.id,
           backend: record.backend,
-          version:
-            record.backend === 'claude-code'
-              ? '2.1.281'
-              : record.backend === 'codex'
-                ? '0.153.4'
-                : 'unknown',
+          // The CLI the preflight saw, not a pinned constant (AGT-01).
+          version: record.executorVersion ?? 'unknown',
           createdAt: Date.now(),
           cwd: record.cwd,
           originCwd: lease.snapshot
