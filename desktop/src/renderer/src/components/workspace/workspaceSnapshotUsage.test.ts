@@ -11,9 +11,13 @@ const binding = app.slice(app.indexOf('bindWorkspaceSnapshotSource({'))
 const block = binding.slice(0, binding.indexOf('})') + 2)
 
 describe('workspace snapshot binding', () => {
-  it('follows the active session, not the viewed one', () => {
+  it('polls the active session; the viewed one only rides along', () => {
     expect(block).toContain('sessionId: () => sessionId.value')
-    expect(block).not.toContain('viewedSessionId')
+    expect(block).toContain(
+      'sessionStore.getSession(sessionId.value)?.project_path',
+    )
+    expect(block).toContain('viewedSessionId: () => viewedSessionId.value')
+    expect(block).not.toMatch(/sessionId: \(\) => viewedSessionId/)
   })
 
   it('keeps the image viewer owned by the viewed session', () => {

@@ -39,6 +39,7 @@ import {
   ref,
   watch,
 } from 'vue'
+import { useWorkspaceSnapshot } from './useWorkspaceSnapshot'
 import { core } from '../../api/http'
 import type { WorkspaceFileRequest } from './workspaceState'
 import { revealReference } from '../../api/backend'
@@ -72,6 +73,7 @@ interface TreeRow {
   hint: string
 }
 
+const { viewedSessionId } = useWorkspaceSnapshot({ active: false })
 const props = defineProps<{
   sessionId: string
   projectPath: string
@@ -362,7 +364,14 @@ async function openPreview(
   request: WorkspaceFileRequest,
   refresh = false,
 ): Promise<void> {
-  if (request.owner !== props.sessionId) return
+  // Requests come from the active session or the child log on screen; Core
+  // re-checks that the owner may read the target.
+  if (
+    !request.owner ||
+    (request.owner !== props.sessionId &&
+      request.owner !== viewedSessionId.value)
+  )
+    return
   currentRequest.value = request
   const key = JSON.stringify(request.target)
   const existing = tabs.value.find(

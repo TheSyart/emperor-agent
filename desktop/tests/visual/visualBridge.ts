@@ -4668,7 +4668,7 @@ export async function installVisualCoreBridge(
               if (input.referenceId.includes('offline'))
                 return {
                   state: 'error',
-                  reason: '网络不可用，原始链接仍可使用。',
+                  reason: 'network_unavailable',
                   updatedAt: Date.now(),
                 }
               return {

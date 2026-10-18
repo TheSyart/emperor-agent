@@ -58,6 +58,17 @@ function log(): VisualSessionLog {
     events: log.events as unknown as VisualSessionLog['events'],
   }
 }
+// These cases exercise real site icons, which are opt-in (PLAN-V020 W-3).
+test.beforeEach(async ({ page }, info) => {
+  if (info.title.includes('site icons stay off')) return
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'emperor.ui.prefs.v1',
+      JSON.stringify({ siteIcons: true }),
+    )
+  })
+})
+
 test.beforeAll(() => mkdirSync(shots, { recursive: true }))
 for (const theme of ['dark', 'light'] as const) {
   for (const width of [1700, 780]) {
@@ -123,6 +134,46 @@ for (const theme of ['dark', 'light'] as const) {
     })
   }
 }
+test('site icons stay off by default and request nothing', async ({ page }) => {
+  const records = new ShowcaseLog(now)
+  records.user('看看这些网站。')
+  records.turnStart(1)
+  records.stepStart(1, 1)
+  records.stream(1, 1, [
+    {
+      text: '[文档](https://docs.example.com/a) 和 [博客](https://blog.example.org/b)',
+    },
+  ])
+  records.stepEnd(1, 1)
+  records.turnEnd(1)
+  await installVisualCoreBridge(page, {
+    sessionLogs: [
+      {
+        id: 'build-ui',
+        header: { version: 0, id: 'build-ui', createdAt: now },
+        events: records.events as unknown as VisualSessionLog['events'],
+      },
+    ],
+  })
+  await page.goto('/chat/build-ui')
+  await expect(page.locator('.assistant-step a.md-link-chip')).toHaveCount(2)
+  await page.waitForTimeout(500)
+  const iconCalls = await page.evaluate(
+    () =>
+      (
+        (
+          window as unknown as {
+            __visualResourceOps?: Array<{ operation: string }>
+          }
+        ).__visualResourceOps ?? []
+      ).filter((op) => op.operation === 'references.siteIcon').length,
+  )
+  expect(iconCalls).toBe(0)
+  await expect(
+    page.locator('.assistant-step a.md-link-chip img.site-icon'),
+  ).toHaveCount(0)
+})
+
 test('a hundred links render without starting metadata requests', async ({
   page,
 }) => {
@@ -244,7 +295,7 @@ for (const theme of ['dark', 'light'] as const) {
       .getByRole('button', { name: '查看详情：离线示例', exact: true })
       .click()
     await expect(page.locator('[data-resource-dialog]')).toContainText(
-      '网络不可用',
+      '当前无法联网补充详情',
     )
     await expect(
       page.getByRole('button', { name: '打开', exact: true }),

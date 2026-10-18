@@ -149,12 +149,14 @@ test('child session files and images follow the viewed owner without activating 
   await installVisualCoreBridge(page)
   await page.goto('/chat/showcase-child?visualTheme=dark')
   await expect(page.locator('.conversation-root')).toBeVisible()
-  const owner = await page.evaluate(async () => {
+  const owners = await page.evaluate(async () => {
     const path = '/src/components/workspace/useWorkspaceSnapshot.ts'
-    return (await import(path)).useWorkspaceSnapshot({ active: false })
-      .sessionId.value
+    const view = (await import(path)).useWorkspaceSnapshot({ active: false })
+    return { polled: view.sessionId.value, viewed: view.viewedSessionId.value }
   })
-  expect(owner).toBe('showcase-child')
+  // The workspace stays on the active parent; Files accepts the child's files.
+  expect(owners.viewed).toBe('showcase-child')
+  expect(owners.polled).not.toBe('showcase-child')
   await page.evaluate(async () => {
     const viewerPath = '/src/components/ui/imageViewer.ts'
     const filesPath = '/src/components/workspace/workspaceState.ts'
@@ -184,6 +186,6 @@ test('child session files and images follow the viewed owner without activating 
   })
   await expect(page.locator('.image-lightbox')).toBeVisible()
   await page.keyboard.press('Escape')
+  // The child's attachment opens as a tab in the parent's Files pane.
   await expect(page.locator('.files-pane .file-tab.active')).toBeVisible()
-  await expect(page.locator('.files-pane .file-tree-column')).toHaveCount(0)
 })

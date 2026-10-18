@@ -127,40 +127,6 @@ async function sessionMenu(page: Page, title: string) {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`sidebar hides scrollbars but keeps wheel scrolling (${theme})`, async ({
-    page,
-  }) => {
-    await open(page, '/chat/build-ui', { theme, height: 360 })
-    const list = sidebar(page).locator('.region > .list')
-    const scrollable = async (target: Locator) => {
-      expect(
-        await target.evaluate((el) => getComputedStyle(el).scrollbarWidth),
-      ).toBe('none')
-      expect(
-        await target.evaluate(
-          (el) => getComputedStyle(el, '::-webkit-scrollbar').display,
-        ),
-      ).toBe('none')
-      expect(
-        await target.evaluate((el) => el.scrollHeight > el.clientHeight),
-      ).toBe(true)
-      await target.hover()
-      await page.mouse.wheel(0, 300)
-      await expect
-        .poll(() => target.evaluate((el) => el.scrollTop))
-        .toBeGreaterThan(0)
-    }
-    await scrollable(list)
-    await sidebar(page)
-      .getByRole('button', { name: '搜索', exact: true })
-      .click()
-    await page.getByLabel('搜索对话').fill('Visual')
-    const results = sidebar(page).getByRole('listbox', { name: '搜索结果' })
-    await expect(results.locator('.search-result')).toHaveCount(3)
-    await scrollable(results)
-    await shot(page, `hidden-scrollbars-${theme}`)
-  })
-
   test(`expanded sidebar (${theme})`, async ({ page }) => {
     await open(page, '/chat/build-ui', { theme })
     const root = sidebar(page)

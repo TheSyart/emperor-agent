@@ -600,14 +600,15 @@ onBeforeUnmount(() =>
 // ── shell: workspace snapshot, columns, shortcuts ───────────────────────
 // The shared workspace snapshot follows the active session, so leaving the
 // chat for a full page or opening a read-only child log keeps the browser,
-// terminal and Files tabs. A file preview carries its own owner session in the
-// open request, so it does not depend on this binding.
+// terminal and Files tabs. The viewed session (a child log) is passed along
+// so Files still accepts the files that log opens.
 const activeConversation = useLazySessionConversation(() => sessionId.value)
 bindWorkspaceSnapshotSource({
   sessionId: () => sessionId.value,
   projectPath: () =>
     sessionStore.getSession(sessionId.value)?.project_path || '',
   refreshKey: () => activeConversation.value?.order.value.length ?? 0,
+  viewedSessionId: () => viewedSessionId.value,
 })
 
 const frame = useFrameState()

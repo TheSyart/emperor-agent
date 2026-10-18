@@ -40,10 +40,18 @@ export interface WorkspaceSnapshotSource {
   projectPath: () => string
   /** Any change schedules a debounced refresh (e.g. transcript length). */
   refreshKey?: () => unknown
+  /**
+   * The session on screen when it differs from the polled one (a read-only
+   * child log). Panes accept file requests from it without rebinding the
+   * workspace, so the browser, terminal and Files tabs stay put.
+   */
+  viewedSessionId?: () => string
 }
 
 export interface WorkspaceSnapshotView {
   sessionId: ComputedRef<string>
+  /** The session on screen; equals sessionId unless a child log is open. */
+  viewedSessionId: ComputedRef<string>
   /** Snapshot project root, falling back to the bound project path. */
   projectPath: ComputedRef<string>
   snapshot: Readonly<ShallowRef<WorkspaceSnapshot | null>>
@@ -63,6 +71,9 @@ const loading = ref(false)
 const error = ref('')
 
 const sessionId = computed(() => source.value?.sessionId() ?? '')
+const viewedSessionId = computed(
+  () => source.value?.viewedSessionId?.() || sessionId.value,
+)
 const boundProjectPath = computed(() => source.value?.projectPath() ?? '')
 const hasProject = computed(() =>
   Boolean(
@@ -213,6 +224,7 @@ export function useWorkspaceSnapshot(
   }
   return {
     sessionId,
+    viewedSessionId,
     projectPath,
     snapshot,
     loading,
