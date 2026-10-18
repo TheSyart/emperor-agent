@@ -7,7 +7,7 @@ import type {
 } from '@emperor/core/runtime-contract'
 
 /** Rows shown before 「展开」. */
-export const COLLAPSED_FILE_ROWS = 5
+export const COLLAPSED_FILE_ROWS = 3
 
 export function splitFilePath(path: string): { dir: string; name: string } {
   const slash = path.lastIndexOf('/')

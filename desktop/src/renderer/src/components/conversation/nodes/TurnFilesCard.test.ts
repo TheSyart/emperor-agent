@@ -118,27 +118,26 @@ describe('TurnFilesCard', () => {
     expect(root.querySelector('.headline')?.textContent).toBe('已编辑 7 个文件')
     expect(root.querySelector('.head .add')?.textContent).toBe('+9')
     expect(root.querySelector('.head .del')?.textContent).toBe('−6')
-    expect(rowNames(root)).toEqual([
-      'a.ts',
-      'b.ts',
-      'old.md',
-      'logo.png',
-      'c.ts',
-    ])
+    expect(rowNames(root)).toEqual(['a.ts', 'b.ts', 'old.md'])
     expect(root.querySelector('.file .dir')?.textContent).toBe('src/')
     const text = root.textContent ?? ''
     expect(text).toContain('新建')
     expect(text).toContain('删除')
-    expect(text).toContain('二进制')
-    expect(text).toContain('由 b0.ts 重命名')
-    expect(text).toContain('按本轮开始与结束时的项目对比')
+    expect(root.querySelector('.scope-info')?.getAttribute('aria-label')).toBe(
+      '按本轮开始与结束时的项目对比',
+    )
+    expect(root.querySelector('.more')?.textContent).toContain(
+      '再显示 4 个文件',
+    )
     root.querySelector<HTMLButtonElement>('.more')!.click()
     await flush()
     expect(rowNames(root)).toHaveLength(7)
+    expect(root.textContent).toContain('二进制')
+    expect(root.textContent).toContain('由 b0.ts 重命名')
     expect(root.textContent).toContain('过大，未记录内容')
   })
 
-  it('opens the review on the turn, or on one file', async () => {
+  it('keeps review separate from current file preview', async () => {
     const root = mount(data())
     root.querySelector<HTMLButtonElement>('[data-action="review"]')!.click()
     expect(requestWorkspace).toHaveBeenLastCalledWith({
@@ -147,8 +146,11 @@ describe('TurnFilesCard', () => {
     })
     root.querySelectorAll<HTMLButtonElement>('.file')[1]!.click()
     expect(requestWorkspace).toHaveBeenLastCalledWith({
-      pane: 'review',
-      turn: { sessionId: 's1', turn: 3, files, path: 'src/b.ts' },
+      pane: 'files',
+      file: {
+        owner: 's1',
+        target: { source: 'turn', sessionId: 's1', turn: 3, path: 'src/b.ts' },
+      },
     })
   })
 
@@ -217,7 +219,7 @@ describe('TurnFilesCard', () => {
     expect(root.textContent).toContain('之后又改过，已跳过')
   })
 
-  it('says when a turn was not recorded, and offers nothing outside Git', () => {
+  it('says when a turn was not recorded, and previews files outside Git', async () => {
     const skipped = mount(
       data({
         status: 'skipped',
@@ -234,8 +236,35 @@ describe('TurnFilesCard', () => {
     const tools = mount(data({ mode: 'tools', reviewable: false }))
     expect(tools.querySelector('[data-action="review"]')).toBeNull()
     expect(tools.querySelector('[data-action="undo"]')).toBeNull()
-    expect(tools.textContent).toContain('只统计 Emperor 文件工具写入的文件')
+    expect(tools.querySelector('.scope-info')?.getAttribute('aria-label')).toBe(
+      '只统计 Emperor 文件工具写入的文件',
+    )
     tools.querySelectorAll<HTMLButtonElement>('.file')[0]!.click()
-    expect(requestWorkspace).not.toHaveBeenCalled()
+    expect(requestWorkspace).toHaveBeenLastCalledWith({
+      pane: 'files',
+      file: {
+        owner: 's1',
+        target: { source: 'turn', sessionId: 's1', turn: 3, path: 'src/a.ts' },
+      },
+    })
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+  })
+
+  it('keeps a single-file summary compact without an empty footer', () => {
+    const root = mount(
+      data({
+        mode: 'tools',
+        reviewable: false,
+        files: [files[0]!],
+        totals: { files: 1, additions: 3, deletions: 1 },
+      }),
+    )
+    expect(root.querySelector('.headline')?.textContent).toBe('已编辑 1 个文件')
+    expect(root.querySelector('.totals')?.getAttribute('aria-label')).toBe(
+      '新增 3 行，删除 1 行',
+    )
+    expect(root.querySelector('.foot')).toBeNull()
+    expect(root.querySelector('.file .document-icon')).not.toBeNull()
+    expect(root.textContent).not.toContain('只统计')
   })
 })

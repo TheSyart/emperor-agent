@@ -2,8 +2,7 @@
 /**
  * TurnFilesCard — 「已编辑 N 个文件 +A −D」 at the end of a turn (plan 7.6):
  * one row per file (folder dim, name bright, lines added and removed), the
- * first five until 展开. 审核 opens the 审查 pane's 本轮改动 mode (a row
- * opens it on that file) and 撤销 asks before undoing; both need the
+ * first three until expanded. 查看变更 opens the 审查 pane's 本轮改动 mode (file rows open current content in Files) and 撤销 asks before undoing; both need the
  * turn's snapshots (a Git project). An undone turn says so and lists what
  * was skipped. A turn whose snapshot failed says it was not recorded.
  *
@@ -12,10 +11,12 @@
  *
  * Props: node (TurnFilesChatNode).
  */
-import { FileDiff } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, FileDiff, Info, Undo2 } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 import type { TurnFilesChatNode } from '../../../conversation/types'
 import Button from '../../ui/Button.vue'
+import DocumentIcon from '../../ui/DocumentIcon.vue'
+import Tooltip from '../../ui/Tooltip.vue'
 import { requestWorkspace } from '../../workspace/workspaceState'
 import { useChatContext, useExpansion } from '../chatContext'
 import TurnRevertDialog from './TurnRevertDialog.vue'
@@ -73,6 +74,17 @@ function review(path?: string): void {
     },
   })
 }
+
+function openFile(path: string): void {
+  const owner = sessionId()
+  requestWorkspace({
+    pane: 'files',
+    file: {
+      owner,
+      target: { source: 'turn', sessionId: owner, turn: data.value.turn, path },
+    },
+  })
+}
 </script>
 
 <template>
@@ -94,55 +106,95 @@ function review(path?: string): void {
     </p>
     <template v-else>
       <header class="head">
-        <FileDiff :size="14" class="icon" aria-hidden="true" />
-        <span class="headline">已编辑 {{ data.totals.files }} 个文件</span>
-        <span class="add">+{{ data.totals.additions }}</span>
-        <span class="del">−{{ data.totals.deletions }}</span>
-        <span class="actions">
+        <div class="summary">
+          <span class="icon-badge"
+            ><FileDiff :size="20" aria-hidden="true"
+          /></span>
+          <div class="summary-text">
+            <div class="summary-title">
+              <span class="headline"
+                >已编辑 {{ data.totals.files }} 个文件</span
+              >
+              <Tooltip :label="turnFilesCaption(data)">
+                <span
+                  class="scope-info"
+                  role="img"
+                  tabindex="0"
+                  :aria-label="turnFilesCaption(data)"
+                >
+                  <Info :size="14" aria-hidden="true" />
+                </span>
+              </Tooltip>
+            </div>
+            <div
+              class="totals"
+              :aria-label="`新增 ${data.totals.additions} 行，删除 ${data.totals.deletions} 行`"
+            >
+              <span class="add">+{{ data.totals.additions }}</span>
+              <span class="del">−{{ data.totals.deletions }}</span>
+            </div>
+          </div>
+        </div>
+        <div v-if="data.reviewable || data.reverted" class="actions">
           <span v-if="data.reverted" class="reverted">
             {{ revertSummary(data.reverted) }}
           </span>
           <template v-else-if="data.reviewable">
-            <Button size="sm" data-action="review" @click="review()">
-              审核
-            </Button>
             <Button
               size="sm"
               data-action="undo"
               :disabled="!canUndo"
               @click="confirming = true"
             >
+              <template #icon><Undo2 :size="14" aria-hidden="true" /></template>
               撤销
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              data-action="review"
+              @click="review()"
+            >
+              查看变更
+            </Button>
           </template>
-        </span>
+        </div>
       </header>
       <ul class="files">
         <li v-for="row in rows" :key="row.file.path">
           <button
             type="button"
             class="file"
-            :disabled="!data.reviewable"
             :title="row.file.path"
-            @click="review(row.file.path)"
+            @click="openFile(row.file.path)"
           >
-            <span class="path">
-              <span class="dir">{{ row.dir }}</span>
-              <span class="name">{{ row.name }}</span>
+            <DocumentIcon :path="row.file.path" :size="18" />
+            <span class="file-main">
+              <span class="path"
+                ><span class="dir">{{ row.dir }}</span
+                ><span class="name">{{ row.name }}</span></span
+              >
+              <span
+                v-if="row.tag || row.outcome || 'note' in row.counts"
+                class="file-meta"
+              >
+                <span v-if="row.tag" class="tag">{{ row.tag }}</span>
+                <span v-if="row.outcome" class="outcome">{{
+                  row.outcome
+                }}</span>
+                <span v-if="'note' in row.counts" class="note">{{
+                  row.counts.note
+                }}</span>
+              </span>
             </span>
-            <span v-if="row.tag" class="tag">{{ row.tag }}</span>
-            <span v-if="row.outcome" class="outcome">{{ row.outcome }}</span>
-            <span v-if="'note' in row.counts" class="note">
-              {{ row.counts.note }}
-            </span>
-            <span v-else class="counts">
+            <span v-if="!('note' in row.counts)" class="counts">
               <span class="add">{{ row.counts.additions }}</span>
               <span class="del">{{ row.counts.deletions }}</span>
             </span>
           </button>
         </li>
       </ul>
-      <div class="foot">
+      <div v-if="hidden > 0 || data.truncated" class="foot">
         <button
           v-if="hidden > 0"
           type="button"
@@ -150,9 +202,14 @@ function review(path?: string): void {
           :aria-expanded="expanded"
           @click="expanded = !expanded"
         >
-          {{ expanded ? '收起' : `展开其余 ${hidden} 个` }}
+          {{ expanded ? '收起文件列表' : `再显示 ${hidden} 个文件` }}
+          <component
+            :is="expanded ? ChevronUp : ChevronDown"
+            :size="14"
+            aria-hidden="true"
+          />
         </button>
-        <span class="caption">{{ turnFilesCaption(data) }}</span>
+        <span v-if="data.truncated" class="limit">仅显示前 200 个文件</span>
       </div>
     </template>
     <TurnRevertDialog
@@ -168,6 +225,8 @@ function review(path?: string): void {
 
 <style scoped>
 .turn-files {
+  container-type: inline-size;
+  overflow: hidden;
   border: 1px solid var(--border-l2);
   border-radius: var(--radius-card);
   background: rgb(var(--bg-elevated));
@@ -180,133 +239,213 @@ function review(path?: string): void {
   align-items: center;
   gap: var(--space-2);
   margin: 0;
-  padding: var(--space-2-5) var(--space-3);
+  padding: var(--space-3) var(--space-4);
   color: rgb(var(--label-secondary));
 }
 
 .head {
   display: flex;
   align-items: center;
-  gap: var(--space-1-5);
-  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  gap: var(--space-3);
+  padding: var(--space-3-5) var(--space-4);
 }
 
-.icon {
+.summary {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.icon-badge {
+  display: grid;
+  place-items: center;
   flex: none;
+  width: calc(var(--space-8) + var(--space-2));
+  height: calc(var(--space-8) + var(--space-2));
+  border: 1px solid var(--border-l2);
+  border-radius: var(--radius-row);
+  background: rgb(var(--bg));
   color: rgb(var(--label-secondary));
+}
+
+.summary-text {
+  min-width: 0;
+}
+
+.summary-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
 }
 
 .headline {
   font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.scope-info {
+  display: inline-flex;
+  border-radius: var(--radius-xs);
+  color: rgb(var(--label-tertiary));
+  cursor: help;
+}
+
+.scope-info:focus-visible,
+.more:focus-visible {
+  outline: 2px solid rgb(var(--focus-ring));
+  outline-offset: 3px;
+}
+
+.totals {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-0-5);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+
+.add,
+.del {
+  font-variant-numeric: tabular-nums;
 }
 
 .add {
   color: rgb(var(--ok));
-  font-variant-numeric: tabular-nums;
 }
 
 .del {
   color: rgb(var(--danger));
-  font-variant-numeric: tabular-nums;
 }
 
 .actions {
-  display: inline-flex;
+  display: flex;
+  flex: none;
   align-items: center;
-  gap: var(--space-1);
-  margin-left: auto;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
 }
 
 .reverted {
-  padding-right: var(--space-1);
   color: rgb(var(--label-secondary));
   font-size: var(--fs-xs);
 }
 
 .files {
   margin: 0;
-  padding: 0 0 var(--space-1);
+  padding: var(--space-1) 0;
+  border-top: 1px solid var(--border-l2);
+  background: rgb(var(--bg) / 0.3);
   list-style: none;
 }
 
 .file {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-2-5);
   width: 100%;
-  padding: var(--space-1) var(--space-3);
+  min-height: calc(calc(var(--space-8) + var(--space-2)) + var(--space-1));
+  padding: var(--space-2-5) var(--space-4);
   border: 0;
   background: transparent;
   color: rgb(var(--label-primary));
   font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
+  line-height: var(--lh-s);
   text-align: start;
   cursor: pointer;
 }
 
-.file:disabled {
-  cursor: default;
+.file:hover {
+  background: var(--interactive-bg-hover);
 }
 
-.file:not(:disabled):hover {
-  background: rgb(var(--fg) / var(--hover-bg-a));
+.file:focus-visible {
+  outline: 2px solid rgb(var(--focus-ring));
+  outline-offset: -3px;
+}
+
+.file-main {
+  flex: 1;
+  min-width: 0;
 }
 
 .path {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  white-space: nowrap;
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .dir {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   color: rgb(var(--label-tertiary));
 }
 
 .name {
-  flex: none;
+  color: rgb(var(--label-primary));
 }
 
-.tag,
-.note,
-.outcome {
-  flex: none;
+.file-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-0-5);
   color: rgb(var(--label-secondary));
   font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  overflow-wrap: anywhere;
 }
 
 .counts {
   display: inline-flex;
   flex: none;
-  gap: var(--space-1);
+  gap: var(--space-1-5);
+  align-self: center;
+  font-size: var(--fs-xs);
 }
 
 .foot {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-3) var(--space-2);
   border-top: 1px solid var(--border-l2);
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
 }
 
 .more {
-  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  padding: var(--space-2-5) var(--space-4);
   border: 0;
+  border-radius: var(--radius-xs);
   background: transparent;
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--label-secondary));
   font: inherit;
   cursor: pointer;
 }
 
-.caption {
-  margin-left: auto;
+.more:hover {
+  color: rgb(var(--label-primary));
+  background: var(--interactive-bg-hover);
+}
+
+.limit {
+  padding: var(--space-2) var(--space-4);
   color: rgb(var(--label-tertiary));
+  font-size: var(--fs-xxs);
+}
+
+@container (max-width: 420px) {
+  .head {
+    flex-wrap: wrap;
+  }
+
+  .actions {
+    margin-inline-start: calc(
+      calc(var(--space-8) + var(--space-2)) + var(--space-3)
+    );
+  }
 }
 </style>
