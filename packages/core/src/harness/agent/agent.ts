@@ -190,6 +190,15 @@ export class Agent {
       : { turn: this.phase.lastTurn, step: 0 }
   }
 
+  /**
+   * The call config this agent's next request starts from: its own route
+   * when it has one, else the active route (throws when none is configured).
+   * Request-config middleware (e.g. a turn's fallback) may still replace it.
+   */
+  proposedCallConfig(): LlmCallConfig {
+    return this.options.callConfig?.() ?? this.deps.llm.defaultCallConfig()
+  }
+
   /** Delegation depth: 0 for a root agent. */
   get depth(): number {
     return this.session.header.delegationDepth ?? 0
@@ -648,8 +657,7 @@ export class Agent {
   ): { request: GenerateOptions; prepared?: PreparedLlmCall } {
     const session = this.session
     const persisted = session.requestHeader()
-    const base =
-      this.options.callConfig?.() ?? this.deps.llm.defaultCallConfig()
+    const base = this.proposedCallConfig()
     // A resumed session keeps its explicitly chosen effort while the route is unchanged.
     const reasoningEffort =
       persisted?.config.provider === base.provider &&

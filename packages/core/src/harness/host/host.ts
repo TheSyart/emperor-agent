@@ -447,6 +447,17 @@ export class HarnessHost {
       ({ agent }) => agent?.session.header.cwd ?? this.chatWorkspace(),
     )
     prompt.section({ name: 'persona', order: 0, text: this.personaText() })
+    // The model and working directory change per session and on a model
+    // switch: they live in the runtime context, never in the system prompt
+    // prefix (provider prefix cache, replayed reasoning signatures).
+    prompt.context({
+      name: 'session:environment',
+      order: 100,
+      text: ({ agent }) =>
+        agent === undefined
+          ? ''
+          : `Current model: ${this.modelLabel(agent)}. Working directory: ${JSON.stringify(agent.session.header.cwd ?? this.chatWorkspace())}.`,
+    })
     installLinkGuidancePromptSection(prompt)
     this.sandbox.install(prompt)
     this.approval.install(prompt)
@@ -903,10 +914,18 @@ export class HarnessHost {
   private personaText(): string {
     const path = join(this.kept.templatesDir, 'agent', 'persona.md')
     if (existsSync(path)) return readFileSync(path, 'utf8').trim()
-    return 'You are Emperor Agent, a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.'
+    return 'You are Emperor Agent, a coding agent. The runtime context names the model you run on and your working directory.'
   }
 
-  private modelLabel(): string {
+  /** The model an agent's next request proposes (a child may run on its own route). */
+  private modelLabel(agent?: Agent): string {
+    if (agent !== undefined) {
+      try {
+        return agent.proposedCallConfig().model
+      } catch {
+        // no route configured yet
+      }
+    }
     const route = this.llm.activeRoute()
     return route === undefined ? 'configured' : route.modelId
   }

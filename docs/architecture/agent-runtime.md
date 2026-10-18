@@ -31,7 +31,7 @@ Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript �
 | MCP 工具桥                        | `harness/host/mcp-tools.ts`    |
 | Scheduler 执行器                  | `harness/host/scheduler.ts`    |
 
-系统提示词由 `templates/agent/persona.md` 与各子系统登记的 prompt section 组成；persona 之后固定有一段文件链接说明（`links`），让模型把希望用户点开的文件写成 Markdown 链接（可读名称加路径），对话里显示为带类型图标的链接。提示词本身保持稳定，以维持 provider 前缀缓存；会变化的运行时信息（沙箱与审批策略、Plan 模式、Goal、委派说明）以 `form: 'snapshot'` 的上下文消息进入 log，只在内容变化时追加。
+系统提示词由 `templates/agent/persona.md` 与各子系统登记的 prompt section 组成；persona 之后固定有一段文件链接说明（`links`），让模型把希望用户点开的文件写成 Markdown 链接（可读名称加路径），对话里显示为带类型图标的链接。提示词本身保持稳定，以维持 provider 前缀缓存；persona 不写当前模型和工作目录，这两项与其他会变化的运行时信息（沙箱与审批策略、Plan 模式、Goal、委派说明）一起以 `form: 'snapshot'` 的上下文消息进入 log，只在内容变化时追加，所以切换模型不会改写提示词前缀。
 
 Pre-step middleware 的顺序是：工作区说明（AGENTS.md / CLAUDE.md）、长期记忆、Skill 目录、插件引用、压缩、重复调用提醒、Hooks，Plan 模式与 Goal 在各自 install 时加入。请求失败时 `retryMiddleware()` 负责按 route 的重试策略重试。
 
