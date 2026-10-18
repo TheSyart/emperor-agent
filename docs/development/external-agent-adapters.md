@@ -2,14 +2,21 @@
 
 > 文档状态：Active<br>
 > 面向读者：贡献者、发布维护者<br>
-> 最后核验：2026-10-17<br>
-> 事实源：`packages/core/src/harness/delegation/adapters/`、`scripts/smoke-external-agents.mjs`、`desktop/tests/external-agents.e2e.mjs`、`desktop/electron-builder.yml`
+> 最后核验：2026-10-19<br>
+> 事实源：`packages/core/src/harness/delegation/adapters/`、`packages/core/src/harness/delegation/compatibility.ts`、`packages/core/src/harness/delegation/executable.ts`、`packages/core/src/harness/delegation/protocol/`、`scripts/codex-protocol-digest.mjs`、`scripts/smoke-external-agents.mjs`、`desktop/tests/external-agents.e2e.mjs`、`desktop/electron-builder.yml`、`desktop/scripts/after-pack.cjs`
 
-当前固定 Claude Code 2.1.281、Claude Agent SDK 0.3.281、Codex 0.153.4。版本超出固定协议基线会禁用 profile；修改 expectedVersion 不能绕过。升级时一起更新规范化事件、Codex 双摘要 schema、contract 测试和真实两轮/问题/干预/取消/恢复证据。
+## 版本兼容：能力握手
+
+兼容性不再按配置里的精确版本判断；旧配置的 `expectedVersion` 读取时忽略，并从 `config.json` 中删除一次（修订号不变）。
+
+- **Claude Code**：默认运行 Claude Agent SDK 0.3.281 随包的 `claude`（2.1.281，`CLAUDE_BUNDLED_VERSION`），版本随 Emperor 发布固定，不受本机 CLI 自动更新影响。打包版从 `app.asar.unpacked` 启动它，源码运行按 SDK 自己的方式解析平台包。profile 的 `executableSource: 'system'`（设置里的「使用本机安装的 claude」）改用 `executablePath`：检测只要求 `>= 2.1`（随包 minor），运行时再检查 SDK `system/init` 消息：必须报告 `claude_code_version` 且不低于 2.1，`permissionMode` 必须是请求的 `default`，工具列表必须可读；不满足即 `EXECUTOR_INCOMPATIBLE`。升级 SDK 时同步改 `CLAUDE_BUNDLED_VERSION`／`CLAUDE_SDK_VERSION`，`registry.test.ts` 会对照 SDK 的 `manifest.json` 与 `package.json`。
+- **Codex**：使用本机 CLI。版本与某个已验证协议不同 major.minor 时为 `incompatible`，诊断与 `requiredVersion` 给出支持范围（如 `0.153.x`）。同一 minor 时，检测在私有 `CODEX_HOME` 下运行 `codex app-server generate-json-schema`（不调用模型），对适配器依赖的 19 个 schema 文件计算摘要（键排序后的 JSON，与格式无关），按可执行文件身份缓存：摘要已知为 `compatibility: 'verified'`；不同为 `unverified`，仍可运行，设置页显示「可能不兼容」，运行失败时结果末尾注明协议差异可能是原因。`initialize` 返回的 user agent 只再核对 minor。
+
+新增 Codex 版本：`node scripts/codex-protocol-digest.mjs` 检查本机 codex 的摘要是否已知；协议有变化且适配器已按新 schema 更新、contract 测试与真实两轮/问题/干预/取消/恢复证据通过后，`--write` 把依赖的 schema 文件与 `digest.json` 写入 `protocol/codex-<version>/`，再在 `compatibility.ts` 的 `KNOWN_CODEX_PROTOCOLS` 注册。同一 minor 的不同摘要可写进同一份 `digest.json` 的 `digests`；`registry.test.ts` 要求每个 `protocol/codex-*` 目录都已注册且摘要与签入文件一致。
 
 Claude 使用 SDK startup 与自定义 managed spawn，业务问题经过权限回调转换，内部 Agent/Task/MCP/后台调度被关闭。Codex 使用应用独占 stdio app-server：initialize、initialized、thread/start 或 resume、turn/start；没有共享桌面 daemon 或 exec fallback。收到中断 ACK 后仍要等待原生终态及进程静止；未知协议请求默认拒绝。
 
-源码运行 macOS helper 先执行 `node scripts/build-delegation-scanner.mjs`；Core pretest 与 desktop native build 会执行同一脚本。安装包携带已编译 helper，无需用户编译器。默认原生构建和 Preview 打包不执行 codesign 重签，Preview 的 afterSign 已禁用；可选的正式发布签名流程独立保留。SDK 作为 main external 依赖，打包包含 SDK 和目标平台可选 CLI binary；可执行 binary 在 asar 外。profile 仍需要明确可发现且匹配版本的 CLI，Codex 不由应用安装。
+源码运行 macOS helper 先执行 `node scripts/build-delegation-scanner.mjs`；Core pretest 与 desktop native build 会执行同一脚本。安装包携带已编译 helper，无需用户编译器。默认原生构建和 Preview 打包不执行 codesign 重签，Preview 的 afterSign 已禁用；可选的正式发布签名流程独立保留。SDK 作为 main external 依赖，打包包含 SDK 和**当前构建架构**的 Claude binary：`electron-builder.yml` 的 `files` 与 `asarUnpack` 用 `${arch}` 只选 `claude-agent-sdk-darwin-${arch}`，binary 在 asar 外；after-pack 要求 SDK 与本架构 binary 存在且可执行，发现其他架构的 binary 即构建失败。跨架构打包（例如在 arm64 机器上打 x64）需要先安装对应架构的 SDK 平台包，否则 after-pack 报缺失。Codex 不由应用安装，需要本机 CLI 在支持范围内。
 
 ## 真实验收
 

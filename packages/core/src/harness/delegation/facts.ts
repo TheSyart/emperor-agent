@@ -3,6 +3,7 @@ import { validPng } from './image-proof'
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, relative, sep } from 'node:path'
 import { durableReplaceSync } from '../../store/persistence'
+import { claudeExecutableSource } from './executable'
 import type {
   ExecutorProfile,
   ExecutorProbe,
@@ -30,7 +31,7 @@ const key = (p: ExecutorProfile) =>
     id: p.id,
     backend: p.backend,
     path: p.executablePath,
-    version: p.expectedVersion,
+    source: claudeExecutableSource(p) ?? null,
     model: p.defaultModel ?? null,
     auth: p.authRef,
     policy: EXECUTOR_TOOL_POLICY,
@@ -364,8 +365,7 @@ export class ExecutorFactsStore {
         delegationId: context.delegationId,
         model: binding.model,
         backend: profile.backend,
-        executorVersion:
-          this.probe(profile)?.executableVersion ?? profile.expectedVersion,
+        executorVersion: this.probe(profile)?.executableVersion,
         adapterVersion: 'native-facts-v2',
         toolPolicy: EXECUTOR_TOOL_POLICY,
         permissionMode: context.permissionMode,

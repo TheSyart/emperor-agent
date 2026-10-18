@@ -34,8 +34,13 @@ export interface ExecutorProfile {
   id: string
   backend: ExternalBackend
   enabled: boolean
+  /**
+   * Claude Code only: `bundled` (default) runs the binary shipped with
+   * Emperor's Agent SDK; `system` runs `executablePath`. Codex always runs
+   * `executablePath`.
+   */
+  executableSource?: 'bundled' | 'system'
   executablePath: string
-  expectedVersion: string
   customModels?: string[]
   defaultModel?: string
   specialties?: string[]
@@ -68,6 +73,17 @@ export interface ExecutorProbe {
     | 'containment_unavailable'
   executableVersion?: string
   sdkVersion?: string
+  /** Claude Code: which binary was checked. */
+  executableSource?: 'bundled' | 'system'
+  /** The range a refused or old CLI needs, e.g. `>= 2.1` or `0.153.x`. */
+  requiredVersion?: string
+  /**
+   * Codex: `verified` when the CLI's protocol digest is a known one;
+   * `unverified` when only the minor matches (runnable, may be incompatible).
+   */
+  compatibility?: 'verified' | 'unverified'
+  /** Codex: the verified release whose protocol the CLI was compared with. */
+  protocolVersion?: string
   capabilities: ExecutorCapabilities
   checkedAt: number
   authVerified: boolean
@@ -160,6 +176,8 @@ export interface DelegationRecord {
   workspaceLeaseId: string
   effectivePermission: SandboxMode
   capabilitySnapshot: ExecutorCapabilities
+  /** CLI version the preflight saw when the delegation was created. */
+  executorVersion?: string
   providerSessionId?: string
   currentRunId?: string
   availability: 'idle' | 'active' | 'needs_recovery' | 'closed'
@@ -374,7 +392,7 @@ export class DelegationError extends Error {
         'configure_executor',
       ],
       EXECUTOR_INCOMPATIBLE: [
-        'CLI 版本与固定协议基线不兼容。',
+        'CLI 版本不在支持范围内，请按设置 › 子智能体中显示的版本安装，或改用 Emperor 内置的 Claude Code。',
         'configure_executor',
       ],
       CONTAINMENT_UNAVAILABLE: [

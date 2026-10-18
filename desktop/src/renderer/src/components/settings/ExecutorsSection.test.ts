@@ -30,7 +30,6 @@ function payload() {
       backend,
       enabled: false,
       executablePath: backend === 'codex' ? 'codex' : 'claude',
-      expectedVersion: backend === 'codex' ? '0.153.4' : '2.1.281',
       defaultModel: `kept-model-${i}`,
       authRef:
         i === 2
@@ -331,10 +330,10 @@ it('does not invent absent profiles', async () => {
   expect(configureExecutors).not.toHaveBeenCalled()
 })
 it.each([
-  ['missing', undefined, '未找到 CLI'],
+  ['missing', undefined, '内置的 Claude Code 缺失'],
   ['needs_auth', 'AUTH_REQUIRED', 'claude auth login'],
   ['incompatible', 'AUTH_ROUTE_UNAVAILABLE', '模型凭据'],
-  ['incompatible', undefined, '实际 1.0'],
+  ['incompatible', undefined, '需要 >= 2.1'],
   ['containment_unavailable', undefined, '运行环境'],
   ['incompatible', 'executor version probe failed', '可执行权限'],
   ['incompatible', 'AUTH_REQUIRED', '仅钥匙串登录不可用'],
@@ -346,16 +345,23 @@ it.each([
       status,
       diagnostic,
       executableVersion: '1.0',
+      ...(status === 'incompatible' && !diagnostic
+        ? { requiredVersion: '>= 2.1' }
+        : {}),
     })
     listExecutors.mockResolvedValue(value)
     await mount()
     expect(row('claude-code').textContent).toContain(message)
-    if (status === 'incompatible' && !diagnostic)
-      expect(row('claude-code').textContent).toContain('预期 2.1.281')
+    if (status === 'incompatible' && !diagnostic) {
+      // 3. The row names the installed version and the version it needs.
+      expect(row('claude-code').textContent).toContain('1.0')
+      expect(row('claude-code').textContent).not.toContain('预期')
+    }
   },
 )
 it('shows path correction only on request and saves it without changing other fields', async () => {
   const value = payload()
+  Object.assign(value.config.profiles[0]!, { executableSource: 'system' })
   value.profiles[0]!.probe.status = 'missing'
   listExecutors.mockResolvedValue(value)
   await mount()
@@ -371,8 +377,76 @@ it('shows path correction only on request and saves it without changing other fi
   await action('save-executors').onClick!()
   await settle()
   const expected = payload().config
+  Object.assign(expected.profiles[0]!, { executableSource: 'system' })
   expected.profiles[0]!.executablePath = '/opt/bin/claude'
   expect(configureExecutors.mock.calls[0]![0].config).toEqual(expected)
+})
+it('offers reinstall or the installed claude, not a path, when the bundled Claude is missing', async () => {
+  const value = payload()
+  Object.assign(value.profiles[0]!.probe, {
+    status: 'missing',
+    executableSource: 'bundled',
+  })
+  listExecutors.mockResolvedValue(value)
+  await mount()
+  expect(row('claude-code').textContent).toContain('重新安装 Emperor')
+  expect(
+    row('claude-code').querySelector(
+      '.recovery-message [data-executor-recovery]',
+    ),
+  ).toBeNull()
+})
+it('warns that a same-minor Codex may be incompatible while keeping it runnable', async () => {
+  const value = payload()
+  value.config.profiles[1]!.enabled = true
+  Object.assign(value.profiles[1]!.probe, {
+    status: 'available',
+    executableVersion: '0.153.9',
+    compatibility: 'unverified',
+    protocolVersion: '0.153.4',
+  })
+  listExecutors.mockResolvedValue(value)
+  await mount()
+  const codex = row('codex')
+  expect(codex.querySelector('.readiness')!.textContent).toContain('可能不兼容')
+  expect(codex.textContent).toContain('0.153.9')
+  expect(codex.textContent).toContain('0.153.4')
+  expect(codex.textContent).toContain('仍可运行')
+})
+it('shows the version range a refused Codex needs', async () => {
+  const value = payload()
+  Object.assign(value.profiles[1]!.probe, {
+    status: 'incompatible',
+    executableVersion: '0.154.0',
+    requiredVersion: '0.153.x',
+  })
+  listExecutors.mockResolvedValue(value)
+  await mount()
+  expect(row('codex').textContent).toContain('0.154.0')
+  expect(row('codex').textContent).toContain('需要 0.153.x')
+})
+it('switches Claude Code between the bundled binary and the installed claude', async () => {
+  const value = payload()
+  Object.assign(value.profiles[0]!.probe, {
+    executableSource: 'bundled',
+    executableVersion: '2.1.281',
+  })
+  listExecutors.mockResolvedValue(value)
+  await mount()
+  const claude = row('claude-code')
+  expect(claude.textContent).toContain('2.1.281（随 Emperor 内置）')
+  expect(
+    row('codex').querySelector('[data-claude-installed-binary]'),
+  ).toBeNull()
+  claude
+    .querySelector<HTMLButtonElement>('[data-claude-installed-binary]')!
+    .click()
+  await settle()
+  await action('save-executors').onClick!()
+  await settle()
+  expect(
+    configureExecutors.mock.calls[0]![0].config.profiles[0].executableSource,
+  ).toBe('system')
 })
 it('shows per-profile probe failures inline with retry', async () => {
   const value = payload()

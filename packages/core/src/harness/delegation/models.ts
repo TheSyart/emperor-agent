@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { parse } from 'smol-toml'
 import { durableReplaceSync } from '../../store/persistence'
 import { ManagedAgentProcess } from './process'
+import { claudeExecutableSource } from './executable'
 import {
   readNativeModels,
   type NativeModel,
@@ -146,7 +147,7 @@ export class ExecutorModelCatalogService {
         provider,
         model: configuredModel,
         executable: profile.executablePath,
-        version: profile.expectedVersion,
+        source: claudeExecutableSource(profile) ?? null,
         authRef: profile.authRef,
         credentials: runtime.secretValues,
       }

@@ -147,7 +147,7 @@ it('persists evidence, rechecks credential identity after restart, and ignores s
   )
   expect(readFileSync(restarted.file, 'utf8')).not.toContain('secret-key')
 })
-it.each(['defaultModel', 'expectedVersion', 'executablePath'] as const)(
+it.each(['defaultModel', 'executablePath'] as const)(
   'invalidates proof when %s changes',
   (key) => {
     const f = fixture()
@@ -159,6 +159,21 @@ it.each(['defaultModel', 'expectedVersion', 'executablePath'] as const)(
     expect(f.store.view(profile).nativeCapabilities.search.status).toBe('stale')
   },
 )
+it('invalidates Claude proof when it switches between the bundled and the installed claude', () => {
+  const f = fixture('claude-code')
+  metadata(f)
+  search(f, 'search')
+  search(f, 'fetch')
+  expect(f.store.view(f.profile).nativeCapabilities.search.status).toBe(
+    'available',
+  )
+  const installed: ExecutorProfile = {
+    ...f.profile,
+    executableSource: 'system',
+  }
+  f.store.bind(installed, f.environment)
+  expect(f.store.view(installed).nativeCapabilities.search.status).toBe('stale')
+})
 it('invalidates old tool proof on provider-reported model change', () => {
   const f = fixture()
   metadata(f)
@@ -337,12 +352,19 @@ it('never attributes a concurrent run result to another reported model or newer 
 
 it('retains non-secret execution provenance with capability evidence', () => {
   const f = fixture()
+  f.store.setProbe(f.profile, {
+    status: 'available',
+    checkedAt: Date.now(),
+    authVerified: false,
+    capabilities: {} as any,
+    executableVersion: '0.153.9',
+  })
   metadata(f)
   search(f, 'search')
   search(f, 'fetch')
   expect(f.store.view(f.profile).nativeCapabilities.search).toMatchObject({
     backend: 'codex',
-    executorVersion: f.profile.expectedVersion,
+    executorVersion: '0.153.9',
     adapterVersion: 'native-facts-v2',
     toolPolicy: 'native-tools-v2-structured-results',
     permissionMode: 'workspace-write',

@@ -196,7 +196,7 @@ function capabilityTone(value: NativeCapabilityStatus) {
 }
 function readinessTone(profile: ExecutorProfile) {
   if (!profile.enabled) return 'neutral'
-  if (hasIssue(profile)) return 'warn'
+  if (hasIssue(profile) || warning(profile)) return 'warn'
   return probes.value[profile.id]?.status === 'available' ? 'ok' : 'neutral'
 }
 async function refreshFacts() {
@@ -328,6 +328,8 @@ function label(profile: ExecutorProfile) {
   if (probe.diagnostic === 'executor version probe failed') return '检测失败'
   if (probe.diagnostic === 'AUTH_REQUIRED') return '需要登录配置'
   if (probe.diagnostic === 'AUTH_ROUTE_UNAVAILABLE') return '凭据不可用'
+  if (probe.status === 'available' && probe.compatibility === 'unverified')
+    return '可能不兼容'
   return {
     available: '执行器就绪',
     missing: '未找到 CLI',
@@ -350,12 +352,49 @@ function detail(profile: ExecutorProfile) {
       ? '所选模型凭据不可读，请在模型设置检查原配置。'
       : `请在终端运行 ${profile.backend === 'codex' ? 'codex login' : 'claude auth login'}。${profile.backend === 'claude-code' ? 'Emperor 需要可读取的 CLI 文件或环境变量认证；仅钥匙串登录不可用。官方订阅可运行 claude setup-token，并将令牌设为 CLAUDE_CODE_OAUTH_TOKEN；无需改用 API 计费。' : ''}配置完成后重新检测。`
   if (probe.status === 'missing')
-    return '未找到 CLI，请检查本机安装或更正路径后保存。'
-  if (probe.status === 'incompatible')
-    return `CLI 版本不兼容：实际 ${probe.executableVersion ?? '未知'}，预期 ${profile.expectedVersion}。请检查本机 CLI 版本。`
+    return usesBundledClaude(profile)
+      ? 'Emperor 内置的 Claude Code 缺失，请重新安装 Emperor，或在「查看详情」里改用本机安装的 claude。'
+      : '未找到 CLI，请检查本机安装或更正路径后保存。'
+  if (probe.status === 'incompatible') {
+    const name = profile.backend === 'codex' ? 'Codex' : 'claude'
+    const installed = probe.executableVersion ?? '版本未知'
+    if (!probe.requiredVersion)
+      return `本机 ${name}（${installed}）不在支持范围内，请检查本机 CLI 版本。`
+    return (
+      `本机 ${name} ${installed} 不在支持范围内，需要 ${probe.requiredVersion}。` +
+      (profile.backend === 'codex'
+        ? '请安装对应版本后重新检测。'
+        : '可以升级本机 claude，或关闭「使用本机安装的 claude」改用 Emperor 内置版本。')
+    )
+  }
   if (probe.status === 'containment_unavailable')
     return '本机运行环境不可用，请检查 CLI 运行环境后重试。'
   return ''
+}
+/** Claude Code runs the binary bundled with Emperor unless switched. */
+function usesBundledClaude(profile: ExecutorProfile) {
+  return (
+    profile.backend === 'claude-code' && profile.executableSource !== 'system'
+  )
+}
+function setInstalledClaude(profile: ExecutorProfile, installed: boolean) {
+  profile.executableSource = installed ? 'system' : 'bundled'
+}
+/** Runnable, but the CLI's protocol only matched by version (AGT-01). */
+function warning(profile: ExecutorProfile) {
+  const probe = probes.value[profile.id]
+  if (probe?.status !== 'available' || probe.compatibility !== 'unverified')
+    return ''
+  return `本机 Codex ${probe.executableVersion ?? ''} 的协议与已验证的 ${probe.protocolVersion ?? '版本'} 不同，可能不兼容；仍可运行，失败时会注明可能是版本原因。`
+}
+function versionText(profile: ExecutorProfile) {
+  const probe = probes.value[profile.id]
+  if (!probe?.executableVersion) return '未知'
+  if (profile.backend !== 'claude-code') return probe.executableVersion
+  return (
+    probe.executableVersion +
+    (probe.executableSource === 'system' ? '（本机）' : '（随 Emperor 内置）')
+  )
 }
 function hasIssue(profile: ExecutorProfile) {
   return (
@@ -614,6 +653,13 @@ onBeforeUnmount(() => {
               @change="selected[row.backend] = $event"
             />
           </div>
+          <div
+            v-if="warning(row.profile)"
+            class="message recovery-message"
+            data-executor-warning
+          >
+            <p role="status">{{ warning(row.profile) }}</p>
+          </div>
           <div v-if="hasIssue(row.profile)" class="message recovery-message">
             <p role="status">{{ detail(row.profile) }}</p>
             <div class="inline-actions">
@@ -631,6 +677,7 @@ onBeforeUnmount(() => {
                 @click="load(true)"
                 >重试</Button
               ><Button
+                v-if="!usesBundledClaude(row.profile)"
                 size="sm"
                 variant="ghost"
                 data-executor-recovery
@@ -639,7 +686,7 @@ onBeforeUnmount(() => {
               >
             </div>
             <TextField
-              v-if="recovery[row.profile.id]"
+              v-if="recovery[row.profile.id] && !usesBundledClaude(row.profile)"
               v-model="row.profile.executablePath"
               :aria-label="`${row.name} 可执行文件路径`"
               :disabled="busy || loading"
@@ -836,9 +883,7 @@ onBeforeUnmount(() => {
                 </div>
                 <div>
                   <dt>CLI 版本</dt>
-                  <dd>
-                    {{ probes[row.profile.id]?.executableVersion ?? '未知' }}
-                  </dd>
+                  <dd>{{ versionText(row.profile) }}</dd>
                 </div>
                 <div>
                   <dt>配置模型</dt>
@@ -927,7 +972,32 @@ onBeforeUnmount(() => {
                   </dd>
                 </div>
               </dl>
-              <div v-if="!hasIssue(row.profile)" class="connection-settings">
+              <div
+                v-if="row.profile.backend === 'claude-code'"
+                class="connection-settings"
+              >
+                <div class="block-heading">
+                  <span>使用本机安装的 claude</span
+                  ><Switch
+                    :model-value="!usesBundledClaude(row.profile)"
+                    data-claude-installed-binary
+                    :disabled="busy || loading"
+                    aria-label="使用本机安装的 claude"
+                    @update:model-value="
+                      setInstalledClaude(row.profile, $event)
+                    "
+                  />
+                </div>
+                <p class="field-hint">
+                  默认使用随 Emperor 发布的 Claude Code，不受本机 CLI
+                  自动更新影响。改用本机安装的 claude 时需要
+                  {{ probes[row.profile.id]?.requiredVersion ?? '>= 2.1' }}。
+                </p>
+              </div>
+              <div
+                v-if="!hasIssue(row.profile) && !usesBundledClaude(row.profile)"
+                class="connection-settings"
+              >
                 <div class="block-heading">
                   <span>连接配置</span
                   ><Button

@@ -2,16 +2,16 @@
 
 > 文档状态：Active<br>
 > 面向读者：开发者、维护者<br>
-> 最后核验：2026-10-18<br>
+> 最后核验：2026-10-19<br>
 > 事实源：`packages/core/src/harness/delegation/`、`packages/core/src/workspace/delegation-*.ts`、`packages/core/src/api/services/delegation-service.ts`、`packages/core/src/runtime/agent-view.ts`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/sidebar/agentTree.ts`
 
-Emperor 的父 Agent 可以通过原有子智能体工具选择 `internal`、`claude-code` 或 `codex`。未指定 backend 时仍用 internal；两个外部 profile 默认启用并复用本机 CLI 登录，主代理可直接派工。设置「子智能体」统一展示本地、Claude Code 与 Codex；外部来源可切换启用状态，通过全局检测读取 CLI 与本地登录可用条件，异常时按需更正可执行文件路径。多份 profile 以来源内选择器切换，不合并或覆盖其他 profile。设置保留既有认证、版本及调度限制；默认模型支持跟随 CLI、候选选择和自定义，修改后仅用于后续派工。已有配置中的开关、路径和有效凭据引用保持不变；旧版空引用按本机登录解析，不自动覆写文件。backend 与内部 provider/model 路由是不同维度。
+Emperor 的父 Agent 可以通过原有子智能体工具选择 `internal`、`claude-code` 或 `codex`。未指定 backend 时仍用 internal；两个外部 profile 默认启用并复用本机 CLI 登录，主代理可直接派工。设置「子智能体」统一展示本地、Claude Code 与 Codex；外部来源可切换启用状态，通过全局检测读取 CLI 与本地登录可用条件，异常时按需更正可执行文件路径。多份 profile 以来源内选择器切换，不合并或覆盖其他 profile。设置保留既有认证及调度限制；默认模型支持跟随 CLI、候选选择和自定义，修改后仅用于后续派工。已有配置中的开关、路径和有效凭据引用保持不变；旧版空引用按本机登录解析，不自动覆写文件。backend 与内部 provider/model 路由是不同维度。
 
 ```mermaid
 flowchart TD
   Parent[Emperor 父 Agent] --> Tools[subagent / send_message / collect_agent]
   Tools --> Service[DelegationService: journal / budget / ownership]
-  Service --> Claude[Claude SDK + 受管 Claude CLI]
+  Service --> Claude[Claude SDK + 随包 claude（可改用本机）]
   Service --> Codex[独占 stdio Codex app-server]
   Service --> Workspace[持久工作区与写入租约]
   Claude --> Receipt[冻结成果与文件树指纹]
@@ -21,6 +21,10 @@ flowchart TD
   Verify --> Preview[保留的 Git 整合预览工作区]
   Preview --> Apply[精确 revision/digest 的人工应用]
 ```
+
+## 版本兼容
+
+兼容性按能力握手判断，不读配置里的精确版本（旧 `expectedVersion` 读取时忽略并清除）。Claude Code 默认运行随 Agent SDK 发布的 `claude`，版本随 Emperor 固定；选择「使用本机安装的 claude」时检测要求 `>= 2.1`，运行时由 SDK `init` 消息核对版本与权限模式。Codex 使用本机 CLI：major.minor 不在已验证协议之列即 `incompatible` 并给出所需范围；同一 minor 时比对 `app-server generate-json-schema` 输出的协议摘要，已知为 `verified`，否则为 `unverified`（可运行、提示可能不兼容、失败结果注明可能的版本原因）。探测结果的 `executableSource`、`requiredVersion`、`compatibility`、`protocolVersion` 供设置页与父 Agent 使用；委派记录保存当时的 `executorVersion`，成果回执的版本取自它。维护流程见 [开发与验证外部执行器](../development/external-agent-adapters.md)。
 
 ## 专长与原生能力事实
 
@@ -32,7 +36,7 @@ flowchart TD
 
 适配器只归一化公开模型元数据和原生工具结果，不转发推理、密钥或原始协议正文。原生搜索与页面读取须在同一轮取得成功证据；Codex 标明请求的实时搜索模式。原生生图还须产生工作区范围内的有效图片。Claude 当前宿主工具清单开放 WebSearch、WebFetch，不提供原生生图。完成文本、自述、脚本绘图、CLI 版本或凭据文件均不能把原生能力升级为已验证可用。
 
-证据绑定 profile、配置模型、认证摘要和固定适配器工具策略；模型报告变化使先前能力失效。模型、执行器路径、版本或账号变化也使旧证据失效，修改专长保留证据。重启后须重新绑定当前认证身份才能恢复匹配的记录，检测不发起模型推理。父 Agent 优先遵从明确来源和已有任务会话，结合专长、模型、工具与证据选择；未知能力可以通过普通授权任务尝试，失败如实交接。
+证据绑定 profile、配置模型、认证摘要和固定适配器工具策略；模型报告变化使先前能力失效。模型、执行器路径、Claude 所用二进制（随包或本机）或账号变化也使旧证据失效，修改专长保留证据。重启后须重新绑定当前认证身份才能恢复匹配的记录，检测不发起模型推理。父 Agent 优先遵从明确来源和已有任务会话，结合专长、模型、工具与证据选择；未知能力可以通过普通授权任务尝试，失败如实交接。
 
 ## 模型候选与本机接入
 
@@ -40,7 +44,7 @@ flowchart TD
 
 Codex 只导入所选模型、所选提供方的连接/认证字段和显式模型目录；选中的配置 profile 合并后写入子会话私有目录，密钥仅留在受控私有配置和进程环境。不会整体载入用户 hooks、插件或权限设置；命令式提供方认证保持明确不支持。Claude 导入模型与别名环境映射及模型限制，适配器继续使用宿主限定的工具与权限。
 
-候选缓存按 CLI 路径/版本、有效模型、提供方、认证摘要与本机配置内容隔离，默认十五分钟复用；刷新失败保留同一上下文的历史候选。缓存是可重建数据，独立于能力验证；账号权限仍须真实执行确认。未知第三方服务不混入 OpenAI 的内置参考。`ExecutorProfile.customModels` 是可选的用户候选列表，最多六十四项、每项最多二百五十六字符，使用既有修订锁保存；旧配置缺省为空。选择模型只修改 `defaultModel`，不提高工具状态，也不影响运行中的进程。
+候选缓存按 CLI 路径与来源、有效模型、提供方、认证摘要与本机配置内容隔离，默认十五分钟复用；刷新失败保留同一上下文的历史候选。缓存是可重建数据，独立于能力验证；账号权限仍须真实执行确认。未知第三方服务不混入 OpenAI 的内置参考。`ExecutorProfile.customModels` 是可选的用户候选列表，最多六十四项、每项最多二百五十六字符，使用既有修订锁保存；旧配置缺省为空。选择模型只修改 `defaultModel`，不提高工具状态，也不影响运行中的进程。
 
 ## 身份、生命周期与控制
 

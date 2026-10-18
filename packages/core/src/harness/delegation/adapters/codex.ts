@@ -19,6 +19,7 @@ import { AsyncQueue } from './async-queue'
 import { redactExecutorText } from '../redaction'
 import { jsonSchema } from '../../tools/json-schema'
 import { publicReferences } from '../facts'
+import { codexUserAgentIssue } from '../compatibility'
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -623,14 +624,11 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
         },
         input.signal,
       )
-      if (
-        typeof initialized.userAgent !== 'string' ||
-        !initialized.userAgent.includes('0.153.4')
-      )
-        throw new DelegationError(
-          'EXECUTOR_INCOMPATIBLE',
-          'Codex initialize returned an unsupported version',
-        )
+      // The preflight compared the protocol digest; here the running
+      // process must still be a supported minor (AGT-01).
+      const incompatible = codexUserAgentIssue(initialized.userAgent)
+      if (incompatible)
+        throw new DelegationError('EXECUTOR_INCOMPATIBLE', incompatible)
       await rpc.notify('initialized')
       const params = codexThreadParams(input)
       const response = await rpc.request(

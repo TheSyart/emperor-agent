@@ -7,7 +7,7 @@ import { defaultExecutorConfig } from '../config'
 import { delegationTestDirectory } from '../testing'
 import type { CodexRpcOptions } from './codex-rpc'
 import type { ExecutorOpenInput } from '../types'
-function fixture() {
+function fixture(userAgent = 'codex/0.153.4') {
   const f = delegationTestDirectory(),
     runtimeRoot = join(f.root, 'runtime')
   mkdirSync(runtimeRoot)
@@ -47,7 +47,7 @@ function fixture() {
   const request = vi.fn(async (method: string, raw: unknown) => {
     const params = raw as Record<string, unknown>
     calls.push({ method, params })
-    if (method === 'initialize') return { userAgent: 'codex/0.153.4' }
+    if (method === 'initialize') return { userAgent }
     if (method === 'thread/start' || method === 'thread/resume')
       return { thread: { id: 'thread-fixture' } }
     if (method === 'turn/start')
@@ -297,4 +297,16 @@ it('denies unknown server requests and answers approved question text only in th
   )
   await session.close()
   f.cleanup()
+})
+
+it('accepts a patch release of the supported minor and refuses another minor with the required range', async () => {
+  const patch = fixture('codex_cli_rs/0.153.9 (Mac OS 26.4.0; arm64)')
+  const session = await patch.adapter.open(patch.input)
+  await session.close()
+  patch.cleanup()
+  const minor = fixture('codex_cli_rs/0.154.0 (Mac OS 26.4.0; arm64)')
+  await expect(minor.adapter.open(minor.input)).rejects.toThrow(
+    /EXECUTOR_INCOMPATIBLE.*0\.153\.x/,
+  )
+  minor.cleanup()
 })

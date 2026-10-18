@@ -151,10 +151,8 @@ export async function runScenario(
   for (const p of config.profiles) {
     p.enabled = options.backend === 'both' || p.backend === options.backend
     p.authRef = { kind: 'managed-cli-login' }
-    p.executablePath =
-      p.backend === 'codex'
-        ? '/opt/homebrew/bin/codex'
-        : '/opt/homebrew/bin/claude'
+    // Claude Code runs the binary bundled with Emperor (AGT-01).
+    if (p.backend === 'codex') p.executablePath = '/opt/homebrew/bin/codex'
   }
   await invoke('executors.configure', {
     expectedRevision: config.revision,

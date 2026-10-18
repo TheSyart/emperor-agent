@@ -34,6 +34,12 @@ import { redactExecutorText } from '../redaction'
 import { jsonSchema } from '../../tools/json-schema'
 import { AsyncQueue } from './async-queue'
 import { CLAUDE_HOST_TOOLS, publicReferences } from '../facts'
+import { claudeInitIssue } from '../compatibility'
+import {
+  bundledClaudeExecutable,
+  claudeExecutableSource,
+  executorExecutable,
+} from '../executable'
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -265,6 +271,8 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
       startup?: (
         options: Options,
       ) => Promise<Pick<WarmQuery, 'query' | 'close'>>
+      /** Test hook: where the SDK-bundled claude lives. */
+      bundledClaude?: () => string | undefined
     } = {},
   ) {
     this.processes = options.processes ?? new ManagedAgentProcess()
@@ -457,10 +465,15 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
       })()
       return closePromise
     }
+    // The SDK-bundled binary unless the user chose the installed claude.
+    const executable = executorExecutable(
+      input.profile,
+      this.options.bundledClaude ?? bundledClaudeExecutable,
+    )
     try {
       const options: Options = {
         cwd: input.cwd,
-        pathToClaudeCodeExecutable: input.profile.executablePath,
+        pathToClaudeCodeExecutable: executable,
         env: input.environment,
         settingSources: [],
         systemPrompt: {
@@ -662,6 +675,14 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
                   'PROVIDER_SESSION_CHANGED',
                   'Claude resumed a different session',
                 )
+              // Capability handshake (AGT-01): an installed claude must
+              // report a supported version and honour the requested mode.
+              const incompatible = claudeInitIssue(raw, {
+                requireVersion:
+                  claudeExecutableSource(input.profile) === 'system',
+              })
+              if (incompatible)
+                throw new DelegationError('EXECUTOR_INCOMPATIBLE', incompatible)
               if (
                 Array.isArray(raw.tools) &&
                 raw.tools.some(

@@ -502,3 +502,33 @@ it('revocation includes idle terminal conversations whose auxiliary verification
   await f.service.shutdown()
   f.cleanup()
 })
+it('a failed run on a Codex with an unverified protocol says the protocol may be the cause', async () => {
+  const f = fixture(async function* (turn, open) {
+    yield {
+      type: 'turn_finished',
+      status: 'failed',
+      error: 'unexpected response shape',
+      delegationId: open.delegationId,
+      runId: turn.runId,
+      generation: open.generation,
+    }
+  })
+  vi.spyOn(f.registry, 'requireAvailable').mockImplementation(async (p) => ({
+    status: 'available',
+    checkedAt: Date.now(),
+    authVerified: false,
+    capabilities: f.registry.capabilities(p.backend),
+    executableVersion: '0.153.9',
+    compatibility: 'unverified',
+    protocolVersion: '0.153.4',
+    diagnostic:
+      'Codex 0.153.9 speaks a protocol that differs from the verified Codex 0.153.4; it may be incompatible',
+  }))
+  const record = await f.service.start(f.owner, spec)
+  const run = await f.service.wait(record.id, record.currentRunId!)
+  expect(run.phase).toBe('failed')
+  expect(run.summary).toContain('unexpected response shape')
+  expect(run.summary).toMatch(/0\.153\.9.*0\.153\.4/s)
+  expect(f.service.inspect(record.id).record!.executorVersion).toBe('0.153.9')
+  f.cleanup()
+})
