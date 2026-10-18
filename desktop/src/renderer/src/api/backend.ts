@@ -174,6 +174,8 @@ interface EmperorBridge {
   revealBrowserExtension?: () => Promise<{ ok: boolean }>
   removeBrowserExtension?: () => Promise<BrowserExtensionRemoveResult>
   onBrowserPairingRequest?: (listener: () => void) => () => void
+  /** App menu items that act in the window (偏好设置… → 设置). */
+  onMenuCommand?: (listener: (command: 'open-settings') => void) => () => void
   onAgentPreviewFrame?: (
     listener: (frame: AgentPreviewUpdate) => void,
   ) => () => void
@@ -833,6 +835,13 @@ export async function removeBrowserExtension(): Promise<BrowserExtensionRemoveRe
 /** An extension asked to pair (main sends nothing else). */
 export function onBrowserPairingRequest(listener: () => void): () => void {
   return bridge()?.onBrowserPairingRequest?.(listener) ?? (() => {})
+}
+
+/** The app menu asked the window to act (偏好设置… ⌘, opens 设置). */
+export function onMenuCommand(
+  listener: (command: 'open-settings') => void,
+): () => void {
+  return bridge()?.onMenuCommand?.(listener) ?? (() => {})
 }
 
 export async function approveBrowserPairing(

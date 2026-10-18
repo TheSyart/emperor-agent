@@ -22,6 +22,7 @@ import {
   EXTERNAL_OPEN_CHANNEL,
   LINK_OPEN_CHANNEL,
   MARKDOWN_REMOTE_IMAGE_CHANNEL,
+  APP_MENU_COMMAND_CHANNEL,
   MAC_HELPER_RECONNECT_CHANNEL,
   REFERENCE_REVEAL_CHANNEL,
   SELECT_FILE_CHANNEL,
@@ -127,6 +128,7 @@ describe('desktop capability preload bridge', () => {
       'onBrowserPairingRequest',
       'onBrowserReveal',
       'onBrowserState',
+      'onMenuCommand',
       'openBrowserDownload',
       'openBrowserHistory',
       'openBrowserUrl',
@@ -177,6 +179,18 @@ describe('desktop capability preload bridge', () => {
       MARKDOWN_REMOTE_IMAGE_CHANNEL,
       { url: 'https://example.com/a.png' },
     ])
+  })
+
+  it('relays only known app menu commands (MAIN-20)', () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createDesktopCapabilityBridge(ipc)
+    const listener = vi.fn()
+    const dispose = bridge.onMenuCommand(listener)
+    ipc.emit(APP_MENU_COMMAND_CHANNEL, 'open-settings')
+    ipc.emit(APP_MENU_COMMAND_CHANNEL, 'reload')
+    dispose()
+    ipc.emit(APP_MENU_COMMAND_CHANNEL, 'open-settings')
+    expect(listener.mock.calls).toEqual([['open-settings']])
   })
 
   it('routes browser pairing only through fixed channels', async () => {

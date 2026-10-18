@@ -34,6 +34,9 @@ describe('desktop pet renderer sandbox', () => {
     expect(preloadSource).toContain(`'${PET_RENDERER_BOOTSTRAP_CHANNEL}'`)
     expect(preloadSource).toContain(`'${PET_RENDERER_CLOSE_CHANNEL}'`)
     expect(preloadSource).toContain(`'${PET_EVENT_CHANNEL}'`)
+    expect(mainSource).toMatch(
+      /createPetWindow[\s\S]*?webPreferences:\s*\{[\s\S]*?devTools:\s*!app\.isPackaged/,
+    )
     expect(mainSource).toContain('const petContents = win.webContents')
     expect(mainSource).toContain('coreEventBridge.attachPet(petContents)')
     expect(mainSource).not.toContain('coreEventBridge.attach(petContents)')

@@ -34,6 +34,7 @@ import {
   BROWSER_STATE_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
   LINK_OPEN_CHANNEL,
+  APP_MENU_COMMAND_CHANNEL,
   MARKDOWN_REMOTE_IMAGE_CHANNEL,
   MAC_HELPER_PERMISSION_CHANNEL,
   MAC_HELPER_RECONNECT_CHANNEL,
@@ -51,6 +52,7 @@ import {
   VAULT_UNLOCK_CHANNEL,
   VAULT_REVEAL_CHANNEL,
   type AgentPreviewUpdate,
+  type AppMenuCommand,
   type AgentPreviewPointer,
   type BrowserViewAction,
   type BrowserViewState,
@@ -84,6 +86,14 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
     /** A remote markdown image the user asked to see: main fetches it. */
     loadRemoteImage: (url: string) =>
       ipcRenderer.invoke(MARKDOWN_REMOTE_IMAGE_CHANNEL, { url }),
+    /** App menu items that act in the window (偏好设置… opens 设置). */
+    onMenuCommand: (listener: (command: AppMenuCommand) => void) => {
+      const wrapped = (_event: unknown, command: unknown) => {
+        if (command === 'open-settings') listener(command)
+      }
+      ipcRenderer.on(APP_MENU_COMMAND_CHANNEL, wrapped)
+      return () => ipcRenderer.removeListener(APP_MENU_COMMAND_CHANNEL, wrapped)
+    },
     openSkillsFolder: (input: {
       scope: 'user' | 'project'
       sessionId?: string | null

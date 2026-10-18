@@ -621,3 +621,8 @@ export const MARKDOWN_REMOTE_IMAGE_CHANNEL = 'emperor:markdown:remote-image'
 
 export type RemoteImageResult =
   { ok: true; dataUrl: string } | { ok: false; error: string }
+
+/** Main → renderer {@link AppMenuCommand}: an app menu item was chosen. */
+export const APP_MENU_COMMAND_CHANNEL = 'emperor:menu:command'
+
+export type AppMenuCommand = 'open-settings'

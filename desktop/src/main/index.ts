@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  Menu,
   nativeImage,
   protocol,
   net,
@@ -41,6 +42,7 @@ import {
   withContentSecurityPolicy,
 } from './protocol'
 import { rendererContentSecurityPolicy } from '../shared/content-security-policy'
+import { applicationMenuTemplate } from './app-menu'
 import { defaultSessionPermission } from './renderer-permissions'
 import { hardenSession } from './computer-use/session-hardening'
 import { registerOpenPathIpc } from './open-path-ipc'
@@ -131,6 +133,7 @@ import {
 import {
   AGENT_PREVIEW_FRAME_CHANNEL,
   AGENT_PREVIEW_POINTER_CHANNEL,
+  APP_MENU_COMMAND_CHANNEL,
   BROWSER_DOWNLOAD_EVENT_CHANNEL,
   BROWSER_PAIRING_REQUEST_CHANNEL,
   BROWSER_REVEAL_CHANNEL,
@@ -142,6 +145,7 @@ import {
   PET_STATUS_REQUEST_CHANNEL,
   SELECT_DIRECTORY_CHANNEL,
   TERMINAL_SUBSCRIPTION_CHANNEL,
+  type AppMenuCommand,
 } from '../shared/ipc-contract'
 
 const mainDir = moduleDirFromUrl(import.meta.url)
@@ -213,6 +217,7 @@ const trustedRendererPolicy = createTrustedRendererPolicy({
 })
 // SEC-05: the app://bundle header; index.html carries the same meta.
 const RENDERER_CSP = rendererContentSecurityPolicy()
+const HELP_URL = 'https://github.com/TheSyart/emperor-agent#readme'
 // Core's web_fetch and the remote markdown images (UI-38) share one public
 // HTTP client: no cookies, no local or private addresses.
 const webFetchClient = createDesktopWebFetchClient({
@@ -826,6 +831,37 @@ function secureDefaultSession(): void {
   })
 }
 
+/** MAIN-20: Emperor's own menu; packaged builds: no reload, no DevTools. */
+function installApplicationMenu(): void {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      applicationMenuTemplate({
+        appName: 'Emperor Agent',
+        packaged: app.isPackaged,
+        platform: process.platform,
+        openSettings: () => sendMenuCommand('open-settings'),
+        openHelp: () => {
+          void shell.openExternal(HELP_URL).catch(() => undefined)
+        },
+      }),
+    ),
+  )
+}
+
+function sendMenuCommand(command: AppMenuCommand): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    if (!runtimeReady) return
+    createWindow()
+    mainWindow?.webContents.once('did-finish-load', () =>
+      mainWindow?.webContents.send(APP_MENU_COMMAND_CHANNEL, command),
+    )
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.webContents.send(APP_MENU_COMMAND_CHANNEL, command)
+}
+
 function createWindow(): void {
   const boundsPath = mainBoundsPath()
   mainWindow = new BrowserWindow({
@@ -834,7 +870,9 @@ function createWindow(): void {
     icon: appIconPath,
     backgroundColor: '#1a1410',
     show: false,
-    webPreferences: mainWindowWebPreferences(mainDir),
+    webPreferences: mainWindowWebPreferences(mainDir, {
+      packaged: app.isPackaged,
+    }),
   })
   pointerOverlay ??= new PointerOverlay()
   syncControlIndicators()
@@ -979,6 +1017,7 @@ function createPetWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      devTools: !app.isPackaged,
       additionalArguments: [`--emperor-asset-base-url=${assetBaseUrl}`],
     },
   })
@@ -1321,7 +1360,9 @@ async function startup(): Promise<void> {
         arch: process.arch,
         verifySeatbelt: verifyPackagedSeatbelt,
         verifyRenderer: () => {
-          const webPreferences = mainWindowWebPreferences(mainDir)
+          const webPreferences = mainWindowWebPreferences(mainDir, {
+            packaged: app.isPackaged,
+          })
           return verifyPackagedRenderer({
             createWindow: () => {
               const win = new BrowserWindow({
@@ -1375,6 +1416,7 @@ function startRuntime(): Promise<void> {
 
 app.whenReady().then(() => {
   secureDefaultSession()
+  installApplicationMenu()
   return startRuntime()
 })
 

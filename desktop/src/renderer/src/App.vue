@@ -46,7 +46,11 @@ import { shouldShowModelSetupPrompt } from './components/onboarding/modelSetupDi
 import { runInitialStartup } from './appStartup'
 import { buildSlashPaletteItems } from './commands'
 import { createCommandCatalogLoader } from './commandCatalog'
-import { onBrowserPairingRequest, onBrowserReveal } from './api/backend'
+import {
+  onBrowserPairingRequest,
+  onBrowserReveal,
+  onMenuCommand,
+} from './api/backend'
 import { core } from './api/http'
 import { fetchSessionLineage } from './api/sessions'
 import {
@@ -680,6 +684,12 @@ const stopPairingRequests = onBrowserPairingRequest(() => {
   void settingsRoute.openSettings('computer', 'chrome')
 })
 onBeforeUnmount(stopPairingRequests)
+
+// 应用菜单 › 偏好设置… (⌘,).
+const stopMenuCommands = onMenuCommand((command) => {
+  if (command === 'open-settings') void settingsRoute.openSettings('general')
+})
+onBeforeUnmount(stopMenuCommands)
 
 provideAppContext({
   boot,
