@@ -1,4 +1,9 @@
 import {
+  SUBAGENT_IDENTITY,
+  SUBAGENT_HANDOFF,
+  EXTERNAL_REPORT_TRANSPORT,
+} from '../../subagent/contract'
+import {
   startup as sdkStartup,
   type Options,
   type WarmQuery,
@@ -377,6 +382,15 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
         pathToClaudeCodeExecutable: input.profile.executablePath,
         env: input.environment,
         settingSources: [],
+        systemPrompt: {
+          type: 'preset',
+          preset: 'claude_code',
+          append: [
+            SUBAGENT_IDENTITY,
+            SUBAGENT_HANDOFF,
+            EXTERNAL_REPORT_TRANSPORT,
+          ].join('\n\n'),
+        },
         persistSession: true,
         includePartialMessages: true,
         ...(input.resumeSessionId

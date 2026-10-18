@@ -16,7 +16,7 @@ import type {
   DelegationStart,
 } from './types'
 import type { DelegationState } from './fold'
-import { buildDelegationBrief, type DelegationBriefInput } from './context'
+import { buildDelegationContext, type DelegationBriefInput } from './context'
 import { jsonSchema } from '../tools/json-schema'
 export interface DelegationToolService {
   start(
@@ -179,7 +179,7 @@ export function createDelegationTools(
           context = args.context ?? 'isolated'
         if (args.output_schema)
           jsonSchema.assertObjectJsonSchema(args.output_schema)
-        const prompt = buildDelegationBrief({
+        const prompt = buildDelegationContext({
           ...(options.briefContext?.(agent) ?? {}),
           prompt: args.prompt,
           description: args.description,

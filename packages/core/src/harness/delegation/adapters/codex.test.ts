@@ -100,6 +100,11 @@ it('handshakes before starting an isolated thread and resumes exact identity', a
     approvalPolicy: 'never',
     config: { 'features.code_mode_host': true, 'features.multi_agent': false },
   })
+  const instructions = f.calls[2]!.params.developerInstructions as string
+  expect(instructions).toContain('parent agent in Emperor Agent')
+  expect(instructions).toContain('Verification')
+  expect(instructions).toContain('Open items')
+  expect(instructions).toContain('public final response')
   await session.close()
   const resumed = await f.adapter.open({
     ...f.input,

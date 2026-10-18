@@ -148,6 +148,16 @@ it('uses managed spawn, isolated settings and exact resume; steer is unsupported
   }
   await submit
   expect(events.map((e) => e.type)).toContain('text_delta')
+  expect(f.getOptions().systemPrompt).toMatchObject({
+    type: 'preset',
+    preset: 'claude_code',
+    append: expect.stringContaining('parent agent in Emperor Agent'),
+  })
+  expect(JSON.stringify(f.getOptions().systemPrompt)).toContain('Verification')
+  expect(JSON.stringify(f.getOptions().systemPrompt)).toContain('Open items')
+  expect(JSON.stringify(f.getOptions().systemPrompt)).toContain(
+    'public final response',
+  )
   expect(f.getOptions().settingSources).toEqual([])
   expect(f.getOptions().resume).toBe('34e4f6da-4e43-46ee-bbfe-2fe1d039fc08')
   expect(f.getOptions().sessionId).toBeUndefined()

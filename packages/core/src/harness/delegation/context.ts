@@ -1,3 +1,4 @@
+import { subagentTask } from '../subagent/contract'
 import type { InstructionFile } from '../prompt/agent-instructions'
 import { DelegationError } from './types'
 export interface DelegationBriefInput {
@@ -15,8 +16,8 @@ export interface DelegationBriefInput {
   }
 }
 /** Explicit handoff values only: parent system/history/reasoning/credentials never enter this builder. */
-export function buildDelegationBrief(input: DelegationBriefInput): string {
-  const parts = ['Task: ' + input.description, input.prompt]
+export function buildDelegationContext(input: DelegationBriefInput): string {
+  const parts = [input.prompt]
   if (input.goal) parts.push('Parent task objective: ' + input.goal)
   if (input.workspace) {
     const w = input.workspace
@@ -38,10 +39,15 @@ export function buildDelegationBrief(input: DelegationBriefInput): string {
   const brief = parts.join('\n\n')
   if (!input.prompt.trim())
     throw new DelegationError('INVALID_REQUEST', 'delegation prompt is empty')
-  if (Buffer.byteLength(brief) > 32 * 1024)
+  if (Buffer.byteLength(subagentTask(input.description, brief)) > 32 * 1024)
     throw new DelegationError(
       'BRIEF_LIMIT',
       'complete task brief exceeds 32 KiB; select less context or reference workspace files',
     )
   return brief
+}
+
+/** The service owns the envelope, so tool and direct API dispatch wrap once. */
+export function buildDelegationBrief(input: DelegationBriefInput): string {
+  return subagentTask(input.description, buildDelegationContext(input))
 }

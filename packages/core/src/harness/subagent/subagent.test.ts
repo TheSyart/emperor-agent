@@ -120,7 +120,18 @@ describe('SubagentManager', () => {
     const childRequest = h.adapter.requests.find(
       (r) => r.sessionId === child.id,
     )!
-    expect(textOf(childRequest)).toContain('find x')
+    expect(textOf(childRequest)).toContain('Task: research\n\nfind x')
+    const childContext = [childRequest.system, ...textOf(childRequest)].join(
+      '\n',
+    )
+    expect(childContext).toContain('parent agent in Emperor Agent')
+    expect(childContext).toContain('Verification')
+    expect(childContext).toContain('Open items')
+    expect(
+      [h.adapter.requests[0]!.system, ...textOf(h.adapter.requests[0]!)].join(
+        '\n',
+      ),
+    ).not.toContain('You are a delegated subagent working for a parent')
     expect(childRequest.tools?.map((t) => t.name)).toContain('report')
     expect(h.adapter.requests[0]!.tools?.map((t) => t.name)).not.toContain(
       'report',
@@ -268,6 +279,10 @@ describe('SubagentManager', () => {
     })
     manager.followup(root, childId, 'more work')
     await settleAll(agents)
+    const continued = h.adapter.requests
+      .filter((r) => r.sessionId === childId)
+      .at(-1)!
+    expect(textOf(continued)).toContain('Task: worker\n\nmore work')
     const rootTexts = root.session
       .deriveMessages()
       .map((m) => messageText(m))

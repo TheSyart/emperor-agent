@@ -5,8 +5,9 @@ import { SubagentManager } from '../subagent/manager'
 import { SandboxPolicyService } from '../sandbox/policy'
 import { ApprovalService } from '../approval/service'
 import { createDelegationTools, type DelegationToolService } from './tools'
+import { fixture as serviceFixture } from './service-test-fixture'
 import { fixtureDelegationRecord, fixtureDelegationRun } from './testing'
-function fixture() {
+function fixture(externalService?: DelegationToolService) {
   const h = createTestHarness(),
     agents = new Map<string, Agent>()
   const manager = new SubagentManager({
@@ -61,7 +62,7 @@ function fixture() {
   }
   for (const tool of createDelegationTools({
     internalManager: manager,
-    delegations: () => service,
+    delegations: () => externalService ?? service,
     ownerResolver: (agent, callId) => ({
       ...record.owner,
       parentAgentId: agent.id,
@@ -229,5 +230,36 @@ it('foreground and collect expose host identities and current workspace in model
     expect(JSON.stringify(result.content)).toContain('/fixture')
     expect(JSON.stringify(result.content)).toContain('dlg-test')
     expect(JSON.stringify(result.content)).toContain('unverified')
+  }
+})
+
+it('dispatches one task envelope through the real tool and service and formats continued turns', async () => {
+  const runtime = serviceFixture(),
+    f = fixture(runtime.service)
+  try {
+    const result = await f.call('subagent', {
+      backend: 'codex',
+      description: 'Review parser',
+      prompt: 'Inspect parser.ts',
+      workspace: 'shared-readonly',
+    })
+    expect(result.isError).toBe(false)
+    const meta = result.meta as { subagentId: string; runId: string }
+    await runtime.service.wait(meta.subagentId, meta.runId)
+    expect(runtime.adapter.submitted[0]!.text).toBe(
+      'Task: Review parser\n\nInspect parser.ts',
+    )
+    await runtime.service.send(meta.subagentId, {
+      messageId: 'followup-envelope',
+      text: 'Inspect tests too',
+      delivery: 'queue',
+    })
+    await vi.waitFor(() => expect(runtime.adapter.submitted).toHaveLength(2))
+    expect(runtime.adapter.submitted[1]!.text).toBe(
+      'Task: Review parser\n\nInspect tests too',
+    )
+  } finally {
+    await runtime.service.shutdown()
+    runtime.cleanup()
   }
 })

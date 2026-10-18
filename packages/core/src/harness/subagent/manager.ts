@@ -15,6 +15,7 @@
  * every settled run notifies the parent (followup when idle, steer when busy).
  */
 
+import { SUBAGENT_IDENTITY, subagentTask } from './contract'
 import { randomUUID } from 'node:crypto'
 import {
   contextMessage,
@@ -67,7 +68,9 @@ export type SubagentStopReason =
   'completed' | 'aborted' | 'error' | 'max-tokens' | 'refusal' | 'interrupted'
 
 export const SUBAGENT_DELEGATION_CONTEXT =
-  'You are a delegated subagent: your permission scope was fixed when you were started and cannot be ' +
+  SUBAGENT_IDENTITY +
+  '\n\n' +
+  'Your permission scope was fixed when you were started and cannot be ' +
   'widened from inside this session — operations that require approval are rejected automatically. ' +
   'When the task needs access beyond that scope, do not retry the denied operation; state the ' +
   'limitation in your reply so the delegating agent can handle it.'
@@ -359,7 +362,12 @@ export class SubagentManager {
     }
     child.followup(
       createUserMessage({
-        content: [{ type: 'text', text: request.prompt }],
+        content: [
+          {
+            type: 'text',
+            text: subagentTask(request.description, request.prompt),
+          },
+        ],
         source: { kind: 'context', producer: 'subagent', form: 'relay' },
       }),
     )
@@ -477,7 +485,11 @@ export class SubagentManager {
         `subagent "${childId}" is not a direct child of agent "${parent.id}"`,
         'UNAUTHORIZED',
       )
-    const message = contextMessage('subagent-parent', text, { form: 'relay' })
+    const message = contextMessage(
+      'subagent-parent',
+      subagentTask(entry.record.description, text),
+      { form: 'relay' },
+    )
     entry.agent.followup(message)
     return message.id
   }

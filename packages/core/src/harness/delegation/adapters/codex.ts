@@ -1,3 +1,8 @@
+import {
+  SUBAGENT_IDENTITY,
+  SUBAGENT_HANDOFF,
+  EXTERNAL_REPORT_TRANSPORT,
+} from '../../subagent/contract'
 import { randomUUID } from 'node:crypto'
 import {
   DelegationError,
@@ -74,7 +79,11 @@ export function codexThreadParams(
       'shell_environment_policy.set': shellEnvironment,
     },
     developerInstructions:
-      'You are an externally scheduled child executor. Native subagents, goals, plugins and MCP are disabled. The host OS enforces your workspace permission boundary. ' +
+      [SUBAGENT_IDENTITY, SUBAGENT_HANDOFF, EXTERNAL_REPORT_TRANSPORT].join(
+        '\n\n',
+      ) +
+      '\n\n' +
+      'The host OS enforces your workspace permission boundary. ' +
       (input.policy.mode === 'read-only'
         ? 'The source workspace is readonly; review only.'
         : 'Deliver changes as files. Do not commit or change Git metadata.'),
