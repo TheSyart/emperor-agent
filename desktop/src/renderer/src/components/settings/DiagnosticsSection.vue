@@ -196,11 +196,15 @@ async function refreshEnvironment() {
   }
 }
 
-async function reveal(target: string) {
-  if (!target) return
+async function reveal(row: DiagnosticRow) {
+  if (!openable(row)) return
   revealError.value = ''
   try {
-    await openPath(target)
+    // Main asks Core where the row's folder is; no path crosses IPC.
+    await openPath({
+      kind: 'diagnostic',
+      rowId: row.id as 'global-state-root' | 'active-project-path',
+    })
   } catch (cause) {
     revealError.value = messageOf(cause)
   }
@@ -319,7 +323,7 @@ function messageOf(cause: unknown): string {
             <IconButton
               v-if="openable(row)"
               :label="`打开${row.label}`"
-              @click="reveal(row.path || '')"
+              @click="reveal(row)"
             >
               <DsFolderOpen :size="16" />
             </IconButton>

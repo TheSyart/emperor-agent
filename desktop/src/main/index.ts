@@ -41,6 +41,7 @@ import {
   withContentSecurityPolicy,
 } from './protocol'
 import { rendererContentSecurityPolicy } from '../shared/content-security-policy'
+import { registerOpenPathIpc } from './open-path-ipc'
 import { registerRemoteImageIpc } from './remote-image-ipc'
 import { pluginAssetResponse } from './plugin-assets'
 import { createCoreHost } from './core-host'
@@ -131,7 +132,13 @@ import {
   BROWSER_DOWNLOAD_EVENT_CHANNEL,
   BROWSER_PAIRING_REQUEST_CHANNEL,
   BROWSER_REVEAL_CHANNEL,
+  PET_CLOSE_CHANNEL,
+  PET_OPEN_CHANNEL,
+  PET_RENDERER_BOOTSTRAP_CHANNEL,
+  PET_RENDERER_CLOSE_CHANNEL,
   PET_STATUS_CHANNEL,
+  PET_STATUS_REQUEST_CHANNEL,
+  SELECT_DIRECTORY_CHANNEL,
   TERMINAL_SUBSCRIPTION_CHANNEL,
 } from '../shared/ipc-contract'
 
@@ -305,7 +312,7 @@ protocol.registerSchemesAsPrivileged([
   },
 ])
 
-ipcMain.handle('emperor:select-directory', async (event) => {
+ipcMain.handle(SELECT_DIRECTORY_CHANNEL, async (event) => {
   trustedRendererPolicy.authorizeIpc(event)
   const options: OpenDialogOptions = {
     properties: ['openDirectory'],
@@ -317,12 +324,38 @@ ipcMain.handle('emperor:select-directory', async (event) => {
   return result.filePaths[0]
 })
 
-ipcMain.handle('emperor:open-path', async (event, target: unknown) => {
-  trustedRendererPolicy.authorizeIpc(event)
-  const pathValue = typeof target === 'string' ? target.trim() : ''
-  if (!pathValue) return { ok: false, error: 'path is required' }
-  const error = await shell.openPath(pathValue)
-  return error ? { ok: false, error } : { ok: true }
+// MAIN-27: only folders Core vouches for, never a renderer-chosen path.
+registerOpenPathIpc({
+  ipcMain,
+  authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
+  sources: {
+    emperorHome: () => config.stateRoot,
+    activeProject: () => {
+      const host = coreApi?.host
+      return host?.activeSession()?.project_path
+        ? host.activeWorkspaceRoot()
+        : null
+    },
+    skillFolder: (name, sessionId) => {
+      try {
+        return coreApi?.skills.get(name, { sessionId }).root ?? null
+      } catch {
+        return null
+      }
+    },
+    invalidSkillPaths: (sessionId) =>
+      coreApi?.skills.list({ sessionId }).invalid.map((item) => item.path) ??
+      [],
+  },
+  isDirectory: (target) => {
+    try {
+      return fs.statSync(target).isDirectory()
+    } catch {
+      return false
+    }
+  },
+  openPath: (target) => shell.openPath(target),
+  showItemInFolder: (target) => shell.showItemInFolder(target),
 })
 
 // UI-38: a remote markdown image the user clicked, fetched here.
@@ -332,7 +365,7 @@ registerRemoteImageIpc({
   client: webFetchClient,
 })
 
-ipcMain.handle('emperor:pet:open', async (event) => {
+ipcMain.handle(PET_OPEN_CHANNEL, async (event) => {
   trustedRendererPolicy.authorizeIpc(event)
   if (petWindow && !petWindow.isDestroyed()) {
     petWindow.showInactive()
@@ -350,7 +383,7 @@ ipcMain.handle('emperor:pet:open', async (event) => {
   }
 })
 
-ipcMain.handle('emperor:pet:close', async (event) => {
+ipcMain.handle(PET_CLOSE_CHANNEL, async (event) => {
   trustedRendererPolicy.authorizeIpc(event)
   petLastError = null
   if (petWindow && !petWindow.isDestroyed()) {
@@ -359,17 +392,17 @@ ipcMain.handle('emperor:pet:close', async (event) => {
   return petStatus()
 })
 
-ipcMain.handle('emperor:pet:status', async (event) => {
+ipcMain.handle(PET_STATUS_REQUEST_CHANNEL, async (event) => {
   trustedRendererPolicy.authorizeIpc(event)
   return petStatus()
 })
 
-ipcMain.handle('emperor:pet:renderer-bootstrap', async (event) => {
+ipcMain.handle(PET_RENDERER_BOOTSTRAP_CHANNEL, async (event) => {
   trustedPetPolicy.authorizeIpc(event)
   return { event: { type: 'connection', online: runtimeReady } }
 })
 
-ipcMain.handle('emperor:pet:renderer-close', async (event) => {
+ipcMain.handle(PET_RENDERER_CLOSE_CHANNEL, async (event) => {
   trustedPetPolicy.authorizeIpc(event)
   petLastError = null
   if (petWindow && !petWindow.isDestroyed()) petWindow.close()

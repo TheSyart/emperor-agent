@@ -1,3 +1,4 @@
+import type { OpenPathTarget } from '../../../shared/ipc-contract'
 // Electron desktop talks to CoreApi over preload IPC. Browser-only tests inject
 // this same bridge surface; the product no longer supports HTTP/WS fallback.
 
@@ -96,7 +97,7 @@ interface EmperorBridge {
   selectDirectory?: () => Promise<string | null>
   getPathForFile?: (file: File) => string
   openPath?: (
-    target: string,
+    target: OpenPathTarget,
   ) => Promise<{ ok?: boolean; error?: string } | void>
   revealReference?: (input: {
     sessionId: string
@@ -297,7 +298,12 @@ export function getPathForFile(file: File): string {
   return path
 }
 
-export async function openPath(target: string): Promise<void> {
+/**
+ * Open a folder in Finder: one Core vouches for (设置 › 诊断's Emperor Home or
+ * project, a Skill's folder). Main resolves the path; the renderer cannot
+ * name one (SEC-05).
+ */
+export async function openPath(target: OpenPathTarget): Promise<void> {
   const opener = bridge()?.openPath
   if (typeof opener !== 'function')
     throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)

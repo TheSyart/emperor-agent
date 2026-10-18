@@ -112,23 +112,27 @@ describe('with an injected Core IPC bridge', () => {
   })
 
   it('delegates openPath to the preload bridge and reports failures', async () => {
-    const calls: string[] = []
+    const calls: unknown[] = []
     g.window = {
       emperor: {
-        openPath: async (target: string) => {
+        openPath: async (target: unknown) => {
           calls.push(target)
           return { ok: true }
         },
       },
     }
 
-    await expect(openPath('/tmp/emperor')).resolves.toBeUndefined()
-    expect(calls).toEqual(['/tmp/emperor'])
+    await expect(
+      openPath({ kind: 'diagnostic', rowId: 'global-state-root' }),
+    ).resolves.toBeUndefined()
+    expect(calls).toEqual([{ kind: 'diagnostic', rowId: 'global-state-root' }])
 
     g.window = {
       emperor: { openPath: async () => ({ ok: false, error: 'not found' }) },
     }
-    await expect(openPath('/missing')).rejects.toThrow('not found')
+    await expect(
+      openPath({ kind: 'skill', name: 'missing', sessionId: null }),
+    ).rejects.toThrow('not found')
   })
 })
 

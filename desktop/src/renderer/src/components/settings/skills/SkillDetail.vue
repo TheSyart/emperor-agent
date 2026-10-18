@@ -218,7 +218,11 @@ async function remove() {
 async function revealFolder() {
   if (!skill.value) return
   try {
-    await openPath(skillFolder(skill.value))
+    await openPath({
+      kind: 'skill',
+      name: skill.value.name,
+      sessionId: props.sessionId,
+    })
   } catch (error) {
     ctx.showToast(skillErrorInfo(error).message)
   }

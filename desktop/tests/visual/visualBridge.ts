@@ -14,6 +14,12 @@ type VisualProjectInfo = {
 
 type VisualCoreListener = (event: unknown) => void
 
+/** `emperor:open-path` targets (shared/ipc-contract.ts OpenPathTarget). */
+type VisualOpenPathTarget =
+  | { kind: 'diagnostic'; rowId: string }
+  | { kind: 'skill'; name: string; sessionId?: string | null }
+  | { kind: 'invalid-skill'; path: string; sessionId?: string | null }
+
 type VisualBridge = {
   version: string
   platform: string
@@ -23,7 +29,7 @@ type VisualBridge = {
   openSkillsFolder?: (input: {
     scope?: string
   }) => Promise<{ ok: boolean; path?: string }>
-  openPath?: (target: string) => Promise<{ ok: boolean }>
+  openPath?: (target: VisualOpenPathTarget) => Promise<{ ok: boolean }>
   onCoreEvent: (listener: VisualCoreListener) => () => void
   onTerminalEvent: (listener: VisualCoreListener) => () => void
   onSessionEvents: (listener: VisualCoreListener) => () => void
@@ -4257,10 +4263,18 @@ export async function installVisualCoreBridge(
           ).__visualOpenedPaths ??= []).push(path)
           return { ok: true, path }
         },
-        openPath: async (target: string) => {
+        openPath: async (target: VisualOpenPathTarget) => {
+          // Main resolves these through Core; the harness records what the
+          // renderer asked for (an invalid Skill's folder, a Skill, a row).
+          const opened =
+            target.kind === 'invalid-skill'
+              ? target.path.replace(/\/[^/]+\.md$/i, '')
+              : target.kind === 'skill'
+                ? `skill:${target.name}`
+                : `diagnostic:${target.rowId}`
           ;((
             window as unknown as { __visualOpenedPaths?: string[] }
-          ).__visualOpenedPaths ??= []).push(target)
+          ).__visualOpenedPaths ??= []).push(opened)
           return { ok: true }
         },
         openBrowserUrl: async (input: string) => {

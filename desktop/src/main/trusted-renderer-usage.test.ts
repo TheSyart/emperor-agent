@@ -16,33 +16,43 @@ function rendererSources(dir: string = rendererRoot): string[] {
 }
 
 describe('trusted renderer policy wiring', () => {
-  it('guards navigation, redirects, popups, Core IPC, and desktop IPC', () => {
+  it('guards navigation, redirects and popups', () => {
     expect(source).toContain("webContents.on('will-navigate'")
     expect(source).toContain("webContents.on('will-redirect'")
     expect(source).toContain('webContents.setWindowOpenHandler')
+  })
+
+  it('authorizes Core IPC and every desktop channel, named by contract constants', () => {
     expect(source).toContain('authorizeIpc: (event) =>')
+    // No channel name is a string literal in main (MAIN-27).
+    expect(source).not.toMatch(/ipcMain\.(?:handle|on)\('emperor:/)
 
     for (const channel of [
-      'emperor:select-directory',
-      'emperor:open-path',
-      'emperor:pet:open',
-      'emperor:pet:close',
-      'emperor:pet:status',
+      'SELECT_DIRECTORY_CHANNEL',
+      'PET_OPEN_CHANNEL',
+      'PET_CLOSE_CHANNEL',
+      'PET_STATUS_REQUEST_CHANNEL',
     ]) {
       expect(source).toMatch(
         new RegExp(
-          `ipcMain\\.handle\\('${channel}'[\\s\\S]{0,180}trustedRendererPolicy\\.authorizeIpc\\(event\\)`,
+          `ipcMain\\.handle\\(${channel},[\\s\\S]{0,180}trustedRendererPolicy\\.authorizeIpc\\(event\\)`,
         ),
       )
     }
+    for (const register of ['registerOpenPathIpc', 'registerRemoteImageIpc'])
+      expect(source).toMatch(
+        new RegExp(
+          `${register}\\(\\{\\s*ipcMain,\\s*authorize: \\(event\\) => trustedRendererPolicy\\.authorizeIpc\\(event\\)`,
+        ),
+      )
 
     for (const channel of [
-      'emperor:pet:renderer-bootstrap',
-      'emperor:pet:renderer-close',
+      'PET_RENDERER_BOOTSTRAP_CHANNEL',
+      'PET_RENDERER_CLOSE_CHANNEL',
     ]) {
       expect(source).toMatch(
         new RegExp(
-          `ipcMain\\.handle\\('${channel}'[\\s\\S]{0,220}trustedPetPolicy\\.authorizeIpc\\(event\\)`,
+          `ipcMain\\.handle\\(${channel},[\\s\\S]{0,220}trustedPetPolicy\\.authorizeIpc\\(event\\)`,
         ),
       )
     }
