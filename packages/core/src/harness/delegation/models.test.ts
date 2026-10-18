@@ -222,3 +222,57 @@ it('rebinding model discovery after account changes makes old verified evidence 
   await service.list(f.profile, true)
   expect(facts.view(f.profile).nativeCapabilities.search.status).toBe('stale')
 })
+
+it('keeps configured and native fallback choices without login and never starts an unauthenticated CLI', async () => {
+  const f = fixture(),
+    home = join(f.root, 'unauthenticated-home')
+  mkdirSync(join(home, '.claude'), { recursive: true })
+  writeFileSync(
+    join(home, '.claude', 'settings.json'),
+    JSON.stringify({ model: 'opus' }),
+  )
+  const runtime = new ExecutorRuntimeService({
+      root: f.root,
+      home,
+      environment: { PATH: '/fixture' },
+    }),
+    readNative = vi.fn(async () => [])
+  const service = new ExecutorModelCatalogService({ ...f, runtime, readNative })
+  const value = await service.list(defaultExecutorConfig().profiles[0]!, true)
+  expect(value.configuredModel).toBe('opus')
+  expect(value.models.map((m) => m.id)).toEqual(
+    expect.arrayContaining(['opus', 'sonnet', 'haiku']),
+  )
+  expect(value.diagnostic).toBeTruthy()
+  expect(readNative).not.toHaveBeenCalled()
+  await expect(
+    runtime.prepare(
+      defaultExecutorConfig().profiles[0]!,
+      'dlg-still-requires-login',
+    ),
+  ).rejects.toThrow('AUTH_REQUIRED')
+})
+
+it('reads a Codex model without login while keeping ordinary execution authentication strict', async () => {
+  const f = fixture(),
+    home = join(f.root, 'no-codex-login')
+  mkdirSync(join(home, '.codex'), { recursive: true })
+  writeFileSync(
+    join(home, '.codex', 'config.toml'),
+    'model="configured-coder"\n',
+  )
+  const runtime = new ExecutorRuntimeService({
+      root: f.root,
+      home,
+      environment: { PATH: '/fixture' },
+    }),
+    readNative = vi.fn(async () => [])
+  const service = new ExecutorModelCatalogService({ ...f, runtime, readNative })
+  const value = await service.list(f.profile, true)
+  expect(value.configuredModel).toBe('configured-coder')
+  expect(value.models.some((m) => m.source === 'builtin')).toBe(true)
+  expect(readNative).not.toHaveBeenCalled()
+  await expect(
+    runtime.prepare(f.profile, 'dlg-requires-codex-login'),
+  ).rejects.toThrow('AUTH_REQUIRED')
+})

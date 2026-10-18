@@ -348,7 +348,7 @@ function detail(profile: ExecutorProfile) {
   if (probe.status === 'needs_auth' || probe.diagnostic === 'AUTH_REQUIRED')
     return profile.authRef.kind === 'model-route'
       ? '所选模型凭据不可读，请在模型设置检查原配置。'
-      : `请在终端运行 ${profile.backend === 'codex' ? 'codex login' : 'claude auth login'}。${profile.backend === 'claude-code' ? 'Emperor 需要可读取的 CLI 文件或环境变量认证；仅钥匙串登录不可用。' : ''}配置完成后重新检测。`
+      : `请在终端运行 ${profile.backend === 'codex' ? 'codex login' : 'claude auth login'}。${profile.backend === 'claude-code' ? 'Emperor 需要可读取的 CLI 文件或环境变量认证；仅钥匙串登录不可用。官方订阅可运行 claude setup-token，并将令牌设为 CLAUDE_CODE_OAUTH_TOKEN；无需改用 API 计费。' : ''}配置完成后重新检测。`
   if (probe.status === 'missing')
     return '未找到 CLI，请检查本机安装或更正路径后保存。'
   if (probe.status === 'incompatible')

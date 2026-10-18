@@ -112,6 +112,7 @@ export class ExecutorModelCatalogService {
       runtime = await this.options.runtime.prepare(
         profile,
         'dlg-models-' + randomUUID(),
+        { allowUnauthenticatedConfig: true },
       )
       if (this.closed) throw Error('model catalog closed')
       this.options.onPrepared?.(profile, runtime)
@@ -158,7 +159,10 @@ export class ExecutorModelCatalogService {
       checkedAt = validCache ? cached.checkedAt : null
       let discovered: NativeModel[] = [],
         source: ExecutorModelCandidate['source'] = 'cli'
-      if (
+      if (!runtime.authenticationAvailable) {
+        diagnostic =
+          '当前隔离执行读取不到认证，仅展示配置与参考候选；执行前请完成登录接入。'
+      } else if (
         !refresh &&
         validCache &&
         Date.now() - cached.checkedAt < 15 * 60_000

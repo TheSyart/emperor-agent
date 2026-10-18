@@ -41,12 +41,15 @@ export class ExecutorRuntimeService {
   async prepare(
     profile: ExecutorProfile,
     id: string,
+    options: { allowUnauthenticatedConfig?: boolean } = {},
   ): Promise<{
     runtimeRoot: string
     tempRoot: string
     environment: Record<string, string>
     secretValues: string[]
+    authenticationAvailable: boolean
   }> {
+    let authenticationAvailable = true
     safeDelegationKey(profile.stateDirectoryId)
     safeDelegationKey(id)
     const runtimeRoot = join(
@@ -209,11 +212,14 @@ export class ExecutorRuntimeService {
         !environment.ANTHROPIC_API_KEY &&
         !environment.ANTHROPIC_AUTH_TOKEN &&
         !environment.CLAUDE_CODE_OAUTH_TOKEN
-      )
-        throw new DelegationError(
-          'AUTH_REQUIRED',
-          'managed Claude login has no resolvable credential',
-        )
+      ) {
+        if (!options.allowUnauthenticatedConfig)
+          throw new DelegationError(
+            'AUTH_REQUIRED',
+            'managed Claude login has no resolvable credential',
+          )
+        authenticationAvailable = false
+      }
     } else {
       const sourceDirectory =
         ambient.CODEX_HOME || join(this.options.home ?? homedir(), '.codex')
@@ -234,7 +240,12 @@ export class ExecutorRuntimeService {
               join(this.options.home ?? homedir(), '.codex'),
             'auth.json',
           )
-      if (!existsSync(path) && !customProvider && !environment.OPENAI_API_KEY)
+      if (
+        !existsSync(path) &&
+        !customProvider &&
+        !environment.OPENAI_API_KEY &&
+        !options.allowUnauthenticatedConfig
+      )
         throw new DelegationError(
           'AUTH_REQUIRED',
           'managed Codex login file is missing',
@@ -263,29 +274,33 @@ export class ExecutorRuntimeService {
           !source ||
           typeof source.access_token !== 'string' ||
           typeof source.refresh_token !== 'string'
-        )
-          throw new DelegationError(
-            'AUTH_REQUIRED',
-            'managed Codex ChatGPT tokens are unavailable',
-          )
+        ) {
+          if (!options.allowUnauthenticatedConfig)
+            throw new DelegationError(
+              'AUTH_REQUIRED',
+              'managed Codex ChatGPT tokens are unavailable',
+            )
+          authenticationAvailable = false
+        }
         const tokens = Object.fromEntries(
           ['access_token', 'refresh_token', 'id_token', 'account_id'].flatMap(
             (key) =>
-              typeof source[key] === 'string' ? [[key, source[key]]] : [],
+              typeof source?.[key] === 'string' ? [[key, source?.[key]]] : [],
           ),
         )
         credentialSecrets.push(...(Object.values(tokens) as string[]))
-        durableReplaceSync(
-          join(environment.CODEX_HOME!, 'auth.json'),
-          JSON.stringify({
-            auth_mode: 'chatgpt',
-            OPENAI_API_KEY: null,
-            tokens,
-            ...(typeof auth.last_refresh === 'string'
-              ? { last_refresh: auth.last_refresh }
-              : {}),
-          }) + '\n',
-        )
+        if (authenticationAvailable)
+          durableReplaceSync(
+            join(environment.CODEX_HOME!, 'auth.json'),
+            JSON.stringify({
+              auth_mode: 'chatgpt',
+              OPENAI_API_KEY: null,
+              tokens,
+              ...(typeof auth.last_refresh === 'string'
+                ? { last_refresh: auth.last_refresh }
+                : {}),
+            }) + '\n',
+          )
       }
     }
     const secretValues = [
@@ -294,6 +309,12 @@ export class ExecutorRuntimeService {
         .filter(([key, value]) => value && /KEY|TOKEN|SECRET/i.test(key))
         .map(([, value]) => value),
     ]
-    return { runtimeRoot, tempRoot, environment, secretValues }
+    return {
+      runtimeRoot,
+      tempRoot,
+      environment,
+      secretValues,
+      authenticationAvailable,
+    }
   }
 }

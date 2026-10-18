@@ -308,3 +308,5 @@ Build 绑定目录并不意味着 Agent 可以任意写整台机器：
 | 需要 Agent 持续推进直到完成    | 在合适的会话中设置 Goal      |
 
 Plan 和 Goal 见 [Plan 与 Goal](plan-goal.md)。数据隔离细节见[全局私有存储根](../architecture/global-state-store.md)。
+
+使用 Claude 官方订阅且不允许读取 macOS 钥匙串时，可在本机运行 `claude setup-token`，将令牌设置为 `CLAUDE_CODE_OAUTH_TOKEN`（CLI 设置文件的 `env` 也支持）。没有可读取的认证时，模型列表仍可展示本机配置和参考候选，但不会启动 CLI 探查或把执行器标为就绪。参见 [Claude 认证说明](https://code.claude.com/docs/en/authentication#generate-a-long-lived-token)。
