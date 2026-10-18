@@ -27,6 +27,14 @@
 
 未取得锁的桌面实例只显示独立恢复页，不初始化迁移、Core 或本地写入服务。关闭占用目录的实例后可以重试；锁存储损坏或不可写时保持阻止启动。不要在 App 运行期间删除锁文件。
 
+持有者在锁文件旁写 `.<目录名>.emperor-writer.sqlite.owner.json`（0600：pid、版本、启动时间、是否打包、打包版的 `.app` 路径）。被挡住的实例只在该 pid 仍存活时读取它，恢复页写明「另一个 Emperor（版本 X，pid Y）正在使用这个数据目录」；持有者是打包版时提供「切换到它」（`/usr/bin/open` 该 `.app`，随后退出当前实例）。这个记录只用于提示，独占与否始终以 SQLite 锁为准。
+
+默认数据目录上，打包版再持有 Electron 单实例锁：第二次启动把主窗口带到前台后退出。`EMPEROR_CONFIG_DIR` 指向其他目录的实例（测试、第二份资料）和打包冒烟不取单实例锁，仍受数据目录锁约束。恢复页「重试」前会关闭上一次启动留下的 Core、驱动与 Chrome 桥接，并移除那次注册的 IPC handler，避免重复创建与重复注册。
+
+退出时先同步写完会话记录（`CoreApi.flushAll()`），再关闭 Core；5 秒内没关完时，同步终止进程运行时登记的全部子进程树和终端（`CoreApi.forceStop()`），然后退出。
+
+Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，路径过长时退到系统临时目录）与 `native-helpers/` 副本跟随 Emperor Home。Chrome/Edge 的 Native Messaging socket 固定在 `~/.emperor/run/nm-<uid>.sock`：浏览器拉起的 host 按设计只信任这一个位置，所以使用自定义 `EMPEROR_CONFIG_DIR` 的实例不会接管扩展连接。
+
 ```text
 ~/.emperor/
   installation.json        # layout/app/runtime revision 与首次启动、迁移状态

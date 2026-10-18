@@ -7,11 +7,13 @@ import {
   nativeImage,
   protocol,
   net,
+  screen,
   session,
   shell,
   type OpenDialogOptions,
   type Rectangle,
 } from 'electron'
+import { execFile } from 'node:child_process'
 import * as fs from 'node:fs'
 import { userInfo } from 'node:os'
 import * as path from 'node:path'
@@ -27,12 +29,22 @@ import { offerMoveToApplications } from './app-location'
 import { resolveConfig } from './config'
 import {
   acquireStateDirectoryLock,
+  StateDirectoryLockError,
+  writeLockOwner,
   type StateDirectoryLock,
 } from './state-directory-lock'
+import { createLoadFailurePolicy } from './load-failure'
 import { createQuitCoordinator } from './quit-coordinator'
+import { claimSingleInstance } from './single-instance'
+import { trackedIpcMain } from './tracked-ipc'
 import { resolveAppIconPath } from './icon'
 import { preparePackagedRuntime, runtimeDefaultsRoot } from './runtime-root'
-import { readBounds, pickBounds } from './window-bounds'
+import {
+  fitBoundsToDisplays,
+  pickBounds,
+  readBounds,
+  type Bounds,
+} from './window-bounds'
 import {
   appAssetRequestAccess,
   resolveAssetPath,
@@ -157,6 +169,16 @@ const packagedSmoke = parsePackagedSmokeArgs(process.argv)
 // bundle audit hold the code to it.
 app.commandLine.appendSwitch('use-mock-keychain')
 let config = resolveConfig({ argv: mainArgv, env: process.env })
+// A second launch on the same data directory hands over and quits.
+const primaryInstance = claimSingleInstance(
+  app,
+  {
+    stateRootSource: config.stateRootSource,
+    packagedSmoke: Boolean(packagedSmoke),
+  },
+  () => showMainWindow(),
+)
+if (!primaryInstance) app.quit()
 let legacyRuntimeRoot = config.runtimeRoot
 let packagedRuntimeRevision = ''
 const rendererRoot = path.join(mainDir, '..', 'renderer')
@@ -176,6 +198,8 @@ let closeCoreTask: Promise<void> | null = null
 // releases the connection, including a hard crash.
 const coreEventBridge = new CoreEventBridge()
 const sessionEventBridge = new SessionEventBridge()
+/** IPC handlers the current startup attempt registered (removed before a retry). */
+let startupIpc: ReturnType<typeof trackedIpcMain> | null = null
 const terminalEventBridge = new TerminalEventBridge()
 let runtimeReady = false
 let mainWindow: BrowserWindow | null = null
@@ -204,7 +228,7 @@ let dictation: DictationService | null = null
 let agentPreview: AgentPreview | null = null
 let desktopPreview: DesktopPreview | null = null
 let pointerOverlay: PointerOverlay | null = null
-let didLoadRetry = false
+const mainLoadFailures = createLoadFailurePolicy()
 const trustedRendererPolicy = createTrustedRendererPolicy({
   productionUrl: 'app://bundle/index.html',
   developmentUrl: process.env.ELECTRON_RENDERER_URL ?? null,
@@ -546,6 +570,8 @@ function createComputerUseHost(): void {
       packaged: app.isPackaged,
       resourcesPath: process.resourcesPath,
       desktopRoot: path.resolve(mainDir, '..', '..'),
+      // Socket and helper copies follow EMPEROR_CONFIG_DIR (MAIN-25).
+      stateRoot: config.stateRoot,
     }
     if (fs.existsSync(macosHelperAppPath(launchOptions)))
       nativeDesktop = new MacosDesktopDriver({
@@ -643,6 +669,21 @@ function closeAgentBrowser(final: boolean): void {
     void (final ? driver.shutdown() : driver.closeAll()).catch(() => undefined)
 }
 
+/**
+ * Undo a failed startup before 重试 (MAIN-12): stop the Chrome bridge,
+ * the drivers and Core it started, and drop the IPC handlers it
+ * registered, so the next attempt starts clean instead of leaking a
+ * second Computer Use host or failing on duplicate handlers.
+ */
+async function resetFailedStartup(): Promise<void> {
+  await closeCoreHost().catch((error) =>
+    console.error(`failed to close the previous startup: ${errMessage(error)}`),
+  )
+  closeCoreTask = null
+  startupIpc?.removeAll()
+  startupIpc = null
+}
+
 function closeCoreHost(): Promise<void> {
   closeCoreTask ??= closeCoreResources()
   return closeCoreTask
@@ -667,6 +708,15 @@ async function closeCoreResources(): Promise<void> {
   await Promise.all([nativeShutdown, bridgeShutdown, current?.close()])
 }
 
+/** Bring a running packaged Emperor forward ('' on success). */
+function activateApp(appPath: string): Promise<string> {
+  return new Promise((resolve) => {
+    execFile('/usr/bin/open', [appPath], { timeout: 10_000 }, (error) =>
+      resolve(error ? errMessage(error) : ''),
+    )
+  })
+}
+
 function fail(title: string, message: string): void {
   dialog.showErrorBox(title, message)
   app.quit()
@@ -686,6 +736,10 @@ async function showBootstrapRecovery(error: unknown): Promise<void> {
     emperorHome: config.stateRoot,
     legacyHome,
   })
+  const ownerApp =
+    payload.canSwitch && error instanceof StateDirectoryLockError
+      ? (error.owner?.appPath ?? null)
+      : null
   const win = new BrowserWindow({
     width: 720,
     height: 560,
@@ -706,6 +760,7 @@ async function showBootstrapRecovery(error: unknown): Promise<void> {
     legacyHome: payload.legacyHome,
     retry: async () => {
       ipcMain.removeHandler(RECOVERY_ACTION_CHANNEL)
+      await resetFailedStartup()
       const restarting = startRuntime()
       if (!win.isDestroyed()) win.close()
       recoveryWindow = null
@@ -713,6 +768,7 @@ async function showBootstrapRecovery(error: unknown): Promise<void> {
     },
     openPath: (target) => shell.openPath(target),
     exit: () => app.quit(),
+    ...(ownerApp ? { switchToOwner: () => activateApp(ownerApp) } : {}),
   })
   ipcMain.handle(RECOVERY_ACTION_CHANNEL, async (event, action: unknown) =>
     handle(event.sender.id, action),
@@ -862,10 +918,23 @@ function sendMenuCommand(command: AppMenuCommand): void {
   mainWindow.webContents.send(APP_MENU_COMMAND_CHANNEL, command)
 }
 
+/** Restored bounds that land on a display connected now (MAIN-19). */
+function onScreen(
+  bounds: Bounds,
+  min?: { width: number; height: number },
+): Bounds {
+  return fitBoundsToDisplays(
+    bounds,
+    screen.getAllDisplays().map((display) => display.workArea),
+    screen.getPrimaryDisplay().workArea,
+    min,
+  )
+}
+
 function createWindow(): void {
   const boundsPath = mainBoundsPath()
   mainWindow = new BrowserWindow({
-    ...readBounds(boundsPath),
+    ...onScreen(readBounds(boundsPath)),
     title: 'Emperor Agent',
     icon: appIconPath,
     backgroundColor: '#1a1410',
@@ -912,15 +981,16 @@ function createWindow(): void {
 
   mainWindow.webContents.on(
     'did-fail-load',
-    (_event, errorCode, errorDescription) => {
+    (_event, errorCode, errorDescription, _url, isMainFrame) => {
+      const action = mainLoadFailures.onFail(errorCode, isMainFrame)
+      if (action === 'ignore') return
       console.error(`did-fail-load: ${errorCode} ${errorDescription}`)
-      if (!didLoadRetry) {
-        didLoadRetry = true
-        loadRenderer()
-      } else {
-        fail('页面加载失败', `无法加载前端（${errorDescription}）。`)
-      }
+      if (action === 'retry') loadRenderer()
+      else fail('页面加载失败', `无法加载前端（${errorDescription}）。`)
     },
+  )
+  mainWindow.webContents.on('did-finish-load', () =>
+    mainLoadFailures.onLoaded(),
   )
 
   mainWindow.on('close', () => {
@@ -1002,7 +1072,7 @@ function createPetWindow(): void {
   const boundsPath = path.join(petStateDir(petStateRoot), 'window.json')
   const rootDir = petRendererRoot()
   const win = new BrowserWindow({
-    ...readPetBounds(boundsPath),
+    ...onScreen(readPetBounds(boundsPath), { width: 300, height: 340 }),
     frame: false,
     transparent: true,
     resizable: false,
@@ -1063,6 +1133,14 @@ function createPetWindow(): void {
   }
   win.on('move', scheduleSave)
   win.on('close', () => savePetBounds(win, boundsPath))
+  // Right-click: reopen the main window (closed while the pet stays) or hide the pet.
+  win.webContents.on('context-menu', () => {
+    Menu.buildFromTemplate([
+      { label: '打开主窗口', click: () => showMainWindow() },
+      { type: 'separator' },
+      { label: '关闭桌宠', click: () => win.isDestroyed() || win.close() },
+    ]).popup({ window: win })
+  })
 }
 
 async function startup(): Promise<void> {
@@ -1100,10 +1178,22 @@ async function startup(): Promise<void> {
     if (packagedSmoke && !app.isPackaged)
       throw new Error('packaged smoke mode requires a packaged application')
     // Acquire before migrations, credentials, Core recovery or any state writer.
-    stateDirectoryLock ??= acquireStateDirectoryLock(
-      config.stateRoot,
-      config.stateRootSource === 'default' ? legacyDefaultStateRoot() : null,
-    )
+    if (!stateDirectoryLock) {
+      stateDirectoryLock = acquireStateDirectoryLock(
+        config.stateRoot,
+        config.stateRootSource === 'default' ? legacyDefaultStateRoot() : null,
+      )
+      // Tells a blocked second App who holds the directory (FIX-07).
+      writeLockOwner(stateDirectoryLock, {
+        pid: process.pid,
+        version: app.getVersion(),
+        startedAt: Date.now(),
+        packaged: app.isPackaged,
+        appPath: app.isPackaged
+          ? path.resolve(process.execPath, '..', '..', '..')
+          : null,
+      })
+    }
     prepareMainRuntime()
     createComputerUseHost()
     userDownloads = createUserDownloads()
@@ -1115,9 +1205,10 @@ async function startup(): Promise<void> {
       )
     // Upgrade the extension folder in the background; never block startup.
     void browserExtension?.start()
+    startupIpc = trackedIpcMain(ipcMain)
     coreApi = await createCoreHost({
       root: config.runtimeRoot,
-      ipcMain,
+      ipcMain: startupIpc,
       eventBridge: coreEventBridge,
       sessionEventBridge,
       authorizeIpc: (event) => trustedRendererPolicy.authorizeIpc(event),
@@ -1162,7 +1253,7 @@ async function startup(): Promise<void> {
     syncControlIndicators()
     startDownloadRetention()
     registerDesktopCapabilityIpc({
-      ipcMain,
+      ipcMain: startupIpc,
       authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
       ...(nativeDesktop ? { macHelper: nativeDesktop } : {}),
       ...(nmBridge ? { browserPairings: nmBridge } : {}),
@@ -1419,6 +1510,7 @@ function startRuntime(): Promise<void> {
 }
 
 app.whenReady().then(() => {
+  if (!primaryInstance) return
   secureDefaultSession()
   installApplicationMenu()
   return startRuntime()
@@ -1429,16 +1521,36 @@ app.on('activate', () => {
     recoveryWindow.show()
     return
   }
-  if (BrowserWindow.getAllWindows().length === 0 && runtimeReady) createWindow()
+  // The pet keeps a window open: count the main window itself (MAIN-17).
+  showMainWindow()
 })
+
+/** Bring the main window back, creating it when it was closed. */
+function showMainWindow(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+    return
+  }
+  if (runtimeReady) createWindow()
+}
 
 app.on('window-all-closed', () => {
   if (packagedSmoke || runtimeStarting) return
   app.quit()
 })
 
+/** Core as it was when quitting began (closeCoreResources clears coreApi). */
+let quittingCore: CoreApi | null = null
+
 const coordinateQuit = createQuitCoordinator({
-  flush: () => coreApi?.flushAll(),
+  flush: () => {
+    quittingCore = coreApi
+    coreApi?.flushAll()
+  },
+  // Shutdown overran 5s: kill child process trees and terminals now (FIX-07).
+  onTimeout: () => quittingCore?.forceStop(),
   close: async () => {
     await startupTask
     await closeCoreHost()

@@ -5,6 +5,7 @@ import {
   pickBounds,
   DEFAULT_BOUNDS,
   MIN_BOUNDS,
+  fitBoundsToDisplays,
 } from './window-bounds'
 
 describe('normalizeBounds', () => {
@@ -65,5 +66,57 @@ describe('pickBounds', () => {
       width: 3,
       height: 4,
     })
+  })
+})
+
+describe('fitBoundsToDisplays (MAIN-19)', () => {
+  const laptop = { x: 0, y: 25, width: 1440, height: 875 }
+  const external = { x: 1440, y: 0, width: 2560, height: 1415 }
+
+  it('keeps a window that is on a connected display', () => {
+    expect(
+      fitBoundsToDisplays(
+        { x: 1600, y: 100, width: 1280, height: 832 },
+        [laptop, external],
+        laptop,
+      ),
+    ).toEqual({ x: 1600, y: 100, width: 1280, height: 832 })
+  })
+
+  it('centres a window left on a display that was unplugged', () => {
+    expect(
+      fitBoundsToDisplays(
+        { x: 1600, y: 100, width: 1280, height: 832 },
+        [laptop],
+        laptop,
+      ),
+    ).toEqual({ width: 1280, height: 832 })
+  })
+
+  it('centres a window that barely peeks onto a display', () => {
+    expect(
+      fitBoundsToDisplays(
+        { x: 1420, y: 100, width: 1280, height: 832 },
+        [laptop],
+        laptop,
+      ),
+    ).toEqual({ width: 1280, height: 832 })
+  })
+
+  it('shrinks a window larger than its display', () => {
+    expect(
+      fitBoundsToDisplays(
+        { x: 10, y: 30, width: 3000, height: 2000 },
+        [laptop],
+        laptop,
+      ),
+    ).toEqual({ x: 0, y: 25, width: 1440, height: 875 })
+  })
+
+  it('keeps the minimum size even on a small display', () => {
+    const small = { x: 0, y: 0, width: 800, height: 600 }
+    expect(
+      fitBoundsToDisplays({ width: 1280, height: 832 }, [small], small),
+    ).toEqual({ width: 960, height: 640 })
   })
 })

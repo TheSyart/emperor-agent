@@ -77,7 +77,10 @@ export interface BrowserData {
 /** Runs `security find-generic-password` (or a stand-in under test). The
  *  default is the only place the real Keychain is reached, and passing a
  *  stand-in keeps automation away from the authorization prompt entirely. */
-export type SecurityRunner = (service: string, account: string) => string
+export type SecurityRunner = (
+  service: string,
+  account: string,
+) => string | Promise<string>
 
 export interface ReadBrowserDataOptions {
   readonly browser: BrowserId
@@ -92,7 +95,9 @@ export interface ReadBrowserDataDeps {
   /** Clock for cookie-expiry filtering, in ms (default: `Date.now`). */
   readonly now?: () => number
   /** Reads the browser's Safe Storage password (default: the Keychain). */
-  readonly readSafeStoragePassword?: (browser: BrowserId) => string
+  readonly readSafeStoragePassword?: (
+    browser: BrowserId,
+  ) => string | Promise<string>
   /** Parent dir for the private copy (default: `os.tmpdir()`). */
   readonly tmpParent?: string
   /** Test seam: the basenames copied into a temp dir before reading. */

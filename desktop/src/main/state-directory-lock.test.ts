@@ -77,6 +77,57 @@ function scriptedWorker(script: string, args: string[]) {
 }
 
 describe('desktop state directory ownership', () => {
+  it('tells a blocked App which Emperor holds the directory (FIX-07)', async () => {
+    const root = directory()
+    const lockUrl = JSON.stringify(pathToFileURL(join(base, 'lock.mjs')).href)
+    const holder = scriptedWorker(
+      `import { acquireStateDirectoryLock, writeLockOwner } from ${lockUrl};const lock=acquireStateDirectoryLock(process.argv[1]);globalThis.l=lock;writeLockOwner(lock,{pid:process.pid,version:'0.2.0',startedAt:1,packaged:true,appPath:'/Applications/Emperor Agent.app'});process.send({type:'owner'});process.on('message',m=>{if(m==='release')process.exit(0)})`,
+      [root],
+    )
+    expect(await holder.first).toMatchObject({ type: 'owner' })
+    const blocked = scriptedWorker(
+      `import { acquireStateDirectoryLock } from ${lockUrl};try{acquireStateDirectoryLock(process.argv[1])}catch(e){process.send({type:'blocked',code:e.code,owner:e.owner});process.exit(0)}`,
+      [root],
+    )
+    expect(await blocked.first).toEqual({
+      type: 'blocked',
+      code: 'state_root_in_use',
+      owner: {
+        pid: holder.child.pid,
+        version: '0.2.0',
+        startedAt: 1,
+        packaged: true,
+        appPath: '/Applications/Emperor Agent.app',
+      },
+    })
+    holder.child.send('release')
+    await holder.exited
+  })
+
+  it('ignores an owner record whose process is gone', async () => {
+    const root = directory()
+    const lockUrl = JSON.stringify(pathToFileURL(join(base, 'lock.mjs')).href)
+    const stale = scriptedWorker(
+      `import { acquireStateDirectoryLock, writeLockOwner } from ${lockUrl};const lock=acquireStateDirectoryLock(process.argv[1]);writeLockOwner(lock,{pid:999999,version:'old',startedAt:1,packaged:false,appPath:null});process.send({type:'owner'});process.exit(0)`,
+      [root],
+    )
+    await stale.first
+    await stale.exited
+    const holder = worker(root)
+    expect(await holder.first).toMatchObject({ type: 'owner' })
+    const blocked = scriptedWorker(
+      `import { acquireStateDirectoryLock } from ${lockUrl};try{acquireStateDirectoryLock(process.argv[1])}catch(e){process.send({type:'blocked',code:e.code,owner:e.owner??null});process.exit(0)}`,
+      [root],
+    )
+    expect(await blocked.first).toEqual({
+      type: 'blocked',
+      code: 'state_root_in_use',
+      owner: null,
+    })
+    holder.child.send('release')
+    await holder.exited
+  })
+
   it('excludes another process until the current owner releases, without creating the data root', async () => {
     const root = join(directory(), 'new-home')
     const first = worker(root)

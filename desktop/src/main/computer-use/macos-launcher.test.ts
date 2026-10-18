@@ -261,6 +261,20 @@ describe('macOS helper launcher paths', () => {
     })
   })
 
+  it('puts the socket under a custom data directory (MAIN-25)', () => {
+    expect(
+      macosSocketLocation({
+        home: '/Users/a',
+        stateRoot: '/tmp/e2e-home',
+        uid: 501,
+      }),
+    ).toEqual({
+      directory: '/tmp/e2e-home/run',
+      path: '/tmp/e2e-home/run/cu-501.sock',
+      temporary: false,
+    })
+  })
+
   it('locates packaged and development helper apps', () => {
     expect(
       macosHelperAppPath({

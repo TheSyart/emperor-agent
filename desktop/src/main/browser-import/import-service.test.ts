@@ -55,6 +55,19 @@ function fakeVault(
         return { handleId: `h${saved.length}` }
       },
     ),
+    saveMany: vi.fn(
+      (
+        drafts: Array<{ bindings: any[]; username?: string; password: string }>,
+      ) => {
+        for (const draft of drafts)
+          saved.push({
+            origin: draft.bindings[0].origin,
+            username: draft.username,
+            password: draft.password,
+          })
+        return drafts.map((_draft, index) => ({ handleId: `h${index}` }))
+      },
+    ),
     saved,
   }
 }
@@ -139,6 +152,30 @@ describe('importBrowserData', () => {
     expect(vault.saved).toEqual([
       { origin: 'https://shop.test', username: 'bob', password: 'pw' },
     ])
+  })
+
+  it('writes a thousand passwords to the vault in one save (MAIN-7)', async () => {
+    const vault = fakeVault()
+    const read = vi.fn(async () => ({
+      passwords: Array.from({ length: 1000 }, (_v, index) =>
+        password({ origin: `https://site${index}.test`, username: 'u' }),
+      ),
+      cookies: [],
+      counts: { passwords: 1000, cookies: 0 },
+    }))
+    const result = await importBrowserData(
+      {
+        browser: 'chrome',
+        profileDir: 'Default',
+        passwords: true,
+        cookies: false,
+      },
+      { read, detect: notRunning, vault },
+    )
+    expect(result).toMatchObject({ passwords: 1000 })
+    expect(vault.saveMany).toHaveBeenCalledTimes(1)
+    expect(vault.save).not.toHaveBeenCalled()
+    expect(vault.saved).toHaveLength(1000)
   })
 
   it('writes cookies to the target profile, counting unique hosts, then flushes', async () => {

@@ -94,6 +94,9 @@ describe('graceful App quit', () => {
     const handler = createQuitCoordinator({
       close: () => new Promise<void>(() => {}),
       timeoutMs: 20,
+      onTimeout: () => {
+        events.push('force-stopped')
+      },
       onError: (error) => {
         events.push(String(error))
       },
@@ -105,6 +108,7 @@ describe('graceful App quit', () => {
     handler({ preventDefault() {} })
     await done
     expect(events).toEqual([
+      'force-stopped',
       'Error: shutdown did not finish within 20ms',
       'quit',
     ])

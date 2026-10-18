@@ -171,7 +171,13 @@ export function agentTabWebPreferences(
   }
 }
 
+const TASK_PARTITION_POOL_SIZE = 4
+const TASK_PARTITION_PREFIX = 'emperor-task-pool-'
+
 export class BrowserSessionManager {
+  /** Cleared pooled partitions waiting for the next temporary task. */
+  private readonly freeTaskPartitions: string[] = []
+  private taskPartitionCount = 0
   private host: HostLike | null = null
   private readonly tabs = new Map<string, AgentTab>()
   private readonly byContents = new Map<number, AgentTab>()
@@ -259,7 +265,7 @@ export class BrowserSessionManager {
     if (persistent) await this.waitForDeletedProfiles()
     const partition = persistent
       ? `profile:${profileId}`
-      : (input.partition ?? `emperor-task-${randomUUID()}`)
+      : (input.partition ?? this.takeTaskPartition())
     const session = persistent
       ? this.options.electron.sessionFromPath(this.profilePath(profileId))
       : this.options.electron.sessionFromPartition(partition)
@@ -448,6 +454,19 @@ export class BrowserSessionManager {
     for (const tab of this.list()) this.applyFrameRate(tab)
   }
 
+  /**
+   * A partition for a new temporary task (MAIN-24). Electron never frees an
+   * in-memory session, so instead of one per task, up to four are reused
+   * once their storage is cleared; a fifth task at once gets its own.
+   */
+  private takeTaskPartition(): string {
+    const free = this.freeTaskPartitions.pop()
+    if (free !== undefined) return free
+    if (this.taskPartitionCount < TASK_PARTITION_POOL_SIZE)
+      return `${TASK_PARTITION_PREFIX}${++this.taskPartitionCount}`
+    return `emperor-task-${randomUUID()}`
+  }
+
   async close(targetId: string): Promise<void> {
     const tab = this.tabs.get(targetId)
     if (tab === undefined || tab.closed) return
@@ -464,11 +483,15 @@ export class BrowserSessionManager {
     const shared = [...this.tabs.values()].some(
       (other) => other.partition === tab.partition,
     )
-    if (tab.profileId === 'temporary' && !shared)
+    if (tab.profileId === 'temporary' && !shared) {
       await Promise.allSettled([
         tab.session.clearStorageData(),
         tab.session.clearCache(),
       ])
+      // Cleared: the next temporary task may use it (MAIN-24).
+      if (tab.partition.startsWith(TASK_PARTITION_PREFIX))
+        this.freeTaskPartitions.push(tab.partition)
+    }
     if (this.tabs.size === 0) this.destroyHost()
   }
 

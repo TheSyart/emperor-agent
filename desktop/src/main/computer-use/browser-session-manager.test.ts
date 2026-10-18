@@ -244,6 +244,27 @@ describe('BrowserSessionManager', () => {
     expect(k.hosts[0]!.children).toHaveLength(2)
   })
 
+  it('reuses at most four cleared temporary partitions (MAIN-24)', async () => {
+    const k = setup()
+    const open = (url: string) => k.manager.open({ ownerSessionId: 's1', url })
+    const first = await open('https://a.test/')
+    await k.manager.close(first.targetId)
+    const session = k.sessions.get(first.partition)!
+    expect(session.clearStorageData).toHaveBeenCalled()
+    const second = await open('https://b.test/')
+    // The cleared partition comes back instead of a new, never-freed one.
+    expect(second.partition).toBe(first.partition)
+    const more = await Promise.all(
+      ['c', 'd', 'e', 'f'].map((host) => open(`https://${host}.test/`)),
+    )
+    const partitions = new Set([second, ...more].map((tab) => tab.partition))
+    // Five tasks at once: four pooled partitions plus one of its own, all different.
+    expect(partitions.size).toBe(5)
+    expect(
+      [...partitions].filter((name) => name.startsWith('emperor-task-pool-')),
+    ).toHaveLength(4)
+  })
+
   it('refuses a blocked or non-web first load before creating anything', async () => {
     const k = setup((request) =>
       request.url.includes('evil') ? 'block' : 'allow',

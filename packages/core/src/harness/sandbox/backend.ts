@@ -143,6 +143,10 @@ export function seatbeltProfileArgs(
   const socketDirectories = new Set([
     canonicalChild(homedir(), '.emperor', 'run'),
     canonicalChild(tmpdir(), `emperor-${process.getuid?.() ?? 0}`),
+    // The Computer Use helper socket follows EMPEROR_CONFIG_DIR.
+    ...(protectedStateRoot === undefined
+      ? []
+      : [canonicalChild(protectedStateRoot, 'run')]),
   ])
   for (const directory of socketDirectories)
     forms.push(

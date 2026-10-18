@@ -4,6 +4,7 @@ import {
   decryptValue,
   deriveKey,
   readSafeStoragePassword,
+  SECURITY_COMMAND,
   safeStorageService,
 } from './chrome-crypto'
 
@@ -74,14 +75,23 @@ describe('safeStorageService', () => {
 })
 
 describe('readSafeStoragePassword', () => {
-  it('reaches the Keychain only through the injected runner', () => {
-    const run = vi.fn((service: string, account: string) => {
+  it('reaches the Keychain only through the injected runner', async () => {
+    const run = vi.fn(async (service: string, account: string) => {
       expect(service).toBe('Microsoft Edge Safe Storage')
       expect(account).toBe('Microsoft Edge')
       return 'edge-secret\n'
     })
     // Trailing newline from `security -w` is trimmed.
-    expect(readSafeStoragePassword('edge', run)).toBe('edge-secret')
+    await expect(readSafeStoragePassword('edge', run)).resolves.toBe(
+      'edge-secret',
+    )
     expect(run).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks /usr/bin/security without blocking, and gives up after a minute (MAIN-7)', () => {
+    expect(SECURITY_COMMAND).toEqual({
+      executable: '/usr/bin/security',
+      timeoutMs: 60_000,
+    })
   })
 })

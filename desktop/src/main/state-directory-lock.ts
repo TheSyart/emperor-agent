@@ -4,14 +4,82 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readFileSync,
   readlinkSync,
   realpathSync,
+  writeFileSync,
 } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import type { DatabaseSync as Database } from 'node:sqlite'
 
+/** Who holds a data directory, written beside the lock by the holder. */
+export interface LockOwner {
+  pid: number
+  version: string
+  startedAt: number
+  packaged: boolean
+  /** The holder's .app bundle (packaged builds), for 「切换到它」. */
+  appPath: string | null
+}
+
+function ownerPath(lockPath: string): string {
+  return `${lockPath}.owner.json`
+}
+
+/** Record this process as the holder (best effort; the lock itself is the truth). */
+export function writeLockOwner(
+  lock: StateDirectoryLock,
+  owner: LockOwner,
+): void {
+  try {
+    writeFileSync(ownerPath(lock.path), `${JSON.stringify(owner)}\n`, {
+      mode: 0o600,
+    })
+  } catch {
+    // An unreadable owner only makes the busy message less specific.
+  }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/** The live holder recorded beside one of these lock files, if any. */
+function readLockOwner(lockPaths: readonly string[]): LockOwner | undefined {
+  for (const lockPath of lockPaths) {
+    try {
+      const raw = JSON.parse(
+        readFileSync(ownerPath(lockPath), 'utf8'),
+      ) as Partial<LockOwner>
+      const pid = Number(raw.pid)
+      if (!Number.isSafeInteger(pid) || pid <= 0 || !processAlive(pid)) continue
+      return {
+        pid,
+        version: String(raw.version ?? ''),
+        startedAt: Number(raw.startedAt) || 0,
+        packaged: raw.packaged === true,
+        appPath:
+          typeof raw.appPath === 'string' && raw.appPath.endsWith('.app')
+            ? raw.appPath
+            : null,
+      }
+    } catch {
+      // Missing or malformed: try the next one.
+    }
+  }
+  return undefined
+}
+
 export class StateDirectoryLockError extends Error {
+  /** The Emperor holding the directory, when it recorded itself. */
+  owner?: LockOwner
+
   constructor(
     readonly code: 'state_root_in_use' | 'state_root_lock_failed',
     readonly root: string,
@@ -76,6 +144,8 @@ export function acquireStateDirectoryLock(
   legacyRoot?: string | null,
 ): StateDirectoryLock {
   const databases: Database[] = []
+  /** Lock files tried, for reading the holder when one is busy. */
+  const attempted: string[] = []
   let root = resolve(input)
   try {
     const snapshot = () => {
@@ -100,6 +170,7 @@ export function acquireStateDirectoryLock(
           `.${basename(target)}.emperor-writer.sqlite`,
         )
         primaryPath ||= path
+        attempted.push(path)
         try {
           closeSync(openSync(path, 'wx', 0o600))
         } catch (error) {
@@ -129,10 +200,15 @@ export function acquireStateDirectoryLock(
       cause !== null &&
       'errcode' in cause &&
       Number(cause.errcode) === 5
-    throw new StateDirectoryLockError(
+    const error = new StateDirectoryLockError(
       busy ? 'state_root_in_use' : 'state_root_lock_failed',
       root,
       { cause },
     )
+    if (busy) {
+      const owner = readLockOwner(attempted)
+      if (owner) error.owner = owner
+    }
+    throw error
   }
 }

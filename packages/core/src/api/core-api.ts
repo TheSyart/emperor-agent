@@ -1257,6 +1257,15 @@ export class CoreApi {
     this.host.sessions.flush(undefined, { sync: true })
   }
 
+  /**
+   * Quit overran its deadline: kill every child process tree and terminal
+   * now, synchronously, so nothing outlives the app (FIX-07).
+   */
+  forceStop(): void {
+    this.host.kept.processRuntime.terminateAll('app quit timeout')
+    this.terminalService.closeAll()
+  }
+
   close(): Promise<void> {
     this.closePromise ??= (async () => {
       this.flushAll()

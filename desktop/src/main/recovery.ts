@@ -15,6 +15,35 @@ export interface RecoveryPayload {
   emperorHome: string
   legacyHome: string | null
   canRetry: boolean
+  /** The holder is a packaged Emperor that can be brought forward. */
+  canSwitch: boolean
+}
+
+interface OwnerHint {
+  pid: number
+  version: string
+  packaged: boolean
+  appPath: string | null
+}
+
+function ownerOf(error: unknown): OwnerHint | null {
+  const owner =
+    error && typeof error === 'object' && 'owner' in error
+      ? (error as { owner?: unknown }).owner
+      : undefined
+  if (!owner || typeof owner !== 'object') return null
+  const record = owner as Record<string, unknown>
+  const pid = Number(record.pid)
+  if (!Number.isSafeInteger(pid) || pid <= 0) return null
+  return {
+    pid,
+    version: String(record.version ?? '').slice(0, 40),
+    packaged: record.packaged === true,
+    appPath:
+      typeof record.appPath === 'string' && record.appPath.endsWith('.app')
+        ? record.appPath
+        : null,
+  }
 }
 
 export function recoveryPayload(
@@ -23,14 +52,18 @@ export function recoveryPayload(
 ): RecoveryPayload {
   const code = stableRecoveryCode(error)
   const copy = recoveryCopy(code)
+  const owner = code === 'state_root_in_use' ? ownerOf(error) : null
   return {
     schemaVersion: 1,
     errorCode: code,
     title: copy.title,
-    message: copy.message,
+    message: owner
+      ? `另一个 Emperor（版本 ${owner.version || '未知'}，pid ${owner.pid}）正在使用这个数据目录。${owner.packaged && owner.appPath ? '可以切换到它，' : '请'}退出另一个 App 后重试，或退出当前窗口。`
+      : copy.message,
     emperorHome: path.resolve(roots.emperorHome),
     legacyHome: roots.legacyHome ? path.resolve(roots.legacyHome) : null,
     canRetry: true,
+    canSwitch: Boolean(owner?.packaged && owner.appPath),
   }
 }
 
@@ -50,6 +83,8 @@ export function createRecoveryActionHandler(opts: {
   retry: () => void | Promise<void>
   openPath: (target: string) => string | Promise<string>
   exit: () => void
+  /** Bring the Emperor holding the directory forward; '' on success. */
+  switchToOwner?: () => string | Promise<string>
 }): (
   senderId: number,
   action: unknown,
@@ -70,6 +105,17 @@ export function createRecoveryActionHandler(opts: {
       opts.exit()
       return { ok: true }
     }
+    if (action === 'switch_to_owner') {
+      if (!opts.switchToOwner)
+        return {
+          ok: false,
+          error: 'the other Emperor cannot be brought forward',
+        }
+      const error = await opts.switchToOwner()
+      if (error) return { ok: false, error: bounded(error) }
+      opts.exit()
+      return { ok: true }
+    }
     const target =
       action === 'open_emperor_home' ? opts.emperorHome : opts.legacyHome
     if (!target) return { ok: false, error: 'directory is unavailable' }
@@ -86,6 +132,7 @@ export function createRecoveryHtml(payload: RecoveryPayload): string {
     emperorHome: payload.emperorHome,
     legacyHome: payload.legacyHome,
     canRetry: payload.canRetry,
+    canSwitch: payload.canSwitch,
   }).replace(/</g, '\\u003c')
   return `<!doctype html>
 <html lang="zh-CN">
@@ -238,6 +285,7 @@ export function createRecoveryHtml(payload: RecoveryPayload): string {
       <div class="row" id="legacy-row"><dt>旧数据目录</dt><dd id="legacy"></dd></div>
     </dl>
     <div class="actions">
+      <button class="primary" id="switch" type="button">切换到它</button>
       <button class="primary" id="retry" type="button">重试初始化</button>
       <button id="open-home" type="button">打开 Emperor Home</button>
       <button id="open-legacy" type="button">打开旧目录</button>
@@ -253,6 +301,8 @@ export function createRecoveryHtml(payload: RecoveryPayload): string {
     byId('code').textContent = payload.code;
     byId('home').textContent = payload.emperorHome;
     byId('retry').hidden = !payload.canRetry;
+    byId('switch').hidden = !payload.canSwitch;
+    if (payload.canSwitch) byId('retry').classList.remove('primary');
     if (payload.legacyHome) byId('legacy').textContent = payload.legacyHome;
     else { byId('legacy-row').hidden = true; byId('open-legacy').hidden = true; }
     async function act(action) {
@@ -260,6 +310,7 @@ export function createRecoveryHtml(payload: RecoveryPayload): string {
       const result = await window.emperorRecovery.action(action);
       if (!result.ok) byId('status').textContent = result.error || '操作失败';
     }
+    byId('switch').addEventListener('click', () => act('switch_to_owner'));
     byId('retry').addEventListener('click', () => act('retry'));
     byId('open-home').addEventListener('click', () => act('open_emperor_home'));
     byId('open-legacy').addEventListener('click', () => act('open_legacy_home'));
@@ -332,6 +383,7 @@ function recoveryAction(value: unknown): RecoveryAction {
     action === 'retry' ||
     action === 'open_emperor_home' ||
     action === 'open_legacy_home' ||
+    action === 'switch_to_owner' ||
     action === 'exit'
   )
     return action

@@ -92,6 +92,15 @@ interface VaultLike {
     username?: string
     password: string
   }): unknown
+  /** Save several in one write (preferred; one fsync for the whole import). */
+  saveMany?(
+    drafts: Array<{
+      label: string
+      bindings: Array<{ kind: 'origin'; origin: string }>
+      username?: string
+      password: string
+    }>,
+  ): unknown
 }
 
 /** What `session.cookies.set` takes (the fields we fill). */
@@ -233,19 +242,28 @@ export async function importBrowserData(
           entry.username !== undefined
         )
           existing.add(`${binding.origin}\n${entry.username}`)
+    const drafts: Array<{
+      label: string
+      bindings: Array<{ kind: 'origin'; origin: string }>
+      username?: string
+      password: string
+    }> = []
     for (const record of data.passwords) {
       if (!isExactHttpOrigin(record.origin)) continue
       const key = `${record.origin}\n${record.username}`
       if (existing.has(key)) continue
-      deps.vault.save({
+      drafts.push({
         label: labelFor(record.origin),
         bindings: [{ kind: 'origin', origin: record.origin }],
         ...(record.username ? { username: record.username } : {}),
         password: record.password,
       })
       existing.add(key)
-      passwords += 1
     }
+    // One write for the whole import: per-entry fsync froze the app (MAIN-7).
+    if (drafts.length && deps.vault.saveMany) deps.vault.saveMany(drafts)
+    else for (const draft of drafts) deps.vault.save(draft)
+    passwords = drafts.length
   }
 
   let sites = 0

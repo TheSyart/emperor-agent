@@ -28,6 +28,29 @@ describe('Computer Use Seatbelt confinement', () => {
     }
   })
 
+  it('refuses the helper socket directory under a custom Emperor Home too (MAIN-25)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-run-profile-'))
+    try {
+      const state = join(root, 'state')
+      mkdirSync(join(state, 'run'), { recursive: true })
+      const profile = seatbeltProfileArgs(
+        { mode: 'workspace-write', workspaceRoot: root },
+        state,
+      )[1]!
+      const sockets = [
+        ...profile.matchAll(
+          /\(deny network-outbound \(remote unix-socket \(path-regex "([^"]+)"\)\)\)/g,
+        ),
+      ].map((match) => match[1]!)
+      expect(sockets.some((regex) => regex.includes('/state/run/'))).toBe(true)
+      expect(sockets.some((regex) => regex.includes('.emperor/run/'))).toBe(
+        true,
+      )
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it.skipIf(process.platform !== 'darwin')(
     'keeps ordinary CLI reads working while refusing Computer Use state',
     () => {

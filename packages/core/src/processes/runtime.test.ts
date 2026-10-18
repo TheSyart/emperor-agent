@@ -109,6 +109,59 @@ describe('OwnedProcessRuntime receipts', () => {
     )
   })
 
+  it('kills every running process at once when quitting overruns (FIX-07)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-terminate-all-'))
+    const sandbox: ProcessContainmentController = {
+      capability: () => ({
+        platform: 'darwin',
+        backend: 'macos-seatbelt',
+        status: 'available',
+        filesystem: 'workspace-write',
+        network: 'policy-controlled',
+        processTree: true,
+        reason: 'ready',
+      }),
+      prepare: () => {
+        throw new Error('unused')
+      },
+    }
+    const killed: number[] = []
+    const runtime = new OwnedProcessRuntime(root, {
+      sandbox,
+      killTree: (pid) => {
+        killed.push(pid)
+        process.kill(pid, 'SIGKILL')
+      },
+    })
+    const running = runtime.run({
+      executable: process.execPath,
+      args: ['-e', 'setTimeout(() => {}, 30000)'],
+      cwd: root,
+      env: {},
+      owner,
+      execution: {
+        kind: 'host',
+        authorization: {
+          version: 1,
+          toolName: 'run_command',
+          operationFingerprint: 'f'.repeat(64),
+          source: 'user_approved_once',
+          permissionMode: 'smart_auto',
+          rule: 'user.approved_once',
+          authorizationId: 'quit',
+        },
+      },
+    })
+    for (let i = 0; i < 100 && runtime.list()[0]?.status !== 'running'; i++)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    const pid = runtime.list()[0]?.pid
+    expect(pid).toBeGreaterThan(0)
+    runtime.terminateAll('app quit timeout')
+    // Synchronous: the kill happened before terminateAll returned.
+    expect(killed).toEqual([pid])
+    await expect(running).resolves.toMatchObject({ status: 'cancelled' })
+  })
+
   it('normalizes a legacy receipt without an execution boundary as sandboxed', () => {
     const root = mkdtempSync(join(tmpdir(), 'emperor-owned-legacy-'))
     const runtime = new OwnedProcessRuntime(root, {

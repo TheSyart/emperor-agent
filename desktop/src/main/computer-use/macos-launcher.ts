@@ -83,6 +83,8 @@ export interface MacosLauncherOptions {
   readonly desktopRoot?: string
   readonly arch?: string
   readonly home?: string
+  /** Emperor Home (EMPEROR_CONFIG_DIR); default `~/.emperor`. */
+  readonly stateRoot?: string
   readonly temp?: string
   readonly uid?: number
   readonly pid?: number
@@ -102,13 +104,23 @@ export interface MacosSocketLocation {
   readonly temporary: boolean
 }
 
+/** Emperor Home: the configured data directory, else `~/.emperor`. */
+function emperorHome(
+  options: Pick<MacosLauncherOptions, 'home' | 'stateRoot'>,
+): string {
+  return options.stateRoot ?? join(options.home ?? homedir(), '.emperor')
+}
+
 export function macosSocketLocation(
-  options: Pick<MacosLauncherOptions, 'home' | 'temp' | 'uid'> = {},
+  options: Pick<
+    MacosLauncherOptions,
+    'home' | 'stateRoot' | 'temp' | 'uid'
+  > = {},
 ): MacosSocketLocation {
   const uid = options.uid ?? process.getuid?.()
   if (uid === undefined || !Number.isSafeInteger(uid) || uid < 0)
     throw new UiError('DRIVER_UNAVAILABLE', 'Cannot determine local user ID')
-  const primaryDirectory = join(options.home ?? homedir(), '.emperor', 'run')
+  const primaryDirectory = join(emperorHome(options), 'run')
   const primary = join(primaryDirectory, `cu-${uid}.sock`)
   if (Buffer.byteLength(primary) <= SOCKET_PATH_LIMIT)
     return { directory: primaryDirectory, path: primary, temporary: false }
@@ -386,7 +398,7 @@ export async function installPackagedMacosHelper(
       'Computer Use helper signer does not match the app',
     )
 
-  const root = join(options.home ?? homedir(), '.emperor')
+  const root = emperorHome(options)
   await secureDirectory(root, uid, fs)
   const installedRoot = join(root, 'native-helpers')
   await secureDirectory(installedRoot, uid, fs)

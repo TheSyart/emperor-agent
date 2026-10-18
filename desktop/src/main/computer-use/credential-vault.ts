@@ -584,8 +584,39 @@ export class CredentialVault implements CredentialVaultPort {
     })
   }
 
+  /**
+   * Save several drafts with one write: all of them, or none if any is
+   * invalid or the write fails (browser import, MAIN-7).
+   */
+  saveMany(drafts: readonly CredentialDraft[]): CredentialHandle[] {
+    this.assertReady()
+    const prior = this.file.entries
+    const saved: StoredEntry[] = []
+    try {
+      for (const draft of drafts) saved.push(this.stage(draft))
+      this.persist()
+    } catch (error) {
+      this.file.entries = prior
+      throw error
+    }
+    return saved.map((entry) => this.handle(entry, false))
+  }
+
   save(draft: CredentialDraft): CredentialHandle {
     this.assertReady()
+    const prior = this.file.entries
+    const entry = this.stage(draft)
+    try {
+      this.persist()
+    } catch (error) {
+      this.file.entries = prior
+      throw error
+    }
+    return this.handle(entry, false)
+  }
+
+  /** Validate one draft and put it into `file.entries` (not yet on disk). */
+  private stage(draft: CredentialDraft): StoredEntry {
     const label = draft.label.trim()
     if (!label || label.length > 120)
       throw new CredentialVaultError(
@@ -636,18 +667,12 @@ export class CredentialVault implements CredentialVaultPort {
         ? {}
         : { lastUsedTarget: old.lastUsedTarget }),
     }
-    const prior = this.file.entries
+    const current = this.file.entries
     this.file.entries =
       oldIndex < 0
-        ? [...prior, entry]
-        : prior.map((item, index) => (index === oldIndex ? entry : item))
-    try {
-      this.persist()
-    } catch (error) {
-      this.file.entries = prior
-      throw error
-    }
-    return this.handle(entry, false)
+        ? [...current, entry]
+        : current.map((item, index) => (index === oldIndex ? entry : item))
+    return entry
   }
 
   remove(handleId: string): void {

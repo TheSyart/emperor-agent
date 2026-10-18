@@ -824,11 +824,19 @@ export class OwnedProcessRuntime implements OwnedProcessRunner {
     return reconciled
   }
 
-  async shutdown(reason = 'app shutdown'): Promise<void> {
+  /**
+   * Kill every running process tree now, synchronously. Quit uses it when
+   * the orderly shutdown overruns its deadline, so no child outlives the app.
+   */
+  terminateAll(reason = 'app shutdown'): void {
     for (const active of this.active.values()) {
       active.terminalReason = cleanReason(reason, 'app shutdown')
       active.controller.abort(active.terminalReason)
     }
+  }
+
+  async shutdown(reason = 'app shutdown'): Promise<void> {
+    this.terminateAll(reason)
     await Promise.all(
       [...this.active.values()].map(async (active) => {
         for (let attempt = 0; attempt < 100; attempt += 1) {

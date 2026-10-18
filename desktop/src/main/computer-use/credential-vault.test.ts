@@ -177,6 +177,41 @@ describe('CredentialVault', () => {
     ).toBe('not-in-cleartext-74')
   })
 
+  it('saves many entries in one write, or none of them (MAIN-7)', () => {
+    const path = vaultPath()
+    const vault = new CredentialVault({ path, storage })
+    const handles = vault.saveMany(
+      Array.from({ length: 3 }, (_v, index) => ({
+        label: `Site ${index}`,
+        bindings: [
+          { kind: 'origin' as const, origin: `https://s${index}.test` },
+        ],
+        username: `user${index}`,
+        password: `pw-${index}`,
+      })),
+    )
+    expect(handles).toHaveLength(3)
+    const reloaded = new CredentialVault({ path, storage })
+    expect(reloaded.secret(handles[2]!.handleId, 'password')).toBe('pw-2')
+    const before = readFileSync(path, 'utf8')
+    caught(() =>
+      vault.saveMany([
+        {
+          label: 'ok',
+          bindings: [{ kind: 'origin', origin: 'https://fine.test' }],
+          password: 'x',
+        },
+        {
+          label: '',
+          bindings: [{ kind: 'origin', origin: 'https://bad.test' }],
+          password: 'y',
+        },
+      ]),
+    )
+    expect(readFileSync(path, 'utf8')).toBe(before)
+    expect(vault.entries()).toHaveLength(3)
+  })
+
   it('requires exact origin bindings and drops deleted entries', () => {
     const vault = new CredentialVault({ path: vaultPath(), storage })
     expect(() =>

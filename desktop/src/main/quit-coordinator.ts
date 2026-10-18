@@ -11,6 +11,8 @@ export function createQuitCoordinator(options: {
   close(): Promise<void>
   quit(): void
   onError(error: unknown): void
+  /** The deadline passed: stop what is left by force before quitting. */
+  onTimeout?(): void
   timeoutMs?: number
 }): (event: { preventDefault(): void }) => void {
   let closing: Promise<void> | undefined
@@ -27,11 +29,14 @@ export function createQuitCoordinator(options: {
     }
     let timer: ReturnType<typeof setTimeout> | undefined
     const deadline = new Promise<void>((_resolve, reject) => {
-      timer = setTimeout(
-        () =>
-          reject(new Error(`shutdown did not finish within ${timeoutMs}ms`)),
-        timeoutMs,
-      )
+      timer = setTimeout(() => {
+        try {
+          options.onTimeout?.()
+        } catch (error: unknown) {
+          options.onError(error)
+        }
+        reject(new Error(`shutdown did not finish within ${timeoutMs}ms`))
+      }, timeoutMs)
     })
     closing = Promise.race([Promise.resolve().then(options.close), deadline])
       .catch(options.onError)
