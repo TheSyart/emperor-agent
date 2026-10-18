@@ -116,6 +116,34 @@ interface CallState {
   bodyInvoked: boolean
 }
 
+/**
+ * Settle with `body`, or reject with the signal's reason as soon as it
+ * aborts. The body keeps running (its lease stays held until it settles);
+ * the listener is removed once either side wins.
+ */
+function raceAbort<T>(body: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    body.catch(() => undefined)
+    return Promise.reject(signal.reason as Error)
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(signal.reason as Error)
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    body.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error as Error)
+      },
+    )
+  })
+}
+
 export class ToolRegistry {
   private readonly tools = new Map<string, ToolDefinition>()
   private readonly visibility = new Map<
@@ -381,7 +409,7 @@ export class ToolRegistry {
     }
   }
 
-  /** Stage 2: run the body under the caller signal and the tool timeout. */
+  /** Stage 2: run the body under the caller signal (always raced) and the tool timeout. */
   async dispatch(context: ToolRunContext): Promise<ToolExecutionResult> {
     const state = this.states.get(context)
     const definition = state?.definition
@@ -424,21 +452,9 @@ export class ToolRegistry {
         .execute(context.arguments, bodyContext)
         .finally(() => releaseBody?.())
       releaseLease = undefined
-      const returned =
-        limit === undefined
-          ? await body
-          : await Promise.race([
-              body,
-              new Promise<never>((_resolve, reject) => {
-                limit.signal.addEventListener(
-                  'abort',
-                  () => {
-                    reject(limit.signal.reason)
-                  },
-                  { once: true },
-                )
-              }),
-            ])
+      // Always race the abort, with or without a timeout: a body that
+      // ignores its signal must not keep a stopped turn waiting.
+      const returned = await raceAbort(body, bodyContext.signal)
       const normalized = normalizeToolReturn(returned)
       const meta =
         normalized.meta === undefined

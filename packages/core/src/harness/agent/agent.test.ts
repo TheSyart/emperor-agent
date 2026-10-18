@@ -526,6 +526,36 @@ describe('Agent loop', () => {
     })
   })
 
+  it('stops a turn whose tool ignores the signal and has no timeout', async () => {
+    const h = createTestHarness({
+      replies: [{ tools: [{ id: 'a', name: 'stubborn' }] }],
+    })
+    h.tools.register(
+      defineTool({
+        name: 'stubborn',
+        description: 'never returns and ignores cancellation',
+        input: z.object({}),
+        execute: () => new Promise(() => {}),
+      }),
+    )
+    const agent = h.agent()
+    agent.followup(userText('go'))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    agent.cancel({ kind: 'user' })
+    const outcome = await Promise.race([
+      agent.whenIdle().then(() => 'idle'),
+      new Promise((resolve) => setTimeout(() => resolve('hung'), 500)),
+    ])
+    expect(outcome).toBe('idle')
+    expect(agent.session.lastOf('tool/result')?.data.error?.code).toBe(
+      'ABORTED',
+    )
+    expect(agent.session.lastOf('turn/end')?.data.reason).toEqual({
+      kind: 'aborted',
+      reason: { kind: 'user' },
+    })
+  })
+
   it('enforces tool timeouts', async () => {
     const h = createTestHarness({
       replies: [{ tools: [{ id: 'a', name: 'sleepy' }] }, { text: 'ok' }],

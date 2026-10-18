@@ -124,3 +124,39 @@ it('a timeout does not release ownership while an uncooperative body still write
   finish()
   await vi.waitFor(() => expect(resources.hasActive('ws')).toBe(false))
 })
+it('a stop answers a body that ignores its signal and has no timeout, keeping the lease until it settles', async () => {
+  const { tools, resources } = registry()
+  let finish!: () => void
+  const gate = new Promise<void>((r) => {
+    finish = r
+  })
+  tools.register({
+    name: 'stubborn',
+    description: 'fixture',
+    parameters: {},
+    parse: (r) => r,
+    execute: async () => {
+      await gate
+      return 'late'
+    },
+  })
+  const controller = new AbortController()
+  const run = tools.execute({
+    callId: 'stubborn',
+    name: 'stubborn',
+    arguments: {},
+    signal: controller.signal,
+  })
+  await vi.waitFor(() => expect(resources.hasActive('ws')).toBe(true))
+  controller.abort({ kind: 'user' })
+  const result = await Promise.race([
+    run,
+    new Promise<'hung'>((resolve) => setTimeout(() => resolve('hung'), 500)),
+  ])
+  expect(result).not.toBe('hung')
+  expect(result !== 'hung' && result.error?.info?.code).toBe('ABORTED')
+  // The body may still be writing: ownership stays until it really ends.
+  expect(resources.hasActive('ws')).toBe(true)
+  finish()
+  await vi.waitFor(() => expect(resources.hasActive('ws')).toBe(false))
+})

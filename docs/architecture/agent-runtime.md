@@ -64,7 +64,7 @@ turn/end
 
 ## 工具执行
 
-`ToolRegistry.prepare()` 对单次调用依次执行：参数校验 → pre-execute middleware（取最严格的 allow / ask / deny）→ 需要时审批 → guard → 在超时内执行工具体 → post-execute middleware → 结果观察者。任何失败都变成模型可读的错误结果，不会抛到循环外。
+`ToolRegistry.prepare()` 对单次调用依次执行：参数校验 → pre-execute middleware（取最严格的 allow / ask / deny）→ 需要时审批 → guard → 在超时内执行工具体 → post-execute middleware → 结果观察者。任何失败都变成模型可读的错误结果，不会抛到循环外。工具体无论有没有超时都与调用的取消信号竞速：Stop 之后即使工具体不理会取消，调用也立即得到 `ABORTED` 结果；工具体真正结束之前，它持有的工作区租约不会释放。
 
 `harness/agent/tool-calls.ts` 按模型顺序分组：连续的并发安全调用共享一个滚动池（默认最多 10 个并行），非并发安全调用单独执行并形成屏障；`tool/call` 事件和 pre-execute 按模型顺序发生，只有工具体重叠，post-execute 与 `tool/result` 严格按模型顺序提交。中止时尚未开始的调用得到合成的 `ABORTED_BEFORE_DISPATCH` 结果，保证每个调用都有结果。
 
