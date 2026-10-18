@@ -16,8 +16,13 @@ files:
   - node_modules/@anthropic-ai/claude-agent-sdk/package.json
   - node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs
   - node_modules/@anthropic-ai/claude-agent-sdk/manifest*.json
-  - node_modules/@anthropic-ai/claude-agent-sdk-*/package.json
-  - node_modules/@anthropic-ai/claude-agent-sdk-*/claude*
+  # Claude Code runs the binary bundled with the SDK (AGT-01). Ship only this
+  # build's architecture: electron-builder expands ${arch} per target, and
+  # after-pack refuses a package carrying another architecture's binary.
+  - node_modules/@anthropic-ai/claude-agent-sdk-darwin-${arch}/package.json
+  - node_modules/@anthropic-ai/claude-agent-sdk-darwin-${arch}/claude
+  - node_modules/@anthropic-ai/claude-agent-sdk/node_modules/@anthropic-ai/claude-agent-sdk-darwin-${arch}/package.json
+  - node_modules/@anthropic-ai/claude-agent-sdk/node_modules/@anthropic-ai/claude-agent-sdk-darwin-${arch}/claude
   - node_modules/typescript/package.json
   - node_modules/typescript/lib/typescript.js
   - node_modules/node-pty/package.json
@@ -61,8 +66,8 @@ extraResources:
 
 asar: true
 asarUnpack:
-  - node_modules/@anthropic-ai/claude-agent-sdk/node_modules/@anthropic-ai/claude-agent-sdk-*/claude*
-  - node_modules/@anthropic-ai/claude-agent-sdk-*/claude*
+  - node_modules/@anthropic-ai/claude-agent-sdk/node_modules/@anthropic-ai/claude-agent-sdk-darwin-${arch}/claude
+  - node_modules/@anthropic-ai/claude-agent-sdk-darwin-${arch}/claude
   - node_modules/node-pty/prebuilds/**/*
   - node_modules/node-pty/build/Release/**/*
 

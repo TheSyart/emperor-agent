@@ -32,18 +32,25 @@ const TYPESCRIPT_ASAR_ENTRIES = new Set([
   '/node_modules/typescript/package.json',
 ])
 
-function isAllowedNodeModuleEntry(entry) {
-  // The Claude Agent SDK and its per-platform binary ship unpacked for the
-  // external executor; nothing else from @anthropic-ai is allowed in.
+function isAllowedNodeModuleEntry(
+  entry,
+  platform = process.platform,
+  arch = process.arch,
+) {
+  // The Claude Agent SDK and the binary for this build's platform and
+  // architecture only (AGT-01) ship for Claude Code; nothing else from
+  // @anthropic-ai is allowed in.
   const sdkNested = '/node_modules/@anthropic-ai/claude-agent-sdk/node_modules'
   if (entry === sdkNested) return true
   if (entry.startsWith(sdkNested + '/'))
     entry = '/node_modules' + entry.slice(sdkNested.length)
   if (entry === '/node_modules/@anthropic-ai') return true
+  const target = /^[a-z0-9]+$/.test(platform) && /^[a-z0-9]+$/.test(arch)
   if (
-    /^\/node_modules\/@anthropic-ai\/claude-agent-sdk(?:-(?:darwin|linux|win32)-(?:arm64|x64)(?:-musl)?)?(?:\/(?:package\.json|sdk\.mjs|manifest(?:\.zst)?\.json|claude(?:\.exe)?))?$/.test(
-      entry,
-    )
+    target &&
+    new RegExp(
+      `^/node_modules/@anthropic-ai/claude-agent-sdk(?:-${platform}-${arch}(?:-musl)?)?(?:/(?:package\\.json|sdk\\.mjs|manifest(?:\\.zst)?\\.json|claude(?:\\.exe)?))?$`,
+    ).test(entry)
   )
     return true
   const nodePtyRoot = '/node_modules/node-pty'
@@ -93,7 +100,7 @@ function validatePackagedAppResources(
   for (const entry of entries) {
     if (
       ((entry === '/node_modules' || entry.startsWith('/node_modules/')) &&
-        !isAllowedNodeModuleEntry(entry)) ||
+        !isAllowedNodeModuleEntry(entry, platform, arch)) ||
       /(?:^|\/)(?:fixtures|tests|desktop-pet)(?:\/|$)/i.test(entry) ||
       /(?:\.py|requirements[^/]*\.txt)$/i.test(entry)
     )
@@ -102,7 +109,7 @@ function validatePackagedAppResources(
       entry !== '/package.json' &&
       entry !== '/out' &&
       !entry.startsWith('/out/') &&
-      !isAllowedNodeModuleEntry(entry)
+      !isAllowedNodeModuleEntry(entry, platform, arch)
     )
       throw new Error(`packaged app contains unexpected ASAR entry: ${entry}`)
   }
@@ -134,6 +141,7 @@ function validatePackagedAppResources(
     throw new Error('packaged TypeScript parser size is invalid')
   assertNoDevelopmentPaths(asarPath, archiveEntries)
   validatePackagedNodePty(resourcesRoot, platform, arch)
+  validatePackagedClaudeSdk(resourcesRoot, entries, platform, arch)
   if (platform === 'darwin') {
     const auth = join(resourcesRoot, 'native', 'credential-auth')
     assertRegularFile(auth, 'native/credential-auth')
@@ -201,6 +209,50 @@ function validatePackagedAppResources(
   for (const forbidden of ['backend', 'node_modules']) {
     if (existsSync(join(resourcesRoot, forbidden)))
       throw new Error(`packaged resources contain forbidden path: ${forbidden}`)
+  }
+}
+
+/**
+ * Claude Code runs the binary bundled with the Agent SDK (AGT-01): the SDK
+ * is in the archive, and exactly this build's binary is unpacked and
+ * executable. Another architecture's 200+ MB binary must not ride along.
+ */
+function validatePackagedClaudeSdk(resourcesRoot, entries, platform, arch) {
+  if (platform !== 'darwin') return
+  const sdk = '/node_modules/@anthropic-ai/claude-agent-sdk'
+  for (const file of ['package.json', 'sdk.mjs', 'manifest.json'])
+    if (!entries.includes(`${sdk}/${file}`))
+      throw new Error(`packaged app is missing the Claude Agent SDK ${file}`)
+  const scope = join(
+    resourcesRoot,
+    'app.asar.unpacked',
+    'node_modules',
+    '@anthropic-ai',
+  )
+  const expected = `claude-agent-sdk-${platform}-${arch}`
+  const found = []
+  for (const directory of [
+    scope,
+    join(scope, 'claude-agent-sdk', 'node_modules', '@anthropic-ai'),
+  ])
+    if (existsSync(directory))
+      for (const name of readdirSync(directory))
+        if (name.startsWith('claude-agent-sdk-'))
+          found.push(join(directory, name))
+  const stray = found.find((path) => !path.endsWith(`/${expected}`))
+  if (stray)
+    throw new Error(
+      `packaged Claude binary for ${stray.slice(stray.lastIndexOf('claude-agent-sdk-') + 'claude-agent-sdk-'.length)} must not ship in a ${platform}-${arch} build`,
+    )
+  if (!found.length)
+    throw new Error(
+      `packaged app is missing the Claude Code binary for ${platform}-${arch}`,
+    )
+  for (const directory of found) {
+    const binary = join(directory, 'claude')
+    assertRegularFile(binary, `Claude Code binary for ${platform}-${arch}`)
+    if ((lstatSync(binary).mode & 0o111) === 0)
+      throw new Error('packaged Claude Code binary is not executable')
   }
 }
 
@@ -456,6 +508,8 @@ function electronBuilderArch(value) {
 
 module.exports = afterPack
 module.exports.validatePackagedAppResources = validatePackagedAppResources
+module.exports.validatePackagedClaudeSdk = validatePackagedClaudeSdk
+module.exports.isAllowedNodeModuleEntry = isAllowedNodeModuleEntry
 module.exports.targetNodePtyFiles = targetNodePtyFiles
 module.exports.prunePackagedNodePty = prunePackagedNodePty
 module.exports.PET_RESOURCE_FILES = PET_RESOURCE_FILES
