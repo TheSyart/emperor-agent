@@ -410,11 +410,11 @@ let host: HTMLElement | null = null
 let hostObserver: ResizeObserver | null = null
 let stackObserver: ResizeObserver | null = null
 
-/** Beside the chat: the span from the column bottom up to the stack's top. */
+/** The visible chip or expanded stack reserves its span below the info card. */
 function publishReserve(): void {
-  const element = stack.value
+  const element = root.value
   previewLayout.reservedHeight =
-    !compact.value && activated.value && host && element && front.value
+    activated.value && host && element && front.value
       ? Math.round(
           host.getBoundingClientRect().bottom -
             element.getBoundingClientRect().top,
@@ -445,6 +445,7 @@ function observeStack(): void {
   stackObserver?.disconnect()
   stackObserver = new ResizeObserver(publishReserve)
   stackObserver.observe(stack.value)
+  if (root.value) stackObserver.observe(root.value)
 }
 
 // --- wiring --------------------------------------------------------------

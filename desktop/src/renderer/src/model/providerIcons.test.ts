@@ -12,6 +12,8 @@ import {
 describe('providerIcons', () => {
   it.each([
     ['openai', 'openai.svg'],
+    ['codex', 'codex.svg'],
+    ['claude-code', 'claude.svg'],
     ['anthropic', 'anthropic.svg'],
     ['dashscope', 'qwen.svg'],
     ['moonshot', 'kimi.svg'],
@@ -25,6 +27,10 @@ describe('providerIcons', () => {
     expect(providerIconAsset(iconId)).toMatch(
       new RegExp(`/provider-logos/${fileName}$`),
     )
+  })
+  it('keeps external agent logos readable as monochrome masks in both themes', () => {
+    expect(providerIconIsMonochrome('codex')).toBe(true)
+    expect(providerIconIsMonochrome('claude-code')).toBe(true)
   })
 
   it('returns null for providers without a copied upstream asset', () => {

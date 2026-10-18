@@ -274,7 +274,8 @@ function stableRecoveryCode(error: unknown): string {
     error && typeof error === 'object' && 'code' in error
       ? String((error as { code?: unknown }).code ?? '')
       : ''
-  if (/^installation_[a-z_]+$/.test(raw)) return raw.slice(0, 96)
+  if (/^(?:installation_|state_root_)[a-z_]+$/.test(raw))
+    return raw.slice(0, 96)
   const message = error instanceof Error ? error.message : String(error ?? '')
   if (/runtime (?:resource|manifest)|runtime-manifest/i.test(message))
     return 'runtime_manifest_invalid'
@@ -282,6 +283,18 @@ function stableRecoveryCode(error: unknown): string {
 }
 
 function recoveryCopy(code: string): { title: string; message: string } {
+  if (code === 'state_root_in_use')
+    return {
+      title: '数据目录正在使用',
+      message:
+        '另一个 Emperor Agent 正在使用这个数据目录。请退出另一个 App 后重试，或退出当前窗口。',
+    }
+  if (code === 'state_root_lock_failed')
+    return {
+      title: '无法锁定数据目录',
+      message:
+        '未能确认数据目录的独占访问，应用未启动。请检查目录权限和存储状态后重试。',
+    }
   if (code === 'installation_layout_newer')
     return {
       title: 'Emperor Home 版本过新',

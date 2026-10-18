@@ -13,6 +13,8 @@
  */
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef } from 'vue'
 import { core } from '../../../api/http'
+import { onCoreEvent } from '../../../api/backend'
+import { mergeExternalTranscript } from '@emperor/core/runtime-contract'
 import Button from '../../ui/Button.vue'
 import Modal from '../../ui/Modal.vue'
 import {
@@ -25,7 +27,8 @@ const PAGE_SIZE = 200
 const props = defineProps<{
   taskId: string
   label: string
-  kind: 'job' | 'workflow'
+  kind: 'job' | 'workflow' | 'external-agent'
+  sessionId?: string
   live: boolean
 }>()
 
@@ -37,6 +40,33 @@ const loading = ref(false)
 const error = ref('')
 const output = ref<HTMLElement | null>(null)
 let generation = 0
+let consumed = 0,
+  alive = true,
+  followPending = false,
+  following = false
+let followTimer: ReturnType<typeof setTimeout> | undefined
+function follow() {
+  following = true
+  followPending = true
+  if (followTimer || !alive) return
+  followTimer = setTimeout(() => {
+    followTimer = undefined
+    if (!alive || loading.value) return
+    followPending = false
+    void load(false)
+  }, 80)
+}
+const unsubscribe = onCoreEvent((input) => {
+  if (props.kind !== 'external-agent' || !input || typeof input !== 'object')
+    return
+  const event = input as Record<string, unknown>
+  if (
+    event.run_id === props.taskId &&
+    (!props.sessionId || event.session_id === props.sessionId) &&
+    String(event.event).startsWith('delegation_')
+  )
+    follow()
+})
 
 async function load(reset: boolean): Promise<void> {
   const current = ++generation
@@ -44,13 +74,24 @@ async function load(reset: boolean): Promise<void> {
   error.value = ''
   try {
     const page = await core('tasks.transcript', props.taskId, {
-      offset: reset ? 0 : entries.value.length,
+      offset: reset ? 0 : consumed,
       limit: PAGE_SIZE,
+      sessionId: props.sessionId,
     })
     if (current !== generation) return
-    entries.value = reset ? page.entries : [...entries.value, ...page.entries]
+    consumed = (reset ? 0 : consumed) + page.entries.length
+    entries.value = (
+      reset ? page.entries : [...entries.value, ...page.entries]
+    ).slice(-2000)
     eof.value = page.eof
-    if (reset && props.kind === 'job') {
+    if (
+      props.kind === 'external-agent' &&
+      (props.live || following) &&
+      !page.eof
+    )
+      followPending = true
+    if (page.eof) following = false
+    if ((reset && props.kind === 'job') || props.kind === 'external-agent') {
       await nextTick()
       if (output.value) output.value.scrollTop = output.value.scrollHeight
     }
@@ -59,17 +100,31 @@ async function load(reset: boolean): Promise<void> {
       error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
     if (current === generation) loading.value = false
+    if (alive && followPending) follow()
   }
 }
 
 void load(true)
 onBeforeUnmount(() => {
+  alive = false
+  unsubscribe()
+  if (followTimer) clearTimeout(followTimer)
   generation += 1
 })
 
-const text = computed(() => transcriptText(entries.value))
+const text = computed(() =>
+  transcriptText(
+    props.kind === 'external-agent'
+      ? mergeExternalTranscript(entries.value)
+      : entries.value,
+  ),
+)
 const title = computed(() =>
-  props.kind === 'workflow' ? '工作流记录' : '命令输出',
+  props.kind === 'workflow'
+    ? '工作流记录'
+    : props.kind === 'external-agent'
+      ? '子智能体输出'
+      : '命令输出',
 )
 const emptyText = computed(() => {
   if (loading.value) return '正在读取…'

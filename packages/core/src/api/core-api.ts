@@ -4,6 +4,7 @@
  * adds the operation surface (sessions, config, workspace, git, terminals,
  * scheduler, plugins, environment, diagnostics) on top of it.
  */
+import { randomUUID } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
@@ -11,7 +12,8 @@ import {
   realpathSync,
   writeFileSync,
 } from 'node:fs'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { mergeExternalTranscript } from '../runtime/external-transcript'
 import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
 import type { MessageReference } from '../harness/host/message-references'
 import type { AttachmentStore } from '../attachments/store'
@@ -77,6 +79,7 @@ import {
   CoreConfigService,
   type UserConfigPayload,
 } from './services/config-service'
+import { CoreAgentService } from './services/agent-service'
 import { CoreDiagnosticsService } from './services/diagnostics-service'
 import { CoreEffectiveConfigService } from './services/effective-config-service'
 import type { BrowserPreferences } from '../config/local-config'
@@ -140,8 +143,43 @@ import {
 } from '../workspace/mutation-coordinator'
 import { HardenedGitRunner } from '../workspace/git-runner'
 import { TurnSnapshots } from '../workspace/turn-snapshots'
+import { DelegationWorkspaceService } from '../workspace/delegation-workspaces'
+import { SnapshotService } from '../workspace/delegation-snapshot'
+import { ExecutorConfigStore } from '../harness/delegation/config'
+import { ExecutorFactsStore } from '../harness/delegation/facts'
+import { CoreExecutorService } from './services/executor-service'
+import {
+  CoreDelegationService,
+  externalTask,
+} from './services/delegation-service'
+import {
+  DelegationReceipts,
+  requiresArtifactAcceptance,
+} from '../harness/delegation/receipts'
+import { DelegationAcceptance } from '../harness/delegation/acceptance'
+import { DelegationIntegration } from '../workspace/delegation-integration'
+import type {
+  DelegationState,
+  DelegationEvent,
+} from '../harness/delegation/fold'
+import type { DelegationProjection } from '../harness/delegation/events'
+
+import { ExecutorRegistry } from '../harness/delegation/registry'
+import { DelegationService } from '../harness/delegation/service'
+import { ExecutorRuntimeService } from '../harness/delegation/runtime'
+import { ExecutorModelCatalogService } from '../harness/delegation/models'
+import { nativeGeneratedImageRoot } from '../harness/delegation/image-proof'
+import { ClaudeExecutorAdapter } from '../harness/delegation/adapters/claude'
+import { CodexExecutorAdapter } from '../harness/delegation/adapters/codex'
+import {
+  DelegationError,
+  type ExecutorAdapter,
+} from '../harness/delegation/types'
+import { ManagedAgentProcess } from '../harness/delegation/process'
+import { loadModelConfig } from '../config/model-config'
 import {
   TurnFileRecorder,
+  mayWriteFiles,
   type TurnFilesReverted,
 } from '../harness/host/turn-files'
 import {
@@ -168,6 +206,8 @@ import type {
 type Dict = Record<string, unknown>
 
 export interface CoreApiCreateOptions extends HarnessHostOptions {
+  /** Host decoder validates native image deliverables after path/size checks. */
+  verifyGeneratedImage?: (bytes: Uint8Array) => boolean
   /** Test hook: use an existing host instead of creating one. */
   host?: HarnessHost | null
   appVersion?: string
@@ -204,7 +244,17 @@ export interface CoreRuntimeReplayPayload {
 /** A Task-panel row: a background job, a subagent session, or a workflow run. */
 export interface CoreTaskRecord {
   id: string
-  kind: 'job' | 'subagent' | 'workflow'
+  kind: 'job' | 'subagent' | 'workflow' | 'external-agent'
+  delegation_id?: string
+  backend?: string
+  model?: string
+  capabilities?: import('../harness/delegation/types').ExecutorCapabilities
+  acceptance?: import('../harness/delegation/types').DelegationRunRecord['acceptance']
+  receipt_id?: string
+  usage?: import('../harness/delegation/types').DelegationRunRecord['usage']
+  workspace_summary?: string
+  recoverable?: boolean
+  revision?: number
   job_kind?: string
   label: string
   description: string
@@ -263,6 +313,27 @@ export class CoreApi {
   readonly workspaceReferenceService: WorkspaceReferenceService
   readonly workspaceBindings: WorkspaceBindingStore
   readonly workspaceMutations = new WorkspaceMutationCoordinator()
+  readonly executorConfig: ExecutorConfigStore
+  readonly executorFacts: ExecutorFactsStore
+  readonly executorRegistry = new ExecutorRegistry()
+  readonly delegationRuntime: DelegationService
+  readonly delegationService: CoreDelegationService
+  readonly delegations: CoreDelegationService
+  private readonly agentService: CoreAgentService
+  private readonly agentIndexSubscriptions: Array<() => void> = []
+  private readonly delegationStates = new Map<string, DelegationState>()
+  readonly executors: CoreExecutorService
+  readonly delegationReceipts: DelegationReceipts
+  readonly delegationAcceptance: DelegationAcceptance
+  readonly delegationIntegration: DelegationIntegration
+  private closePromise?: Promise<void>
+  private readonly delegationOutput = new Map<
+    string,
+    {
+      timer: ReturnType<typeof setTimeout>
+      output: { role: string; content: string }[]
+    }
+  >()
   /** Per-turn file records of Build projects (E-track contract §5). */
   readonly turnFiles: TurnFileRecorder
   readonly gitReceipts: GitOperationReceiptStore
@@ -556,7 +627,12 @@ export class CoreApi {
       resolveProject: resolveWorkspaceProject,
       resolveRuntime: resolveGit,
       run: runGit,
-      hasActiveWriter: (sessionId) => host.isBusy(sessionId),
+      hasActiveWriter: (sessionId) =>
+        host.isBusy(sessionId) ||
+        this.workspaceMutations.hasActiveWriter(
+          resolveWorkspaceProject(sessionId).projectRoot,
+          'renderer_git',
+        ),
       stateRoot: this.paths.stateRoot,
       bindings: this.workspaceBindings,
       receipts: this.gitReceipts,
@@ -575,6 +651,242 @@ export class CoreApi {
       run: runGit,
       privateHome: resolve(this.paths.stateRoot, 'git', 'runtime-home'),
     })
+    this.executorConfig = new ExecutorConfigStore(this.paths.delegationsRoot)
+    this.executorFacts = new ExecutorFactsStore(
+      this.paths.delegationsRoot,
+      opts.verifyGeneratedImage,
+    )
+    const executorRuntime = new ExecutorRuntimeService({
+      root: this.paths.delegationsRoot,
+      resolveRoute: async (id, backend) => {
+        const config = await loadModelConfig(this.paths.modelConfigFile)
+        const entry = config.raw.models.find((entry) => entry.entryId === id)
+        if (!entry?.apiKey)
+          throw new DelegationError(
+            'AUTH_REQUIRED',
+            'selected model credential route is missing',
+          )
+        if (
+          entry.protocol !==
+          (backend === 'claude-code' ? 'anthropic' : 'openai')
+        )
+          throw new DelegationError(
+            'AUTH_ROUTE_INVALID',
+            'credential route protocol does not match the external executor',
+          )
+        if (
+          (entry.legacy?.extraBody &&
+            Object.keys(entry.legacy.extraBody).length) ||
+          (entry.legacy?.extraHeaders &&
+            Object.keys(entry.legacy.extraHeaders).length)
+        )
+          throw new DelegationError(
+            'AUTH_ROUTE_UNSUPPORTED',
+            'external executors require a credential route without custom legacy headers/body',
+          )
+        return { apiKey: entry.apiKey, baseUrl: entry.apiBase }
+      },
+    })
+    const executorProcesses = new ManagedAgentProcess({
+      sandbox: host.sandboxBackend,
+    })
+    const checkExecutorAuth = async (
+      profile: Parameters<typeof executorRuntime.prepare>[0],
+    ) => {
+      const runtime = await executorRuntime.prepare(
+        profile,
+        'dlg-probe-' + randomUUID(),
+      )
+      this.executorFacts.bind(profile, runtime.environment)
+    }
+    const externalWorkspaces = new DelegationWorkspaceService({
+      root: this.paths.delegationsRoot,
+      runner: turnGit,
+      mutations: this.workspaceMutations,
+      snapshots: new SnapshotService({
+        runner: turnGit,
+        tempRoot: join(this.paths.delegationsRoot, 'indexes'),
+        resources: this.workspaceMutations.resources,
+      }),
+    })
+    this.delegationRuntime = new DelegationService({
+      facts: this.executorFacts,
+      root: this.paths.delegationsRoot,
+      config: () => this.executorConfig.read(),
+      registry: this.executorRegistry,
+      adapters: new Map<string, ExecutorAdapter>([
+        [
+          'claude-code',
+          new ClaudeExecutorAdapter({ processes: executorProcesses }),
+        ],
+        ['codex', new CodexExecutorAdapter({ processes: executorProcesses })],
+      ]),
+      parent: (owner) => host.delegationParent(owner),
+      workspaces: externalWorkspaces,
+      mutations: this.workspaceMutations,
+      runtime: (profile, id) => executorRuntime.prepare(profile, id),
+      notices: {
+        parent: (owner) => host.delegationNoticeParent(owner),
+        canWake: (owner) => host.delegationNoticeParent(owner) !== undefined,
+        flush: (sessionId) => host.sessions.flush(sessionId),
+      },
+      acceptanceCurrent: (id) => this.delegationAcceptance.current(id),
+      deliveryRequiresAcceptance: (id, record) => {
+        const receipt = this.delegationReceipts.get(id)
+        return requiresArtifactAcceptance(record, receipt)
+      },
+      onState: (state, event) => this.projectDelegation(state, event),
+      onEvent: (event) => {
+        if (
+          event.type !== 'text_delta' &&
+          event.type !== 'tool_started' &&
+          event.type !== 'tool_finished'
+        )
+          return
+        const key = event.runId,
+          pending = this.delegationOutput.get(key)
+        const item = {
+          role: event.type === 'text_delta' ? 'assistant' : 'tool',
+          content:
+            event.type === 'text_delta'
+              ? event.text
+              : JSON.stringify({
+                  type: event.type,
+                  id: event.id,
+                  ...('name' in event ? { name: event.name } : {}),
+                  ...('status' in event ? { status: event.status } : {}),
+                  ...('detail' in event ? { detail: event.detail } : {}),
+                }),
+        }
+        if (pending) pending.output.push(item)
+        else
+          this.delegationOutput.set(key, {
+            output: [item],
+            timer: setTimeout(() => this.flushDelegationOutput(key), 100),
+          })
+      },
+      onSettled: async (id, runId) => {
+        this.flushDelegationOutput(runId)
+        const receipt = await this.delegationReceipts.collect(runId)
+        await this.delegationRuntime.bindReceipt(
+          id,
+          runId,
+          receipt.id,
+          'unverified',
+        )
+      },
+      onStopRoot: (id) => this.delegationAcceptance.stopRoot(id),
+      onQuestion: (question, signal) =>
+        host.delegationInteractions.ask(question, signal),
+    })
+    host.delegations = this.delegationRuntime
+    this.agentService = new CoreAgentService({
+      sessions: host.sessions,
+      roots: () =>
+        host.kept.sessionStore.list({ includeArchived: true }).map((s) => s.id),
+      external: () => this.delegationRuntime.list(),
+      live: (id) => host.subagents.record(id),
+      waiting: (id) => host.pending.hasPending(id),
+      changed: (event) =>
+        host.emitHost({
+          event: 'agent_tree_changed',
+          ...event,
+          session_id: event.rootSessionId,
+        }),
+    })
+    this.agentService.list([])
+    this.agentIndexSubscriptions.push(
+      host.rawTap((id, event) => this.agentService.sessionChanged(id, event)),
+      host.pending.onChange((id) => this.agentService.sessionChanged(id)),
+    )
+    const facts = (runId: string) => {
+      const state = this.delegationRuntime.list().find((s) => s.runs[runId])
+      if (!state?.record)
+        throw new DelegationError('RUN_NOT_FOUND', 'external run not found')
+      return {
+        record: state.record,
+        run: state.runs[runId]!,
+        lease: externalWorkspaces.get(state.record.workspaceLeaseId),
+      }
+    }
+    this.delegationReceipts = new DelegationReceipts({
+      root: this.paths.delegationsRoot,
+      runner: turnGit,
+      mutations: this.workspaceMutations,
+      resolve: facts,
+    })
+    this.delegationAcceptance = new DelegationAcceptance({
+      root: this.paths.delegationsRoot,
+      receipts: this.delegationReceipts,
+      mutations: this.workspaceMutations,
+      processes: executorProcesses,
+      scope: (runId) => {
+        const { record, run } = facts(runId),
+          parent = host.delegationParent(record.owner)
+        return {
+          taskScopeId: record.owner.taskScopeId,
+          permission: parent.planMode ? 'read-only' : parent.policy.mode,
+          rootSessionId: record.owner.rootSessionId,
+          generation: run.generation,
+        }
+      },
+    })
+    this.delegationIntegration = new DelegationIntegration({
+      root: this.paths.delegationsRoot,
+      receipts: this.delegationReceipts,
+      acceptance: this.delegationAcceptance,
+      mutations: this.workspaceMutations,
+      runner: turnGit,
+      scope: (runId) => facts(runId).record.owner.taskScopeId,
+      canApply: (runId) => {
+        const { record } = facts(runId),
+          entry = host.kept.sessionStore.get(record.owner.rootSessionId)
+        if (!entry || entry.archived_at) return false
+        const parent = host.delegationParent(record.owner)
+        return !parent.planMode && parent.policy.mode !== 'read-only'
+      },
+    })
+    this.delegationService = new CoreDelegationService({
+      root: this.paths.delegationsRoot,
+      service: this.delegationRuntime,
+      cachedState: (id) => this.delegationStates.get(id),
+      receipts: this.delegationReceipts,
+      acceptance: this.delegationAcceptance,
+      integration: this.delegationIntegration,
+      activeSession: () => host.activeSessionId,
+      session: (id) => host.kept.sessionStore.get(id),
+      assertMutation: (id, action) => {
+        if (id !== host.activeSessionId)
+          throw new DelegationError(
+            'PERMISSION_DENIED',
+            'activate the owning chat before controlling its task',
+          )
+        if (action !== 'control') this.assertMutation('delegations', action)
+      },
+    })
+    this.delegations = this.delegationService
+    this.executors = new CoreExecutorService({
+      modelCatalog: new ExecutorModelCatalogService({
+        root: this.paths.delegationsRoot,
+        runtime: executorRuntime,
+        processes: executorProcesses,
+        onPrepared: (profile, runtime) =>
+          this.executorFacts.bind(profile, runtime.environment),
+      }),
+      facts: this.executorFacts,
+      store: this.executorConfig,
+      registry: this.executorRegistry,
+      assertConfigure: () => this.assertMutation('executors', 'configure'),
+      refresh: () => this.delegationRuntime.probeProfiles(),
+      checkAuth: checkExecutorAuth,
+    })
+    host.delegationQuestionTimeoutMs = () => {
+      try {
+        return this.executorConfig.read().limits.questionTimeoutMs
+      } catch {
+        return 15 * 60_000
+      }
+    }
     const projectRootOf = (sessionId: string): string | null => {
       try {
         return resolveWorkspaceProject(sessionId).projectRoot
@@ -582,6 +894,26 @@ export class CoreApi {
         return null
       }
     }
+    host.tools.setWorkspaceAccessLeaseProvider({
+      acquire: async (call) => {
+        if (!mayWriteFiles(call.name)) return undefined
+        const root = host.sandbox.resolve({
+          session: call.agent?.session,
+        }).workspaceRoot
+        const args = call.arguments as {
+          workdir?: unknown
+          file_path?: unknown
+        } | null
+        const extra = args?.workdir ?? args?.file_path
+        const keys = [workspaceMutationDomain(root)]
+        if (typeof extra === 'string')
+          keys.push(workspaceMutationDomain(resolve(root, extra)))
+        return this.workspaceMutations.resources.acquire(
+          { keys, mode: 'shared', owner: call.callId },
+          call.signal,
+        )
+      },
+    })
     this.turnFiles = new TurnFileRecorder({
       snapshots: new TurnSnapshots({
         exec: (cwd, args, options) => turnGit.execute(cwd, args, options),
@@ -592,6 +924,7 @@ export class CoreApi {
       rootOf: (agent) => host.rootOf(agent),
       sessionLog: (sessionId) => host.sessionLog(sessionId),
       workspaceBusy: (projectRoot) => {
+        if (this.workspaceMutations.hasActiveWriter(projectRoot)) return true
         const domain = workspaceMutationDomain(projectRoot)
         return host
           .busySessions()
@@ -655,6 +988,15 @@ export class CoreApi {
         await this.workspaceGitService.ignoredPaths({ sessionId, paths }),
     })
     this.workspaceReferenceService = new WorkspaceReferenceService({
+      delegatedImageRoots: (sessionId, delegationId) =>
+        this.delegationImageRoots(
+          this.delegationService.get({ id: delegationId, sessionId }).record!,
+        ),
+      delegatedRoot: (sessionId, delegationId) => {
+        this.requireReadableSession(sessionId, 'references.resolve')
+        return this.delegationService.get({ id: delegationId, sessionId })
+          .record!.cwd
+      },
       resolveProject: resolveWorkspaceProject,
       resolveFileRoot: (sessionId) =>
         this.host.sessionWorkspaceRoot(
@@ -891,7 +1233,12 @@ export class CoreApi {
     let api: CoreApi | null = null
     try {
       api = new CoreApi(root, host, opts)
+      await api.delegationRuntime.reconcile()
+      api.agentService.rebuild()
+      await api.delegationAcceptance.reconcile()
+      api.delegationIntegration.reconcile()
       await api.environmentService.initialize()
+      await api.delegationRuntime.probeProfiles()
       await api.sessionTransitionService.recover()
       await api.syncPlugins()
       return api
@@ -902,10 +1249,100 @@ export class CoreApi {
     }
   }
 
-  async close(): Promise<void> {
-    this.terminalService.closeAll()
-    this.onboardingService.dispose()
-    await this.host.close()
+  close(): Promise<void> {
+    this.closePromise ??= (async () => {
+      await this.executors.close()
+      this.terminalService.closeAll()
+      this.onboardingService.dispose()
+      for (const unsubscribe of this.agentIndexSubscriptions) unsubscribe()
+      try {
+        await this.delegationAcceptance.stopRoot()
+        await this.delegationRuntime.shutdown()
+      } finally {
+        for (const key of this.delegationOutput.keys())
+          this.flushDelegationOutput(key)
+        await this.host.close()
+      }
+    })()
+    return this.closePromise
+  }
+
+  private flushDelegationOutput(runId: string): void {
+    const pending = this.delegationOutput.get(runId)
+    if (!pending) return
+    clearTimeout(pending.timer)
+    this.delegationOutput.delete(runId)
+    const state = [...this.delegationStates.values()].find((s) => s.runs[runId])
+    if (!state?.record) return
+    this.appendDelegationProjection(state, {
+      event: 'delegation_output',
+      delegation_id: state.record.id,
+      run_id: runId,
+      journal_seq: state.lastSeq,
+      output: pending.output,
+    })
+  }
+  private appendDelegationProjection(
+    state: DelegationState,
+    projection: DelegationProjection,
+  ): void {
+    if (
+      !state.record ||
+      !this.host.kept.sessionStore.get(state.record.owner.rootSessionId)
+    )
+      return
+    const owner = state.record.owner
+    const payload = JSON.parse(
+      JSON.stringify({
+        ...projection,
+        parent_call_id: owner.parentCallId,
+        current_run_id: state.record.currentRunId,
+        backend: state.record.backend,
+      }),
+    ) as DelegationProjection
+    const parent =
+      owner.parentAgentId === owner.rootSessionId
+        ? this.host.agentFor(owner.rootSessionId).session
+        : this.host.sessionLog(owner.parentAgentId)
+    if (parent) {
+      parent.append('delegation/projection', payload)
+      this.host.sessions.flush(parent.id)
+    }
+    // Child log projection streams raw events to its own timeline. Its
+    // legacy projector does not forward delegation events to the root UI.
+    if (owner.parentAgentId !== owner.rootSessionId)
+      this.host.emitHost({ ...payload, session_id: owner.rootSessionId })
+  }
+  private projectDelegation(
+    state: DelegationState,
+    event: DelegationEvent,
+  ): void {
+    const record = state.record
+    if (!record) return
+    this.delegationStates.set(record.id, state)
+    this.agentService.externalChanged(state)
+    const name =
+      event.type === 'created'
+        ? 'delegation_created'
+        : event.type === 'interaction'
+          ? 'delegation_interaction'
+          : event.type === 'receipt'
+            ? 'delegation_receipt'
+            : 'delegation_run_changed'
+    const runId =
+      'runId' in event
+        ? event.runId
+        : event.type === 'run-created'
+          ? event.run.id
+          : record.currentRunId
+    const run = runId ? state.runs[runId] : undefined
+    this.appendDelegationProjection(state, {
+      event: name,
+      delegation_id: record.id,
+      run_id: runId,
+      journal_seq: state.lastSeq,
+      ...(run ? { task: externalTask(state, run) } : {}),
+    })
   }
 
   async bootstrap(opts: { sessionId?: string | null } = {}) {
@@ -1381,6 +1818,27 @@ export class CoreApi {
     },
   }
 
+  /** Read-only children of existing owning roots; archived roots remain inspectable. */
+  readonly agents = {
+    list: (input: { rootSessionIds: string[] }) => {
+      const roots = [
+        ...new Set(input.rootSessionIds.map((id) => String(id).trim())),
+      ]
+      for (const id of roots) {
+        if (
+          !id ||
+          id.startsWith(DRAFT_SESSION_PREFIX) ||
+          !this.host.kept.sessionStore.get(id)
+        )
+          throw new InvalidSessionError(
+            'agents.list requires a readable owning root session',
+            id,
+          )
+      }
+      return this.agentService.list(roots)
+    },
+  }
+
   readonly sessions = {
     list: (opts: { includeArchived?: boolean } = {}) =>
       this.sessionApplicationService.list(opts),
@@ -1492,11 +1950,109 @@ export class CoreApi {
     return this.watchedSessions.has(sessionId)
   }
 
+  private delegationImageRoots(record: {
+    id: string
+    backend: string
+    profileId: string
+  }): string[] {
+    if (record.backend !== 'codex') return []
+    try {
+      const profile = this.executorConfig
+        .read()
+        .profiles.find((p) => p.id === record.profileId)
+      if (!profile) return []
+      const root = nativeGeneratedImageRoot(
+        join(
+          this.paths.delegationsRoot,
+          'runtime',
+          profile.stateDirectoryId,
+          record.id,
+        ),
+        this.paths.delegationsRoot,
+      )
+      return root ? [root] : []
+    } catch {
+      return []
+    }
+  }
+
   readonly references = {
     siteIcon: (input: Parameters<WorkspaceReferenceService['siteIcon']>[0]) =>
       this.workspaceReferenceService.siteIcon(input),
     preview: (input: Parameters<WorkspaceReferenceService['preview']>[0]) =>
       this.workspaceReferenceService.preview(input),
+    image: async (input: { sessionId: string; referenceId: string }) => {
+      this.requireReadableSession(input.sessionId, 'references.image')
+      const descriptor = this.workspaceReferenceService.authorize(
+        input.referenceId,
+        input.sessionId,
+      )
+      const target = this.workspaceReferenceService.previewPath(
+        input.referenceId,
+        input.sessionId,
+      )
+      if (!/\.(png|jpe?g|gif|webp)$/i.test(target))
+        throw new WorkspaceOperationError(
+          'reference_image_unsupported',
+          '该文件不支持图片预览。',
+        )
+      if (descriptor.kind === 'project_file')
+        // Same path as files.preview: works for Build projects and for the
+        // workspace of an ordinary chat.
+        return this.workspaceReferenceService.previewFile(input)
+      const delegationId = this.workspaceReferenceService.delegationScope(
+        input.referenceId,
+        input.sessionId,
+      )
+      const ownedRecord = delegationId
+        ? this.delegationService.get({
+            id: delegationId,
+            sessionId: input.sessionId,
+          }).record!
+        : undefined
+      const ownedRoots = ownedRecord
+        ? [ownedRecord.cwd, ...this.delegationImageRoots(ownedRecord)]
+        : [
+            this.host.sessionWorkspaceRoot(input.sessionId),
+            ...this.delegationRuntime
+              .list()
+              .flatMap((state) =>
+                state.record?.owner.rootSessionId === input.sessionId
+                  ? [
+                      state.record.cwd,
+                      ...this.delegationImageRoots(state.record),
+                    ]
+                  : [],
+              ),
+          ]
+      for (const root of ownedRoots) {
+        let cwd: string
+        try {
+          cwd = realpathSync(root)
+        } catch {
+          continue
+        }
+        const path = relative(cwd, target)
+        if (
+          !path ||
+          isAbsolute(path) ||
+          path === '..' ||
+          path.startsWith('..' + sep)
+        )
+          continue
+        const files = new WorkspaceFilesService({
+          resolveProject: () => ({
+            sessionId: input.sessionId,
+            projectRoot: cwd,
+          }),
+        })
+        return files.read({ sessionId: input.sessionId, relativePath: path })
+      }
+      throw new WorkspaceOperationError(
+        'reference_image_outside_workspace',
+        '图片不属于当前会话工作区。',
+      )
+    },
     resolve: (input: Parameters<WorkspaceReferenceService['resolve']>[0]) =>
       this.workspaceReferenceService.resolve(input),
     /** Electron main-only capability; returns a path only after reference ownership checks. */
@@ -2199,29 +2755,34 @@ export class CoreApi {
         String(opts.sessionId ?? '').trim() || this.host.activeSessionId
       return sessionId ? this.sessionTasks(sessionId) : []
     },
-    get: (taskId: string): CoreTaskRecord | null => this.findTask(taskId),
+    get: (
+      taskId: string,
+      opts: { sessionId?: string | null } = {},
+    ): CoreTaskRecord | null => this.findTask(taskId, opts.sessionId),
     transcript: (
       taskId: string,
-      opts: { offset?: number; limit?: number } = {},
+      opts: { offset?: number; limit?: number; sessionId?: string | null } = {},
     ) => {
-      const task = this.requireTask(taskId)
+      const task = this.requireTask(taskId, opts.sessionId)
       const offset = Math.max(0, Math.floor(Number(opts.offset ?? 0)) || 0)
       const limit = Math.max(
         1,
         Math.min(500, Math.floor(Number(opts.limit ?? 200)) || 200),
       )
       const entries =
-        task.kind === 'workflow'
-          ? this.workflowTranscript(task.id)
-          : task.kind === 'subagent'
-            ? this.subagentTranscript(task.id)
-            : [
-                {
-                  role: 'output',
-                  content: this.host.jobs.peek(task.id, this.jobOwner(task))
-                    .text,
-                },
-              ]
+        task.kind === 'external-agent'
+          ? this.delegationService.transcript(task.id, opts.sessionId)
+          : task.kind === 'workflow'
+            ? this.workflowTranscript(task.id)
+            : task.kind === 'subagent'
+              ? this.subagentTranscript(task.id)
+              : [
+                  {
+                    role: 'output',
+                    content: this.host.jobs.peek(task.id, this.jobOwner(task))
+                      .text,
+                  },
+                ]
       return {
         taskId: task.id,
         entries: entries.slice(offset, offset + limit),
@@ -2232,13 +2793,15 @@ export class CoreApi {
     },
     wait: async (
       taskId: string,
-      opts: { timeoutMs?: number } = {},
+      opts: { timeoutMs?: number; sessionId?: string | null } = {},
     ): Promise<Dict | null> => {
-      const task = this.requireTask(taskId)
+      const task = this.requireTask(taskId, opts.sessionId)
       const timeoutMs = Math.max(
         0,
         Math.min(600_000, Number(opts.timeoutMs ?? 30_000) || 30_000),
       )
+      if (task.kind === 'external-agent')
+        return this.delegationService.wait(task.id, timeoutMs, opts.sessionId)
       if (task.kind === 'workflow') {
         const deadline = Date.now() + timeoutMs
         let current = this.findTask(task.id)
@@ -2272,14 +2835,21 @@ export class CoreApi {
         clearTimeout(timer)
       }
     },
-    readOutput: async (taskId: string, _opts: { cursor?: string } = {}) => {
-      const task = this.requireTask(taskId)
+    readOutput: async (
+      taskId: string,
+      opts: { cursor?: string; sessionId?: string | null } = {},
+    ) => {
+      const task = this.requireTask(taskId, opts.sessionId)
       const content =
         task.kind === 'job'
           ? this.host.jobs.peek(task.id, this.jobOwner(task)).text
-          : (task.kind === 'workflow'
-              ? this.workflowTranscript(task.id)
-              : this.subagentTranscript(task.id)
+          : (task.kind === 'external-agent'
+              ? mergeExternalTranscript(
+                  this.delegationService.transcript(task.id, opts.sessionId),
+                )
+              : task.kind === 'workflow'
+                ? this.workflowTranscript(task.id)
+                : this.subagentTranscript(task.id)
             )
               .map((entry) => `${entry.role}: ${entry.content}`)
               .join('\n\n')
@@ -2295,9 +2865,14 @@ export class CoreApi {
       taskId: string,
       _opts: { reason?: string } = {},
     ): Promise<Dict> => {
-      this.assertMutation('tasks', 'cancel')
-      this.requireTask(taskId)
-      this.cancelTask(taskId)
+      const task = this.requireTask(taskId)
+      if (task.kind !== 'external-agent') this.assertMutation('tasks', 'cancel')
+      if (task.kind === 'external-agent')
+        await this.delegationService.interrupt({
+          id: task.delegation_id!,
+          runId: task.id,
+        })
+      else this.cancelTask(taskId)
       return { ...this.findTask(taskId) }
     },
     resume: async (_taskId: string, _opts: Dict = {}): Promise<never> => {
@@ -2568,8 +3143,10 @@ export class CoreApi {
   }
 
   private sessionTasks(sessionId: string): CoreTaskRecord[] {
+    if (this.host.kept.sessionStore.get(sessionId)?.archived_at)
+      return this.delegationService.tasks(sessionId)
     const root = this.rootAgentOf(sessionId)
-    if (root === null) return []
+    if (root === null) return this.delegationService.tasks(sessionId)
     const jobs = this.sessionJobs(sessionId).map((job) =>
       jobTask(job, sessionId),
     )
@@ -2583,9 +3160,12 @@ export class CoreApi {
           live: this.host.workflowRuns.isLive(record.runId),
         }) as CoreTaskRecord,
     )
-    return [...workflows, ...children, ...jobs].sort(
-      (left, right) => right.started_at - left.started_at,
-    )
+    return [
+      ...this.delegationService.tasks(sessionId),
+      ...workflows,
+      ...children,
+      ...jobs,
+    ].sort((left, right) => right.started_at - left.started_at)
   }
 
   private allSubagents(): SubagentRecord[] {
@@ -2594,9 +3174,16 @@ export class CoreApi {
     return root === null ? [] : this.host.subagents.list(root, 'descendants')
   }
 
-  private findTask(taskId: string): CoreTaskRecord | null {
+  private findTask(
+    taskId: string,
+    sessionId?: string | null,
+  ): CoreTaskRecord | null {
     const id = String(taskId ?? '').trim()
     if (!id) return null
+    if (id.startsWith('dgr-')) {
+      const { state, run } = this.delegationService.run(id, sessionId)
+      return externalTask(state, run)
+    }
     for (const entry of this.host.kept.sessionStore.list({
       includeArchived: false,
     })) {
@@ -2606,8 +3193,11 @@ export class CoreApi {
     return null
   }
 
-  private requireTask(taskId: string): CoreTaskRecord {
-    const task = this.findTask(taskId)
+  private requireTask(
+    taskId: string,
+    sessionId?: string | null,
+  ): CoreTaskRecord {
+    const task = this.findTask(taskId, sessionId)
     if (task === null)
       throw new CoreMutationGuardError(
         403,
@@ -2619,6 +3209,12 @@ export class CoreApi {
   private cancelTask(taskId: string): boolean {
     const task = this.findTask(taskId)
     if (task === null) return false
+    if (task.kind === 'external-agent') {
+      void this.delegationService
+        .interrupt({ id: task.delegation_id!, runId: task.id })
+        .catch(() => undefined)
+      return true
+    }
     if (task.kind === 'workflow')
       return this.host.workflowRuns.cancel(
         task.id,

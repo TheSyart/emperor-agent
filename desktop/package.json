@@ -31,6 +31,7 @@
     "dist": "npm run dist:mac"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.281",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "node-pty": "^1.1.0",

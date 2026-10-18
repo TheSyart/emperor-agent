@@ -8,19 +8,71 @@
  *
  * Props: node (tool).
  */
-import { computed } from 'vue'
+import { computed, defineAsyncComponent, inject, ref } from 'vue'
+import { routerKey } from 'vue-router'
+import { agentSourceLabel } from '@emperor/core/runtime-contract'
 import type { ToolChatNode, ToolGrantView } from '../../../conversation/types'
-import { DsChevronRight, DsShieldAlert } from '../../icons/ds'
-import SubagentAvatar from '../../ui/SubagentAvatar.vue'
+import { DsShieldAlert } from '../../icons/ds'
 import { useChatContext } from '../chatContext'
-import { subagentStatusLabel } from '../tools/registry'
-import { lastLine } from '../tools/toolModel'
+import { subagentStatusLabel, toolView } from '../tools/registry'
+import { lastLine, nativeAgentTarget } from '../tools/toolModel'
+import { useAgentTree } from '../../sidebar/agentTree'
+import SubagentAvatar from '../../ui/SubagentAvatar.vue'
 import ToolCallRow from './ToolCallRow.vue'
 import WorkflowRunPanel from './WorkflowRunPanel.vue'
+import ExternalAgentStream from '../tools/ExternalAgentStream.vue'
 
 const props = defineProps<{ node: ToolChatNode }>()
-const { actions } = useChatContext()
+const chat = useChatContext()
+const { actions } = chat
+const router = inject(routerKey, undefined)
 const data = computed(() => props.node.data)
+const owner = computed(() => chat.rootSessionId?.() ?? chat.sessionId())
+const agentTree = useAgentTree()
+const nativeAgent = computed(() => {
+  const id = nativeAgentTarget(data.value)
+  const agent = id ? agentTree.trees[owner.value]?.byId[id] : undefined
+  return agent?.kind === 'internal' &&
+    agent.backend === 'internal' &&
+    agent.rootSessionId === owner.value
+    ? agent
+    : undefined
+})
+const nativeId = computed(
+  () => data.value.subagent?.subagentId ?? nativeAgent.value?.id,
+)
+const detailsRun = ref<{ runId: string; delegationId: string } | null>(null)
+const ExternalAgentDetails = defineAsyncComponent(
+  () => import('../environment/ExternalAgentDetails.vue'),
+)
+const entryBackend = computed(
+  () => data.value.externalAgent?.backend ?? 'internal',
+)
+const entryTitle = computed(() =>
+  toolView(data.value.name, data.value, nativeAgent.value).title(data.value),
+)
+const entryHref = computed(() =>
+  data.value.externalAgent
+    ? `/chat/${encodeURIComponent(owner.value)}/agents/${encodeURIComponent(data.value.externalAgent.delegationId)}`
+    : `/chat/${encodeURIComponent(nativeId.value ?? '')}`,
+)
+function openAgent(event: MouseEvent) {
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  if (data.value.externalAgent) {
+    if (!router) return
+    event.preventDefault()
+    void router.push({
+      name: 'external-agent',
+      params: {
+        sessionId: owner.value,
+        delegationId: data.value.externalAgent.delegationId,
+      },
+    })
+  } else if (nativeId.value) {
+    event.preventDefault()
+    actions.openSubagent(nativeId.value)
+  }
+}
 
 const subagentStatus = computed(() => {
   const sub = data.value.subagent
@@ -69,6 +121,7 @@ const hasChildren = computed(
   () =>
     data.value.workflow !== undefined ||
     data.value.subagent !== undefined ||
+    data.value.externalAgent !== undefined ||
     data.value.approvals.length > 0 ||
     (data.value.grants?.length ?? 0) > 0,
 )
@@ -76,8 +129,43 @@ const hasChildren = computed(
 
 <template>
   <div class="tool-call" :data-chat-call-id="data.callId">
-    <ToolCallRow :data="data" />
+    <div v-if="data.externalAgent || nativeId" class="agent-entry-row">
+      <a
+        data-agent-entry
+        class="agent-entry"
+        :href="entryHref"
+        @click="openAgent"
+      >
+        <SubagentAvatar
+          v-if="nativeId && !data.externalAgent"
+          :session-id="nativeId"
+          :size="24"
+        />
+        {{ entryTitle }}
+        <span>{{ agentSourceLabel(entryBackend) }} · 子智能体 ↗</span>
+      </a>
+      <button
+        v-if="data.externalAgent"
+        type="button"
+        class="open-link"
+        data-agent-details
+        @click="
+          detailsRun = {
+            runId: data.externalAgent.runId,
+            delegationId: data.externalAgent.delegationId,
+          }
+        "
+      >
+        任务详情
+      </button>
+    </div>
+    <ToolCallRow :data="data" :agent="nativeAgent" />
     <div v-if="hasChildren" class="subcalls" data-subcalls>
+      <ExternalAgentStream
+        v-if="data.externalAgent"
+        :run="data.externalAgent"
+        :call-id="data.callId"
+      />
       <div
         v-for="approval in data.approvals"
         :key="approval.id"
@@ -134,13 +222,6 @@ const hasChildren = computed(
           <span class="sep" aria-hidden="true" />
           <span class="sub-text">{{ subagentLine }}</span>
         </template>
-        <button
-          type="button"
-          class="open-link"
-          @click="actions.openSubagent(data.subagent.subagentId)"
-        >
-          打开子会话<DsChevronRight :size="12" />
-        </button>
       </div>
       <WorkflowRunPanel
         v-if="data.workflow"
@@ -148,10 +229,45 @@ const hasChildren = computed(
         :expansion-key="`workflow:${data.callId}`"
       />
     </div>
+    <ExternalAgentDetails
+      v-if="detailsRun"
+      :run-id="detailsRun.runId"
+      :delegation-id="detailsRun.delegationId"
+      :session-id="owner"
+      @close="detailsRun = null"
+      @root="router?.push({ name: 'chat', params: { sessionId: owner } })"
+      @configure="
+        router?.push({
+          query: { ...router.currentRoute.value.query, settings: 'executors' },
+        })
+      "
+    />
   </div>
 </template>
 
 <style scoped>
+.agent-entry-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.agent-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  color: rgb(var(--label-primary));
+  font-size: var(--fs-s);
+  text-decoration: none;
+}
+.agent-entry:hover {
+  text-decoration: underline;
+}
+.agent-entry > span:not(.subagent-avatar) {
+  color: rgb(var(--label-tertiary));
+  font-size: var(--fs-xs);
+  margin-left: var(--space-2);
+}
 .tool-call {
   display: flex;
   flex-direction: column;

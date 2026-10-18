@@ -5,6 +5,7 @@ import {
 } from '../harness/computer-use/external-site-rules'
 import { validDownloadDirectory } from '../config/local-config'
 import { z } from 'zod'
+import { executorConfigSchema } from '../harness/delegation/config'
 import type { CoreApi } from './core-api'
 import {
   MAX_MESSAGE_REFERENCES,
@@ -17,6 +18,32 @@ import {
   sha256Schema,
 } from '../environment/models'
 
+const externalIdSchema = z.string().regex(/^dlg-[a-zA-Z0-9-]+$/)
+const externalRunSchema = z.string().regex(/^dgr-[a-zA-Z0-9-]+$/)
+const externalSession = z.string().trim().min(1).max(256).optional()
+const externalRef = z
+  .object({ id: externalIdSchema, sessionId: externalSession })
+  .strict()
+const externalRunRef = z
+  .object({ runId: externalRunSchema, sessionId: externalSession })
+  .strict()
+const acceptanceCriteriaSchema = z
+  .object({
+    description: z.string().min(1).max(8192),
+    commands: z
+      .array(
+        z
+          .object({
+            executable: z.string().min(1).max(4096),
+            args: z.array(z.string().max(65536)).max(256),
+            timeoutMs: z.number().int().min(1000).max(600000).optional(),
+          })
+          .strict(),
+      )
+      .max(16),
+    requiresReview: z.boolean().optional(),
+  })
+  .strict()
 const dictSchema = z.record(z.string(), z.unknown())
 const idSchema = z.string().trim().min(1)
 const taskIdSchema = idSchema.refine(
@@ -572,6 +599,10 @@ const terminalResizeSchema = terminalIdentitySchema.extend({
 const referenceResolveSchema = z
   .object({
     sessionId: idSchema,
+    delegationId: z
+      .string()
+      .regex(/^dlg-[a-zA-Z0-9-]+$/)
+      .optional(),
     sourceMessageId: idSchema,
     href: z.string().trim().min(1).max(4_096),
     label: z.string().max(500),
@@ -804,6 +835,140 @@ function operation<Schema extends AnyArgsSchema, Result>(
 }
 
 export const CORE_OPERATION_REGISTRY = {
+  'executors.list': operation(z.tuple([]), (api) => api.executors.list()),
+  'executors.models': operation(
+    z.tuple([
+      z
+        .object({
+          profileId: z.string().min(1).max(64),
+          refresh: z.boolean().optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.executors.models(input),
+  ),
+  'executors.probe': operation(
+    z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),
+    (api, [input]) => api.executors.probe(input),
+  ),
+  'executors.configure': operation(
+    z.tuple([
+      z
+        .object({
+          expectedRevision: z.number().int().nonnegative(),
+          config: executorConfigSchema,
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.executors.configure(input),
+  ),
+  'delegations.get': operation(z.tuple([externalRef]), (api, [input]) =>
+    api.delegations.get(input),
+  ),
+  'delegations.history': operation(
+    z.tuple([
+      externalRef
+        .extend({
+          before: z.string().max(1024).optional(),
+          after: z.string().max(1024).optional(),
+          limit: z.number().int().positive().optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.delegations.history(input),
+  ),
+  'delegations.send': operation(
+    z.tuple([
+      externalRef
+        .extend({
+          messageId: z.string().regex(/^dgm-[a-zA-Z0-9-]+$/),
+          text: z.string().min(1).max(32768),
+          delivery: z.enum(['queue', 'steer']),
+          expectedRunId: externalRunSchema.optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.delegations.send(input),
+  ),
+  'delegations.interrupt': operation(
+    z.tuple([externalRef.extend({ runId: externalRunSchema }).strict()]),
+    (api, [input]) => api.delegations.interrupt(input),
+  ),
+  'delegations.recover': operation(
+    z.tuple([
+      externalRef
+        .extend({
+          expectedRevision: z.number().int().nonnegative(),
+          inspect: z.boolean().optional(),
+          verificationId: z
+            .string()
+            .regex(/^dgr-verification-[a-f0-9-]+$/)
+            .optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.delegations.recover(input),
+  ),
+  'delegations.collect': operation(z.tuple([externalRunRef]), (api, [input]) =>
+    api.delegations.collect(input),
+  ),
+  'delegations.receipt': operation(z.tuple([externalRunRef]), (api, [input]) =>
+    api.delegations.receipt(input),
+  ),
+  'delegations.validate': operation(
+    z.tuple([
+      externalRunRef
+        .extend({
+          receiptId: z.string().regex(/^drr-[a-f0-9-]+$/),
+          criteria: acceptanceCriteriaSchema,
+          reviewedTreeDigest: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/)
+            .optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.delegations.validate(input),
+  ),
+  'delegations.integrate': operation(
+    z.tuple([
+      externalRunRef
+        .extend({
+          action: z.enum(['preview', 'apply']),
+          expectedBase: z
+            .object({
+              cwd: z.string().min(1).max(4096),
+              head: z.string().nullable(),
+              indexDigest: z.string().nullable(),
+              treeDigest: z.string().regex(/^[a-f0-9]{64}$/),
+            })
+            .strict()
+            .optional(),
+          previewId: z
+            .string()
+            .regex(/^dpi-[a-f0-9-]+$/)
+            .optional(),
+          expectedRevision: z.number().int().nonnegative().optional(),
+          previewDigest: z
+            .string()
+            .regex(/^[a-f0-9]{64}$/)
+            .optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.delegations.integrate(input),
+  ),
+  'delegations.close': operation(
+    z.tuple([
+      externalRef
+        .extend({
+          failureDisposition: z.string().trim().min(1).max(4096).optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.delegations.close(input),
+  ),
+
   'attachments.rawPath': operation(z.tuple([idSchema]), (api, [id]) =>
     api.attachments.rawPath(id),
   ),
@@ -1422,6 +1587,12 @@ export const CORE_OPERATION_REGISTRY = {
   'sessions.activate': operation(z.tuple([idSchema]), (api, [id]) =>
     api.sessions.activate(id),
   ),
+  'agents.list': operation(
+    z.tuple([
+      z.object({ rootSessionIds: z.array(idSchema).max(500) }).strict(),
+    ]),
+    (api, [input]) => api.agents.list(input),
+  ),
   'sessions.children': operation(z.tuple([sessionRefSchema]), (api, [input]) =>
     api.sessions.children(input),
   ),
@@ -1504,7 +1675,16 @@ export const CORE_OPERATION_REGISTRY = {
   'skills.validate': operation(z.tuple([skillValidateSchema]), (api, [input]) =>
     api.skills.validate(input),
   ),
-  'tasks.get': operation(z.tuple([idSchema]), (api, [id]) => api.tasks.get(id)),
+  'tasks.get': operation(
+    z.tuple([
+      idSchema,
+      z
+        .object({ sessionId: sessionLogIdSchema.optional() })
+        .strict()
+        .optional(),
+    ]),
+    (api, [id, options]) => api.tasks.get(id, options),
+  ),
   'tasks.cancel': operation(
     z.tuple([
       taskIdSchema,
@@ -1526,6 +1706,7 @@ export const CORE_OPERATION_REGISTRY = {
       taskIdSchema,
       z
         .object({
+          sessionId: sessionLogIdSchema.optional(),
           offset: z.number().int().nonnegative().optional(),
           limit: z.number().int().nonnegative().optional(),
         })
@@ -1538,7 +1719,10 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([
       taskIdSchema,
       z
-        .object({ cursor: z.string().max(64).optional() })
+        .object({
+          cursor: z.string().max(64).optional(),
+          sessionId: sessionLogIdSchema.optional(),
+        })
         .strict()
         .optional(),
     ]),
@@ -1567,6 +1751,7 @@ export const CORE_OPERATION_REGISTRY = {
       taskIdSchema,
       z
         .object({
+          sessionId: sessionLogIdSchema.optional(),
           timeoutMs: z
             .number()
             .int()
@@ -1625,6 +1810,14 @@ export const CORE_OPERATION_REGISTRY = {
   'references.resolve': operation(
     z.tuple([referenceResolveSchema]),
     (api, [input]) => api.references.resolve(input),
+  ),
+  'references.image': operation(
+    z.tuple([
+      z
+        .object({ sessionId: sessionLogIdSchema, referenceId: idSchema })
+        .strict(),
+    ]),
+    (api, [input]) => api.references.image(input),
   ),
   'terminals.close': operation(
     z.tuple([terminalIdentitySchema]),

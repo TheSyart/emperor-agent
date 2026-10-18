@@ -83,3 +83,43 @@ export type {
   ExternalSiteDecision,
   ExternalSiteRule,
 } from '../harness/computer-use/external-site-rules'
+
+export type {
+  ExecutorConfig,
+  ExecutorModelCatalog,
+  ExecutorModelCandidate,
+  ExecutorProfile,
+  ExecutorProbe,
+  ExecutorCapabilities,
+  ExecutorRuntimeFacts,
+  NativeCapabilityStatus,
+  NativeCapabilityEvidence,
+  DelegationRecord,
+  DelegationRunRecord,
+} from '../harness/delegation/types'
+export {
+  executorIntroduction,
+  executorSpecialties,
+} from '../harness/delegation/specialties'
+export type {
+  DelegationProjection,
+  DelegationRuntimeName,
+} from '../harness/delegation/events'
+export type { DelegationReceipt } from '../harness/delegation/receipts'
+export type {
+  AcceptanceCriteria,
+  AcceptanceReceipt,
+} from '../harness/delegation/acceptance'
+export type {
+  IntegrationPreview,
+  IntegrationReceipt,
+} from '../workspace/delegation-integration'
+
+export { mergeExternalTranscript } from '../runtime/external-transcript'
+
+export {
+  agentTitle,
+  agentSourceLabel,
+  agentPhaseLabel,
+} from '../runtime/agent-view'
+export type { AgentView, AgentBackend, AgentPhase } from '../runtime/agent-view'

@@ -1,6 +1,7 @@
 /** Delegation tools (ported from dsh tool-subagent, tool-subagent-control, tool-subagent-report). */
 
 import { z } from 'zod'
+import { SUBAGENT_HANDOFF, INTERNAL_REPORT_TRANSPORT } from './contract'
 import type { SystemPromptAssembler } from '../prompt/assembler'
 import {
   defineTool,
@@ -328,9 +329,10 @@ export function installSubagents(
   manager: SubagentManager,
   tools: ToolRegistry,
   prompt: SystemPromptAssembler,
+  delegationTools?: ToolDefinition[],
 ): () => void {
   const disposers: Array<() => void> = []
-  for (const tool of createSubagentTools(manager))
+  for (const tool of delegationTools ?? createSubagentTools(manager))
     disposers.push(tools.register(tool))
   disposers.push(
     tools.register(createReportTool(manager), {
@@ -381,7 +383,7 @@ export function installSubagents(
     prompt.section({
       name: 'tool:subagent',
       order: 116.5,
-      text: "Use subagent in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set `run_in_background: false` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.",
+      text: "Give each child a clear scoped task, relevant constraints and paths, expected deliverables and checks when known. Do not assume a fresh child can see your conversation. All backends use the same identity and evidence-based handoff rules. Use subagent in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set `run_in_background: false` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.",
     }),
   )
   disposers.push(
@@ -391,11 +393,7 @@ export function installSubagents(
       text: ({ agent }) =>
         agent?.owner === undefined
           ? ''
-          : 'Deliver your result with the report tool before you finish: call it once with a self-contained ' +
-            'answer. The agent that started you shares your workspace but does not automatically receive your ' +
-            'transcript, tool output, or reasoning, so a closing remark such as "done" leaves it nothing it can ' +
-            'use. Report earlier as well whenever a partial finding changes what that agent should do next; ' +
-            'reporting never ends your turn.',
+          : SUBAGENT_HANDOFF + '\n\n' + INTERNAL_REPORT_TRANSPORT,
     }),
   )
   return () => {

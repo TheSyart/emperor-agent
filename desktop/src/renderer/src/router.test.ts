@@ -185,3 +185,13 @@ describe('renderer routes', () => {
     expect(sessionLocation('')).toEqual({ name: 'chat' })
   })
 })
+it('keeps the external child route rooted without rewriting its identity', async () => {
+  const route = await resolve('/chat/78abd5498fc6469f/agents/dlg-retained')
+  expect(route.name).toBe('external-agent')
+  expect(route.params).toEqual({
+    sessionId: '78abd5498fc6469f',
+    delegationId: 'dlg-retained',
+  })
+  const { isConversationRoute } = await import('./router')
+  expect(isConversationRoute(route.name)).toBe(true)
+})

@@ -9,7 +9,9 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({ include: ['typescript', 'node-pty'] })],
     build: {
       outDir: 'out/main',
-      rollupOptions: { external: ['turndown'] },
+      rollupOptions: {
+        external: ['turndown', '@anthropic-ai/claude-agent-sdk'],
+      },
     },
   },
   preload: {

@@ -111,3 +111,7 @@ Core package 只开放三个受控导入面：`@emperor/core/api`、`@emperor/co
 - 磁盘格式变化有兼容与恢复策略。
 - 相关测试与 `make check` 通过。
 - 用户可感知变化已进入 [`docs/release/CHANGELOG.md`](../release/CHANGELOG.md) 的 `Unreleased`。
+
+## 外部执行器
+
+扩展 Claude Code/Codex 适配器、构建 macOS 进程边界 helper 或验证打包后原生会话时，阅读[适配器开发与真实验收](external-agent-adapters.md)。

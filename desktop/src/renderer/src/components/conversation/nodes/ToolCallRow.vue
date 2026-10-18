@@ -11,23 +11,29 @@
  * inspect(callId).
  */
 import { computed } from 'vue'
+import type { AgentView } from '@emperor/core/api'
 import type { ToolChatData } from '../../../conversation/types'
 import { DsInspect } from '../../icons/ds'
 import DisclosureRow from '../../ui/DisclosureRow.vue'
 import StateDot from '../../ui/StateDot.vue'
+import SubagentAvatar from '../../ui/SubagentAvatar.vue'
+import ProviderLogo from '../../ui/ProviderLogo.vue'
 import { useChatContext, useExpansion } from '../chatContext'
 import { TOOL_BODIES } from '../tools/bodies'
 import { toolView } from '../tools/registry'
-import { errorSummary, toolRowState } from '../tools/toolModel'
+import { argsOf, errorSummary, toolRowState } from '../tools/toolModel'
 
-const props = defineProps<{ data: ToolChatData }>()
+const props = defineProps<{ data: ToolChatData; agent?: AgentView }>()
 const { actions } = useChatContext()
 
 /** Bodies that only render result material (nothing to show while running). */
 const RESULT_ONLY = new Set(['read', 'glob', 'grep', 'web', 'job', 'skill'])
 
-const view = computed(() => toolView(props.data.name, props.data))
+const view = computed(() => toolView(props.data.name, props.data, props.agent))
 const state = computed(() => toolRowState(props.data))
+const backend = computed(
+  () => props.data.externalAgent?.backend ?? argsOf(props.data).backend,
+)
 const title = computed(() => view.value.title(props.data))
 const failure = computed(() => errorSummary(props.data))
 const summary = computed(() => failure.value ?? view.value.summary(props.data))
@@ -75,8 +81,23 @@ const stateLabel = computed(() => {
       :tone="failure !== null ? 'error' : 'default'"
     >
       <template #icon>
-        <StateDot v-if="state === 'error'" state="error" />
+        <SubagentAvatar
+          v-if="!data.externalAgent && (data.subagent?.subagentId || agent?.id)"
+          :session-id="data.subagent?.subagentId || agent!.id"
+          :size="20"
+        />
+        <StateDot v-else-if="state === 'error'" state="error" />
         <StateDot v-else-if="state === 'stopped'" state="warn" />
+        <ProviderLogo
+          v-else-if="
+            (data.name === 'subagent' || data.name === 'subagent_fork') &&
+            (backend === 'codex' || backend === 'claude-code')
+          "
+          :icon-id="backend"
+          :label="backend === 'codex' ? 'Codex' : 'Claude Code'"
+          size="xs"
+          :data-agent-logo="backend"
+        />
         <component :is="view.icon" v-else :size="14" />
       </template>
       <template v-if="summary" #summary>

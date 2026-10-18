@@ -101,3 +101,12 @@ export type {
 
 export type { ReferencePreview } from '../workspace/reference-preview'
 export type { ReferenceSiteIcon } from '../workspace/reference-site-icon'
+export type { CoreExecutorService } from '../api/services/executor-service'
+export type { CoreDelegationService } from '../api/services/delegation-service'
+
+export {
+  agentTitle,
+  agentSourceLabel,
+  agentPhaseLabel,
+} from '../runtime/agent-view'
+export type { AgentView, AgentBackend, AgentPhase } from '../runtime/agent-view'

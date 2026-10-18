@@ -27,6 +27,7 @@ export interface ChatContext {
   readonly expansion: ExpansionStore
   /** The session the timeline shows ('' in galleries without one). */
   readonly sessionId: () => string
+  readonly rootSessionId?: () => string
 }
 
 const CHAT_CONTEXT: InjectionKey<ChatContext> = Symbol('chat-context')

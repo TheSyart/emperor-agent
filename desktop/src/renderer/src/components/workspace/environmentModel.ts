@@ -249,7 +249,7 @@ export function backgroundTaskDetail(task: BackgroundTaskInput): string {
     const rounds = Math.max(0, Math.floor(Number(task.rounds ?? 0)) || 0)
     if (task.workflow_tool === 'ralph')
       return rounds ? `第 ${rounds} 轮` : 'Ralph'
-    return rounds ? `${rounds} 个代理` : '工作流'
+    return rounds ? `${rounds} 个子智能体` : '工作流'
   }
   if (!isLiveTaskStatus(task.status) && typeof task.exit_code === 'number')
     return `退出码 ${task.exit_code}`
@@ -325,7 +325,7 @@ const TRANSCRIPT_ROLE_LABEL: Record<string, string> = {
   workflow: '工作流',
   phase: '阶段',
   log: '日志',
-  agent: '代理',
+  agent: '子智能体',
   result: '结果',
   error: '错误',
   user: '用户',

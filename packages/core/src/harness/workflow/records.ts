@@ -46,6 +46,8 @@ declare module '../../session-log/types' {
       label: string
       phase?: string
       childId: string
+      externalRunId?: string
+      backend?: 'internal' | 'claude-code' | 'codex'
     }
     /** Log-only: one member settled. */
     'tool-workflow/agent-end': {
@@ -77,6 +79,8 @@ export type WorkflowRecordStatus =
   'running' | 'completed' | 'cancelled' | 'error' | 'interrupted'
 
 export interface WorkflowAgentRecord {
+  externalRunId?: string
+  backend?: 'internal' | 'claude-code' | 'codex'
   seq: number
   label: string
   phase?: string
@@ -162,6 +166,12 @@ export class WorkflowRunFold {
             ? {}
             : { phase: event.data.phase }),
           childId: event.data.childId,
+          ...(event.data.externalRunId === undefined
+            ? {}
+            : { externalRunId: event.data.externalRunId }),
+          ...(event.data.backend === undefined
+            ? {}
+            : { backend: event.data.backend }),
         })
         record.agentsStarted = Math.max(record.agentsStarted, event.data.seq)
         return snapshot(record)
@@ -256,6 +266,10 @@ export class WorkflowRunRegistry {
         label: agent.label,
         ...(agent.phase === undefined ? {} : { phase: agent.phase }),
         childId: agent.childId,
+        ...(agent.externalRunId === undefined
+          ? {}
+          : { externalRunId: agent.externalRunId }),
+        ...(agent.backend === undefined ? {} : { backend: agent.backend }),
       })
     },
     agentEnd: (info, agent) => {

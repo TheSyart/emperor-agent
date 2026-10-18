@@ -12,6 +12,36 @@ afterEach(() => {
 })
 
 describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
+  it('invalidates an affected agent root even while another root is selected, without text invalidations', () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => undefined
+      },
+    })
+    const onAgentTreeChanged = vi.fn()
+    const runtime = useRuntime({ ...testOptions(), onAgentTreeChanged })
+    runtime.connectSocket()
+    runtime.switchSession('other')
+    const changed = {
+      event: 'agent_tree_changed',
+      rootSessionId: 'root',
+      revision: 3,
+      session_id: 'root',
+    }
+    emitCoreEvent(listener, changed)
+    emitCoreEvent(listener, {
+      event: 'subagent_delta',
+      session_id: 'root',
+      subagent_id: 'sub-a',
+      delta: 'text',
+    })
+    expect(onAgentTreeChanged).toHaveBeenCalledTimes(1)
+    expect(onAgentTreeChanged).toHaveBeenCalledWith(changed)
+  })
+
   it('refreshes memory and slash Skills after a live assistant completes', async () => {
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({

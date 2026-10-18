@@ -86,3 +86,8 @@
 ## 维护规则
 
 文档分类、事实源映射、归档规则和人工验收清单见 [文档维护规范](DOCUMENTATION.md)。源码开发约定见[开发指南](development/README.md)。
+
+## 外部 Agent 调度
+
+- [调度架构、生命周期与验收](architecture/external-agent-delegation.md)
+- [适配器开发与真实验收](development/external-agent-adapters.md)

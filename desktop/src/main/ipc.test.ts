@@ -56,6 +56,32 @@ describe('core IPC bridge (MIG-IPC-002)', () => {
     expect(create).not.toHaveBeenCalled()
   })
 
+  it('uses the generic authorized bridge for external agents and refuses native startup fields', async () => {
+    const ipc = new FakeIpcMain(),
+      get = vi.fn(() => ({ record: { id: 'dlg-one' } })),
+      send = vi.fn()
+    registerCoreIpc(ipc, asCoreApi({ delegations: { get, send } }), [
+      'delegations.get',
+      'delegations.send',
+    ])
+    await expect(
+      ipc.invoke('emperor:core:delegations:get', { id: 'dlg-one' }),
+    ).resolves.toEqual({ record: { id: 'dlg-one' } })
+    await expect(
+      ipc.invoke('emperor:core:delegations:send', {
+        id: 'dlg-one',
+        messageId: 'dgm-one',
+        text: 'next',
+        delivery: 'queue',
+        env: { KEY: 'secret' },
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'invalid_core_arguments' },
+    })
+    expect(send).not.toHaveBeenCalled()
+  })
+
   it('authorizes the IPC caller before invoking the CoreApi adapter', async () => {
     const ipc = new FakeIpcMain()
     const create = vi.fn(() => ({ id: 's1' }))

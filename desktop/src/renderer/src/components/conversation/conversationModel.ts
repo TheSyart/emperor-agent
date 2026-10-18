@@ -2,8 +2,10 @@
  * Pure helpers for the ConversationView shell: layout phase (hero vs
  * active), child-session detection and breadcrumb construction.
  */
+import { agentTitle } from '@emperor/core/runtime-contract'
 import type { SessionLineage } from '@emperor/core/runtime-contract'
 import type { ComposerPhase } from '../../conversation/composerPhase'
+import type { WindowOpenState } from '../../conversation/sessionWindow'
 import type { SessionInfo } from '../../types'
 
 export interface HeaderCrumb {
@@ -13,6 +15,8 @@ export interface HeaderCrumb {
   sessionId?: string
   current?: boolean
   subagent?: boolean
+  nativeSessionId?: string
+  source?: string
 }
 
 export type ConversationPhase = 'hero' | 'active'
@@ -27,8 +31,17 @@ export function conversationPhase(input: {
   composer: ComposerPhase
   child: boolean
   tab: 'chat' | 'trajectory'
+  externalActivity?: boolean
+  /** Initial history state for a persisted session, absent for new drafts. */
+  historyState?: WindowOpenState
 }): ConversationPhase {
-  if (input.child || input.tab !== 'chat') return 'active'
+  if (
+    input.child ||
+    input.tab !== 'chat' ||
+    input.externalActivity ||
+    (input.historyState !== undefined && input.historyState !== 'open')
+  )
+    return 'active'
   return input.composer === 'active' ? 'active' : 'hero'
 }
 
@@ -55,13 +68,16 @@ export function conversationCrumbs(input: {
       const label =
         index === 0
           ? input.titleOf(entry.sessionId) || '父会话'
-          : entry.description || input.titleOf(entry.sessionId) || '子代理'
+          : agentTitle(entry.description, 'internal')
       return {
         id: entry.sessionId,
         label,
         sessionId: entry.sessionId,
         current,
         subagent: index > 0 && !current,
+        ...(index > 0
+          ? { source: 'Emperor', nativeSessionId: entry.sessionId }
+          : {}),
       }
     })
   }

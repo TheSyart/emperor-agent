@@ -16,10 +16,12 @@ export interface LinkStatus {
 
 /** The parts of a Core reference descriptor a status is made from. */
 export interface ResolvedLink {
+  id?: string
   kind: 'project_file' | 'external_file' | 'web'
   available: boolean
   directory?: boolean
   tooltip: string
+  relativePath?: string
 }
 
 export interface LinkStatusSource {
@@ -27,12 +29,15 @@ export interface LinkStatusSource {
   readonly version: Readonly<Ref<number>>
   /** The status of a file link; null when Core cannot tell. */
   status(href: string, sourceMessageId?: string): Promise<LinkStatus | null>
+  /** A data URL for an image file link the session owns; null otherwise. */
+  image?(href: string, sourceMessageId?: string): Promise<string | null>
 }
 
 export const LINK_STATUS_KEY: InjectionKey<LinkStatusSource> =
   Symbol('link-status')
 
 const MAX_IN_FLIGHT = 4
+const MAX_IMAGES = 24
 
 export function linkStatusOf(reference: ResolvedLink): LinkStatus | null {
   if (reference.kind === 'web') return null
@@ -46,12 +51,17 @@ export function linkStatusOf(reference: ResolvedLink): LinkStatus | null {
 
 export function createLinkStatusSource(
   resolve: (href: string, sourceMessageId?: string) => Promise<ResolvedLink>,
+  readImage?: (reference: ResolvedLink) => Promise<string | null>,
 ): LinkStatusSource & {
+  image(href: string, sourceMessageId?: string): Promise<string | null>
   refresh(): void
   record(href: string, reference: ResolvedLink, sourceMessageId?: string): void
 } {
   const version = ref(0)
-  let known = new Map<string, Promise<LinkStatus | null>>()
+  // Keyed by message and href: the same path in two messages is two
+  // references, each bound to its own source.
+  let known = new Map<string, Promise<ResolvedLink>>()
+  let images = new Map<string, Promise<string | null>>()
   let inFlight = 0
   const waiting: Array<() => void> = []
 
@@ -67,29 +77,56 @@ export function createLinkStatusSource(
     }
   }
 
+  const keyOf = (href: string, sourceMessageId?: string) =>
+    `${sourceMessageId ?? ''}\0${href}`
+  function reference(href: string, sourceMessageId?: string) {
+    const key = keyOf(href, sourceMessageId)
+    let pending = known.get(key)
+    if (!pending) {
+      pending = limited(() => resolve(href, sourceMessageId))
+      known.set(key, pending)
+    }
+    return pending
+  }
+
   return {
     version,
     status(href, sourceMessageId) {
-      const key = `${sourceMessageId ?? ''}\0${href}`
-      let status = known.get(key)
-      if (!status) {
-        status = limited(() => resolve(href, sourceMessageId)).then(
-          linkStatusOf,
-          () => null,
-        )
-        known.set(key, status)
+      return reference(href, sourceMessageId).then(linkStatusOf, () => null)
+    },
+    image(href, sourceMessageId) {
+      const key = keyOf(href, sourceMessageId)
+      let pending = images.get(key)
+      if (!pending) {
+        const generation = version.value
+        pending = reference(href, sourceMessageId)
+          .then(async (value) => {
+            if (
+              generation !== version.value ||
+              !readImage ||
+              !value.available ||
+              value.directory ||
+              value.kind === 'web'
+            )
+              return null
+            const src = await limited(() => readImage(value))
+            return generation === version.value ? src : null
+          })
+          .catch(() => null)
+        images.set(key, pending)
+        while (images.size > MAX_IMAGES)
+          images.delete(images.keys().next().value!)
       }
-      return status
+      return pending
     },
     refresh() {
       known = new Map()
+      images = new Map()
       version.value += 1
     },
     record(href, reference, sourceMessageId) {
-      known.set(
-        `${sourceMessageId ?? ''}\0${href}`,
-        Promise.resolve(linkStatusOf(reference)),
-      )
+      known.set(keyOf(href, sourceMessageId), Promise.resolve(reference))
+      images = new Map()
       version.value += 1
     },
   }

@@ -22,6 +22,8 @@ export interface ReferenceDescriptor {
 }
 
 export interface ResolveReferenceInput {
+  /** Resolve inside a child agent's workspace instead of the project. */
+  delegationId?: string
   sessionId: string
   sourceMessageId: string
   href: string

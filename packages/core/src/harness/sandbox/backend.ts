@@ -70,7 +70,12 @@ export function bwrapProfileArgs(policy: SandboxPolicy): string[] {
     '/proc',
     '--die-with-parent',
   ]
-  if (policy.mode === 'workspace-write') {
+  if (policy.privateTempRoot !== undefined) {
+    args.push('--tmpfs', '/tmp')
+    for (const root of writableRoots(policy)) args.push('--bind', root, root)
+    for (const root of policy.readOnlyRoots ?? [])
+      args.push('--ro-bind', root, root)
+  } else if (policy.mode === 'workspace-write') {
     args.push('--tmpfs', '/tmp')
     args.push('--bind', policy.workspaceRoot, policy.workspaceRoot)
   }
@@ -103,12 +108,25 @@ export function seatbeltProfileArgs(
     '(deny file-write*)',
     `(allow file-write* (literal ${sbplString('/dev/null')}))`,
   ]
+  if (policy.processBoundaryTag) {
+    const root = '/private/tmp/emperor-boundary-' + policy.processBoundaryTag
+    forms.push(
+      `(deny file-read-data (literal ${sbplString(root + '-denied')}))`,
+    )
+    forms.push(
+      `(allow file-read-data (literal ${sbplString(root + '-allowed')}))`,
+    )
+  }
   const roots = writableRoots(policy)
   if (roots.length > 0) {
     forms.push(
       `(allow file-write* ${roots.map((root) => `(subpath ${sbplString(root)})`).join(' ')})`,
     )
   }
+  for (const root of policy.readOnlyRoots ?? [])
+    forms.push(
+      `(deny file-write* (subpath ${sbplString(canonicalPath(root))}))`,
+    )
   // E-M13: these operations were checked against a real sandbox-exec child.
   // They apply only to confined Shell modes, never danger-full-access.
   forms.push(

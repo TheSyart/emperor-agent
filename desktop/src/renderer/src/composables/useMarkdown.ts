@@ -98,6 +98,17 @@ const defaultValidateLink = md.validateLink.bind(md)
 md.validateLink = (url: string) =>
   defaultValidateLink(url) || url.startsWith('file://')
 
+const renderImage = md.renderer.rules.image!
+md.renderer.rules.image = (tokens, index, options, env, self) => {
+  const token = tokens[index]!,
+    src = token.attrGet('src') ?? ''
+  if (classifyMdLink(src) === 'file') {
+    token.attrSet('data-md-image', src)
+    token.attrs = token.attrs?.filter(([name]) => name !== 'src') ?? null
+  }
+  return renderImage(tokens, index, options, env, self)
+}
+
 /**
  * 把内联链接升级成 chip 卡：附加 class / data-md-link / data-md-ext / target / rel，
  * 以及类型图标 data-md-icon（语言另有 data-md-badge 徽标文字与 data-md-tone 色调）。

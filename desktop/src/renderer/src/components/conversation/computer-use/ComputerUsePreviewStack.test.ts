@@ -212,6 +212,7 @@ afterEach(() => {
   document.body.innerHTML = ''
   for (const mock of Object.values(bridge)) mock.mockReset()
   delete (window as unknown as { emperor?: unknown }).emperor
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
@@ -533,13 +534,22 @@ describe('ComputerUsePreviewStack', () => {
 
   it('folds into a counted chip in a narrow column and streams only when expanded', async () => {
     columnWidth = 900
+    const rectangles = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.classList.contains('conversation-root'))
+          return { top: 0, bottom: 900 } as DOMRect
+        if (this.classList.contains('cu-preview'))
+          return { top: 704, bottom: 738 } as DOMRect
+        return { top: 0, bottom: 0 } as DOMRect // hidden full stack must not supply reserve
+      })
     setTargets([target(), target({ targetId: 't-2', title: '访达' })])
     const root = await mount()
     const chip = root.querySelector<HTMLButtonElement>('.cu-preview-chip')!
     expect(chip.textContent).toContain('2')
     expect(chip.getAttribute('aria-expanded')).toBe('false')
     expect(bridge.agentPreviewStart).not.toHaveBeenCalled()
-    expect(previewLayout.reservedHeight).toBe(0)
+    expect(previewLayout.reservedHeight).toBe(208)
     chip.click()
     await flush()
     expect(chip.getAttribute('aria-expanded')).toBe('true')
@@ -557,6 +567,7 @@ describe('ComputerUsePreviewStack', () => {
     await flush()
     expect(chip.getAttribute('aria-expanded')).toBe('false')
     expect(bridge.agentPreviewStop).toHaveBeenCalledTimes(2)
+    rectangles.mockRestore()
   })
 
   it('brings a target forward and enlarges it on a tool row request', async () => {

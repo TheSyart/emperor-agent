@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  nativeImage,
   protocol,
   net,
   session,
@@ -23,6 +24,11 @@ import {
 
 import { offerMoveToApplications } from './app-location'
 import { resolveConfig } from './config'
+import {
+  acquireStateDirectoryLock,
+  type StateDirectoryLock,
+} from './state-directory-lock'
+import { createQuitCoordinator } from './quit-coordinator'
 import { resolveAppIconPath } from './icon'
 import { preparePackagedRuntime, runtimeDefaultsRoot } from './runtime-root'
 import { readBounds, pickBounds } from './window-bounds'
@@ -145,6 +151,13 @@ const appIconPath = resolveAppIconPath({
 })
 
 let coreApi: CoreApi | null = null
+let stateDirectoryLock: StateDirectoryLock | null = null
+let startupTask: Promise<void> = Promise.resolve()
+let runtimeStarting = false
+let shutdownRequested = false
+let closeCoreTask: Promise<void> | null = null
+// Keep ownership through every quit/exit hook; only actual OS process exit
+// releases the connection, including a hard crash.
 const coreEventBridge = new CoreEventBridge()
 const sessionEventBridge = new SessionEventBridge()
 const terminalEventBridge = new TerminalEventBridge()
@@ -572,26 +585,28 @@ function closeAgentBrowser(final: boolean): void {
     void (final ? driver.shutdown() : driver.closeAll()).catch(() => undefined)
 }
 
-function closeCoreHost(): void {
+function closeCoreHost(): Promise<void> {
+  closeCoreTask ??= closeCoreResources()
+  return closeCoreTask
+}
+
+async function closeCoreResources(): Promise<void> {
   pointerOverlay?.dispose()
   pointerOverlay = null
   browserViewHost?.close()
   browserViewHost = null
   closeAgentBrowser(true)
-  void nativeDesktop?.shutdown().catch(() => undefined)
+  const nativeShutdown = nativeDesktop?.shutdown().catch(() => undefined)
   externalBrowser?.dispose()
   externalBrowser = null
   browserExtension?.dispose()
   browserExtension = null
-  void nmBridge?.stop().catch(() => undefined)
+  const bridgeShutdown = nmBridge?.stop().catch(() => undefined)
   nmBridge = null
   sessionEventBridge.dispose()
-  if (!coreApi) return
   const current = coreApi
   coreApi = null
-  void current.close().catch((err) => {
-    console.error(`failed to close CoreApi: ${errMessage(err)}`)
-  })
+  await Promise.all([nativeShutdown, bridgeShutdown, current?.close()])
 }
 
 function fail(title: string, message: string): void {
@@ -633,9 +648,10 @@ async function showBootstrapRecovery(error: unknown): Promise<void> {
     legacyHome: payload.legacyHome,
     retry: async () => {
       ipcMain.removeHandler(RECOVERY_ACTION_CHANNEL)
+      const restarting = startRuntime()
       if (!win.isDestroyed()) win.close()
       recoveryWindow = null
-      await startup()
+      await restarting
     },
     openPath: (target) => shell.openPath(target),
     exit: () => app.quit(),
@@ -923,6 +939,7 @@ function createPetWindow(): void {
 }
 
 async function startup(): Promise<void> {
+  if (shutdownRequested) return
   app.setName('Emperor Agent')
   if (process.platform === 'darwin') app.dock?.setIcon(appIconPath)
   if (process.platform === 'win32')
@@ -955,6 +972,11 @@ async function startup(): Promise<void> {
   try {
     if (packagedSmoke && !app.isPackaged)
       throw new Error('packaged smoke mode requires a packaged application')
+    // Acquire before migrations, credentials, Core recovery or any state writer.
+    stateDirectoryLock ??= acquireStateDirectoryLock(
+      config.stateRoot,
+      config.stateRootSource === 'default' ? legacyDefaultStateRoot() : null,
+    )
     prepareMainRuntime()
     createComputerUseHost()
     userDownloads = createUserDownloads()
@@ -973,6 +995,16 @@ async function startup(): Promise<void> {
       sessionEventBridge,
       authorizeIpc: (event) => trustedRendererPolicy.authorizeIpc(event),
       coreOptions: {
+        verifyGeneratedImage: (bytes) => {
+          const image = nativeImage.createFromBuffer(Buffer.from(bytes))
+          const size = image.getSize()
+          return (
+            !image.isEmpty() &&
+            size.width > 0 &&
+            size.height > 0 &&
+            size.width * size.height <= 16 * 1024 * 1024
+          )
+        },
         appVersion: app.getVersion(),
         ...(packagedRuntimeRevision
           ? { runtimeRevision: packagedRuntimeRevision }
@@ -1249,7 +1281,15 @@ async function startup(): Promise<void> {
   createWindow()
 }
 
-app.whenReady().then(startup)
+function startRuntime(): Promise<void> {
+  runtimeStarting = true
+  startupTask = startup().finally(() => {
+    runtimeStarting = false
+  })
+  return startupTask
+}
+
+app.whenReady().then(startRuntime)
 
 app.on('activate', () => {
   if (recoveryWindow && !recoveryWindow.isDestroyed()) {
@@ -1260,15 +1300,28 @@ app.on('activate', () => {
 })
 
 app.on('window-all-closed', () => {
-  if (packagedSmoke) return
-  closeCoreHost()
+  if (packagedSmoke || runtimeStarting) return
   app.quit()
 })
 
-app.on('before-quit', () => {
-  ipcMain.removeHandler(RECOVERY_ACTION_CHANNEL)
-  closeCoreHost()
+const coordinateQuit = createQuitCoordinator({
+  close: async () => {
+    await startupTask
+    await closeCoreHost()
+  },
+  onError: (error) =>
+    console.error(`failed to close CoreApi: ${errMessage(error)}`),
+  quit: () => app.quit(),
 })
+
+app.on('before-quit', (event) => {
+  shutdownRequested = true
+  ipcMain.removeHandler(RECOVERY_ACTION_CHANNEL)
+  coordinateQuit(event)
+})
+
+process.once('SIGTERM', () => app.quit())
+process.once('SIGINT', () => app.quit())
 
 app.on('will-quit', () => {
   dictation?.dispose()

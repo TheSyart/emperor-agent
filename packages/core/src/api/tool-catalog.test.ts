@@ -50,6 +50,8 @@ const EXPECTED: Record<ToolCategory, string[]> = {
     'update_goal',
   ],
   agents: [
+    'collect_agent',
+    'inspect_agent',
     'interrupt_agent',
     'list_agents',
     'ralph',

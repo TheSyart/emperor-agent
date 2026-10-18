@@ -46,6 +46,33 @@
           "scoped": true
         }
       ]
+    },
+    "executors": {
+      "view": "components/settings/ExecutorsSection.vue",
+      "controller": "api/delegations.ts",
+      "layers": [
+        {
+          "role": "component-scoped",
+          "path": "components/settings/ExecutorsSection.vue",
+          "scoped": true
+        }
+      ]
+    },
+    "external-agent": {
+      "view": "components/conversation/environment/ExternalAgentDetails.vue",
+      "controller": "api/delegations.ts",
+      "layers": [
+        {
+          "role": "component-scoped",
+          "path": "components/conversation/environment/ExternalAgentDetails.vue",
+          "scoped": true
+        },
+        {
+          "role": "component-scoped",
+          "path": "components/conversation/environment/EnvironmentCard.vue",
+          "scoped": true
+        }
+      ]
     }
   }
 }

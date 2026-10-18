@@ -45,7 +45,7 @@ describe('WorkspaceReferenceService', () => {
       available: true,
       relativePath: 'docs/设计.md',
       line: 42,
-      actions: ['open_files', 'preview'],
+      actions: ['open_files', 'preview', 'reveal'],
     })
     expect(result.id).toMatch(/^ref_[a-f0-9]{24}$/)
   })
@@ -97,7 +97,7 @@ describe('WorkspaceReferenceService', () => {
               ? 'docs/设计 #L2 文档.md'
               : 'docs/设计 文档.md',
         line: 17,
-        actions: ['open_files', 'preview'],
+        actions: ['open_files', 'preview', 'reveal'],
       })
     },
   )
@@ -210,7 +210,7 @@ describe('WorkspaceReferenceService', () => {
       sessionId: 'session-1',
       referenceId: result.id,
     })
-    expect(preview).toMatchObject({ kind: 'text', revealable: false })
+    expect(preview).toMatchObject({ kind: 'text', revealable: true })
     expect(preview.content).toContain('# 设计')
   })
 
@@ -302,7 +302,7 @@ describe('WorkspaceReferenceService', () => {
         available: true,
         directory: true,
         relativePath: 'docs',
-        actions: ['open_files', 'preview'],
+        actions: ['open_files', 'preview', 'reveal'],
       })
     expect(
       service.resolve({
@@ -346,7 +346,7 @@ describe('WorkspaceReferenceService', () => {
     const found = service.resolve(input)
     expect(found).toMatchObject({
       available: true,
-      actions: ['open_files', 'preview'],
+      actions: ['open_files', 'preview', 'reveal'],
     })
     expect(found.id).toBe(missing.id)
     expect(service.authorize(found.id, 'session-1').available).toBe(true)

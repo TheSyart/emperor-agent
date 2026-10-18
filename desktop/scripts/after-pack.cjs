@@ -33,6 +33,19 @@ const TYPESCRIPT_ASAR_ENTRIES = new Set([
 ])
 
 function isAllowedNodeModuleEntry(entry) {
+  // The Claude Agent SDK and its per-platform binary ship unpacked for the
+  // external executor; nothing else from @anthropic-ai is allowed in.
+  const sdkNested = '/node_modules/@anthropic-ai/claude-agent-sdk/node_modules'
+  if (entry === sdkNested) return true
+  if (entry.startsWith(sdkNested + '/'))
+    entry = '/node_modules' + entry.slice(sdkNested.length)
+  if (entry === '/node_modules/@anthropic-ai') return true
+  if (
+    /^\/node_modules\/@anthropic-ai\/claude-agent-sdk(?:-(?:darwin|linux|win32)-(?:arm64|x64)(?:-musl)?)?(?:\/(?:package\.json|sdk\.mjs|manifest(?:\.zst)?\.json|claude(?:\.exe)?))?$/.test(
+      entry,
+    )
+  )
+    return true
   const nodePtyRoot = '/node_modules/node-pty'
   const nodePtyLib = `${nodePtyRoot}/lib`
   const nodePtyPrebuilds = `${nodePtyRoot}/prebuilds`

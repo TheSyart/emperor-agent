@@ -77,6 +77,13 @@ declare module '../../session-log/types' {
       callId?: string
       questions: UserQuestionItem[]
       intent?: UserQuestionIntent
+      external?: {
+        delegationId: string
+        runId: string
+        generation: number
+        requestId: string
+        backend: string
+      }
     }
     'question/answered':
       | { id: string; answers: UserAnswers }

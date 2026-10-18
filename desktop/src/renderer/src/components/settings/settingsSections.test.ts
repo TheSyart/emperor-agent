@@ -25,6 +25,7 @@ describe('settings sections', () => {
     expect(keys).toEqual([
       'general',
       'model',
+      'executors',
       'hooks',
       'computer',
       'browser',
@@ -46,6 +47,13 @@ describe('settings sections', () => {
       'skills',
       'tools',
     ])
+  })
+
+  it('keeps the executors deep link under the unified label', () => {
+    expect(
+      SETTINGS_SECTIONS.find((section) => section.key === 'executors')?.label,
+    ).toBe('子智能体')
+    expect(modalSettingsSection('executors')).toBe('executors')
   })
 
   it('opens the retired 配置 section as 记忆', () => {

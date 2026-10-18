@@ -17,6 +17,7 @@ import type { SettingsModalSection } from './settingsSections'
 export const SETTINGS_SECTION_ICONS: Record<SettingsModalSection, Component> = {
   general: Settings,
   model: Cpu,
+  executors: Cpu,
   hooks: Webhook,
   computer: MousePointerClick,
   browser: Globe,

@@ -49,7 +49,7 @@ export interface FrameState {
   workspacePane: WorkspacePane
   /**
    * Chat-tab environment card: `auto` shows it beside a wide conversation
-   * (≥ 1120px) and hides it over a narrow one, `open` shows it either way
+   * (≥ 1120px) and hides it on a narrow one, `open` shows it either way
    * (opened on demand), `closed` hides it (closed by hand, remembered).
    */
   envCard: EnvCardPreference
@@ -339,8 +339,8 @@ export const frameActions = {
   },
   /**
    * Open or close the card by hand. Closing beside a wide chat is
-   * remembered; closing an overlay (narrow) returns to `auto`; opening
-   * over a narrow chat is on demand (`open`), beside a wide one `auto`.
+   * remembered; closing a narrow card returns to `auto`; opening
+   * beside a narrow chat is on demand (`open`), beside a wide one `auto`.
    */
   setEnvCard(state: FrameState, open: boolean): void {
     if (open) state.envCard = state.envCardWide ? 'auto' : 'open'

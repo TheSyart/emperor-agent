@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { GenerateOptions } from '../llm/types'
 import { replyChunks, type ScriptedReply } from '../harness/testing'
 import type { CoreApi } from './core-api'
+import { workspaceMutationDomain } from '../workspace/mutation-coordinator'
 import { CoreMutationGuardError } from './mutation-guard'
 import { coreOperationKeys } from './operations'
 import {
@@ -21,6 +22,7 @@ import {
 } from './test-helpers'
 
 const EXPECTED_OPERATIONS = [
+  'agents.list',
   'attachments.rawPath',
   'attachments.save',
   'bootstrap',
@@ -55,6 +57,16 @@ const EXPECTED_OPERATIONS = [
   'control.get',
   'control.setMode',
   'control.setPermissionMode',
+  'delegations.close',
+  'delegations.collect',
+  'delegations.get',
+  'delegations.history',
+  'delegations.integrate',
+  'delegations.interrupt',
+  'delegations.receipt',
+  'delegations.recover',
+  'delegations.send',
+  'delegations.validate',
   'desktopPet.get',
   'desktopPet.setEnabled',
   'diagnostics.get',
@@ -63,6 +75,10 @@ const EXPECTED_OPERATIONS = [
   'environment.getInstallLog',
   'environment.getStatus',
   'environment.install',
+  'executors.configure',
+  'executors.list',
+  'executors.models',
+  'executors.probe',
   'files.list',
   'files.preview',
   'files.read',
@@ -157,6 +173,7 @@ const EXPECTED_OPERATIONS = [
   'pullRequests.list',
   'pullRequests.status',
   'pullRequests.view',
+  'references.image',
   'references.preview',
   'references.resolve',
   'references.siteIcon',
@@ -849,6 +866,61 @@ describe('CoreApi mutation guard', () => {
 })
 
 describe('CoreApi tasks and tools', () => {
+  it('composes external tools with the shared Core workspace coordinator and stops them with the root', async () => {
+    const { api } = await setup()
+    const id = session(api)
+    api.host.agentFor(id)
+    expect(api.host.delegations).toBe(api.delegationRuntime)
+    expect(
+      api.executorConfig
+        .read()
+        .profiles.every(
+          (profile) =>
+            profile.enabled && profile.authRef.kind === 'managed-cli-login',
+        ),
+    ).toBe(true)
+    const schema = api.host.tools
+      .schemas()
+      .find((tool) => tool.name === 'subagent')!
+    expect(JSON.stringify(schema.parameters)).toContain('claude-code')
+    const stop = vi.spyOn(api.delegationRuntime, 'stopRoot').mockResolvedValue()
+    api.host.stop(id)
+    expect(stop).toHaveBeenCalledWith(id)
+  })
+  it('holds real internal tool dispatch behind an external workspace lease', async () => {
+    const { api } = await setup()
+    const id = session(api)
+    const agent = api.host.agentFor(id)
+    const root = api.host.sessionWorkspaceRoot(id)
+    let invoked = false
+    api.host.tools.register({
+      name: 'mcp_fixture_writer',
+      description: 'lease fixture',
+      parameters: {},
+      parse: (r) => r,
+      execute: async () => {
+        invoked = true
+        return 'wrote'
+      },
+    })
+    const lease = await api.workspaceMutations.resources.acquire({
+      keys: [workspaceMutationDomain(root)],
+      mode: 'exclusive',
+      owner: 'external',
+    })
+    const run = api.host.tools.execute({
+      name: 'mcp_fixture_writer',
+      arguments: {},
+      agent,
+      callId: 'lease-check',
+      signal: new AbortController().signal,
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(invoked).toBe(false)
+    lease.release()
+    expect((await run).isError).toBe(false)
+    expect(invoked).toBe(true)
+  })
   it('lists a background bash job and serves its transcript', async () => {
     const { api } = await setup({
       replies: [

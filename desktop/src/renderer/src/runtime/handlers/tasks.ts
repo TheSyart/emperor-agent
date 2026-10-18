@@ -16,6 +16,10 @@ type TaskEvent = Extract<
       | 'workflow_started'
       | 'workflow_progress'
       | 'workflow_finished'
+      | 'delegation_created'
+      | 'delegation_run_changed'
+      | 'delegation_receipt'
+      | 'delegation_interaction'
   }
 >
 

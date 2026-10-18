@@ -29,6 +29,7 @@ export type {
 } from './reference-types'
 
 interface StoredReference {
+  delegationId?: string
   sessionId: string
   sourceMessageId: string
   descriptor: ReferenceDescriptor
@@ -44,6 +45,9 @@ export interface AttachmentReferenceTarget {
 export interface WorkspaceReferenceServiceOptions {
   resolveProject: ResolveWorkspaceProject
   resolveFileRoot?: (sessionId: string) => string
+  delegatedRoot?: (sessionId: string, delegationId: string) => string
+  delegatedImageRoots?: (sessionId: string, delegationId: string) => string[]
+  preferReveal?: (sessionId: string) => boolean
   maxEntries?: number
   authorizeSession?: (sessionId: string) => void
   webFetchClient?: WebFetchClient | null
@@ -52,16 +56,22 @@ export interface WorkspaceReferenceServiceOptions {
 }
 
 export class WorkspaceReferenceService {
+  private readonly delegatedRoot?: WorkspaceReferenceServiceOptions['delegatedRoot']
+  private readonly delegatedImageRoots?: WorkspaceReferenceServiceOptions['delegatedImageRoots']
   private readonly resolveProject: ResolveWorkspaceProject
   private readonly maxEntries: number
+  private readonly preferReveal: (sessionId: string) => boolean
   private readonly previews: ReferencePreviewService
   private readonly siteIcons: ReferenceSiteIconService
   private readonly references = new Map<string, StoredReference>()
   private readonly cache = new Map<string, string>()
 
   constructor(private readonly options: WorkspaceReferenceServiceOptions) {
+    this.delegatedRoot = options.delegatedRoot
+    this.delegatedImageRoots = options.delegatedImageRoots
     this.resolveProject = options.resolveProject
     this.maxEntries = options.maxEntries ?? 2_000
+    this.preferReveal = options.preferReveal ?? (() => false)
     this.previews = new ReferencePreviewService({
       authorize: (input) => {
         return this.authorize(input.referenceId, input.sessionId)
@@ -100,6 +110,8 @@ export class WorkspaceReferenceService {
         '引用目标无效。',
       )
 
+    if (input.delegationId)
+      this.delegatedRoot?.(input.sessionId, input.delegationId)
     if (/^attachment:/i.test(href)) return this.resolveAttachment(input, href)
     if (/^https?:\/\//i.test(href)) return this.resolveWeb(input, href)
     if (
@@ -112,7 +124,15 @@ export class WorkspaceReferenceService {
         '不支持该引用协议。',
       )
 
-    return this.resolveFile(input, href)
+    const descriptor = this.resolveFile(input, href)
+    const stored = this.references.get(descriptor.id)
+    if (stored) stored.delegationId = input.delegationId
+    return descriptor
+  }
+
+  delegationScope(referenceId: string, sessionId: string): string | undefined {
+    this.authorize(referenceId, sessionId)
+    return this.references.get(referenceId)?.delegationId
   }
 
   authorize(referenceId: string, sessionId: string): ReferenceDescriptor {
@@ -138,6 +158,17 @@ export class WorkspaceReferenceService {
       throw new WorkspaceOperationError(
         'reference_action_denied',
         '该引用不允许在文件管理器中定位。',
+      )
+    return stored.canonicalPath
+  }
+  /** Main-only image capability; callers still enforce an owned workspace. */
+  previewPath(referenceId: string, sessionId: string): string {
+    const descriptor = this.authorize(referenceId, sessionId)
+    const stored = this.references.get(referenceId)!
+    if (!descriptor.available || descriptor.directory || !stored.canonicalPath)
+      throw new WorkspaceOperationError(
+        'reference_image_unavailable',
+        '图片文件不可用。',
       )
     return stored.canonicalPath
   }
@@ -288,9 +319,12 @@ export class WorkspaceReferenceService {
     const { target, line } = fileTarget(rawHref)
     this.options.authorizeSession?.(input.sessionId)
     const projectRoot = realpathSync(
-      this.options.resolveFileRoot
-        ? this.options.resolveFileRoot(input.sessionId)
-        : resolveOwnedProject(this.resolveProject, input.sessionId).projectRoot,
+      input.delegationId && this.delegatedRoot
+        ? this.delegatedRoot(input.sessionId, input.delegationId)
+        : this.options.resolveFileRoot
+          ? this.options.resolveFileRoot(input.sessionId)
+          : resolveOwnedProject(this.resolveProject, input.sessionId)
+              .projectRoot,
     )
     if (!isAbsolute(target) && escapesProject(target))
       throw new WorkspaceOperationError(
@@ -307,8 +341,21 @@ export class WorkspaceReferenceService {
     const lexicalWithin = within(projectRoot, lexicalTarget)
     const exists = existsSync(lexicalTarget)
     const canonicalTarget = exists ? realpathSync(lexicalTarget) : lexicalTarget
+    const nativeImageWithin =
+      !!input.delegationId &&
+      isAbsolute(target) &&
+      /\.(png|jpe?g|gif|webp)$/i.test(canonicalTarget) &&
+      (
+        this.delegatedImageRoots?.(input.sessionId, input.delegationId) ?? []
+      ).some((root) => within(root, canonicalTarget))
     const canonicalWithin =
-      lexicalWithin && within(projectRoot, canonicalTarget)
+      (lexicalWithin && within(projectRoot, canonicalTarget)) ||
+      nativeImageWithin
+    if (input.delegationId && !canonicalWithin)
+      throw new WorkspaceOperationError(
+        'reference_outside_project',
+        '子智能体引用不能指向工作区外。',
+      )
     const stats = exists ? statSync(canonicalTarget) : undefined
     const directory = stats?.isDirectory() === true
     const available = stats?.isFile() === true || directory
@@ -318,7 +365,11 @@ export class WorkspaceReferenceService {
     }
     const fallback = basename(target) || target
 
-    if (canonicalWithin) {
+    if (
+      canonicalWithin &&
+      !input.delegationId &&
+      !this.preferReveal(input.sessionId)
+    ) {
       const relativePath = toProjectPath(relative(projectRoot, lexicalTarget))
       const descriptor: ReferenceDescriptor = {
         id: referenceId(),
@@ -328,7 +379,7 @@ export class WorkspaceReferenceService {
         ...shape,
         relativePath,
         ...(line ? { line } : {}),
-        actions: available ? ['open_files', 'preview'] : [],
+        actions: available ? ['open_files', 'preview', 'reveal'] : [],
       }
       return this.store(
         input.sessionId,
@@ -352,7 +403,7 @@ export class WorkspaceReferenceService {
           actions: available ? ['reveal'] : [],
         },
         available ? canonicalTarget : undefined,
-        `external\0${input.sessionId}\0${input.sourceMessageId}\0${canonicalTarget}\0${line ?? 0}`,
+        `external\0${input.sessionId}\0${input.delegationId ?? ''}\0${input.sourceMessageId}\0${canonicalTarget}\0${line ?? 0}`,
       )
 
     if (!isAbsolute(target))
@@ -373,7 +424,7 @@ export class WorkspaceReferenceService {
         actions: available ? ['reveal'] : [],
       },
       available ? canonicalTarget : undefined,
-      `external\0${input.sessionId}\0${input.sourceMessageId}\0${canonicalTarget}\0${line ?? 0}`,
+      `external\0${input.sessionId}\0${input.delegationId ?? ''}\0${input.sourceMessageId}\0${canonicalTarget}\0${line ?? 0}`,
     )
   }
 

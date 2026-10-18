@@ -435,6 +435,7 @@ export function createShellTool(
     if (context.signal.aborted) throw abortedError()
     const { argv, confined } = prepareArgv(args.command, policy)
     const jobId = jobs.start({
+      retainExecutionLease: context.retainWorkspaceLease,
       kind: 'bash',
       label: args.command,
       description: args.description,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { AgentView } from '@emperor/core/api'
 import type { ToolChatData } from '../../../conversation/types'
 import { REGISTERED_TOOLS, subagentStatusLabel, toolView } from './registry'
 import {
@@ -6,6 +7,7 @@ import {
   grepCard,
   hunksFromUnifiedDiff,
   mutationHunks,
+  nativeAgentTarget,
   readWindow,
   shellOutcome,
   toolRowState,
@@ -302,6 +304,89 @@ describe('tool registry titles and summaries', () => {
     ).toBe('Ship it · 继续规划')
   })
 
+  it('names native continuation cards from their matched stable shared identity and preserves external behavior', () => {
+    const child: AgentView = {
+      id: 'sub-existing',
+      kind: 'internal',
+      backend: 'internal',
+      rootSessionId: 'root',
+      parentAgentId: 'root',
+      title: 'creation task',
+      phase: 'waiting',
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    const native = tool(
+      'send_message',
+      { subagent_id: child.id, message: 'new followup' },
+      { text: 'queued', meta: { messageId: 'msg-next', subagentId: child.id } },
+    )
+    const view = toolView('send_message', undefined, child)
+    expect(view.title(native)).toBe('creation task')
+    expect(view.summary(native)).toBe('Emperor · 等待回答')
+    expect(nativeAgentTarget(native)).toBe(child.id)
+    expect(
+      view.title(
+        tool('send_message', { subagent_id: 'sub-other', message: 'other' }),
+      ),
+    ).toBe('发送消息')
+    for (const id of ['dlg-one', 'dgr-one', 'root', 'sub-'])
+      expect(
+        nativeAgentTarget(
+          tool(
+            'send_message',
+            { subagent_id: child.id },
+            { text: '', meta: { subagentId: id } },
+          ),
+        ),
+      ).toBeUndefined()
+    const external = tool(
+      'send_message',
+      { agent_id: 'dlg-one', message: 'external followup' },
+      undefined,
+      {
+        externalAgent: {
+          title: 'external creation',
+          delegationId: 'dlg-one',
+          runId: 'dgr-next',
+          backend: 'codex',
+          phase: 'running',
+          text: '',
+          activity: [],
+        },
+      },
+    )
+    expect(nativeAgentTarget(external)).toBeUndefined()
+    expect(view.title(external)).toBe('external creation')
+    expect(view.summary(external)).toBe('Codex · 运行中')
+  })
+
+  it('keeps continuation cards named after the creation task, with the source separate', () => {
+    expect(
+      row(
+        tool(
+          'send_message',
+          { agent_id: 'dlg-one', message: 'a different followup task' },
+          undefined,
+          {
+            externalAgent: {
+              title: 'creation task',
+              delegationId: 'dlg-one',
+              runId: 'dgr-next',
+              backend: 'claude-code',
+              phase: 'outcome_unknown',
+              text: '',
+              activity: [],
+            },
+          },
+        ),
+      ),
+    ).toMatchObject({
+      title: 'creation task',
+      summary: 'Claude Code · 结果待确认',
+    })
+  })
+
   it('subagent, jobs, workflow, ralph', () => {
     const running = tool(
       'subagent',
@@ -318,14 +403,33 @@ describe('tool registry titles and summaries', () => {
       },
     )
     expect(row(running)).toMatchObject({
-      title: '子代理',
-      summary: 'research · 后台运行中',
+      title: 'research',
+      summary: 'Emperor · 后台运行中',
       body: 'subagent',
     })
+    expect(row(tool('subagent', {})).title).toBe('Emperor 子智能体')
+    expect(
+      row(
+        tool(
+          'subagent',
+          { backend: 'codex', description: 'changed followup' },
+          undefined,
+          {
+            externalAgent: {
+              title: 'creation task',
+              delegationId: 'dlg-one',
+              runId: 'dgr-next',
+              backend: 'codex',
+              phase: 'waiting_input',
+              text: '',
+              activity: [],
+            },
+          },
+        ),
+      ),
+    ).toMatchObject({ title: 'creation task', summary: 'Codex · 等待回答' })
     expect(subagentStatusLabel(running)).toBe('后台运行中')
-    expect(row(tool('subagent_fork', { description: 'x' })).title).toBe(
-      '分叉子代理',
-    )
+    expect(row(tool('subagent_fork', { description: 'x' })).title).toBe('x')
     expect(
       row(
         tool(

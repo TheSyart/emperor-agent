@@ -114,8 +114,10 @@ export function useRuntime(options: {
     interaction?: ControlInteraction | null,
   ) => void
   refreshSessions?: () => Promise<void>
-  /** Live subagent_* event of a session (sidebar child counts refresh). */
-  onSubagentEvent?: (sessionId: string) => void
+  /** Root-scoped topology/state invalidation, including inactive roots. */
+  onAgentTreeChanged?: (
+    event: Extract<WsEvent, { event: 'agent_tree_changed' }>,
+  ) => void
   /**
    * A live event worth a bell notification (scheduler run done / failed,
    * a waiting question / approval / plan, a finished turn, a finished git
@@ -969,6 +971,7 @@ export function useRuntime(options: {
       return
     }
     const data = parsed as WsEvent
+    if (data.event === 'agent_tree_changed') options.onAgentTreeChanged?.(data)
 
     const sessionTransition = sessionStore.dispatch({
       type: 'runtime_event_received',
@@ -1121,9 +1124,6 @@ export function useRuntime(options: {
     // Git receipts carry no view state: they only reach the bell
     // (notifyRuntimeEvent), whichever session they belong to.
     if (isGitOperationCompletedEvent(data)) return
-
-    if (origin === 'live' && data.event.startsWith('subagent_'))
-      options.onSubagentEvent?.(eventOwnerSessionId(data) || sessionId.value)
   }
 
   /**

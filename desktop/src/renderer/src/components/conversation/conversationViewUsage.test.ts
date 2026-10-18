@@ -65,8 +65,10 @@ describe('ConversationView composer seat integration', () => {
       'linkStatus.record(detail.href, reference, detail.sourceMessageId)',
     )
     expect(source).toContain('directory: reference.relativePath')
-    // Statuses are checked again for a new session and after each turn.
-    expect(source.match(/linkStatus\.refresh\(\)/g)).toHaveLength(2)
+    // Background deliverables also refresh links after delegation changes.
+    expect(source).toContain("event.event === 'delegation_run_changed'")
+    expect(source).toContain("event.event === 'delegation_receipt'")
+    expect(source.match(/linkStatus\.refresh\(\)/g)).toHaveLength(3)
   })
 
   it('sends tool-row Inspect to the trajectory inspector column', () => {
@@ -85,7 +87,7 @@ describe('ConversationView composer seat integration', () => {
     expect(source).toContain('container: conversation / inline-size')
   })
 
-  it('seats the environment card beside a wide chat and over a narrow one', () => {
+  it('seats the environment card beside chat with reserved space at every opened width', () => {
     expect(source).toContain('v-if="envCardShown"')
     expect(source).toContain("phase.value !== 'hero'")
     expect(source).toContain('@reveal="revealRow"')

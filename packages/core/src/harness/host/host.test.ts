@@ -450,3 +450,15 @@ describe('HarnessHost', () => {
     expect(JSON.stringify(page.events)).toContain('fork child answer')
   })
 })
+
+it('root stop disarms an idle Goal before an external settlement can revive automatic work', async () => {
+  const { host, adapter } = await makeHost()
+  const entry = host.kept.sessionStore.create('stop fixture', { mode: 'chat' }),
+    agent = host.agentFor(entry.id)
+  host.goals.create(agent, { objective: 'fixture only' })
+  host.stop(entry.id)
+  host.goalInstall.driver.delegationSettled(entry.id)
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  expect(host.goals.get(agent)?.activation).toBe('disarmed')
+  expect(adapter.requests).toHaveLength(0)
+})

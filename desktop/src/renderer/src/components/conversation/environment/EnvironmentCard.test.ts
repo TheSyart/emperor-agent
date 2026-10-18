@@ -13,6 +13,7 @@ vi.mock('../../../composables/useAppContext', async (importOriginal) => ({
 }))
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: async () => undefined }),
+  useRoute: () => ({ params: {}, query: {}, path: '/chat/s1', name: 'chat' }),
 }))
 import EnvironmentCard from './EnvironmentCard.vue'
 

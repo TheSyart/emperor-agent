@@ -1,0 +1,450 @@
+import { z } from 'zod'
+import { createHash } from 'node:crypto'
+import {
+  defineTool,
+  ToolError,
+  type ToolDefinition,
+  type ToolRunContext,
+} from '../tools/definition'
+import type { Agent } from '../agent/agent'
+import type { SubagentManager } from '../subagent/manager'
+import { createSubagentTools } from '../subagent/tools'
+import type {
+  DelegationOwner,
+  DelegationRecord,
+  DelegationRunRecord,
+  DelegationStart,
+} from './types'
+import type { DelegationState } from './fold'
+import { buildDelegationContext, type DelegationBriefInput } from './context'
+import { jsonSchema } from '../tools/json-schema'
+export interface DelegationToolService {
+  start(
+    owner: DelegationOwner,
+    spec: DelegationStart,
+  ): Promise<DelegationRecord>
+  inspect(id: string): DelegationState
+  list(): DelegationState[]
+  send(
+    id: string,
+    input: {
+      messageId: string
+      text: string
+      delivery: 'queue' | 'steer'
+      expectedRunId?: string
+      signal?: AbortSignal
+    },
+  ): Promise<{
+    messageId: string
+    state: 'queued' | 'accepted'
+    runId?: string
+  }>
+  interrupt(id: string, runId: string): Promise<{ requested: boolean }>
+  wait(id: string, runId: string): Promise<DelegationRunRecord>
+}
+export interface DelegationToolOptions {
+  internalManager: SubagentManager
+  delegations: () => DelegationToolService | undefined
+  ownerResolver: (agent: Agent, callId: string) => DelegationOwner
+  canControl: (agent: Agent, owner: DelegationOwner) => boolean
+  briefContext?: (
+    agent: Agent,
+  ) => Omit<DelegationBriefInput, 'prompt' | 'description' | 'context'>
+  parentReadOnly?: (agent: Agent) => boolean
+}
+function messageId(owner: DelegationOwner, callId: string, id: string): string {
+  // RFC 4122 UUIDv5 over host-owned call scope. A replay reuses the same message identity.
+  const bytes = createHash('sha1')
+    .update(Buffer.from('29a559a4b41446e4bf3f12c2143b8b9a', 'hex'))
+    .update(
+      JSON.stringify([owner.rootSessionId, owner.parentAgentId, callId, id]),
+    )
+    .digest()
+    .subarray(0, 16)
+  bytes[6] = (bytes[6]! & 15) | 0x50
+  bytes[8] = (bytes[8]! & 63) | 0x80
+  const hex = bytes.toString('hex')
+  return (
+    'dgm-' +
+    [
+      hex.slice(0, 8),
+      hex.slice(8, 12),
+      hex.slice(12, 16),
+      hex.slice(16, 20),
+      hex.slice(20),
+    ].join('-')
+  )
+}
+function closingText(
+  record: DelegationRecord,
+  run: DelegationRunRecord,
+): string {
+  return (
+    JSON.stringify({
+      delegationId: record.id,
+      runId: run.id,
+      backend: record.backend,
+      cwd: record.cwd,
+      phase: run.phase,
+      acceptance: run.acceptance,
+      receiptId: run.receiptId,
+      providerSessionId: record.providerSessionId,
+      providerTurnId: run.providerTurnId,
+    }) +
+    '\n' +
+    (run.summary ?? '(executor returned no closing text)')
+  )
+}
+export function createDelegationTools(
+  options: DelegationToolOptions,
+): ToolDefinition[] {
+  const legacy = new Map(
+    createSubagentTools(options.internalManager).map((t) => [t.name, t]),
+  )
+  const service = () => {
+    const s = options.delegations()
+    if (!s)
+      throw new ToolError(
+        'external executor service is not composed',
+        'EXECUTOR_UNAVAILABLE',
+      )
+    return s
+  }
+  const caller = (context: ToolRunContext) => {
+    if (!context.agent)
+      throw new ToolError(
+        'delegation tool requires a calling agent',
+        'PERMISSION_DENIED',
+      )
+    return context.agent
+  }
+  const route = (id: string): 'internal' | 'external' => {
+    if (/^sub-/.test(id)) return 'internal'
+    if (/^dlg-/.test(id)) return 'external'
+    throw new ToolError('unknown agent id namespace', 'INVALID_ID')
+  }
+  const owned = (id: string, context: ToolRunContext) => {
+    const agent = caller(context),
+      state = service().inspect(id)
+    if (!state.record || !options.canControl(agent, state.record.owner))
+      throw new ToolError(
+        'external conversation is not owned by this agent',
+        'PERMISSION_DENIED',
+      )
+    return state
+  }
+  const invoke = async (name: string, args: unknown, ctx: ToolRunContext) => {
+    const tool = legacy.get(name)!
+    return tool.execute(tool.parse(args), ctx)
+  }
+  const start = (name: 'subagent' | 'subagent_fork') =>
+    defineTool({
+      category: 'agents',
+      name,
+      description:
+        legacy.get(name)!.description +
+        ' Optional backend selects internal (default), claude-code or codex. Enabled external CLIs reuse local login and can be dispatched directly. External contexts are isolated or a host-built brief; exact fork is internal only. Collect ordinary text results directly; check file artifacts at delivery or integration.',
+      input: z.object({
+        description: z.string(),
+        prompt: z.string(),
+        run_in_background: z.boolean().optional(),
+        backend: z.enum(['internal', 'claude-code', 'codex']).optional(),
+        profile_id: z.string().optional(),
+        context: z.enum(['isolated', 'brief', 'fork']).optional(),
+        workspace: z
+          .enum(['isolated-worktree', 'shared-readonly', 'shared-exclusive'])
+          .optional(),
+        base: z.enum(['committed', 'snapshot']).optional(),
+        model: z.string().optional(),
+        provider: z.string().optional(),
+        output_schema: z.record(z.string(), z.unknown()).optional(),
+      }),
+      isConcurrencySafe: () => true,
+      execute: async (args, ctx) => {
+        const agent = caller(ctx)
+        if (!args.backend || args.backend === 'internal')
+          return invoke(name, args, ctx)
+        if (name === 'subagent_fork' || args.context === 'fork')
+          throw new ToolError(
+            'external executors cannot fork internal conversation history',
+            'UNSUPPORTED_CONTEXT_MODE',
+          )
+        if (args.provider !== undefined)
+          throw new ToolError(
+            'external backend does not accept internal provider routing',
+            'UNSUPPORTED_OPTION',
+          )
+        if (ctx.signal.aborted)
+          throw new ToolError('parent turn was cancelled', 'ABORTED')
+        const owner = options.ownerResolver(agent, ctx.callId),
+          context = args.context ?? 'isolated'
+        if (args.output_schema)
+          jsonSchema.assertObjectJsonSchema(args.output_schema)
+        const prompt = buildDelegationContext({
+          ...(options.briefContext?.(agent) ?? {}),
+          prompt: args.prompt,
+          description: args.description,
+          context,
+        })
+        const record = await service().start(owner, {
+          backend: args.backend,
+          profileId: args.profile_id,
+          description: args.description,
+          prompt,
+          context,
+          workspace:
+            args.workspace ??
+            (options.parentReadOnly?.(agent)
+              ? 'shared-readonly'
+              : 'isolated-worktree'),
+          base: args.base ?? 'committed',
+          model: args.model,
+          outputSchema: args.output_schema,
+          runInBackground: args.run_in_background ?? true,
+          clientRequestId: ctx.callId,
+        })
+        const meta = {
+          kind: 'continuable',
+          subagentId: record.id,
+          runId: record.currentRunId,
+          backend: record.backend,
+          profileId: record.profileId,
+          acceptance: 'unverified',
+        }
+        if (args.run_in_background !== false)
+          return {
+            content:
+              'accepted external delegation ' +
+              record.id +
+              '; run ' +
+              record.currentRunId +
+              ' is queued',
+            meta,
+          }
+        const abort = () => {
+          if (record.currentRunId)
+            void service()
+              .interrupt(record.id, record.currentRunId)
+              .catch(() => undefined)
+        }
+        ctx.signal.addEventListener('abort', abort, { once: true })
+        if (ctx.signal.aborted) abort()
+        try {
+          const run = await service().wait(record.id, record.currentRunId!)
+          if (run.phase !== 'completed')
+            throw new ToolError(
+              'external run ' +
+                run.phase +
+                ': ' +
+                (run.failureCode ?? run.summary ?? ''),
+              'DELEGATION_FAILED',
+            )
+          return {
+            content: closingText(service().inspect(record.id).record!, run),
+            meta: {
+              ...meta,
+              kind: 'foreground',
+              phase: run.phase,
+              acceptance: run.acceptance,
+              ...(run.structured === undefined
+                ? {}
+                : { structured: run.structured }),
+            },
+          }
+        } finally {
+          ctx.signal.removeEventListener('abort', abort)
+        }
+      },
+    })
+  return [
+    start('subagent'),
+    start('subagent_fork'),
+    defineTool({
+      category: 'agents',
+      name: 'send_message',
+      description:
+        'Queue a later turn in the same child conversation (default). Codex can steer the current turn only with delivery=steer and exact expected_run_id; Claude Code steer is unsupported. Delivery confirmation is separate from execution completion.',
+      input: z.object({
+        subagent_id: z.string(),
+        message: z.string(),
+        delivery: z.enum(['queue', 'steer']).optional(),
+        expected_run_id: z.string().optional(),
+      }),
+      execute: async (args, ctx) => {
+        if (route(args.subagent_id) === 'internal') {
+          if (args.delivery === 'steer')
+            throw new ToolError(
+              'internal send_message queues a later turn',
+              'UNSUPPORTED_OPTION',
+            )
+          return invoke('send_message', args, ctx)
+        }
+        const state = owned(args.subagent_id, ctx),
+          owner = options.ownerResolver(caller(ctx), ctx.callId),
+          id = messageId(owner, ctx.callId, args.subagent_id)
+        const result = await service().send(args.subagent_id, {
+          messageId: id,
+          text: args.message,
+          delivery: args.delivery ?? 'queue',
+          expectedRunId: args.expected_run_id,
+          signal: ctx.signal,
+        })
+        return {
+          content: 'message ' + result.state + ' for ' + state.record!.id,
+          meta: {
+            ...result,
+            subagentId: args.subagent_id,
+            delivery: args.delivery ?? 'queue',
+          },
+        }
+      },
+    }),
+    defineTool({
+      category: 'agents',
+      name: 'interrupt_agent',
+      description:
+        'Stop an owned child run. External interruption stops queued followups and waits for process proof; unknown termination retains the writer lease.',
+      input: z.object({
+        agent_id: z.string(),
+        expected_run_id: z.string().optional(),
+      }),
+      execute: async (args, ctx) => {
+        if (route(args.agent_id) === 'internal')
+          return invoke('interrupt_agent', args, ctx)
+        const state = owned(args.agent_id, ctx),
+          runId = args.expected_run_id ?? state.record!.currentRunId
+        if (!runId)
+          return {
+            content: 'external conversation is idle',
+            meta: { accepted: false },
+          }
+        const result = await service().interrupt(args.agent_id, runId)
+        return {
+          content:
+            'interrupt ' +
+            (result.requested ? 'requested' : 'already settled') +
+            ' for ' +
+            args.agent_id,
+          meta: {
+            accepted: result.requested,
+            subagentId: args.agent_id,
+            runId,
+          },
+        }
+      },
+    }),
+    defineTool({
+      category: 'agents',
+      name: 'list_agents',
+      description:
+        'List your internal and external children or descendants, with backend, conversation and current run status.',
+      input: z.object({
+        scope: z.enum(['children', 'descendants']).optional(),
+      }),
+      isConcurrencySafe: () => true,
+      execute: async (args, ctx) => {
+        const agent = caller(ctx),
+          external = (options.delegations()?.list() ?? []).filter(
+            (s) =>
+              s.record &&
+              options.canControl(agent, s.record.owner) &&
+              (args.scope === 'descendants' ||
+                s.record.owner.parentAgentId === agent.id),
+          )
+        if (!external.length) return invoke('list_agents', args, ctx)
+        const internal = options.internalManager.list(
+            agent,
+            args.scope ?? 'children',
+          ),
+          agents = [
+            ...internal,
+            ...external.map((s) => ({
+              id: s.record!.id,
+              backend: s.record!.backend,
+              profileId: s.record!.profileId,
+              description: s.record!.startSpec?.description ?? '',
+              status: s.record!.currentRunId
+                ? s.runs[s.record!.currentRunId]?.phase
+                : s.record!.availability,
+              runId: s.record!.currentRunId,
+              depth: s.record!.owner.depth,
+            })),
+          ]
+        return {
+          content: agents
+            .map((a) => '- ' + a.id + ' [' + a.status + ']: ' + a.description)
+            .join('\n'),
+          meta: { agents },
+        }
+      },
+    }),
+    defineTool({
+      category: 'agents',
+      name: 'inspect_agent',
+      description:
+        'Inspect an owned child conversation and its run identity without consuming output.',
+      input: z.object({ agent_id: z.string() }),
+      isConcurrencySafe: () => true,
+      execute: async (args, ctx) => {
+        if (route(args.agent_id) === 'internal') {
+          const agent = caller(ctx)
+          const record = options.internalManager
+            .list(agent, 'descendants')
+            .find((r) => r.id === args.agent_id)
+          if (!record)
+            throw new ToolError(
+              'internal agent is not a held descendant',
+              'PERMISSION_DENIED',
+            )
+          return { content: JSON.stringify(record), meta: { agent: record } }
+        }
+        const state = owned(args.agent_id, ctx)
+        return {
+          content: JSON.stringify(state.record),
+          meta: { agent: state.record, runs: Object.values(state.runs) },
+        }
+      },
+    }),
+    defineTool({
+      category: 'agents',
+      name: 'collect_agent',
+      description:
+        'Wait for a specific external run and collect its summary, structured output and delivery check state. Successful text results can be used directly. Check changed files before final delivery or integration; execution completion is not evidence that tests passed.',
+      input: z.object({
+        agent_id: z.string(),
+        expected_run_id: z.string().optional(),
+      }),
+      execute: async (args, ctx) => {
+        if (route(args.agent_id) === 'internal')
+          throw new ToolError(
+            'internal agents deliver their results through the existing report/settlement path',
+            'UNSUPPORTED_OPTION',
+          )
+        const state = owned(args.agent_id, ctx),
+          runId = args.expected_run_id ?? state.record!.currentRunId
+        if (!runId || !state.runs[runId])
+          throw new ToolError(
+            'run is not part of this conversation',
+            'RUN_NOT_FOUND',
+          )
+        const run = await service().wait(args.agent_id, runId)
+        return {
+          content: closingText(service().inspect(args.agent_id).record!, run),
+          meta: {
+            subagentId: args.agent_id,
+            runId,
+            phase: run.phase,
+            acceptance: run.acceptance,
+            ...(run.receiptId === undefined
+              ? {}
+              : { receiptId: run.receiptId }),
+            ...(run.structured === undefined
+              ? {}
+              : { structured: run.structured }),
+          },
+          isError: run.phase !== 'completed',
+        }
+      },
+    }),
+  ]
+}

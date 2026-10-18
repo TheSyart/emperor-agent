@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
 import { createApp, h, nextTick, ref } from 'vue'
 import { afterEach, describe, expect, it } from 'vitest'
-import { loadKernelLog } from '../../conversation/testing/fixtures'
+import { createRouter, createMemoryHistory, type Router } from 'vue-router'
+import { loadKernelLog, LogBuilder } from '../../conversation/testing/fixtures'
+import { ConversationStore } from '../../conversation/store'
+import type { SessionHistoryPage } from '@emperor/core/runtime-contract'
 import ChatTimeline from './ChatTimeline.vue'
+import { buildAgentTree, useAgentTree } from '../sidebar/agentTree'
 import { createFixtureStore, type FixtureStore } from './gallery/fixtureStore'
 import { showcaseScenario, streamingScenario } from './gallery/scenarios'
 import {
@@ -24,14 +28,19 @@ globalThis.IntersectionObserver ??= class {
 let container: HTMLDivElement | null = null
 let app: ReturnType<typeof createApp> | null = null
 let fixture: FixtureStore | null = null
+let router: Router
+let delayedStore: ConversationStore | null = null
 
 afterEach(() => {
   app?.unmount()
   container?.remove()
   fixture?.dispose()
+  delayedStore?.dispose()
+  delayedStore = null
   container = null
   app = null
   fixture = null
+  delete useAgentTree().trees['native-root']
 })
 
 async function settle(rounds = 20): Promise<void> {
@@ -50,11 +59,12 @@ function mount(
   sessionId: string,
   sessions: Parameters<typeof createFixtureStore>[0],
   events: Record<string, (value: string) => void> = {},
+  customStore?: ConversationStore,
 ): HTMLDivElement {
   fixture = createFixtureStore(sessions, { scheduler: immediate })
   container = document.createElement('div')
   document.body.append(container)
-  const store = fixture.store
+  const store = customStore ?? fixture.store
   app = createApp({
     render: () =>
       h(ChatTimeline, {
@@ -64,11 +74,219 @@ function mount(
         'onOpen-subagent': events.openSubagent,
       }),
   })
+  router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', component: { render: () => null } },
+      {
+        path: '/chat/:sessionId',
+        name: 'chat',
+        component: { render: () => null },
+      },
+      {
+        path: '/chat/:sessionId/agents/:delegationId',
+        name: 'external-agent',
+        component: { render: () => null },
+      },
+    ],
+  })
+  app.use(router)
   app.mount(container)
   return container
 }
 
 describe('ChatTimeline over the recorded kernel log', () => {
+  it.each(['resolve', 'reject'] as const)(
+    'shows an initial loading transition until delayed history %ss',
+    async (outcome) => {
+      let resolve!: (page: SessionHistoryPage) => void
+      let reject!: (error: Error) => void
+      delayedStore = new ConversationStore({
+        api: {
+          history: () =>
+            new Promise<SessionHistoryPage>((yes, no) => {
+              resolve = yes
+              reject = no
+            }),
+        },
+        watch: async () => undefined,
+        subscribe: () => () => {},
+        scheduler: immediate,
+      })
+      const root = mount('delayed', [], {}, delayedStore)
+      await settle()
+      expect(root.querySelector('[aria-busy="true"]')).not.toBeNull()
+      if (outcome === 'resolve')
+        resolve({
+          header: { version: 0, id: 'delayed', createdAt: 0 },
+          events: [],
+          hasMore: false,
+          lastSeq: -1,
+        } as SessionHistoryPage)
+      else reject(new Error('history offline'))
+      await settle()
+      expect(root.querySelector('[aria-busy="true"]')).toBeNull()
+      expect(
+        root.querySelector('[role="alert"]')?.textContent?.trim() ?? '',
+      ).toBe(outcome === 'reject' ? '会话记录读取失败：history offline' : '')
+    },
+  )
+
+  it('shows an external agents partial output and tools before native completion', async () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.call(1, 1, 'external-call', 'subagent', {
+      backend: 'codex',
+      description: 'live work',
+    })
+    const root = mount('live-external', [
+      { id: 'live-external', events: [...log.events] },
+    ])
+    await settle()
+    fixture!.emit('live-external', [
+      log.add('delegation/projection', {
+        event: 'delegation_output',
+        delegation_id: 'dlg-one',
+        run_id: 'dgr-one',
+        current_run_id: 'dgr-one',
+        parent_call_id: 'external-call',
+        backend: 'codex',
+        journal_seq: 1,
+        output: [
+          { role: 'assistant', content: '正在读取项目' },
+          {
+            role: 'tool',
+            content: JSON.stringify({
+              name: 'shell',
+              type: 'tool_started',
+              detail: 'read README',
+            }),
+          },
+        ],
+      }),
+    ])
+    await settle()
+    const live = root.querySelector('[data-external-agent-stream]')
+    expect(live?.textContent).toContain('Codex')
+    expect(live?.querySelector('[data-agent-logo="codex"]')).not.toBeNull()
+    expect(live?.textContent).toContain('正在读取项目')
+    expect(live?.textContent).toContain('shell')
+    const entry = root.querySelector<HTMLAnchorElement>('[data-agent-entry]')
+    expect(entry?.textContent).toContain('live work')
+    expect(entry?.getAttribute('href')).toBe(
+      '/chat/live-external/agents/dlg-one',
+    )
+    expect(
+      root.querySelector('[data-agent-details]')?.textContent?.trim(),
+    ).toBe('任务详情')
+    expect(entry?.querySelector('button')).toBeNull()
+    const toggle = live?.querySelector<HTMLButtonElement>('.stream-toggle')
+    toggle?.click()
+    await settle()
+    expect(live?.querySelector('.stream-content')).toBeNull()
+    expect(root.querySelector('[data-agent-entry]')).not.toBeNull()
+    entry?.click()
+    await settle()
+    expect(router.currentRoute.value.name).toBe('external-agent')
+    expect(router.currentRoute.value.params).toEqual({
+      sessionId: 'live-external',
+      delegationId: 'dlg-one',
+    })
+  })
+  it('keeps a continued external run on its creation name and stable dlg route', async () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.call(1, 1, 'followup-call', 'send_message', {
+      agent_id: 'dlg-one',
+      message: 'new prompt changes scope',
+    })
+    log.add('delegation/projection', {
+      event: 'delegation_run_changed',
+      delegation_id: 'dlg-one',
+      run_id: 'dgr-next',
+      current_run_id: 'dgr-next',
+      parent_call_id: 'followup-call',
+      backend: 'codex',
+      journal_seq: 2,
+      task: { description: 'original creation task', status: 'waiting_input' },
+    })
+    const root = mount('root', [{ id: 'root', events: [...log.events] }])
+    await settle()
+    const entry = root.querySelector<HTMLAnchorElement>('[data-agent-entry]')!
+    expect(entry.textContent).toContain('original creation task')
+    expect(entry.textContent).not.toContain('new prompt changes scope')
+    expect(entry.getAttribute('href')).toBe('/chat/root/agents/dlg-one')
+    expect(root.querySelector('.tool-row')?.textContent).toContain(
+      'original creation task',
+    )
+    expect(root.querySelector('.tool-row')?.textContent).toContain(
+      'Codex · 等待回答',
+    )
+    expect(root.querySelector('[data-agent-details]')?.closest('a')).toBeNull()
+  })
+  it('resolves native continuation identity and creation title from the shared root tree without a new started event', async () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.call(1, 1, 'native-followup', 'send_message', {
+      subagent_id: 'sub-existing',
+      message: 'different followup task',
+    })
+    log.result(1, 1, 'native-followup', 'queued', {
+      meta: { messageId: 'msg-next', subagentId: 'sub-existing' },
+    })
+    const opened: string[] = []
+    const root = mount(
+      'native-root',
+      [{ id: 'native-root', events: [...log.events] }],
+      { openSubagent: (id) => opened.push(id) },
+    )
+    await settle()
+    expect(root.querySelector('[data-agent-entry]')).toBeNull()
+    // Hydration can finish after the continuation card is already mounted.
+    useAgentTree().trees['native-root'] = buildAgentTree('native-root', [
+      {
+        id: 'sub-existing',
+        kind: 'internal',
+        backend: 'internal',
+        rootSessionId: 'native-root',
+        parentAgentId: 'native-root',
+        title: 'original native creation',
+        phase: 'running',
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    ])
+    await settle()
+    const entry = root.querySelector<HTMLAnchorElement>('[data-agent-entry]')!
+    expect(entry?.textContent).toContain('original native creation')
+    expect(entry?.textContent).toContain('Emperor')
+    expect(entry?.getAttribute('href')).toBe('/chat/sub-existing')
+    expect(
+      entry.querySelector('[data-agent-identity="sub-existing"]'),
+    ).not.toBeNull()
+    expect(
+      root.querySelector('.tool-row [data-agent-identity="sub-existing"]'),
+    ).not.toBeNull()
+    expect(root.querySelector('.tool-row')?.textContent).toContain(
+      'original native creation',
+    )
+    expect(root.querySelector('.tool-row')?.textContent).toContain(
+      'Emperor · 运行中',
+    )
+    entry.click()
+    expect(opened).toEqual(['sub-existing'])
+    root.querySelector<HTMLButtonElement>('[data-disclosure-row]')!.click()
+    await settle()
+    expect(root.textContent).toContain('different followup task')
+    useAgentTree().trees['native-root'].byId['sub-existing'].rootSessionId =
+      'foreign-root'
+    await settle()
+    expect(root.querySelector('[data-agent-entry]')).toBeNull()
+  })
+
   it('renders every chat row kind of the fixture', async () => {
     const log = loadKernelLog()
     const root = mount('kernel', [
@@ -105,7 +323,8 @@ describe('ChatTimeline over the recorded kernel log', () => {
     expect(tools[0]).toContain('终端')
     expect(tools[0]).toContain('print alpha')
     expect(tools[2]).toContain('已回答 1/1 · Which color?')
-    expect(tools[3]).toContain('research · 已完成')
+    expect(tools[3]).toContain('research')
+    expect(tools[3]).toContain('Emperor · 已完成')
     expect(root.querySelector('[data-subagent-line]')?.textContent).toContain(
       'child found x',
     )
@@ -126,9 +345,7 @@ describe('ChatTimeline over the recorded kernel log', () => {
       },
     )
     await settle()
-    root
-      .querySelector<HTMLButtonElement>('[data-subagent-line] .open-link')
-      ?.click()
+    root.querySelector<HTMLButtonElement>('[data-agent-entry]')?.click()
     expect(opened).toHaveLength(1)
     expect(opened[0]).toMatch(/^sub-/)
     const bash = root.querySelector<HTMLElement>(
@@ -187,6 +404,23 @@ describe('ChatTimeline reveal', () => {
       render: () =>
         h(ChatTimeline, { sessionId: 'showcase', store, ref: timeline }),
     })
+    router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', component: { render: () => null } },
+        {
+          path: '/chat/:sessionId',
+          name: 'chat',
+          component: { render: () => null },
+        },
+        {
+          path: '/chat/:sessionId/agents/:delegationId',
+          name: 'external-agent',
+          component: { render: () => null },
+        },
+      ],
+    })
+    app.use(router)
     app.mount(container)
     await settle()
     const key = container

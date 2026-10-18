@@ -6,7 +6,7 @@
  * stop button interrupts it (the parent's tool call then settles).
  *
  * Props: parentTitle?, running? (child turn open), stopping? (request sent).
- * Emits: back, stop.
+ * Emits: back, stop, root.
  */
 withDefaults(
   defineProps<{
@@ -16,15 +16,15 @@ withDefaults(
   }>(),
   { parentTitle: undefined, running: false, stopping: false },
 )
-const emit = defineEmits<{ back: []; stop: [] }>()
+const emit = defineEmits<{ back: []; stop: []; root: [] }>()
 </script>
 
 <template>
   <div class="read-only-composer" role="note">
     <span class="copy"
-      >这是子代理会话，只读。<template v-if="parentTitle"
-        >在<strong>{{ parentTitle }}</strong
-        >中继续对话。</template
+      >子智能体对话 · 只读。<template v-if="parentTitle"
+        >父智能体：<strong>{{ parentTitle }}</strong
+        >。</template
       ></span
     >
     <button
@@ -34,9 +34,14 @@ const emit = defineEmits<{ back: []; stop: [] }>()
       :disabled="stopping"
       @click="emit('stop')"
     >
-      {{ stopping ? '正在停止…' : '停止子代理' }}
+      {{ stopping ? '正在停止…' : '停止子智能体' }}
     </button>
-    <button type="button" class="back" @click="emit('back')">返回父会话</button>
+    <button type="button" class="back" @click="emit('root')">
+      返回主会话继续派工
+    </button>
+    <button type="button" class="back" @click="emit('back')">
+      返回父智能体
+    </button>
   </div>
 </template>
 
@@ -45,6 +50,7 @@ const emit = defineEmits<{ back: []; stop: [] }>()
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-wrap: wrap;
   gap: var(--space-2);
   box-sizing: border-box;
   width: calc(100% - 2 * var(--space-6));
@@ -58,6 +64,11 @@ const emit = defineEmits<{ back: []; stop: [] }>()
   color: rgb(var(--label-tertiary));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
+}
+
+.copy {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 strong {

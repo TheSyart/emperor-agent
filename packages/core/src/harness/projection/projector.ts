@@ -22,6 +22,7 @@ import {
   type InteractionPayload,
 } from './interactions'
 import '../computer-use/events'
+import '../delegation/events'
 import '../subagent/manager'
 import '../compaction/events'
 import '../plan/plan-mode'
@@ -154,6 +155,11 @@ export class SessionProjector {
       k += 1
     }
     switch (event.type) {
+      case 'delegation/projection': {
+        const { event: name, ...payload } = event.data
+        emit(name, payload)
+        break
+      }
       case 'host/user-meta':
         this.userMeta.set(event.data.messageId, event.data)
         break

@@ -149,7 +149,7 @@ describe('workflow tool over the real in-process stack', () => {
         return { text: 'workflow finished' }
       }
       childRequests.push(request)
-      if (firstUserText(request).startsWith('find'))
+      if (firstUserText(request).endsWith('\n\nfind the answer'))
         return { text: 'answer=42' }
       // The structured child: first a bad call (schema violation), then a valid one.
       if (!hasToolResult(request))
@@ -205,7 +205,7 @@ describe('workflow tool over the real in-process stack', () => {
 
     // Only the structured child sees structured_output, with its own schema.
     const judgeRequest = childRequests.find((request) =>
-      firstUserText(request).startsWith('judge'),
+      firstUserText(request).includes('\n\njudge: '),
     )!
     const structuredTool = judgeRequest.tools?.find(
       (tool) => tool.name === 'structured_output',
@@ -215,7 +215,7 @@ describe('workflow tool over the real in-process stack', () => {
     })
     expect(judgeRequest.system).toContain('structured_output')
     const finderRequest = childRequests.find((request) =>
-      firstUserText(request).startsWith('find'),
+      firstUserText(request).endsWith('\n\nfind the answer'),
     )!
     expect(
       finderRequest.tools?.some((tool) => tool.name === 'structured_output'),
@@ -223,7 +223,8 @@ describe('workflow tool over the real in-process stack', () => {
     // The invalid first capture was rejected back to the child.
     const retried = childRequests.find(
       (request) =>
-        firstUserText(request).startsWith('judge') && hasToolResult(request),
+        firstUserText(request).includes('\n\njudge: ') &&
+        hasToolResult(request),
     )!
     expect(JSON.stringify(retried.messages)).toContain(
       'missing required property',

@@ -56,7 +56,7 @@ const summary = computed(() => {
               :size="14"
               class="spin"
             />
-            <span v-else class="ring" />
+            <span v-else class="pending-marker" />
           </span>
           <span class="content" :title="item.content">{{ item.content }}</span>
         </li>
@@ -174,7 +174,7 @@ const summary = computed(() => {
   color: rgb(var(--accent-fill));
 }
 
-.ring {
+.pending-marker {
   box-sizing: border-box;
   width: var(--space-3);
   height: var(--space-3);

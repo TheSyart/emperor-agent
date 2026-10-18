@@ -1,3 +1,5 @@
+import { createRoutingChildProvider } from '../delegation/workflow-provider'
+import { DelegationInteractionBridge } from '../delegation/interactions'
 /**
  * `HarnessHost`: the single composition root of Emperor's agent kernel.
  *
@@ -8,8 +10,15 @@
  * UI through the projector, and answers pending interactions for CoreApi.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from 'node:fs'
+import { join, resolve, relative, isAbsolute, sep } from 'node:path'
 import { AttachmentStore, type AttachmentRef } from '../../attachments/store'
 import type { MessageReference } from './message-references'
 import {
@@ -91,6 +100,12 @@ import { LocalSandbox, type SandboxBackend } from '../sandbox/backend'
 import { SandboxPolicyService, type SandboxMode } from '../sandbox/policy'
 import { SubagentManager } from '../subagent/manager'
 import { installSubagents } from '../subagent/tools'
+import { createDelegationTools } from '../delegation/tools'
+import type { DelegationService } from '../delegation/service'
+import { DelegationError, type DelegationOwner } from '../delegation/types'
+import type { DelegationParentContext } from '../delegation/policy'
+import { discoverInstructionFiles } from '../prompt/agent-instructions'
+import { workspaceMutationDomain } from '../../workspace/mutation-coordinator'
 import {
   createSpawnChildProvider,
   installWorkflow,
@@ -226,9 +241,22 @@ export class HarnessHost {
   readonly questions = new UserQuestionService()
   readonly compaction: CompactionEngine
   readonly jobs = new JobRegistry()
-  readonly goals = new GoalService()
+  readonly goals = new GoalService({
+    requiresCompletionVerification: (agent, ref) =>
+      (this.delegations?.requiredForGoal(ref, this.rootOf(agent).id).length ??
+        0) > 0,
+    completionCurrent: (agent, ref) =>
+      this.delegations?.goalCompletionCurrent(ref, this.rootOf(agent).id) ??
+      true,
+    verifyCompletion: async (agent, ref) => {
+      await this.delegations?.verifyGoalCompletion(ref, this.rootOf(agent).id)
+    },
+  })
   readonly goalInstall: InstalledGoal
   readonly subagents: SubagentManager
+  delegations: DelegationService | null = null
+  delegationQuestionTimeoutMs = () => 15 * 60 * 1000
+  readonly delegationInteractions: DelegationInteractionBridge
   /** Dynamic workflows (`workflow` / `ralph` tools) over in-process subagents. */
   readonly workflows: WorkflowEngine
   readonly workflowRuns = new WorkflowRunRegistry()
@@ -306,13 +334,39 @@ export class HarnessHost {
       approval: this.approval,
     })
     this.workflows = new WorkflowEngine([
-      createSpawnChildProvider({ manager: this.subagents, llm: this.llm }),
+      createRoutingChildProvider({
+        internal: createSpawnChildProvider({
+          manager: this.subagents,
+          llm: this.llm,
+        }),
+        delegations: () => this.delegations ?? undefined,
+        ownerResolver: (agent, callId) => this.delegationOwner(agent, callId),
+        readOnly: (agent) => {
+          const parent = this.delegationParent(
+            this.delegationOwner(agent, 'workflow'),
+          )
+          return parent.policy.mode === 'read-only' || !!parent.planMode
+        },
+      }),
     ])
     this.hooks = new ClaudeCodeHooks({
       configPaths: defaultHookConfigPaths({ stateRoot: kept.paths.stateRoot }),
     })
     this.mcpTools = new McpToolBridge(kept.mcpClient, this.tools)
     kept.mcpClient.setReservedToolNames(() => this.mcpTools.reservedNames())
+    this.delegationInteractions = new DelegationInteractionBridge({
+      pending: this.pending,
+      root: (id) => {
+        try {
+          return this.agentFor(id)
+        } catch {
+          return undefined
+        }
+      },
+      available: (owner) =>
+        this.eventSink !== null && owner.source !== 'scheduler',
+      timeoutMs: () => this.delegationQuestionTimeoutMs(),
+    })
     this.goalInstall = this.compose(options)
   }
 
@@ -480,12 +534,75 @@ export class HarnessHost {
     installMcpConfigPromptSection(prompt, {
       configPath: mcpConfigDisplayPath(this.kept.paths.stateRoot),
     })
-    installSubagents(this.subagents, tools, prompt)
+    installSubagents(
+      this.subagents,
+      tools,
+      prompt,
+      createDelegationTools({
+        internalManager: this.subagents,
+        delegations: () => this.delegations ?? undefined,
+        ownerResolver: (agent, callId) => this.delegationOwner(agent, callId),
+        canControl: (agent, owner) => this.canControlDelegation(agent, owner),
+        parentReadOnly: (agent) =>
+          this.sandbox.resolve({ session: agent.session }).mode === 'read-only',
+        briefContext: (agent) => {
+          const cwd = this.sandbox.resolve({
+              session: agent.session,
+            }).workspaceRoot,
+            root = workspaceMutationDomain(cwd)
+          const instructions = discoverInstructionFiles(cwd, {
+            globalDir: this.kept.paths.stateRoot,
+          }).filter((file) => {
+            if (
+              file.absolutePath === join(this.kept.paths.stateRoot, 'AGENTS.md')
+            )
+              return false
+            const path = relative(root, realpathSync(file.absolutePath))
+            if (
+              isAbsolute(path) ||
+              path === '..' ||
+              path.startsWith('..' + sep)
+            )
+              throw new DelegationError(
+                'PERMISSION_DENIED',
+                'workspace instruction resolves outside source root',
+              )
+            if (
+              statSync(file.absolutePath).size > Buffer.byteLength(file.content)
+            )
+              throw new DelegationError(
+                'BRIEF_LIMIT',
+                'workspace instruction exceeds complete brief budget',
+              )
+            return true
+          })
+          const goal = this.goals.get(this.rootOf(agent))
+          return {
+            instructions,
+            ...(goal && goal.phase !== 'complete'
+              ? { goal: goal.objective }
+              : {}),
+          }
+        },
+      }),
+    )
+    prompt.context({
+      name: 'external-executors',
+      order: 121,
+      text: () =>
+        this.delegations?.executorContext() ??
+        'External executors are not composed; internal subagents remain available.',
+    })
     installWorkflow(tools, prompt, {
       engine: this.workflows,
       runs: this.workflowRuns,
     })
-    const goal = installGoal({ prompt, middleware, tools }, this.goals)
+    const goal = installGoal({ prompt, middleware, tools }, this.goals, {
+      driverOptions: {
+        hasOutstandingDelegations: (id) =>
+          this.delegations?.hasOutstanding(id) ?? false,
+      },
+    })
     void createGoalTools
     // Middleware (order matters): instructions, memory, skills, compaction, hooks.
     middleware.preStep.push(
@@ -864,6 +981,82 @@ export class HarnessHost {
   }
 
   /** The root (session-level) agent of an owner chain. */
+  delegationOwner(agent: Agent, callId: string): DelegationOwner {
+    const root = this.rootOf(agent),
+      goal = this.goals.get(root)
+    let messageId: string | undefined
+    for (let i = root.session.events.length - 1; i >= 0; i--) {
+      const e = root.session.events[i]!
+      if (
+        e.type === 'user/message' &&
+        (e.data.source.kind === 'user' ||
+          (e.data.source.kind === 'context' &&
+            e.data.source.producer === 'scheduler'))
+      ) {
+        messageId = e.data.id
+        break
+      }
+    }
+    const activeGoal = goal && goal.phase !== 'complete' ? goal : undefined
+    return {
+      rootSessionId: root.id,
+      parentAgentId: agent.id,
+      taskScopeId: activeGoal
+        ? 'goal:' + activeGoal.id
+        : 'message:' + (messageId ?? root.id),
+      ...(activeGoal
+        ? { goalRef: { id: activeGoal.id, revision: activeGoal.revision } }
+        : {}),
+      requiredForGoal: Boolean(activeGoal),
+      parentCallId: callId,
+      depth: agent.depth + 1,
+      source:
+        currentTurnSource(root.session.events) === 'scheduler'
+          ? 'scheduler'
+          : 'model',
+    }
+  }
+  delegationParent(owner: DelegationOwner): DelegationParentContext {
+    const parent =
+      this.agents.get(owner.parentAgentId) ??
+      this.subagents.get(owner.parentAgentId)
+    if (!parent || this.rootOf(parent).id !== owner.rootSessionId)
+      throw new DelegationError(
+        'PARENT_NOT_FOUND',
+        'delegation parent is not active',
+      )
+    let policy = this.sandbox.resolve({ session: parent.session })
+    let planMode = false
+    const rank = {
+      'read-only': 0,
+      'workspace-write': 1,
+      'danger-full-access': 2,
+    }
+    for (
+      let ancestor: Agent | undefined = parent;
+      ancestor;
+      ancestor = ancestor.owner
+    ) {
+      const ancestorPolicy = this.sandbox.resolve({ session: ancestor.session })
+      if (rank[ancestorPolicy.mode] < rank[policy.mode])
+        policy = { ...policy, mode: ancestorPolicy.mode }
+      planMode ||= this.planMode.get(ancestor.session).active
+    }
+    return { cwd: policy.workspaceRoot, policy, planMode }
+  }
+  canControlDelegation(agent: Agent, owner: DelegationOwner): boolean {
+    if (this.rootOf(agent).id !== owner.rootSessionId) return false
+    if (agent.id === owner.rootSessionId || agent.id === owner.parentAgentId)
+      return true
+    let target =
+      this.agents.get(owner.parentAgentId) ??
+      this.subagents.get(owner.parentAgentId)
+    while (target) {
+      if (target.id === agent.id) return true
+      target = target.owner
+    }
+    return false
+  }
   rootOf(agent: Agent): Agent {
     let current = agent
     while (current.owner !== undefined) current = current.owner
@@ -961,6 +1154,18 @@ export class HarnessHost {
         new Set(this.queuedPrompts(sessionId).map((p) => p.prompt_id)),
       )
     const unsubscribe = agent.session.subscribe((_session, event) => {
+      if (event.type === 'sandbox/mode' || event.type === 'plan/mode') {
+        const root = this.rootOf(agent)
+        if (this.delegations?.parentPermissionsRevoked(root.id)) {
+          this.goals.disarm(root)
+          this.delegationInteractions.cancelRoot(root.id)
+          void this.delegations.stopRoot(root.id).catch((error) =>
+            logger.warn('external permission revocation needs recovery', {
+              error: String(error),
+            }),
+          )
+        }
+      }
       // The splice is logged before the inbox applies it: diff afterwards.
       if (agent.owner === undefined && event.type === 'agent/inbox/spliced')
         queueMicrotask(() => {
@@ -1146,6 +1351,23 @@ export class HarnessHost {
    * Deliver one user prompt. Resolves when the turn that consumed it ended
    * (or immediately for an interjection into a running turn).
    */
+  delegationNoticeParent(
+    owner: import('../delegation/types').DelegationOwner,
+  ): Agent | undefined {
+    const root = this.kept.sessionStore.get(owner.rootSessionId)
+    if (!root || root.archived_at || this.closed) return undefined
+    return owner.parentAgentId === owner.rootSessionId
+      ? this.agentFor(owner.rootSessionId)
+      : this.agents.get(owner.parentAgentId)
+  }
+  private resumeDelegationNotices(input: SubmitInput): void {
+    if (input.scheduler || (input.source && input.source !== 'user')) return
+    void this.delegations?.resumeRootNotices(input.sessionId).catch((error) =>
+      logger.warn('external result notification remains pending', {
+        error: String(error),
+      }),
+    )
+  }
   async submit(input: SubmitInput): Promise<SubmitResult> {
     const agent = this.agentFor(input.sessionId)
     this.activeSessionId = input.sessionId
@@ -1178,6 +1400,7 @@ export class HarnessHost {
     })
     if (input.delivery === 'interject' && agent.status === 'running') {
       agent.steer(message)
+      this.resumeDelegationNotices(input)
       return {
         sessionId: agent.id,
         messageId: message.id,
@@ -1192,6 +1415,7 @@ export class HarnessHost {
     input.signal?.addEventListener('abort', onAbort, { once: true })
     try {
       agent.followup(message)
+      this.resumeDelegationNotices(input)
       await agent.whenIdle()
     } finally {
       input.signal?.removeEventListener('abort', onAbort)
@@ -1216,13 +1440,28 @@ export class HarnessHost {
   }
 
   stop(sessionId: string): boolean {
+    this.delegationInteractions.cancelRoot(sessionId)
+    const externalActive =
+      this.delegations
+        ?.list()
+        .some(
+          (state) =>
+            state.record?.owner.rootSessionId === sessionId &&
+            state.record.availability === 'active',
+        ) ?? false
+    void this.delegations?.stopRoot(sessionId).catch((error) =>
+      logger.warn('external delegation stop requires recovery', {
+        error: String(error),
+      }),
+    )
     const agent = this.agents.get(sessionId)
-    if (agent === undefined) return false
+    if (agent === undefined) return externalActive
     const running = agent.status === 'running'
     this.pending.cancelSession(sessionId)
+    this.goals.disarm(agent)
     agent.cancel({ kind: 'user' })
     this.subagents.disposeChildrenOf(sessionId)
-    return running
+    return running || externalActive
   }
 
   isBusy(sessionId: string | null): boolean {
@@ -1516,6 +1755,12 @@ export class HarnessHost {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.delegationInteractions.cancelRoot()
+    await this.delegations?.shutdown().catch((error) =>
+      logger.warn('external delegation shutdown requires recovery', {
+        error: String(error),
+      }),
+    )
     await this.computerUse?.dispose().catch(() => {})
     for (const agent of this.agents.values()) agent.dispose()
     for (const unsubscribe of this.unsubscribes.values()) unsubscribe()

@@ -88,6 +88,14 @@ const segments = computed<Segment[]>(() =>
 .ds-md :deep(p) {
   margin: var(--space-4) 0;
 }
+.ds-md :deep(.md-image-preview) {
+  display: block;
+  max-width: min(100%, 480px);
+  max-height: 480px;
+  object-fit: contain;
+  margin: var(--space-3) 0;
+  border-radius: var(--radius-card);
+}
 
 .ds-md :deep(strong) {
   font-weight: 600;
@@ -392,6 +400,15 @@ const segments = computed<Segment[]>(() =>
 .ds-md :deep(img) {
   max-width: 100%;
   border-radius: var(--radius-row);
+}
+
+.ds-md :deep(img[role='button']) {
+  cursor: zoom-in;
+}
+
+.ds-md :deep(img[role='button']:focus-visible) {
+  outline: 2px solid rgb(var(--accent));
+  outline-offset: var(--space-1);
 }
 
 .ds-md :deep(input[type='checkbox']) {

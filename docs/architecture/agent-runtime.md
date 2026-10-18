@@ -132,7 +132,7 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 - 子代理的沙箱模式在创建时从父会话继承，审批策略为 `never`，提权请求被自动拒绝。
 - `bash` 的 `run_in_background` 把命令交给 `JobRegistry`，用 `job_output`、`job_list`、`job_kill` 管理。每个 owner 最多 10 个运行中的 job；job 结束时空闲的 owner 会被唤醒（自上次用户输入起最多连续 3 次），运行中的 owner 在下一步收到通知。
 - `workflow` / `ralph` 由 `WorkflowEngine` 执行：每次运行在一个 worker thread 里跑脚本（隔离事件循环、可强制终止，不是安全边界），脚本的 `agent()` 经 `spawn` provider 调用 `SubagentManager` 创建前台子代理（`callId` 为工具调用 id，结束后释放）；带 `schema` 的子代理通过仅对其可见的 `structured_output` 工具交付结果。运行记录以 `tool-workflow/*` 事件写入调用方 session，投影为 `workflow_started` / `workflow_progress` / `workflow_finished`。worker 入口是把自包含的工厂函数序列化后用 `new Worker(source, { eval: true })` 启动，源码模式与打包后的 `out/main` 走同一条路径。
-- CoreApi `tasks.*` 把后台 job、子代理会话与工作流运行（`kind: 'workflow'`，可读记录、取消）列在一起；桌面端的环境信息卡用 `tasks.list` 显示本会话的子智能体和后台任务，用 `tasks.transcript` 查看后台命令输出和工作流记录，用 `tasks.cancel` 停止运行中的后台命令或工作流；子会话视图用 `tasks.cancel` 停止运行中的子代理。`tasks.resume` 已退役，继续子代理需在对话中让主 Agent 使用 `send_message`。
+- CoreApi `tasks.*` 把后台 job、子代理会话与工作流运行（`kind: 'workflow'`，可读记录、取消）列在一起；桌面端的环境信息卡用共享 `agents.list` 树显示根会话的子智能体，用 `tasks.list` 显示后台任务，用 `tasks.transcript` 查看后台命令输出和工作流记录，用 `tasks.cancel` 停止运行中的后台命令或工作流；子会话视图用 `tasks.cancel` 停止运行中的子代理。`tasks.resume` 已退役，继续子代理需在对话中让主 Agent 使用 `send_message`。
 
 ## Turn 的结束语义
 
@@ -144,3 +144,7 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 - 新 session 事件类型：通过 `declare module '../../session-log/types'` 扩展 `SessionEventMap`，需要界面可见时同步 `harness/projection/`。
 - 新工具：见[扩展 Emperor Agent](../development/extending-emperor.md#新工具)。
 - 改变压缩、修复或 fork 语义时，同步 session-log 与 compaction 的测试。
+
+## 外部子会话
+
+`subagent` 可显式选择 claude-code/codex；internal 保持默认。`dlg-*` 是持久会话，`dgr-*` 是单轮 task，原生 ID 独立保存。队列继续沿用原生会话，Codex steer 绑定当前 turn；输出刷新 UI，终态才投递稳定去重通知。[完整生命周期](external-agent-delegation.md)。

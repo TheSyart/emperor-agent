@@ -103,6 +103,8 @@ export function createExecutionKit(deps: ExecutionKitDeps): ExecutionKit {
     'schema',
     'provider',
     'model',
+    'backend',
+    'profileId',
   ])
   const DEFERRED_AGENT_OPTIONS = new Set(['effort', 'isolation', 'agentType'])
 
@@ -323,6 +325,10 @@ export function createExecutionKit(deps: ExecutionKitDeps): ExecutionKit {
           run = await this.children.startAgent({
             prompt: rawPrompt,
             label,
+            ...(opts.backend === undefined ? {} : { backend: opts.backend }),
+            ...(opts.profileId === undefined
+              ? {}
+              : { profileId: opts.profileId }),
             ...(opts.schema === undefined ? {} : { schema: opts.schema }),
             ...(opts.provider === undefined ? {} : { provider: opts.provider }),
             ...(opts.model === undefined ? {} : { model: opts.model }),
@@ -344,6 +350,10 @@ export function createExecutionKit(deps: ExecutionKitDeps): ExecutionKit {
           label,
           ...(phase === undefined ? {} : { phase }),
           childId: run.id,
+          ...(run.externalRunId === undefined
+            ? {}
+            : { externalRunId: run.externalRunId }),
+          ...(run.backend === undefined ? {} : { backend: run.backend }),
         }
         this.observer.agentStart(info)
         try {
@@ -390,6 +400,8 @@ export function createExecutionKit(deps: ExecutionKitDeps): ExecutionKit {
     }
 
     private readAgentOptions(rawOpts: unknown): {
+      backend?: 'internal' | 'claude-code' | 'codex'
+      profileId?: string
       label?: string
       phase?: string
       provider?: string
@@ -419,16 +431,23 @@ export function createExecutionKit(deps: ExecutionKitDeps): ExecutionKit {
         if (SUPPORTED_AGENT_OPTIONS.has(key)) continue
         if (DEFERRED_AGENT_OPTIONS.has(key)) {
           throw new WorkflowError(
-            `agent() option "${key}" is deferred and not supported by this engine (supported: label, phase, schema, provider, model)`,
+            `agent() option "${key}" is deferred and not supported by this engine (supported: label, phase, schema, provider, model, backend, profileId)`,
             'UNSUPPORTED_OPTION',
           )
         }
         throw new WorkflowError(
-          `agent() option "${key}" is not recognized (supported: label, phase, schema, provider, model)`,
+          `agent() option "${key}" is not recognized (supported: label, phase, schema, provider, model, backend, profileId)`,
           'UNSUPPORTED_OPTION',
         )
       }
-      for (const key of ['label', 'phase', 'provider', 'model']) {
+      for (const key of [
+        'label',
+        'phase',
+        'provider',
+        'model',
+        'backend',
+        'profileId',
+      ]) {
         if (record[key] !== undefined && typeof record[key] !== 'string') {
           throw new WorkflowError(
             `agent() option "${key}" must be a string`,
@@ -436,6 +455,14 @@ export function createExecutionKit(deps: ExecutionKitDeps): ExecutionKit {
           )
         }
       }
+      if (
+        record.backend !== undefined &&
+        !['internal', 'claude-code', 'codex'].includes(record.backend as string)
+      )
+        throw new WorkflowError(
+          'agent() backend is unsupported',
+          'UNSUPPORTED_OPTION',
+        )
       let schema: ObjectJsonSchema | undefined
       if (record.schema !== undefined) {
         try {
@@ -453,6 +480,14 @@ export function createExecutionKit(deps: ExecutionKitDeps): ExecutionKit {
         }
       }
       return {
+        ...(record.backend === undefined
+          ? {}
+          : {
+              backend: record.backend as 'internal' | 'claude-code' | 'codex',
+            }),
+        ...(record.profileId === undefined
+          ? {}
+          : { profileId: record.profileId as string }),
         ...(record.label === undefined
           ? {}
           : { label: record.label as string }),

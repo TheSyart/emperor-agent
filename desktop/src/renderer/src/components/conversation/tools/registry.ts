@@ -5,6 +5,13 @@
 // `desktop_*` to the Computer Use view.
 import type { Component } from 'vue'
 import {
+  agentTitle,
+  agentSourceLabel,
+  type AgentBackend,
+  type AgentView,
+  agentPhaseLabel,
+} from '@emperor/core/runtime-contract'
+import {
   DsAgent,
   DsApi,
   DsBrowse,
@@ -37,6 +44,7 @@ import {
   mcpIdentity,
   memoryTargetLabel,
   metaOf,
+  nativeAgentTarget,
   numberArg,
   planOutcome,
   planTitle,
@@ -308,6 +316,21 @@ const SUBAGENT_STOP_LABEL: Record<string, string> = {
 }
 
 export function subagentStatusLabel(data: ToolChatData): string {
+  if (data.externalAgent) {
+    const labels: Record<string, string> = {
+      queued: '等待调度',
+      preparing: '正在准备',
+      running: '运行中',
+      waiting_input: '等待回答',
+      cancelling: '正在停止',
+      completed: '已完成',
+      failed: '失败',
+      cancelled: '已取消',
+      interrupted: '已中断',
+      outcome_unknown: '结果待确认',
+    }
+    return labels[data.externalAgent.phase] ?? data.externalAgent.phase
+  }
   const sub = data.subagent
   if (sub === undefined)
     return data.status === 'running'
@@ -319,24 +342,41 @@ export function subagentStatusLabel(data: ToolChatData): string {
   return SUBAGENT_STOP_LABEL[sub.stopReason ?? 'completed'] ?? '已结束'
 }
 
-function subagentSpec(fork: boolean): ToolViewSpec {
+function subagentBackend(data: ToolChatData): AgentBackend {
+  const backend =
+    data.externalAgent?.backend ?? stringArg(argsOf(data), 'backend')
+  return backend === 'codex' || backend === 'claude-code' ? backend : 'internal'
+}
+function subagentSpec(): ToolViewSpec {
   return {
     icon: DsSubagent,
     body: 'subagent',
-    title: () => (fork ? '分叉子代理' : '子代理'),
-    summary: (data) =>
-      join(
-        data.subagent?.description ?? stringArg(argsOf(data), 'description'),
-        subagentStatusLabel(data),
+    title: (data) =>
+      agentTitle(
+        data.externalAgent?.title ??
+          data.subagent?.description ??
+          stringArg(argsOf(data), 'description'),
+        subagentBackend(data),
       ),
+    summary: (data) =>
+      join(agentSourceLabel(subagentBackend(data)), subagentStatusLabel(data)),
   }
 }
 
 const agentMessage = (title: string, key: string): ToolViewSpec => ({
   icon: DsAgent,
   body: 'generic',
-  title: () => title,
-  summary: (data) => truncate(stringArg(argsOf(data), key) ?? ''),
+  title: (data) =>
+    data.externalAgent
+      ? agentTitle(data.externalAgent.title, data.externalAgent.backend)
+      : title,
+  summary: (data) =>
+    data.externalAgent
+      ? join(
+          agentSourceLabel(data.externalAgent.backend),
+          subagentStatusLabel(data),
+        )
+      : truncate(stringArg(argsOf(data), key) ?? ''),
 })
 
 const jobSpec = (title: string): ToolViewSpec => ({
@@ -502,11 +542,11 @@ const REGISTRY: Readonly<Record<string, ToolViewSpec>> = {
   todo_write: todoWrite,
   ask_user_question: askUserQuestion,
   exit_plan_mode: exitPlanMode,
-  subagent: subagentSpec(false),
-  subagent_fork: subagentSpec(true),
+  subagent: subagentSpec(),
+  subagent_fork: subagentSpec(),
   send_message: agentMessage('发送消息', 'message'),
-  interrupt_agent: agentMessage('中断代理', 'agent_id'),
-  list_agents: agentMessage('列出代理', 'scope'),
+  interrupt_agent: agentMessage('中断子智能体', 'agent_id'),
+  list_agents: agentMessage('列出子智能体', 'scope'),
   report: agentMessage('汇报', 'output'),
   job_output: jobSpec('任务输出'),
   job_kill: jobSpec('停止任务'),
@@ -525,7 +565,11 @@ const REGISTRY: Readonly<Record<string, ToolViewSpec>> = {
 export const REGISTERED_TOOLS: readonly string[] = Object.keys(REGISTRY)
 
 /** Resolve one wire tool name. */
-export function toolView(name: string, data?: ToolChatData): ToolViewSpec {
+export function toolView(
+  name: string,
+  data?: ToolChatData,
+  agent?: AgentView,
+): ToolViewSpec {
   if (
     name.startsWith('mcp_') &&
     name !== 'mcp_config' &&
@@ -533,7 +577,7 @@ export function toolView(name: string, data?: ToolChatData): ToolViewSpec {
     toolResources(data).some((resource) => resource.role !== 'observation')
   )
     return { ...mcp, body: 'resource' }
-  return (
+  const view =
     REGISTRY[name] ??
     (name.startsWith('mcp_') ? mcp : undefined) ??
     (isComputerUseTool(name)
@@ -542,5 +586,22 @@ export function toolView(name: string, data?: ToolChatData): ToolViewSpec {
         : browserTool
       : undefined) ??
     generic
+  if (
+    name !== 'send_message' ||
+    agent?.kind !== 'internal' ||
+    agent.backend !== 'internal' ||
+    !agent.id.startsWith('sub-')
   )
+    return view
+  return {
+    ...view,
+    title: (data) =>
+      nativeAgentTarget(data) === agent.id
+        ? agentTitle(agent.title, agent.backend)
+        : view.title(data),
+    summary: (data) =>
+      nativeAgentTarget(data) === agent.id
+        ? join(agentSourceLabel(agent.backend), agentPhaseLabel(agent.phase))
+        : view.summary(data),
+  }
 }

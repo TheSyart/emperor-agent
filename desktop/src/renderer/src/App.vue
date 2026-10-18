@@ -30,7 +30,7 @@ import {
   installNavHistory,
 } from './components/shell/navHistory'
 import SidebarRoot from './components/sidebar/SidebarRoot.vue'
-import { useSubagentCounts } from './components/sidebar/subagentCounts'
+import { useAgentTree } from './components/sidebar/agentTree'
 import { bindWorkspaceSnapshotSource } from './components/workspace/useWorkspaceSnapshot'
 import {
   openWorkspacePane,
@@ -48,6 +48,11 @@ import { buildSlashPaletteItems } from './commands'
 import { createCommandCatalogLoader } from './commandCatalog'
 import { onBrowserPairingRequest, onBrowserReveal } from './api/backend'
 import { core } from './api/http'
+import { fetchSessionLineage } from './api/sessions'
+import {
+  createRouteOwnerController,
+  routeOwnerFromLineage,
+} from './runtime/routeOwner'
 import { useBootstrap } from './composables/useBootstrap'
 import { useNotifications } from './composables/useNotifications'
 import { useRuntime } from './composables/useRuntime'
@@ -79,7 +84,7 @@ const SettingsModal = defineAsyncComponent(
 const router = useRouter()
 const route = useRoute()
 const settingsRoute = useSettingsRoute()
-const subagentCounts = useSubagentCounts()
+const agentTree = useAgentTree()
 const toast = ref('')
 const toastOpen = ref(false)
 const modelSetupPromptOpen = ref(false)
@@ -133,7 +138,7 @@ const runtime = useRuntime({
   onSessionTitleUpdated: sessionStore.applySessionTitleUpdatedEvent,
   onSessionControlPendingChanged: sessionStore.applySessionControlPending,
   refreshSessions: sessionStore.load,
-  onSubagentEvent: (owner) => subagentCounts.schedule(owner),
+  onAgentTreeChanged: (event) => agentTree.handleEvent(event),
   onNotify: (notice) => notifyFromRuntime(notice),
 })
 const {
@@ -496,35 +501,47 @@ const routeSessionId = computed(() => {
   return typeof value === 'string' ? value : ''
 })
 const startupDone = ref(false)
-let activating: string | null = null
-
+const routeOwner = createRouteOwnerController({
+  resolve: async (target) => {
+    if (sessionStore.getSession(target)) return target
+    if (target.startsWith('dlg-') || target.startsWith('dgr-')) return undefined
+    const cached = Object.values(agentTree.trees)
+      .map((tree) => tree.byId[target])
+      .find(Boolean)
+    if (cached && sessionStore.getSession(cached.rootSessionId))
+      return cached.rootSessionId
+    return routeOwnerFromLineage(
+      target,
+      await fetchSessionLineage(target),
+      (id) => Boolean(sessionStore.getSession(id)),
+    )
+  },
+  activate: onSessionActivate,
+  isActive: (owner) =>
+    owner === sessionStore.activeId.value && owner === sessionId.value,
+})
 async function syncRouteSession(): Promise<void> {
-  if (!startupDone.value) return
-  if (route.name !== 'chat' && route.name !== 'trajectory') return
+  if (!startupDone.value || !isConversationRoute(route.name)) {
+    routeOwner.cancel()
+    return
+  }
   const target = routeSessionId.value
-  const active = sessionStore.activeId.value
   if (!target) {
+    routeOwner.cancel()
+    const active = sessionStore.activeId.value
     if (active)
       await router
         .replace({ ...(sessionLocation(active) as object), query: route.query })
         .catch(() => undefined)
     return
   }
-  if (target === activating) return
-  // The sidebar store and the runtime each track an active session; creating
-  // a draft only moves the store. Activate unless BOTH already point here, or
-  // sends would still go to the previously active runtime session.
-  if (target === active && target === sessionId.value) return
-  if (!sessionStore.getSession(target)) return
-  activating = target
-  try {
-    await onSessionActivate(target)
-  } finally {
-    activating = null
-  }
+  await routeOwner.sync(target)
 }
 
-watch([routeSessionId, startupDone], () => void syncRouteSession())
+watch(
+  [routeSessionId, () => route.name, startupDone],
+  () => void syncRouteSession(),
+)
 watch(
   () => sessionStore.activeId.value,
   (active) => {

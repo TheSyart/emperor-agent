@@ -3,7 +3,7 @@
  * EnvironmentCard — 环境信息, the chat-tab card floating at the top right of
  * the conversation (async chunk; ConversationView seats it while
  * `frameActions.envCardVisible` on an active chat: beside a wide chat by
- * default until closed by hand, over a narrow one on demand).
+ * default until closed by hand, beside a narrow one on demand).
  *
  * Title: the project name in a Build session, else 环境信息. The 「…」 menu
  * holds 打开工作台 and the Git actions: 工作位置 ▸ 本地 / worktree
@@ -20,9 +20,8 @@
  *   merge or rebase is unfinished. Other sessions show one muted line.
  * - 计划: the latest `exit_plan_mode` call (conversation/planSummary.ts);
  *   click reveals its row.
- * - 子智能体: `tasks.list` of the session, active first; deterministic
- *   stable SVG character portraits and `--avatar-*` colors; three shown, 「再显示 n 个」 for the rest; click opens
- *   the child session.
+ * - 子智能体: `agents.list` shared root tree; active plus recent stable agents,
+ *   five shown initially; canonical routes preserve the root context.
  * - 后台任务: background jobs / workflow runs, only when there are any;
  *   expands to one line each (live first) with 「输出」 (TaskOutputDialog,
  *   `tasks.transcript`) and, while running, 「停止」 (`tasks.cancel`;
@@ -34,7 +33,7 @@
  *
  * Layout: absolute inside the view area. From a 1120px conversation column
  * the chat and the composer make room for it (ConversationView pads them);
- * narrower, it overlays the chat and Escape closes it.
+ * narrower, opening the card also reserves chat and composer space.
  *
  * Props: sessionId, snapshot (the viewed chat window), build (a Build session
  * bound to a project), agentBusy (a turn runs in it), child (a subagent view),
@@ -56,7 +55,6 @@ import {
   Plus,
   TriangleAlert,
   Workflow,
-  X,
 } from 'lucide-vue-next'
 import {
   computed,
@@ -82,19 +80,17 @@ import {
 import type { ChatSnapshot } from '../../../conversation/types'
 import type { RuntimeTaskRecord } from '../../../types'
 import IconButton from '../../ui/IconButton.vue'
+import EnvironmentAgents from './EnvironmentAgents.vue'
 import Menu from '../../ui/Menu.vue'
 import MenuItem from '../../ui/MenuItem.vue'
 import SubagentAvatar from '../../ui/SubagentAvatar.vue'
-import { modalLayerCount } from '../../ui/modalStack'
+import type { AgentView } from '@emperor/core/api'
 import {
   backgroundTaskLines,
   backgroundTaskSummary,
   backgroundTaskTime,
   compareBranchLink,
-  environmentSubagentGroups,
   isLiveTaskStatus,
-  SUBAGENT_STATUS_LABEL,
-  subagentTaskStatus,
   type BackgroundTaskLine,
   type CompareLink,
   type RemoteInfo,
@@ -117,12 +113,6 @@ import { requestResourceDetail } from '../resources/resourceEvents'
 import ResourceRow from '../resources/ResourceRow.vue'
 import ResourceIcon from '../resources/ResourceIcon.vue'
 
-/**
- * Conversation column width from which the card sits beside the chat
- * (mirrors the `@container conversation (min-width: 1120px)` rule in
- * ConversationView).
- */
-const ENV_CARD_INLINE_MIN = 1120
 /** Gap (px) kept under a card that runs down beside the padded composer. */
 const INLINE_BOTTOM_GAP = 16
 const VISIBLE_ROWS = 3
@@ -133,6 +123,9 @@ const TaskOutputDialog = defineAsyncComponent(
 const props = withDefaults(
   defineProps<{
     sessionId: string
+    rootSessionId?: string
+    agents?: AgentView[]
+    nativeSessionId?: string
     snapshot: ChatSnapshot
     build?: boolean
     agentBusy?: boolean
@@ -152,9 +145,8 @@ const emit = defineEmits<{
 const ctx = useAppContext()
 const router = useRouter()
 
-// ── placement: beside the chat or overlaying it ────────────────────────
+// ── placement: always beside the chat ────────────────────────
 const root = ref<HTMLElement | null>(null)
-const overlay = ref(false)
 let resizeObserver: ResizeObserver | null = null
 /**
  * ConversationView is kept alive: a cached (deactivated) card must neither
@@ -164,13 +156,13 @@ const activated = ref(true)
 /**
  * Beside the chat the composer stack is padded away from the card, so the
  * card may run down to the column bottom (px; null = the CSS cap above the
- * composer seat, used while overlaying).
+ * composer seat before the first measurement).
  */
 const inlineMaxHeight = ref<number | null>(null)
 
 /**
  * Escape closes an open card menu first (focus may still sit on its row),
- * then — only while overlaying the chat and under no modal — the card.
+ * without stealing Escape from a modal or the conversation.
  */
 function onKeydown(event: KeyboardEvent): void {
   if (!activated.value || event.key !== 'Escape') return
@@ -188,9 +180,6 @@ function onKeydown(event: KeyboardEvent): void {
     sourcesMenu.value = false
     return
   }
-  if (!overlay.value || modalLayerCount() > 0) return
-  event.preventDefault()
-  emit('close')
 }
 
 onActivated(() => {
@@ -204,12 +193,15 @@ let measureHost: (() => void) | null = null
 
 onMounted(() => {
   document.addEventListener('keydown', onKeydown)
-  const host = root.value?.closest<HTMLElement>('.conversation-root')
+  // External viewers own a bounded body above their full-width readonly footer.
+  // Native/root conversations retain their original composer/preview reservation.
+  const childSeat = root.value?.closest<HTMLElement>('.child-view-area')
+  const host =
+    childSeat ?? root.value?.closest<HTMLElement>('.conversation-root')
   if (!host || typeof ResizeObserver === 'undefined') return
   const measure = () => {
-    overlay.value = host.clientWidth < ENV_CARD_INLINE_MIN
     const card = root.value
-    if (!card || overlay.value) {
+    if (!card) {
       inlineMaxHeight.value = null
       return
     }
@@ -217,8 +209,10 @@ onMounted(() => {
     const available =
       host.getBoundingClientRect().bottom -
       card.getBoundingClientRect().top -
-      Math.max(INLINE_BOTTOM_GAP, previewLayout.reservedHeight)
-    inlineMaxHeight.value = Math.max(160, Math.round(available))
+      (childSeat
+        ? INLINE_BOTTOM_GAP
+        : Math.max(INLINE_BOTTOM_GAP, previewLayout.reservedHeight))
+    inlineMaxHeight.value = Math.max(0, Math.round(available))
   }
   measureHost = measure
   measure()
@@ -275,7 +269,7 @@ const writesBlockedReason = computed(() => {
 const writesDisabled = computed(() => Boolean(writesBlockedReason.value))
 const unavailableLine = computed(() =>
   props.child
-    ? '子会话 · 在父会话中查看变更与分支'
+    ? '子智能体 · 在父智能体中查看变更与分支'
     : '未绑定项目 · Build 会话可查看变更与分支',
 )
 const gitLine = computed(() => {
@@ -474,7 +468,6 @@ function planValue(summary: PlanSummary): string {
 
 // ── subagents and background tasks (tasks.list) ─────────────────────────
 const tasks = shallowRef<RuntimeTaskRecord[]>([])
-const showAllSubagents = ref(false)
 const backgroundOpen = ref(false)
 const showAllBackground = ref(false)
 /** The background task whose 「输出」 is open. */
@@ -503,7 +496,6 @@ watch(
   () => props.sessionId,
   () => {
     tasks.value = []
-    showAllSubagents.value = false
     backgroundOpen.value = false
     showAllBackground.value = false
     outputTask.value = null
@@ -543,27 +535,6 @@ onBeforeUnmount(() => {
   clearInterval(clockTimer)
 })
 
-const subagents = computed(() =>
-  environmentSubagentGroups(
-    tasks.value
-      .filter((task) => task.kind === 'subagent')
-      .map((task) => ({
-        id: task.id,
-        name: task.description || task.label || '子智能体',
-        status: subagentTaskStatus(task),
-        started_at: task.started_at,
-        ended_at: task.finished_at ?? task.started_at,
-      })),
-  ),
-)
-const visibleSubagents = computed(() =>
-  showAllSubagents.value
-    ? subagents.value.ordered
-    : subagents.value.ordered.slice(0, VISIBLE_ROWS),
-)
-const hiddenSubagents = computed(() =>
-  Math.max(0, subagents.value.ordered.length - VISIBLE_ROWS),
-)
 const background = computed(() => backgroundTaskSummary(tasks.value))
 const backgroundValue = computed(() =>
   background.value.running
@@ -628,7 +599,7 @@ async function stopTask(line: BackgroundTaskLine): Promise<void> {
   if (
     line.confirmStop &&
     !window.confirm(
-      `停止工作流「${line.label}」？它正在运行的子代理也会一起停止。`,
+      `停止工作流「${line.label}」？它正在运行的子智能体也会一起停止。`,
     )
   )
     return
@@ -718,7 +689,6 @@ function openLauncher(): void {
   <aside
     ref="root"
     class="environment-card"
-    :data-overlay="overlay || undefined"
     :data-session-id="sessionId"
     :style="
       inlineMaxHeight === null
@@ -728,6 +698,11 @@ function openLauncher(): void {
     aria-label="环境信息"
   >
     <header class="card-head">
+      <SubagentAvatar
+        v-if="nativeSessionId"
+        :session-id="nativeSessionId"
+        :size="24"
+      />
       <h2 class="card-title" :title="title || '环境信息'">
         {{ title || '环境信息' }}
       </h2>
@@ -741,9 +716,6 @@ function openLauncher(): void {
           <Ellipsis :size="15" />
         </IconButton>
       </span>
-      <IconButton v-if="overlay" label="关闭环境信息" @click="emit('close')">
-        <X :size="15" />
-      </IconButton>
     </header>
 
     <div class="card-body">
@@ -794,41 +766,10 @@ function openLauncher(): void {
         </button>
       </section>
 
-      <section
-        v-if="subagents.ordered.length"
-        class="section"
-        data-section="subagents"
-      >
-        <h3 class="section-head">
-          子智能体
-          <span v-if="subagents.active.length" class="section-meta"
-            >{{ subagents.active.length }} 个运行中</span
-          >
-        </h3>
-        <button
-          v-for="agent in visibleSubagents"
-          :key="agent.id"
-          type="button"
-          class="row agent"
-          :title="agent.name"
-          @click="emit('open-subagent', agent.id)"
-        >
-          <SubagentAvatar :id="agent.id" :status="agent.status" />
-          <span class="row-label">{{ agent.name }}</span>
-          <span class="row-value" :data-status="agent.status">{{
-            SUBAGENT_STATUS_LABEL[agent.status] ?? agent.status
-          }}</span>
-        </button>
-        <button
-          v-if="hiddenSubagents"
-          type="button"
-          class="more"
-          :aria-expanded="showAllSubagents"
-          @click="showAllSubagents = !showAllSubagents"
-        >
-          {{ showAllSubagents ? '收起' : `再显示 ${hiddenSubagents} 个` }}
-        </button>
-      </section>
+      <EnvironmentAgents
+        :root-session-id="rootSessionId || sessionId"
+        :agents="agents"
+      />
 
       <section
         v-if="background.total"
@@ -1179,7 +1120,7 @@ function openLauncher(): void {
   position: absolute;
   top: var(--space-3);
   right: var(--space-4);
-  z-index: var(--z-raised);
+  z-index: var(--z-sticky);
   display: flex;
   flex-direction: column;
   width: min(var(--env-card-width, 340px), 100% - 2 * var(--space-4));
@@ -1190,17 +1131,6 @@ function openLauncher(): void {
   background: rgb(var(--bg-layer-1));
   box-shadow: var(--shadow-lv2);
   color: rgb(var(--label-primary));
-}
-
-/* Beside the chat it may run past the composer seat (padded away from it),
-   so it stacks above the seat's fade. */
-.environment-card:not([data-overlay]) {
-  z-index: var(--z-sticky);
-}
-
-.environment-card[data-overlay] {
-  border-color: var(--border-l2);
-  box-shadow: var(--shadow-lv3);
 }
 
 .card-head {

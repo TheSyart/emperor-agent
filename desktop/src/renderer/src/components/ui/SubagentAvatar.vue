@@ -1,21 +1,36 @@
 <script setup lang="ts">
 import { computed, useId } from 'vue'
 import { avatarSeed } from '../workspace/environmentModel'
-import { subagentPortrait } from './subagentPortraits'
+import { SUBAGENT_PORTRAITS, subagentPortrait } from './subagentPortraits'
 
+/**
+ * One portrait per child agent. `id` (or the older `sessionId`) picks it by
+ * a stable hash; `frameId` pins a specific portrait (settings preview).
+ */
 const props = withDefaults(
-  defineProps<{ id: string; size?: number; status?: string }>(),
+  defineProps<{
+    id?: string
+    sessionId?: string
+    frameId?: string
+    size?: number
+    status?: string
+  }>(),
   { size: 24 },
 )
 // Stable identity across status updates, reorder, reload and history replay.
 const clipId = `portrait-${useId()}`
-const portrait = computed(() => subagentPortrait(avatarSeed(props.id)))
+const portrait = computed(
+  () =>
+    SUBAGENT_PORTRAITS.find((frame) => frame.id === props.frameId) ??
+    subagentPortrait(avatarSeed(props.id ?? props.sessionId ?? '')),
+)
 </script>
 
 <template>
   <span
     class="subagent-avatar"
     :data-avatar="portrait.id"
+    :data-agent-identity="id ?? sessionId"
     :data-status="status"
     :style="{ width: `${size}px`, height: `${size}px` }"
     aria-hidden="true"

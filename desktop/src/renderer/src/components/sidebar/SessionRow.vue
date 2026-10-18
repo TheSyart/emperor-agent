@@ -2,7 +2,7 @@
 /**
  * One sidebar session row (dsh Rows: 32px, radius 8, 16px status slot, 14/20
  * title, 12/20 tertiary time). Running rows show the gold pixel chase and an
- * "N 个子代理运行中" subline; hover swaps the time for a more-actions button
+ * "N 个子智能体运行中" subline; hover swaps the time for a more-actions button
  * (rename / pin / archive / delete, plus move up/down under manual sort).
  */
 import { computed, nextTick, ref } from 'vue'
@@ -146,7 +146,7 @@ defineExpose({ beginRename })
       </button>
     </div>
     <div v-if="subagents > 0" class="subline">
-      {{ subagents }} 个子代理运行中
+      {{ subagents }} 个子智能体运行中
     </div>
     <div v-else-if="indicator === 'pending' && pendingLabel" class="subline">
       {{ pendingLabel }}

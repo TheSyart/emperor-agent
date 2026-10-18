@@ -46,7 +46,7 @@ import {
 import { useRoute, useRouter } from 'vue-router'
 import { pluginDetailLocation } from '../../capabilities/pluginChoices'
 import type { SessionLineage } from '@emperor/core/runtime-contract'
-import { openLink, revealReference } from '../../api/backend'
+import { onCoreEvent, openLink, revealReference } from '../../api/backend'
 import { core } from '../../api/http'
 import { activateModelEntry, setModelReasoningEffort } from '../../api/model'
 import { fetchSessionLineage } from '../../api/sessions'
@@ -75,6 +75,7 @@ import ReadOnlyComposer from '../composer/ReadOnlyComposer.vue'
 import TodoDock from '../composer/TodoDock.vue'
 import { frameActions, useFrameState } from '../shell/frameState'
 import Button from '../ui/Button.vue'
+import { useAgentTree } from '../sidebar/agentTree'
 import { requestWorkspace } from '../workspace/workspaceState'
 import ChatTimeline from './ChatTimeline.vue'
 import ConversationHeader from './ConversationHeader.vue'
@@ -208,11 +209,67 @@ const composerPhase = computed(() =>
     busy: isActiveSession.value && ctx.busy.value,
   }),
 )
+// Durable external tasks remain useful even when this chat has no visible messages.
+const externalActivity = ref(false)
+let externalActivityGeneration = 0
+watch(
+  viewingId,
+  async (id) => {
+    const generation = ++externalActivityGeneration
+    externalActivity.value = false
+    if (!id || sessionStore.isDraftSessionId(id)) return
+    try {
+      const tasks = await core('tasks.list', { sessionId: id })
+      if (generation === externalActivityGeneration)
+        externalActivity.value = tasks.some(
+          (task) => task.kind === 'external-agent',
+        )
+    } catch {
+      /* an unavailable optional task feature does not block chat */
+    }
+  },
+  { immediate: true },
+)
+const unsubscribeExternalActivity = onCoreEvent((input) => {
+  if (!input || typeof input !== 'object') return
+  const event = input as Record<string, unknown>
+  if (
+    event.session_id === viewingId.value &&
+    String(event.event).startsWith('delegation_')
+  ) {
+    externalActivity.value = true
+    if (
+      event.event === 'delegation_run_changed' ||
+      event.event === 'delegation_receipt'
+    )
+      linkStatus.refresh()
+  }
+})
+onBeforeUnmount(() => {
+  externalActivityGeneration++
+  unsubscribeExternalActivity()
+})
+const agentTree = useAgentTree()
+const owningRootId = computed(
+  () => lineage.value?.chain[0]?.sessionId ?? viewingId.value,
+)
 const phase = computed(() =>
   conversationPhase({
     composer: composerPhase.value,
+    externalActivity:
+      externalActivity.value ||
+      Boolean(agentTree.trees[owningRootId.value]?.agents.length),
     child: child.value || unknownSession.value,
     tab: tab.value,
+    historyState:
+      viewingId.value &&
+      !viewingDraft.value &&
+      (!promptedSessions.value.has(viewingId.value) ||
+        (knownSession.value?.message_count ?? 0) > 0)
+        ? conversation.value?.sessionId === viewingId.value
+          ? conversation.value.window.value.openState
+          : 'cold'
+        : undefined,
   }),
 )
 const crumbs = computed(() =>
@@ -382,13 +439,27 @@ const projectName = computed(() =>
 
 // ── document links in replies ──────────────────────────────────────────────
 /** What reply file links point at in the active session (MarkdownHtml). */
-const linkStatus = createLinkStatusSource((href, sourceMessageId) =>
-  core('references.resolve', {
-    sessionId: viewingId.value,
-    sourceMessageId: sourceMessageId || viewingId.value,
-    href,
-    label: href,
-  }),
+const linkStatus = createLinkStatusSource(
+  (href, sourceMessageId) =>
+    core('references.resolve', {
+      sessionId: viewingId.value,
+      sourceMessageId: sourceMessageId || viewingId.value,
+      href,
+      label: href,
+    }),
+  async (reference) => {
+    if (!reference.id) return null
+    const image = await core('references.image', {
+      sessionId: viewingId.value,
+      referenceId: reference.id,
+    })
+    return image.kind === 'image' &&
+      !image.truncated &&
+      image.dataBase64 &&
+      /^image\/(png|jpeg|gif|webp)$/.test(image.mimeType)
+      ? `data:${image.mimeType};base64,${image.dataBase64}`
+      : null
+  },
 )
 provide(LINK_STATUS_KEY, linkStatus)
 // Files come and go: check again for a new session and after each turn.
@@ -682,7 +753,7 @@ async function stopChild(): Promise<void> {
     const cancelled = await core('tasks.cancel', id)
     if (!cancelled) {
       stoppingChild.value = false
-      ctx.showToast('子代理已结束或无法停止')
+      ctx.showToast('子智能体已结束或无法停止')
     }
   } catch (error) {
     stoppingChild.value = false
@@ -836,6 +907,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           ref="timeline"
           :key="viewingId"
           :session-id="viewingId"
+          :root-session-id="lineage?.chain[0]?.sessionId ?? viewingId"
           @inspect="inspectCall"
           @open-subagent="openSubagent"
           @edit-message="editMessage"
@@ -854,6 +926,8 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         v-if="envCardShown"
         :key="viewingId"
         :session-id="viewingId"
+        :root-session-id="owningRootId"
+        :native-session-id="child ? viewingId : undefined"
         :snapshot="snapshot"
         :build="buildSession"
         :agent-busy="agentBusyHere"
@@ -893,6 +967,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         :running="childRunning"
         :stopping="stoppingChild"
         @back="backToParent"
+        @root="navigate(lineage?.chain[0]?.sessionId ?? ctx.sessionId.value)"
         @stop="stopChild"
       />
       <div v-else class="stack">
@@ -983,7 +1058,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   container: conversation / inline-size;
   position: relative;
   --chat-content-width: 748px;
-  --env-card-width: 340px;
+  --env-card-width: min(340px, 42cqi);
   --composer-card-max: calc(var(--chat-content-width) + var(--space-8));
   --composer-clearance: var(--space-4);
   --dock-inset: var(--space-2);
@@ -1008,11 +1083,12 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   min-height: 0;
 }
 
-/* Wide column: the chat and the composer make room for the environment card
-   (no transition on the padding — the card appears at once). */
+/* Every opened card reserves space, including a narrow manual toggle. */
+.conversation-root[data-env-card] .chat-body-slot,
+.conversation-root[data-env-card] .composer-seat {
+  padding-inline-end: calc(var(--env-card-width) + var(--space-4));
+}
 @container conversation (min-width: 1120px) {
-  .conversation-root[data-env-card] .chat-body-slot,
-  .conversation-root[data-env-card] .stack,
   .conversation-root[data-cu-preview] .chat-body-slot {
     padding-inline-end: calc(var(--env-card-width) + var(--space-4));
   }

@@ -184,6 +184,16 @@ export class SessionLogStore {
   open(id: string): Session {
     const existing = this.get(id)
     if (existing) return existing
+    const session = this.readSnapshot(id)
+    this.attach(session)
+    this.repair(session)
+    return session
+  }
+
+  /** Read durable facts without attaching, crash repair, or writing to the log. */
+  readSnapshot(id: string): Session {
+    const live = this.get(id)
+    if (live) return live
     if (!this.persist) throw new Error(`session "${id}" not found`)
     const path = this.logPath(id)
     if (!existsSync(path)) throw new Error(`session "${id}" not found`)
@@ -211,10 +221,8 @@ export class SessionLogStore {
       }
       events.push(...decodeStorageRecord(value))
     }
-    const session = new Session(header, events, 'restore')
-    this.attach(session)
-    this.repair(session)
-    return session
+    if (header.id !== id) throw new Error('session log identity changed')
+    return new Session(header, events, 'restore')
   }
 
   /** Open if stored, else undefined. */
