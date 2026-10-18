@@ -18,10 +18,12 @@ export class DelegationPolicy {
         'DEPTH_LIMIT',
         'delegation nesting limit exceeded',
       )
-    if (parent.planMode)
+    // Plan mode explores without changing anything: a read-only review is
+    // part of that, a child that writes is not.
+    if (parent.planMode && request.workspace !== 'shared-readonly')
       throw new DelegationError(
         'PLAN_MODE_UNSUPPORTED',
-        'external execution is unavailable in parent Plan mode',
+        'in Plan mode an external child can only review read-only (workspace=shared-readonly)',
       )
     if (
       parent.policy.mode === 'read-only' &&

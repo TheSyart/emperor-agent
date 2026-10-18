@@ -319,6 +319,66 @@ describe('ApprovalPanel', () => {
     ])
   })
 
+  it('asks before an external executor spends quota: 不允许 / 本次允许 / 以后都允许', async () => {
+    // The shape Core projects for a `question/asked` with `consent`.
+    const consent = permission({
+      id: 'ask_consent-1',
+      context:
+        'Emperor 想把这个子任务交给 Codex，会使用你的 ChatGPT 额度（或 API Key 计费）',
+      questions: [
+        {
+          id: 'executor-consent',
+          header: '子智能体',
+          question:
+            'Emperor 想把这个子任务交给 Codex，会使用你的 ChatGPT 额度（或 API Key 计费）',
+          options: [
+            { id: 'allow_once', label: '本次允许' },
+            { id: 'allow_always', label: '以后都允许' },
+            { id: 'deny', label: '不允许' },
+          ],
+        },
+      ],
+      meta: {
+        interaction_type: 'permission',
+        question_id: 'consent-1',
+        executor_consent: { backend: 'codex', profileId: 'codex-default' },
+        permission: {
+          version: 2,
+          operation_count: 1,
+          operations: [
+            {
+              tool_name: 'Codex',
+              risk: 'quota',
+              reason:
+                'Emperor 想把这个子任务交给 Codex，会使用你的 ChatGPT 额度（或 API Key 计费）',
+              summary: 'Review parser',
+            },
+          ],
+        },
+      },
+    })
+    const { ctx, root } = await mount(ApprovalPanel, { interaction: consent })
+    expect(root.querySelector('.headline')?.textContent).toContain('交给 Codex')
+    expect(root.querySelector('.meta')?.textContent).toContain(
+      'Codex · 使用额度',
+    )
+    expect(root.querySelector('.command')?.textContent).toBe('Review parser')
+    expect(approvalActions(consent).map((a) => [a.label, a.variant])).toEqual([
+      ['不允许', 'danger'],
+      ['本次允许', 'outline'],
+      ['以后都允许', 'primary'],
+    ])
+    button(root, '以后都允许').click()
+    await nextTick()
+    expect(ctx.sendInteractionAnswer).toHaveBeenCalledWith('ask_consent-1', {
+      'executor-consent': {
+        option_id: 'allow_always',
+        choice: '以后都允许',
+        freeform: '',
+      },
+    })
+  })
+
   it('summarizes multi-operation requests', () => {
     const presentation = approvalPresentation(
       permission({

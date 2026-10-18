@@ -38,6 +38,10 @@ it('lists local-login executor defaults and revision-fences configuration withou
 it('uses one runtime fact store for settings and parent routing, preserving evidence on specialty edits', async () => {
   const { api } = await makeApi()
   try {
+    // Only an enabled executor appears in the parent's context (AGT-05).
+    const enabled = api.executorConfig.read()
+    enabled.profiles[1]!.enabled = true
+    api.executorConfig.update(enabled.revision, enabled)
     const profile = api.executorConfig.read().profiles[1]!
     api.executorFacts.bind(profile, { OPENAI_API_KEY: 'private-fixture-key' })
     const ctx = {
@@ -87,9 +91,11 @@ it('uses one runtime fact store for settings and parent routing, preserving evid
       reportedModel: 'observed-real-model',
       nativeCapabilities: { search: { status: 'available' } },
     })
-    expect(api.delegationRuntime.executorContext()).toContain(
-      JSON.stringify(view.runtime),
-    )
+    // The same facts, summarized (no runtime JSON in the prompt).
+    const context = api.delegationRuntime.executorContext()
+    expect(context).toContain('model=observed-real-model')
+    expect(context).toContain('search=available')
+    expect(context).not.toContain('"nativeCapabilities"')
     const config = api.executorConfig.read()
     config.profiles[1]!.specialties = ['自定义调研']
     await api.executors.configure({ expectedRevision: config.revision, config })

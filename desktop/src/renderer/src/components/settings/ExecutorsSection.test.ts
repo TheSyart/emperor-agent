@@ -607,3 +607,40 @@ it('refreshes model candidates independently and preserves unsaved specialty and
     refresh: true,
   })
 })
+it('explains once that external subagents are now off by default; dismissing saves nothing else', async () => {
+  const value = payload() as any
+  value.config.upgradeNotice = 'external-default-off'
+  listExecutors.mockResolvedValue(value)
+  await mount()
+  const notice = root.querySelector('[data-executor-upgrade-notice]')!
+  expect(notice.textContent).toContain('默认关闭')
+  expect(notice.textContent).toContain('已关闭')
+  // A draft edit on the page is not saved by dismissing the notice.
+  await toggle('codex')
+  notice
+    .querySelector<HTMLButtonElement>('[data-dismiss-upgrade-notice]')!
+    .click()
+  await settle()
+  expect(configureExecutors).toHaveBeenCalledTimes(1)
+  const sent = configureExecutors.mock.calls[0]![0]
+  expect(sent.expectedRevision).toBe(7)
+  expect(sent.config.upgradeNotice).toBeUndefined()
+  expect(sent.config.profiles[1].enabled).toBe(false)
+  expect(root.querySelector('[data-executor-upgrade-notice]')).toBeNull()
+  // The draft survives and can still be saved.
+  expect(action('save-executors').disabled).toBe(false)
+})
+it('says that Emperor asks before the first dispatch, or that the user chose always', async () => {
+  const value = payload() as any
+  value.config.profiles[0].enabled = true
+  value.config.profiles[1].enabled = true
+  value.profiles[1].consent = 'always'
+  listExecutors.mockResolvedValue(value)
+  await mount()
+  expect(
+    row('codex').querySelector('[data-executor-consent]')!.textContent,
+  ).toContain('以后都允许')
+  expect(
+    row('claude-code').querySelector('[data-executor-consent]')!.textContent,
+  ).toContain('征得你的同意')
+})

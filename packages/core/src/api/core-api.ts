@@ -4,7 +4,6 @@
  * adds the operation surface (sessions, config, workspace, git, terminals,
  * scheduler, plugins, environment, diagnostics) on top of it.
  */
-import { randomUUID } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
@@ -167,6 +166,8 @@ import type { DelegationProjection } from '../harness/delegation/events'
 import { ExecutorRegistry } from '../harness/delegation/registry'
 import { DelegationService } from '../harness/delegation/service'
 import { ExecutorRuntimeService } from '../harness/delegation/runtime'
+import { ExecutorConsentStore } from '../harness/delegation/consent'
+import { createLoginShellEnvironment } from '../harness/delegation/login-shell'
 import { ExecutorModelCatalogService } from '../harness/delegation/models'
 import { nativeGeneratedImageRoot } from '../harness/delegation/image-proof'
 import { ClaudeExecutorAdapter } from '../harness/delegation/adapters/claude'
@@ -652,12 +653,15 @@ export class CoreApi {
       privateHome: resolve(this.paths.stateRoot, 'git', 'runtime-home'),
     })
     this.executorConfig = new ExecutorConfigStore(this.paths.delegationsRoot)
+    const executorConsent = new ExecutorConsentStore(this.paths.delegationsRoot)
+    host.delegationConsent.store = executorConsent
     this.executorFacts = new ExecutorFactsStore(
       this.paths.delegationsRoot,
       opts.verifyGeneratedImage,
     )
     const executorRuntime = new ExecutorRuntimeService({
       root: this.paths.delegationsRoot,
+      loginShell: createLoginShellEnvironment(),
       resolveRoute: async (id, backend) => {
         const config = await loadModelConfig(this.paths.modelConfigFile)
         const entry = config.raw.models.find((entry) => entry.entryId === id)
@@ -693,10 +697,7 @@ export class CoreApi {
     const checkExecutorAuth = async (
       profile: Parameters<typeof executorRuntime.prepare>[0],
     ) => {
-      const runtime = await executorRuntime.prepare(
-        profile,
-        'dlg-probe-' + randomUUID(),
-      )
+      const runtime = await executorRuntime.probe(profile)
       this.executorFacts.bind(profile, runtime.environment)
     }
     const externalWorkspaces = new DelegationWorkspaceService({
@@ -778,6 +779,14 @@ export class CoreApi {
       onStopRoot: (id) => this.delegationAcceptance.stopRoot(id),
       onQuestion: (question, signal) =>
         host.delegationInteractions.ask(question, signal),
+      consent: (owner, profile, spec, signal) =>
+        host.delegationConsent.decide({
+          owner,
+          profile,
+          description: spec.description,
+          ...(owner.parentCallId ? { callId: owner.parentCallId } : {}),
+          ...(signal ? { signal } : {}),
+        }),
     })
     host.delegations = this.delegationRuntime
     this.agentService = new CoreAgentService({
@@ -879,6 +888,7 @@ export class CoreApi {
       assertConfigure: () => this.assertMutation('executors', 'configure'),
       refresh: () => this.delegationRuntime.probeProfiles(),
       checkAuth: checkExecutorAuth,
+      consent: executorConsent,
     })
     host.delegationQuestionTimeoutMs = () => {
       try {

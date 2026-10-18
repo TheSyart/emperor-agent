@@ -73,6 +73,8 @@ export function bwrapProfileArgs(policy: SandboxPolicy): string[] {
   if (policy.privateTempRoot !== undefined) {
     args.push('--tmpfs', '/tmp')
     for (const root of writableRoots(policy)) args.push('--bind', root, root)
+    for (const file of policy.writableFiles ?? [])
+      args.push('--bind', file, file)
     for (const root of policy.readOnlyRoots ?? [])
       args.push('--ro-bind', root, root)
   } else if (policy.mode === 'workspace-write') {
@@ -123,6 +125,12 @@ export function seatbeltProfileArgs(
       `(allow file-write* ${roots.map((root) => `(subpath ${sbplString(root)})`).join(' ')})`,
     )
   }
+  // Exact files only: the holder may rewrite them in place, but cannot
+  // create, rename or delete anything beside them.
+  for (const file of policy.writableFiles ?? [])
+    forms.push(
+      `(allow file-write* (literal ${sbplString(canonicalPath(file))}))`,
+    )
   for (const root of policy.readOnlyRoots ?? [])
     forms.push(
       `(deny file-write* (subpath ${sbplString(canonicalPath(root))}))`,

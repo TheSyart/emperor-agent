@@ -8,7 +8,17 @@ import {
 } from '../tools/definition'
 import type { Agent } from '../agent/agent'
 import type { SubagentManager } from '../subagent/manager'
-import { createSubagentTools } from '../subagent/tools'
+import {
+  createSubagentTools,
+  subagentInput,
+  subagentDescription,
+  SEND_MESSAGE_DESCRIPTION,
+  SEND_MESSAGE_INPUT,
+  INTERRUPT_AGENT_DESCRIPTION,
+  INTERRUPT_AGENT_INPUT,
+  LIST_AGENTS_DESCRIPTION,
+  LIST_AGENTS_INPUT,
+} from '../subagent/tools'
 import type {
   DelegationOwner,
   DelegationRecord,
@@ -18,6 +28,59 @@ import type {
 import type { DelegationState } from './fold'
 import { buildDelegationContext, type DelegationBriefInput } from './context'
 import { jsonSchema } from '../tools/json-schema'
+import { DelegationError } from './types'
+
+/**
+ * The local subagent tools keep main's descriptions and parameters
+ * (AGT-05, SUB-27); everything about external executors lives in the
+ * optional fields below, each saying it applies to external backends.
+ */
+const EXTERNAL_START_FIELDS = {
+  backend: z
+    .enum(['internal', 'claude-code', 'codex'])
+    .optional()
+    .describe(
+      'Who runs the task. internal (default) is an Emperor subagent and needs none of the external fields. ' +
+        'claude-code or codex hands it to that local CLI when it is enabled in Settings (the runtime context lists enabled executors): ' +
+        'Emperor asks the user once before the first dispatch to each executor, since it uses their own quota or API billing, ' +
+        'and runs the task as an internal subagent if they decline. External children get an isolated or brief context ' +
+        '(never a fork of this conversation), are continued with send_message and collected with collect_agent.',
+    ),
+  profile_id: z
+    .string()
+    .optional()
+    .describe('External backends only: a specific executor profile id.'),
+  context: z
+    .enum(['isolated', 'brief', 'fork'])
+    .optional()
+    .describe(
+      'External backends only: isolated (default) sends just the prompt; brief adds workspace instructions and the goal. fork is internal only.',
+    ),
+  workspace: z
+    .enum(['isolated-worktree', 'shared-readonly', 'shared-exclusive'])
+    .optional()
+    .describe(
+      'External backends only: where the child works. shared-readonly reviews without writing (the only choice in Plan mode or a read-only session); isolated-worktree (default otherwise) writes in a separate worktree.',
+    ),
+  base: z
+    .enum(['committed', 'snapshot'])
+    .optional()
+    .describe(
+      'External backends only: the code the child starts from, the last commit (default) or a snapshot of the current changes.',
+    ),
+  model: z
+    .string()
+    .optional()
+    .describe(
+      "External backends only: the executor's model id; omit to use its default.",
+    ),
+  output_schema: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe(
+      'External backends only: a JSON schema the final answer must match.',
+    ),
+}
 export interface DelegationToolService {
   start(
     owner: DelegationOwner,
@@ -95,6 +158,32 @@ function closingText(
     (run.summary ?? '(executor returned no closing text)')
   )
 }
+const executorName = (backend: string) =>
+  backend === 'codex' ? 'Codex' : 'Claude Code'
+/** Tell the model the task ran locally because the user said no. */
+function withConsentNote(
+  result: Awaited<ReturnType<ToolDefinition['execute']>>,
+  backend: string,
+): Awaited<ReturnType<ToolDefinition['execute']>> {
+  const note = `The user did not allow ${executorName(backend)} for this task, so it runs as an internal subagent instead.`
+  if (typeof result === 'string') return note + '\n' + result
+  if (Array.isArray(result)) return [{ type: 'text', text: note }, ...result]
+  const content = result.content
+  return {
+    ...result,
+    content:
+      typeof content === 'string'
+        ? note + '\n' + content
+        : [{ type: 'text', text: note }, ...content],
+    meta: {
+      ...(result.meta && typeof result.meta === 'object'
+        ? (result.meta as Record<string, unknown>)
+        : {}),
+      requestedBackend: backend,
+      consent: 'denied',
+    },
+  }
+}
 export function createDelegationTools(
   options: DelegationToolOptions,
 ): ToolDefinition[] {
@@ -141,24 +230,10 @@ export function createDelegationTools(
     defineTool({
       category: 'agents',
       name,
-      description:
-        legacy.get(name)!.description +
-        ' Optional backend selects internal (default), claude-code or codex. Enabled external CLIs reuse local login and can be dispatched directly. External contexts are isolated or a host-built brief; exact fork is internal only. Collect ordinary text results directly; check file artifacts at delivery or integration.',
-      input: z.object({
-        description: z.string(),
-        prompt: z.string(),
-        run_in_background: z.boolean().optional(),
-        backend: z.enum(['internal', 'claude-code', 'codex']).optional(),
-        profile_id: z.string().optional(),
-        context: z.enum(['isolated', 'brief', 'fork']).optional(),
-        workspace: z
-          .enum(['isolated-worktree', 'shared-readonly', 'shared-exclusive'])
-          .optional(),
-        base: z.enum(['committed', 'snapshot']).optional(),
-        model: z.string().optional(),
-        provider: z.string().optional(),
-        output_schema: z.record(z.string(), z.unknown()).optional(),
-      }),
+      description: subagentDescription(name === 'subagent' ? 'spawn' : 'fork'),
+      input: subagentInput(name === 'subagent' ? 'spawn' : 'fork').extend(
+        EXTERNAL_START_FIELDS,
+      ),
       isConcurrencySafe: () => true,
       execute: async (args, ctx) => {
         const agent = caller(ctx)
@@ -168,11 +243,6 @@ export function createDelegationTools(
           throw new ToolError(
             'external executors cannot fork internal conversation history',
             'UNSUPPORTED_CONTEXT_MODE',
-          )
-        if (args.provider !== undefined)
-          throw new ToolError(
-            'external backend does not accept internal provider routing',
-            'UNSUPPORTED_OPTION',
           )
         if (ctx.signal.aborted)
           throw new ToolError('parent turn was cancelled', 'ABORTED')
@@ -186,23 +256,47 @@ export function createDelegationTools(
           description: args.description,
           context,
         })
-        const record = await service().start(owner, {
-          backend: args.backend,
-          profileId: args.profile_id,
-          description: args.description,
-          prompt,
-          context,
-          workspace:
-            args.workspace ??
-            (options.parentReadOnly?.(agent)
-              ? 'shared-readonly'
-              : 'isolated-worktree'),
-          base: args.base ?? 'committed',
-          model: args.model,
-          outputSchema: args.output_schema,
-          runInBackground: args.run_in_background ?? true,
-          clientRequestId: ctx.callId,
-        })
+        let record: DelegationRecord
+        try {
+          record = await service().start(owner, {
+            backend: args.backend,
+            profileId: args.profile_id,
+            description: args.description,
+            prompt,
+            context,
+            workspace:
+              args.workspace ??
+              (options.parentReadOnly?.(agent)
+                ? 'shared-readonly'
+                : 'isolated-worktree'),
+            base: args.base ?? 'committed',
+            model: args.model,
+            outputSchema: args.output_schema,
+            runInBackground: args.run_in_background ?? true,
+            clientRequestId: ctx.callId,
+          })
+        } catch (error) {
+          if (
+            !(error instanceof DelegationError) ||
+            error.code !== 'EXECUTOR_CONSENT_DENIED'
+          )
+            throw error
+          // The user kept their quota: the same task runs locally.
+          return withConsentNote(
+            await invoke(
+              name,
+              {
+                description: args.description,
+                prompt: args.prompt,
+                ...(args.run_in_background === undefined
+                  ? {}
+                  : { run_in_background: args.run_in_background }),
+              },
+              ctx,
+            ),
+            args.backend,
+          )
+        }
         const meta = {
           kind: 'continuable',
           subagentId: record.id,
@@ -262,13 +356,20 @@ export function createDelegationTools(
     defineTool({
       category: 'agents',
       name: 'send_message',
-      description:
-        'Queue a later turn in the same child conversation (default). Codex can steer the current turn only with delivery=steer and exact expected_run_id; Claude Code steer is unsupported. Delivery confirmation is separate from execution completion.',
-      input: z.object({
-        subagent_id: z.string(),
-        message: z.string(),
-        delivery: z.enum(['queue', 'steer']).optional(),
-        expected_run_id: z.string().optional(),
+      description: SEND_MESSAGE_DESCRIPTION,
+      input: SEND_MESSAGE_INPUT.extend({
+        delivery: z
+          .enum(['queue', 'steer'])
+          .optional()
+          .describe(
+            'External children only: queue (default) waits for the current turn; steer redirects a running Codex turn (needs expected_run_id; Claude Code cannot steer).',
+          ),
+        expected_run_id: z
+          .string()
+          .optional()
+          .describe(
+            'External children only: the run id a steer must still match.',
+          ),
       }),
       execute: async (args, ctx) => {
         if (route(args.subagent_id) === 'internal') {
@@ -302,11 +403,14 @@ export function createDelegationTools(
     defineTool({
       category: 'agents',
       name: 'interrupt_agent',
-      description:
-        'Stop an owned child run. External interruption stops queued followups and waits for process proof; unknown termination retains the writer lease.',
-      input: z.object({
-        agent_id: z.string(),
-        expected_run_id: z.string().optional(),
+      description: INTERRUPT_AGENT_DESCRIPTION,
+      input: INTERRUPT_AGENT_INPUT.extend({
+        expected_run_id: z
+          .string()
+          .optional()
+          .describe(
+            'External children only: the run to stop; defaults to the current run. Stopping an external child also cancels its queued messages.',
+          ),
       }),
       execute: async (args, ctx) => {
         if (route(args.agent_id) === 'internal')
@@ -336,11 +440,8 @@ export function createDelegationTools(
     defineTool({
       category: 'agents',
       name: 'list_agents',
-      description:
-        'List your internal and external children or descendants, with backend, conversation and current run status.',
-      input: z.object({
-        scope: z.enum(['children', 'descendants']).optional(),
-      }),
+      description: LIST_AGENTS_DESCRIPTION,
+      input: LIST_AGENTS_INPUT,
       isConcurrencySafe: () => true,
       execute: async (args, ctx) => {
         const agent = caller(ctx),

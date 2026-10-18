@@ -58,6 +58,23 @@ export function seedScenario(options) {
     { mode: 0o600 },
   )
   chmodSync(join(options.state, 'model_config.json'), 0o600)
+  // This run is explicitly authorized (--real): answer the first-dispatch
+  // consent card (AGT-05) with 以后都允许 for both executors up front.
+  mkdirSync(join(options.state, 'delegations'), {
+    recursive: true,
+    mode: 0o700,
+  })
+  writeFileSync(
+    join(options.state, 'delegations', 'consent.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      profiles: {
+        'claude-default': { grantedAt: Date.now() },
+        'codex-default': { grantedAt: Date.now() },
+      },
+    }),
+    { mode: 0o600 },
+  )
   const git = (...args) => {
     const r = spawnSync('/usr/bin/git', args, {
       cwd: options.workspace,

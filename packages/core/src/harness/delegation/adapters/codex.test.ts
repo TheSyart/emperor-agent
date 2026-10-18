@@ -1,13 +1,26 @@
 import { expect, it, vi } from 'vitest'
-import { mkdirSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { CodexExecutorAdapter } from './codex'
 import { ManagedAgentProcess } from '../process'
 import { defaultExecutorConfig } from '../config'
 import { delegationTestDirectory } from '../testing'
+import { codexAuthLockPath, linkCodexAuth } from '../codex-auth'
+import { DelegationError } from '../types'
 import type { CodexRpcOptions } from './codex-rpc'
 import type { ExecutorOpenInput } from '../types'
-function fixture(userAgent = 'codex/0.153.4') {
+function fixture(
+  userAgent = 'codex/0.153.4',
+  script = 'process.stdin.resume()',
+) {
   const f = delegationTestDirectory(),
     runtimeRoot = join(f.root, 'runtime')
   mkdirSync(runtimeRoot)
@@ -37,13 +50,24 @@ function fixture(userAgent = 'codex/0.153.4') {
     spawn({
       ...spec,
       executable: process.execPath,
-      args: ['-e', 'process.stdin.resume()'],
+      args: ['-e', script],
     }),
   )
   let callbacks: CodexRpcOptions | undefined
   const calls: { method: string; params: Record<string, unknown> }[] = []
   const respond = vi.fn(async () => undefined),
     reject = vi.fn(async () => undefined)
+  const holds = { active: 0, total: 0 }
+  const hold = vi.fn(() => {
+    holds.active++
+    holds.total++
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      holds.active--
+    }
+  })
   const request = vi.fn(async (method: string, raw: unknown) => {
     const params = raw as Record<string, unknown>
     calls.push({ method, params })
@@ -66,6 +90,7 @@ function fixture(userAgent = 'codex/0.153.4') {
         },
         respond,
         reject,
+        hold,
         close: () => options.output.end(),
       }
     },
@@ -74,10 +99,12 @@ function fixture(userAgent = 'codex/0.153.4') {
     ...f,
     input,
     adapter,
+    processes,
     calls,
     request,
     respond,
     reject,
+    holds,
     notify: (method: string, params: Record<string, unknown>) =>
       callbacks!.onNotification!(method, params),
     serverRequest: (
@@ -309,4 +336,200 @@ it('accepts a patch release of the supported minor and refuses another minor wit
     /EXECUTOR_INCOMPATIBLE.*0\.153\.x/,
   )
   minor.cleanup()
+})
+
+it('resumes without hydrating history, so a long thread cannot exceed the frame limit', async () => {
+  const f = fixture()
+  const session = await f.adapter.open({
+    ...f.input,
+    resumeSessionId: 'thread-fixture',
+  })
+  expect(
+    f.calls.find((c) => c.method === 'thread/resume')!.params,
+  ).toMatchObject({ threadId: 'thread-fixture', excludeTurns: true })
+  await session.close()
+  f.cleanup()
+})
+
+it('inspects history through thread/turns/list pages of at most 1 MiB', async () => {
+  const f = fixture()
+  const pages: Record<string, unknown>[] = []
+  f.request.mockImplementation(
+    async (
+      method: string,
+      raw: unknown,
+      _signal?: unknown,
+      options?: unknown,
+    ) => {
+      const params = raw as Record<string, unknown>
+      f.calls.push({ method, params })
+      if (method === 'initialize') return { userAgent: 'codex/0.153.4' }
+      if (method === 'thread/resume')
+        return { thread: { id: 'thread-fixture' } }
+      if (method === 'thread/read')
+        return { thread: { id: 'thread-fixture', status: { type: 'idle' } } }
+      if (method === 'thread/turns/list') {
+        pages.push({ ...params, options })
+        // A page of 8 large turns would not fit in 1 MiB; the adapter halves it.
+        if ((params.limit as number) > 4)
+          throw new DelegationError('OUTPUT_LIMIT', 'result exceeded limit')
+        // Newest first: turn-7..turn-4, then turn-3..turn-0.
+        const newest = params.cursor === 'c1' ? 3 : 7
+        return {
+          data: Array.from({ length: 4 }, (_, i) => ({
+            id: 'turn-' + (newest - i),
+            status: 'completed',
+            items: [{ type: 'agentMessage', text: 'answer ' + (newest - i) }],
+          })),
+          nextCursor: newest === 7 ? 'c1' : null,
+        }
+      }
+      return {}
+    },
+  )
+  const history = await f.adapter.inspect({
+    ...f.input,
+    resumeSessionId: 'thread-fixture',
+  })
+  expect(
+    f.calls.some((c) => c.method === 'thread/read' && c.params.includeTurns),
+  ).toBe(false)
+  expect(pages.length).toBeGreaterThan(1)
+  for (const page of pages)
+    expect(page).toMatchObject({
+      threadId: 'thread-fixture',
+      sortDirection: 'desc',
+      options: { maxResultBytes: 1024 * 1024 },
+    })
+  expect(history.nativeStatus).toBe('idle')
+  // Newest first from the server, oldest first in the inspection.
+  expect(history.turns.map((t) => t.id)).toEqual(
+    Array.from({ length: 8 }, (_, i) => 'turn-' + i),
+  )
+  expect(history.turns.at(-1)!.text).toBe('answer 7')
+  f.cleanup()
+})
+
+it('a running turn pauses the idle timer until the turn finishes or the session closes', async () => {
+  const f = fixture()
+  const session = await f.adapter.open(f.input)
+  expect(f.holds.active).toBe(0)
+  await session.submit({ runId: 'dgr-a', messageId: 'dgm-a', text: 'task' })
+  expect(f.holds.active).toBe(1)
+  f.notify('turn/completed', {
+    threadId: 'thread-fixture',
+    turn: { id: 'turn-fixture', status: 'completed' },
+  })
+  expect(f.holds.active).toBe(0)
+  await session.close()
+  expect(f.holds).toEqual({ active: 0, total: 1 })
+  const second = await f.adapter.open(f.input)
+  await second.submit({ runId: 'dgr-b', messageId: 'dgm-b', text: 'task' })
+  expect(f.holds.active).toBe(1)
+  await second.close()
+  expect(f.holds.active).toBe(0)
+  f.cleanup()
+})
+
+function authFixture(script?: string) {
+  const f = fixture('codex/0.153.4', script)
+  const home = join(f.root, 'fake-home', '.codex')
+  mkdirSync(home, { recursive: true })
+  const source = join(home, 'auth.json')
+  writeFileSync(
+    source,
+    JSON.stringify({
+      auth_mode: 'chatgpt',
+      tokens: { refresh_token: 'refresh-0', account_id: 'acct-1' },
+      last_refresh: '2026-10-10T00:00:00Z',
+    }),
+    { mode: 0o600 },
+  )
+  const link = { source, isolated: join(f.input.runtimeRoot, 'auth.json') }
+  linkCodexAuth(link)
+  const input: ExecutorOpenInput = {
+    ...f.input,
+    codexAuth: link,
+    policy: { ...f.input.policy, writableFiles: [realpathSync(source)] },
+  }
+  return { ...f, input, link }
+}
+
+it('starts app-server with file-only credential storage, never the Keychain', async () => {
+  const f = authFixture()
+  const spawn = vi.mocked(f.processes.spawn)
+  const session = await f.adapter.open(f.input)
+  const args = spawn.mock.calls[0]![0].args
+  expect(args.join(' ')).toContain('cli_auth_credentials_store="file"')
+  await session.close()
+  f.cleanup()
+})
+
+it.skipIf(process.platform !== 'darwin')(
+  'a Codex refresh written through the link reaches the user file inside the Seatbelt boundary',
+  async () => {
+    // The fake app-server rewrites auth.json in place, as Codex 0.153 does.
+    const f = authFixture(
+      `const fs=require('fs');const p=process.env.CODEX_HOME+'/auth.json';` +
+        `const a=JSON.parse(fs.readFileSync(p,'utf8'));a.tokens.refresh_token='refresh-1';` +
+        `a.last_refresh='2026-10-19T00:00:00Z';fs.writeFileSync(p,JSON.stringify(a));` +
+        `fs.writeFileSync(process.env.CODEX_HOME+'/written','1');process.stdin.resume()`,
+    )
+    const session = await f.adapter.open(f.input)
+    await vi.waitFor(
+      () => expect(existsSync(join(f.input.runtimeRoot, 'written'))).toBe(true),
+      { timeout: 5000 },
+    )
+    expect(existsSync(codexAuthLockPath(f.link))).toBe(true)
+    await session.close()
+    expect(
+      JSON.parse(readFileSync(f.link.source, 'utf8')).tokens.refresh_token,
+    ).toBe('refresh-1')
+    expect(readlinkSync(f.link.isolated)).toBe(f.link.source)
+    expect(existsSync(codexAuthLockPath(f.link))).toBe(false)
+    f.cleanup()
+  },
+)
+
+it.skipIf(process.platform !== 'darwin')(
+  'a Codex that replaces auth.json by rename still leaves the user file current',
+  async () => {
+    const f = authFixture(
+      `const fs=require('fs');const p=process.env.CODEX_HOME+'/auth.json';` +
+        `const a=JSON.parse(fs.readFileSync(p,'utf8'));a.tokens.refresh_token='refresh-1';` +
+        `a.last_refresh='2026-10-19T00:00:00Z';fs.writeFileSync(p+'.tmp',JSON.stringify(a));` +
+        `fs.renameSync(p+'.tmp',p);fs.writeFileSync(process.env.CODEX_HOME+'/written','1');process.stdin.resume()`,
+    )
+    const session = await f.adapter.open(f.input)
+    await vi.waitFor(
+      () => expect(existsSync(join(f.input.runtimeRoot, 'written'))).toBe(true),
+      { timeout: 5000 },
+    )
+    await session.close()
+    expect(
+      JSON.parse(readFileSync(f.link.source, 'utf8')).tokens.refresh_token,
+    ).toBe('refresh-1')
+    expect(lstatSync(f.link.isolated).isSymbolicLink()).toBe(true)
+    f.cleanup()
+  },
+)
+
+it('two Codex processes on the same login never run at the same time', async () => {
+  const f = authFixture()
+  const first = await f.adapter.open(f.input)
+  let opened = false
+  const second = f.adapter
+    .open({ ...f.input, delegationId: 'dlg-second' })
+    .then((session) => {
+      opened = true
+      return session
+    })
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  expect(opened).toBe(false)
+  expect(vi.mocked(f.processes.spawn)).toHaveBeenCalledTimes(1)
+  await first.close()
+  const session = await second
+  expect(vi.mocked(f.processes.spawn)).toHaveBeenCalledTimes(2)
+  await session.close()
+  f.cleanup()
 })

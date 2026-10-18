@@ -5,6 +5,9 @@ import {
   existsSync,
   symlinkSync,
   readFileSync,
+  lstatSync,
+  readlinkSync,
+  readdirSync,
 } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -12,7 +15,6 @@ import { join } from 'node:path'
 import { ExecutorRuntimeService } from './runtime'
 import { delegationTestDirectory } from './testing'
 import { defaultExecutorConfig } from './config'
-import { statSync } from 'node:fs'
 it('runs an env-node CLI from a GUI PATH while keeping the isolated HOME and auth allowlist', async () => {
   const f = delegationTestDirectory()
   try {
@@ -98,12 +100,13 @@ it('reuses explicit local CLI authentication directories without importing their
     f.cleanup()
   }
 })
-it('stages only explicit managed Codex auth fields into a private per-conversation home', async () => {
+it('links the managed Codex login into the private home instead of forking the refresh token', async () => {
   const f = delegationTestDirectory(),
     home = join(f.root, 'host-home')
   mkdirSync(join(home, '.codex'), { recursive: true })
+  const source = join(home, '.codex', 'auth.json')
   writeFileSync(
-    join(home, '.codex', 'auth.json'),
+    source,
     JSON.stringify({
       auth_mode: 'chatgpt',
       tokens: {
@@ -111,50 +114,191 @@ it('stages only explicit managed Codex auth fields into a private per-conversati
         refresh_token: 'fixture-refresh',
         id_token: 'fixture-id',
         account_id: 'fixture-account',
-        unrelated: 'omit',
       },
       last_refresh: '2026-10-16T00:00:00Z',
-      otherSecret: 'omit',
     }),
   )
-  const runtime = await new ExecutorRuntimeService({
+  const service = new ExecutorRuntimeService({
     root: f.root,
     home,
     environment: { PATH: '/fixture' },
-  }).prepare(
+  })
+  const runtime = await service.prepare(
     {
       ...defaultExecutorConfig().profiles[1]!,
       authRef: { kind: 'managed-cli-login' },
     },
     'dlg-codex',
   )
-  const path = join(runtime.environment.CODEX_HOME!, 'auth.json'),
-    auth = JSON.parse(readFileSync(path, 'utf8'))
-  expect(auth.tokens.access_token).toBe('fixture-access')
-  expect(auth.tokens.unrelated).toBeUndefined()
-  expect(auth.otherSecret).toBeUndefined()
-  expect(statSync(path).mode & 0o777).toBe(0o600)
-  expect(runtime.secretValues).toContain('fixture-access')
-  auth.tokens.access_token = 'refreshed-fixture'
-  writeFileSync(path, JSON.stringify(auth))
-  await new ExecutorRuntimeService({
-    root: f.root,
-    home,
-    environment: { PATH: '/fixture' },
-  }).prepare(
+  const path = join(runtime.environment.CODEX_HOME!, 'auth.json')
+  expect(lstatSync(path).isSymbolicLink()).toBe(true)
+  expect(readlinkSync(path)).toBe(source)
+  expect(runtime.codexAuth).toEqual({ source, isolated: path })
+  expect(runtime.secretValues).toContain('fixture-refresh')
+  // No file under the runtime root holds the refresh token.
+  const files = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory()
+        ? files(join(dir, entry.name))
+        : entry.isFile()
+          ? [join(dir, entry.name)]
+          : [],
+    )
+  for (const file of files(runtime.runtimeRoot))
+    expect(readFileSync(file, 'utf8')).not.toContain('fixture-refresh')
+  // Preparing the same conversation again keeps the link.
+  await service.prepare(
     {
       ...defaultExecutorConfig().profiles[1]!,
       authRef: { kind: 'managed-cli-login' },
     },
     'dlg-codex',
   )
-  expect(JSON.parse(readFileSync(path, 'utf8')).tokens.access_token).toBe(
-    'refreshed-fixture',
-  )
+  expect(readlinkSync(path)).toBe(source)
   expect(existsSync(join(runtime.environment.CODEX_HOME!, 'config.toml'))).toBe(
     false,
   )
   f.cleanup()
+})
+it('API key mode passes only OPENAI_API_KEY and leaves no auth.json in the private home', async () => {
+  const f = delegationTestDirectory(),
+    home = join(f.root, 'host-home')
+  mkdirSync(join(home, '.codex'), { recursive: true })
+  writeFileSync(
+    join(home, '.codex', 'auth.json'),
+    JSON.stringify({ auth_mode: 'apikey', OPENAI_API_KEY: 'fixture-key' }),
+  )
+  const service = new ExecutorRuntimeService({
+    root: f.root,
+    home,
+    environment: { PATH: '/fixture' },
+  })
+  const profile = {
+    ...defaultExecutorConfig().profiles[1]!,
+    authRef: { kind: 'managed-cli-login' as const },
+  }
+  const first = await service.prepare(profile, 'dlg-api-key')
+  // A copy forked by an older build is removed, not reused.
+  writeFileSync(
+    join(first.environment.CODEX_HOME!, 'auth.json'),
+    JSON.stringify({ auth_mode: 'chatgpt', tokens: { refresh_token: 'old' } }),
+  )
+  const runtime = await service.prepare(profile, 'dlg-api-key')
+  expect(runtime.environment.OPENAI_API_KEY).toBe('fixture-key')
+  expect(runtime.codexAuth).toBeUndefined()
+  expect(existsSync(join(runtime.environment.CODEX_HOME!, 'auth.json'))).toBe(
+    false,
+  )
+  f.cleanup()
+})
+it('probes reuse one long-lived private directory and sweep the old per-probe copies', async () => {
+  const f = delegationTestDirectory(),
+    home = join(f.root, 'host-home')
+  mkdirSync(join(home, '.codex'), { recursive: true })
+  writeFileSync(
+    join(home, '.codex', 'auth.json'),
+    JSON.stringify({
+      auth_mode: 'chatgpt',
+      tokens: { access_token: 'a', refresh_token: 'r', account_id: 'x' },
+    }),
+  )
+  const profile = defaultExecutorConfig().profiles[1]!
+  const legacy = join(
+    f.root,
+    'runtime',
+    profile.stateDirectoryId,
+    'dlg-probe-0b6ad0c3-legacy',
+  )
+  mkdirSync(join(legacy, 'codex'), { recursive: true })
+  writeFileSync(join(legacy, 'codex', 'auth.json'), '{"tokens":{}}')
+  const service = new ExecutorRuntimeService({
+    root: f.root,
+    home,
+    environment: { PATH: '/fixture' },
+  })
+  const a = await service.probe(profile),
+    b = await service.probe(profile)
+  expect(a.runtimeRoot).toBe(b.runtimeRoot)
+  const entries = readdirSync(join(f.root, 'runtime', profile.stateDirectoryId))
+  expect(entries.filter((name) => name.startsWith('dlg-probe-'))).toEqual([])
+  expect(entries).toHaveLength(1)
+  f.cleanup()
+})
+it('keeps an Azure provider query_params, such as api-version', async () => {
+  const f = delegationTestDirectory(),
+    home = join(f.root, 'host-home')
+  mkdirSync(join(home, '.codex'), { recursive: true })
+  writeFileSync(
+    join(home, '.codex', 'config.toml'),
+    'model = "gpt-5-codex"\nmodel_provider = "azure"\n[model_providers.azure]\nname = "Azure"\nbase_url = "https://fixture.openai.azure.com/openai"\nenv_key = "AZURE_OPENAI_API_KEY"\nwire_api = "responses"\nquery_params = { api-version = "2025-04-01-preview" }\n',
+  )
+  try {
+    const runtime = await new ExecutorRuntimeService({
+      root: f.root,
+      home,
+      environment: { PATH: '/fixture', AZURE_OPENAI_API_KEY: 'fixture-azure' },
+    }).prepare(defaultExecutorConfig().profiles[1]!, 'dlg-azure')
+    const { parse } = await import('smol-toml')
+    const config = parse(
+      readFileSync(
+        join(runtime.environment.CODEX_HOME!, 'config.toml'),
+        'utf8',
+      ),
+    ) as any
+    expect(config.model_providers.azure.query_params).toEqual({
+      'api-version': '2025-04-01-preview',
+    })
+    expect(runtime.environment.EMPEROR_CODEX_PROVIDER_TOKEN).toBe(
+      'fixture-azure',
+    )
+  } finally {
+    f.cleanup()
+  }
+})
+it('reads a provider env_key from the login shell when started from the Dock', async () => {
+  const f = delegationTestDirectory(),
+    home = join(f.root, 'host-home')
+  mkdirSync(join(home, '.codex'), { recursive: true })
+  writeFileSync(
+    join(home, '.codex', 'config.toml'),
+    'model_provider = "team"\n[model_providers.team]\nname = "Team"\nbase_url = "https://gateway.example/v1"\nenv_key = "TEAM_TOKEN"\nwire_api = "responses"\n[model_providers.team.env_http_headers]\nX-Team = "TEAM_HEADER"\n',
+  )
+  const asked: string[][] = []
+  try {
+    const service = new ExecutorRuntimeService({
+      root: f.root,
+      home,
+      // A Dock launch: the process has none of the shell exports.
+      environment: { PATH: '/usr/bin:/bin' },
+      loginShell: {
+        read: async (names) => {
+          asked.push([...names])
+          return { TEAM_TOKEN: 'from-zshrc', TEAM_HEADER: 'header-from-zshrc' }
+        },
+      },
+    })
+    const runtime = await service.prepare(
+      defaultExecutorConfig().profiles[1]!,
+      'dlg-dock',
+    )
+    expect(runtime.environment.EMPEROR_CODEX_PROVIDER_TOKEN).toBe('from-zshrc')
+    expect(Object.values(runtime.environment)).toContain('header-from-zshrc')
+    expect(runtime.secretValues).toContain('from-zshrc')
+    // Only the variables the provider names are asked for.
+    expect(asked).toEqual([['TEAM_HEADER', 'TEAM_TOKEN']])
+    // The login shell wins over a stale process value; the process env is the fallback.
+    const fallback = await new ExecutorRuntimeService({
+      root: f.root,
+      home,
+      environment: { PATH: '/fixture', TEAM_TOKEN: 'from-process' },
+      loginShell: { read: async () => ({}) },
+    }).prepare(defaultExecutorConfig().profiles[1]!, 'dlg-terminal')
+    expect(fallback.environment.EMPEROR_CODEX_PROVIDER_TOKEN).toBe(
+      'from-process',
+    )
+  } finally {
+    f.cleanup()
+  }
 })
 it('imports only explicit managed credential/env keys into per-conversation runtime, without copying settings or plugins', async () => {
   const f = delegationTestDirectory()

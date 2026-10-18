@@ -13,6 +13,9 @@ import { ExecutorRuntimeService } from './runtime'
 import { ExecutorFactsStore } from './facts'
 import type { NormalizedExecutorEvent } from './types'
 import { defaultExecutorConfig } from './config'
+import { acquireCodexAuth } from './codex-auth'
+import { readNativeModels } from './native-models'
+import { ManagedAgentProcess } from './process'
 const roots: string[] = []
 afterEach(() =>
   roots
@@ -275,4 +278,30 @@ it('reads a Codex model without login while keeping ordinary execution authentic
   await expect(
     runtime.prepare(f.profile, 'dlg-requires-codex-login'),
   ).rejects.toThrow('AUTH_REQUIRED')
+})
+
+it('never waits behind a running Codex task to list models, and never starts a second process on the login', async () => {
+  const f = fixture()
+  writeFileSync(
+    join(f.home, '.codex', 'auth.json'),
+    JSON.stringify({
+      auth_mode: 'chatgpt',
+      tokens: { access_token: 'a', refresh_token: 'r', account_id: 'x' },
+    }),
+  )
+  const runtime = await f.runtime.prepare(f.profile, 'dlg-models-busy')
+  expect(runtime.codexAuth).toBeDefined()
+  const running = (await acquireCodexAuth(runtime.codexAuth!))!
+  const processes = new ManagedAgentProcess()
+  const spawn = vi.spyOn(processes, 'spawn')
+  await expect(
+    readNativeModels(
+      f.profile,
+      runtime,
+      processes,
+      new AbortController().signal,
+    ),
+  ).rejects.toThrow('another Codex process')
+  expect(spawn).not.toHaveBeenCalled()
+  await running.release()
 })

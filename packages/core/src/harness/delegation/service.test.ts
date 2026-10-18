@@ -494,7 +494,12 @@ it('awaits the same shutdown barrier for concurrent and repeated close requests'
 
 it('revocation includes idle terminal conversations whose auxiliary verification can still run', async () => {
   const f = fixture()
-  const record = await f.service.start(f.owner, spec)
+  // A writing child: plan mode still allows a read-only review (AGT-05).
+  f.setParent('workspace-write')
+  const record = await f.service.start(f.owner, {
+    ...spec,
+    workspace: 'shared-exclusive',
+  })
   await f.service.wait(record.id, record.currentRunId!)
   f.setPlan(true)
   expect(f.service.inspect(record.id).record!.availability).toBe('idle')

@@ -358,3 +358,56 @@ int main(void) {
     },
   )
 })
+
+describe('host-granted single-file writes', () => {
+  it('allows writing exactly the granted files', () => {
+    const profile = seatbeltProfileArgs({
+      mode: 'read-only',
+      workspaceRoot: '/fixture',
+      privateTempRoot: '/fixture-tmp',
+      writableFiles: ['/Users/fixture/.codex/auth.json'],
+    })[1]!
+    expect(profile).toContain(
+      '(allow file-write* (literal "/Users/fixture/.codex/auth.json"))',
+    )
+    expect(profile).not.toContain('(subpath "/Users/fixture/.codex")')
+  })
+
+  it.skipIf(process.platform !== 'darwin')(
+    'a confined process can rewrite the granted file but not its neighbours',
+    () => {
+      const root = mkdtempSync(join(tmpdir(), 'emperor-file-grant-'))
+      try {
+        const home = join(root, 'home', '.codex')
+        mkdirSync(home, { recursive: true })
+        const granted = join(home, 'auth.json'),
+          neighbour = join(home, 'config.toml')
+        writeFileSync(granted, 'old')
+        writeFileSync(neighbour, 'old')
+        const sandbox = new LocalSandbox()
+        const policy = {
+          mode: 'read-only' as const,
+          workspaceRoot: root,
+          privateTempRoot: join(root, 'tmp'),
+          writableFiles: [granted],
+        }
+        mkdirSync(policy.privateTempRoot)
+        const write = (path: string) => {
+          const confined = sandbox.confine(
+            ['/bin/sh', '-c', `printf new > ${JSON.stringify(path)}`],
+            policy,
+          )
+          return spawnSync(confined.argv[0]!, confined.argv.slice(1), {
+            encoding: 'utf8',
+            timeout: 5_000,
+          })
+        }
+        expect(write(granted).status).toBe(0)
+        expect(write(neighbour).status).not.toBe(0)
+        expect(write(join(home, 'auth.json.tmp')).status).not.toBe(0)
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    },
+  )
+})

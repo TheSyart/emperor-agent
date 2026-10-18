@@ -1,12 +1,40 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  unlinkSync,
+} from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { DelegationError, type ExecutorProfile } from './types'
 import { safeDelegationKey } from './fold'
 import { durableReplaceSync } from '../../store/persistence'
 import { executorEnvironment } from './environment'
-import { inheritCodexModels, claudeModelSettings } from './local-model-config'
+import {
+  inheritCodexModels,
+  claudeModelSettings,
+  codexProviderVariables,
+} from './local-model-config'
+import {
+  linkCodexAuth,
+  removeCodexAuth,
+  type CodexAuthLink,
+} from './codex-auth'
+import type { LoginShellEnvironment } from './login-shell'
+/** The one long-lived private directory every login probe of a profile reuses. */
+export const PROBE_RUNTIME_ID = 'probe'
+export interface PreparedRuntime {
+  runtimeRoot: string
+  tempRoot: string
+  environment: Record<string, string>
+  secretValues: string[]
+  authenticationAvailable: boolean
+  /** Codex ChatGPT login: the isolated auth.json links to the user's file. */
+  codexAuth?: CodexAuthLink
+}
 export interface ExecutorCredential {
   apiKey: string
   baseUrl?: string
@@ -27,6 +55,7 @@ const baseKeys = [
   'no_proxy',
 ]
 export class ExecutorRuntimeService {
+  private readonly swept = new Set<string>()
   constructor(
     private readonly options: {
       root: string
@@ -36,20 +65,41 @@ export class ExecutorRuntimeService {
         id: string,
         backend: string,
       ) => Promise<ExecutorCredential>
+      /** Provider keys exported in ~/.zshrc (absent from a Dock launch). */
+      loginShell?: LoginShellEnvironment
     },
   ) {}
+  /**
+   * Login check for settings: prepares the profile's one long-lived probe
+   * directory. Older builds made a new `dlg-probe-<uuid>` directory with a
+   * token copy on every check; those are removed once.
+   */
+  async probe(profile: ExecutorProfile): Promise<PreparedRuntime> {
+    safeDelegationKey(profile.stateDirectoryId)
+    if (!this.swept.has(profile.stateDirectoryId)) {
+      this.swept.add(profile.stateDirectoryId)
+      const directory = join(
+        this.options.root,
+        'runtime',
+        profile.stateDirectoryId,
+      )
+      try {
+        for (const name of readdirSync(directory))
+          if (name.startsWith('dlg-probe-'))
+            rmSync(join(directory, name), { recursive: true, force: true })
+      } catch {
+        /* Nothing to sweep yet. */
+      }
+    }
+    return this.prepare(profile, PROBE_RUNTIME_ID)
+  }
   async prepare(
     profile: ExecutorProfile,
     id: string,
     options: { allowUnauthenticatedConfig?: boolean } = {},
-  ): Promise<{
-    runtimeRoot: string
-    tempRoot: string
-    environment: Record<string, string>
-    secretValues: string[]
-    authenticationAvailable: boolean
-  }> {
-    let authenticationAvailable = true
+  ): Promise<PreparedRuntime> {
+    let authenticationAvailable = true,
+      codexAuth: CodexAuthLink | undefined
     safeDelegationKey(profile.stateDirectoryId)
     safeDelegationKey(id)
     const runtimeRoot = join(
@@ -115,6 +165,7 @@ export class ExecutorRuntimeService {
         if (credential.model) environment.ANTHROPIC_MODEL = credential.model
       } else {
         environment.OPENAI_API_KEY = credential.apiKey
+        removeCodexAuth(join(environment.CODEX_HOME!, 'auth.json'))
         {
           environment.OPENAI_BASE_URL =
             credential.baseUrl ?? 'https://api.openai.com/v1'
@@ -223,23 +274,25 @@ export class ExecutorRuntimeService {
     } else {
       const sourceDirectory =
         ambient.CODEX_HOME || join(this.options.home ?? homedir(), '.codex')
+      // A provider key exported in ~/.zshrc wins; the process env is the
+      // fallback (a terminal launch already has it).
+      const names = codexProviderVariables(sourceDirectory)
+      const shell =
+        names.length && this.options.loginShell
+          ? await this.options.loginShell.read(names)
+          : {}
       const customProvider = inheritCodexModels(
         sourceDirectory,
         environment.CODEX_HOME!,
-        ambient,
+        { ...ambient, ...shell },
         environment,
         credentialSecrets,
       )
       if (ambient.OPENAI_API_KEY)
         environment.OPENAI_API_KEY = ambient.OPENAI_API_KEY
-      const local = join(environment.CODEX_HOME!, 'auth.json')
-      const path = existsSync(local)
-        ? local
-        : join(
-            ambient.CODEX_HOME ||
-              join(this.options.home ?? homedir(), '.codex'),
-            'auth.json',
-          )
+      // The user's own file, never a copy left in the isolated home.
+      const path = join(sourceDirectory, 'auth.json'),
+        isolated = join(environment.CODEX_HOME!, 'auth.json')
       if (
         !existsSync(path) &&
         !customProvider &&
@@ -266,6 +319,7 @@ export class ExecutorRuntimeService {
         typeof auth.OPENAI_API_KEY === 'string' &&
         auth.OPENAI_API_KEY
       ) {
+        // API key mode: only the variable crosses into the isolated home.
         environment.OPENAI_API_KEY = auth.OPENAI_API_KEY
       } else if (!customProvider && !environment.OPENAI_API_KEY) {
         const source = auth.tokens as Record<string, unknown> | undefined
@@ -282,26 +336,23 @@ export class ExecutorRuntimeService {
             )
           authenticationAvailable = false
         }
-        const tokens = Object.fromEntries(
-          ['access_token', 'refresh_token', 'id_token', 'account_id'].flatMap(
-            (key) =>
-              typeof source?.[key] === 'string' ? [[key, source?.[key]]] : [],
-          ),
-        )
-        credentialSecrets.push(...(Object.values(tokens) as string[]))
-        if (authenticationAvailable)
-          durableReplaceSync(
-            join(environment.CODEX_HOME!, 'auth.json'),
-            JSON.stringify({
-              auth_mode: 'chatgpt',
-              OPENAI_API_KEY: null,
-              tokens,
-              ...(typeof auth.last_refresh === 'string'
-                ? { last_refresh: auth.last_refresh }
-                : {}),
-            }) + '\n',
-          )
+        // Read only to redact them from executor output.
+        for (const key of [
+          'access_token',
+          'refresh_token',
+          'id_token',
+          'account_id',
+        ])
+          if (typeof source?.[key] === 'string')
+            credentialSecrets.push(source[key] as string)
+        if (authenticationAvailable) {
+          codexAuth = { source: path, isolated }
+          // A copy forked by an older build is settled under the lock
+          // before the next Codex process starts (codex-auth.ts).
+          linkCodexAuth(codexAuth)
+        }
       }
+      if (!codexAuth) removeCodexAuth(isolated)
     }
     const secretValues = [
       ...credentialSecrets,
@@ -315,6 +366,7 @@ export class ExecutorRuntimeService {
       environment,
       secretValues,
       authenticationAvailable,
+      ...(codexAuth ? { codexAuth } : {}),
     }
   }
 }

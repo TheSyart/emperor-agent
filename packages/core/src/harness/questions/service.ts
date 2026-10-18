@@ -83,6 +83,12 @@ declare module '../../session-log/types' {
         requestId: string
         backend: string
       }
+      /** First-dispatch consent for an external executor (AGT-05). */
+      consent?: {
+        backend: string
+        profileId: string
+        description: string
+      }
     }
     'question/answered':
       | { id: string; answers: UserAnswers }

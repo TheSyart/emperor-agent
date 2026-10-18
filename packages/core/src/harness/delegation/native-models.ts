@@ -13,6 +13,12 @@ import type { ExecutorProfile } from './types'
 import type { ExecutorRuntimeService } from './runtime'
 import { claudeModelSettings } from './local-model-config'
 import { executorExecutable } from './executable'
+import {
+  CODEX_FILE_CREDENTIALS,
+  acquireCodexAuth,
+  codexAuthWritableFile,
+  type CodexAuthLease,
+} from './codex-auth'
 export interface NativeModel {
   id: string
   name?: string
@@ -27,6 +33,7 @@ export async function readNativeModels(
   signal: AbortSignal,
 ): Promise<NativeModel[]> {
   let handle: ManagedProcessHandle | undefined,
+    lease: CodexAuthLease | undefined,
     rpc: CodexRpc | undefined,
     warm: WarmQuery | undefined,
     query: Query | undefined
@@ -39,9 +46,21 @@ export async function readNativeModels(
     workspaceRoot: runtime.runtimeRoot,
     runtimeStateRoots: [runtime.runtimeRoot],
     privateTempRoot: runtime.tempRoot,
+    ...(runtime.codexAuth
+      ? { writableFiles: [codexAuthWritableFile(runtime.codexAuth)] }
+      : {}),
   }
   try {
     if (profile.backend === 'codex') {
+      // Listing models may refresh the login too. Never wait behind a running
+      // Codex task for a picker: keep the cached list instead.
+      if (runtime.codexAuth) {
+        lease = await acquireCodexAuth(runtime.codexAuth, {
+          signal,
+          wait: false,
+        })
+        if (!lease) throw new Error('another Codex process is using this login')
+      }
       handle = processes.spawn({
         executable: profile.executablePath,
         args: [
@@ -58,6 +77,7 @@ export async function readNativeModels(
           'features.apps=false',
           '-c',
           'features.memories=false',
+          ...CODEX_FILE_CREDENTIALS,
         ],
         cwd: runtime.runtimeRoot,
         env: runtime.environment,
@@ -183,6 +203,10 @@ export async function readNativeModels(
     query?.close()
     warm?.close()
     rpc?.close()
-    if (handle) await handle.terminate()
+    try {
+      if (handle) await handle.terminate()
+    } finally {
+      await lease?.release()
+    }
   }
 }

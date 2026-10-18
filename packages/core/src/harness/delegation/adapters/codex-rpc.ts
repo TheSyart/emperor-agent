@@ -24,6 +24,7 @@ interface Pending {
   reject: (error: unknown) => void
   dispose: () => void
   method: string
+  maxResultBytes?: number
 }
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
@@ -31,10 +32,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function key(id: RpcId): string {
   return typeof id + ':' + String(id)
 }
+/**
+ * JSON-RPC over the app-server's stdio. The idle timer (default 120 s) only
+ * guards a silent protocol between turns: it pauses while a server request
+ * (a question for the user) waits for its answer and while a caller holds it
+ * (a running turn). A long turn is bounded by the delegation's run limit.
+ */
 export class CodexRpc {
   private nextId = 1
   private ended = false
   private idle: ReturnType<typeof setTimeout> | undefined
+  private holds = 0
+  private unanswered = 0
   private readonly pending = new Map<RpcId, Pending>()
   private readonly requests = new Map<
     string,
@@ -53,9 +62,22 @@ export class CodexRpc {
       ),
     )
   }
+  /** Pause the idle timer until the returned release is called (idempotent). */
+  hold(): () => void {
+    this.holds++
+    this.touch()
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      this.holds--
+      this.touch()
+    }
+  }
   private touch(): void {
     if (this.idle) clearTimeout(this.idle)
-    if (this.ended) return
+    this.idle = undefined
+    if (this.ended || this.holds > 0 || this.unanswered > 0) return
     this.idle = setTimeout(
       () =>
         this.finish(
@@ -91,6 +113,7 @@ export class CodexRpc {
     method: string,
     params: unknown,
     signal?: AbortSignal,
+    options: { maxResultBytes?: number } = {},
   ): Promise<Record<string, unknown>> {
     if (this.ended)
       return Promise.reject(
@@ -125,6 +148,9 @@ export class CodexRpc {
       timer.unref()
       this.pending.set(id, {
         method,
+        ...(options.maxResultBytes
+          ? { maxResultBytes: options.maxResultBytes }
+          : {}),
         resolve,
         reject,
         dispose: () => {
@@ -156,6 +182,8 @@ export class CodexRpc {
         'server request is missing or already answered',
       )
     request.answered = true
+    this.unanswered--
+    this.touch()
     await this.write({ id, ...(payload as Record<string, unknown>) })
   }
   respond(id: RpcId, result: unknown, generation: number): Promise<void> {
@@ -205,6 +233,8 @@ export class CodexRpc {
             'server request history exceeded run limit',
           )
         this.requests.set(key(id), { id, digest, answered: false })
+        this.unanswered++
+        this.touch()
         const method = frame.method
         void Promise.resolve()
           .then(async () => {
@@ -250,8 +280,19 @@ export class CodexRpc {
           this.options.secretValues ?? [],
         ).slice(0, 4096)
         p.reject(new DelegationError('RPC_ERROR', p.method + ': ' + detail))
-      } else if (isRecord(frame.result)) p.resolve(frame.result)
-      else
+      } else if (isRecord(frame.result)) {
+        if (
+          p.maxResultBytes !== undefined &&
+          Buffer.byteLength(JSON.stringify(frame.result)) > p.maxResultBytes
+        )
+          p.reject(
+            new DelegationError(
+              'OUTPUT_LIMIT',
+              p.method + ' result exceeded the page byte limit',
+            ),
+          )
+        else p.resolve(frame.result)
+      } else
         p.reject(
           new DelegationError(
             'PROTOCOL_INVALID',

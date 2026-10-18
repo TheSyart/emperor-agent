@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用自动化能力的用户<br>
-> 最后核验：2026-09-23<br>
+> 最后核验：2026-10-19<br>
 > 事实源：`packages/core/src/scheduler/`、`packages/core/src/harness/host/scheduler.ts`、`packages/core/src/harness/hooks/`、`packages/core/src/api/services/hooks-service.ts`、`packages/core/src/watchlist/`、DesktopPet service、`desktop/src/renderer/src/components/pages/scheduler/`、`desktop/src/renderer/src/components/settings/`（Hooks / 记忆 / 桌宠分区）
 
 本页介绍预览阶段的自动化能力。它们都通过与普通对话相同的内核运行，不获得额外权限。
@@ -78,6 +78,12 @@ Watchlist 由 `memory/watchlist.md` 定义，在“设置 → 记忆”的“Wat
 
 ## 外部执行器与长任务
 
+Claude Code 和 Codex 子智能体默认关闭，因为它们会使用你自己的订阅额度（ChatGPT、Claude 订阅）或 API 计费。在「设置 › 子智能体」打开后，Emperor 第一次把任务交给某个执行器时，会在对话里弹出确认卡：「本次允许」只对这一轮对话有效；「以后都允许」以后不再询问（在设置里关闭再打开会恢复询问）；「不允许」时这个任务改由 Emperor 的本地子智能体完成。定时任务等无人值守的运行无法询问，除非你选过「以后都允许」，否则不会使用外部执行器。升级前没有改过这项设置的用户，外部执行器会被关闭，第一次打开设置页时会看到说明。Plan 模式下子智能体只能做只读审查。
+
 已启用的 Claude Code/Codex 可被父 Agent 和工作流调度。Goal 等待未结束的外部任务，不为轮询而反复调用模型；用户消息优先。Scheduler 共享同一并发/权限边界，无法人工回答的子任务问题返回 needs_user。停止根任务后不会被晚到子任务通知自动复活；重启保留成果，需要明确恢复才能继续推理。
+
+Codex 登录：Codex 子智能体与你自己的 Codex 共用 `~/.codex/auth.json` 这一份登录，不再复制令牌，子任务刷新登录后你自己的 Codex 也拿到新令牌，不会被登出。同一时间只有一个 Codex 子任务在运行，另一个会排队等待。使用 API Key 的 Codex 只把密钥作为环境变量传给子任务。Emperor 从程序坞或访达启动时，也会读取你在 `~/.zshrc` 里导出的自定义提供方密钥（例如 Azure 的 `AZURE_OPENAI_API_KEY`），Azure 的 `api-version` 等查询参数也会保留。
+
+长时间等待：Codex 子智能体向你提问后，过几分钟再回答也不会超时；长时间没有输出的命令（例如构建）也不会被中途停止。只有超过运行上限（默认 30 分钟）时才会停止，结果里写明原因是超时。多轮对话、输出很长的 Codex 子智能体也可以继续派工。
 
 版本：Claude Code 默认使用随 Emperor 发布的版本，本机 claude 自动更新不会影响它；在「设置 › 子智能体 › Claude Code › 查看详情」打开「使用本机安装的 claude」后改用本机版本，需要 2.1 或更高。Codex 使用本机安装的 CLI，需要与 Emperor 验证过的版本同属一个次版本（目前是 0.153.x）；同一次版本但协议有变化时显示「可能不兼容」，仍然可以运行，失败时结果里会注明可能是版本原因；其他版本显示「版本不兼容」和需要的版本范围。

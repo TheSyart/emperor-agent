@@ -516,11 +516,9 @@ export class SubagentManager {
         `subagent "${childId}" is not a direct child of agent "${parent.id}"`,
         'UNAUTHORIZED',
       )
-    const message = contextMessage(
-      'subagent-parent',
-      subagentTask(entry.record.description, text),
-      { form: 'relay' },
-    )
+    // A follow-up is the parent's new instruction, delivered as written; only
+    // the first turn carries the task's name (AGT-05, SUB-27).
+    const message = contextMessage('subagent-parent', text, { form: 'relay' })
     entry.agent.followup(message)
     return message.id
   }

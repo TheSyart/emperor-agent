@@ -134,11 +134,73 @@ function uiQuestions(
   }))
 }
 
+export const CONSENT_OPTION_IDS: Record<string, string> = {
+  本次允许: PERMISSION_ALLOW,
+  以后都允许: 'allow_always',
+  不允许: PERMISSION_DENY,
+}
+
+/**
+ * External-executor consent (AGT-05) as an approval card: the composer's
+ * approval takeover renders 不允许 / 本次允许 / 以后都允许 from these options.
+ * The answer still travels as an ordinary question answer (option labels).
+ */
+function consentInteraction(
+  asked: SessionEventMap['question/asked'],
+  consent: NonNullable<SessionEventMap['question/asked']['consent']>,
+  time: number,
+): InteractionPayload {
+  const question = asked.questions[0]
+  const reason = question?.question ?? ''
+  return {
+    id: questionInteractionId(asked.id),
+    kind: 'ask',
+    status: 'waiting',
+    created_at: time,
+    updated_at: time,
+    parent_call_id: asked.callId ?? null,
+    context: reason,
+    questions: [
+      {
+        id: question?.id ?? 'executor-consent',
+        header: question?.header ?? '子智能体',
+        question: reason,
+        options: (question?.options ?? []).map((option) => ({
+          id: CONSENT_OPTION_IDS[option.label] ?? option.label,
+          label: option.label,
+        })),
+      },
+    ],
+    answers: {},
+    meta: {
+      interaction_type: 'permission',
+      question_id: asked.id,
+      executor_consent: {
+        backend: consent.backend,
+        profileId: consent.profileId,
+      },
+      permission: {
+        version: 2,
+        operation_count: 1,
+        operations: [
+          {
+            tool_name: consent.backend === 'codex' ? 'Codex' : 'Claude Code',
+            risk: 'quota',
+            reason,
+            summary: consent.description,
+          },
+        ],
+      },
+    },
+  }
+}
+
 /** A pending `ask_user_question` or plan review. */
 export function questionInteraction(
   asked: SessionEventMap['question/asked'],
   time: number,
 ): InteractionPayload {
+  if (asked.consent) return consentInteraction(asked, asked.consent, time)
   if (asked.intent?.kind === 'plan-review') {
     const review = asked.questions[0]
     const plan = review?.detail ?? ''

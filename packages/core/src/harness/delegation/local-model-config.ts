@@ -20,13 +20,8 @@ export function readModelFile(path: string): string | undefined {
     )
   return data.toString('utf8')
 }
-export function inheritCodexModels(
-  source: string,
-  target: string,
-  ambient: NodeJS.ProcessEnv,
-  env: Record<string, string>,
-  secrets: string[],
-) {
+/** The user's Codex config.toml with the selected profile layered on. */
+export function readCodexModelConfig(source: string): Record<string, unknown> {
   let config: Record<string, unknown> = {}
   try {
     const raw = readModelFile(join(source, 'config.toml'))
@@ -47,6 +42,40 @@ export function inheritCodexModels(
       'Codex model configuration could not be read',
     )
   }
+  return config
+}
+/**
+ * Environment variables the selected provider reads its credentials from
+ * (`env_key`, `env_http_headers`). Unreadable configuration names none; it is
+ * reported when the configuration is inherited.
+ */
+export function codexProviderVariables(source: string): string[] {
+  let config: Record<string, unknown>
+  try {
+    config = readCodexModelConfig(source)
+  } catch {
+    return []
+  }
+  const provider = object(
+    object(config.model_providers)[text(config.model_provider) ?? 'openai'],
+  )
+  return [
+    ...new Set(
+      [
+        text(provider.env_key),
+        ...Object.values(object(provider.env_http_headers)).map(text),
+      ].filter((name): name is string => !!name),
+    ),
+  ].sort()
+}
+export function inheritCodexModels(
+  source: string,
+  target: string,
+  ambient: NodeJS.ProcessEnv,
+  env: Record<string, string>,
+  secrets: string[],
+) {
+  const config = readCodexModelConfig(source)
   const safe: Record<string, unknown> = {}
   for (const key of ['model', 'model_provider', 'model_reasoning_effort'])
     if (text(config[key])) safe[key] = text(config[key])
@@ -116,6 +145,22 @@ export function inheritCodexModels(
       }
     if (Object.keys(headers).length) picked.http_headers = headers
     if (Object.keys(envHeaders).length) picked.env_http_headers = envHeaders
+    // Azure needs `api-version`; other gateways put routing keys here.
+    const query: Record<string, string> = {}
+    for (const [key, v] of Object.entries(object(provider.query_params)).slice(
+      0,
+      32,
+    ))
+      if (
+        typeof v === 'string' &&
+        key.length > 0 &&
+        key.length <= 256 &&
+        v.length <= 4096
+      ) {
+        query[key] = v
+        if (/key|token|secret|sig|password|auth/i.test(key)) secrets.push(v)
+      }
+    if (Object.keys(query).length) picked.query_params = query
     safe.model_providers = { [providerId]: picked }
     if (text(provider.base_url)) env.OPENAI_BASE_URL = text(provider.base_url)!
   }

@@ -112,6 +112,8 @@ export function riskLabel(risk: string): string {
     medium: '中风险',
     low: '低风险',
     escalation: '需要提权',
+    // External executor consent (AGT-05): it spends the user's quota.
+    quota: '使用额度',
   }
   return labels[risk] || `风险 ${risk}`
 }

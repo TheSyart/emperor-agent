@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { z } from 'zod'
 import { DelegationError, type ExecutorConfig } from './types'
@@ -82,6 +82,8 @@ export const executorConfigSchema = z
         estimatedBudgetUsd: z.number().positive().max(10),
       })
       .strict(),
+    touchedAt: z.number().int().nonnegative().optional(),
+    upgradeNotice: z.literal('external-default-off').optional(),
   })
   .strict()
   .superRefine((c, ctx) => {
@@ -132,10 +134,12 @@ export function defaultExecutorConfig(): ExecutorConfig {
     schemaVersion: 1,
     revision: 0,
     profiles: [
+      // External executors spend the user's own subscription or API quota:
+      // off until the user turns them on (AGT-05).
       {
         id: 'claude-default',
         backend: 'claude-code',
-        enabled: true,
+        enabled: false,
         executableSource: 'bundled',
         executablePath: 'claude',
         authRef: { kind: 'managed-cli-login' },
@@ -145,7 +149,7 @@ export function defaultExecutorConfig(): ExecutorConfig {
       {
         id: 'codex-default',
         backend: 'codex',
-        enabled: true,
+        enabled: false,
         executablePath: 'codex',
         authRef: { kind: 'managed-cli-login' },
         stateDirectoryId: 'codex-default',
@@ -169,7 +173,12 @@ export class ExecutorConfigStore {
     this.file = join(root, 'config.json')
   }
   read(): ExecutorConfig {
-    if (!existsSync(this.file)) return defaultExecutorConfig()
+    if (!existsSync(this.file)) {
+      const config = defaultExecutorConfig()
+      // Never saved, but external tasks ran under the old enabled default.
+      if (this.ranExternalTasks()) config.upgradeNotice = 'external-default-off'
+      return config
+    }
     let raw: unknown, config: ExecutorConfig
     try {
       raw = JSON.parse(readFileSync(this.file, 'utf8'))
@@ -180,16 +189,37 @@ export class ExecutorConfigStore {
         'invalid or unsupported configuration; original file retained',
       )
     }
+    // External executors are opt-in (AGT-05). A file the user never saved
+    // through settings (no touchedAt) holds the old enabled default, not a
+    // choice: turn those off once and explain it on the settings page.
+    let rewrite = hasLegacyVersionPin(raw)
+    if (
+      config.touchedAt === undefined &&
+      config.profiles.some((p) => p.enabled)
+    ) {
+      for (const profile of config.profiles) profile.enabled = false
+      config.upgradeNotice = 'external-default-off'
+      rewrite = true
+    }
     // Compatibility is a handshake now (AGT-01). Drop the old exact-version
-    // pin from the file once; the revision is unchanged because nothing the
-    // user chose changed.
-    if (hasLegacyVersionPin(raw))
+    // pin from the file once. The revision is unchanged in both cases: no
+    // choice of the user's changed.
+    if (rewrite)
       try {
         durableReplaceSync(this.file, JSON.stringify(config, null, 2) + '\n')
       } catch {
-        /* Still ignored in memory; the next save drops it. */
+        /* Still applied in memory; the next save persists it. */
       }
     return config
+  }
+  private ranExternalTasks(): boolean {
+    try {
+      return readdirSync(join(this.root, 'conversations')).some((name) =>
+        name.startsWith('dlg-'),
+      )
+    } catch {
+      return false
+    }
   }
   update(expectedRevision: number, value: unknown): ExecutorConfig {
     const current = this.read()
@@ -200,6 +230,9 @@ export class ExecutorConfigStore {
       )
     const next = parseExecutorConfig(value)
     next.revision = current.revision + 1
+    // Saving is the user's choice: later upgrades keep it, the notice is seen.
+    next.touchedAt = Date.now()
+    delete next.upgradeNotice
     durableReplaceSync(this.file, JSON.stringify(next, null, 2) + '\n')
     return next
   }

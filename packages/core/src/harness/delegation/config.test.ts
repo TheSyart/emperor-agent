@@ -1,4 +1,10 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -72,12 +78,12 @@ describe('executor configuration', () => {
     expect(paths.delegationsRoot).toBe(join(store.root, 'delegations'))
     expect(paths.pathCatalog.get('delegations').createPolicy).toBe('lazy')
   })
-  it('makes both local CLI logins available for direct delegation without secret fields', () => {
+  it('uses both local CLI logins without secret fields, off until the user turns them on', () => {
     const store = setup()
     const config = store.read()
     expect(config.profiles.map((p) => [p.backend, p.enabled])).toEqual([
-      ['claude-code', true],
-      ['codex', true],
+      ['claude-code', false],
+      ['codex', false],
     ])
     expect(config.profiles.map((p) => p.authRef)).toEqual([
       { kind: 'managed-cli-login' },
@@ -193,5 +199,96 @@ describe('executor configuration', () => {
     const config = store.read()
     config.limits.globalConcurrency = 3
     expect(() => store.update(0, config)).toThrow(/EXECUTOR_CONFIG_INVALID/)
+  })
+})
+
+describe('external executors are opt-in (AGT-05)', () => {
+  const branchDefault = (revision: number, extra: object = {}) => ({
+    schemaVersion: 1,
+    revision,
+    profiles: [
+      {
+        id: 'claude-default',
+        backend: 'claude-code',
+        enabled: true,
+        executableSource: 'bundled',
+        executablePath: 'claude',
+        authRef: { kind: 'managed-cli-login' },
+        stateDirectoryId: 'claude-default',
+        concurrencyLimit: 1,
+      },
+      {
+        id: 'codex-default',
+        backend: 'codex',
+        enabled: true,
+        executablePath: 'codex',
+        authRef: { kind: 'managed-cli-login' },
+        stateDirectoryId: 'codex-default',
+        concurrencyLimit: 1,
+      },
+    ],
+    limits: {
+      globalConcurrency: 2,
+      maxQueuedMessages: 16,
+      maxRunsPerTask: 32,
+      maxDepth: 3,
+      runTimeoutMs: 1_800_000,
+      questionTimeoutMs: 900_000,
+      estimatedBudgetUsd: 10,
+    },
+    ...extra,
+  })
+  it('a fresh install has both external executors off and nothing to explain', () => {
+    const config = setup().read()
+    expect(config.profiles.map((p) => [p.backend, p.enabled])).toEqual([
+      ['claude-code', false],
+      ['codex', false],
+    ])
+    expect(config.upgradeNotice).toBeUndefined()
+  })
+  it('turns off a branch default the user never saved, once, and says so', () => {
+    const store = setup()
+    writeFileSync(store.file, JSON.stringify(branchDefault(4)))
+    const config = store.read()
+    expect(config.profiles.every((p) => !p.enabled)).toBe(true)
+    expect(config.upgradeNotice).toBe('external-default-off')
+    expect(config.revision).toBe(4)
+    const file = JSON.parse(readFileSync(store.file, 'utf8'))
+    expect(file.profiles.every((p: { enabled: boolean }) => !p.enabled)).toBe(
+      true,
+    )
+    expect(file.upgradeNotice).toBe('external-default-off')
+    expect(file.touchedAt).toBeUndefined()
+  })
+  it('keeps an executor the user turned on in settings', () => {
+    const store = setup()
+    writeFileSync(
+      store.file,
+      JSON.stringify(branchDefault(7, { touchedAt: 1_760_000_000_000 })),
+    )
+    const config = store.read()
+    expect(config.profiles.every((p) => p.enabled)).toBe(true)
+    expect(config.upgradeNotice).toBeUndefined()
+  })
+  it('saving records that the user touched the settings and clears the notice', () => {
+    const store = setup()
+    writeFileSync(store.file, JSON.stringify(branchDefault(4)))
+    const config = store.read()
+    config.profiles[1]!.enabled = true
+    const saved = store.update(4, config)
+    expect(saved.touchedAt).toEqual(expect.any(Number))
+    expect(saved.upgradeNotice).toBeUndefined()
+    const again = new ExecutorConfigStore(store.root).read()
+    expect(again.profiles[1]!.enabled).toBe(true)
+    expect(again.upgradeNotice).toBeUndefined()
+  })
+  it('explains the change to someone who ran external tasks without ever saving settings', () => {
+    const store = setup()
+    mkdirSync(join(store.root, 'conversations', 'dlg-earlier'), {
+      recursive: true,
+    })
+    const config = store.read()
+    expect(config.profiles.every((p) => !p.enabled)).toBe(true)
+    expect(config.upgradeNotice).toBe('external-default-off')
   })
 })

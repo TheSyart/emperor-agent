@@ -63,6 +63,13 @@ export interface ExecutorConfig {
   revision: number
   profiles: ExecutorProfile[]
   limits: ExecutorLimits
+  /** When the user last saved these settings (absent: never saved). */
+  touchedAt?: number
+  /**
+   * Shown once on the settings page: an upgrade turned off external
+   * executors the user had never chosen (AGT-05).
+   */
+  upgradeNotice?: 'external-default-off'
 }
 export interface ExecutorProbe {
   status:
@@ -242,6 +249,18 @@ export interface ExecutorOpenInput {
   resumeSessionId?: string
   generation: number
   signal: AbortSignal
+  /**
+   * Codex ChatGPT login: the isolated auth.json links to the user's file.
+   * The adapter holds the login lock for the process lifetime (AGT-03).
+   */
+  codexAuth?: CodexAuthLink
+}
+/** The isolated CODEX_HOME's auth.json is a symlink to the user's own file. */
+export interface CodexAuthLink {
+  /** The user's own auth.json (their CODEX_HOME or ~/.codex). */
+  source: string
+  /** `auth.json` of an isolated CODEX_HOME: a symlink to `source`. */
+  isolated: string
 }
 export interface ExecutorTurnInput {
   runId: string
@@ -368,7 +387,7 @@ export class DelegationError extends Error {
         'review_task_permission',
       ],
       PLAN_MODE_UNSUPPORTED: [
-        'Plan 模式不支持启动外部执行，请先完成计划确认。',
+        'Plan 模式下子智能体只能做只读审查；需要修改文件时请先完成计划确认。',
         'review_task_permission',
       ],
       OUTCOME_UNKNOWN: [

@@ -49,3 +49,22 @@ it('narrows full access for readonly review and enforces depth and plan boundari
     p.resolve({ ...parent, planMode: true }, spec, owner, 3),
   ).toThrow('PLAN_MODE_UNSUPPORTED')
 })
+it('plan mode allows a read-only review and refuses anything that writes', () => {
+  const p = new DelegationPolicy(),
+    owner = fixtureDelegationRecord().owner
+  for (const mode of ['workspace-write', 'danger-full-access'] as const) {
+    const parent = {
+      cwd: '/src',
+      policy: { mode, workspaceRoot: '/src' },
+      planMode: true,
+    }
+    expect(
+      p.resolve(parent, { ...spec, workspace: 'shared-readonly' }, owner, 3)
+        .mode,
+    ).toBe('read-only')
+    for (const workspace of ['isolated-worktree', 'shared-exclusive'] as const)
+      expect(() => p.resolve(parent, { ...spec, workspace }, owner, 3)).toThrow(
+        'PLAN_MODE_UNSUPPORTED',
+      )
+  }
+})

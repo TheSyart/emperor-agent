@@ -18,7 +18,7 @@ import {
 import { defaultExecutorConfig } from './config'
 import { ExecutorFactsStore } from './facts'
 import { nativeGeneratedImageRoot } from './image-proof'
-import { executorIntroduction, executorSpecialties } from './specialties'
+import { executorSpecialties } from './specialties'
 import { DelegationPolicy, type DelegationParentContext } from './policy'
 import { DelegationBudget, type BudgetLease } from './budget'
 import { DelegationJournal } from './journal'
@@ -28,7 +28,7 @@ import {
   type DelegationEvent,
 } from './fold'
 import { redactExecutorText } from './redaction'
-import { buildDelegationBrief } from './context'
+import { buildDelegationBrief, buildDelegationContext } from './context'
 import type {
   DelegationQuestion,
   DelegationQuestionOutcome,
@@ -49,6 +49,7 @@ import {
 } from './ownership'
 import { terminateRecordedProcess } from './process'
 import { durableReplaceSync } from '../../store/persistence'
+import { codexAuthWritableFile, type CodexAuthLink } from './codex-auth'
 export interface DelegationServiceOptions {
   facts?: ExecutorFactsStore
   root: string
@@ -69,6 +70,7 @@ export interface DelegationServiceOptions {
     runtimeRoot: string
     tempRoot: string
     secretValues?: string[]
+    codexAuth?: CodexAuthLink
   }>
   notices?: {
     parent: (
@@ -91,6 +93,17 @@ export interface DelegationServiceOptions {
     question: DelegationQuestion,
     signal: AbortSignal,
   ) => Promise<DelegationQuestionOutcome>
+  /**
+   * First-dispatch consent (AGT-05): false means the user did not allow this
+   * executor, and the start fails with EXECUTOR_CONSENT_DENIED before any
+   * record exists, so the caller can run the task locally instead.
+   */
+  consent?: (
+    owner: DelegationOwner,
+    profile: ExecutorProfile,
+    spec: DelegationStart,
+    signal?: AbortSignal,
+  ) => Promise<boolean>
 }
 interface Entry {
   journal: DelegationJournal
@@ -103,6 +116,8 @@ interface Entry {
   closing?: Promise<{ quiescent: boolean }>
   held?: { workspace?: ResourceLease; budget?: BudgetLease; quiescent: boolean }
   stop: boolean
+  /** The run limit (runTimeoutMs) stopped the current run. */
+  timedOut?: boolean
   inputFailure?: string
   waiters: Set<() => void>
 }
@@ -329,11 +344,16 @@ export class DelegationService {
           generation: run.generation,
           boundaryReceiptId,
           signal: controller.signal,
+          ...(runtime.codexAuth ? { codexAuth: runtime.codexAuth } : {}),
           policy: {
             mode: 'read-only',
             workspaceRoot: record.cwd,
             runtimeStateRoots: [runtime.runtimeRoot],
             privateTempRoot: runtime.tempRoot,
+            // Opening the thread may refresh the shared Codex login too.
+            ...(runtime.codexAuth
+              ? { writableFiles: [codexAuthWritableFile(runtime.codexAuth)] }
+              : {}),
           },
           onProcessStarted: async (identity) => {
             ownership = {
@@ -563,7 +583,8 @@ export class DelegationService {
       try {
         const parent = this.options.parent(record.owner)
         return (
-          !!parent.planMode ||
+          // Plan mode still allows a read-only review (AGT-05).
+          (!!parent.planMode && record.effectivePermission !== 'read-only') ||
           permissionRank(parent.policy.mode) <
             permissionRank(record.effectivePermission)
         )
@@ -704,39 +725,54 @@ export class DelegationService {
       )
     this.goalProofs.set(key, proof)
   }
+  /**
+   * Runtime context for the parent model. Nothing at all when no external
+   * executor is enabled; otherwise a short note (AGT-05: kept well under 600
+   * tokens, never telling the model to skip the user).
+   */
   executorContext(): string {
     let config: ExecutorConfig
     try {
       config = this.options.config()
     } catch {
-      return 'External executors unavailable: EXECUTOR_CONFIG_INVALID; original configuration retained.'
+      return ''
     }
+    const enabled = config.profiles.filter((profile) => profile.enabled)
+    if (!enabled.length) return ''
     return [
-      'External executor profiles (internal remains the default):',
-      'Use enabled local CLIs directly for ordinary delegation. Local availability and login are checked automatically on dispatch; an unchecked profile is not a request for user approval. Reuse sessions for follow-up. Collect successful text results directly; check file deliverables before final delivery or integration. Do not require manual artifact acceptance for text-only work.',
-      'Follow an explicit user backend choice first; otherwise reuse the existing child for the same task. Specialties are editable preferences, not rankings, tool grants or guarantees. Product introductions describe official product features, not enabled tools or verified availability for this profile. Consider both external backends for coding. Choose using the reported model (including its source/provider), host-allowed tools, advertised inventory, observed calls and native capability evidence. Unknown models remain unknown; a gateway model label is provider-reported, not an independently verified model identity. Only available native evidence proves prior successful tool use; unverified, verifying, stale and unavailable never mean ready. An unknown capability may be tried as ordinary authorized work without demanding a separate user approval or paid preflight. On native tool failure report the limitation and choose an appropriate alternative; do not silently run CLIs through Bash to bypass managed delegation, or substitute script-drawn pictures for native image generation.',
-      ...config.profiles.map((profile) => {
-        const probe = this.facts.probe(profile)
-        return (
-          profile.id +
-          ' backend=' +
-          profile.backend +
-          ' status=' +
-          (!profile.enabled ? 'disabled' : (probe?.status ?? 'unchecked')) +
-          (profile.enabled && probe?.compatibility === 'unverified'
-            ? ' compatibility=unverified(may be incompatible; a failure may be the version)'
-            : '') +
-          ' persistentSession=true queuedFollowup=true steer=' +
-          (profile.backend === 'codex') +
-          ' productIntroduction=' +
-          JSON.stringify(executorIntroduction(profile.backend)) +
-          ' specialties=' +
-          JSON.stringify(executorSpecialties(profile)) +
-          ' runtime=' +
-          JSON.stringify(this.facts.view(profile))
-        )
-      }),
+      'External subagents: the subagent tool can also hand a task to a local CLI (backend=claude-code or backend=codex). Internal subagents remain the default.',
+      'Choose an external backend when the user asks for one or the task clearly fits it; follow an explicit user choice, and reuse an existing child for follow-ups on the same task.',
+      'The first dispatch to each executor asks the user, because it uses their own subscription quota or API billing; if they decline, the task runs as an internal subagent.',
+      'Collect text results directly; check changed files before delivery or integration. A model or tool capability stays unknown until a run proves it. Do not run these CLIs through Bash to bypass managed delegation.',
+      'Enabled executors:',
+      ...enabled.map((profile) => this.executorLine(profile)),
     ].join('\n')
+  }
+  private executorLine(profile: ExecutorProfile): string {
+    const probe = this.facts.probe(profile),
+      facts = this.facts.view(profile),
+      model =
+        profile.defaultModel ??
+        facts.reportedModel ??
+        facts.configuredModel ??
+        'CLI default'
+    const parts = [
+      'status=' + (probe?.status ?? 'unchecked'),
+      ...(probe?.compatibility === 'unverified'
+        ? ['protocol unverified (a failure may be the version)']
+        : []),
+      'model=' + model,
+      'specialties=' + (executorSpecialties(profile).join(', ') || 'none'),
+      'search=' + facts.nativeCapabilities.search.status,
+      ...(profile.backend === 'codex'
+        ? [
+            'image generation=' +
+              facts.nativeCapabilities.imageGeneration.status,
+            'steer=yes',
+          ]
+        : ['steer=no']),
+    ]
+    return '- ' + profile.id + ' (' + profile.backend + '): ' + parts.join('; ')
   }
   async stopRoot(rootSessionId: string): Promise<void> {
     const auxiliary = this.options.onStopRoot?.(rootSessionId)
@@ -920,6 +956,14 @@ export class DelegationService {
     )
     const profile = this.profile(spec)
     const probe = await this.options.registry.requireAvailable(profile, signal)
+    if (
+      this.options.consent &&
+      !(await this.options.consent(owner, profile, spec, signal))
+    )
+      throw new DelegationError(
+        'EXECUTOR_CONSENT_DENIED',
+        'the user did not allow this external executor',
+      )
     if (
       signal?.aborted ||
       this.disposed ||
@@ -1241,6 +1285,7 @@ export class DelegationService {
     const controller = new AbortController()
     e.controller = controller
     e.inputFailure = undefined
+    e.timedOut = false
     e.closing = undefined
     let budget: BudgetLease | undefined,
       workspace: ResourceLease | undefined,
@@ -1352,7 +1397,12 @@ export class DelegationService {
             estimatedUsd: prior.reduce((n, r) => n + r.usage!.estimatedUsd!, 0),
           }
         : undefined
-      const dispatchText = buildDelegationBrief({
+      // The first message carries the task's name; a follow-up is a new
+      // instruction and is delivered as written (AGT-05).
+      const firstMessage = Object.keys(state.messages)[0] === messageId
+      const dispatchText = (
+        firstMessage ? buildDelegationBrief : buildDelegationContext
+      )({
         prompt: state.messages[messageId]!.text,
         description: spec.description,
         context: spec.context,
@@ -1429,6 +1479,7 @@ export class DelegationService {
         signal: controller.signal,
         runtimeRoot: runtime.runtimeRoot,
         secretValues: runtime.secretValues,
+        ...(runtime.codexAuth ? { codexAuth: runtime.codexAuth } : {}),
         policy: {
           mode: record.effectivePermission,
           workspaceRoot: record.cwd,
@@ -1437,6 +1488,11 @@ export class DelegationService {
           readOnlyRoots: lease?.snapshot
             ? [lease.snapshot.commonDir, join(lease.path, '.git')]
             : [],
+          // A token refresh rewrites the user's Codex login in place through
+          // the isolated home's link; nothing beside that one file.
+          ...(runtime.codexAuth
+            ? { writableFiles: [codexAuthWritableFile(runtime.codexAuth)] }
+            : {}),
         },
       })
       e.session = session
@@ -1476,10 +1532,12 @@ export class DelegationService {
             patch: { phase: 'running' },
           })
       })
-      timer = setTimeout(
-        () => void this.interrupt(id, activeRunId).catch(() => undefined),
-        config.limits.runTimeoutMs,
-      )
+      // The only backstop for a long turn: the protocol's idle timer pauses
+      // while a turn runs or a question waits for the user.
+      timer = setTimeout(() => {
+        e.timedOut = true
+        void this.interrupt(id, activeRunId).catch(() => undefined)
+      }, config.limits.runTimeoutMs)
       timer.unref()
       let bytes = 0
       for await (const raw of session.events) {
@@ -1659,6 +1717,7 @@ export class DelegationService {
       }
       if (current.phase === 'cancelling' && phase === 'failed')
         failureCode = 'OUTCOME_UNKNOWN'
+      if (e.timedOut && phase === 'cancelled') failureCode = 'RUN_TIMEOUT'
       const finalPhase =
         current.phase === 'cancelling' && phase === 'failed'
           ? 'outcome_unknown'

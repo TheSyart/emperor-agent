@@ -288,7 +288,11 @@ describe('SubagentManager', () => {
     const continued = h.adapter.requests
       .filter((r) => r.sessionId === childId)
       .at(-1)!
-    expect(textOf(continued)).toContain('Task: worker\n\nmore work')
+    // send_message delivers the parent's words as written (no Task: header).
+    expect(textOf(continued)).toContain('more work')
+    expect(textOf(continued).join('\n')).not.toContain(
+      'Task: worker\n\nmore work',
+    )
     const rootTexts = root.session
       .deriveMessages()
       .map((m) => messageText(m))
