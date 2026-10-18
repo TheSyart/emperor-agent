@@ -68,8 +68,10 @@ export function safeStorageService(browser: BrowserId): {
 /** The default runner — the only place the real Keychain prompt can appear.
  *  Never called under test: every caller there injects a stand-in. */
 function runSecurity(service: string, account: string): string {
+  // By absolute path (SEC-04): a `security` found on PATH would receive
+  // the browser's Safe Storage password.
   return execFileSync(
-    'security',
+    '/usr/bin/security',
     ['find-generic-password', '-w', '-s', service, '-a', account],
     { encoding: 'utf8' },
   )

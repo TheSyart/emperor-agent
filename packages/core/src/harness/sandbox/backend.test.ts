@@ -8,6 +8,16 @@ import { describe, expect, it } from 'vitest'
 import { LocalSandbox, seatbeltProfileArgs } from './backend'
 import { protectedStateDirs } from './protected-state'
 
+describe('Seatbelt runner (SEC-04)', () => {
+  it('confines through /usr/bin/sandbox-exec, never a sandbox-exec found on PATH', () => {
+    const confined = new LocalSandbox({ platform: 'darwin' }).confine(
+      ['/usr/bin/true'],
+      { mode: 'read-only', workspaceRoot: '/tmp' },
+    )
+    expect(confined.argv[0]).toBe('/usr/bin/sandbox-exec')
+  })
+})
+
 describe('Computer Use Seatbelt confinement', () => {
   it('denies Shell reads of exactly the directories the file tools refuse', () => {
     const root = mkdtempSync(join(tmpdir(), 'emperor-cu-profile-'))

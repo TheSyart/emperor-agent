@@ -1,7 +1,18 @@
+import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { createConnection, createServer, type Socket } from 'node:net'
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { readFile, rm } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   FrameDecoder,
@@ -9,11 +20,13 @@ import {
 } from '../../../../packages/core/src/harness/computer-use/protocol/framing'
 import {
   LSREGISTER,
+  MACOS_TOOLS,
   installPackagedMacosHelper,
   launchMacosHelper,
   macosHelperAppPath,
   macosNativeArch,
   macosSocketLocation,
+  signedIdentity,
   type MacosHelperInstallFs,
   type MacosHelperInstallSystem,
 } from './macos-launcher'
@@ -28,12 +41,18 @@ const HELPER_ID = 'com.emperor.agent.desktop.computer-helper'
 const TEAM = 'TEAM123456'
 const CDHASH = 'a'.repeat(40)
 const OLD_CDHASH = 'b'.repeat(40)
+// SEC-04: system tools by absolute path, never through PATH.
+const CODESIGN = '/usr/bin/codesign'
+const DITTO = '/usr/bin/ditto'
+const PLUTIL = '/usr/bin/plutil'
+const PS = '/bin/ps'
 
 interface FakeSignature {
   readonly identifier: string
   readonly team: string | null
   readonly cdHash: string
   readonly adHoc: boolean
+  readonly runtime?: boolean
 }
 interface FakeEntry {
   kind: 'dir' | 'file' | 'symlink'
@@ -58,6 +77,8 @@ class FakeInstallSystem implements MacosHelperInstallSystem {
   lsregisterFails = false
   /** Signature applied by `codesign --force --sign -` (Preview re-seal). */
   resealed: FakeSignature | null = null
+  /** A codesign that drops `--options runtime` (SEC-04 negative case). */
+  resealDropsRuntime = false
   /** Lets a test corrupt what ditto copies. */
   onDitto: ((destination: string) => void) | null = null
   private temporaryCount = 0
@@ -106,16 +127,16 @@ class FakeInstallSystem implements MacosHelperInstallSystem {
 
   async execFile(file: string, args: readonly string[]) {
     this.calls.push([file, ...args])
-    if (file === 'ps') {
+    if (file === PS) {
       if (this.psFails) throw new Error('ps failed')
       return { stdout: `${this.processes.join('\n')}\n`, stderr: '' }
     }
-    if (file === 'plutil') return { stdout: '', stderr: '' }
+    if (file === PLUTIL) return { stdout: '', stderr: '' }
     if (file === LSREGISTER) {
       if (this.lsregisterFails) throw new Error('lsregister failed')
       return { stdout: '', stderr: '' }
     }
-    if (file === 'ditto') {
+    if (file === DITTO) {
       const [from, to] = args.filter((arg) => !arg.startsWith('--')) as [
         string,
         string,
@@ -127,11 +148,16 @@ class FakeInstallSystem implements MacosHelperInstallSystem {
       this.onDitto?.(to)
       return { stdout: '', stderr: '' }
     }
-    if (file !== 'codesign') throw new Error(`unexpected command ${file}`)
+    if (file !== CODESIGN) throw new Error(`unexpected command ${file}`)
     if (args[0] === '--force') {
-      const target = this.entry(args[3]!)
+      const target = this.entry(args[args.length - 1]!)
       if (!this.resealed) throw new Error('no reseal identity')
-      target.signature = this.resealed
+      const runtime =
+        !this.resealDropsRuntime &&
+        args.some(
+          (arg, index) => arg === '--options' && args[index + 1] === 'runtime',
+        )
+      target.signature = { ...this.resealed, runtime }
       return { stdout: '', stderr: '' }
     }
     const path = args[args.length - 1]!
@@ -139,7 +165,11 @@ class FakeInstallSystem implements MacosHelperInstallSystem {
     if (!signature || this.entry(path).invalid)
       throw new Error('codesign failed')
     if (args[0] === '--verify') return { stdout: '', stderr: '' }
-    const flags = signature.adHoc ? '0x2(adhoc)' : '0x10000(runtime)'
+    const flags = signature.adHoc
+      ? signature.runtime
+        ? '0x10002(adhoc,runtime)'
+        : '0x2(adhoc)'
+      : '0x10000(runtime)'
     return {
       stdout: '',
       stderr: [
@@ -419,6 +449,56 @@ describe('macOS helper launcher paths', () => {
   })
 })
 
+describe('system tools (SEC-04)', () => {
+  it('runs codesign, ditto, plutil, ps and open from their absolute paths', () => {
+    expect(MACOS_TOOLS).toEqual({
+      codesign: '/usr/bin/codesign',
+      ditto: '/usr/bin/ditto',
+      plutil: '/usr/bin/plutil',
+      ps: '/bin/ps',
+      open: '/usr/bin/open',
+    })
+  })
+
+  it.runIf(process.platform === 'darwin')(
+    '8. checks a signature with /usr/bin/codesign when PATH starts with another codesign',
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), 'emperor-codesign-path-'))
+      const saved = process.env.PATH
+      try {
+        const probe = join(root, 'probe')
+        copyFileSync('/usr/bin/true', probe)
+        execFileSync('/usr/bin/codesign', [
+          '--force',
+          '--sign',
+          '-',
+          '--options',
+          'runtime',
+          probe,
+        ])
+        const bin = join(root, 'bin')
+        const marker = join(root, 'fake-codesign-ran')
+        mkdirSync(bin)
+        writeFileSync(
+          join(bin, 'codesign'),
+          `#!/bin/sh\ntouch '${marker}'\necho 'Identifier=com.emperor.agent.desktop.computer-helper' >&2\necho 'CDHash=${'f'.repeat(40)}' >&2\necho 'TeamIdentifier=EVILTEAM00' >&2\nexit 0\n`,
+        )
+        chmodSync(join(bin, 'codesign'), 0o755)
+        process.env.PATH = `${bin}:${saved ?? ''}`
+        const identity = await signedIdentity(probe)
+        expect(existsSync(marker)).toBe(false)
+        expect(identity.adHoc).toBe(true)
+        expect(identity.team).toBeNull()
+        expect(identity.runtime).toBe(true)
+        expect(identity.cdHash).not.toBe('f'.repeat(40))
+      } finally {
+        process.env.PATH = saved
+        rmSync(root, { recursive: true, force: true })
+      }
+    },
+  )
+})
+
 describe('packaged macOS helper installation', () => {
   it('installs the bundled helper under its CDHash in a private directory', async () => {
     const system = new FakeInstallSystem({
@@ -426,9 +506,9 @@ describe('packaged macOS helper installation', () => {
       helper: signedHelper,
     })
     await expect(install(system)).resolves.toBe(installed(CDHASH))
-    expect(system.calls.filter(([command]) => command === 'ditto')).toEqual([
+    expect(system.calls.filter(([command]) => command === DITTO)).toEqual([
       [
-        'ditto',
+        DITTO,
         SOURCE,
         `${INSTALLED_ROOT}/.pending-1/Emperor Computer Helper.app`,
       ],
@@ -444,7 +524,7 @@ describe('packaged macOS helper installation', () => {
     expect(system.entries.get(`${HOME}/.emperor`)?.mode).toBe(0o700)
     expect(system.entries.get(INSTALLED_ROOT)?.mode).toBe(0o700)
     // No stale copy, so the process list is never read.
-    expect(system.calls.some(([command]) => command === 'ps')).toBe(false)
+    expect(system.calls.some(([command]) => command === PS)).toBe(false)
   })
 
   it('re-verifies the installed copy on every launch and refuses a changed one', async () => {
@@ -456,13 +536,13 @@ describe('packaged macOS helper installation', () => {
     system.calls.length = 0
     await expect(install(system)).resolves.toBe(installed(CDHASH))
     expect(system.calls).toContainEqual([
-      'codesign',
+      CODESIGN,
       '--verify',
       '--strict',
       '--',
       installed(CDHASH),
     ])
-    expect(system.calls.some(([command]) => command === 'ditto')).toBe(false)
+    expect(system.calls.some(([command]) => command === DITTO)).toBe(false)
 
     const copy = system.entries.get(installed(CDHASH))!
     copy.signature = { ...signedHelper, cdHash: 'd'.repeat(40) }
@@ -487,7 +567,7 @@ describe('packaged macOS helper installation', () => {
       message: 'Unsafe installed Computer Use helper',
     })
     // A refused copy is never replaced or deleted behind the user's back.
-    expect(system.calls.some(([command]) => command === 'ditto')).toBe(false)
+    expect(system.calls.some(([command]) => command === DITTO)).toBe(false)
     expect(system.has(installed(CDHASH))).toBe(true)
   })
 
@@ -520,7 +600,7 @@ describe('packaged macOS helper installation', () => {
         code: 'DRIVER_UNAVAILABLE',
         message: 'Computer Use helper signer does not match the app',
       })
-      expect(system.calls.some(([command]) => command === 'ditto')).toBe(false)
+      expect(system.calls.some(([command]) => command === DITTO)).toBe(false)
       expect(system.has(`${HOME}/.emperor`)).toBe(false)
     }
     const wrongApp = new FakeInstallSystem({
@@ -565,9 +645,9 @@ describe('packaged macOS helper installation', () => {
     }
     await expect(install(system)).resolves.toBe(installed(resealed))
     // A downloaded Preview's quarantine must not reach the resealed copy.
-    expect(system.calls.filter(([command]) => command === 'ditto')).toEqual([
+    expect(system.calls.filter(([command]) => command === DITTO)).toEqual([
       [
-        'ditto',
+        DITTO,
         '--noqtn',
         SOURCE,
         `${INSTALLED_ROOT}/.pending-1/Emperor Computer Helper.app`,
@@ -575,7 +655,7 @@ describe('packaged macOS helper installation', () => {
     ])
     const plist = `${INSTALLED_ROOT}/.pending-1/Emperor Computer Helper.app/Contents/Info.plist`
     expect(system.calls).toContainEqual([
-      'plutil',
+      PLUTIL,
       '-replace',
       'EmperorExpectedMainCDHash',
       '-string',
@@ -583,7 +663,7 @@ describe('packaged macOS helper installation', () => {
       plist,
     ])
     expect(system.calls).toContainEqual([
-      'plutil',
+      PLUTIL,
       '-replace',
       'EmperorExpectedMainExecutable',
       '-string',
@@ -593,6 +673,51 @@ describe('packaged macOS helper installation', () => {
     expect(system.children(INSTALLED_ROOT)).toEqual([resealed])
     await expect(install(system)).resolves.toBe(installed(resealed))
     expect(system.children(INSTALLED_ROOT)).toEqual([resealed])
+  })
+
+  it('reseals the Preview helper copy with the hardened runtime (SEC-04)', async () => {
+    const previewApp = { ...signedApp, team: null, adHoc: true }
+    const resealed = '2'.repeat(40)
+    const preview = () => {
+      const system = new FakeInstallSystem({
+        app: previewApp,
+        helper: {
+          ...signedHelper,
+          team: null,
+          adHoc: true,
+          cdHash: OLD_CDHASH,
+        },
+      })
+      system.resealed = {
+        identifier: HELPER_ID,
+        team: null,
+        adHoc: true,
+        cdHash: resealed,
+      }
+      return system
+    }
+    const system = preview()
+    await expect(install(system)).resolves.toBe(installed(resealed))
+    expect(system.calls).toContainEqual([
+      CODESIGN,
+      '--force',
+      '--sign',
+      '-',
+      '--options',
+      'runtime',
+      `${INSTALLED_ROOT}/.pending-1/Emperor Computer Helper.app`,
+    ])
+    expect(system.entries.get(installed(resealed))?.signature?.runtime).toBe(
+      true,
+    )
+    // A copy that came out without the runtime flag is never installed.
+    const dropped = preview()
+    dropped.resealDropsRuntime = true
+    await expect(install(dropped)).rejects.toMatchObject({
+      code: 'DRIVER_UNAVAILABLE',
+      message: 'Invalid Preview helper identity',
+    })
+    expect(dropped.children(INSTALLED_ROOT)).toEqual([])
   })
 
   it('removes only idle, user-owned CDHash copies beside the verified one', async () => {
