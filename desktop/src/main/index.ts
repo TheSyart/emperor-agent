@@ -38,7 +38,9 @@ import {
   resolveAttachmentRawPath,
   resolveMediaRawPath,
   resolveStaticAssetPath,
+  withContentSecurityPolicy,
 } from './protocol'
+import { rendererContentSecurityPolicy } from '../shared/content-security-policy'
 import { pluginAssetResponse } from './plugin-assets'
 import { createCoreHost } from './core-host'
 import { CoreEventBridge, SessionEventBridge } from './event-bridge'
@@ -199,6 +201,8 @@ const trustedRendererPolicy = createTrustedRendererPolicy({
     console.error(`failed to open external URL ${url}: ${errMessage(error)}`)
   },
 })
+// SEC-05: the app://bundle header; index.html carries the same meta.
+const RENDERER_CSP = rendererContentSecurityPolicy()
 const trustedPetPolicy = createTrustedRendererPolicy({
   productionUrl: 'app://pet/renderer.html',
   mainWebContents: () => petWindow?.webContents ?? null,
@@ -703,7 +707,14 @@ function registerAppProtocol(): void {
     }
     let filePath: string | null = null
     if (url.host === 'bundle')
-      filePath = resolveAssetPath(url.pathname, rendererRoot)
+      return withContentSecurityPolicy(
+        await net.fetch(
+          pathToFileURL(
+            resolveAssetPath(url.pathname, rendererRoot),
+          ).toString(),
+        ),
+        RENDERER_CSP,
+      )
     else if (url.host === 'pet')
       filePath = resolveStaticAssetPath(url.pathname, petRendererRoot())
     else if (url.host === 'pet-assets')

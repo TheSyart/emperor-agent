@@ -10,6 +10,25 @@ const TRUSTED_CROSS_ORIGIN: Readonly<Record<string, string>> = {
   'plugin-assets': 'app://bundle',
 }
 
+/**
+ * An `app://bundle` response with the main window's CSP header (SEC-05; the
+ * policy is content-security-policy.ts, also in index.html's meta) and
+ * `nosniff`. Fetched responses have immutable headers, so this copies.
+ */
+export function withContentSecurityPolicy(
+  response: Response,
+  policy: string,
+): Response {
+  const headers = new Headers(response.headers)
+  headers.set('Content-Security-Policy', policy)
+  headers.set('X-Content-Type-Options', 'nosniff')
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  })
+}
+
 export function appAssetRequestAccess(
   host: string,
   origin: string | null,
