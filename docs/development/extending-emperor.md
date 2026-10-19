@@ -125,7 +125,7 @@ MCP 工具不需要注册代码：`McpToolBridge` 会把每个已连接 server �
 
 设置弹窗的分区列表在 `desktop/src/renderer/src/components/settings/settingsSections.ts`，分区组件在 `SettingsModal.vue` 的 `SECTION_BODIES` 中按 key 懒加载，每个分区一个 `<Name>Section.vue`。写法以 `components/settings/ui/index.ts` 顶部注释为准：
 
-- 用 `components/settings/ui/` 的原语搭建：`SettingsSection`、`SettingsGroup`、`SettingsRow`、`SettingsCard`，表单控件包在 `Field` 里（`TextField`、`TextArea`、`CodeEditor`、`Select`、`Switch`、`Segmented`、`SearchField`），状态用 `StatusBadge` / `Metric` 和 `--state-*` token。开发模式下打开 `?settings-gallery` 可以查看全部原语。
+- 用 `components/settings/ui/` 的原语搭建：`SettingsSection`、`SettingsGroup`、`SettingsRow`、`SettingsCard`，表单控件包在 `Field` 里（`TextField`、`TextArea`、`CodeEditor`、`Select`、`Switch`、`Segmented`、`SearchField`、`Checkbox`），状态用 `Badge` / `Metric`，出问题时页面顶部放一条 `Notice`。表单控件与 Badge、Notice 来自 `components/ui/`，`components/settings/ui/` 只是转出；全部组件见[组件规范](../design/components.md)。开发模式下打开 `?settings-gallery` 查看设置原语，`?ui-gallery` 查看全部组件。
 - 每一行都放进 `SettingsGroup`：行式分组就是一张卡片，组标题和一句说明在卡片上方，行在卡片里（左右 16px，行间细线内缩）；不写标题的分组就是一张卡片。自带边框的内容（例如 `CodeEditor`）给分组加 `plain`。
 - 页面按「要你决定的开关和选择」在前排列；出问题时在最上面放一张 `SettingsNotice`（提醒、错误或信息，附修复按钮），正常时不显示状态行。按列排的设置（例如按网站的权限）用 `SettingsTable` + `SettingsTableRow`。
 - 弹窗外壳负责标题栏，分区内不要再渲染标题或操作栏；唯一的例外是只讲一件事的二级页，可以用 `SettingsHero` 开头（大标题、状态标记和它自己的操作）。刷新、主要和次要操作通过 `settingsHeader.ts` 的 `useSettingsHeader({ actions })` 与 `refreshAction()` 注册到标题栏，下拉菜单用 action 的 `menu`；注册在组件卸载时自动移除。
