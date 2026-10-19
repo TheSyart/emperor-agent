@@ -6,6 +6,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -187,6 +188,24 @@ describe('imported cookies (SEC-10, MAIN-4)', () => {
     await t.store.prepare(PROFILE, session)
     expect(set).toHaveBeenCalledTimes(1)
     expect(t.logs.some((line) => line.includes('Time Machine'))).toBe(true)
+  })
+
+  it('tries again after a profile could not be prepared', async () => {
+    const t = setup()
+    await t.store.save(PROFILE, [cookie()])
+    const { set, session } = fakeSession()
+    // The folder cannot be made: a file stands where it should be.
+    const blocked = new ImportedCookieStore({
+      profilesRoot: join(t.root, 'not-a-folder'),
+      storage: t.storage,
+      excludeFromBackup: async () => undefined,
+    })
+    writeFileSync(join(t.root, 'not-a-folder'), 'x')
+    await expect(blocked.prepare(PROFILE, session)).rejects.toThrow()
+    rmSync(join(t.root, 'not-a-folder'))
+    await blocked.prepare(PROFILE, session)
+    expect(set).not.toHaveBeenCalled() // nothing imported under that root
+    await expect(blocked.prepare(PROFILE, session)).resolves.toBeUndefined()
   })
 
   it('refuses a profile id that is not Emperor’s', async () => {

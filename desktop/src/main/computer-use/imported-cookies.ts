@@ -274,6 +274,10 @@ export class ImportedCookieStore {
     if (known !== undefined) return known
     const work = this.inject(profileId, session)
     this.prepared.set(session, work)
+    // A failure (the folder could not be made) is tried again next time.
+    work.catch(() => {
+      if (this.prepared.get(session) === work) this.prepared.delete(session)
+    })
     return work
   }
 
