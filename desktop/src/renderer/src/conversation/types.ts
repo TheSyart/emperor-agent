@@ -27,12 +27,18 @@ export type AssistantBlock =
   | { readonly kind: 'image'; readonly attachment: ImageAttachmentRef }
   /**
    * A tool call requested inside the message. Arguments are intentionally
-   * absent in chat: the call renders as its own `tool` node.
+   * absent in chat once the message lands: the call renders as its own
+   * `tool` node.
    */
   | {
       readonly kind: 'tool-call'
       readonly callId: string
       readonly name: string
+      /**
+       * While the step streams: the raw arguments so far, capped at
+       * `TOOL_DRAFT_LIMIT` (the preparing row reads the file name from it).
+       */
+      readonly draft?: string
     }
   | { readonly kind: 'other'; readonly block: unknown }
 
