@@ -72,6 +72,8 @@ export async function makeApi(
     replies?: ScriptedReply[]
     root?: string
     stateRoot?: string
+    /** Overrides of the one scripted model route (`test-route`). */
+    route?: Partial<RouteSpec>
     extra?: Partial<CoreApiCreateOptions>
   } = {},
 ): Promise<ApiFixture> {
@@ -85,7 +87,10 @@ export async function makeApi(
       assertRequestInvariant(request, (id) => ref.api?.host.sessionLog(id))
     },
   })
-  llm.setRoutes([testRoute()], 'test-route')
+  llm.setRoutes(
+    [testRoute({ ...options.route, id: 'test-route' })],
+    'test-route',
+  )
   const events: Array<Record<string, unknown>> = []
   const api = await CoreApi.create({
     root,

@@ -83,6 +83,9 @@ import { CoreDiagnosticsService } from './services/diagnostics-service'
 import { CoreEffectiveConfigService } from './services/effective-config-service'
 import type { BrowserPreferences } from '../config/local-config'
 import { CoreBrowserPreferencesService } from './services/browser-preferences-service'
+import { CoreWebToolsService } from './services/web-tools-service'
+import type { WebToolsStatus } from '../harness/host/web-tools'
+import type { WebToolPreferences } from '../config/local-config'
 import { CoreDesktopPetService } from './services/desktop-pet-service'
 import { CoreEnvironmentService } from './services/environment-service'
 import { CoreHooksService } from './services/hooks-service'
@@ -299,6 +302,7 @@ export class CoreApi {
   readonly effectiveConfigService: CoreEffectiveConfigService
   readonly desktopPetService: CoreDesktopPetService
   readonly browserPreferencesService: CoreBrowserPreferencesService
+  readonly webToolsService: CoreWebToolsService
   readonly diagnosticsService: CoreDiagnosticsService
   readonly environmentService: CoreEnvironmentService
   readonly hooksService: CoreHooksService
@@ -419,6 +423,13 @@ export class CoreApi {
           host.emitHost({ event: 'browser_preferences_changed', preferences }),
       },
     )
+    this.webToolsService = new CoreWebToolsService(this.root, {
+      stateRoot: this.paths.stateRoot,
+      tools: host.webTools,
+      assertMutation: (area, action) => this.assertMutation(area, action),
+      changed: (status) =>
+        host.emitHost({ event: 'web_tools_changed', settings: status }),
+    })
     this.modelService = new CoreModelService(this.paths.stateRoot, {
       refreshModelConfig: () => host.refreshModelConfig(),
       afterConfigSaved: () => this.onboardingService.start({ manual: false }),
@@ -2920,6 +2931,11 @@ export class CoreApi {
   }
 
   readonly tools = {
+    /** 设置 › 高级 › 网络工具: the web_fetch / web_search switches and availability. */
+    networkSettings: (): WebToolsStatus => this.webToolsService.status(),
+    setNetworkSettings: (
+      change: Partial<WebToolPreferences>,
+    ): Promise<WebToolsStatus> => this.webToolsService.update(change),
     /** Full text of a spilled tool result (`ref` is the spill file path). */
     readResult: (opts: { ref: string }) => {
       const spillRoot = resolve(this.paths.stateRoot, 'spill')

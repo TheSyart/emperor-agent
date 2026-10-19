@@ -1852,9 +1852,23 @@ export const CORE_OPERATION_REGISTRY = {
   'terminals.write': operation(z.tuple([terminalWriteSchema]), (api, [input]) =>
     api.terminals.write(input),
   ),
+  'tools.networkSettings': operation(z.tuple([]), (api) =>
+    api.tools.networkSettings(),
+  ),
   'tools.readResult': operation(
     z.tuple([z.object({ ref: idSchema }).strict()]),
     (api, [input]) => api.tools.readResult(input),
+  ),
+  'tools.setNetworkSettings': operation(
+    z.tuple([
+      z
+        .object({
+          webFetch: z.boolean().optional(),
+          webSearch: z.boolean().optional(),
+        })
+        .strict(),
+    ]),
+    (api, [change]) => api.tools.setNetworkSettings(change),
   ),
   'workspace.snapshot': operation(
     z.tuple([workspaceSessionSchema]),

@@ -17,7 +17,7 @@ describe('Core operation registry', () => {
     const descriptors = coreOperationDescriptors()
     const descriptorKeys = descriptors.map((entry) => entry.key)
 
-    expect(coreOperationKeys()).toHaveLength(202)
+    expect(coreOperationKeys()).toHaveLength(204)
     expect(coreOperationKeys()).toEqual(descriptorKeys)
     expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(descriptorKeys)
     expect(
@@ -66,6 +66,8 @@ describe('Core operation registry', () => {
         'sessions.lineage',
         'sessions.children',
         'sessions.watch',
+        'tools.networkSettings',
+        'tools.setNetworkSettings',
       ]),
     )
     for (const retired of [

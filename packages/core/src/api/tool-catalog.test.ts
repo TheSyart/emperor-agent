@@ -14,12 +14,17 @@ afterEach(async () => {
   for (const fixture of fixtures.splice(0)) await fixture.api.close()
 })
 
-/** Every tool a host can register: web search and computer use on too. */
+/** Every tool a host can register: web fetch, web search and computer use on too. */
 async function fullApi() {
   const fixture = await makeApi({
     extra: {
       computerUsePort: new FakeComputerUsePort(),
       computerUseSettings: () => ({ enabled: true }),
+      webFetchClient: {
+        get: async () => {
+          throw new Error('not called')
+        },
+      },
       webSearch: { search: async () => [] },
     },
   })
@@ -39,7 +44,7 @@ const EXPECTED: Record<ToolCategory, string[]> = {
     'read',
     'write',
   ],
-  network: ['web_search'],
+  network: ['web_fetch', 'web_search'],
   planning: [
     'ask_user_question',
     'create_goal',

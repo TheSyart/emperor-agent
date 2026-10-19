@@ -297,6 +297,19 @@ export type RuntimeEvent = RuntimeEventEnvelope &
     | { event: 'skill_catalog_changed'; catalog_version?: number }
     | { event: 'browser_preferences_changed'; preferences: BrowserPreferences }
     | {
+        /** 设置 › 高级 › 网络工具 changed: the Agent's tool list did too. */
+        event: 'web_tools_changed'
+        settings: {
+          webFetch: { enabled: boolean; available: boolean }
+          webSearch: {
+            enabled: boolean
+            available: boolean
+            provider: 'deepseek' | 'host' | null
+            model: string | null
+          }
+        }
+      }
+    | {
         /** Installed plugins, their toggles, or the active project changed. */
         event: 'plugins_changed'
         reason: 'plugins' | 'project'
