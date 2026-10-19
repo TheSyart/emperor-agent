@@ -23,6 +23,8 @@ import { onCoreEvent } from '../../../api/backend'
 import Modal from '../../ui/Modal.vue'
 import Button from '../../ui/Button.vue'
 import Avatar from '../../ui/Avatar.vue'
+import Checkbox from '../../ui/Checkbox.vue'
+import TextField from '../../ui/TextField.vue'
 import TaskOutputDialog from './TaskOutputDialog.vue'
 const props = defineProps<{
   runId: string
@@ -462,29 +464,31 @@ onBeforeUnmount(() => {
             <summary>独立验证当前成果</summary>
             <div class="external-form">
               <label
-                >验收要求<input v-model="criterion" :disabled="busy" /></label
+                >验收要求<TextField
+                  v-model="criterion"
+                  :disabled="busy" /></label
               ><label
-                >可执行文件<input
+                >可执行文件<TextField
                   v-model="command"
                   :disabled="busy"
+                  monospace
                   placeholder="例如 npm 或 /usr/bin/python3" /></label
               ><label
-                >参数（JSON 数组）<input
+                >参数（JSON 数组）<TextField
                   v-model="args"
                   :disabled="busy"
+                  monospace
                   spellcheck="false" /></label
-              ><label class="external-check"
-                ><input
-                  v-model="requiresReview"
-                  type="checkbox"
-                  :disabled="busy"
-                />需要人工审查</label
-              ><label class="external-check"
-                ><input
-                  v-model="reviewed"
-                  type="checkbox"
-                  :disabled="busy"
-                />我已审查上面的结果树</label
+              ><Checkbox
+                v-model="requiresReview"
+                class="external-check"
+                :disabled="busy"
+                >需要人工审查</Checkbox
+              ><Checkbox
+                v-model="reviewed"
+                class="external-check"
+                :disabled="busy"
+                >我已审查上面的结果树</Checkbox
               ><Button
                 size="sm"
                 variant="secondary"
@@ -551,7 +555,7 @@ onBeforeUnmount(() => {
           class="external-form"
         >
           明确接受本项失败的处置理由（填写后关闭会话，Goal 才能将其视为已处置）
-          <input
+          <TextField
             v-model="failureDisposition"
             aria-label="必需任务失败处置理由"
             :disabled="busy || !mutable"
@@ -682,35 +686,9 @@ p {
   gap: var(--space-2);
   padding: var(--space-3) 0;
 }
-.external-form label {
+.external-form label:not(.external-check) {
   display: grid;
   gap: var(--space-1);
-}
-.external-form .external-check {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-input:not([type='checkbox']),
-textarea {
-  box-sizing: border-box;
-  width: 100%;
-  min-width: 0;
-  padding: var(--space-2);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-row);
-  background: rgb(var(--bg-layer-3));
-  color: rgb(var(--label-primary));
-  font: inherit;
-}
-textarea {
-  min-height: 84px;
-  resize: vertical;
-}
-input:focus-visible,
-textarea:focus-visible {
-  outline: 2px solid rgb(var(--focus-ring) / 0.5);
-  outline-offset: 1px;
 }
 summary {
   cursor: pointer;

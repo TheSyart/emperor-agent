@@ -28,6 +28,7 @@
  * Props: sessionId (the viewed chat), awaiting (a question or card waits for
  * the user in it).
  */
+import Badge from '../../ui/Badge.vue'
 import type {
   ComputerUseStatusView,
   UiTargetView,
@@ -548,7 +549,7 @@ onBeforeUnmount(() => {
     >
       <ScreenShare :size="15" aria-hidden="true" />
       <span>电脑操作</span>
-      <span class="cu-preview-count">{{ ordered.length }}</span>
+      <Badge variant="count" :label="ordered.length" />
     </button>
     <div
       v-show="!compact || expanded"
@@ -581,12 +582,13 @@ onBeforeUnmount(() => {
           <span class="cu-card-status" :data-tone="statusOf(front).tone">{{
             statusOf(front).label
           }}</span>
-          <span
+          <Badge
             v-if="ordered.length > 1"
             class="cu-card-total"
+            variant="count"
+            :label="ordered.length"
             :aria-label="`共 ${ordered.length} 个目标`"
-            >{{ ordered.length }}</span
-          >
+          />
         </header>
         <p class="cu-card-source" :title="front.url">
           {{ previewSource(front) }}
@@ -671,19 +673,6 @@ onBeforeUnmount(() => {
   color: rgb(var(--label-primary));
   font: var(--font-xs);
   cursor: pointer;
-}
-
-.cu-preview-count,
-.cu-card-total {
-  display: inline-grid;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 var(--space-1);
-  place-items: center;
-  border-radius: var(--radius-pill);
-  background: rgb(var(--bg-layer-3));
-  color: rgb(var(--label-secondary));
-  font-size: var(--fs-xxs);
 }
 
 .cu-preview-stack {

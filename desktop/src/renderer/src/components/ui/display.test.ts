@@ -141,9 +141,9 @@ describe('props snapshot (test 1)', () => {
         h(Tag, { label: '筛选' }),
         h(Tag, { label: '已选', selected: true }),
         h(Tag, { label: 'README.md', removable: true }),
-        ...(['ok', 'warn', 'error', 'running', 'idle'] as const).map((state) =>
-          h(Dot, { state }),
-        ),
+        ...(
+          ['ok', 'warn', 'error', 'running', 'idle', 'attention'] as const
+        ).map((state) => h(Dot, { state })),
         h(Dot, { state: 'ok', size: 'sm', label: '已完成' }),
         h(Avatar, { kind: 'initials', label: 'GitHub', size: 28 }),
         h(Avatar, { kind: 'color', label: '设计', id: 'designer', size: 20 }),

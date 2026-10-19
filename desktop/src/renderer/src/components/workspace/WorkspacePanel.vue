@@ -31,6 +31,7 @@
  * - open: the column is visible (width > 0).
  * - agentBusy: disables conflicting Git writes while the agent runs.
  */
+import EmptyState from '../ui/EmptyState.vue'
 import { House } from 'lucide-vue-next'
 import {
   computed,
@@ -261,7 +262,12 @@ async function persistFilesTreeWidth(): Promise<void> {
         @open="selectPane"
       />
       <template v-else-if="pane === 'review'">
-        <p v-if="reviewReason" class="workspace-empty">{{ reviewReason }}</p>
+        <EmptyState
+          v-if="reviewReason"
+          class="workspace-empty"
+          variant="inline"
+          :title="reviewReason"
+        />
         <TurnReviewView
           v-else-if="turnReview"
           :request="turnReview"
@@ -288,7 +294,12 @@ async function persistFilesTreeWidth(): Promise<void> {
       </template>
       <template v-else-if="pane === 'terminal'">
         <TerminalPane v-if="hasProject" :session-id="sessionId" />
-        <p v-else class="workspace-empty">{{ NO_PROJECT_REASON }}</p>
+        <EmptyState
+          v-else
+          class="workspace-empty"
+          variant="inline"
+          :title="NO_PROJECT_REASON"
+        />
       </template>
       <BrowserPane
         v-else-if="pane === 'browser'"
@@ -356,10 +367,6 @@ async function persistFilesTreeWidth(): Promise<void> {
 }
 
 .workspace-empty {
-  margin: 0;
-  padding: var(--space-3) var(--space-4);
-  color: rgb(var(--label-tertiary));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
+  margin: 0 var(--space-4);
 }
 </style>

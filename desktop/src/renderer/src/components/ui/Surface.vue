@@ -37,7 +37,6 @@ withDefaults(
 
 <style scoped>
 .ds-surface {
-  display: block;
   min-width: 0;
   padding: var(--space-4);
   border: none;

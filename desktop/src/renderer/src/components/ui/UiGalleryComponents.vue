@@ -42,7 +42,14 @@ const tones = [
   'attention',
   'info',
 ] as const
-const dotStates = ['ok', 'warn', 'error', 'running', 'idle'] as const
+const dotStates = [
+  'ok',
+  'warn',
+  'error',
+  'running',
+  'idle',
+  'attention',
+] as const
 const pluginArt = providerIconAsset('deepseek')
 
 const selectedRow = ref('b')

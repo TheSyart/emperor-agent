@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** Search hits share resource cards with cited links and the resource index. */
+import EmptyState from '../../ui/EmptyState.vue'
 import { computed } from 'vue'
 import type { ToolChatData } from '../../../conversation/types'
 import ResourceCard from '../resources/ResourceCard.vue'
@@ -45,7 +46,7 @@ const sources = computed(() =>
         />
       </li>
     </ol>
-    <div v-else-if="!card.answer" class="empty">未找到结果</div>
+    <EmptyState v-else-if="!card.answer" variant="inline" title="未找到结果" />
     <div v-if="card.truncated" class="truncated">来源列表已截断</div>
     <details class="raw-result">
       <summary>原始结果</summary>
@@ -82,7 +83,6 @@ const sources = computed(() =>
   font: var(--font-xs);
   color: rgb(var(--label-tertiary));
 }
-.empty,
 .truncated {
   margin: var(--space-2) 0;
   font: var(--font-xs);

@@ -10,6 +10,7 @@
  * Props: controller.
  * Emits: open-subagent(sessionId), collapse.
  */
+import EmptyState from '../../ui/EmptyState.vue'
 import { PanelRightClose } from 'lucide-vue-next'
 import { computed } from 'vue'
 import type { TrajectoryDetailTab } from '../../../trajectory/model'
@@ -112,7 +113,7 @@ const tabItems = computed(() =>
         />
       </div>
     </template>
-    <p v-else class="empty">在轨迹中选择一条记录查看详情</p>
+    <EmptyState v-else title="在轨迹中选择一条记录查看详情" />
   </aside>
 </template>
 
@@ -190,13 +191,5 @@ const tabItems = computed(() =>
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-gutter: stable;
-}
-
-.empty {
-  margin: 0;
-  padding: var(--space-6) var(--space-4);
-  color: rgb(var(--label-tertiary));
-  font: var(--font-xs);
-  text-align: center;
 }
 </style>

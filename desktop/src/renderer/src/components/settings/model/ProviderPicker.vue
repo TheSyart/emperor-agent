@@ -10,6 +10,7 @@
  * - selected?: the provider currently chosen (marked, aria-pressed).
  * Emits: pick(providerName).
  */
+import EmptyState from '../../ui/EmptyState.vue'
 import { computed, ref } from 'vue'
 import type { ProviderOption } from '../../../types'
 import Avatar from '../../ui/Avatar.vue'
@@ -92,7 +93,7 @@ function tileParts(option: ProviderOption): { name: string; caption: string } {
         </button>
       </div>
     </section>
-    <p v-if="!sections.length" class="empty">没有匹配的供应商</p>
+    <EmptyState v-if="!sections.length" title="没有匹配的供应商" />
   </div>
 </template>
 
@@ -185,14 +186,5 @@ function tileParts(option: ProviderOption): { name: string; caption: string } {
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
   color: rgb(var(--label-tertiary));
-}
-
-.empty {
-  margin: 0;
-  padding: var(--space-4) 0;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
-  text-align: center;
 }
 </style>

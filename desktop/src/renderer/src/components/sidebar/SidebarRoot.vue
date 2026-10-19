@@ -10,8 +10,10 @@
  * owned by AppFrame; this fills the column it is given. The persisted
  * layout (sorts, orders, pins) lives in useSidebarState.
  */
+import EmptyState from '../ui/EmptyState.vue'
 import { elementOf } from '../ui/elementOf'
 import IconButton from '../ui/IconButton.vue'
+import SearchField from '../ui/SearchField.vue'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { selectDirectory } from '../../api/backend'
@@ -26,7 +28,7 @@ import {
   type SidebarProjectGroup,
 } from '../../runtime/sidebarModel'
 import type { ProjectInfo, SessionInfo } from '../../types'
-import { DsClose, DsFolderClose, DsMore, DsPlus, DsSearch } from '../icons/ds'
+import { DsFolderClose, DsMore, DsPlus } from '../icons/ds'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
 import SessionRow from './SessionRow.vue'
@@ -73,7 +75,7 @@ const { state: sidebarState, grouped } = layout
 
 const searchQuery = ref('')
 const searchOpen = ref(false)
-const searchInput = ref<HTMLInputElement | null>(null)
+const searchInput = ref<InstanceType<typeof SearchField> | null>(null)
 const searchIndex = ref(0)
 const creatingBuild = ref(false)
 const projectMenuOpen = ref(false)
@@ -366,39 +368,22 @@ defineExpose({ focusSearch })
       @new-project="openNewProjectMenu"
     />
 
-    <label
+    <SearchField
       v-if="searchVisible"
+      ref="searchInput"
+      v-model="searchQuery"
       class="search"
-      :data-active="searching || undefined"
-    >
-      <DsSearch :size="14" class="search-icon" />
-      <input
-        ref="searchInput"
-        v-model="searchQuery"
-        type="search"
-        placeholder="搜索对话"
-        aria-label="搜索对话"
-        @keydown.down.prevent="moveSearch(1)"
-        @keydown.up.prevent="moveSearch(-1)"
-        @keydown.enter.prevent="commitSearch"
-        @keydown.esc.prevent="escapeSearch"
-        @blur="onSearchBlur"
-      />
-      <IconButton
-        v-if="searching"
-        class="search-clear"
-        label="清除搜索"
-        size="xs"
-        :tooltip="false"
-        @mousedown.prevent
-        @click="clearSearch"
-      >
-        <DsClose :size="12" />
-      </IconButton>
-    </label>
+      placeholder="搜索对话"
+      @clear="clearSearch"
+      @keydown.down.prevent="moveSearch(1)"
+      @keydown.up.prevent="moveSearch(-1)"
+      @keydown.enter.prevent="commitSearch"
+      @keydown.esc.prevent="escapeSearch"
+      @blur="onSearchBlur"
+    />
 
     <div class="region">
-      <div v-if="loading && !sessions.length" class="empty">加载中…</div>
+      <div v-if="loading && !sessions.length" class="loading">加载中…</div>
 
       <SidebarSearchResults
         v-else-if="searching"
@@ -485,14 +470,20 @@ defineExpose({ focusSearch })
                     "
                   />
                 </template>
-                <div v-if="!project.sessions.length" class="empty nested">
-                  暂无会话
-                </div>
+                <EmptyState
+                  v-if="!project.sessions.length"
+                  class="empty nested"
+                  variant="inline"
+                  title="暂无会话"
+                />
               </template>
             </template>
-            <div v-if="!grouped.projects.length" class="empty">
-              还没有绑定项目
-            </div>
+            <EmptyState
+              v-if="!grouped.projects.length"
+              class="empty"
+              variant="inline"
+              title="还没有绑定项目"
+            />
           </template>
         </section>
 
@@ -534,7 +525,12 @@ defineExpose({ focusSearch })
                 />
               </template>
             </template>
-            <div v-if="!grouped.chats.length" class="empty">暂无对话</div>
+            <EmptyState
+              v-if="!grouped.chats.length"
+              class="empty"
+              variant="inline"
+              title="暂无对话"
+            />
           </template>
         </section>
       </div>
@@ -670,68 +666,10 @@ defineExpose({ focusSearch })
 }
 
 .search {
-  display: flex;
   flex: none;
-  align-items: center;
-  gap: var(--space-1-5);
-  box-sizing: border-box;
-  height: 30px;
+  width: auto;
   margin: 0 var(--space-0-5) var(--space-2);
-  padding: 0 var(--space-1) 0 var(--space-2-5);
-  border: 1px solid var(--border-l1);
-  border-radius: var(--radius-cell);
-  color: rgb(var(--label-caption));
-  cursor: text;
   animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
-}
-
-.search:focus-within,
-.search[data-active] {
-  border-color: var(--border-l3);
-  color: rgb(var(--label-secondary));
-}
-
-.search input {
-  flex: 1;
-  width: 0;
-  min-width: 0;
-  padding: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: rgb(var(--label-primary));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-}
-
-.search input:focus {
-  box-shadow: none;
-}
-
-.search input::placeholder {
-  color: rgb(var(--label-caption));
-}
-
-.search input::-webkit-search-cancel-button {
-  display: none;
-}
-
-.search-clear {
-  display: inline-grid;
-  place-items: center;
-  flex: none;
-  width: var(--space-5);
-  height: var(--space-5);
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: rgb(var(--label-tertiary));
-  cursor: pointer;
-}
-
-.search-clear:hover {
-  background: var(--interactive-bg-hover);
 }
 
 .region {
@@ -761,14 +699,18 @@ defineExpose({ focusSearch })
   color: rgb(var(--label-caption));
 }
 
-.empty {
+.loading {
   padding: var(--space-2);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   color: rgb(var(--label-caption));
 }
 
+.empty {
+  margin: 0 var(--space-2);
+}
+
 .empty.nested {
-  padding-left: calc(var(--space-2) + var(--space-5) + 2px);
+  margin-left: calc(var(--space-2) + var(--space-5) + 2px);
 }
 </style>

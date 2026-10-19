@@ -11,6 +11,7 @@
  * Loaded lazily by PullRequestDetail (markdown-it + DOMPurify stay out of
  * the page chunk). Props: body.
  */
+import EmptyState from '../../ui/EmptyState.vue'
 import { computed, inject } from 'vue'
 import { openLink } from '../../../api/backend'
 import { APP_CONTEXT_KEY } from '../../../composables/useAppContext'
@@ -45,7 +46,7 @@ function onClick(event: MouseEvent): void {
     @click="onClick"
     v-html="html"
   />
-  <p v-else class="pr-md-empty">没有描述。</p>
+  <EmptyState v-else variant="inline" title="没有描述。" />
 </template>
 
 <style scoped>
@@ -79,12 +80,5 @@ function onClick(event: MouseEvent): void {
   font-size: var(--fs-xxs);
   font-weight: 400;
   text-decoration: none;
-}
-
-.pr-md-empty {
-  margin: 0;
-  color: rgb(var(--label-tertiary));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
 }
 </style>

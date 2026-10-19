@@ -2,7 +2,7 @@
 /**
  * ToolCallRow — dsh ToolRow: one 24px line `[icon] 标题 · 摘要`; the icon
  * crossfades to a chevron on hover; running plays the glare sweep; error /
- * interrupted swap the icon for a StateDot and an error row's summary is
+ * interrupted swap the icon for a Dot and an error row's summary is
  * the failure's first line in the danger color. The expanded body is the
  * registry's tool view (collapsed by default) with a hover-revealed
  * Inspect pill that jumps to the trajectory.

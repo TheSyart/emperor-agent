@@ -235,7 +235,7 @@ const actions = computed(() =>
           <section class="comments" data-issue-comments>
             <h3 class="section-title">
               评论
-              <span class="count">{{ shown.commentCount }}</span>
+              <Badge variant="count" :label="shown.commentCount" />
             </h3>
             <p v-if="shown.commentCount > shown.comments.length" class="hint">
               只显示最近 {{ shown.comments.length }} 条，其余在 GitHub 上查看。
@@ -465,11 +465,6 @@ const actions = computed(() =>
   line-height: var(--lh-xs);
   font-weight: 600;
   color: rgb(var(--label-primary));
-}
-
-.count {
-  font-weight: 400;
-  color: rgb(var(--label-tertiary));
 }
 
 .comment-list {

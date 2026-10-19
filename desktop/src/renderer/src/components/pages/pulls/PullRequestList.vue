@@ -12,6 +12,7 @@
  * Models: filter, search (raw text), clientFilters, grouping.
  * Emits: select (item), retry.
  */
+import Badge from '../../ui/Badge.vue'
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import type {
   PullRequestErrorInfo,
@@ -284,7 +285,11 @@ const showFooter = computed(
               class="group-chevron"
               aria-hidden="true"
             />
-            <span class="group-count">{{ group.items.length }}</span>
+            <Badge
+              class="group-count"
+              variant="count"
+              :label="group.items.length"
+            />
           </button>
           <div v-if="!collapsed.has(group.key)" class="group-rows" role="list">
             <div

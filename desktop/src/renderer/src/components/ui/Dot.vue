@@ -2,7 +2,8 @@
 /**
  * Dot — a run or connection state as a small dot (DS-04).
  *   state: ok | warn | error | running (gold, pulsing; the one running
- *          indicator a screen shows) | idle (grey)
+ *          indicator a screen shows) | idle (grey) | attention (orange:
+ *          an approval or plan waiting for the user)
  *   size:  sm 6 | md 8 (default)
  * `label` names it for assistive technology (role img); without one the
  * dot is decorative. Reduced motion stills the pulse (styles/a11y.css).
@@ -49,6 +50,10 @@ withDefaults(
 
 .ds-dot[data-state='error'] {
   --dot-color: var(--error);
+}
+
+.ds-dot[data-state='attention'] {
+  --dot-color: var(--attention);
 }
 
 .ds-dot[data-state='idle'] {

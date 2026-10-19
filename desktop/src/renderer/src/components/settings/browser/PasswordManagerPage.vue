@@ -27,12 +27,15 @@ import Button from '../../ui/Button.vue'
 import Modal from '../../ui/Modal.vue'
 import { useSettingsHeader } from '../settingsHeader'
 import {
+  Checkbox,
   EmptyState,
   SettingsGroup,
   Notice,
   SettingsRow,
   SettingsSection,
   Badge,
+  TextArea,
+  TextField,
 } from '../ui'
 import {
   TOTP_WARNING,
@@ -355,9 +358,12 @@ onBeforeUnmount(hidePassword)
             >{{ unsignedAppWarning(handle) }}</span
           >
         </template>
-        <input
+        <TextField
           v-if="revealed?.handleId === handle.handleId"
-          :value="revealed.password"
+          class="vault-revealed"
+          size="sm"
+          monospace
+          :model-value="revealed.password"
           readonly
           aria-label="已验证的密码，30 秒后隐藏"
         />
@@ -399,7 +405,7 @@ onBeforeUnmount(hidePassword)
       >
         <Notice v-if="error" tone="error" :title="error" />
         <label v-if="protect === 'unlock'"
-          >主密码<input
+          >主密码<TextField
             v-model="master"
             type="password"
             autocomplete="off"
@@ -407,7 +413,7 @@ onBeforeUnmount(hidePassword)
             required
         /></label>
         <label v-else
-          >新的主密码<input
+          >新的主密码<TextField
             v-model="master"
             type="password"
             autocomplete="new-password"
@@ -449,18 +455,20 @@ onBeforeUnmount(hidePassword)
       >
         <Notice v-if="error" tone="error" :title="error" />
         <label
-          >名称<input v-model="form.label" required maxlength="120"
+          >名称<TextField v-model="form.label" required maxlength="120"
         /></label>
         <label
-          >网站 origin（每行一个）<textarea
+          >网站 origin（每行一个）<TextArea
             v-model="form.origin"
+            :min-rows="2"
             placeholder="https://example.com"
             spellcheck="false"
           />
         </label>
         <label
-          >macOS App 绑定（每行 Bundle ID | Team ID | 绝对路径）<textarea
+          >macOS App 绑定（每行 Bundle ID | Team ID | 绝对路径）<TextArea
             v-model="form.appBindings"
+            :min-rows="2"
             placeholder="com.example.Writer | EXAMPLE123 |&#10;com.example.Unsigned | | /Applications/Unsigned.app"
             spellcheck="false"
           />
@@ -471,7 +479,7 @@ onBeforeUnmount(hidePassword)
         </p>
         <p v-if="formUnsigned" class="vault-warning">{{ formUnsigned }}</p>
         <label
-          >用户名<input
+          >用户名<TextField
             v-model="form.username"
             autocomplete="off"
             :placeholder="
@@ -479,7 +487,7 @@ onBeforeUnmount(hidePassword)
             "
         /></label>
         <label
-          >密码<input
+          >密码<TextField
             v-model="password"
             type="password"
             autocomplete="new-password"
@@ -487,24 +495,23 @@ onBeforeUnmount(hidePassword)
             :placeholder="editing ? '留空则保持不变' : ''"
         /></label>
         <label
-          >TOTP 密钥（可选）<input
+          >TOTP 密钥（可选）<TextField
             v-model="totpSeed"
             type="password"
             autocomplete="off"
             :disabled="form.removeTotp"
             :placeholder="form.totpSaved ? '已保存，留空则保持不变' : ''"
         /></label>
-        <label v-if="editing && form.totpSaved" class="vault-check"
-          ><input
-            v-model="form.removeTotp"
-            type="checkbox"
-            @change="removeTotpChanged"
-          />删除已保存的 TOTP 密钥</label
+        <Checkbox
+          v-if="editing && form.totpSaved"
+          v-model="form.removeTotp"
+          class="vault-check"
+          @change="removeTotpChanged"
+          >删除已保存的 TOTP 密钥</Checkbox
         >
         <p v-if="totpSeed" class="vault-warning">{{ TOTP_WARNING }}</p>
-        <label class="vault-check"
-          ><input v-model="form.revealUsername" type="checkbox" />允许 Agent
-          查看用户名</label
+        <Checkbox v-model="form.revealUsername" class="vault-check"
+          >允许 Agent 查看用户名</Checkbox
         >
         <p class="vault-note">
           Agent 每次代填账号、密码或验证码前都会暂停并请你确认。
@@ -538,36 +545,16 @@ onBeforeUnmount(hidePassword)
   gap: var(--space-3);
   padding-top: var(--space-3);
 }
-.vault-form label,
-.vault-protect label {
+.vault-form label:not(.vault-check),
+.vault-protect label:not(.vault-check) {
   display: grid;
   gap: var(--space-1);
   font-size: var(--fs-xs);
   color: rgb(var(--label-secondary));
 }
-.vault-form input:not([type='checkbox']),
-.vault-protect input:not([type='checkbox']),
-.vault-form select,
-.vault-form textarea,
-.vault-inline input:not([type='checkbox']) {
-  min-width: 0;
-  padding: var(--space-2);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-row);
-  background: transparent;
-  color: rgb(var(--label-primary));
-}
-.vault-form .vault-check,
-.vault-protect .vault-check,
-.vault-inline .vault-check {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-.vault-check input[type='checkbox'] {
-  flex: none;
+.vault-revealed {
   width: auto;
-  margin: 0;
+  min-width: 0;
 }
 .vault-inline .vault-check {
   font-size: var(--fs-xs);

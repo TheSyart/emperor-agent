@@ -17,6 +17,7 @@
  * Header actions: 刷新 (diagnostics + environment re-detection) and 复制报告
  * (plain-text report of the page).
  */
+import EmptyState from '../ui/EmptyState.vue'
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import IconButton from '../ui/IconButton.vue'
 import { useCopyFeedback } from '../ui/useCopyFeedback'
@@ -323,9 +324,11 @@ function messageOf(cause: unknown): string {
               <DsFolderOpen :size="16" />
             </IconButton>
           </DiagnosticItem>
-          <p v-if="!card.rows.length" class="empty">
-            Core 没有返回这一组的数据。
-          </p>
+          <EmptyState
+            v-if="!card.rows.length"
+            variant="inline"
+            title="Core 没有返回这一组的数据。"
+          />
         </div>
       </SettingsCard>
     </div>
@@ -443,13 +446,5 @@ function messageOf(cause: unknown): string {
   display: flex;
   flex-direction: column;
   min-width: 0;
-}
-
-.empty {
-  margin: 0;
-  padding: var(--space-2) 0;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
 }
 </style>

@@ -10,6 +10,7 @@ import { DsMore } from '../icons/ds'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
 import Dot from '../ui/Dot.vue'
+import TextField from '../ui/TextField.vue'
 import type { SessionRuntimeIndicator } from '../../runtime/sidebarModel'
 import { sidebarRelativeTime } from '../../runtime/sidebarModel'
 import type { SessionInfo } from '../../types'
@@ -49,7 +50,7 @@ const emit = defineEmits<{
 
 const editing = ref(false)
 const draftTitle = ref('')
-const input = ref<HTMLInputElement | null>(null)
+const input = ref<InstanceType<typeof TextField> | null>(null)
 const menuOpen = ref(false)
 const moreButton = ref<HTMLElement | null>(null)
 
@@ -117,9 +118,10 @@ defineExpose({ beginRename })
           :label="stateLabel"
         />
       </span>
-      <input
+      <TextField
         v-if="editing"
         ref="input"
+        size="sm"
         v-model="draftTitle"
         class="rename"
         aria-label="会话标题"
@@ -242,21 +244,8 @@ defineExpose({ beginRename })
 
 .rename {
   flex: 1;
-  min-width: 0;
+  width: auto;
   margin: 0 var(--space-1-5) 0 var(--space-1);
-  padding: 0 var(--space-0-5);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-xs);
-  outline: none;
-  background: rgb(var(--bg-layer-2));
-  color: inherit;
-  font-size: var(--fs-s);
-  line-height: var(--space-5);
-}
-
-.rename:focus {
-  border-color: var(--border-l3);
-  box-shadow: none;
 }
 
 .time {

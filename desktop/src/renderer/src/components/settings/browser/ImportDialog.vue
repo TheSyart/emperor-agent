@@ -6,6 +6,7 @@
  * main; this dialog only picks a source, shows whether the browser is still
  * running, and reports counts. It never sees a password or a cookie value.
  */
+import EmptyState from '../../ui/EmptyState.vue'
 import { computed, ref, watch } from 'vue'
 import {
   fetchBrowserImportSources,
@@ -224,9 +225,11 @@ watch(
     @update:open="(value: boolean) => emit('update:open', value)"
   >
     <div class="import-body">
-      <p v-if="!loading && flatSources.length === 0" class="import-empty">
-        没有可导入的浏览器。请确认本机装有 Google Chrome 或 Microsoft Edge。
-      </p>
+      <EmptyState
+        v-if="!loading && flatSources.length === 0"
+        title="没有可导入的浏览器"
+        description="请确认本机装有 Google Chrome 或 Microsoft Edge。"
+      />
       <template v-else>
         <label class="import-source-row">
           <span class="import-label">从</span>
@@ -416,12 +419,6 @@ watch(
   line-height: var(--lh-xxs);
   color: rgb(var(--label-tertiary));
   text-wrap: pretty;
-}
-
-.import-empty {
-  margin: 0;
-  font-size: var(--fs-s);
-  color: rgb(var(--label-secondary));
 }
 
 .import-result {

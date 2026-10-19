@@ -260,9 +260,11 @@ function openOnGithub(): void {
                 checksText
               }}</span>
             </div>
-            <p v-if="!checks.length" class="section-empty">
-              最新提交没有运行检查。
-            </p>
+            <EmptyState
+              v-if="!checks.length"
+              variant="inline"
+              title="最新提交没有运行检查。"
+            />
             <ul v-else class="rows" data-pr-checks>
               <li
                 v-for="(check, index) in checks"
@@ -291,9 +293,11 @@ function openOnGithub(): void {
                 {{ countLabel(data.changedFiles, '文件') }}
               </span>
             </div>
-            <p v-if="!data.files.length" class="section-empty">
-              没有文件改动。
-            </p>
+            <EmptyState
+              v-if="!data.files.length"
+              variant="inline"
+              title="没有文件改动。"
+            />
             <ul v-else class="rows" data-pr-files>
               <li v-for="file in data.files" :key="file.path">
                 <button
@@ -564,13 +568,6 @@ function openOnGithub(): void {
 
 .section-meta,
 .section-note,
-.section-empty {
-  margin: 0;
-  color: rgb(var(--label-tertiary));
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-}
-
 .rows {
   display: flex;
   flex-direction: column;

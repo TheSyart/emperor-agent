@@ -1,8 +1,10 @@
 /**
- * Dot states (DS-04): green done, amber attention, red error, the gold
- * running pulse (the one running indicator a screen shows) and grey idle.
+ * Dot states (DS-04): green done, amber warning, red error, the gold
+ * running pulse (the one running indicator a screen shows), grey idle, and
+ * the orange of approvals and plans waiting for the user (attention).
  */
-export type DotState = 'ok' | 'warn' | 'error' | 'running' | 'idle'
+export type DotState =
+  'ok' | 'warn' | 'error' | 'running' | 'idle' | 'attention'
 
 /** Map run / tool / job status strings onto the five dot states. */
 export function dotFromStatus(status: string | undefined): DotState {

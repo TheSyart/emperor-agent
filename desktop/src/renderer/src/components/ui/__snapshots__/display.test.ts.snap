@@ -49,6 +49,7 @@ exports[`props snapshot (test 1) > Tag, Dot and Avatar 1`] = `
   "ds-dot size=md state=error",
   "ds-dot size=md state=running",
   "ds-dot size=md state=idle",
+  "ds-dot size=md state=attention",
   "ds-dot role=img size=sm state=ok",
   "ds-avatar kind=initials shown=initials size=28 "G"",
   "ds-avatar color=5 kind=color shown=color size=20 "设"",

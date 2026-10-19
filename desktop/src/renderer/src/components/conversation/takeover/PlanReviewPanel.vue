@@ -12,6 +12,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { ControlInteraction } from '../../../types'
 import { useAppContext } from '../../../composables/useAppContext'
 import Button from '../../ui/Button.vue'
+import Dot from '../../ui/Dot.vue'
 import IconButton from '../../ui/IconButton.vue'
 import MarkdownBlock from '../../chat/MarkdownBlock.vue'
 import { DsClose } from '../../icons/ds'
@@ -83,7 +84,7 @@ function onCommentKeydown(event: KeyboardEvent) {
       @keydown="foldOnEscape($event, props.interaction.id)"
     >
       <div class="strip">
-        <span class="dot" aria-hidden="true" />
+        <Dot state="attention" />
         <span class="strip-label">计划待确认</span>
         <IconButton
           shape="circle"
@@ -168,14 +169,6 @@ function onCommentKeydown(event: KeyboardEvent) {
   color: rgb(var(--approval-line));
   font-size: var(--fs-xs);
   line-height: 18px;
-}
-
-.dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: rgb(var(--approval-line));
 }
 
 .strip-label {

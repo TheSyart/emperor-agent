@@ -6,6 +6,7 @@
 
 import { formatClock } from '../conversation/chatFormat'
 import { formatElapsed } from '../ui/elapsed'
+import type { DotState } from '../ui/dot'
 
 export interface EnvironmentSubagentGroups<T extends object> {
   active: T[]
@@ -208,6 +209,14 @@ export interface BackgroundTaskInput {
  * `error` / `interrupted`). */
 export type BackgroundTaskTone =
   'running' | 'pending' | 'completed' | 'failed' | 'cancelled'
+
+/** The Dot a background task line shows (running pulses; the rest rest). */
+export function backgroundTaskDot(tone: BackgroundTaskTone): DotState {
+  if (tone === 'running') return 'running'
+  if (tone === 'completed') return 'ok'
+  if (tone === 'failed') return 'error'
+  return 'idle'
+}
 
 export function backgroundTaskTone(status: string): BackgroundTaskTone {
   switch (status) {

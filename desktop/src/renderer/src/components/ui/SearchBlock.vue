@@ -10,6 +10,7 @@
  * - truncated? / total?: backend cap → "显示 n / 共 total".
  * - maxLines (default 16).
  */
+import Badge from './Badge.vue'
 import { computed, ref } from 'vue'
 import type { SearchFileGroup } from './blockTypes'
 import { capRows, DEFAULT_BLOCK_MAX_LINES, headTailCap } from './headTailCap'
@@ -137,7 +138,7 @@ const { copied, copy } = useCopyFeedback(() =>
           @click="toggleFile(row.index)"
         >
           <span class="file-path" v-text="row.path" />
-          <span class="file-count">{{ row.count }}</span>
+          <Badge variant="count" :label="row.count" />
         </button>
         <div v-else-if="row.type === 'match'" class="line">
           <span class="line-no">{{ row.lineNumber }}: </span
@@ -201,10 +202,6 @@ const { copied, copy } = useCopyFeedback(() =>
 }
 
 .line-no,
-.file-count {
-  color: rgb(var(--label-tertiary));
-}
-
 .file {
   display: flex;
   align-items: baseline;
@@ -224,10 +221,6 @@ const { copied, copy } = useCopyFeedback(() =>
   font-weight: 600;
   white-space: pre;
   color: rgb(var(--label-primary));
-}
-
-.file-count {
-  flex: none;
 }
 
 .expand {

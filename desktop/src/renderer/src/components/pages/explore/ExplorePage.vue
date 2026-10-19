@@ -13,6 +13,7 @@
  *   verifies.
  * A Skill or MCP entry that is already present reads 「已安装」.
  */
+import Badge from '../../ui/Badge.vue'
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { openLink } from '../../../api/backend'
@@ -168,7 +169,7 @@ function clearFilters() {
             @click="filter = item.id"
           >
             {{ item.label }}
-            <span class="count">{{ counts[item.id] }}</span>
+            <Badge variant="count" :label="counts[item.id]" />
           </Chip>
         </div>
       </div>
@@ -254,12 +255,6 @@ function clearFilters() {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1-5);
-}
-
-.count {
-  margin-left: var(--space-1);
-  color: rgb(var(--label-tertiary));
-  font-variant-numeric: tabular-nums;
 }
 
 .grid {

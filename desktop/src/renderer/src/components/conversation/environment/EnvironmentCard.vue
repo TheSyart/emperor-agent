@@ -40,6 +40,8 @@
  * title (the project name; '' for 环境信息).
  * Emits: reveal(nodeKey), open-subagent(sessionId), close.
  */
+import Badge from '../../ui/Badge.vue'
+import Dot from '../../ui/Dot.vue'
 import {
   ArrowUpRight,
   ChevronDown,
@@ -86,6 +88,7 @@ import MenuItem from '../../ui/MenuItem.vue'
 import Avatar from '../../ui/Avatar.vue'
 import type { AgentView } from '@emperor/core/api'
 import {
+  backgroundTaskDot,
   backgroundTaskLines,
   backgroundTaskSummary,
   backgroundTaskTime,
@@ -732,7 +735,7 @@ function openLauncher(): void {
           >
             <FileDiff :size="15" class="row-icon" />
             <span class="row-label mono">{{ branchLabel }}</span>
-            <span v-if="activeWorktree" class="row-tag">worktree</span>
+            <Badge v-if="activeWorktree">worktree</Badge>
             <span v-if="aheadBehind" class="row-meta">{{ aheadBehind }}</span>
             <span v-if="git.summary.changedFiles" class="row-value changes">
               <b>+{{ git.summary.additions }}</b>
@@ -808,10 +811,11 @@ function openLauncher(): void {
             :data-kind="line.kind"
             :title="lineTitle(line)"
           >
-            <span
+            <Dot
               class="task-dot"
+              size="sm"
               :data-status="line.tone"
-              aria-hidden="true"
+              :state="backgroundTaskDot(line.tone)"
             />
             <span class="task-label" :class="{ mono: line.kind === 'job' }">{{
               line.label
@@ -1283,18 +1287,11 @@ button.row[aria-disabled='true'] .row-label {
   overflow-wrap: anywhere;
 }
 
-.row-tag,
 .row-meta {
   flex: none;
   color: rgb(var(--label-tertiary));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-}
-
-.row-tag {
-  padding: 0 var(--space-1);
-  border-radius: var(--radius-xs);
-  background: rgb(var(--fg) / var(--hover-bg-a));
 }
 
 .row-thumb,
@@ -1373,29 +1370,7 @@ button.row[aria-disabled='true'] .row-label {
 
 /* In the row-icon column, so labels line up with 后台任务. */
 .task-dot {
-  flex: none;
-  width: var(--space-1-5);
-  height: var(--space-1-5);
-  margin: 0 calc((15px - var(--space-1-5)) / 2);
-  border-radius: var(--radius-pill);
-  background: rgb(var(--label-tertiary));
-}
-
-.task-dot[data-status='running'] {
-  background: rgb(var(--accent-strong));
-  animation: env-card-pulse 1.6s ease-in-out infinite;
-}
-
-.task-dot[data-status='completed'] {
-  background: rgb(var(--state-ok-label));
-}
-
-.task-dot[data-status='failed'] {
-  background: rgb(var(--state-error-label));
-}
-
-.task-dot[data-status='cancelled'] {
-  opacity: 0.55;
+  margin: 0 calc((15px - var(--dot-sm)) / 2);
 }
 
 .task-label {
@@ -1518,10 +1493,5 @@ button.row[aria-disabled='true'] .row-label {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-variant-numeric: tabular-nums;
-}
-@keyframes env-card-pulse {
-  50% {
-    opacity: 0.35;
-  }
 }
 </style>

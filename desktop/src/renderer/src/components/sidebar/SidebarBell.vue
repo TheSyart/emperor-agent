@@ -5,6 +5,7 @@
  */
 import { computed, defineAsyncComponent, ref } from 'vue'
 import { useNotifications } from '../../composables/useNotifications'
+import Dot from '../ui/Dot.vue'
 import IconButton from '../ui/IconButton.vue'
 import { elementOf } from '../ui/elementOf'
 import { SIDEBAR_ICONS } from './sidebarNav'
@@ -36,7 +37,7 @@ const label = computed(() =>
     @click="open = !open"
   >
     <component :is="SIDEBAR_ICONS.bell" :size="rail ? 18 : 16" />
-    <span v-if="unreadCount" class="dot" aria-hidden="true" />
+    <Dot v-if="unreadCount" class="unread" state="error" size="sm" />
   </IconButton>
   <NotificationsPopover v-if="open" v-model:open="open" :anchor="anchor" />
 </template>
@@ -75,14 +76,10 @@ const label = computed(() =>
   box-shadow: 0 0 0 2px rgb(var(--focus-ring) / 0.5);
 }
 
-.dot {
+.unread {
   position: absolute;
   top: 22%;
   right: 22%;
-  width: var(--space-1-5);
-  height: var(--space-1-5);
-  border: 1px solid rgb(var(--sidebar-fill));
-  border-radius: var(--radius-pill);
-  background: rgb(var(--danger));
+  box-shadow: 0 0 0 1px rgb(var(--sidebar-fill));
 }
 </style>

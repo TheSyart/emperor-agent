@@ -11,22 +11,12 @@
  * environment card has nothing to show before the first message and stays
  * hidden there, so its toggle does too.
  */
+import { computed } from 'vue'
 import { PanelRight, PictureInPicture2 } from 'lucide-vue-next'
 import Avatar from '../ui/Avatar.vue'
 import IconButton from '../ui/IconButton.vue'
+import Tabs from '../ui/Tabs.vue'
 import type { HeaderCrumb } from './conversationModel'
-
-withDefaults(
-  defineProps<{
-    crumbs: HeaderCrumb[]
-    tab: 'chat' | 'trajectory'
-    workspaceOpen: boolean
-    envCardOpen: boolean
-    tabsDisabled?: boolean
-    slim?: boolean
-  }>(),
-  { tabsDisabled: false, slim: false },
-)
 
 const emit = defineEmits<{
   navigate: [sessionId: string]
@@ -35,10 +25,30 @@ const emit = defineEmits<{
   'toggle-env-card': []
 }>()
 
-const tabs = [
-  { id: 'chat', label: '对话' },
-  { id: 'trajectory', label: '轨迹' },
-] as const
+const props = defineProps<{
+  crumbs: HeaderCrumb[]
+  tab: 'chat' | 'trajectory'
+  workspaceOpen: boolean
+  envCardOpen: boolean
+  tabsDisabled?: boolean
+  slim?: boolean
+}>()
+
+const tabs = computed(() =>
+  (
+    [
+      { id: 'chat', label: '对话' },
+      { id: 'trajectory', label: '轨迹' },
+    ] as const
+  ).map((item) => ({
+    ...item,
+    disabled: Boolean(props.tabsDisabled) && item.id !== props.tab,
+  })),
+)
+
+function onTab(id: string) {
+  if (id === 'chat' || id === 'trajectory') emit('tab', id)
+}
 </script>
 
 <template>
@@ -98,20 +108,14 @@ const tabs = [
         </IconButton>
       </div>
     </div>
-    <div v-if="!slim" class="tabs" role="tablist" aria-label="会话视图">
-      <button
-        v-for="item in tabs"
-        :key="item.id"
-        type="button"
-        role="tab"
-        class="tab"
-        :aria-selected="tab === item.id"
-        :disabled="tabsDisabled && item.id !== tab"
-        @click="emit('tab', item.id)"
-      >
-        {{ item.label }}
-      </button>
-    </div>
+    <Tabs
+      v-if="!slim"
+      class="tabs"
+      aria-label="会话视图"
+      :tabs="tabs"
+      :model-value="tab"
+      @update:model-value="onTab"
+    />
   </header>
 </template>
 
@@ -228,55 +232,13 @@ button.crumb:hover {
 .tabs {
   position: relative;
   z-index: var(--z-raised);
-  display: flex;
   gap: calc(var(--space-8) + var(--space-1));
   margin-top: var(--space-1);
   padding-left: var(--space-2);
 }
 
-.tab {
-  position: relative;
-  padding: 0 0 11px;
-  border: none;
-  background: transparent;
-  color: rgb(var(--label-tertiary));
-  font-size: var(--fs-xs);
-  line-height: var(--space-4);
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.tab:hover:not(:disabled) {
-  color: rgb(var(--label-secondary));
-}
-
-.tab:disabled {
-  color: rgb(var(--label-dimmed));
-  cursor: default;
-}
-
-.tab::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 2px;
-  border-radius: 2px;
-  background: transparent;
-}
-
-.tab[aria-selected='true'] {
-  color: rgb(var(--accent-strong));
-}
-
-.tab[aria-selected='true']::after {
-  background: rgb(var(--accent-fill));
-}
-
-.tab:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px rgb(var(--focus-ring) / 0.5);
-  border-radius: var(--radius-xs);
+/* The header keeps its compact 28px strip. */
+.tabs :deep(.tab) {
+  height: var(--space-7);
 }
 </style>

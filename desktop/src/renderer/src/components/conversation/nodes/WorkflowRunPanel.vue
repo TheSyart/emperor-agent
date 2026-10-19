@@ -7,6 +7,7 @@
  *
  * Props: run (WorkflowRunView), expansionKey.
  */
+import EmptyState from '../../ui/EmptyState.vue'
 import { computed } from 'vue'
 import type {
   WorkflowMemberView,
@@ -148,9 +149,11 @@ const latestLog = computed(() => props.run.logs.at(-1))
       </span>
     </div>
     <div v-if="isOpen('run', runMode)" class="phase-list">
-      <span v-if="phases.length === 0" class="run-empty">{{
-        run.status === 'running' ? '等待成员启动…' : '没有启动成员'
-      }}</span>
+      <EmptyState
+        v-if="phases.length === 0"
+        variant="inline"
+        :title="run.status === 'running' ? '等待成员启动…' : '没有启动成员'"
+      />
       <div v-for="phase in phases" :key="phase.key" class="phase">
         <div
           class="phase-header"
@@ -402,7 +405,6 @@ const latestLog = computed(() => props.run.logs.at(-1))
   color: rgb(var(--label-secondary));
 }
 
-.run-empty,
 .run-log {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);

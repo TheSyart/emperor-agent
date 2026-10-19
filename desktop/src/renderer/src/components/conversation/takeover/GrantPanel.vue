@@ -16,6 +16,7 @@ import type { ControlInteraction } from '../../../types'
 import { useAppContext } from '../../../composables/useAppContext'
 import Segmented from '../../ui/Segmented.vue'
 import Button from '../../ui/Button.vue'
+import Dot from '../../ui/Dot.vue'
 import { GRANT_DENY, grantAnswer, grantPresentation } from './grantModel'
 
 const props = defineProps<{ interaction: ControlInteraction }>()
@@ -59,7 +60,7 @@ function send(optionId: string) {
       @keydown="foldOnEscape($event, props.interaction.id)"
     >
       <div class="strip">
-        <span class="dot" aria-hidden="true" />
+        <Dot state="attention" />
         <span>电脑操作授权</span>
         <span v-if="presentation.tool" class="tool"
           >· {{ presentation.tool }}</span
@@ -164,14 +165,6 @@ function send(optionId: string) {
   color: rgb(var(--approval-line));
   font-size: var(--fs-xs);
   line-height: 18px;
-}
-
-.dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: rgb(var(--approval-line));
 }
 
 .tool {

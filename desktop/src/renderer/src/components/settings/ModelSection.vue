@@ -405,13 +405,9 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
                   </span>
                   <span class="model-meta">
                     <code class="model-id">{{ entry.modelId }}</code>
-                    <span
-                      v-for="tag in capabilityTags(entry)"
-                      :key="tag"
-                      class="cap-tag"
-                    >
+                    <Badge v-for="tag in capabilityTags(entry)" :key="tag">
                       {{ tag }}
-                    </span>
+                    </Badge>
                     <span v-if="contextLabel(entry)" class="context">
                       {{ contextLabel(entry) }}
                     </span>
@@ -616,15 +612,6 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
   font: var(--font-code-small);
   color: rgb(var(--label-secondary));
   overflow-wrap: anywhere;
-}
-
-.cap-tag {
-  padding: 0 var(--space-1);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-xs);
-  font-size: var(--fs-xxxs);
-  line-height: var(--lh-xxxs);
-  color: rgb(var(--label-secondary));
 }
 
 .model-actions {

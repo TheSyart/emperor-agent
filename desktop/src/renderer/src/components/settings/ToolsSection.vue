@@ -9,6 +9,7 @@
  * in its detail; the lead-in links there. Refresh reloads the list from
  * Core (`skills.tools`) into the bootstrap state.
  */
+import Badge from '../ui/Badge.vue'
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { core } from '../../api/http'
@@ -120,7 +121,11 @@ function openTab(tab: 'mcp' | 'plugins'): void {
     >
       <template #title>
         {{ group.title }}
-        <span class="group-count">{{ group.tools.length }}</span>
+        <Badge
+          class="group-count"
+          variant="count"
+          :label="group.tools.length"
+        />
       </template>
       <ul class="tool-list">
         <ToolRow
@@ -167,8 +172,7 @@ function openTab(tab: 'mcp' | 'plugins'): void {
   margin-top: var(--space-1);
 }
 
-.count,
-.group-count {
+.count {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-weight: 400;

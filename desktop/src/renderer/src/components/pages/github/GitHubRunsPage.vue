@@ -23,6 +23,8 @@ import { core } from '../../../api/http'
 import { useAppContext } from '../../../composables/useAppContext'
 import { DsChevronLeft, DsChevronRight, DsGlobe } from '../../icons/ds'
 import Button from '../../ui/Button.vue'
+import Dot from '../../ui/Dot.vue'
+import type { DotState } from '../../ui/dot'
 import { EmptyState, Badge, TextField } from '../../settings/ui'
 import { refreshAction } from '../../settings/settingsHeader'
 import PageShell from '../PageShell.vue'
@@ -238,6 +240,11 @@ function runMeta(run: GitHubRunListItem): string {
 const actions = computed(() =>
   pluginOn.value ? [refreshAction(refresh, { label: '刷新运行记录' })] : [],
 )
+
+/** A step's outcome as a Dot (no outcome yet: idle). */
+function stepDot(tone: string): DotState {
+  return tone === 'ok' || tone === 'error' || tone === 'warn' ? tone : 'idle'
+}
 </script>
 
 <template>
@@ -339,7 +346,7 @@ const actions = computed(() =>
                   class="step"
                   :data-outcome="runOutcome(step).tone"
                 >
-                  <span class="step-dot" aria-hidden="true" />
+                  <Dot size="sm" :state="stepDot(runOutcome(step).tone)" />
                   <span class="step-name">{{ step.name }}</span>
                   <span class="step-outcome">{{ runOutcome(step).label }}</span>
                 </li>
@@ -620,26 +627,6 @@ const actions = computed(() =>
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   color: rgb(var(--label-secondary));
-}
-
-.step-dot {
-  flex: none;
-  width: var(--space-1-5);
-  height: var(--space-1-5);
-  border-radius: 50%;
-  background: rgb(var(--label-caption));
-}
-
-.step[data-outcome='ok'] .step-dot {
-  background: rgb(var(--state-ok));
-}
-
-.step[data-outcome='error'] .step-dot {
-  background: rgb(var(--state-error));
-}
-
-.step[data-outcome='warn'] .step-dot {
-  background: rgb(var(--state-warn));
 }
 
 .step-name {

@@ -13,6 +13,7 @@
  * - limit (default 5; 0 = all).
  * - emptyText (default 「所选范围内没有用量。」).
  */
+import EmptyState from '../../ui/EmptyState.vue'
 import { computed, ref, watch } from 'vue'
 import type { RankingItem } from './tokenUsageModel'
 
@@ -46,7 +47,7 @@ const collapsible = computed(
 
 <template>
   <div class="token-ranking">
-    <p v-if="!items.length" class="empty">{{ emptyText }}</p>
+    <EmptyState v-if="!items.length" :title="emptyText" />
     <ol v-else class="rows" :aria-label="label">
       <li
         v-for="(item, index) in shown"
@@ -216,14 +217,6 @@ const collapsible = computed(
 .expand:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px rgb(var(--focus-ring) / 0.5);
-}
-
-.empty {
-  margin: 0;
-  padding: var(--space-4) 0;
-  font-size: var(--fs-xxs);
-  color: rgb(var(--label-tertiary));
-  text-align: center;
 }
 
 @container (max-width: 439px) {
