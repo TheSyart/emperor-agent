@@ -57,6 +57,7 @@ import {
   runPackagedSmoke,
 } from './packaged-smoke'
 import { developmentRendererUrl, mainRendererUrl } from './renderer-url'
+import { DEBUG_SWITCH_REFUSED_EXIT, refusedDebugSwitch } from './debug-switches'
 import { verifyPackagedSeatbelt } from './packaged-seatbelt-smoke'
 import {
   createPackagedSmokeAttachment,
@@ -159,6 +160,16 @@ import {
 
 const mainDir = moduleDirFromUrl(import.meta.url)
 const mainArgv = process.argv.slice(2)
+// SEC-04: a packaged app opens no DevTools endpoint (no fuse covers these).
+const debugSwitch = refusedDebugSwitch({
+  isPackaged: app.isPackaged,
+  hasSwitch: (name) => app.commandLine.hasSwitch(name),
+})
+if (debugSwitch) {
+  console.error(`refusing --${debugSwitch} in a packaged build`)
+  app.exit(DEBUG_SWITCH_REFUSED_EXIT)
+  process.exit(DEBUG_SWITCH_REFUSED_EXIT)
+}
 // Emperor keeps no secret in the macOS Keychain (local-secret-store.ts).
 // Should Chromium itself reach for it, a mock keychain answers instead of a
 // "Safe Storage" prompt. Extra insurance only; keychain-free.test.ts and the
