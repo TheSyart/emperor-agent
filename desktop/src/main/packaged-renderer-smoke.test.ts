@@ -22,6 +22,7 @@ const PROBE = {
   cspMeta: CSP,
   evalBlocked: true,
   microphoneDenied: true,
+  href: 'app://bundle/index.html',
 }
 
 function fakeWindow(
@@ -59,6 +60,7 @@ describe('packaged renderer smoke', () => {
 
     const receipt = await verifyPackagedRenderer({
       createWindow: () => win,
+      rendererUrl: 'app://bundle/index.html',
       attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
       attachmentContent: 'emperor-renderer-smoke',
       chromiumSandboxDisabledForTest: false,
@@ -93,10 +95,38 @@ describe('packaged renderer smoke', () => {
         microphoneDenied: true,
         devToolsDisabled: true,
         productionMenu: true,
+        rendererUrlPinned: true,
       },
     })
     expect(win.webContents.openDevTools).toHaveBeenCalled()
     expect(destroy).toHaveBeenCalledOnce()
+  })
+
+  it('6. fails when the main window would load anything but app://bundle (SEC-04)', async () => {
+    for (const [rendererUrl, href] of [
+      ['https://example.com/', 'https://example.com/'],
+      ['http://127.0.0.1:5173/', 'http://127.0.0.1:5173/'],
+      ['app://bundle/index.html', 'https://example.com/'],
+    ]) {
+      const { win, destroy } = fakeWindow({ probe: { ...PROBE, href } })
+      await expect(
+        verifyPackagedRenderer({
+          createWindow: () => win,
+          rendererUrl,
+          attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
+          attachmentContent: 'emperor-renderer-smoke',
+          chromiumSandboxDisabledForTest: false,
+          webPreferences: {
+            sandbox: true,
+            contextIsolation: true,
+            nodeIntegration: false,
+          },
+          security: security(),
+        }),
+      ).rejects.toThrow(/renderer-url/)
+      expect(win.loadURL).toHaveBeenNthCalledWith(1, rendererUrl)
+      expect(destroy).toHaveBeenCalledOnce()
+    }
   })
 
   it('fails when the packaged main window lacks a renderer defense (SEC-05)', async () => {
@@ -115,6 +145,7 @@ describe('packaged renderer smoke', () => {
       await expect(
         verifyPackagedRenderer({
           createWindow: () => win,
+          rendererUrl: 'app://bundle/index.html',
           attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
           attachmentContent: 'emperor-renderer-smoke',
           chromiumSandboxDisabledForTest: false,
@@ -145,6 +176,7 @@ describe('packaged renderer smoke', () => {
     await expect(
       verifyPackagedRenderer({
         createWindow: () => win,
+        rendererUrl: 'app://bundle/index.html',
         attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
         attachmentContent: 'emperor-renderer-smoke',
         chromiumSandboxDisabledForTest: true,
@@ -168,6 +200,7 @@ describe('packaged renderer smoke', () => {
     await expect(
       verifyPackagedRenderer({
         createWindow: () => win,
+        rendererUrl: 'app://bundle/index.html',
         attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
         attachmentContent: 'emperor-renderer-smoke',
         chromiumSandboxDisabledForTest: false,

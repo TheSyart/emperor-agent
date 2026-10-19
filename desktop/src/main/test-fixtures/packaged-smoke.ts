@@ -70,6 +70,7 @@ export function packagedSmokeFixture(
           microphoneDenied: true,
           devToolsDisabled: true,
           productionMenu: true,
+          rendererUrlPinned: true,
         },
       },
     },

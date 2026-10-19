@@ -51,7 +51,12 @@ import { pluginAssetResponse } from './plugin-assets'
 import { createCoreHost } from './core-host'
 import { CoreEventBridge, SessionEventBridge } from './event-bridge'
 import { moduleDirFromUrl } from './esm-path'
-import { parsePackagedSmokeArgs, runPackagedSmoke } from './packaged-smoke'
+import {
+  PACKAGED_SMOKE_REFUSED_EXIT,
+  packagedSmokeLaunch,
+  runPackagedSmoke,
+} from './packaged-smoke'
+import { developmentRendererUrl, mainRendererUrl } from './renderer-url'
 import { verifyPackagedSeatbelt } from './packaged-seatbelt-smoke'
 import {
   createPackagedSmokeAttachment,
@@ -150,13 +155,28 @@ import {
 
 const mainDir = moduleDirFromUrl(import.meta.url)
 const mainArgv = process.argv.slice(2)
-const packagedSmoke = parsePackagedSmokeArgs(process.argv)
 // Emperor keeps no secret in the macOS Keychain (local-secret-store.ts).
 // Should Chromium itself reach for it, a mock keychain answers instead of a
 // "Safe Storage" prompt. Extra insurance only; keychain-free.test.ts and the
 // bundle audit hold the code to it.
 app.commandLine.appendSwitch('use-mock-keychain')
 let config = resolveConfig({ argv: mainArgv, env: process.env })
+// MAIN-28: the smoke runs only on a disposable state root under the system
+// temp directory; otherwise exit before anything reads or writes state.
+const smokeLaunch = packagedSmokeLaunch(process.argv, {
+  stateRoot: config.stateRoot,
+})
+if (smokeLaunch.kind === 'refuse') {
+  console.error(`packaged smoke refused: ${smokeLaunch.reason}`)
+  app.exit(PACKAGED_SMOKE_REFUSED_EXIT)
+  process.exit(PACKAGED_SMOKE_REFUSED_EXIT)
+}
+const packagedSmoke =
+  smokeLaunch.kind === 'run' ? { receiptPath: smokeLaunch.receiptPath } : null
+// Chromium's profile (Local Storage, caches) stays with the smoke's state,
+// not in the installed app's Application Support folder.
+if (packagedSmoke)
+  app.setPath('userData', path.join(config.stateRoot, 'electron-user-data'))
 let legacyRuntimeRoot = config.runtimeRoot
 let packagedRuntimeRevision = ''
 const rendererRoot = path.join(mainDir, '..', 'renderer')
@@ -207,7 +227,10 @@ let pointerOverlay: PointerOverlay | null = null
 let didLoadRetry = false
 const trustedRendererPolicy = createTrustedRendererPolicy({
   productionUrl: 'app://bundle/index.html',
-  developmentUrl: process.env.ELECTRON_RENDERER_URL ?? null,
+  developmentUrl: developmentRendererUrl({
+    isPackaged: app.isPackaged,
+    env: process.env,
+  }),
   mainWebContents: () => mainWindow?.webContents ?? null,
   openExternal: (url) => shell.openExternal(url),
   openLink: (url) => openUserLink(url),
@@ -783,9 +806,10 @@ function registerAppProtocol(): void {
 
 function loadRenderer(): void {
   if (!mainWindow) return
-  const devUrl = process.env.ELECTRON_RENDERER_URL
-  if (devUrl) mainWindow.loadURL(devUrl)
-  else mainWindow.loadURL('app://bundle/index.html')
+  // The Vite dev server only when not packaged (MAIN-10, renderer-url.ts).
+  mainWindow.loadURL(
+    mainRendererUrl({ isPackaged: app.isPackaged, env: process.env }),
+  )
 }
 
 /**
@@ -1374,6 +1398,11 @@ async function startup(): Promise<void> {
               secureWindowNavigation(win, trustedRendererPolicy)
               return win
             },
+            // The URL the real main window loads, from the same helper.
+            rendererUrl: mainRendererUrl({
+              isPackaged: app.isPackaged,
+              env: process.env,
+            }),
             attachmentUrl: attachment.url,
             attachmentContent: attachment.content,
             chromiumSandboxDisabledForTest:
