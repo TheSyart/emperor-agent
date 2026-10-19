@@ -117,6 +117,16 @@ export interface BrowserSessionManagerOptions {
   readonly downloads?: DownloadInbox
   /** The kernel's site-permission verdict (null: deny everything). */
   sitePermission?(): SitePermissionPolicy | null
+  /**
+   * A persistent profile's storage beyond Chromium's own (SEC-10): before a
+   * profile's first page in a run its session is prepared (imported cookies
+   * set in memory, the folder kept out of Time Machine); clearing the
+   * profile clears that storage too. `ImportedCookieStore` in main.
+   */
+  readonly profileStorage?: {
+    prepare(profileId: string, session: Session): Promise<void>
+    cleared(profileId: string, session: Session): Promise<void>
+  }
   now?(): number
 }
 
@@ -301,6 +311,15 @@ export class BrowserSessionManager {
       },
     })
     this.filterRequests(session)
+    if (persistent)
+      await this.options.profileStorage
+        ?.prepare(profileId, session)
+        .catch((error: unknown) => {
+          // The tab still opens; it just lacks what could not be prepared.
+          console.warn(
+            `Browser profile ${profileId} could not be prepared: ${error instanceof Error ? error.message : String(error)}`,
+          )
+        })
     const view = this.options.electron.createView(
       agentTabWebPreferences(persistent ? { session } : { partition }),
     )
@@ -515,6 +534,8 @@ export class BrowserSessionManager {
     const session = this.options.electron.sessionFromPath(path)
     await session.clearStorageData()
     await session.clearCache()
+    // Imported cookies live beside Chromium's data: they go as well.
+    await this.options.profileStorage?.cleared(profileId, session)
     if (options.remove) {
       await this.deletions?.mark(profileId)
       await (

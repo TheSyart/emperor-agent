@@ -45,6 +45,7 @@ import type { AgentPreviewPointer } from '../../shared/ipc-contract'
 import {
   BrowserSessionManager,
   type AgentTab,
+  type BrowserSessionManagerOptions,
   type ElectronFactory,
 } from './browser-session-manager'
 import { IsolatedWorlds } from './cdp/isolated'
@@ -120,6 +121,8 @@ export interface EmbeddedBrowserDriverOptions {
   readonly profilesRoot?: string
   /** `~/.emperor/browser/downloads` (download inbox). */
   readonly downloadsRoot?: string
+  /** Imported cookies and backup exclusion of persistent profiles (SEC-10). */
+  readonly profileStorage?: BrowserSessionManagerOptions['profileStorage']
   /** Main-only. The model and Core pass only a handle. */
   readonly credentials?: CredentialVault
   /** Stop renderer preview before a secret is inserted; resume on document navigation. */
@@ -168,6 +171,9 @@ export class EmbeddedBrowserDriver implements BrowserDriver {
       ...(options.profilesRoot === undefined
         ? {}
         : { profilesRoot: options.profilesRoot }),
+      ...(options.profileStorage === undefined
+        ? {}
+        : { profileStorage: options.profileStorage }),
       onPopup: (opener, popup) => {
         this.runtimes.set(popup.targetId, this.newRuntime(popup))
         this.emit({
