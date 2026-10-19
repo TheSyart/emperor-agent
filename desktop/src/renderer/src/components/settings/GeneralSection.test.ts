@@ -83,6 +83,18 @@ function button(root: ParentNode, text: string): HTMLButtonElement {
   return found
 }
 
+/** Pick `text` from a row's 「⋯」 menu (it opens on document.body). */
+async function rowMenu(row: ParentNode, text: string): Promise<void> {
+  row.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!.click()
+  await settle()
+  const item = [
+    ...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ].find((entry) => entry.textContent?.trim() === text)
+  if (!item) throw new Error(`no menu item ${text}`)
+  item.click()
+  await settle()
+}
+
 const trashed = {
   id: 's-gone',
   title: '旧草稿',
@@ -230,15 +242,15 @@ describe('GeneralSection 最近删除 (FIX-01 2)', () => {
     const root = await mount()
     await openArchive(root)
     const group = root.querySelector('[data-group="deleted"]')!
-    button(group, '永久删除').click()
-    await settle()
+    // The main action stays a button; deleting is in the row's 「⋯」.
+    expect(() => button(group, '永久删除')).toThrow()
+    await rowMenu(group, '永久删除')
     expect(responder).toHaveBeenCalledWith(
       expect.objectContaining({ tone: 'danger' }),
     )
     expect(session.purgeDeleted).not.toHaveBeenCalled()
     responder.mockReturnValue(true)
-    button(group, '永久删除').click()
-    await settle()
+    await rowMenu(group, '永久删除')
     expect(session.purgeDeleted).toHaveBeenCalledWith('s-gone')
   })
 })

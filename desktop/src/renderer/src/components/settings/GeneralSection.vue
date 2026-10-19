@@ -40,6 +40,7 @@ import {
   SettingsGroup,
   SettingsLinkRow,
   SettingsRow,
+  SettingsRowMenu,
   SettingsSection,
   Switch,
   type SegmentedOption,
@@ -316,13 +317,16 @@ onMounted(() => void loadPermission())
             >
               恢复
             </Button>
-            <Button
-              size="sm"
-              variant="danger"
-              @click="deleteArchived(session.id)"
-            >
-              删除
-            </Button>
+            <SettingsRowMenu
+              :items="[
+                {
+                  id: 'delete',
+                  label: '删除',
+                  danger: true,
+                  onSelect: () => deleteArchived(session.id),
+                },
+              ]"
+            />
           </SettingsRow>
         </template>
       </SettingsGroup>
@@ -361,9 +365,16 @@ onMounted(() => void loadPermission())
             <Button size="sm" variant="secondary" @click="restoreDeleted(item)">
               恢复
             </Button>
-            <Button size="sm" variant="danger" @click="purgeDeleted(item)">
-              永久删除
-            </Button>
+            <SettingsRowMenu
+              :items="[
+                {
+                  id: 'purge',
+                  label: '永久删除',
+                  danger: true,
+                  onSelect: () => purgeDeleted(item),
+                },
+              ]"
+            />
           </SettingsRow>
         </template>
       </SettingsGroup>

@@ -18,3 +18,12 @@ export interface SettingsTableColumn {
   label: string
   width?: string
 }
+
+/** One action of a row's 「⋯」 menu (SettingsRowMenu). */
+export interface SettingsRowMenuItem {
+  id: string
+  label: string
+  danger?: boolean
+  disabled?: boolean
+  onSelect: () => unknown
+}
