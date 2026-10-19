@@ -41,6 +41,7 @@ import type {
   ToolRegistry,
 } from '../tools/registry'
 import {
+  CLAUDE_HOOK_EVENTS,
   parseClaudeCodeConfig,
   type ClaudeCodeHookConfig,
   type ClaudeHookEvent,
@@ -102,8 +103,25 @@ export interface ClaudeCodeHooksDescription {
 /** Hooks one plugin contributes: already in Emperor's shape, with its own variables. */
 export interface PluginHookSet {
   readonly id: string
+  /** The contributing plugin (a project's own copy hides its global one). */
+  readonly pluginId?: string
   readonly env: Readonly<Record<string, string>>
   readonly config: ClaudeCodeHookConfig
+}
+
+/**
+ * Plugin hooks per session scope (KRN-01): a session in a project runs the
+ * global plugin sets (minus plugins the project replaces) plus the
+ * project's own sets; a Chat session runs only the global ones.
+ */
+export interface PluginHookScope {
+  /** The project an agent works in (its root session's); null for Chat. */
+  projectOf(agent: Agent | undefined): string | null
+  project(projectRoot: string): {
+    readonly sets: readonly PluginHookSet[]
+    /** Plugin ids whose global sets this project replaces. */
+    readonly hidden: ReadonlySet<string>
+  }
 }
 
 interface RunPointOptions {
@@ -142,6 +160,7 @@ function openTurn(agent: Agent | undefined): number | undefined {
 export class ClaudeCodeHooks {
   private config: ClaudeCodeHookConfig = {}
   private pluginSets: readonly PluginHookSet[] = []
+  private pluginScope: PluginHookScope | null = null
   private files: string[] = []
   private errors: string[] = []
   private readonly log: Logger
@@ -226,39 +245,39 @@ export class ClaudeCodeHooks {
         )
       }
     }
-    // Plugin sets run after the user's files, each group carrying its plugin's variables.
-    for (const set of this.pluginSets) {
-      for (const [event, groups] of Object.entries(set.config) as Array<
-        [ClaudeHookEvent, NonNullable<ClaudeCodeHookConfig[ClaudeHookEvent]>]
-      >) {
-        merged[event] = [
-          ...(merged[event] ?? []),
-          ...groups.map((group) => ({ ...group, env: { ...set.env } })),
-        ]
-      }
-    }
     this.config = merged
     this.files = files
     this.errors = errors
   }
 
-  /** Replace the plugin hook sets; the user's files are re-read, never written. */
+  /**
+   * Replace the global plugin hook sets (user-wide and shipped plugins); the
+   * user's files are re-read, never written.
+   */
   setPluginHooks(sets: readonly PluginHookSet[]): void {
     this.pluginSets = sets.map((set) => ({
       id: set.id,
+      ...(set.pluginId === undefined ? {} : { pluginId: set.pluginId }),
       env: { ...set.env },
       config: set.config,
     }))
     this.reload()
   }
 
+  /** Per-project plugin sets (KRN-01); null: every session runs the global sets only. */
+  setPluginHookScope(scope: PluginHookScope | null): void {
+    this.pluginScope = scope
+  }
+
+  /** The user's files and the global plugin sets (what a Chat session runs). */
   describe(): ClaudeCodeHooksDescription {
     const events: Record<string, number> = {}
-    for (const [event, groups] of Object.entries(this.config)) {
-      events[event] = (groups ?? []).reduce(
+    for (const event of CLAUDE_HOOK_EVENTS) {
+      const count = this.groupsFor(event, undefined).reduce(
         (sum, group) => sum + group.hooks.length,
         0,
       )
+      if (count > 0 || this.config[event] !== undefined) events[event] = count
     }
     return {
       events,
@@ -268,9 +287,40 @@ export class ClaudeCodeHooks {
     }
   }
 
-  /** Whether any hook is configured for `event`. */
-  has(event: ClaudeHookEvent): boolean {
-    return (this.config[event]?.length ?? 0) > 0
+  /** Whether any hook is configured for `event` (for `agent`'s session when given). */
+  has(event: ClaudeHookEvent, agent?: Agent): boolean {
+    return this.groupsFor(event, agent).length > 0
+  }
+
+  /**
+   * The groups `event` runs for an agent: the user's files, then the plugin
+   * sets of its scope, each plugin group carrying its plugin's variables.
+   */
+  private groupsFor(
+    event: ClaudeHookEvent,
+    agent: Agent | undefined,
+  ): NonNullable<ClaudeCodeHookConfig[ClaudeHookEvent]> {
+    const projectRoot = this.pluginScope?.projectOf(agent) ?? null
+    let sets: readonly PluginHookSet[] = this.pluginSets
+    if (projectRoot !== null && this.pluginScope !== null) {
+      const project = this.pluginScope.project(projectRoot)
+      sets = [
+        ...this.pluginSets.filter(
+          (set) =>
+            set.pluginId === undefined || !project.hidden.has(set.pluginId),
+        ),
+        ...project.sets,
+      ]
+    }
+    return [
+      ...(this.config[event] ?? []),
+      ...sets.flatMap((set) =>
+        (set.config[event] ?? []).map((group) => ({
+          ...group,
+          env: { ...set.env },
+        })),
+      ),
+    ]
   }
 
   /** Register the in-turn hook points; returns the uninstaller. */
@@ -297,7 +347,7 @@ export class ClaudeCodeHooks {
    * matcher subject is `source`.
    */
   sessionStarted(agent: Agent, source: SessionStartSource): void {
-    if (this.disposed || !this.has('SessionStart')) return
+    if (this.disposed || !this.has('SessionStart', agent)) return
     this.detached.track(
       this.runPoint(
         'SessionStart',
@@ -317,7 +367,7 @@ export class ClaudeCodeHooks {
 
   /** SubagentStart (detached): additionalContext is injected into the child. */
   subagentStarted(child: Agent): void {
-    if (this.disposed || !this.has('SubagentStart')) return
+    if (this.disposed || !this.has('SubagentStart', child)) return
     const payload = {
       ...this.base(child, 'SubagentStart'),
       agent_id: child.id,
@@ -340,7 +390,7 @@ export class ClaudeCodeHooks {
 
   /** SubagentStop (detached): observe only. */
   subagentStopped(child: Agent): void {
-    if (this.disposed || !this.has('SubagentStop')) return
+    if (this.disposed || !this.has('SubagentStop', child)) return
     const payload = {
       ...this.base(child, 'SubagentStop'),
       agent_id: child.id,
@@ -368,7 +418,11 @@ export class ClaudeCodeHooks {
   private async userPromptSubmit(
     input: Parameters<PreStepMiddleware>[0],
   ): Promise<PreStepDecision | undefined> {
-    if (this.disposed || input.step !== 1 || !this.has('UserPromptSubmit'))
+    if (
+      this.disposed ||
+      input.step !== 1 ||
+      !this.has('UserPromptSubmit', input.agent)
+    )
       return undefined
     const prompts = input.messages.filter(
       (message) => message.source.kind === 'user',
@@ -403,7 +457,7 @@ export class ClaudeCodeHooks {
   private async preToolUse(
     call: ToolCallInfo,
   ): Promise<PreToolDecision | undefined> {
-    if (this.disposed || !this.has('PreToolUse')) return undefined
+    if (this.disposed || !this.has('PreToolUse', call.agent)) return undefined
     const payload = {
       ...this.base(call.agent, 'PreToolUse'),
       tool_name: call.name,
@@ -433,7 +487,7 @@ export class ClaudeCodeHooks {
     call: ToolCallInfo,
     result: Parameters<PostExecuteMiddleware>[1],
   ): Promise<PostToolDecision | undefined> {
-    if (this.disposed || !this.has('PostToolUse')) return undefined
+    if (this.disposed || !this.has('PostToolUse', call.agent)) return undefined
     const payload = {
       ...this.base(call.agent, 'PostToolUse'),
       tool_name: call.name,
@@ -468,7 +522,7 @@ export class ClaudeCodeHooks {
   private async stop(
     input: Parameters<TurnStoppingMiddleware>[0],
   ): Promise<void> {
-    if (this.disposed || !this.has('Stop')) return
+    if (this.disposed || !this.has('Stop', input.agent)) return
     const { agent, turn, signal } = input
     let state = this.stopState.get(agent)
     if (state === undefined || state.turn !== turn) {
@@ -552,7 +606,7 @@ export class ClaudeCodeHooks {
     payload: unknown,
     opts: RunPointOptions,
   ): Promise<MergedHookOutcome> {
-    const groups = this.config[point] ?? []
+    const groups = this.groupsFor(point, opts.agent)
     const outputs: HookOutput[] = []
     const cwd = this.workdir(opts.agent)
     const env: Record<string, string> = {

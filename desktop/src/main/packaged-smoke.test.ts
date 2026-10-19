@@ -268,10 +268,10 @@ describe('packaged smoke contract', () => {
 
     expect(core.bootstrap).toHaveBeenCalledOnce()
     expect(core.diagnostics.get).toHaveBeenCalledOnce()
-    expect(getStatus).toHaveBeenCalledWith({
-      forceRefresh: true,
-      projectRoot: path.join(fixture.stateRoot, 'packaged-smoke-workspace'),
-    })
+    expect(getStatus).toHaveBeenCalledWith(
+      { forceRefresh: true },
+      { sessionId: null },
+    )
     expect(receipt.operations).toMatchObject({
       bootstrap: {
         ok: true,

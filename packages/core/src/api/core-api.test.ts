@@ -21,6 +21,9 @@ import {
   type ApiFixture,
 } from './test-helpers'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 const EXPECTED_OPERATIONS = [
   'agents.list',
   'attachments.rawPath',
@@ -330,7 +333,7 @@ describe('CoreApi operation surface', () => {
     })
     expect(payload.goals).toEqual({ active: null })
     expect(payload.provider).toBe('test')
-    expect(api.host.activeSessionId).toBe(id)
+    expect(payload.sessionId).toBe(id)
   })
 
   it('rejects draft session ids at bootstrap before activating or replaying', async () => {
@@ -340,7 +343,7 @@ describe('CoreApi operation surface', () => {
     await expect(
       api.bootstrap({ sessionId: 'draft:new-chat' }),
     ).rejects.toThrow(/draft/i)
-    expect(api.host.activeSessionId).toBe(id)
+    expect((await api.bootstrap()).sessionId).toBe(id)
   })
 })
 
@@ -796,41 +799,54 @@ describe('CoreApi mutation guard', () => {
     const id = session(api)
     api.sessions.activate(id)
     api.control.setMode('plan', id)
-    await expect(api.config.save('x')).rejects.toBeInstanceOf(
+    // The guard reads the session the caller shows (KRN-01: passed, not focused).
+    const view = { sessionId: id }
+    await expect(api.config.save('x', view)).rejects.toBeInstanceOf(
       CoreMutationGuardError,
     )
-    await expect(api.mcp.saveConfig({ servers: {} })).rejects.toBeInstanceOf(
-      CoreMutationGuardError,
-    )
+    await expect(
+      api.mcp.saveConfig({ servers: {} }, view),
+    ).rejects.toBeInstanceOf(CoreMutationGuardError)
     const pasted = { mcpServers: { docs: { url: 'https://docs.test/mcp' } } }
-    await expect(api.mcp.importServers({ raw: pasted })).rejects.toBeInstanceOf(
-      CoreMutationGuardError,
-    )
+    await expect(
+      api.mcp.importServers({ raw: pasted }, view),
+    ).rejects.toBeInstanceOf(CoreMutationGuardError)
     await expect(
       api.mcp.importServers({ raw: pasted, dryRun: true }),
     ).resolves.toMatchObject({ dryRun: true, added: ['docs'] })
     await expect(
-      api.mcp.setServerEnabled({ name: 'docs', enabled: false }),
-    ).rejects.toBeInstanceOf(CoreMutationGuardError)
-    await expect(api.mcp.removeServer({ name: 'docs' })).rejects.toBeInstanceOf(
-      CoreMutationGuardError,
-    )
-    await expect(
-      api.model.saveEntry(validModelEntry('blocked') as never),
+      api.mcp.setServerEnabled({ name: 'docs', enabled: false }, view),
     ).rejects.toBeInstanceOf(CoreMutationGuardError)
     await expect(
-      api.model.deleteEntry({ entryId: 'entry-1' }),
+      api.mcp.removeServer({ name: 'docs' }, view),
     ).rejects.toBeInstanceOf(CoreMutationGuardError)
-    expect(() => api.scheduler.createJob({})).toThrow(CoreMutationGuardError)
-    expect(() => api.skills.save('blocked-save', '# Blocked')).toThrow(
+    await expect(
+      api.model.saveEntry(validModelEntry('blocked') as never, view),
+    ).rejects.toBeInstanceOf(CoreMutationGuardError)
+    await expect(
+      api.model.deleteEntry({ entryId: 'entry-1' }, view),
+    ).rejects.toBeInstanceOf(CoreMutationGuardError)
+    expect(() => api.scheduler.createJob({}, view)).toThrow(
       CoreMutationGuardError,
     )
-    expect(() => api.skills.delete('blocked-delete')).toThrow(
+    expect(() =>
+      api.skills.save('blocked-save', '# Blocked', { sessionId: null }, view),
+    ).toThrow(CoreMutationGuardError)
+    expect(() =>
+      api.skills.delete('blocked-delete', { sessionId: null }, view),
+    ).toThrow(CoreMutationGuardError)
+    await expect(api.hooks.saveConfig('{}', view)).rejects.toBeInstanceOf(
       CoreMutationGuardError,
     )
-    await expect(api.hooks.saveConfig('{}')).rejects.toBeInstanceOf(
-      CoreMutationGuardError,
-    )
+    // A caller that names no session cannot pass the guard.
+    await expect(
+      api.config.save('x', undefined as never),
+    ).rejects.toMatchObject({ code: 'SESSION_REQUIRED' })
+    // Another session without plan mode is not blocked by this one.
+    const other = session(api)
+    await expect(
+      api.mcp.saveConfig({ servers: {} }, { sessionId: other }),
+    ).resolves.toBeDefined()
   })
 
   it('rejects config, MCP, and model writes while an interaction is pending', async () => {
@@ -840,21 +856,24 @@ describe('CoreApi mutation guard', () => {
     const id = session(api)
     const submitted = api.chat.submit({ content: 'pick', sessionId: id })
     await waitFor(() => eventOf(events, 'ask_request') !== undefined)
-    await expect(api.config.save('x')).rejects.toBeInstanceOf(
-      CoreMutationGuardError,
-    )
-    await expect(api.mcp.saveConfig({ servers: {} })).rejects.toBeInstanceOf(
+    const view = { sessionId: id }
+    await expect(api.config.save('x', view)).rejects.toBeInstanceOf(
       CoreMutationGuardError,
     )
     await expect(
-      api.model.saveEntry(validModelEntry('blocked') as never),
+      api.mcp.saveConfig({ servers: {} }, view),
+    ).rejects.toBeInstanceOf(CoreMutationGuardError)
+    await expect(
+      api.model.saveEntry(validModelEntry('blocked') as never, view),
     ).rejects.toBeInstanceOf(CoreMutationGuardError)
     await api.control.answerInteraction(
       pendingInteractionId(events, 'ask_request'),
       { color: { choice: 'red', freeform: '' } },
     )
     await submitted
-    await expect(api.mcp.saveConfig({ servers: {} })).resolves.toBeDefined()
+    await expect(
+      api.mcp.saveConfig({ servers: {} }, view),
+    ).resolves.toBeDefined()
   })
 
   it('keeps retired install operations retired', async () => {
@@ -1160,20 +1179,20 @@ describe('CoreApi goals', () => {
     })
     expect(events.some((event) => event.event === 'goal_updated')).toBe(true)
 
-    const paused = await api.goals.pause(goalId)
+    const paused = await api.goals.pause(goalId, id)
     expect(paused.goal).toMatchObject({ id: goalId, phase: 'paused' })
-    expect((await api.goals.get(goalId)).phase).toBe('paused')
-    const resumed = await api.goals.resume(goalId)
+    expect((await api.goals.get(goalId, id)).phase).toBe('paused')
+    const resumed = await api.goals.resume(goalId, id)
     expect(resumed.goal).toMatchObject({ id: goalId, phase: 'active' })
     await agent.whenIdle()
-    const cancelled = await api.goals.cancel(goalId)
+    const cancelled = await api.goals.cancel(goalId, null, id)
     expect(cancelled).toMatchObject({
       accepted: true,
       goal: null,
       cleared: { id: goalId },
     })
     expect((await api.bootstrap({ sessionId: id })).goals.active).toBeNull()
-    await expect(api.goals.get(goalId)).rejects.toMatchObject({
+    await expect(api.goals.get(goalId, id)).rejects.toMatchObject({
       code: 'goal_not_found',
     })
     await expect(
@@ -1206,7 +1225,7 @@ describe('CoreApi commands', () => {
       status: 'completed',
       receipt: { code: 'session_transitioned' },
     })
-    const next = String(api.host.activeSessionId)
+    const next = String((await api.bootstrap()).sessionId)
     expect(next).not.toBe(previous)
     expect(api.host.kept.sessionStore.get(next)).toMatchObject({
       parent_session_id: previous,
@@ -1231,7 +1250,7 @@ describe('CoreApi commands', () => {
       invocationSource: 'desktop',
     })
     expect(result).toMatchObject({ status: 'completed' })
-    const next = String(api.host.activeSessionId)
+    const next = String((await api.bootstrap()).sessionId)
     expect(next).not.toBe(previous)
     expect(api.host.controlPayload(next)).toMatchObject({
       preset: 'read-only',
@@ -1356,60 +1375,73 @@ describe('CoreApi sessions and kept services', () => {
 
   it('returns structured scheduler payloads and rejects non agent_turn payloads', async () => {
     const { api } = await setup()
-    const created = api.scheduler.createJob({
-      name: 'Typed scheduler job',
-      schedule: { kind: 'every', everyMs: 60_000 },
-      payload: {
-        kind: 'agent_turn',
-        message: 'run a typed task',
-        deliver: true,
+    const created = api.scheduler.createJob(
+      {
+        name: 'Typed scheduler job',
+        schedule: { kind: 'every', everyMs: 60_000 },
+        payload: {
+          kind: 'agent_turn',
+          message: 'run a typed task',
+          deliver: true,
+        },
+        deleteAfterRun: false,
+        misfirePolicy: 'latest',
       },
-      deleteAfterRun: false,
-      misfirePolicy: 'latest',
-    })
+      VIEW,
+    )
     expect(created).toMatchObject({
       job: { name: 'Typed scheduler job', misfirePolicy: 'latest' },
       scheduler: { jobs: expect.any(Array) },
     })
     const jobId = String((created.job as Record<string, unknown>).id)
     expect(
-      api.scheduler.updateJob(jobId, { misfirePolicy: 'catch-up-one' }).job,
+      api.scheduler.updateJob(jobId, { misfirePolicy: 'catch-up-one' }, VIEW)
+        .job,
     ).toMatchObject({ misfirePolicy: 'catch-up-one' })
     expect(
-      api.scheduler.updateJob(jobId, { name: 'Renamed' }).job,
+      api.scheduler.updateJob(jobId, { name: 'Renamed' }, VIEW).job,
     ).toMatchObject({ name: 'Renamed', misfirePolicy: 'catch-up-one' })
-    expect(api.scheduler.pauseJob(jobId)).toMatchObject({
+    expect(api.scheduler.pauseJob(jobId, VIEW)).toMatchObject({
       job: { id: jobId, enabled: false },
     })
-    expect(api.scheduler.deleteJob(jobId)).toMatchObject({
+    expect(api.scheduler.deleteJob(jobId, VIEW)).toMatchObject({
       deleted: jobId,
       scheduler: { jobs: expect.any(Array) },
     })
 
     const schedule = { kind: 'every', everyMs: 60_000 }
     expect(() =>
-      api.scheduler.createJob({
-        name: 'x',
-        schedule,
-        payload: { kind: 'system_event', message: 'internal' },
-      }),
+      api.scheduler.createJob(
+        {
+          name: 'x',
+          schedule,
+          payload: { kind: 'system_event', message: 'internal' },
+        },
+        VIEW,
+      ),
     ).toThrow(/system_event.*internal/i)
     expect(() =>
-      api.scheduler.createJob({
-        name: 'x',
-        schedule,
-        payload: { kind: 'team_wake', message: 'wake' },
-      }),
+      api.scheduler.createJob(
+        {
+          name: 'x',
+          schedule,
+          payload: { kind: 'team_wake', message: 'wake' },
+        },
+        VIEW,
+      ),
     ).toThrow(/agent_turn/)
     expect(() =>
-      api.scheduler.createJob({
-        name: 'x',
-        schedule,
-        payload: { kind: 'agent_turn', message: 'run' },
-        misfirePolicy: 'replay-all',
-      }),
+      api.scheduler.createJob(
+        {
+          name: 'x',
+          schedule,
+          payload: { kind: 'agent_turn', message: 'run' },
+          misfirePolicy: 'replay-all',
+        },
+        VIEW,
+      ),
     ).toThrow(/misfirePolicy/)
-    expect(() => api.scheduler.deleteJob('missing')).toThrow(/not found/)
+    expect(() => api.scheduler.deleteJob('missing', VIEW)).toThrow(/not found/)
   })
 
   it('normalizes missing and legacy sidebar state', async () => {
@@ -1525,7 +1557,9 @@ describe('CoreApi sessions and kept services', () => {
     const { api, root, stateRoot } = await setup()
     const id = session(api)
     api.sessions.activate(id)
-    const diagnostics = (await api.diagnostics.get()) as Record<string, any>
+    const diagnostics = (await api.diagnostics.get({
+      sessionId: id,
+    })) as Record<string, any>
     expect(diagnostics.kernel).toMatchObject({
       activeSessionId: id,
       busySessions: [],
@@ -1562,7 +1596,10 @@ describe('CoreApi sessions and kept services', () => {
 
   it('saves model config in stateRoot', async () => {
     const { api, root, stateRoot } = await setup()
-    await api.model.saveEntry(validModelEntry('state-root-model') as never)
+    await api.model.saveEntry(
+      validModelEntry('state-root-model') as never,
+      VIEW,
+    )
     expect(existsSync(join(stateRoot, 'model_config.json'))).toBe(true)
     expect(existsSync(join(root, 'model_config.json'))).toBe(false)
     expect(
@@ -1577,7 +1614,7 @@ describe('CoreApi sessions and kept services', () => {
     mkdirSync(join(stateRoot, 'skills', 'demo'), { recursive: true })
     writeFileSync(join(stateRoot, 'skills', 'demo', 'SKILL.md'), '# Demo\n')
     const { api } = await setup({ root, stateRoot })
-    expect(api.skills.delete('demo')).toMatchObject({
+    expect(api.skills.delete('demo', { sessionId: null }, VIEW)).toMatchObject({
       deleted: 'demo',
       scope: 'user',
     })
@@ -1633,13 +1670,13 @@ describe('CoreApi sessions and kept services', () => {
 
   it('manages desktop pet preference without spawning a process', async () => {
     const { api } = await setup()
-    expect(await api.desktopPet.setEnabled(true)).toMatchObject({
+    expect(await api.desktopPet.setEnabled(true, VIEW)).toMatchObject({
       enabled: true,
       running: false,
       lastError: null,
     })
     expect((await api.desktopPet.get()).enabled).toBe(true)
-    expect(await api.desktopPet.setEnabled(false)).toMatchObject({
+    expect(await api.desktopPet.setEnabled(false, VIEW)).toMatchObject({
       enabled: false,
       running: false,
     })
@@ -1664,13 +1701,13 @@ describe('CoreApi sessions and kept services', () => {
     expect(api.hooks.validateConfig({ content: '{not json' })).toMatchObject({
       valid: false,
     })
-    const saved = await api.hooks.saveConfig(JSON.stringify(config))
+    const saved = await api.hooks.saveConfig(JSON.stringify(config), VIEW)
     expect(saved).toMatchObject({ events: { PreToolUse: 1 }, errors: [] })
     expect(
       JSON.parse(readFileSync(join(stateRoot, 'hooks.json'), 'utf8')),
     ).toEqual(config)
     expect((await api.hooks.getConfig()).content).toContain('PreToolUse')
-    await expect(api.hooks.saveConfig('{not json')).rejects.toThrow()
+    await expect(api.hooks.saveConfig('{not json', VIEW)).rejects.toThrow()
     expect(api.hooks.getMetadata()).toMatchObject({ format: 'claude-code' })
   })
 

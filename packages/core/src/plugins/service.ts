@@ -78,7 +78,6 @@ export interface PluginApplicationServiceOptions {
   /** Folders that may hold the packages shipped with Emperor; the first that exists is used. */
   readonly bundledPluginRoots?: readonly string[]
   readonly computerUse?: PluginComputerUseSwitch | null
-  readonly activeWorkspaceRoot?: (() => string | null) | null
   readonly onChanged?: (() => void) | null
   readonly now?: () => Date
   readonly idFactory?: () => string
@@ -93,7 +92,6 @@ export class PluginApplicationService {
   readonly stagingRoot: string
   readonly cacheRoot: string
   readonly store: PluginStore
-  private readonly activeWorkspaceRoot: () => string | null
   private readonly onChanged: () => void
   private readonly now: () => Date
   private readonly idFactory: () => string
@@ -117,7 +115,6 @@ export class PluginApplicationService {
     this.stagingRoot = join(this.pluginsRoot, 'staging')
     this.cacheRoot = join(this.pluginsRoot, 'cache')
     this.store = new PluginStore({ pluginsRoot: this.pluginsRoot })
-    this.activeWorkspaceRoot = opts.activeWorkspaceRoot ?? (() => null)
     this.onChanged = opts.onChanged ?? (() => {})
     this.now = opts.now ?? (() => new Date())
     this.idFactory =
@@ -136,15 +133,20 @@ export class PluginApplicationService {
     this.removeStalePreviews()
   }
 
-  /** Installed packages as the active session's project sees them. */
-  list(): PluginSummary[] {
-    return this.summariesFor(this.activeWorkspaceRoot())
+  /**
+   * Installed packages as one project sees them (`null`: a Chat session or
+   * no session). Callers pass the project of the session the UI shows.
+   */
+  list(workspace: string | null = null): PluginSummary[] {
+    return this.summariesFor(workspace)
   }
 
   /** Everything the detail page shows (contract §6.2); throws `plugin_not_found`. */
-  detail(input: PluginScopeTarget): PluginDetail {
+  detail(
+    input: PluginScopeTarget,
+    workspace: string | null = null,
+  ): PluginDetail {
     const pluginId = assertPluginId(input.pluginId)
-    const workspace = this.activeWorkspaceRoot()
     const summaries = this.summariesFor(workspace)
     const summary = summaries.find(
       (item) => item.pluginId === pluginId && item.scope === input.scope,
@@ -204,6 +206,7 @@ export class PluginApplicationService {
           : {}),
         components,
         runtime: this.runtime,
+        projectRoot: workspace,
         scrub,
       }),
     }
@@ -244,8 +247,11 @@ export class PluginApplicationService {
   }
 
   /** The result row of a mutation, including a package that is no longer registered. */
-  private summaryOf(pluginId: string, scope: PluginScope): PluginSummary {
-    const workspace = this.activeWorkspaceRoot()
+  private summaryOf(
+    pluginId: string,
+    scope: PluginScope,
+    workspace: string | null,
+  ): PluginSummary {
     return (
       this.summariesFor(workspace).find(
         (item) => item.pluginId === pluginId && item.scope === scope,
@@ -351,7 +357,11 @@ export class PluginApplicationService {
     }
   }
 
-  async install(input: ConfirmedPluginInstall): Promise<PluginOperationResult> {
+  /** `workspace`: the project a `project` / `local` install is for. */
+  async install(
+    input: ConfirmedPluginInstall,
+    workspace: string | null = null,
+  ): Promise<PluginOperationResult> {
     const preview = this.previews.get(String(input.previewId ?? ''))
     if (!preview) throw new Error('Plugin preview is missing or expired')
     if (preview.digest !== String(input.digest ?? '').toLowerCase())
@@ -359,7 +369,7 @@ export class PluginApplicationService {
     if (!isPluginScope(input.scope) || input.scope === 'managed')
       throw new Error('Plugin install scope is not user-mutable')
     // Checked before anything is written: a refused scope leaves no registry row.
-    this.assertMutableScope(input.scope)
+    this.assertMutableScope(input.scope, workspace)
     const currentDigest = digestTree(preview.payloadRoot)
     if (currentDigest !== preview.digest)
       throw new Error('Plugin preview content changed after inspection')
@@ -386,7 +396,7 @@ export class PluginApplicationService {
       updatedAt: timestamp,
     }
     this.store.upsert(entry)
-    this.writeIntent(input.scope, preview.pluginId, true)
+    this.writeIntent(input.scope, preview.pluginId, true, workspace)
     this.previews.delete(preview.previewId)
     rmSync(join(this.stagingRoot, preview.previewId), {
       recursive: true,
@@ -395,49 +405,50 @@ export class PluginApplicationService {
     this.onChanged()
     return {
       changed: true,
-      plugin: this.summaryOf(preview.pluginId, input.scope),
+      plugin: this.summaryOf(preview.pluginId, input.scope, workspace),
     }
   }
 
   setEnabled(
     input: PluginScopeTarget & { enabled: boolean },
+    workspace: string | null = null,
   ): PluginOperationResult {
     const pluginId = assertPluginId(input.pluginId)
     if (input.scope === 'managed')
-      return this.setManagedEnabled(pluginId, input.enabled)
-    this.assertMutableScope(input.scope)
-    const workspace = this.activeWorkspaceRoot()
+      return this.setManagedEnabled(pluginId, input.enabled, workspace)
+    this.assertMutableScope(input.scope, workspace)
     const before = this.readIntent(input.scope, workspace)[pluginId] === true
-    this.writeIntent(input.scope, pluginId, input.enabled)
+    this.writeIntent(input.scope, pluginId, input.enabled, workspace)
     this.onChanged()
     return {
       changed: before !== input.enabled,
-      plugin: this.summaryOf(pluginId, input.scope),
+      plugin: this.summaryOf(pluginId, input.scope, workspace),
     }
   }
 
   /** Remove the registration and its intent; the immutable cache stays. */
-  uninstall(input: PluginScopeTarget): PluginOperationResult {
+  uninstall(
+    input: PluginScopeTarget,
+    workspace: string | null = null,
+  ): PluginOperationResult {
     const pluginId = assertPluginId(input.pluginId)
     if (input.scope === 'managed')
       throw new EmperorError(
         '随 Emperor 提供的插件不能卸载，可以停用',
         'plugin_managed_uninstall_denied',
       )
-    this.assertMutableScope(input.scope)
+    this.assertMutableScope(input.scope, workspace)
     const changed = this.store.remove(pluginId, input.scope)
-    this.deleteIntent(input.scope, pluginId)
+    this.deleteIntent(input.scope, pluginId, workspace)
     this.onChanged()
-    return { changed, plugin: this.summaryOf(pluginId, input.scope) }
+    return { changed, plugin: this.summaryOf(pluginId, input.scope, workspace) }
   }
 
   /**
    * Skill folders of the packages in effect for one project (`null` = chat),
    * so project-scoped plugins never leak into chat or other projects.
    */
-  enabledSkillRoots(
-    projectRoot: string | null = this.activeWorkspaceRoot(),
-  ): string[] {
+  enabledSkillRoots(projectRoot: string | null): string[] {
     return this.summariesFor(projectRoot).flatMap((summary) => {
       if (!summary.effective) return []
       const entry = this.entryOf(summary.pluginId, summary.scope)
@@ -459,9 +470,7 @@ export class PluginApplicationService {
   }
 
   /** Packages in effect for one project (`null` = chat): active and winning their scope. */
-  effectivePackages(
-    projectRoot: string | null = this.activeWorkspaceRoot(),
-  ): ActivePluginPackage[] {
+  effectivePackages(projectRoot: string | null): ActivePluginPackage[] {
     return this.summariesFor(projectRoot).flatMap((summary) => {
       if (!summary.effective) return []
       const entry = this.entryOf(summary.pluginId, summary.scope)
@@ -627,6 +636,7 @@ export class PluginApplicationService {
   private setManagedEnabled(
     pluginId: string,
     enabled: boolean,
+    workspace: string | null,
   ): PluginOperationResult {
     if (!this.managed().has(pluginId))
       throw new EmperorError('找不到这个插件', 'plugin_not_found')
@@ -648,7 +658,7 @@ export class PluginApplicationService {
     this.onChanged()
     return {
       changed: before !== enabled,
-      plugin: this.summaryOf(pluginId, 'managed'),
+      plugin: this.summaryOf(pluginId, 'managed', workspace),
     }
   }
 
@@ -704,20 +714,17 @@ export class PluginApplicationService {
     }
   }
 
-  private assertMutableScope(scope: PluginScope): void {
+  private assertMutableScope(
+    scope: PluginScope,
+    workspace: string | null,
+  ): void {
     if (!isPluginScope(scope) || scope === 'managed')
       throw new Error('managed Plugin scope is read-only')
-    if (
-      (scope === 'project' || scope === 'local') &&
-      !this.activeWorkspaceRoot()
-    )
+    if ((scope === 'project' || scope === 'local') && !workspace)
       throw new Error('Plugin project scope requires an active workspace')
   }
 
-  private settingsPath(
-    scope: PluginScope,
-    workspace: string | null = this.activeWorkspaceRoot(),
-  ): string {
+  private settingsPath(scope: PluginScope, workspace: string | null): string {
     if (scope === 'user') return join(this.emperorHome, 'settings.json')
     if (!workspace) return ''
     return join(
@@ -762,9 +769,10 @@ export class PluginApplicationService {
     scope: PluginScope,
     pluginId: string,
     enabled: boolean,
+    workspace: string | null,
   ): void {
-    this.assertMutableScope(scope)
-    const path = this.settingsPath(scope)
+    this.assertMutableScope(scope, workspace)
+    const path = this.settingsPath(scope, workspace)
     const settings = existsSync(path) ? readJsonObject(path) : {}
     const current =
       settings.enabledPlugins &&
@@ -778,8 +786,12 @@ export class PluginApplicationService {
   }
 
   /** Drop the intent key so an uninstalled package leaves no row behind. */
-  private deleteIntent(scope: PluginScope, pluginId: string): void {
-    const path = this.settingsPath(scope)
+  private deleteIntent(
+    scope: PluginScope,
+    pluginId: string,
+    workspace: string | null,
+  ): void {
+    const path = this.settingsPath(scope, workspace)
     if (!path || !existsSync(path)) return
     const settings = readJsonObject(path)
     const current = settings.enabledPlugins

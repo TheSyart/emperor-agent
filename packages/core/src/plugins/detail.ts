@@ -139,6 +139,7 @@ function memberState(
     readonly pluginId: string
     readonly scope: PluginScope
     readonly runtime: PluginRuntimeView
+    readonly projectRoot: string | null
   },
   skills: ReturnType<PluginRuntimeView['effectiveSkills']>,
 ): Pick<PluginComponentView, 'state' | 'reason'> {
@@ -171,7 +172,12 @@ function memberState(
   }
   if (component.kind === 'mcp')
     return mcpState(
-      input.runtime.mcpServer(input.pluginId, input.scope, component.id),
+      input.runtime.mcpServer(
+        input.pluginId,
+        input.scope,
+        component.id,
+        input.projectRoot,
+      ),
     )
   return { state: 'available', reason: null }
 }

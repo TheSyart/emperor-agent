@@ -1,13 +1,23 @@
 /**
- * Scheduler job execution on the new kernel. `agent_turn` jobs submit one
- * prompt to their session (or the active one) and resolve with the turn's
- * reply; `system_event` jobs run system handlers (watchlist-check turns
- * into an agent turn when due). Team wake jobs are retired with Team.
+ * Scheduler job execution on the new kernel. `agent_turn` jobs run one
+ * background turn in their session (KRN-01: never the session in view) and
+ * map its typed result onto the run record: completed → OK, error → Failed
+ * with the error code, aborted → Cancelled, blocked → Blocked, a prompt no
+ * turn took → Failed. `system_event` jobs run system handlers
+ * (watchlist-check turns into an agent turn when due). Team wake jobs are
+ * retired with Team.
  */
 
 import type { SchedulerJob } from '../../scheduler/models'
-import { schedulerPayloadSessionId } from '../../scheduler/models'
-import type { SchedulerRunContext } from '../../scheduler/service'
+import {
+  SchedulerStatus,
+  schedulerPayloadSessionId,
+} from '../../scheduler/models'
+import {
+  SchedulerRunFailure,
+  type SchedulerRunContext,
+} from '../../scheduler/service'
+import type { TurnResult } from './scope'
 
 export interface SchedulerTurnRequest {
   sessionId: string | null
@@ -20,7 +30,10 @@ export interface SchedulerTurnRequest {
 }
 
 export interface SchedulerExecutorDeps {
-  submitTurn(request: SchedulerTurnRequest): Promise<string>
+  /** Run the job's turn in the background and say how it ended. */
+  runTurn(request: SchedulerTurnRequest): Promise<{ result: TurnResult }>
+  /** The limit runTurn applies, for the record's wording (default 30 minutes). */
+  timeoutMs?: number
   hasPendingInteraction(sessionId: string | null): boolean
   watchlistCheck?(
     signal: AbortSignal,
@@ -59,7 +72,7 @@ export function createSchedulerExecutor(
       throw new Error(
         'cannot run scheduler agent_turn while a question or approval is pending',
       )
-    return deps.submitTurn({
+    const { result } = await deps.runTurn({
       sessionId,
       content: schedulerTurnContent(job, message),
       displayContent: `定时任务触发 · ${job.name}\n\n${message}`,
@@ -75,6 +88,9 @@ export function createSchedulerExecutor(
       },
       signal: context.signal,
     })
+    // The scheduler stopped the run itself (paused, removed, shutting down).
+    if (context.signal.aborted) throw context.signal.reason
+    return schedulerRunResult(result, deps.timeoutMs)
   }
   return async (job, context) => {
     switch (job.payload.kind) {
@@ -106,5 +122,66 @@ export function createSchedulerExecutor(
           `unsupported scheduler payload kind: ${String(job.payload.kind)}`,
         )
     }
+  }
+}
+
+/**
+ * The record of one scheduled turn: its reply when it completed, otherwise a
+ * `SchedulerRunFailure` with the status and note the job history shows.
+ */
+export function schedulerRunResult(
+  result: TurnResult,
+  timeoutMs = 30 * 60_000,
+): string {
+  switch (result.kind) {
+    case 'completed':
+      return result.content
+    case 'error':
+      throw new SchedulerRunFailure(
+        SchedulerStatus.ERROR,
+        result.message || `the scheduled turn failed (${result.code})`,
+        result.code,
+      )
+    case 'aborted':
+      throw new SchedulerRunFailure(
+        SchedulerStatus.CANCELLED,
+        result.by === 'timeout'
+          ? `运行超过 ${Math.round(timeoutMs / 60_000)} 分钟，已停止（timeout）`
+          : result.by === 'user'
+            ? '已被用户停止'
+            : '已被系统停止',
+        result.by === 'timeout' ? 'TIMEOUT' : null,
+      )
+    case 'blocked':
+      throw new SchedulerRunFailure(
+        SchedulerStatus.BLOCKED,
+        blockedNote(result.reason, result.detail),
+        'BLOCKED',
+      )
+    case 'not-consumed':
+      throw new SchedulerRunFailure(
+        SchedulerStatus.ERROR,
+        `定时任务的消息没有发出（${result.reason}），仍在会话的队列里待发送`,
+        'NOT_CONSUMED',
+      )
+  }
+}
+
+function blockedNote(
+  reason: Extract<TurnResult, { kind: 'blocked' }>['reason'],
+  detail: string | undefined,
+): string {
+  const suffix = detail ? `：${detail}` : ''
+  switch (reason) {
+    case 'interaction-rejected':
+      return `需要审批或回答的操作已自动拒绝（定时任务无人应答）${suffix}`
+    case 'plan-mode':
+      return `会话处于计划模式，计划审阅已自动拒绝${suffix}`
+    case 'interaction-timeout':
+      return `等待审批或回答超时${suffix}`
+    case 'cost-cap':
+      return '达到单轮费用上限，已停止'
+    case 'prompt-rejected':
+      return 'UserPromptSubmit Hook 拒绝了这条消息'
   }
 }

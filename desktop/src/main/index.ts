@@ -416,12 +416,9 @@ registerOpenPathIpc({
   authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
   sources: {
     emperorHome: () => config.stateRoot,
-    activeProject: () => {
-      const host = coreApi?.host
-      return host?.activeSession()?.project_path
-        ? host.activeWorkspaceRoot()
-        : null
-    },
+    // KRN-01: the renderer names the session; main keeps no focus.
+    sessionProject: (sessionId) =>
+      coreApi?.host.projectRootForSession(sessionId) ?? null,
     skillFolder: (name, sessionId) => {
       try {
         return coreApi?.skills.get(name, { sessionId }).root ?? null

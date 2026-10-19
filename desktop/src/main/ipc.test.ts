@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { EnvironmentError } from '@emperor/core/api'
-import { channelForCoreOperation } from '../shared/ipc-contract'
+import {
+  channelForCoreOperation,
+  coreCallEnvelope,
+} from '../shared/ipc-contract'
 import { registerCoreIpc, type CoreApiLike } from './ipc'
 
 describe('core IPC bridge (MIG-IPC-002)', () => {
@@ -56,6 +59,23 @@ describe('core IPC bridge (MIG-IPC-002)', () => {
     expect(create).not.toHaveBeenCalled()
   })
 
+  it('takes the call context off the arguments and refuses a malformed one', async () => {
+    const ipc = new FakeIpcMain()
+    const list = vi.fn(() => [])
+    registerCoreIpc(ipc, asCoreApi({ plugins: { list } }), ['plugins.list'])
+    await expect(
+      ipc.invoke('emperor:core:plugins:list', coreCallEnvelope('s1')),
+    ).resolves.toEqual([])
+    expect(list).toHaveBeenCalledWith({ sessionId: 's1' })
+    await expect(
+      ipc.invoke('emperor:core:plugins:list', {
+        emperorCoreCall: 1,
+        view: { sessionId: 7 },
+      }),
+    ).resolves.toMatchObject({ ok: false })
+    expect(list).toHaveBeenCalledTimes(1)
+  })
+
   it('uses the generic authorized bridge for external agents and refuses native startup fields', async () => {
     const ipc = new FakeIpcMain(),
       get = vi.fn(() => ({ record: { id: 'dlg-one' } })),
@@ -64,9 +84,18 @@ describe('core IPC bridge (MIG-IPC-002)', () => {
       'delegations.get',
       'delegations.send',
     ])
+    // The renderer's call carries the session it shows (KRN-01): the
+    // operation fills the owning chat from it.
+    await expect(
+      ipc.invoke('emperor:core:delegations:get', coreCallEnvelope('s1'), {
+        id: 'dlg-one',
+      }),
+    ).resolves.toEqual({ record: { id: 'dlg-one' } })
+    expect(get).toHaveBeenLastCalledWith({ id: 'dlg-one', sessionId: 's1' })
+    // Without one, and naming none, there is no session to act on.
     await expect(
       ipc.invoke('emperor:core:delegations:get', { id: 'dlg-one' }),
-    ).resolves.toEqual({ record: { id: 'dlg-one' } })
+    ).resolves.toMatchObject({ ok: false, error: { code: 'SESSION_REQUIRED' } })
     await expect(
       ipc.invoke('emperor:core:delegations:send', {
         id: 'dlg-one',

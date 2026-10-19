@@ -71,7 +71,23 @@ export type TurnStoppingMiddleware = (
   input: TurnStoppingInput,
 ) => Promise<void> | void
 
+/** What a pre-assemble hook sees: the agent, its position and the step's signal. */
+export interface PreAssembleInput {
+  readonly agent: Agent
+  readonly turn: number
+  readonly step: number
+  readonly signal: AbortSignal
+}
+
+/**
+ * Runs before each step's prompt (system prompt and tool list) is
+ * assembled: resources the step's tools depend on are made ready here, such
+ * as the project MCP instance of the agent's session (KRN-01).
+ */
+export type PreAssembleMiddleware = (input: PreAssembleInput) => Promise<void>
+
 export interface AgentMiddleware {
+  preAssemble: PreAssembleMiddleware[]
   preStep: PreStepMiddleware[]
   requestConfig: RequestConfigMiddleware[]
   requestError: RequestErrorMiddleware[]
@@ -79,5 +95,11 @@ export interface AgentMiddleware {
 }
 
 export function createMiddleware(): AgentMiddleware {
-  return { preStep: [], requestConfig: [], requestError: [], turnStopping: [] }
+  return {
+    preAssemble: [],
+    preStep: [],
+    requestConfig: [],
+    requestError: [],
+    turnStopping: [],
+  }
 }

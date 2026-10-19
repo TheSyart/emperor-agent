@@ -19,7 +19,7 @@ import {
   createTicketCleanup,
   type GateDeps,
 } from './gate'
-import { GrantAskService } from './grants/ask'
+import { GrantAskService, type GrantAnswerer } from './grants/ask'
 import { BrowserProfileStore } from './profiles'
 import { RestorableTabStore } from './restorable'
 import { SitePermissionStore } from './site-permissions'
@@ -105,6 +105,8 @@ export interface InstallComputerUseOptions {
   readonly tools: ToolRegistry
   readonly prompt: SystemPromptAssembler
   readonly pending: PendingInteractions
+  /** Answers grant cards; defaults to the pending UI cards (`pending.grantAnswerer`). */
+  readonly grantAnswerer?: GrantAnswerer
   /** `~/.emperor/computer-use` */
   readonly stateDir: string
   /** `~/.emperor/browser` (persistent profiles); absent: temporary only. */
@@ -160,7 +162,7 @@ export function installComputerUse(
       : new RestorableTabStore(options.profilesDir, now)
   const policy = new UiActionPolicy({ grants, now })
   const ask = new GrantAskService()
-  ask.setAnswerer(options.pending.grantAnswerer)
+  ask.setAnswerer(options.grantAnswerer ?? options.pending.grantAnswerer)
   const externalSites = new ExternalSiteRuleStore(options.stateDir)
   const confirmExternal = createExternalConfirmation({
     ask,

@@ -278,10 +278,12 @@ export interface PluginMcpRuntimeState {
 
 /** Live facts the detail view layers onto a package's own verdicts. */
 export interface PluginRuntimeView {
+  /** `projectRoot`: the project whose instance runs a project-scoped server. */
   mcpServer(
     pluginId: string,
     scope: PluginScope,
     server: string,
+    projectRoot?: string | null,
   ): PluginMcpRuntimeState | null
   /**
    * An app member's connection, when Emperor has an adapter for that member
@@ -301,6 +303,7 @@ export interface PluginRuntimeView {
     pluginId: string,
     scope: PluginScope,
     server: string,
+    projectRoot?: string | null,
   ): readonly PluginToolView[]
   /** Computer Use's GUI tools by family (`ui` and each driver); static, so listed while it is off. */
   computerUseTools?(): ReadonlyArray<{

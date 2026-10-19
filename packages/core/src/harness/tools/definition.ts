@@ -72,6 +72,11 @@ export interface ToolDefinition<A = unknown> {
    * schema); falls back to {@link parameters} when absent or undefined.
    */
   parametersFor?(agent: Agent | undefined): Record<string, unknown> | undefined
+  /**
+   * Per-agent description (an MCP tool whose server differs per project);
+   * falls back to {@link description} when absent or undefined.
+   */
+  descriptionFor?(agent: Agent | undefined): string | undefined
   /** Validate raw arguments; throw {@link ToolArgsError} on mismatch. */
   parse(raw: unknown): A
   execute(args: A, context: ToolRunContext): Promise<ToolReturn>

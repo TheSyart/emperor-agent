@@ -234,12 +234,13 @@ async function runGoalAction(
   reason = 'user_confirmed_cancel',
 ): Promise<GoalOperationResult> {
   const owner = sessionId.value
+  // The goal belongs to the session on screen; name it (KRN-01).
   const result =
     action === 'pause'
-      ? await core('goals.pause', goalId)
+      ? await core('goals.pause', goalId, owner)
       : action === 'resume'
-        ? await core('goals.resume', goalId)
-        : await core('goals.cancel', goalId, reason)
+        ? await core('goals.resume', goalId, owner)
+        : await core('goals.cancel', goalId, reason, owner)
   applyGoalResult(owner, result)
   showToast(
     action === 'pause'

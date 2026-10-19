@@ -54,8 +54,13 @@ export interface PluginMcpServer {
 
 export interface MCPClientOptions {
   readonly processRuntime?: OwnedProcessRuntime | null
-  readonly workspaceRoot?: (() => string) | null
-  readonly ownerSessionId?: (() => string | null) | null
+  /** Where stdio servers run and may write (the chat workspace, or a project root). */
+  readonly workspaceRoot?: string | null
+  /**
+   * Run the servers of `mcp_config.json` (default). A project instance runs
+   * only the plugin servers it is given (KRN-01).
+   */
+  readonly userServers?: boolean
   readonly connectionFactory?: MCPConnectionFactory
   /** Opens sealed `headers` / `env` values of `mcp_config.json` (SEC-06). */
   readonly sealer?: SecretSealer | null
@@ -103,9 +108,10 @@ export class MCPClient {
           (snapshot) => this.configForSnapshot(config.name, snapshot),
           {
             processRuntime: opts.processRuntime ?? null,
-            workspaceRoot: opts.workspaceRoot?.() ?? null,
+            workspaceRoot: opts.workspaceRoot ?? null,
             stateRoot: this.root,
-            ownerSessionId: opts.ownerSessionId?.() ?? null,
+            // Servers serve every session of their scope: no session owns them.
+            ownerSessionId: null,
           },
         ))
   }
@@ -151,15 +157,18 @@ export class MCPClient {
     executionEnvironment: ExecutionEnvironment | null = this
       .executionEnvironment,
   ): Promise<void> {
-    const config = executionEnvironment
-      ? await loadMcpConfigForEnvironment(
-          this.root,
-          executionEnvironment,
-          this.opts.sealer,
-        )
-      : await loadMcpConfig(this.root, process.env, {
-          sealer: this.opts.sealer ?? null,
-        })
+    const config: MCPConfig =
+      this.opts.userServers === false
+        ? { servers: {}, defaults: {} }
+        : executionEnvironment
+          ? await loadMcpConfigForEnvironment(
+              this.root,
+              executionEnvironment,
+              this.opts.sealer,
+            )
+          : await loadMcpConfig(this.root, process.env, {
+              sealer: this.opts.sealer ?? null,
+            })
     this.executionEnvironment = executionEnvironment
     const desired = new Set<string>()
     const userNames = new Set(Object.keys(config.servers))
@@ -387,6 +396,7 @@ export class MCPClient {
     // Plugin servers live here, not in mcp_config.json.
     const plugin = this.pluginServers.get(serverName)
     if (plugin) return { ...plugin.config, name: plugin.key }
+    if (this.opts.userServers === false) return null
     const config = (
       await loadMcpConfigForEnvironment(this.root, snapshot, this.opts.sealer)
     ).servers[serverName]

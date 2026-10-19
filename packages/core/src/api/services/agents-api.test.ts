@@ -42,7 +42,11 @@ describe('agents.list Core boundary', () => {
           },
         ],
       })
-      expect(f.api.host.activeSessionId).toBe(id)
+      // The UI still shows the root (KRN-01: only activateSession moves it).
+      const boot = await f.api.bootstrap()
+      expect(
+        boot.runtime.events.every((event) => event.session_id === id),
+      ).toBe(true)
       expect(f.api.sessions.children({ sessionId: id })[0]?.subagentId).toBe(
         child.id,
       )

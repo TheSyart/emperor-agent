@@ -461,6 +461,54 @@ export function channelForCoreOperation(
   return CORE_IPC_PREFIX + key.replaceAll('.', ':')
 }
 
+/**
+ * The context a Core call carries besides its arguments (KRN-01): the
+ * session the renderer shows. The preload puts it first on every core
+ * channel; main takes it off and hands it to the operation, which uses it
+ * when the call names no session. Nothing in main or Core remembers it.
+ */
+export const CORE_CALL_CONTEXT_KEY = 'emperorCoreCall'
+
+export interface CoreCallEnvelope {
+  readonly [CORE_CALL_CONTEXT_KEY]: 1
+  readonly view: { readonly sessionId: string | null }
+}
+
+export function coreCallEnvelope(sessionId: string | null): CoreCallEnvelope {
+  return { [CORE_CALL_CONTEXT_KEY]: 1, view: { sessionId } }
+}
+
+/** Split a core channel's arguments into the call context and the operation's own. */
+export function splitCoreCallEnvelope(args: readonly unknown[]): {
+  view: { sessionId: string | null } | undefined
+  args: unknown[]
+} {
+  const first = args[0]
+  if (
+    !first ||
+    typeof first !== 'object' ||
+    Array.isArray(first) ||
+    !Object.hasOwn(first, CORE_CALL_CONTEXT_KEY)
+  )
+    return { view: undefined, args: [...args] }
+  const envelope = first as Record<string, unknown>
+  const view = envelope.view as Record<string, unknown> | undefined
+  const sessionId = view?.sessionId
+  if (
+    envelope[CORE_CALL_CONTEXT_KEY] !== 1 ||
+    !view ||
+    typeof view !== 'object' ||
+    Object.keys(envelope).length !== 2 ||
+    Object.keys(view).length !== 1 ||
+    !(
+      sessionId === null ||
+      (typeof sessionId === 'string' && sessionId.length <= 256)
+    )
+  )
+    throw new Error('invalid core call context')
+  return { view: { sessionId }, args: args.slice(1) }
+}
+
 /** One batch of raw session-log events sent on {@link SESSION_EVENT_CHANNEL}. */
 export interface SessionEventBatch {
   sessionId: string
@@ -618,6 +666,8 @@ export type OpenPathTarget =
   | {
       kind: 'diagnostic'
       rowId: 'global-state-root' | 'active-project-path'
+      /** The session the Diagnostics page was opened from (its project row). */
+      sessionId?: string | null
     }
   | { kind: 'skill'; name: string; sessionId?: string | null }
   | { kind: 'invalid-skill'; path: string; sessionId?: string | null }

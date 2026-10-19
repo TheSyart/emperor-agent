@@ -39,11 +39,20 @@ export function schedulerRunDone(
 
 export function schedulerRunError(
   job: EventPayload,
-  opts: { error: string; run?: EventPayload },
+  opts: {
+    error: string
+    /** The run's status: `error`, or `blocked` (an approval was rejected for it). */
+    status?: string
+    /** The turn's error code (`AUTH`, …), when it failed with one. */
+    code?: string | null
+    run?: EventPayload
+  },
 ): EventPayload {
   return runtimeEvent('scheduler_run_error', {
     job,
     error: opts.error,
+    status: opts.status,
+    code: opts.code,
     ...schedulerRunCorrelation(opts.run),
   })
 }

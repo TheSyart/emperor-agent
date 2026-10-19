@@ -6,6 +6,7 @@
  */
 
 import { EmperorError, OperationRetiredError } from '../../errors'
+import { SessionRequiredError } from '../../harness/host/scope'
 import type { Agent } from '../../harness/agent/agent'
 import type { GoalService as HarnessGoalService } from '../../harness/goal/service'
 import type { GoalRef, GoalView } from '../../harness/goal/types'
@@ -42,7 +43,6 @@ export interface GoalServiceDeps {
   goals: HarnessGoalService
   agentFor(sessionId: string): Agent
   goalView(sessionId: string): GoalPayload | null
-  activeSessionId(): string | null
   /**
    * Materialize a draft session before the first goal starts in it;
    * resolves the session the draft became (a real session id).
@@ -168,8 +168,9 @@ export class GoalService {
     return { agent, ref: { id: goal.id, revision: goal.revision } }
   }
 
+  /** The session a caller named (KRN-01: never the one in view). */
   private optionalSessionId(explicit: string | null | undefined): string {
-    return String(explicit ?? this.deps.activeSessionId() ?? '').trim()
+    return String(explicit ?? '').trim()
   }
 
   private sessionId(
@@ -177,11 +178,7 @@ export class GoalService {
     operation: string,
   ): string {
     const sessionId = this.optionalSessionId(explicit)
-    if (!sessionId)
-      throw new GoalServiceError(
-        'goal_session_required',
-        `${operation} 需要一个会话。`,
-      )
+    if (!sessionId) throw new SessionRequiredError(operation)
     return sessionId
   }
 }

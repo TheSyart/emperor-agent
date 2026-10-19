@@ -1,3 +1,4 @@
+import { SessionRequiredError } from '../../harness/host/scope'
 import {
   DelegationHistory,
   type DelegationHistoryOptions,
@@ -74,7 +75,6 @@ export class CoreDelegationService {
       receipts: DelegationReceipts
       acceptance: DelegationAcceptance
       integration: DelegationIntegration
-      activeSession: () => string | null
       session: (id: string) => { archived_at?: string | null } | null
       assertMutation: (id: string, action: string) => void
     },
@@ -88,7 +88,9 @@ export class CoreDelegationService {
     const state = cached
         ? structuredClone(cached)
         : this.options.service.inspect(id),
-      root = String(sessionId ?? this.options.activeSession() ?? '')
+      // The caller names the owning chat (KRN-01: never the one in view).
+      root = String(sessionId ?? '').trim()
+    if (!root) throw new SessionRequiredError('delegations')
     const session = this.options.session(root)
     if (!session || state.record?.owner.rootSessionId !== root)
       throw new DelegationError(
@@ -174,10 +176,7 @@ export class CoreDelegationService {
     expectedRunId?: string
   }) {
     this.access(input.id, input.sessionId, true)
-    this.options.assertMutation(
-      String(input.sessionId ?? this.options.activeSession()),
-      'send',
-    )
+    this.options.assertMutation(String(input.sessionId), 'send')
     return this.options.service.send(input.id, input)
   }
   async interrupt(input: {

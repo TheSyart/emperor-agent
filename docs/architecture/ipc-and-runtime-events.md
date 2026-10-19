@@ -25,6 +25,8 @@ sequenceDiagram
   Preload-->>UI: Promise result
 ```
 
+每次调用除 operation 自己的参数外还带调用上下文：preload 把 `{ emperorCoreCall: 1, view: { sessionId } }` 放在参数最前（`coreCallEnvelope()`，`desktop/src/shared/ipc-contract.ts`），`sessionId` 是窗口正在显示的会话（renderer 切换会话时调用 bridge 的 `setViewingSession`，草稿或没有会话为 `null`）；main 用 `splitCoreCallEnvelope()` 取下并校验（形状不对时整次调用失败），作为 `CoreOperationContext.view` 交给 `invokeCoreOperation()`。Core 与 main 都不记住它：operation 的输入没写会话时用它，需要会话却两者都没有时返回 `SESSION_REQUIRED`。详见 [Agent 执行链路](agent-runtime.md#选中会话只决定显示)。
+
 Operation 的名称与参数 schema 定义在 `packages/core/src/api/operations.ts`，是显式 allowlist。Renderer 传入的数据在 Core 边界用 zod 重新校验；TypeScript 类型或隐藏按钮都不是安全边界。`createCoreHost()` 在 `CoreApi.create()`（含内核启动、MCP 初始化和 Scheduler 启动）完成后才注册 IPC handler。
 
 已退役的 operation 仍保留名称以便旧调用得到明确错误：`environment.createInstallPlan`、`environment.install` 和 `tasks.resume` 会返回 `OperationRetiredError`，附带建议的替代动作。旧的 `skills.previewInstall`、`skills.confirmInstall` 与 `skills.package` 已从注册表移除，Skill 安装改用 `skills.import`。
@@ -37,7 +39,7 @@ Operation 的名称与参数 schema 定义在 `packages/core/src/api/operations.
 | `sessions.*`、`sidebar.*`                                                                                      | 会话列表、创建、重命名/归档、删除（移入 `sessions/.trash`，`listDeleted` / `restoreDeleted` / `purgeDeleted`，30 天后启动时清除）、激活；原始历史分页、祖先链、子代理列表、watch 集合；侧栏布局 |
 | `control.*`                                                                                                    | 读取控制状态、切换权限预设与 Plan 模式、回答交互                                                                                                                                                |
 | `commands.*`                                                                                                   | Slash command 列表、补全、调用                                                                                                                                                                  |
-| `goals.*`                                                                                                      | 当前 session 的 Goal                                                                                                                                                                            |
+| `goals.*`                                                                                                      | 某个 session 的 Goal（参数里的 `sessionId`，未写时为调用方显示的会话）                                                                                                                          |
 | `tasks.*`                                                                                                      | 后台 job 与子代理会话（列表、详情、transcript、等待、读取输出、取消）                                                                                                                           |
 | `tools.readResult`                                                                                             | 读取落盘到 `stateRoot/spill/` 的完整工具结果                                                                                                                                                    |
 | `tools.networkSettings`、`tools.setNetworkSettings`                                                            | 「设置 › 高级 › 网络工具」：`web_fetch` / `web_search` 的开关与可用性，变更后广播 `web_tools_changed`                                                                                           |
@@ -51,7 +53,9 @@ Operation 的名称与参数 schema 定义在 `packages/core/src/api/operations.
 | `scheduler.*`                                                                                                  | 定时任务                                                                                                                                                                                        |
 | `environment.*`、`diagnostics.*`、`processes.*`、`onboarding.*`、`desktopPet.*`、`attachments.*`、`projects.*` | 其他宿主能力                                                                                                                                                                                    |
 
-会修改状态的 operation 经过 CoreApi mutation guard：当前 session 有待处理交互时返回 409，处于 Plan 模式时返回 403。
+会修改状态的 operation 经过 CoreApi mutation guard：调用方显示的会话（调用上下文的 `view`）有待处理交互时返回 409，处于 Plan 模式时返回 403；`view` 为 `null` 时不拦截。进程内调用不带 `view` 时返回 `SESSION_REQUIRED`。
+
+`bootstrap` 的结果带 `sessionId`：它描述的会话，即界面显示的会话（`bootstrap({ sessionId })` 会先激活它）。`sessions.activate` 只改变这一项，不影响任何会话里正在运行的东西。
 
 ## 交互
 
@@ -149,15 +153,18 @@ Renderer 对 UiEvent 的 session、task 和 replay 处理使用小型 domain act
 
 ## 其他 operation 约束
 
-- `tasks.wait`、`tasks.readOutput`、`tasks.transcript` 只读；`tasks.cancel` 经过 mutation guard。
-- `processes.list/cancel/reparent` 只作用于当前 active session 的受管进程；cancel/reparent 要求 lease，reparent 不能跨 session。
+- `tasks.*` 的 `sessionId` 未写时为调用方显示的会话；`tasks.wait`、`tasks.readOutput`、`tasks.transcript` 只读；`tasks.cancel` 经过所属会话的 mutation guard。
+- `chat.stopRuntime({ taskId?, sessionId? })`：带 `taskId` 时停止该任务，否则停止 `sessionId` 指明的会话的 turn；两者都没有时返回 `SESSION_REQUIRED`，不再默认到任何会话。
+- `processes.list/cancel/reparent` 只作用于参数 `sessionId` 指明的会话的受管进程，缺少时返回 `SESSION_REQUIRED`；cancel/reparent 要求 lease，reparent 不能跨 session。
+- `goals.get/pause/resume(goalId, sessionId?)`、`goals.cancel(goalId, reason?, sessionId?)`、`goals.list({ sessionId? })`：会话未写时为调用方显示的会话；renderer 写明当前会话。
+- `scheduler.createJob` / `updateJob`：任务载荷没写会话时绑定到调用方显示的会话。运行记录（`runHistory[]`）的 `status` 增加 `blocked`（定时 turn 遇到审批或提问，已自动拒绝），失败的记录带 `errorCode`（例如 `AUTH`、`TIMEOUT`、`NOT_CONSUMED`）；`scheduler_run_error` 同时用于 `error` 与 `blocked`，带 `status` 与 `code`。
 - `tools.readResult` 只接受位于 `stateRoot/spill/` 内的路径。
 - `mcp.getConfig` 保留 `${ENV_NAME}`，把 args、env、headers、URL 中其余字面字符串逐叶显示为 `[REDACTED]`；`mcp.saveConfig` 只从同一位置的旧值回填掩码，孤立掩码 fail closed。
 - `mcp.importServers({ raw, overwrite?, dryRun? })` 接受粘贴的 JSON 文本或对象，经 `mcp/import.ts` 规范化后按名称合并：`dryRun: true` 只返回计划（每个 server 的 `add` / `update` / `skip`、冲突与警告），不写入，也不经过 mutation guard；`overwrite` 为 `true` 或要替换的 server 名称列表，未指定时同名 server 跳过。`mcp.setServerEnabled({ name, enabled })` 与 `mcp.removeServer({ name })` 按名称修改。三者实际写入后重载 MCP，并返回掩码后的配置与 MCP 状态快照。
 - `skills.*` 的读写都可以带 `sessionId`，Core 按该 session 的 Build 项目选择 Skill loader；Chat 或未知 session 只看到个人、Plugin 与内置 Skill。`skills.list` 同时返回 `invalid`（不合格 Skill 与原因）；`skills.delete` 带 `scope` 时可删除该 scope 下不合格 Skill 的文件夹；`skills.import` 的 `source.kind` 为 `content`、`folder`、`zip` 或 `url`（只接受 `https://`），`scope` 为 `user` 或 `project`，同名冲突需要 `overwrite: true`，结果的 `errors[]` 逐项带 `code`（`skill_exists`、`skill_invalid`、`skill_duplicate`、`skill_import_failed`），renderer 按 `code` 判断是否提供覆盖；`skills.validate` 校验粘贴的内容或已安装的 Skill；`skills.copyToUser` 把只读 Skill 复制为个人 Skill。内置与 Plugin Skill 的写入返回 `skill_read_only`。`skills.create` 生成个人 Skill 骨架，`skills.tools` 返回当前注册的工具目录。
 - `skills.tools` 的每项另带 `category`（内建工具在「能力 › 工具」的分组：`basic`、`network`、`planning`、`agents`、`config`；MCP 与插件的工具没有）和 `plugin_id`（带来这个工具的插件：插件 MCP server 的工具，以及 `computer-use` 的 GUI 工具）。「能力 › 工具」只列 `source` 为 `builtin` 且没有 `plugin_id` 的工具。
 - `plugins.inspect` 暂存本地文件夹、本地 zip 或 `https://` 来源并返回预览（id、格式 `portable`/`codex-compat`/`emperor-v1`、版本（可为 `null`）、digest、签名、按类别列出的成员），`plugins.install({ previewId, digest, scope })` 只确认同一份暂存内容，先校验范围再写入。预览失败时抛出 `plugin_preview_*` 错误码（如 `multiple_roots`、`identity_mismatch`、`path_unsafe`、`duplicate_member`、`member_invalid`），暂存目录随即删除；超过一天的遗留预览在启动时清理。URL 来源在签名验证通过前 activation 为 `blocked_unverified`。
-- `plugins.list` 的每项带显示名、短述、开发者、格式、Logo 地址（`app://plugin-assets/<范围>/<编码后的插件 ID>/logo?v=<digest 前 8 位>`，没有合规 Logo 时为 `null`，详情的 `logoIssue` 写明原因）、`effective`（同一插件在多个范围启用时，`local` > `project` > `user` > `managed` 中生效的那一个）、`toggleable`、`uninstallable`，以及按真实成员计的 `capabilities`。`plugins.getDetail({ pluginId, scope })` 返回详情：元数据、权限（会执行本机命令、会联网）和每个成员的状态与原因，不含任何绝对路径或 server 凭据；找不到时报 `plugin_not_found`。成员状态先看包：内容缺失时没有成员，停用、签名未验证、被别的范围覆盖时所有成员统一显示原因，之后才是各成员自己的状态（Skill 与更高优先级的同名 Skill 冲突时为失败）。卸载会同时删掉该范围的启用意图，不再留下空行。随 Emperor 提供的插件（`scope: 'managed'`，来源 `{ kind: 'managed' }`，签名为 Emperor 已验证）在启动时从 `<runtimeRoot>/bundled-plugins`（打包版）或 `<runtimeRoot>/packages/core/bundled-plugins`（开发版）发现，不写入 `installed_plugins.json`；`plugins.setEnabled` 接受 `managed`，开关存 `plugins/managed.json`，`computer-use` 转给电脑操作总开关（不支持的主机上 `toggleable` 为 false，切换报 `plugin_toggle_unavailable`；关闭与 `computerUse.setEnabled(false)` 一样不经过 mutation guard，打开仍经过）；`computer-use` 包带 `computer-use` Skill 和三个驱动成员（`embedded-browser`、`external-browser`、`desktop`），驱动状态在详情打开且插件启用时从 `computerUse.status()` 读取；`plugins.uninstall` 对它们报 `plugin_managed_uninstall_denied`。`computerUse.setEnabled` 之后同样发送 `plugins_changed`。安装、启停、卸载以及活动会话切到别的项目后，host 发送 `plugins_changed`（`reason` 为 `plugins` 或 `project`），renderer 据此重新拉取 `plugins.list`。插件 Skill 根按项目分别计算，项目范围的插件只在该项目的会话里可见。
+- `plugins.list` 的每项带显示名、短述、开发者、格式、Logo 地址（`app://plugin-assets/<范围>/<编码后的插件 ID>/logo?v=<digest 前 8 位>`，没有合规 Logo 时为 `null`，详情的 `logoIssue` 写明原因）、`effective`（同一插件在多个范围启用时，`local` > `project` > `user` > `managed` 中生效的那一个）、`toggleable`、`uninstallable`，以及按真实成员计的 `capabilities`。`plugins.getDetail({ pluginId, scope })` 返回详情：元数据、权限（会执行本机命令、会联网）和每个成员的状态与原因，不含任何绝对路径或 server 凭据；找不到时报 `plugin_not_found`。成员状态先看包：内容缺失时没有成员，停用、签名未验证、被别的范围覆盖时所有成员统一显示原因，之后才是各成员自己的状态（Skill 与更高优先级的同名 Skill 冲突时为失败）。卸载会同时删掉该范围的启用意图，不再留下空行。随 Emperor 提供的插件（`scope: 'managed'`，来源 `{ kind: 'managed' }`，签名为 Emperor 已验证）在启动时从 `<runtimeRoot>/bundled-plugins`（打包版）或 `<runtimeRoot>/packages/core/bundled-plugins`（开发版）发现，不写入 `installed_plugins.json`；`plugins.setEnabled` 接受 `managed`，开关存 `plugins/managed.json`，`computer-use` 转给电脑操作总开关（不支持的主机上 `toggleable` 为 false，切换报 `plugin_toggle_unavailable`；关闭与 `computerUse.setEnabled(false)` 一样不经过 mutation guard，打开仍经过）；`computer-use` 包带 `computer-use` Skill 和三个驱动成员（`embedded-browser`、`external-browser`、`desktop`），驱动状态在详情打开且插件启用时从 `computerUse.status()` 读取；`plugins.uninstall` 对它们报 `plugin_managed_uninstall_denied`。`computerUse.setEnabled` 之后同样发送 `plugins_changed`。`plugins.list`、`plugins.getDetail` 与安装、启停、卸载按调用方显示的会话所属项目计算（项目范围的启用意图写在该项目）。安装、启停、卸载以及界面切到另一个项目的会话后，host 发送 `plugins_changed`（`reason` 为 `plugins` 或 `project`），renderer 据此重新拉取 `plugins.list`；切换会话本身不会改变任何插件在哪里运行。插件 Skill 根、MCP server 与 Hook 都按项目分别计算，项目范围的插件只在该项目的会话里生效。
 - `plugins.getDetail` 的结果另带 `tools: { note, groups }`：每组 `{ id, kind, title, note, tools }`，`tools` 的每项是 `{ name, description, parameters, readOnly }`。`computer-use` 按驱动给出 `ui`（通用）、`embedded-browser`、`external-browser`、`desktop` 四组，取自四个工具工厂的静态定义（列出时不执行任何工具），电脑操作关闭时照样列出，`note` 为「打开电脑操作后可用」（不支持的主机上为「这台电脑不能使用电脑操作」）；其他插件每个 MCP 成员一组（`kind: 'mcp'`，`id` 为成员名），只在 server 运行时列出它注册的工具，否则 `tools` 为空、组的 `note` 说明原因。说明文字与成员一样不含本机路径。
 - `config.effective` 是只读解释面，返回可复现的脱敏 snapshot、来源与覆盖轨迹。
 - `model.discoverModels` 与 `model.probeConnection` 只读，不经过 mutation guard，接受添加模型表单的草稿连接：表单里的 Key 优先；Key 为空或为掩码时，只有 `entryId` / `connectionId` 指向的条目与草稿的供应商、协议和规范化地址一致才借用已保存的 Key。结果不含 Key，错误信息抹掉 Key；成功的列表按连接哈希在内存中缓存 15 分钟。接口、字段与错误码见[厂商模型列表接口规范](../design/vendor-model-apis.md)。
@@ -260,7 +267,7 @@ Packaged smoke 会创建隐藏的生产 BrowserWindow、加载 ASAR 内的 `app:
 
 ## 新增 operation
 
-1. `operations.ts` 中的名称与 schema，以及 CoreApi handler。
+1. `operations.ts` 中的名称与 schema，以及 CoreApi handler。依赖「哪个会话」的 operation 显式接收会话（输入里的 `sessionId`，或调用上下文的 `view`），不读 CoreApi 记着的显示会话。
 2. Electron main 的 operation contract 与 `desktop/src/main/core-host.test.ts`。
 3. Preload bridge 的输入输出类型。
 4. Renderer API 映射和调用方。

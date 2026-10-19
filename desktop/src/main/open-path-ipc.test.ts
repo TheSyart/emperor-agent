@@ -8,7 +8,8 @@ import {
 
 const sources: OpenPathSources = {
   emperorHome: () => '/Users/me/.emperor',
-  activeProject: () => '/Users/me/code/app',
+  sessionProject: (sessionId) =>
+    sessionId === 's1' ? '/Users/me/code/app' : null,
   skillFolder: (name, sessionId) =>
     name === 'review' && sessionId === 's1'
       ? '/Users/me/code/app/.emperor/skills/review'
@@ -70,7 +71,15 @@ describe('emperor:open-path (MAIN-27)', () => {
     expect(
       await invoke({ kind: 'diagnostic', rowId: 'global-state-root' }),
     ).toEqual({ ok: true })
-    await invoke({ kind: 'diagnostic', rowId: 'active-project-path' })
+    await invoke({
+      kind: 'diagnostic',
+      rowId: 'active-project-path',
+      sessionId: 's1',
+    })
+    // Without the session it was opened from, no project row (KRN-01).
+    expect(
+      await invoke({ kind: 'diagnostic', rowId: 'active-project-path' }),
+    ).toMatchObject({ ok: false })
     await invoke({ kind: 'skill', name: 'review', sessionId: 's1' })
     await invoke({
       kind: 'invalid-skill',
@@ -93,10 +102,14 @@ describe('emperor:open-path (MAIN-27)', () => {
 
   it('reveals an app bundle instead of launching it', async () => {
     const { invoke, openPath, showItemInFolder } = setup({
-      activeProject: () => '/Users/me/Evil.app',
+      sessionProject: () => '/Users/me/Evil.app',
     })
     expect(
-      await invoke({ kind: 'diagnostic', rowId: 'active-project-path' }),
+      await invoke({
+        kind: 'diagnostic',
+        rowId: 'active-project-path',
+        sessionId: 's1',
+      }),
     ).toEqual({ ok: true })
     expect(openPath).not.toHaveBeenCalled()
     expect(showItemInFolder).toHaveBeenCalledWith('/Users/me/Evil.app')

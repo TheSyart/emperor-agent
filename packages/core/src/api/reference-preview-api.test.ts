@@ -12,6 +12,9 @@ import {
 } from './operations'
 import { makeApi, tmp } from './test-helpers'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 const apis: CoreApi[] = []
 afterEach(async () => {
   for (const api of apis.splice(0)) await api.close()
@@ -409,11 +412,14 @@ describe('GitHub reference preview integration', () => {
       reason: 'github_unauthenticated',
     })
     expect(JSON.stringify(unavailable)).not.toContain('SECRET')
-    await api.plugins.setEnabled({
-      pluginId: 'github',
-      scope: 'managed',
-      enabled: false,
-    })
+    await api.plugins.setEnabled(
+      {
+        pluginId: 'github',
+        scope: 'managed',
+        enabled: false,
+      },
+      VIEW,
+    )
     const count = requests.length
     expect(
       await api.references.preview({ sessionId, referenceId: pull.id }),
