@@ -25,6 +25,7 @@ import {
   type DelegationRunRecord,
   TERMINAL_RUN_PHASES,
 } from '../../harness/delegation/types'
+import { delegationNeedsExit } from '../../runtime/agent-view'
 export function externalTask(state: DelegationState, run: DelegationRunRecord) {
   const record = state.record!
   return {
@@ -48,6 +49,10 @@ export function externalTask(state: DelegationState, run: DelegationRunRecord) {
     recoverable:
       record.availability === 'needs_recovery' ||
       record.dispatchPaused === true,
+    // Its current run ended without an outcome: offer 「标记为已结束」.
+    needs_exit:
+      run.id === record.currentRunId && delegationNeedsExit(record, run),
+    ...(run.abandoned ? { abandoned_by: run.abandoned.by } : {}),
     detail: run.summary ?? null,
     revision: run.revision,
   }
@@ -215,6 +220,13 @@ export class CoreDelegationService {
     return input.inspect
       ? this.options.service.inspectRecovery(input.id)
       : this.options.service.recover(input.id, input.expectedRevision)
+  }
+  /** 「标记为已结束」 from the conversation (AGT-04). */
+  async abandon(input: { id: string; sessionId?: string | null }) {
+    const state = this.access(input.id, input.sessionId, true)
+    for (const run of Object.values(state.runs))
+      await this.options.acceptance.stopRun(run.id)
+    return this.options.service.abandon(input.id, 'user')
   }
   async collect(input: { runId: string; sessionId?: string | null }) {
     const { record, run } = this.run(input.runId, input.sessionId)

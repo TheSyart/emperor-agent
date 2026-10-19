@@ -198,6 +198,11 @@ export interface DelegationRecord {
 }
 export interface DelegationRunRecord {
   goalFailureDisposition?: { source: 'human'; reason: string; at: number }
+  /**
+   * "标记为已结束" (AGT-04): the user, or the model with the user's
+   * approval, ended a run that had no outcome; it no longer blocks anything.
+   */
+  abandoned?: { by: 'user' | 'model'; at: number }
   recoveryResolved?: boolean
   recoveryInspection?: {
     id: string

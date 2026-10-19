@@ -574,4 +574,20 @@ describe('unified child-agent read index', () => {
     expect(f.changes).toHaveLength(1)
     f.sessions.closeAll()
   })
+  it('an external run interrupted by a restart reads 已中断, and one without an outcome offers the exit (AGT-04)', () => {
+    const interrupted = external('dlg-interrupted'),
+      stuck = external('dlg-stuck')
+    interrupted.runs['dgr-one']!.phase = 'interrupted'
+    stuck.runs['dgr-one']!.phase = 'outcome_unknown'
+    stuck.record!.availability = 'needs_recovery'
+    const f = fixture([interrupted, stuck])
+    const rows = f.service.list(['root']).agents
+    const a = rows.find((r) => r.id === 'dlg-interrupted')!,
+      b = rows.find((r) => r.id === 'dlg-stuck')!
+    expect(a.phase).toBe('interrupted')
+    expect(agentPhaseLabel(a.phase)).toBe('已中断')
+    expect(a.needsExit).toBeUndefined()
+    expect(b).toMatchObject({ phase: 'unknown', needsExit: true })
+    f.sessions.closeAll()
+  })
 })

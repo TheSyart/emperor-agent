@@ -54,6 +54,7 @@ import {
   currentBootTime,
   terminateRecordedProcess,
 } from './process'
+import { delegationNeedsExit } from '../../runtime/agent-view'
 import { durableReplaceSync } from '../../store/persistence'
 import { codexAuthWritableFile, type CodexAuthLink } from './codex-auth'
 export interface DelegationServiceOptions {
@@ -784,6 +785,8 @@ export class DelegationService {
         record.availability === 'closed'
       )
         continue
+      // Marked as ended by the user (or the model, with approval): disposed.
+      if (run?.abandoned && TERMINAL_RUN_PHASES.has(run.phase)) continue
       const resultOnly =
         run?.receiptId &&
         run.acceptance === 'unverified' &&
@@ -2096,6 +2099,67 @@ export class DelegationService {
       )
     await e.active
     return { requested: true }
+  }
+  /**
+   * 「标记为已结束」 (AGT-04): end a run that has no outcome, as it is. Its
+   * workspace quarantine is released (a budget slot was never held), its
+   * queue cancelled, and a Goal no longer waits for it. A run still live in
+   * this process is stopped instead, with interrupt.
+   */
+  async abandon(id: string, by: 'user' | 'model'): Promise<DelegationRecord> {
+    const e = this.entry(id)
+    return this.serial(e, async () => {
+      const state = e.journal.load(),
+        record = state.record!,
+        run = record.currentRunId ? state.runs[record.currentRunId] : undefined
+      if (e.active)
+        throw new DelegationError(
+          'ACTIVE_RUN',
+          'the run is still in progress; stop it instead',
+        )
+      if (
+        !run ||
+        !(
+          delegationNeedsExit(record, run) ||
+          !TERMINAL_RUN_PHASES.has(run.phase)
+        )
+      )
+        throw new DelegationError(
+          'NOTHING_TO_END',
+          'this task has no unfinished run to end',
+        )
+      // A quarantined group gets one last stop before its workspace is
+      // released; whatever the result, the user's decision stands.
+      if (e.held && !e.held.quiescent && run.process)
+        await this.stopRecordedRun(id, run, this.bootTime()).catch(
+          () => undefined,
+        )
+      const closeIt =
+        record.availability !== 'closed' &&
+        !!record.workspaceLeaseId &&
+        !this.workspaceAvailable(record)
+      await this.append(e, {
+        type: 'run-abandoned',
+        runId: run.id,
+        by,
+        at: Date.now(),
+      })
+      // Its workspace is gone: nothing can continue in this conversation.
+      if (closeIt)
+        await this.append(e, { type: 'availability', availability: 'closed' })
+      if (!e.journal.load().outbox['dgn-' + run.id])
+        await this.append(e, {
+          type: 'outbox',
+          notice: settlementNotice(
+            e.journal.load().record!,
+            e.journal.load().runs[run.id]!,
+          ),
+        })
+      e.held?.workspace?.release()
+      e.held = undefined
+      e.stop = false
+      return e.journal.load().record!
+    })
   }
   async bindIntegration(
     id: string,

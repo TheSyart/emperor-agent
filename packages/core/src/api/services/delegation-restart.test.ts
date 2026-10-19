@@ -91,3 +91,45 @@ it('startup does not open historical root conversations or run their SessionStar
     await second.api.close()
   }
 })
+
+it('marks a run without an outcome as ended from the conversation', async () => {
+  const first = await makeApi()
+  const root = String(first.api.sessions.create({ title: 'stuck' }).id)
+  const delegationsRoot = first.api.paths.delegationsRoot
+  await first.api.close()
+  await historicalDelegation(
+    delegationsRoot,
+    'dlg-stuck',
+    root,
+    'outcome_unknown',
+  )
+  const second = await makeApi({ root: first.root, stateRoot: first.stateRoot })
+  try {
+    second.api.sessions.activate(root)
+    const before = second.api.agents
+      .list({ rootSessionIds: [root] })
+      .agents.find((agent) => agent.id === 'dlg-stuck')
+    expect(before).toMatchObject({ needsExit: true })
+    expect(
+      second.api.tasks
+        .list({ sessionId: root })
+        .find((task) => task.delegation_id === 'dlg-stuck'),
+    ).toMatchObject({ needs_exit: true })
+    await second.api.delegations.abandon({ id: 'dlg-stuck', sessionId: root })
+    const run = second.api.delegationRuntime.inspect('dlg-stuck').runs['dgr-1']
+    expect(run).toMatchObject({
+      phase: 'outcome_unknown',
+      failureCode: 'OUTPUT_LIMIT',
+      abandoned: { by: 'user' },
+    })
+    await vi.waitFor(() =>
+      expect(
+        second.api.agents
+          .list({ rootSessionIds: [root] })
+          .agents.find((agent) => agent.id === 'dlg-stuck')?.needsExit,
+      ).toBeUndefined(),
+    )
+  } finally {
+    await second.api.close()
+  }
+})

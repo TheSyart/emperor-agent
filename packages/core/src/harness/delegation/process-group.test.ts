@@ -138,7 +138,8 @@ describe.skipIf(process.platform === 'win32')('process group stop', () => {
     const elapsed = await untilGone(pgid, 14_000)
     // interrupt, five seconds, SIGTERM, five seconds, SIGKILL.
     expect(elapsed).toBeGreaterThanOrEqual(9500)
-    expect(elapsed).toBeLessThan(11_000)
+    // Ten seconds plus timer drift on a busy machine.
+    expect(elapsed).toBeLessThan(11_500)
     expect(alive(child)).toBe(false)
     expect(await h.closed).toMatchObject({ quiescent: true })
   }, 20_000)

@@ -89,6 +89,8 @@ export type DelegationEvent =
       acceptance: DelegationRunRecord['acceptance']
     }
   | { type: 'recovery'; reason: string }
+  /** The run is ended as is: resolved, its queue cancelled (AGT-04). */
+  | { type: 'run-abandoned'; runId: string; by: 'user' | 'model'; at: number }
 export interface DelegationState {
   record?: DelegationRecord
   runs: Record<string, DelegationRunRecord>
@@ -350,6 +352,31 @@ export class DelegationFold {
       case 'recovery':
         next.record!.availability = 'needs_recovery'
         break
+      case 'run-abandoned': {
+        const run = requireRun(e.runId)
+        if (!TERMINAL_RUN_PHASES.has(run.phase)) {
+          run.phase = run.phase === 'queued' ? 'cancelled' : 'interrupted'
+          run.finishedAt ??= e.at
+        }
+        run.abandoned = { by: e.by, at: e.at }
+        run.recoveryResolved = true
+        run.revision++
+        for (const message of Object.values(next.messages))
+          if (
+            ['queued', 'sending', 'delivery_unknown'].includes(message.status)
+          )
+            message.status = 'cancelled'
+        for (const interaction of Object.values(next.interactions))
+          if (
+            interaction.runId === run.id &&
+            ['pending', 'answering'].includes(interaction.state)
+          )
+            interaction.state = 'cancelled'
+        if (next.record!.availability !== 'closed')
+          next.record!.availability = 'idle'
+        next.record!.dispatchPaused = false
+        break
+      }
       default:
         throw new DelegationError('JOURNAL_CORRUPT', 'unknown delegation event')
     }

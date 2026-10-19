@@ -133,4 +133,55 @@ describe('AGT-04 fold rules', () => {
     )
     expect(fold.state.runs['dgr-1']!.revision).toBe(revision)
   })
+  it('an ended run is resolved, its queue cancelled and the conversation idle', () => {
+    const fold = new DelegationFold()
+    ;[
+      ...settled('OUTPUT_LIMIT'),
+      {
+        type: 'message-enqueued' as const,
+        message: { id: 'dgm-2', text: 'later', status: 'queued' as const },
+      },
+      { type: 'dispatch-paused' as const, paused: true },
+      {
+        type: 'run-abandoned' as const,
+        runId: 'dgr-1',
+        by: 'user' as const,
+        at: 5,
+      },
+    ].forEach((e, i) => fold.apply(entry(i + 1, e)))
+    expect(fold.state.runs['dgr-1']).toMatchObject({
+      phase: 'outcome_unknown',
+      failureCode: 'OUTPUT_LIMIT',
+      recoveryResolved: true,
+      abandoned: { by: 'user', at: 5 },
+    })
+    expect(fold.state.messages['dgm-2']?.status).toBe('cancelled')
+    expect(fold.state.record).toMatchObject({
+      availability: 'idle',
+      dispatchPaused: false,
+    })
+  })
+  it('an ended run that never settled becomes interrupted (queued: cancelled)', () => {
+    const fold = new DelegationFold()
+    ;[
+      { type: 'created' as const, record: record() },
+      { type: 'run-created' as const, run: run() },
+      {
+        type: 'run-changed' as const,
+        runId: 'dgr-1',
+        patch: { phase: 'preparing' as const },
+      },
+      {
+        type: 'run-abandoned' as const,
+        runId: 'dgr-1',
+        by: 'model' as const,
+        at: 9,
+      },
+    ].forEach((e, i) => fold.apply(entry(i + 1, e)))
+    expect(fold.state.runs['dgr-1']).toMatchObject({
+      phase: 'interrupted',
+      finishedAt: 9,
+      abandoned: { by: 'model' },
+    })
+  })
 })

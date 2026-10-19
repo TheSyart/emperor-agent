@@ -567,6 +567,15 @@ export class HarnessHost {
         delegations: () => this.delegations ?? undefined,
         ownerResolver: (agent, callId) => this.delegationOwner(agent, callId),
         canControl: (agent, owner) => this.canControlDelegation(agent, owner),
+        // collect_agent({abandon}) ends a run only with the user's approval.
+        approve: ({ agent, callId, reason, signal }) =>
+          this.approval.request({
+            agent,
+            toolName: 'collect_agent',
+            callId,
+            reason,
+            signal,
+          }),
         // Plan mode explores read-only: external children default to review.
         parentReadOnly: (agent) =>
           this.sandbox.resolve({ session: agent.session }).mode ===

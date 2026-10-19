@@ -10,7 +10,12 @@ export function settlementNotice(
   record: DelegationRecord,
   run: DelegationRunRecord,
 ): DelegationNotice {
-  const text = `External ${record.backend} delegation ${record.id}, run ${run.id}: execution=${run.phase}; artifact acceptance=${run.acceptance}.\n${run.summary ?? 'No closing summary.'}`
+  const ended = run.abandoned
+    ? run.abandoned.by === 'user'
+      ? ' (marked as ended by the user)'
+      : " (marked as ended with the user's approval)"
+    : ''
+  const text = `External ${record.backend} delegation ${record.id}, run ${run.id}: execution=${run.phase}${ended}; artifact acceptance=${run.acceptance}.\n${run.summary ?? 'No closing summary.'}`
   const bytes = Buffer.from(text),
     bounded =
       bytes.length <= 8192

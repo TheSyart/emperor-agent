@@ -29,6 +29,8 @@ import type { DelegationState } from './fold'
 import { buildDelegationContext, type DelegationBriefInput } from './context'
 import { jsonSchema } from '../tools/json-schema'
 import { DelegationError } from './types'
+import type { ApprovalOutcome } from '../tools/registry'
+import { delegationNeedsExit } from '../../runtime/agent-view'
 
 /**
  * The local subagent tools keep main's descriptions and parameters
@@ -104,6 +106,8 @@ export interface DelegationToolService {
   }>
   interrupt(id: string, runId: string): Promise<{ requested: boolean }>
   wait(id: string, runId: string): Promise<DelegationRunRecord>
+  /** End a run that has no outcome (AGT-04). */
+  abandon?(id: string, by: 'user' | 'model'): Promise<DelegationRecord>
 }
 export interface DelegationToolOptions {
   internalManager: SubagentManager
@@ -114,6 +118,13 @@ export interface DelegationToolOptions {
     agent: Agent,
   ) => Omit<DelegationBriefInput, 'prompt' | 'description' | 'context'>
   parentReadOnly?: (agent: Agent) => boolean
+  /** Ask the user (collect_agent abandon); absent: the request fails closed. */
+  approve?: (request: {
+    agent: Agent
+    callId: string
+    reason: string
+    signal: AbortSignal
+  }) => Promise<ApprovalOutcome>
 }
 function messageId(owner: DelegationOwner, callId: string, id: string): string {
   // RFC 4122 UUIDv5 over host-owned call scope. A replay reuses the same message identity.
@@ -510,10 +521,17 @@ export function createDelegationTools(
       category: 'agents',
       name: 'collect_agent',
       description:
-        'Wait for a specific external run and collect its summary, structured output and delivery check state. Successful text results can be used directly. Check changed files before final delivery or integration; execution completion is not evidence that tests passed.',
+        'Wait for a specific external run and collect its summary, structured output and delivery check state. Successful text results can be used directly. Check changed files before final delivery or integration; execution completion is not evidence that tests passed. ' +
+        'If the last run ended without an outcome (Emperor or the computer restarted, or its stop could not be confirmed), abandon=true asks the user to mark it as ended, which releases its workspace and lets the task and any Goal move on.',
       input: z.object({
         agent_id: z.string(),
         expected_run_id: z.string().optional(),
+        abandon: z
+          .boolean()
+          .optional()
+          .describe(
+            'Mark the run as ended as it is, after the user approves. Only for a run that has no outcome; a live run is stopped with interrupt_agent.',
+          ),
       }),
       execute: async (args, ctx) => {
         if (route(args.agent_id) === 'internal')
@@ -528,6 +546,66 @@ export function createDelegationTools(
             'run is not part of this conversation',
             'RUN_NOT_FOUND',
           )
+        if (args.abandon) {
+          const run = state.runs[runId]!
+          if (
+            runId !== state.record!.currentRunId ||
+            !delegationNeedsExit(state.record, run)
+          )
+            throw new ToolError(
+              'NOTHING_TO_END: run ' +
+                runId +
+                ' is ' +
+                run.phase +
+                '; only a run without an outcome can be marked as ended (stop a live run with interrupt_agent)',
+              'NOTHING_TO_END',
+            )
+          const s = service()
+          if (!s.abandon || !options.approve)
+            throw new ToolError(
+              'marking a run as ended needs the user, but no approval channel is available',
+              'APPROVAL_UNAVAILABLE',
+            )
+          const outcome = await options.approve({
+            agent: caller(ctx),
+            callId: ctx.callId,
+            reason:
+              'Mark external task "' +
+              (state.record!.startSpec?.description || args.agent_id) +
+              '" (' +
+              args.agent_id +
+              ', run ' +
+              runId +
+              ', ' +
+              run.phase +
+              ') as ended. It releases its workspace; its retained files are kept.',
+            signal: ctx.signal,
+          })
+          if (outcome !== 'allowed-once')
+            throw new ToolError(
+              outcome === 'rejected'
+                ? 'APPROVAL_REJECTED: the user did not allow marking this run as ended'
+                : 'APPROVAL_' +
+                    outcome.toUpperCase() +
+                    ': marking this run as ended was not approved',
+              outcome === 'rejected'
+                ? 'APPROVAL_REJECTED'
+                : 'APPROVAL_' + outcome.toUpperCase(),
+            )
+          await s.abandon(args.agent_id, 'model')
+          const ended = s.inspect(args.agent_id)
+          return {
+            content:
+              closingText(ended.record!, ended.runs[runId]!) +
+              "\nMarked as ended with the user's approval.",
+            meta: {
+              subagentId: args.agent_id,
+              runId,
+              phase: ended.runs[runId]!.phase,
+              abandoned: true,
+            },
+          }
+        }
         const run = await service().wait(args.agent_id, runId)
         return {
           content: closingText(service().inspect(args.agent_id).record!, run),

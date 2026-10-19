@@ -82,7 +82,8 @@ it('unknown sends are not replayed; the interrupted run keeps neither a slot nor
     runs: 1,
     unknownRuns: 1,
   })
-  // Its workspace lease is gone: the conversation cannot continue.
+  // Its workspace lease is gone: the conversation cannot continue, and
+  // marking it as ended closes it instead of reopening it.
   expect(state.record?.availability).toBe('needs_recovery')
   await expect(
     restarted.send(record.id, {
@@ -91,6 +92,9 @@ it('unknown sends are not replayed; the interrupted run keeps neither a slot nor
       delivery: 'queue',
     }),
   ).rejects.toThrow('NEEDS_RECOVERY')
+  await restarted.abandon(record.id, 'user')
+  expect(restarted.inspect(record.id).record?.availability).toBe('closed')
+  expect(restarted.hasOutstanding('root')).toBe(false)
   expect(f.adapter.submitted).toHaveLength(0)
   f.cleanup()
 })

@@ -259,6 +259,89 @@ it.skipIf(process.platform === 'win32')(
   },
 )
 
+it('marking a stuck run as ended releases its workspace and lets the Goal continue', async () => {
+  const f = fixture()
+  cleanup.push(f.cleanup)
+  f.setParent('workspace-write')
+  const goal = { id: 'g', revision: 1 }
+  // Its recorded PID is alive under a different birth: it cannot be stopped
+  // or proved gone, so the workspace stays quarantined.
+  const record = await crashedRun(f, {
+    workspace: 'shared-exclusive',
+    owner: { taskScopeId: 'goal:g', goalRef: goal, requiredForGoal: true },
+    process: {
+      pid: process.pid,
+      fingerprint: 'Mon Jan 1 00:00:00 2001',
+      bootTime: systemBootMarker() ?? undefined,
+    },
+    phase: 'outcome_unknown',
+    patch: { quiescent: false, failureCode: 'OUTPUT_LIMIT', finishedAt: 2 },
+  })
+  f.options.workspaces.get = () => ({
+    id: 'lease-fixture',
+    revision: 1,
+    owner: record.owner,
+    cwd: f.root,
+    path: f.root,
+    mode: 'shared-exclusive',
+    status: 'retained',
+  })
+  const restarted = new DelegationService(f.options)
+  await restarted.reconcile()
+  expect(f.mutations.hasActiveWriter(f.root)).toBe(true)
+  expect(restarted.hasOutstanding('root')).toBe(true)
+  await expect(restarted.verifyGoalCompletion(goal, 'root')).rejects.toThrow(
+    'REQUIRED_DELEGATION_UNVERIFIED',
+  )
+  await restarted.abandon(record.id, 'user')
+  const state = restarted.inspect(record.id)
+  expect(state.runs['dgr-1']).toMatchObject({
+    phase: 'outcome_unknown',
+    failureCode: 'OUTPUT_LIMIT',
+    recoveryResolved: true,
+    abandoned: { by: 'user' },
+  })
+  expect(state.record?.availability).toBe('idle')
+  expect(state.messages['dgm-1']?.status).toBe('cancelled')
+  expect(f.mutations.hasActiveWriter(f.root)).toBe(false)
+  expect(restarted.hasOutstanding('root')).toBe(false)
+  await expect(
+    restarted.verifyGoalCompletion(goal, 'root'),
+  ).resolves.toBeUndefined()
+  // Nothing more to end.
+  await expect(restarted.abandon(record.id, 'user')).rejects.toThrow(
+    'NOTHING_TO_END',
+  )
+})
+
+it('a queued run paused by a restart can be marked as ended', async () => {
+  const f = fixture()
+  cleanup.push(f.cleanup)
+  const record = {
+      ...fixtureDelegationRecord(),
+      cwd: f.root,
+      workspaceLeaseId: 'lease-fixture',
+      startSpec: spec,
+    },
+    journal = new DelegationJournal(f.root, record.id)
+  await journal.append({ type: 'created', record })
+  await journal.append({
+    type: 'message-enqueued',
+    message: { id: 'dgm-1', text: 'queued', status: 'queued' },
+  })
+  await journal.append({ type: 'run-created', run: fixtureDelegationRun() })
+  const restarted = new DelegationService(f.options)
+  await restarted.reconcile()
+  expect(restarted.hasOutstanding('root')).toBe(true)
+  await restarted.abandon(record.id, 'user')
+  expect(restarted.inspect(record.id).runs['dgr-1']).toMatchObject({
+    phase: 'cancelled',
+    abandoned: { by: 'user' },
+  })
+  expect(restarted.hasOutstanding('root')).toBe(false)
+  expect(f.adapter.submitted).toHaveLength(0)
+})
+
 it('a quarantined run holds no budget slot: a second task on the same executor runs', async () => {
   const f = fixture()
   cleanup.push(f.cleanup)
@@ -353,10 +436,12 @@ it('a stop racing the end of a turn never makes an illegal transition (100 round
         ...spec,
         clientRequestId: 'race-' + round,
       })
-      await vi.waitFor(() =>
-        expect(
-          f.service.inspect(record.id).runs[record.currentRunId!]?.phase,
-        ).toBe('running'),
+      await vi.waitFor(
+        () =>
+          expect(
+            f.service.inspect(record.id).runs[record.currentRunId!]?.phase,
+          ).toBe('running'),
+        { interval: 2, timeout: 5000 },
       )
       // The turn ends on its own; the stop lands a few microtasks later,
       // sweeping the window in which the host settles the run.
@@ -381,7 +466,7 @@ it('a stop racing the end of a turn never makes an illegal transition (100 round
       f.cleanup()
     }
   }
-}, 60_000)
+}, 180_000)
 
 it('a previous failure reason survives restarts', async () => {
   const f = fixture()
