@@ -380,6 +380,12 @@ function usesBundledClaude(profile: ExecutorProfile) {
     profile.backend === 'claude-code' && profile.executableSource !== 'system'
   )
 }
+/** 高级 › 诊断模式 (AGT-04): stored only when on. */
+function setDiagnostics(on: boolean) {
+  if (!config.value) return
+  if (on) config.value.diagnosticsMode = true
+  else delete config.value.diagnosticsMode
+}
 function setInstalledClaude(profile: ExecutorProfile, installed: boolean) {
   profile.executableSource = installed ? 'system' : 'bundled'
 }
@@ -1095,6 +1101,26 @@ onBeforeUnmount(() => {
             </div>
           </details>
         </template>
+      </SettingsCard>
+      <SettingsCard
+        v-if="config"
+        class="agent-card advanced-card"
+        data-executor-advanced
+      >
+        <template #title><h3>高级</h3></template>
+        <template #description
+          ><span
+            >诊断模式：停止外部子智能体时，额外用原生扫描器查找并停止离开了它进程组的进程。默认关闭，排查问题时再打开。</span
+          ></template
+        >
+        <template #actions
+          ><Switch
+            :model-value="config.diagnosticsMode === true"
+            data-diagnostics-mode
+            :disabled="busy || loading"
+            aria-label="诊断模式"
+            @update:model-value="setDiagnostics($event)"
+        /></template>
       </SettingsCard>
     </div>
   </SettingsSection>

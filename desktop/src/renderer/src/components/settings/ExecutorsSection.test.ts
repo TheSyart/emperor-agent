@@ -547,7 +547,13 @@ it('does not attach another revision runtime facts after saving a specialty draf
 it('uses light cards, a local introduction and a persistent custom model picker without rewriting the reported model', async () => {
   await mount()
   expect(row('local').textContent).toContain('在主会话允许的工具与权限范围')
-  expect(root.querySelectorAll('.ds-settings-card')).toHaveLength(3)
+  // Local and two vendors; the 高级 card follows them.
+  expect(
+    root.querySelectorAll('.ds-settings-card[data-settings-agent]'),
+  ).toHaveLength(3)
+  expect(
+    root.querySelector('.ds-settings-card[data-executor-advanced]'),
+  ).not.toBeNull()
   expect(
     root.querySelector(
       '[data-native-capability="imageGeneration"][data-status="unsupported"]',
@@ -643,4 +649,18 @@ it('says that Emperor asks before the first dispatch, or that the user chose alw
   expect(
     row('claude-code').querySelector('[data-executor-consent]')!.textContent,
   ).toContain('征得你的同意')
+})
+it('offers diagnostics mode under 高级, off by default, and saves it only when turned on', async () => {
+  await mount()
+  const toggle = root.querySelector<HTMLButtonElement>(
+    '[data-diagnostics-mode]',
+  )!
+  expect(toggle).not.toBeNull()
+  expect(toggle.getAttribute('aria-checked')).toBe('false')
+  expect(root.textContent).toContain('诊断模式')
+  toggle.click()
+  await settle()
+  await action('save-executors').onClick!()
+  await settle()
+  expect(configureExecutors.mock.calls[0]![0].config.diagnosticsMode).toBe(true)
 })
