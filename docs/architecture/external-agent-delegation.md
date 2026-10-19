@@ -90,9 +90,19 @@ Codex 只导入所选模型、所选提供方的连接/认证字段和显式模�
 
 支持 isolated-worktree、shared-readonly、shared-exclusive。Git dirty 基线需要明确 snapshot；未选中的 untracked、ignored、敏感文件、符号链接、嵌套仓库与 submodule 有明确排除记录。原仓库 HEAD/index 不移动。非 Git 共享工作区也在推理前冻结初始基线。独占写入租约同时约束宿主工具、后台任务、验证与 Git 应用。
 
-macOS 使用 Seatbelt；Linux 实现使用 bubblewrap PID namespace。受管进程用独立 process group、PID/start 身份及后代记录停止；macOS 还通过原生 helper 查询继承的随机 Seatbelt 标记，查找快速 double-fork、setsid 和重新挂父的进程。进程标记随 ownership 凭据保留，避免活跃宿主与独立恢复检查争用退出证明。helper 或标记不可用时保留 unknown 与写入隔离，不能解锁或收集为已验证成果。该 macOS helper 使用系统 sandbox 查询接口，系统升级需要重新跑真实探针。
+macOS 使用 Seatbelt；Linux 实现使用 bubblewrap PID namespace。每次运行的 CLI 进程是自己进程组（process group）的组长，停止以进程组为单位、时间线固定（`process.ts`）：
 
-Windows 没有完整的受限执行/进程树停止证明：能力声明为 none，不能把未证明的停止标记为 quiescent。Linux 有实现及协议测试；真实 Linux/Windows 验收需要在对应目标机执行，macOS 证据不能替代。
+1. 协议 interrupt（Codex `turn/interrupt`、Claude `interrupt()`），最多等 5 秒；
+2. 对进程组发 `SIGTERM`，再等 5 秒；
+3. 对进程组发 `SIGKILL`。
+
+进程组清空即视为已停止（`quiescent`）。根进程自己退出时，组里剩下的进程走同样的 `SIGTERM` → 5 秒 → `SIGKILL`。运行期间不再轮询进程表（原来每 100 毫秒一次 `ps`），也不再要求「证明每个后代都已静止」。`ps` 一律在 `LC_ALL=C` 下调用，`lstart` 不随系统语言变化；进程表里连 Emperor 自己都没有时按读取失败处理，不当作「全部已停止」。只在组还有成员回应信号时才读一次进程表，用来排除僵尸进程。
+
+**取舍**：离开进程组的进程（`setsid`、double fork）不会被找到。原来的「静止证明」用 Seatbelt 随机标记加原生扫描器（`native/darwin/delegation-scan.c`）去找这类进程，证明不了就隔离工作区并占住预算槽位，而重启会清掉 `/private/tmp` 下的标记，于是永远证明不了，任务、槽位和 Goal 都卡住，且没有出口。现在的缓解：受限运行（`read-only` / `workspace-write`）在 Seatbelt 下，逃逸进程同样只能写工作区与运行时目录，读写边界不变；`danger-full-access` 运行没有这层限制。需要排查时可以打开 **设置 › 子智能体 › 高级 › 诊断模式**（配置字段 `diagnosticsMode`，默认关闭，只在打开时写入）：此时每次运行写一对边界标记、受限进程继承随机 Seatbelt 标记，运行结束（以及崩溃后的恢复）时用原生扫描器找出仍带标记、却已不在进程组里的进程并停止，收据记 `escaped` 个数，然后删除标记。扫描器缺失或扫描失败只影响诊断，不会让运行失败。该扫描器使用系统 sandbox 查询接口，系统升级需要重新跑真实探针。
+
+崩溃或重启后恢复以前运行的进程（`terminateRecordedProcess`）从不只凭 PID 下手：记录里的开机标记（`kern.bootsessionuuid`，旧系统用 `kern.boottime`）与当前不同，进程必然已不存在，不发任何信号；PID 还活着但出生时间（`ps lstart`）与记录不符，说明 PID 已被复用，不发信号（`OWNER_MISMATCH`）；组长已退出但组里还有成员时，因为进程组还在、组号不会被复用，按同样的时间线停止整个组。旧版本记录的后代 PID 只有出生时间仍一致时才处理，且不再以 PID 为种子去搜索它的子进程。
+
+Windows 没有完整的受限执行和进程组停止：能力声明为 none，停止不会标记为 quiescent。Linux 有实现及协议测试；真实 Linux/Windows 验收需要在对应目标机执行，macOS 证据不能替代。
 
 每个会话有私有 HOME/config/temp。默认从本机 CLI 设置和凭据文件读取窄认证配置，支持显式 CLAUDE_CONFIG_DIR / CODEX_HOME；也可选择模型凭据引用。Claude 仅 Keychain OAuth 不读取，返回 AUTH_REQUIRED。认证不传到 renderer、日志摘要或公共 receipt。运行环境不继承宿主全部密钥，也不导入本机插件或 hooks。设置页的检测只确认本地可用条件，真实调用失败时单独报告认证错误。
 
@@ -111,7 +121,22 @@ Codex 自定义提供方继承 `query_params`（如 Azure 的 `api-version`，�
 
 ## 崩溃恢复与通知
 
-发送先记 intent，再记录原生确认；确认未知时标记 delivery_unknown，禁止自动重放。启动恢复只加载日志、核对受管进程与保留成果，不重发 queued/sending，不开始推理。恢复原生历史是独立的只读 inspection，不能冒充执行成功。无法证明停止的 writer 继续隔离，等待明确恢复。
+发送先记 intent，再记录原生确认；确认未知时标记 delivery_unknown，禁止自动重放（同一消息 ID 再发会被拒绝）。轮次结束后，这条消息不再算作待处理的工作，不挡 Goal 自动续跑。
+
+委派日志（`journal.ts`）在内存中折叠，只有文件被外部改动时才重读；不改变状态的事件不写入、不投影。启动恢复（`reconcile`）只为真实变化追加事件：
+
+- 运行中的轮次：Emperor 已不在，协议必然断开。开机标记不同 → 直接 `interrupted`（`failureCode: SYSTEM_RESTARTED`），不碰旧 PID；同一次开机 → 若进程组还在，按上面的时间线停止，再标 `interrupted`（`APP_RESTARTED`）；停不下来或身份对不上 → `outcome_unknown`。已有的失败原因保留，不再被改写为 `CONNECTION_LOST`。
+- 未派发的 queued 轮次：只给这一个委派写 `dispatch-paused`，等用户继续、恢复或标记为已结束。
+- 已结束的历史委派：不追加任何事件，不再给每个委派写 `dispatch-paused`；也不打开它们的根会话（投影写入根会话日志，不实例化 Agent，SessionStart hook 不触发）。待送达的通知在内存中保持暂停，直到用户在该根会话发消息。停止根会话同样不改写已结束的委派。
+- 启动时删除 `/private/tmp/emperor-boundary-*` 中超过一天、属于当前用户的旧标记。
+
+`outcome_unknown`（结果待确认）、`needs_recovery` 或因重启暂停的 queued 轮次都有出口「标记为已结束」：主会话环境信息卡、子对话页和任务详情里的按钮，以及父模型的 `collect_agent({ abandon: true })`（必须经用户审批）。它写入 `run-abandoned { by: 'user' | 'model' }`：轮次标记已解决（未结束的轮次变为 interrupted，queued 变为 cancelled），取消排队和送达未知的消息，释放工作区隔离，委派恢复空闲（工作区已不存在时关闭会话）；Goal 把它当作已处置的必需任务。被隔离的进程组在释放前再按时间线停止一次。原有的原生历史 inspection 与 `recover` 仍可用，但不再是唯一出口。
+
+隔离不再占预算槽位：停止无法确认的轮次只保留工作区隔离，预算槽位在进程结束时就释放，重启后恢复的历史也只计入任务的轮次和费用上限。
+
+外部轮次的状态只存在委派日志里；会话日志中只有 `delegation/projection` 快照，没有成对的开始/结束标记，所以会话日志的崩溃修复（`REPAIR_CONTRIBUTORS`）不需要外部委派的 contributor，修复矩阵也不会把它列为缺口，重启后的收尾由上面的 `reconcile` 完成。
+
+停止与回合结束的竞态：设置 `stop` 与写 `cancelling` 在同一个串行段内完成，回合结束时从读取轮次到写入结果也在一个串行段内，并且只走合法的状态迁移，不会再出现 `running → cancelled` 的非法迁移，使轮次卡在非终态。
 
 终态通知使用稳定 `dgn-<runId>` outbox ID，先 flush 父 inbox 再唤醒，重启后也对已消费通知去重。前台第一轮由工具结果收取，不再重复唤醒。停止、归档和关闭根任务后不晚到唤醒。输出增量只刷新界面，不触发模型轮询。
 
@@ -123,7 +148,7 @@ Codex 自定义提供方继承 `query_params`（如 Azure 的 `api-version`，�
 
 ## Goal、Scheduler 与默认限额
 
-自动 Goal 轮次在外部任务 outstanding 时等待，用户消息正常优先。Goal 使用稳定 Goal ID 共享配额，revision 仅用于审计/CAS。Goal 下创建的外部任务默认必需：成功完成、进程已停止且 receipt 确认没有文件改动或未解决成果项的文字结果可直接回收；有文件成果时，在交付前重查当前宿主验收。失败、中断、结果未知、待发消息或已失败的检查仍会阻止完成。用户也可在任务详情填写明确失败处置理由并关闭该会话；这会记录人工处置，仍保留失败验收，模型不能自行把任务改成可选。
+自动 Goal 轮次在外部任务 outstanding 时等待，用户消息正常优先。Goal 使用稳定 Goal ID 共享配额，revision 仅用于审计/CAS。Goal 下创建的外部任务默认必需：成功完成、进程已停止且 receipt 确认没有文件改动或未解决成果项的文字结果可直接回收；有文件成果时，在交付前重查当前宿主验收。失败、中断、结果未知、待发消息或已失败的检查仍会阻止完成。用户也可在任务详情填写明确失败处置理由并关闭该会话；这会记录人工处置，仍保留失败验收，模型不能自行把任务改成可选。被「标记为已结束」的轮次视为已处置。
 
 Scheduler 与普通调用使用同一服务、权限与配额。无人工 answerer 的提问明确结束为 needs_user。根 stop 立即解除 Goal 自动续跑并取消全部受管后代；恢复通知不会自动恢复队列推理。
 
