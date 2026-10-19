@@ -92,7 +92,7 @@ Windows 没有完整的受限执行/进程树停止证明：能力声明为 none
 
 ## 崩溃恢复与通知
 
-发送先记 intent，再记录原生确认；确认未知时标记 delivery_unknown，禁止自动重放。启动恢复只加载日志、核对受管进程与保留成果，不重发 queued/sending，不开始推理。恢复原生历史是独立的只读 inspection，不能冒充执行成功。无法证明停止的 writer 继续隔离，等待明确恢复。
+发送先记 intent，再记录原生确认；确认未知时标记 delivery_unknown，禁止自动重放。启动恢复只加载日志、核对受管进程与保留成果，不重发 queued/sending，不开始推理。恢复原生历史是独立的只读 inspection，不能冒充执行成功；Claude 的历史在 worker 线程里用 SDK 读取，带该委派自己的环境（`CLAUDE_CONFIG_DIR`），不再以 `ELECTRON_RUN_AS_NODE` 启动应用本体（打包版的 RunAsNode fuse 已关闭）。无法证明停止的 writer 继续隔离，等待明确恢复。
 
 终态通知使用稳定 `dgn-<runId>` outbox ID，先 flush 父 inbox 再唤醒，重启后也对已消费通知去重。前台第一轮由工具结果收取，不再重复唤醒。停止、归档和关闭根任务后不晚到唤醒。输出增量只刷新界面，不触发模型轮询。
 

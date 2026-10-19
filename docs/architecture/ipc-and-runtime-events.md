@@ -244,7 +244,9 @@ Chrome 和 Edge 的智能体权限（PLAN-CAP-001 RV-09）：`computerUse.extern
 
 附件与 media 通过受限的 `app://` URL 读取。Main 根据受管 ID 解析 `stateRoot` 中的文件，校验目录和类型，不接受 renderer 提供任意绝对路径。`bundle`、`attachments`、`media`、`pet`、`pet-assets` 与 `plugin-assets` 按 host 分流；静态资源 resolver 拒绝 traversal、畸形编码和 extensionless fallback。`plugin-assets` 的地址只含范围和插件 ID：Main 调 Core 的 `plugins.logo`（只供 Main 使用，不是 renderer operation），由 Core 找到插件包、只读 `./assets/` 下的普通文件并按文件头确认是不超过 1 MiB 的 PNG、JPEG 或 WebP，再返回字节，响应带 `nosniff`。Main 只允许 `app://bundle` 读取 attachment、media 与 plugin-assets，`app://pet` 读取 pet-assets，其他显式 Origin 返回 403。
 
-Packaged smoke 会创建隐藏的生产 BrowserWindow、加载 ASAR 内的 `app://bundle/index.html`，证明 Node globals 不存在、preload 报告 sandboxed、Core bootstrap 可调用、临时附件字节可精确读取；并检查渲染层防护（回执 `operations.renderer.security`）：响应头与 meta 都是生产 CSP、`eval` 抛 `EvalError`、`getUserMedia` 被拒、打开 DevTools 无效、应用菜单没有重新载入和开发者工具。
+Packaged smoke 会创建隐藏的生产 BrowserWindow、加载 ASAR 内的 `app://bundle/index.html`，证明 Node globals 不存在、preload 报告 sandboxed、Core bootstrap 可调用、临时附件字节可精确读取；并检查渲染层防护（回执 `operations.renderer.security`）：响应头与 meta 都是生产 CSP、`eval` 抛 `EvalError`、`getUserMedia` 被拒、打开 DevTools 无效、应用菜单没有重新载入和开发者工具，主窗口载入的地址固定为 `app://bundle`（`rendererUrlPinned`：runner 把 `ELECTRON_RENDERER_URL` 指向一个本地诱饵服务器，它必须收不到任何请求）。
+
+主窗口地址由 `main/renderer-url.ts` 决定：`ELECTRON_RENDERER_URL`（electron-vite 开发服务器）只在 `!app.isPackaged` 时生效，打包版忽略它，可信渲染策略的开发地址同样为空。打包版带 `--remote-debugging-port` 或 `--remote-debugging-pipe` 启动时在模块加载阶段退出（退出码 64，`main/debug-switches.ts`），这两个 Chromium 开关不受 Electron fuses 约束；`--emperor-packaged-smoke` 只接受系统临时目录下的状态目录（`packagedSmokeLaunch`），否则同样退出 64，smoke 模式下 Chromium 的 userData 也放在该状态目录里。macOS packaged smoke 另有 `operations.helpers`：经桌面驱动安装并启动电脑操作 Helper 副本、完成 socket 握手，并确认副本带 hardened runtime；听写 Helper 回答 hello 与 status。
 
 桌宠窗口使用相同的 sandbox 不变量，但不复用主 Core bridge；其 preload 只通过受 pet webContents、top frame 和 `app://pet` host 约束的专用 IPC 取得最近的 runtime/control 投影。
 

@@ -10,11 +10,11 @@
 
 本轮只提供 macOS Apple Silicon（arm64）与 Intel（x64）的 DMG / ZIP；Windows / Linux 暂不更新。下文 Windows 说明供旧 Preview 安装包用户参考。
 
-这是面向测试用户的公开预览版，不是 Stable。macOS 文件没有 Developer ID 签名且未经 Apple 公证；Windows 安装程序会显示 `Unknown publisher`，并可能触发 Microsoft Defender SmartScreen。只有在你确认下载来源并核对 SHA-256 后才应继续。
+这是面向测试用户的公开预览版，不是 Stable。macOS 文件没有 Developer ID 签名且未经 Apple 公证；Windows 安装程序会显示 `Unknown publisher`，并可能触发 Microsoft Defender SmartScreen。只有在你确认下载来源并核对 SHA-256 后才应继续。未签名不等于未封签：应用和各个 Helper 都以 hardened runtime 做了 ad-hoc 封签，Electron 的 Node 运行与调试入口也已关闭，其他程序不能借 Emperor 的身份和已授予的权限运行自己的代码。
 
 This release provides macOS arm64 and x64 DMG / ZIP files only. Windows and Linux packages are not updated; the Windows guidance below applies to earlier previews.
 
-This public preview is for testing and is not a Stable release. The macOS files have no Developer ID signature and are not notarized by Apple. The Windows installer has no trusted publisher signature and may trigger Microsoft Defender SmartScreen. Continue only after confirming the download source and verifying its SHA-256 digest.
+This public preview is for testing and is not a Stable release. The macOS files have no Developer ID signature and are not notarized by Apple. The Windows installer has no trusted publisher signature and may trigger Microsoft Defender SmartScreen. Continue only after confirming the download source and verifying its SHA-256 digest. Unsigned does not mean unsealed: the app and its helpers are sealed ad hoc with the hardened runtime, and Electron's Node and debugging entry points are turned off, so other programs cannot run their own code with Emperor's identity and permissions.
 
 ## 下载前验证 / Verify before running
 

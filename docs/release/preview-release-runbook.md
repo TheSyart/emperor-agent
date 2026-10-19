@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：发布维护者<br>
-> 最后核验：2026-10-15<br>
-> 事实源：`.github/workflows/release-preview.yml`、`scripts/preview-*-contract.mjs`、`scripts/packaged-smoke-contract.mjs`、`scripts/publish-preview-release.sh`
+> 最后核验：2026-10-19<br>
+> 事实源：`.github/workflows/release-preview.yml`、`scripts/preview-*-contract.mjs`、`scripts/packaged-smoke-contract.mjs`、`scripts/publish-preview-release.sh`、`desktop/scripts/after-pack.cjs`、`desktop/scripts/harden-package.cjs`
 
 当前公开安装包使用未签名 Preview 渠道。它通过独立 workflow 构建、验证和发布为 GitHub Pre-release，不应被描述为 Stable，也不能混入受信签名渠道的产物。
 
@@ -15,6 +15,18 @@
 - Windows：没有 Authenticode 发布者签名。
 - 来源和完整性由 `SHA256SUMS.txt` 与 GitHub attestation 证明，它们不是代码签名，照常生成。
 - 本地打包同样不签名，做法见[开发指南](../development/README.md#质量门禁)。
+
+### 不签名不等于不封签
+
+没有 Developer ID，同一用户的其他进程仍不能借 Emperor 的身份（路径、cdhash、已授予的辅助功能、屏幕录制、麦克风权限）运行自己的代码。打包流水线（`desktop/scripts/after-pack.cjs` 与 `harden-package.cjs`）保证以下各项，缺一项构建或 packaged smoke 就失败，发布前不得关闭：
+
+- **Electron fuses**（所有平台）：`RunAsNode`、`EnableNodeOptionsEnvironmentVariable`、`EnableNodeCliInspectArguments`、`GrantFileProtocolExtraPrivileges` 关闭，`OnlyLoadAppFromAsar` 开启；macOS 另开 `EnableEmbeddedAsarIntegrityValidation`（`app.asar` 改动一个字节就无法启动）。`EnableCookieEncryption` 不开：它依赖钥匙串条目，而 Emperor 不使用钥匙串。
+- **ad-hoc 封签带 hardened runtime**（macOS）：由内到外逐个签名，每一段 Emperor 的代码都带 `--options runtime`，`DYLD_*` 变量注入不了任何进程。entitlements 只给需要的：主程序 `allow-jit`、`disable-library-validation`、`device.audio-input`；Electron Helper 进程 `allow-jit`、`disable-library-validation`；听写 Helper 只有 `device.audio-input`；电脑操作 Helper、NM host、`credential-auth`、`delegation-scan` 不带 entitlements。任何代码都不得带 `allow-dyld-environment-variables`、`get-task-allow` 或 `allow-unsigned-executable-memory`。`app.asar.unpacked` 里的 Claude Code（Anthropic 的签名）与 node-pty 二进制保留原签名。运行时复制到 `~/.emperor/native-helpers/<cdhash>/` 的电脑操作 Helper 同样以 runtime 重新封签，没有 runtime 标志的副本不会被启动。
+- **启动保护**：打包版不读取 `ELECTRON_RENDERER_URL`；带 `--remote-debugging-port` 或 `--remote-debugging-pipe` 启动直接退出（退出码 64）；`--emperor-packaged-smoke` 只接受系统临时目录下的状态目录，否则退出码 64，不碰 `~/.emperor`。
+
+packaged smoke 在启动包之前检查：`codesign --verify --deep --strict` 通过、标识为 `com.emperor.agent.desktop`、每段代码都带 runtime 且 entitlements 与上面一致、fuses 状态正确；回执的 `package` 一节记录结果。`npm --prefix desktop run package:probe` 逐项尝试 `ELECTRON_RUN_AS_NODE`、`NODE_OPTIONS`、`--inspect`、远程调试、改动 asar、`DYLD_INSERT_LIBRARIES` 注入应用与三个 Helper，全部应被拒绝。
+
+每次重新封签都会改变 cdhash，用户更新后要重新允许辅助功能、屏幕录制、麦克风与语音识别（见[未签名 Preview 安全说明](unsigned-preview-notice.md)）。
 
 ## 发布前条件
 

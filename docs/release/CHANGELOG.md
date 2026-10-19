@@ -159,6 +159,11 @@
 
 ### Security
 
+- 安装包仍不签名，但不再「不封签」：打包时翻转 Electron fuses，`ELECTRON_RUN_AS_NODE`、`NODE_OPTIONS`、`--inspect` 都不能再让 Emperor 运行别人的脚本，只从 `app.asar` 加载应用，macOS 上 `app.asar` 改动一个字节就无法启动。
+- macOS 上应用和每个 Helper 的 ad-hoc 封签都带 hardened runtime，其他程序不能用 `DYLD_INSERT_LIBRARIES` 把代码注入电脑操作、听写 Helper 或 Emperor 本身来借用它们已获得的权限；entitlements 只保留必需的几项。更新到这一版后，辅助功能、屏幕录制、麦克风与语音识别需要重新允许一次。
+- 打包版不再读取 `ELECTRON_RENDERER_URL`（以前可被指向任意网页并获得主窗口的全部能力），带 `--remote-debugging-port`/`--remote-debugging-pipe` 启动会直接退出。
+- 打包冒烟（`--emperor-packaged-smoke`）只接受系统临时目录下的状态目录，不会再对你真实的 `~/.emperor` 运行，也不再写入应用自己的 Application Support 目录。
+- 查验 Helper 签名、复制 Helper、读取浏览器密钥等系统命令一律按绝对路径执行，不受 `PATH` 影响；受限 Shell 固定使用 `/usr/bin/sandbox-exec`。
 - 主窗口有了严格的内容安全策略（响应头与页面同一份）：只运行应用自带的脚本，禁止 `eval` 和内联脚本，不能向任何网络地址发请求或嵌入框架；内联样式照旧可用。
 - Emperor 自己的窗口不再授予网页权限：麦克风、摄像头、屏幕、通知和设备一律拒绝，也不能下载；主窗口的复制按钮照常可用。听写在独立 Helper 里录音，不受影响。
 - 打包版使用 Emperor 自己的应用菜单（关于、偏好设置… ⌘,、编辑、显示、窗口、帮助），不再提供「重新载入」和「开发者工具」，主窗口与桌宠的 DevTools 关闭；以前误按 ⌘R 会重载界面并暂停电脑操作。
