@@ -130,13 +130,15 @@ describe('isolated function registry', () => {
 
   it('keeps a fixed set of names', () => {
     expect(Object.keys(ISOLATED_FUNCTIONS).sort()).toEqual([
-      'activeIsFrame',
       'documentState',
       'fieldState',
       'fileInputState',
       'focus',
       'focusAndSelectAll',
+      'focusForInput',
       'hasText',
+      'inputFocus',
+      'releaseInputFence',
       'scrollBy',
       'scrollIntoView',
       'scrollPage',

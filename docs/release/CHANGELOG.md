@@ -198,6 +198,12 @@
 
 ### Security
 
+- 从 Chrome/Edge 导入的 Cookie 不再写进 Chromium 的 Cookie 数据库（Emperor 不用钥匙串，那里只有固定口令保护）：改用 Emperor 本地密钥加密保存在 profile 文件夹的 `imported-cookies.el1`，使用时只放进浏览器内存。Agent 浏览中网站新设置的登录状态仍按 Chromium 默认方式保存；profile 文件夹已排除出 Time Machine。清空 profile 会一并删除导入的登录状态。升级前已经导入、留在 Chromium 数据库里的 Cookie 不会自动迁移，需要时清空那个 profile 再重新导入。
+- 网页在你要输入的字段获得焦点时把焦点挪进跨源 iframe，Agent 的输入、填写、按键和凭据代填会被拒绝（`FOCUS_IN_CROSS_ORIGIN_FRAME`），不再让 Emperor 卡死或崩溃；输入期间跨源 iframe 暂时不能获得焦点，一次输入最多 5 秒，超时后重新连接这个标签页。
+- Agent 下载收件箱里的文件带 macOS 来源标记（`com.apple.quarantine`），写不上时在「下载历史记录」标注「未能标记来源」。
+- 下载黑名单补上 `.iso`、`.img`、`.sparseimage`、`.mobileconfig`、`.shortcut`、`.plugin`、`.bundle`、`.saver`、`.py`、`.pl`、`.rb`（对 Agent 下载和你自己的下载都生效）。
+- 启动时重新核对 Chrome/Edge 扩展文件夹里的实际文件，被改动（例如 `service-worker.js`）就整个重装并让已连接的扩展重新加载；文件夹权限收紧为只有你能访问。
+- Chrome/Edge 连接通道在扩展完成认证前只接受 64 KiB 以内的消息，同时最多 3 个配对请求等待确认、每分钟最多受理 6 个。
 - 安装包仍不签名，但不再「不封签」：打包时翻转 Electron fuses，`ELECTRON_RUN_AS_NODE`、`NODE_OPTIONS`、`--inspect` 都不能再让 Emperor 运行别人的脚本，只从 `app.asar` 加载应用，macOS 上 `app.asar` 改动一个字节就无法启动。
 - macOS 上应用和每个 Helper 的 ad-hoc 封签都带 hardened runtime，其他程序不能用 `DYLD_INSERT_LIBRARIES` 把代码注入电脑操作、听写 Helper 或 Emperor 本身来借用它们已获得的权限；entitlements 只保留必需的几项。更新到这一版后，辅助功能、屏幕录制、麦克风与语音识别需要重新允许一次。
 - 打包版不再读取 `ELECTRON_RENDERER_URL`（以前可被指向任意网页并获得主窗口的全部能力），带 `--remote-debugging-port`/`--remote-debugging-pipe` 启动会直接退出。

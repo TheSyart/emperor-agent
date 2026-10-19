@@ -117,12 +117,13 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
     external-downloads.json  # 「Emperor 的下载」里来自 Chrome/Edge 的记录（最新 200 条，0600；文件留在浏览器的下载文件夹）
   browser/                   # 启动时设为 0700；受限 Shell 的 Seatbelt 规则与 Agent 的文件、搜索工具都拒绝读取整个目录
     profiles.json            # 临时与持久 profile 元数据
-    profiles/<profile-id>/   # 持久 profile 的网站数据
+    profiles/<profile-id>/   # 持久 profile 的网站数据（Chromium 默认方式保存；已排除出 Time Machine）
+      imported-cookies.el1   # 从 Chrome/Edge 导入的 Cookie，本地密钥加密并绑定该 profile（0600）；使用时只放进内存
     site-permissions.json    # 精确 origin、profile 与权限
     restorable.json          # 正常退出时记下的持久 profile 标签页（7 天）
-    downloads/               # Agent 下载收件箱，按保留天数清理
-      .index.json            # 下载 ID → 当前位置与所属会话（重启后仍可显示、移动）
-  browser-extension/         # 随应用分发的 Chrome/Edge 扩展副本（暂存目录 + 两次改名，带版本与摘要的 emperor-bundle.json；不用符号链接）
+    downloads/               # Agent 下载收件箱，按保留天数清理；完成的文件带 com.apple.quarantine
+      .index.json            # 下载 ID → 当前位置与所属会话（重启后仍可显示、移动），以及未能写上来源标记的文件
+  browser-extension/         # 随应用分发的 Chrome/Edge 扩展副本（暂存目录 + 两次改名，带版本与摘要的 emperor-bundle.json；不用符号链接；0700，启动时重新计算实际文件摘要，不符即重装）
   run/                       # 本机 Helper 和浏览器 bridge socket
   native-helpers/<cdhash>/   # 签名 Helper 的独立安装版本（macOS）
   migrations/

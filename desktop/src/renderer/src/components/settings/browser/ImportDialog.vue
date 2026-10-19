@@ -2,9 +2,10 @@
 /**
  * 从浏览器导入 (ST-06) — a dialog that reads a local Chrome/Edge profile and
  * imports its saved passwords into the password manager and its cookies into a
- * persistent 登录状态 profile. Reading, decrypting and writing all happen in
- * main; this dialog only picks a source, shows whether the browser is still
- * running, and reports counts. It never sees a password or a cookie value.
+ * persistent 登录状态 profile (sealed with Emperor's local key, SEC-10).
+ * Reading, decrypting and writing all happen in main; this dialog only picks
+ * a source, shows whether the browser is still running, and reports counts.
+ * It never sees a password or a cookie value.
  */
 import EmptyState from '../../ui/EmptyState.vue'
 import { computed, ref, watch } from 'vue'
@@ -302,6 +303,14 @@ watch(
         <p class="import-note">
           导入在本机完成：读取密码需要 macOS
           钥匙串授权，系统会弹窗；不导入浏览记录。
+        </p>
+        <p
+          v-if="wantCookies"
+          class="import-note"
+          data-testid="import-cookie-note"
+        >
+          导入的登录状态由 Emperor 本地密钥加密保存，浏览中产生的新登录状态以
+          Chromium 默认方式保存。
         </p>
 
         <p

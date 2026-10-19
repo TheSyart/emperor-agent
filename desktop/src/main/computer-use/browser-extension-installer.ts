@@ -9,9 +9,14 @@
  *   the version and a digest of the files.
  * - recover: a crash between the renames leaves the old folder aside; put
  *   it back, and drop unfinished copies.
- * - upgrade (startup): replace the folder when this app ships different
- *   files; extensions that connect with an older version are told to
- *   `extension.reload` (once per pairing per run).
+ * - upgrade (startup): hash the files really in the folder again (SEC-10,
+ *   MAIN-16) and replace the folder when this app ships different files or
+ *   the folder no longer holds what was installed (a changed
+ *   `service-worker.js`, an added file, a stamp that lies or is gone);
+ *   extensions that connect with an older version, or after such a repair,
+ *   are told to `extension.reload` (once per pairing per run).
+ * - The folder and its subfolders are 0700, and tightened at startup when
+ *   an older Emperor left them readable to others.
  * - remove: connected extensions uninstall themselves
  *   (`extension.uninstall`), every pairing is revoked, the Native Messaging
  *   manifests go, then the folder.
@@ -49,8 +54,19 @@ export interface ExtensionBundle extends ExtensionStamp {
   readonly files: readonly string[]
 }
 
+/**
+ * What upkeep found at startup: no folder, the files this app ships, an
+ * older install, or files that are not what was installed.
+ */
+export type ExtensionFolderState =
+  'absent' | 'current' | 'outdated' | 'tampered'
+
+/** Chrome's own notes inside an unpacked extension, not part of the bundle. */
+const BROWSER_WRITTEN = '_metadata'
+
 export type ExtensionFolderFs = Pick<
   typeof nodeFs,
+  | 'chmod'
   | 'copyFile'
   | 'lstat'
   | 'mkdir'
@@ -124,7 +140,7 @@ export class BrowserExtensionFolder {
       withFileTypes: true,
     })) {
       const path = prefix ? `${prefix}/${entry.name}` : entry.name
-      if (!shippedEntry(path)) continue
+      if (!shippedEntry(path) || path === BROWSER_WRITTEN) continue
       if (entry.isDirectory())
         files.push(...(await this.list(join(directory, entry.name), path)))
       else if (entry.isFile()) files.push(path)
@@ -133,9 +149,26 @@ export class BrowserExtensionFolder {
     return files
   }
 
+  /** The digest of the shipped-looking files in `directory`, as installed. */
+  private async digest(directory: string): Promise<{
+    digest: string
+    files: string[]
+  }> {
+    const files = (await this.list(directory)).sort()
+    const digest = createHash('sha256')
+    for (const file of files) {
+      const content = await this.fs.readFile(
+        join(directory, ...file.split('/')),
+      )
+      digest.update(file).update('\0')
+      digest.update(createHash('sha256').update(content).digest('hex'))
+      digest.update('\n')
+    }
+    return { digest: digest.digest('hex'), files }
+  }
+
   /** Version and digest of the extension this app ships. */
   async bundle(): Promise<ExtensionBundle> {
-    const files = (await this.list(this.source)).sort()
     const manifest = JSON.parse(
       await this.fs.readFile(join(this.source, 'manifest.json'), 'utf8'),
     ) as { version?: unknown; manifest_version?: unknown }
@@ -145,16 +178,20 @@ export class BrowserExtensionFolder {
       !/^\d+(?:\.\d+){0,3}$/.test(manifest.version)
     )
       throw new Error('the bundled extension manifest is invalid')
-    const digest = createHash('sha256')
-    for (const file of files) {
-      const content = await this.fs.readFile(
-        join(this.source, ...file.split('/')),
-      )
-      digest.update(file).update('\0')
-      digest.update(createHash('sha256').update(content).digest('hex'))
-      digest.update('\n')
-    }
-    return { version: manifest.version, digest: digest.digest('hex'), files }
+    const { digest, files } = await this.digest(this.source)
+    return { version: manifest.version, digest, files }
+  }
+
+  /** Every folder from `directory` down is 0700 (files keep their modes). */
+  private async keepPrivate(directory: string): Promise<void> {
+    const info = await this.fs.lstat(directory)
+    if (!info.isDirectory()) return
+    if ((info.mode & 0o777) !== 0o700) await this.fs.chmod(directory, 0o700)
+    for (const entry of await this.fs.readdir(directory, {
+      withFileTypes: true,
+    }))
+      if (entry.isDirectory())
+        await this.keepPrivate(join(directory, entry.name))
   }
 
   /** The stamp of the folder, or null when it is absent or not Emperor's. */
@@ -197,10 +234,10 @@ export class BrowserExtensionFolder {
     return this.serial(async () => {
       await this.recoverNow()
       const bundle = await this.bundle()
-      await this.fs.mkdir(this.staging, { recursive: true, mode: 0o755 })
+      await this.fs.mkdir(this.staging, { recursive: true, mode: 0o700 })
       for (const file of bundle.files) {
         const to = join(this.staging, ...file.split('/'))
-        await this.fs.mkdir(dirname(to), { recursive: true, mode: 0o755 })
+        await this.fs.mkdir(dirname(to), { recursive: true, mode: 0o700 })
         await this.fs.copyFile(join(this.source, ...file.split('/')), to)
       }
       const stamp = { version: bundle.version, digest: bundle.digest }
@@ -208,6 +245,8 @@ export class BrowserExtensionFolder {
         join(this.staging, EXTENSION_STAMP),
         `${JSON.stringify(stamp)}\n`,
       )
+      // Whatever the umask: only this user can read the extension's code.
+      await this.keepPrivate(this.staging)
       try {
         await this.fs.rename(this.target, this.previous)
       } catch (cause) {
@@ -220,16 +259,44 @@ export class BrowserExtensionFolder {
   }
 
   /**
+   * What the folder holds, compared with this app's bundle: the stamp says
+   * what was installed, and the files really there are hashed again, so a
+   * changed `service-worker.js` counts even under a matching stamp.
+   */
+  async state(): Promise<ExtensionFolderState> {
+    if (!(await this.exists(this.target))) return 'absent'
+    const [stamp, bundle] = await Promise.all([this.installed(), this.bundle()])
+    // A folder of ours without its stamp was not left so by an install.
+    if (stamp === null) return 'tampered'
+    if (stamp.digest !== bundle.digest) return 'outdated'
+    const actual = await this.digest(this.target)
+    return actual.digest === bundle.digest ? 'current' : 'tampered'
+  }
+
+  /**
+   * Startup: replace a folder that holds an older install or files other
+   * than what was installed; keep a current one private (0700). Never
+   * creates a folder that is not there.
+   */
+  upkeep(): Promise<ExtensionFolderState> {
+    return this.serial(async () => {
+      const state = await this.state()
+      if (state === 'current') await this.keepPrivate(this.target)
+      return state
+    }).then(async (state) => {
+      if (state === 'outdated' || state === 'tampered') await this.install()
+      return state
+    })
+  }
+
+  /**
    * Startup: when the folder exists and holds other files than this app
-   * ships, replace it. False when absent (never installed) or current.
+   * ships (or than were installed), replace it. False when absent (never
+   * installed) or current.
    */
   async upgrade(): Promise<boolean> {
-    const current = await this.installed()
-    if (current === null) return false
-    const bundle = await this.bundle()
-    if (bundle.digest === current.digest) return false
-    await this.install()
-    return true
+    const state = await this.upkeep()
+    return state === 'outdated' || state === 'tampered'
   }
 
   /** Delete the folder and anything a replacement left behind. */
@@ -295,6 +362,8 @@ export class BrowserExtensionService {
   private unsubscribe: (() => void) | null = null
   /** Pairings already told to reload in this run (no reload loop). */
   private readonly reloaded = new Set<string>()
+  /** Startup found files that were not what was installed, and replaced them. */
+  private repaired = false
 
   constructor(options: {
     folder: BrowserExtensionFolder
@@ -419,7 +488,15 @@ export class BrowserExtensionService {
   start(): Promise<unknown> {
     this.ready = this.folder
       .recover()
-      .then(() => this.folder.upgrade())
+      .then(() => this.folder.upkeep())
+      .then((state) => {
+        if (state === 'tampered') {
+          this.repaired = true
+          console.warn(
+            'The browser extension folder held files Emperor did not install; it was reinstalled',
+          )
+        }
+      })
       .catch((cause: unknown) => {
         console.warn(
           `Browser extension folder upkeep failed: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -439,7 +516,8 @@ export class BrowserExtensionService {
     const stamp = await this.folder.installed().catch(() => null)
     if (
       !stamp ||
-      !newerVersion(stamp.version, event.version) ||
+      // After a repair the same version may still run the changed files.
+      !(this.repaired || newerVersion(stamp.version, event.version)) ||
       this.reloaded.has(event.pairingId)
     )
       return

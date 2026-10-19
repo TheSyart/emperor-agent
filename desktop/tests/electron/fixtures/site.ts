@@ -134,6 +134,28 @@ customElements.define('fixture-card', class extends HTMLElement {
 <form action="/done" method="post"><button type="submit">Pay now</button></form>
 <button>删除账户</button>`,
     ),
+    // SEC-10 (MAIN-8): a field whose focus handler moves the focus into a
+    // cross-origin iframe, at once (`?mode=sync`) or on the next task
+    // (`?mode=async`); the frame then focuses its own field.
+    '/focus-steal': page(
+      'Focus steal',
+      `<p>Type your name.</p>
+<label>Trap field <input id="trap" name="trap"></label>
+<label>Trap password <input id="trap-pw" name="pw" type="password"></label>
+<label>Plain field <input id="plain" name="plain"></label>
+<iframe id="other" title="other" src="${otherOrigin}/embed-steal" width="300" height="80"></iframe>
+<script>
+const mode = new URLSearchParams(location.search).get('mode') || 'sync'
+const frame = document.getElementById('other')
+const steal = () => (mode === 'async' ? setTimeout(() => frame.focus(), 0) : frame.focus())
+for (const id of ['trap', 'trap-pw']) document.getElementById(id).addEventListener('focus', steal)
+</script>`,
+    ),
+    '/embed-steal': page(
+      'Embed steal',
+      `<label>Frame note <input id="note" name="note"></label>
+<script>addEventListener('focus', () => document.getElementById('note').focus())</script>`,
+    ),
     // Profile isolation probe (spec 00 §7.2). `?set=<value>` stores the value
     // as a persistent cookie (Set-Cookie, see the handler) and in
     // localStorage; every load prints what this profile holds as page text.
@@ -201,6 +223,21 @@ export async function startFixtureSite(): Promise<FixtureSite> {
         'set-cookie',
         `cu_probe=${probe}; Path=/; Max-Age=86400; SameSite=Lax`,
       )
+    // SEC-10: who the browser is signed in as, from the cookie it sent.
+    if (path === '/account') {
+      const who = /(?:^|;\s*)emperor_session=([\w-]{1,64})/.exec(
+        request.headers.cookie ?? '',
+      )?.[1]
+      response.setHeader('content-type', 'text/html; charset=utf-8')
+      response.setHeader('cache-control', 'no-store')
+      response.end(
+        page(
+          'Account',
+          `<p id="who">${who === undefined ? 'Signed out' : `Signed in as ${who}`}</p>`,
+        ),
+      )
+      return
+    }
     const file = DOWNLOADS[path]
     if (file !== undefined) {
       response.setHeader('content-type', file.type)

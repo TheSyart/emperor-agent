@@ -34,6 +34,44 @@ describe('download inbox rules', () => {
     expect(isExecutableDownload(name)).toBe(true),
   )
 
+  // SEC-10 (MAIN-23): disk images, installers, configuration profiles,
+  // Shortcuts, loadable bundles and scripts an interpreter runs.
+  it.each([
+    'ubuntu.iso',
+    'Disk.img',
+    'Backup.sparseimage',
+    'Installer.dmg',
+    'Tool.pkg',
+    'Suite.mpkg',
+    'Wi-Fi.mobileconfig',
+    'Do it.shortcut',
+    'Internet.plugin',
+    'Loader.bundle',
+    'Flurry.saver',
+    'Helper.prefPane',
+    'Rename.workflow',
+    'setup.py',
+    'setup.pl',
+    'setup.rb',
+    'setup.sh',
+    'Start.command',
+    'Run.tool',
+    'script.scpt',
+    'script.applescript',
+    'app.jar',
+  ])('refuses %s (SEC-10 list)', (name) =>
+    expect(isExecutableDownload(name)).toBe(true),
+  )
+
+  it('refuses a configuration profile or a disk image by its MIME type', () => {
+    expect(
+      isExecutableDownload('settings', 'application/x-apple-aspen-config'),
+    ).toBe(true)
+    expect(isExecutableDownload('disk', 'application/x-iso9660-image')).toBe(
+      true,
+    )
+  })
+
   it.each(['report.pdf', 'data.csv', 'archive.zip', 'photo.png', 'README'])(
     'accepts %s',
     (name) => expect(isExecutableDownload(name)).toBe(false),

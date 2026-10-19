@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { IsolatedWorlds } from './isolated'
 import {
+  INPUT_TIMEOUT_MS,
   clickTarget,
   fillTarget,
   pressKey,
@@ -44,25 +45,38 @@ function kit(
       options?: string[]
     }
     moved?: boolean
-    crossOriginFrames?: boolean
-    activeIsFrame?: boolean
     failKey?: string
+    /** `focusForInput` finds the focus moved into a cross-origin frame. */
+    focusInFrame?: boolean
+    /** `inputFocus` calls (0-based) that find the focus in such a frame. */
+    frameOnCheck?: readonly number[]
+    /** `Input.insertText` never answers (until its signal aborts). */
+    hangInsert?: boolean
   } = {},
 ) {
   const sent: Sent[] = []
   const calls: Array<{ name: string; args: readonly unknown[] }> = []
+  /** Which frame each isolated call ran in. */
+  const frames: Array<{ name: string; frame: string }> = []
+  let checks = 0
   const fields = [...(options.fields ?? [field(), field()])]
   const cdp = {
     send: async (
       method: string,
       params: Record<string, unknown> = {},
-      opts: { sessionId?: string } = {},
+      opts: { sessionId?: string; signal?: AbortSignal } = {},
     ) => {
       sent.push({
         method,
         params,
         ...(opts.sessionId === undefined ? {} : { sessionId: opts.sessionId }),
       })
+      if (method === 'Input.insertText' && options.hangInsert)
+        return await new Promise((_resolve, reject) =>
+          opts.signal?.addEventListener('abort', () =>
+            reject(new Error('aborted')),
+          ),
+        )
       if (
         method === 'Input.dispatchKeyEvent' &&
         params.key === options.failKey &&
@@ -90,25 +104,32 @@ function kit(
   const worlds = {
     contains: async () => options.contains ?? true,
     callOnElement: async (
-      _frame: string,
+      frame: string,
       _node: number,
       name: string,
       args: readonly unknown[],
     ) => {
       calls.push({ name, args })
+      frames.push({ name, frame })
       if (name === 'fieldState') return fields.shift() ?? field()
+      if (name === 'focusForInput')
+        return { focused: true, frame: options.focusInFrame ?? false }
       if (name === 'selectOption')
         return options.select ?? { ok: true, value: String(args[0]) }
       if (name === 'scrollBy') return { moved: options.moved ?? true }
       return undefined
     },
     callInFrame: async (
-      _frame: string,
+      frame: string,
       name: string,
       args: readonly unknown[],
     ) => {
       calls.push({ name, args })
-      if (name === 'activeIsFrame') return options.activeIsFrame ?? false
+      frames.push({ name, frame })
+      if (name === 'inputFocus')
+        return {
+          frame: (options.frameOnCheck ?? []).includes(checks++),
+        }
       if (name === 'scrollPage') return { moved: options.moved ?? true }
       return undefined
     },
@@ -117,7 +138,6 @@ function kit(
     cdp,
     worlds,
     mainFrameId: 'F0',
-    crossOriginFrames: options.crossOriginFrames ?? false,
   }
   let dispatched = 0
   const hooks = { dispatched: () => (dispatched += 1) }
@@ -125,6 +145,7 @@ function kit(
     page,
     sent,
     calls,
+    frames,
     hooks,
     get dispatched() {
       return dispatched
@@ -226,8 +247,10 @@ describe('renderer actions', () => {
     expect(result.warnings).toHaveLength(1)
     expect(k.calls.map((call) => call.name)).toEqual([
       'fieldState',
-      'focusAndSelectAll',
+      'focusForInput',
+      'inputFocus',
       'fieldState',
+      'releaseInputFence',
     ])
     expect(k.input()).toEqual([
       { method: 'Input.insertText', params: { text: '5550100000' } },
@@ -276,7 +299,15 @@ describe('renderer actions', () => {
       signal,
     )
     expect(changes).toEqual(['typed 7 chars'])
-    expect(k.calls.map((call) => call.name)).toEqual(['fieldState', 'focus'])
+    // Focused and checked in one call, checked again before each part.
+    expect(k.calls.map((call) => call.name)).toEqual([
+      'fieldState',
+      'focusForInput',
+      'inputFocus',
+      'inputFocus',
+      'inputFocus',
+      'releaseInputFence',
+    ])
     expect(
       k
         .input()
@@ -289,16 +320,20 @@ describe('renderer actions', () => {
   })
 
   it('refuses keys without a ref when the focus is inside a cross-origin frame', async () => {
-    const k = kit({ crossOriginFrames: true, activeIsFrame: true })
+    const k = kit({ frameOnCheck: [0] })
     await expect(
       typeText(k.page, undefined, 'x', k.hooks, signal),
     ).rejects.toMatchObject({
-      reason: 'cross-origin-frame-input',
+      reason: 'FOCUS_IN_CROSS_ORIGIN_FRAME',
     })
     expect(k.dispatched).toBe(0)
     const plain = kit()
     await typeText(plain.page, undefined, 'x', plain.hooks, signal)
-    expect(plain.calls).toEqual([])
+    expect(plain.calls.map((call) => call.name)).toEqual([
+      'inputFocus',
+      'inputFocus',
+      'releaseInputFence',
+    ])
   })
 
   it('parses a key before anything else and releases modifiers even when the key fails', async () => {
@@ -489,5 +524,119 @@ describe('renderer actions', () => {
     ).toEqual(['Size = Large'])
     expect(k.dispatched).toBe(1)
     expect(landed).not.toHaveBeenCalled()
+  })
+})
+
+describe('keyboard input never lands in a cross-origin frame (SEC-10, MAIN-8)', () => {
+  const textbox = (over: Partial<RefTarget> = {}) =>
+    target({ role: 'textbox', name: 'Name', ...over })
+  const refusedForFocus = {
+    code: 'CAPABILITY_DISABLED',
+    reason: 'FOCUS_IN_CROSS_ORIGIN_FRAME',
+  }
+
+  it('focuses, checks and fences in one call, checks again right before the text, then lifts the fence', async () => {
+    const k = kit()
+    await fillTarget(k.page, textbox(), 'r3.2', 'hi', k.hooks, signal)
+    expect(k.calls.map((call) => call.name)).toEqual([
+      'fieldState',
+      'focusForInput',
+      'inputFocus',
+      'fieldState',
+      'releaseInputFence',
+    ])
+    // focusForInput selects the old value so the text replaces it.
+    expect(k.calls[1]).toEqual({ name: 'focusForInput', args: [true] })
+    expect(k.input()).toEqual([
+      { method: 'Input.insertText', params: { text: 'hi' } },
+    ])
+    expect(k.frames.find((item) => item.name === 'inputFocus')?.frame).toBe(
+      'F0',
+    )
+  })
+
+  it('returns FOCUS_IN_CROSS_ORIGIN_FRAME when the page moves the focus into a cross-origin frame on focus', async () => {
+    for (const run of [
+      (k: ReturnType<typeof kit>) =>
+        fillTarget(k.page, textbox(), 'r3.2', 'hi', k.hooks, signal),
+      (k: ReturnType<typeof kit>) =>
+        typeText(k.page, textbox(), 'hi', k.hooks, signal),
+      (k: ReturnType<typeof kit>) =>
+        pressKey(k.page, textbox(), strokeFor('a'), 'a', k.hooks, signal),
+    ]) {
+      const k = kit({ focusInFrame: true })
+      await expect(run(k)).rejects.toMatchObject(refusedForFocus)
+      expect(k.dispatched).toBe(0)
+      expect(k.input()).toEqual([])
+    }
+  })
+
+  it('checks where keys go even without a ref, and with no cross-origin frame attached yet', async () => {
+    for (const run of [
+      (k: ReturnType<typeof kit>) =>
+        typeText(k.page, undefined, 'hi', k.hooks, signal),
+      (k: ReturnType<typeof kit>) =>
+        pressKey(
+          k.page,
+          undefined,
+          strokeFor('Enter'),
+          'Enter',
+          k.hooks,
+          signal,
+        ),
+    ]) {
+      const k = kit({ frameOnCheck: [0] })
+      await expect(run(k)).rejects.toMatchObject(refusedForFocus)
+      expect(k.dispatched).toBe(0)
+      expect(k.input()).toEqual([])
+    }
+  })
+
+  it('checks again before every line, and stops typing once the focus moved', async () => {
+    const k = kit({ frameOnCheck: [1] })
+    await expect(
+      typeText(k.page, textbox(), 'one\ntwo', k.hooks, signal),
+    ).rejects.toMatchObject(refusedForFocus)
+    expect(
+      k
+        .input()
+        .map((item) =>
+          item.method === 'Input.insertText'
+            ? item.params.text
+            : item.params.key,
+        ),
+    ).toEqual(['one'])
+    expect(k.calls.at(-1)?.name).toBe('releaseInputFence')
+  })
+
+  it('checks the page frame as well when the field is in a same-origin frame', async () => {
+    const k = kit()
+    await typeText(k.page, textbox({ frameId: 'F1' }), 'hi', k.hooks, signal)
+    expect(k.frames.filter((item) => item.name !== 'fieldState')).toEqual([
+      { name: 'focusForInput', frame: 'F1' },
+      { name: 'inputFocus', frame: 'F0' },
+      { name: 'inputFocus', frame: 'F0' },
+      { name: 'releaseInputFence', frame: 'F0' },
+      { name: 'releaseInputFence', frame: 'F1' },
+    ])
+  })
+
+  it('gives up after its input deadline and rebuilds the tab’s debugger session', async () => {
+    const k = kit({ hangInsert: true })
+    const rebuilt = vi.fn()
+    const page = { ...k.page, inputTimeoutMs: 50, onInputTimeout: rebuilt }
+    const started = Date.now()
+    await expect(
+      typeText(page, undefined, 'hi', k.hooks, signal),
+    ).rejects.toMatchObject({
+      code: 'OUTCOME_UNKNOWN',
+      reason: 'input-timeout',
+    })
+    expect(Date.now() - started).toBeLessThan(2_000)
+    expect(rebuilt).toHaveBeenCalledTimes(1)
+  })
+
+  it('allows 5 seconds of input in total by default', () => {
+    expect(INPUT_TIMEOUT_MS).toBe(5_000)
   })
 })

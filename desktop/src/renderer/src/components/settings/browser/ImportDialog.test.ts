@@ -117,6 +117,16 @@ describe('ImportDialog', () => {
     expect(runBrowserImport).not.toHaveBeenCalled()
   })
 
+  it('says how imported and new sign-ins are stored (SEC-10)', async () => {
+    await mount()
+    expect(testid('import-cookie-note')?.textContent?.replace(/\s+/g, '')).toBe(
+      '导入的登录状态由Emperor本地密钥加密保存，浏览中产生的新登录状态以Chromium默认方式保存。',
+    )
+    testid('import-cookies')!.click() // turn cookies off
+    await settle()
+    expect(testid('import-cookie-note')).toBeNull()
+  })
+
   it('drops the cookie target when only passwords are chosen', async () => {
     await mount()
     testid('import-cookies')!.click() // turn cookies off
