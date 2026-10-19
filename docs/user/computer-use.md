@@ -57,7 +57,7 @@ Agent 截图时，给你看的原图与给模型的压缩图都保存为附件�
 
 ## macOS 桌面
 
-macOS 驱动通过独立的 Emperor Computer Helper 运行。在“设置 → 电脑操作 → 系统权限”查看辅助功能和屏幕录制状态。缺权限时，页面顶部的提醒卡有“请求权限”，点后到系统设置打开开关；列表里没有 Helper 时，点“＋”，按 ⌘⇧G 输入 `~/.emperor/native-helpers/`，选择当前安装版本的 `Emperor Computer Helper.app`。屏幕录制用于截图和对话中的实时画面，打开开关后点“重启 Helper”生效。状态为未允许或需重启时，“系统权限”标题旁有需再次确认的“重置授权”。Emperor 启动 Helper 时先在自己的 `~/.emperor/run/` 里监听一个新的 socket，再把一次性密钥经 Helper 的标准输入交给它（不出现在启动参数里）；Helper 连上后双方用这把密钥做 HMAC 挑战应答，答不出的连接会被直接断开，所以抢先连上 socket 的其他程序拿不到任何凭据。
+macOS 驱动通过独立的 Emperor Computer Helper 运行。在“设置 → 电脑操作 → 系统权限”查看辅助功能和屏幕录制状态。缺权限时，页面顶部的提醒卡有“请求权限”，点后到系统设置打开开关；列表里没有 Helper 时，点“＋”，按 ⌘⇧G 输入 `~/.emperor/native-helpers/`，选择当前安装版本的 `Emperor Computer Helper.app`。屏幕录制用于截图和对话中的实时画面，打开开关后点“重启 Helper”生效。状态为未允许或需重启时，“系统权限”标题旁有需再次确认的“重置授权”。Emperor 启动 Helper 时先在自己的 `~/.emperor/run/` 里监听 socket，再把一次性密钥经 Helper 的标准输入交给它（不出现在启动参数里）；Helper 连上后双方用这把密钥做 HMAC 挑战应答，答不出的连接会被直接断开，所以抢先连上 socket 的其他程序拿不到任何凭据。
 
 macOS 的系统录屏授权按应用生效。如果你也向 Emperor Agent 主应用打开“录屏与系统录音”，它启动的 Shell 子进程可能直接截图，不受电脑操作的目标授权约束。本机实验已在“工作区”预设下复现；当前受限 Shell 的 Seatbelt 规则没有阻止该截图。需要将桌面录屏权限限定在 Helper 时，请核对系统设置中主应用的开关状态。
 

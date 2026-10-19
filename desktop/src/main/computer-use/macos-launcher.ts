@@ -139,25 +139,26 @@ function emperorHome(
 }
 
 /**
- * Where main listens for the Helper: `<Emperor Home>/run/cu-<uid>[-<tag>].sock`,
- * or the system temp directory when that path is too long for a socket.
- * Each launch uses a fresh `tag`, so a stale or squatted path never matters.
+ * Where main listens for the Helper: `<Emperor Home>/run/cu-<uid>.sock`, or
+ * the system temp directory when that path is too long for a socket. One
+ * Emperor holds a data directory at a time, so the name is fixed; main
+ * replaces a stale socket there before it listens.
  */
 export function macosSocketLocation(
-  options: Pick<MacosLauncherOptions, 'home' | 'stateRoot' | 'temp' | 'uid'> & {
-    readonly tag?: string
-  } = {},
+  options: Pick<
+    MacosLauncherOptions,
+    'home' | 'stateRoot' | 'temp' | 'uid'
+  > = {},
 ): MacosSocketLocation {
   const uid = options.uid ?? process.getuid?.()
   if (uid === undefined || !Number.isSafeInteger(uid) || uid < 0)
     throw new UiError('DRIVER_UNAVAILABLE', 'Cannot determine local user ID')
-  const suffix = options.tag ? `-${options.tag}` : ''
   const primaryDirectory = join(emperorHome(options), 'run')
-  const primary = join(primaryDirectory, `cu-${uid}${suffix}.sock`)
+  const primary = join(primaryDirectory, `cu-${uid}.sock`)
   if (Buffer.byteLength(primary) <= SOCKET_PATH_LIMIT)
     return { directory: primaryDirectory, path: primary, temporary: false }
   const temporaryDirectory = join(options.temp ?? tmpdir(), `emperor-${uid}`)
-  const fallback = join(temporaryDirectory, `cu${suffix}.sock`)
+  const fallback = join(temporaryDirectory, 'cu.sock')
   if (Buffer.byteLength(fallback) > SOCKET_PATH_LIMIT)
     throw new UiError(
       'DRIVER_UNAVAILABLE',
@@ -568,6 +569,23 @@ export async function forgetHelperCopy(
   await system.execFile(LSREGISTER, ['-u', path], { timeout: 5_000 })
 }
 
+/**
+ * Remove what an earlier launch left at the socket path: only a socket of
+ * this user. Anything else there is refused rather than removed.
+ */
+async function replaceStaleSocket(path: string, uid: number): Promise<void> {
+  let info: Awaited<ReturnType<typeof lstat>>
+  try {
+    info = await lstat(path)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw error
+  }
+  if (!info.isSocket() || info.uid !== uid)
+    throw new Error('Unsafe helper socket path')
+  await unlink(path)
+}
+
 function listen(server: Server, path: string): Promise<void> {
   return new Promise((resolveListen, reject) => {
     server.once('error', reject)
@@ -595,8 +613,7 @@ export async function launchMacosHelper(
     pid < 2
   )
     throw new UiError('DRIVER_UNAVAILABLE', 'Invalid helper process identity')
-  const tag = randomBytes(4).toString('hex')
-  const location = macosSocketLocation({ ...options, tag })
+  const location = macosSocketLocation(options)
   await secureDirectory(location.directory, uid)
   const sourceAppPath = macosHelperAppPath(options)
   const appPath =
@@ -607,14 +624,20 @@ export async function launchMacosHelper(
         )(sourceAppPath)
       : sourceAppPath
   const secret = randomBytes(32)
-  const fifo = join(location.directory, `cu-${uid}-${tag}.in`)
+  const fifo = join(
+    location.directory,
+    `cu-${uid}-${randomBytes(4).toString('hex')}.in`,
+  )
   const server = createServer()
   const peers = new Set<Socket>()
   let stdin: FileHandle | null = null
   let winner: Socket | null = null
+  let listening = false
   try {
     try {
+      await replaceStaleSocket(location.path, uid)
       await listen(server, location.path)
+      listening = true
       await chmod(location.path, 0o600)
       // The secret waits in a FIFO only this user can open; main keeps it
       // open for writing so LaunchServices can open it as the Helper's stdin.
@@ -699,7 +722,7 @@ export async function launchMacosHelper(
     // Nothing more may connect, and the secret leaves the disk.
     server.close()
     for (const peer of peers) if (peer !== winner) peer.destroy()
-    await unlink(location.path).catch(() => undefined)
+    if (listening) await unlink(location.path).catch(() => undefined)
     await stdin?.close().catch(() => undefined)
     await unlink(fifo).catch(() => undefined)
     secret.fill(0)

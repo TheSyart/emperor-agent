@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { createHmac, randomBytes } from 'node:crypto'
-import { createConnection, type Socket } from 'node:net'
+import { createConnection, createServer, type Socket } from 'node:net'
 import {
   chmodSync,
   constants,
@@ -8,6 +8,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -397,9 +398,7 @@ describe('macOS helper launcher paths', () => {
         '--parent-pid',
         String(process.pid),
         '--socket',
-        expect.stringMatching(
-          new RegExp(`^${home}/\\.emperor/run/cu-${uid}-[0-9a-f]{8}\\.sock$`),
-        ),
+        `${home}/.emperor/run/cu-${uid}.sock`,
       ])
       expect(fifo.startsWith(`${home}/.emperor/run/`)).toBe(true)
       const secret = helper!.secret
@@ -414,6 +413,59 @@ describe('macOS helper launcher paths', () => {
       expect(existsSync(launchArgs.at(-1)!)).toBe(false)
       expect(existsSync(fifo)).toBe(false)
       await client.close()
+    } finally {
+      ;(helper as SimulatedHelper | null)?.socket.destroy()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('replaces a stale socket of its own at the path, and refuses anything else there', async () => {
+    const home = mkdtempSync('/tmp/cu-stale-')
+    const uid = process.getuid!()
+    const location = macosSocketLocation({ home, uid })
+    let helper: SimulatedHelper | null = null
+    try {
+      mkdirSync(location.directory, { recursive: true, mode: 0o700 })
+      // A socket an earlier launch left behind (nobody listens on it).
+      const stale = createServer()
+      await new Promise<void>((resolveListen) =>
+        stale.listen(location.path, resolveListen),
+      )
+      await new Promise<void>((resolveClose) => {
+        stale.close(() => resolveClose())
+      })
+      // Node removes the file on close; put back a dead socket file.
+      execFileSync('/usr/bin/python3', [
+        '-c',
+        'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])',
+        location.path,
+      ])
+      expect(existsSync(location.path)).toBe(true)
+      const client = await launchMacosHelper({
+        packaged: false,
+        appPath: '/tmp/Emperor Computer Helper.app',
+        home,
+        uid,
+        connectTimeoutMs: 5_000,
+        openApp: async (args) => {
+          helper = await simulatedHelper(args)
+        },
+      })
+      expect(helper!.welcomeVerified).toBe(true)
+      await client.close()
+      // A regular file where the socket goes is left alone and refused.
+      writeFileSync(location.path, 'not a socket')
+      await expect(
+        launchMacosHelper({
+          packaged: false,
+          appPath: '/tmp/Emperor Computer Helper.app',
+          home,
+          uid,
+          connectTimeoutMs: 1_000,
+          openApp: async () => undefined,
+        }),
+      ).rejects.toThrow('Could not prepare the Computer Use helper connection')
+      expect(readFileSync(location.path, 'utf8')).toBe('not a socket')
     } finally {
       ;(helper as SimulatedHelper | null)?.socket.destroy()
       await rm(home, { recursive: true, force: true })

@@ -33,7 +33,7 @@
 
 退出时先同步写完会话记录（`CoreApi.flushAll()`），再关闭 Core；5 秒内没关完时，同步终止进程运行时登记的全部子进程树和终端（`CoreApi.forceStop()`），然后退出。
 
-Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>-<随机>.sock`，由 main 每次启动 Helper 前新建并监听，Helper 证明了一次性密钥后即删除；路径过长时退到系统临时目录）、传递该密钥的 FIFO（同目录 `cu-<uid>-<随机>.in`，0600，握手结束即删除）与 `native-helpers/` 副本跟随 Emperor Home。Chrome/Edge 的 Native Messaging socket 固定在 `~/.emperor/run/nm-<uid>.sock`：浏览器拉起的 host 按设计只信任这一个位置，所以使用自定义 `EMPEROR_CONFIG_DIR` 的实例不会接管扩展连接。
+Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main 每次启动 Helper 前监听，先移走上次留下的、属于当前用户的 socket，其他类型的文件则拒绝；Helper 证明了一次性密钥后即删除；路径过长时退到系统临时目录）、传递该密钥的 FIFO（同目录 `cu-<uid>-<随机>.in`，0600，握手结束即删除）与 `native-helpers/` 副本跟随 Emperor Home。Chrome/Edge 的 Native Messaging socket 固定在 `~/.emperor/run/nm-<uid>.sock`：浏览器拉起的 host 按设计只信任这一个位置，所以使用自定义 `EMPEROR_CONFIG_DIR` 的实例不会接管扩展连接。
 
 ```text
 ~/.emperor/
