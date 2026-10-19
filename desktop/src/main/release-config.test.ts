@@ -854,6 +854,25 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     const afterPack = require(
       path.join(desktopRoot, 'scripts', 'after-pack.cjs'),
     ) as AfterPackHook & PackagedResourceHook
+    // SEC-04: after-pack flips the fuses of Electron's binary; a stand-in
+    // with Electron 42's nine-fuse wire (all defaults).
+    const fuseHost = path.join(
+      appOutDir,
+      'Emperor Agent.app',
+      'Contents',
+      'Frameworks',
+      'Electron Framework.framework',
+      'Electron Framework',
+    )
+    fs.mkdirSync(path.dirname(fuseHost), { recursive: true })
+    fs.writeFileSync(
+      fuseHost,
+      Buffer.concat([
+        Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX'),
+        Buffer.from([1, 9]),
+        Buffer.from('101100011'),
+      ]),
+    )
     await expect(
       afterPack({
         appOutDir,
@@ -864,6 +883,7 @@ describe('desktop release packaging (MIG-REL-001)', () => {
         },
       }),
     ).resolves.toBeUndefined()
+    expect(fs.readFileSync(fuseHost).subarray(34).toString()).toBe('000011001')
 
     expect(() =>
       afterPack.validatePackagedAppResources(

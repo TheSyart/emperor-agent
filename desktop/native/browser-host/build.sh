@@ -23,6 +23,7 @@ if [[ "$mode" == "fixture" ]]; then
 fi
 
 xcrun swiftc "${flags[@]}" "$native_dir/main.swift" -o "$output"
-codesign --force --sign - --timestamp=none "$output" >/dev/null
+# Hardened runtime (SEC-04): the host vouches for Emperor to the browser.
+codesign --force --options runtime --sign - --timestamp=none "$output" >/dev/null
 codesign --verify --strict "$output"
 printf '%s\n' "$output"

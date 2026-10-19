@@ -40,6 +40,7 @@
   },
   "devDependencies": {
     "@electron/asar": "^3.4.1",
+    "@electron/fuses": "1.8.0",
     "@emperor/core": "file:../packages/core",
     "@playwright/test": "^1.61.0",
     "@types/markdown-it": "^14.1.2",

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Ad-hoc Preview, main app, hardened runtime (SEC-04, scripts/harden-package.cjs).
+  JIT: V8 (MAP_JIT; no unsigned executable memory needed, as Electron's own
+  osx-sign defaults). Library validation off: an ad-hoc seal has no Team ID,
+  and dyld refuses the ad-hoc Electron Framework otherwise ("different Team
+  IDs"). Microphone: the dictation helper runs as this app's child, and macOS
+  checks the responsible app. Never allow-dyld-environment-variables or
+  get-task-allow.
+-->
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+</dict>
+</plist>

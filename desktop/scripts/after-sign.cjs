@@ -1,6 +1,10 @@
 const { spawnSync } = require('node:child_process')
 const { join } = require('node:path')
 
+// Absolute paths (SEC-04): PATH never picks the tool that checks a seal.
+const CODESIGN = '/usr/bin/codesign'
+const LIPO = '/usr/bin/lipo'
+
 const EXPECTED_LABELS = [
   'app',
   'Electron Framework',
@@ -20,8 +24,8 @@ function checked(command, args) {
 }
 
 function signatureEntry(label, signedPath, executablePath) {
-  const detail = checked('codesign', ['-dv', '--verbose=4', signedPath])
-  const architectures = checked('lipo', ['-archs', executablePath])
+  const detail = checked(CODESIGN, ['-dv', '--verbose=4', signedPath])
+  const architectures = checked(LIPO, ['-archs', executablePath])
     .trim()
     .split(/\s+/)
   return {
@@ -63,7 +67,7 @@ function validateMacSignatureEntries(entries, arch) {
 }
 
 function validateMacPackage(app, arch) {
-  checked('codesign', ['--verify', '--deep', '--strict', app])
+  checked(CODESIGN, ['--verify', '--deep', '--strict', app])
   const contents = join(app, 'Contents')
   const framework = join(contents, 'Frameworks', 'Electron Framework.framework')
   const helper = join(
