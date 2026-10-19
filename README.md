@@ -257,7 +257,7 @@ Build 项目目录不会承载私有会话、记忆或附件数据。
 - 只能作为桌面应用使用；普通浏览器不能直接运行完整产品。
 - Headless ACP 是源码级、本机 stdio operator preview，不随当前桌面安装包提供服务端入口；它不能回答问题或审批。
 - Python runtime、Python CLI 和 HTTP/WS backend 已退役，不是备用执行路径。
-- 默认没有内置网页搜索或网页抓取工具。
+- 网页搜索（`web_search`）只在模型使用 DeepSeek 官方 API 时提供；网页读取（`web_fetch`）默认开启，只读公开网页，见[Tools、Skills 与 MCP](docs/user/tools-skills-mcp.md#tools)。
 - 没有 macOS / Linux 以外的 Shell 沙箱后端。
 - Watchlist 仍属于受控后台维护基础设施，不提供外部消息平台连接器。
 - 电脑操作仍属实验能力，不能保证所有应用后台操作；Edge、部分系统权限和真实应用场景仍需目标环境验收。
