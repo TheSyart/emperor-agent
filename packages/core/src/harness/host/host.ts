@@ -35,6 +35,7 @@ import {
   type UserMessage,
 } from '../../llm/message'
 import { routeFromEntry, type RouteSpec } from '../../llm/route'
+import { imageDimensions } from '../../attachments/image-dimensions'
 import type { ContentBlock } from '../../llm/types'
 import {
   historyPage,
@@ -1595,6 +1596,15 @@ export class HarnessHost {
 
   // ── turns ───────────────────────────────────────────────────────────
 
+  /** Pixel size of a stored image, for token pricing (KRN-05); empty when unreadable. */
+  private imageSize(ref: AttachmentRef): { width?: number; height?: number } {
+    try {
+      return imageDimensions(this.attachments.readBytes(ref)) ?? {}
+    } catch {
+      return {}
+    }
+  }
+
   private userContent(input: SubmitInput): ContentBlock[] {
     const blocks: ContentBlock[] = []
     const extra: string[] = []
@@ -1608,6 +1618,7 @@ export class HarnessHost {
             attachmentId: ref.id,
             mediaType: ref.mime,
             bytes: ref.size,
+            ...this.imageSize(ref),
           },
         })
       } else if (ref.has_text) {
