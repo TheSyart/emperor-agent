@@ -92,6 +92,14 @@ export { searchProbe } from './search-probe'
 export type { SearchProbeRequest } from './search-probe'
 export { writeJsonAtomic } from '../store/atomic-json'
 export { LocalSandbox } from '../harness/sandbox/backend'
+export {
+  LocalSecretError,
+  LocalSecretStore,
+} from '../security/local-secret-store'
+export type {
+  LocalSecretProblem,
+  LocalSecretStoreOptions,
+} from '../security/local-secret-store'
 export { loadBundledToolCatalog } from '../environment/catalog'
 export type { LoadedToolCatalog } from '../environment/catalog'
 export type {
