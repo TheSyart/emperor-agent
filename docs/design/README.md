@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-09-29<br>
+> 最后核验：2026-10-19<br>
 > 事实源：`desktop/src/renderer/src/theme/`、`desktop/src/renderer/src/style-audit.test.ts`、`desktop/src/renderer/src/feature-style-owners.json`、`assets/generated/`
 
 本目录集中维护 Emperor Agent 的设计规范，包括品牌与图形资源、界面主题与样式、插件 Logo、模型元数据目录等。系统怎样运转见[架构文档](../architecture/overview.md)，怎样开发和扩展见[开发指南](../development/README.md)；根目录 README 只链接到这里，不复制规范正文。
@@ -13,6 +13,8 @@
 | ------------------------------------- | ------------------------------------------------------------------ |
 | [插件 Logo 设计规范](plugin-logos.md) | 受管插件 Logo 的方框材质、渐变与光照、透明边界、尺寸和验收         |
 | [模型元数据规范](model-metadata.md)   | 随包模型目录的数据来源与许可、匹配规则、覆盖层与家族规则、刷新流程 |
+| [设计令牌](tokens.md)                 | L1 原子、L2 语义、L3 组件三层令牌，全部 L2/L3 令牌与用途，迁移进度 |
+| [颜色使用规范](color.md)              | 暖中性灰为主，金色只用于少数关键位置，状态色与用户气泡             |
 
 ## 现有的设计事实源
 
@@ -20,7 +22,7 @@
 
 | 方面           | 事实源                                                                                                                               |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| 颜色与主题变量 | `desktop/src/renderer/src/theme/`（`base.css`、`dark.css`、`light.css`、`tokens.ts`）                                                |
+| 颜色与主题变量 | `desktop/src/renderer/src/theme/`（见[设计令牌](tokens.md)）                                                                         |
 | 样式约束       | `desktop/src/renderer/src/style-audit.test.ts`：颜色与尺寸必须收敛到主题变量，`theme/*.css` 本身除外                                 |
 | 样式归属       | `desktop/src/renderer/src/feature-style-owners.json`：每个界面功能的视图、控制器和样式层位置                                         |
 | 设置页组件     | `components/settings/ui/` 的原语；开发模式下打开 `?settings-gallery` 查看，搭建方法见[扩展指南](../development/extending-emperor.md) |

@@ -1,0 +1,57 @@
+/* ── Legacy aliases (DS-01, removed by DS-02) ──
+   Pre-0.2 token names → the L2 token they now mean. New code uses the L2
+   names; DS-02 migrates the remaining call sites and deletes this file. */
+:root {
+  --bg-base: var(--surface-canvas);
+  --bg-layer-1: var(--surface-base);
+  --bg-layer-2: var(--surface-raised);
+  --bg-layer-3: var(--surface-overlay);
+  --bg-overlay: var(--surface-strong);
+  --border-l1: var(--stroke-1);
+  --border-l2: var(--stroke-2);
+  --border-l3: var(--stroke-3);
+  --border-l4: var(--stroke-4);
+  --border-inverted: var(--stroke-inverted);
+  --interactive-bg-hover: var(--surface-hover);
+  --interactive-bg-active: var(--surface-active);
+  --interactive-bg-hover-strong: var(--surface-hover-strong);
+  --interactive-bg-hover-danger: var(--surface-hover-danger);
+  --interactive-bg-hover-solid: var(--surface-hover-solid);
+  --mask-1: var(--scrim);
+  --mask-2: var(--scrim-soft);
+  --label-primary: var(--text-1);
+  --label-secondary: var(--text-2);
+  --label-tertiary: var(--text-3);
+  --label-caption: var(--text-4);
+  --label-dimmed: var(--text-disabled);
+  --label-inverted: var(--text-inverted);
+  --accent-fill: var(--accent);
+  --accent-strong: var(--text-link);
+  --approval-soft: var(--attention-soft);
+  --danger-soft: var(--error-soft);
+  --state-error: var(--error);
+  --bg: var(--surface-canvas);
+  --bg-elevated: var(--surface-base);
+  --bg-inset: var(--surface-sunken);
+  --fg: var(--text-1);
+  --border: var(--stroke-solid);
+  --border-strong: var(--stroke-solid-strong);
+  --accent-fg: var(--text-on-accent);
+  --danger: var(--error);
+  --shadow-sm: var(--elev-1);
+  --shadow-md: var(--elev-2);
+  --shadow-lg: var(--elev-3);
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: var(--radius-row);
+  --radius: var(--radius-row);
+  --radius-lg: var(--radius-card);
+  --radius-xl: var(--radius-takeover);
+  --font-size-2xs: 10px;
+  --font-size-xs: var(--fs-xxxs);
+  --font-size-sm: var(--fs-xxs);
+  --font-size-md: var(--fs-xs);
+  --font-size-lg: var(--fs-s);
+  --font-size-xl: 17px;
+  --font-size-2xl: 20px;
+}

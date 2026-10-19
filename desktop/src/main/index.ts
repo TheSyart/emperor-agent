@@ -6,6 +6,7 @@ import {
   Menu,
   nativeImage,
   protocol,
+  nativeTheme,
   net,
   screen,
   session,
@@ -34,6 +35,7 @@ import {
   type StateDirectoryLock,
 } from './state-directory-lock'
 import { createLoadFailurePolicy } from './load-failure'
+import { windowBackground } from './window-background'
 import { createQuitCoordinator } from './quit-coordinator'
 import { claimSingleInstance } from './single-instance'
 import { trackedIpcMain } from './tracked-ipc'
@@ -937,7 +939,7 @@ function createWindow(): void {
     ...onScreen(readBounds(boundsPath)),
     title: 'Emperor Agent',
     icon: appIconPath,
-    backgroundColor: '#1a1410',
+    backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors),
     show: false,
     webPreferences: mainWindowWebPreferences(mainDir, {
       packaged: app.isPackaged,
@@ -1458,7 +1460,9 @@ async function startup(): Promise<void> {
             createWindow: () => {
               const win = new BrowserWindow({
                 show: false,
-                backgroundColor: '#1a1410',
+                backgroundColor: windowBackground(
+                  nativeTheme.shouldUseDarkColors,
+                ),
                 webPreferences,
               })
               mainWindow = win

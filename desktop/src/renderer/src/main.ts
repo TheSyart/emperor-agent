@@ -5,8 +5,11 @@ import { initTheme } from './composables/useTheme'
 // Feature CSS responsibilities and effective cascade order are guarded by
 // feature-style-owners.json + featureStyleOwnership.test.ts.
 import './styles.css'
-import './theme/dark.css'
-import './theme/light.css'
+import './theme/primitives.css'
+import './theme/semantic.dark.css'
+import './theme/semantic.light.css'
+import './theme/components.css'
+import './theme/legacy-aliases.css'
 import './theme/base.css'
 import './styles/materials.css'
 import './styles/a11y.css'

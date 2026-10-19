@@ -1,0 +1,146 @@
+/* ── L3 component tokens (DS-01) ──
+   Tokens owned by one component family (sidebar, menus, code, toasts,
+   avatars, materials). They reference L2; the per-theme literals below are
+   phase-1 values that DS-02 replaces with L2 references. */
+:root {
+  --sidebar-fill: var(--surface-sunken);
+  --sidebar-item-active: var(--surface-selected);
+  --menu-fill: var(--surface-overlay);
+  --input-major: var(--surface-raised);
+  --code-block-bg: var(--surface-sunken);
+  --toast-fg: var(--surface-overlay);
+  --button-primary-fill: var(--text-1);
+  --ghost-active-fill: var(--surface-selected);
+  --mask-blur: 2px;
+  --caret: var(--accent);
+  --approval-strong: 247 173 49;
+  --approval-line: 221 134 41;
+  --code-fg: var(--text-1);
+  --shadow-lv1-blur: 0 4px 12px 0 rgb(0 0 0 / 0.02);
+  --glass-bg: var(--surface-raised);
+  --glass-border-a: 0.06;
+  --glass-blur: 24px;
+  --glass-saturate: 1.4;
+  --glass-shadow: var(--shadow-lv3);
+  --glass-solid-alpha: 0.97;
+  --material-1-bg: var(--surface-base);
+  --material-1-alpha: 0.9;
+  --material-1-blur: 12px;
+  --material-2-bg: var(--surface-base);
+  --material-2-alpha: 0.94;
+  --material-2-blur: 24px;
+  --material-3-bg: var(--surface-raised);
+  --material-3-alpha: 0.96;
+  --material-3-blur: 24px;
+}
+
+:root,
+:root[data-theme='dark'] {
+  --sidebar-item-hover: 44 44 46;
+  --selector-fill: 53 54 56;
+  --settings-card-fill: 50 50 53;
+  --settings-card-control-fill: 40 40 42;
+  --tip-fill: 53 54 56;
+  --code-banner-bg: 44 44 46;
+  --inline-code-bg: 44 44 46;
+  --tooltip-bg: 67 69 74;
+  --tooltip-fg: 255 255 255;
+  --toast-bg: 249 250 251;
+  --button-primary-hover: 235 238 242;
+  --button-primary-fg: 15 17 21;
+  --ghost-active-border: 129 133 140;
+  --scrollbar-thumb: 60 60 61;
+  --scrollbar-thumb-hover: 84 85 87;
+  --skeleton-bg: rgb(255 255 255 / 0.08);
+  --accent-soft-strong: 84 71 46;
+  --accent-glare: 244 222 170;
+  --state-ok-soft: 30 52 38;
+  --state-ok-label: 74 222 128;
+  --state-warn-soft: 56 44 24;
+  --state-warn-label: 247 181 64;
+  --state-error-soft: 72 32 34;
+  --state-error-label: 248 125 125;
+  --avatar-1: 96 165 250;
+  --avatar-2: 74 222 128;
+  --avatar-3: 251 146 60;
+  --avatar-4: 192 132 252;
+  --avatar-5: 244 114 182;
+  --avatar-6: 45 212 191;
+  --code-constant: 77 171 247;
+  --code-string: 105 219 124;
+  --code-comment: 173 181 189;
+  --code-keyword: 250 162 193;
+  --code-parameter: 255 169 77;
+  --code-function: 177 151 252;
+  --code-string-expression: 140 233 154;
+  --code-punctuation: 206 212 218;
+  --code-link: 116 192 252;
+  --tone-cyan: 103 232 249;
+  --tone-violet: 196 181 253;
+  --tone-blue: 147 197 253;
+  --glass-alpha: 0.86;
+  --glass-border: 255 255 255;
+  --scrim-a: 0.5;
+  --text-primary: 0.92;
+  --text-secondary: 0.8;
+  --text-tertiary: 0.64;
+  --hover-bg-a: 0.08;
+  --active-bg-a: 0.14;
+  --shadow-color: 0 0 0;
+  --nb-60: 249 250 251;
+}
+
+:root[data-theme='light'] {
+  --sidebar-item-hover: 241 243 245;
+  --selector-fill: 245 246 247;
+  --settings-card-fill: 249 250 251;
+  --settings-card-control-fill: 255 255 255;
+  --tip-fill: 245 246 247;
+  --code-banner-bg: 249 250 251;
+  --inline-code-bg: 235 238 242;
+  --tooltip-bg: 44 44 46;
+  --tooltip-fg: 255 255 255;
+  --toast-bg: 97 102 107;
+  --button-primary-hover: 67 69 74;
+  --button-primary-fg: 255 255 255;
+  --ghost-active-border: 151 157 166;
+  --scrollbar-thumb: 229 229 229;
+  --scrollbar-thumb-hover: 212 212 212;
+  --skeleton-bg: rgb(0 0 0 / 0.04);
+  --accent-soft-strong: 240 225 190;
+  --accent-glare: 232 206 146;
+  --state-ok-soft: 230 250 237;
+  --state-ok-label: 21 128 61;
+  --state-warn-soft: 254 245 231;
+  --state-warn-label: 180 83 9;
+  --state-error-soft: 254 226 226;
+  --state-error-label: 200 30 30;
+  --avatar-1: 37 99 235;
+  --avatar-2: 22 163 74;
+  --avatar-3: 234 88 12;
+  --avatar-4: 147 51 234;
+  --avatar-5: 219 39 119;
+  --avatar-6: 13 148 136;
+  --code-constant: 28 126 214;
+  --code-string: 47 158 68;
+  --code-comment: 134 142 150;
+  --code-keyword: 214 51 108;
+  --code-parameter: 232 89 12;
+  --code-function: 103 65 217;
+  --code-string-expression: 43 138 62;
+  --code-punctuation: 73 80 87;
+  --code-link: 25 113 194;
+  --tone-cyan: 8 145 178;
+  --tone-violet: 124 58 237;
+  --tone-blue: 37 99 235;
+  --glass-alpha: 0.9;
+  --glass-border: 0 0 0;
+  --scrim-a: 0.24;
+  --text-primary: 0.9;
+  --text-secondary: 0.66;
+  --text-tertiary: 0.52;
+  --hover-bg-a: 0.05;
+  --active-bg-a: 0.08;
+  --shadow-color: 30 30 46;
+  --nb-60: 245 246 247;
+}

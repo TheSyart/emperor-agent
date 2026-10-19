@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 样式入口:主题 token 表见 theme/dark.css、theme/light.css;全局 base 见
+/* 样式入口:主题 token 见 theme/（L1 primitives、L2 semantic.*、L3 components、legacy-aliases）;全局 base 见
    theme/base.css;按表面拆分的组件样式见 styles/ 目录,均由 main.ts 引入。
    @layer base 必须留在本文件——Tailwind 按文件处理,它依赖同文件的
    @tailwind base 指令。 */
