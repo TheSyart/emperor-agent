@@ -135,7 +135,7 @@ describe('诊断', () => {
     // No lead-in: the runtime root moved into 存储路径.
     expect(root.querySelector('.ds-settings-section .intro')).toBeNull()
     expect(
-      [...overview.querySelectorAll('.summary .ds-status-badge')].map((badge) =>
+      [...overview.querySelectorAll('.summary .ds-badge')].map((badge) =>
         badge.textContent?.trim(),
       ),
     ).toEqual(['2 项需要关注'])
@@ -183,8 +183,8 @@ describe('诊断', () => {
       ),
     ).toEqual(['runtime', 'environment', 'desktop', 'paths', 'config'])
     const badges = (id: string) =>
-      [...card(root, id).querySelectorAll('.head .ds-status-badge')].map(
-        (badge) => badge.textContent?.trim(),
+      [...card(root, id).querySelectorAll('.head .ds-badge')].map((badge) =>
+        badge.textContent?.trim(),
       )
     expect(badges('runtime')).toEqual(['1 项需要关注'])
     expect(badges('environment')).toEqual(['1 项需要关注'])
@@ -215,7 +215,7 @@ describe('诊断', () => {
   it('shows a normal row as its value, and says why on a row that needs attention', async () => {
     const root = await mount()
     const runtime = await open(root, 'runtime')
-    expect(runtime.querySelector('.ds-status-badge.value')).toBeNull()
+    expect(runtime.querySelector('.ds-badge.value')).toBeNull()
     const fine = rowOf(runtime, 'scheduler-store')
     expect(fine.querySelector('.value')?.textContent?.trim()).toBe('正常')
     expect(fine.querySelector('.description')).toBeNull()
@@ -261,9 +261,7 @@ describe('诊断', () => {
       return undefined
     })
     const root = await mount()
-    const notices = [
-      ...root.querySelectorAll<HTMLElement>('.ds-settings-notice'),
-    ]
+    const notices = [...root.querySelectorAll<HTMLElement>('.ds-notice')]
     expect(notices.map((notice) => notice.dataset.tone)).toEqual([
       'error',
       'error',

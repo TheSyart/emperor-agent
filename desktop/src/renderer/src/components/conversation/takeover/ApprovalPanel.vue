@@ -14,6 +14,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { ControlInteraction } from '../../../types'
 import { useAppContext } from '../../../composables/useAppContext'
 import Button from '../../ui/Button.vue'
+import Dot from '../../ui/Dot.vue'
 import {
   approvalActions,
   approvalAnswer,
@@ -63,7 +64,7 @@ function decide(action: ApprovalAction) {
       @keydown="foldOnEscape($event, props.interaction.id)"
     >
       <div class="strip">
-        <span class="dot" aria-hidden="true" />
+        <Dot state="attention" />
         <span>需要你的授权</span>
         <span v-if="presentation.count > 1" class="count"
           >· {{ presentation.count }} 项操作</span
@@ -145,14 +146,6 @@ function decide(action: ApprovalAction) {
   color: rgb(var(--approval-line));
   font-size: var(--fs-xs);
   line-height: 18px;
-}
-
-.dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: rgb(var(--approval-line));
 }
 
 .body {

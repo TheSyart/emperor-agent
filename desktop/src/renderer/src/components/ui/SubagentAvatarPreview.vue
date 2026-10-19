@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import SubagentAvatar from './SubagentAvatar.vue'
+import Avatar from './Avatar.vue'
 import { subagentFrames, subagentSheet } from './subagentAvatars'
 import { createAvatarPreviewPlayer } from './avatarPreview'
 // Same approved order as the visual reference; coprime stride visits all 36.
@@ -91,14 +91,16 @@ onBeforeUnmount(() => dispose?.())
     "
   >
     <span ref="first" class="layer" aria-hidden="true"
-      ><SubagentAvatar
-        session-id="settings-preview"
+      ><Avatar
+        kind="sprite"
+        id="settings-preview"
         :frame-id="frames[current]!.id"
         :size="40"
     /></span>
     <span ref="second" class="layer" aria-hidden="true"
-      ><SubagentAvatar
-        session-id="settings-preview"
+      ><Avatar
+        kind="sprite"
+        id="settings-preview"
         :frame-id="frames[next]!.id"
         :size="40"
     /></span>

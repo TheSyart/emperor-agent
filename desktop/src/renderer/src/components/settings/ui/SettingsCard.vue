@@ -18,14 +18,14 @@
  * - master?: a page's master switch (电脑操作, 浏览器), its first card: the
  *   leading glyph (18px) sits on a 36px gold tile and the title is
  *   semibold.
- * Slots: `leading` (16px glyph / StateDot), `title`, `description`, `meta`
+ * Slots: `leading` (16px glyph / Dot), `title`, `description`, `meta`
  * (badges after the title), `actions` (buttons / Switch; never toggles),
  * default (body), `footer` (right-aligned buttons, e.g. 取消 / 保存).
  * Emits: toggle(open).
  */
 import { useSlots } from 'vue'
 import { DsChevronDown } from '../../icons/ds'
-import { settingsId } from './fieldContext'
+import { settingsId } from '../../ui/fieldContext'
 import { provideSurface } from '../../ui/surface'
 
 const props = withDefaults(

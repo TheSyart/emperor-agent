@@ -19,7 +19,7 @@ import {
   EmptyState,
   Field,
   SettingsGroup,
-  SettingsNotice,
+  Notice,
   SettingsRow,
   SettingsSection,
   TextField,
@@ -139,13 +139,14 @@ onMounted(() => {
   <SettingsSection
     intro="Emperor 操作网页时用这些 profile，持久的会保留网站登录。"
   >
-    <SettingsNotice v-if="error && !dialog" tone="error" :title="error" />
+    <Notice v-if="error && !dialog" tone="error" :title="error" />
     <SettingsGroup title="持久 profile">
       <EmptyState
         v-if="!persistent.length"
-        compact
         title="还没有持久 profile"
         description="点右上角的「新建」创建一个，或从 Chrome 导入登录。"
+        variant="inline"
+        framed
       />
       <SettingsRow
         v-for="profile in persistent"
@@ -194,7 +195,7 @@ onMounted(() => {
       @update:open="onDialogOpen"
     >
       <form id="profile-form" class="profile-form" @submit.prevent="submit">
-        <SettingsNotice v-if="error" tone="error" :title="error" />
+        <Notice v-if="error" tone="error" :title="error" />
         <Field label="名称">
           <TextField v-model="name" required :maxlength="60" />
         </Field>

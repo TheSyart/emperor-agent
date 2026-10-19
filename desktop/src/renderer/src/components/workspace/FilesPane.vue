@@ -16,8 +16,10 @@
  * Emits: treeWidth(px) once a column resize settles.
  * Exposes: openPath(path, line?) — open (or activate) a file at a line.
  */
+import EmptyState from '../ui/EmptyState.vue'
 import LinkButton from '../ui/LinkButton.vue'
 import Button from '../ui/Button.vue'
+import SearchField from '../ui/SearchField.vue'
 import type { WorkspaceFileEntry, FilePreviewResult } from '@emperor/core/api'
 import {
   ChevronDown,
@@ -29,7 +31,6 @@ import {
   PanelRightOpen,
   Plus,
   RefreshCw,
-  Search,
   X,
 } from 'lucide-vue-next'
 import {
@@ -97,7 +98,7 @@ const paneRoot = ref<HTMLElement | null>(null)
 const tabStrip = ref<HTMLElement | null>(null)
 const previewBody = ref<HTMLElement | null>(null)
 const treeList = ref<HTMLElement | null>(null)
-const filterInput = ref<HTMLInputElement | null>(null)
+const filterInput = ref<InstanceType<typeof SearchField> | null>(null)
 const treeByDirectory = ref<Record<string, WorkspaceFileEntry[]>>({})
 const expanded = ref(new Set<string>())
 const searchResults = ref<WorkspaceFileEntry[] | null>(null)
@@ -831,17 +832,17 @@ function message(value: unknown): string {
             预览已截断 · {{ activeTab.preview.bytes }} bytes
           </small>
         </template>
-        <div v-else-if="!openError" class="files-empty">
-          <FileText :size="22" class="files-empty-glyph" aria-hidden="true" />
-          <strong>打开文件</strong>
-          <p>
-            {{
-              hasProject
-                ? '从项目目录树中选择文件'
-                : '点击对话中的文件名或附件，在这里查看'
-            }}
-          </p>
-        </div>
+        <EmptyState
+          v-else-if="!openError"
+          class="files-empty"
+          title="打开文件"
+          :icon="FileText"
+          :description="
+            hasProject
+              ? '从项目目录树中选择文件'
+              : '点击对话中的文件名或附件，在这里查看'
+          "
+        />
       </div>
     </section>
 
@@ -858,14 +859,14 @@ function message(value: unknown): string {
       ></div>
       <div class="file-tree-toolbar">
         <form class="files-search" role="search" @submit.prevent="searchFiles">
-          <Search :size="14" aria-hidden="true" />
-          <input
+          <SearchField
             ref="filterInput"
             v-model="query"
+            size="sm"
             placeholder="筛选文件…"
             aria-label="筛选文件"
             @input="onQueryInput"
-            @keydown.esc.prevent="clearQuery"
+            @clear="clearQuery"
           />
         </form>
         <IconButton label="刷新目录树" @click="reloadTree">
@@ -1223,33 +1224,8 @@ function message(value: unknown): string {
 }
 
 .files-empty {
-  display: flex;
   height: 100%;
-  flex-direction: column;
-  align-items: center;
   justify-content: center;
-  gap: var(--space-1);
-  padding: var(--space-4);
-  text-align: center;
-}
-
-.files-empty-glyph {
-  margin-bottom: var(--space-1-5);
-  color: rgb(var(--label-tertiary));
-}
-
-.files-empty strong {
-  color: rgb(var(--label-primary));
-  font-size: var(--fs-s);
-  line-height: var(--lh-s);
-  font-weight: 500;
-}
-
-.files-empty p {
-  margin: 0;
-  color: rgb(var(--label-tertiary));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
 }
 
 /* ── tree column (far right) ──────────────────────────────────────── */
@@ -1292,36 +1268,6 @@ function message(value: unknown): string {
   display: flex;
   min-width: 0;
   flex: 1;
-  align-items: center;
-  gap: var(--space-1-5);
-  height: var(--space-7);
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-row);
-  color: rgb(var(--label-tertiary));
-  background: rgb(var(--input-major));
-}
-
-.files-search:focus-within {
-  border-color: var(--border-l4);
-}
-
-.files-search input {
-  min-width: 0;
-  flex: 1;
-  height: 100%;
-  padding: 0;
-  border: 0;
-  outline: none;
-  color: rgb(var(--label-primary));
-  background: transparent;
-  box-shadow: none;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-}
-
-.files-search input::placeholder {
-  color: rgb(var(--label-tertiary));
 }
 
 .file-tree-list {

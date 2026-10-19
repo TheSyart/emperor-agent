@@ -8,7 +8,7 @@
  * shell header's title.
  *
  * Props: title, description?.
- * Slots: `badge` (StatusBadge), `description`, `actions` (ui/Button size="sm").
+ * Slots: `badge` (Badge), `description`, `actions` (ui/Button size="sm").
  */
 withDefaults(defineProps<{ title: string; description?: string }>(), {
   description: undefined,

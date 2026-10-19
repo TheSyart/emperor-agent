@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
 > 最后核验：2026-10-19<br>
-> 事实源：`desktop/src/renderer/src/theme/`、`desktop/src/renderer/src/style-audit.test.ts`、`desktop/src/renderer/src/feature-style-owners.json`、`assets/generated/`
+> 事实源：`desktop/src/renderer/src/theme/`、`desktop/src/renderer/src/components/ui/`、`desktop/src/renderer/src/style-audit.test.ts`、`desktop/src/renderer/src/feature-style-owners.json`、`assets/generated/`
 
 本目录集中维护 Emperor Agent 的设计规范，包括品牌与图形资源、界面主题与样式、插件 Logo、模型元数据目录等。系统怎样运转见[架构文档](../architecture/overview.md)，怎样开发和扩展见[开发指南](../development/README.md)；根目录 README 只链接到这里，不复制规范正文。
 
@@ -17,18 +17,19 @@
 | [设计令牌](tokens.md)                        | L1 原子、L2 语义、L3 组件三层令牌，全部 L2/L3 令牌与用途，迁移进度 |
 | [颜色使用规范](color.md)                     | 暖中性灰为主，金色只用于少数关键位置，状态色与用户气泡             |
 | [浮层规范](overlays.md)                      | 模态弹窗的焦点与 Esc、确认框、轻提示队列、锚定面板                 |
+| [组件规范](components.md)                    | `components/ui/` 每个组件的用途、变体、键盘行为与反例              |
 
 ## 现有的设计事实源
 
 以下内容已经由代码或资源文件约束，暂时没有单独的规范文档；修改时以这些文件为准：
 
-| 方面           | 事实源                                                                                                                               |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| 颜色与主题变量 | `desktop/src/renderer/src/theme/`（见[设计令牌](tokens.md)）                                                                         |
-| 样式约束       | `desktop/src/renderer/src/style-audit.test.ts`：颜色与尺寸必须收敛到主题变量，`theme/*.css` 本身除外                                 |
-| 样式归属       | `desktop/src/renderer/src/feature-style-owners.json`：每个界面功能的视图、控制器和样式层位置                                         |
-| 设置页组件     | `components/settings/ui/` 的原语；开发模式下打开 `?settings-gallery` 查看，搭建方法见[扩展指南](../development/extending-emperor.md) |
-| 品牌与产品图   | `assets/generated/` 下的产品字标、标志、产品图和插件 Logo；图片生成的提示词记录在 `assets/generated/PROMPTS.md`                      |
+| 方面           | 事实源                                                                                                                                                                                                                     |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 颜色与主题变量 | `desktop/src/renderer/src/theme/`（见[设计令牌](tokens.md)）                                                                                                                                                               |
+| 样式约束       | `desktop/src/renderer/src/style-audit.test.ts`：颜色与尺寸必须收敛到主题变量，`theme/*.css` 本身除外                                                                                                                       |
+| 样式归属       | `desktop/src/renderer/src/feature-style-owners.json`：每个界面功能的视图、控制器和样式层位置                                                                                                                               |
+| 组件           | `components/ui/`（见[组件规范](components.md)），开发模式下打开 `?ui-gallery` 查看；设置页的布局原语在 `components/settings/ui/`，打开 `?settings-gallery` 查看，搭建方法见[扩展指南](../development/extending-emperor.md) |
+| 品牌与产品图   | `assets/generated/` 下的产品字标、标志、产品图和插件 Logo；图片生成的提示词记录在 `assets/generated/PROMPTS.md`                                                                                                            |
 
 ## 新增规范
 

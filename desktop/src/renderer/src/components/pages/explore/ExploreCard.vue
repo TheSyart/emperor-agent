@@ -11,7 +11,8 @@ import { computed } from 'vue'
 import { ExternalLink, Plug, Puzzle, Sparkles } from 'lucide-vue-next'
 import Button from '../../ui/Button.vue'
 import IconButton from '../../ui/IconButton.vue'
-import { StatusBadge } from '../../settings/ui'
+import { Badge } from '../../settings/ui'
+import Surface from '../../ui/Surface.vue'
 import { EXPLORE_KIND_LABELS, type ExploreEntry } from './exploreModel'
 
 const props = withDefaults(
@@ -27,7 +28,8 @@ const titleId = computed(() => `explore-card-${props.entry.id}`)
 </script>
 
 <template>
-  <li
+  <Surface
+    as="li"
     class="explore-card"
     :data-entry-id="entry.id"
     :data-kind="entry.kind"
@@ -41,9 +43,7 @@ const titleId = computed(() => `explore-card-${props.entry.id}`)
         <h3 :id="titleId" class="name">{{ entry.name }}</h3>
         <span class="publisher">{{ entry.publisher }}</span>
       </div>
-      <StatusBadge class="kind">{{
-        EXPLORE_KIND_LABELS[entry.kind]
-      }}</StatusBadge>
+      <Badge class="kind">{{ EXPLORE_KIND_LABELS[entry.kind] }}</Badge>
     </div>
     <p class="description">{{ entry.description }}</p>
     <p v-if="entry.kind === 'plugin'" class="note">
@@ -51,7 +51,9 @@ const titleId = computed(() => `explore-card-${props.entry.id}`)
     </p>
     <div class="foot">
       <ul v-if="entry.tags.length" class="tags" aria-label="标签">
-        <li v-for="tag in entry.tags" :key="tag" class="tag">{{ tag }}</li>
+        <li v-for="tag in entry.tags" :key="tag">
+          <Badge>{{ tag }}</Badge>
+        </li>
       </ul>
       <div class="actions">
         <IconButton
@@ -75,7 +77,7 @@ const titleId = computed(() => `explore-card-${props.entry.id}`)
         </Button>
       </div>
     </div>
-  </li>
+  </Surface>
 </template>
 
 <style scoped>
@@ -83,11 +85,6 @@ const titleId = computed(() => `explore-card-${props.entry.id}`)
   display: flex;
   flex-direction: column;
   gap: var(--space-2-5);
-  min-width: 0;
-  padding: var(--space-4);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-3));
   list-style: none;
 }
 
@@ -180,16 +177,6 @@ const titleId = computed(() => `explore-card-${props.entry.id}`)
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.tag {
-  padding: 0 var(--space-1-5);
-  border-radius: var(--radius-sm);
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-tertiary));
-  font-size: var(--fs-xxxs);
-  line-height: var(--lh-xxs);
-  white-space: nowrap;
 }
 
 .actions {

@@ -88,7 +88,7 @@ for (const theme of ['dark', 'light'] as const) {
     // The control card opens the page: no lead-in, no notice while all is
     // well, and 导入… sits beside 自动填充和密码.
     await expect(dialog.locator('.ds-settings-section .intro')).toHaveCount(0)
-    await expect(dialog.locator('.ds-settings-notice')).toHaveCount(0)
+    await expect(dialog.locator('.ds-notice')).toHaveCount(0)
     const autofill = dialog.locator('.ds-settings-group').filter({
       has: page.locator('.head .title', { hasText: /^自动填充和密码$/ }),
     })
@@ -163,7 +163,7 @@ for (const theme of ['dark', 'light'] as const) {
       theme,
       page: 'passwords&visualVault=key-missing',
     })
-    const notice = dialog.locator('.ds-settings-notice')
+    const notice = dialog.locator('.ds-notice')
     await expect(notice).toHaveAttribute('data-tone', 'error')
     await expect(notice).toContainText('已保存的密码无法解密')
     await expect(notice).toContainText('本地密钥文件不见了')
@@ -328,7 +328,7 @@ for (const theme of ['dark', 'light'] as const)
     })
     const dialog = await openBrowser(page, { theme })
     await dialog.locator('#browser-agent').click()
-    const notice = dialog.locator('.ds-settings-notice')
+    const notice = dialog.locator('.ds-notice')
     await expect(notice).toHaveAttribute('data-tone', 'error')
     await expect(notice).toContainText('电脑操作服务没有响应')
     // On top of the page, above the control card.
@@ -336,7 +336,7 @@ for (const theme of ['dark', 'light'] as const)
       .locator('.ds-settings-section > .body > *')
       .first()
       .getAttribute('class')
-    expect(first).toContain('ds-settings-notice')
+    expect(first).toContain('ds-notice')
     await dialog.locator('[data-action="clear-browser-data"]').click()
     const outcome = dialog.locator('[data-clear-status]')
     await expect(outcome).toHaveText('清除失败')

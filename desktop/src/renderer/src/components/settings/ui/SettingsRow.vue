@@ -22,7 +22,7 @@
  * Slots: `leading` (a step marker or icon left of the text; the row then
  * aligns to the top), `eyebrow` (a small label above the title, e.g. ⚠
  * 风险升高), `title`, `description`, `badge` (inline after the title, e.g.
- * a StatusBadge), default (the control / value).
+ * a Badge), default (the control / value).
  */
 import { computed } from 'vue'
 import { useSurface } from '../../ui/surface'

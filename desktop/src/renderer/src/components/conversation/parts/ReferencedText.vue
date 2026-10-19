@@ -14,7 +14,7 @@ import type { MessageReference } from '../../../types'
 import { DsSkill } from '../../icons/ds'
 import { useReferenceCatalog } from '../../composer/editor/referenceCatalog'
 import { messageSegments } from '../../composer/editor/referenceText'
-import PluginLogo from '../../settings/plugins/PluginLogo.vue'
+import Avatar from '../../ui/Avatar.vue'
 import ResourceLink from '../resources/ResourceLink.vue'
 import ResourceCard from '../resources/ResourceCard.vue'
 import {
@@ -89,12 +89,13 @@ function chipName(kind: string, label: string): string {
           : `${chipName(segment.chip.kind, segment.chip.label)}（已不可用）`
       "
       :title="segment.available ? undefined : '已不可用'"
-      ><PluginLogo
+      ><Avatar
+        kind="logo"
         v-if="segment.chip.kind === 'plugin' && segment.available"
         class="reference-chip-icon"
-        :name="segment.chip.label"
-        :logo="catalog.pluginLogo?.(segment.chip.id) ?? null"
-        :size="14"
+        :label="segment.chip.label"
+        :src="catalog.pluginLogo?.(segment.chip.id) ?? null"
+        :size="16"
       /><component
         :is="pluginGlyph"
         v-else-if="segment.chip.kind === 'plugin'"

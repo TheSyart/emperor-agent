@@ -5,20 +5,20 @@
  */
 import { computed } from 'vue'
 import type { ToolChatData } from '../../../conversation/types'
-import StateDot from '../../ui/StateDot.vue'
-import type { StateDotState } from '../../ui/stateDot'
+import Dot from '../../ui/Dot.vue'
+import type { DotState } from '../../ui/dot'
 import ConversationMarkdown from '../parts/ConversationMarkdown.vue'
 import { PLAN_OUTCOME_LABEL, argsOf, planOutcome, stringArg } from './toolModel'
 
 const props = defineProps<{ data: ToolChatData }>()
 const plan = computed(() => stringArg(argsOf(props.data), 'plan') ?? '')
 const outcome = computed(() => planOutcome(props.data))
-const dot = computed<StateDotState>(() => {
+const dot = computed<DotState>(() => {
   switch (outcome.value.outcome) {
     case 'approved':
       return 'ok'
     case 'waiting':
-      return 'ongoing'
+      return 'running'
     case 'failed':
       return 'error'
     default:
@@ -33,7 +33,7 @@ const dot = computed<StateDotState>(() => {
       <ConversationMarkdown :text="plan" />
     </div>
     <div class="result" :data-outcome="outcome.outcome">
-      <StateDot :state="dot" />
+      <Dot :state="dot" />
       <span class="label">{{ PLAN_OUTCOME_LABEL[outcome.outcome] }}</span>
       <span v-if="outcome.feedback" class="feedback">{{
         outcome.feedback

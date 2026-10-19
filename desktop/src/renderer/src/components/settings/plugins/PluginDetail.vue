@@ -30,14 +30,14 @@ import { DsChevronLeft, DsNewChat, DsSettings, DsTrash } from '../../icons/ds'
 import Button from '../../ui/Button.vue'
 import SkillConfirmDialog from '../skills/SkillConfirmDialog.vue'
 import ToolRow from '../tools/ToolRow.vue'
-import { DefinitionList, EmptyState, StatusBadge, Switch } from '../ui'
+import { DefinitionList, EmptyState, Badge, Switch } from '../ui'
 import { useSettingsRoute } from '../useSettingsRoute'
 import {
   activationState,
   type PluginDetail,
   type PluginSummary,
 } from './pluginInstall'
-import PluginLogo from './PluginLogo.vue'
+import Avatar from '../../ui/Avatar.vue'
 import {
   componentStateBadge,
   isComputerUsePlugin,
@@ -223,20 +223,21 @@ defineExpose({ reload: load })
       v-if="loadError && !shown"
       title="无法打开这个插件"
       :description="loadError"
+      framed
     >
       <Button size="sm" variant="secondary" @click="load()">重试</Button>
     </EmptyState>
 
     <template v-else-if="shown">
       <header class="hero">
-        <PluginLogo :name="title" :logo="shown.logo" :size="56" />
+        <Avatar kind="logo" :label="title" :src="shown.logo" :size="40" />
         <div class="hero-text">
           <div class="title-line">
             <h3 class="name">{{ title }}</h3>
-            <StatusBadge>{{ pluginSourceTag(shown) }}</StatusBadge>
-            <StatusBadge v-if="state" :tone="state.tone" dot>
+            <Badge>{{ pluginSourceTag(shown) }}</Badge>
+            <Badge v-if="state" :tone="state.tone" variant="dot-label">
               {{ state.label }}
-            </StatusBadge>
+            </Badge>
           </div>
           <p class="description">{{ shown.description || '没有描述' }}</p>
           <p class="byline">
@@ -301,7 +302,7 @@ defineExpose({ reload: load })
         >
           <h4 class="block-title">
             {{ group.title }}
-            <span class="count">{{ group.items.length }}</span>
+            <Badge variant="count" :label="group.items.length" />
           </h4>
           <ul class="members">
             <li
@@ -313,9 +314,12 @@ defineExpose({ reload: load })
             >
               <div class="member-head">
                 <span class="member-title">{{ item.title }}</span>
-                <StatusBadge :tone="componentStateBadge(item.state).tone" dot>
+                <Badge
+                  :tone="componentStateBadge(item.state).tone"
+                  variant="dot-label"
+                >
                   {{ componentStateBadge(item.state).label }}
-                </StatusBadge>
+                </Badge>
               </div>
               <p
                 v-if="item.description"
@@ -341,7 +345,7 @@ defineExpose({ reload: load })
 
       <section v-if="toolGroups.length" class="block" data-plugin-tools>
         <h4 class="block-title">
-          工具 <span class="count">{{ toolCount }}</span>
+          工具 <Badge variant="count" :label="toolCount" />
         </h4>
         <p v-if="shown.tools.note" class="note" data-tools-note>
           {{ shown.tools.note }}
@@ -355,7 +359,7 @@ defineExpose({ reload: load })
           <div class="tool-group-head">
             <span class="tool-group-title">
               {{ group.title }}
-              <span class="count">{{ group.tools.length }}</span>
+              <Badge variant="count" :label="group.tools.length" />
             </span>
             <Button
               v-if="group.settings"
@@ -527,12 +531,6 @@ defineExpose({ reload: load })
   line-height: var(--lh-xs);
   font-weight: 600;
   color: rgb(var(--label-primary));
-}
-
-.count {
-  font-weight: 400;
-  color: rgb(var(--label-tertiary));
-  font-variant-numeric: tabular-nums;
 }
 
 .prompts,

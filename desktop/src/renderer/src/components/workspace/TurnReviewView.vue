@@ -7,6 +7,7 @@
  *
  * Props: request (TurnReviewRequest). Emits: close.
  */
+import Badge from '../ui/Badge.vue'
 import { ArrowLeft } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import type { TurnFileEntry } from '@emperor/core/runtime-contract'
@@ -127,9 +128,7 @@ function noteOf(entry: TurnFileEntry): string {
             <span class="dir">{{ splitFilePath(entry.path).dir }}</span>
             <span class="name">{{ splitFilePath(entry.path).name }}</span>
           </span>
-          <span v-if="fileStatusTag(entry)" class="tag">
-            {{ fileStatusTag(entry) }}
-          </span>
+          <Badge v-if="fileStatusTag(entry)">{{ fileStatusTag(entry) }}</Badge>
           <span v-if="noteOf(entry)" class="note">{{ noteOf(entry) }}</span>
           <span v-else class="counts">
             <span class="add">{{ lineCounts(entry).additions }}</span>
@@ -243,7 +242,6 @@ function noteOf(entry: TurnFileEntry): string {
   flex: none;
 }
 
-.tag,
 .note {
   flex: none;
   color: rgb(var(--label-secondary));

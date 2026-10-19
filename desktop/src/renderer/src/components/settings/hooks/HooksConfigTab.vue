@@ -7,7 +7,7 @@
  */
 import { computed } from 'vue'
 import Button from '../../ui/Button.vue'
-import { CodeEditor, SettingsGroup, SettingsRow, StatusBadge } from '../ui'
+import { CodeEditor, SettingsGroup, SettingsRow, Badge } from '../ui'
 import { useHooksController } from './hooksController'
 
 const {
@@ -54,7 +54,7 @@ const validationState = computed(() => {
     <SettingsGroup title="配置来源">
       <SettingsRow title="全局" dense>
         <template #badge>
-          <StatusBadge tone="accent">可编辑</StatusBadge>
+          <Badge tone="accent">可编辑</Badge>
         </template>
         <template #description>
           <code class="path">{{ payload?.path || '—' }}</code>
@@ -67,7 +67,7 @@ const validationState = computed(() => {
         dense
         data-testid="hooks-project-source"
       >
-        <template #badge><StatusBadge>只读</StatusBadge></template>
+        <template #badge><Badge>只读</Badge></template>
         <template #description>
           <code class="path">{{ file }}</code>
         </template>
@@ -103,9 +103,9 @@ const validationState = computed(() => {
           :data-event="row.eventName"
         >
           <span class="event-name">{{ row.eventName }}</span>
-          <StatusBadge :tone="row.count ? 'ok' : 'neutral'" mono>
+          <Badge :tone="row.count ? 'ok' : 'neutral'" mono>
             {{ row.count }}
-          </StatusBadge>
+          </Badge>
         </li>
       </ul>
     </SettingsGroup>
@@ -116,7 +116,7 @@ const validationState = computed(() => {
       plain
     >
       <template #actions>
-        <StatusBadge v-if="dirty" tone="warn" dot>未保存</StatusBadge>
+        <Badge v-if="dirty" tone="warn" variant="dot-label">未保存</Badge>
       </template>
       <div class="editor-block">
         <CodeEditor
@@ -144,16 +144,20 @@ const validationState = computed(() => {
             :data-state="validationState"
             aria-live="polite"
           >
-            <StatusBadge v-if="validationState === 'valid'" tone="ok" dot>
+            <Badge
+              v-if="validationState === 'valid'"
+              tone="ok"
+              variant="dot-label"
+            >
               配置有效
-            </StatusBadge>
-            <StatusBadge
+            </Badge>
+            <Badge
               v-else-if="validationState === 'invalid'"
               tone="error"
-              dot
+              variant="dot-label"
             >
               校验未通过
-            </StatusBadge>
+            </Badge>
             <span v-else class="muted">尚未校验</span>
           </div>
           <div class="actions">

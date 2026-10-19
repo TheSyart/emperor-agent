@@ -78,7 +78,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(dialog.locator('[data-permission="all"]')).toContainText(
       '已允许',
     )
-    await expect(dialog.locator('.ds-settings-notice')).toHaveCount(0)
+    await expect(dialog.locator('.ds-notice')).toHaveCount(0)
     await expect(dialog).toContainText('已保存 14 张，共 9.0 MB')
     // No app lists and no emergency stop (2026-10-01). The page body only:
     // the nav has its own 高级 section (KRN-08).

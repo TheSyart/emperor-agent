@@ -10,9 +10,10 @@
  * - selected?: the provider currently chosen (marked, aria-pressed).
  * Emits: pick(providerName).
  */
+import EmptyState from '../../ui/EmptyState.vue'
 import { computed, ref } from 'vue'
 import type { ProviderOption } from '../../../types'
-import ProviderLogo from '../../ui/ProviderLogo.vue'
+import Avatar from '../../ui/Avatar.vue'
 import { SearchField } from '../ui'
 import {
   providerDisplayName,
@@ -77,10 +78,11 @@ function tileParts(option: ProviderOption): { name: string; caption: string } {
           :aria-label="tileLabel(option)"
           @click="emit('pick', option.name)"
         >
-          <ProviderLogo
+          <Avatar
+            kind="logo"
             :icon-id="option.iconId || option.name"
             :label="providerDisplayName(option.name, option)"
-            size="sm"
+            :size="24"
           />
           <span class="tile-text">
             <span class="tile-name">{{ tileParts(option).name }}</span>
@@ -91,7 +93,7 @@ function tileParts(option: ProviderOption): { name: string; caption: string } {
         </button>
       </div>
     </section>
-    <p v-if="!sections.length" class="empty">没有匹配的供应商</p>
+    <EmptyState v-if="!sections.length" title="没有匹配的供应商" />
   </div>
 </template>
 
@@ -184,14 +186,5 @@ function tileParts(option: ProviderOption): { name: string; caption: string } {
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
   color: rgb(var(--label-tertiary));
-}
-
-.empty {
-  margin: 0;
-  padding: var(--space-4) 0;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
-  text-align: center;
 }
 </style>

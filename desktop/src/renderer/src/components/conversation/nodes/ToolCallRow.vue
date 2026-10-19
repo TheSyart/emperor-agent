@@ -2,7 +2,7 @@
 /**
  * ToolCallRow — dsh ToolRow: one 24px line `[icon] 标题 · 摘要`; the icon
  * crossfades to a chevron on hover; running plays the glare sweep; error /
- * interrupted swap the icon for a StateDot and an error row's summary is
+ * interrupted swap the icon for a Dot and an error row's summary is
  * the failure's first line in the danger color. The expanded body is the
  * registry's tool view (collapsed by default) with a hover-revealed
  * Inspect pill that jumps to the trajectory.
@@ -15,9 +15,8 @@ import type { AgentView } from '@emperor/core/api'
 import type { ToolChatData } from '../../../conversation/types'
 import { DsInspect } from '../../icons/ds'
 import DisclosureRow from '../../ui/DisclosureRow.vue'
-import StateDot from '../../ui/StateDot.vue'
-import SubagentAvatar from '../../ui/SubagentAvatar.vue'
-import ProviderLogo from '../../ui/ProviderLogo.vue'
+import Dot from '../../ui/Dot.vue'
+import Avatar from '../../ui/Avatar.vue'
 import { useChatContext, useExpansion } from '../chatContext'
 import { TOOL_BODIES } from '../tools/bodies'
 import { toolView } from '../tools/registry'
@@ -81,21 +80,23 @@ const stateLabel = computed(() => {
       :tone="failure !== null ? 'error' : 'default'"
     >
       <template #icon>
-        <SubagentAvatar
+        <Avatar
+          kind="sprite"
           v-if="!data.externalAgent && (data.subagent?.subagentId || agent?.id)"
-          :session-id="data.subagent?.subagentId || agent!.id"
+          :id="data.subagent?.subagentId || agent!.id"
           :size="20"
         />
-        <StateDot v-else-if="state === 'error'" state="error" />
-        <StateDot v-else-if="state === 'stopped'" state="warn" />
-        <ProviderLogo
+        <Dot v-else-if="state === 'error'" state="error" />
+        <Dot v-else-if="state === 'stopped'" state="warn" />
+        <Avatar
+          kind="logo"
           v-else-if="
             (data.name === 'subagent' || data.name === 'subagent_fork') &&
             (backend === 'codex' || backend === 'claude-code')
           "
           :icon-id="backend"
           :label="backend === 'codex' ? 'Codex' : 'Claude Code'"
-          size="xs"
+          :size="16"
           :data-agent-logo="backend"
         />
         <component :is="view.icon" v-else :size="14" />

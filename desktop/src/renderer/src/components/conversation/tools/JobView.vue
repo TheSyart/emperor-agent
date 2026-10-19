@@ -2,9 +2,9 @@
 /** JobView — job_output / job_kill / job_list: job facts + output text. */
 import { computed } from 'vue'
 import type { ToolChatData } from '../../../conversation/types'
-import Pill from '../../ui/Pill.vue'
-import StateDot from '../../ui/StateDot.vue'
-import { stateFromStatus } from '../../ui/stateDot'
+import Badge from '../../ui/Badge.vue'
+import Dot from '../../ui/Dot.vue'
+import { dotFromStatus } from '../../ui/dot'
 import { JOB_STATUS_LABEL, metaOf, resultText } from './toolModel'
 
 interface JobFacts {
@@ -28,16 +28,16 @@ const output = computed(() =>
   resultText(props.data).replace(/\n?\[status: [^\]]*\]\s*$/u, ''),
 )
 function dot(status: string | undefined) {
-  return status === 'completed' ? 'ok' : stateFromStatus(status)
+  return status === 'completed' ? 'ok' : dotFromStatus(status)
 }
 </script>
 
 <template>
   <div class="job-view">
     <div v-for="(job, index) in jobs" :key="job.id ?? index" class="job">
-      <StateDot :state="dot(job.status)" />
+      <Dot :state="dot(job.status)" />
       <code class="id">{{ job.id }}</code>
-      <Pill v-if="job.kind">{{ job.kind }}</Pill>
+      <Badge v-if="job.kind">{{ job.kind }}</Badge>
       <span class="label">{{ job.label }}</span>
       <span class="status">{{
         JOB_STATUS_LABEL[job.status ?? ''] ?? job.status

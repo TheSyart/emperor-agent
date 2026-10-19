@@ -39,10 +39,13 @@ import { useSettingsHeader } from '../settingsHeader'
 import {
   EmptyState,
   SettingsGroup,
-  SettingsNotice,
   SettingsRow,
   SettingsSection,
-  StatusBadge,
+  Checkbox,
+  Notice,
+  Badge,
+  TextArea,
+  TextField,
 } from '../ui'
 import {
   TOTP_WARNING,
@@ -441,7 +444,7 @@ onBeforeUnmount(hidePassword)
   <SettingsSection
     intro="Emperor 操作网页和 App 时用来代填的账号密码，每次代填前都会请你确认。"
   >
-    <SettingsNotice
+    <Notice
       v-if="problem"
       tone="error"
       :title="problem.title"
@@ -485,23 +488,19 @@ onBeforeUnmount(hidePassword)
           >清空</Button
         >
       </template>
-    </SettingsNotice>
-    <SettingsNotice v-if="pageError" tone="error" :title="pageError" />
-    <SettingsNotice v-if="note" tone="info" :title="note" />
+    </Notice>
+    <Notice v-if="pageError" tone="error" :title="pageError" />
+    <Notice v-if="note" tone="info" :title="note" />
     <SettingsGroup title="保护">
       <SettingsRow title="保护状态" :description="availability.description">
-        <StatusBadge :tone="availability.tone">{{
-          availability.badge
-        }}</StatusBadge>
+        <Badge :tone="availability.tone">{{ availability.badge }}</Badge>
       </SettingsRow>
       <SettingsRow
         v-if="encryption"
         title="加密方式"
         :description="encryption.description"
       >
-        <StatusBadge :tone="encryption.tone">{{
-          encryption.badge
-        }}</StatusBadge>
+        <Badge :tone="encryption.tone">{{ encryption.badge }}</Badge>
       </SettingsRow>
       <SettingsRow
         v-if="status?.available"
@@ -562,9 +561,10 @@ onBeforeUnmount(hidePassword)
     >
       <EmptyState
         v-if="!status?.handles.length"
-        compact
         title="还没有保存的密码"
         description="点右上角的「添加」保存一个。"
+        variant="inline"
+        framed
       />
       <SettingsRow
         v-for="handle in status?.handles ?? []"
@@ -580,9 +580,12 @@ onBeforeUnmount(hidePassword)
             >{{ unsignedAppWarning(handle) }}</span
           >
         </template>
-        <input
+        <TextField
           v-if="revealed?.handleId === handle.handleId"
-          :value="revealed.password"
+          class="vault-revealed"
+          size="sm"
+          monospace
+          :model-value="revealed.password"
           readonly
           aria-label="已验证的密码，30 秒后隐藏"
         />
@@ -650,9 +653,9 @@ onBeforeUnmount(hidePassword)
         autocomplete="off"
         @submit.prevent="submitProtect"
       >
-        <SettingsNotice v-if="error" tone="error" :title="error" />
+        <Notice v-if="error" tone="error" :title="error" />
         <label v-if="protect === 'unlock'"
-          >主密码<input
+          >主密码<TextField
             v-model="master"
             type="password"
             autocomplete="off"
@@ -661,7 +664,7 @@ onBeforeUnmount(hidePassword)
         /></label>
         <template v-else>
           <label v-if="protect === 'change'"
-            >当前主密码<input
+            >当前主密码<TextField
               v-model="currentMaster"
               type="password"
               autocomplete="current-password"
@@ -669,7 +672,7 @@ onBeforeUnmount(hidePassword)
               required
           /></label>
           <label
-            >新的主密码<input
+            >新的主密码<TextField
               v-model="master"
               type="password"
               autocomplete="new-password"
@@ -677,7 +680,7 @@ onBeforeUnmount(hidePassword)
               required
           /></label>
           <label
-            >再次输入新的主密码<input
+            >再次输入新的主密码<TextField
               v-model="confirmMaster"
               type="password"
               autocomplete="new-password"
@@ -714,12 +717,12 @@ onBeforeUnmount(hidePassword)
         autocomplete="off"
         @submit.prevent="removeMaster"
       >
-        <SettingsNotice v-if="error" tone="error" :title="error" />
+        <Notice v-if="error" tone="error" :title="error" />
         <p class="vault-note">
           移除后，已保存的密码只由本地密钥保护：以你身份运行的程序也能读到这把密钥。
         </p>
         <label
-          >当前主密码<input
+          >当前主密码<TextField
             v-model="currentMaster"
             type="password"
             autocomplete="current-password"
@@ -747,7 +750,7 @@ onBeforeUnmount(hidePassword)
       @update:open="startOverOpen = $event"
     >
       <div class="vault-dialog">
-        <SettingsNotice v-if="error" tone="error" :title="error" />
+        <Notice v-if="error" tone="error" :title="error" />
         <p class="vault-note">
           现在的凭据库文件会原样另存为 vault.json.unreadable-时间 或
           vault.json.newer-时间（只有你能读），然后从一个空的凭据库开始。以后可以用更新的
@@ -780,13 +783,13 @@ onBeforeUnmount(hidePassword)
         autocomplete="off"
         @submit.prevent="exportBackup"
       >
-        <SettingsNotice v-if="error" tone="error" :title="error" />
+        <Notice v-if="error" tone="error" :title="error" />
         <p class="vault-note">
           备份文件包含全部凭据和本地密钥，用这个口令加密（scrypt
           派生密钥）。至少 12 个字符；忘记口令就无法从备份恢复。
         </p>
         <label
-          >备份口令<input
+          >备份口令<TextField
             v-model="passphrase"
             type="password"
             autocomplete="new-password"
@@ -794,7 +797,7 @@ onBeforeUnmount(hidePassword)
             required
         /></label>
         <label
-          >再次输入备份口令<input
+          >再次输入备份口令<TextField
             v-model="confirmPassphrase"
             type="password"
             autocomplete="new-password"
@@ -827,12 +830,12 @@ onBeforeUnmount(hidePassword)
         autocomplete="off"
         @submit.prevent="importBackup"
       >
-        <SettingsNotice v-if="error" tone="error" :title="error" />
+        <Notice v-if="error" tone="error" :title="error" />
         <p class="vault-note">
           {{ importName }}：备份里的凭据会合并进来，同一条凭据以备份为准。
         </p>
         <label
-          >备份口令<input
+          >备份口令<TextField
             v-model="passphrase"
             type="password"
             autocomplete="off"
@@ -865,19 +868,21 @@ onBeforeUnmount(hidePassword)
         autocomplete="off"
         @submit.prevent="save"
       >
-        <SettingsNotice v-if="error" tone="error" :title="error" />
+        <Notice v-if="error" tone="error" :title="error" />
         <label
-          >名称<input v-model="form.label" required maxlength="120"
+          >名称<TextField v-model="form.label" required maxlength="120"
         /></label>
         <label
-          >网站 origin（每行一个）<textarea
+          >网站 origin（每行一个）<TextArea
+            :min-rows="2"
             v-model="form.origin"
             placeholder="https://example.com"
             spellcheck="false"
           />
         </label>
         <label
-          >macOS App 绑定（每行 Bundle ID | Team ID | 绝对路径）<textarea
+          >macOS App 绑定（每行 Bundle ID | Team ID | 绝对路径）<TextArea
+            :min-rows="2"
             v-model="form.appBindings"
             placeholder="com.example.Writer | EXAMPLE123 |&#10;com.example.Unsigned | | /Applications/Unsigned.app"
             spellcheck="false"
@@ -889,7 +894,7 @@ onBeforeUnmount(hidePassword)
         </p>
         <p v-if="formUnsigned" class="vault-warning">{{ formUnsigned }}</p>
         <label
-          >用户名<input
+          >用户名<TextField
             v-model="form.username"
             autocomplete="off"
             :placeholder="
@@ -897,7 +902,7 @@ onBeforeUnmount(hidePassword)
             "
         /></label>
         <label
-          >密码<input
+          >密码<TextField
             v-model="password"
             type="password"
             autocomplete="new-password"
@@ -905,24 +910,23 @@ onBeforeUnmount(hidePassword)
             :placeholder="editing ? '留空则保持不变' : ''"
         /></label>
         <label
-          >TOTP 密钥（可选）<input
+          >TOTP 密钥（可选）<TextField
             v-model="totpSeed"
             type="password"
             autocomplete="off"
             :disabled="form.removeTotp"
             :placeholder="form.totpSaved ? '已保存，留空则保持不变' : ''"
         /></label>
-        <label v-if="editing && form.totpSaved" class="vault-check"
-          ><input
-            v-model="form.removeTotp"
-            type="checkbox"
-            @change="removeTotpChanged"
-          />删除已保存的 TOTP 密钥</label
+        <Checkbox
+          v-if="editing && form.totpSaved"
+          v-model="form.removeTotp"
+          class="vault-check"
+          @change="removeTotpChanged"
+          >删除已保存的 TOTP 密钥</Checkbox
         >
         <p v-if="totpSeed" class="vault-warning">{{ TOTP_WARNING }}</p>
-        <label class="vault-check"
-          ><input v-model="form.revealUsername" type="checkbox" />允许 Agent
-          查看用户名</label
+        <Checkbox v-model="form.revealUsername" class="vault-check"
+          >允许 Agent 查看用户名</Checkbox
         >
         <p class="vault-note">
           Agent 每次代填账号、密码或验证码前都会暂停并请你确认。
@@ -957,38 +961,17 @@ onBeforeUnmount(hidePassword)
   gap: var(--space-3);
   padding-top: var(--space-3);
 }
-.vault-form label,
-.vault-protect label,
-.vault-dialog label {
+.vault-form label:not(.vault-check),
+.vault-protect label:not(.vault-check),
+.vault-dialog label:not(.vault-check) {
   display: grid;
   gap: var(--space-1);
   font-size: var(--fs-xs);
   color: rgb(var(--label-secondary));
 }
-.vault-form input:not([type='checkbox']),
-.vault-protect input:not([type='checkbox']),
-.vault-dialog input:not([type='checkbox']),
-.vault-form select,
-.vault-form textarea,
-.vault-inline input:not([type='checkbox']) {
-  min-width: 0;
-  padding: var(--space-2);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-row);
-  background: transparent;
-  color: rgb(var(--label-primary));
-}
-.vault-form .vault-check,
-.vault-protect .vault-check,
-.vault-inline .vault-check {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-.vault-check input[type='checkbox'] {
-  flex: none;
+.vault-revealed {
   width: auto;
-  margin: 0;
+  min-width: 0;
 }
 .vault-inline .vault-check {
   font-size: var(--fs-xs);

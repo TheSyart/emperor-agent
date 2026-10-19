@@ -15,7 +15,9 @@ import type {
   TurnFilesReverted,
 } from '@emperor/core/runtime-contract'
 import { core } from '../../../api/http'
+import Badge from '../../ui/Badge.vue'
 import Button from '../../ui/Button.vue'
+import Checkbox from '../../ui/Checkbox.vue'
 import Modal from '../../ui/Modal.vue'
 import { fileStatusTag, splitFilePath } from './turnFilesModel'
 
@@ -84,24 +86,22 @@ async function confirm(): Promise<void> {
     </p>
     <ul class="files" aria-label="要撤销的文件">
       <li v-for="file in files" :key="file.path">
-        <label class="file" :class="{ disabled: file.tooLarge }">
-          <input
-            type="checkbox"
-            :checked="chosen.has(file.path)"
-            :disabled="file.tooLarge || busy"
-            @change="
-              toggle(file.path, ($event.target as HTMLInputElement).checked)
-            "
-          />
+        <Checkbox
+          class="file"
+          :class="{ disabled: file.tooLarge }"
+          :model-value="chosen.has(file.path)"
+          :disabled="file.tooLarge || busy"
+          @update:model-value="toggle(file.path, $event)"
+        >
           <span class="path" :title="file.path">
             <span class="dir">{{ splitFilePath(file.path).dir }}</span>
             <span class="name">{{ splitFilePath(file.path).name }}</span>
           </span>
-          <span v-if="file.tooLarge" class="tag">过大，无法撤销</span>
-          <span v-else-if="fileStatusTag(file)" class="tag">
+          <Badge v-if="file.tooLarge" tone="warn">过大，无法撤销</Badge>
+          <Badge v-else-if="fileStatusTag(file)">
             {{ fileStatusTag(file) }}
-          </span>
-        </label>
+          </Badge>
+        </Checkbox>
       </li>
     </ul>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -142,23 +142,18 @@ async function confirm(): Promise<void> {
 
 .file {
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
   padding: var(--space-1) 0;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  cursor: pointer;
 }
 
-.file input {
-  flex: none;
-  width: auto;
-  margin: 0;
-  accent-color: rgb(var(--accent));
+.file :deep(.label) {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
 .file.disabled {
-  cursor: default;
   color: rgb(var(--label-tertiary));
 }
 
@@ -180,12 +175,6 @@ async function confirm(): Promise<void> {
 
 .name {
   flex: none;
-}
-
-.tag {
-  flex: none;
-  color: rgb(var(--label-secondary));
-  font-size: var(--fs-xxs);
 }
 
 .error {

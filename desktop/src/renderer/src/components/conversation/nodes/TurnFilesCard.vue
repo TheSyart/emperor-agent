@@ -11,6 +11,7 @@
  *
  * Props: node (TurnFilesChatNode).
  */
+import Badge from '../../ui/Badge.vue'
 import { ChevronDown, ChevronUp, FileDiff, Info, Undo2 } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 import type { TurnFilesChatNode } from '../../../conversation/types'
@@ -178,7 +179,7 @@ function openFile(path: string): void {
                 v-if="row.tag || row.outcome || 'note' in row.counts"
                 class="file-meta"
               >
-                <span v-if="row.tag" class="tag">{{ row.tag }}</span>
+                <Badge v-if="row.tag">{{ row.tag }}</Badge>
                 <span v-if="row.outcome" class="outcome">{{
                   row.outcome
                 }}</span>

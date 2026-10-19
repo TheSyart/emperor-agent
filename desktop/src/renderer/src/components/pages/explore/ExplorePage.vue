@@ -13,6 +13,7 @@
  *   verifies.
  * A Skill or MCP entry that is already present reads 「已安装」.
  */
+import Badge from '../../ui/Badge.vue'
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { openLink } from '../../../api/backend'
@@ -168,7 +169,7 @@ function clearFilters() {
             @click="filter = item.id"
           >
             {{ item.label }}
-            <span class="count">{{ counts[item.id] }}</span>
+            <Badge variant="count" :label="counts[item.id]" />
           </Chip>
         </div>
       </div>
@@ -188,6 +189,7 @@ function clearFilters() {
         title="暂无精选插件"
         description="目录里还没有经过核实的插件。可以在「能力」页的「插件」标签从本地文件夹、zip 或 HTTPS 地址安装。"
         data-testid="explore-empty"
+        framed
       >
         <Button
           size="sm"
@@ -199,10 +201,11 @@ function clearFilters() {
       </EmptyState>
       <EmptyState
         v-else
-        compact
         title="没有匹配的条目"
         description="换个关键词或类型试试。"
         data-testid="explore-empty"
+        variant="inline"
+        framed
       >
         <Button size="sm" variant="secondary" @click="clearFilters">
           清除筛选
@@ -252,12 +255,6 @@ function clearFilters() {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1-5);
-}
-
-.count {
-  margin-left: var(--space-1);
-  color: rgb(var(--label-tertiary));
-  font-variant-numeric: tabular-nums;
 }
 
 .grid {

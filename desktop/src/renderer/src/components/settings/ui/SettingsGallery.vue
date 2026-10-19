@@ -8,7 +8,7 @@
  */
 import { ref } from 'vue'
 import Button from '../../ui/Button.vue'
-import StateDot from '../../ui/StateDot.vue'
+import Dot from '../../ui/Dot.vue'
 import {
   DsClose,
   DsCode,
@@ -32,12 +32,12 @@ import {
   SettingsCard,
   SettingsGroup,
   SettingsHero,
-  SettingsNotice,
+  Notice,
   SettingsRow,
   SettingsSection,
   SettingsTable,
   SettingsTableRow,
-  StatusBadge,
+  Badge,
   Switch,
   TextArea,
   TextField,
@@ -181,22 +181,22 @@ const facts = [
           <SettingsSection
             intro="设置分区的基础组件：行、分组、卡片、表单、展示。所有尺寸按 dsh 设置面板，内容区 564px。"
           >
-            <SettingsNotice
+            <Notice
               tone="warn"
               title="还缺 2 项系统权限"
-              description="SettingsNotice：只在出问题时出现在页面最上面，写明缺什么、怎么修。"
+              description="Notice：只在出问题时出现在页面最上面，写明缺什么、怎么修。"
             >
               <template #actions>
                 <Button size="sm" variant="primary">请求权限</Button>
                 <Button size="sm" variant="secondary">打开系统设置</Button>
               </template>
-            </SettingsNotice>
+            </Notice>
             <SettingsHero
               title="Chrome 和 Edge"
               description="SettingsHero：只用于讲一件事的二级页"
             >
               <template #badge>
-                <StatusBadge tone="ok" dot>已连接 1 个浏览器</StatusBadge>
+                <Badge tone="ok" variant="dot-label">已连接 1 个浏览器</Badge>
               </template>
               <template #actions>
                 <Button size="sm" variant="secondary">重新安装扩展程序</Button>
@@ -215,7 +215,7 @@ const facts = [
               </SettingsRow>
               <SettingsRow title="失败回退" label-for="gallery-fallback">
                 <template #badge>
-                  <StatusBadge tone="accent">实验</StatusBadge>
+                  <Badge tone="accent">实验</Badge>
                 </template>
                 <Switch id="gallery-fallback" v-model="fallback" />
               </SettingsRow>
@@ -350,10 +350,10 @@ const facts = [
                 description="热点聚合 · 12 个工具"
                 expandable
               >
-                <template #leading><StateDot state="ok" /></template>
+                <template #leading><Dot state="ok" /></template>
                 <template #meta>
-                  <StatusBadge mono>http</StatusBadge>
-                  <StatusBadge tone="ok" dot>已连接</StatusBadge>
+                  <Badge mono>http</Badge>
+                  <Badge tone="ok" variant="dot-label">已连接</Badge>
                 </template>
                 <template #actions>
                   <Switch :model-value="true" aria-label="启用 aihot" />
@@ -371,10 +371,10 @@ const facts = [
                 description="npx exa-mcp-server"
                 expandable
               >
-                <template #leading><StateDot state="error" /></template>
+                <template #leading><Dot state="error" /></template>
                 <template #meta>
-                  <StatusBadge mono>stdio</StatusBadge>
-                  <StatusBadge tone="error" dot>启动失败</StatusBadge>
+                  <Badge mono>stdio</Badge>
+                  <Badge tone="error" variant="dot-label">启动失败</Badge>
                 </template>
                 <template #actions>
                   <Switch :model-value="false" aria-label="启用 exa" />
@@ -408,6 +408,7 @@ const facts = [
               <EmptyState
                 title="还没有 MCP 服务器"
                 description="粘贴 Claude / Cursor / VS Code 的配置，或手动填写 URL 与命令。"
+                framed
               >
                 <Button size="sm" variant="secondary">粘贴 JSON</Button>
                 <Button size="sm" variant="primary">添加服务器</Button>
@@ -415,18 +416,19 @@ const facts = [
               <EmptyState
                 title="暂无归档对话。"
                 description="compact 变体：列表内的单行空状态"
-                compact
+                variant="inline"
+                framed
               />
             </SettingsGroup>
 
             <SettingsGroup title="状态与指标" variant="stack">
               <div class="badges">
-                <StatusBadge tone="ok" dot>已连接</StatusBadge>
-                <StatusBadge tone="warn" dot>版本不匹配</StatusBadge>
-                <StatusBadge tone="error" dot>启动失败</StatusBadge>
-                <StatusBadge tone="neutral">已禁用</StatusBadge>
-                <StatusBadge tone="accent">推荐</StatusBadge>
-                <StatusBadge mono>v1.29.0</StatusBadge>
+                <Badge tone="ok" variant="dot-label">已连接</Badge>
+                <Badge tone="warn" variant="dot-label">版本不匹配</Badge>
+                <Badge tone="error" variant="dot-label">启动失败</Badge>
+                <Badge tone="neutral">已禁用</Badge>
+                <Badge tone="accent">推荐</Badge>
+                <Badge mono>v1.29.0</Badge>
               </div>
               <div class="metrics">
                 <Metric label="总 Token" value="1.28M" hint="近 30 天" />

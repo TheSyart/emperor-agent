@@ -9,13 +9,13 @@
  */
 import { computed } from 'vue'
 import { DsChevronRight } from '../../icons/ds'
-import { StatusBadge } from '../ui'
+import { Badge } from '../ui'
 import {
   activationState,
   scopeLabel,
   type PluginSummary,
 } from './pluginInstall'
-import PluginLogo from './PluginLogo.vue'
+import Avatar from '../../ui/Avatar.vue'
 import { pluginSourceTag } from './pluginsModel'
 
 const props = defineProps<{ plugin: PluginSummary }>()
@@ -36,15 +36,20 @@ const showScope = computed(
       :data-plugin-scope="plugin.scope"
       @click="emit('select')"
     >
-      <PluginLogo :name="plugin.displayName" :logo="plugin.logo" :size="32" />
+      <Avatar
+        kind="logo"
+        :label="plugin.displayName"
+        :src="plugin.logo"
+        :size="28"
+      />
       <span class="main">
         <span class="title-line">
           <span class="name">{{ plugin.displayName }}</span>
-          <StatusBadge>{{ pluginSourceTag(plugin) }}</StatusBadge>
-          <StatusBadge v-if="showScope">{{
-            scopeLabel(plugin.scope)
-          }}</StatusBadge>
-          <StatusBadge :tone="state.tone" dot>{{ state.label }}</StatusBadge>
+          <Badge>{{ pluginSourceTag(plugin) }}</Badge>
+          <Badge v-if="showScope">{{ scopeLabel(plugin.scope) }}</Badge>
+          <Badge :tone="state.tone" variant="dot-label">{{
+            state.label
+          }}</Badge>
         </span>
         <span class="description" :title="plugin.description || undefined">
           {{ plugin.description || '没有描述' }}

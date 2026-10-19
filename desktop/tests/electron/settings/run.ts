@@ -569,7 +569,7 @@ async function damagedVault(page: Page, home: string): Promise<void> {
       const damaged = readFileSync(vault, 'utf8')
       const dialog = await openSection(page, 'browser')
       await dialog.locator('[data-action="manage-passwords"]').click()
-      const notice = dialog.locator('.ds-settings-notice[data-tone="error"]')
+      const notice = dialog.locator('.ds-notice[data-tone="error"]')
       await notice.waitFor({ timeout: 10_000 })
       const text = await notice.innerText()
       if (!text.includes('凭据库无法读取')) throw new Error(`notice ${text}`)
@@ -588,7 +588,7 @@ async function damagedVault(page: Page, home: string): Promise<void> {
       const copy = readFileSync(join(home, 'computer-use', kept[0]!), 'utf8')
       if (copy !== damaged) throw new Error('the backup differs')
       const info = (
-        await dialog.locator('.ds-settings-notice').allInnerTexts()
+        await dialog.locator('.ds-notice').allInnerTexts()
       ).join(' ')
       if (!info.includes(kept[0]!)) throw new Error(`note ${info}`)
       return { backup: kept[0] }

@@ -160,7 +160,7 @@ afterEach(() => {
 })
 
 function notices(root: HTMLElement): HTMLElement[] {
-  return [...root.querySelectorAll<HTMLElement>('.ds-settings-notice')]
+  return [...root.querySelectorAll<HTMLElement>('.ds-notice')]
 }
 
 function rowText(root: HTMLElement, title: string): string {
@@ -235,7 +235,7 @@ describe('ComputerUseSection main page', () => {
     const root = await mount()
     const badge = (driver: string) =>
       root
-        .querySelector(`[data-driver="${driver}"] .ds-status-badge`)
+        .querySelector(`[data-driver="${driver}"] .ds-badge`)
         ?.textContent?.trim()
     expect(badge('desktop')).toBe('实验')
     expect(badge('external-browser')).toBeUndefined()

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * SkillRow — one Skill in the 能力 › Skills list: a full-width button
- * (14/22 medium name, source StatusBadge, 只读 / status badges, a warn glyph
+ * (14/22 medium name, source Badge, 只读 / status badges, a warn glyph
  * with the loader-warning count) over a one-line 13/20 tertiary
  * description; a trailing chevron shows it opens the detail. Rows sit in
  * the section's bordered list and draw their own l2 hairline.
@@ -11,7 +11,7 @@
 import { computed } from 'vue'
 import { DsChevronRight, DsWarning } from '../../icons/ds'
 import type { SkillInfo } from '../../../types'
-import { StatusBadge } from '../ui'
+import { Badge } from '../ui'
 import {
   isSkillReadOnly,
   skillSourceLabel,
@@ -40,11 +40,11 @@ const status = computed(() =>
       <span class="main">
         <span class="title-line">
           <span class="name">{{ skill.name }}</span>
-          <StatusBadge :tone="skillSourceTone(skill)">
+          <Badge :tone="skillSourceTone(skill)">
             {{ skillSourceLabel(skill) }}
-          </StatusBadge>
-          <StatusBadge v-if="isSkillReadOnly(skill)">只读</StatusBadge>
-          <StatusBadge v-if="status" tone="warn" mono>{{ status }}</StatusBadge>
+          </Badge>
+          <Badge v-if="isSkillReadOnly(skill)">只读</Badge>
+          <Badge v-if="status" tone="warn" mono>{{ status }}</Badge>
           <span
             v-if="warnings.length"
             class="warnings"

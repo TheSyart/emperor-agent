@@ -339,6 +339,7 @@ const deleteDialogOpen = computed({
         :icon="DsSkill"
         title="还没有 Skill"
         description="粘贴一个 SKILL.md，或把 Skill 文件夹放进个人 Skills 文件夹。"
+        framed
       >
         <Button size="sm" variant="primary" @click="pasteOpen = true">
           粘贴 SKILL.md
@@ -349,9 +350,10 @@ const deleteDialogOpen = computed({
       </EmptyState>
       <EmptyState
         v-else-if="filtered"
-        compact
         title="没有匹配的 Skill"
         description="换个关键词或来源试试。"
+        variant="inline"
+        framed
       >
         <Button size="sm" variant="secondary" @click="clearFilters">
           清除筛选

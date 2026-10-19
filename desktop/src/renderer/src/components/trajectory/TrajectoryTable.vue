@@ -13,6 +13,7 @@
  * Emits: record-select(index) (direct row selection), clear (whitespace
  * click: clears selection and the timeline range).
  */
+import EmptyState from '../ui/EmptyState.vue'
 import Spinner from '../ui/Spinner.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 // @ts-expect-error vue-virtual-scroller v2 beta 无类型声明（见 shims）
@@ -479,9 +480,10 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
           }}
         </button>
       </div>
-      <p v-if="openState === 'open' && layout.rows.length === 0" class="empty">
-        No trajectory records yet
-      </p>
+      <EmptyState
+        v-if="openState === 'open' && layout.rows.length === 0"
+        title="No trajectory records yet"
+      />
       <RecycleScroller
         v-if="virtual"
         class="list"
@@ -640,14 +642,6 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
 
 .history-button:disabled {
   cursor: default;
-}
-
-.empty {
-  margin: 0;
-  padding: var(--space-6) var(--space-4);
-  color: rgb(var(--label-tertiary));
-  font: var(--font-xs);
-  text-align: center;
 }
 
 .terminal-row {

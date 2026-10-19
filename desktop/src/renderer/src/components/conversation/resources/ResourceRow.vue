@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Badge from '../../ui/Badge.vue'
 import { ChevronRight } from 'lucide-vue-next'
 import { attachmentRawUrl } from '../../../api/attachments'
 import { openResourceImages } from './resourceImages'
@@ -50,11 +51,11 @@ defineProps<{
           · {{ resource.subtitle }}</template
         ></span
       ></button
-    ><span
+    ><Badge
       v-if="resource.uses && resource.uses.length > 1"
-      class="resource-row-count"
-      >×{{ resource.uses.length }}</span
-    ><ChevronRight class="resource-row-arrow" :size="12" />
+      variant="count"
+      :label="`×${resource.uses.length}`"
+    /><ChevronRight class="resource-row-arrow" :size="12" />
   </div>
 </template>
 <style scoped>
@@ -117,10 +118,6 @@ defineProps<{
   font: var(--font-xxs);
   color: rgb(var(--label-tertiary));
   overflow-wrap: anywhere;
-}
-.resource-row-count {
-  font: var(--font-xxxs);
-  color: rgb(var(--label-tertiary));
 }
 .resource-row-arrow {
   flex: none;

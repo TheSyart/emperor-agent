@@ -27,7 +27,7 @@ import type {
   ProviderOption,
 } from '../../types'
 import Button from '../ui/Button.vue'
-import ProviderLogo from '../ui/ProviderLogo.vue'
+import Avatar from '../ui/Avatar.vue'
 import { DsPlus } from '../icons/ds'
 import ModelEntryEditor from './model/ModelEntryEditor.vue'
 import ModelPolicyGroup from './model/ModelPolicyGroup.vue'
@@ -52,7 +52,7 @@ import {
   SettingsCard,
   SettingsGroup,
   SettingsSection,
-  StatusBadge,
+  Badge,
 } from './ui'
 
 /**
@@ -267,12 +267,7 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
   <SettingsSection
     intro="按供应商管理模型的连接、凭证与能力。对话使用哪个模型，在聊天输入框中选择。"
   >
-    <EmptyState
-      v-if="!payload"
-      title="正在读取模型配置…"
-      variant="plain"
-      compact
-    />
+    <EmptyState v-if="!payload" title="正在读取模型配置…" variant="inline" />
     <template v-else>
       <p v-if="notice" class="notice" role="status">{{ notice }}</p>
       <p v-if="listError" class="list-error" role="alert">{{ listError }}</p>
@@ -327,36 +322,37 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
           :data-provider="group.provider"
         >
           <template #leading>
-            <ProviderLogo
+            <Avatar
+              kind="logo"
               :icon-id="group.iconId"
               :label="group.label"
-              size="lg"
+              :size="40"
             />
           </template>
           <template #meta>
             <span class="model-count">{{ group.entries.length }} 个模型</span>
-            <StatusBadge
+            <Badge
               v-if="providerCredentialState(group) === 'ok'"
               tone="ok"
-              dot
+              variant="dot-label"
             >
               Key 已配置
-            </StatusBadge>
-            <StatusBadge
+            </Badge>
+            <Badge
               v-else-if="providerCredentialState(group) === 'reentry'"
               tone="warn"
-              dot
+              variant="dot-label"
             >
               凭据需要重新输入
-            </StatusBadge>
-            <StatusBadge
+            </Badge>
+            <Badge
               v-else-if="providerCredentialState(group) === 'missing'"
               tone="warn"
-              dot
+              variant="dot-label"
             >
               缺少 API Key
-            </StatusBadge>
-            <StatusBadge v-else>本地 · 无需 Key</StatusBadge>
+            </Badge>
+            <Badge v-else>本地 · 无需 Key</Badge>
           </template>
           <template #description>
             <span class="endpoint">{{ providerEndpointSummary(group) }}</span>
@@ -407,28 +403,24 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
                 <div class="model-text">
                   <span class="model-title">
                     <span class="model-name">{{ modelEntryLabel(entry) }}</span>
-                    <StatusBadge
+                    <Badge
                       v-if="entry.entryId === payload.activeModelId"
                       tone="accent"
                     >
                       当前
-                    </StatusBadge>
-                    <StatusBadge
+                    </Badge>
+                    <Badge
                       v-if="entry.credentialState === 'needs_reentry'"
                       tone="warn"
                     >
                       凭据需要重新输入
-                    </StatusBadge>
+                    </Badge>
                   </span>
                   <span class="model-meta">
                     <code class="model-id">{{ entry.modelId }}</code>
-                    <span
-                      v-for="tag in capabilityTags(entry)"
-                      :key="tag"
-                      class="cap-tag"
-                    >
+                    <Badge v-for="tag in capabilityTags(entry)" :key="tag">
                       {{ tag }}
-                    </span>
+                    </Badge>
                     <span v-if="contextLabel(entry)" class="context">
                       {{ contextLabel(entry) }}
                     </span>
@@ -493,6 +485,7 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
           v-if="!entries.length && !adding"
           title="还没有模型"
           description="添加一个模型后即可开始对话。"
+          framed
         >
           <Button size="sm" variant="secondary" @click="openAdd">
             添加第一个模型
@@ -632,15 +625,6 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
   font: var(--font-code-small);
   color: rgb(var(--label-secondary));
   overflow-wrap: anywhere;
-}
-
-.cap-tag {
-  padding: 0 var(--space-1);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-xs);
-  font-size: var(--fs-xxxs);
-  line-height: var(--lh-xxxs);
-  color: rgb(var(--label-secondary));
 }
 
 .model-actions {

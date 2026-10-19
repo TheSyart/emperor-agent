@@ -32,7 +32,7 @@ import {
 } from '../../../api/skills'
 import { useAppContext } from '../../../composables/useAppContext'
 import type { SkillInfo } from '../../../types'
-import { CodeEditor, DefinitionList, EmptyState, StatusBadge } from '../ui'
+import { CodeEditor, DefinitionList, EmptyState, Badge } from '../ui'
 import SkillConfirmDialog from './SkillConfirmDialog.vue'
 import SkillIssues from './SkillIssues.vue'
 import {
@@ -282,6 +282,7 @@ defineExpose({ reload: () => load(false), dirty })
       v-if="loadError && !detail"
       title="无法打开这个 Skill"
       :description="loadError"
+      framed
     >
       <Button size="sm" variant="secondary" @click="load()">重试</Button>
     </EmptyState>
@@ -290,11 +291,11 @@ defineExpose({ reload: () => load(false), dirty })
       <header class="head">
         <div class="title-line">
           <h3 class="name">{{ name }}</h3>
-          <StatusBadge :tone="skillSourceTone(skill)">
+          <Badge :tone="skillSourceTone(skill)">
             {{ skillSourceLabel(skill) }}
-          </StatusBadge>
-          <StatusBadge v-if="readOnly">只读</StatusBadge>
-          <StatusBadge v-if="dirty" tone="accent">未保存</StatusBadge>
+          </Badge>
+          <Badge v-if="readOnly">只读</Badge>
+          <Badge v-if="dirty" tone="accent">未保存</Badge>
         </div>
         <p class="description">{{ skill.description || '没有描述' }}</p>
       </header>
@@ -309,14 +310,14 @@ defineExpose({ reload: () => load(false), dirty })
       <div class="skill-editor">
         <div class="skill-editor-head">
           <h4 class="skill-editor-title">SKILL.md</h4>
-          <StatusBadge
+          <Badge
             v-if="badge"
             :tone="badge.tone"
-            dot
+            variant="dot-label"
             data-testid="skill-validation"
           >
             {{ badge.label }}
-          </StatusBadge>
+          </Badge>
           <Button
             v-if="dirty"
             size="sm"

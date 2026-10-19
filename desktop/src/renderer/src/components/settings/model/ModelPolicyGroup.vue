@@ -17,7 +17,7 @@ import {
   Select,
   SettingsGroup,
   SettingsRow,
-  StatusBadge,
+  Badge,
   Switch,
   TextField,
   settingsId,
@@ -103,9 +103,7 @@ async function save(): Promise<void> {
     data-testid="model-policy"
   >
     <template #actions>
-      <StatusBadge v-if="saved && !dirty" tone="ok" role="status">
-        已保存
-      </StatusBadge>
+      <Badge v-if="saved && !dirty" tone="ok" role="status"> 已保存 </Badge>
       <Button
         size="sm"
         variant="secondary"

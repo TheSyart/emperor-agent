@@ -14,10 +14,10 @@ import { DsDark, DsFollowSystem, DsLight } from '../icons/ds'
 import {
   EmptyState,
   SettingsGroup,
-  SettingsNotice,
+  Notice,
   SettingsRow,
   SettingsSection,
-  StatusBadge,
+  Badge,
   Switch,
 } from './ui'
 import { confirm } from '../ui/confirm'
@@ -169,9 +169,13 @@ function archivedMeta(session: SessionInfo) {
   <SettingsSection>
     <SettingsGroup>
       <SettingsRow title="运行状态" description="当前本地 Agent 服务状态">
-        <StatusBadge :tone="runtime.tone" dot data-testid="runtime-status">
+        <Badge
+          :tone="runtime.tone"
+          variant="dot-label"
+          data-testid="runtime-status"
+        >
           {{ runtime.text }}
-        </StatusBadge>
+        </Badge>
       </SettingsRow>
       <SettingsRow
         title="当前模型"
@@ -232,7 +236,7 @@ function archivedMeta(session: SessionInfo) {
       description="恢复后会重新出现在主侧边栏"
       data-group="archived"
     >
-      <SettingsNotice
+      <Notice
         v-if="archivedError"
         tone="error"
         title="无法读取归档对话"
@@ -243,20 +247,20 @@ function archivedMeta(session: SessionInfo) {
             >重试</Button
           >
         </template>
-      </SettingsNotice>
+      </Notice>
       <EmptyState
         v-else-if="archivedLoading && !archivedSessions.length"
         class="archive-empty"
         title="加载归档对话中…"
-        variant="plain"
-        compact
+        variant="inline"
       />
       <EmptyState
         v-else-if="!archivedSessions.length"
         class="archive-empty"
         title="暂无归档对话。"
         description="在侧边栏会话菜单中选择「归档」即可收进这里。"
-        compact
+        variant="inline"
+        framed
       />
       <template v-else>
         <SettingsRow
@@ -290,7 +294,7 @@ function archivedMeta(session: SessionInfo) {
       description="删除的对话保留 30 天，可以恢复；之后自动清除"
       data-group="deleted"
     >
-      <SettingsNotice
+      <Notice
         v-if="deletedError"
         tone="error"
         title="无法读取最近删除"
@@ -301,12 +305,13 @@ function archivedMeta(session: SessionInfo) {
             >重试</Button
           >
         </template>
-      </SettingsNotice>
+      </Notice>
       <EmptyState
         v-else-if="!deletedSessions.length"
         class="archive-empty"
         title="最近没有删除的对话。"
-        compact
+        variant="inline"
+        framed
       />
       <template v-else>
         <SettingsRow

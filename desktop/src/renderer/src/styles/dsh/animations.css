@@ -99,26 +99,3 @@
     transform: translateY(6px);
   }
 }
-
-/* StateDot ongoing:3x3 像素矩阵外圈 8 格顺时针追逐(阶梯式亮度,无补间)。 */
-@keyframes ds-state-chase {
-  0%,
-  12.4% {
-    opacity: 1;
-  }
-
-  12.5%,
-  24.9% {
-    opacity: 0.6;
-  }
-
-  25%,
-  37.4% {
-    opacity: 0.35;
-  }
-
-  37.5%,
-  100% {
-    opacity: 0.15;
-  }
-}

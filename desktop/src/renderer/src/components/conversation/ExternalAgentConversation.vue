@@ -57,7 +57,7 @@ import { provideDelegationLinks } from './delegationLinks'
 import ConversationMarkdown from './parts/ConversationMarkdown.vue'
 import ExternalAgentDetails from './environment/ExternalAgentDetails.vue'
 import Button from '../ui/Button.vue'
-import ProviderLogo from '../ui/ProviderLogo.vue'
+import Avatar from '../ui/Avatar.vue'
 const route = useRoute(),
   router = useRouter()
 const rootId = computed(() => String(route.params.sessionId ?? ''))
@@ -481,11 +481,12 @@ async function stop() {
       </nav>
       <div class="child-title">
         <h1 :title="title" :aria-label="title">{{ title }}</h1>
-        <ProviderLogo
+        <Avatar
+          kind="logo"
           v-if="record"
           :icon-id="record.backend"
           :label="agentSourceLabel(record.backend)"
-          size="xs"
+          :size="16"
         /><span v-if="record">{{ agentSourceLabel(record.backend) }}</span
         ><span role="status">{{ phase }}</span
         ><IconButton

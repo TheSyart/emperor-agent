@@ -6,7 +6,7 @@
  *
  * Props: state ('error' | 'warn'), title, message, code?.
  */
-import StateDot from '../../ui/StateDot.vue'
+import Dot from '../../ui/Dot.vue'
 
 defineProps<{
   state: 'error' | 'warn'
@@ -18,7 +18,7 @@ defineProps<{
 
 <template>
   <div class="notice" role="status" :data-state="state">
-    <StateDot :state="state" class="notice-dot" />
+    <Dot :state="state" class="notice-dot" />
     <div class="copy">
       <span class="title">{{ title }}</span>
       <span class="message">{{ message }}</span>

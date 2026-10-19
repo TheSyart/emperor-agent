@@ -12,7 +12,7 @@
 import { computed } from 'vue'
 import type { PullRequestBrowserStatus } from '../../../api/pullRequests'
 import Button from '../../ui/Button.vue'
-import EmptyState from '../../settings/ui/EmptyState.vue'
+import EmptyState from '../../ui/EmptyState.vue'
 import { pullIcons } from './pullIcons'
 
 const props = withDefaults(
@@ -45,7 +45,7 @@ const title = computed(() =>
 
 <template>
   <div class="pr-unavailable" :data-reason="reason" role="status">
-    <EmptyState variant="plain" :title="title">
+    <EmptyState :title="title">
       <template #icon>
         <span class="icon-well"><component :is="icon" :size="22" /></span>
       </template>

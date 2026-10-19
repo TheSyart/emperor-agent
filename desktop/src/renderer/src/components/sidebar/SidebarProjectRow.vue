@@ -4,6 +4,7 @@
  * chevron on hover), name, session count, and a hover 新建该项目会话 button.
  * Clicking the row folds / unfolds its sessions.
  */
+import Badge from '../ui/Badge.vue'
 import type { SidebarProjectGroup } from '../../runtime/sidebarModel'
 import {
   DsChevronRight,
@@ -39,7 +40,11 @@ const emit = defineEmits<{ toggle: []; 'new-session': [] }>()
       />
     </span>
     <span class="project-name">{{ project.name }}</span>
-    <span class="project-count">{{ project.sessions.length }}</span>
+    <Badge
+      class="project-count"
+      variant="count"
+      :label="project.sessions.length"
+    />
     <button
       type="button"
       class="row-action"
@@ -111,13 +116,6 @@ const emit = defineEmits<{ toggle: []; 'new-session': [] }>()
   line-height: var(--space-5);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.project-count {
-  flex: none;
-  font-size: var(--fs-xxs);
-  line-height: var(--space-5);
-  color: rgb(var(--label-tertiary));
 }
 
 .row-action {

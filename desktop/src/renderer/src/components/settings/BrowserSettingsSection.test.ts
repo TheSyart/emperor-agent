@@ -211,7 +211,7 @@ describe('BrowserSettingsSection', () => {
     // No lead-in paragraph and nothing above the control card while all is
     // well: the cards say it.
     expect(root.querySelector('.ds-settings-section .intro')).toBeNull()
-    expect(root.querySelector('.ds-settings-notice')).toBeNull()
+    expect(root.querySelector('.ds-notice')).toBeNull()
     expect(
       root.querySelector('.ds-settings-section > .body')?.firstElementChild,
     ).toBe(root.querySelector('[data-testid="browser-agent-card"]'))
@@ -321,7 +321,7 @@ describe('BrowserSettingsSection', () => {
     // The outcome is a status badge in the row itself, before its button.
     const outcome = () =>
       row(root, '浏览数据').querySelector<HTMLElement>('[data-clear-status]')
-    expect(outcome()?.classList.contains('ds-status-badge')).toBe(true)
+    expect(outcome()?.classList.contains('ds-badge')).toBe(true)
     expect(outcome()?.dataset.tone).toBe('ok')
     expect(outcome()?.textContent?.trim()).toBe('已清除')
     expect(outcome()?.nextElementSibling).toBe(button())
@@ -334,7 +334,7 @@ describe('BrowserSettingsSection', () => {
       row(root, '浏览数据').querySelector('.description [role="alert"]')
         ?.textContent,
     ).toContain('disk busy')
-    expect(root.querySelector('.ds-settings-notice')).toBeNull()
+    expect(root.querySelector('.ds-notice')).toBeNull()
   })
 
   it('says what went wrong in a notice at the top of the page', async () => {
@@ -349,7 +349,7 @@ describe('BrowserSettingsSection', () => {
       return await invoke(key, input)
     }
     const root = await mount()
-    const notice = root.querySelector<HTMLElement>('.ds-settings-notice')
+    const notice = root.querySelector<HTMLElement>('.ds-notice')
     expect(notice?.dataset.tone).toBe('error')
     expect(notice?.getAttribute('role')).toBe('alert')
     expect(notice?.textContent).toContain('电脑操作服务没有响应')

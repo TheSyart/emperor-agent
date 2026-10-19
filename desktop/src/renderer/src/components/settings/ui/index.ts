@@ -47,8 +47,8 @@
  *        </SettingsGroup>
  *        <SettingsGroup title="服务器" variant="stack">   // cards 8px apart
  *          <SettingsCard v-for … expandable v-model:open="open[id]" :title :description>
- *            <template #leading><StateDot … /></template>
- *            <template #meta><StatusBadge tone="ok" dot>已连接</StatusBadge></template>
+ *            <template #leading><Dot … /></template>
+ *            <template #meta><Badge tone="ok" variant="dot-label">已连接</Badge></template>
  *            <template #actions><Switch v-model … aria-label="启用" /></template>
  *            <DefinitionList :items="facts" />
  *            <template #footer><Button size="sm" …>保存</Button></template>
@@ -67,7 +67,7 @@
  *      `<SettingsCard master>` puts its 18px glyph on a gold tile.
  *    - Order a page by what the user decides: the switches and choices
  *      first, then the rest. When something is wrong, show one
- *      SettingsNotice at the top (tone warn / error / info, with the fix
+ *      Notice at the top (tone warn / error / info, with the fix
  *      buttons) instead of status rows; a page that is fine shows none.
  *    - SettingsRow: text left / control right; `layout="stacked"` puts the
  *      control under the text; `dense` for list rows; `#eyebrow` for a small
@@ -84,7 +84,7 @@
  *      inside cards / rows).
  *    - Editors that should take the remaining height: <SettingsSection fill>
  *      + <SettingsGroup fill> + <CodeEditor fill />.
- *    - Status colors: StatusBadge / Metric tones, or the tokens
+ *    - Status colors: Badge / Metric tones, or the tokens
  *      --state-{ok,warn,error}[-soft|-label] (no ad-hoc success/warning names).
  *    - Own container queries: `@container (max-width: …)` inside a
  *      SettingsSection resolves against the section width.
@@ -97,22 +97,23 @@
 export { default as SettingsSection } from './SettingsSection.vue'
 export { default as SettingsGroup } from './SettingsGroup.vue'
 export { default as SettingsHero } from './SettingsHero.vue'
-export { default as SettingsNotice } from './SettingsNotice.vue'
+export { default as Notice } from '../../ui/Notice.vue'
+export { default as Checkbox } from '../../ui/Checkbox.vue'
 export { default as SettingsTable } from './SettingsTable.vue'
 export { default as SettingsTableRow } from './SettingsTableRow.vue'
 export { default as SettingsRow } from './SettingsRow.vue'
 export { default as SettingsCard } from './SettingsCard.vue'
-export { default as Field } from './Field.vue'
-export { default as TextField } from './TextField.vue'
-export { default as TextArea } from './TextArea.vue'
+export { default as Field } from '../../ui/Field.vue'
+export { default as TextField } from '../../ui/TextField.vue'
+export { default as TextArea } from '../../ui/TextArea.vue'
 export { default as CodeEditor } from './CodeEditor.vue'
-export { default as Select } from './Select.vue'
-export { default as Switch } from './Switch.vue'
-export { default as Segmented } from './Segmented.vue'
-export { default as SearchField } from './SearchField.vue'
-export { default as EmptyState } from './EmptyState.vue'
+export { default as Select } from '../../ui/Select.vue'
+export { default as Switch } from '../../ui/Switch.vue'
+export { default as Segmented } from '../../ui/Segmented.vue'
+export { default as SearchField } from '../../ui/SearchField.vue'
+export { default as EmptyState } from '../../ui/EmptyState.vue'
 export { default as DefinitionList } from './DefinitionList.vue'
-export { default as StatusBadge } from './StatusBadge.vue'
+export { default as Badge } from '../../ui/Badge.vue'
 export { default as Metric } from './Metric.vue'
 export type {
   DefinitionItem,
@@ -120,7 +121,11 @@ export type {
   SelectOption,
   SettingsTableColumn,
 } from './types'
-export { FIELD_CONTEXT, settingsId, useFieldControl } from './fieldContext'
+export {
+  FIELD_CONTEXT,
+  settingsId,
+  useFieldControl,
+} from '../../ui/fieldContext'
 export {
   refreshAction,
   useSettingsHeader,

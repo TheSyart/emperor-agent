@@ -9,7 +9,7 @@ import { computed, nextTick, ref } from 'vue'
 import { DsMore } from '../icons/ds'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
-import StateDot from '../ui/StateDot.vue'
+import Dot from '../ui/Dot.vue'
 import type { SessionRuntimeIndicator } from '../../runtime/sidebarModel'
 import { sidebarRelativeTime } from '../../runtime/sidebarModel'
 import type { SessionInfo } from '../../types'
@@ -101,22 +101,19 @@ defineExpose({ beginRename })
   >
     <div class="line">
       <span class="slot" aria-hidden="true">
-        <StateDot
+        <Dot
           v-if="indicator === 'running'"
-          state="ongoing"
-          :size="10"
+          state="running"
           :label="stateLabel"
         />
-        <StateDot
+        <Dot
           v-else-if="indicator === 'pending'"
           state="warn"
-          :size="8"
           :label="stateLabel"
         />
-        <StateDot
+        <Dot
           v-else-if="indicator === 'attention'"
           state="ok"
-          :size="8"
           :label="stateLabel"
         />
       </span>

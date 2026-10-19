@@ -34,7 +34,7 @@ import {
   SettingsCard,
   SettingsGroup,
   SettingsSection,
-  StatusBadge,
+  Badge,
 } from './ui'
 import { refreshAction, useSettingsHeader } from './settingsHeader'
 import { onPageReactivated } from '../pages/pageLifecycle'
@@ -309,9 +309,10 @@ async function saveDraft() {
     <SettingsGroup title="服务器" :description="summary" variant="stack">
       <EmptyState
         v-if="loadError && !config"
-        compact
         title="无法读取 MCP 配置"
         :description="loadError"
+        variant="inline"
+        framed
       >
         <Button size="sm" variant="secondary" @click="refresh(true)"
           >重试</Button
@@ -323,6 +324,7 @@ async function saveDraft() {
         :icon="DsApi"
         title="还没有 MCP 服务器"
         data-testid="mcp-empty"
+        framed
       >
         <template #description>
           <span class="empty-text">{{ EMPTY_DESCRIPTION }}</span>
@@ -360,7 +362,7 @@ async function saveDraft() {
         description="密钥显示为 [REDACTED]，保存时会保留原值。"
       >
         <template #meta>
-          <StatusBadge v-if="dirty" tone="warn">未保存</StatusBadge>
+          <Badge v-if="dirty" tone="warn">未保存</Badge>
         </template>
         <Field :error="draftError">
           <CodeEditor

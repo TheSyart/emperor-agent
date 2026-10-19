@@ -181,6 +181,7 @@ async function onUninstalled(): Promise<void> {
       v-else-if="!plugins.length"
       title="尚未安装插件"
       description="从右上角「安装」选择本地文件夹、zip 文件或 HTTPS 地址。"
+      framed
     />
     <div v-else class="catalog">
       <SearchField v-model="query" placeholder="搜索插件">
@@ -193,8 +194,7 @@ async function onUninstalled(): Promise<void> {
       <EmptyState
         v-if="!filtered.length"
         title="没有匹配的插件"
-        variant="plain"
-        compact
+        variant="inline"
       />
       <template
         v-for="group in ['installed', 'preinstalled'] as const"

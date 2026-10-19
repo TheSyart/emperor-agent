@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * Settings › 诊断 — a conclusion first, details on demand:
- * - a SettingsNotice on top only while a request failed (诊断请求失败,
+ * - a Notice on top only while a request failed (诊断请求失败,
  *   环境检测失败, or a folder that would not open);
  * - the overview card: the state as badges (「n 项异常」「n 项需要关注」, or
  *   「运行正常」) and one conclusion (「其余都正常」), then the rows that need
@@ -17,16 +17,12 @@
  * Header actions: 刷新 (diagnostics + environment re-detection) and 复制报告
  * (plain-text report of the page).
  */
+import EmptyState from '../ui/EmptyState.vue'
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import IconButton from '../ui/IconButton.vue'
 import { useCopyFeedback } from '../ui/useCopyFeedback'
 import { DsCopy, DsFolderOpen, DsShieldAlert, DsWarning } from '../icons/ds'
-import {
-  SettingsCard,
-  SettingsNotice,
-  SettingsSection,
-  StatusBadge,
-} from './ui'
+import { SettingsCard, Notice, SettingsSection, Badge } from './ui'
 import { refreshAction, useSettingsHeader } from './settingsHeader'
 import { core } from '../../api/http'
 import { openPath } from '../../api/backend'
@@ -231,7 +227,7 @@ function messageOf(cause: unknown): string {
 
 <template>
   <SettingsSection>
-    <SettingsNotice
+    <Notice
       v-for="notice in notices"
       :key="notice.id"
       class="diag-notice"
@@ -248,12 +244,12 @@ function messageOf(cause: unknown): string {
       :data-tone="summary.tone"
     >
       <p class="summary">
-        <StatusBadge
+        <Badge
           v-for="badge in summary.badges"
           :key="badge.text"
           :tone="badge.tone"
-          :dot="badge.tone === 'ok'"
-          >{{ badge.text }}</StatusBadge
+          :variant="badge.tone === 'ok' ? 'dot-label' : 'soft'"
+          >{{ badge.text }}</Badge
         >
         <span class="conclusion">{{ summary.conclusion }}</span>
       </p>
@@ -299,11 +295,11 @@ function messageOf(cause: unknown): string {
         :data-diagnostic-card="card.id"
       >
         <template v-if="card.badges.length" #meta>
-          <StatusBadge
+          <Badge
             v-for="badge in card.badges"
             :key="badge.text"
             :tone="badge.tone"
-            >{{ badge.text }}</StatusBadge
+            >{{ badge.text }}</Badge
           >
         </template>
 
@@ -328,9 +324,11 @@ function messageOf(cause: unknown): string {
               <DsFolderOpen :size="16" />
             </IconButton>
           </DiagnosticItem>
-          <p v-if="!card.rows.length" class="empty">
-            Core 没有返回这一组的数据。
-          </p>
+          <EmptyState
+            v-if="!card.rows.length"
+            variant="inline"
+            title="Core 没有返回这一组的数据。"
+          />
         </div>
       </SettingsCard>
     </div>
@@ -448,13 +446,5 @@ function messageOf(cause: unknown): string {
   display: flex;
   flex-direction: column;
   min-width: 0;
-}
-
-.empty {
-  margin: 0;
-  padding: var(--space-2) 0;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
 }
 </style>

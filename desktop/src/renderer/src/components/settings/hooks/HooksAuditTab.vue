@@ -15,7 +15,7 @@ import {
   Select,
   SettingsCard,
   SettingsGroup,
-  StatusBadge,
+  Badge,
   type DefinitionItem,
   type SelectOption,
 } from '../ui'
@@ -108,7 +108,8 @@ function details(record: HookAuditRecordPayload): DefinitionItem[] {
         v-if="!records.length"
         :title="auditLoading ? '加载运行记录中…' : '当前会话无 Hook 运行记录'"
         description="Hook 触发后，处理结果、退出码与耗时会记录在这里。"
-        compact
+        variant="inline"
+        framed
       />
       <SettingsCard
         v-for="(record, index) in records"
@@ -123,9 +124,9 @@ function details(record: HookAuditRecordPayload): DefinitionItem[] {
         @update:open="toggleAudit(record, $event)"
       >
         <template #meta>
-          <StatusBadge :tone="hookOutcomeTone(record.outcome)" dot>
+          <Badge :tone="hookOutcomeTone(record.outcome)" variant="dot-label">
             {{ record.outcome || 'none' }}
-          </StatusBadge>
+          </Badge>
         </template>
         <template #actions>
           <code class="duration">{{ record.durationMs ?? '—' }}ms</code>

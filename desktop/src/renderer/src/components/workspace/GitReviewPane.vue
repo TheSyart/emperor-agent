@@ -11,8 +11,11 @@
  * Emits: commitFocused — that request has been handled.
  */
 import { confirm } from '../ui/confirm'
+import EmptyState from '../ui/EmptyState.vue'
 import Spinner from '../ui/Spinner.vue'
 import IconButton from '../ui/IconButton.vue'
+import Checkbox from '../ui/Checkbox.vue'
+import TextField from '../ui/TextField.vue'
 import type {
   GitFileStatus,
   GitStatusResult,
@@ -685,9 +688,12 @@ function friendlyPullRequestError(value: unknown): string {
       </IconButton>
     </div>
 
-    <div v-if="!hasProject" class="workspace-empty-state">
-      当前会话没有 Git 项目。
-    </div>
+    <EmptyState
+      v-if="!hasProject"
+      class="workspace-empty-state"
+      variant="inline"
+      title="当前会话没有 Git 项目。"
+    />
     <div v-else-if="error" class="workspace-inline-error">{{ error }}</div>
     <template v-if="status">
       <div
@@ -757,8 +763,9 @@ function friendlyPullRequestError(value: unknown): string {
           <ChevronDown :size="13" />
         </label>
         <div class="workspace-inline-form">
-          <input
+          <TextField
             v-model="branchName"
+            size="sm"
             placeholder="新分支名称"
             :disabled="gitWritesDisabled"
             @keydown.enter.prevent="createBranch"
@@ -818,8 +825,9 @@ function friendlyPullRequestError(value: unknown): string {
           </button>
         </div>
         <div v-else class="workspace-inline-form">
-          <input
+          <TextField
             v-model="worktreeName"
+            size="sm"
             placeholder="临时 worktree 分支名"
             :disabled="gitWritesDisabled"
             @keydown.enter.prevent="enterWorktree"
@@ -1048,8 +1056,9 @@ function friendlyPullRequestError(value: unknown): string {
           </span>
         </div>
         <div class="git-pr-editor">
-          <input
+          <TextField
             v-model="pullRequestTitle"
+            size="sm"
             placeholder="Pull Request 标题"
             :disabled="gitWritesDisabled"
           />
@@ -1059,10 +1068,7 @@ function friendlyPullRequestError(value: unknown): string {
             placeholder="Pull Request 正文"
             :disabled="gitWritesDisabled"
           />
-          <label>
-            <input v-model="pullRequestDraft" type="checkbox" />
-            Draft
-          </label>
+          <Checkbox v-model="pullRequestDraft">Draft</Checkbox>
           <button
             type="button"
             :disabled="!pullRequestTitle.trim() || gitWritesDisabled"
@@ -1178,11 +1184,6 @@ function friendlyPullRequestError(value: unknown): string {
 .git-review-pane :is(input, select, textarea):disabled {
   cursor: not-allowed;
   opacity: 0.6;
-}
-
-.git-review-pane input[type='checkbox'] {
-  width: auto;
-  accent-color: rgb(var(--accent-fill));
 }
 
 /* Secondary buttons (sync, forms, PR, worktree): outlined pills. */
@@ -1315,7 +1316,8 @@ function friendlyPullRequestError(value: unknown): string {
   margin-top: var(--space-2);
 }
 
-.workspace-inline-form :is(input, select) {
+.workspace-inline-form :is(input, select),
+.workspace-inline-form .ds-text-field {
   flex: 1;
 }
 
@@ -1560,7 +1562,7 @@ function friendlyPullRequestError(value: unknown): string {
   margin-top: var(--space-2);
 }
 
-.git-pr-editor > input:not([type]),
+.git-pr-editor > .ds-text-field,
 .git-pr-editor textarea {
   grid-column: 1 / -1;
   resize: vertical;
@@ -1575,8 +1577,7 @@ function friendlyPullRequestError(value: unknown): string {
   line-height: var(--lh-xs);
 }
 
-.workspace-muted,
-.workspace-empty-state {
+.workspace-muted {
   margin: 0;
   padding: var(--space-2);
   color: rgb(var(--label-tertiary));
@@ -1585,8 +1586,7 @@ function friendlyPullRequestError(value: unknown): string {
 }
 
 .workspace-empty-state {
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
+  margin: 0 var(--space-2);
 }
 
 .workspace-inline-error,

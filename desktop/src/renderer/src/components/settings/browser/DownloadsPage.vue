@@ -8,7 +8,7 @@
  *   as its tool rows: 在访达中显示, 移到工作区 (the conversation's
  *   workspace) and 另存为….
  * Each row reads 「网站 · 时间 · 状态」 under the file name; an empty list
- * says 暂无. How the last action went is a SettingsNotice at the top (an
+ * says 暂无. How the last action went is a Notice at the top (an
  * error, or a one-line info such as 已另存). Main reports each of your
  * downloads as it goes (`onUserDownload`) and the list follows. Only ids go
  * back to main; no path reaches this page.
@@ -30,7 +30,7 @@ import Button from '../../ui/Button.vue'
 import {
   EmptyState,
   SettingsGroup,
-  SettingsNotice,
+  Notice,
   SettingsRow,
   SettingsSection,
 } from '../ui'
@@ -96,10 +96,10 @@ onBeforeUnmount(() => unsubscribe())
   <SettingsSection
     intro="这里列出你和 Emperor 下载的文件，从列表移除不会删除文件。"
   >
-    <SettingsNotice v-if="error" tone="error" :title="error" />
-    <SettingsNotice v-else-if="notice" tone="info" :title="notice" />
+    <Notice v-if="error" tone="error" :title="error" />
+    <Notice v-else-if="notice" tone="info" :title="notice" />
     <SettingsGroup title="你的下载">
-      <EmptyState v-if="!mine.length" compact title="暂无" />
+      <EmptyState v-if="!mine.length" title="暂无" variant="inline" framed />
       <SettingsRow
         v-for="item in mine"
         :key="item.id"
@@ -139,7 +139,7 @@ onBeforeUnmount(() => unsubscribe())
       title="Emperor 的下载"
       description="Emperor 在对话里下载的文件。内置浏览器的先放进收件箱，按「下载保留时间」自动删除；Chrome 和 Edge 的留在浏览器自己的下载文件夹。"
     >
-      <EmptyState v-if="!emperor.length" compact title="暂无" />
+      <EmptyState v-if="!emperor.length" title="暂无" variant="inline" framed />
       <SettingsRow
         v-for="item in emperor"
         :key="item.id"

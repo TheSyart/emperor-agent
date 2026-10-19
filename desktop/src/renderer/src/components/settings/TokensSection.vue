@@ -112,12 +112,12 @@ function partWidth(value: number, total: number) {
       :title="
         ctx.tokensLoading.value ? '加载 Token 统计中…' : '暂无 Token 统计'
       "
-      variant="plain"
     />
     <EmptyState
       v-else-if="empty"
       title="还没有 Token 记录"
       description="发起一次真实模型调用后会自动出现统计。"
+      framed
     />
     <div v-else class="dashboard">
       <div class="toolbar">

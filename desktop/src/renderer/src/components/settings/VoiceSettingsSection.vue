@@ -2,7 +2,7 @@
 /**
  * Settings › 语音 — editor dictation (VO-02; macOS only for now), choices
  * first:
- * - a SettingsNotice on top only while something stops dictation: the
+ * - a Notice on top only while something stops dictation: the
  *   dictation helper unavailable (why, and 重新检测) or a permission denied
  *   or restricted (with 打开系统设置); another one if a choice could not be
  *   saved for the next start;
@@ -21,10 +21,10 @@ import {
   EmptyState,
   Select,
   SettingsGroup,
-  SettingsNotice,
+  Notice,
   SettingsRow,
   SettingsSection,
-  StatusBadge,
+  Badge,
   refreshAction,
   useSettingsHeader,
 } from './ui'
@@ -128,9 +128,10 @@ onBeforeUnmount(() => {
       v-if="!supported"
       title="暂不支持"
       :description="status?.reason ?? '听写目前只支持 macOS'"
+      framed
     />
     <template v-else>
-      <SettingsNotice
+      <Notice
         v-if="notice"
         class="voice-notice"
         :tone="notice.tone"
@@ -148,8 +149,8 @@ onBeforeUnmount(() => {
             >{{ action.label }}</Button
           >
         </template>
-      </SettingsNotice>
-      <SettingsNotice
+      </Notice>
+      <Notice
         v-if="saveFailed"
         class="voice-notice"
         tone="error"
@@ -163,7 +164,7 @@ onBeforeUnmount(() => {
       >
         <SettingsRow title="麦克风" :description="device?.description">
           <template v-if="device?.tone" #badge>
-            <StatusBadge :tone="device.tone">需要留意</StatusBadge>
+            <Badge :tone="device.tone">需要留意</Badge>
           </template>
           <Select
             size="sm"
@@ -176,7 +177,7 @@ onBeforeUnmount(() => {
         </SettingsRow>
         <SettingsRow title="识别语言" :description="locale?.description">
           <template v-if="locale?.tone" #badge>
-            <StatusBadge :tone="locale.tone">需要留意</StatusBadge>
+            <Badge :tone="locale.tone">需要留意</Badge>
           </template>
           <Select
             size="sm"
@@ -214,10 +215,10 @@ onBeforeUnmount(() => {
           "
           :data-permission="permission.id"
         >
-          <StatusBadge
+          <Badge
             :tone="permission.tone"
-            :dot="permission.tone === 'ok'"
-            >{{ permission.badge }}</StatusBadge
+            :variant="permission.tone === 'ok' ? 'dot-label' : 'soft'"
+            >{{ permission.badge }}</Badge
           >
         </SettingsRow>
       </SettingsGroup>

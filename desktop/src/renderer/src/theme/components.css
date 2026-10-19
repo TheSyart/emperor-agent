@@ -28,6 +28,20 @@
   /* Attention (approvals, plans) */
   --approval-strong: var(--attention);
 
+  /* Display, input and surface components (DS-04) */
+  --badge-h: 18px;
+  --dot-sm: 6px;
+  --dot-md: 8px;
+  --field-h: var(--control-md);
+  --field-h-sm: var(--control-sm);
+  --field-fill: var(--surface-overlay);
+  --list-row-sm: var(--row-h);
+  --list-row-md: var(--control-lg);
+  --list-row-lg: var(--row-h-lg);
+  --list-inset: var(--space-4);
+  --pane-header-h: 48px;
+  --switch-thumb: 255 255 255;
+
   /* Materials and glass */
   --mask-blur: 2px;
   --shadow-lv1-blur: var(--elev-1);

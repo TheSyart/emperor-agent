@@ -64,6 +64,9 @@
 - [插件 Logo 设计规范](design/plugin-logos.md)
 - [模型元数据规范](design/model-metadata.md)
 - [厂商模型列表接口规范](design/vendor-model-apis.md)
+- [设计令牌](design/tokens.md)
+- [颜色使用规范](design/color.md)
+- [组件规范](design/components.md)
 
 ### 发布与安全
 

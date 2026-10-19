@@ -8,6 +8,7 @@
  */
 import { computed } from 'vue'
 import type { PullRequestListItem } from '../../../api/pullRequests'
+import Dot from '../../ui/Dot.vue'
 import { pullStateIcon } from './pullIcons'
 
 const props = defineProps<{
@@ -47,12 +48,18 @@ const checksLabel = computed(() => {
   >
     <span class="glyph" :data-draft="item.isDraft || undefined">
       <component :is="icon" :size="16" aria-hidden="true" />
-      <span
+      <Dot
         v-if="item.checks"
         class="checks-dot"
         :data-checks="item.checks"
-        role="img"
-        :aria-label="checksLabel"
+        :state="
+          item.checks === 'success'
+            ? 'ok'
+            : item.checks === 'failure'
+              ? 'error'
+              : 'warn'
+        "
+        :label="checksLabel"
       />
     </span>
     <span class="main">
@@ -130,18 +137,6 @@ const checksLabel = computed(() => {
   height: var(--space-2);
   border-radius: var(--radius-pill);
   box-shadow: 0 0 0 2px rgb(var(--bg-base));
-}
-
-.checks-dot[data-checks='success'] {
-  background: rgb(var(--state-ok));
-}
-
-.checks-dot[data-checks='failure'] {
-  background: rgb(var(--danger));
-}
-
-.checks-dot[data-checks='pending'] {
-  background: rgb(var(--warn));
 }
 
 .main {

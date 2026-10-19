@@ -22,7 +22,7 @@ import {
   Field,
   Select,
   SettingsGroup,
-  SettingsNotice,
+  Notice,
   SettingsRow,
   SettingsSection,
   TextField,
@@ -151,13 +151,14 @@ onMounted(() => {
   <SettingsSection
     intro="Emperor 操作的网页请求摄像头、麦克风等权限时默认一律拒绝，这里放行的除外。"
   >
-    <SettingsNotice v-if="error && !dialogOpen" tone="error" :title="error" />
+    <Notice v-if="error && !dialogOpen" tone="error" :title="error" />
     <SettingsGroup title="已放行">
       <EmptyState
         v-if="!permissions.length"
-        compact
         title="暂无"
         description="点右上角的「放行」为一个网站开放权限。"
+        variant="inline"
+        framed
       />
       <SettingsRow
         v-for="(permission, index) in permissions"
@@ -177,7 +178,7 @@ onMounted(() => {
     </SettingsGroup>
     <Modal v-model:open="dialogOpen" title="放行网站权限" :width="440">
       <form id="site-form" class="site-form" @submit.prevent="allow">
-        <SettingsNotice v-if="error" tone="error" :title="error" />
+        <Notice v-if="error" tone="error" :title="error" />
         <Field label="网址" hint="完整的 origin，例如 https://meet.example.com">
           <TextField
             v-model="origin"

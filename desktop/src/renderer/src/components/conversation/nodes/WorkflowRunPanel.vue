@@ -7,6 +7,7 @@
  *
  * Props: run (WorkflowRunView), expansionKey.
  */
+import EmptyState from '../../ui/EmptyState.vue'
 import { computed } from 'vue'
 import type {
   WorkflowMemberView,
@@ -14,8 +15,8 @@ import type {
   WorkflowRunView,
 } from '../../../conversation/types'
 import { DsChevronRight } from '../../icons/ds'
-import StateDot from '../../ui/StateDot.vue'
-import type { StateDotState } from '../../ui/stateDot'
+import Dot from '../../ui/Dot.vue'
+import type { DotState } from '../../ui/dot'
 import { useChatContext } from '../chatContext'
 
 type MemberStatus =
@@ -32,10 +33,10 @@ const STATUS_LABEL: Record<MemberStatus, string> = {
   interrupted: '已中断',
 }
 
-function dot(status: MemberStatus): StateDotState {
+function dot(status: MemberStatus): DotState {
   switch (status) {
     case 'running':
-      return 'ongoing'
+      return 'running'
     case 'completed':
       return 'ok'
     case 'failed':
@@ -143,14 +144,16 @@ const latestLog = computed(() => props.run.logs.at(-1))
       <span class="sep" aria-hidden="true" />
       <span class="run-summary">{{ totalMembers }} 个成员</span>
       <span class="status-tail">
-        <StateDot :state="dot(runStatus)" />
+        <Dot :state="dot(runStatus)" />
         <span>{{ STATUS_LABEL[runStatus] }}</span>
       </span>
     </div>
     <div v-if="isOpen('run', runMode)" class="phase-list">
-      <span v-if="phases.length === 0" class="run-empty">{{
-        run.status === 'running' ? '等待成员启动…' : '没有启动成员'
-      }}</span>
+      <EmptyState
+        v-if="phases.length === 0"
+        variant="inline"
+        :title="run.status === 'running' ? '等待成员启动…' : '没有启动成员'"
+      />
       <div v-for="phase in phases" :key="phase.key" class="phase">
         <div
           class="phase-header"
@@ -192,9 +195,7 @@ const latestLog = computed(() => props.run.logs.at(-1))
                 : undefined
             "
           >
-            <span class="dot-slot"
-              ><StateDot :state="dot(member.status)"
-            /></span>
+            <span class="dot-slot"><Dot :state="dot(member.status)" /></span>
             <span class="member-label">{{ member.label || '空成员名' }}</span>
             <span class="member-status">{{ STATUS_LABEL[member.status] }}</span>
           </component>
@@ -404,7 +405,6 @@ const latestLog = computed(() => props.run.logs.at(-1))
   color: rgb(var(--label-secondary));
 }
 
-.run-empty,
 .run-log {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);

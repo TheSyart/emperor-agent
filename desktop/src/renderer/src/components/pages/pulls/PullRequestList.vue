@@ -12,6 +12,7 @@
  * Models: filter, search (raw text), clientFilters, grouping.
  * Emits: select (item), retry.
  */
+import Badge from '../../ui/Badge.vue'
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import type {
   PullRequestErrorInfo,
@@ -23,8 +24,8 @@ import IconButton from '../../ui/IconButton.vue'
 import Menu from '../../ui/Menu.vue'
 import MenuItem from '../../ui/MenuItem.vue'
 import Tabs from '../../ui/Tabs.vue'
-import EmptyState from '../../settings/ui/EmptyState.vue'
-import SearchField from '../../settings/ui/SearchField.vue'
+import EmptyState from '../../ui/EmptyState.vue'
+import SearchField from '../../ui/SearchField.vue'
 import PullRequestRow from './PullRequestRow.vue'
 import { pullIcons } from './pullIcons'
 import {
@@ -241,7 +242,6 @@ const showFooter = computed(
 
       <EmptyState
         v-else-if="error && !groups.length"
-        variant="plain"
         title="无法读取 Pull Request"
         :description="error.message"
       >
@@ -253,7 +253,6 @@ const showFooter = computed(
       <EmptyState
         v-else-if="!groups.length"
         class="list-empty"
-        variant="plain"
         :title="emptyMessage"
       />
 
@@ -286,7 +285,11 @@ const showFooter = computed(
               class="group-chevron"
               aria-hidden="true"
             />
-            <span class="group-count">{{ group.items.length }}</span>
+            <Badge
+              class="group-count"
+              variant="count"
+              :label="group.items.length"
+            />
           </button>
           <div v-if="!collapsed.has(group.key)" class="group-rows" role="list">
             <div

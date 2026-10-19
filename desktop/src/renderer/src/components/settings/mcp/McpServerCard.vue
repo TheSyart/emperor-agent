@@ -12,16 +12,19 @@
  * - open (v-model:open): expanded state.
  * Emits: toggle(enabled) from the Switch, remove from 删除.
  */
+import EmptyState from '../../ui/EmptyState.vue'
 import { computed } from 'vue'
 import Button from '../../ui/Button.vue'
+import Dot from '../../ui/Dot.vue'
 import { DsTrash } from '../../icons/ds'
-import { DefinitionList, SettingsCard, StatusBadge, Switch } from '../ui'
+import { DefinitionList, SettingsCard, Badge, Switch } from '../ui'
 import {
   mcpEmptyToolsText,
   mcpServerFacts,
   mcpServerSummary,
   mcpTransportLabel,
   type McpServerView,
+  mcpStateDot,
 } from './mcpModel'
 
 const props = withDefaults(
@@ -49,15 +52,15 @@ function onToggle(value: boolean) {
     :data-state="server.state"
   >
     <template #leading>
-      <span
+      <Dot
         class="state-dot"
         :data-state="server.state"
-        role="img"
-        :aria-label="server.stateLabel"
+        :state="mcpStateDot(server.state)"
+        :label="server.stateLabel"
       />
     </template>
     <template #meta>
-      <StatusBadge mono>{{ mcpTransportLabel(server.transport) }}</StatusBadge>
+      <Badge mono>{{ mcpTransportLabel(server.transport) }}</Badge>
     </template>
     <template #description>
       <span class="summary" :data-tone="server.tone" :title="summary">
@@ -78,7 +81,7 @@ function onToggle(value: boolean) {
     <div class="tools">
       <div class="tools-head">
         <span>工具</span>
-        <span class="tools-count">{{ server.tools.length }}</span>
+        <Badge variant="count" :label="server.tools.length" />
       </div>
       <ul v-if="server.tools.length" class="tool-list">
         <li v-for="tool in server.tools" :key="tool.name" class="tool">
@@ -88,7 +91,7 @@ function onToggle(value: boolean) {
           </span>
         </li>
       </ul>
-      <p v-else class="tools-empty">{{ mcpEmptyToolsText(server) }}</p>
+      <EmptyState v-else variant="inline" :title="mcpEmptyToolsText(server)" />
     </div>
 
     <template #footer>
@@ -107,76 +110,7 @@ function onToggle(value: boolean) {
 </template>
 
 <style scoped>
-.state-dot {
-  position: relative;
-  display: inline-block;
-  flex: none;
-  width: var(--space-2-5);
-  height: var(--space-2-5);
-  border-radius: var(--radius-pill);
-  color: rgb(var(--label-tertiary));
-}
-
 .state-dot::before,
-.state-dot::after {
-  content: '';
-  position: absolute;
-  border-radius: inherit;
-  background: currentColor;
-}
-
-.state-dot::before {
-  inset: 0;
-  opacity: 0.16;
-}
-
-.state-dot::after {
-  inset: 2px;
-}
-
-.state-dot[data-state='connected'] {
-  color: rgb(var(--state-ok));
-}
-
-.state-dot[data-state='connecting'] {
-  color: rgb(var(--state-warn));
-}
-
-.state-dot[data-state='connecting']::before {
-  animation: mcp-dot-pulse 1.2s var(--ease-in-out) infinite;
-}
-
-.state-dot[data-state='failed'] {
-  color: rgb(var(--state-error));
-}
-
-.state-dot[data-state='disabled'] {
-  color: rgb(var(--label-tertiary));
-}
-
-.state-dot[data-state='disabled']::before {
-  opacity: 0;
-}
-
-.state-dot[data-state='disabled']::after {
-  inset: 1px;
-  background: transparent;
-  box-shadow: inset 0 0 0 1.5px currentColor;
-}
-
-@keyframes mcp-dot-pulse {
-  0%,
-  100% {
-    opacity: 0.12;
-    transform: scale(0.8);
-  }
-
-  50% {
-    opacity: 0.32;
-    transform: scale(1.15);
-  }
-}
-
 .summary {
   display: block;
   overflow: hidden;
@@ -205,12 +139,6 @@ function onToggle(value: boolean) {
   line-height: var(--lh-xxs);
   font-weight: 500;
   color: rgb(var(--label-secondary));
-}
-
-.tools-count {
-  font-family: var(--font-mono);
-  font-weight: 400;
-  color: rgb(var(--label-tertiary));
 }
 
 .tool-list {
@@ -249,12 +177,5 @@ function onToggle(value: boolean) {
   line-height: var(--lh-xxs);
   color: rgb(var(--label-tertiary));
   overflow-wrap: anywhere;
-}
-
-.tools-empty {
-  margin: 0;
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
 }
 </style>

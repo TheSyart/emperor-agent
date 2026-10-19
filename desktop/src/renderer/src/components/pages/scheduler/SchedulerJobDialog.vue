@@ -18,7 +18,7 @@ import Modal from '../../ui/Modal.vue'
 import {
   DefinitionList,
   EmptyState,
-  StatusBadge,
+  Badge,
   Switch,
   type DefinitionItem,
 } from '../../settings/ui'
@@ -140,9 +140,11 @@ function submit() {
     >
       <div v-if="job && status" class="meta">
         <div class="badges">
-          <StatusBadge :tone="status.tone" dot>{{ status.label }}</StatusBadge>
-          <StatusBadge v-if="job.protected">受保护</StatusBadge>
-          <StatusBadge v-if="job.deleteAfterRun">一次性</StatusBadge>
+          <Badge :tone="status.tone" variant="dot-label">{{
+            status.label
+          }}</Badge>
+          <Badge v-if="job.protected">受保护</Badge>
+          <Badge v-if="job.deleteAfterRun">一次性</Badge>
         </div>
         <span class="toggle">
           <span aria-hidden="true">启用</span>
@@ -186,16 +188,16 @@ function submit() {
         <ul v-if="history.length" class="runs">
           <li v-for="run in history" :key="runKey(run)" class="run">
             <div class="run-top">
-              <StatusBadge :tone="schedulerRunStatusTone(run.status)">
+              <Badge :tone="schedulerRunStatusTone(run.status)">
                 {{ schedulerRunStatusLabel(run.status) }}
-              </StatusBadge>
+              </Badge>
               <span class="run-time">实际 {{ formatMs(run.runAtMs) }}</span>
             </div>
             <p class="run-detail">{{ runDetail(run) }}</p>
             <p v-if="run.error" class="run-error">{{ run.error }}</p>
           </li>
         </ul>
-        <EmptyState v-else title="暂无运行记录" variant="plain" compact />
+        <EmptyState v-else title="暂无运行记录" variant="inline" />
       </section>
     </div>
 

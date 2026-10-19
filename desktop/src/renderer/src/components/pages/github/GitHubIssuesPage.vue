@@ -31,12 +31,7 @@ import {
 import { useAppContext } from '../../../composables/useAppContext'
 import { DsChevronLeft, DsChevronRight, DsGlobe } from '../../icons/ds'
 import Button from '../../ui/Button.vue'
-import {
-  EmptyState,
-  SearchField,
-  Segmented,
-  StatusBadge,
-} from '../../settings/ui'
+import { EmptyState, SearchField, Segmented, Badge } from '../../settings/ui'
 import { refreshAction } from '../../settings/settingsHeader'
 import PageShell from '../PageShell.vue'
 import { onPageReactivated } from '../pageLifecycle'
@@ -211,6 +206,7 @@ const actions = computed(() =>
           v-if="detailError && !shown"
           title="无法读取这个 Issue"
           :description="detailError"
+          framed
         >
           <Button size="sm" variant="secondary" @click="loadDetail"
             >重试</Button
@@ -221,9 +217,9 @@ const actions = computed(() =>
           <header class="head">
             <h2 class="title">{{ shown.title }}</h2>
             <div class="meta">
-              <StatusBadge v-if="badge" :tone="badge.tone" dot>
+              <Badge v-if="badge" :tone="badge.tone" variant="dot-label">
                 {{ badge.label }}
-              </StatusBadge>
+              </Badge>
               <span>{{ shown.repo }}#{{ shown.number }}</span>
               <span>
                 {{ shown.author }} 创建于
@@ -239,7 +235,7 @@ const actions = computed(() =>
           <section class="comments" data-issue-comments>
             <h3 class="section-title">
               评论
-              <span class="count">{{ shown.commentCount }}</span>
+              <Badge variant="count" :label="shown.commentCount" />
             </h3>
             <p v-if="shown.commentCount > shown.comments.length" class="hint">
               只显示最近 {{ shown.comments.length }} 条，其余在 GitHub 上查看。
@@ -285,8 +281,7 @@ const actions = computed(() =>
               ? '别人在你名下仓库里开的 Issue，在「我的仓库」里查看。'
               : undefined
           "
-          variant="plain"
-          compact
+          variant="inline"
         />
         <ul v-else-if="list" class="rows" :aria-busy="listLoading || undefined">
           <li v-for="item in list.items" :key="`${item.repo}#${item.number}`">
@@ -470,11 +465,6 @@ const actions = computed(() =>
   line-height: var(--lh-xs);
   font-weight: 600;
   color: rgb(var(--label-primary));
-}
-
-.count {
-  font-weight: 400;
-  color: rgb(var(--label-tertiary));
 }
 
 .comment-list {

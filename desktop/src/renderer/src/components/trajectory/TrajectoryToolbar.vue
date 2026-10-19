@@ -17,7 +17,8 @@ import { PanelRight } from 'lucide-vue-next'
 import { onBeforeUnmount, ref, watch } from 'vue'
 import DsChevronDown from '../icons/ds/DsChevronDown.vue'
 import DsChevronUp from '../icons/ds/DsChevronUp.vue'
-import DsSearch from '../icons/ds/DsSearch.vue'
+import IconButton from '../ui/IconButton.vue'
+import SearchField from '../ui/SearchField.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -51,8 +52,8 @@ watch(
   },
 )
 
-function onInput(event: Event): void {
-  draft.value = (event.target as HTMLInputElement).value
+function onDraft(value: string): void {
+  draft.value = value
   clearTimeout(timer)
   timer = setTimeout(() => emit('update:query', draft.value), props.debounceMs)
 }
@@ -62,16 +63,12 @@ function flush(): void {
   if (draft.value !== props.query) emit('update:query', draft.value)
 }
 
+// Escape clears through SearchField (then `clear` flushes at once).
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Enter') {
-    event.preventDefault()
-    flush()
-    emit('step', event.shiftKey ? -1 : 1)
-  } else if (event.key === 'Escape' && draft.value !== '') {
-    event.preventDefault()
-    draft.value = ''
-    flush()
-  }
+  if (event.key !== 'Enter') return
+  event.preventDefault()
+  flush()
+  emit('step', event.shiftKey ? -1 : 1)
 }
 
 onBeforeUnmount(() => clearTimeout(timer))
@@ -130,43 +127,40 @@ onBeforeUnmount(() => clearTimeout(timer))
         Calls
       </button>
     </div>
-    <div class="search" :data-active="query !== '' || undefined">
-      <DsSearch :size="11" class="search-icon" />
-      <input
-        type="search"
-        class="search-input"
-        aria-label="Search trajectory"
-        placeholder="Search"
-        :value="draft"
-        @input="onInput"
-        @keydown="onKeydown"
-      />
-      <template v-if="query !== ''">
+    <SearchField
+      class="search"
+      size="sm"
+      placeholder="Search"
+      aria-label="Search trajectory"
+      :model-value="draft"
+      @update:model-value="onDraft"
+      @clear="flush"
+      @keydown="onKeydown"
+    >
+      <template v-if="query !== ''" #trailing>
         <span class="count" data-search-count aria-live="polite">{{
           matchCount === 0
             ? '0'
             : `${matchPosition < 0 ? '–' : matchPosition + 1}/${matchCount}`
         }}</span>
-        <button
-          type="button"
-          class="step"
-          aria-label="Previous match"
+        <IconButton
+          size="xs"
+          label="Previous match"
           :disabled="matchCount === 0"
           @click="emit('step', -1)"
         >
           <DsChevronUp :size="12" />
-        </button>
-        <button
-          type="button"
-          class="step"
-          aria-label="Next match"
+        </IconButton>
+        <IconButton
+          size="xs"
+          label="Next match"
           :disabled="matchCount === 0"
           @click="emit('step', 1)"
         >
           <DsChevronDown :size="12" />
-        </button>
+        </IconButton>
       </template>
-    </div>
+    </SearchField>
     <button
       type="button"
       class="action inspector-toggle"
@@ -244,46 +238,10 @@ onBeforeUnmount(() => clearTimeout(timer))
 }
 
 .search {
-  display: flex;
   flex: 0 1 220px;
-  align-items: center;
-  gap: var(--space-1);
+  width: auto;
   min-width: 96px;
-  height: 22px;
   margin-left: auto;
-  padding: 0 var(--space-1-5);
-  border: 1px solid var(--border-l2);
-  border-radius: 2px;
-  color: rgb(var(--label-caption));
-  background: rgb(var(--bg-layer-2));
-}
-
-.search:hover {
-  border-color: rgb(var(--label-caption));
-}
-
-.search:focus-within {
-  border-color: rgb(var(--accent-fill));
-  background: rgb(var(--bg-layer-1));
-}
-
-.search-icon {
-  flex: none;
-}
-
-.search-input {
-  width: 100%;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  outline: 0;
-  color: rgb(var(--label-primary));
-  background: transparent;
-  font: var(--font-xxs);
-}
-
-.search-input::placeholder {
-  color: rgb(var(--label-caption));
 }
 
 .count {
@@ -291,30 +249,5 @@ onBeforeUnmount(() => clearTimeout(timer))
   color: rgb(var(--label-tertiary));
   font: var(--font-xxxs);
   font-variant-numeric: tabular-nums;
-}
-
-.step {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: 0;
-  border-radius: 2px;
-  color: rgb(var(--label-tertiary));
-  background: transparent;
-  cursor: pointer;
-}
-
-.step:hover:not(:disabled) {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
-}
-
-.step:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 </style>

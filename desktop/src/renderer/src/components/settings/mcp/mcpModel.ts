@@ -5,6 +5,7 @@
  * No Vue, no IPC — McpSection / McpAddDialog own the effects.
  */
 import type { DefinitionItem } from '../ui/types'
+import type { DotState } from '../../ui/dot'
 
 export type McpTransportKind = 'stdio' | 'sse' | 'http'
 
@@ -87,6 +88,14 @@ const HTTP_ALIASES = new Set([
 ])
 
 /** Effective transport, matching Core's import normalization. */
+/** The Dot a server card leads with, from its connection state. */
+export function mcpStateDot(state: string): DotState {
+  if (state === 'connected') return 'ok'
+  if (state === 'connecting') return 'warn'
+  if (state === 'failed') return 'error'
+  return 'idle'
+}
+
 export function mcpTransportOf(config: McpServerConfigLike): McpTransportKind {
   const declared = String(config.transport ?? config.type ?? '')
     .trim()

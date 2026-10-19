@@ -1,0 +1,74 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`props snapshot (test 1) > Badge: seven tones, three variants, height 18 1`] = `
+[
+  "ds-badge tone=neutral variant=soft "neutral"",
+  "ds-badge tone=accent variant=soft "accent"",
+  "ds-badge tone=ok variant=soft "ok"",
+  "ds-badge tone=warn variant=soft "warn"",
+  "ds-badge tone=error variant=soft "error"",
+  "ds-badge tone=attention variant=soft "attention"",
+  "ds-badge tone=info variant=soft "info"",
+  "ds-badge tone=neutral variant=count "12"",
+  "ds-badge tone=ok variant=dot-label "已连接"",
+  "ds-badge mono=true tone=neutral variant=soft "stdio"",
+]
+`;
+
+exports[`props snapshot (test 1) > ListRow, Surface, List, ListSection, EmptyState and Notice 1`] = `
+[
+  "ds-list role=listbox dsList "今天默认选中子项删除"",
+  "ds-list-section role=group "今天默认选中子项删除"",
+  "ds-list-row role=option size=sm "默认"",
+  "ds-list-row role=option selected=true size=md "选中"",
+  "ds-list-row role=option nested=true size=lg "子项"",
+  "ds-list-row role=option danger=true size=sm "删除"",
+  "ds-surface pad=md radius=md tone=raised "raised"",
+  "ds-surface pad=md radius=md tone=sunken "sunken"",
+  "ds-surface pad=md radius=md tone=overlay "overlay"",
+  "ds-surface interactive=true pad=none radius=lg tone=raised "x"",
+  "ds-empty-state variant=block "暂无对话"",
+  "ds-empty-state variant=inline "没有匹配"",
+  "ds-notice role=status tone=neutral "neutral 提示"",
+  "ds-notice role=status tone=accent "accent 提示"",
+  "ds-notice role=status tone=ok "ok 提示"",
+  "ds-notice role=alert tone=warn "warn 提示"",
+  "ds-notice role=alert tone=error "error 提示"",
+  "ds-notice role=status tone=attention "attention 提示"",
+  "ds-notice role=status tone=info "info 提示"",
+]
+`;
+
+exports[`props snapshot (test 1) > Tag, Dot and Avatar 1`] = `
+[
+  "ds-tag "筛选"",
+  "ds-tag selected=true "已选"",
+  "ds-tag removable=true "README.md"",
+  "ds-dot size=md state=ok",
+  "ds-dot size=md state=warn",
+  "ds-dot size=md state=error",
+  "ds-dot size=md state=running",
+  "ds-dot size=md state=idle",
+  "ds-dot size=md state=attention",
+  "ds-dot role=img size=sm state=ok",
+  "ds-avatar kind=initials shown=initials size=28 "G"",
+  "ds-avatar color=5 kind=color shown=color size=20 "设"",
+  "ds-avatar kind=logo shown=mask size=24",
+  "ds-avatar kind=logo shown=image size=40",
+  "ds-avatar agentIdentity=child-0 avatar=A09 kind=sprite shown=sprite size=16",
+]
+`;
+
+exports[`props snapshot (test 1) > inputs: Checkbox, TextField, TextArea, SearchField, Select, Segmented, Switch, Field 1`] = `
+[
+  "ds-checkbox state=checked "记住"",
+  "ds-field "名称最多 120 字"",
+  "ds-text-field size=md",
+  "ds-text-field invalid=true size=sm",
+  "ds-text-area",
+  "ds-search-field size=md",
+  "ds-select size=md "甲"",
+  "ds-tabs role=radiogroup size=default variant=segmented "日周"",
+  "ds-switch role=switch on=true",
+]
+`;

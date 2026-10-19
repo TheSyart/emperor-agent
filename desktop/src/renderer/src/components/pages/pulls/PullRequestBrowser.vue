@@ -30,7 +30,7 @@ import {
 import { useResizable } from '../../../composables/useResizable'
 import { refreshAction, useSettingsHeader } from '../../settings/settingsHeader'
 import { useSettingsRoute } from '../../settings/useSettingsRoute'
-import EmptyState from '../../settings/ui/EmptyState.vue'
+import EmptyState from '../../ui/EmptyState.vue'
 import PullRequestDetail from './PullRequestDetail.vue'
 import PullRequestList from './PullRequestList.vue'
 import PullRequestUnavailable from './PullRequestUnavailable.vue'
@@ -317,7 +317,6 @@ watch(selectedKey, () => {
         />
         <div v-else class="detail-empty">
           <EmptyState
-            variant="plain"
             title="选择要查看的 Pull Request"
             description="从左侧列表选择后，可查看描述、检查和改动。"
             :icon="pullIcons.pull"

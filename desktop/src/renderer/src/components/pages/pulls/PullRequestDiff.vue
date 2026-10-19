@@ -14,8 +14,8 @@ import { computed, nextTick, shallowRef, watch } from 'vue'
 import type { PullRequestDiffResult } from '../../../api/pullRequests'
 import Button from '../../ui/Button.vue'
 import DiffBlock from '../../ui/DiffBlock.vue'
-import EmptyState from '../../settings/ui/EmptyState.vue'
-import StatusBadge from '../../settings/ui/StatusBadge.vue'
+import EmptyState from '../../ui/EmptyState.vue'
+import Badge from '../../ui/Badge.vue'
 import { pullIcons } from './pullIcons'
 import {
   diffFileStartsOpen,
@@ -117,7 +117,6 @@ function emptyNote(file: PullDiffFile): string {
 
     <EmptyState
       v-else-if="entry.error && !entry.data"
-      variant="plain"
       title="无法加载 diff"
       :description="entry.error.message"
     >
@@ -132,11 +131,7 @@ function emptyNote(file: PullDiffFile): string {
         </button>
       </p>
 
-      <EmptyState
-        v-if="!files.length"
-        variant="plain"
-        title="这个 Pull Request 没有文件改动"
-      />
+      <EmptyState v-if="!files.length" title="这个 Pull Request 没有文件改动" />
 
       <template v-else>
         <div class="diff-toolbar">
@@ -174,12 +169,12 @@ function emptyNote(file: PullDiffFile): string {
               <template v-if="file.oldPath">{{ file.oldPath }} → </template
               >{{ file.path }}
             </span>
-            <StatusBadge
+            <Badge
               v-if="diffFileStatusLabel(file.status)"
               :tone="file.status === 'deleted' ? 'error' : 'neutral'"
             >
               {{ diffFileStatusLabel(file.status) }}
-            </StatusBadge>
+            </Badge>
             <span class="file-stats">
               <span class="add">+{{ file.additions }}</span>
               <span class="del">−{{ file.deletions }}</span>

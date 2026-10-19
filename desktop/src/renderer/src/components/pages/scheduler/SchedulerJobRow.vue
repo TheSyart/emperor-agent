@@ -25,7 +25,7 @@ import {
 } from 'lucide-vue-next'
 import IconButton from '../../ui/IconButton.vue'
 import { DsMore } from '../../icons/ds'
-import { StatusBadge } from '../../settings/ui'
+import { Badge } from '../../settings/ui'
 import {
   schedulerJobLine,
   schedulerRowState,
@@ -117,9 +117,9 @@ function onMenu(event: MouseEvent) {
         <span class="line">{{ line }}</span>
       </span>
     </button>
-    <StatusBadge v-if="badge" class="badge" :tone="badge.tone" dot>
+    <Badge v-if="badge" class="badge" :tone="badge.tone" variant="dot-label">
       {{ badge.label }}
-    </StatusBadge>
+    </Badge>
     <IconButton
       class="more"
       :label="`「${job.name}」的更多操作`"

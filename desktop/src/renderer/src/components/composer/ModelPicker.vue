@@ -10,6 +10,7 @@
  * back through the composer controller (switch-model /
  * set-reasoning-effort).
  */
+import EmptyState from '../ui/EmptyState.vue'
 import IconButton from '../ui/IconButton.vue'
 import { computed, nextTick, ref, watch } from 'vue'
 import type { ModelEntry, ProviderOption } from '../../types'
@@ -18,7 +19,8 @@ import { groupEntriesByProvider } from '../../model/providerGroups'
 import Chip from '../ui/Chip.vue'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
-import ProviderLogo from '../ui/ProviderLogo.vue'
+import Avatar from '../ui/Avatar.vue'
+import SearchField from '../ui/SearchField.vue'
 
 /** Entries above this count get a search box in the model list. */
 const SEARCH_THRESHOLD = 6
@@ -134,10 +136,11 @@ function onKeydown(event: KeyboardEvent): void {
       @click="open = !open"
     >
       <template v-if="activeGroup" #icon>
-        <ProviderLogo
+        <Avatar
+          kind="logo"
           :icon-id="activeGroup.iconId"
           :label="activeGroup.label"
-          size="xs"
+          :size="16"
         />
       </template>
       <span class="name">{{ label }}</span>
@@ -149,11 +152,12 @@ function onKeydown(event: KeyboardEvent): void {
       <template v-if="pane === 'root'">
         <MenuItem keep-open @select="show('model')">
           <template #icon>
-            <ProviderLogo
+            <Avatar
+              kind="logo"
               v-if="activeGroup"
               :icon-id="activeGroup.iconId"
               :label="activeGroup.label"
-              size="xs"
+              :size="16"
             />
           </template>
           模型
@@ -186,14 +190,11 @@ function onKeydown(event: KeyboardEvent): void {
           </IconButton>
           <span class="pane-title">模型 · 下一轮生效</span>
         </div>
-        <input
+        <SearchField
           v-if="searchable"
           v-model="query"
           class="search"
-          type="search"
           placeholder="搜索模型"
-          aria-label="搜索模型"
-          spellcheck="false"
         />
         <section
           v-for="group in groups"
@@ -203,10 +204,11 @@ function onKeydown(event: KeyboardEvent): void {
           :aria-label="group.label"
         >
           <div class="group-title">
-            <ProviderLogo
+            <Avatar
+              kind="logo"
               :icon-id="group.iconId"
               :label="group.label"
-              size="xs"
+              :size="16"
             />
             <span>{{ group.label }}</span>
           </div>
@@ -221,7 +223,12 @@ function onKeydown(event: KeyboardEvent): void {
             {{ entryLabel(entry) }}
           </MenuItem>
         </section>
-        <p v-if="!groups.length" class="empty">没有匹配的模型</p>
+        <EmptyState
+          v-if="!groups.length"
+          class="empty"
+          variant="inline"
+          title="没有匹配的模型"
+        />
       </template>
 
       <template v-else>
@@ -329,22 +336,14 @@ function onKeydown(event: KeyboardEvent): void {
   background: var(--interactive-bg-hover);
 }
 
-.back:focus-visible,
-.search:focus-visible {
+.back:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px rgb(var(--focus-ring) / 0.5);
 }
 
 .search {
-  height: var(--space-8);
+  width: auto;
   margin: 0 var(--space-1) var(--space-1);
-  padding: 0 var(--space-2-5);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-row);
-  background: rgb(var(--bg-layer-1));
-  color: rgb(var(--label-primary));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
 }
 
 .group + .group {
@@ -366,10 +365,6 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 .empty {
-  margin: 0;
-  padding: var(--space-3) var(--space-2-5);
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  margin: 0 var(--space-2-5);
 }
 </style>
