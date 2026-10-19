@@ -412,3 +412,51 @@ describe('ModelSection', () => {
     })
   })
 })
+
+describe('ModelSection › entries that do not validate (MOD-03 9)', () => {
+  it('names them, keeps the rest usable and deletes one after a confirmation', async () => {
+    const { answerConfirmsForTest } = await import('../../ui/confirm')
+    const responder = vi.fn((): boolean => true)
+    answerConfirmsForTest(responder)
+    try {
+      const config = {
+        ...payload([entry({})]),
+        rejectedEntries: [
+          {
+            key: 'broken',
+            index: 1,
+            entryId: 'broken',
+            modelId: 'gpt-old',
+            provider: 'openai',
+            reason: 'protocol 无效: carrier-pigeon',
+          },
+        ],
+      }
+      core.mockResolvedValue({ ...config, rejectedEntries: [] })
+      await mount(config)
+      const notice = container!.querySelector<HTMLElement>(
+        '[data-testid="model-rejected"]',
+      )!
+      expect(notice.textContent).toContain('有 1 个模型条目无法读取')
+      expect(notice.textContent).toContain('gpt-old')
+      expect(notice.textContent).toContain('protocol 无效')
+      expect(container!.querySelector('[data-entry-id="main"]')).not.toBeNull()
+      const remove = [...notice.querySelectorAll('button')].find(
+        (item) => item.textContent?.trim() === '删除',
+      )!
+      remove.click()
+      await flush()
+      expect(responder).toHaveBeenCalledWith(
+        expect.objectContaining({ tone: 'danger' }),
+      )
+      expect(core).toHaveBeenCalledWith('model.discardRejected', {
+        key: 'broken',
+      })
+      expect(
+        container!.querySelector('[data-testid="model-rejected"]'),
+      ).toBeNull()
+    } finally {
+      answerConfirmsForTest(null)
+    }
+  })
+})

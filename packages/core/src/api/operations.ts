@@ -294,6 +294,142 @@ const modelDiscoverySchema = z
   .object({ ...modelConnectionShape, refresh: z.boolean().optional() })
   .strict()
 const modelProbeSchema = z.object(modelConnectionShape).strict()
+// MOD-03: the optional facts an entry carries (validated leniently again
+// when the entry is normalized; unknown keys are refused here).
+const modelEntryFactsShape = {
+  limits: z
+    .object({
+      maxInputTokens: z.number().int().positive().optional(),
+      maxOutputTokens: z.number().int().positive().optional(),
+    })
+    .strict()
+    .optional(),
+  detected: z
+    .object({
+      toolCall: z.boolean().optional(),
+      vision: z.boolean().optional(),
+      reasoning: z.boolean().optional(),
+      reasoningEfforts: z.array(z.string().trim().min(1)).optional(),
+      defaultReasoningEffort: z.string().trim().min(1).optional(),
+      reasoningControl: z
+        .enum(['effort', 'toggle', 'budget', 'always'])
+        .optional(),
+      acceptsTemperature: z.boolean().optional(),
+      modalities: z.array(z.string().trim().min(1)).optional(),
+      kind: z
+        .enum(['chat', 'embedding', 'rerank', 'image', 'audio', 'other'])
+        .optional(),
+    })
+    .strict()
+    .optional(),
+  metadata: z
+    .object({
+      name: z.string().trim().optional(),
+      source: z.enum([
+        'vendor_api',
+        'catalog',
+        'family_rule',
+        'fallback',
+        'manual',
+      ]),
+      catalogKey: z.string().optional(),
+      catalogVersion: z.string().optional(),
+      checkedAt: z.string().optional(),
+      userLocked: z
+        .array(
+          z.enum([
+            'contextWindowTokens',
+            'maxTokens',
+            'pricing',
+            'capabilities',
+            'reasoningEffort',
+            'displayName',
+          ]),
+        )
+        .optional(),
+      pricingSource: z.enum(['catalog', 'vendor_api', 'manual']).optional(),
+      lifecycle: z
+        .object({
+          status: z.enum(['active', 'deprecated', 'retired']).optional(),
+          retiresAt: z.string().optional(),
+          replacement: z.string().optional(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict()
+    .optional(),
+  sampling: z
+    .object({
+      temperature: z.number().min(0).max(2).nullable().optional(),
+      topP: z.number().min(0).max(1).nullable().optional(),
+    })
+    .strict()
+    .optional(),
+}
+const modelEntriesSaveSchema = z
+  .object({
+    connection: z
+      .object({
+        provider: z.string().trim().min(1),
+        protocol: modelProtocolSchema,
+        apiBase: z.string().trim().min(1),
+        apiKey: z.string().nullable().optional(),
+      })
+      .strict(),
+    entries: z
+      .array(
+        z
+          .object({
+            entryId: idSchema.optional(),
+            modelId: z.string().trim().min(1),
+            displayName: z.string().trim().optional(),
+            capabilityOverrides: modelCapabilityOverridesSchema.optional(),
+            pricing: modelPricingSchema.nullable().optional(),
+            contextWindowTokens: z.number().int().positive(),
+            maxTokens: z.number().int().positive(),
+            reasoningEffort: z.string().trim().nullable().optional(),
+            ...modelEntryFactsShape,
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(200),
+    activateEntryId: idSchema.nullable().optional(),
+  })
+  .strict()
+const modelConnectionUpdateSchema = z
+  .object({
+    connectionId: idSchema.optional(),
+    entryId: idSchema.optional(),
+    apiKey: z.string().nullable().optional(),
+    apiBase: z.string().trim().min(1).optional(),
+  })
+  .strict()
+  .refine((value) => Boolean(value.connectionId || value.entryId), {
+    message: 'connectionId 或 entryId 必须提供一个',
+  })
+const modelMetadataRefreshSchema = z
+  .object({
+    entryIds: z.array(idSchema).min(1).max(200).optional(),
+    connectionId: idSchema.optional(),
+    apply: z.boolean().optional(),
+  })
+  .strict()
+  .refine((value) => Boolean(value.entryIds?.length || value.connectionId), {
+    message: 'entryIds 或 connectionId 必须提供一个',
+  })
+const modelDefaultsSchema = z
+  .object({
+    provider: z.string().trim().min(1),
+    protocol: modelProtocolSchema,
+    apiBase: z.string().trim().optional(),
+    modelId: z.string().trim().min(1),
+  })
+  .strict()
+const modelRejectedKeySchema = z
+  .object({ key: z.string().trim().min(1).max(200) })
+  .strict()
 const modelProfilePreviewSchema = z
   .object({
     provider: z.string().trim().min(1),
@@ -1657,6 +1793,30 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([modelEntrySaveSchema]),
     (api, [input], ctx) =>
       api.model.saveEntry(input, viewOf(ctx, 'model.saveEntry')),
+  ),
+  'model.saveEntries': operation(
+    z.tuple([modelEntriesSaveSchema]),
+    (api, [input], ctx) =>
+      api.model.saveEntries(input, viewOf(ctx, 'model.saveEntries')),
+  ),
+  'model.updateConnection': operation(
+    z.tuple([modelConnectionUpdateSchema]),
+    (api, [input], ctx) =>
+      api.model.updateConnection(input, viewOf(ctx, 'model.updateConnection')),
+  ),
+  'model.refreshMetadata': operation(
+    z.tuple([modelMetadataRefreshSchema]),
+    (api, [input], ctx) =>
+      api.model.refreshMetadata(input, viewOf(ctx, 'model.refreshMetadata')),
+  ),
+  'model.lookupDefaults': operation(
+    z.tuple([modelDefaultsSchema]),
+    (api, [input]) => api.model.lookupDefaults(input),
+  ),
+  'model.discardRejected': operation(
+    z.tuple([modelRejectedKeySchema]),
+    (api, [input], ctx) =>
+      api.model.discardRejected(input, viewOf(ctx, 'model.discardRejected')),
   ),
   'model.savePolicy': operation(
     z.tuple([modelExecutionPolicySchema]),

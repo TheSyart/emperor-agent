@@ -1,5 +1,6 @@
 import type {
   ModelCapabilityOverrides,
+  ModelEntryDetected,
   ModelEntryV2,
   ModelProtocol,
 } from '../config/model-config'
@@ -16,7 +17,7 @@ export const REASONING_EFFORT_ORDER = [
 ] as const
 
 export type ReasoningEffort = (typeof REASONING_EFFORT_ORDER)[number]
-export type CapabilitySource = 'override' | 'inferred' | 'default'
+export type CapabilitySource = 'override' | 'detected' | 'inferred' | 'default'
 
 export type ModelReasoningAdapter =
   | 'none'
@@ -33,6 +34,8 @@ export interface ModelProfileEntry extends Pick<
   'provider' | 'protocol' | 'modelId'
 > {
   capabilityOverrides?: ModelCapabilityOverrides
+  /** Facts from the vendor API or catalog (MOD-03); below the user's overrides. */
+  detected?: ModelEntryDetected
   contextWindowTokens?: number
   maxTokens?: number
 }
@@ -104,20 +107,26 @@ export function resolveModelProfile(
 ): ResolvedModelProfile {
   const id = entry.modelId.trim().toLowerCase()
   const inferred = inferCapabilities(id)
+  const detected = entry.detected
+  // User override > detected facts > id inference > default (MOD-03).
   const toolCall = resolveCapability(
     entry.capabilityOverrides?.toolCall,
     inferred.toolCall,
     true,
+    detected?.toolCall,
   )
   const vision = resolveCapability(
     entry.capabilityOverrides?.vision,
     inferred.vision,
     false,
+    detected?.vision,
   )
   const reasoning = resolveCapability(
     entry.capabilityOverrides?.reasoning,
     inferred.reasoning,
     false,
+    detected?.reasoning ??
+      (detected?.reasoningEfforts?.length ? true : undefined),
   )
   const contextWindowTokens = positiveTokenLimit(
     entry.contextWindowTokens,
@@ -125,7 +134,11 @@ export function resolveModelProfile(
   )
   const maxTokens = positiveTokenLimit(entry.maxTokens, 8_000)
   const reasoningConfig = reasoning.value
-    ? resolveReasoningConfig(entry.provider, entry.protocol, id)
+    ? withDetectedEfforts(
+        resolveReasoningConfig(entry.provider, entry.protocol, id),
+        entry.protocol,
+        detected,
+      )
     : { adapter: 'none' as const, efforts: [] as const }
 
   return {
@@ -193,10 +206,41 @@ function resolveCapability(
   override: boolean | undefined,
   inferred: boolean | undefined,
   fallback: boolean,
+  detected?: boolean,
 ): ResolvedCapability {
   if (override !== undefined) return { value: override, source: 'override' }
+  if (detected !== undefined) return { value: detected, source: 'detected' }
   if (inferred !== undefined) return { value: inferred, source: 'inferred' }
   return { value: fallback, source: 'default' }
+}
+
+/**
+ * Detected efforts (vendor list or catalog) replace the id-inferred ones;
+ * a model the rules do not know gets the protocol's effort adapter, or the
+ * on/off toggle when only that is offered.
+ */
+function withDetectedEfforts(
+  config: {
+    adapter: ModelReasoningAdapter
+    efforts: readonly ReasoningEffort[]
+  },
+  protocol: ModelProtocol,
+  detected: ModelEntryDetected | undefined,
+): { adapter: ModelReasoningAdapter; efforts: readonly ReasoningEffort[] } {
+  const efforts = (detected?.reasoningEfforts ?? []).filter(
+    (effort): effort is ReasoningEffort =>
+      (REASONING_EFFORT_ORDER as readonly string[]).includes(effort),
+  )
+  if (detected?.reasoningControl === 'toggle' && config.adapter === 'none')
+    return { adapter: 'thinking_toggle', efforts: ['none', 'high'] }
+  if (!efforts.length) return config
+  const adapter =
+    config.adapter !== 'none'
+      ? config.adapter
+      : protocol === 'anthropic'
+        ? 'anthropic_adaptive'
+        : 'openai_effort'
+  return { adapter, efforts }
 }
 
 function inferCapabilities(id: string): InferredCapabilities {

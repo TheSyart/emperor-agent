@@ -35,9 +35,22 @@ export type {
 } from '../model/discovery'
 export type {
   ModelConnectionInput,
+  ModelDefaultsInput,
   ModelDiscoveryInput,
   ModelDiscoveryPayload,
+  ModelEntriesSaveInput,
+  ModelMetadataChange,
+  ModelMetadataDiff,
+  ModelMetadataRefreshInput,
+  RejectedModelEntryPayload,
 } from '../api/services/model-service'
+export type {
+  ModelEntryDetected,
+  ModelEntryLimits,
+  ModelEntryMetadata,
+  ModelEntrySampling,
+  ModelMetadataField,
+} from '../config/model-config'
 export type {
   CompactionDecision,
   DiscardedItem,

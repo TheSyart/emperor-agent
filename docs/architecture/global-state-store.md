@@ -39,7 +39,7 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
 ~/.emperor/
   installation.json        # layout/app/runtime revision 与首次启动、迁移状态
   settings.json            # 用户通用配置
-  model_config.json        # schemaVersion 2；多个模型、单 active；apiKey 以本地密钥加密（el1:…）
+  model_config.json        # schemaVersion 2；多个模型、单 active；apiKey 以本地密钥加密（el1:…）；单条坏条目只跳过该条（MOD-03）
   model_config.json.pre-seal-<ts>  # 第一次加密前的原文件（含明文 Key，0600，用户可删）
   mcp_config.json          # headers / env 中 key、token、secret 等值以本地密钥加密
   hooks.json               # Claude Code hooks.json 格式的 command hooks（可选）

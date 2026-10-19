@@ -101,6 +101,7 @@ export function routeFromEntry(entry: ModelEntry): RouteSpec {
     ...(entry.capabilityOverrides === undefined
       ? {}
       : { capabilityOverrides: entry.capabilityOverrides }),
+    ...(entry.detected === undefined ? {} : { detected: entry.detected }),
     ...(entry.contextWindowTokens === null
       ? {}
       : { contextWindowTokens: entry.contextWindowTokens }),
