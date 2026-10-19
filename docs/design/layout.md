@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
 > 最后核验：2026-10-19<br>
-> 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/SidebarRail.vue`、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/theme/base.css`、`desktop/src/main/window-chrome.ts`；测试 `AppFrame.test.ts`、`SidebarRail.test.ts`、`window-chrome.test.ts`、`desktop/tests/visual/shell.spec.ts`、`desktop/tests/electron/shell/run.ts`
+> 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/SidebarRail.vue`、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/theme/base.css`、`desktop/src/main/window-chrome.ts`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）；测试 `AppFrame.test.ts`、`SidebarRail.test.ts`、`window-chrome.test.ts`、`desktop/tests/visual/shell.spec.ts`、`desktop/tests/electron/shell/run.ts`、`desktop/tests/visual/settings-groups.spec.ts`
 
 主窗口是「画布 + 面板」：窗口底色是 `--surface-canvas`，图标栏和侧栏直接画在画布上；中间的对话（或整页）和右侧工作台各是一块面板。层级靠明度区分，画布上不画任何列边框。
 
