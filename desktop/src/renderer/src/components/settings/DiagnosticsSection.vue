@@ -204,6 +204,7 @@ async function reveal(row: DiagnosticRow) {
     await openPath({
       kind: 'diagnostic',
       rowId: row.id as 'global-state-root' | 'active-project-path',
+      sessionId: ctx.sessionId.value || null,
     })
   } catch (cause) {
     revealError.value = messageOf(cause)

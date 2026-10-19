@@ -377,6 +377,9 @@ export type RuntimeEvent = RuntimeEventEnvelope &
     | (SchedulerRunEventFields & {
         event: 'scheduler_run_error'
         error?: string
+        /** `error`, or `blocked` when an approval was rejected for the run. */
+        status?: 'error' | 'blocked'
+        code?: string
       })
     | (SchedulerRunEventFields & {
         event:

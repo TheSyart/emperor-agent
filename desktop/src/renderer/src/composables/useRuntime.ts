@@ -31,7 +31,12 @@ import {
   type RuntimeNotice,
 } from '../runtime/notifications'
 import type { TaskProjection } from '../runtime/handlers/tasks'
-import { hasCoreBridge, invokeCore, onCoreEvent } from '../api/backend'
+import {
+  hasCoreBridge,
+  invokeCore,
+  onCoreEvent,
+  setViewingSession,
+} from '../api/backend'
 import { isDraftSessionId } from '../runtime/sessionDrafts'
 import { core } from '../api/http'
 import { ActionEffectStore } from '../runtime/actionEffect'
@@ -608,7 +613,11 @@ export function useRuntime(options: {
   async function stopActive() {
     updatePending('正在停止当前任务...', '', 'running')
     try {
-      const data = await core('chat.stopRuntime', {})
+      // Stop the session on screen, named (KRN-01: Core has no default).
+      const target = sessionId.value
+      const data = await core('chat.stopRuntime', {
+        sessionId: target && !isDraftSessionId(target) ? target : null,
+      })
       return handleStopResult(data)
     } catch (err) {
       updatePending(
@@ -778,6 +787,11 @@ export function useRuntime(options: {
 
   function syncSessionProjection(state: SessionProjectionState): void {
     sessionId.value = state.activeSessionId
+    setViewingSession(
+      state.activeSessionId && !isDraftSessionId(state.activeSessionId)
+        ? state.activeSessionId
+        : null,
+    )
     lastSeq.value = state.activeLastSeq
     status.value = state.transport
     for (const [id, value] of Object.entries(state.sessions)) {

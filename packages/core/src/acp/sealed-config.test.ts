@@ -6,6 +6,9 @@ import { CoreApi } from '../api/core-api'
 import { loadModelConfig } from '../config/model-config'
 import { localSecretKeyPath } from '../security/secret-sealer'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
 const apis: CoreApi[] = []
 
@@ -32,15 +35,18 @@ describe('sealed model keys without the desktop main process (SEC-06)', () => {
     apis.push(api)
     expect(api.host.kept.secretSealer.available).toBe(true)
 
-    const payload = await api.model.saveEntry({
-      provider: 'openai',
-      protocol: 'openai',
-      modelId: 'gpt-5.2',
-      apiBase: 'https://api.openai.com/v1',
-      apiKey: 'sk-headless-acp-1234',
-      contextWindowTokens: 128_000,
-      maxTokens: 16_000,
-    })
+    const payload = await api.model.saveEntry(
+      {
+        provider: 'openai',
+        protocol: 'openai',
+        modelId: 'gpt-5.2',
+        apiBase: 'https://api.openai.com/v1',
+        apiKey: 'sk-headless-acp-1234',
+        contextWindowTokens: 128_000,
+        maxTokens: 16_000,
+      },
+      VIEW,
+    )
     expect(payload.models[0]!.apiKey).toBe('***1234')
     const disk = readFileSync(join(stateRoot, 'model_config.json'), 'utf8')
     expect(disk).not.toContain('sk-headless-acp')

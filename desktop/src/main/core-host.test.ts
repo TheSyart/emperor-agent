@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   channelForCoreOperation,
+  coreCallEnvelope,
   SESSION_EVENT_CHANNEL,
 } from '../shared/ipc-contract'
 import {
@@ -184,15 +185,18 @@ describe('desktop CoreApi host (MIG-IPC-002)', () => {
       }),
     ).resolves.toMatchObject({ added: ['aihot'] })
     await expect(
-      ipc.invoke(channelForCoreOperation('mcp.setServerEnabled'), {
-        name: 'aihot',
-        enabled: false,
-      }),
+      ipc.invoke(
+        channelForCoreOperation('mcp.setServerEnabled'),
+        coreCallEnvelope(null),
+        { name: 'aihot', enabled: false },
+      ),
     ).resolves.toMatchObject({ enabled: false })
     await expect(
-      ipc.invoke(channelForCoreOperation('mcp.removeServer'), {
-        name: 'aihot',
-      }),
+      ipc.invoke(
+        channelForCoreOperation('mcp.removeServer'),
+        coreCallEnvelope(null),
+        { name: 'aihot' },
+      ),
     ).resolves.toMatchObject({ removed: 'aihot' })
     await expect(
       ipc.invoke(channelForCoreOperation('mcp.importServers'), {
@@ -342,7 +346,11 @@ describe('desktop CoreApi host (MIG-IPC-002)', () => {
     } as unknown as CoreApiLike)
 
     await expect(
-      ipc.invoke(channelForCoreOperation('goals.get'), 'goal_missing'),
+      ipc.invoke(
+        channelForCoreOperation('goals.get'),
+        coreCallEnvelope('s1'),
+        'goal_missing',
+      ),
     ).resolves.toEqual({
       ok: false,
       error: { code: 'goal_not_found', message: 'Goal does not exist.' },

@@ -23,6 +23,9 @@ import { computerUseStateDir } from './install'
 import { FakeComputerUsePort } from './testing/fake-port'
 import { GUI_TOOL_CATALOG, isGuiToolName } from './tools/catalog'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 const fixtures: ApiFixture[] = []
 
 afterEach(async () => {
@@ -154,7 +157,7 @@ describe('computer use host wiring', () => {
       scope: 'session',
       backgroundAllowed: false,
     })
-    const payload = (await core.diagnostics.get()) as unknown as {
+    const payload = (await core.diagnostics.get(VIEW)) as unknown as {
       computerUse: Record<string, unknown>
     }
     expect(payload.computerUse).toMatchObject({
@@ -169,8 +172,11 @@ describe('computer use host wiring', () => {
     expect(JSON.stringify(payload)).not.toContain('secret-origin')
     const { api: bare } = await api()
     expect(
-      ((await bare.diagnostics.get()) as unknown as { computerUse: unknown })
-        .computerUse,
+      (
+        (await bare.diagnostics.get(VIEW)) as unknown as {
+          computerUse: unknown
+        }
+      ).computerUse,
     ).toMatchObject({ supported: false, enabled: false })
   })
 
@@ -351,7 +357,7 @@ describe('computer use master switch', () => {
     expect(guiTools(core.host.tools.names())).toEqual([])
     expect((await core.computerUse.status()).enabled).toBe(false)
 
-    expect((await core.computerUse.setEnabled(true)).enabled).toBe(true)
+    expect((await core.computerUse.setEnabled(true, VIEW)).enabled).toBe(true)
     expect(guiTools(core.host.tools.names())).toHaveLength(GUI_TOOLS)
     expect(
       new ComputerUseConfigStore(computerUseStateDir(stateRoot)).get().enabled,
@@ -365,7 +371,7 @@ describe('computer use master switch', () => {
     })
     expect(guiTools(again.host.tools.names())).toHaveLength(GUI_TOOLS)
 
-    expect((await core.computerUse.setEnabled(false)).enabled).toBe(false)
+    expect((await core.computerUse.setEnabled(false, VIEW)).enabled).toBe(false)
     expect(guiTools(core.host.tools.names())).toEqual([])
     expect(changes).toEqual([true, false])
     expect(
@@ -385,11 +391,14 @@ describe('computer use master switch', () => {
       stateRoot,
       extra: { computerUsePort: port },
     })
-    await core.computerUse.setEnabled(true)
-    const view = await core.computerUse.setDriverEnabled({
-      driver: 'embedded-browser',
-      enabled: false,
-    })
+    await core.computerUse.setEnabled(true, VIEW)
+    const view = await core.computerUse.setDriverEnabled(
+      {
+        driver: 'embedded-browser',
+        enabled: false,
+      },
+      VIEW,
+    )
     const embedded = view.drivers.find(
       (driver) => driver.driver === 'embedded-browser',
     )
@@ -399,10 +408,13 @@ describe('computer use master switch', () => {
     expect(
       new ComputerUseConfigStore(computerUseStateDir(stateRoot)).get().drivers,
     ).toEqual({ 'embedded-browser': false })
-    await core.computerUse.setDriverEnabled({
-      driver: 'embedded-browser',
-      enabled: true,
-    })
+    await core.computerUse.setDriverEnabled(
+      {
+        driver: 'embedded-browser',
+        enabled: true,
+      },
+      VIEW,
+    )
     expect(
       new ComputerUseConfigStore(computerUseStateDir(stateRoot)).get().drivers,
     ).toEqual({ 'embedded-browser': true })
@@ -431,13 +443,15 @@ describe('computer use master switch', () => {
       ],
       extra: { computerUsePort: new FakeComputerUsePort() },
     })
-    await core.computerUse.setEnabled(true)
+    await core.computerUse.setEnabled(true, VIEW)
     const id = String(core.sessions.create({ title: 'GUI' }).id)
     const submitted = core.chat.submit({ content: 'go', sessionId: id })
     await waitFor(() => eventOf(events, 'ask_request') !== undefined)
-    // Pending cards block ordinary mutations, but never switching off.
-    await expect(core.computerUse.setEnabled(true)).rejects.toThrow()
-    await core.computerUse.setEnabled(false)
+    // Pending cards in the session shown block ordinary mutations, but
+    // never switching off.
+    const shown = { sessionId: id }
+    await expect(core.computerUse.setEnabled(true, shown)).rejects.toThrow()
+    await core.computerUse.setEnabled(false, shown)
     expect((await submitted).content).toBe('stopped')
     expect(refused).toContain('PERMISSION_DENIED')
     expect((await core.computerUse.status()).targets).toEqual([])
@@ -558,10 +572,13 @@ describe('computer use browser profiles', () => {
         computerUseSettings: () => ({ enabled: true }),
       },
     })
-    const { profile } = await core.computerUse.manageProfile({
-      action: 'create',
-      name: '购物',
-    })
+    const { profile } = await core.computerUse.manageProfile(
+      {
+        action: 'create',
+        name: '购物',
+      },
+      VIEW,
+    )
     const profileId = profile!.profileId
     const grants = core.host.computerUse!.grants
     grants.issue({
@@ -591,11 +608,11 @@ describe('computer use browser profiles', () => {
       backgroundAllowed: false,
     })
     await expect(
-      core.computerUse.manageProfile({ action: 'clear', profileId }),
+      core.computerUse.manageProfile({ action: 'clear', profileId }, VIEW),
     ).resolves.toEqual({ revokedGrants: 1 })
     expect(port.browser.clearedProfiles).toEqual([{ profileId, remove: false }])
     expect(core.host.computerUse!.grants.list()).toHaveLength(1)
-    await core.computerUse.manageProfile({ action: 'delete', profileId })
+    await core.computerUse.manageProfile({ action: 'delete', profileId }, VIEW)
     expect(port.browser.clearedProfiles.at(-1)).toEqual({
       profileId,
       remove: true,
@@ -604,7 +621,7 @@ describe('computer use browser profiles', () => {
       'temporary',
     ])
     await expect(
-      core.computerUse.manageProfile({ action: 'delete', profileId }),
+      core.computerUse.manageProfile({ action: 'delete', profileId }, VIEW),
     ).rejects.toThrow(/no browser profile/)
   })
 
@@ -616,10 +633,13 @@ describe('computer use browser profiles', () => {
         computerUseSettings: () => ({ enabled: true }),
       },
     })
-    const { profile } = await core.computerUse.manageProfile({
-      action: 'create',
-      name: '银行',
-    })
+    const { profile } = await core.computerUse.manageProfile(
+      {
+        action: 'create',
+        name: '银行',
+      },
+      VIEW,
+    )
     const profileId = profile!.profileId
     core.host.computerUse!.grants.issue({
       subject: 'session:s1',
@@ -638,7 +658,7 @@ describe('computer use browser profiles', () => {
       throw new Error('disk busy')
     }
     await expect(
-      core.computerUse.manageProfile({ action: 'delete', profileId }),
+      core.computerUse.manageProfile({ action: 'delete', profileId }, VIEW),
     ).rejects.toThrow(/disk busy/)
     expect(core.host.computerUse!.grants.list()).toEqual([])
     // The profile is kept so the user can retry the wipe.
@@ -687,29 +707,38 @@ describe('computer use site permissions', () => {
     ).notes.get(snapshot.targetId)
     expect(notes?.filter((note) => note.includes('camera'))).toHaveLength(1)
     expect(
-      core.computerUse.setSitePermission({
-        profileId: 'temporary',
-        origin: 'https://meet.test',
-        kind: 'camera',
-        allow: true,
-      }).permissions,
+      core.computerUse.setSitePermission(
+        {
+          profileId: 'temporary',
+          origin: 'https://meet.test',
+          kind: 'camera',
+          allow: true,
+        },
+        VIEW,
+      ).permissions,
     ).toHaveLength(1)
     expect(ask('camera')).toBe(true)
     expect(ask('microphone')).toBe(false)
-    core.computerUse.setSitePermission({
-      profileId: 'temporary',
-      origin: 'https://meet.test',
-      kind: 'camera',
-      allow: false,
-    })
-    expect(ask('camera')).toBe(false)
-    expect(() =>
-      core.computerUse.setSitePermission({
-        profileId: 'p_000000000000',
+    core.computerUse.setSitePermission(
+      {
+        profileId: 'temporary',
         origin: 'https://meet.test',
         kind: 'camera',
-        allow: true,
-      }),
+        allow: false,
+      },
+      VIEW,
+    )
+    expect(ask('camera')).toBe(false)
+    expect(() =>
+      core.computerUse.setSitePermission(
+        {
+          profileId: 'p_000000000000',
+          origin: 'https://meet.test',
+          kind: 'camera',
+          allow: true,
+        },
+        VIEW,
+      ),
     ).toThrow(/no browser profile/)
   })
 })
@@ -759,10 +788,13 @@ describe('computer use restorable tabs', () => {
         computerUseSettings: () => ({ enabled: true }),
       },
     })
-    const { profile } = await first.api.computerUse.manageProfile({
-      action: 'create',
-      name: '邮箱',
-    })
+    const { profile } = await first.api.computerUse.manageProfile(
+      {
+        action: 'create',
+        name: '邮箱',
+      },
+      VIEW,
+    )
     const id = String(first.api.sessions.create({ title: 'GUI' }).id)
     first.api.control.setPermissionMode('danger-full-access', id)
     await first.api.chat.submit({

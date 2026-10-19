@@ -34,8 +34,8 @@ import type {
 export interface CoreSkillServiceDeps {
   runtimeRoot?: string
   manager?: SkillManager
-  /** Kernel tool catalog (HarnessHost ToolRegistry.schemas()). */
-  toolNames?: () => SkillServiceToolEntry[]
+  /** The tools a session sees (null: a Chat session or none) (KRN-01). */
+  toolNames?: (sessionId: string | null) => SkillServiceToolEntry[]
   refreshRuntimeContext?: () => void
   installService?: SkillInstallService
   resolveMissing?: (
@@ -182,8 +182,9 @@ export class CoreSkillService {
       })
   }
 
-  tools(): ToolInfoPayload[] {
-    return (this.deps.toolNames?.() ?? []).map((tool) => {
+  /** The tools of one session (its project's MCP tools included); null: Chat. */
+  tools(sessionId: string | null = null): ToolInfoPayload[] {
+    return (this.deps.toolNames?.(sessionId) ?? []).map((tool) => {
       // Server names may contain `_`, and builtins such as `mcp_config` share
       // the prefix: only the adapter-provided server name marks an MCP tool.
       const server = tool.mcpServer ?? ''

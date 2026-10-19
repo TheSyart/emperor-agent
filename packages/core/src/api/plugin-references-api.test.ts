@@ -14,6 +14,9 @@ import {
 import { makeApi, tmp, type ApiFixture } from './test-helpers'
 import type { CoreApiCreateOptions } from './core-api'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 // E-track contract §3 through CoreApi: a user message naming `@plugin`
 // reaches the model with the plugin's reference after it, the system
 // prompt unchanged.
@@ -83,11 +86,14 @@ async function installHello(fixture: ApiFixture) {
     kind: 'local',
     path: source,
   })
-  await fixture.api.plugins.install({
-    previewId: preview.previewId,
-    digest: preview.digest,
-    scope: 'user',
-  })
+  await fixture.api.plugins.install(
+    {
+      previewId: preview.previewId,
+      digest: preview.digest,
+      scope: 'user',
+    },
+    VIEW,
+  )
 }
 
 /** References this step injected: after the latest user message (earlier ones stay in history). */
@@ -142,11 +148,14 @@ describe('plugin references through CoreApi', () => {
     const captured: GenerateOptions[] = []
     const fixture = await api(captured)
     await installHello(fixture)
-    await fixture.api.plugins.setEnabled({
-      pluginId: 'hello-kit',
-      scope: 'user',
-      enabled: false,
-    })
+    await fixture.api.plugins.setEnabled(
+      {
+        pluginId: 'hello-kit',
+        scope: 'user',
+        enabled: false,
+      },
+      VIEW,
+    )
     const sessionId = String(fixture.api.sessions.create({ title: 'Chat' }).id)
 
     // Chips always stand after whitespace, as the gesture requires.
@@ -184,7 +193,7 @@ describe('plugin references through CoreApi', () => {
       /status="disabled">.*电脑操作未开启（设置 › 电脑操作）/,
     )
 
-    await fixture.api.computerUse.setEnabled(true)
+    await fixture.api.computerUse.setEnabled(true, VIEW)
     await ask(fixture, sessionId, '@computer-use 打开示例网页')
     const text = messageText(injected(captured[1]!)[0]!)
     expect(text).toContain(

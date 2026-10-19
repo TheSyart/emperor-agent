@@ -3,6 +3,9 @@ import { makeApi } from '../../api/test-helpers'
 import { fixtureDelegationRecord } from './testing'
 import { defaultExecutorConfig } from './config'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 it('the consent card reaches the conversation as an approval and the answer comes back through control', async () => {
   const { api, events } = await makeApi()
   try {
@@ -47,17 +50,23 @@ it('turning an executor off in settings forgets "以后都允许"', async () => 
     const listed = api.executors.list()
     const config = structuredClone(listed.config!)
     config.profiles[1]!.enabled = true
-    const on = await api.executors.configure({
-      expectedRevision: config.revision,
-      config,
-    })
+    const on = await api.executors.configure(
+      {
+        expectedRevision: config.revision,
+        config,
+      },
+      VIEW,
+    )
     expect(api.executors.list().profiles[1]!.consent).toBe('always')
     const off = structuredClone(on)
     off.profiles[1]!.enabled = false
-    await api.executors.configure({
-      expectedRevision: on.revision,
-      config: off,
-    })
+    await api.executors.configure(
+      {
+        expectedRevision: on.revision,
+        config: off,
+      },
+      VIEW,
+    )
     expect(api.executors.list().profiles[1]!.consent).toBeNull()
   } finally {
     await api.close()

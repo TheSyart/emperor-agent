@@ -351,7 +351,7 @@ class FakeCore implements EmperorAcpCore {
   }
 
   readonly chat = {
-    submit: async (input: SubmitInput) => {
+    runBackground: async (input: SubmitInput) => {
       this.submitCalls.push(input)
       return await this.submitBehavior(input)
     },

@@ -9,6 +9,9 @@ import { replyChunks, type ScriptedReply } from '../../testing'
 import { FakeComputerUsePort } from '../testing/fake-port'
 import type { DriverCapability } from '../types'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 const fixtures: ApiFixture[] = []
 
 afterEach(async () => {
@@ -84,10 +87,13 @@ describe('browser_profile_list', () => {
       ],
       settings,
     )
-    const { profile } = await api.computerUse.manageProfile({
-      action: 'create',
-      name: '邮箱',
-    })
+    const { profile } = await api.computerUse.manageProfile(
+      {
+        action: 'create',
+        name: '邮箱',
+      },
+      VIEW,
+    )
     profileId = profile!.profileId
 
     // An info tool never asks.

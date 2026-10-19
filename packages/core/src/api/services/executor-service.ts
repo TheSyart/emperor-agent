@@ -1,3 +1,4 @@
+import type { ViewScope } from '../../harness/host/scope'
 import {
   ExecutorConfigStore,
   parseExecutorConfig,
@@ -18,7 +19,8 @@ export class CoreExecutorService {
       registry: ExecutorRegistry
       facts: ExecutorFactsStore
       modelCatalog: ExecutorModelCatalogService
-      assertConfigure: () => void
+      /** The mutation guard of the session the caller shows (KRN-01). */
+      assertConfigure: (view: ViewScope) => void
       refresh: () => Promise<void>
       checkAuth?: (profile: ExecutorProfile) => Promise<void>
       /** "以后都允许" per profile (AGT-05). */
@@ -93,8 +95,11 @@ export class CoreExecutorService {
     this.options.facts.setProbe(profile, value)
     return value
   }
-  async configure(input: { expectedRevision: number; config: unknown }) {
-    this.options.assertConfigure()
+  async configure(
+    input: { expectedRevision: number; config: unknown },
+    view: ViewScope,
+  ) {
+    this.options.assertConfigure(view)
     const before = this.options.store.read()
     const parsed = parseExecutorConfig(input.config),
       config = this.options.store.update(input.expectedRevision, parsed)

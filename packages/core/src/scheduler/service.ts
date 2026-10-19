@@ -38,7 +38,6 @@ export type SchedulerSetTimer = (
   delayMs: number,
 ) => unknown
 export type SchedulerClearTimer = (handle: unknown) => void
-export type SchedulerTargetSession = () => string | null | undefined
 
 export interface SchedulerRunContext {
   runId: string
@@ -49,6 +48,25 @@ export interface SchedulerRunContext {
   missedCount: number
   countCapped: boolean
   signal: AbortSignal
+}
+
+/**
+ * How a run ended when it did not complete (KRN-01): the executor maps a
+ * turn's typed result to Failed (with the error code), Cancelled or
+ * Blocked, and the record says so.
+ */
+export class SchedulerRunFailure extends Error {
+  constructor(
+    readonly status:
+      | SchedulerStatus.ERROR
+      | SchedulerStatus.CANCELLED
+      | SchedulerStatus.BLOCKED,
+    message: string,
+    readonly code: string | null = null,
+  ) {
+    super(message)
+    this.name = 'SchedulerRunFailure'
+  }
 }
 
 export interface SchedulerTaskTerminalSnapshot {
@@ -94,7 +112,6 @@ export class SchedulerService {
   timeFunc: () => number
   maxSleepMs: number
   readonly misfirePolicy = SchedulerMisfirePolicy.SKIP
-  private readonly targetSessionId: SchedulerTargetSession
   private readonly setTimer: SchedulerSetTimer
   private readonly clearTimer: SchedulerClearTimer
   private readonly runPoolLimits: SchedulerRunPoolLimits
@@ -122,7 +139,6 @@ export class SchedulerService {
       eventSink?: ((event: Record<string, unknown>) => Promise<void>) | null
       timeFunc?: () => number
       maxSleepMs?: number
-      targetSessionId?: SchedulerTargetSession | null
       setTimer?: SchedulerSetTimer
       clearTimer?: SchedulerClearTimer
       runPoolLimits?: Partial<SchedulerRunPoolLimits>
@@ -135,7 +151,6 @@ export class SchedulerService {
     this.eventSink = opts.eventSink ?? null
     this.timeFunc = opts.timeFunc ?? nowMs
     this.maxSleepMs = Math.max(1, Math.trunc(opts.maxSleepMs ?? 300_000))
-    this.targetSessionId = opts.targetSessionId ?? (() => null)
     this.setTimer =
       opts.setTimer ??
       ((callback, delayMs) =>
@@ -230,10 +245,12 @@ export class SchedulerService {
     misfirePolicy?: SchedulerMisfirePolicy
     protected?: boolean
     purpose?: string | null
+    /** The session a payload without one runs in (the one the creator shows). */
+    targetSessionId?: string | null
   }): SchedulerJob {
     validateSchedule(opts.schedule)
     const current = this.timeFunc()
-    const payload = this.withTargetSession(opts.payload)
+    const payload = withTargetSession(opts.payload, opts.targetSessionId)
     const job = SchedulerJob.create({
       name: opts.name,
       schedule: opts.schedule,
@@ -258,6 +275,8 @@ export class SchedulerService {
       payload?: SchedulerPayload | null
       deleteAfterRun?: boolean | null
       misfirePolicy?: SchedulerMisfirePolicy | null
+      /** The session a new payload without one runs in. */
+      targetSessionId?: string | null
     },
   ): SchedulerJob | 'not_found' | 'protected' {
     const job = this.store.getJob(jobId)
@@ -272,7 +291,8 @@ export class SchedulerService {
           this.timeFunc(),
         )
     }
-    if (opts.payload) job.payload = this.withTargetSession(opts.payload)
+    if (opts.payload)
+      job.payload = withTargetSession(opts.payload, opts.targetSessionId)
     if (opts.name !== undefined && opts.name !== null)
       job.name = String(opts.name || '').trim() || job.name
     if (opts.deleteAfterRun !== undefined && opts.deleteAfterRun !== null)
@@ -661,6 +681,8 @@ export class SchedulerService {
     const end = this.timeFunc()
     const status = terminalStatus(active, failure, this.shutdownReason !== null)
     const error = terminalError(status, failure, this.shutdownReason)
+    const errorCode =
+      failure instanceof SchedulerRunFailure ? failure.code : null
     job.state.recordRun({
       runId: active.run_id,
       taskId: active.task_id,
@@ -676,6 +698,7 @@ export class SchedulerService {
         end - (active.started_at_ms ?? active.enqueued_at_ms),
       ),
       error,
+      errorCode,
     })
     const automaticAt =
       job.schedule.kind === 'at' &&
@@ -695,11 +718,13 @@ export class SchedulerService {
       deleted ? 'delete' : 'update',
       deleted ? { jobId: job.id } : { job },
     )
-    if (status === SchedulerStatus.ERROR)
+    if (status === SchedulerStatus.ERROR || status === SchedulerStatus.BLOCKED)
       await this.emit(
         this.withEventSession(
           runtimeEvents.schedulerRunError(schedulerJobPublicPayload(job), {
             error: error ?? 'unknown error',
+            status,
+            code: errorCode,
             run: schedulerRunEventPayload(active),
           }),
           job,
@@ -870,19 +895,6 @@ export class SchedulerService {
     if (this.eventSink) await this.eventSink(event)
   }
 
-  private withTargetSession(payload: SchedulerPayload): SchedulerPayload {
-    if (schedulerPayloadSessionId(payload)) return payload
-    const sessionId = cleanString(this.targetSessionId())
-    if (!sessionId) return payload
-    return SchedulerPayload.fromDict({
-      ...payload.toDict(),
-      meta: {
-        ...payload.meta,
-        [SCHEDULER_TARGET_SESSION_METADATA_KEY]: sessionId,
-      },
-    })
-  }
-
   private withEventSession(
     event: Record<string, unknown>,
     job: SchedulerJob,
@@ -890,6 +902,23 @@ export class SchedulerService {
     const sessionId = schedulerPayloadSessionId(job.payload) || 'scheduler'
     return { ...event, session_id: sessionId }
   }
+}
+
+/** A payload without a session gets `targetSessionId` (explicit; never a focus). */
+function withTargetSession(
+  payload: SchedulerPayload,
+  targetSessionId: string | null | undefined,
+): SchedulerPayload {
+  if (schedulerPayloadSessionId(payload)) return payload
+  const sessionId = cleanString(targetSessionId)
+  if (!sessionId) return payload
+  return SchedulerPayload.fromDict({
+    ...payload.toDict(),
+    meta: {
+      ...payload.meta,
+      [SCHEDULER_TARGET_SESSION_METADATA_KEY]: sessionId,
+    },
+  })
 }
 
 function newRunIdentity(): { runId: string; taskId: string } {
@@ -946,6 +975,7 @@ function terminalStatus(
   shuttingDown: boolean,
 ): SchedulerStatus {
   if (!failure) return SchedulerStatus.OK
+  if (failure instanceof SchedulerRunFailure) return failure.status
   if (failure instanceof SchedulerRunPoolCapacityError)
     return SchedulerStatus.SKIPPED
   if (failure instanceof SchedulerRunPoolCancelledError)

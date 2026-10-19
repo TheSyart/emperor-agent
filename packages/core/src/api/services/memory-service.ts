@@ -58,7 +58,6 @@ export interface CoreMemoryServiceDeps {
   tokenTracker: TokenTracker
   watchlist: WatchlistService
   sessionStore: SessionStore
-  activeSessionId(): string | null
   /** The session's log (open or lazily restored); undefined when it has none. */
   sessionLog(sessionId: string): Session | undefined
   /** Manual compaction of one session's log (`HarnessHost.compactNow`). */
@@ -158,7 +157,8 @@ export class CoreMemoryService {
     return this.deps.sharedMemory
   }
 
-  getMemory() {
+  /** Memory, plus the context gauge of `sessionId` (the session in view; null: none). */
+  getMemory(sessionId: string | null) {
     const memoryDir = this.memory.memoryDir
     const episodes = existsSync(memoryDir)
       ? readdirSync(memoryDir)
@@ -166,7 +166,6 @@ export class CoreMemoryService {
           .sort()
           .map((name) => this.rel(join(memoryDir, name)))
       : []
-    const sessionId = this.deps.activeSessionId()
     const session = sessionId ? this.deps.sessionLog(sessionId) : undefined
     const tracker = this.deps.tokenTracker
     return {
@@ -268,10 +267,10 @@ export class CoreMemoryService {
     return this.memory.versions.detail(versionId)
   }
 
-  restoreVersion(versionId: string) {
+  restoreVersion(versionId: string, sessionId: string | null) {
     const restored = this.memory.versions.restore(versionId)
     this.deps.refreshRuntimeContext()
-    return { restored, memory: this.getMemory() }
+    return { restored, memory: this.getMemory(sessionId) }
   }
 
   getWatchlist(): Dict {
@@ -288,7 +287,8 @@ export class CoreMemoryService {
     return { decision: decision.toDict(), watchlist: watchlist.payload() }
   }
 
-  tokens() {
+  /** Token statistics; `messages` counts the session in view (null: none). */
+  tokens(sessionId: string | null) {
     const tracker = this.deps.tokenTracker
     return {
       totals: tracker.totals(),
@@ -299,7 +299,7 @@ export class CoreMemoryService {
       byHour: tracker.statsByHour(),
       streak: tracker.streakMetrics(),
       sessions: tracker.sessionCount(),
-      messages: this.countActiveMessages(),
+      messages: this.countMessages(sessionId),
       recentCalls: tracker.recentCalls(),
       recentCacheCalls: tracker.recentCacheCalls(),
       generatedAt: localIsoSeconds(),
@@ -318,9 +318,7 @@ export class CoreMemoryService {
       instructions?: string | null
     } = {},
   ): Promise<CoreCompactPayload> {
-    const sessionId = String(
-      opts.sessionId ?? this.deps.activeSessionId() ?? '',
-    ).trim()
+    const sessionId = String(opts.sessionId ?? '').trim()
     const entry = sessionId ? this.deps.sessionStore.get(sessionId) : null
     if (!entry) throw new Error('session is required for compaction')
     const before = this.deps.sessionLog(sessionId)
@@ -330,7 +328,7 @@ export class CoreMemoryService {
         status: 'skipped',
         count,
         message: `会话上下文不足 2 条消息，无需压缩。${CONSOLIDATION_RETIRED}`,
-        memory: this.getMemory(),
+        memory: this.getMemory(sessionId),
         unarchivedHistory: [],
       }
     }
@@ -342,7 +340,7 @@ export class CoreMemoryService {
         status: 'degraded',
         count,
         message: '会话压缩失败，已保留当前会话上下文。',
-        memory: this.getMemory(),
+        memory: this.getMemory(sessionId),
         unarchivedHistory: [],
         error: String(exc instanceof Error ? exc.message : exc).slice(0, 500),
       }
@@ -355,7 +353,7 @@ export class CoreMemoryService {
         status: 'skipped',
         count,
         message: `当前上下文没有可压缩的范围。${CONSOLIDATION_RETIRED}`,
-        memory: this.getMemory(),
+        memory: this.getMemory(sessionId),
         unarchivedHistory: [],
         runtime,
       }
@@ -366,7 +364,7 @@ export class CoreMemoryService {
       status: 'compacted',
       count,
       message: `已将较早的会话上下文压缩为摘要（约 ${tokens} tokens）。${CONSOLIDATION_RETIRED}`,
-      memory: this.getMemory(),
+      memory: this.getMemory(sessionId),
       unarchivedHistory: [],
       runtime,
       compaction: {
@@ -385,15 +383,13 @@ export class CoreMemoryService {
   explainContext(
     opts: { sessionId?: string | null; turnId?: string | null } = {},
   ) {
-    const sessionId = String(
-      opts.sessionId ?? this.deps.activeSessionId() ?? '',
-    ).trim()
+    const sessionId = String(opts.sessionId ?? '').trim()
     if (!sessionId) {
       return {
         status: 'missing_session',
         sessionId: null,
         turnId: opts.turnId ?? null,
-        reason: 'no active or requested session',
+        reason: 'no requested session',
       }
     }
     const session = this.deps.sessionLog(sessionId)
@@ -644,9 +640,8 @@ export class CoreMemoryService {
     }
   }
 
-  /** User prompts + assistant replies in the active session's log. */
-  private countActiveMessages(): number {
-    const sessionId = this.deps.activeSessionId()
+  /** User prompts + assistant replies in one session's log. */
+  private countMessages(sessionId: string | null): number {
     const session = sessionId ? this.deps.sessionLog(sessionId) : undefined
     if (!session) return 0
     let count = 0

@@ -4,6 +4,9 @@ import { GUI_TOOL_CATALOG } from '../harness/computer-use/tools/catalog'
 import { TOOL_CATEGORIES, type ToolCategory } from '../harness/tools/definition'
 import { makeApi, type ApiFixture } from './test-helpers'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 // 能力 › 工具 lists Emperor's own tools by category (PLAN-CAP-001 ST-08):
 // every builtin tool the Agent sees has one, and the computer use tools
 // belong to their plugin (its detail lists them), not to that page.
@@ -67,7 +70,7 @@ describe('the tool catalog of 能力 › 工具', () => {
   it('gives every builtin tool a category', async () => {
     const api = await fullApi()
     const builtin = api.skills
-      .tools()
+      .tools(VIEW)
       .filter((tool) => tool.source === 'builtin' && !tool.plugin_id)
     // A new tool registered without a category fails here, by name.
     expect(
@@ -88,7 +91,7 @@ describe('the tool catalog of 能力 › 工具', () => {
   it('puts the computer use tools under their plugin, without a category', async () => {
     const api = await fullApi()
     const gui = api.skills
-      .tools()
+      .tools(VIEW)
       .filter((tool) => tool.plugin_id === 'computer-use')
     expect(gui.map((tool) => tool.name).sort()).toEqual(
       Object.keys(GUI_TOOL_CATALOG).sort(),

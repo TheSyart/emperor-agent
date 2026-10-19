@@ -16,6 +16,9 @@ import {
 import type { DelegationState } from '../../harness/delegation/fold'
 import type { DelegationRunRecord } from '../../harness/delegation/types'
 import { SessionProjector } from '../../harness/projection/projector'
+
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
 async function fixture(
   replies?: import('../../harness/testing').ScriptedReply[],
 ) {
@@ -67,9 +70,13 @@ it('exposes one terminal task per external run and keeps old rows terminal on fo
     const next = { ...f.run, id: 'dgr-next', phase: 'running' as const }
     f.state.runs[next.id] = next
     f.record.currentRunId = next.id
-    expect(f.api.tasks.get(f.run.id)?.status).toBe('completed')
+    expect(f.api.tasks.get(f.run.id, { sessionId: f.root })?.status).toBe(
+      'completed',
+    )
     expect(f.api.tasks.list({ sessionId: f.root })).toHaveLength(2)
-    expect(await f.api.tasks.wait(f.run.id, { timeoutMs: 5 })).toMatchObject({
+    expect(
+      await f.api.tasks.wait(f.run.id, { timeoutMs: 5, sessionId: f.root }),
+    ).toMatchObject({
       status: 'completed',
     })
   } finally {
@@ -142,31 +149,39 @@ it('pages external transcript at 500 and readOutput reads its own durable run on
         }),
       ).join('\n') + '\n',
     )
-    expect(f.api.tasks.transcript(f.run.id, { limit: 900 })).toMatchObject({
+    expect(
+      f.api.tasks.transcript(f.run.id, { limit: 900, sessionId: f.root }),
+    ).toMatchObject({
       total: 505,
       eof: false,
       entries: expect.any(Array),
     })
     expect(
-      f.api.tasks.transcript(f.run.id, { limit: 900 }).entries,
+      f.api.tasks.transcript(f.run.id, { limit: 900, sessionId: f.root })
+        .entries,
     ).toHaveLength(500)
     expect(
-      f.api.tasks.transcript(f.run.id, { offset: 500 }).entries,
+      f.api.tasks.transcript(f.run.id, { offset: 500, sessionId: f.root })
+        .entries,
     ).toHaveLength(5)
-    expect((await f.api.tasks.readOutput(f.run.id)).content).toContain(
-      'line 504',
-    )
+    expect(
+      (await f.api.tasks.readOutput(f.run.id, { sessionId: f.root })).content,
+    ).toContain('line 504')
   } finally {
     await f.api.close()
   }
 })
-it('denies cross-root external reads and mutations after switching the active chat', async () => {
+it('denies cross-root external reads and mutations when the caller names another chat', async () => {
   const f = await fixture()
   try {
-    const other = f.api.sessions.create({ title: 'another' })
-    f.api.sessions.activate(String(other.id))
+    const other = String(f.api.sessions.create({ title: 'another' }).id)
+    // The session in view is no authority (KRN-01): the caller names one.
+    f.api.sessions.activate(f.root)
+    expect(() =>
+      f.api.delegationService.get({ id: f.record.id, sessionId: other }),
+    ).toThrow('PERMISSION_DENIED')
     expect(() => f.api.delegationService.get({ id: f.record.id })).toThrow(
-      'PERMISSION_DENIED',
+      expect.objectContaining({ code: 'SESSION_REQUIRED' }),
     )
     expect(() => f.api.tasks.transcript(f.run.id)).toThrow()
     expect(
@@ -305,7 +320,7 @@ it('collects real artifacts through Core composition and requires independent cr
     )
     const config = api.executorConfig.read()
     config.profiles.find((p) => p.backend === 'codex')!.enabled = true
-    await api.executors.configure({ expectedRevision: 0, config })
+    await api.executors.configure({ expectedRevision: 0, config }, VIEW)
     const owner = {
       ...fixtureDelegationRecord().owner,
       rootSessionId: root,
@@ -332,10 +347,13 @@ it('collects real artifacts through Core composition and requires independent cr
       acceptance: 'unverified',
       receiptId: expect.any(String),
     })
-    expect((await api.delegations.collect({ runId: run.id })).id).toBe(
-      run.receiptId,
-    )
-    const receipt = await api.delegations.receipt({ runId: run.id })
+    expect(
+      (await api.delegations.collect({ runId: run.id, sessionId: root })).id,
+    ).toBe(run.receiptId)
+    const receipt = await api.delegations.receipt({
+      runId: run.id,
+      sessionId: root,
+    })
     expect(receipt.patch?.content).toContain('diff --git')
     expect(
       api.delegationReceipts.readPatch(run.receiptId!, 32)?.truncated,
@@ -350,10 +368,15 @@ it('collects real artifacts through Core composition and requires independent cr
       ),
     ).toBe(true)
     await expect(
-      api.delegations.integrate({ runId: run.id, action: 'preview' }),
+      api.delegations.integrate({
+        runId: run.id,
+        action: 'preview',
+        sessionId: root,
+      }),
     ).rejects.toThrow('ACCEPTANCE_REQUIRED')
     const accepted = await api.delegations.validate({
       runId: run.id,
+      sessionId: root,
       receiptId: run.receiptId!,
       criteria: {
         description: 'independent bytes check',
@@ -372,16 +395,19 @@ it('collects real artifacts through Core composition and requires independent cr
     const preview = await api.delegations.integrate({
       runId: run.id,
       action: 'preview',
+      sessionId: root,
     })
     expect(preview).toMatchObject({ status: 'ready', revision: 1 })
-    expect((await api.delegations.receipt({ runId: run.id })).preview?.id).toBe(
-      preview.id,
-    )
+    expect(
+      (await api.delegations.receipt({ runId: run.id, sessionId: root }))
+        .preview?.id,
+    ).toBe(preview.id)
     if (!('digest' in preview)) throw new Error('expected preview')
     const head = fixtureGit(f.repo, 'rev-parse', 'HEAD')
     expect(
       await api.delegations.integrate({
         runId: run.id,
+        sessionId: root,
         action: 'apply',
         previewId: preview.id,
         expectedRevision: preview.revision,
@@ -392,6 +418,7 @@ it('collects real artifacts through Core composition and requires independent cr
     expect(fixtureGit(f.repo, 'rev-parse', 'HEAD')).toBe(head)
     const cancelled = api.delegations.validate({
       runId: run.id,
+      sessionId: root,
       receiptId: run.receiptId!,
       criteria: {
         description: 'stop a live verifier',
@@ -519,6 +546,7 @@ it('scopes verification recovery to the owning external run', async () => {
     await expect(
       f.api.delegations.recover({
         id: f.record.id,
+        sessionId: f.root,
         expectedRevision: 1,
         verificationId: 'dgr-verification-another',
       }),
@@ -526,6 +554,7 @@ it('scopes verification recovery to the owning external run', async () => {
     expect(recover).not.toHaveBeenCalled()
     await f.api.delegations.recover({
       id: f.record.id,
+      sessionId: f.root,
       expectedRevision: 1,
       verificationId: 'dgr-verification-123',
     })

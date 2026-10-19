@@ -17,8 +17,24 @@ describe('preload core IPC bridge (MIG-IPC-002)', () => {
     await expect(
       bridge.invokeCore('sessions.create', { title: 'A' }),
     ).resolves.toEqual({ ok: true })
+    // Every call carries the session the window shows (KRN-01).
     expect(calls).toEqual([
-      { channel: 'emperor:core:sessions:create', args: [{ title: 'A' }] },
+      {
+        channel: 'emperor:core:sessions:create',
+        args: [
+          { emperorCoreCall: 1, view: { sessionId: null } },
+          { title: 'A' },
+        ],
+      },
+    ])
+    calls.length = 0
+    bridge.setViewingSession('s1')
+    await bridge.invokeCore('plugins.list')
+    bridge.setViewingSession(null)
+    await bridge.invokeCore('plugins.list')
+    expect(calls.map((call) => call.args)).toEqual([
+      [{ emperorCoreCall: 1, view: { sessionId: 's1' } }],
+      [{ emperorCoreCall: 1, view: { sessionId: null } }],
     ])
   })
 })

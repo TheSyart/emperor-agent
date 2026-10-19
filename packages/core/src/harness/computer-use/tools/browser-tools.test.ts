@@ -12,6 +12,9 @@ import type { GenerateOptions, StreamChunk } from '../../../llm/types'
 import { replyChunks, testRoute, type ScriptedReply } from '../../testing'
 import { FakeComputerUsePort } from '../testing/fake-port'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 const fixtures: ApiFixture[] = []
 
 afterEach(async () => {
@@ -236,6 +239,7 @@ describe('browser_* tools end to end', () => {
           ],
         },
       }),
+      VIEW,
     )
     expect(
       (await api.chat.submit({ content: 'go', sessionId: id })).content,

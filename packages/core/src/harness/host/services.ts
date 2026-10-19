@@ -138,8 +138,6 @@ export interface KeptServices {
 export interface KeptServiceHooks {
   /** Host event sink (non-session events: scheduler, MCP, environment, skills). */
   emit(event: Record<string, unknown>): Promise<void> | void
-  activeSessionId(): string | null
-  activeWorkspaceRoot(): string
   refreshRuntimeContext(): void
 }
 
@@ -221,13 +219,16 @@ export async function createKeptServices(
     runtimeRoot: root,
     stateRoot: paths.stateRoot,
   })
+  // Chat sessions work here; user-wide services (Skill installs, the global
+  // MCP servers) use it instead of whichever session is in view (KRN-01).
+  const chatWorkspace = join(paths.stateRoot, 'workspace')
   const skillInstallService = new SkillInstallService({
     manager: skillManager,
     stateRoot: paths.stateRoot,
     resolveMissing: async (requirements) => {
       const skillName = 'install-candidate'
       const status = await environmentProbe.getStatus({
-        projectRoot: hooks.activeWorkspaceRoot(),
+        projectRoot: chatWorkspace,
         forceRefresh: true,
         skillRequirements: [{ skillName, skillStatus: 'active', requirements }],
       })
@@ -291,13 +292,13 @@ export async function createKeptServices(
     eventSink: async (event) => {
       await hooks.emit(event)
     },
-    targetSessionId: () => hooks.activeSessionId(),
   })
+  // The global MCP servers (mcp_config.json and user-wide plugins) serve
+  // every session; project-scoped plugins run in per-project instances.
   const mcpClient = new MCPClient(paths.stateRoot, {
     sealer: secretSealer,
     processRuntime,
-    workspaceRoot: () => hooks.activeWorkspaceRoot(),
-    ownerSessionId: () => hooks.activeSessionId(),
+    workspaceRoot: chatWorkspace,
     onStateChange: async (snapshot) => {
       await hooks.emit({
         event: 'mcp_connection_state',

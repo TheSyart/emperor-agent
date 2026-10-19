@@ -15,6 +15,9 @@ import { FakeComputerUsePort } from '../harness/computer-use/testing/fake-port'
 import type { DriverCapability } from '../harness/computer-use/types'
 import { eventOf, makeApi, tmp, waitFor, type ApiFixture } from './test-helpers'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 // The Computer Use plugin (plugin contract §5, PL-09): the only source of
 // the computer-use Skill, the master switch under another name, and a
 // detail that shows each driver's real state.
@@ -59,14 +62,14 @@ async function cuApi(
 
 function skillSources(api: ApiFixture['api'], name: string): string[] {
   return api.skills
-    .list()
+    .list(VIEW)
     .skills.filter((skill) => skill.name === name)
     .map((skill) => skill.source)
 }
 
 function row(api: ApiFixture['api']) {
   const found = api.plugins
-    .list()
+    .list(VIEW)
     .find((plugin) => plugin.pluginId === PACKAGE && plugin.scope === 'managed')
   if (!found) throw new Error('no Computer Use plugin row')
   return found
@@ -120,10 +123,10 @@ describe('the Computer Use plugin', () => {
     expect(skillSources(api, 'skill-creator')).toEqual(['builtin'])
     expect(skillSources(api, 'computer-use')).toEqual([])
 
-    await api.computerUse.setEnabled(true)
+    await api.computerUse.setEnabled(true, VIEW)
     expect(skillSources(api, 'computer-use')).toEqual(['plugin'])
 
-    await api.plugins.setEnabled({ ...REF, enabled: false })
+    await api.plugins.setEnabled({ ...REF, enabled: false }, VIEW)
     expect(skillSources(api, 'computer-use')).toEqual([])
   })
 
@@ -131,14 +134,14 @@ describe('the Computer Use plugin', () => {
     const { api, events } = await cuApi()
     expect([row(api).enabled, row(api).activation]).toEqual([false, 'disabled'])
 
-    await api.computerUse.setEnabled(true)
+    await api.computerUse.setEnabled(true, VIEW)
     expect([row(api).enabled, row(api).activation]).toEqual([true, 'active'])
 
-    await api.plugins.setEnabled({ ...REF, enabled: false })
+    await api.plugins.setEnabled({ ...REF, enabled: false }, VIEW)
     expect((await api.computerUse.status()).enabled).toBe(false)
     expect(guiTools(api)).toEqual([])
 
-    await api.plugins.setEnabled({ ...REF, enabled: true })
+    await api.plugins.setEnabled({ ...REF, enabled: true }, VIEW)
     expect((await api.computerUse.status()).enabled).toBe(true)
     expect(guiTools(api).length).toBeGreaterThan(0)
 
@@ -182,12 +185,12 @@ describe('the Computer Use plugin', () => {
         },
       ],
     })
-    await api.computerUse.setEnabled(true)
+    await api.computerUse.setEnabled(true, VIEW)
     const sessionId = String(api.sessions.create({ title: 'GUI' }).id)
     await api.chat.submit({ content: 'open it', sessionId })
     expect(results[0]).not.toContain('unknown tool')
 
-    await api.plugins.setEnabled({ ...REF, enabled: false })
+    await api.plugins.setEnabled({ ...REF, enabled: false }, VIEW)
     const status = await api.computerUse.status()
     expect(
       status.targets.every(
@@ -220,16 +223,18 @@ describe('the Computer Use plugin', () => {
         },
       ],
     })
-    await api.computerUse.setEnabled(true)
+    await api.computerUse.setEnabled(true, VIEW)
     const sessionId = String(api.sessions.create({ title: 'GUI' }).id)
     const submitted = api.chat.submit({ content: 'go', sessionId })
     await waitFor(() => eventOf(events, 'ask_request') !== undefined)
 
-    // Widening waits for the card; narrowing never does, as in Settings.
+    // Widening waits for the card in the session shown; narrowing never
+    // does, as in Settings.
+    const shown = { sessionId }
     await expect(
-      api.plugins.setEnabled({ ...REF, enabled: true }),
+      api.plugins.setEnabled({ ...REF, enabled: true }, shown),
     ).rejects.toThrow()
-    await api.plugins.setEnabled({ ...REF, enabled: false })
+    await api.plugins.setEnabled({ ...REF, enabled: false }, shown)
     expect((await submitted).content).toBe('stopped')
     expect(refused).toContain('PERMISSION_DENIED')
     expect((await api.computerUse.status()).enabled).toBe(false)
@@ -243,7 +248,7 @@ describe('the Computer Use plugin', () => {
     // Off: every member says the plugin is off, and the host (which may
     // launch the Helper to answer) is not asked.
     const before = port.capabilityCalls
-    const off = await api.plugins.getDetail(REF)
+    const off = await api.plugins.getDetail(REF, VIEW)
     expect(off.components.map((member) => member.state)).toEqual([
       'disabled',
       'disabled',
@@ -252,9 +257,9 @@ describe('the Computer Use plugin', () => {
     ])
     expect(port.capabilityCalls).toBe(before)
 
-    await api.computerUse.setEnabled(true)
+    await api.computerUse.setEnabled(true, VIEW)
     const view = async () =>
-      (await api.plugins.getDetail(REF)).components.map((member) => [
+      (await api.plugins.getDetail(REF, VIEW)).components.map((member) => [
         member.kind,
         member.id,
         member.title,
@@ -281,10 +286,13 @@ describe('the Computer Use plugin', () => {
     ])
 
     // A driver switched off in Settings, then the built-in browser gone.
-    await api.computerUse.setDriverEnabled({
-      driver: 'external-browser',
-      enabled: false,
-    })
+    await api.computerUse.setDriverEnabled(
+      {
+        driver: 'external-browser',
+        enabled: false,
+      },
+      VIEW,
+    )
     port.browser.available = false
     const after = await view()
     expect(after[2]).toEqual([
@@ -305,7 +313,7 @@ describe('the Computer Use plugin', () => {
 
   it('cannot be uninstalled', async () => {
     const { api } = await cuApi()
-    await expect(api.plugins.uninstall(REF)).rejects.toMatchObject({
+    await expect(api.plugins.uninstall(REF, VIEW)).rejects.toMatchObject({
       code: 'plugin_managed_uninstall_denied',
     })
     expect(row(api).uninstallable).toBe(false)
@@ -333,8 +341,8 @@ describe('the Computer Use plugin’s tools', () => {
 
   it('lists the 46 tools by driver, as the factories define them', async () => {
     const { api } = await cuApi()
-    await api.computerUse.setEnabled(true)
-    const { tools } = await api.plugins.getDetail(REF)
+    await api.computerUse.setEnabled(true, VIEW)
+    const { tools } = await api.plugins.getDetail(REF, VIEW)
     expect(tools.note).toBeNull()
     expect(
       tools.groups.map((group) => [
@@ -382,7 +390,7 @@ describe('the Computer Use plugin’s tools', () => {
   it('lists them while computer use is off, saying they wait for it', async () => {
     const { api, port } = await cuApi()
     const before = port.capabilityCalls
-    const { tools } = await api.plugins.getDetail(REF)
+    const { tools } = await api.plugins.getDetail(REF, VIEW)
     expect(tools.note).toBe('打开电脑操作后可用')
     expect(tools.groups.flatMap((group) => group.tools)).toHaveLength(46)
     // Listing them asks the host nothing.
@@ -392,8 +400,12 @@ describe('the Computer Use plugin’s tools', () => {
   it('lists no tools for a plugin without MCP servers', async () => {
     const { api } = await cuApi()
     expect(
-      (await api.plugins.getDetail({ pluginId: 'github', scope: 'managed' }))
-        .tools,
+      (
+        await api.plugins.getDetail(
+          { pluginId: 'github', scope: 'managed' },
+          VIEW,
+        )
+      ).tools,
     ).toEqual({ note: null, groups: [] })
   })
 })
