@@ -22,7 +22,9 @@
   --label-primary: var(--text-1);
   --label-secondary: var(--text-2);
   --label-tertiary: var(--text-3);
-  --label-caption: var(--text-4);
+  --label-caption: var(
+    --text-3
+  ); /* captions stay legible; --text-4 is for placeholders and disabled text */
   --label-dimmed: var(--text-disabled);
   --label-inverted: var(--text-inverted);
   --accent-fill: var(--accent);

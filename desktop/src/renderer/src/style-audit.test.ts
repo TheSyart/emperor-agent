@@ -60,8 +60,11 @@ describe('style audit: color convergence', () => {
   })
 
   it('no var(--paper/--ink/--seal/--jade/--amber/--muted/--line/--paper-2) consumption', () => {
+    // Exact retired names only: the DS-01 numbered primitives (--ink-50,
+    // --paper-0, …) are a different family, kept inside theme/ by
+    // theme/tokens.test.ts.
     const aliasVar =
-      /var\(--(?:paper|paper-2|ink|muted|line|seal|jade|amber)\b/g
+      /var\(--(?:paper|paper-2|ink|muted|line|seal|jade|amber)(?![\w-])/g
     const offenders: string[] = []
     for (const rel of SCANNED) {
       const hits = read(rel).match(aliasVar)

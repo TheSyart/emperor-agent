@@ -181,6 +181,71 @@ describe('token layers (DS-01)', () => {
   })
 })
 
+describe('readability of the semantic palette (DS-01 tests 4 and 8)', () => {
+  const primitives = declarations(readThemeFile('primitives.css'))
+  const themes = {
+    dark: declarations(readThemeFile('semantic.dark.css')),
+    light: declarations(readThemeFile('semantic.light.css')),
+  }
+
+  function rgb(theme: 'dark' | 'light', key: string): [number, number, number] {
+    let value = themes[theme].get(key) ?? primitives.get(key) ?? ''
+    for (let i = 0; i < 6 && value.startsWith('var('); i++) {
+      const ref = value.slice(4, -1)
+      value = themes[theme].get(ref) ?? primitives.get(ref) ?? ''
+    }
+    const m = value.match(/^(\d+) (\d+) (\d+)$/)
+    if (!m) throw new Error(`${theme} ${key} is not a solid colour: ${value}`)
+    return [Number(m[1]), Number(m[2]), Number(m[3])]
+  }
+
+  function luminance([r, g, b]: [number, number, number]): number {
+    const channel = (c: number) => {
+      const v = c / 255
+      return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+    }
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+  }
+
+  function contrast(theme: 'dark' | 'light', fg: string, bg: string): number {
+    const [a, b] = [luminance(rgb(theme, fg)), luminance(rgb(theme, bg))]
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+  }
+
+  it.each(['dark', 'light'] as const)(
+    'keeps %s text readable on panels and raised fills',
+    (theme) => {
+      for (const surface of ['--surface-base', '--surface-raised'])
+        for (const text of ['--text-1', '--text-2']) {
+          expect(
+            contrast(theme, text, surface),
+            `${text} on ${surface}`,
+          ).toBeGreaterThanOrEqual(4.5)
+        }
+      expect(
+        contrast(theme, '--text-3', '--surface-base'),
+      ).toBeGreaterThanOrEqual(4.5)
+      // Recorded exception: metadata on raised fills may sit at 4.3:1.
+      expect(
+        contrast(theme, '--text-3', '--surface-raised'),
+      ).toBeGreaterThanOrEqual(4.3)
+      expect(
+        contrast(theme, '--text-link', '--surface-base'),
+      ).toBeGreaterThanOrEqual(4.5)
+    },
+  )
+
+  it('gives the light theme four distinct surfaces (canvas, panel, raised, selected)', () => {
+    const values = [
+      '--surface-canvas',
+      '--surface-base',
+      '--surface-raised',
+      '--surface-selected',
+    ].map((key) => rgb('light', key).join(' '))
+    expect(new Set(values).size).toBe(4)
+  })
+})
+
 describe('colour primitives stay out of component CSS (DS-01 test 6)', () => {
   const root = new URL('..', import.meta.url).pathname
   function files(dir: string): string[] {

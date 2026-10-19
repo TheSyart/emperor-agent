@@ -1,69 +1,72 @@
 /* ── L2 semantic tokens, light ──
    The colours components mean: surfaces, text, lines, accent, status,
    elevation. Key set must equal the other theme (tokens.test.ts).
-   Phase 1 keeps the pre-0.2 values; phase 2 points these at the target
-   palette in primitives.css. */
+   Values follow the 0.2 target (warm neutrals, restrained gold; see
+   docs/design/color.md). */
 :root[data-theme='light'] {
   color-scheme: light;
 
   /* ── Surfaces ── */
-  --surface-canvas: var(--nb-00); /* window background */
-  --surface-base: var(--nb-00); /* panels and cards */
-  --surface-raised: var(--nb-00); /* raised fills inside a panel */
-  --surface-overlay: var(--nb-00); /* menus and popovers */
-  --surface-sunken: var(--nb-50); /* code blocks, wells */
-  --surface-selected: var(--nb-100); /* selected row */
-  --surface-strong: var(--nb-150); /* strong neutral fill */
-  --surface-hover: rgb(38 49 72 / 0.06); /* hover overlay (full colour) */
-  --surface-active: rgb(38 49 72 / 0.1); /* pressed overlay (full colour) */
-  --surface-hover-strong: rgb(38 49 72 / 0.14); /* strong hover overlay */
-  --surface-hover-danger: rgb(236 19 19 / 0.05); /* destructive hover overlay */
-  --surface-hover-solid: var(--nb-75); /* opaque hover fill */
+  --surface-canvas: var(--paper-50); /* window background */
+  --surface-base: var(--paper-0); /* panels and cards */
+  --surface-raised: 247 246 243; /* raised fills inside a panel */
+  --surface-overlay: var(--paper-0); /* menus and popovers */
+  --surface-sunken: var(--paper-50); /* code blocks, wells */
+  --surface-selected: var(--paper-150); /* selected row */
+  --surface-strong: var(--ink-500); /* strong neutral fill */
+  --surface-hover: rgb(28 27 25 / 0.045); /* hover overlay (full colour) */
+  --surface-active: rgb(28 27 25 / 0.08); /* pressed overlay (full colour) */
+  --surface-hover-strong: rgb(28 27 25 / 0.14); /* strong hover overlay */
+  --surface-hover-danger: rgb(217 48 48 / 0.1); /* destructive hover overlay */
+  --surface-hover-solid: var(--paper-100); /* opaque hover fill */
 
   /* ── Text ── */
-  --text-1: var(--nb-1000); /* primary text */
-  --text-2: var(--nb-700); /* secondary text */
-  --text-3: var(--nb-600); /* tertiary text, metadata */
-  --text-4: var(--nb-400); /* captions, placeholders */
-  --text-disabled: var(--nb-200); /* disabled text */
-  --text-inverted: var(--nb-00); /* text on inverted fills */
-  --text-link: 138 96 24; /* links and inline references */
+  --text-1: 28 27 25; /* primary text */
+  --text-2: 95 93 88; /* secondary text */
+  --text-3: 117 115 109; /* tertiary text, metadata */
+  --text-4: 179 177 171; /* captions, placeholders */
+  --text-disabled: 179 177 171; /* disabled text */
+  --text-inverted: var(--paper-0); /* text on inverted fills */
+  --text-link: var(--gold-800); /* links and inline references */
   --text-on-accent: 255 255 255; /* text on the accent fill */
 
   /* ── Strokes (full colours; drawn as 0.5px box-shadow from DS-02 on) ── */
-  --stroke-1: rgb(0 0 0 / 0.04); /* faint separator */
-  --stroke-2: rgb(0 0 0 / 0.1); /* default hairline */
-  --stroke-3: rgb(0 0 0 / 0.12); /* strong hairline */
-  --stroke-4: rgb(0 0 0 / 0.16); /* strongest hairline */
-  --stroke-inverted: rgb(0 0 0 / 0); /* hairline on inverted fills */
-  --stroke-solid: 230 230 231; /* opaque border (triplet) */
-  --stroke-solid-strong: 214 214 215; /* opaque strong border (triplet) */
+  --stroke-1: rgb(0 0 0 / 0.06); /* faint separator */
+  --stroke-2: rgb(0 0 0 / 0.12); /* default hairline */
+  --stroke-3: rgb(0 0 0 / 0.16); /* strong hairline */
+  --stroke-4: rgb(0 0 0 / 0.22); /* strongest hairline */
+  --stroke-inverted: rgb(255 255 255 / 0.12); /* hairline on inverted fills */
+  --stroke-solid: 216 216 213; /* opaque border (triplet) */
+  --stroke-solid-strong: 197 196 194; /* opaque strong border (triplet) */
+  --hairline: var(--stroke-2); /* the default 0.5px line */
 
   /* ── Accent (Emperor gold, used sparingly: see docs/design/color.md) ── */
-  --accent: 170 122 38; /* send, the one primary button, selected switch */
-  --accent-hover: 192 144 58; /* accent hover */
-  --accent-soft: 248 239 219; /* selected / tertiary accent fill */
-  --brand: 155 111 35; /* brand mark */
-  --focus-ring: 192 144 58; /* focus ring colour (triplet) */
-  --bubble-user: 250 246 238; /* user message bubble */
+  --accent: var(--gold-700); /* send, the one primary button, selected switch */
+  --accent-hover: var(--gold-600); /* accent hover */
+  --accent-soft: 245 241 233; /* selected / tertiary accent fill */
+  --brand: var(--gold-700); /* brand mark */
+  --focus-ring: var(--gold-700); /* focus ring colour (triplet) */
+  --bubble-user: 247 239 224; /* user message bubble */
 
   /* ── Status ── */
-  --ok: 34 197 94; /* success */
-  --warn: 245 158 11; /* warning */
-  --error: 236 19 19; /* error, destructive */
-  --attention: 245 158 11; /* approvals and plans waiting for the user */
-  --ok-soft: 230 250 237; /* success fill */
-  --warn-soft: 254 245 231; /* warning fill */
-  --error-soft: 254 242 242; /* error fill */
-  --attention-soft: 254 245 231; /* attention fill */
+  --ok: 31 157 85; /* success */
+  --warn: 181 96 11; /* warning */
+  --error: 217 48 48; /* error, destructive */
+  --attention: 194 87 12; /* approvals and plans waiting for the user */
+  --ok-soft: 233 245 238; /* success fill */
+  --warn-soft: 248 239 231; /* warning fill */
+  --error-soft: 251 234 234; /* error fill */
+  --attention-soft: 249 238 231; /* attention fill */
+  --info: 47 111 224; /* information, neutral notices */
+  --info-soft: 234 241 252; /* information fill */
 
   /* ── Elevation and scrim ── */
-  --elev-1: 0 2px 4px 0 rgb(0 0 0 / 0.05); /* cards */
+  --elev-1:
+    0 0 0 0.5px rgb(0 0 0 / 0.08), 0 8px 24px -12px rgb(0 0 0 / 0.12); /* cards */
   --elev-2:
-    0 4px 12px 0 rgb(0 0 0 / 0.02), 0 2px 8px 0 rgb(0 0 0 / 0.04); /* popovers */
+    0 0 0 0.5px rgb(0 0 0 / 0.1), 0 16px 40px -12px rgb(0 0 0 / 0.18); /* popovers */
   --elev-3:
-    0 0 1px 0 rgb(0 0 0 / 0.2), 0 0 4px 0 rgb(0 0 0 / 0.02),
-    0 12px 32px 0 rgb(0 0 0 / 0.08); /* dialogs */
+    0 0 0 0.5px rgb(0 0 0 / 0.08), 0 32px 80px -24px rgb(0 0 0 / 0.25); /* dialogs */
   --scrim: rgb(0 0 0 / 0.24); /* modal backdrop (full colour) */
   --scrim-soft: rgb(0 0 0 / 0.12); /* light backdrop (full colour) */
 }

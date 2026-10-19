@@ -19,6 +19,8 @@ body {
   font-family: theme('fontFamily.body');
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* A thin space between Chinese and Latin text (DS-01; ignored where unsupported). */
+  text-autospace: normal;
 }
 
 /* Image lightboxes use a constant dark viewing surface in both themes. */

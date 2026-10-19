@@ -1,27 +1,41 @@
 /* ── L3 component tokens (DS-01) ──
    Tokens owned by one component family (sidebar, menus, code, toasts,
-   avatars, materials). They reference L2; the per-theme literals below are
-   phase-1 values that DS-02 replaces with L2 references. */
+   avatars, materials). They reference L2 where the meaning matches; the
+   per-theme literals are target values with no L2 equivalent (syntax and
+   avatar colours, inverted toast, scrollbars). */
 :root {
-  --sidebar-fill: var(--surface-sunken);
+  /* Sidebar and lists */
+  --sidebar-fill: var(--surface-canvas);
   --sidebar-item-active: var(--surface-selected);
   --menu-fill: var(--surface-overlay);
-  --input-major: var(--surface-raised);
-  --code-block-bg: var(--surface-sunken);
-  --toast-fg: var(--surface-overlay);
-  --button-primary-fill: var(--text-1);
+  --selector-fill: var(--surface-raised);
+  --tip-fill: var(--surface-overlay);
   --ghost-active-fill: var(--surface-selected);
-  --mask-blur: 2px;
-  --caret: var(--accent);
-  --approval-strong: 247 173 49;
-  --approval-line: 221 134 41;
+
+  /* Settings cards sit on the panel; their controls one step down */
+  --settings-card-fill: var(--surface-raised);
+  --settings-card-control-fill: var(--surface-base);
+
+  /* Code (fills set per theme below: visible on the canvas and on panels) */
   --code-fg: var(--text-1);
-  --shadow-lv1-blur: 0 4px 12px 0 rgb(0 0 0 / 0.02);
+
+  /* Primary (neutral) button: inverted fill; gold is reserved for send */
+  --button-primary-fill: var(--text-1);
+
+  /* Accent family */
+  --caret: var(--accent);
+
+  /* Attention (approvals, plans) */
+  --approval-strong: var(--attention);
+
+  /* Materials and glass */
+  --mask-blur: 2px;
+  --shadow-lv1-blur: var(--elev-1);
   --glass-bg: var(--surface-raised);
   --glass-border-a: 0.06;
   --glass-blur: 24px;
   --glass-saturate: 1.4;
-  --glass-shadow: var(--shadow-lv3);
+  --glass-shadow: var(--elev-3);
   --glass-solid-alpha: 0.97;
   --material-1-bg: var(--surface-base);
   --material-1-alpha: 0.9;
@@ -36,100 +50,100 @@
 
 :root,
 :root[data-theme='dark'] {
-  --sidebar-item-hover: 44 44 46;
-  --selector-fill: 53 54 56;
-  --settings-card-fill: 50 50 53;
-  --settings-card-control-fill: 40 40 42;
-  --tip-fill: 53 54 56;
-  --code-banner-bg: 44 44 46;
-  --inline-code-bg: 44 44 46;
-  --tooltip-bg: 67 69 74;
-  --tooltip-fg: 255 255 255;
-  --toast-bg: 249 250 251;
-  --button-primary-hover: 235 238 242;
-  --button-primary-fg: 15 17 21;
-  --ghost-active-border: 129 133 140;
-  --scrollbar-thumb: 60 60 61;
-  --scrollbar-thumb-hover: 84 85 87;
-  --skeleton-bg: rgb(255 255 255 / 0.08);
-  --accent-soft-strong: 84 71 46;
-  --accent-glare: 244 222 170;
-  --state-ok-soft: 30 52 38;
-  --state-ok-label: 74 222 128;
-  --state-warn-soft: 56 44 24;
-  --state-warn-label: 247 181 64;
-  --state-error-soft: 72 32 34;
-  --state-error-label: 248 125 125;
+  --sidebar-item-hover: 33 33 32;
+  --input-major: var(--surface-raised);
+  --code-block-bg: var(--surface-raised);
+  --code-banner-bg: var(--surface-overlay);
+  --inline-code-bg: var(--surface-raised);
+  --tooltip-bg: 48 48 46;
+  --tooltip-fg: 236 236 234;
+  --toast-bg: 236 236 234;
+  --toast-fg: 26 26 25;
+  --button-primary-hover: 250 250 249;
+  --button-primary-fg: 26 26 25;
+  --ghost-active-border: 82 81 77;
+  --scrollbar-thumb: 48 48 46;
+  --scrollbar-thumb-hover: 58 58 55;
+  --skeleton-bg: rgb(255 255 255 / 0.06);
+  --accent-soft-strong: 63 55 39;
+  --accent-glare: 230 200 142;
+  --approval-line: 200 112 52;
+  --state-ok-soft: var(--ok-soft);
+  --state-ok-label: 118 214 166;
+  --state-warn-soft: var(--warn-soft);
+  --state-warn-label: 240 184 96;
+  --state-error-soft: var(--error-soft);
+  --state-error-label: 248 150 150;
   --avatar-1: 96 165 250;
   --avatar-2: 74 222 128;
   --avatar-3: 251 146 60;
   --avatar-4: 192 132 252;
   --avatar-5: 244 114 182;
   --avatar-6: 45 212 191;
-  --code-constant: 77 171 247;
-  --code-string: 105 219 124;
-  --code-comment: 173 181 189;
-  --code-keyword: 250 162 193;
-  --code-parameter: 255 169 77;
-  --code-function: 177 151 252;
-  --code-string-expression: 140 233 154;
-  --code-punctuation: 206 212 218;
-  --code-link: 116 192 252;
+  --code-constant: 122 167 247;
+  --code-string: 128 200 140;
+  --code-comment: 138 135 128;
+  --code-keyword: 232 150 176;
+  --code-parameter: 236 170 102;
+  --code-function: 176 156 240;
+  --code-string-expression: 150 216 160;
+  --code-punctuation: 168 166 161;
+  --code-link: 122 167 247;
   --tone-cyan: 103 232 249;
   --tone-violet: 196 181 253;
   --tone-blue: 147 197 253;
   --glass-alpha: 0.86;
   --glass-border: 255 255 255;
-  --scrim-a: 0.5;
+  --scrim-a: 0.55;
   --text-primary: 0.92;
   --text-secondary: 0.8;
   --text-tertiary: 0.64;
-  --hover-bg-a: 0.08;
-  --active-bg-a: 0.14;
+  --hover-bg-a: 0.05;
+  --active-bg-a: 0.08;
   --shadow-color: 0 0 0;
   --nb-60: 249 250 251;
 }
 
 :root[data-theme='light'] {
-  --sidebar-item-hover: 241 243 245;
-  --selector-fill: 245 246 247;
-  --settings-card-fill: 249 250 251;
-  --settings-card-control-fill: 255 255 255;
-  --tip-fill: 245 246 247;
-  --code-banner-bg: 249 250 251;
-  --inline-code-bg: 235 238 242;
-  --tooltip-bg: 44 44 46;
-  --tooltip-fg: 255 255 255;
-  --toast-bg: 97 102 107;
-  --button-primary-hover: 67 69 74;
+  --sidebar-item-hover: 239 238 234;
+  --input-major: var(--surface-base);
+  --code-block-bg: 239 238 234;
+  --code-banner-bg: 231 229 224;
+  --inline-code-bg: 239 238 234;
+  --tooltip-bg: 28 27 25;
+  --tooltip-fg: 250 250 249;
+  --toast-bg: 33 33 32;
+  --toast-fg: 236 236 234;
+  --button-primary-hover: 48 48 46;
   --button-primary-fg: 255 255 255;
-  --ghost-active-border: 151 157 166;
-  --scrollbar-thumb: 229 229 229;
-  --scrollbar-thumb-hover: 212 212 212;
-  --skeleton-bg: rgb(0 0 0 / 0.04);
-  --accent-soft-strong: 240 225 190;
-  --accent-glare: 232 206 146;
-  --state-ok-soft: 230 250 237;
-  --state-ok-label: 21 128 61;
-  --state-warn-soft: 254 245 231;
-  --state-warn-label: 180 83 9;
-  --state-error-soft: 254 226 226;
-  --state-error-label: 200 30 30;
+  --ghost-active-border: 179 177 171;
+  --scrollbar-thumb: 214 212 207;
+  --scrollbar-thumb-hover: 190 188 183;
+  --skeleton-bg: rgb(0 0 0 / 0.05);
+  --accent-soft-strong: 239 232 220;
+  --accent-glare: 221 184 120;
+  --approval-line: 194 87 12;
+  --state-ok-soft: var(--ok-soft);
+  --state-ok-label: 22 120 64;
+  --state-warn-soft: var(--warn-soft);
+  --state-warn-label: 150 78 8;
+  --state-error-soft: var(--error-soft);
+  --state-error-label: 180 36 36;
   --avatar-1: 37 99 235;
   --avatar-2: 22 163 74;
   --avatar-3: 234 88 12;
   --avatar-4: 147 51 234;
   --avatar-5: 219 39 119;
   --avatar-6: 13 148 136;
-  --code-constant: 28 126 214;
-  --code-string: 47 158 68;
-  --code-comment: 134 142 150;
-  --code-keyword: 214 51 108;
-  --code-parameter: 232 89 12;
-  --code-function: 103 65 217;
-  --code-string-expression: 43 138 62;
-  --code-punctuation: 73 80 87;
-  --code-link: 25 113 194;
+  --code-constant: 47 111 224;
+  --code-string: 40 140 70;
+  --code-comment: 117 115 109;
+  --code-keyword: 196 50 104;
+  --code-parameter: 200 90 20;
+  --code-function: 104 70 210;
+  --code-string-expression: 40 128 60;
+  --code-punctuation: 95 93 88;
+  --code-link: 47 111 224;
   --tone-cyan: 8 145 178;
   --tone-violet: 124 58 237;
   --tone-blue: 37 99 235;
@@ -139,8 +153,8 @@
   --text-primary: 0.9;
   --text-secondary: 0.66;
   --text-tertiary: 0.52;
-  --hover-bg-a: 0.05;
+  --hover-bg-a: 0.045;
   --active-bg-a: 0.08;
-  --shadow-color: 30 30 46;
+  --shadow-color: 28 27 25;
   --nb-60: 245 246 247;
 }

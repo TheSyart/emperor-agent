@@ -5,7 +5,7 @@
  * appearance decides, which matches the default 「跟随系统」. Kept equal to
  * theme/semantic.*.css by window-background.test.ts.
  */
-const CANVAS = { dark: '#151517', light: '#ffffff' } as const
+const CANVAS = { dark: '#141413', light: '#f6f5f2' } as const
 
 export function windowBackground(systemDark: boolean): string {
   return systemDark ? CANVAS.dark : CANVAS.light

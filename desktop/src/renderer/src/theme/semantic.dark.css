@@ -1,70 +1,75 @@
 /* ── L2 semantic tokens, dark (default) ──
    The colours components mean: surfaces, text, lines, accent, status,
    elevation. Key set must equal the other theme (tokens.test.ts).
-   Phase 1 keeps the pre-0.2 values; phase 2 points these at the target
-   palette in primitives.css. */
+   Values follow the 0.2 target (warm neutrals, restrained gold; see
+   docs/design/color.md). */
 :root,
 :root[data-theme='dark'] {
   color-scheme: dark;
 
   /* ── Surfaces ── */
-  --surface-canvas: var(--nb-950); /* window background */
-  --surface-base: var(--nb-875); /* panels and cards */
-  --surface-raised: var(--nb-850); /* raised fills inside a panel */
-  --surface-overlay: var(--nb-800); /* menus and popovers */
-  --surface-sunken: var(--nb-900); /* code blocks, wells */
-  --surface-selected: var(--nb-750); /* selected row */
-  --surface-strong: var(--nb-700); /* strong neutral fill */
-  --surface-hover: rgb(255 255 255 / 0.08); /* hover overlay (full colour) */
-  --surface-active: rgb(255 255 255 / 0.14); /* pressed overlay (full colour) */
-  --surface-hover-strong: rgb(255 255 255 / 0.24); /* strong hover overlay */
-  --surface-hover-danger: rgb(242 90 90 / 0.15); /* destructive hover overlay */
-  --surface-hover-solid: var(--nb-800); /* opaque hover fill */
+  --surface-canvas: var(--ink-50); /* window background */
+  --surface-base: var(--ink-100); /* panels and cards */
+  --surface-raised: var(--ink-150); /* raised fills inside a panel */
+  --surface-overlay: var(--ink-200); /* menus and popovers */
+  --surface-sunken: var(--ink-50); /* code blocks, wells */
+  --surface-selected: var(--ink-250); /* selected row */
+  --surface-strong: var(--ink-700); /* strong neutral fill */
+  --surface-hover: rgb(255 255 255 / 0.05); /* hover overlay (full colour) */
+  --surface-active: rgb(255 255 255 / 0.08); /* pressed overlay (full colour) */
+  --surface-hover-strong: rgb(255 255 255 / 0.16); /* strong hover overlay */
+  --surface-hover-danger: rgb(
+    240 112 112 / 0.14
+  ); /* destructive hover overlay */
+  --surface-hover-solid: var(--ink-200); /* opaque hover fill */
 
   /* ── Text ── */
-  --text-1: var(--nb-50); /* primary text */
-  --text-2: var(--nb-300); /* secondary text */
-  --text-3: var(--nb-400); /* tertiary text, metadata */
-  --text-4: var(--nb-600); /* captions, placeholders */
-  --text-disabled: var(--nb-750); /* disabled text */
-  --text-inverted: var(--nb-800); /* text on inverted fills */
-  --text-link: 226 190 118; /* links and inline references */
-  --text-on-accent: 21 21 23; /* text on the accent fill */
+  --text-1: var(--ink-900); /* primary text */
+  --text-2: var(--ink-700); /* secondary text */
+  --text-3: var(--ink-600); /* tertiary text, metadata */
+  --text-4: var(--ink-400); /* captions, placeholders */
+  --text-disabled: var(--ink-400); /* disabled text */
+  --text-inverted: var(--ink-100); /* text on inverted fills */
+  --text-link: var(--gold-400); /* links and inline references */
+  --text-on-accent: 26 20 8; /* text on the accent fill */
 
   /* ── Strokes (full colours; drawn as 0.5px box-shadow from DS-02 on) ── */
   --stroke-1: rgb(255 255 255 / 0.06); /* faint separator */
-  --stroke-2: rgb(255 255 255 / 0.12); /* default hairline */
-  --stroke-3: rgb(255 255 255 / 0.16); /* strong hairline */
-  --stroke-4: rgb(255 255 255 / 0.2); /* strongest hairline */
-  --stroke-inverted: rgb(255 255 255 / 0.06); /* hairline on inverted fills */
-  --stroke-solid: 50 50 52; /* opaque border (triplet) */
-  --stroke-solid-strong: 68 68 70; /* opaque strong border (triplet) */
+  --stroke-2: rgb(255 255 255 / 0.1); /* default hairline */
+  --stroke-3: rgb(255 255 255 / 0.14); /* strong hairline */
+  --stroke-4: rgb(255 255 255 / 0.18); /* strongest hairline */
+  --stroke-inverted: rgb(0 0 0 / 0.08); /* hairline on inverted fills */
+  --stroke-solid: 44 44 43; /* opaque border (triplet) */
+  --stroke-solid-strong: 62 62 60; /* opaque strong border (triplet) */
+  --hairline: var(--stroke-2); /* the default 0.5px line */
 
   /* ── Accent (Emperor gold, used sparingly: see docs/design/color.md) ── */
-  --accent: 214 172 92; /* send, the one primary button, selected switch */
-  --accent-hover: 203 158 72; /* accent hover */
-  --accent-soft: 62 53 36; /* selected / tertiary accent fill */
-  --brand: 203 158 72; /* brand mark */
-  --focus-ring: 214 172 92; /* focus ring colour (triplet) */
-  --bubble-user: 46 43 38; /* user message bubble */
+  --accent: var(--gold-500); /* send, the one primary button, selected switch */
+  --accent-hover: var(--gold-400); /* accent hover */
+  --accent-soft: 48 43 33; /* selected / tertiary accent fill */
+  --brand: var(--gold-500); /* brand mark */
+  --focus-ring: var(--gold-500); /* focus ring colour (triplet) */
+  --bubble-user: 43 39 32; /* user message bubble */
 
   /* ── Status ── */
-  --ok: 34 197 94; /* success */
-  --warn: 245 158 11; /* warning */
-  --error: 242 90 90; /* error, destructive */
-  --attention: 245 158 11; /* approvals and plans waiting for the user */
-  --ok-soft: 35 60 44; /* success fill */
-  --warn-soft: 39 36 31; /* warning fill */
-  --error-soft: 87 12 12; /* error fill */
-  --attention-soft: 39 36 31; /* attention fill */
+  --ok: 76 195 138; /* success */
+  --warn: 232 162 59; /* warning */
+  --error: 240 112 112; /* error, destructive */
+  --attention: 240 136 62; /* approvals and plans waiting for the user */
+  --ok-soft: 33 50 41; /* success fill */
+  --warn-soft: 55 45 30; /* warning fill */
+  --error-soft: 56 38 37; /* error fill */
+  --attention-soft: 56 41 30; /* attention fill */
+  --info: 122 167 247; /* information, neutral notices */
+  --info-soft: 39 46 56; /* information fill */
 
   /* ── Elevation and scrim ── */
-  --elev-1: 0 2px 4px 0 rgb(0 0 0 / 0.05); /* cards */
+  --elev-1:
+    inset 0 1px 0 rgb(255 255 255 / 0.04), 0 8px 24px -8px rgb(0 0 0 / 0.5); /* cards */
   --elev-2:
-    0 4px 12px 0 rgb(0 0 0 / 0.02), 0 2px 8px 0 rgb(0 0 0 / 0.04); /* popovers */
+    0 0 0 0.5px rgb(255 255 255 / 0.1), 0 16px 40px -8px rgb(0 0 0 / 0.6); /* popovers */
   --elev-3:
-    0 0 1px 0 rgb(0 0 0 / 0.2), 0 0 4px 0 rgb(0 0 0 / 0.02),
-    0 12px 32px 0 rgb(0 0 0 / 0.08); /* dialogs */
-  --scrim: rgb(0 0 0 / 0.5); /* modal backdrop (full colour) */
-  --scrim-soft: rgb(0 0 0 / 0.2); /* light backdrop (full colour) */
+    0 0 0 0.5px rgb(255 255 255 / 0.1), 0 32px 80px -16px rgb(0 0 0 / 0.7); /* dialogs */
+  --scrim: rgb(0 0 0 / 0.55); /* modal backdrop (full colour) */
+  --scrim-soft: rgb(0 0 0 / 0.24); /* light backdrop (full colour) */
 }
