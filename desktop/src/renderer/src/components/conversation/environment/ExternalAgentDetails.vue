@@ -10,10 +10,15 @@ import {
   validateDelegation,
   integrateDelegation,
   closeDelegation,
+  abandonDelegation,
   type DelegationView,
   type DelegationDelivery,
 } from '../../../api/delegations'
-import { agentTitle, agentSourceLabel } from '@emperor/core/runtime-contract'
+import {
+  agentTitle,
+  agentSourceLabel,
+  delegationNeedsExit,
+} from '@emperor/core/runtime-contract'
 import { onCoreEvent } from '../../../api/backend'
 import Modal from '../../ui/Modal.vue'
 import Button from '../../ui/Button.vue'
@@ -90,6 +95,17 @@ const mutable = computed(
     record.value?.availability !== 'closed' &&
     record.value?.availability !== 'needs_recovery',
 )
+/** The current run ended without an outcome: 「标记为已结束」 (AGT-04). */
+const needsExit = computed(
+  () =>
+    record.value?.currentRunId === props.runId &&
+    delegationNeedsExit(record.value, run.value),
+)
+function end() {
+  return action(() =>
+    abandonDelegation({ id: props.delegationId, sessionId: props.sessionId }),
+  )
+}
 const verifyingNow = computed(
   () => verifying.value || delivery.value?.verificationActive === true,
 )
@@ -333,13 +349,27 @@ onBeforeUnmount(() => {
           >确认验证进程已停止</Button
         >
       </div>
-      <p
-        v-if="
-          record?.availability === 'needs_recovery' || record?.dispatchPaused
-        "
-        class="external-note"
-      >
-        当前调度已暂停或结果待确认，请返回主会话处理。此页面不会恢复或重新派发执行。
+      <p v-if="needsExit" class="external-note" data-needs-exit>
+        这次运行没有正常结束（例如 Emperor
+        或电脑重启过，或无法确认它已停止）。确认不再需要后，可以标记为已结束：释放它占用的工作区，Goal
+        可以继续；保留的文件不受影响。<Button
+          data-abandon-run
+          size="sm"
+          variant="outline"
+          :disabled="busy"
+          @click="end"
+          >标记为已结束</Button
+        >
+      </p>
+      <p v-else-if="record?.dispatchPaused" class="external-note">
+        主会话停止后，这个子智能体的结果会在你下次给主会话发消息时送达。
+      </p>
+      <p v-if="run?.abandoned" class="external-note" data-abandoned>
+        {{
+          run.abandoned.by === 'user'
+            ? '已由你标记为已结束。'
+            : '主会话在你同意后将其标记为已结束。'
+        }}
       </p>
       <p class="external-note">
         请返回主会话回答问题或继续派工。<Button size="sm" @click="returnRoot"

@@ -143,8 +143,14 @@ beforeEach(() => {
               kind: 'external',
               title: '检验图片',
               backend: 'codex',
-              phase: phase === 'completed' ? 'completed' : 'running',
+              phase:
+                phase === 'completed'
+                  ? 'completed'
+                  : phase === 'outcome_unknown'
+                    ? 'unknown'
+                    : 'running',
               parentAgentId: 'sub-parent',
+              ...(phase === 'outcome_unknown' ? { needsExit: true } : {}),
             },
           ],
         }
@@ -169,6 +175,10 @@ beforeEach(() => {
         return new Promise<void>((resolve) => {
           stopResolve = resolve
         })
+      if (key === 'delegations.abandon') {
+        phase = 'interrupted'
+        return {}
+      }
       throw new Error('unexpected operation: ' + key)
     },
   )
@@ -765,4 +775,20 @@ it('seats root-scoped sibling entries beside the external viewer without schedul
   expect(bridge.invokeCore.mock.calls.map(([key]) => key)).not.toContain(
     'delegations.start',
   )
+})
+
+it('offers 标记为已结束 for a run without an outcome and refreshes after ending it', async () => {
+  phase = 'outcome_unknown'
+  const dom = await mount()
+  expect(dom.querySelector('[data-stop-child]')).toBeNull()
+  const end = dom.querySelector<HTMLButtonElement>('[data-abandon-child]')!
+  expect(end.textContent).toContain('标记为已结束')
+  end.click()
+  await settle()
+  expect(bridge.invokeCore).toHaveBeenCalledWith('delegations.abandon', {
+    id: 'dlg-one',
+    sessionId: 'root',
+  })
+  await settle()
+  expect(dom.querySelector('[data-abandon-child]')).toBeNull()
 })

@@ -32,6 +32,10 @@ export const validateDelegation = (
 export const integrateDelegation = (
   input: CoreOperationArgs<'delegations.integrate'>[0],
 ) => invokeCore('delegations.integrate', input)
+/** 「标记为已结束」: end a run that has no outcome (AGT-04). */
+export const abandonDelegation = (
+  input: CoreOperationArgs<'delegations.abandon'>[0],
+) => invokeCore('delegations.abandon', input)
 export const closeDelegation = (
   input: CoreOperationArgs<'delegations.close'>[0],
 ) => invokeCore('delegations.close', input)

@@ -15,6 +15,7 @@ import {
 } from '../../sidebar/agentTree'
 import SubagentAvatar from '../../ui/SubagentAvatar.vue'
 import ProviderLogo from '../../ui/ProviderLogo.vue'
+import { abandonDelegation } from '../../../api/delegations'
 const props = defineProps<{ rootSessionId: string; agents?: AgentView[] }>()
 const route = useRoute()
 const router = useRouter()
@@ -76,6 +77,22 @@ watch(
 function ancestry(agent: AgentView) {
   return agentAncestry(props.rootSessionId, agent, agents.value)
 }
+/** 「标记为已结束」 for an external task whose run has no outcome (AGT-04). */
+const ending = ref<string | null>(null)
+const endError = ref('')
+async function end(agent: AgentView) {
+  if (ending.value || !readableRoot.value) return
+  ending.value = agent.id
+  endError.value = ''
+  try {
+    await abandonDelegation({ id: agent.id, sessionId: readableRoot.value })
+  } catch (cause) {
+    endError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    ending.value = null
+    refreshRoot()
+  }
+}
 </script>
 <template>
   <section
@@ -86,37 +103,49 @@ function ancestry(agent: AgentView) {
     <h3>
       子智能体 <span v-if="active">{{ active }} 个活动中</span>
     </h3>
-    <button
-      v-for="agent in visible"
-      :key="agent.id"
-      type="button"
-      class="agent-row"
-      :data-agent-id="agent.id"
-      :title="ancestry(agent).text"
-      :aria-current="currentId === agent.id ? 'page' : undefined"
-      @click="router.push(agentLocation(agent))"
-    >
-      <SubagentAvatar
-        v-if="agent.backend === 'internal'"
-        :session-id="agent.id"
-        :size="28"
-      />
-      <ProviderLogo
-        v-else
-        :icon-id="agent.backend"
-        :label="agentSourceLabel(agent.backend)"
-        size="xs"
-        :data-agent-logo="agent.backend"
-      />
-      <span class="agent-copy"
-        ><strong>{{ agentTitle(agent.title, agent.backend) }}</strong
-        ><small>{{ agentSourceLabel(agent.backend) }}</small
-        ><small v-if="ancestry(agent).unavailable" data-unavailable-parent>{{
-          ancestry(agent).unavailable
-        }}</small></span
+    <div v-for="agent in visible" :key="agent.id" class="agent-entry">
+      <button
+        type="button"
+        class="agent-row"
+        :data-agent-id="agent.id"
+        :title="ancestry(agent).text"
+        :aria-current="currentId === agent.id ? 'page' : undefined"
+        @click="router.push(agentLocation(agent))"
       >
-      <span class="agent-phase">{{ agentPhaseLabel(agent.phase) }}</span>
-    </button>
+        <SubagentAvatar
+          v-if="agent.backend === 'internal'"
+          :session-id="agent.id"
+          :size="28"
+        />
+        <ProviderLogo
+          v-else
+          :icon-id="agent.backend"
+          :label="agentSourceLabel(agent.backend)"
+          size="xs"
+          :data-agent-logo="agent.backend"
+        />
+        <span class="agent-copy"
+          ><strong>{{ agentTitle(agent.title, agent.backend) }}</strong
+          ><small>{{ agentSourceLabel(agent.backend) }}</small
+          ><small v-if="ancestry(agent).unavailable" data-unavailable-parent>{{
+            ancestry(agent).unavailable
+          }}</small></span
+        >
+        <span class="agent-phase">{{ agentPhaseLabel(agent.phase) }}</span>
+      </button>
+      <button
+        v-if="agent.needsExit && readableRoot"
+        type="button"
+        class="agent-end"
+        :data-abandon-agent="agent.id"
+        title="这次运行没有正常结束。确认不再需要后，标记为已结束会释放它占用的工作区，Goal 可以继续。"
+        :disabled="ending !== null"
+        @click="end(agent)"
+      >
+        {{ ending === agent.id ? '正在结束…' : '标记为已结束' }}
+      </button>
+    </div>
+    <p v-if="endError" class="agents-error" role="alert">{{ endError }}</p>
     <p v-if="error" class="agents-error" role="alert">
       {{ error }}
       <button
@@ -199,6 +228,24 @@ h3 span {
 }
 .agent-phase {
   flex: none;
+}
+.agent-end {
+  display: block;
+  margin: 0 0 var(--space-1) calc(28px + var(--space-3));
+  padding: var(--space-0-5) var(--space-2);
+  border: 1px solid var(--border-l2);
+  border-radius: var(--radius-row);
+  background: transparent;
+  color: rgb(var(--label-secondary));
+  font-size: var(--fs-xxs);
+  cursor: pointer;
+}
+.agent-end:hover:not(:disabled) {
+  background: var(--interactive-bg-hover);
+}
+.agent-end:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 .agent-more {
   padding: var(--space-1) 0;

@@ -18,6 +18,8 @@ vi.mock('../../sidebar/agentTree', async (original) => ({
   ...(await original<object>()),
   useAgentTree: () => state,
 }))
+const delegations = vi.hoisted(() => ({ abandonDelegation: vi.fn() }))
+vi.mock('../../../api/delegations', () => delegations)
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: state.push }),
   useRoute: () => state.route,
@@ -189,4 +191,34 @@ it('reveals a selected older sibling on direct child navigation, while allowing 
   await nextTick()
   expect(el.querySelectorAll('[data-agent-id]')).toHaveLength(5)
   state.route.params.delegationId = 'dlg-child'
+})
+
+it('offers 标记为已结束 for an external task that has no outcome, then refreshes its root', async () => {
+  state.trees.root = buildAgentTree('root', [
+    { ...agent('dlg-stuck'), phase: 'unknown', needsExit: true },
+    agent('dlg-done'),
+  ])
+  delegations.abandonDelegation.mockResolvedValue({})
+  el = document.createElement('div')
+  document.body.append(el)
+  app = createApp({
+    render: () => h(EnvironmentAgents, { rootSessionId: 'root' }),
+  })
+  app.mount(el)
+  await nextTick()
+  expect(el.querySelector('[data-abandon-agent="dlg-done"]')).toBeNull()
+  const end = el.querySelector<HTMLButtonElement>(
+    '[data-abandon-agent="dlg-stuck"]',
+  )!
+  expect(end.textContent).toContain('标记为已结束')
+  state.refresh.mockClear()
+  end.click()
+  for (let i = 0; i < 8; i++) await Promise.resolve()
+  expect(delegations.abandonDelegation).toHaveBeenCalledWith({
+    id: 'dlg-stuck',
+    sessionId: 'root',
+  })
+  // Ending it does not navigate to the child.
+  expect(state.push).not.toHaveBeenCalled()
+  expect(state.refresh).toHaveBeenCalledWith('root')
 })
