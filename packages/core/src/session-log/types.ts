@@ -88,6 +88,9 @@ export interface RequestContext {
 
 export type RequestHeaderReason = 'initial' | 'resume' | 'change'
 
+/** Why an image left the requests: `request-bytes` = over the route's inline image budget. */
+export type ImageOffloadReason = 'request-bytes'
+
 /** Core event payloads; domains merge more entries in. */
 export interface SessionEventMap {
   'turn/start': { turn: number }
@@ -120,6 +123,11 @@ export interface SessionEventMap {
   'todo/write': { todos: TodoItem[] }
   'request/header': { header: EpochHeader; reason: RequestHeaderReason }
   'request/context': RequestContext
+  /**
+   * The images of surface node `seq` are sent as a placeholder from now on,
+   * whatever route serves later requests (KRN-05, DSH-13).
+   */
+  'image/offload': { seq: number; reason: ImageOffloadReason }
   /** Marks where a fork's copied seed ends. */
   'session/end-seed': Record<string, never>
 }

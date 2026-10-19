@@ -2,6 +2,11 @@
  * TokenTracker — 每调用 JSONL 账本 + 聚合。
  * should_compact 阈值 0.7；新记录使用 model_entry_id，旧 role/fallback 字段只读兼容。
  * 实现 runner 的 TokenTrackerLike。
+ *
+ * 计数互不重叠（CORE-18）：input 不含缓存读写，output 不含 reasoning；
+ * total = input + output + cache_read + cache_create + reasoning。旧字段名
+ * （prompt_tokens 含缓存命中、prompt_cache_hit_tokens、completion_tokens、
+ * cache_*_input_tokens）读写时都换算成这五项。
  */
 import { randomUUID } from 'node:crypto'
 import {
@@ -16,14 +21,22 @@ import {
 import { gzipSync, gunzipSync } from 'node:zlib'
 import { basename, dirname, join } from 'node:path'
 
-const TOKEN_KEYS = ['input', 'output', 'cache_read', 'cache_create'] as const
+const TOKEN_KEYS = [
+  'input',
+  'output',
+  'cache_read',
+  'cache_create',
+  'reasoning',
+] as const
 type Row = Record<string, unknown>
+type TokenCounts = Record<(typeof TOKEN_KEYS)[number], number>
 
 export interface TokenStatsRow {
   input?: number
   output?: number
   cache_read?: number
   cache_create?: number
+  reasoning?: number
   total?: number
   calls?: number
   provider?: string
@@ -47,6 +60,8 @@ export interface TokenUsageRow {
   output: number
   cache_read: number
   cache_create: number
+  /** Present when the call reported reasoning tokens (not part of `output`). */
+  reasoning?: number
   total: number
   route_reason?: string
   used_fallback?: boolean
@@ -66,6 +81,8 @@ export interface RecordOptions {
   routeReason?: string | null
   estimatedInputTokens?: number | null
   routeEstimatedTokens?: number | null
+  /** Cost of the call in USD; null: the price is unknown (recorded as incomplete). */
+  costUsd?: number | null
   costUsdNanos?: number | null
   costCapUsdNanos?: number | null
   costComplete?: boolean | null
@@ -111,25 +128,26 @@ export class TokenTracker {
     const routeEstimatedTokens = (o.routeEstimatedTokens ??
       o.route_estimated_tokens ??
       null) as number | null
-    const costUsdNanos = optionalNonNegativeInt(
-      o.costUsdNanos ?? o.cost_usd_nanos,
-    )
+    const costUsd = 'costUsd' in o ? o.costUsd : o.cost_usd
+    const costUsdNanos =
+      costUsd === null || costUsd === undefined
+        ? optionalNonNegativeInt(o.costUsdNanos ?? o.cost_usd_nanos)
+        : optionalNonNegativeInt(Math.round(Number(costUsd) * 1e9))
     const costCapUsdNanos = optionalNonNegativeInt(
       o.costCapUsdNanos ?? o.cost_cap_usd_nanos,
     )
-    const costComplete = o.costComplete ?? o.cost_complete
+    const costComplete =
+      costUsd === null
+        ? false
+        : costUsd !== undefined && costUsdNanos !== null
+          ? true
+          : (o.costComplete ?? o.cost_complete)
     const usedFallback = Boolean(o.usedFallback ?? o.used_fallback ?? false)
     const fallbackReason = String(
       o.fallbackReason ?? o.fallback_reason ?? '',
     ).trim()
 
-    const u = usage ?? {}
-    const inputTokens = Number(u.input ?? u.prompt_tokens ?? 0) || 0
-    const outputTokens = Number(u.output ?? u.completion_tokens ?? 0) || 0
-    const cacheRead =
-      Number(u.cache_read ?? u.cache_read_input_tokens ?? 0) || 0
-    const cacheCreate =
-      Number(u.cache_create ?? u.cache_creation_input_tokens ?? 0) || 0
+    const counts = tokenCounts(usage ?? {})
 
     const row: Row = {
       ts: localIsoSeconds(),
@@ -137,11 +155,12 @@ export class TokenTracker {
       model,
       model_entry_id: modelEntryId || 'unknown',
       usage_type: usageType,
-      input: inputTokens,
-      output: outputTokens,
-      cache_read: cacheRead,
-      cache_create: cacheCreate,
+      input: counts.input,
+      output: counts.output,
+      cache_read: counts.cache_read,
+      cache_create: counts.cache_create,
     }
+    if (counts.reasoning > 0) row.reasoning = counts.reasoning
     if (routeReason) row.route_reason = routeReason
     if (estimatedInputTokens !== null && estimatedInputTokens !== undefined)
       row.estimated_input_tokens = estimatedInputTokens
@@ -432,6 +451,7 @@ function emptyStats(): TokenStatsRow {
     output: 0,
     cache_read: 0,
     cache_create: 0,
+    reasoning: 0,
     total: 0,
     cost_usd_nanos: 0,
     cost_complete_calls: 0,
@@ -442,9 +462,10 @@ function emptyStats(): TokenStatsRow {
 
 function addRow(bucket: TokenStatsRow, row: Row): void {
   bucket.calls = (Number(bucket.calls) || 0) + 1
+  const counts = tokenCounts(row)
   let total = 0
   for (const key of TOKEN_KEYS) {
-    const value = Number(row[key]) || 0
+    const value = counts[key]
     bucket[key] = (Number(bucket[key]) || 0) + value
     total += value
   }
@@ -461,21 +482,19 @@ function addRow(bucket: TokenStatsRow, row: Row): void {
 }
 
 function normalizeRow(row: Row): TokenUsageRow {
-  const inputTokens = rowInt(row, 'input', 'prompt_tokens')
-  const outputTokens = rowInt(row, 'output', 'completion_tokens')
-  const cacheRead = rowInt(row, 'cache_read', 'cache_read_input_tokens')
-  const cacheCreate = rowInt(row, 'cache_create', 'cache_creation_input_tokens')
+  const counts = tokenCounts(row)
   const normalized: TokenUsageRow = {
     ts: String(row.ts ?? ''),
     provider: String(row.provider ?? 'unknown'),
     model: String(row.model ?? 'unknown'),
     model_entry_id: String(row.model_entry_id ?? 'unknown'),
     usage_type: String(row.usage_type ?? 'main_agent'),
-    input: inputTokens,
-    output: outputTokens,
-    cache_read: cacheRead,
-    cache_create: cacheCreate,
-    total: inputTokens + outputTokens + cacheRead + cacheCreate,
+    input: counts.input,
+    output: counts.output,
+    cache_read: counts.cache_read,
+    cache_create: counts.cache_create,
+    ...(counts.reasoning > 0 ? { reasoning: counts.reasoning } : {}),
+    total: TOKEN_KEYS.reduce((sum, key) => sum + counts[key], 0),
   }
   if (row.model_role) normalized.model_role = String(row.model_role)
   for (const key of ['route_reason', 'fallback_reason']) {
@@ -513,11 +532,58 @@ function rowInt(row: Row, ...keys: string[]): number {
 }
 
 function inputTotal(row: Row): number {
-  return (
-    rowInt(row, 'input', 'prompt_tokens') +
-    rowInt(row, 'cache_read', 'cache_read_input_tokens') +
-    rowInt(row, 'cache_create', 'cache_creation_input_tokens')
+  const counts = tokenCounts(row)
+  return counts.input + counts.cache_read + counts.cache_create
+}
+
+/** A non-negative integer count, 0 for anything else. */
+function count(value: unknown): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : 0
+}
+
+function firstKey(row: Row, ...keys: string[]): unknown {
+  for (const key of keys) if (key in row) return row[key]
+  return undefined
+}
+
+/**
+ * The five disjoint counts of a usage or ledger row, under current or
+ * legacy field names. A legacy `prompt_tokens` includes cache hits and a
+ * legacy `completion_tokens` includes reasoning: both are split out.
+ */
+function tokenCounts(row: Row): TokenCounts {
+  const cacheRead = count(
+    firstKey(
+      row,
+      'cache_read',
+      'cache_read_input_tokens',
+      'prompt_cache_hit_tokens',
+    ),
   )
+  const cacheCreate = count(
+    firstKey(row, 'cache_create', 'cache_creation_input_tokens'),
+  )
+  const reasoning = count(firstKey(row, 'reasoning', 'reasoning_tokens'))
+  const input =
+    'input' in row
+      ? count(row.input)
+      : Math.max(
+          0,
+          count(row.prompt_tokens) -
+            ('prompt_cache_hit_tokens' in row ? cacheRead : 0),
+        )
+  const output =
+    'output' in row
+      ? count(row.output)
+      : Math.max(0, count(row.completion_tokens) - reasoning)
+  return {
+    input,
+    output,
+    cache_read: cacheRead,
+    cache_create: cacheCreate,
+    reasoning,
+  }
 }
 
 function archiveMonth(row: Row): string {

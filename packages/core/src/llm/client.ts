@@ -9,6 +9,7 @@ import type { LlmAdapter } from './adapter'
 import { BlockAssembler } from './assembler'
 import {
   contentHasImage,
+  DEFAULT_REQUEST_IMAGE_BYTES,
   projectClearedImages,
   projectImagesForTextModel,
   type ImageResolver,
@@ -50,6 +51,8 @@ export interface PreparedLlmCall {
   readonly config: LlmCallConfig
   readonly retryPolicy: ResolvedRetryPolicy
   readonly context?: { contextWindow: number }
+  /** Inline image budget (base64 bytes) of a vision route; the harness offloads past it. */
+  readonly imageBudgetBytes?: number
   readonly inputModalities: readonly ModelModality[]
   readonly adapterDefaults: LlmCallConfigAdapterDefaults
   stream(options: GenerateOptions): AsyncIterable<StreamChunk>
@@ -195,6 +198,12 @@ export class LlmClient {
       config: frozen,
       retryPolicy: route.retryPolicy,
       context: { contextWindow: route.contextWindow },
+      ...(route.vision
+        ? {
+            imageBudgetBytes:
+              route.maxRequestImageBytes ?? DEFAULT_REQUEST_IMAGE_BYTES,
+          }
+        : {}),
       inputModalities: route.vision
         ? (['text', 'image'] as const)
         : (['text'] as const),

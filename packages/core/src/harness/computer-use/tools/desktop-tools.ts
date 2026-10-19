@@ -307,6 +307,8 @@ export function createDesktopTools(runtime: ToolRuntime): ToolDefinition[] {
                   attachmentId: shot.model.attachmentId,
                   mediaType: shot.model.mediaType,
                   bytes: shot.model.bytes,
+                  width: shot.model.width,
+                  height: shot.model.height,
                 }
           return uiResult({
             tool: 'desktop_screenshot',

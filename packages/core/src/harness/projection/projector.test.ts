@@ -43,6 +43,22 @@ function project(events: SessionEvent[]): UiEvent[] {
 }
 
 describe('SessionProjector', () => {
+  it('tells the user when automatic compaction keeps failing (KRN-05)', () => {
+    const l = log()
+    l.add('turn/start', { turn: 1 })
+    l.add('compaction/warning', { failures: 3 })
+    const thought = project(l.events).find(
+      (event) => event.event === 'agent_thought',
+    )
+    expect(thought).toMatchObject({
+      thought_id: 'compaction-warning:1',
+      stage: 'compaction',
+      status: 'error',
+      label: '上下文接近上限',
+    })
+    expect(String(thought?.summary)).toContain('建议 /compact 或新开会话')
+  })
+
   it('drops a failed attempt’s streamed text on llm/retry and says so with assistant_reset', () => {
     const l = log()
     l.add('turn/start', { turn: 1 })

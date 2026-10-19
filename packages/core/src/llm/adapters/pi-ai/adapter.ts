@@ -63,6 +63,21 @@ export function piModel(route: RouteSpec): Model<Api> {
   } as Model<Api>
 }
 
+/**
+ * The pi-ai thinking level of one request. Titles and compaction summaries
+ * are sent without thinking, whatever effort the route materialized.
+ */
+export function piReasoningLevel(
+  options: GenerateOptions,
+): ThinkingLevel | undefined {
+  if (options.purpose === 'session-title' || options.purpose === 'compaction')
+    return undefined
+  const effort = options.reasoningEffort
+  return effort !== undefined && THINKING_LEVELS.has(effort)
+    ? (effort as ThinkingLevel)
+    : undefined
+}
+
 export class PiAiAdapter implements LlmAdapter {
   constructor(
     private readonly onReplayDegrade?: (detail: {
@@ -104,11 +119,7 @@ export class PiAiAdapter implements LlmAdapter {
           this.onReplayDegrade?.({ route: route.id, reason })
         },
       )
-      const effort = options.reasoningEffort
-      const reasoning =
-        effort !== undefined && THINKING_LEVELS.has(effort)
-          ? (effort as ThinkingLevel)
-          : undefined
+      const reasoning = piReasoningLevel(options)
       const extraBody = route.extraBody
       const streamOptions: SimpleStreamOptions = {
         ...(apiKey === undefined ? {} : { apiKey }),
