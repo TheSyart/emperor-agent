@@ -36,8 +36,13 @@ import {
   BROWSER_DOWNLOAD_REMOVE_CHANNEL,
   BROWSER_DOWNLOAD_REVEAL_CHANNEL,
   SKILLS_OPEN_FOLDER_CHANNEL,
+  VAULT_EXPORT_CHANNEL,
+  VAULT_IMPORT_CHANNEL,
+  VAULT_IMPORT_PICK_CHANNEL,
   VAULT_MASTER_CHANNEL,
+  VAULT_REPAIR_KEY_CHANNEL,
   VAULT_RESET_CHANNEL,
+  VAULT_START_OVER_CHANNEL,
   VAULT_UNLOCK_CHANNEL,
 } from '../shared/ipc-contract'
 import { createDesktopCapabilityBridge } from './desktop-capabilities'
@@ -143,12 +148,17 @@ describe('desktop capability preload bridge', () => {
       'revokeBrowserPairing',
       'runBrowserImport',
       'selectFile',
+      'vaultExport',
+      'vaultImport',
+      'vaultImportPick',
       'vaultLock',
+      'vaultMaster',
       'vaultRemove',
+      'vaultRepairKey',
       'vaultReset',
       'vaultReveal',
       'vaultSave',
-      'vaultSetMaster',
+      'vaultStartOver',
       'vaultStatus',
       'vaultUnlock',
     ])
@@ -216,14 +226,59 @@ describe('desktop capability preload bridge', () => {
       (...args: unknown[]) => Promise<unknown>
     >
     await bridge.vaultUnlock!('correct horse battery', true)
-    await bridge.vaultSetMaster!('correct horse battery', true)
-    await bridge.vaultSetMaster!(null)
+    await bridge.vaultMaster!({
+      action: 'change',
+      currentPassword: 'correct horse battery',
+      password: 'another passphrase',
+      confirmPassword: 'another passphrase',
+      biometric: true,
+    })
+    await bridge.vaultMaster!({ action: 'remove', currentPassword: 'x' })
     await bridge.vaultReset!('ignored')
     expect(ipc.invoked).toEqual([
       [VAULT_UNLOCK_CHANNEL, { password: 'correct horse battery' }],
-      [VAULT_MASTER_CHANNEL, { password: 'correct horse battery' }],
-      [VAULT_MASTER_CHANNEL, { password: null }],
+      [
+        VAULT_MASTER_CHANNEL,
+        {
+          action: 'change',
+          currentPassword: 'correct horse battery',
+          password: 'another passphrase',
+          confirmPassword: 'another passphrase',
+        },
+      ],
+      [VAULT_MASTER_CHANNEL, { action: 'remove', currentPassword: 'x' }],
       [VAULT_RESET_CHANNEL, undefined],
+    ])
+  })
+
+  it('repairs, starts over, exports and imports through fixed vault channels (SEC-09)', async () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createDesktopCapabilityBridge(ipc) as unknown as Record<
+      string,
+      (...args: unknown[]) => Promise<unknown>
+    >
+    await bridge.vaultRepairKey!('ignored')
+    await bridge.vaultStartOver!('ignored')
+    await bridge.vaultExport!(
+      'backup passphrase 1',
+      'backup passphrase 1',
+      '/x',
+    )
+    await bridge.vaultImportPick!('/etc/passwd')
+    await bridge.vaultImport!('backup passphrase 1', '/x')
+    expect(ipc.invoked).toEqual([
+      [VAULT_REPAIR_KEY_CHANNEL, undefined],
+      [VAULT_START_OVER_CHANNEL, undefined],
+      [
+        VAULT_EXPORT_CHANNEL,
+        {
+          passphrase: 'backup passphrase 1',
+          confirmPassphrase: 'backup passphrase 1',
+        },
+      ],
+      // The file is chosen in main's own dialog; no path crosses IPC.
+      [VAULT_IMPORT_PICK_CHANNEL, undefined],
+      [VAULT_IMPORT_CHANNEL, { passphrase: 'backup passphrase 1' }],
     ])
   })
 

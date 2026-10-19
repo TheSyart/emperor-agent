@@ -1,4 +1,5 @@
 /** Framed, validated main-process connection to a platform helper. */
+import { randomBytes } from 'node:crypto'
 import type { Duplex } from 'node:stream'
 import {
   isUiErrorCode,
@@ -8,6 +9,11 @@ import {
   FrameDecoder,
   encodeJsonFrame,
 } from '../../../../packages/core/src/harness/computer-use/protocol/framing'
+import {
+  helloProof,
+  sameLaunchToken,
+  welcomeProof,
+} from '../../../../packages/core/src/harness/computer-use/protocol/handshake'
 import {
   acceptHello,
   HELPER_EVENTS,
@@ -126,8 +132,13 @@ type Pending = {
 
 export interface HelperClientOptions {
   readonly platform: Platform
-  /** Required by the macOS helper; never included in diagnostics. */
-  readonly nonce?: string
+  /**
+   * The one-time launch secret main gave the macOS Helper on its stdin
+   * (SEC-09). Required on macOS: the client challenges first, accepts only
+   * a hello that proves the secret and proves it back in welcome. Never in
+   * diagnostics.
+   */
+  readonly secret?: Buffer
   readonly handshakeMs?: number
   readonly heartbeatMs?: number
   readonly maxMissedPings?: number
@@ -162,7 +173,9 @@ export class HelperClient {
       'platform' | 'handshakeMs' | 'heartbeatMs' | 'maxMissedPings'
     >
   > &
-    Pick<HelperClientOptions, 'nonce'>
+    Pick<HelperClientOptions, 'secret'>
+  /** main's half of the launch handshake, sent in `challenge` (macOS). */
+  private readonly serverNonce: string | null
   private resolveReady!: (hello: HelperHello) => void
   private rejectReady!: (error: Error) => void
   private handshakeTimer: ReturnType<typeof setTimeout>
@@ -186,16 +199,20 @@ export class HelperClient {
       handshakeMs: options.handshakeMs ?? 5_000,
       heartbeatMs: options.heartbeatMs ?? 5_000,
       maxMissedPings: options.maxMissedPings ?? 3,
-      ...(options.nonce === undefined ? {} : { nonce: options.nonce }),
+      ...(options.secret === undefined ? {} : { secret: options.secret }),
     }
     if (
       this.options.platform === 'macos' &&
-      !/^[A-Za-z0-9_-]{16,128}$/.test(this.options.nonce ?? '')
+      (!Buffer.isBuffer(this.options.secret) ||
+        this.options.secret.length !== 32)
     )
       throw new UiError(
         'INVALID_REQUEST',
-        'macOS helper launch nonce is missing or invalid',
+        'macOS helper launch secret is missing or invalid',
       )
+    this.serverNonce = this.options.secret
+      ? randomBytes(32).toString('hex')
+      : null
     this.ready = new Promise<HelperHello>((resolve, reject) => {
       this.resolveReady = resolve
       this.rejectReady = reject
@@ -204,7 +221,15 @@ export class HelperClient {
     void this.ready.catch(() => undefined)
     stream.on('data', (chunk: Buffer) => this.onData(chunk))
     stream.on('error', () =>
-      this.fail(new UiError('DRIVER_UNAVAILABLE', 'Helper connection failed')),
+      this.fail(
+        new UiError(
+          'DRIVER_UNAVAILABLE',
+          // Writing the challenge to a peer that already hung up fails first.
+          this.hello === null
+            ? 'Helper closed the connection before hello (peer rejected or helper exited)'
+            : 'Helper connection failed',
+        ),
+      ),
     )
     stream.on('close', () =>
       this.fail(
@@ -225,6 +250,17 @@ export class HelperClient {
         ),
       this.options.handshakeMs,
     )
+    // main speaks first on macOS: whoever connected must prove the secret.
+    if (this.serverNonce !== null)
+      try {
+        this.send({
+          type: 'challenge',
+          protocol: HELPER_PROTOCOL_VERSION,
+          nonce: this.serverNonce,
+        })
+      } catch {
+        this.fail(new UiError('DRIVER_UNAVAILABLE', 'Helper connection failed'))
+      }
   }
 
   diagnostics(): HelperDiagnostics {
@@ -381,14 +417,32 @@ export class HelperClient {
         const message = parseHelperMessage(frame.value)
         if (this.hello === null) {
           if (message.type !== 'hello') throw new Error('Expected helper hello')
-          const hello = acceptHello(message)
-          if (hello.platform !== this.options.platform)
+          const accepted = acceptHello(message)
+          if (accepted.platform !== this.options.platform)
             throw new Error('Unexpected helper platform')
+          const secret = this.options.secret
+          let proof: string | undefined
+          if (secret && this.serverNonce !== null) {
+            // A peer without the launch secret learns nothing more.
+            if (
+              typeof accepted.nonce !== 'string' ||
+              !sameLaunchToken(
+                accepted.proof,
+                helloProof(secret, this.serverNonce, accepted.nonce),
+              )
+            )
+              throw new UiError(
+                'PERMISSION_DENIED',
+                'Helper failed the launch challenge',
+              )
+            proof = welcomeProof(secret, this.serverNonce, accepted.nonce)
+          }
           this.send({
             type: 'welcome',
             protocol: HELPER_PROTOCOL_VERSION,
-            ...(this.options.nonce ? { nonce: this.options.nonce } : {}),
+            ...(proof ? { proof } : {}),
           })
+          const { nonce: _nonce, proof: _proof, ...hello } = accepted
           this.hello = hello
           clearTimeout(this.handshakeTimer)
           this.resolveReady(hello)

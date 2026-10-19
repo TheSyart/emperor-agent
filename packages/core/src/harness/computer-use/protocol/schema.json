@@ -56,6 +56,14 @@
                 "stale"
               ]
             }
+          },
+          "nonce": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "proof": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
           }
         },
         "required": [
@@ -74,7 +82,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "const": "welcome"
+            "const": "challenge"
           },
           "protocol": {
             "type": "integer",
@@ -83,8 +91,31 @@
           },
           "nonce": {
             "type": "string",
-            "minLength": 16,
-            "maxLength": 128
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "type",
+          "protocol",
+          "nonce"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "welcome"
+          },
+          "protocol": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "proof": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
           },
           "sessionToken": {
             "type": "string",

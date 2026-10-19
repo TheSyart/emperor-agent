@@ -14,11 +14,21 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { LocalSecretError, LocalSecretStore } from './local-secret-store'
+import {
+  LocalSecretError,
+  LocalSecretStore,
+  openWithKey,
+  sealWithKey,
+} from './local-secret-store'
 
-/** Lets a test publish a rival key just before this process links its own. */
+/**
+ * Lets a test publish a rival key just before this process links its own,
+ * and records what each fsync was for (a file or a directory) in order with
+ * the link calls.
+ */
 const race = vi.hoisted(() => ({
   beforeLink: null as null | ((target: string) => void),
+  trace: [] as string[],
 }))
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>()
@@ -27,12 +37,20 @@ vi.mock('node:fs', async (importOriginal) => {
     linkSync(existing: string, target: string): void {
       race.beforeLink?.(target)
       actual.linkSync(existing, target)
+      race.trace.push('link')
+    },
+    fsyncSync(fd: number): void {
+      actual.fsyncSync(fd)
+      race.trace.push(
+        actual.fstatSync(fd).isDirectory() ? 'fsync-dir' : 'fsync-file',
+      )
     },
   }
 })
 
 afterEach(() => {
   race.beforeLink = null
+  race.trace = []
 })
 
 function keyPath(): string {
@@ -166,15 +184,8 @@ describe('LocalSecretStore', () => {
     expect(existsSync(path)).toBe(false)
   })
 
-  it('checks the key like the pairing store: no symlink, owner, 0600, 32 bytes, 0700 directory', () => {
+  it('checks the key like the pairing store: no symlink, owner, private modes, 32 bytes', () => {
     const cases: Array<[string, (path: string) => void]> = [
-      [
-        'loose file mode',
-        (path) => {
-          plantKey(path)
-          chmodSync(path, 0o644)
-        },
-      ],
       [
         'symlinked key',
         (path) => {
@@ -189,13 +200,6 @@ describe('LocalSecretStore', () => {
         'short key',
         (path) => {
           plantKey(path, randomBytes(16))
-        },
-      ],
-      [
-        'loose directory mode',
-        (path) => {
-          plantKey(path)
-          chmodSync(dirname(path), 0o755)
         },
       ],
       [
@@ -274,8 +278,7 @@ describe('LocalSecretStore', () => {
 
   it('discards an unusable key only when told, so a new one can be made', () => {
     const path = keyPath()
-    plantKey(path)
-    chmodSync(path, 0o644)
+    plantKey(path, randomBytes(16))
     const store = new LocalSecretStore({ keyPath: path })
     expect(store.problem()).toBe('key-invalid')
     store.discardKey()
@@ -291,5 +294,96 @@ describe('LocalSecretStore', () => {
     new LocalSecretStore({ keyPath: linked }).discardKey()
     expect(existsSync(dirname(linked))).toBe(false)
     expect(existsSync(join(target, 'local.key'))).toBe(true)
+  })
+
+  // SEC-09 test 3: a user who tightens the modes (chmod -R 700) keeps a
+  // working key; a key opened up to group or others is reported as such and
+  // repaired on request, never on its own.
+  it('accepts any owner-only mode and repairs a key opened to others on request (SEC-09 #3)', () => {
+    const path = keyPath()
+    const store = new LocalSecretStore({ keyPath: path })
+    const sealed = store.encryptString('kept-31')
+    chmodSync(path, 0o700)
+    chmodSync(dirname(path), 0o700)
+    expect(store.problem()).toBeNull()
+    expect(store.decryptString(sealed)).toBe('kept-31')
+    chmodSync(path, 0o400)
+    expect(store.problem()).toBeNull()
+    expect(store.decryptString(sealed)).toBe('kept-31')
+
+    for (const [name, loosen] of [
+      ['file 0644', () => chmodSync(path, 0o644)],
+      ['directory 0755', () => chmodSync(dirname(path), 0o755)],
+      ['file 0640', () => chmodSync(path, 0o640)],
+    ] as const) {
+      chmodSync(path, 0o600)
+      chmodSync(dirname(path), 0o700)
+      loosen()
+      expect(store.problem(), name).toBe('key-permissions')
+      expect(store.isEncryptionAvailable(), name).toBe(false)
+      expect(
+        reason(() => store.decryptString(sealed)),
+        name,
+      ).toBe('key-permissions')
+      expect(
+        reason(() => store.encryptString('x')),
+        name,
+      ).toBe('key-permissions')
+      // Not repaired behind the user's back.
+      expect(store.problem(), name).toBe('key-permissions')
+      expect(store.repairPermissions(), name).toBe(true)
+      expect(statSync(path).mode & 0o777, name).toBe(0o600)
+      expect(statSync(dirname(path)).mode & 0o777, name).toBe(0o700)
+      expect(store.problem(), name).toBeNull()
+      expect(store.decryptString(sealed), name).toBe('kept-31')
+    }
+
+    // Repair fixes modes only: a short, symlinked or foreign key stays invalid.
+    const short = keyPath()
+    plantKey(short, randomBytes(16))
+    chmodSync(short, 0o644)
+    const shortStore = new LocalSecretStore({ keyPath: short })
+    expect(shortStore.problem()).toBe('key-invalid')
+    expect(shortStore.repairPermissions()).toBe(false)
+    expect(statSync(short).mode & 0o777).toBe(0o644)
+    const foreign = keyPath()
+    plantKey(foreign)
+    chmodSync(foreign, 0o644)
+    const foreignStore = new LocalSecretStore({
+      keyPath: foreign,
+      uid: 4_000_000,
+    })
+    expect(foreignStore.problem()).toBe('key-invalid')
+    expect(foreignStore.repairPermissions()).toBe(false)
+    expect(statSync(foreign).mode & 0o777).toBe(0o644)
+  })
+
+  it('syncs the directory after publishing a new key with link(2) (SEC-09 #3)', () => {
+    const path = keyPath()
+    new LocalSecretStore({ keyPath: path }).encryptString('first')
+    const link = race.trace.indexOf('link')
+    expect(link).toBeGreaterThan(0)
+    expect(race.trace.slice(0, link)).toContain('fsync-file')
+    expect(race.trace.slice(link)).toContain('fsync-dir')
+  })
+
+  it('installs a restored key only where none exists, and reads its own key back', () => {
+    const path = keyPath()
+    const restored = randomBytes(32)
+    const store = new LocalSecretStore({ keyPath: path })
+    expect(store.installKey(restored)).toBe(true)
+    expect(readFileSync(path).equals(restored)).toBe(true)
+    expect(statSync(path).mode & 0o777).toBe(0o600)
+    expect(store.exportKey().equals(restored)).toBe(true)
+    // A key already in place is never replaced.
+    expect(store.installKey(randomBytes(32))).toBe(false)
+    expect(readFileSync(path).equals(restored)).toBe(true)
+    // Sealing with a key in memory matches the store's own envelope.
+    const sealed = sealWithKey(restored, 'value-44', 'ctx')
+    expect(store.decryptString(sealed, 'ctx')).toBe('value-44')
+    expect(openWithKey(restored, store.encryptString('v', 'c'), 'c')).toBe('v')
+    expect(() => openWithKey(randomBytes(32), sealed, 'ctx')).toThrow(
+      LocalSecretError,
+    )
   })
 })

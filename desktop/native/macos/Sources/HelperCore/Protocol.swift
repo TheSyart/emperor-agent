@@ -3,7 +3,8 @@ import Foundation
 public enum ProtocolError: Error, Equatable {
     case invalidMessage
     case unsupportedVersion
-    case invalidNonce
+    /// main did not prove the launch secret in `welcome` (SEC-09).
+    case invalidProof
 }
 
 /// JSON object validation at the native trust boundary. The TypeScript schema
@@ -34,12 +35,16 @@ public enum HelperProtocol {
         return data
     }
 
-    public static func hello(arch: String, permissions: [String: String], capabilities: [String] = []) -> [String: Any] {
-        [
+    public static func hello(arch: String, permissions: [String: String], capabilities: [String] = [],
+                             nonce: String? = nil, proof: String? = nil) -> [String: Any] {
+        var message: [String: Any] = [
             "type": "hello", "protocol": version, "helperVersion": helperVersion,
             "platform": "macos", "arch": arch,
             "capabilities": capabilities, "permissions": permissions,
         ]
+        if let nonce { message["nonce"] = nonce }
+        if let proof { message["proof"] = proof }
+        return message
     }
 
     public static func error(id: Int, code: String, message: String) -> [String: Any] {
@@ -51,7 +56,13 @@ public enum HelperProtocol {
         guard let type = string(message["type"], max: 32) else { throw ProtocolError.invalidMessage }
         switch type {
         case "hello":
-            try keys(message, required: ["type", "protocol", "helperVersion", "platform", "arch", "capabilities", "permissions"])
+            try keys(message, required: ["type", "protocol", "helperVersion", "platform", "arch", "capabilities", "permissions"],
+                     optional: ["nonce", "proof"])
+            for name in ["nonce", "proof"] where message[name] != nil {
+                guard let value = message[name] as? String, LaunchHandshake.isToken(value) else {
+                    throw ProtocolError.invalidMessage
+                }
+            }
             guard let proto = integer(message["protocol"]), proto > 0,
                   string(message["helperVersion"], max: 64) != nil,
                   let platform = string(message["platform"], max: 16),
@@ -62,11 +73,21 @@ public enum HelperProtocol {
                   let permissions = message["permissions"] as? [String: String],
                   permissions.allSatisfy({ ["granted", "denied", "unknown", "stale"].contains($0.value) })
             else { throw ProtocolError.invalidMessage }
+        case "challenge":
+            try keys(message, required: ["type", "protocol", "nonce"])
+            guard let proto = integer(message["protocol"]), proto > 0,
+                  let nonce = message["nonce"] as? String, LaunchHandshake.isToken(nonce)
+            else { throw ProtocolError.invalidMessage }
         case "welcome":
-            try keys(message, required: ["type", "protocol"], optional: ["nonce", "sessionToken"])
+            try keys(message, required: ["type", "protocol"], optional: ["proof", "sessionToken"])
             guard let proto = integer(message["protocol"]), proto > 0 else { throw ProtocolError.invalidMessage }
-            for name in ["nonce", "sessionToken"] where message[name] != nil {
-                guard let value = string(message[name], max: 128), value.utf8.count >= 16 else {
+            if message["proof"] != nil {
+                guard let proof = message["proof"] as? String, LaunchHandshake.isToken(proof) else {
+                    throw ProtocolError.invalidMessage
+                }
+            }
+            if message["sessionToken"] != nil {
+                guard let value = string(message["sessionToken"], max: 128), value.utf8.count >= 16 else {
                     throw ProtocolError.invalidMessage
                 }
             }

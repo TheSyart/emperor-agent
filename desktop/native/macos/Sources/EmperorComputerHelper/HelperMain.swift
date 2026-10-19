@@ -3,21 +3,20 @@ import Foundation
 import HelperCore
 import HelperPlatform
 
+/// argv carries no secret (SEC-09): the parent's pid and main's socket.
+/// The one-time launch secret arrives on stdin.
 private struct LaunchOptions {
     let parentPID: pid_t
-    let nonce: String
     let socketPath: String
 
     init(arguments: [String]) throws {
-        guard arguments.count == 6,
+        guard arguments.count == 4,
               arguments[0] == "--parent-pid", let pid = Int32(arguments[1]), pid > 1,
-              arguments[2] == "--nonce", (16...128).contains(arguments[3].utf8.count),
-              arguments[4] == "--socket", arguments[5].hasPrefix("/") else {
+              arguments[2] == "--socket", arguments[3].hasPrefix("/") else {
             throw ProtocolError.invalidMessage
         }
         parentPID = pid
-        nonce = arguments[3]
-        socketPath = arguments[5]
+        socketPath = arguments[3]
     }
 }
 
@@ -104,39 +103,10 @@ private final class Connection {
     }
 }
 
-private func constantTimeEqual(_ left: String, _ right: String) -> Bool {
-    let a = Array(left.utf8), b = Array(right.utf8)
-    guard a.count == b.count else { return false }
-    var difference: UInt8 = 0
-    for index in a.indices { difference |= a[index] ^ b[index] }
-    return difference == 0
-}
-
-private func releaseAllInput() {
-    InputController.shared.releaseAll()
-}
-
-private func serve(_ connection: Connection, nonce: String, parentPID: pid_t) async throws {
-    #if arch(arm64)
-    let arch = "arm64"
-    #elseif arch(x86_64)
-    let arch = "x86_64"
-    #else
-    let arch = "unknown"
-    #endif
-    let dispatcher = ReadOnlyDispatcher(verifiedMainPID: parentPID)
-    try connection.send(HelperProtocol.hello(
-        arch: arch, permissions: DesktopPermissions.status(),
-        capabilities: ["permissions.status", "permissions.request", "apps.list", "windows.list",
-                       "target.bind", "target.release", "observe.semantic", "observe.screenshot", "observe.menu", "act",
-                       "target.capture", "target.preview", "front.restore",
-                       "act.fillSecret",
-                       "input.releaseAll"]))
-
-    let handshakeDeadline = ContinuousClock.now.advanced(by: .seconds(5))
-    var welcome: [String: Any]?
-    var initialMessages: [[String: Any]] = []
-    while ContinuousClock.now < handshakeDeadline && welcome == nil {
+/// The first message main sends after connect, plus any that came with it.
+private func firstMessage(_ connection: Connection, deadline: ContinuousClock.Instant)
+    throws -> (message: [String: Any], rest: [[String: Any]]) {
+    while ContinuousClock.now < deadline {
         let received: [[String: Any]]?
         do {
             received = try connection.read(timeoutMilliseconds: 200)
@@ -149,13 +119,50 @@ private func serve(_ connection: Connection, nonce: String, parentPID: pid_t) as
             HelperDiagnostic.emit("HANDSHAKE_FAILED", ["reason": "disconnected"])
             throw ProtocolError.invalidMessage
         }
-        welcome = first
-        initialMessages = Array(messages.dropFirst())
+        return (first, Array(messages.dropFirst()))
     }
-    guard let welcome else {
-        HelperDiagnostic.emit("HANDSHAKE_FAILED", ["reason": "timeout"])
+    HelperDiagnostic.emit("HANDSHAKE_FAILED", ["reason": "timeout"])
+    throw ProtocolError.invalidMessage
+}
+
+private func releaseAllInput() {
+    InputController.shared.releaseAll()
+}
+
+private func serve(_ connection: Connection, secret: Data, parentPID: pid_t) async throws {
+    #if arch(arm64)
+    let arch = "arm64"
+    #elseif arch(x86_64)
+    let arch = "x86_64"
+    #else
+    let arch = "unknown"
+    #endif
+    let dispatcher = ReadOnlyDispatcher(verifiedMainPID: parentPID)
+    let handshakeDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+    // main speaks first: a challenge only the holder of the secret can answer.
+    let challenge = try firstMessage(connection, deadline: handshakeDeadline).message
+    guard challenge["type"] as? String == "challenge",
+          let serverNonce = challenge["nonce"] as? String else {
+        HelperDiagnostic.emit("HANDSHAKE_FAILED", ["reason": "unexpected-message"])
         throw ProtocolError.invalidMessage
     }
+    guard challenge["protocol"] as? Int == HelperProtocol.version else {
+        HelperDiagnostic.emit("HANDSHAKE_FAILED", ["reason": "protocol"])
+        throw ProtocolError.unsupportedVersion
+    }
+    let clientNonce = LaunchHandshake.newNonce()
+    try connection.send(HelperProtocol.hello(
+        arch: arch, permissions: DesktopPermissions.status(),
+        capabilities: ["permissions.status", "permissions.request", "apps.list", "windows.list",
+                       "target.bind", "target.release", "observe.semantic", "observe.screenshot", "observe.menu", "act",
+                       "target.capture", "target.preview", "front.restore",
+                       "act.fillSecret",
+                       "input.releaseAll"],
+        nonce: clientNonce,
+        proof: LaunchHandshake.helloProof(secret: secret, serverNonce: serverNonce, clientNonce: clientNonce)))
+
+    let (welcome, initial) = try firstMessage(connection, deadline: handshakeDeadline)
+    var initialMessages = initial
     guard welcome["type"] as? String == "welcome" else {
         HelperDiagnostic.emit("HANDSHAKE_FAILED", ["reason": "unexpected-message"])
         throw ProtocolError.invalidMessage
@@ -164,11 +171,12 @@ private func serve(_ connection: Connection, nonce: String, parentPID: pid_t) as
         HelperDiagnostic.emit("HANDSHAKE_FAILED", ["reason": "protocol"])
         throw ProtocolError.unsupportedVersion
     }
-    // Never report the expected or received nonce, only that it did not match.
-    guard let receivedNonce = welcome["nonce"] as? String,
-          constantTimeEqual(receivedNonce, nonce) else {
-        HelperDiagnostic.emit("PEER_REJECTED", ["reason": "nonce"])
-        throw ProtocolError.invalidNonce
+    // Never report the expected or received proof, only that it did not match.
+    let expected = LaunchHandshake.welcomeProof(secret: secret, serverNonce: serverNonce, clientNonce: clientNonce)
+    guard let receivedProof = welcome["proof"] as? String,
+          LaunchHandshake.matches(receivedProof, expected) else {
+        HelperDiagnostic.emit("PEER_REJECTED", ["reason": "proof"])
+        throw ProtocolError.invalidProof
     }
 
     var lastRequest = ContinuousClock.now
@@ -278,26 +286,47 @@ private func serve(_ connection: Connection, nonce: String, parentPID: pid_t) as
 
 private func run() async throws {
     let options = try LaunchOptions(arguments: Array(CommandLine.arguments.dropFirst()))
-    let server = try UnixServer(path: options.socketPath)
-    let idleDeadline = ContinuousClock.now.advanced(by: .seconds(600))
-    while ContinuousClock.now < idleDeadline {
+    // main wrote the secret before LaunchServices started us.
+    let secret: Data
+    do {
+        secret = try LaunchSecretReader.read(fd: STDIN_FILENO, timeoutMilliseconds: 5_000)
+    } catch {
+        HelperDiagnostic.emit("HANDSHAKE_FAILED", ["reason": "no-launch-secret"])
+        throw error
+    }
+    let connectDeadline = ContinuousClock.now.advanced(by: .seconds(10))
+    while ContinuousClock.now < connectDeadline {
         guard kill(options.parentPID, 0) == 0 || errno == EPERM else { return }
-        guard let client = server.acceptIfReady(timeoutMilliseconds: 1_000) else { continue }
+        let client: Int32
         do {
+            client = try UnixClient.connect(path: options.socketPath)
+        } catch SocketError.connectFailed {
+            // Not listening (yet), or replaced meanwhile: try again.
+            try? await Task.sleep(for: .milliseconds(100))
+            continue
+        } catch {
+            // A shared directory or a non-socket path does not fix itself.
+            HelperDiagnostic.emit("HANDSHAKE_FAILED", ["reason": "unsafe-socket"])
+            throw error
+        }
+        do {
+            // Whoever listens must be the parent that started us.
             try PeerIdentity.verify(fd: client, expectedPID: options.parentPID)
         } catch {
-            // Keep listening for the real parent. The rejected peer learns
-            // nothing; the reason goes to stderr without pid, path or nonce.
+            // The reason goes to stderr without pid, path or secret.
             let reason = (error as? PeerError) == .peerPID ? "pid" : "signature"
             HelperDiagnostic.emit("PEER_REJECTED", ["reason": reason])
             close(client)
+            try? await Task.sleep(for: .milliseconds(200))
             continue
         }
         let connection = Connection(fd: client)
         defer { releaseAllInput() }
-        try await serve(connection, nonce: options.nonce, parentPID: options.parentPID)
+        try await serve(connection, secret: secret, parentPID: options.parentPID)
         return
     }
+    HelperDiagnostic.emit("HANDSHAKE_FAILED", ["reason": "no-main"])
+    throw ProtocolError.invalidMessage
 }
 
 @main private struct HelperMain {
@@ -308,7 +337,7 @@ private func run() async throws {
         do {
             try await run()
         } catch {
-            // No diagnostic file and no launch nonce, peer path, or secret in stderr.
+            // No diagnostic file and no launch secret, peer path, or credential in stderr.
             HelperDiagnostic.emit("HELPER_FAILED", ["error": String(describing: type(of: error))])
             exit(EXIT_FAILURE)
         }

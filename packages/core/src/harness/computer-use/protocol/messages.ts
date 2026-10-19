@@ -4,8 +4,11 @@
  * exported as JSON Schema (`schema.json`) and exercised by golden fixtures
  * shared with the helper test suites.
  *
- * Handshake: helper → `hello`; main → `welcome` (carries the launch nonce on
- * macOS). A different major protocol version is `PROTOCOL_MISMATCH`.
+ * Handshake: on macOS main first sends `challenge`; the helper answers with
+ * `hello` carrying its own nonce and a proof of the launch secret, and main
+ * answers with `welcome` carrying its proof (SEC-09, `handshake.ts`).
+ * Other platforms start at `hello`. A different major protocol version is
+ * `PROTOCOL_MISMATCH`.
  */
 
 import { z } from 'zod'
@@ -22,6 +25,8 @@ import {
 export const HELPER_PROTOCOL_VERSION = 1
 
 const permissionStatus = z.enum(['granted', 'denied', 'unknown', 'stale'])
+/** A launch nonce or proof: 32 bytes as 64 lowercase hex digits. */
+const launchToken = z.string().regex(/^[0-9a-f]{64}$/)
 const requestId = z.number().int().nonnegative()
 const identifier = z.string().min(1).max(256)
 const errorCode = z.enum(Object.keys(UI_ERROR_CODES) as [string, ...string[]])
@@ -35,6 +40,19 @@ export const helloSchema = z
     arch: z.string().min(1).max(32),
     capabilities: z.array(z.string().min(1).max(64)).max(64),
     permissions: z.record(z.string(), permissionStatus),
+    /** The helper's half of the launch handshake (macOS). */
+    nonce: launchToken.optional(),
+    /** HMAC of both nonces under the launch secret (macOS). */
+    proof: launchToken.optional(),
+  })
+  .strict()
+
+/** main → helper, first on a macOS connection: prove the launch secret. */
+export const challengeSchema = z
+  .object({
+    type: z.literal('challenge'),
+    protocol: z.number().int().positive(),
+    nonce: launchToken,
   })
   .strict()
 
@@ -42,8 +60,8 @@ export const welcomeSchema = z
   .object({
     type: z.literal('welcome'),
     protocol: z.number().int().positive(),
-    /** One-time launch nonce the helper was started with (macOS). */
-    nonce: z.string().min(16).max(128).optional(),
+    /** main's proof of the launch secret (macOS). */
+    proof: launchToken.optional(),
     sessionToken: z.string().min(16).max(128).optional(),
   })
   .strict()
@@ -107,6 +125,7 @@ export const pongSchema = z
 
 export const helperMessageSchema = z.union([
   helloSchema,
+  challengeSchema,
   welcomeSchema,
   requestSchema,
   responseSchema,
@@ -119,6 +138,7 @@ export const helperMessageSchema = z.union([
 export type HelperMessage = z.infer<typeof helperMessageSchema>
 export type HelperHello = z.infer<typeof helloSchema>
 export type HelperWelcome = z.infer<typeof welcomeSchema>
+export type HelperChallenge = z.infer<typeof challengeSchema>
 export type HelperRequest = z.infer<typeof requestSchema>
 export type HelperResponse = z.infer<typeof responseSchema>
 export type HelperEvent = z.infer<typeof eventSchema>

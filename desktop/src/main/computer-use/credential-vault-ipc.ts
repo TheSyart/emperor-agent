@@ -1,10 +1,16 @@
 /** Trusted Settings-only IPC; secrets never pass through CoreApi or tool logs. */
+import { basename } from 'node:path'
 import {
+  VAULT_EXPORT_CHANNEL,
+  VAULT_IMPORT_CHANNEL,
+  VAULT_IMPORT_PICK_CHANNEL,
   VAULT_LOCK_CHANNEL,
   VAULT_MASTER_CHANNEL,
   VAULT_REMOVE_CHANNEL,
+  VAULT_REPAIR_KEY_CHANNEL,
   VAULT_RESET_CHANNEL,
   VAULT_SAVE_CHANNEL,
+  VAULT_START_OVER_CHANNEL,
   VAULT_STATUS_CHANNEL,
   VAULT_UNLOCK_CHANNEL,
   VAULT_REVEAL_CHANNEL,
@@ -53,6 +59,14 @@ function sanitize(error: unknown): Error {
 function guarded<T>(action: () => T): T {
   try {
     return action()
+  } catch (error) {
+    throw sanitize(error)
+  }
+}
+
+async function guardedAsync<T>(action: () => Promise<T>): Promise<T> {
+  try {
+    return await action()
   } catch (error) {
     throw sanitize(error)
   }
@@ -133,6 +147,60 @@ function draft(value: unknown): CredentialDraft {
   }
 }
 
+/**
+ * 主密码 requests: `set` (typed twice), `change` (current + new twice) and
+ * `remove` (current; its own danger action). The old `{ password }` shape,
+ * whose null removed protection without a check, is refused.
+ */
+type MasterRequest =
+  | { action: 'set'; password: string; confirmPassword: string }
+  | {
+      action: 'change'
+      currentPassword: string
+      password: string
+      confirmPassword: string
+    }
+  | { action: 'remove'; currentPassword: string }
+
+function masterRequest(value: unknown): MasterRequest {
+  const input = record(value)
+  if (input.action === 'set')
+    return {
+      action: 'set',
+      password: string(input.password, 4096),
+      confirmPassword: string(input.confirmPassword, 4096),
+    }
+  if (input.action === 'change')
+    return {
+      action: 'change',
+      currentPassword: string(input.currentPassword, 4096),
+      password: string(input.password, 4096),
+      confirmPassword: string(input.confirmPassword, 4096),
+    }
+  if (input.action === 'remove')
+    return {
+      action: 'remove',
+      currentPassword: string(input.currentPassword, 4096),
+    }
+  throw new VaultRequestError(
+    'invalid-request',
+    'invalid master password request',
+  )
+}
+
+/** Main's own save and open dialogs, and file access for backups. */
+export interface VaultBackupFiles {
+  /** A path the user chose to save a `.emperor-vault`, or null. */
+  chooseExportPath(): Promise<string | null>
+  /** A `.emperor-vault` the user chose to open, or null. */
+  chooseImportPath(): Promise<string | null>
+  read(path: string): Promise<Buffer>
+  write(path: string, data: Buffer): Promise<void>
+}
+
+/** A picked backup waits this long for its passphrase. */
+const PICKED_TTL_MS = 10 * 60_000
+
 export function registerCredentialVaultIpc(input: {
   ipcMain: IpcMainLike
   authorize(event: unknown): void
@@ -154,11 +222,23 @@ export function registerCredentialVaultIpc(input: {
     | 'unlock'
     | 'lock'
     | 'setMasterPassword'
+    | 'changeMasterPassword'
+    | 'removeMasterPassword'
     | 'revealPassword'
     | 'reset'
+    | 'startOver'
+    | 'repairKeyPermissions'
+    | 'exportBackup'
+    | 'importBackup'
   >
+  /** Save/open dialogs for 导出 and 导入; absent: no backup channels work. */
+  backupFiles?: VaultBackupFiles
+  now?: () => number
 }): void {
   const { ipcMain, vault } = input
+  const now = input.now ?? Date.now
+  // The file picked for import; its bytes never reach the renderer.
+  let picked: { data: Buffer; at: number } | null = null
   // Authorization stays outside `guarded`: an untrusted sender is rejected
   // before any payload is read, with the policy's own error.
   ipcMain.handle(VAULT_STATUS_CHANNEL, (event) => {
@@ -186,8 +266,8 @@ export function registerCredentialVaultIpc(input: {
   })
   ipcMain.handle(VAULT_UNLOCK_CHANNEL, (event, payload) => {
     input.authorize(event)
-    return guarded(() => ({
-      unlocked: vault.unlock(string(record(payload).password, 4096)),
+    return guardedAsync(async () => ({
+      unlocked: await vault.unlock(string(record(payload).password, 4096)),
     }))
   })
   ipcMain.handle(VAULT_LOCK_CHANNEL, (event) => {
@@ -197,11 +277,19 @@ export function registerCredentialVaultIpc(input: {
   })
   ipcMain.handle(VAULT_MASTER_CHANNEL, (event, payload) => {
     input.authorize(event)
-    guarded(() => {
-      const raw = record(payload).password
-      vault.setMasterPassword(raw === null ? null : string(raw, 4096))
+    return guardedAsync(async () => {
+      const request = masterRequest(payload)
+      if (request.action === 'set')
+        await vault.setMasterPassword(request.password, request.confirmPassword)
+      else if (request.action === 'change')
+        await vault.changeMasterPassword(
+          request.currentPassword,
+          request.password,
+          request.confirmPassword,
+        )
+      else await vault.removeMasterPassword(request.currentPassword)
+      return { ok: true }
     })
-    return { ok: true }
   })
   // Settings asks the user to confirm first; nothing else ever clears.
   ipcMain.handle(VAULT_RESET_CHANNEL, (event) => {
@@ -209,6 +297,65 @@ export function registerCredentialVaultIpc(input: {
     guarded(() => vault.reset())
     return { ok: true }
   })
+  // Settings confirms first; the old file is kept beside the new vault.
+  ipcMain.handle(VAULT_START_OVER_CHANNEL, (event) => {
+    input.authorize(event)
+    return guarded(() => ({ ok: true, ...vault.startOver() }))
+  })
+  ipcMain.handle(VAULT_REPAIR_KEY_CHANNEL, (event) => {
+    input.authorize(event)
+    return guarded(() => ({ repaired: vault.repairKeyPermissions() }))
+  })
+  ipcMain.handle(VAULT_EXPORT_CHANNEL, (event, payload) => {
+    input.authorize(event)
+    return guardedAsync(async () => {
+      const request = record(payload)
+      const passphrase = string(request.passphrase, 4096)
+      const confirmPassphrase = string(request.confirmPassphrase, 4096)
+      const files = backupFiles()
+      const path = await files.chooseExportPath()
+      if (!path) return { canceled: true }
+      const data = await vault.exportBackup(passphrase, confirmPassphrase)
+      await files.write(path, data)
+      return { ok: true, name: basename(path) }
+    })
+  })
+  ipcMain.handle(VAULT_IMPORT_PICK_CHANNEL, (event) => {
+    input.authorize(event)
+    return guardedAsync(async () => {
+      const files = backupFiles()
+      const path = await files.chooseImportPath()
+      if (!path) return { canceled: true }
+      picked = { data: await files.read(path), at: now() }
+      return { name: basename(path) }
+    })
+  })
+  ipcMain.handle(VAULT_IMPORT_CHANNEL, (event, payload) => {
+    input.authorize(event)
+    return guardedAsync(async () => {
+      const passphrase = string(record(payload).passphrase, 4096)
+      const file = picked
+      if (!file || now() - file.at > PICKED_TTL_MS) {
+        picked = null
+        throw new VaultRequestError(
+          'invalid-request',
+          'choose a backup file first',
+        )
+      }
+      // A wrong passphrase keeps the file picked, so the user can retry.
+      const result = await vault.importBackup(file.data, passphrase)
+      if (picked === file) picked = null
+      return result
+    })
+  })
+  function backupFiles(): VaultBackupFiles {
+    if (!input.backupFiles)
+      throw new VaultRequestError(
+        'invalid-request',
+        'credential backups are unavailable here',
+      )
+    return input.backupFiles
+  }
   ipcMain.handle(VAULT_REVEAL_CHANNEL, async (event, payload) => {
     input.authorize(event)
     const handleId = guarded(() => string(record(payload).handleId, 40))

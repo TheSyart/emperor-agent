@@ -1,16 +1,18 @@
 import { execFileSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHmac, randomBytes } from 'node:crypto'
 import { createConnection, createServer, type Socket } from 'node:net'
 import {
   chmodSync,
+  constants,
   copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import { readFile, rm } from 'node:fs/promises'
+import { open, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -357,52 +359,14 @@ describe('macOS helper launcher paths', () => {
       expect(macosNativeArch(node!)).toBe(native)
   })
 
-  it('starts through LaunchServices arguments and retries the socket until handshake', async () => {
-    const home = `/tmp/cu-launch-${randomUUID()}`
+  it('listens before LaunchServices starts the Helper and hands it the secret on stdin, never argv', async () => {
+    const home = mkdtempSync('/tmp/cu-launch-')
     const uid = process.getuid!()
-    const location = macosSocketLocation({ home, uid })
-    const received: Record<string, unknown>[] = []
-    let peer: Socket | undefined
-    const server = createServer((socket) => {
-      peer = socket
-      const decoder = new FrameDecoder()
-      socket.on('data', (chunk: Buffer) => {
-        for (const frame of decoder.push(chunk)) {
-          if (frame.kind !== 'json') continue
-          const message = frame.value as Record<string, unknown>
-          received.push(message)
-          if (message.type === 'request')
-            socket.write(
-              Buffer.from(
-                encodeJsonFrame({
-                  type: 'response',
-                  id: message.id,
-                  ok: true,
-                  result: {},
-                }),
-              ),
-            )
-        }
-      })
-      socket.write(
-        Buffer.from(
-          encodeJsonFrame({
-            type: 'hello',
-            protocol: 1,
-            helperVersion: 'test',
-            platform: 'macos',
-            arch: 'arm64',
-            capabilities: [],
-            permissions: {},
-          }),
-        ),
-      )
-    })
-    let attempts = 0
-    let launchArgs: readonly string[] = []
     const installPackagedHelper = vi.fn(
       async () => '/tmp/Emperor Computer Helper.app',
     )
+    let launchArgs: readonly string[] = []
+    let helper: SimulatedHelper | null = null
     try {
       const client = await launchMacosHelper({
         packaged: true,
@@ -410,67 +374,331 @@ describe('macOS helper launcher paths', () => {
         installPackagedHelper,
         home,
         uid,
-        connectTimeoutMs: 1_000,
+        connectTimeoutMs: 5_000,
         openApp: async (args) => {
           launchArgs = args
-          await new Promise<void>((resolve, reject) =>
-            server.listen(location.path, () => resolve()).once('error', reject),
-          )
-        },
-        connectSocket: (path) => {
-          attempts++
-          if (attempts < 3) return Promise.reject(new Error('not ready yet'))
-          return new Promise<Socket>((resolve, reject) => {
-            const socket = createConnection(path)
-            socket.once('connect', () => resolve(socket))
-            socket.once('error', reject)
-          })
+          // The socket is already listening when LaunchServices runs.
+          const socketPath = args[args.indexOf('--socket') + 1]!
+          expect(existsSync(socketPath)).toBe(true)
+          helper = await simulatedHelper(args)
         },
       })
-      expect(attempts).toBe(3)
-      expect(installPackagedHelper).toHaveBeenCalledOnce()
       expect(installPackagedHelper).toHaveBeenCalledWith(
         '/Applications/Emperor Agent.app/Contents/Library/Helpers/Emperor Computer Helper.app',
       )
-      expect(launchArgs.slice(0, 7)).toEqual([
+      const fifo = launchArgs[5]!
+      expect(launchArgs).toEqual([
         '-g',
         '-n',
         '-a',
         '/tmp/Emperor Computer Helper.app',
+        '--stdin',
+        fifo,
         '--args',
         '--parent-pid',
         String(process.pid),
-      ])
-      expect(launchArgs.slice(7, 10)).toEqual([
-        '--nonce',
-        expect.stringMatching(/^[a-f0-9]{64}$/),
         '--socket',
+        `${home}/.emperor/run/cu-${uid}.sock`,
       ])
-      expect(launchArgs[10]).toBe(location.path)
-      await vi.waitFor(() =>
-        expect(received[0]).toEqual({
-          type: 'welcome',
-          protocol: 1,
-          nonce: launchArgs[8],
-        }),
-      )
+      expect(fifo.startsWith(`${home}/.emperor/run/`)).toBe(true)
+      const secret = helper!.secret
+      expect(secret).toMatch(/^[0-9a-f]{64}$/)
+      expect(launchArgs.join(' ')).not.toContain(secret)
+      expect(launchArgs).not.toContain('--nonce')
+      expect(helper!.welcomeVerified).toBe(true)
+      expect(await client.request('permissions.status', {})).toEqual({
+        permissions: { accessibility: 'granted' },
+      })
+      // Nothing is left to connect to, and the secret is gone from disk.
+      expect(existsSync(launchArgs.at(-1)!)).toBe(false)
+      expect(existsSync(fifo)).toBe(false)
       await client.close()
     } finally {
-      peer?.destroy()
-      await new Promise<void>((resolve) => server.close(() => resolve()))
+      ;(helper as SimulatedHelper | null)?.socket.destroy()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('replaces a stale socket of its own at the path, and refuses anything else there', async () => {
+    const home = mkdtempSync('/tmp/cu-stale-')
+    const uid = process.getuid!()
+    const location = macosSocketLocation({ home, uid })
+    let helper: SimulatedHelper | null = null
+    try {
+      mkdirSync(location.directory, { recursive: true, mode: 0o700 })
+      // A socket an earlier launch left behind (nobody listens on it).
+      const stale = createServer()
+      await new Promise<void>((resolveListen) =>
+        stale.listen(location.path, resolveListen),
+      )
+      await new Promise<void>((resolveClose) => {
+        stale.close(() => resolveClose())
+      })
+      // Node removes the file on close; put back a dead socket file.
+      execFileSync('/usr/bin/python3', [
+        '-c',
+        'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])',
+        location.path,
+      ])
+      expect(existsSync(location.path)).toBe(true)
+      const client = await launchMacosHelper({
+        packaged: false,
+        appPath: '/tmp/Emperor Computer Helper.app',
+        home,
+        uid,
+        connectTimeoutMs: 5_000,
+        openApp: async (args) => {
+          helper = await simulatedHelper(args)
+        },
+      })
+      expect(helper!.welcomeVerified).toBe(true)
+      await client.close()
+      // A regular file where the socket goes is left alone and refused.
+      writeFileSync(location.path, 'not a socket')
+      await expect(
+        launchMacosHelper({
+          packaged: false,
+          appPath: '/tmp/Emperor Computer Helper.app',
+          home,
+          uid,
+          connectTimeoutMs: 1_000,
+          openApp: async () => undefined,
+        }),
+      ).rejects.toThrow('Could not prepare the Computer Use helper connection')
+      expect(readFileSync(location.path, 'utf8')).toBe('not a socket')
+    } finally {
+      ;(helper as SimulatedHelper | null)?.socket.destroy()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  // SEC-09 test 8: a process of the same user that connects first cannot
+  // answer the challenge; main keeps waiting for the Helper it launched.
+  it('refuses a rival that races the Helper to the socket (SEC-09 #8)', async () => {
+    const home = mkdtempSync('/tmp/cu-race-')
+    const uid = process.getuid!()
+    const rivals: RivalConnection[] = []
+    let helper: SimulatedHelper | null = null
+    try {
+      const client = await launchMacosHelper({
+        packaged: false,
+        appPath: '/tmp/Emperor Computer Helper.app',
+        home,
+        uid,
+        connectTimeoutMs: 5_000,
+        openApp: async (args) => {
+          const socketPath = args[args.indexOf('--socket') + 1]!
+          // One rival guesses a proof, one stays silent, one replays the
+          // greeting a real Helper would send without the secret.
+          rivals.push(await rivalConnection(socketPath, 'guess'))
+          rivals.push(await rivalConnection(socketPath, 'silent'))
+          rivals.push(await rivalConnection(socketPath, 'no-proof'))
+          await Promise.all(
+            rivals
+              .filter((rival) => rival.mode !== 'silent')
+              .map((rival) => rival.closed),
+          )
+          helper = await simulatedHelper(args)
+        },
+      })
+      for (const rival of rivals.filter((item) => item.mode !== 'silent')) {
+        expect(rival.challenged).toBe(true)
+        expect(rival.received.map((message) => message.type)).toEqual([
+          'challenge',
+        ])
+      }
+      // The silent one is dropped once the Helper is in.
+      await rivals.find((rival) => rival.mode === 'silent')!.closed
+      expect(helper!.welcomeVerified).toBe(true)
+      expect(await client.request('permissions.status', {})).toEqual({
+        permissions: { accessibility: 'granted' },
+      })
+      await client.close()
+    } finally {
+      for (const rival of rivals) rival.socket.destroy()
+      ;(helper as SimulatedHelper | null)?.socket.destroy()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('gives up when no peer proves itself before the deadline', async () => {
+    const home = mkdtempSync('/tmp/cu-timeout-')
+    const rivals: RivalConnection[] = []
+    let socketPath = ''
+    let fifo = ''
+    try {
+      await expect(
+        launchMacosHelper({
+          packaged: false,
+          appPath: '/tmp/Emperor Computer Helper.app',
+          home,
+          uid: process.getuid!(),
+          connectTimeoutMs: 400,
+          openApp: async (args) => {
+            socketPath = args[args.indexOf('--socket') + 1]!
+            fifo = args[args.indexOf('--stdin') + 1]!
+            rivals.push(await rivalConnection(socketPath, 'guess'))
+          },
+        }),
+      ).rejects.toThrow('Computer Use helper did not connect')
+      expect(existsSync(socketPath)).toBe(false)
+      expect(existsSync(fifo)).toBe(false)
+    } finally {
+      for (const rival of rivals) rival.socket.destroy()
       await rm(home, { recursive: true, force: true })
     }
   })
 })
 
+const HELLO = {
+  type: 'hello',
+  protocol: 1,
+  helperVersion: 'test',
+  platform: 'macos',
+  arch: 'arm64',
+  capabilities: [],
+  permissions: {},
+}
+
+function proof(secret: string, label: string, server: string, client: string) {
+  return createHmac('sha256', Buffer.from(secret, 'hex'))
+    .update(`${label}\0${server}\0${client}`)
+    .digest('hex')
+}
+
+interface SimulatedHelper {
+  readonly secret: string
+  readonly socket: Socket
+  welcomeVerified: boolean
+}
+
+/** What the Swift Helper does: read the secret from stdin, connect, prove it. */
+async function simulatedHelper(
+  args: readonly string[],
+): Promise<SimulatedHelper> {
+  const fifo = args[args.indexOf('--stdin') + 1]!
+  const socketPath = args[args.indexOf('--socket') + 1]!
+  const stdin = await open(fifo, constants.O_RDONLY | constants.O_NONBLOCK)
+  const { bytesRead, buffer } = await stdin.read(Buffer.alloc(256), 0, 256)
+  await stdin.close()
+  const line = buffer.subarray(0, bytesRead).toString('utf8')
+  expect(line.endsWith('\n')).toBe(true)
+  const secret = line.trim()
+  const socket = createConnection(socketPath)
+  socket.on('error', () => undefined)
+  const state: SimulatedHelper = { secret, socket, welcomeVerified: false }
+  const clientNonce = randomBytes(32).toString('hex')
+  let serverNonce = ''
+  const decoder = new FrameDecoder()
+  socket.on('data', (chunk: Buffer) => {
+    for (const frame of decoder.push(chunk)) {
+      if (frame.kind !== 'json') continue
+      const message = frame.value as Record<string, unknown>
+      if (message.type === 'challenge') {
+        serverNonce = message.nonce as string
+        socket.write(
+          Buffer.from(
+            encodeJsonFrame({
+              ...HELLO,
+              nonce: clientNonce,
+              proof: proof(
+                secret,
+                'emperor-helper-hello',
+                serverNonce,
+                clientNonce,
+              ),
+            }),
+          ),
+        )
+      } else if (message.type === 'welcome') {
+        state.welcomeVerified =
+          message.proof ===
+          proof(secret, 'emperor-main-welcome', serverNonce, clientNonce)
+      } else if (message.type === 'request') {
+        socket.write(
+          Buffer.from(
+            encodeJsonFrame({
+              type: 'response',
+              id: message.id,
+              ok: true,
+              result:
+                message.method === 'permissions.status'
+                  ? { permissions: { accessibility: 'granted' } }
+                  : {},
+            }),
+          ),
+        )
+      }
+    }
+  })
+  await new Promise<void>((resolveConnect) =>
+    socket.once('connect', resolveConnect),
+  )
+  return state
+}
+
+interface RivalConnection {
+  readonly mode: 'guess' | 'silent' | 'no-proof'
+  readonly socket: Socket
+  readonly received: Record<string, unknown>[]
+  readonly closed: Promise<void>
+  challenged: boolean
+}
+
+async function rivalConnection(
+  socketPath: string,
+  mode: RivalConnection['mode'],
+): Promise<RivalConnection> {
+  const socket = createConnection(socketPath)
+  socket.on('error', () => undefined)
+  const received: Record<string, unknown>[] = []
+  const rival: RivalConnection = {
+    mode,
+    socket,
+    received,
+    challenged: false,
+    closed: new Promise<void>((resolveClosed) =>
+      socket.once('close', () => resolveClosed()),
+    ),
+  }
+  const decoder = new FrameDecoder()
+  socket.on('data', (chunk: Buffer) => {
+    for (const frame of decoder.push(chunk)) {
+      if (frame.kind !== 'json') continue
+      const message = frame.value as Record<string, unknown>
+      received.push(message)
+      if (message.type !== 'challenge' || mode === 'silent') continue
+      rival.challenged = true
+      socket.write(
+        Buffer.from(
+          encodeJsonFrame(
+            mode === 'guess'
+              ? {
+                  ...HELLO,
+                  nonce: randomBytes(32).toString('hex'),
+                  proof: randomBytes(32).toString('hex'),
+                }
+              : HELLO,
+          ),
+        ),
+      )
+    }
+  })
+  await new Promise<void>((resolveConnect) =>
+    socket.once('connect', resolveConnect),
+  )
+  return rival
+}
+
 describe('system tools (SEC-04)', () => {
-  it('runs codesign, ditto, plutil, ps and open from their absolute paths', () => {
+  it('runs codesign, ditto, plutil, ps, open and mkfifo from their absolute paths', () => {
     expect(MACOS_TOOLS).toEqual({
       codesign: '/usr/bin/codesign',
       ditto: '/usr/bin/ditto',
       plutil: '/usr/bin/plutil',
       ps: '/bin/ps',
       open: '/usr/bin/open',
+      mkfifo: '/usr/bin/mkfifo',
     })
   })
 

@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { CredentialHandle } from '@emperor/core/runtime-contract'
 import {
+  VAULT_EXPORT_CHANNEL,
+  VAULT_IMPORT_CHANNEL,
+  VAULT_IMPORT_PICK_CHANNEL,
   VAULT_LOCK_CHANNEL,
   VAULT_MASTER_CHANNEL,
   VAULT_REMOVE_CHANNEL,
+  VAULT_REPAIR_KEY_CHANNEL,
   VAULT_RESET_CHANNEL,
   VAULT_SAVE_CHANNEL,
+  VAULT_START_OVER_CHANNEL,
   VAULT_STATUS_CHANNEL,
   VAULT_UNLOCK_CHANNEL,
   VAULT_REVEAL_CHANNEL,
@@ -36,11 +41,17 @@ describe('credential vault IPC', () => {
       entries: vi.fn(() => [{ ...handle, revealUsername: true }]),
       save: vi.fn(() => handle),
       remove: vi.fn(),
-      unlock: vi.fn(() => true),
+      unlock: vi.fn(async () => true),
       lock: vi.fn(),
-      setMasterPassword: vi.fn(),
+      setMasterPassword: vi.fn(async () => undefined),
+      changeMasterPassword: vi.fn(async () => undefined),
+      removeMasterPassword: vi.fn(async () => undefined),
       revealPassword: vi.fn(() => 'private'),
       reset: vi.fn(),
+      startOver: vi.fn(() => ({ backup: null })),
+      repairKeyPermissions: vi.fn(() => false),
+      exportBackup: vi.fn(async () => Buffer.alloc(0)),
+      importBackup: vi.fn(async () => ({ imported: 0 })),
     }
     registerCredentialVaultIpc({
       ipcMain: {
@@ -74,11 +85,16 @@ describe('credential vault IPC', () => {
       unlocked: true,
     })
     await call(VAULT_LOCK_CHANNEL)
-    await call(VAULT_MASTER_CHANNEL, { password: 'long master passphrase' })
+    await call(VAULT_MASTER_CHANNEL, {
+      action: 'set',
+      password: 'long master passphrase',
+      confirmPassword: 'long master passphrase',
+    })
     expect(await call(VAULT_RESET_CHANNEL)).toEqual({ ok: true })
     expect(authorize).toHaveBeenCalledTimes(7)
     expect(vault.unlock).toHaveBeenCalledWith('master')
     expect(vault.setMasterPassword).toHaveBeenCalledWith(
+      'long master passphrase',
       'long master passphrase',
     )
     expect(vault.reset).toHaveBeenCalledTimes(1)
@@ -270,9 +286,13 @@ describe('credential vault IPC', () => {
     ).toThrow('[credential-vault:vault-locked] credential vault is locked')
     let foreign: unknown
     try {
-      handlers.get(VAULT_MASTER_CHANNEL)!(
+      await handlers.get(VAULT_MASTER_CHANNEL)!(
         {},
-        { password: 'long master passphrase' },
+        {
+          action: 'set',
+          password: 'long master passphrase',
+          confirmPassword: 'long master passphrase',
+        },
       )
     } catch (error) {
       foreign = error
@@ -282,5 +302,185 @@ describe('credential vault IPC', () => {
     expect(() => handlers.get(VAULT_SAVE_CHANNEL)!({}, 'not a record')).toThrow(
       '[credential-vault:invalid-request]',
     )
+  })
+
+  function register(vault: unknown, extra: Record<string, unknown> = {}) {
+    const handlers = new Map<
+      string,
+      (event: unknown, payload?: unknown) => unknown
+    >()
+    const authorize = vi.fn()
+    registerCredentialVaultIpc({
+      ipcMain: {
+        handle: (channel, callback) => {
+          handlers.set(channel, callback)
+        },
+      },
+      authorize,
+      vault: vault as never,
+      ...extra,
+    })
+    const call = async (channel: string, payload?: unknown) =>
+      await handlers.get(channel)!({}, payload)
+    return { call, authorize, handlers }
+  }
+
+  it('sets the master password typed twice and needs the current one to change or remove it (SEC-09 #5 #6)', async () => {
+    const vault = {
+      setMasterPassword: vi.fn(async (password: string, confirm: string) => {
+        if (password !== confirm)
+          throw new CredentialVaultError(
+            'master-password-mismatch',
+            'the two master passwords differ',
+          )
+      }),
+      changeMasterPassword: vi.fn(async () => undefined),
+      removeMasterPassword: vi.fn(async () => undefined),
+    }
+    const { call } = register(vault)
+    await expect(
+      call(VAULT_MASTER_CHANNEL, {
+        action: 'set',
+        password: 'correct horse battery',
+        confirmPassword: 'correct horse batterY',
+      }),
+    ).rejects.toThrow('[credential-vault:master-password-mismatch]')
+    // Without a confirmation, no current password, or the old shape: refused
+    // before the vault is asked.
+    for (const payload of [
+      { action: 'set', password: 'correct horse battery' },
+      { action: 'remove' },
+      { action: 'remove', currentPassword: 42 },
+      { action: 'change', password: 'n', confirmPassword: 'n' },
+      { password: null },
+      { password: 'correct horse battery' },
+      { action: 'disable', currentPassword: 'x' },
+    ])
+      await expect(call(VAULT_MASTER_CHANNEL, payload)).rejects.toThrow(
+        '[credential-vault:invalid-request]',
+      )
+    expect(vault.removeMasterPassword).not.toHaveBeenCalled()
+    expect(vault.changeMasterPassword).not.toHaveBeenCalled()
+    expect(
+      await call(VAULT_MASTER_CHANNEL, {
+        action: 'change',
+        currentPassword: 'correct horse battery',
+        password: 'another passphrase',
+        confirmPassword: 'another passphrase',
+      }),
+    ).toEqual({ ok: true })
+    expect(vault.changeMasterPassword).toHaveBeenCalledWith(
+      'correct horse battery',
+      'another passphrase',
+      'another passphrase',
+    )
+    expect(
+      await call(VAULT_MASTER_CHANNEL, {
+        action: 'remove',
+        currentPassword: 'another passphrase',
+      }),
+    ).toEqual({ ok: true })
+    expect(vault.removeMasterPassword).toHaveBeenCalledWith(
+      'another passphrase',
+    )
+  })
+
+  it('reports an unreadable vault and starts over only after a backup (SEC-09 #1)', async () => {
+    const vault = {
+      available: false,
+      backend: 'emperor-local',
+      problem: 'vault-unreadable' as string | null,
+      locked: false,
+      hasMasterPassword: false,
+      entries: () => [],
+      startOver: vi.fn(() => {
+        vault.problem = null
+        return { backup: 'vault.json.unreadable-1700000000000' }
+      }),
+    }
+    const { call } = register(vault)
+    expect(await call(VAULT_STATUS_CHANNEL)).toMatchObject({
+      available: false,
+      problem: 'vault-unreadable',
+      handles: [],
+    })
+    expect(await call(VAULT_START_OVER_CHANNEL)).toEqual({
+      ok: true,
+      backup: 'vault.json.unreadable-1700000000000',
+    })
+    expect(await call(VAULT_STATUS_CHANNEL)).not.toHaveProperty('problem')
+  })
+
+  it('repairs the local key permissions on request (SEC-09 #3)', async () => {
+    const vault = { repairKeyPermissions: vi.fn(() => true) }
+    const { call, authorize } = register(vault)
+    expect(await call(VAULT_REPAIR_KEY_CHANNEL)).toEqual({ repaired: true })
+    expect(vault.repairKeyPermissions).toHaveBeenCalledTimes(1)
+    expect(authorize).toHaveBeenCalledTimes(1)
+  })
+
+  it('exports to a file the user picks and imports a picked backup (SEC-09 #4)', async () => {
+    const backup = Buffer.from('{"format":"emperor-vault-backup"}')
+    const vault = {
+      exportBackup: vi.fn(async () => backup),
+      importBackup: vi.fn(async () => ({ imported: 3 })),
+    }
+    const files = {
+      chooseExportPath: vi.fn(async (): Promise<string | null> => null),
+      chooseImportPath: vi.fn(async (): Promise<string | null> => null),
+      read: vi.fn(async () => backup),
+      write: vi.fn(async () => undefined),
+    }
+    const { call } = register(vault, { backupFiles: files })
+    const passphrases = {
+      passphrase: 'backup passphrase 1',
+      confirmPassphrase: 'backup passphrase 1',
+    }
+    // Cancelled save dialog: nothing derived, nothing written.
+    expect(await call(VAULT_EXPORT_CHANNEL, passphrases)).toEqual({
+      canceled: true,
+    })
+    expect(vault.exportBackup).not.toHaveBeenCalled()
+    files.chooseExportPath.mockResolvedValue(
+      '/Users/a/Desktop/备份.emperor-vault',
+    )
+    expect(await call(VAULT_EXPORT_CHANNEL, passphrases)).toEqual({
+      ok: true,
+      name: '备份.emperor-vault',
+    })
+    expect(vault.exportBackup).toHaveBeenCalledWith(
+      'backup passphrase 1',
+      'backup passphrase 1',
+    )
+    expect(files.write).toHaveBeenCalledWith(
+      '/Users/a/Desktop/备份.emperor-vault',
+      backup,
+    )
+    await expect(
+      call(VAULT_EXPORT_CHANNEL, { passphrase: 'backup passphrase 1' }),
+    ).rejects.toThrow('[credential-vault:invalid-request]')
+
+    // Import: nothing picked yet → refused; a picked file is read once.
+    await expect(
+      call(VAULT_IMPORT_CHANNEL, { passphrase: 'backup passphrase 1' }),
+    ).rejects.toThrow('[credential-vault:invalid-request]')
+    expect(await call(VAULT_IMPORT_PICK_CHANNEL)).toEqual({ canceled: true })
+    files.chooseImportPath.mockResolvedValue(
+      '/Users/a/Desktop/备份.emperor-vault',
+    )
+    expect(await call(VAULT_IMPORT_PICK_CHANNEL)).toEqual({
+      name: '备份.emperor-vault',
+    })
+    expect(
+      await call(VAULT_IMPORT_CHANNEL, { passphrase: 'backup passphrase 1' }),
+    ).toEqual({ imported: 3 })
+    expect(vault.importBackup).toHaveBeenCalledWith(
+      backup,
+      'backup passphrase 1',
+    )
+    // Used up: a second import needs a new pick.
+    await expect(
+      call(VAULT_IMPORT_CHANNEL, { passphrase: 'backup passphrase 1' }),
+    ).rejects.toThrow('[credential-vault:invalid-request]')
   })
 })

@@ -2,23 +2,32 @@
 /**
  * 设置 › 浏览器 › 密码管理器 — the credential vault Emperor fills from:
  * 保护 (how the vault is protected: Emperor's local key, and the master
- * password) and 已保存 (one row per entry: 查看密码 / 编辑 / 删除). 添加
- * (header) and 编辑 open the entry form in a dialog; setting, changing or
- * entering the master password happens in a small dialog too, so the page
- * itself has no input fields. When the local key is lost or fails its
- * checks, a notice on top offers 清空 (after a confirmation). Credential
- * values travel only over the trusted preload → main IPC.
+ * password), 已保存 (one row per entry: 查看密码 / 编辑 / 删除) and 备份
+ * (导出 / 导入 a password-protected `.emperor-vault`). 添加 (header) and
+ * 编辑 open the entry form in a dialog; setting (typed twice), changing
+ * (needs the current one) or entering the master password happens in a
+ * small dialog too, and 移除主密码 is its own danger dialog, so the page
+ * itself has no input fields. When the vault cannot be used a notice on top
+ * says why and offers the way out: 从备份恢复 / 重新开始（先备份） for an
+ * unreadable or newer vault.json, 修复权限 for a key other users can read,
+ * 清空 (after a confirmation) for a lost or invalid key. Credential values
+ * travel only over the trusted preload → main IPC.
  */
 import { confirm } from '../../ui/confirm'
 import { Plus } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
+  vaultExport,
+  vaultImport,
+  vaultImportPick,
   vaultLock,
+  vaultMaster,
   vaultRemove,
+  vaultRepairKey,
   vaultReset,
   vaultReveal,
   vaultSave,
-  vaultSetMaster,
+  vaultStartOver,
   vaultStatus,
   vaultUnlock,
   type VaultEntry,
@@ -61,9 +70,24 @@ const form = ref(emptyForm())
 const password = ref('')
 const totpSeed = ref('')
 const master = ref('')
+/** 更改: the current master password; set / change: the new one twice. */
+const currentMaster = ref('')
+const confirmMaster = ref('')
 /** The master password dialog, when open. */
 type ProtectDialog = 'unlock' | 'set' | 'change'
 const protect = ref<ProtectDialog | null>(null)
+/** 移除主密码: its own danger dialog, with the current master password. */
+const removeOpen = ref(false)
+/** 重新开始（先备份）: confirm in a dialog before the file is moved aside. */
+const startOverOpen = ref(false)
+/** 导出凭据备份: the passphrase, typed twice. */
+const exportOpen = ref(false)
+const passphrase = ref('')
+const confirmPassphrase = ref('')
+/** 导入 / 从备份恢复: the picked file's name while its passphrase is asked. */
+const importName = ref<string | null>(null)
+/** A one-time note after a backup, restore or new start. */
+const note = ref('')
 const PROTECT_TITLES: Record<ProtectDialog, string> = {
   unlock: '解锁密码管理器',
   set: '设置主密码',
@@ -82,8 +106,18 @@ const encryption = computed(() => vaultEncryption(status.value))
 const problem = computed(() => vaultProblem(status.value))
 const formUnsigned = computed(() => unsignedFormWarning(form.value.appBindings))
 /** A dialog shows its own errors while it is open. */
-const pageError = computed(() =>
-  formOpen.value || protect.value ? '' : error.value,
+const dialogOpen = computed(
+  () =>
+    formOpen.value ||
+    protect.value !== null ||
+    removeOpen.value ||
+    startOverOpen.value ||
+    exportOpen.value ||
+    importName.value !== null,
+)
+const pageError = computed(() => (dialogOpen.value ? '' : error.value))
+const importTitle = computed(() =>
+  status.value?.problem ? '从备份恢复' : '导入凭据备份',
 )
 const masterDescription = computed(() =>
   status.value?.locked
@@ -125,6 +159,7 @@ async function run(action: () => Promise<void>): Promise<void> {
   if (busy.value) return
   busy.value = true
   error.value = ''
+  note.value = ''
   try {
     await action()
     await refresh()
@@ -206,14 +241,23 @@ function reveal(handleId: string): void {
   })
 }
 
+function clearMasterFields(): void {
+  master.value = ''
+  currentMaster.value = ''
+  confirmMaster.value = ''
+}
+
 function openProtect(kind: ProtectDialog): void {
   error.value = ''
-  master.value = ''
+  clearMasterFields()
   protect.value = kind
 }
 
 function onProtectOpen(open: boolean): void {
-  if (!open) protect.value = null
+  if (!open) {
+    protect.value = null
+    clearMasterFields()
+  }
 }
 
 function submitProtect(): void {
@@ -229,11 +273,140 @@ function unlock(): void {
   })
 }
 
+/** 设置 / 更改: the new master password must be typed the same twice. */
 function setMaster(): void {
+  if (master.value !== confirmMaster.value) {
+    error.value = '两次输入的主密码不一致。'
+    return
+  }
+  const change = protect.value === 'change'
   void run(async () => {
-    await vaultSetMaster(master.value || null)
-    master.value = ''
+    await vaultMaster(
+      change
+        ? {
+            action: 'change',
+            currentPassword: currentMaster.value,
+            password: master.value,
+            confirmPassword: confirmMaster.value,
+          }
+        : {
+            action: 'set',
+            password: master.value,
+            confirmPassword: confirmMaster.value,
+          },
+    )
+    clearMasterFields()
     protect.value = null
+  })
+}
+
+function openRemove(): void {
+  error.value = ''
+  clearMasterFields()
+  removeOpen.value = true
+}
+
+function onRemoveOpen(open: boolean): void {
+  removeOpen.value = open
+  if (!open) clearMasterFields()
+}
+
+/** 移除主密码: only with the current one; entries stay, sealed by the key. */
+function removeMaster(): void {
+  if (!currentMaster.value) {
+    error.value = '请输入当前主密码。'
+    return
+  }
+  void run(async () => {
+    await vaultMaster({
+      action: 'remove',
+      currentPassword: currentMaster.value,
+    })
+    clearMasterFields()
+    removeOpen.value = false
+  })
+}
+
+/** 修复权限: the local key becomes readable by you only. */
+function repairKey(): void {
+  void run(async () => {
+    if (!(await vaultRepairKey()))
+      throw new Error(
+        '无法修复权限：本地密钥文件的属主或类型不对。可以清空后重新开始。',
+      )
+  })
+}
+
+function openStartOver(): void {
+  error.value = ''
+  startOverOpen.value = true
+}
+
+/** 重新开始（先备份）: main moves vault.json aside, then starts empty. */
+function startOver(): void {
+  hidePassword()
+  void run(async () => {
+    const { backup } = await vaultStartOver()
+    startOverOpen.value = false
+    note.value = backup
+      ? `原凭据库已另存为 ${backup}，现在从空的凭据库开始。`
+      : '现在从空的凭据库开始。'
+  })
+}
+
+function openExport(): void {
+  error.value = ''
+  passphrase.value = ''
+  confirmPassphrase.value = ''
+  exportOpen.value = true
+}
+
+function onExportOpen(open: boolean): void {
+  exportOpen.value = open
+  if (!open) {
+    passphrase.value = ''
+    confirmPassphrase.value = ''
+  }
+}
+
+/** 导出凭据备份: main asks where to save it once the passphrases match. */
+function exportBackup(): void {
+  if (passphrase.value !== confirmPassphrase.value) {
+    error.value = '两次输入的口令不一致。'
+    return
+  }
+  void run(async () => {
+    const result = await vaultExport(passphrase.value, confirmPassphrase.value)
+    passphrase.value = ''
+    confirmPassphrase.value = ''
+    exportOpen.value = false
+    if ('ok' in result) note.value = `凭据备份已导出到 ${result.name}。`
+  })
+}
+
+/** 导入 / 从备份恢复: main's open dialog picks the file, then its passphrase. */
+function startImport(): void {
+  void run(async () => {
+    const picked = await vaultImportPick()
+    if ('canceled' in picked) return
+    passphrase.value = ''
+    importName.value = picked.name
+  })
+}
+
+function onImportOpen(open: boolean): void {
+  if (!open) {
+    importName.value = null
+    passphrase.value = ''
+  }
+}
+
+function importBackup(): void {
+  void run(async () => {
+    const { imported } = await vaultImport(passphrase.value)
+    passphrase.value = ''
+    importName.value = null
+    note.value = `已导入 ${imported} 个凭据。`
   })
 }
 
@@ -276,6 +449,34 @@ onBeforeUnmount(hidePassword)
     >
       <template #actions>
         <Button
+          v-if="problem.actions.includes('repair')"
+          size="sm"
+          variant="primary"
+          :disabled="busy"
+          data-action="vault-repair-key"
+          @click="repairKey"
+          >修复权限</Button
+        >
+        <Button
+          v-if="problem.actions.includes('restore')"
+          size="sm"
+          variant="secondary"
+          :disabled="busy"
+          data-action="vault-restore"
+          @click="startImport"
+          >从备份恢复</Button
+        >
+        <Button
+          v-if="problem.actions.includes('start-over')"
+          size="sm"
+          variant="secondary"
+          :disabled="busy"
+          data-action="vault-start-over"
+          @click="openStartOver"
+          >重新开始（先备份）</Button
+        >
+        <Button
+          v-if="problem.actions.includes('reset')"
           size="sm"
           variant="danger"
           :disabled="busy"
@@ -286,6 +487,7 @@ onBeforeUnmount(hidePassword)
       </template>
     </SettingsNotice>
     <SettingsNotice v-if="pageError" tone="error" :title="pageError" />
+    <SettingsNotice v-if="note" tone="info" :title="note" />
     <SettingsGroup title="保护">
       <SettingsRow title="保护状态" :description="availability.description">
         <StatusBadge :tone="availability.tone">{{
@@ -332,6 +534,14 @@ onBeforeUnmount(hidePassword)
               data-action="vault-change-master"
               @click="openProtect('change')"
               >更改</Button
+            >
+            <Button
+              size="sm"
+              variant="danger"
+              :disabled="busy"
+              data-action="vault-remove-master"
+              @click="openRemove"
+              >移除主密码</Button
             >
           </template>
           <Button
@@ -400,6 +610,34 @@ onBeforeUnmount(hidePassword)
         >
       </SettingsRow>
     </SettingsGroup>
+    <SettingsGroup v-if="status?.available" title="备份">
+      <SettingsRow
+        title="导出凭据备份"
+        description="把全部凭据和本地密钥加密成一个 .emperor-vault 文件，用你设的口令保护，可在另一台 Mac 或重装后导入。"
+      >
+        <Button
+          size="sm"
+          variant="secondary"
+          :disabled="busy || !writable"
+          data-action="vault-export"
+          @click="openExport"
+          >导出…</Button
+        >
+      </SettingsRow>
+      <SettingsRow
+        title="导入凭据备份"
+        description="把备份里的凭据合并进来，同一条凭据以备份为准；导入前会另存当前的凭据库。"
+      >
+        <Button
+          size="sm"
+          variant="secondary"
+          :disabled="busy || !writable"
+          data-action="vault-import"
+          @click="startImport"
+          >导入…</Button
+        >
+      </SettingsRow>
+    </SettingsGroup>
     <Modal
       :open="protect !== null"
       :title="protect ? PROTECT_TITLES[protect] : ''"
@@ -421,21 +659,35 @@ onBeforeUnmount(hidePassword)
             aria-label="主密码"
             required
         /></label>
-        <label v-else
-          >新的主密码<input
-            v-model="master"
-            type="password"
-            autocomplete="new-password"
-            aria-label="新的主密码"
-            :required="protect === 'set'"
-        /></label>
-        <p v-if="protect === 'set' || protect === 'change'" class="vault-note">
-          {{
-            protect === 'change'
-              ? '至少 12 个字符；留空保存会关闭主密码。'
-              : '至少 12 个字符。忘记主密码就无法找回已保存的密码。'
-          }}
-        </p>
+        <template v-else>
+          <label v-if="protect === 'change'"
+            >当前主密码<input
+              v-model="currentMaster"
+              type="password"
+              autocomplete="current-password"
+              aria-label="当前主密码"
+              required
+          /></label>
+          <label
+            >新的主密码<input
+              v-model="master"
+              type="password"
+              autocomplete="new-password"
+              aria-label="新的主密码"
+              required
+          /></label>
+          <label
+            >再次输入新的主密码<input
+              v-model="confirmMaster"
+              type="password"
+              autocomplete="new-password"
+              aria-label="再次输入新的主密码"
+              required
+          /></label>
+          <p class="vault-note">
+            至少 12 个字符。忘记主密码就无法找回已保存的密码。
+          </p>
+        </template>
       </form>
       <template #footer>
         <Button variant="secondary" type="button" @click="protect = null"
@@ -447,6 +699,157 @@ onBeforeUnmount(hidePassword)
           form="vault-protect-form"
           :disabled="busy"
           >{{ protect ? PROTECT_SUBMIT[protect] : '' }}</Button
+        >
+      </template>
+    </Modal>
+    <Modal
+      :open="removeOpen"
+      title="移除主密码"
+      :width="400"
+      @update:open="onRemoveOpen"
+    >
+      <form
+        id="vault-remove-form"
+        class="vault-dialog"
+        autocomplete="off"
+        @submit.prevent="removeMaster"
+      >
+        <SettingsNotice v-if="error" tone="error" :title="error" />
+        <p class="vault-note">
+          移除后，已保存的密码只由本地密钥保护：以你身份运行的程序也能读到这把密钥。
+        </p>
+        <label
+          >当前主密码<input
+            v-model="currentMaster"
+            type="password"
+            autocomplete="current-password"
+            aria-label="当前主密码"
+            required
+        /></label>
+      </form>
+      <template #footer>
+        <Button variant="secondary" type="button" @click="onRemoveOpen(false)"
+          >取消</Button
+        >
+        <Button
+          variant="danger"
+          type="submit"
+          form="vault-remove-form"
+          :disabled="busy"
+          >移除主密码</Button
+        >
+      </template>
+    </Modal>
+    <Modal
+      :open="startOverOpen"
+      title="重新开始（先备份）"
+      :width="420"
+      @update:open="startOverOpen = $event"
+    >
+      <div class="vault-dialog">
+        <SettingsNotice v-if="error" tone="error" :title="error" />
+        <p class="vault-note">
+          现在的凭据库文件会原样另存为 vault.json.unreadable-时间 或
+          vault.json.newer-时间（只有你能读），然后从一个空的凭据库开始。以后可以用更新的
+          Emperor 或凭据备份找回原来的凭据。
+        </p>
+      </div>
+      <template #footer>
+        <Button variant="secondary" type="button" @click="startOverOpen = false"
+          >取消</Button
+        >
+        <Button
+          variant="danger"
+          type="button"
+          :disabled="busy"
+          data-action="vault-start-over-confirm"
+          @click="startOver"
+          >备份并重新开始</Button
+        >
+      </template>
+    </Modal>
+    <Modal
+      :open="exportOpen"
+      title="导出凭据备份"
+      :width="420"
+      @update:open="onExportOpen"
+    >
+      <form
+        id="vault-export-form"
+        class="vault-dialog"
+        autocomplete="off"
+        @submit.prevent="exportBackup"
+      >
+        <SettingsNotice v-if="error" tone="error" :title="error" />
+        <p class="vault-note">
+          备份文件包含全部凭据和本地密钥，用这个口令加密（scrypt
+          派生密钥）。至少 12 个字符；忘记口令就无法从备份恢复。
+        </p>
+        <label
+          >备份口令<input
+            v-model="passphrase"
+            type="password"
+            autocomplete="new-password"
+            aria-label="备份口令"
+            required
+        /></label>
+        <label
+          >再次输入备份口令<input
+            v-model="confirmPassphrase"
+            type="password"
+            autocomplete="new-password"
+            aria-label="再次输入备份口令"
+            required
+        /></label>
+      </form>
+      <template #footer>
+        <Button variant="secondary" type="button" @click="onExportOpen(false)"
+          >取消</Button
+        >
+        <Button
+          variant="primary"
+          type="submit"
+          form="vault-export-form"
+          :disabled="busy"
+          >导出…</Button
+        >
+      </template>
+    </Modal>
+    <Modal
+      :open="importName !== null"
+      :title="importTitle"
+      :width="420"
+      @update:open="onImportOpen"
+    >
+      <form
+        id="vault-import-form"
+        class="vault-dialog"
+        autocomplete="off"
+        @submit.prevent="importBackup"
+      >
+        <SettingsNotice v-if="error" tone="error" :title="error" />
+        <p class="vault-note">
+          {{ importName }}：备份里的凭据会合并进来，同一条凭据以备份为准。
+        </p>
+        <label
+          >备份口令<input
+            v-model="passphrase"
+            type="password"
+            autocomplete="off"
+            aria-label="备份口令"
+            required
+        /></label>
+      </form>
+      <template #footer>
+        <Button variant="secondary" type="button" @click="onImportOpen(false)"
+          >取消</Button
+        >
+        <Button
+          variant="primary"
+          type="submit"
+          form="vault-import-form"
+          :disabled="busy"
+          >导入</Button
         >
       </template>
     </Modal>
@@ -548,13 +951,15 @@ onBeforeUnmount(hidePassword)
   gap: var(--space-2);
 }
 .vault-form,
-.vault-protect {
+.vault-protect,
+.vault-dialog {
   display: grid;
   gap: var(--space-3);
   padding-top: var(--space-3);
 }
 .vault-form label,
-.vault-protect label {
+.vault-protect label,
+.vault-dialog label {
   display: grid;
   gap: var(--space-1);
   font-size: var(--fs-xs);
@@ -562,6 +967,7 @@ onBeforeUnmount(hidePassword)
 }
 .vault-form input:not([type='checkbox']),
 .vault-protect input:not([type='checkbox']),
+.vault-dialog input:not([type='checkbox']),
 .vault-form select,
 .vault-form textarea,
 .vault-inline input:not([type='checkbox']) {

@@ -68,15 +68,38 @@ export interface VaultEntry extends CredentialHandle {
   readonly lastUsedTarget?: string
 }
 
+export type VaultProblem =
+  | 'key-missing'
+  | 'key-invalid'
+  | 'key-permissions'
+  | 'vault-unreadable'
+  | 'vault-newer'
+
+/** 主密码 changes: change and remove need the current one; set types it twice. */
+export type VaultMasterRequest =
+  | { action: 'set'; password: string; confirmPassword: string }
+  | {
+      action: 'change'
+      currentPassword: string
+      password: string
+      confirmPassword: string
+    }
+  | { action: 'remove'; currentPassword: string }
+
+export type VaultExportResult = { ok: true; name: string } | { canceled: true }
+export type VaultImportPick = { name: string } | { canceled: true }
+
 export interface VaultStatus {
   available: boolean
   /** Where secrets are sealed: `emperor-local` (Emperor's local key file). */
   backend?: string
   /**
-   * Why the vault is unavailable: the local key is gone while entries need
-   * it, or its file failed the permission checks. 清空 (vaultReset) fixes both.
+   * Why the vault is unavailable: vault.json cannot be read or a newer
+   * Emperor wrote it (从备份恢复 / 重新开始（先备份）, the file is kept), the
+   * local key is gone while entries need it or failed its checks (清空), or
+   * other users can read the key (修复权限 first).
    */
-  problem?: 'key-missing' | 'key-invalid'
+  problem?: VaultProblem
   locked: boolean
   hasMasterPassword: boolean
   handles: VaultEntry[]
@@ -91,9 +114,17 @@ interface EmperorBridge {
   vaultRemove?: (handleId: string) => Promise<{ ok: boolean }>
   vaultUnlock?: (password: string) => Promise<{ unlocked: boolean }>
   vaultLock?: () => Promise<{ ok: boolean }>
-  vaultSetMaster?: (password: string | null) => Promise<{ ok: boolean }>
+  vaultMaster?: (request: VaultMasterRequest) => Promise<{ ok: boolean }>
   vaultReveal?: (handleId: string) => Promise<{ password: string }>
   vaultReset?: () => Promise<{ ok: boolean }>
+  vaultRepairKey?: () => Promise<{ repaired: boolean }>
+  vaultStartOver?: () => Promise<{ ok: boolean; backup: string | null }>
+  vaultExport?: (
+    passphrase: string,
+    confirmPassphrase: string,
+  ) => Promise<VaultExportResult>
+  vaultImportPick?: () => Promise<VaultImportPick>
+  vaultImport?: (passphrase: string) => Promise<{ imported: number }>
   selectDirectory?: () => Promise<string | null>
   getPathForFile?: (file: File) => string
   openPath?: (
@@ -266,11 +297,52 @@ export async function vaultLock(): Promise<void> {
   await invoke()
 }
 
-/** Sets, changes (re-sealing every entry) or, with null, removes it. */
-export async function vaultSetMaster(password: string | null): Promise<void> {
-  const invoke = bridge()?.vaultSetMaster
+/** Sets, changes or removes the master password (re-sealing every entry). */
+export async function vaultMaster(request: VaultMasterRequest): Promise<void> {
+  const invoke = bridge()?.vaultMaster
   if (!invoke) throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
-  await invoke(password)
+  await invoke(request)
+}
+
+/** 修复权限: true when the local key is usable afterwards. */
+export async function vaultRepairKey(): Promise<boolean> {
+  const invoke = bridge()?.vaultRepairKey
+  if (!invoke) throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  return (await invoke()).repaired
+}
+
+/** 重新开始（先备份）: the backup's file name, or null when there was none. */
+export async function vaultStartOver(): Promise<{ backup: string | null }> {
+  const invoke = bridge()?.vaultStartOver
+  if (!invoke) throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  const { backup } = await invoke()
+  return { backup }
+}
+
+/** 导出凭据备份: main asks where to save it. */
+export async function vaultExport(
+  passphrase: string,
+  confirmPassphrase: string,
+): Promise<VaultExportResult> {
+  const invoke = bridge()?.vaultExport
+  if (!invoke) throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  return invoke(passphrase, confirmPassphrase)
+}
+
+/** Step 1 of 导入 / 从备份恢复: main's open dialog picks the file. */
+export async function vaultImportPick(): Promise<VaultImportPick> {
+  const invoke = bridge()?.vaultImportPick
+  if (!invoke) throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  return invoke()
+}
+
+/** Step 2: open the picked backup with its passphrase. */
+export async function vaultImport(
+  passphrase: string,
+): Promise<{ imported: number }> {
+  const invoke = bridge()?.vaultImport
+  if (!invoke) throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+  return invoke(passphrase)
 }
 
 /** 清空: deletes every entry and the master password; confirm first. */

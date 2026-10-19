@@ -17,11 +17,36 @@
       }
     },
     {
+      "name": "challenge",
+      "message": {
+        "type": "challenge",
+        "protocol": 1,
+        "nonce": "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5ec0ffee00c0ffee00c0ffee00c0ffee00"
+      }
+    },
+    {
+      "name": "hello-proved",
+      "message": {
+        "type": "hello",
+        "protocol": 1,
+        "helperVersion": "0.1.0",
+        "platform": "macos",
+        "arch": "arm64",
+        "capabilities": ["observe.semantic", "observe.screenshot", "act"],
+        "permissions": {
+          "accessibility": "granted",
+          "screen-recording": "denied"
+        },
+        "nonce": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c10badcafe0badcafe0badcafe0badcafe",
+        "proof": "a6de680245d341f7cc3d78af6c6c7c84c60831f19a56feefa170ea26b0ca94c0"
+      }
+    },
+    {
       "name": "welcome",
       "message": {
         "type": "welcome",
         "protocol": 1,
-        "nonce": "0123456789abcdef0123456789abcdef"
+        "proof": "3b995854f30fba63899f8e2b47fa9087ca51b2d321e504f197a8a2c20fb96d14"
       }
     },
     {

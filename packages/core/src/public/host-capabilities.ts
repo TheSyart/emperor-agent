@@ -95,6 +95,8 @@ export { LocalSandbox } from '../harness/sandbox/backend'
 export {
   LocalSecretError,
   LocalSecretStore,
+  openWithKey,
+  sealWithKey,
 } from '../security/local-secret-store'
 export type {
   LocalSecretProblem,

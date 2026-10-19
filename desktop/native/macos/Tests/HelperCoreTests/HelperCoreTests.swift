@@ -583,4 +583,35 @@ final class HelperCoreTests: XCTestCase {
         XCTAssertEqual(KeyMapper.character(forVirtualKey: 18), "1")
         XCTAssertNil(KeyMapper.character(forVirtualKey: 36)) // Return has no character
     }
+
+    // SEC-09: the same launch handshake vector the TypeScript suite checks.
+    func testLaunchHandshakeMatchesTheSharedVector() throws {
+        let vector = try fixture("handshake")
+        let secretHex = try XCTUnwrap(vector["secret"] as? String)
+        let server = try XCTUnwrap(vector["serverNonce"] as? String)
+        let client = try XCTUnwrap(vector["clientNonce"] as? String)
+        let secret = try LaunchHandshake.parseSecret(Data("\(secretHex)\n".utf8))
+        XCTAssertEqual(secret, bytes(hex: secretHex))
+        XCTAssertEqual(LaunchHandshake.helloProof(secret: secret, serverNonce: server, clientNonce: client),
+                       vector["helloProof"] as? String)
+        XCTAssertEqual(LaunchHandshake.welcomeProof(secret: secret, serverNonce: server, clientNonce: client),
+                       vector["welcomeProof"] as? String)
+        XCTAssertTrue(LaunchHandshake.isToken(server))
+        XCTAssertFalse(LaunchHandshake.isToken("0123456789abcdef0123456789abcdef"))
+        XCTAssertFalse(LaunchHandshake.isToken(server.uppercased()))
+        XCTAssertTrue(LaunchHandshake.matches(vector["welcomeProof"] as? String ?? "",
+                                              LaunchHandshake.welcomeProof(secret: secret, serverNonce: server, clientNonce: client)))
+        XCTAssertFalse(LaunchHandshake.matches(String(repeating: "0", count: 64),
+                                               LaunchHandshake.welcomeProof(secret: secret, serverNonce: server, clientNonce: client)))
+        for bad in ["", String(repeating: "z", count: 64), String(repeating: "0", count: 62), String(repeating: "0", count: 66)] {
+            XCTAssertThrowsError(try LaunchHandshake.parseSecret(Data("\(bad)\n".utf8)), bad)
+        }
+        // A token is 64 lowercase hex digits; the old argv nonce is gone from welcome.
+        XCTAssertNoThrow(try HelperProtocol.validate(["type": "challenge", "protocol": 1, "nonce": server]))
+        XCTAssertThrowsError(try HelperProtocol.validate(["type": "challenge", "protocol": 1, "nonce": "short"]))
+        XCTAssertThrowsError(try HelperProtocol.validate(["type": "welcome", "protocol": 1,
+                                                          "nonce": "0123456789abcdef0123456789abcdef"]))
+        XCTAssertNoThrow(try HelperProtocol.validate(["type": "welcome", "protocol": 1,
+                                                      "proof": vector["welcomeProof"] as? String ?? ""]))
+    }
 }
