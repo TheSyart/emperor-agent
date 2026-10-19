@@ -121,6 +121,10 @@ Trajectory（`desktop/src/renderer/src/trajectory/model/`）复用同一个 asse
 - **原始 session 事件**：Chat 时间线与 Trajectory 的唯一数据源。
 - **UiEvent（runtime events）**：`onCoreEvent`、`packages/core/src/runtime/events.ts` 与 `useRuntime.ts` 这一条管线继续负责控制状态与待处理交互、Goal、后台任务、排队消息、会话创建与标题、onboarding、Scheduler、MCP、桌宠、侧栏运行标记以及 busy / stop 状态。它同时是侧栏通知的来源：`runtime/notifications.ts` 从 `scheduler_run_done` / `scheduler_run_error`、`ask_request` / `plan_draft`、`assistant_done` 和 host-only 的 `git_operation_completed` 推导通知，renderer 对 `git_operation_completed` 只做这一件事（`runtime/handlers/git.ts`），不投影到其他视图状态。host-only 的 `session_log_state`（会话记录被修复、无法读取、暂停或恢复写入，字段 `state`、`kind`、`line`、`backup_path`、`error` 等）同样只变成一条提示（`runtime/handlers/sessionLog.ts`），不论属于哪个会话，也不进入投影。
 
+排队消息有三个 host-only 事件：`prompt_queued` / `prompt_dequeued` 在用户消息进入或离开 inbox 时发出，`queue_item_state { prompt_id, state, reason? }` 在一条用户消息的队列状态变化时发出。`state` 为 `sending`（某个 step 预留了它，pre-step 通过后它的 `user_message` 随之到达）、`queued`（回到队列，或待发送的项被重新发送）、`failed-previous`（待发送：前一轮失败或被停止，或应用重启前未发出；`reason` 为 `previous-turn-failed`、`previous-turn-stopped` 或 `interrupted`）、`discarded`（`reason` 为 `user`、`cancelled`、`stopped` 或 `dropped`）。`useRuntime` 在 `sending` 与 `discarded` 时直接把该项移出队列栏，其余状态重新读取 `chat.listQueuedPrompts`；列表项的 `state` 为 `queued` 或 `failed-previous`（带 `reason`），QueueDock 把后者显示为「待发送 · 上一轮失败」等，提供「发送」（`chat.manageQueuedPrompt` 的 `action: 'send'`）、编辑与「丢弃」（`cancel`）。已被预留的项不能再修改，返回 `prompt_already_started`。
+
+`chat.submit` 的结果带 `delivery` 与 `result`：`delivery` 为 `completed`（有 turn 消费了这条消息，`result` 是 `TurnResult`：`completed`、`error`、`aborted`、`blocked`）、`interjected`（进入运行中 turn 的下一个 step，`result` 为空）、`queued`（没有 turn 消费它，`result` 为 `{ kind: 'not-consumed', reason }`，消息仍在队列中待发送）或 `discarded`（离开了队列）。Renderer 的输入框只在 submit 被拒绝时退回草稿，所以 `queued` 视为已接受，草稿不会被放回。消息生命周期见 [Agent 执行链路](agent-runtime.md#消息生命周期)。
+
 两条管线只通过 `sessionId` 关联，各自的 `seq` 不共享、不可互相比较。
 
 ## Runtime event 链路

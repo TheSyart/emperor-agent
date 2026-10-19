@@ -3,7 +3,7 @@
 // sessions), submit results, and the queued-prompt surface while a turn is
 // blocked on a pending question.
 import { afterEach, describe, expect, it } from 'vitest'
-import type { ScriptedReply } from '../harness/testing'
+import { replyChunks, type ScriptedReply } from '../harness/testing'
 import type { CoreApi } from './core-api'
 import { InvalidSessionError } from './chat-service'
 import {
@@ -214,10 +214,81 @@ describe('ChatService', () => {
       { ok: { choice: 'yes', freeform: '' } },
     )
     expect((await first).content).toBe('first done')
-    // The cancelled prompt never ran a turn.
-    expect((await second).content).toBe('')
+    // The cancelled prompt never ran a turn, and its submit says so.
+    expect(await second).toMatchObject({
+      content: '',
+      turnId: null,
+      delivery: 'discarded',
+      result: { kind: 'aborted', by: 'user', turnId: null },
+    })
     expect(() => api.chat.listQueuedPrompts({ sessionId: 'missing' })).toThrow(
       /unknown session/,
     )
+  })
+
+  // KRN-02: a prompt left behind by a failed turn waits for the user.
+  it('lists a prompt held after a failed turn as waiting to send, and sends it on request', async () => {
+    let fail!: () => void
+    const failing = new Promise<void>((resolve) => {
+      fail = resolve
+    })
+    const { api, adapter, events } = await setup([
+      async () => {
+        await failing
+        return replyChunks({ error: 'bad key', code: 'AUTH' })
+      },
+      { text: 'second answer' },
+    ])
+    const sessionId = String(api.sessions.create({ title: 'Held' }).id)
+    const first = api.chat.submit({ content: 'first', sessionId })
+    await waitFor(() => adapter.requests.length === 1)
+    const second = api.chat.submit({
+      content: 'queued text',
+      clientMessageId: 'client-q',
+      sessionId,
+    })
+    await waitFor(() => api.chat.listQueuedPrompts({ sessionId }).length === 1)
+    fail()
+    expect(await first).toMatchObject({
+      delivery: 'completed',
+      result: { kind: 'error', code: 'AUTH' },
+    })
+    expect(await second).toMatchObject({
+      delivery: 'queued',
+      turnId: null,
+      content: '',
+      result: { kind: 'not-consumed', reason: 'previous-turn-failed' },
+    })
+    const [record] = api.chat.listQueuedPrompts({ sessionId })
+    expect(record).toMatchObject({
+      clientMessageId: 'client-q',
+      state: 'failed-previous',
+      reason: 'previous-turn-failed',
+    })
+    // A held prompt does not make the session busy for commands.
+    expect(api.commandApplicationService.sessionBusy(sessionId)).toBe(false)
+
+    expect(
+      api.chat.manageQueuedPrompt({
+        sessionId,
+        promptId: record!.id,
+        action: 'send',
+      }),
+    ).toEqual({ ok: true })
+    await waitFor(() =>
+      events.some(
+        (event) =>
+          event.event === 'assistant_done' && event.content === 'second answer',
+      ),
+    )
+    await api.host.agentFor(sessionId).whenIdle()
+    expect(api.chat.listQueuedPrompts({ sessionId })).toEqual([])
+    expect(
+      events.find(
+        (event) =>
+          event.event === 'user_message' &&
+          event.client_message_id === 'client-q',
+      ),
+    ).toBeDefined()
   })
 })

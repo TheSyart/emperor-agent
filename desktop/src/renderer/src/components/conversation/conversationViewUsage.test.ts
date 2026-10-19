@@ -23,6 +23,11 @@ describe('ConversationView composer seat integration', () => {
     )
   })
 
+  it('sends a held prompt (待发送) from the queue dock', () => {
+    expect(source).toContain('@send="sendQueuedPrompt"')
+    expect(source).toContain("ctx.manageQueuedPrompt(item.id, 'send')")
+  })
+
   it('returns the send outcome to the composer, which restores a refused draft', () => {
     expect(source).toContain('@send="sendFromComposer"')
     expect(source).toContain('return ctx.submitFromComposer(payload)')

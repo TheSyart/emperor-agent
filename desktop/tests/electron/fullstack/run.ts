@@ -994,6 +994,53 @@ async function fullstack(
     },
   )
 
+  // KRN-02: a message queued behind a stopped turn is not dropped and does
+  // not run on its own; it waits as 待发送 until the user sends it.
+  await check(
+    page,
+    'a message queued behind a stopped turn waits as 待发送 and 发送 runs it',
+    async () => {
+      // The first turn's request never answers: it stays open until stopped.
+      const running = hold({ text: 'never shown' })
+      model.enqueue(running.step, say('KRN-02 queued message answered'))
+      await send(page, 'KRN-02 long turn')
+      await until(() => running.reached, 15_000, 'the turn to reach the model')
+      await send(page, 'KRN-02 queued message')
+      const dock = page.getByRole('region', { name: '待处理消息队列' })
+      await until(
+        async () =>
+          (await dock.innerText().catch(() => '')).includes(
+            'KRN-02 queued message',
+          ),
+        10_000,
+        'the queued message in the dock',
+      )
+      await page.getByRole('button', { name: '停止', exact: true }).click()
+      await until(
+        async () =>
+          (await dock.innerText().catch(() => '')).includes(
+            '待发送 · 上一轮已停止',
+          ),
+        10_000,
+        'the message to wait as 待发送',
+      )
+      await page.screenshot({ path: join(shots, 'queue-held.png') })
+      if (await assistantSaid(page, 'KRN-02 queued message answered'))
+        throw new Error('the held message ran on its own')
+      await dock.getByRole('button', { name: '发送排队消息' }).click()
+      await until(
+        () => assistantSaid(page, 'KRN-02 queued message answered'),
+        15_000,
+        'the sent message to run',
+      )
+      await until(
+        async () => (await dock.count()) === 0,
+        10_000,
+        'the dock to empty',
+      )
+    },
+  )
+
   if (model.errors.length > 0)
     throw new Error(`model step errors: ${String(model.errors[0])}`)
 }

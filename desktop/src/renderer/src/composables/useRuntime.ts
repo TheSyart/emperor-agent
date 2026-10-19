@@ -507,7 +507,15 @@ export function useRuntime(options: {
         clientMessageId: record.clientMessageId,
         content: record.displayContent || '',
         delivery: record.delivery,
-        status: record.delivery === 'interject' ? 'interjecting' : 'queued',
+        status:
+          record.state === 'failed-previous'
+            ? 'failed-previous'
+            : record.delivery === 'interject'
+              ? 'interjecting'
+              : 'queued',
+        ...(record.state === 'failed-previous' && record.reason
+          ? { holdReason: record.reason }
+          : {}),
         supportsInterjection: record.supportsInterjection,
         createdOrder: record.createdOrder,
         attachmentCount: record.attachmentIds.length,
@@ -527,9 +535,10 @@ export function useRuntime(options: {
     }
   }
 
+  /** `send` runs a held prompt (发送); the queue is re-read, it may still wait its turn. */
   async function manageQueuedPrompt(
     promptId: string,
-    action: 'cancel' | 'interject',
+    action: 'cancel' | 'interject' | 'send',
   ): Promise<boolean> {
     if (!sessionId.value || isDraftSessionId(sessionId.value)) return false
     try {
@@ -547,6 +556,10 @@ export function useRuntime(options: {
         )
         await refreshQueuedPrompts()
         return false
+      }
+      if (action === 'send') {
+        await refreshQueuedPrompts()
+        return true
       }
       queuedPrompts.value = queuedPrompts.value.filter(
         (prompt) => prompt.id !== promptId,
@@ -1095,6 +1108,22 @@ export function useRuntime(options: {
       // The queue tray lists the host inbox; re-read it on every change.
       if (origin === 'live')
         void refreshQueuedPrompts(eventOwnerSessionId(data) || sessionId.value)
+      return
+    }
+
+    if (data.event === 'queue_item_state') {
+      if (origin !== 'live') return
+      const owner = eventOwnerSessionId(data) || sessionId.value
+      // A step took it (sending) or it was discarded: it leaves the tray.
+      if (data.state === 'sending' || data.state === 'discarded') {
+        if (owner === sessionId.value)
+          queuedPrompts.value = queuedPrompts.value.filter(
+            (prompt) => prompt.id !== data.prompt_id,
+          )
+        return
+      }
+      // Held (待发送) or back in line: re-read for the row and its reason.
+      void refreshQueuedPrompts(owner)
       return
     }
 

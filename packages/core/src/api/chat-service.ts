@@ -9,7 +9,13 @@
 import { DRAFT_SESSION_PREFIX } from '../sessions/constants'
 import { fallbackSessionTitle, sanitizeSessionTitle } from '../sessions/title'
 import type { SessionEntry } from '../sessions/store'
-import type { HarnessHost } from '../harness/host/host'
+import type {
+  HarnessHost,
+  QueueActionRefusal,
+  SubmitResult,
+  TurnResult,
+} from '../harness/host/host'
+import type { HoldReason } from '../harness/agent/inbox'
 import { isSkillName } from '../skills/name'
 import {
   hasSkillGesture,
@@ -35,6 +41,8 @@ export interface MainlineSubmitInput {
   clientDraftId?: string | null
   draftSession?: DraftSessionInput | null
   delivery?: 'queue' | 'interject' | null
+  /** In-process adapters: discard the message if no turn takes it (see `SubmitInput.unconsumed`). */
+  unconsumed?: 'keep' | 'withdraw' | null
   /** In-process adapters: receive this session's UI events while the submit runs. */
   emit?: ((event: Record<string, unknown>) => void | Promise<void>) | null
 }
@@ -53,7 +61,10 @@ export interface MainlineSubmitResult {
   messageId: string
   content: string
   activeSessionId: string | null
-  delivery: 'completed' | 'interjected'
+  /** See `SubmitResult.delivery`: never `completed` for a message no turn took. */
+  delivery: SubmitResult['delivery']
+  /** How the message's turn ended; null for an interjection. */
+  result: TurnResult | null
 }
 
 export interface MaterializedSession {
@@ -89,8 +100,10 @@ export interface QueuedPromptRecord {
   references?: MessageReference[]
   createdOrder: number
   supportsInterjection: boolean
-  state: 'queued'
-  reason: null
+  /** `failed-previous`: waits for the user to send or discard it (「待发送」). */
+  state: 'queued' | 'failed-previous'
+  /** Why a `failed-previous` prompt waits; null while it is simply queued. */
+  reason: HoldReason | null
   createdAt: string
   updatedAt: string
 }
@@ -151,6 +164,7 @@ export class ChatService {
         uiHidden: input.uiHidden ?? false,
         delivery: input.delivery ?? 'queue',
         signal: input.signal ?? null,
+        unconsumed: input.unconsumed ?? null,
       })
       replyResolve(result.content)
       return {
@@ -159,6 +173,7 @@ export class ChatService {
         content: result.content,
         activeSessionId: sessionId,
         delivery: result.delivery,
+        result: result.result,
       }
     } finally {
       untap?.()
@@ -265,25 +280,25 @@ export class ChatService {
           : {}),
         createdOrder: index,
         supportsInterjection: prompt.target === 'next-turn',
-        state: 'queued',
-        reason: null,
+        state: prompt.state,
+        reason: prompt.reason ?? null,
         createdAt: now,
         updatedAt: now,
       }
     })
   }
 
+  /** `cancel` (丢弃), `interject` (插入当前执行) or `send` (发送 a held prompt). */
   manageQueuedPrompt(input: {
     sessionId: string
     promptId: string
-    action: 'cancel' | 'interject'
-  }): { ok: boolean; reason?: string } {
-    const applied = this.host.manageQueuedPrompt(
+    action: 'cancel' | 'interject' | 'send'
+  }): { ok: boolean; reason?: QueueActionRefusal } {
+    return this.host.manageQueuedPrompt(
       input.sessionId,
       input.promptId,
       input.action,
     )
-    return applied ? { ok: true } : { ok: false, reason: 'prompt_not_queued' }
   }
 
   /** One title per promoted session; failures fall back and never fail submit. */

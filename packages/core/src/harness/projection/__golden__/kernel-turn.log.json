@@ -74,20 +74,9 @@
         }
       },
       {
-        "type": "agent/inbox/spliced",
+        "type": "instructions/baseline",
         "seq": 6,
         "time": 1700000000600,
-        "data": {
-          "target": "next-turn",
-          "start": 0,
-          "removedCount": 1,
-          "inserted": []
-        }
-      },
-      {
-        "type": "instructions/baseline",
-        "seq": 7,
-        "time": 1700000000700,
         "data": {
           "digest": "",
           "files": []
@@ -95,10 +84,21 @@
       },
       {
         "type": "memory/baseline",
+        "seq": 7,
+        "time": 1700000000700,
+        "data": {
+          "digest": ""
+        }
+      },
+      {
+        "type": "agent/inbox/spliced",
         "seq": 8,
         "time": 1700000000800,
         "data": {
-          "digest": ""
+          "target": "next-turn",
+          "start": 0,
+          "removedCount": 1,
+          "inserted": []
         }
       },
       {
@@ -2561,23 +2561,23 @@
           }
         },
         {
-          "type": "agent/inbox/spliced",
+          "type": "instructions/baseline",
           "seq": 5,
           "time": 1700000000500,
+          "data": {
+            "digest": "",
+            "files": []
+          }
+        },
+        {
+          "type": "agent/inbox/spliced",
+          "seq": 6,
+          "time": 1700000000600,
           "data": {
             "target": "next-turn",
             "start": 0,
             "removedCount": 1,
             "inserted": []
-          }
-        },
-        {
-          "type": "instructions/baseline",
-          "seq": 6,
-          "time": 1700000000600,
-          "data": {
-            "digest": "",
-            "files": []
           }
         },
         {

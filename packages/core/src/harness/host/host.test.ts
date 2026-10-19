@@ -378,7 +378,7 @@ describe('HarnessHost', () => {
     ])
     expect(
       host.manageQueuedPrompt(entry.id, queued[0]!.prompt_id, 'cancel'),
-    ).toBe(true)
+    ).toEqual({ ok: true })
     await waitFor(() =>
       events.some((event) => event.event === 'prompt_dequeued'),
     )

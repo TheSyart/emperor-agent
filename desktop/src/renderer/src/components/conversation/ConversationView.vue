@@ -891,6 +891,11 @@ async function interjectQueuedPrompt(item: QueuedPromptItem): Promise<void> {
 async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   await ctx.manageQueuedPrompt(item.id, 'cancel')
 }
+
+/** 发送 a held prompt (the turn before it failed or was stopped). */
+async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
+  await ctx.manageQueuedPrompt(item.id, 'send')
+}
 </script>
 
 <template>
@@ -1036,6 +1041,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           @edit="editQueuedPrompt"
           @interject="interjectQueuedPrompt"
           @cancel="cancelQueuedPrompt"
+          @send="sendQueuedPrompt"
         />
         <ComposerCard
           v-show="!takeoverOpen"

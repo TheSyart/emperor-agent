@@ -61,6 +61,7 @@ export const RUNTIME_EVENT_NAMES = [
   'profile_onboarding_status_changed',
   'prompt_dequeued',
   'prompt_queued',
+  'queue_item_state',
   'scheduler_run_cancelled',
   'scheduler_run_done',
   'scheduler_run_error',

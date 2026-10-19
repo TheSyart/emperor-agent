@@ -322,7 +322,7 @@ const manageQueuedPromptSchema = z
   .object({
     sessionId: z.string().trim().min(1),
     promptId: z.string().trim().min(1),
-    action: z.enum(['cancel', 'interject']),
+    action: z.enum(['cancel', 'interject', 'send']),
   })
   .strict()
 

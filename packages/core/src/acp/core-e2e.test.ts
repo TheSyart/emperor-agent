@@ -8,11 +8,12 @@ import {
   type ClientContext,
   type SessionNotification,
 } from '@agentclientprotocol/sdk'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CoreApi } from '../api/core-api'
 import { LlmClient } from '../llm/client'
 import type { SandboxBackend } from '../harness/sandbox/backend'
 import {
+  replyChunks,
   ScriptedAdapter,
   testRoute,
   type ScriptedReply,
@@ -137,6 +138,138 @@ describe('Emperor ACP real Core E2E', () => {
       await adapter.settle()
       await api.host.agentFor(created.sessionId).whenIdle()
       expect(api.host.isBusy(created.sessionId)).toBe(false)
+    } finally {
+      connection.close()
+      await adapter.settle()
+      await api.close()
+    }
+  })
+
+  // KRN-02 #5 (CORE-23): the ACP cancel reaches only the ACP prompt.
+  it('cancels a still-queued ACP prompt without touching the running turn', async () => {
+    const runtimeRoot = temp('emperor-acp-queued-runtime-')
+    const workspace = temp('emperor-acp-queued-workspace-')
+    const stateRoot = temp('emperor-acp-queued-state-')
+    let enter!: () => void
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
+    })
+    let runningAborted = false
+    const hang: ScriptedReply = (request) => {
+      enter()
+      return new Promise((_resolve, reject) => {
+        const signal = request.signal
+        const stop = () => {
+          runningAborted = true
+          reject(signal?.reason)
+        }
+        if (signal?.aborted) stop()
+        else signal?.addEventListener('abort', stop, { once: true })
+      })
+    }
+    const scripted = new ScriptedAdapter([hang])
+    const api = await createApi(runtimeRoot, stateRoot, scripted)
+    const adapter = new EmperorAcpAdapter(api, { version: 'test' })
+    const connection = client({ name: 'queued-cancel' }).connect(
+      adapter.agentApp,
+    )
+    try {
+      await initialize(connection.agent)
+      const created = await connection.agent.request(
+        methods.agent.session.new,
+        { cwd: workspace, mcpServers: [] },
+      )
+      // The desktop runs a turn in the same session.
+      const desktop = api.chat.submit({
+        content: 'desktop turn',
+        sessionId: created.sessionId,
+      })
+      await entered
+      const prompt = connection.agent.request(methods.agent.session.prompt, {
+        sessionId: created.sessionId,
+        prompt: [{ type: 'text', text: 'acp prompt' }],
+      })
+      await vi.waitFor(() => {
+        expect(api.host.queuedPrompts(created.sessionId)).toHaveLength(1)
+      })
+      await connection.agent.notify(methods.agent.session.cancel, {
+        sessionId: created.sessionId,
+      })
+
+      await expect(prompt).resolves.toMatchObject({ stopReason: 'cancelled' })
+      expect(api.host.queuedPrompts(created.sessionId)).toEqual([])
+      const agent = api.host.agentFor(created.sessionId)
+      expect(agent.session.lastOf('agent/inbox/discarded')?.data).toMatchObject(
+        { reason: 'cancelled' },
+      )
+      // The running desktop turn never saw the cancel.
+      expect(runningAborted).toBe(false)
+      expect(api.host.isBusy(created.sessionId)).toBe(true)
+      expect(scripted.requests).toHaveLength(1)
+
+      api.host.stop(created.sessionId)
+      await desktop
+      expect(runningAborted).toBe(true)
+    } finally {
+      connection.close()
+      await adapter.settle()
+      await api.close()
+    }
+  })
+
+  // KRN-02: an ACP prompt no turn took must not wait in the desktop queue.
+  it('refuses an ACP prompt left behind by a failed turn and withdraws it from the queue', async () => {
+    const runtimeRoot = temp('emperor-acp-held-runtime-')
+    const workspace = temp('emperor-acp-held-workspace-')
+    const stateRoot = temp('emperor-acp-held-state-')
+    let fail!: () => void
+    const failing = new Promise<void>((resolve) => {
+      fail = resolve
+    })
+    const scripted = new ScriptedAdapter([
+      async () => {
+        await failing
+        return replyChunks({ error: 'bad key', code: 'AUTH' })
+      },
+    ])
+    const api = await createApi(runtimeRoot, stateRoot, scripted)
+    const adapter = new EmperorAcpAdapter(api, { version: 'test' })
+    const connection = client({ name: 'held-refusal' }).connect(
+      adapter.agentApp,
+    )
+    try {
+      await initialize(connection.agent)
+      const created = await connection.agent.request(
+        methods.agent.session.new,
+        { cwd: workspace, mcpServers: [] },
+      )
+      const desktop = api.chat.submit({
+        content: 'desktop turn',
+        sessionId: created.sessionId,
+      })
+      await vi.waitFor(() => {
+        expect(scripted.requests).toHaveLength(1)
+      })
+      const prompt = connection.agent.request(methods.agent.session.prompt, {
+        sessionId: created.sessionId,
+        prompt: [{ type: 'text', text: 'acp prompt' }],
+      })
+      await vi.waitFor(() => {
+        expect(api.host.queuedPrompts(created.sessionId)).toHaveLength(1)
+      })
+      fail()
+      await expect(prompt).resolves.toMatchObject({
+        stopReason: 'refusal',
+        _meta: { emperor: { notConsumed: 'previous-turn-failed' } },
+      })
+      await desktop
+      expect(api.host.queuedPrompts(created.sessionId)).toEqual([])
+      expect(
+        api.host
+          .agentFor(created.sessionId)
+          .session.lastOf('agent/inbox/discarded')?.data,
+      ).toMatchObject({ reason: 'cancelled' })
+      expect(scripted.requests).toHaveLength(1)
     } finally {
       connection.close()
       await adapter.settle()

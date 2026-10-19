@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用普通会话或项目会话的用户<br>
-> 最后核验：2026-10-15<br>
+> 最后核验：2026-10-19<br>
 > 事实源：`packages/core/src/sessions/store.ts`、`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/prompt/agent-instructions.ts`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/sidebar/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/composer/`、`desktop/src/renderer/src/components/trajectory/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/pages/pulls/`、`desktop/src/renderer/src/components/pages/github/`、`desktop/src/main/browser-view.ts`
 
 Chat（普通对话）和 Build（项目工作）是会话类型。它们决定 Agent 的工作目录和能看到哪些长期上下文，不决定权限。
@@ -318,7 +318,8 @@ Agent 正在回复时仍可输入文字、添加附件和引用 Skill：
 - **发送**：消息排队，当前 turn 结束后作为下一轮开始。排队的消息显示在 Composer 顶部，不会提前出现在聊天时间线中。
 - **插入当前执行**：把排队的消息提升为插话，在下一个 step 进入当前 turn。
 - **删除**：取消尚未开始的排队消息。
-- **停止**：取消当前 turn；排队的下一轮不会被删除。
+- **停止**：取消当前 turn；排队的消息不会被删除，也不会自动接着运行，显示为「待发送 · 上一轮已停止」。
+- **待发送**：当前 turn 出错或被成本上限等拦下时，排在后面的消息不会自动运行，显示为「待发送 · 上一轮失败」；应用在消息发出前退出或崩溃，重新打开会话后显示为「待发送 · 应用重启前未发出」。点「发送」让它像新消息一样运行，点「丢弃」删除它，也可以编辑后重新发送。待发送的消息不会挡住你直接发送新消息。
 
 审批、问题（支持多选）和 Plan 审阅出现时，会以卡片形式在底部接管 Composer 的位置；回答、批准、提交意见或取消后，Composer 连同原草稿恢复。按 Esc 只会把卡片收成输入框上方的一行（「等待你回答」等），点「展开」回到卡片；取消必须点卡片上的按钮。输入法组字时按 Esc 不会影响卡片。
 

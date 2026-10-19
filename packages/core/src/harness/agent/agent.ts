@@ -8,12 +8,19 @@
  * One turn: `turn/start` → steps → `turn/end` (always, in `finally`).
  * One step: claim the inbox (all of next-step, plus one next-turn message on
  * the first step) → assemble prompt → runtime-context snapshot if changed →
- * pre-step middleware → `step/start` → `user/message` per entering message →
- * request built ONLY from `session.deriveMessages()` + the logged
- * `request/header` → every chunk logged as `assistant/chunk` →
+ * pre-step middleware → commit the claim → `step/start` → `user/message`
+ * per entering message → request built ONLY from `session.deriveMessages()`
+ * + the logged `request/header` → every chunk logged as `assistant/chunk` →
  * `assistant/message` → tool calls → `step/end`. A turn may stop when a
  * step completes (no tool calls, `concludesTurn`, or sticky max-tokens) and
  * next-step is empty; turn-stopping middleware can steer another step.
+ *
+ * Message lifecycle (KRN-02): a message is consumed only once its
+ * `user/message` is logged. The claim reserves messages; a pre-step that
+ * rejects, is stopped or throws releases them at the head of the queue.
+ * Every message has one outcome (`outcome(id)`): consumed at the `turn/end`
+ * of the turn that took it, not consumed (held: the turn before it failed
+ * or was stopped, so it waits for the user to send it again), or discarded.
  *
  * There is deliberately no max-steps limit.
  */
@@ -47,7 +54,15 @@ import {
   type SystemPromptAssembler,
 } from '../prompt/assembler'
 import type { ToolFilter, ToolRegistry } from '../tools/registry'
-import { Inbox, type InboxTarget } from './inbox'
+import {
+  Inbox,
+  isUserTyped,
+  type Claim,
+  type DiscardReason,
+  type HoldReason,
+  type InboxTarget,
+  type QueueChange,
+} from './inbox'
 import type { AgentMiddleware, PreStepDecision } from './middleware'
 import { RuntimeContextProjection } from './runtime-context'
 import { executeToolCalls } from './tool-calls'
@@ -86,6 +101,30 @@ export interface AgentObserver {
     error: unknown,
     position: { turn: number; step: number },
   ): void
+  /** A pending message changed queue state (reserved, released, held, sent again, discarded). */
+  queue?(agent: Agent, change: QueueChange): void
+}
+
+/** What became of one message (KRN-02). */
+export type MessageOutcome =
+  /** A turn took it; resolved at that turn's `turn/end`. */
+  | { kind: 'consumed'; turn: number; reason: TurnEndReason }
+  /** Still in the inbox, held until the user sends it again. */
+  | { kind: 'not-consumed'; reason: HoldReason }
+  /** Removed from the inbox without entering a step. */
+  | { kind: 'discarded'; reason: DiscardReason }
+
+interface Deferred<T> {
+  readonly promise: Promise<T>
+  resolve(value: T): void
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
 }
 
 type Phase =
@@ -102,6 +141,12 @@ type Phase =
       turn: number
       step: number
       wakeRequested: boolean
+      /** Ids of the messages the current turn consumed. */
+      consumed: Set<string>
+      /** A stop is unwinding the turn: released messages are held or discarded. */
+      stopping: boolean
+      /** How the last turn of this run ended. */
+      lastEnd?: TurnEndReason['kind']
     }
 
 type StepEndReason = Extract<
@@ -168,6 +213,11 @@ export class Agent {
   private requestHeaderLogged = false
   private readonly runtimeContext: RuntimeContextProjection
   private readonly observers = new Set<AgentObserver>()
+  private readonly outcomes = new Map<string, Deferred<MessageOutcome>>()
+  private readonly turnWaiters = new Set<{
+    turn: number
+    resolve: () => void
+  }>()
   private disposed = false
 
   constructor(
@@ -177,7 +227,11 @@ export class Agent {
   ) {
     this.toolFilter = options.toolFilter
     this.owner = options.owner
-    this.inbox = new Inbox(session)
+    this.inbox = new Inbox(session, {
+      changed: (change) => {
+        this.queueChanged(change)
+      },
+    })
     let lastTurn = 0
     for (let index = session.events.length - 1; index >= 0; index--) {
       const event = session.events[index]
@@ -229,6 +283,7 @@ export class Agent {
   private setPhase(next: Phase): void {
     const previous = this.status
     this.phase = next
+    this.releaseTurnWaiters()
     const status = this.status
     if (status !== previous) {
       for (const observer of this.observers) {
@@ -247,14 +302,67 @@ export class Agent {
     const wakingAfterAbort =
       wakeup && this.phase.kind !== 'idle' && this.phase.abort.signal.aborted
     const resolvedTarget = wakingAfterAbort ? 'next-turn' : target
-    this.inbox.splice(resolvedTarget, Infinity, 0, [message])
+    this.inbox.append(resolvedTarget, message)
     if (wakeup) this.wakeDriver(wakingAfterAbort)
   }
 
   /** Wake an already durable inbox without inserting another message. */
   wakeInbox(): void {
     if (this.disposed) throw new Error(`agent "${this.id}" is disposed`)
-    if (this.inbox.hasPending) this.wakeDriver()
+    if (this.inbox.hasClaimable()) this.wakeDriver()
+  }
+
+  /**
+   * What becomes of one message. Ask before sending it (or while it is
+   * pending); a message already settled in the log resolves from the log.
+   */
+  outcome(messageId: string): Promise<MessageOutcome> {
+    const waiting = this.outcomes.get(messageId)
+    if (waiting !== undefined) return waiting.promise
+    const known = this.knownOutcome(messageId)
+    if (known !== undefined) return Promise.resolve(known)
+    const pending = deferred<MessageOutcome>()
+    this.outcomes.set(messageId, pending)
+    return pending.promise
+  }
+
+  /**
+   * A submitter cancelled one message: while it waits it is discarded;
+   * once a turn reserved or consumed it, only that turn is cancelled and
+   * whatever else is queued still runs.
+   */
+  cancelMessage(messageId: string): 'discarded' | 'cancelled' | 'not-found' {
+    const state = this.inbox.stateOf(messageId)
+    if (state === 'queued' || state === 'failed-previous')
+      return this.inbox.discard(messageId, 'cancelled')
+        ? 'discarded'
+        : 'not-found'
+    if (this.phase.kind !== 'running') return 'not-found'
+    if (state === 'sending') this.inbox.withdraw(messageId)
+    else if (!this.phase.consumed.has(messageId)) return 'not-found'
+    this.phase.wakeRequested = !this.disposed
+    this.phase.abort.abort({ kind: 'user' } satisfies AgentCancelCause)
+    return 'cancelled'
+  }
+
+  /** The user sends a held message again (发送): it runs like a new prompt. */
+  sendQueued(messageId: string): boolean {
+    if (this.disposed || !this.inbox.unhold(messageId)) return false
+    this.wakeDriver(true)
+    return true
+  }
+
+  /** Move a queued (or held) `next-turn` message into the next step (插入当前执行). */
+  interjectQueued(messageId: string): boolean {
+    if (this.disposed) return false
+    const state = this.inbox.stateOf(messageId)
+    if (state !== 'queued' && state !== 'failed-previous') return false
+    if (!this.inbox.promote(messageId)) return false
+    if (state === 'failed-previous') {
+      this.inbox.unhold(messageId)
+      this.wakeDriver(true)
+    }
+    return true
   }
 
   /** A new prompt: starts a turn when idle, else waits for the next turn. */
@@ -272,10 +380,17 @@ export class Agent {
     this.send(message, 'next-step', false)
   }
 
+  /**
+   * Cancel the active work. Without `keepInbox` this is a stop: harness
+   * context waiting in the inbox is discarded and the user's queued
+   * messages are held (they wait for the user to send or discard them).
+   */
   cancel(cause: AgentCancelCause, options: CancelOptions = {}): void {
     if (!options.keepInbox) {
-      this.inbox.clear()
+      this.inbox.discardWhere((message) => !isUserTyped(message), 'stopped')
+      this.holdUnsent('previous-turn-stopped')
       if (this.phase.kind !== 'idle') this.phase.wakeRequested = false
+      if (this.phase.kind === 'running') this.phase.stopping = true
     }
     if (this.phase.kind !== 'idle') this.phase.abort.abort(cause)
   }
@@ -301,11 +416,37 @@ export class Agent {
         return await job(maintenance.abort.signal)
       } finally {
         this.setPhase({ kind: 'idle', lastTurn: maintenance.lastTurn })
-        if (maintenance.wakeRequested && this.inbox.hasPending)
+        if (maintenance.wakeRequested && this.inbox.hasClaimable())
           this.wakeDriver()
         resolveDone()
       }
     })()
+  }
+
+  /**
+   * Resolve once the driver is past `turn` (default: the turn running now):
+   * idle, or into a later turn. Unlike `whenIdle`, never waits for turns
+   * queued behind it.
+   */
+  whenTurnSettled(turn?: number): Promise<void> {
+    const target =
+      turn ?? (this.phase.kind === 'running' ? this.phase.turn : -1)
+    if (this.turnSettled(target)) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      this.turnWaiters.add({ turn: target, resolve })
+    })
+  }
+
+  private turnSettled(turn: number): boolean {
+    return this.phase.kind !== 'running' || this.phase.turn > turn
+  }
+
+  private releaseTurnWaiters(): void {
+    for (const waiter of this.turnWaiters) {
+      if (!this.turnSettled(waiter.turn)) continue
+      this.turnWaiters.delete(waiter)
+      waiter.resolve()
+    }
   }
 
   /** Resolve once the driver (and any work it chained) has gone idle. */
@@ -345,6 +486,8 @@ export class Agent {
       turn: this.phase.lastTurn,
       step: 0,
       wakeRequested: false,
+      consumed: new Set(),
+      stopping: false,
     })
     void this.kick().then(resolveDriver, resolveDriver)
   }
@@ -374,22 +517,120 @@ export class Agent {
       // Already recorded in turn/end and reported to observers.
     } finally {
       if (this.phase.kind === 'running') {
-        const { turn, wakeRequested } = this.phase
+        const { turn, wakeRequested, lastEnd } = this.phase
+        const restart =
+          wakeRequested && this.inbox.hasClaimable() && !this.disposed
+        // The driver stops with user messages still waiting: they never run
+        // on their own; the user sends or discards them.
+        if (!restart)
+          this.holdUnsent(
+            lastEnd === 'error' || lastEnd === 'blocked'
+              ? 'previous-turn-failed'
+              : 'previous-turn-stopped',
+          )
         this.setPhase({ kind: 'idle', lastTurn: turn })
-        if (wakeRequested && this.inbox.hasPending && !this.disposed)
-          this.wakeDriver()
+        if (restart) this.wakeDriver()
       }
     }
   }
 
+  /** Hold every waiting user message that is neither held nor reserved. */
+  private holdUnsent(reason: HoldReason): void {
+    for (const message of [...this.inbox.nextStep, ...this.inbox.nextTurn])
+      if (isUserTyped(message)) this.inbox.hold(message.id, reason)
+  }
+
+  private queueChanged(change: QueueChange): void {
+    if (change.state === 'failed-previous')
+      this.settleOutcome(change.message.id, {
+        kind: 'not-consumed',
+        reason: change.reason,
+      })
+    else if (change.state === 'discarded')
+      this.settleOutcome(change.message.id, {
+        kind: 'discarded',
+        reason: change.reason,
+      })
+    for (const observer of this.observers) {
+      try {
+        observer.queue?.(this, change)
+      } catch {
+        // Observers never affect the driver.
+      }
+    }
+  }
+
+  private settleOutcome(messageId: string, outcome: MessageOutcome): void {
+    const waiting = this.outcomes.get(messageId)
+    if (waiting === undefined) return
+    this.outcomes.delete(messageId)
+    waiting.resolve(outcome)
+  }
+
+  /** The outcome of a message no longer pending, read from the log. */
+  private knownOutcome(messageId: string): MessageOutcome | undefined {
+    const held = this.inbox.holdReason(messageId)
+    if (held !== undefined) return { kind: 'not-consumed', reason: held }
+    if (this.inbox.locate(messageId) !== undefined) return undefined
+    if (this.phase.kind === 'running' && this.phase.consumed.has(messageId))
+      return undefined
+    let turn: number | undefined
+    let consumedIn: number | undefined
+    for (const event of this.session.events) {
+      if (event.type === 'turn/start') turn = event.data.turn
+      else if (event.type === 'user/message' && event.data.id === messageId)
+        consumedIn = turn
+      else if (
+        event.type === 'turn/end' &&
+        consumedIn !== undefined &&
+        event.data.turn === consumedIn
+      )
+        return { kind: 'consumed', turn: consumedIn, reason: event.data.reason }
+      else if (
+        event.type === 'agent/inbox/discarded' &&
+        event.data.messageIds.includes(messageId)
+      )
+        return { kind: 'discarded', reason: event.data.reason }
+    }
+    return undefined
+  }
+
+  /** A claimed step did not enter: its messages stay queued. */
+  private releaseClaim(
+    claim: Claim,
+    reason: 'aborted' | 'rejected' | 'failed',
+  ): void {
+    const released = claim.release(reason)
+    if (this.phase.kind !== 'running' || !this.phase.stopping) return
+    // Stopped while the step was being prepared: same as a stop while queued.
+    const ids = new Set(released.map((message) => message.id))
+    this.inbox.discardWhere(
+      (message) => ids.has(message.id) && !isUserTyped(message),
+      'stopped',
+    )
+    for (const message of released)
+      if (isUserTyped(message))
+        this.inbox.hold(message.id, 'previous-turn-stopped')
+  }
+
+  /** Resolve the turn's consumed messages; a failed turn holds the rest. */
+  private settleTurn(turn: number, reason: TurnEndReason): void {
+    if (this.phase.kind === 'running') {
+      this.phase.lastEnd = reason.kind
+      for (const messageId of this.phase.consumed)
+        this.settleOutcome(messageId, { kind: 'consumed', turn, reason })
+    }
+    if (reason.kind === 'error' || reason.kind === 'blocked')
+      this.holdUnsent('previous-turn-failed')
+  }
+
   private async preStep(
-    target: InboxTarget,
+    claimed: readonly UserMessage[],
     position: { turn: number; step: number },
   ): Promise<PreparedStep> {
     if (this.phase.kind !== 'running')
       throw new Error(`agent "${this.id}": pre-step outside running phase`)
     const signal = this.phase.abort.signal
-    const claimed = this.inbox.claim(target, position.turn)
     const assembly = this.deps.prompt.assemble({ agent: this, signal })
     signal.throwIfAborted()
     const sections = renderContextSections(assembly)
@@ -399,7 +640,7 @@ export class Agent {
     )
     let decision: PreStepDecision = {
       kind: 'enter',
-      messages: context === undefined ? claimed : [...claimed, context],
+      messages: context === undefined ? [...claimed] : [...claimed, context],
     }
     for (const middleware of this.deps.middleware.preStep) {
       if (decision.kind === 'reject') break
@@ -424,23 +665,39 @@ export class Agent {
     const turn = phase.turn + 1
     this.session.append('turn/start', { turn })
     phase.turn = turn
+    phase.consumed = new Set()
+    this.releaseTurnWaiters()
     let turnEnds: TurnEndReason | null = null
     let target: InboxTarget = 'next-turn'
     try {
       while (true) {
         signal.throwIfAborted()
         const step = phase.step + 1
-        const decision = await this.preStep(target, { turn, step })
+        const claim = this.inbox.claim(target)
+        let decision: PreparedStep
+        try {
+          decision = await this.preStep(claim.messages, { turn, step })
+          signal.throwIfAborted()
+        } catch (error: unknown) {
+          this.releaseClaim(claim, signal.aborted ? 'aborted' : 'failed')
+          throw error
+        }
         if (decision.kind === 'reject') {
+          this.releaseClaim(claim, 'rejected')
           turnEnds = { kind: 'blocked' }
           return false
         }
+        // Consumed from here: the messages leave the inbox right before
+        // their user/message (one synchronous block, one log batch).
+        const entered = new Set(decision.messages.map((message) => message.id))
+        for (const messageId of claim.commit(entered))
+          phase.consumed.add(messageId)
         if (turnEnds && decision.messages.length === 0) break
         if (phase.step === 0 && decision.messages.length === 0) {
+          // Nothing to run (e.g. a dropped stale goal round): an empty turn.
           turnEnds = { kind: 'completed' }
-          return false
+          break
         }
-        signal.throwIfAborted()
         const stepStartSeq = this.session.append('step/start', {
           turn,
           step,
@@ -463,13 +720,13 @@ export class Agent {
           this.session.append('step/end', { turn, step })
         }
         signal.throwIfAborted()
-        if (turnEnds && this.inbox.nextStep.length === 0) {
+        if (turnEnds && !this.inbox.hasClaimable('next-step')) {
           for (const middleware of this.deps.middleware.turnStopping) {
             await middleware({ agent: this, turn, signal })
             signal.throwIfAborted()
           }
         }
-        if (turnEnds && this.inbox.nextStep.length === 0) break
+        if (turnEnds && !this.inbox.hasClaimable('next-step')) break
         target = 'next-step'
       }
     } catch (error: unknown) {
@@ -488,12 +745,11 @@ export class Agent {
       this.reportError(error)
       throw error
     } finally {
-      this.session.append('turn/end', {
-        turn,
-        reason: turnEnds ?? { kind: 'completed' },
-      })
+      const reason = turnEnds ?? { kind: 'completed' as const }
+      this.session.append('turn/end', { turn, reason })
+      this.settleTurn(turn, reason)
     }
-    if (!this.inbox.hasPending || this.disposed) return false
+    if (!this.inbox.hasClaimable() || this.disposed) return false
     phase.abort = new AbortController()
     phase.wakeRequested = false
     phase.step = 0
@@ -650,10 +906,9 @@ export class Agent {
           turn,
           step,
           signal,
-          acceptContext: (context) =>
-            this.inbox.splice('next-step', this.inbox.nextStep.length, 0, [
-              context,
-            ]),
+          acceptContext: (context) => {
+            this.inbox.append('next-step', context)
+          },
         },
         toolCalls,
       )
