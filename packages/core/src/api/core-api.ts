@@ -87,7 +87,11 @@ import { CoreDesktopPetService } from './services/desktop-pet-service'
 import { CoreEnvironmentService } from './services/environment-service'
 import { CoreHooksService } from './services/hooks-service'
 import { CoreMemoryService } from './services/memory-service'
-import { CoreModelService } from './services/model-service'
+import {
+  CoreModelService,
+  type ModelConnectionInput,
+  type ModelDiscoveryInput,
+} from './services/model-service'
 import { CoreSkillService } from './services/skill-service'
 import { OnboardingService } from './services/onboarding-service'
 import { PluginActivationController } from '../plugins/activation'
@@ -1681,8 +1685,12 @@ export class CoreApi {
       )
       return this.modelService.setReasoningEffort(entryId, reasoningEffort)
     },
-    discoverModels: async (body: Dict) =>
+    /** Read-only: the vendor's model list for a draft connection. */
+    discoverModels: async (body: ModelDiscoveryInput) =>
       this.modelService.discoverModels(body),
+    /** Read-only: check a draft connection's key and address (UI-29). */
+    probeConnection: async (body: ModelConnectionInput) =>
+      this.modelService.probeConnection(body),
     test: async (body: Dict): Promise<Dict> => this.modelService.test(body),
   }
 

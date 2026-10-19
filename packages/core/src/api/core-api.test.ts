@@ -150,6 +150,7 @@ const EXPECTED_OPERATIONS = [
   'model.deleteEntry',
   'model.discoverModels',
   'model.getConfig',
+  'model.probeConnection',
   'model.resolveProfile',
   'model.saveEntry',
   'model.savePolicy',

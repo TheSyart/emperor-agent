@@ -276,16 +276,23 @@ const modelReasoningEffortSchema = z
     reasoningEffort: z.string().trim().min(1).nullable(),
   })
   .strict()
+// A draft connection from the add-model form (MOD-02, UI-29): the typed
+// key wins; entryId / connectionId only lend a saved key to the same
+// provider, protocol and API base.
+const modelConnectionShape = {
+  entryId: idSchema.optional(),
+  connectionId: idSchema.optional(),
+  provider: z.string().trim().min(1).optional(),
+  protocol: modelProtocolSchema.optional(),
+  apiBase: z.string().trim().optional(),
+  apiKey: z.string().nullable().optional(),
+  extraHeaders: z.record(z.string(), z.string()).optional(),
+  workspaceId: z.string().trim().max(63).optional(),
+}
 const modelDiscoverySchema = z
-  .object({
-    entryId: idSchema.optional(),
-    provider: z.string().trim().min(1).optional(),
-    protocol: modelProtocolSchema.optional(),
-    apiBase: z.string().trim().optional(),
-    apiKey: z.string().nullable().optional(),
-    extraHeaders: z.record(z.string(), z.string()).optional(),
-  })
+  .object({ ...modelConnectionShape, refresh: z.boolean().optional() })
   .strict()
+const modelProbeSchema = z.object(modelConnectionShape).strict()
 const modelProfilePreviewSchema = z
   .object({
     provider: z.string().trim().min(1),
@@ -1470,6 +1477,10 @@ export const CORE_OPERATION_REGISTRY = {
     (api, [input]) => api.model.discoverModels(input),
   ),
   'model.getConfig': operation(z.tuple([]), (api) => api.model.getConfig()),
+  'model.probeConnection': operation(
+    z.tuple([modelProbeSchema]),
+    (api, [input]) => api.model.probeConnection(input),
+  ),
   'model.resolveProfile': operation(
     z.tuple([modelProfilePreviewSchema]),
     (api, [input]) => api.model.resolveProfile(input),

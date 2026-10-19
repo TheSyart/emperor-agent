@@ -1,0 +1,27 @@
+{
+  "vendor": "vllm",
+  "source": "Shape: vLLM OpenAI-compatible server ModelCard (id, owned_by \"vllm\", root, parent, max_model_len; research notes 2026-10-18). The served name differs from the weights to exercise `root`.",
+  "exchanges": [
+    {
+      "request": { "method": "GET", "url": "http://10.0.0.5:8000/v1/models" },
+      "response": {
+        "status": 200,
+        "body": {
+          "object": "list",
+          "data": [
+            {
+              "id": "team-coder",
+              "object": "model",
+              "created": 1789000000,
+              "owned_by": "vllm",
+              "root": "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8",
+              "parent": null,
+              "max_model_len": 131072,
+              "permission": []
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
