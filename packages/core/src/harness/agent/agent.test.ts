@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { userText, type Message } from '../../llm/message'
+import { contextMessage, userText, type Message } from '../../llm/message'
 import type { ContentBlock } from '../../llm/types'
 import type { AgentCancelCause, SessionEvent } from '../../session-log/types'
 import { createTestHarness, replyChunks } from '../testing'
@@ -659,7 +659,9 @@ describe('Agent loop', () => {
     const agent = h.agent('s')
     agent.followup(userText('first'))
     await agent.whenIdle()
-    agent.inject(userText('pending'))
+    // Harness context rejoins the next step; a restored user prompt would
+    // wait for the user instead (KRN-02, inbox.test.ts #7).
+    agent.inject(contextMessage('test', 'pending'))
     agent.dispose()
     h.sessions.close('s')
     const h2 = createTestHarness({ root, replies: [{ text: 'two' }] })

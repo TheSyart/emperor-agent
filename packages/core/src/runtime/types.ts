@@ -273,6 +273,25 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         prompt_id: string
       }
     | {
+        /**
+         * A queued user prompt changed state (host-only, KRN-02): `sending`
+         * (a step reserved it), `queued` (back in line, or sent again),
+         * `failed-previous` (held: the turn before it failed or was stopped,
+         * or the app restarted; it waits for 发送 / 丢弃), `discarded`.
+         */
+        event: 'queue_item_state'
+        prompt_id: string
+        state: 'queued' | 'sending' | 'failed-previous' | 'discarded'
+        reason?:
+          | 'previous-turn-failed'
+          | 'previous-turn-stopped'
+          | 'interrupted'
+          | 'user'
+          | 'cancelled'
+          | 'stopped'
+          | 'dropped'
+      }
+    | {
         event: 'profile_onboarding_status_changed'
         profile_onboarding?: RuntimeEventPayload
         reason?: string

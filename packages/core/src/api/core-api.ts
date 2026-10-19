@@ -384,6 +384,8 @@ export class CoreApi {
           displayContent: '',
           source: 'onboarding',
           uiHidden: true,
+          // A hidden prompt cannot wait in the user's queue.
+          unconsumed: 'withdraw',
         }),
       cancelInteraction: (id) => host.cancelInteraction(id),
       emit: (event) => host.emitHost(event),
@@ -1114,8 +1116,13 @@ export class CoreApi {
       getSession: (sessionId) => kept.sessionStore.get(sessionId),
       skillsForSession: (sessionId) =>
         this.skillService.list({ sessionId }).skills,
+      // Prompts held after a failed or stopped turn wait for the user; they
+      // do not make the session busy.
       sessionBusy: (sessionId) =>
-        host.isBusy(sessionId) || host.queuedPrompts(sessionId).length > 0,
+        host.isBusy(sessionId) ||
+        host
+          .queuedPrompts(sessionId)
+          .some((prompt) => prompt.state === 'queued'),
       compact: (sessionId) => host.compactNow(sessionId),
       stop: (sessionId) => host.stop(sessionId),
       activateModel: async (entryId) => await this.model.activate({ entryId }),
@@ -1446,6 +1453,8 @@ export class CoreApi {
       source?: string | null
       /** In-process adapters only: this session's UI events during the submit. */
       emit?: ((event: Record<string, unknown>) => void | Promise<void>) | null
+      /** In-process adapters only: discard the prompt if no turn takes it. */
+      unconsumed?: 'keep' | 'withdraw' | null
       /** Accepted for adapter compatibility; turn ids are assigned by the kernel. */
       turnId?: string | null
     }) =>
@@ -1464,13 +1473,14 @@ export class CoreApi {
         signal: opts.signal ?? null,
         source: opts.source ?? 'chat',
         emit: opts.emit ?? null,
+        unconsumed: opts.unconsumed ?? null,
       }),
     listQueuedPrompts: (opts: { sessionId: string }) =>
       this.chatService.listQueuedPrompts(opts),
     manageQueuedPrompt: (opts: {
       sessionId: string
       promptId: string
-      action: 'cancel' | 'interject'
+      action: 'cancel' | 'interject' | 'send'
     }) => this.chatService.manageQueuedPrompt(opts),
     stopRuntime: async (
       opts: {

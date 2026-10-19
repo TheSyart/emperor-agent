@@ -48,7 +48,8 @@ import type { SessionEntry } from '../../sessions/store'
 import type { FileSkillsLoader } from '../../skills/file-loader'
 import { logger } from '../../util/log'
 import { WatchlistService } from '../../watchlist/service'
-import { Agent, type AgentDeps } from '../agent/agent'
+import { Agent, type AgentDeps, type MessageOutcome } from '../agent/agent'
+import { isUserTyped, type HoldReason, type QueueChange } from '../agent/inbox'
 import { createMiddleware, type AgentMiddleware } from '../agent/middleware'
 import { retryMiddleware } from '../agent/retry'
 import {
@@ -201,20 +202,45 @@ export interface SubmitInput {
   uiHidden?: boolean | null
   delivery?: 'queue' | 'interject' | null
   signal?: AbortSignal | null
+  /**
+   * A message no turn took (the turn before it failed or was stopped) waits
+   * in the queue for the user (`keep`, the default), or is discarded when
+   * its submitter cannot come back to it (`withdraw`: ACP, hidden prompts).
+   */
+  unconsumed?: 'keep' | 'withdraw' | null
 }
+
+/** What one submitted message came to (KRN-02; the shape KRN-01 builds on). */
+export type TurnResult =
+  | { kind: 'completed'; content: string; turnId: string }
+  | { kind: 'error'; code: string; message: string; turnId: string }
+  /** `turnId` is null when the message was cancelled before a turn took it. */
+  | { kind: 'aborted'; by: 'user' | 'system'; turnId: string | null }
+  | { kind: 'blocked'; reason: 'cost-cap' | 'prompt-rejected'; turnId: string }
+  | { kind: 'not-consumed'; reason: HoldReason }
 
 export interface SubmitResult {
   sessionId: string
   messageId: string
   turnId: string | null
   content: string
-  delivery: 'completed' | 'interjected'
+  /**
+   * `completed`: a turn consumed the message (`result` says how it ended);
+   * `interjected`: it entered the running turn's next step; `queued`: no
+   * turn took it, it waits in the queue for the user (发送 / 丢弃);
+   * `discarded`: it left the queue without running.
+   */
+  delivery: 'completed' | 'interjected' | 'queued' | 'discarded'
+  /** Null for an interjection (it resolves before its step). */
+  result: TurnResult | null
 }
 
 export interface QueuedPrompt {
   prompt_id: string
   content: string
-  state: 'queued'
+  /** `failed-previous`: held until the user sends it again (see `reason`). */
+  state: 'queued' | 'failed-previous'
+  reason?: HoldReason
   target: 'next-turn' | 'next-step'
 }
 
@@ -848,6 +874,13 @@ export class HarnessHost {
           scheduler: request.scheduler,
           signal: request.signal,
         })
+        // A prompt no turn took never ran: the run did not complete.
+        if (result.delivery === 'queued' || result.delivery === 'discarded')
+          throw new Error(
+            result.result?.kind === 'not-consumed'
+              ? `the scheduled prompt was not sent (${result.result.reason}); it waits in the session queue`
+              : 'the scheduled prompt was cancelled before it ran',
+          )
         return result.content
       },
       hasPendingInteraction: (sessionId) =>
@@ -1215,6 +1248,9 @@ export class HarnessHost {
       this.publishRaw(sessionId, event)
     })
     const unobserve = agent.observe({
+      queue: (_agent, change) => {
+        if (agent.owner === undefined) this.announceQueueItem(sessionId, change)
+      },
       status: (_agent, status) => {
         if (status === 'idle' && agent.owner === undefined) {
           try {
@@ -1237,6 +1273,18 @@ export class HarnessHost {
       unobserve()
     })
     return agent
+  }
+
+  /** Tell the queue UI a user message changed state (host-only `queue_item_state`). */
+  private announceQueueItem(sessionId: string, change: QueueChange): void {
+    if (!isUserTyped(change.message)) return
+    this.emitHost({
+      event: 'queue_item_state',
+      session_id: sessionId,
+      prompt_id: change.message.id,
+      state: change.state,
+      ...('reason' in change ? { reason: change.reason } : {}),
+    })
   }
 
   /** Emit prompt_queued / prompt_dequeued for inbox changes since the last call. */
@@ -1441,26 +1489,35 @@ export class HarnessHost {
         turnId: null,
         content: '',
         delivery: 'interjected',
+        result: null,
       }
     }
+    // The submitter's cancel reaches only this message: discarded while it
+    // waits, or only the turn that took it (CORE-23).
     const onAbort = (): void => {
-      agent.cancel({ kind: 'user' }, { keepInbox: true })
+      agent.cancelMessage(message.id)
     }
+    const outcome = agent.outcome(message.id)
     input.signal?.addEventListener('abort', onAbort, { once: true })
     try {
       agent.followup(message)
+      if (input.signal?.aborted) onAbort()
       this.resumeDelegationNotices(input)
-      await agent.whenIdle()
+      const settled = await outcome
+      const withdrawn =
+        settled.kind === 'not-consumed' &&
+        input.unconsumed === 'withdraw' &&
+        agent.inbox.discard(message.id, 'cancelled')
+      // Resolve once that turn has fully ended (the driver is idle or on to
+      // the next queued turn), as callers did when submit awaited idleness.
+      if (settled.kind !== 'discarded')
+        await agent.whenTurnSettled(
+          settled.kind === 'consumed' ? settled.turn : undefined,
+        )
+      const result = submitResultFor(agent, message.id, settled)
+      return withdrawn ? { ...result, delivery: 'discarded' } : result
     } finally {
       input.signal?.removeEventListener('abort', onAbort)
-    }
-    const outcome = turnOutcomeFor(agent.session.events, message.id)
-    return {
-      sessionId: agent.id,
-      messageId: message.id,
-      turnId: outcome.turn === undefined ? null : `${agent.id}:${outcome.turn}`,
-      content: outcome.text,
-      delivery: 'completed',
     }
   }
 
@@ -1512,36 +1569,62 @@ export class HarnessHost {
       .map((agent) => agent.id)
   }
 
+  /**
+   * The user's queue: waiting and held user prompts. A prompt a step has
+   * reserved (state `sending`) is left out; it either enters (its
+   * user_message follows) or comes back (queue_item_state).
+   */
   queuedPrompts(sessionId: string): QueuedPrompt[] {
     const agent = this.agents.get(sessionId)
     if (agent === undefined) return []
-    const user = (message: UserMessage): boolean =>
-      message.source.kind === 'user'
+    const listed = (
+      messages: readonly UserMessage[],
+      target: QueuedPrompt['target'],
+    ): QueuedPrompt[] =>
+      messages.flatMap((message) => {
+        if (!isUserTyped(message)) return []
+        const state = agent.inbox.stateOf(message.id)
+        if (state === undefined || state === 'sending') return []
+        const reason = agent.inbox.holdReason(message.id)
+        return [
+          {
+            prompt_id: message.id,
+            content: messageText(message),
+            state,
+            ...(reason === undefined ? {} : { reason }),
+            target,
+          },
+        ]
+      })
     return [
-      ...agent.inbox.nextStep.filter(user).map((message) => ({
-        prompt_id: message.id,
-        content: messageText(message),
-        state: 'queued' as const,
-        target: 'next-step' as const,
-      })),
-      ...agent.inbox.nextTurn.filter(user).map((message) => ({
-        prompt_id: message.id,
-        content: messageText(message),
-        state: 'queued' as const,
-        target: 'next-turn' as const,
-      })),
+      ...listed(agent.inbox.nextStep, 'next-step'),
+      ...listed(agent.inbox.nextTurn, 'next-turn'),
     ]
   }
 
+  /**
+   * Queue actions: `cancel` discards a waiting or held prompt (丢弃),
+   * `interject` moves it into the running turn's next step, `send` runs a
+   * held prompt (发送). A prompt a step already reserved cannot change.
+   */
   manageQueuedPrompt(
     sessionId: string,
     promptId: string,
-    action: 'cancel' | 'interject',
-  ): boolean {
+    action: 'cancel' | 'interject' | 'send',
+  ): { ok: true } | { ok: false; reason: QueueActionRefusal } {
     const agent = this.agents.get(sessionId)
-    if (agent === undefined) return false
-    if (action === 'cancel') return agent.inbox.remove(promptId)
-    return agent.inbox.promote(promptId)
+    const state = agent?.inbox.stateOf(promptId)
+    if (agent === undefined || state === undefined)
+      return { ok: false, reason: 'prompt_not_queued' }
+    if (state === 'sending')
+      return { ok: false, reason: 'prompt_already_started' }
+    const applied =
+      action === 'cancel'
+        ? agent.inbox.discard(promptId, 'user')
+        : action === 'send'
+          ? agent.sendQueued(promptId)
+          : agent.interjectQueued(promptId)
+    return applied ? { ok: true } : { ok: false, reason: 'prompt_not_queued' }
   }
 
   async compactNow(
@@ -1845,29 +1928,96 @@ export function sessionLogStateEvent(
   }
 }
 
-/** The turn that consumed a message, and that turn's final assistant text. */
-function turnOutcomeFor(
+export type QueueActionRefusal = 'prompt_not_queued' | 'prompt_already_started'
+
+/** One turn's final assistant text, and whether a cost cap stopped it. */
+function turnFacts(
   events: readonly SessionEvent[],
-  messageId: string,
-): { turn?: number; text: string } {
-  let turn: number | undefined
-  let found = false
+  turn: number,
+): { text: string; costCapped: boolean } {
+  let inside = false
   let text = ''
+  let costCapped = false
   for (const event of events) {
     if (event.type === 'turn/start') {
-      if (found) break
-      turn = event.data.turn
-      text = ''
-    } else if (event.type === 'user/message' && event.data.id === messageId) {
-      found = true
-    } else if (found && event.type === 'assistant/message') {
+      if (inside) break
+      inside = event.data.turn === turn
+    } else if (!inside) {
+      continue
+    } else if (event.type === 'assistant/message') {
       const next = messageText(event.data.message).trim()
       if (next) text = next
-    } else if (found && event.type === 'turn/end') {
+    } else if (event.type === 'llm/cost-cap') {
+      costCapped = true
+    } else if (event.type === 'turn/end') {
       break
     }
   }
-  return found
-    ? { ...(turn === undefined ? {} : { turn }), text }
-    : { text: '' }
+  return { text, costCapped }
+}
+
+/** The submit result for one message's outcome. */
+function submitResultFor(
+  agent: Agent,
+  messageId: string,
+  outcome: MessageOutcome,
+): SubmitResult {
+  const base = { sessionId: agent.id, messageId }
+  if (outcome.kind === 'not-consumed')
+    return {
+      ...base,
+      turnId: null,
+      content: '',
+      delivery: 'queued',
+      result: { kind: 'not-consumed', reason: outcome.reason },
+    }
+  if (outcome.kind === 'discarded')
+    return {
+      ...base,
+      turnId: null,
+      content: '',
+      delivery: 'discarded',
+      result: {
+        kind: 'aborted',
+        by:
+          outcome.reason === 'user' || outcome.reason === 'cancelled'
+            ? 'user'
+            : 'system',
+        turnId: null,
+      },
+    }
+  const turnId = `${agent.id}:${outcome.turn}`
+  const { text, costCapped } = turnFacts(agent.session.events, outcome.turn)
+  const reason = outcome.reason
+  let result: TurnResult
+  switch (reason.kind) {
+    case 'error':
+      result = {
+        kind: 'error',
+        code: reason.error.code ?? 'UNKNOWN',
+        message: reason.error.message,
+        turnId,
+      }
+      break
+    case 'aborted':
+      result = {
+        kind: 'aborted',
+        by: reason.reason?.kind === 'user' ? 'user' : 'system',
+        turnId,
+      }
+      break
+    case 'interrupted':
+      result = { kind: 'aborted', by: 'system', turnId }
+      break
+    case 'blocked':
+      result = {
+        kind: 'blocked',
+        reason: costCapped ? 'cost-cap' : 'prompt-rejected',
+        turnId,
+      }
+      break
+    default:
+      result = { kind: 'completed', content: text, turnId }
+  }
+  return { ...base, turnId, content: text, delivery: 'completed', result }
 }
