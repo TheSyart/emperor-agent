@@ -382,7 +382,7 @@ async function settings(page: Page, home: string): Promise<void> {
           await dialogOf(page).waitFor({ state: 'hidden' })
         }
         await page
-          .getByRole('navigation', { name: '侧栏导航' })
+          .getByRole('navigation', { name: '应用导航' })
           .getByRole('button', { name: '能力', exact: true })
           .click()
         const back = page.getByRole('button', { name: '全部插件' })
@@ -453,7 +453,7 @@ async function settings(page: Page, home: string): Promise<void> {
           await dialogOf(page).waitFor({ state: 'hidden' })
         }
         await page
-          .getByRole('navigation', { name: '侧栏导航' })
+          .getByRole('navigation', { name: '应用导航' })
           .getByRole('button', { name: '能力', exact: true })
           .click()
         await page.getByRole('tab', { name: '工具', exact: true }).click()
