@@ -120,7 +120,8 @@ for (const theme of ['dark', 'light'] as const) {
       })
       expect(geometry.gap).toBeGreaterThanOrEqual(5.9)
       expect(geometry.gap).toBeLessThanOrEqual(10)
-      expect(geometry.icon).toBeGreaterThanOrEqual(15)
+      // UI-S03: the source icon in front of a link is 12px.
+      expect(geometry.icon).toBe(12)
       expect(geometry.background).toBe('rgba(0, 0, 0, 0)')
       expect(geometry.outside).toBeGreaterThanOrEqual(7.9)
       expect(

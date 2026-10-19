@@ -7,5 +7,9 @@ defineProps<{ node: WorkflowRunChatNode }>()
 </script>
 
 <template>
-  <WorkflowRunPanel :run="node.data" :expansion-key="node.key" />
+  <WorkflowRunPanel
+    :run="node.data"
+    :expansion-key="node.key"
+    data-process-step
+  />
 </template>

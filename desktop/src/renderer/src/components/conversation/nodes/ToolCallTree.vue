@@ -128,7 +128,7 @@ const hasChildren = computed(
 </script>
 
 <template>
-  <div class="tool-call" :data-chat-call-id="data.callId">
+  <div class="tool-call" data-process-step :data-chat-call-id="data.callId">
     <div v-if="data.externalAgent || nativeId" class="agent-entry-row">
       <a
         data-agent-entry
@@ -175,7 +175,7 @@ const hasChildren = computed(
       >
         <span class="sub-leading"><DsShieldAlert :size="14" /></span>
         <span class="sub-title">审批</span>
-        <span class="sep" aria-hidden="true" />
+        <span class="sep" aria-hidden="true">·</span>
         <span class="sub-text">{{ approval.reason ?? approval.toolName }}</span>
         <span class="sub-status">{{
           approval.outcome === undefined
@@ -202,7 +202,7 @@ const hasChildren = computed(
         <span class="sub-title">{{
           grant.highImpact ? '高影响操作确认' : '电脑操作授权'
         }}</span>
-        <span class="sep" aria-hidden="true" />
+        <span class="sep" aria-hidden="true">·</span>
         <span class="sub-text">{{ grant.target }}</span>
         <span class="sub-status">{{ grantStatus(grant) }}</span>
       </div>
@@ -221,7 +221,7 @@ const hasChildren = computed(
         /></span>
         <span class="sub-title">{{ subagentStatusLabel(data) }}</span>
         <template v-if="subagentLine">
-          <span class="sep" aria-hidden="true" />
+          <span class="sep" aria-hidden="true">·</span>
           <span class="sub-text">{{ subagentLine }}</span>
         </template>
       </div>
@@ -280,9 +280,8 @@ const hasChildren = computed(
 .subcalls {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  margin: var(--space-1) 0 var(--space-0-5)
-    calc(var(--space-4) + var(--space-1-5));
+  gap: 0;
+  margin: 0 0 var(--space-0-5) calc(var(--space-4) + var(--space-1-5));
   padding-left: var(--space-2);
   border-left: 1px solid var(--border-l2);
 }
@@ -291,9 +290,8 @@ const hasChildren = computed(
   display: flex;
   align-items: center;
   min-width: 0;
-  height: var(--lh-base);
-  font-size: var(--fs-s);
-  line-height: var(--lh-base);
+  height: var(--control-sm);
+  font: var(--type-footnote) var(--font-sans);
 }
 
 .sub-leading {
@@ -322,11 +320,8 @@ const hasChildren = computed(
 
 .sep {
   flex: none;
-  width: 2px;
-  height: 2px;
-  margin: 0 var(--space-2);
-  border-radius: 50%;
-  background: rgb(var(--label-caption));
+  margin: 0 var(--space-1-5);
+  color: rgb(var(--text-4));
 }
 
 .sub-text {

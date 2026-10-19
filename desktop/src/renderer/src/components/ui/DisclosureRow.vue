@@ -1,10 +1,12 @@
 <script setup lang="ts">
 /**
- * DisclosureRow — dsh 24px flow row (tool call / think / retry …).
+ * DisclosureRow — the 28px flow row (tool call / think / context / hook …;
+ * UI-S03): 14px icon in text-3, 13px title in text-2, 13px summary in text-3,
+ * 「·」 between them.
  *
  * Props:
- * - title: 14/24 secondary label.
- * - summary?: truncating tertiary text after a 2x2 dot separator
+ * - title: 13 secondary label.
+ * - summary?: truncating tertiary text after the 「·」 separator
  *   (or use the `summary` slot).
  * - open (v-model:open): expanded state; uncontrolled when unbound.
  * - expandable (default true): whether a body exists to reveal.
@@ -13,11 +15,13 @@
  * - running: plays the glare sweep over the row.
  * - tone: 'default' | 'error' (summary in the danger color).
  *
- * Slots: `icon` (16px leading glyph; crossfades to a chevron on hover),
- * `summary`, `trailing` (right-aligned actions), default (body, indented 22px).
+ * Slots: `icon` (14px leading glyph; crossfades to a chevron on hover),
+ * `summary`, `trailing` (right-aligned actions), default (body, indented 22px,
+ * opening and folding with the flow's one CollapseTransition).
  */
 import { computed } from 'vue'
 import { DsChevronDown } from '../icons/ds'
+import CollapseTransition from '../motion/CollapseTransition.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -90,7 +94,7 @@ function onKeydown(event: KeyboardEvent) {
       </component>
       <span class="title">{{ title }}</span>
       <template v-if="summary || $slots.summary">
-        <span class="sep" aria-hidden="true" />
+        <span class="sep" aria-hidden="true">·</span>
         <span class="summary"
           ><slot name="summary">{{ summary }}</slot></span
         >
@@ -99,9 +103,11 @@ function onKeydown(event: KeyboardEvent) {
         <slot name="trailing" />
       </span>
     </div>
-    <div v-if="open && $slots.default" class="body">
-      <slot />
-    </div>
+    <CollapseTransition>
+      <div v-if="open && $slots.default" class="body">
+        <slot />
+      </div>
+    </CollapseTransition>
   </div>
 </template>
 
@@ -116,9 +122,10 @@ function onKeydown(event: KeyboardEvent) {
 .row {
   display: flex;
   align-items: center;
-  height: var(--lh-base);
+  height: var(--control-sm);
   min-width: 0;
   border-radius: var(--radius-xs);
+  font: var(--type-footnote) var(--font-sans);
 }
 
 .row[data-expandable] {
@@ -142,7 +149,7 @@ function onKeydown(event: KeyboardEvent) {
   padding: 0;
   border: none;
   background: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 button.leading {
@@ -179,18 +186,13 @@ button.leading {
 
 .title {
   flex: none;
-  font-size: var(--fs-s);
-  line-height: var(--lh-base);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .sep {
   flex: none;
-  width: 2px;
-  height: 2px;
-  margin: 0 var(--space-2);
-  border-radius: 50%;
-  background: rgb(var(--label-caption));
+  margin: 0 var(--space-1-5);
+  color: rgb(var(--text-4));
 }
 
 .summary {
@@ -199,9 +201,7 @@ button.leading {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--fs-s);
-  line-height: var(--lh-base);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 [data-tone='error'] .summary {

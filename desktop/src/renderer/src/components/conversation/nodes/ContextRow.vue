@@ -51,13 +51,13 @@ const body = computed(() => {
 </script>
 
 <template>
-  <div class="context-row">
+  <div class="context-row" data-process-step>
     <DisclosureRow v-model:open="open" :title="title" :expandable="body !== ''">
       <template #icon><DsBrowse :size="14" /></template>
       <template #summary>
         <span class="source">{{ source }}</span>
         <template v-if="summary">
-          <span class="sep" aria-hidden="true" />
+          <span class="sep" aria-hidden="true">·</span>
           <span class="text">{{ summary }}</span>
         </template>
       </template>
@@ -86,11 +86,8 @@ const body = computed(() => {
 
 .sep {
   flex: none;
-  width: 2px;
-  height: 2px;
-  margin: 0 var(--space-2);
-  border-radius: 50%;
-  background: rgb(var(--label-caption));
+  margin: 0 var(--space-1-5);
+  color: rgb(var(--text-4));
 }
 
 .text {
@@ -106,8 +103,8 @@ const body = computed(() => {
   margin-top: var(--space-1);
   padding: var(--space-2-5) var(--space-4) var(--space-3) var(--space-3);
   overflow: auto;
-  border-radius: var(--radius-row);
-  background: rgb(var(--code-block-bg));
+  border-radius: var(--r-md);
+  background: rgb(var(--surface-raised));
   color: rgb(var(--label-tertiary));
   font: 400 var(--fs-xxxs) / 16px var(--font-mono);
   white-space: pre-wrap;

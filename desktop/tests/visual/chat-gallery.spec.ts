@@ -10,15 +10,25 @@ test.beforeAll(() => {
   mkdirSync(screenshotDir, { recursive: true })
 })
 
+// UI-S03: a finished turn's steps fold into one process line. Tests that
+// look at the step rows themselves open with 处理过程 = 始终展开.
+const EXPANDED = { processDisplay: 'expanded' }
+
 async function open(
   page: Page,
   scenario: string,
   theme: 'light' | 'dark',
   size: { width: number; height: number } = { width: 1000, height: 1400 },
+  prefs: Record<string, unknown> | null = null,
 ): Promise<void> {
-  await page.addInitScript((value) => {
-    localStorage.setItem('emperor.theme', value)
-  }, theme)
+  await page.addInitScript(
+    ({ theme: value, prefs: stored }) => {
+      localStorage.setItem('emperor.theme', value)
+      if (stored)
+        localStorage.setItem('emperor.ui.prefs.v1', JSON.stringify(stored))
+    },
+    { theme, prefs },
+  )
   await page.setViewportSize(size)
   await page.goto(`/?chat-gallery&bare&scenario=${scenario}`)
   await expect(page.getByTestId('chat-gallery')).toBeVisible()
@@ -58,7 +68,7 @@ for (const theme of ['light', 'dark'] as const) {
   })
 
   test(`tools expanded (${theme})`, async ({ page }) => {
-    await open(page, 'showcase', theme, { width: 1000, height: 2400 })
+    await open(page, 'showcase', theme, { width: 1000, height: 2400 }, EXPANDED)
     await toTop(page)
     for (const id of ['call_grep', 'call_edit', 'call_test', 'call_lint'])
       await expand(page, id)
@@ -72,7 +82,7 @@ for (const theme of ['light', 'dark'] as const) {
 test('tools expanded: read, write, todo, glob, web, subagent', async ({
   page,
 }) => {
-  await open(page, 'showcase', 'light', { width: 1000, height: 2600 })
+  await open(page, 'showcase', 'light', { width: 1000, height: 2600 }, EXPANDED)
   await toTop(page)
   for (const id of [
     'call_read',
@@ -88,15 +98,25 @@ test('tools expanded: read, write, todo, glob, web, subagent', async ({
 })
 
 test('reasoning streaming (dark)', async ({ page }) => {
-  await open(page, 'streaming-reasoning', 'dark', { width: 1000, height: 700 })
+  await open(
+    page,
+    'streaming-reasoning',
+    'dark',
+    { width: 1000, height: 700 },
+    EXPANDED,
+  )
   await expect(page.locator('.reasoning[data-state="running"]')).toBeVisible()
-  await expect(page.locator('.turn-status')).toBeVisible()
+  // The live process line is the status line (UI-S03).
+  await expect(
+    page.locator('[data-process-group][data-live] [data-process-header]'),
+  ).toContainText('正在思考')
+  await expect(page.locator('.turn-status')).toBeHidden()
   await page.waitForTimeout(1500)
   await shot(page, 'chat-reasoning-streaming-dark')
 })
 
 test('streaming reply with running tool (light)', async ({ page }) => {
-  await open(page, 'streaming', 'light', { width: 1000, height: 800 })
+  await open(page, 'streaming', 'light', { width: 1000, height: 800 }, EXPANDED)
   await expect(
     page.locator('.tool-row[data-call-id="live_read"][data-state="running"]'),
   ).toBeVisible({ timeout: 15_000 })
@@ -107,7 +127,7 @@ for (const theme of ['light', 'dark'] as const)
   test(`retry / error / max-tokens / compaction rows (${theme})`, async ({
     page,
   }) => {
-    await open(page, 'notices', theme, { width: 1000, height: 1300 })
+    await open(page, 'notices', theme, { width: 1000, height: 1300 }, EXPANDED)
     await expect(
       page.locator('[data-chat-flow-kind="turnError"]'),
     ).toBeVisible()
@@ -118,14 +138,14 @@ for (const theme of ['light', 'dark'] as const)
   })
 
 test('workflow panel (light)', async ({ page }) => {
-  await open(page, 'workflow', 'light', { width: 1000, height: 900 })
+  await open(page, 'workflow', 'light', { width: 1000, height: 900 }, EXPANDED)
   await expect(page.locator('[data-workflow-run]').first()).toBeVisible()
   await page.locator('[data-workflow-run] .run-header').nth(1).click()
   await shot(page, 'chat-workflow-light')
 })
 
 test('subagent row and child session (kernel log)', async ({ page }) => {
-  await open(page, 'kernel', 'light', { width: 1000, height: 900 })
+  await open(page, 'kernel', 'light', { width: 1000, height: 900 }, EXPANDED)
   await expect(page.locator('[data-subagent-line]')).toBeVisible()
   await shot(page, 'chat-subagent-light')
   await page.locator('[data-subagent-line] .open-link').click()
@@ -135,7 +155,13 @@ test('subagent row and child session (kernel log)', async ({ page }) => {
 })
 
 test('interactions: question, MCP, plan (light)', async ({ page }) => {
-  await open(page, 'interactions', 'light', { width: 1000, height: 1600 })
+  await open(
+    page,
+    'interactions',
+    'light',
+    { width: 1000, height: 1600 },
+    EXPANDED,
+  )
   await toTop(page)
   await expand(page, 'call_ask')
   await expand(page, 'call_mcp')
@@ -213,14 +239,14 @@ for (const theme of ['light', 'dark'] as const) {
         (element) => getComputedStyle(element).textDecorationLine,
       ),
     ).toBe('line-through')
-    // Links keep the body line height (no bordered chip).
+    // Links keep the body line height (no bordered chip): 15/26 (UI-S03).
     const [lineHeight, border] = await link('package.json').evaluate(
       (element) => {
         const style = getComputedStyle(element)
         return [style.lineHeight, style.borderTopWidth]
       },
     )
-    expect(lineHeight).toBe('28px')
+    expect(lineHeight).toBe('26px')
     expect(border).toBe('0px')
     await shot(page, `chat-document-links-${theme}`)
   })

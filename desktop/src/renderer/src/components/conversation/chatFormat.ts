@@ -15,13 +15,22 @@ export function formatClock(time: number, now = Date.now()): string {
   return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${clock}`
 }
 
-/** Run duration: `8s`, `2m 05s`, `1h 02m`. */
+/**
+ * Run duration as read in the flow (「用时」 of the process line and the turn
+ * tail): `8 秒`, `1 分 12 秒`, `1 分`, `1 小时 2 分`.
+ */
 export function formatRunDuration(ms: number): string {
   const seconds = Math.max(0, Math.round(ms / 1000))
-  if (seconds < 60) return `${seconds}s`
+  if (seconds < 60) return `${seconds} 秒`
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ${pad(seconds % 60)}s`
-  return `${Math.floor(minutes / 60)}h ${pad(minutes % 60)}m`
+  if (minutes < 60)
+    return seconds % 60 === 0
+      ? `${minutes} 分`
+      : `${minutes} 分 ${seconds % 60} 秒`
+  const hours = Math.floor(minutes / 60)
+  return minutes % 60 === 0
+    ? `${hours} 小时`
+    : `${hours} 小时 ${minutes % 60} 分`
 }
 
 /** Latency in seconds with one decimal (`0.8s`). */

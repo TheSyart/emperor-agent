@@ -57,7 +57,7 @@ const label = computed(() => {
 </script>
 
 <template>
-  <div class="retry" :data-active="active || undefined">
+  <div class="retry" data-process-step :data-active="active || undefined">
     <button
       type="button"
       class="summary"

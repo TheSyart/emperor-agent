@@ -60,6 +60,17 @@ export function toAssistantBlocks(
   return content.map(toAssistantBlock)
 }
 
+/**
+ * Characters of a streaming call's arguments kept on its block (DSH-23): enough
+ * for the path, command or pattern the preparing row shows, without copying a
+ * large `write` body on every delta.
+ */
+export const TOOL_DRAFT_LIMIT = 4096
+
+function capDraft(text: string): string {
+  return text.length > TOOL_DRAFT_LIMIT ? text.slice(0, TOOL_DRAFT_LIMIT) : text
+}
+
 /** Empty block for a streamed `block-start`. */
 export function emptyAssistantBlock(blockType: string): AssistantBlock {
   switch (blockType) {
@@ -110,21 +121,31 @@ export function foldChunk(
     case 'tool-call-delta': {
       const next = [...blocks]
       const previous = blocks[chunk.index]
-      const base =
-        previous?.kind === 'tool-call'
-          ? previous
-          : { kind: 'tool-call' as const, callId: '', name: '' }
+      const base: { callId: string; name: string; draft?: string } =
+        previous?.kind === 'tool-call' ? previous : { callId: '', name: '' }
+      const draft =
+        (base.draft?.length ?? 0) >= TOOL_DRAFT_LIMIT
+          ? (base.draft as string)
+          : capDraft((base.draft ?? '') + chunk.argumentsDelta)
       next[chunk.index] = {
         kind: 'tool-call',
         callId: base.callId || String(chunk.id),
         // An empty name on a later delta (older logs) never clears the established one.
         name: chunk.name || base.name,
+        ...(draft === '' ? {} : { draft }),
       }
       return next
     }
     case 'block-end': {
       const next = [...blocks]
-      next[chunk.index] = toAssistantBlock(chunk.block)
+      const block = toAssistantBlock(chunk.block)
+      // The assembled call keeps its (capped) arguments until the message lands.
+      next[chunk.index] =
+        block.kind === 'tool-call' &&
+        chunk.block.type === 'tool-call' &&
+        chunk.block.arguments !== ''
+          ? { ...block, draft: capDraft(chunk.block.arguments) }
+          : block
       return next
     }
     default:

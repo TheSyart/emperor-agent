@@ -1,6 +1,6 @@
 // Timeline-scoped context shared by every chat row: user actions routed up
-// to ChatTimeline's emits, and the expansion store that keeps disclosure
-// state across virtual-scroller unmount/remount.
+// to ChatTimeline's emits, the expansion store that keeps disclosure state
+// across virtual-scroller unmount/remount, and the turn under the pointer.
 import {
   computed,
   inject,
@@ -14,6 +14,11 @@ export interface ChatActions {
   inspect(callId: string): void
   openSubagent(sessionId: string): void
   editMessage(text: string): void
+  /**
+   * Keep row `key` where it is on screen while its height changes (a
+   * process group the reader opens or folds).
+   */
+  holdRow?(key: string): void
 }
 
 export interface ExpansionStore {
@@ -28,6 +33,8 @@ export interface ChatContext {
   /** The session the timeline shows ('' in galleries without one). */
   readonly sessionId: () => string
   readonly rootSessionId?: () => string
+  /** The turn under the pointer (its turn tail shows copy and 用时). */
+  readonly hoverTurn?: () => number | null
 }
 
 const CHAT_CONTEXT: InjectionKey<ChatContext> = Symbol('chat-context')

@@ -1,22 +1,27 @@
 <script setup lang="ts">
 /**
- * InOutCard — dsh expanded tool body: IN / OUT sections with sticky caption
- * gutter labels, an l2 hairline between them, each section capped at 150px
- * (scrolls) with an expand toggle when the payload is long.
+ * IoBlock — the expanded tool body's IN / OUT block (UI-S03 merges the old
+ * InOutCard and JsonIoCard): `--surface-raised`, r-md, no border; sticky
+ * caption labels in a gutter, a hairline between the sections, each capped
+ * at 150px (scrolls) with 「展开全部」 when long.
  *
  * Props:
- * - input?: string or any JSON value (pretty-printed).
+ * - input?: string or any JSON value (an empty object or string is left out).
  * - output?: string or any JSON value; omitted while the call runs.
- * - error?: tints OUT in the danger color.
+ * - error?: tints OUT in the error colour (and never shows it as a tree).
+ * - tree?: show object values as a JsonTree instead of pretty-printed text
+ *   (the generic body of unknown tools).
  * - inLabel / outLabel (default 'IN' / 'OUT').
  */
 import { computed, reactive } from 'vue'
+import JsonTree from './JsonTree.vue'
 
 const props = withDefaults(
   defineProps<{
     input?: unknown
     output?: unknown
     error?: boolean
+    tree?: boolean
     inLabel?: string
     outLabel?: string
   }>(),
@@ -24,6 +29,7 @@ const props = withDefaults(
     input: undefined,
     output: undefined,
     error: false,
+    tree: false,
     inLabel: 'IN',
     outLabel: 'OUT',
   },
@@ -32,8 +38,21 @@ const props = withDefaults(
 /** Lines past which a section offers "expand" instead of only scrolling. */
 const LONG_LINES = 7
 
+type Key = 'in' | 'out'
+
+function isObject(value: unknown): value is object {
+  return typeof value === 'object' && value !== null
+}
+
+function empty(value: unknown): boolean {
+  return (
+    value === undefined ||
+    value === '' ||
+    (isObject(value) && Object.keys(value).length === 0)
+  )
+}
+
 function show(value: unknown): string {
-  if (value === undefined) return ''
   if (typeof value === 'string') return value
   try {
     return JSON.stringify(value, null, 2)
@@ -43,16 +62,28 @@ function show(value: unknown): string {
 }
 
 const sections = computed(() =>
-  [
-    { key: 'in' as const, label: props.inLabel, text: show(props.input) },
-    { key: 'out' as const, label: props.outLabel, text: show(props.output) },
-  ].filter((section) => section.text !== ''),
+  (
+    [
+      { key: 'in', label: props.inLabel, value: props.input },
+      { key: 'out', label: props.outLabel, value: props.output },
+    ] as const
+  )
+    .filter((section) => !empty(section.value))
+    .map((section) => {
+      const asTree =
+        props.tree &&
+        isObject(section.value) &&
+        !(section.key === 'out' && props.error)
+      return {
+        ...section,
+        asTree,
+        text: show(section.value),
+        depth: section.key === 'in' ? 2 : 1,
+      }
+    }),
 )
 
-const expanded = reactive<Record<'in' | 'out', boolean>>({
-  in: false,
-  out: false,
-})
+const expanded = reactive<Record<Key, boolean>>({ in: false, out: false })
 
 function isLong(text: string): boolean {
   return text.split('\n').length > LONG_LINES || text.length > 600
@@ -66,7 +97,14 @@ function isLong(text: string): boolean {
       <div class="section" :data-expanded="expanded[section.key] || undefined">
         <span class="label">{{ section.label }}</span>
         <div class="text-col">
+          <JsonTree
+            v-if="section.asTree"
+            class="tree"
+            :value="section.value"
+            :expand-depth="section.depth"
+          />
           <div
+            v-else
             class="text"
             :data-error="(section.key === 'out' && error) || undefined"
             v-text="section.text"
@@ -90,9 +128,8 @@ function isLong(text: string): boolean {
 .ds-io {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border-l1);
-  border-radius: var(--radius-card);
-  background: rgb(var(--code-block-bg));
+  border-radius: var(--r-md);
+  background: rgb(var(--surface-raised));
   font: var(--font-code-small);
 }
 
@@ -120,28 +157,32 @@ function isLong(text: string): boolean {
   position: sticky;
   top: 0;
   align-self: start;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-4));
 }
 
 .divider {
   flex: none;
-  height: 1px;
-  background: var(--border-l2);
+  height: 0.5px;
+  background: var(--hairline);
 }
 
 .text-col {
   min-width: 0;
 }
 
+.tree {
+  margin-left: calc(0px - var(--space-2-5));
+}
+
 .text {
   min-width: 0;
   white-space: pre-wrap;
   word-break: break-word;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .text[data-error] {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .toggle {
@@ -149,12 +190,12 @@ function isLong(text: string): boolean {
   padding: 0;
   border: none;
   background: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: inherit;
   cursor: pointer;
 }
 
 .toggle:hover {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 </style>

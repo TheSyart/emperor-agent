@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * UserBubble — dsh right-aligned user bubble: --bubble-user fill, radius 22,
- * 10/16 padding, 16/24 text, max min(525px, 82%). Attachments render above
- * the bubble (image thumbnails / file chips); copy + edit-resend actions
- * and the send time sit below, revealed on hover.
+ * UserBubble — right-aligned user bubble (UI-S03): --bubble-user fill,
+ * r-xl, 10/16 padding, 15/26 text, at most 80% of the column, no border.
+ * Attachments render above the bubble (image thumbnails / file Tags); copy +
+ * edit-resend actions and the send time sit below, revealed on hover.
  *
  * Skill / plugin chips show as in the composer (ReferencedText); copying
  * gives their `/name` text and editing puts them back as chips.
@@ -18,6 +18,7 @@ import { formatBytes } from '../chatFormat'
 import MessageIconActions from '../parts/MessageIconActions.vue'
 import ReferencedText from '../parts/ReferencedText.vue'
 import DocumentIcon from '../../ui/DocumentIcon.vue'
+import Tag from '../../ui/Tag.vue'
 import { openResourceImages } from '../resources/resourceImages'
 import { requestResourceDetail } from '../resources/resourceEvents'
 import type { DisplayResource } from '../resources/resourceModel'
@@ -116,11 +117,11 @@ function attachmentResource(
         </figure>
       </div>
       <div v-if="files.length" class="files">
-        <button
+        <Tag
           v-for="file in files"
           :key="file.id"
-          type="button"
-          class="file-chip"
+          class="file-tag"
+          :label="file.name"
           @click="
             requestResourceDetail(
               attachmentResource(file.id, file.name, false),
@@ -128,12 +129,14 @@ function attachmentResource(
             )
           "
         >
-          <DocumentIcon :path="file.name" :size="18" class="file-icon" />
+          <template #leading>
+            <DocumentIcon :path="file.name" :size="16" />
+          </template>
           <span class="file-name">{{ file.name }}</span>
           <span v-if="file.size !== undefined" class="file-size">{{
             formatBytes(file.size)
           }}</span>
-        </button>
+        </Tag>
       </div>
       <div v-if="node.data.text" class="user-bubble">
         <ReferencedText
@@ -173,17 +176,17 @@ function attachmentResource(
   align-items: flex-end;
   gap: var(--space-2);
   min-width: 0;
-  max-width: min(525px, 82%);
+  max-width: 80%;
 }
 
 .user-bubble {
   max-width: 100%;
   padding: var(--space-2-5) var(--space-4);
-  border-radius: var(--radius-composer);
+  border: none;
+  border-radius: var(--r-xl);
   background: rgb(var(--bubble-user));
-  color: rgb(var(--label-primary));
-  font-size: var(--fs-base);
-  line-height: var(--lh-base);
+  color: rgb(var(--text-1));
+  font: var(--type-body) var(--font-sans);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -201,8 +204,7 @@ function attachmentResource(
   background: none;
   cursor: pointer;
 }
-.image-open:focus-visible,
-.file-chip:focus-visible {
+.image-open:focus-visible {
   outline: 2px solid rgb(var(--focus-ring));
   outline-offset: 2px;
 }
@@ -223,36 +225,20 @@ function attachmentResource(
   gap: var(--space-1-5);
 }
 
-.file-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1-5);
+.file-tag {
   max-width: 260px;
-  min-height: var(--space-8);
-  padding: var(--space-1-5) var(--space-3);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-cell);
-  background: rgb(var(--bg-layer-1));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
-  cursor: pointer;
-}
-
-.file-icon {
-  flex: none;
-  color: rgb(var(--label-tertiary));
 }
 
 .file-name {
   min-width: 0;
-  overflow-wrap: anywhere;
-  white-space: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .file-size {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  margin-left: var(--space-1-5);
+  color: rgb(var(--text-3));
 }
 
 .source {

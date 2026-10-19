@@ -3,7 +3,7 @@
 import { computed } from 'vue'
 import type { ToolChatData } from '../../../conversation/types'
 import Badge from '../../ui/Badge.vue'
-import InOutCard from '../../ui/InOutCard.vue'
+import IoBlock from '../../ui/IoBlock.vue'
 import { metaOf, resultText } from './toolModel'
 
 const props = defineProps<{ data: ToolChatData }>()
@@ -17,7 +17,7 @@ const meta = computed(() => metaOf(props.data))
       <span v-if="meta.source" class="source">{{ meta.source }}</span>
       <span v-if="meta.root" class="root">{{ meta.root }}</span>
     </div>
-    <InOutCard
+    <IoBlock
       v-if="data.result"
       :output="resultText(data)"
       :error="data.result.isError"

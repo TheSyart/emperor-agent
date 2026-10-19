@@ -1181,7 +1181,12 @@ async function conversationResources(
         )
         if (missing.length)
           throw new Error(`real site icons missing: ${missing.join(', ')}`)
-        if (icons.some((icon) => icon.gap < 5.9 || icon.renderedWidth < 15))
+        // UI-S03: the source icon in front of a link is 12px, 6px from it.
+        if (
+          icons.some(
+            (icon) => icon.gap < 5.9 || Math.round(icon.renderedWidth) !== 12,
+          )
+        )
           throw new Error(
             `website icon spacing is cramped: ${JSON.stringify(icons)}`,
           )
@@ -1859,6 +1864,15 @@ async function realModel(page: Page): Promise<void> {
     async () => {
       const site = await startFixtureSite()
       try {
+        // UI-S03: the finished turn folds its steps; list the tool rows.
+        await page.evaluate(() =>
+          localStorage.setItem(
+            'emperor.ui.prefs.v1',
+            JSON.stringify({ processDisplay: 'expanded' }),
+          ),
+        )
+        await page.reload()
+        await page.locator('.app-frame').waitFor({ timeout: 60_000 })
         await core(page, 'computerUse.setEnabled', true)
         const box = page.getByLabel('消息输入框').first()
         await box.click()
