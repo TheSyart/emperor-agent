@@ -5,11 +5,11 @@
  * count, key status, endpoint) listing its models as rows. 「编辑」 expands the
  * entry editor under its row (no nested dialog), 「删除」 asks inline.
  *
- * Adding a model: the header's 「添加模型」 opens an add card whose first step
- * is the provider picker (logo tiles by region); a provider card's own
- * 「添加模型」 skips the picker. A model added under a provider that already
- * has a saved key reuses it (`credentialsFrom`) until another key is typed.
- * With no models yet the add card is open from the start. The execution /
+ * Adding models: the header's 「添加模型」 opens the three-step dialog
+ * (model/AddModelDialog: connect → pick → confirm, one saveEntries); a
+ * provider card's 「管理模型」 opens it at step 2 for that provider. With no
+ * models yet the dialog opens by itself. Saved rows are highlighted and the
+ * first new model gets a text test in the background. The execution /
  * cost policy is a SettingsGroup of rows below the list. The model used by a
  * conversation is picked in the composer, not here.
  *
@@ -17,8 +17,9 @@
  * bootstrap state (current model, provider, availability, profile
  * onboarding) — the same contract the retired ModelView had.
  */
-import { computed, nextTick, ref, watch } from 'vue'
-import { deleteModelEntry } from '../../api/model'
+import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
+import { deleteModelEntry, testModelEntry } from '../../api/model'
+import { addModelRequested, takeAddModelRequest } from './model/addModelRequest'
 import { core } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
 import type {
@@ -31,7 +32,6 @@ import Avatar from '../ui/Avatar.vue'
 import { DsPlus } from '../icons/ds'
 import ModelEntryEditor from './model/ModelEntryEditor.vue'
 import ModelPolicyGroup from './model/ModelPolicyGroup.vue'
-import ProviderPicker from './model/ProviderPicker.vue'
 import {
   CAPABILITY_ROWS,
   CAPABILITY_TAGS,
@@ -39,10 +39,8 @@ import {
   modelEntryLabel,
 } from './model/modelFormModel'
 import {
-  credentialSourceEntry,
   groupEntriesByProvider,
   providerCredentialState,
-  providerDisplayName,
   providerEndpointSummary,
   type ProviderGroup,
 } from '../../model/providerGroups'
@@ -63,14 +61,10 @@ import type { RejectedModelEntryPayload } from '../../types'
  * editor for `provider` — in the top add card, or inside that provider's
  * card when `inGroup`.
  */
-type AddState =
-  | { step: 'pick' }
-  | {
-      step: 'form'
-      provider: string
-      source: ModelEntry | null
-      inGroup: boolean
-    }
+// The dialog loads when it is first opened.
+const AddModelDialog = defineAsyncComponent(
+  () => import('./model/AddModelDialog.vue'),
+)
 
 const ctx = useAppContext()
 
@@ -86,36 +80,48 @@ const providerOptions = computed<ProviderOption[]>(
 const groups = computed(() =>
   groupEntriesByProvider(entries.value, providerOptions.value),
 )
-const modelCounts = computed(() =>
-  Object.fromEntries(
-    groups.value.map((group) => [group.provider, group.entries.length]),
-  ),
-)
 
-const adding = ref<AddState | null>(null)
+/** The add-model dialog: open, and the provider it manages (null: add). */
+const dialogOpen = ref(false)
+const manageProvider = ref<string | null>(null)
+const dialogKey = ref(0)
+/** Rows saved by the dialog, highlighted for a few seconds. */
+const highlight = ref<Set<string>>(new Set())
+let highlightTimer: ReturnType<typeof setTimeout> | undefined
 /** The saved entry whose editor is open. */
 const editing = ref<string | null>(null)
 const confirmingDelete = ref<string | null>(null)
 const deletingId = ref<string | null>(null)
 const notice = ref('')
 const listError = ref('')
-/** Bumped to remount the add editor with a fresh draft. */
-const addRevision = ref(0)
 
-const topAdd = computed(() =>
-  adding.value && !(adding.value.step === 'form' && adding.value.inGroup)
-    ? adding.value
-    : null,
+let autoOpened = false
+// 添加模型… from the composer's model menu (addModelRequest.ts).
+watch(
+  () => addModelRequested.value && Boolean(payload.value),
+  (requested) => {
+    if (requested && takeAddModelRequest()) {
+      autoOpened = true
+      openAdd()
+    }
+  },
 )
 
-// First-run posture: with nothing configured the add card is the page.
+// First run: with nothing configured the dialog opens by itself, once.
 watch(
   () => Boolean(payload.value) && entries.value.length === 0,
   (empty) => {
-    if (empty && !adding.value) adding.value = { step: 'pick' }
+    if (empty && !autoOpened) {
+      autoOpened = true
+      openAdd()
+    }
   },
   { immediate: true },
 )
+if (payload.value && takeAddModelRequest()) {
+  autoOpened = true
+  openAdd()
+}
 
 useSettingsHeader({
   actions: () => [
@@ -130,23 +136,6 @@ useSettingsHeader({
     },
   ],
 })
-
-function groupOf(provider: string): ProviderGroup | undefined {
-  return groups.value.find((group) => group.provider === provider)
-}
-
-function optionOf(provider: string): ProviderOption | undefined {
-  return providerOptions.value.find((option) => option.name === provider)
-}
-
-function addingIn(group: ProviderGroup): boolean {
-  const state = adding.value
-  return Boolean(
-    state?.step === 'form' &&
-    state.inGroup &&
-    state.provider === group.provider,
-  )
-}
 
 function capabilityTags(entry: ModelEntry): string[] {
   const profile = entry.resolvedProfile
@@ -172,31 +161,50 @@ function resetTransient(): void {
 function openAdd(): void {
   resetTransient()
   editing.value = null
-  adding.value = { step: 'pick' }
-  addRevision.value += 1
+  manageProvider.value = null
+  dialogKey.value += 1
+  dialogOpen.value = true
 }
 
-function startAdd(provider: string, inGroup: boolean): void {
+function manage(group: ProviderGroup): void {
   resetTransient()
   editing.value = null
-  adding.value = {
-    step: 'form',
-    provider,
-    source: credentialSourceEntry(groupOf(provider)),
-    inGroup,
+  manageProvider.value = group.provider
+  dialogKey.value += 1
+  dialogOpen.value = true
+}
+
+/** The dialog saved: show the new rows and test the first one quietly. */
+async function onDialogSaved(
+  result: ModelConfigPayload & { savedEntryIds: string[] },
+): Promise<void> {
+  await applyPayload(result)
+  const ids = result.savedEntryIds
+  highlight.value = new Set(ids)
+  clearTimeout(highlightTimer)
+  highlightTimer = setTimeout(() => (highlight.value = new Set()), 4000)
+  notice.value = ids.length ? `已添加 ${ids.length} 个模型` : '已更新模型'
+  const first = ids[0]
+  if (!first) return
+  const label =
+    result.models.find((entry) => entry.entryId === first)
+      ?.effectiveDisplayName ?? first
+  try {
+    const test = await testModelEntry(first, 'text')
+    notice.value = test.ok
+      ? `已添加 ${ids.length} 个模型 ·「${label}」测试通过`
+      : `已添加 ${ids.length} 个模型 ·「${label}」测试失败：${test.error ?? '没有回复'}`
+  } catch (error) {
+    notice.value = `已添加 ${ids.length} 个模型 ·「${label}」测试失败：${
+      error instanceof Error ? error.message : String(error)
+    }`
   }
-  addRevision.value += 1
 }
 
 function toggleEdit(entry: ModelEntry): void {
   resetTransient()
-  adding.value = null
   if (editing.value === entry.entryId) closeEditor()
   else editing.value = entry.entryId
-}
-
-function closeAdd(): void {
-  adding.value = null
 }
 
 function closeEditor(): void {
@@ -231,7 +239,6 @@ async function applyPayload(next: ModelConfigPayload): Promise<void> {
 }
 
 async function onSaved(next: ModelConfigPayload, label: string): Promise<void> {
-  adding.value = null
   editing.value = null
   notice.value = `已保存「${label}」`
   await applyPayload(next)
@@ -321,46 +328,6 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
 
       <SettingsGroup variant="stack" data-testid="model-entries">
         <SettingsCard
-          v-if="topAdd"
-          :key="`add-${addRevision}`"
-          variant="outline"
-          class="add-card"
-          :title="
-            topAdd.step === 'pick'
-              ? '添加模型 · 选择供应商'
-              : `添加模型 · ${providerDisplayName(topAdd.provider, optionOf(topAdd.provider))}`
-          "
-          data-testid="model-add-card"
-          data-editor-host
-        >
-          <template #actions>
-            <Button
-              v-if="topAdd.step === 'pick' && entries.length"
-              size="sm"
-              variant="secondary"
-              @click="closeAdd"
-            >
-              取消
-            </Button>
-          </template>
-          <ProviderPicker
-            v-if="topAdd.step === 'pick'"
-            :options="providerOptions"
-            :counts="modelCounts"
-            @pick="(provider) => startAdd(provider, false)"
-          />
-          <ModelEntryEditor
-            v-else
-            :entry="null"
-            :provider="topAdd.provider"
-            :source="topAdd.source"
-            :provider-options="providerOptions"
-            @saved="onSaved"
-            @cancel="closeAdd"
-          />
-        </SettingsCard>
-
-        <SettingsCard
           v-for="group in groups"
           :key="group.provider"
           variant="outline"
@@ -408,34 +375,12 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
             <Button
               size="sm"
               variant="secondary"
-              :aria-label="`在 ${group.label} 下添加模型`"
-              :aria-expanded="addingIn(group)"
-              @click="
-                addingIn(group) ? closeAdd() : startAdd(group.provider, true)
-              "
+              :aria-label="`管理 ${group.label} 的模型`"
+              @click="manage(group)"
             >
-              <template #icon><DsPlus :size="14" /></template>
-              添加模型
+              管理模型
             </Button>
           </template>
-
-          <div
-            v-if="addingIn(group) && adding?.step === 'form'"
-            :key="`add-${addRevision}`"
-            class="group-add"
-            data-testid="model-add-card"
-            data-editor-host
-          >
-            <h4 class="group-add-title">添加 {{ group.label }} 模型</h4>
-            <ModelEntryEditor
-              :entry="null"
-              :provider="adding.provider"
-              :source="adding.source"
-              :provider-options="providerOptions"
-              @saved="onSaved"
-              @cancel="closeAdd"
-            />
-          </div>
 
           <ul class="model-list" :aria-label="`${group.label} 的模型`">
             <li
@@ -443,6 +388,7 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
               :key="entry.entryId"
               class="model-row"
               :class="{ editing: editing === entry.entryId }"
+              :data-highlight="highlight.has(entry.entryId) || undefined"
               :data-entry-id="entry.entryId"
               data-editor-host
             >
@@ -529,7 +475,7 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
         </SettingsCard>
 
         <EmptyState
-          v-if="!entries.length && !adding"
+          v-if="!entries.length"
           title="还没有模型"
           description="添加一个模型后即可开始对话。"
           framed
@@ -541,6 +487,14 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
       </SettingsGroup>
 
       <ModelPolicyGroup :payload="payload" @updated="applyPayload" />
+      <AddModelDialog
+        v-if="dialogOpen"
+        :key="dialogKey"
+        v-model:open="dialogOpen"
+        :payload="payload"
+        :manage-provider="manageProvider"
+        @saved="onDialogSaved"
+      />
     </template>
   </SettingsSection>
 </template>
@@ -559,10 +513,6 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
   overflow-wrap: anywhere;
 }
 
-.add-card {
-  border-color: rgb(var(--label-dimmed));
-}
-
 .model-count {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
@@ -573,23 +523,6 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
   font: var(--font-code-small);
   color: rgb(var(--label-tertiary));
   overflow-wrap: anywhere;
-}
-
-.group-add {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-3-5);
-  border-radius: var(--radius-cell);
-  background: rgb(var(--bg-layer-2));
-}
-
-.group-add-title {
-  margin: 0;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
 }
 
 .model-list {
@@ -723,5 +656,11 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
   min-width: 0;
   overflow-wrap: anywhere;
   color: rgb(var(--text-2));
+}
+
+.model-row[data-highlight] {
+  border-radius: var(--r-sm);
+  background: rgb(var(--accent) / 0.08);
+  transition: background-color var(--motion-slow) var(--ease-standard);
 }
 </style>

@@ -701,58 +701,7 @@ test('model editor discovers candidates, edits an entry and tests the connection
   await shot(page, 'settings-model-editor-tested')
 })
 
-test('model editor adds a new entry', async ({ page }) => {
-  await open(page, '/chat/build-ui?settings=model', {
-    width: 1280,
-    height: 860,
-  })
-  await page.getByRole('button', { name: '添加模型', exact: true }).click()
-  await expect(page.getByTestId('model-add-card')).toBeVisible()
-  // The add card starts at the provider picker (logo tiles by region).
-  const picker = page.getByTestId('provider-picker')
-  await expect(picker.getByRole('region', { name: '国内厂商' })).toBeVisible()
-  await expectSettingsColumnFits(page)
-  await shot(page, 'settings-model-add-picker')
-  await picker.getByRole('button', { name: 'Visual Provider' }).click()
-  await page.getByLabel('模型 ID').fill('visual-added')
-  await page.getByLabel('标识', { exact: true }).fill('Visual Added')
-  await shot(page, 'settings-model-add')
-  await page.getByRole('button', { name: '保存模型' }).click()
-  await expect(page.getByRole('button', { name: '保存模型' })).toBeHidden()
-  // Saving returns to the model list (reopen the section if it closed).
-  if (!(await page.getByRole('dialog', { name: '设置' }).isVisible())) {
-    await page.getByRole('button', { name: '设置', exact: true }).click()
-    await page
-      .getByRole('navigation', { name: '设置分区' })
-      .getByRole('button', { name: '模型', exact: true })
-      .click()
-  }
-  await expect(page.getByText('Visual Added').first()).toBeVisible()
-  await expect(
-    page.getByRole('status').filter({ hasText: '已保存「Visual Added」' }),
-  ).toBeVisible()
-})
-
-test('model added under a provider reuses its key', async ({ page }) => {
-  await open(page, '/chat/build-ui?settings=model', {
-    width: 1280,
-    height: 860,
-  })
-  const anthropic = page.locator('[data-provider="anthropic"]')
-  await expect(anthropic.getByText('2 个模型')).toBeVisible()
-  await expect(anthropic.getByText('Key 已配置')).toBeVisible()
-  await anthropic
-    .getByRole('button', { name: '在 Anthropic 下添加模型' })
-    .click()
-  const add = anthropic.getByTestId('model-add-card')
-  await expect(add).toBeVisible()
-  await expect(add.getByRole('textbox', { name: 'API Key' })).toHaveAttribute(
-    'placeholder',
-    '沿用「Claude Visual」的 API Key',
-  )
-  await expectSettingsColumnFits(page)
-  await shot(page, 'settings-model-add-in-provider')
-})
+// Adding models goes through the three-step dialog (models.spec.ts, MOD-04).
 
 test('model row deletes after an inline confirmation', async ({ page }) => {
   await open(page, '/chat/build-ui?settings=model', {
