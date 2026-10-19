@@ -14,7 +14,6 @@ import {
   FsError,
   probe,
   readForEdit,
-  resolveTarget,
   restoreLineEndings,
   writeFileAtomic,
 } from './fsio'
@@ -95,9 +94,13 @@ export function createEditTool(state: FsToolState): ToolDefinition<EditArgs> {
     input: editInput,
     async execute(args, context) {
       const input = parseEditArgs(args)
-      const policy = await resolveMutationPolicy(state, 'edit', args, context)
-      const resolved = await resolveTarget(policy.workspaceRoot, input.filePath)
-      await refuseProtected(state, resolved, 'edit')
+      const { policy, resolved } = await resolveMutationPolicy(
+        state,
+        'edit',
+        args,
+        context,
+        input.filePath,
+      )
       const sessionId = sessionIdOf(context)
       try {
         const expected = state.observations.editIntent(sessionId, resolved)

@@ -7,6 +7,7 @@
 
 import { extname } from 'node:path'
 import { z } from 'zod'
+import { escalationFields } from '../../../sandbox/escalation'
 import { defineTool, type ToolDefinition } from '../../definition'
 import {
   FsError,
@@ -16,7 +17,7 @@ import {
   streamWholeText,
 } from './fsio'
 import {
-  refuseProtected,
+  authorizeRead,
   sessionCwd,
   sessionIdOf,
   type FsToolState,
@@ -214,6 +215,8 @@ const readInput = z.object({
     .number()
     .optional()
     .describe(`Maximum number of lines to return. Defaults to ${READ_LIMIT}.`),
+  // Only a credential file (e.g. ~/.ssh/config) needs it (SEC-06).
+  ...escalationFields,
 })
 
 export type ReadArgs = z.output<typeof readInput>
@@ -232,7 +235,7 @@ export function createReadTool(state: FsToolState): ToolDefinition<ReadArgs> {
         sessionCwd(state, context, input.filePath),
         input.filePath,
       )
-      await refuseProtected(state, target, 'read')
+      await authorizeRead(state, target, args, context)
       const sessionId = sessionIdOf(context)
       const info = await probe(target.targetKey)
       if (info === null) {

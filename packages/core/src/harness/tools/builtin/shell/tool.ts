@@ -12,6 +12,7 @@
  */
 
 import { statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { isAbsolute, resolve as resolvePath } from 'node:path'
 import { z } from 'zod'
 import { clampTimeout, deadline, timeoutOf } from '../../../../util/timeout'
@@ -30,8 +31,8 @@ import {
   SandboxUnavailableError,
   validateEscalationArgs,
   type SandboxExecutionPolicy,
-  type SandboxMode,
 } from '../../../sandbox/policy'
+import { credentialPathMentions } from '../../../sandbox/protected-state'
 import {
   defineTool,
   TOOL_ABORTED,
@@ -297,13 +298,22 @@ export function createShellTool(
   const graceMs = options.graceMs ?? DEFAULT_GRACE_MS
   const jobs = options.jobs
 
-  /** Resolve argv + sandbox facts for one policy (throws SANDBOX_UNAVAILABLE for unusable confinement). */
+  /**
+   * Resolve argv + sandbox facts for one policy (throws SANDBOX_UNAVAILABLE
+   * for unusable confinement). danger-full-access runs under the backend's
+   * protected-path guard when it has one (SEC-06), unconfined otherwise.
+   */
   const prepareArgv = (
     command: string,
     policy: SandboxExecutionPolicy,
   ): { argv: string[]; confined?: ConfinedArgv } => {
     const argv = shellArgv(platform, command)
-    if (policy.mode === 'danger-full-access') return { argv }
+    if (policy.mode === 'danger-full-access') {
+      const guarded = services.sandboxBackend.guard?.(argv) ?? null
+      return guarded === null
+        ? { argv }
+        : { argv: guarded.argv, confined: guarded }
+    }
     const confined = services.sandboxBackend.confine(argv, {
       ...policy,
       mode: policy.mode,
@@ -354,10 +364,7 @@ export function createShellTool(
       } catch (error: unknown) {
         if (context.signal.aborted) throw abortedError()
         if (confined !== undefined && isRunnerSpawnFailure(error, argv[0])) {
-          throw new SandboxUnavailableError(
-            policy.mode as Exclude<SandboxMode, 'danger-full-access'>,
-            String(error),
-          )
+          throw new SandboxUnavailableError(policy.mode, String(error))
         }
         throw error
       }
@@ -380,10 +387,7 @@ export function createShellTool(
           .find((text) =>
             signatures.some((s) => text.toLowerCase().startsWith(s)),
           )
-        throw new SandboxUnavailableError(
-          policy.mode as Exclude<SandboxMode, 'danger-full-access'>,
-          line,
-        )
+        throw new SandboxUnavailableError(policy.mode, line)
       }
       sandbox = {
         mode: policy.mode,
@@ -566,12 +570,22 @@ export function createShellTool(
         args.sandbox_permissions !== undefined &&
         args.justification !== undefined
       ) {
+        // Name the credential files the command reads in the prompt.
+        const reads =
+          args.sandbox_permissions === 'danger-full-access' &&
+          services.protectedStateRoot !== undefined
+            ? credentialPathMentions(
+                args.command,
+                services.protectedHome ?? homedir(),
+              ).join(', ')
+            : ''
         const mode = await approveEscalation(
           {
             requestedMode: args.sandbox_permissions,
             justification: args.justification,
             effectiveMode: standing.mode,
             subject: 'command',
+            ...(reads ? { reads } : {}),
           },
           {
             service: services.approval,

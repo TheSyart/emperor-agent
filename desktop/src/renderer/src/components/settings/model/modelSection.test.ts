@@ -290,6 +290,45 @@ describe('ModelSection', () => {
     expect(row.textContent).toContain('128K 上下文')
   })
 
+  it('shows a saved key only by its last 4 characters and asks to re-enter a lost one (SEC-06)', async () => {
+    await mount(
+      payload([
+        entry({ apiKey: '***WXYZ' }),
+        entry({
+          entryId: 'lost',
+          modelId: 'deepseek-reasoner',
+          displayName: 'Lost',
+          effectiveDisplayName: 'Lost',
+          apiKey: '',
+          credentialState: 'needs_reentry',
+        }),
+      ]),
+    )
+    const card = container!.querySelector('[data-provider="deepseek"]')!
+    expect(card.textContent).toContain('凭据需要重新输入')
+    expect(card.textContent).not.toContain('Key 已配置')
+    expect(card.querySelector('[data-entry-id="lost"]')!.textContent).toContain(
+      '凭据需要重新输入',
+    )
+    expect(
+      card.querySelector('[data-entry-id="main"]')!.textContent,
+    ).not.toContain('凭据需要重新输入')
+
+    button('编辑 Main').click()
+    await flush()
+    const key = input('API Key')
+    expect(key.value).toBe('')
+    expect(key.placeholder).toBe('已保存 ···WXYZ，留空保留')
+    expect(container!.textContent).not.toContain('***WXYZ')
+
+    button('编辑 Lost').click()
+    await flush()
+    expect(input('API Key').placeholder).toBe('凭据需要重新输入')
+    expect(container!.textContent).toContain(
+      '保存这个 Key 的本机密钥已不可用，请重新填写',
+    )
+  })
+
   it('adds a model under a provider reusing its saved key', async () => {
     api.saveModelEntry.mockResolvedValue(payload([entry({})]))
     await mount(payload([entry({})]))

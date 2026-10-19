@@ -18,7 +18,7 @@
 
 - 新会话总是从 `workspace-write` 开始；预设只属于当前会话，不会保存为全局规则。
 - 批准只对那一次工具调用有效，下一次仍会询问。
-- 沙箱只限制文件写入：读取文件和网络访问不受限制。
+- 沙箱主要限制文件写入，网络访问不受限制。读取有一张固定的例外表（任何预设下都生效）：Emperor Home 的 `computer-use/`、`browser/` 与 `model_config.json`、`mcp_config.json`、`settings.json`、`hooks.json`（含它们的备份）Agent 既不能读也不能改，提权也不行；`~/.ssh`、`~/.aws`、`~/.config/gcloud`、`~/.docker/config.json`、`~/.netrc`、`~/.codex/auth.json`、`~/.claude/.credentials.json` 不能写，读取要你批准一次提权（审批卡写明文件和理由），`danger-full-access` 下可以直接读。因此在默认预设下，经 SSH 的 `git push` / `pull`、`aws`、`gcloud` 等命令需要批准一次，或在你自己的终端里执行。
 - Shell 命令在 macOS 上使用 Seatbelt、在 Linux 上使用 bubblewrap 执行。其他平台没有沙箱后端，`read-only` 和 `workspace-write` 下的 Shell 命令会直接失败，需要时切换到 `danger-full-access`。
 - 记忆编辑、MCP 工具、Skill 加载和 Scheduler 工具不受沙箱限制，也不需要审批。
 - Agent 用 `skill_manage` 新建、修改、删除或导入 Skill，或用 `mcp_config` 添加、删除、启停 MCP server 时，写入同样跟随当前预设：`danger-full-access` 下直接执行，其他预设每次写入都会请求你批准。

@@ -429,7 +429,10 @@ export interface ModelEntry {
   modelId: string
   displayName?: string
   effectiveDisplayName: string
+  /** `***` + the last 4 characters of the saved key, or ''; never the key. */
   apiKey: string
+  /** The saved key cannot be opened (the local key is gone): ask for it again. */
+  credentialState?: 'needs_reentry'
   apiBase: string
   capabilityOverrides?: ModelCapabilityOverrides
   contextWindowTokens: number

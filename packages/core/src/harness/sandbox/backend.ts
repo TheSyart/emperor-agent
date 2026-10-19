@@ -17,7 +17,13 @@ import {
   type ConfinedSandboxMode,
   type SandboxPolicy,
 } from './policy'
-import { protectedStateDirs } from './protected-state'
+import {
+  protectedAncestors,
+  protectedEntries,
+  protectedPathSpellings,
+  type ProtectedEntry,
+  type ProtectedPathScope,
+} from './protected-state'
 
 export type SandboxEnforcement = 'full' | 'partial'
 
@@ -33,11 +39,24 @@ export interface ConfinedArgv {
   denialSignatures: readonly string[]
   /** Runner-owned fatal diagnostics (the command did not run). */
   runnerFailureRules: readonly RunnerFailureRule[]
+  /**
+   * The full-access guard only: a denial counts when its stderr line also
+   * names one of these (lowercase) paths, so an unrelated "Operation not
+   * permitted" (privacy-protected folders, root-owned files) is not
+   * reported as a protected-path denial.
+   */
+  denialPaths?: readonly string[]
 }
 
 export interface SandboxBackend {
   /** Wrap argv for one confined policy; throws SANDBOX_UNAVAILABLE when no runner is usable. */
   confine(argv: readonly string[], policy: SandboxPolicy): ConfinedArgv
+  /**
+   * danger-full-access: wrap argv so the protected paths (protected-state.ts)
+   * stay out of reach and nothing else is confined. Null: this host has no
+   * guard and the command runs unwrapped (tests, Linux, no protected root).
+   */
+  guard?(argv: readonly string[]): ConfinedArgv | null
 }
 
 type Runner = 'bwrap' | 'seatbelt'
@@ -95,14 +114,76 @@ function canonicalChild(root: string, ...parts: string[]): string {
   )
 }
 
-function pathPrefixRegex(path: string): string {
-  return `^${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`
+function escapeSbplRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/** Seatbelt SBPL profile: allow default, deny file writes except /dev/null and writable roots. */
+function pathPrefixRegex(path: string): string {
+  return `^${escapeSbplRegex(path)}/`
+}
+
+function sbplFilter(entry: ProtectedEntry): string {
+  switch (entry.match) {
+    case 'subtree':
+      return `(subpath ${sbplString(entry.path)})`
+    case 'exact':
+      return `(literal ${sbplString(entry.path)})`
+    case 'prefix':
+      return `(regex ${sbplString(
+        `^${escapeSbplRegex(entry.path)}/(${entry.names.map(escapeSbplRegex).join('|')})`,
+      )})`
+  }
+}
+
+/**
+ * The protected-path table (protected-state.ts) as Seatbelt rules, appended
+ * after every allow so it wins: `state` and `config` are never read or
+ * written; `credential` paths are never written and, in confined modes,
+ * never read, except single files the host granted to an external runtime
+ * it launches (Codex's own auth.json, AGT-03). Renaming Emperor Home or a
+ * credential path's parents is refused too, so nothing moves out from under
+ * the rules.
+ */
+function protectedPathRules(
+  scope: ProtectedPathScope,
+  confined: boolean,
+  hostGrantedFiles: readonly string[],
+): string[] {
+  const entries = protectedEntries(scope)
+  const forms: string[] = []
+  for (const entry of entries)
+    if (entry.class === 'credential')
+      forms.push(
+        `(deny ${confined ? 'file-read* ' : ''}file-write* ${sbplFilter(entry)})`,
+      )
+  for (const file of hostGrantedFiles)
+    forms.push(
+      `(allow file-read* file-write* (literal ${sbplString(canonicalPath(file))}))`,
+    )
+  for (const entry of entries)
+    if (entry.class !== 'credential')
+      forms.push(`(deny file-read* file-write* ${sbplFilter(entry)})`)
+  for (const directory of protectedAncestors(scope))
+    forms.push(`(deny file-write* (literal ${sbplString(directory)}))`)
+  return forms
+}
+
+function protectedScope(
+  stateRoot: string | undefined,
+  home: string | undefined,
+): ProtectedPathScope | null {
+  return stateRoot === undefined ? null : { stateRoot, home: home ?? homedir() }
+}
+
+/**
+ * Seatbelt SBPL profile: allow default, deny file writes except /dev/null
+ * and writable roots; with a protected Emperor Home, the protected-path
+ * table on top (`protectedHome` defaults to the user's home folder).
+ */
 export function seatbeltProfileArgs(
   policy: SandboxPolicy,
   protectedStateRoot?: string,
+  protectedHome?: string,
 ): string[] {
   const forms = [
     '(version 1)',
@@ -160,14 +241,32 @@ export function seatbeltProfileArgs(
     forms.push(
       `(deny network-outbound (remote unix-socket (path-regex ${sbplString(pathPrefixRegex(directory))})))`,
     )
-  if (protectedStateRoot !== undefined) {
-    // Computer Use (grants, vault, local key, pairings) and browser state
-    // (profiles with cookies, the download inbox, remembered tabs, site
-    // permissions): the directories the file and search tools refuse too.
-    for (const directory of protectedStateDirs(protectedStateRoot))
-      forms.push(`(deny file-read* (subpath ${sbplString(directory)}))`)
-  }
+  const scope = protectedScope(protectedStateRoot, protectedHome)
+  // Computer Use and browser state, Emperor's config files and the user's
+  // credentials: the table the file and search tools refuse too.
+  if (scope !== null)
+    forms.push(...protectedPathRules(scope, true, policy.writableFiles ?? []))
   return ['-p', forms.join(' ')]
+}
+
+/**
+ * danger-full-access Shell: nothing is confined except the protected-path
+ * table, so an approved escalation never opens Emperor's private state or
+ * config files, and no mode writes the user's credentials.
+ */
+export function seatbeltGuardArgs(
+  protectedStateRoot: string,
+  protectedHome?: string,
+): string[] {
+  const scope = protectedScope(protectedStateRoot, protectedHome)!
+  return [
+    '-p',
+    [
+      '(version 1)',
+      '(allow default)',
+      ...protectedPathRules(scope, false, []),
+    ].join(' '),
+  ]
 }
 
 export interface LocalSandboxOptions {
@@ -177,8 +276,10 @@ export interface LocalSandboxOptions {
   probeBwrap?: () => boolean
   /** Test hook: replace the sandbox-exec executable. */
   seatbeltExec?: string
-  /** Emperor Home: Shell must not read its protected state (protected-state.ts). */
+  /** Emperor Home: Shell must not reach the protected-path table (protected-state.ts). */
   protectedStateRoot?: string
+  /** The home folder the credential paths hang off; defaults to the user's. */
+  protectedHome?: string
 }
 
 export class LocalSandbox implements SandboxBackend {
@@ -201,13 +302,39 @@ export class LocalSandbox implements SandboxBackend {
             // The host OS's own binary (tool-catalog-review.md): a
             // sandbox-exec first on PATH would run commands unconfined.
             this.options.seatbeltExec ?? '/usr/bin/sandbox-exec',
-            ...seatbeltProfileArgs(policy, this.options.protectedStateRoot),
+            ...seatbeltProfileArgs(
+              policy,
+              this.options.protectedStateRoot,
+              this.options.protectedHome,
+            ),
           ]
     return {
       argv: [...runnerArgv, '--', ...argv],
       enforcement: 'full',
       denialSignatures: DENIAL_SIGNATURES[runner],
       runnerFailureRules: RUNNER_FAILURE_RULES[runner],
+    }
+  }
+
+  guard(argv: readonly string[]): ConfinedArgv | null {
+    const stateRoot = this.options.protectedStateRoot
+    if (stateRoot === undefined) return null
+    this.selected ??= this.chainVerdict()
+    if (this.selected !== 'seatbelt') return null
+    return {
+      argv: [
+        this.options.seatbeltExec ?? '/usr/bin/sandbox-exec',
+        ...seatbeltGuardArgs(stateRoot, this.options.protectedHome),
+        '--',
+        ...argv,
+      ],
+      enforcement: 'partial',
+      denialSignatures: DENIAL_SIGNATURES.seatbelt,
+      runnerFailureRules: RUNNER_FAILURE_RULES.seatbelt,
+      denialPaths: protectedPathSpellings({
+        stateRoot,
+        home: this.options.protectedHome ?? homedir(),
+      }),
     }
   }
 
@@ -247,9 +374,18 @@ export function classifyConfinedStderr(
   exitCode: number | null,
 ): { denied: boolean; runnerFailed: boolean } {
   const lower = stderr.toLowerCase()
-  const denied = confined.denialSignatures.some((signature) =>
-    lower.includes(signature),
-  )
+  const paths = confined.denialPaths
+  const denied =
+    paths === undefined
+      ? confined.denialSignatures.some((signature) => lower.includes(signature))
+      : lower
+          .split('\n')
+          .some(
+            (line) =>
+              confined.denialSignatures.some((signature) =>
+                line.includes(signature),
+              ) && paths.some((path) => line.includes(path)),
+          )
   const runnerFailed = confined.runnerFailureRules.some(
     (rule) =>
       (rule.allowedExitCodes === undefined ||

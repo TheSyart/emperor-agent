@@ -17,6 +17,7 @@ import { userText } from '../../../../llm/message'
 import { createTestHarness } from '../../../testing'
 import { textOf } from '../../definition'
 import type { ToolServices } from '../../services'
+import { SandboxPolicyService, type SandboxMode } from '../../../sandbox/policy'
 import {
   buildGlobCommand,
   buildGrepCommand,
@@ -43,7 +44,11 @@ const engines = [
 
 function setup(
   resolveBinary?: () => string | undefined,
-  options: { protectedStateRoot?: (workdir: string) => string } = {},
+  options: {
+    protectedStateRoot?: (workdir: string) => string
+    protectedHome?: (workdir: string) => string
+    mode?: SandboxMode
+  } = {},
 ) {
   const workdir = mkdtempSync(join(tmpdir(), 'emperor-search-'))
   const spillRoot = mkdtempSync(join(tmpdir(), 'emperor-spill-'))
@@ -52,6 +57,17 @@ function setup(
     ...(resolveBinary !== undefined ? { resolveBinary } : {}),
     ...(options.protectedStateRoot
       ? { protectedStateRoot: options.protectedStateRoot(workdir) }
+      : {}),
+    ...(options.protectedHome
+      ? { protectedHome: options.protectedHome(workdir) }
+      : {}),
+    ...(options.mode
+      ? {
+          sandbox: new SandboxPolicyService({
+            defaultMode: options.mode,
+            workspaceRoot: workdir,
+          }),
+        }
       : {}),
   } as unknown as ToolServices
   const tools = createSearchTools(services)
@@ -390,6 +406,67 @@ for (const engine of engines) {
       expect(found).not.toContain('needle vault')
       expect(found).not.toContain('needle key')
       expect(found).not.toContain('Cookies')
+    })
+
+    it('leaves Emperor config files and credentials out of searches (SEC-06)', async () => {
+      const layout = (workdir: string) => {
+        write(workdir, 'home/.emperor/model_config.json', 'needle model\n')
+        write(workdir, 'home/.emperor/mcp_config.json', 'needle mcp\n')
+        write(workdir, 'home/.emperor/sessions/log.jsonl', 'needle session\n')
+        write(workdir, 'home/.ssh/id_rsa', 'needle ssh\n')
+        write(workdir, 'home/.codex/auth.json', 'needle codex auth\n')
+        write(workdir, 'home/.codex/config.toml', 'needle codex config\n')
+      }
+      const options = {
+        protectedStateRoot: (dir: string) => join(dir, 'home', '.emperor'),
+        protectedHome: (dir: string) => join(dir, 'home'),
+      }
+      const grep = async (
+        run: (name: string, args: unknown) => Promise<any>,
+        path: string,
+      ) => textOf((await run('grep', { pattern: 'needle', path })).content)
+
+      const confined = setup(engine.resolveBinary, options)
+      layout(confined.workdir)
+      const state = await grep(confined.run, 'home/.emperor')
+      expect(state).toContain('needle session')
+      expect(state).not.toContain('needle model')
+      expect(state).not.toContain('needle mcp')
+      const listed = textOf(
+        (await confined.run('glob', { pattern: '*', path: 'home/.emperor' }))
+          .content,
+      )
+      expect(listed).toContain('log.jsonl')
+      expect(listed).not.toContain('model_config.json')
+      const codex = await grep(confined.run, 'home/.codex')
+      expect(codex).toContain('needle codex config')
+      expect(codex).not.toContain('needle codex auth')
+      const inside = await confined.run('grep', {
+        pattern: 'needle',
+        path: 'home/.ssh',
+      })
+      expect(inside.error?.info?.code).toBe('SEARCH_PROTECTED_PATH')
+      expect(textOf(inside.content)).not.toContain('needle ssh')
+
+      // Full access may search credentials, never Emperor's config.
+      const full = setup(engine.resolveBinary, {
+        ...options,
+        mode: 'danger-full-access',
+      })
+      layout(full.workdir)
+      expect(await grep(full.run, 'home/.ssh')).toContain('needle ssh')
+      expect(await grep(full.run, 'home/.codex')).toContain('needle codex auth')
+      expect(await grep(full.run, 'home/.emperor')).not.toContain(
+        'needle model',
+      )
+      expect(
+        (
+          await full.run('grep', {
+            pattern: 'needle',
+            path: 'home/.emperor/mcp_config.json',
+          })
+        ).error?.info?.code,
+      ).toBe('SEARCH_PROTECTED_PATH')
     })
 
     it('runs end to end in an agent turn', async () => {

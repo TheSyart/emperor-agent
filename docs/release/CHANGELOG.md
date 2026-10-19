@@ -182,6 +182,8 @@
 - 打包版不再读取 `ELECTRON_RENDERER_URL`（以前可被指向任意网页并获得主窗口的全部能力），带 `--remote-debugging-port`/`--remote-debugging-pipe` 启动会直接退出。
 - 打包冒烟（`--emperor-packaged-smoke`）只接受系统临时目录下的状态目录，不会再对你真实的 `~/.emperor` 运行，也不再写入应用自己的 Application Support 目录。
 - 查验 Helper 签名、复制 Helper、读取浏览器密钥等系统命令一律按绝对路径执行，不受 `PATH` 影响；受限 Shell 固定使用 `/usr/bin/sandbox-exec`。
+- 模型 API Key 不再明文写入 `model_config.json`：保存时用 Emperor 本地密钥加密（`el1:…`，与凭据库同一把密钥，不用钥匙串），设置页只显示末 4 位。旧版本的明文 Key 照常可用，下一次保存模型设置时自动加密，加密前的原文件保留为 `model_config.json.pre-seal-<时间>`。本地密钥丢失或被替换时，受影响的模型显示「凭据需要重新输入」，其余配置不受影响。`mcp_config.json` 里 `headers` 与 `env` 中 key、token、secret、authorization、password 类的值同样加密，连接时解开。
+- Agent 的文件、搜索与 Shell 工具在任何权限模式下都不能读写 `~/.emperor` 的 `model_config.json`、`mcp_config.json`、`settings.json`、`hooks.json`（含备份），提权也不行；Agent 通过 `mcp_config`、`skill_manage` 等工具改配置，不受影响。`~/.ssh`、`~/.aws`、`~/.config/gcloud`、`~/.docker/config.json`、`~/.netrc`、`~/.codex/auth.json`、`~/.claude/.credentials.json` 不能写，读取需要你批准一次（审批卡写明文件和理由），`danger-full-access` 下可以直接读。默认预设下经 SSH 的 `git push`、`aws`、`gcloud` 等命令因此需要批准一次。`danger-full-access` 的 Shell 在 macOS 上也受这张表约束；Emperor 启动的 Codex 子任务仍能刷新自己的登录。
 - 主窗口有了严格的内容安全策略（响应头与页面同一份）：只运行应用自带的脚本，禁止 `eval` 和内联脚本，不能向任何网络地址发请求或嵌入框架；内联样式照旧可用。
 - Emperor 自己的窗口不再授予网页权限：麦克风、摄像头、屏幕、通知和设备一律拒绝，也不能下载；主窗口的复制按钮照常可用。听写在独立 Helper 里录音，不受影响。
 - 打包版使用 Emperor 自己的应用菜单（关于、偏好设置… ⌘,、编辑、显示、窗口、帮助），不再提供「重新载入」和「开发者工具」，主窗口与桌宠的 DevTools 关闭；以前误按 ⌘R 会重载界面并暂停电脑操作。

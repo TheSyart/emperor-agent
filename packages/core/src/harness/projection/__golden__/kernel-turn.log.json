@@ -664,6 +664,18 @@
                     "limit": {
                       "description": "Maximum number of lines to return. Defaults to 2000.",
                       "type": "number"
+                    },
+                    "sandbox_permissions": {
+                      "description": "Request a wider sandbox mode for this one call (requires user approval). Use only after a sandbox denial.",
+                      "type": "string",
+                      "enum": [
+                        "workspace-write",
+                        "danger-full-access"
+                      ]
+                    },
+                    "justification": {
+                      "description": "One sentence telling the user why this call needs the wider mode. Required with sandbox_permissions.",
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -3128,6 +3140,18 @@
                       "limit": {
                         "description": "Maximum number of lines to return. Defaults to 2000.",
                         "type": "number"
+                      },
+                      "sandbox_permissions": {
+                        "description": "Request a wider sandbox mode for this one call (requires user approval). Use only after a sandbox denial.",
+                        "type": "string",
+                        "enum": [
+                          "workspace-write",
+                          "danger-full-access"
+                        ]
+                      },
+                      "justification": {
+                        "description": "One sentence telling the user why this call needs the wider mode. Required with sandbox_permissions.",
+                        "type": "string"
                       }
                     },
                     "required": [

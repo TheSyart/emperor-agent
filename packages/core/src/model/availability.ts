@@ -51,6 +51,16 @@ export function modelAvailability(config: ModelConfig): ModelAvailability {
 
   const spec = findByName(providerName) ?? findByName('custom')
   if (
+    entry.entryId &&
+    config.credentialsNeedingReentry.includes(entry.entryId)
+  ) {
+    return unavailable(
+      `模型条目「${entryName || mainModelId}」的凭据需要重新输入：保存它的本机密钥已不可用。请到模型配置中重新填写 ${spec?.displayName || providerName || 'Provider'} 的 API Key。`,
+      spec?.name || providerName,
+      entryName,
+    )
+  }
+  if (
     !spec?.isLocal &&
     !spec?.isOauth &&
     !credentialFor(entry, config.providers[spec?.name || providerName || ''])

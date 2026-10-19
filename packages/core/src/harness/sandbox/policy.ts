@@ -71,11 +71,14 @@ export const ESCALATION_TARGETS: readonly SandboxMode[] = [
 export const SANDBOX_UNAVAILABLE = 'SANDBOX_UNAVAILABLE'
 
 export class SandboxUnavailableError extends HarnessError {
-  constructor(mode: ConfinedSandboxMode, detail?: string) {
+  constructor(mode: SandboxMode, detail?: string) {
     super(
-      `sandbox mode "${mode}" is requested but no sandbox backend is usable on this host; ` +
-        'refusing to run the command unconfined. Install bubblewrap (Linux) or ensure sandbox-exec is usable (macOS); ' +
-        'on other platforms switch the session to danger-full-access.' +
+      (mode === 'danger-full-access'
+        ? "the protected-path guard (sandbox-exec) that keeps Emperor's private data, settings files and credential files out of Shell could not start; " +
+          'refusing to run the command without it.'
+        : `sandbox mode "${mode}" is requested but no sandbox backend is usable on this host; ` +
+          'refusing to run the command unconfined. Install bubblewrap (Linux) or ensure sandbox-exec is usable (macOS); ' +
+          'on other platforms switch the session to danger-full-access.') +
         (detail === undefined ? '' : ` Runner failure: ${detail}`),
       SANDBOX_UNAVAILABLE,
     )
@@ -132,6 +135,10 @@ export function writableRoots(policy: SandboxExecutionPolicy): string[] {
 export function sandboxDenialMarker(mode: SandboxMode): string {
   return `[sandbox: file access denied under ${mode} mode]`
 }
+
+/** A denial no wider mode lifts: the protected-path table (SEC-06). */
+export const PROTECTED_PATH_DENIAL_MARKER =
+  "[sandbox: Emperor's protected paths are closed to Shell in every mode — its private data and settings files (read and write) and the user's credential files (write); no escalation opens them, use Emperor's own tools for its settings]"
 
 export function escalationHintMarker(subject: string): string {
   return `[sandbox: escalation available — retry this exact ${subject} once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]`

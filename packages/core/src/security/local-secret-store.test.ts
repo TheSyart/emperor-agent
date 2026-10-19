@@ -92,6 +92,22 @@ describe('LocalSecretStore', () => {
     )
   })
 
+  it('binds a value to its context as associated data (SEC-06)', () => {
+    const store = new LocalSecretStore({ keyPath: keyPath() })
+    const sealed = store.encryptString('api-key', 'model_config.json#a')
+    expect(store.decryptString(sealed, 'model_config.json#a')).toBe('api-key')
+    expect(
+      reason(() => store.decryptString(sealed, 'model_config.json#b')),
+    ).toBe('ciphertext-invalid')
+    expect(reason(() => store.decryptString(sealed))).toBe('ciphertext-invalid')
+    // Without a context the envelope is exactly what it always was.
+    const plain = store.encryptString('vault-field')
+    expect(reason(() => store.decryptString(plain, 'ctx'))).toBe(
+      'ciphertext-invalid',
+    )
+    expect(store.decryptString(plain)).toBe('vault-field')
+  })
+
   it('never replaces a key another process published first (O_EXCL + link)', () => {
     const path = keyPath()
     const rival = randomBytes(32)

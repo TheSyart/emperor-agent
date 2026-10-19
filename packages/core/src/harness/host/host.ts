@@ -507,7 +507,8 @@ export class HarnessHost {
       spillRoot: join(this.kept.paths.stateRoot, 'spill'),
       shellEnv: () => process.env,
       resolveBinary: (name) => (name === 'rg' ? this.ripgrepPath : undefined),
-      // The same directories Seatbelt keeps Shell out of (LocalSandbox).
+      // The table Seatbelt keeps Shell out of (LocalSandbox): Emperor's
+      // private state and config files, and the user's credential files.
       protectedStateRoot: this.kept.paths.stateRoot,
     }
     const fs = createFsTools(services)
@@ -575,6 +576,7 @@ export class HarnessHost {
     tools.register(
       createMcpConfigTool({
         stateRoot: this.kept.paths.stateRoot,
+        sealer: this.kept.secretSealer,
         sandbox: this.sandbox,
         approval: this.approval,
         reload: () => this.reloadMcp(),
@@ -1010,6 +1012,7 @@ export class HarnessHost {
   async refreshModelConfig(): Promise<void> {
     const config = await loadModelConfig(this.kept.paths.stateRoot, {
       create: true,
+      sealer: this.kept.secretSealer,
     })
     this.kept.modelConfig = config
     this.applyModelConfig(config)

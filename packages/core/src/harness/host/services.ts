@@ -42,6 +42,10 @@ import {
   resolveRuntimePaths,
   type RuntimePaths,
 } from '../../runtime/paths'
+import {
+  createLocalKeySealer,
+  type SecretSealer,
+} from '../../security/secret-sealer'
 import { SchedulerService } from '../../scheduler/service'
 import { SchedulerStore } from '../../scheduler/store'
 import { ensureUserProfileFile } from '../../sessions/onboarding'
@@ -88,6 +92,12 @@ export interface KeptServicesOptions {
   legacyRuntimeSkillsHandled?: boolean
   /** Host public-HTTPS client (Plugin installs, Skill URL imports). */
   webFetchClient?: WebFetchClient | null
+  /**
+   * Seals model API keys and MCP tokens at rest (SEC-06). The desktop main
+   * process passes one over its `LocalSecretStore`; absent (ACP, headless),
+   * Core uses its own implementation over the same key file.
+   */
+  secretSealer?: SecretSealer | null
 }
 
 export interface KeptServices {
@@ -98,6 +108,8 @@ export interface KeptServices {
   /** Where pre-harness sessions were moved on first start, if any. */
   archivedLegacySessions: string | null
   localConfig: Awaited<ReturnType<typeof loadLocalConfig>>
+  /** The one sealer for `model_config.json` and `mcp_config.json` secrets. */
+  secretSealer: SecretSealer
   modelConfig: ModelConfig
   sessionStore: SessionStore
   sharedMemory: MemoryStore
@@ -175,7 +187,12 @@ export async function createKeptServices(
       ? join(templatesDir, 'init', 'MEMORY.md')
       : null,
   })
-  const modelConfig = await loadModelConfig(paths.stateRoot, { create: true })
+  const secretSealer =
+    opts.secretSealer ?? createLocalKeySealer(paths.stateRoot)
+  const modelConfig = await loadModelConfig(paths.stateRoot, {
+    create: true,
+    sealer: secretSealer,
+  })
   const archivedLegacySessions = archiveLegacySessions(paths.sessionsRoot)
   const sessionStore = new SessionStore(paths.stateRoot)
   const projectStore = new ProjectStore(paths.stateRoot, {
@@ -277,6 +294,7 @@ export async function createKeptServices(
     targetSessionId: () => hooks.activeSessionId(),
   })
   const mcpClient = new MCPClient(paths.stateRoot, {
+    sealer: secretSealer,
     processRuntime,
     workspaceRoot: () => hooks.activeWorkspaceRoot(),
     ownerSessionId: () => hooks.activeSessionId(),
@@ -294,6 +312,7 @@ export async function createKeptServices(
     legacyStateMigration,
     archivedLegacySessions,
     localConfig,
+    secretSealer,
     modelConfig,
     sessionStore,
     sharedMemory,

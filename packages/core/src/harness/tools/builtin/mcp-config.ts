@@ -14,9 +14,10 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import type { MCPClientSnapshot } from '../../../mcp/client'
 import {
-  loadMcpConfig,
+  loadMcpConfigUnresolved,
   maskSecretUrl,
   MCP_CONFIG_FILE,
+  type MCPConfig,
   type ServerConfig,
 } from '../../../mcp/config'
 import {
@@ -29,11 +30,18 @@ import type { Agent } from '../../agent/agent'
 import type { ApprovalService } from '../../approval/service'
 import type { SystemPromptAssembler } from '../../prompt/assembler'
 import type { SandboxPolicyService } from '../../sandbox/policy'
+import type { SecretSealer } from '../../../security/secret-sealer'
 import { defineTool, ToolError, type ToolDefinition } from '../definition'
 
 export interface McpConfigToolDeps {
   /** Emperor Home (directory holding `mcp_config.json`). */
   stateRoot: string
+  /**
+   * Seals secret-named `headers` / `env` values on write (SEC-06). The tool
+   * edits the file through Core, never through the file tools, which refuse
+   * `mcp_config.json` in every mode.
+   */
+  sealer?: SecretSealer | null
   sandbox: SandboxPolicyService
   approval: ApprovalService | undefined
   /** Reload the MCP client and resync the `mcp_*` tools. */
@@ -82,6 +90,10 @@ export function createMcpConfigTool(
   deps: McpConfigToolDeps,
 ): ToolDefinition<McpConfigArgs> {
   const displayPath = mcpConfigDisplayPath(deps.stateRoot)
+  const store = { sealer: deps.sealer ?? null }
+  /** Names, transports and targets only: secret values stay masked. */
+  const listed = (): Promise<MCPConfig> =>
+    loadMcpConfigUnresolved(deps.stateRoot, store)
 
   /** Ask the user unless the calling agent runs under danger-full-access. */
   const authorize = async (
@@ -165,10 +177,10 @@ export function createMcpConfigTool(
       }
       switch (args.action) {
         case 'list':
-          return await formatList(deps, displayPath)
+          return formatList(deps, displayPath, await listed())
         case 'reload':
           return await reloadReport(
-            Object.values((await loadMcpConfig(deps.stateRoot, {})).servers)
+            Object.values((await listed()).servers)
               .filter((server) => server.enabled)
               .map((server) => server.name),
           )
@@ -181,6 +193,7 @@ export function createMcpConfigTool(
           const raw = withServerName(args.config, name)
           const overwrite = args.overwrite === true
           const preview = await importMcpServers(deps.stateRoot, raw, {
+            ...store,
             overwrite,
             dryRun: true,
           })
@@ -198,6 +211,7 @@ export function createMcpConfigTool(
               .join('；')}`,
           )
           const applied = await importMcpServers(deps.stateRoot, raw, {
+            ...store,
             overwrite,
           })
           return formatImport(
@@ -206,25 +220,25 @@ export function createMcpConfigTool(
           )
         }
         case 'remove': {
-          const server = await storedServer(deps.stateRoot, needsName())
+          const server = storedServer(await listed(), needsName())
           await authorize(
             context,
             `从 ${displayPath} 删除 MCP server "${name}" [${server.transport}] ${targetOf(server)}`,
           )
-          await removeMcpServer(deps.stateRoot, name)
+          await removeMcpServer(deps.stateRoot, name, store)
           return `MCP server removed: ${name}.\n${await reloadReport([])}`
         }
         case 'enable':
         case 'disable': {
           const enabled = args.action === 'enable'
-          const server = await storedServer(deps.stateRoot, needsName())
+          const server = storedServer(await listed(), needsName())
           if (server.enabled === enabled)
             return `MCP server ${name} is already ${enabled ? 'enabled' : 'disabled'}.`
           await authorize(
             context,
             `${enabled ? '启用' : '停用'} ${displayPath} 中的 MCP server "${name}" [${server.transport}] ${targetOf(server)}`,
           )
-          await setMcpServerEnabled(deps.stateRoot, name, enabled)
+          await setMcpServerEnabled(deps.stateRoot, name, enabled, store)
           return `MCP server ${enabled ? 'enabled' : 'disabled'}: ${name}.\n${await reloadReport(enabled ? [name] : [])}`
         }
       }
@@ -272,8 +286,8 @@ function withServerName(config: unknown, name: string): unknown {
   return config
 }
 
-async function storedServer(root: string, name: string): Promise<ServerConfig> {
-  const server = (await loadMcpConfig(root, {})).servers[name]
+function storedServer(config: MCPConfig, name: string): ServerConfig {
+  const server = config.servers[name]
   if (server === undefined)
     throw new ToolError(`MCP server not configured: ${name}`, 'NOT_FOUND')
   return server
@@ -290,11 +304,11 @@ function targetOf(server: ServerConfig): string {
   return server.url ? maskSecretUrl(server.url) : '(no url)'
 }
 
-async function formatList(
+function formatList(
   deps: McpConfigToolDeps,
   displayPath: string,
-): Promise<string> {
-  const config = await loadMcpConfig(deps.stateRoot, {})
+  config: MCPConfig,
+): string {
   const servers = Object.values(config.servers)
   if (!servers.length)
     return `No MCP servers configured in ${displayPath}. Use action=add with the server JSON.`
