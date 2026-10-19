@@ -223,6 +223,8 @@ Agent 被要求只通过 `mcp_config` 添加 server，不使用 mcporter，也�
 - `stdio` server 会启动本地进程，应像审查命令一样审查它的来源和参数。
 - MCP 工具的副作用不受 Emperor 权限预设约束，只配置你信任的 server。
 - 远程 MCP、Skill 脚本和 Plugin 内容都按不可信输入处理。导入 Skill 或安装 Plugin 前确认来源可信。
+- `mcp_config.json` 里 `headers` 与 `env` 中名字含 key、token、secret、authorization 或 password（不分大小写）的值保存时加密（`el1:…`，与模型 Key 同一把本地密钥），连接时解开；只引用环境变量的值（如 `Bearer ${API_TOKEN}`）保持原样。第一次加密前的原文件保留为 `mcp_config.json.pre-seal-<时间>`。本地密钥丢失时这些值无法解开，对应 server 会报认证失败，重新填写即可。
+- Agent 的文件、搜索和 Shell 工具读不到 `mcp_config.json`；它只能通过 `mcp_config` 工具查看名称、地址与字段名，看不到字段值。
 - 不要把 API Key 直接写进可提交的项目文件，优先使用 `${ENV_NAME}`。MCP 标签读取配置时保留 `${ENV_NAME}`，把 args、env、headers、URL 中其余字面字符串显示为 `[REDACTED]`；保存原始配置时，未改动的掩码只从同一 server 同一字段回填，没有旧值的掩码会被拒绝。
 
 排查加载问题时，先看能力页“MCP”标签中该 server 卡片的状态和最近错误，再检查配置 JSON、执行环境和“设置 → 诊断”。

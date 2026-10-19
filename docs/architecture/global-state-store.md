@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-10-18<br>
+> 最后核验：2026-10-19<br>
 > 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store
 
 ## 两个根的区分
@@ -39,8 +39,9 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，路径过�
 ~/.emperor/
   installation.json        # layout/app/runtime revision 与首次启动、迁移状态
   settings.json            # 用户通用配置
-  model_config.json        # schemaVersion 2；多个模型、单 active
-  mcp_config.json
+  model_config.json        # schemaVersion 2；多个模型、单 active；apiKey 以本地密钥加密（el1:…）
+  model_config.json.pre-seal-<ts>  # 第一次加密前的原文件（含明文 Key，0600，用户可删）
+  mcp_config.json          # headers / env 中 key、token、secret 等值以本地密钥加密
   hooks.json               # Claude Code hooks.json 格式的 command hooks（可选）
   onboarding.json
   AGENTS.md                # 可选的全局工作区说明，用户手写
@@ -107,7 +108,7 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，路径过�
     grants.json              # 授权记录（会话与定时授权已退役，加载时丢弃）；不含凭据明文；损坏时隔离，从空授权开始
     screenshots.json         # 截图配额清单（附件 ID、会话、大小、时间）
     vault.json               # 凭据库（版本 2）：本地密钥加密，可再加主密码；读到钥匙串时代的版本 1 即删除
-    secrets/local.key        # Emperor 本地密钥（32 字节，目录 0700、文件 0600），取代 macOS 钥匙串
+    secrets/local.key        # Emperor 本地密钥（32 字节，目录 0700、文件 0600），取代 macOS 钥匙串；也加密模型 Key 与 MCP 令牌
     browser-pairings/pairings.json  # 外部浏览器配对（版本 2，本地密钥加密，记录可带 chrome/edge）；版本 1 即删除
     external-site-rules.json # Chrome/Edge 的智能体权限（浏览、下载的默认与按网站例外）和历史记录、站点工具设置（0600）
     external-downloads.json  # 「Emperor 的下载」里来自 Chrome/Edge 的记录（最新 200 条，0600；文件留在浏览器的下载文件夹）

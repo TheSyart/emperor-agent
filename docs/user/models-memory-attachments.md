@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：配置模型或管理本地上下文的用户<br>
-> 最后核验：2026-09-22<br>
-> 事实源：`packages/core/src/config/model-config.ts`、`packages/core/src/llm/`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/harness/compaction/`、`packages/core/src/attachments/store.ts`、`desktop/src/renderer/src/components/settings/`（模型 / 记忆分区）
+> 最后核验：2026-10-19<br>
+> 事实源：`packages/core/src/config/model-config.ts`、`packages/core/src/security/secret-sealer.ts`、`packages/core/src/llm/`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/harness/compaction/`、`packages/core/src/attachments/store.ts`、`desktop/src/renderer/src/components/settings/`（模型 / 记忆分区）
 
 ## 模型配置
 
@@ -15,6 +15,8 @@ Emperor Agent 可以保存多条模型配置，但全局同时只激活一个模
 - 模型数组：`models[]`
 
 每条模型至少包含 Provider、协议、模型 ID、API Base、上下文窗口、最大输出 Token 和稳定的 `entryId`。API Key 可以为空，例如连接本地兼容服务时。
+
+API Key 加密后写入文件（`"apiKey": "el1:…"`），使用与凭据库相同的 Emperor 本地密钥（`computer-use/secrets/local.key`），不使用 macOS 钥匙串；每个 Key 只能在它所属的那条模型里解开。旧版本留下的明文 Key 照常可用，下一次保存模型设置时自动加密，加密前的原文件保留为 `model_config.json.pre-seal-<时间>`（含明文，确认一切正常后可以自行删除）。设置页只显示已保存 Key 的末 4 位。本地密钥丢失或被替换时（例如只复制了 `model_config.json` 到另一台电脑），受影响的模型显示「凭据需要重新输入」，其余模型和设置照常可用，重新填写 Key 并保存即可；以同一用户运行的程序仍可能读到本地密钥，这是基础保护。
 
 Provider 描述的是访问方式，不是固定模型清单。部分 Provider 支持模型发现；发现失败时仍可以手工填写模型 ID。`custom` 需要明确选择 `openai` 或 `anthropic` 协议。Provider 为 `deepseek` 时使用内置的 DeepSeek 适配器，其他 Provider 按所选协议走 OpenAI Chat Completions 或 Anthropic Messages。
 
@@ -85,7 +87,7 @@ Composer 一次最多保留 5 个待发送附件：
 
 ## 备份与迁移
 
-备份时先完全退出应用，再复制整个 Emperor Home。只复制 `memory/` 会遗漏会话、Scheduler、MCP、用户 Skills、受管工具环境和模型配置。
+备份时先完全退出应用，再复制整个 Emperor Home。只复制 `memory/` 会遗漏会话、Scheduler、MCP、用户 Skills、受管工具环境和模型配置；模型 Key 和 MCP 令牌用 `computer-use/secrets/local.key` 加密，单独复制 `model_config.json` 或 `mcp_config.json` 时这些值无法解开，需要重新填写。
 
 首次启动当前版本时，旧版本的 `sessions/` 目录会整体移到 `sessions.legacy-<时间戳>/` 保留，新版本从空的会话列表开始；旧会话不会被删除，但也不会在界面中显示。不要在应用运行时手工修改 `log.jsonl`。
 

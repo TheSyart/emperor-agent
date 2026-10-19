@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、安全审查者、维护者<br>
 > 最后核验：2026-10-19<br>
-> 事实源：`packages/core/src/harness/sandbox/`、`packages/core/src/harness/approval/`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/questions/`、`packages/core/src/harness/host/interactions.ts`、`packages/core/src/harness/computer-use/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/api/mutation-guard.ts`、`packages/core/src/workspace/git-runner.ts`
+> 事实源：`packages/core/src/harness/sandbox/`、`packages/core/src/harness/approval/`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/questions/`、`packages/core/src/harness/host/interactions.ts`、`packages/core/src/harness/computer-use/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/api/mutation-guard.ts`、`packages/core/src/workspace/git-runner.ts`、`packages/core/src/security/`、`packages/core/src/config/model-config.ts`、`packages/core/src/mcp/config.ts`
 
 Agent 能做什么由两个独立旋钮决定：**沙箱模式**限制文件写入范围，**审批策略**决定需要批准的操作是否询问用户。用户看到的是把两者打包在一起的**权限预设**。Plan 模式是独立的会话状态，不是第四种权限。
 
@@ -25,13 +25,13 @@ Agent 能做什么由两个独立旋钮决定：**沙箱模式**限制文件写�
 | -------------------- | ----------------------------------------- |
 | `read-only`          | 受限操作不能修改文件                      |
 | `workspace-write`    | 只能写入 session workspace 与系统临时目录 |
-| `danger-full-access` | 不限制文件效果                            |
+| `danger-full-access` | 除受保护路径表外不限制文件效果            |
 
 执行方式：
 
 - `write` / `edit` 在进程内做路径围栏：`read-only` 直接拒绝；`workspace-write` 在写入前重新解析真实路径（能发现被替换的符号链接祖先），要求目标位于可写根内。
 - `bash` 在受限模式下通过 OS 沙箱运行：macOS 使用 Seatbelt（`sandbox-exec`），Linux 使用 bubblewrap（启动时做一次功能探测）。其他平台没有后端，`read-only` 与 `workspace-write` 下的 `bash` 在启动前失败（fail closed），只有 `danger-full-access` 才会执行 Shell。
-- 受限 `bash` 主要限制文件写入。macOS Seatbelt 还拒读 Emperor 的电脑操作状态与浏览器数据，并拒绝向 Apple Events、WindowServer 和 Helper socket 发起部分连接；普通文件读取与互联网访问没有普遍禁止。`read`、`edit`、`write`、`glob`、`grep` 不经过该 Shell 沙箱，但与 Seatbelt 共用同一份受保护目录表（`sandbox/protected-state.ts`）：在任何模式下都拒绝 Emperor Home 的 `computer-use/` 与 `browser/`（按真实路径判断，符号链接、大小写和 `/System/Volumes/Data` 别名都算），`glob`、`grep` 从上级目录搜索时略过它们；这两个目录启动时设为 0700。
+- 受限 `bash` 主要限制文件写入，并拒绝向 Apple Events、WindowServer 和 Helper socket 发起部分连接；普通文件读取与互联网访问没有普遍禁止。读写都受下文「受保护路径」一表约束：`read`、`edit`、`write`、`glob`、`grep` 不经过 Shell 沙箱，但与 Seatbelt 共用这一张表（`sandbox/protected-state.ts`）。`danger-full-access` 下的 `bash`（包括一次经批准的提权）在 macOS 上也跑在只含这张表的 Seatbelt profile 里（`LocalSandbox.guard`），守护进程起不来时 fail closed；Linux 与其他平台没有这层守护。
 - `memory_edit`、`scheduler`、MCP 工具与 Skill 加载不经过文件沙箱，也不需要审批；Memory 是应用状态，MCP server 的能力由其配置决定。
 - `skill_manage`（Skills 文件夹）与 `mcp_config`（`mcp_config.json`）同样不经过文件沙箱，但写入动作跟随权限预设：沙箱模式为 `danger-full-access` 时直接执行，其他模式下每次写入都通过 `ApprovalService` 询问一次，审批策略为 `never` 时被拒绝。查看类动作（`list`、`validate`、`reload`）不询问。
 
@@ -39,11 +39,33 @@ Chat 会话的 workspace 是 `stateRoot/workspace/` 下的可写目录；Build �
 
 ## 一次性提权
 
-`bash`、`write`、`edit` 的参数都可以带 `sandbox_permissions`（`workspace-write` 或 `danger-full-access`）和一句 `justification`。请求的模式必须严格宽于当前有效模式；审批服务向用户询问一次，只有 `allowed-once` 才让这一次调用以更宽的模式执行，授权不会延续到之后的调用。
+`bash`、`write`、`edit` 的参数都可以带 `sandbox_permissions`（`workspace-write` 或 `danger-full-access`）和一句 `justification`。请求的模式必须严格宽于当前有效模式；审批服务向用户询问一次，只有 `allowed-once` 才让这一次调用以更宽的模式执行，授权不会延续到之后的调用。`read` 也接受这对参数，但只用于读取凭据文件（见下节）：它要求 `danger-full-access`，审批理由写明文件（`escalate sandbox to danger-full-access to read credentials (~/.ssh/config): …`）。`bash` 请求 `danger-full-access` 时，命令文本里能认出的凭据路径（`~/…`、`$HOME/…`、`${HOME}/…` 或展开的家目录）同样写进审批理由；这只是提示，实际约束由 Seatbelt 执行。写入受保护路径的 `write` / `edit` 在询问之前就被拒绝，不会弹出无意义的审批。
 
 审批策略为 `never` 时，需要审批的请求被确定性地拒绝，系统提示词也会告诉模型不要请求提权。子代理的审批策略固定为 `never`，因此子代理内的提权总是被拒绝。
 
 每次询问在 session log 中记录为 `approval/asked` 与 `approval/decided`。结果只可能是 `allowed-once`、`rejected`、`cancelled` 或 `unavailable`；应答方缺失或出错时 fail closed 为 `unavailable`，崩溃修复会把没有决定的询问关闭为 `unavailable`。
+
+## 受保护路径与配置加密
+
+`sandbox/protected-state.ts` 定义一张表，分三类：
+
+| 类别         | 路径                                                                                                                                         | 读                                          | 写  |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | --- |
+| `state`      | `<stateRoot>/computer-use`、`<stateRoot>/browser`                                                                                            | 拒                                          | 拒  |
+| `config`     | `<stateRoot>` 下直接以 `model_config`、`mcp_config`、`settings.json`、`hooks.json` 开头的文件（含 `.pre-seal-*`、`.tmp-*`、`.corrupt-*` 等） | 拒                                          | 拒  |
+| `credential` | `~/.ssh`、`~/.aws`、`~/.config/gcloud`、`~/.docker/config.json`、`~/.netrc`、`~/.codex/auth.json`、`~/.claude/.credentials.json`             | 仅 `danger-full-access`（常设或一次性提权） | 拒  |
+
+- 文件工具：`write` / `edit` 对三类都返回 `FS_PROTECTED_PATH`，任何模式、任何提权都一样；`read` 对 `state` / `config` 返回 `FS_PROTECTED_PATH`，对 `credential` 在受限模式下返回 `FS_SANDBOX_DENIED` 并提示带 `sandbox_permissions="danger-full-access"` 重试。判断按真实路径（符号链接、大小写、`/System/Volumes/Data` 别名），再按文件身份（硬链接）。
+- 搜索工具：搜索根落在表内时报 `SEARCH_PROTECTED_PATH`，从上级目录搜索时略过表内条目；`credential` 只在 `danger-full-access` 下可搜，搜索不提供提权。
+- Seatbelt：受限 profile 在所有放行规则之后追加 `(deny file-read* file-write* …)`（`state`、`config`）与凭据规则（受限模式读写都拒，`danger-full-access` 只拒写）；`config` 用以 Emperor Home 真实路径开头的正则匹配。Emperor Home 和凭据路径的各级父目录追加 `(deny file-write* (literal …))`，防止把整个目录改名移出规则（目录里照常可以新建文件）。宿主通过 `SandboxExecutionPolicy.writableFiles` 授给外部执行器的单个文件（AGT-03 的 Codex `auth.json`）在凭据规则之后重新放行读写，所以 Emperor 启动的 Codex 进程仍能读取并原地刷新用户的 `auth.json`；Agent 自己的 Shell 没有这项授权。`state` / `config` 规则排在放行之后，宿主授权也打不开它们。
+- 已知影响：默认预设下 Agent 的 Shell 读不到 `~/.ssh`，经 SSH 的 git、`aws`、`gcloud`、带私有仓库凭据的 `docker` 需要一次提权或在用户终端运行；委派给 Claude Code / Codex 的子进程同样读不到这些位置（它们不能提权）。Claude 的 `.credentials.json` 由 Core 进程读取后以环境变量传入子进程，不受影响。MCP stdio server 用的是另一套进程隔离（SEC-08 统一），不在此表约束内。
+
+配置里的秘密不再明文落盘（SEC-06）：
+
+- 端口 `SecretSealer`（`security/secret-sealer.ts`）：`seal(plain, context) → "el1:<base64>"`、`open(sealed, context)`、`available`。实现基于 `security/local-secret-store.ts` 的 `LocalSecretStore`（AES-256-GCM，密钥文件 `<stateRoot>/computer-use/secrets/local.key`，从不使用钥匙串）；`context` 进入关联数据，值换到别的字段就解不开。桌面主进程把凭据库同一个 `LocalSecretStore` 实例包成 sealer 传给 Core（`KeptServicesOptions.secretSealer`）；没有主进程时（ACP、headless）Core 用同一个密钥文件自建（`createLocalKeySealer`），连「密钥丢失而凭据库仍有密文时不新建密钥」这条规则也一样（读 `vault.json` 判断）。
+- `model_config.json`：每条 `apiKey` 以 `model_config.json#models/<entryId>/apiKey` 为上下文加密。读取时解开，运行时视图与模型路由只见明文；明文 Key 照常读取，第一次保存时加密，加密前把原文件复制为 `model_config.json.pre-seal-<时间>`（0600）。解不开的条目（密钥丢失或被替换）`apiKey` 读作 null、记入 `ModelConfig.credentialsNeedingReentry`，设置页显示「凭据需要重新输入」，可用性判定给出同样的提示；文件不被隔离，其余条目照常可用，密文保留到重新填写或用户明确清除为止。sealer 不可用时（凭据库仍需旧密钥）明文保持明文并记日志，不阻塞保存。
+- `mcp_config.json`：`headers`、`env` 中名字匹配 `/(key|token|secret|authorization|password)/i` 的值以 `mcp_config.json#servers/<名>/<headers|env>/<字段>` 为上下文加密；只引用环境变量的值（`${VAR}`、`Bearer ${VAR}`）不加密。连接时解开；解不开的值在连接时丢弃（server 报认证失败，不发送密文），在编辑器往返与具名修改里原样保留。第一次加密时同样保留 `mcp_config.json.pre-seal-<时间>`。
+- 设置页的 Key 只以 `***` 加末 4 位到达 renderer，编辑器占位显示「已保存 ···1234」。
 
 ## Git 控制文件与 Emperor 内部 Git
 
@@ -100,6 +122,8 @@ Plan 模式与权限预设相互独立：在 Plan 模式中切换预设，只改
 
 - 新预设或旋钮：`harness/approval/presets.ts`、`commands/builtins.ts` 的 `PERMISSION_PRESET_VALUES`、renderer 权限选择器和用户文档。
 - 新受限工具：复用 `harness/sandbox/escalation.ts` 的 `escalationFields` 与 `approveEscalation()`，不要自建审批通道。
+- 新的直接读写路径的工具：按 `classifyProtectedPath()` 处理受保护路径表；新增表项同时影响 Seatbelt profile、文件与搜索工具。
+- 新的配置秘密：经 `SecretSealer` 加密并给出稳定的 `context`，不要直接调用 `LocalSecretStore`，也不要用钥匙串。
 - 修改应用配置而非 workspace 文件的工具：参照 `skill_manage` / `mcp_config`，在写入前按沙箱模式判断并调用注入的 `ApprovalService.request()`，拒绝、取消或通道不可用时抛出 `ToolError`。
 - 新沙箱后端：`harness/sandbox/backend.ts` 的平台链、profile 生成与拒绝特征测试。
 - 新交互类型：`harness/host/interactions.ts`、`harness/projection/interactions.ts`、`control.*` operation 与 renderer 底部面板。

@@ -217,7 +217,8 @@ Build 会话绑定一个本地文件夹，适合代码、文档和其他项目�
 
 | 数据                         | 路径                                    |
 | ---------------------------- | --------------------------------------- |
-| 模型配置                     | `model_config.json`                     |
+| 模型配置（API Key 加密）     | `model_config.json`                     |
+| MCP 配置（令牌加密）         | `mcp_config.json`                       |
 | 会话记录                     | `sessions/<session-id>/log.jsonl`       |
 | 全局长期记忆                 | `memory/MEMORY.local.md`                |
 | 项目私有记忆                 | `projects/<project-id>/AGENTS.local.md` |
@@ -238,14 +239,18 @@ Build 项目目录不会承载私有会话、记忆或附件数据。
 
 ### 安全要点
 
-- 权限预设主要限制 Agent 的文件写入；普通文件读取与网络访问没有普遍禁止。文件与搜索工具始终拒读 Emperor Home 的 `computer-use/` 和 `browser/`；macOS 受限 Shell 也对这些目录及部分系统 GUI 连接做额外限制。
+- 权限预设主要限制 Agent 的文件写入；普通文件读取与网络访问没有普遍禁止，但有一张固定的受保护路径表，文件工具、搜索工具和 macOS Shell（Seatbelt）共用：
+  - Emperor Home 的 `computer-use/`、`browser/`，以及 `model_config.json`、`mcp_config.json`、`settings.json`、`hooks.json`（含备份）：任何预设下都不能读也不能改，提权也不行。Agent 改配置只能通过 `mcp_config`、`skill_manage` 等工具，或由你在设置页修改。
+  - `~/.ssh`、`~/.aws`、`~/.config/gcloud`、`~/.docker/config.json`、`~/.netrc`、`~/.codex/auth.json`、`~/.claude/.credentials.json`：任何预设下都不能写；读取需要你批准一次提权，审批卡写明文件与理由，`danger-full-access` 下可以直接读。默认预设下经 SSH 的 `git push`、`aws`、`gcloud` 等命令因此需要批准一次。
+  - macOS 受限 Shell 另对部分系统 GUI 连接做额外限制。
+- 模型 API Key 与 MCP `headers`、`env` 中的 key / token / secret / authorization / password 类值加密后落盘（`el1:…`），设置页只显示 Key 的末 4 位。旧的明文文件在下一次保存时加密，原文件保留为 `*.pre-seal-<时间>` 备份（含明文，确认无误后可删除）。本地密钥丢失时，受影响的模型显示「凭据需要重新输入」，重新填写即可。
 - 子代理继承当前沙箱模式，但不能请求提权。
 - 记忆编辑、MCP 工具、Skill 加载和 Scheduler 工具不需要审批；只配置你信任的 MCP server。
 - Agent 用 `skill_manage` 修改 Skills、用 `mcp_config` 修改 MCP 配置时，除 `danger-full-access` 外每次写入都需要你批准。
 - 有待回答的问题或审批，或处于 Plan 模式时，你在界面上对定时任务、Skill、Plugin、模型和 MCP 配置的修改会被暂时拒绝；先回答或退出 Plan 再改。
 - 用户内置浏览器只加载不带账号密码的 `http(s)` 地址，拒绝网页权限请求；支持受文件类型、大小与保存位置规则约束的下载。浏览数据与 Agent 的持久 profile 分开，清除浏览数据不会删除下载好的文件。
 - 电脑操作与 Shell 权限独立。高影响动作和凭据代填逐次确认；完全放行的 Shell 仍可能执行电脑操作服务以外的命令，总开关不能限制这些命令。
-- 凭据与浏览器配对用 Emperor 本地密钥加密，不依赖 macOS 钥匙串。以同一用户运行的程序可能读到这把密钥；凭据库可再设主密码。秘密只在受信设置、main 与驱动的代填通道处理，模型工具使用句柄。
+- 凭据库、浏览器配对、模型 Key 与 MCP 令牌都用 Emperor 本地密钥（`computer-use/secrets/local.key`）加密，不依赖 macOS 钥匙串。以同一用户运行的程序可能读到这把密钥；凭据库可再设主密码。秘密只在受信设置、main 与驱动的代填通道处理，模型工具使用句柄。
 - MCP 结果和外部内容按不可信输入处理。涉及命令、文件、模型配置或外部服务时，仍应检查请求内容和授权范围。
 
 <a id="boundaries"></a>
