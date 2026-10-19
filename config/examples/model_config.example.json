@@ -1,7 +1,42 @@
 {
   "schemaVersion": 2,
-  "activeModelId": null,
-  "models": [],
+  "activeModelId": "example-deepseek-flash",
+  "models": [
+    {
+      "entryId": "example-deepseek-flash",
+      "connectionId": "conn-example-deepseek",
+      "provider": "deepseek",
+      "protocol": "openai",
+      "modelId": "deepseek-flash",
+      "displayName": "DeepSeek Flash",
+      "apiBase": "https://api.deepseek.com",
+      "apiKey": null,
+      "contextWindowTokens": 1048576,
+      "maxTokens": 393216,
+      "reasoningEffort": "high",
+      "limits": {
+        "maxOutputTokens": 393216
+      },
+      "detected": {
+        "toolCall": true,
+        "vision": true,
+        "reasoning": true,
+        "reasoningEfforts": ["none", "high"],
+        "defaultReasoningEffort": "high",
+        "reasoningControl": "effort",
+        "kind": "chat"
+      },
+      "metadata": {
+        "name": "DeepSeek Flash",
+        "source": "catalog",
+        "catalogKey": "models.dev:deepseek/deepseek-flash",
+        "userLocked": ["displayName"]
+      },
+      "sampling": {
+        "temperature": null
+      }
+    }
+  ],
   "policy": {
     "fallback": {
       "enabled": false,

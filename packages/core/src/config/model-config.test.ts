@@ -277,7 +277,7 @@ describe('typed entry mutation', () => {
     expect((await loadModelConfig(dir)).models[0]?.apiKey).toBeNull()
   })
 
-  it('activates entries and selects the first remaining entry after deleting active', async () => {
+  it('activates entries and refuses to delete the active one (MOD-03)', async () => {
     await saveModelConfig(dir, {
       schemaVersion: 2,
       activeModelId: 'a',
@@ -288,8 +288,9 @@ describe('typed entry mutation', () => {
     })
 
     expect((await activateModelEntry(dir, 'b')).activeModelId).toBe('b')
-    const afterDelete = await deleteModelEntry(dir, 'b')
-    expect(afterDelete.activeModelId).toBe('a')
+    await expect(deleteModelEntry(dir, 'b')).rejects.toThrow('正在使用')
+    const afterDelete = await deleteModelEntry(dir, 'a')
+    expect(afterDelete.activeModelId).toBe('b')
     await expect(activateModelEntry(dir, 'missing')).rejects.toThrow(
       ValidationError,
     )

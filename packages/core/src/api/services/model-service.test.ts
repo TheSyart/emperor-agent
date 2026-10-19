@@ -214,14 +214,13 @@ describe('CoreModelService schema v2', () => {
 
     await modelService.activate(secondId)
     expect((await modelService.getConfig()).activeModelId).toBe(secondId)
+    // The entry in use cannot be deleted (MOD-03); switch first.
+    await expect(modelService.deleteEntry(secondId)).rejects.toThrow('正在使用')
+    await modelService.activate(firstId)
     await modelService.deleteEntry(secondId)
-    expect((await modelService.getConfig()).activeModelId).toBe(firstId)
-    await modelService.deleteEntry(firstId)
     expect(await modelService.getConfig()).toMatchObject({
-      activeModelId: null,
-      models: [],
-      current: null,
-      availability: { usable: false },
+      activeModelId: firstId,
+      models: [expect.objectContaining({ entryId: firstId })],
     })
     expect(lifecycle.filter((item) => item === 'onboarding')).toHaveLength(1)
   })
@@ -531,19 +530,17 @@ describe('CoreModelService schema v2', () => {
     expect(activated.profileOnboarding).toMatchObject({ started: true })
     expect(activateHook).toHaveBeenCalledOnce()
 
+    // Deleting the active entry is refused (MOD-03), so a delete can no
+    // longer be what first makes the active model usable.
     const deleteRoot = tmp('emperor-model-service-delete-onboarding-')
     writeConfig(deleteRoot, [invalid, local], 'invalid')
-    const deleteHook = vi.fn(() => ({
-      started: true,
-      state: { status: 'in_progress' },
-    }))
-    const deleted = await (
-      await service(deleteRoot, {
-        afterConfigSaved: deleteHook,
-      })
-    ).deleteEntry('invalid')
-    expect(deleted.profileOnboarding).toMatchObject({ started: true })
-    expect(deleteHook).toHaveBeenCalledOnce()
+    const deleteHook = vi.fn()
+    await expect(
+      (await service(deleteRoot, { afterConfigSaved: deleteHook })).deleteEntry(
+        'invalid',
+      ),
+    ).rejects.toThrow('正在使用')
+    expect(deleteHook).not.toHaveBeenCalled()
   })
 
   it('keeps vision tests read-only and rejects descriptive negative answers', async () => {
