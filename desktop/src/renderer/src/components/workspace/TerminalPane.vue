@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmTerminalClose } from './terminalClose'
 import IconButton from '../ui/IconButton.vue'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
@@ -198,6 +199,12 @@ async function activate(
 async function closeTerminal(terminalId: string): Promise<void> {
   const owner = props.sessionId
   const generation = ownerGeneration
+  if (
+    !(await confirmTerminalClose(terminalId, () =>
+      core('terminals.list', { sessionId: owner }),
+    ))
+  )
+    return
   try {
     await core('terminals.close', { sessionId: owner, terminalId })
     if (!isCurrentOwner(owner, generation)) return

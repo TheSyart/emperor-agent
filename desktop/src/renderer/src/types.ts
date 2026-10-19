@@ -1366,6 +1366,16 @@ export type GitOperationCompletedEvent = Extract<
 
 export type GitOperationAction = GitOperationCompletedEvent['action']
 
+/** A deleted session in 最近删除 (Core sessions.listDeleted, FIX-01). */
+export interface DeletedSessionInfo {
+  id: string
+  title: string
+  mode: 'chat' | 'build'
+  project_name: string | null
+  project_path: string | null
+  deleted_at: string
+}
+
 export interface SessionInfo {
   id: string
   title: string

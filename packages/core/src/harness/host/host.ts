@@ -1892,7 +1892,11 @@ export class HarnessHost {
   }
 
   /** Remove a session's log, agent, and children. */
-  deleteSession(sessionId: string): void {
+  /**
+   * Stop a session and drop it from the kernel, keeping its log on disk
+   * (closed and flushed): a soft-deleted session can come back (FIX-01).
+   */
+  unloadSession(sessionId: string): void {
     this.stop(sessionId)
     this.agents.get(sessionId)?.dispose()
     this.agents.delete(sessionId)
@@ -1902,6 +1906,12 @@ export class HarnessHost {
     this.announcedQueue.delete(sessionId)
     void this.jobs.disposeOwner(sessionId)
     void this.computerUse?.service.onSessionDeleted(sessionId)
+    this.sessions.close(sessionId)
+  }
+
+  /** unloadSession, then remove the session's log directory. */
+  deleteSession(sessionId: string): void {
+    this.unloadSession(sessionId)
     this.sessions.delete(sessionId)
   }
 

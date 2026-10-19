@@ -11,7 +11,12 @@
 import { ref } from 'vue'
 import { DsCheck, DsClose, DsWarning } from '../icons/ds'
 import { writeClipboard } from './useCopyFeedback'
-import { dismissToast, visibleToasts, type ToastItem } from './toasts'
+import {
+  dismissToast,
+  runToastAction,
+  visibleToasts,
+  type ToastItem,
+} from './toasts'
 
 const copiedId = ref<number | null>(null)
 let copiedTimer: ReturnType<typeof setTimeout> | undefined
@@ -35,6 +40,7 @@ async function copyDetail(item: ToastItem): Promise<void> {
         class="ds-toast"
         :data-tone="item.tone"
         :data-sticky="item.sticky || undefined"
+        :data-actionable="item.action ? '' : undefined"
         :role="item.tone === 'error' ? 'alert' : 'status'"
         :aria-live="item.tone === 'error' ? 'assertive' : 'polite'"
       >
@@ -43,6 +49,14 @@ async function copyDetail(item: ToastItem): Promise<void> {
           <DsWarning v-else :size="16" />
         </span>
         <span class="text">{{ item.message }}</span>
+        <button
+          v-if="item.action"
+          type="button"
+          class="toast-action"
+          @click="runToastAction(item.id)"
+        >
+          {{ item.action.label }}
+        </button>
         <template v-if="item.sticky">
           <button
             v-if="item.tone === 'error'"
@@ -96,7 +110,8 @@ async function copyDetail(item: ToastItem): Promise<void> {
   animation: ds-rise-in var(--duration-ds) var(--ease-in-out) both;
 }
 
-.ds-toast[data-sticky] {
+.ds-toast[data-sticky],
+.ds-toast[data-actionable] {
   padding-right: var(--space-2);
   pointer-events: auto;
 }

@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -57,6 +58,19 @@ export interface SessionCreateOptions {
   lineageRootId?: string | null
   transitionReason?: 'clear' | null
 }
+
+/** A deleted session waiting in `sessions/.trash/<id>` (FIX-01). */
+export interface TrashedSession {
+  id: string
+  title: string
+  mode: 'chat' | 'build'
+  project_name: string | null
+  project_path: string | null
+  deleted_at: string
+}
+
+const TRASH_DIR = '.trash'
+const TRASH_RECORD = 'trash.json'
 
 export type SessionIndexSource = 'cache' | 'rebuilt'
 
@@ -164,6 +178,77 @@ export class SessionStore {
     rmSync(this.sessionDir(sessionId), { recursive: true, force: true })
     this.save(items)
     return true
+  }
+
+  /**
+   * Soft delete: drop the session from the index and move its directory
+   * (meta, log, attachments) to `sessions/.trash/<id>` with a trash
+   * record. The last session is kept. Returns the entry, or null.
+   */
+  trash(sessionId: string, deletedAt = stamp()): SessionEntry | null {
+    const items = this.load()
+    if (items.length <= 1) return null
+    const idx = items.findIndex((item) => item.id === sessionId)
+    if (idx < 0) return null
+    const [entry] = items.splice(idx, 1)
+    const target = this.trashDir(sessionId)
+    mkdirSync(join(this.sessionsDir, TRASH_DIR), { recursive: true })
+    rmSync(target, { recursive: true, force: true })
+    // Index first: load() would otherwise re-materialize the moved session.
+    this.save(items)
+    renameSync(this.sessionDir(sessionId), target)
+    const record: TrashedSession = {
+      id: entry!.id,
+      title: entry!.title,
+      mode: entry!.mode,
+      project_name: entry!.project_name,
+      project_path: entry!.project_path,
+      deleted_at: deletedAt,
+    }
+    writeFileSync(join(target, TRASH_RECORD), JSON.stringify(record), {
+      encoding: 'utf8',
+      mode: 0o600,
+    })
+    return cloneSession(entry!)
+  }
+
+  /** Undo a soft delete; the entry comes back exactly as it was. */
+  restoreTrashed(sessionId: string): SessionEntry | null {
+    const source = this.trashDir(sessionId)
+    if (!this.isTrashId(sessionId) || !existsSync(source)) return null
+    if (existsSync(this.sessionDir(sessionId))) return null
+    rmSync(join(source, TRASH_RECORD), { force: true })
+    renameSync(source, this.sessionDir(sessionId))
+    return this.get(sessionId)
+  }
+
+  /** Deleted sessions in the trash, most recent first. */
+  listTrashed(): TrashedSession[] {
+    const root = join(this.sessionsDir, TRASH_DIR)
+    if (!existsSync(root)) return []
+    const out: TrashedSession[] = []
+    for (const dirent of readdirSync(root, { withFileTypes: true })) {
+      if (!dirent.isDirectory()) continue
+      const record = this.readTrashRecord(dirent.name)
+      if (record) out.push(record)
+    }
+    return out.sort((a, b) => b.deleted_at.localeCompare(a.deleted_at))
+  }
+
+  /** Ids of trashed sessions deleted before `cutoffMs` (epoch ms). */
+  trashedBefore(cutoffMs: number): string[] {
+    return this.listTrashed()
+      .filter((item) => Date.parse(item.deleted_at) < cutoffMs)
+      .map((item) => item.id)
+  }
+
+  /** Remove a trashed session for good; returns its record, or null. */
+  purgeTrashed(sessionId: string): TrashedSession | null {
+    if (!this.isTrashId(sessionId)) return null
+    const record = this.readTrashRecord(sessionId)
+    if (!record) return null
+    rmSync(this.trashDir(sessionId), { recursive: true, force: true })
+    return record
   }
 
   rename(sessionId: string, title: string): boolean {
@@ -425,6 +510,39 @@ export class SessionStore {
     }
   }
 
+  private trashDir(sessionId: string): string {
+    return join(this.sessionsDir, TRASH_DIR, sessionId)
+  }
+
+  /** Session ids are single path segments; refuse anything else. */
+  private isTrashId(sessionId: string): boolean {
+    return (
+      Boolean(sessionId) &&
+      !sessionId.startsWith('.') &&
+      !/[\\/]/.test(sessionId)
+    )
+  }
+
+  private readTrashRecord(sessionId: string): TrashedSession | null {
+    try {
+      const raw = JSON.parse(
+        readFileSync(join(this.trashDir(sessionId), TRASH_RECORD), 'utf8'),
+      ) as Partial<TrashedSession>
+      if (raw.id !== sessionId || typeof raw.deleted_at !== 'string')
+        return null
+      return {
+        id: raw.id,
+        title: String(raw.title ?? ''),
+        mode: raw.mode === 'build' ? 'build' : 'chat',
+        project_name: raw.project_name ?? null,
+        project_path: raw.project_path ?? null,
+        deleted_at: raw.deleted_at,
+      }
+    } catch {
+      return null
+    }
+  }
+
   private setArchived(
     sessionId: string,
     archived: boolean,
@@ -462,7 +580,8 @@ export class SessionStore {
     for (const dirent of readdirSync(this.sessionsDir, {
       withFileTypes: true,
     })) {
-      if (!dirent.isDirectory()) continue
+      // `.trash` (and any other dot directory) holds no live session.
+      if (!dirent.isDirectory() || dirent.name.startsWith('.')) continue
       const id = dirent.name
       const sessionDir = this.sessionDir(id)
       const fromMeta = this.readLatestMeta(id, diagnostics)

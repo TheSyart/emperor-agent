@@ -4,7 +4,8 @@
  * reaches the screen, not when it is queued. Error toasts stay until
  * closed and carry an error id and a detail text for 「复制详情」.
  * A repeat of a toast already shown or waiting (same tone and message)
- * restarts that toast instead of stacking a copy.
+ * restarts that toast instead of stacking a copy. A toast may carry one
+ * action (「撤销」) and its own duration (10 s for an undo).
  *
  * App.vue mounts ToastStack once; components reach the queue through the
  * app context (`showToast`, `showError`).
@@ -22,6 +23,15 @@ export interface ToastItem {
   errorId?: string
   /** Error toasts: what 「复制详情」 copies. */
   detail?: string
+  /** One action button, such as 「撤销」; the toast closes after it runs. */
+  action?: ToastAction
+  /** How long it stays once shown (default TOAST_DURATION_MS). */
+  durationMs?: number
+}
+
+export interface ToastAction {
+  label: string
+  run: () => void | Promise<void>
 }
 
 export interface ToastOptions {
@@ -30,6 +40,8 @@ export interface ToastOptions {
   sticky?: boolean
   detail?: string
   errorId?: string
+  action?: ToastAction
+  durationMs?: number
 }
 
 export const TOAST_VISIBLE = 3
@@ -48,7 +60,10 @@ function startTimer(item: ToastItem): void {
   if (item.sticky || timers.has(item.id)) return
   timers.set(
     item.id,
-    setTimeout(() => dismissToast(item.id), TOAST_DURATION_MS),
+    setTimeout(
+      () => dismissToast(item.id),
+      item.durationMs ?? TOAST_DURATION_MS,
+    ),
   )
 }
 
@@ -81,10 +96,20 @@ export function pushToast(message: string, options: ToastOptions = {}): number {
     sticky: tone === 'error' || Boolean(options.sticky),
     errorId: options.errorId,
     detail: options.detail,
+    action: options.action,
+    durationMs: options.durationMs,
   }
   items.value = [...items.value, item]
   promote()
   return item.id
+}
+
+/** Run a toast's action, then close it. */
+export async function runToastAction(id: number): Promise<void> {
+  const item = items.value.find((entry) => entry.id === id)
+  if (!item?.action) return
+  dismissToast(id)
+  await item.action.run()
 }
 
 export function dismissToast(id: number): void {

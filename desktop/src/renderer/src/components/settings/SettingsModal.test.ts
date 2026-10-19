@@ -332,7 +332,7 @@ describe('SettingsModal', () => {
       header()
         ?.querySelector('[data-action="refresh"]')
         ?.getAttribute('aria-label'),
-    ).toBe('刷新归档对话')
+    ).toBe('刷新归档与最近删除')
 
     await router.replace('/chat/s1?settings=tokens')
     await flushPromises()

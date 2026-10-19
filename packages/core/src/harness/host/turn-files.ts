@@ -297,10 +297,16 @@ export class TurnFileRecorder {
     return reverted
   }
 
-  /** Delete a session's kept snapshots (before the session goes). */
-  async forgetSession(sessionId: string): Promise<void> {
+  /**
+   * Delete a session's kept snapshots. `projectRoot` names the project
+   * when the session is already gone from the store (an emptied trash);
+   * omitted, it is looked up.
+   */
+  async forgetSession(
+    sessionId: string,
+    projectRoot: string | null = this.options.projectRoot(sessionId),
+  ): Promise<void> {
     this.turns.delete(sessionId)
-    const projectRoot = this.options.projectRoot(sessionId)
     if (projectRoot === null) return
     try {
       const place = await this.options.snapshots.locate(projectRoot)
