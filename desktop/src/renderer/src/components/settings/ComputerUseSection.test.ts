@@ -27,7 +27,10 @@ const { core, helperStatus, requestPermission, resetPermission, reconnect } =
     reconnect: vi.fn(),
   }))
 
-vi.mock('../../api/http', () => ({ core }))
+vi.mock('../../api/http', async (original) => ({
+  ...(await original<typeof import('../../api/http')>()),
+  core,
+}))
 vi.mock('../../api/backend', () => ({
   macHelperStatus: helperStatus,
   macHelperRequestPermission: requestPermission,
@@ -381,6 +384,58 @@ describe('ComputerUseSection main page', () => {
       .click()
     await settle()
     expect(reconnect).toHaveBeenCalledOnce()
+  })
+
+  const stopped = {
+    available: true,
+    connected: false,
+    autoRestartSuspended: true,
+    reason: 'Helper 在一分钟内崩溃超过 3 次，已停止自动重启',
+    permissions: { accessibility: 'unknown', 'screen-recording': 'unknown' },
+  }
+
+  it('keeps the master switch usable while 重新连接 hangs, and turns off at once (FIX-06 2, 7)', async () => {
+    reconnect.mockReturnValue(new Promise(() => undefined))
+    const root = await mount({}, stopped)
+    root
+      .querySelector<HTMLButtonElement>('[data-testid="mac-helper-reconnect"]')!
+      .click()
+    await settle()
+    const master = root.querySelector<HTMLButtonElement>(
+      '#computer-use-enabled',
+    )!
+    expect(master.disabled).toBe(false)
+    core.mockClear()
+    master.click()
+    await settle()
+    expect(core).toHaveBeenCalledWith('computerUse.setEnabled', false)
+  })
+
+  it('stops waiting for a stuck action after 30 s and says so in Chinese (FIX-06 3, 8)', async () => {
+    reconnect.mockReturnValue(new Promise(() => undefined))
+    const root = await mount({}, stopped)
+    vi.useFakeTimers()
+    try {
+      root
+        .querySelector<HTMLButtonElement>(
+          '[data-testid="mac-helper-reconnect"]',
+        )!
+        .click()
+      await vi.advanceTimersByTimeAsync(30_000)
+    } finally {
+      vi.useRealTimers()
+    }
+    await settle()
+    const error = notices(root).find(
+      (notice) => notice.getAttribute('data-tone') === 'error',
+    )
+    expect(error?.textContent).toContain('30 秒')
+    // The section is usable again.
+    expect(
+      root.querySelector<HTMLButtonElement>(
+        '[data-testid="mac-helper-reconnect"]',
+      )?.disabled,
+    ).toBe(false)
   })
 
   it('turns computer use on, and one driver off', async () => {
