@@ -21,7 +21,9 @@ import {
 const HOOKS = {
   hooks: {
     PreToolUse: [{ matcher: 'Bash', hooks: [{ command: 'check.sh' }] }],
-    PostToolUse: [{ matcher: 'WebFetch', hooks: [{ command: 'fetch.sh' }] }],
+    PostToolUse: [
+      { matcher: 'NotebookEdit', hooks: [{ command: 'notebook.sh' }] },
+    ],
   },
 }
 
@@ -107,7 +109,7 @@ describe('plugin member states', () => {
         'hook',
         'PostToolUse#1',
         'unsupported',
-        'Emperor 没有与「WebFetch」对应的工具',
+        'Emperor 没有与「NotebookEdit」对应的工具',
       ],
     ])
   })
