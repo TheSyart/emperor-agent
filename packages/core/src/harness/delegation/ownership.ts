@@ -41,6 +41,8 @@ export function loadOwnership(root: string, runId: string): ProcessOwnership {
     typeof value.cwd !== 'string' ||
     !value.pid ||
     !identity({ pid: value.pid, fingerprint: value.fingerprint }) ||
+    (value.bootTime !== undefined &&
+      (typeof value.bootTime !== 'string' || value.bootTime.length > 256)) ||
     !Array.isArray(value.descendants) ||
     value.descendants.length > 1024 ||
     !value.descendants.every(identity)

@@ -370,12 +370,6 @@ export class DelegationService {
             }
             saveOwnership(this.options.root, ownership)
           },
-          onProcessObserved: (descendants) => {
-            if (ownership) {
-              ownership = { ...ownership, descendants }
-              saveOwnership(this.options.root, ownership)
-            }
-          },
           onProcessExit: (exit) => {
             if (ownership)
               saveOwnership(this.options.root, { ...ownership, exit })
@@ -1448,15 +1442,6 @@ export class DelegationService {
           await this.change(e, activeRunId, {
             process: { ...identity, boundaryReceiptId, policyDigest },
           })
-        },
-        onProcessObserved: (descendants) => {
-          if (!ownership)
-            throw new DelegationError(
-              'OWNER_MISMATCH',
-              'process root was not persisted',
-            )
-          ownership = { ...ownership, descendants }
-          saveOwnership(this.options.root, ownership)
         },
         onProcessExit: (exit) => {
           if (ownership) {

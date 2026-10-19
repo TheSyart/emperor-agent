@@ -693,6 +693,8 @@ export class CoreApi {
     })
     const executorProcesses = new ManagedAgentProcess({
       sandbox: host.sandboxBackend,
+      // 诊断模式: boundary markers and the native scanner (AGT-04).
+      diagnostics: () => this.executorConfig.read().diagnosticsMode === true,
     })
     const checkExecutorAuth = async (
       profile: Parameters<typeof executorRuntime.prepare>[0],

@@ -305,7 +305,6 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
       signal: input.signal,
       secretValues: input.secretValues,
       onSpawn: input.onProcessStarted,
-      onObserved: input.onProcessObserved,
       onExit: input.onProcessExit,
     })
     let value: import('../types').NativeSessionInspection | undefined
@@ -407,7 +406,6 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
       if (closePromise) return closePromise
       closePromise = (async () => {
         closed = true
-        await handle?.captureDescendants()
         rejectSubmit(
           new DelegationError(
             'EXECUTOR_CLOSED',
@@ -639,7 +637,6 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
             policy: input.policy,
             secretValues: input.secretValues,
             onSpawn: input.onProcessStarted,
-            onObserved: input.onProcessObserved,
             onExit: input.onProcessExit,
           })
           return handle.spawnedProcess
@@ -907,7 +904,6 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
         })
       },
       interrupt: async () => {
-        await handle?.captureDescendants()
         interrupted = true
         let timer: ReturnType<typeof setTimeout> | undefined
         try {

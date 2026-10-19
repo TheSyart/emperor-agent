@@ -70,6 +70,12 @@ export interface ExecutorConfig {
    * executors the user had never chosen (AGT-05).
    */
   upgradeNotice?: 'external-default-off'
+  /**
+   * Settings › 子智能体 › 高级 › 诊断模式 (AGT-04): mark external runs with a
+   * Seatbelt boundary and let the native scanner stop processes that left a
+   * run's process group when it ends. Off by default.
+   */
+  diagnosticsMode?: boolean
 }
 export interface ExecutorProbe {
   status:
@@ -204,6 +210,8 @@ export interface DelegationRunRecord {
     pid: number | null
     startedAt: number
     fingerprint: string
+    /** System boot marker at spawn (AGT-04). */
+    bootTime?: string
     boundaryReceiptId: string
     policyDigest: string
   }
@@ -230,9 +238,6 @@ export interface ExecutorOpenInput {
   onProcessStarted?: (
     identity: import('./process-types').OwnedProcessIdentity,
   ) => Promise<void>
-  onProcessObserved?: (
-    descendants: import('./process-types').OwnedDescendant[],
-  ) => void
   onProcessExit?: (
     receipt: import('./process-types').ProcessExitReceipt,
   ) => void

@@ -1,3 +1,15 @@
+/**
+ * External agent processes (AGT-04).
+ *
+ * Every run starts as the leader of its own process group, and stopping it
+ * is a group operation with a fixed timeline: interrupt, five seconds,
+ * SIGTERM to the group, five seconds, SIGKILL to the group. A run counts as
+ * stopped once its group is empty. There is no periodic process scan and no
+ * attempt to prove that every descendant went quiet; a process that leaves
+ * the group (setsid / double fork) is not tracked, except in diagnostics
+ * mode, where a Seatbelt boundary marks the run's processes and the native
+ * scanner stops any that are left outside the group when the run ends.
+ */
 import {
   spawn,
   execFile,
@@ -6,7 +18,14 @@ import {
 } from 'node:child_process'
 import { promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
-import { existsSync, writeFileSync, readFileSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  readdirSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -19,14 +38,25 @@ import { LocalSandbox, type SandboxBackend } from '../sandbox/backend'
 import type { SandboxExecutionPolicy } from '../sandbox/policy'
 import { DelegationError } from './types'
 import { redactExecutorText } from './redaction'
+import { systemBootMarker } from '../../util/stable-process-identity'
+import type {
+  OwnedProcessIdentity,
+  ProcessExitReceipt,
+  ProcessOwnership,
+} from './process-types'
+export type { ProcessExitReceipt } from './process-types'
 const execute = promisify(execFile)
+
+/** The wait between each step of a stop: interrupt, SIGTERM, SIGKILL. */
+export const STOP_GRACE_MS = 5000
+/** After SIGKILL, how long the group may take to disappear. */
+const KILL_SETTLE_MS = 1000
+/** Seatbelt boundary markers (diagnostics mode) live here. */
+export const BOUNDARY_MARKER_DIR = '/private/tmp'
+const BOUNDARY_MARKER = /^emperor-boundary-[a-f0-9-]{36}-(?:denied|allowed)$/
+
 export interface ManagedProcessSpec {
-  onSpawn?: (
-    identity: import('./process-types').OwnedProcessIdentity,
-  ) => Promise<void>
-  onObserved?: (
-    descendants: import('./process-types').OwnedDescendant[],
-  ) => void
+  onSpawn?: (identity: OwnedProcessIdentity) => Promise<void>
   onExit?: (receipt: ProcessExitReceipt) => void
   executable: string
   args: string[]
@@ -37,8 +67,6 @@ export interface ManagedProcessSpec {
   maxFrameBytes?: number
   secretValues?: readonly string[]
 }
-import type { ProcessExitReceipt } from './process-types'
-export type { ProcessExitReceipt } from './process-types'
 export interface AgentSpawnedProcess {
   stdin: Writable
   stdout: Readable
@@ -56,12 +84,13 @@ export interface ManagedProcessHandle {
   stdin: Writable
   stdout: Readable
   stderr: Readable
-  identity: { pid: number | null; startedAt: number; fingerprint: string }
+  identity: OwnedProcessIdentity
   started: Promise<void>
   closed: Promise<ProcessExitReceipt>
   diagnostics(): string
-  captureDescendants(): Promise<void>
+  /** SIGINT to the group; SIGTERM after five seconds, SIGKILL five later. */
   interrupt(): Promise<void>
+  /** SIGTERM to the group; SIGKILL after five seconds. */
   terminate(): Promise<void>
 }
 class FrameLimit extends Transform {
@@ -101,55 +130,6 @@ class FrameLimit extends Transform {
       return
     }
     done(null, chunk)
-  }
-}
-function fingerprint(pid: number): string {
-  if (process.platform === 'win32') return String(pid) // The held ChildProcess handle remains the authority on Windows.
-  try {
-    return execFileSync('/bin/ps', ['-p', String(pid), '-o', 'lstart='], {
-      encoding: 'utf8',
-      timeout: 1000,
-    })
-      .trim()
-      .replace(/\s+/g, ' ')
-  } catch {
-    return ''
-  }
-}
-interface ProcessRow {
-  pid: number
-  parent: number
-  group: number
-  state: string
-  birth: string
-}
-async function processTable(): Promise<Map<number, ProcessRow> | null> {
-  if (process.platform === 'win32') return null
-  try {
-    const { stdout } = await execute(
-      '/bin/ps',
-      ['-axo', 'pid=,ppid=,pgid=,stat=,lstart='],
-      {
-        timeout: 1000,
-        maxBuffer: 4 * 1024 * 1024,
-      },
-    )
-    const rows = new Map<number, ProcessRow>()
-    for (const line of stdout.trim().split('\n')) {
-      const fields = line.trim().split(/\s+/),
-        pid = Number(fields[0])
-      if (fields.length < 9 || !Number.isSafeInteger(pid)) continue
-      rows.set(pid, {
-        pid,
-        parent: Number(fields[1]),
-        group: Number(fields[2]),
-        state: fields[3]!,
-        birth: fields.slice(4).join(' '),
-      })
-    }
-    return rows
-  } catch {
-    return null
   }
 }
 export async function* readJsonLines(
@@ -196,7 +176,145 @@ export async function* readJsonLines(
   }
   if (pending.length) yield decode(pending)
 }
-function boundaryScanner(): string {
+/** `ps` output must not depend on the user's language (SUB-16). */
+function psEnvironment(): NodeJS.ProcessEnv {
+  return { ...process.env, LC_ALL: 'C', LANG: 'C' }
+}
+/**
+ * A process's start time (`ps lstart`, C locale), the identity Emperor
+ * records next to a PID. Empty when the process is gone or `ps` failed; an
+ * empty birth never matches anything.
+ */
+export function processBirth(pid: number): string {
+  if (process.platform === 'win32') return String(pid) // The held ChildProcess handle remains the authority on Windows.
+  try {
+    return execFileSync('/bin/ps', ['-p', String(pid), '-o', 'lstart='], {
+      encoding: 'utf8',
+      timeout: 1000,
+      env: psEnvironment(),
+    })
+      .trim()
+      .replace(/\s+/g, ' ')
+  } catch {
+    return ''
+  }
+}
+export interface ProcessRow {
+  pid: number
+  parent: number
+  group: number
+  state: string
+  birth: string
+}
+export function parseProcessTable(stdout: string): Map<number, ProcessRow> {
+  const rows = new Map<number, ProcessRow>()
+  for (const line of stdout.split('\n')) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S.*?)\s*$/.exec(line)
+    if (!match) continue
+    const pid = Number(match[1])
+    if (!Number.isSafeInteger(pid)) continue
+    rows.set(pid, {
+      pid,
+      parent: Number(match[2]),
+      group: Number(match[3]),
+      state: match[4]!,
+      birth: match[5]!.replace(/\s+/g, ' '),
+    })
+  }
+  return rows
+}
+/**
+ * The whole process table, or null when it cannot be trusted: `ps` failed,
+ * or the table does not even list this process (a misparsed table must not
+ * read as "everything stopped").
+ */
+export async function processTable(): Promise<Map<number, ProcessRow> | null> {
+  if (process.platform === 'win32') return null
+  try {
+    const { stdout } = await execute(
+      '/bin/ps',
+      ['-axo', 'pid=,ppid=,pgid=,stat=,lstart='],
+      { timeout: 2000, maxBuffer: 8 * 1024 * 1024, env: psEnvironment() },
+    )
+    const rows = parseProcessTable(stdout)
+    return rows.has(process.pid) ? rows : null
+  } catch {
+    return null
+  }
+}
+/** True while any process is in group `pgid` (or it cannot be signalled). */
+function groupExists(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
+  }
+}
+function pidExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
+  }
+}
+/** Members of `pgid` that are still running (zombies excluded); null if unknown. */
+function liveMembers(
+  rows: Map<number, ProcessRow> | null,
+  pgid: number,
+): ProcessRow[] | null {
+  return rows
+    ? [...rows.values()].filter(
+        (row) => row.group === pgid && !row.state.startsWith('Z'),
+      )
+    : null
+}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+let bootTime: string | null | undefined
+/**
+ * This boot of the computer (kern.bootsessionuuid, else kern.boottime).
+ * A process recorded under another value cannot still be running.
+ */
+export function currentBootTime(): string | null {
+  if (bootTime === undefined) bootTime = systemBootMarker()
+  return bootTime
+}
+/**
+ * Remove Seatbelt boundary markers older than a day. Older builds wrote a
+ * pair per process and never removed them; current builds only write them
+ * in diagnostics mode and remove them when the run ends.
+ */
+export function cleanBoundaryMarkers(
+  options: { dir?: string; now?: number; maxAgeMs?: number } = {},
+): number {
+  const dir = options.dir ?? BOUNDARY_MARKER_DIR,
+    now = options.now ?? Date.now(),
+    maxAge = options.maxAgeMs ?? 86_400_000,
+    uid = typeof process.getuid === 'function' ? process.getuid() : undefined
+  let names: string[]
+  try {
+    names = readdirSync(dir)
+  } catch {
+    return 0
+  }
+  let removed = 0
+  for (const name of names) {
+    if (!BOUNDARY_MARKER.test(name)) continue
+    const path = join(dir, name)
+    try {
+      const stat = lstatSync(path)
+      if (!stat.isFile() || now - stat.mtimeMs <= maxAge) continue
+      if (uid !== undefined && stat.uid !== uid) continue
+      unlinkSync(path)
+      removed++
+    } catch {
+      /* gone already, or not ours */
+    }
+  }
+  return removed
+}
+function boundaryScanner(): string | undefined {
   const suffix = `native/build/${process.platform}-${process.arch}/delegation-scan`
   const candidates = [
     ...((process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
@@ -216,13 +334,18 @@ function boundaryScanner(): string {
     resolve(process.cwd(), '../packages/core', suffix),
     resolve(process.cwd(), suffix),
   ]
-  const found = candidates.find((path) => existsSync(path))
-  if (!found)
-    throw new DelegationError(
-      'CONTAINMENT_UNAVAILABLE',
-      'macOS delegation scanner missing; build the native helper before running external agents',
-    )
-  return found
+  return candidates.find((path) => existsSync(path))
+}
+function markerPath(tag: string, kind: 'denied' | 'allowed'): string {
+  return join(BOUNDARY_MARKER_DIR, `emperor-boundary-${tag}-${kind}`)
+}
+function removeMarkers(tag: string): void {
+  for (const kind of ['denied', 'allowed'] as const)
+    try {
+      unlinkSync(markerPath(tag, kind))
+    } catch {
+      /* already removed */
+    }
 }
 async function boundaryPids(boundary: {
   tag: string
@@ -230,13 +353,10 @@ async function boundaryPids(boundary: {
 }): Promise<number[] | null> {
   if (!/^[a-f0-9-]{36}$/.test(boundary.tag)) return null
   if (
-    ['denied', 'allowed'].some((kind) => {
+    (['denied', 'allowed'] as const).some((kind) => {
       try {
         return (
-          readFileSync(
-            `/private/tmp/emperor-boundary-${boundary.tag}-${kind}`,
-            'utf8',
-          ) !== boundary.tag
+          readFileSync(markerPath(boundary.tag, kind), 'utf8') !== boundary.tag
         )
       } catch {
         return true
@@ -259,13 +379,51 @@ async function boundaryPids(boundary: {
     return null
   }
 }
+/**
+ * Diagnostics mode: stop processes that still carry the run's boundary after
+ * its group is gone. Returns how many were stopped, or null if the scan
+ * itself failed (a diagnostic never fails the run).
+ */
+async function sweepBoundary(boundary: {
+  tag: string
+  scannerPath: string
+}): Promise<number | null> {
+  const pids = await boundaryPids(boundary)
+  if (!pids) return null
+  let stopped = 0
+  if (pids.length) {
+    const rows = await processTable()
+    if (!rows) return null
+    for (const pid of pids) {
+      const row = rows.get(pid)
+      // The scanner named the process by its inherited boundary; confirm the
+      // PID still names that same process before signalling it.
+      if (!row || row.state.startsWith('Z') || processBirth(pid) !== row.birth)
+        continue
+      try {
+        process.kill(pid, 'SIGKILL')
+        stopped++
+      } catch {
+        /* exited meanwhile */
+      }
+    }
+  }
+  removeMarkers(boundary.tag)
+  return stopped
+}
 export class ManagedAgentProcess {
   private readonly sandbox: SandboxBackend
   constructor(
     private readonly options: {
       sandbox?: SandboxBackend
+      /** Test hook: refuse to signal a live root (identity cannot be verified). */
       identityMatches?: (handle: ManagedProcessHandle) => boolean
+      /** Process table reader; only consulted when a stopped group still answers signals. */
       observeProcesses?: () => Promise<Map<number, ProcessRow> | null>
+      /** Diagnostics mode (Settings › 子智能体 › 高级): boundary markers and the native scanner. */
+      diagnostics?: () => boolean
+      /** The wait between stop steps; five seconds unless a test shortens it. */
+      stopGraceMs?: number
     } = {},
   ) {
     this.sandbox = options.sandbox ?? new LocalSandbox()
@@ -275,20 +433,29 @@ export class ManagedAgentProcess {
     await h.started
     return h
   }
+  /** Diagnostics mode only, and only when the scanner is present. */
+  private boundary(): { tag: string; scannerPath: string } | undefined {
+    if (process.platform !== 'darwin') return undefined
+    let enabled = false
+    try {
+      enabled = this.options.diagnostics?.() === true
+    } catch {
+      enabled = false
+    }
+    if (!enabled) return undefined
+    const scannerPath = boundaryScanner()
+    if (!scannerPath) return undefined
+    const tag = randomUUID()
+    for (const kind of ['denied', 'allowed'] as const)
+      writeFileSync(markerPath(tag, kind), tag, { mode: 0o600, flag: 'wx' })
+    return { tag, scannerPath }
+  }
   spawn(spec: ManagedProcessSpec): ManagedProcessHandle {
     if (spec.signal?.aborted)
       throw new DelegationError('ABORTED', 'process start cancelled')
-    const boundary =
-      process.platform === 'darwin'
-        ? { tag: randomUUID(), scannerPath: boundaryScanner() }
-        : undefined
-    if (boundary)
-      for (const kind of ['denied', 'allowed'])
-        writeFileSync(
-          `/private/tmp/emperor-boundary-${boundary.tag}-${kind}`,
-          boundary.tag,
-          { mode: 0o600, flag: 'wx' },
-        )
+    const grace = this.options.stopGraceMs ?? STOP_GRACE_MS
+    const table = this.options.observeProcesses ?? processTable
+    const boundary = this.boundary()
     const policy = {
       ...spec.policy,
       ...(boundary ? { processBoundaryTag: boundary.tag } : {}),
@@ -301,6 +468,7 @@ export class ManagedAgentProcess {
           mode: spec.policy.mode,
         }).argv
       } catch {
+        if (boundary) removeMarkers(boundary.tag)
         throw new DelegationError(
           'CONTAINMENT_UNAVAILABLE',
           'requested process boundary is unavailable',
@@ -311,7 +479,7 @@ export class ManagedAgentProcess {
       argv = [
         '/usr/bin/sandbox-exec',
         '-p',
-        `(version 1)(allow default)(deny file-read-data (literal "/private/tmp/emperor-boundary-${boundary.tag}-denied"))`,
+        `(version 1)(allow default)(deny file-read-data (literal "${markerPath(boundary.tag, 'denied')}"))`,
         ...argv,
       ]
     const child = spawn(argv[0]!, argv.slice(1), {
@@ -328,13 +496,16 @@ export class ManagedAgentProcess {
       },
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
+      // Its own process group: the unit every stop signal is sent to.
       detached: process.platform !== 'win32',
       windowsHide: true,
     })
-    const identity = {
+    const boot = currentBootTime()
+    const identity: OwnedProcessIdentity = {
       pid: child.pid ?? null,
       startedAt: Date.now(),
       fingerprint: '',
+      ...(boot ? { bootTime: boot } : {}),
       ...(boundary ? { boundary } : {}),
     }
     const output = new FrameLimit(spec.maxFrameBytes ?? 4 * 1024 * 1024)
@@ -347,9 +518,11 @@ export class ManagedAgentProcess {
     let stderr = Buffer.alloc(0),
       failureCode: string | undefined,
       done = false,
+      finishing = false,
       signalled = false,
-      confirmedGroup = false,
-      shutdownDeadline = 0
+      interrupting = false,
+      /** When SIGKILL is due; set by the first SIGTERM. */
+      killAt: number | undefined
     const timers: ReturnType<typeof setTimeout>[] = []
     let settle!: (receipt: ProcessExitReceipt) => void
     const closed = new Promise<ProcessExitReceipt>((resolve) => {
@@ -358,7 +531,7 @@ export class ManagedAgentProcess {
     const started = new Promise<void>((resolve, reject) => {
       child.once('spawn', () => {
         identity.pid = child.pid ?? null
-        identity.fingerprint = child.pid ? fingerprint(child.pid) : ''
+        identity.fingerprint = child.pid ? processBirth(child.pid) : ''
         Promise.resolve()
           .then(() => spec.onSpawn?.({ ...identity }))
           .then(resolve, (error) => {
@@ -377,146 +550,32 @@ export class ManagedAgentProcess {
     child.stdin.on('error', () => {
       /* EPIPE is represented by the process exit receipt. */
     })
-    const matches = () => {
-      if (optionsIdentity()) return true
-      return false
-    }
-    const descendants = new Map<number, string>()
-    let proofFailed = false
-    let scan: Promise<Map<number, ProcessRow> | null> | undefined
-    const scanTree = (): Promise<Map<number, ProcessRow> | null> => {
-      if (scan) return scan
-      const operation = (async () => {
-        const rows = await (this.options.observeProcesses ?? processTable)()
-        if (!rows) {
-          proofFailed = true
-          return null
-        }
-        const previousSize = descendants.size
-        if (boundary) {
-          const marked = await boundaryPids(boundary)
-          if (!marked) {
-            proofFailed = true
-            return null
-          }
-          for (const pid of marked) {
-            const row = rows.get(pid)
-            if (row && pid !== child.pid && !row.state.startsWith('Z'))
-              descendants.set(pid, row.birth)
-          }
-        }
-        const owned = new Set<number>()
-        const root = child.pid ? rows.get(child.pid) : undefined
-        if (
-          root?.birth === identity.fingerprint &&
-          (!this.options.identityMatches ||
-            this.options.identityMatches(handle))
-        )
-          owned.add(root.pid)
-        for (const [pid, birth] of descendants)
-          if (rows.get(pid)?.birth === birth) owned.add(pid)
-        for (let changed = true; changed;) {
-          changed = false
-          for (const row of rows.values()) {
-            if (owned.has(row.pid) || row.state.startsWith('Z')) continue
-            if (owned.has(row.parent)) {
-              if (descendants.size >= 1024) {
-                proofFailed = true
-                continue
-              }
-              descendants.set(row.pid, row.birth)
-              owned.add(row.pid)
-              changed = true
-            }
-          }
-        }
-        if (descendants.size !== previousSize) {
-          try {
-            spec.onObserved?.(
-              [...descendants].map(([pid, fingerprint]) => ({
-                pid,
-                fingerprint,
-              })),
-            )
-          } catch {
-            proofFailed = true
-            failureCode = 'OWNERSHIP_PERSIST_FAILED'
-            try {
-              signal('SIGTERM')
-            } catch {
-              /* receipt will retain the writer lease */
-            }
-          }
-        }
-        return rows
-      })()
-      scan = operation
-      void operation.then(
-        () => {
-          if (scan === operation) scan = undefined
-        },
-        () => {
-          proofFailed = true
-          if (scan === operation) scan = undefined
-        },
-      )
-      return operation
-    }
-    const captureDescendants = async (): Promise<void> => {
-      await scanTree()
-    }
-    const stopDescendants = async (kind: NodeJS.Signals): Promise<void> => {
-      const rows = await scanTree()
-      if (!rows) return
-      // Children may call setsid/setpgid. Signal held descendant identities,
-      // independently of the root group, before their parents disappear.
-      for (const [pid, birth] of [...descendants].reverse()) {
-        const row = rows.get(pid)
-        if (!row || row.state.startsWith('Z') || row.birth !== birth) continue
-        if (fingerprint(pid) !== birth) continue
-        try {
-          process.kill(pid, kind)
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ESRCH')
-            proofFailed = true
-        }
+    const rootLive = () => child.exitCode === null && child.signalCode === null
+    /**
+     * Signal the run's process group. While the root is unreaped its PID,
+     * and so the group id, cannot belong to anyone else; after it exits the
+     * id stays reserved for as long as any member of the group lives.
+     */
+    const signalGroup = (kind: NodeJS.Signals): boolean => {
+      if (done || !child.pid) return false
+      if (process.platform === 'win32') {
+        if (!rootLive()) return false
+        child.kill(kind)
+        signalled = true
+        return true
       }
-    }
-    const watch = setInterval(() => {
-      if (!done) void scanTree()
-    }, 100)
-    watch.unref()
-    const optionsIdentity = () =>
-      this.options.identityMatches
-        ? this.options.identityMatches(handle)
-        : Boolean(
-            child.pid &&
-            child.exitCode === null &&
-            child.signalCode === null &&
-            identity.fingerprint &&
-            fingerprint(child.pid) === identity.fingerprint,
-          )
-    const signal = (
-      kind: NodeJS.Signals,
-      afterConfirmation = false,
-    ): boolean => {
-      if (done) return false
       if (
-        afterConfirmation &&
-        confirmedGroup &&
-        (child.exitCode !== null || child.signalCode !== null)
+        rootLive() &&
+        this.options.identityMatches &&
+        !this.options.identityMatches(handle)
       )
-        return false
-      if (!matches() && !(afterConfirmation && confirmedGroup))
         throw new DelegationError(
           'OUTCOME_UNKNOWN',
           'process identity cannot be verified; no signal sent',
         )
       try {
-        if (process.platform === 'win32') child.kill(kind)
-        else process.kill(-child.pid!, kind)
+        process.kill(-child.pid, kind)
         signalled = true
-        confirmedGroup = true
         return true
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false
@@ -524,93 +583,85 @@ export class ManagedAgentProcess {
       }
     }
     const scheduleKill = () => {
+      killAt = Date.now() + grace
       timers.push(
-        setTimeout(async () => {
-          if (!done)
-            try {
-              await stopDescendants('SIGKILL')
-              signal('SIGKILL', true)
-            } catch {
-              failureCode = 'OUTCOME_UNKNOWN'
-            }
-        }, 2000),
+        setTimeout(() => {
+          if (done || finishing) return
+          try {
+            signalGroup('SIGKILL')
+          } catch {
+            failureCode = 'OUTCOME_UNKNOWN'
+          }
+        }, grace),
       )
     }
     const terminate = async () => {
       if (done) return
-      shutdownDeadline = Math.max(shutdownDeadline, Date.now() + 2500)
-      await stopDescendants('SIGTERM')
-      if (child.exitCode === null && child.signalCode === null)
-        signal('SIGTERM', confirmedGroup)
-      scheduleKill()
+      if (killAt === undefined && !finishing) {
+        signalGroup('SIGTERM')
+        scheduleKill()
+      }
       await closed
     }
     const interrupt = async () => {
       if (done) return
-      shutdownDeadline = Date.now() + 7500
-      await stopDescendants('SIGINT')
-      signal('SIGINT')
-      timers.push(
-        setTimeout(() => {
-          if (!done)
-            void terminate().catch(() => {
-              failureCode = 'OUTCOME_UNKNOWN'
-            })
-        }, 5000),
-      )
+      if (!interrupting && killAt === undefined && !finishing) {
+        signalGroup('SIGINT')
+        interrupting = true
+        timers.push(
+          setTimeout(() => {
+            if (!done)
+              void terminate().catch(() => {
+                failureCode = 'OUTCOME_UNKNOWN'
+              })
+          }, grace),
+        )
+      }
       await closed
     }
+    /** The root exited: whatever is left of its group gets the same stop. */
     const finish = async (code: number | null, sig: NodeJS.Signals | null) => {
-      if (done) return
-      let quiescent = !proofFailed && process.platform !== 'win32'
-      if (child.pid && process.platform !== 'win32') {
-        // A scan already in flight can describe the group before the exit.
-        // Drain it before starting the bounded final observation window.
-        if (scan) await scan
-        const until = Math.max(
-          shutdownDeadline,
-          Date.now() + (confirmedGroup ? 2500 : 100),
-        )
-        while (true) {
-          const rows = await scanTree()
-          if (rows === null) {
-            quiescent = false
-            break
+      if (done || finishing) return
+      finishing = true
+      let quiescent = process.platform !== 'win32',
+        escaped: number | undefined
+      const pgid = child.pid
+      if (pgid && process.platform !== 'win32') {
+        try {
+          if (groupExists(pgid)) {
+            if (killAt === undefined) {
+              signalGroup('SIGTERM')
+              killAt = Date.now() + grace
+            }
+            while (groupExists(pgid) && Date.now() < killAt) await sleep(50)
+            if (groupExists(pgid)) {
+              signalGroup('SIGKILL')
+              const until = Date.now() + KILL_SETTLE_MS
+              while (groupExists(pgid) && Date.now() < until) await sleep(25)
+            }
+            // Only zombies may still answer; anything else did not stop.
+            if (groupExists(pgid))
+              quiescent = (liveMembers(await table(), pgid)?.length ?? 1) === 0
           }
-          const activeDescendants = [...descendants].filter(([pid, birth]) => {
-            const row = rows.get(pid)
-            return row?.birth === birth && !row.state.startsWith('Z')
-          })
-          const groupMembers = [...rows.values()].filter(
-            (row) => row.group === child.pid && !row.state.startsWith('Z'),
-          )
-          if (activeDescendants.length === 0 && groupMembers.length === 0) break
-          if (Date.now() >= until) {
-            quiescent = false
-            break
-          }
-          await new Promise((r) => setTimeout(r, 20))
+        } catch {
+          quiescent = false
+        }
+        if (boundary) {
+          const stopped = await sweepBoundary(boundary)
+          if (stopped) escaped = stopped
         }
       }
-      if (done) return
       done = true
-      clearInterval(watch)
       timers.forEach(clearTimeout)
       spec.signal?.removeEventListener('abort', abort)
       if (!quiescent) failureCode = 'OUTCOME_UNKNOWN'
-      // Keep the tiny marker pair with the ownership proof. Independent
-      // recovery readers can still be observing this exit; deleting here
-      // races their final scan and turns a proven stop into unknown.
-      if (proofFailed) {
-        quiescent = false
-        failureCode = 'OUTCOME_UNKNOWN'
-      }
       const receipt: ProcessExitReceipt = {
         pid: child.pid ?? null,
         exitCode: code,
         signal: sig,
         quiescent,
         ...(failureCode ? { failureCode } : {}),
+        ...(escaped ? { escaped } : {}),
       }
       try {
         spec.onExit?.(receipt)
@@ -637,7 +688,7 @@ export class ManagedAgentProcess {
       },
       kill: (kind) => {
         try {
-          return signal(kind)
+          return signalGroup(kind)
         } catch {
           return false
         }
@@ -659,7 +710,6 @@ export class ManagedAgentProcess {
         Buffer.from(redactExecutorText(stderr.toString('utf8'), secrets))
           .subarray(-64 * 1024)
           .toString('utf8'),
-      captureDescendants,
       terminate,
       interrupt,
     }
@@ -683,102 +733,108 @@ export class ManagedAgentProcess {
   }
 }
 
-/** Stop only process identities recorded by the host; never kill by PID alone. */
+/**
+ * Stop a run recorded by an earlier Emperor process (after a crash or
+ * restart), with the same group timeline. Never kills by PID alone:
+ * - another boot time: the process cannot exist; nothing is signalled;
+ * - the recorded PID is alive under another birth time: it was reused;
+ *   nothing is signalled (`OWNER_MISMATCH`);
+ * - descendants recorded by older builds count only while their own birth
+ *   time still matches, and their PIDs never seed a search.
+ */
 export async function terminateRecordedProcess(
-  ownership: import('./process-types').ProcessOwnership,
+  ownership: ProcessOwnership,
+  options: { bootTime?: string | null; graceMs?: number } = {},
 ): Promise<ProcessExitReceipt> {
-  const receipt: ProcessExitReceipt = {
+  const unknown: ProcessExitReceipt = {
     pid: ownership.pid,
     exitCode: null,
     signal: null,
     quiescent: false,
     failureCode: 'OUTCOME_UNKNOWN',
   }
+  const stopped: ProcessExitReceipt = {
+    pid: ownership.pid,
+    exitCode: null,
+    signal: null,
+    quiescent: true,
+  }
   if (
     process.platform === 'win32' ||
     ownership.platform !== process.platform ||
     !ownership.pid
   )
-    return receipt
+    return unknown
+  const boot =
+    options.bootTime === undefined ? currentBootTime() : options.bootTime
+  if (ownership.bootTime && boot && ownership.bootTime !== boot) return stopped
+  const pgid = ownership.pid,
+    grace = options.graceMs ?? STOP_GRACE_MS
   let rows = await processTable()
-  if (!rows) return receipt
-  const root = rows.get(ownership.pid)
-  if (root && root.birth !== ownership.fingerprint)
-    return { ...receipt, failureCode: 'OWNER_MISMATCH' }
-  const marked = ownership.boundary
-    ? await boundaryPids(ownership.boundary)
-    : []
-  if (!marked) return receipt
-  const known = new Map(
-    ownership.descendants.map((x) => [x.pid, x.fingerprint]),
+  if (!rows) return unknown
+  const root = rows.get(pgid)
+  if (root && (!ownership.fingerprint || root.birth !== ownership.fingerprint))
+    return { ...unknown, failureCode: 'OWNER_MISMATCH' }
+  const recorded = (ownership.descendants ?? []).filter(
+    (d) => d.fingerprint && d.pid > 1 && d.pid !== pgid,
   )
-  for (const pid of marked) {
-    const row = rows.get(pid)
-    if (row) known.set(pid, row.birth)
+  const strays = (table: Map<number, ProcessRow>) =>
+    recorded.filter((d) => {
+      const row = table.get(d.pid)
+      return (
+        row &&
+        !row.state.startsWith('Z') &&
+        row.group !== pgid &&
+        row.birth === d.fingerprint
+      )
+    })
+  const running = (table: Map<number, ProcessRow>) =>
+    (liveMembers(table, pgid)?.length ?? 0) > 0 || strays(table).length > 0
+  const sweep = async () => {
+    if (ownership.boundary) await sweepBoundary(ownership.boundary)
   }
-  if (root) known.set(root.pid, root.birth)
-  for (let changed = true; changed;) {
-    changed = false
-    for (const row of rows.values())
-      if (known.has(row.parent) && !known.has(row.pid)) {
-        if (known.size >= 1025) return receipt
-        known.set(row.pid, row.birth)
-        changed = true
-      }
+  if (!running(rows)) {
+    await sweep()
+    return stopped
   }
-  const kill = (kind: NodeJS.Signals) => {
-    // Signal the group while its held leader identity is still live. Killing
-    // the leader first can turn a subsequent group signal into EPERM on macOS.
-    if (root && fingerprint(root.pid) === root.birth && root.group === root.pid)
+  const signal = (kind: NodeJS.Signals, table: Map<number, ProcessRow>) => {
+    // No row leads the group, or it is the recorded root: the id is ours.
+    const leader = table.get(pgid)
+    if (
+      groupExists(pgid) &&
+      (!leader || leader.birth === ownership.fingerprint)
+    )
       try {
-        process.kill(-root.pid, kind)
+        process.kill(-pgid, kind)
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
       }
-    for (const [pid, birth] of [...known].reverse())
-      if (pid !== root?.pid && fingerprint(pid) === birth)
+    for (const d of strays(table))
+      if (processBirth(d.pid) === d.fingerprint)
         try {
-          process.kill(pid, kind)
+          process.kill(d.pid, kind)
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
         }
-    if (root && root.group !== root.pid && fingerprint(root.pid) === root.birth)
-      try {
-        process.kill(root.pid, kind)
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
-      }
   }
-  const active = (table: Map<number, ProcessRow>) =>
-    [...known].some(([pid, birth]) => {
-      const row = table.get(pid)
-      return row?.birth === birth && !row.state.startsWith('Z')
-    }) ||
-    [...table.values()].some(
-      (row) => row.group === ownership.pid && !row.state.startsWith('Z'),
-    )
+  const tracked = strays(rows)
+  const alive = () => groupExists(pgid) || tracked.some((d) => pidExists(d.pid))
   try {
-    if (active(rows)) kill('SIGTERM')
-    const deadline = Date.now() + 2500,
-      forceAt = Date.now() + 2000
-    while (true) {
+    signal('SIGTERM', rows)
+    const killAt = Date.now() + grace
+    while (alive() && Date.now() < killAt) await sleep(50)
+    if (alive()) {
       rows = await processTable()
-      if (!rows) return receipt
-      if (ownership.boundary) {
-        const marked = await boundaryPids(ownership.boundary)
-        if (!marked) return receipt
-        for (const pid of marked) {
-          const row = rows.get(pid)
-          if (row) known.set(pid, row.birth)
-        }
-      }
-      if (!active(rows))
-        return { ...receipt, quiescent: true, failureCode: undefined }
-      if (Date.now() >= deadline) return receipt
-      if (Date.now() >= forceAt) kill('SIGKILL')
-      await new Promise((resolve) => setTimeout(resolve, 25))
+      if (!rows) return unknown
+      signal('SIGKILL', rows)
+      const until = Date.now() + KILL_SETTLE_MS
+      while (alive() && Date.now() < until) await sleep(25)
     }
+    rows = await processTable()
+    if (!rows || running(rows)) return unknown
+    await sweep()
+    return stopped
   } catch {
-    return receipt
+    return unknown
   }
 }

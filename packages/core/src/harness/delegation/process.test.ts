@@ -25,8 +25,8 @@ function fixture() {
   return { ...d, workspace, runtime, temp, policy }
 }
 describe('managed streaming agent process', () => {
-  it.skipIf(process.platform === 'win32')(
-    'stops an owned descendant that created a separate process group',
+  it.skipIf(process.platform !== 'darwin')(
+    'diagnostics mode stops a descendant that left the process group',
     async () => {
       const f = fixture(),
         late = join(f.workspace, 'detached-late')
@@ -36,9 +36,49 @@ describe('managed streaming agent process', () => {
         'require("child_process").spawn(process.execPath,["-e",' +
         JSON.stringify(nested) +
         ',process.argv[1]],{detached:true,stdio:["ignore","inherit","inherit"]});setInterval(()=>{},1000)'
-      const h = await new ManagedAgentProcess().open({
+      const h = await new ManagedAgentProcess({
+        diagnostics: () => true,
+      }).open({
         executable: process.execPath,
         args: ['-e', code, late],
+        cwd: f.workspace,
+        env: process.env,
+        policy: { ...f.policy, mode: 'danger-full-access' },
+      })
+      expect(h.identity.boundary).toBeDefined()
+      let nestedPid = 0
+      for await (const row of readJsonLines(h.stdout)) {
+        nestedPid = Number(row.pid)
+        break
+      }
+      try {
+        await h.terminate()
+        const exit = await h.closed
+        expect(exit).toMatchObject({ quiescent: true, escaped: 1 })
+        await new Promise((resolve) => setTimeout(resolve, 1700))
+        expect(existsSync(late)).toBe(false)
+      } finally {
+        try {
+          process.kill(nestedPid, 'SIGKILL')
+        } catch {
+          /* already stopped */
+        }
+      }
+    },
+  )
+  it.skipIf(process.platform === 'win32')(
+    'outside diagnostics mode a descendant that left the group is not tracked (the documented trade-off)',
+    async () => {
+      const f = fixture()
+      const nested =
+        'console.log(JSON.stringify({pid:process.pid}));setInterval(()=>{},1000)'
+      const code =
+        'require("child_process").spawn(process.execPath,["-e",' +
+        JSON.stringify(nested) +
+        '],{detached:true,stdio:["ignore","inherit","inherit"]});setInterval(()=>{},1000)'
+      const h = await new ManagedAgentProcess().open({
+        executable: process.execPath,
+        args: ['-e', code],
         cwd: f.workspace,
         env: process.env,
         policy: { ...f.policy, mode: 'danger-full-access' },
@@ -50,9 +90,9 @@ describe('managed streaming agent process', () => {
       }
       try {
         await h.terminate()
-        await new Promise((resolve) => setTimeout(resolve, 1700))
-        expect(existsSync(late)).toBe(false)
-        expect((await h.closed).quiescent).toBe(true)
+        // The run's group is empty, so the stop is complete.
+        expect(await h.closed).toMatchObject({ quiescent: true })
+        expect(() => process.kill(nestedPid, 0)).not.toThrow()
       } finally {
         try {
           process.kill(nestedPid, 'SIGKILL')
@@ -78,76 +118,6 @@ describe('managed streaming agent process', () => {
       expect(String(error)).toContain('PROTOCOL_INVALID')
     }
   })
-  it.skipIf(process.platform === 'win32')(
-    'refreshes an in-flight observation after process exit before proving quiescence',
-    async () => {
-      const f = fixture()
-      let resolveScan!: (
-        rows: Map<
-          number,
-          {
-            pid: number
-            parent: number
-            group: number
-            state: string
-            birth: string
-          }
-        >,
-      ) => void
-      let scans = 0
-      const pending = new Promise<
-        Map<
-          number,
-          {
-            pid: number
-            parent: number
-            group: number
-            state: string
-            birth: string
-          }
-        >
-      >((resolve) => {
-        resolveScan = resolve
-      })
-      const manager = new ManagedAgentProcess({
-        observeProcesses: async () => (++scans === 1 ? pending : new Map()),
-      })
-      const h = await manager.open({
-        executable: process.execPath,
-        args: [
-          '-e',
-          'process.stdin.resume();process.stdin.on("end",()=>process.exit(0))',
-        ],
-        cwd: f.workspace,
-        env: process.env,
-        policy: { ...f.policy, mode: 'danger-full-access' },
-      })
-      const capture = h.captureDescendants()
-      h.stdin.end()
-      await new Promise<void>((resolve) =>
-        h.child.once('exit', () => resolve()),
-      )
-      await new Promise((resolve) => setTimeout(resolve, 150))
-      const pid = h.identity.pid!
-      resolveScan(
-        new Map([
-          [
-            pid,
-            {
-              pid,
-              parent: process.pid,
-              group: pid,
-              state: 'S',
-              birth: h.identity.fingerprint,
-            },
-          ],
-        ]),
-      )
-      await capture
-      expect(await h.closed).toMatchObject({ exitCode: 0, quiescent: true })
-      expect(scans).toBeGreaterThanOrEqual(2)
-    },
-  )
   it('streams stdin and stdout through a real child without collecting all output', async () => {
     const f = fixture(),
       manager = new ManagedAgentProcess()
@@ -342,7 +312,7 @@ describe('managed streaming agent process', () => {
         'require("child_process").spawn(process.execPath,["-e",' +
         JSON.stringify(descendant) +
         '],{stdio:["ignore","inherit","inherit"]});setInterval(()=>{},1000)'
-      const h = await new ManagedAgentProcess().open({
+      const h = await new ManagedAgentProcess({ stopGraceMs: 300 }).open({
         executable: process.execPath,
         args: ['-e', code],
         cwd: f.workspace,
@@ -367,7 +337,7 @@ describe('managed streaming agent process', () => {
     },
   )
   it.skipIf(process.platform !== 'darwin')(
-    'finds a fast double-fork writer after its parent exited and session changed',
+    'diagnostics mode finds a fast double-fork writer after its parent exited and session changed',
     async () => {
       const f = fixture(),
         marker = join(f.workspace, 'double-fork-late')
@@ -382,7 +352,9 @@ if os.fork()==0:
 os.wait()
 time.sleep(.3)
 `
-      const h = await new ManagedAgentProcess().open({
+      const h = await new ManagedAgentProcess({
+        diagnostics: () => true,
+      }).open({
         executable: python,
         args: ['-c', code],
         cwd: f.workspace,
