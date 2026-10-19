@@ -7,8 +7,8 @@
 
 Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资源包；Plugin 是带来源、版本和启用状态的 Skill 分发单元；MCP 把外部 server 暴露的工具接入 Agent。
 
-- 侧栏的「能力」打开能力页（`/capabilities`），用“插件 / Skills / MCP / 工具”四个标签分别管理 Plugin、Skill、MCP server，并查看注册给 Agent 的工具；
-- 侧栏的「探索」列出应用内置的一小组精选 Skills 和 MCP server，见[探索](#探索)；
+- 图标栏的「能力」打开能力页（`/capabilities`），用“插件 / Skills / MCP / 工具”四个标签分别管理 Plugin、Skill、MCP server，并查看注册给 Agent 的工具；
+- 图标栏的「探索」列出应用内置的一小组精选 Skills 和 MCP server，见[探索](#探索)；
 - 能力页的“工具”标签（`/capabilities/tools`）按用途分类查看 Emperor 内建的工具。
 
 ## Tools
@@ -223,7 +223,7 @@ Agent 被要求只通过 `mcp_config` 添加 server，不使用 mcporter，也�
 
 ## 探索
 
-侧栏的「探索」（`/explore`）以卡片列出一小组随应用发布的精选条目，可以搜索，并按“全部 / Skills / MCP / 插件”筛选：
+图标栏的「探索」（`/explore`）以卡片列出一小组随应用发布的精选条目，可以搜索，并按“全部 / Skills / MCP / 插件”筛选：
 
 - Skills：来自 [anthropics/skills](https://github.com/anthropics/skills) 的若干 Skill；
 - MCP：[modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers) 中的几个本地 server，以及一个无需 API 密钥的远程 server。标签会注明需要 Node.js 或 uv 等本机依赖。

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、开发者、希望理解产品边界的用户<br>
-> 最后核验：2026-10-15<br>
+> 最后核验：2026-10-19<br>
 > 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/api/core-api.ts`、`packages/core/src/api/operations.ts`、`desktop/src/main/`、`desktop/src/preload/`、`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/workspace/`
 
 Emperor Agent 的桌面主产品是本地单用户 Electron 应用。Electron main 进程内创建一个 TypeScript `CoreApi`；`CoreApi` 背后是唯一的内核组合根 `HarnessHost`。Vue renderer 只能通过 preload 暴露的 IPC contract 请求 Core，并通过 runtime events 接收过程状态。源码还提供默认不随桌面安装包开放的 ACP V1 stdio operator preview，它为受信本机 client 创建独立的 `CoreApi`。产品主线没有 Python runtime、HTTP backend 或 WebSocket backend。
@@ -69,7 +69,7 @@ Scheduler 的 `agent_turn` 任务、Watchlist 检查和 Goal 续跑都通过同�
 
 ## 桌面外壳与路由
 
-Renderer 外壳是 `components/shell/AppFrame.vue` 的三栏网格：左侧会话栏、中间列、右侧工作台。列宽由 `components/shell/columns.ts` 的纯函数 `computeColumns()` 求解：中间列有下限（对话 480px、轨迹 640px），空间不足时右侧工作台先在 360–960px 内缩窄，再自动关闭；这一让位只作用于渲染宽度，不改写用户的宽度偏好，窗口变宽后恢复。窗口宽度小于 1024px 时侧栏收起为 56px 图标栏。
+Renderer 外壳是 `components/shell/AppFrame.vue` 的网格：常驻的 56px 图标栏、会话侧栏、中间列、右侧工作台；中间列与工作台各是一块面板，布局规则见[外壳布局](../design/layout.md)。主窗口在 macOS 上隐藏系统标题栏（`desktop/src/main/window-chrome.ts`），红绿灯放在图标栏顶部，拖拽区由 renderer 的 `data-app-drag` 标记。列宽由 `components/shell/columns.ts` 的纯函数 `computeColumns()` 求解：中间列有下限（对话 480px、轨迹 640px），空间不足时右侧工作台先在 360–960px 内缩窄，再自动关闭；这一让位只作用于渲染宽度，不改写用户的宽度偏好，窗口变宽后恢复。窗口宽度小于 1024px 时侧栏自动收起，图标栏保留。
 
 布局偏好由 `components/shell/frameState.ts` 管理，按窗口保存在 renderer 的 `localStorage`（键 `emperor.frame.v2`）：侧栏宽度、工作台开关与宽度、当前工作台面板（`launcher` / `review` / `terminal` / `files` / `browser`）、环境信息卡偏好（`envCard`：`auto` 在会话列不窄于 1120 px 时默认展开，`open` 按需打开，`closed` 手动关闭后保持；旧的 `envCardOpen` 读取时迁移），以及轨迹「详情」列的开关与宽度。会话列是否够宽由 ConversationView 实时测量，不保存。旧的 `emperor.frame.v1`（右侧详情栏）在首次读取时迁移一次后删除。
 

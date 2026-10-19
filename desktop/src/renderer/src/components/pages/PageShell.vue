@@ -78,7 +78,7 @@ const titleId = `page-title-${useId()}`
   min-width: 0;
   min-height: 0;
   height: 100%;
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-base));
   color: rgb(var(--label-primary));
 }
 

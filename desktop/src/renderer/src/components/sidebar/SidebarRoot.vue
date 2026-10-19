@@ -1,14 +1,14 @@
 <script setup lang="ts">
 /**
- * Sidebar column. Top to bottom: SidebarTopRow (collapse, ← →),
- * SidebarBrandRow (BrandMark + Emperor, search toggle, bell),
- * SidebarNav (新对话 + the full pages), the search capsule while
- * searching, then the session list — 置顶 (pinned, pin order), 项目
- * (projects → sessions), 对话 (chats grouped by day) — and SidebarFooter
- * (设置 / 明暗切换).
- * Collapsed, the column renders the 56px SidebarRail instead. Geometry is
- * owned by AppFrame; this fills the column it is given. The persisted
- * layout (sorts, orders, pins) lives in useSidebarState.
+ * Sidebar column (UI-S01): projects and chats only. Top to bottom: the 46px
+ * SidebarBrandRow (Emperor + collapse; a window drag region), the search
+ * capsule while searching, then the session list — 置顶 (pinned, pin order),
+ * 项目 (projects → sessions), 对话 (chats grouped by day). New chat, search,
+ * the full pages, the bell and settings live in the permanent rail
+ * (SidebarRail, rendered by App beside this column). Geometry is owned by
+ * AppFrame; this fills the column it is given and stays mounted (hidden by
+ * App) while folded. The persisted layout (sorts, orders, pins) lives in
+ * useSidebarState.
  */
 import { elementOf } from '../ui/elementOf'
 import IconButton from '../ui/IconButton.vue'
@@ -27,18 +27,14 @@ import {
   type SidebarProjectGroup,
 } from '../../runtime/sidebarModel'
 import type { ProjectInfo, SessionInfo } from '../../types'
-import { DsFolderClose, DsMore, DsPlus } from '../icons/ds'
+import { DsMore, DsPlus } from '../icons/ds'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
 import SessionRow from './SessionRow.vue'
 import SidebarBrandRow from './SidebarBrandRow.vue'
-import SidebarFooter from './SidebarFooter.vue'
-import SidebarNav from './SidebarNav.vue'
 import SidebarProjectRow from './SidebarProjectRow.vue'
-import SidebarRail from './SidebarRail.vue'
 import SidebarSearchResults from './SidebarSearchResults.vue'
 import SidebarSectionHeader from './SidebarSectionHeader.vue'
-import SidebarTopRow from './SidebarTopRow.vue'
 import { useSidebarState } from './useSidebarState'
 import { useAgentTree } from './agentTree'
 import { fetchSessionLineage } from '../../api/sessions'
@@ -80,8 +76,6 @@ const searchIndex = ref(0)
 const creatingBuild = ref(false)
 const projectMenuOpen = ref(false)
 const projectMenuAnchor = ref<HTMLElement | null>(null)
-const newProjectMenuOpen = ref(false)
-const newProjectMenuAnchor = ref<HTMLElement | null>(null)
 const chatMenuOpen = ref(false)
 const chatMenuAnchor = ref<HTMLElement | null>(null)
 const pinnedCollapsed = ref(false)
@@ -199,11 +193,6 @@ function openSession(id: string) {
   void router.push(sessionLocation(id)).catch(() => undefined)
 }
 
-async function newChat() {
-  const session = await create({ mode: 'chat', title: '新会话' })
-  openSession(session.id)
-}
-
 async function newProjectSession(project: SidebarProjectGroup) {
   const session = await create({
     mode: 'build',
@@ -237,11 +226,6 @@ async function pickBuildProject() {
   } finally {
     creatingBuild.value = false
   }
-}
-
-function openNewProjectMenu(anchor: HTMLElement) {
-  newProjectMenuAnchor.value = anchor
-  newProjectMenuOpen.value = !newProjectMenuOpen.value
 }
 
 function firstOtherSession(id: string): SessionInfo | undefined {
@@ -313,15 +297,6 @@ function focusSearch() {
   void nextTick(() => searchInput.value?.focus())
 }
 
-/** Brand-row search icon: open + focus, or close an empty capsule. */
-function toggleSearch() {
-  if (searchVisible.value && !searching.value) {
-    searchOpen.value = false
-    return
-  }
-  focusSearch()
-}
-
 function clearSearch() {
   searchQuery.value = ''
   searchIndex.value = 0
@@ -374,25 +349,12 @@ defineExpose({ focusSearch })
 </script>
 
 <template>
-  <SidebarRail
-    v-if="collapsed"
-    @toggle="emit('toggle')"
-    @new-chat="newChat"
-    @search="focusSearch"
-  />
   <aside
-    v-else
     class="sidebar-root"
     aria-label="会话侧栏"
     :style="{ width: `${width}px` }"
   >
-    <SidebarTopRow @toggle="emit('toggle')" />
-    <SidebarBrandRow :search-active="searchVisible" @search="toggleSearch" />
-    <SidebarNav
-      :project-menu-open="newProjectMenuOpen"
-      @new-chat="newChat"
-      @new-project="openNewProjectMenu"
-    />
+    <SidebarBrandRow class="bar" @toggle="emit('toggle')" />
 
     <SearchField
       v-if="searchVisible"
@@ -551,32 +513,6 @@ defineExpose({ focusSearch })
       </div>
     </div>
 
-    <SidebarFooter />
-
-    <Menu
-      v-model:open="newProjectMenuOpen"
-      :anchor="newProjectMenuAnchor"
-      :width="220"
-      placement="bottom"
-      label="新建项目会话"
-    >
-      <template v-if="grouped.projects.length">
-        <MenuItem variant="label">在项目中新建会话</MenuItem>
-        <MenuItem
-          v-for="project in grouped.projects.slice(0, 6)"
-          :key="project.id"
-          @select="newProjectSession(project)"
-        >
-          <template #icon><DsFolderClose :size="16" /></template>
-          {{ project.name }}
-        </MenuItem>
-        <MenuItem variant="separator" />
-      </template>
-      <MenuItem :disabled="creatingBuild" @select="pickBuildProject()">
-        选择项目文件夹…
-      </MenuItem>
-    </Menu>
-
     <Menu
       v-model:open="projectMenuOpen"
       :anchor="projectMenuAnchor"
@@ -647,11 +583,16 @@ defineExpose({ focusSearch })
   box-sizing: border-box;
   height: 100%;
   min-width: 0;
-  padding: var(--space-1-5) var(--space-3);
+  padding: 0 var(--space-3) var(--space-1-5);
   background: rgb(var(--sidebar-fill));
   color: rgb(var(--label-primary));
   font-size: var(--fs-s);
   animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
+}
+
+/* The top bar spans the column (it lines up with the traffic lights). */
+.bar {
+  margin: 0 calc(0px - var(--space-3)) var(--space-1);
 }
 
 .head-button {

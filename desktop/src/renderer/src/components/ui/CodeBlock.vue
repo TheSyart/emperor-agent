@@ -63,7 +63,7 @@ const { copied, copy } = useCopyFeedback(() => trimmed.value)
   position: sticky;
   top: 0;
   z-index: var(--z-raised);
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-base));
   border-top-left-radius: var(--radius-card);
   border-top-right-radius: var(--radius-card);
 }

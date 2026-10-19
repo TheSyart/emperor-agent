@@ -1,12 +1,14 @@
 <script setup lang="ts">
 /**
  * IconButton — a glyph-only button (DS-03).
- *   size:    xs 20 | sm 28 (default) | md 32
+ *   size:    xs 20 | sm 28 (default) | md 32 | lg 36 (the app rail, UI-S01)
  *   variant: ghost (default) | tonal (neutral fill) | primary (gold; send)
  *   shape:   square (radius 8, default) | circle
  * `label` is required (accessible name and tooltip text); the tooltip is a
  * real Tooltip bubble with an optional `shortcut`, never a native title.
  * `tooltip: false` keeps the accessible name without a bubble.
+ * `selected` marks the current entry of a navigation strip (the rail) on
+ * `--surface-selected`; the caller sets aria-current itself.
  */
 import { computed, ref } from 'vue'
 import TooltipBubble from './TooltipBubble.vue'
@@ -15,10 +17,11 @@ import { useTooltip } from './useTooltip'
 const props = withDefaults(
   defineProps<{
     label: string
-    size?: 'xs' | 'sm' | 'md'
+    size?: 'xs' | 'sm' | 'md' | 'lg'
     variant?: 'ghost' | 'tonal' | 'primary'
     shape?: 'square' | 'circle'
     active?: boolean
+    selected?: boolean
     disabled?: boolean
     tooltip?: string | false
     shortcut?: string
@@ -30,6 +33,7 @@ const props = withDefaults(
     variant: 'ghost',
     shape: 'square',
     active: false,
+    selected: false,
     disabled: false,
     tooltip: undefined,
     shortcut: '',
@@ -45,7 +49,12 @@ const anchor = ref<HTMLButtonElement | null>(null)
 const tooltipText = computed(() =>
   props.tooltip === false ? '' : (props.tooltip ?? props.label),
 )
-const { visible, position, listeners } = useTooltip({
+const {
+  visible,
+  position,
+  side: bubbleSide,
+  listeners,
+} = useTooltip({
   anchor,
   side: () => props.side,
   delayMs: () => 400,
@@ -62,6 +71,7 @@ const { visible, position, listeners } = useTooltip({
     :data-variant="variant"
     :data-shape="shape"
     :data-active="active || undefined"
+    :data-selected="selected || undefined"
     :aria-label="label"
     :disabled="disabled"
     v-on="listeners"
@@ -72,7 +82,7 @@ const { visible, position, listeners } = useTooltip({
       v-if="visible"
       :label="tooltipText"
       :shortcut="shortcut"
-      :side="side"
+      :side="bubbleSide"
       :position="position"
     />
   </button>
@@ -107,6 +117,11 @@ const { visible, position, listeners } = useTooltip({
   height: var(--control-md);
 }
 
+.ds-icon-button[data-size='lg'] {
+  width: var(--icon-button-lg);
+  height: var(--icon-button-lg);
+}
+
 .ds-icon-button[data-shape='circle'] {
   border-radius: var(--r-full);
 }
@@ -114,6 +129,12 @@ const { visible, position, listeners } = useTooltip({
 .ds-icon-button[data-variant='ghost']:hover:not(:disabled),
 .ds-icon-button[data-variant='ghost'][data-active] {
   background: var(--surface-hover);
+  color: rgb(var(--text-1));
+}
+
+.ds-icon-button[data-selected],
+.ds-icon-button[data-selected]:hover:not(:disabled) {
+  background: rgb(var(--surface-selected));
   color: rgb(var(--text-1));
 }
 

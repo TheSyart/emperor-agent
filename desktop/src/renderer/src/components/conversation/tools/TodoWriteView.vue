@@ -72,7 +72,7 @@ const items = computed(() => todoItems(props.data))
 
 [data-status='in_progress'] .mark {
   border-color: rgb(var(--accent-fill));
-  box-shadow: inset 0 0 0 3px rgb(var(--bg-base));
+  box-shadow: inset 0 0 0 3px rgb(var(--surface-base));
   background: rgb(var(--accent-fill));
 }
 

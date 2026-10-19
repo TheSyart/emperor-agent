@@ -1107,7 +1107,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   min-height: 0;
   height: 100%;
   overflow: hidden;
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-base));
   color: rgb(var(--label-primary));
 }
 
@@ -1170,8 +1170,8 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   padding-top: calc(var(--space-8) + var(--space-1));
   background: linear-gradient(
     180deg,
-    rgb(var(--bg-base) / 0) 0,
-    rgb(var(--bg-base)) calc(var(--space-8) + var(--space-1))
+    rgb(var(--surface-base) / 0) 0,
+    rgb(var(--surface-base)) calc(var(--space-8) + var(--space-1))
   );
   pointer-events: none;
 }

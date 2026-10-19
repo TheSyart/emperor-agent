@@ -1,8 +1,10 @@
 <script setup lang="ts">
 /**
- * WorkspacePanel — the AppFrame's right workspace column: a header (pane
- * title, segmented pane switch 审查 / 终端 / 文件 / 浏览器 / 电脑, launcher home,
- * close) over one pane body. The launcher lists the panes with their
+ * WorkspacePanel — the AppFrame's right workspace panel: a PaneHeader (pane
+ * title, segmented pane switch 审查 / 终端 / 文件 / 浏览器, launcher home,
+ * close) over one pane body. The 48px PaneHeader is pulled up 2px so its
+ * bottom meets the 46px top bars of the other columns (UI-S01); its empty
+ * space moves the window. The launcher lists the panes with their
  * shortcuts; every pane is its own async chunk (xterm, the file
  * highlighter and the diff views stay out of the shell bundle). The
  * AppFrame owns the column width and drag handle; this fills whatever the
@@ -51,6 +53,7 @@ import {
   type WorkspacePane,
 } from '../shell/frameState'
 import IconButton from '../ui/IconButton.vue'
+import PaneHeader from '../ui/PaneHeader.vue'
 import WorkspaceLauncher from './WorkspaceLauncher.vue'
 import { useWorkspaceSnapshot } from './useWorkspaceSnapshot'
 import { WORKSPACE_PANE_ICONS } from './workspaceIcons'
@@ -228,33 +231,37 @@ async function persistFilesTreeWidth(): Promise<void> {
 
 <template>
   <div class="workspace-panel" role="region" aria-label="工作台">
-    <header class="workspace-header">
-      <h2 class="workspace-title">{{ title }}</h2>
-      <div class="segments" role="group" aria-label="工作台面板">
+    <PaneHeader class="workspace-header" data-app-drag>
+      <template #title>
+        <h2 class="workspace-title">{{ title }}</h2>
+      </template>
+      <template #actions>
+        <div class="segments" role="group" aria-label="工作台面板">
+          <IconButton
+            v-for="segment in segments"
+            :key="segment.pane"
+            :label="segment.label"
+            :active="pane === segment.pane"
+            :aria-pressed="pane === segment.pane"
+            :disabled="Boolean(segment.reason)"
+            :data-pane="segment.pane"
+            @click="selectPane(segment.pane)"
+          >
+            <component :is="segment.icon" :size="16" />
+          </IconButton>
+        </div>
         <IconButton
-          v-for="segment in segments"
-          :key="segment.pane"
-          :label="segment.label"
-          :active="pane === segment.pane"
-          :aria-pressed="pane === segment.pane"
-          :disabled="Boolean(segment.reason)"
-          :data-pane="segment.pane"
-          @click="selectPane(segment.pane)"
+          label="工作台首页"
+          :active="pane === 'launcher'"
+          @click="showLauncher"
         >
-          <component :is="segment.icon" :size="16" />
+          <House :size="16" />
         </IconButton>
-      </div>
-      <IconButton
-        label="工作台首页"
-        :active="pane === 'launcher'"
-        @click="showLauncher"
-      >
-        <House :size="16" />
-      </IconButton>
-      <IconButton shape="circle" label="关闭工作台" @click="close">
-        <DsClose :size="14" />
-      </IconButton>
-    </header>
+        <IconButton shape="circle" label="关闭工作台" @click="close">
+          <DsClose :size="14" />
+        </IconButton>
+      </template>
+    </PaneHeader>
     <div class="workspace-body" :data-pane="pane">
       <WorkspaceLauncher
         v-if="pane === 'launcher'"
@@ -317,26 +324,20 @@ async function persistFilesTreeWidth(): Promise<void> {
   flex-direction: column;
   height: 100%;
   min-width: 0;
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-base));
   color: rgb(var(--label-primary));
 }
 
-/* dsh RightSidebar header frame: pad 14/12/12, gap 8, hairline below. */
+/* The 48px PaneHeader, pulled up 2px: its bottom (and hairline) meets the
+   46px top bars of the rail, the sidebar and the conversation. */
 .workspace-header {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3-5) var(--space-3) var(--space-3);
-  border-bottom: 1px solid var(--border-l2);
+  margin-top: calc(var(--shell-bar-h) - var(--pane-header-h));
 }
 
 .workspace-title {
-  flex: 1;
   min-width: 0;
   margin: 0;
   overflow: hidden;
-  padding-left: var(--space-1);
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   font-weight: 500;

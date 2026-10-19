@@ -1,8 +1,10 @@
 <script setup lang="ts">
 /**
- * ConversationHeader — dsh conversation header (padding 12 28 0 20, l2
- * hairline): breadcrumb row (project / ancestors / current title; ancestor
- * crumbs navigate) with the right-hand toggles — 环境信息 (the chat
+ * ConversationHeader — dsh conversation header (l2 hairline). Its first row
+ * is the center panel's 46px top bar (UI-S01: bottoms line up with the rail,
+ * sidebar and workspace bars, and its empty space moves the window): the
+ * breadcrumb (project / ancestors / current title; ancestor crumbs
+ * navigate) with the right-hand toggles — 环境信息 (the chat
  * environment card, Chat tab only; a floating-card glyph so it does not read
  * as "about") and 工作台 (the right workspace column) — then the 对话 | 轨迹
  * tab strip (13/16 medium, gap 36, 2px gold bar).
@@ -53,7 +55,7 @@ function onTab(id: string) {
 
 <template>
   <header class="conversation-header" :data-slim="slim || undefined">
-    <div class="title-row">
+    <div class="title-row" data-app-drag>
       <nav v-if="!slim" class="crumbs" aria-label="会话路径">
         <template v-for="(crumb, index) in crumbs" :key="crumb.id">
           <span v-if="index > 0" class="sep" aria-hidden="true">/</span>
@@ -128,7 +130,7 @@ function onTab(id: string) {
 .conversation-header {
   position: relative;
   flex: none;
-  padding: var(--space-3) var(--space-7) 0 var(--space-5);
+  padding: 0 var(--space-3) 0 var(--space-5);
 }
 
 .conversation-header::after {
@@ -165,7 +167,8 @@ function onTab(id: string) {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: var(--space-8);
+  box-sizing: border-box;
+  height: var(--shell-bar-h);
 }
 
 .crumbs {
