@@ -20,7 +20,7 @@ import {
 import { dirname, join, resolve } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import {
-  prepareOwnedProcessExecution,
+  containOwnedProcess,
   type OwnedProcessRequest,
   type OwnedProcessResult,
   type OwnedProcessRunner,
@@ -29,8 +29,8 @@ import {
 import {
   OsSandboxController,
   type ProcessContainmentController,
-  type ProcessContainmentReceipt,
 } from '../environment/sandbox'
+import type { ContainmentReceipt } from '../sandbox/policy'
 import { isPathWithin } from '../util/paths'
 import {
   compareStableProcessStartIdentity,
@@ -45,6 +45,8 @@ const MAX_TIMEOUT_MS = 30 * 60_000
 const DEFAULT_OUTPUT_BYTES = 64 * 1_024
 const MAX_OUTPUT_BYTES = 8 * 1_024 * 1_024
 const MAX_RECEIPTS = 10_000
+/** Containment receipts the diagnostics page lists. */
+const RECENT_CONTAINMENT = 20
 
 export type ProcessOwnerKind =
   | 'app'
@@ -79,6 +81,20 @@ export type OwnedProcessReceiptStatus =
   | 'interrupted'
   | 'orphan_reaped'
   | 'orphan_unverified'
+  /** The containment refused the start (SEC-08); nothing was spawned. */
+  | 'refused'
+
+/** One managed install's plan, digested (never the raw ids). */
+interface ManagedInstallAuthorizationReceipt {
+  kind: 'managed_environment_install'
+  source: 'managed_environment_install'
+  planIdDigest: string
+  recipeDigest: string
+  toolId: string
+  toolVersion: string
+  operationFingerprintDigest: string
+  authorizationIdDigest: string
+}
 
 export interface OwnedProcessReceipt {
   schemaVersion: 1
@@ -92,7 +108,7 @@ export interface OwnedProcessReceipt {
     workspaceRootDigest: string
     withinWorkspace: boolean
   }
-  containment: ProcessContainmentReceipt
+  containment: ContainmentReceipt
   executionBoundary?: {
     kind: 'sandbox' | 'host'
     authorization:
@@ -104,16 +120,7 @@ export interface OwnedProcessReceipt {
           operationFingerprintDigest: string
           authorizationIdDigest: string | null
         }
-      | {
-          kind: 'managed_environment_install'
-          source: 'managed_environment_install'
-          planIdDigest: string
-          recipeDigest: string
-          toolId: string
-          toolVersion: string
-          operationFingerprintDigest: string
-          authorizationIdDigest: string
-        }
+      | ManagedInstallAuthorizationReceipt
       | null
   }
   outputQuota: {
@@ -185,6 +192,32 @@ export class ProcessLeaseConflictError extends Error {
   }
 }
 
+/** The containment refused to start a process (SEC-08); the message says why. */
+export class ContainmentRefusedError extends Error {
+  readonly code = 'containment_refused'
+
+  constructor(
+    readonly receipt: ContainmentReceipt,
+    readonly processId: string,
+  ) {
+    super(receipt.reason || 'process containment refused the start')
+    this.name = 'ContainmentRefusedError'
+  }
+}
+
+/** One line of the diagnostics page's containment list. */
+export interface ContainmentReceiptSummary {
+  owner: ProcessOwnerKind
+  id: string
+  decision: ContainmentReceipt['decision']
+  backend: ContainmentReceipt['backend']
+  /** First 12 hex characters. */
+  policyHash: string
+  status: OwnedProcessReceiptStatus
+  reason: string
+  at: string
+}
+
 export class ProcessOwnerError extends Error {
   readonly code = 'process_owner_invalid'
 
@@ -251,22 +284,83 @@ export class OwnedProcessRuntime implements OwnedProcessRunner {
         defaultStrategy: 'terminate',
       },
       sandbox: this.sandbox.capability(),
+      containment: {
+        backend: this.sandbox.capability().backend,
+        available: this.sandbox.capability().status === 'available',
+        recent: this.containmentReceipts(RECENT_CONTAINMENT),
+      },
     }
   }
 
+  /** The newest containment decisions (SEC-08), newest first. */
+  containmentReceipts(limit = RECENT_CONTAINMENT): ContainmentReceiptSummary[] {
+    return [...this.receipts.values()]
+      .sort(
+        (left, right) =>
+          right.startedAt.localeCompare(left.startedAt) ||
+          right.id.localeCompare(left.id),
+      )
+      .slice(0, Math.max(0, limit))
+      .map((receipt) => ({
+        owner: receipt.owner.kind,
+        id: receipt.owner.id,
+        decision: receipt.containment.decision,
+        backend: receipt.containment.backend,
+        policyHash: String(receipt.containment.policyHash ?? '').slice(0, 12),
+        status: receipt.status,
+        reason: String(receipt.containment.reason ?? ''),
+        at: receipt.startedAt,
+      }))
+  }
+
+  /** A start the containment refused: kept as a receipt, nothing spawned. */
+  private recordRefused(
+    request: ManagedOwnedProcessRequest,
+    containment: ContainmentReceipt,
+  ): OwnedProcessReceipt {
+    const workspaceRoot = requestWorkspaceRoot(request)
+    const receipt = this.createReceipt({
+      owner: normalizeOwner(request.owner),
+      executable: request.executable,
+      args: request.args,
+      cwd: resolve(request.cwd ?? workspaceRoot),
+      workspaceRoot,
+      containment,
+      execution: requestExecutionBoundary(request),
+      maxOutputBytes: boundedInteger(
+        request.maxOutputBytes,
+        DEFAULT_OUTPUT_BYTES,
+        1,
+        MAX_OUTPUT_BYTES,
+      ),
+      outputPolicy: request.outputPolicy ?? 'terminate',
+      outputScope: request.outputQuotaScope ?? 'combined',
+    })
+    receipt.status = 'refused'
+    receipt.finishedAt = receipt.startedAt
+    receipt.terminalReason = containment.reason.slice(0, 500) || null
+    this.receipts.set(receipt.id, receipt)
+    this.persistReceipts()
+    return receipt
+  }
+
   async run(request: ManagedOwnedProcessRequest): Promise<OwnedProcessResult> {
-    const prepared = prepareOwnedProcessExecution(this.sandbox, request)
+    const prepared = await containOwnedProcess(this.sandbox, request)
     await request.onContainment?.(prepared.receipt)
-    if (prepared.receipt.decision === 'denied' || !prepared.executable)
+    if (prepared.receipt.decision === 'refused' || !prepared.executable) {
+      const refused = this.recordRefused(request, prepared.receipt)
       return {
         status: 'containment_unavailable',
         exitCode: null,
         stdout: '',
         stderr: '',
         durationMs: 0,
-        error: prepared.receipt.reason || 'required containment unavailable',
+        error:
+          prepared.receipt.reason || 'process containment refused the start',
         containment: prepared.receipt,
+        processId: refused.id,
       }
+    }
 
     const started = Date.now()
     const owner = normalizeOwner(request.owner)
@@ -320,7 +414,7 @@ export class OwnedProcessRuntime implements OwnedProcessRunner {
     return await new Promise<OwnedProcessResult>((resolveResult) => {
       const options: SpawnOptionsWithoutStdio = {
         cwd,
-        env: { ...request.env },
+        env: { ...request.env, ...prepared.env },
         shell: false,
         detached: this.platform !== 'win32',
         windowsHide: true,
@@ -462,12 +556,12 @@ export class OwnedProcessRuntime implements OwnedProcessRunner {
   async spawn(
     request: ManagedOwnedProcessRequest,
   ): Promise<OwnedProcessHandle> {
-    const prepared = prepareOwnedProcessExecution(this.sandbox, request)
+    const prepared = await containOwnedProcess(this.sandbox, request)
     await request.onContainment?.(prepared.receipt)
-    if (prepared.receipt.decision === 'denied' || !prepared.executable)
-      throw new Error(
-        prepared.receipt.reason || 'required containment unavailable',
-      )
+    if (prepared.receipt.decision === 'refused' || !prepared.executable) {
+      const refused = this.recordRefused(request, prepared.receipt)
+      throw new ContainmentRefusedError(prepared.receipt, refused.id)
+    }
 
     const startedAt = Date.now()
     const owner = normalizeOwner(request.owner)
@@ -507,7 +601,7 @@ export class OwnedProcessRuntime implements OwnedProcessRunner {
 
     const child = spawn(prepared.executable, [...prepared.args], {
       cwd,
-      env: { ...request.env },
+      env: { ...request.env, ...prepared.env },
       shell: false,
       detached: this.platform !== 'win32',
       windowsHide: true,
@@ -853,7 +947,7 @@ export class OwnedProcessRuntime implements OwnedProcessRunner {
     args: string[]
     cwd: string
     workspaceRoot: string
-    containment: ProcessContainmentReceipt
+    containment: ContainmentReceipt
     execution: ProcessExecutionBoundary
     maxOutputBytes: number
     outputPolicy: 'terminate' | 'truncate_tail'
@@ -1179,8 +1273,39 @@ function cloneReceipt(receipt: OwnedProcessReceipt): OwnedProcessReceipt {
   return structuredClone(receipt)
 }
 
+/** A receipt written before SEC-08 names its containment in the old words. */
+function normalizeContainment(value: unknown): ContainmentReceipt {
+  const raw = (value && typeof value === 'object' ? value : {}) as Record<
+    string,
+    unknown
+  >
+  const decision = String(raw.decision ?? '')
+  const backend = String(raw.backend ?? '')
+  return {
+    backend:
+      backend === 'seatbelt' || backend === 'macos-seatbelt'
+        ? decision === 'sandboxed' || decision === 'contained'
+          ? 'seatbelt'
+          : 'none'
+        : backend === 'bwrap' || backend === 'linux-bwrap'
+          ? decision === 'sandboxed' || decision === 'contained'
+            ? 'bwrap'
+            : 'none'
+          : 'none',
+    decision:
+      decision === 'contained' || decision === 'sandboxed'
+        ? 'contained'
+        : decision === 'user-allowed-unsandboxed' || decision === 'unsandboxed'
+          ? 'user-allowed-unsandboxed'
+          : 'refused',
+    policyHash: String(raw.policyHash ?? ''),
+    reason: String(raw.reason ?? ''),
+  }
+}
+
 function normalizeReceipt(receipt: OwnedProcessReceipt): OwnedProcessReceipt {
   const cloned = cloneReceipt(receipt)
+  cloned.containment = normalizeContainment(cloned.containment)
   cloned.executionBoundary ??= { kind: 'sandbox', authorization: null }
   const rawAuthorization = cloned.executionBoundary.authorization as Record<
     string,
@@ -1217,8 +1342,14 @@ function requestExecutionBoundary(
 
 function requestWorkspaceRoot(request: ManagedOwnedProcessRequest): string {
   const execution = requestExecutionBoundary(request)
-  if (execution.kind === 'sandbox') return execution.policy.workspaceRoot
   const cwd = String(request.cwd ?? '').trim()
+  if (execution.kind === 'sandbox') {
+    // The policy lists the workspace first among its readable folders.
+    const reads = execution.policy.read.allow
+    const workspace = Array.isArray(reads) ? reads[0] : undefined
+    if (workspace) return workspace
+    if (cwd) return cwd
+  }
   if (!cwd)
     throw new ProcessOwnerError(
       'Host process requires an explicit workspace cwd',
@@ -1229,23 +1360,26 @@ function requestWorkspaceRoot(request: ManagedOwnedProcessRequest): string {
 function executionBoundaryReceipt(
   execution: ProcessExecutionBoundary,
 ): NonNullable<OwnedProcessReceipt['executionBoundary']> {
-  if (execution.kind === 'sandbox')
-    return { kind: 'sandbox', authorization: null }
-  const authorization = execution.authorization
-  if (authorization.toolName === 'manage_environment')
+  if (execution.kind === 'sandbox') {
+    const authorization = execution.authorization
+    if (!authorization) return { kind: 'sandbox', authorization: null }
     return {
-      kind: 'host',
+      kind: 'sandbox',
       authorization: {
         kind: 'managed_environment_install',
         source: authorization.source,
-        planIdDigest: sha256(authorization.planId),
-        recipeDigest: authorization.recipeDigest,
-        toolId: authorization.toolId.slice(0, 128),
-        toolVersion: authorization.toolVersion.slice(0, 128),
-        operationFingerprintDigest: sha256(authorization.operationFingerprint),
-        authorizationIdDigest: sha256(authorization.authorizationId),
+        planIdDigest: sha256(String(authorization.planId)),
+        recipeDigest: String(authorization.recipeDigest),
+        toolId: String(authorization.toolId).slice(0, 128),
+        toolVersion: String(authorization.toolVersion).slice(0, 128),
+        operationFingerprintDigest: sha256(
+          String(authorization.operationFingerprint),
+        ),
+        authorizationIdDigest: sha256(String(authorization.authorizationId)),
       },
     }
+  }
+  const authorization = execution.authorization
   return {
     kind: 'host',
     authorization: {

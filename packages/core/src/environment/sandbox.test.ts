@@ -12,7 +12,10 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { OsSandboxController, type ProcessContainmentPolicy } from './sandbox'
+import { mcpServerContainment } from '../mcp/containment'
+import { ContainmentBackend, type ContainmentPolicy } from '../sandbox/policy'
+import { processContainmentPolicy } from '../sandbox/presets'
+import { OsSandboxController } from './sandbox'
 import { NodeOwnedProcessRunner } from './process-runner'
 
 const cleanup: string[] = []
@@ -27,25 +30,37 @@ afterEach(() => {
   }
 })
 
-function policy(workspaceRoot = '/workspace'): ProcessContainmentPolicy {
-  return {
-    mode: 'required',
-    workspaceRoot,
+function policy(
+  workspaceRoot = '/workspace',
+  extra: { read?: string[]; write?: string[] } = {},
+): ContainmentPolicy {
+  return processContainmentPolicy({
+    workspace: { root: workspaceRoot, access: 'write' },
     stateRoot: join(workspaceRoot, '.emperor'),
-    tempRoot: join(workspaceRoot, '.tmp'),
-    readOnlyRoots: ['/runtime/bin'],
+    tempDir: join(workspaceRoot, '.tmp'),
+    read: ['/runtime/bin', ...(extra.read ?? [])],
+    write: extra.write ?? [],
     network: 'deny',
-  }
+    fallback: 'refuse',
+    env: { PATH: '/usr/bin:/bin' },
+    home: '/Users/example',
+  })
 }
 
-describe('OsSandboxController capability and preparation', () => {
-  it('prepares a macOS Seatbelt profile without exposing arbitrary outside paths', () => {
-    const controller = new OsSandboxController({
+const seatbelt = (ok = true) =>
+  new OsSandboxController({
+    backend: new ContainmentBackend({
       platform: 'darwin',
-      pathExists: (path) => path === '/usr/bin/sandbox-exec',
-      probeProcess: () => ({ ok: true, detail: 'seatbelt probe passed' }),
-    })
+      probe: () => ({
+        ok,
+        detail: ok ? 'seatbelt probe passed' : 'mock: broken',
+      }),
+    }),
+  })
 
+describe('OsSandboxController (adapter over the one backend, SEC-08)', () => {
+  it('prepares a macOS Seatbelt profile without exposing arbitrary outside paths', async () => {
+    const controller = seatbelt()
     expect(controller.capability()).toMatchObject({
       platform: 'darwin',
       backend: 'macos-seatbelt',
@@ -54,49 +69,40 @@ describe('OsSandboxController capability and preparation', () => {
       network: 'policy-controlled',
       processTree: true,
     })
-    const prepared = controller.prepare('/bin/sh', ['-c', 'pwd'], policy())
+    const prepared = await controller.contain(
+      '/bin/sh',
+      ['-c', 'pwd'],
+      policy(),
+    )
     expect(prepared.receipt).toMatchObject({
-      decision: 'sandboxed',
-      backend: 'macos-seatbelt',
-      network: 'denied',
-      filesystem: 'workspace-write',
+      decision: 'contained',
+      backend: 'seatbelt',
     })
     expect(prepared.executable).toBe('/usr/bin/sandbox-exec')
     expect(prepared.args.slice(0, 2)).toEqual(['-p', expect.any(String)])
     const profile = prepared.args[1]!
-    expect(profile).toContain('(deny default)')
-    expect(profile).toContain('/workspace')
-    expect(profile).toContain('/workspace/.emperor')
+    expect(profile).toContain('(deny file-read*)')
+    expect(profile).toContain('(subpath "/workspace")')
+    expect(profile).toContain(
+      '(deny file-read* (subpath "/workspace/.emperor"))',
+    )
     expect(profile).toContain('(deny network*)')
     expect(profile).not.toContain('/Users/example/private')
     expect(prepared.args.slice(-3)).toEqual(['/bin/sh', '-c', 'pwd'])
+    expect(prepared.env.TMPDIR).toBe('/workspace/.tmp')
   })
 
-  it('allows only metadata reads for ancestors of a read-only runtime root', () => {
+  it('allows only metadata reads for ancestors of a read-only runtime root', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'emperor-sandbox-profile-'))
     const outside = mkdtempSync(join(tmpdir(), 'emperor-runtime-root-'))
     cleanup.push(workspace, outside)
     const runtimeRoot = join(outside, 'opt', 'homebrew', 'bin')
-    const stateRoot = join(workspace, '.emperor')
-    const tempRoot = join(workspace, '.tmp')
     mkdirSync(runtimeRoot, { recursive: true })
-    mkdirSync(stateRoot, { recursive: true })
-    mkdirSync(tempRoot, { recursive: true })
-    const controller = new OsSandboxController({
-      platform: 'darwin',
-      pathExists: (path) =>
-        path === '/usr/bin/sandbox-exec' || existsSync(path),
-      probeProcess: () => ({ ok: true, detail: 'seatbelt probe passed' }),
-    })
-
-    const prepared = controller.prepare('/bin/sh', ['-c', 'pwd'], {
-      mode: 'required',
-      workspaceRoot: workspace,
-      stateRoot,
-      tempRoot,
-      readOnlyRoots: [runtimeRoot],
-      network: 'deny',
-    })
+    const prepared = await seatbelt().contain(
+      '/bin/sh',
+      ['-c', 'pwd'],
+      policy(workspace, { read: [runtimeRoot] }),
+    )
     const profile = prepared.args[1]!
     const canonicalOutside = realpathSync(outside)
 
@@ -110,79 +116,78 @@ describe('OsSandboxController capability and preparation', () => {
     )
   })
 
-  it('grants named folders inside the state root and drops any other grant', () => {
-    const controller = new OsSandboxController({
-      platform: 'darwin',
-      pathExists: (path) => path === '/usr/bin/sandbox-exec',
-      probeProcess: () => ({ ok: true, detail: 'seatbelt probe passed' }),
-    })
-    const base = policy()
-    const read = '/workspace/.emperor/plugins/cache/kit'
-    const write = '/workspace/.emperor/plugins/data/kit'
-    const prepared = controller.prepare('/bin/sh', ['-c', 'pwd'], {
+  it("grants a plugin's named folders inside the state root and drops any other grant", () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), 'emperor-sandbox-grants-'))
+    cleanup.push(stateRoot)
+    const read = join(stateRoot, 'plugins', 'cache', 'kit')
+    const write = join(stateRoot, 'plugins', 'data', 'kit')
+    const base = {
+      name: 'kit-docs',
+      source: 'plugin' as const,
+      stateRoot,
+      workspaceRoot: join(stateRoot, 'workspace'),
+      command: '/bin/sh',
+      args: [],
+      env: { PATH: '/usr/bin:/bin' },
+      home: '/Users/example',
+    }
+    const granted = mcpServerContainment({
       ...base,
-      stateGrants: {
-        read: [read, '/elsewhere/package', '/workspace/.emperor'],
+      grants: {
+        read: [read, '/elsewhere/package', stateRoot],
         write: [write, '/workspace'],
       },
-    })
-    const profile = prepared.args[1]!
-    expect(profile).toContain(`(allow file-read* (subpath "${read}"))`)
-    expect(profile).toContain(
-      `(allow file-read* file-write* (subpath "${write}"))`,
-    )
+    }).policy
+    const real = realpathSync(stateRoot)
+    expect(granted.read.allow).toContain(join(real, 'plugins', 'cache', 'kit'))
+    expect(granted.write.allow).toContain(join(real, 'plugins', 'data', 'kit'))
     // Only strict subfolders of the state root are granted.
-    expect(profile).not.toContain('(subpath "/elsewhere/package")')
-    expect(profile).not.toContain(
-      '(allow file-read* (subpath "/workspace/.emperor"))',
-    )
-    expect(profile).not.toContain(
-      '(allow file-read* file-write* (subpath "/workspace"))',
-    )
-    // Grants change the policy hash.
-    expect(prepared.receipt.policyHash).not.toBe(
-      controller.prepare('/bin/sh', ['-c', 'pwd'], base).receipt.policyHash,
-    )
+    expect(JSON.stringify(granted)).not.toContain('/elsewhere/package')
+    expect(granted.read.allow).not.toContain(real)
+    expect(granted.write.allow).not.toContain('/workspace')
+    expect(granted.fallback).toBe('refuse')
   })
 
-  it('prepares Linux bwrap without a read-only bind of the whole host root', () => {
+  it('prepares Linux bwrap without a read-only bind of the whole host root', async () => {
     const controller = new OsSandboxController({
-      platform: 'linux',
-      pathExists: (path) => path === '/usr/bin/bwrap',
-      probeProcess: () => ({ ok: true, detail: 'user namespaces enabled' }),
+      backend: new ContainmentBackend({
+        platform: 'linux',
+        probe: () => ({ ok: true, detail: 'user namespaces enabled' }),
+      }),
     })
-    const prepared = controller.prepare('/bin/sh', ['-c', 'pwd'], policy())
+    const prepared = await controller.contain(
+      '/bin/sh',
+      ['-c', 'pwd'],
+      policy(),
+    )
 
     expect(prepared.receipt).toMatchObject({
-      decision: 'sandboxed',
-      backend: 'linux-bwrap',
-      network: 'denied',
+      decision: 'contained',
+      backend: 'bwrap',
     })
-    expect(prepared.executable).toBe('/usr/bin/bwrap')
+    expect(prepared.executable).toBe('bwrap')
     expect(prepared.args).toContain('--unshare-net')
     expect(prepared.args).toContain('--die-with-parent')
     expect(prepared.args.join(' ')).not.toContain('--ro-bind / /')
     expect(prepared.args.slice(-3)).toEqual(['/bin/sh', '-c', 'pwd'])
   })
 
-  it('reports unavailable and unsupported backends as typed decisions', () => {
-    const missing = new OsSandboxController({
-      platform: 'linux',
-      pathExists: () => false,
-    })
+  it('reports unavailable and unsupported backends and refuses — never a silent unsandboxed start', async () => {
+    const missing = seatbelt(false)
     expect(missing.capability()).toMatchObject({
-      backend: 'linux-bwrap',
+      backend: 'macos-seatbelt',
       status: 'unavailable',
+      reason: 'mock: broken',
     })
-    expect(
-      missing.prepare('/bin/sh', ['-c', 'pwd'], policy()).receipt,
-    ).toMatchObject({ decision: 'denied', backend: 'linux-bwrap' })
-    expect(
-      missing.prepare('/bin/sh', ['-c', 'pwd'], {
-        ...policy(),
-        mode: 'preferred',
-      }).receipt,
-    ).toMatchObject({ decision: 'unsandboxed', backend: 'none' })
+    for (const fallback of ['refuse', 'ask-user'] as const)
+      expect(
+        (
+          await missing.contain('/bin/sh', ['-c', 'pwd'], {
+            ...policy(),
+            fallback,
+          })
+        ).receipt,
+      ).toMatchObject({ decision: 'refused', backend: 'none' })
 
     const windows = new OsSandboxController({ platform: 'win32' })
     expect(windows.capability()).toMatchObject({
@@ -217,15 +222,15 @@ describe('NodeOwnedProcessRunner containment', () => {
           timeoutMs: 5_000,
           execution: {
             kind: 'sandbox' as const,
-            policy: {
-              mode: 'required' as const,
-              workspaceRoot: workspace,
+            policy: processContainmentPolicy({
+              workspace: { root: workspace, access: 'write' },
               stateRoot,
-              tempRoot,
-              readOnlyRoots: [],
-              network: 'deny' as const,
-              stateGrants: { read: [packageRoot], write: [dataRoot] },
-            },
+              tempDir: tempRoot,
+              read: [packageRoot],
+              write: [dataRoot],
+              network: 'deny',
+              fallback: 'refuse',
+            }),
           },
           executable: '/bin/sh',
           args: ['-c', command],
@@ -282,14 +287,15 @@ describe('NodeOwnedProcessRunner containment', () => {
         timeoutMs: 5_000,
         execution: {
           kind: 'sandbox' as const,
-          policy: {
-            mode: 'required' as const,
-            workspaceRoot: workspace,
+          policy: processContainmentPolicy({
+            workspace: { root: workspace, access: 'write' },
             stateRoot,
-            tempRoot,
-            readOnlyRoots: [dirname(process.execPath)],
-            network: 'deny' as const,
-          },
+            tempDir: tempRoot,
+            read: [dirname(process.execPath)],
+            network: 'deny',
+            fallback: 'refuse',
+            executables: [process.execPath],
+          }),
         },
       }
 
@@ -301,7 +307,7 @@ describe('NodeOwnedProcessRunner containment', () => {
       expect(inside).toMatchObject({
         status: 'completed',
         exitCode: 0,
-        containment: { decision: 'sandboxed' },
+        containment: { decision: 'contained' },
       })
       expect(readFileSync(workspaceWrite, 'utf8')).toBe('inside')
 
@@ -318,7 +324,7 @@ describe('NodeOwnedProcessRunner containment', () => {
           args: ['-c', command],
         })
         expect(result.exitCode, command).not.toBe(0)
-        expect(result.containment.decision, command).toBe('sandboxed')
+        expect(result.containment.decision, command).toBe('contained')
       }
       expect(existsSync(outsideWrite)).toBe(false)
       expect(existsSync(join(outside, 'symlink-escaped.txt'))).toBe(false)
@@ -343,7 +349,7 @@ describe('NodeOwnedProcessRunner containment', () => {
         expect(network).toMatchObject({
           status: 'completed',
           exitCode: 7,
-          containment: { decision: 'sandboxed', network: 'denied' },
+          containment: { decision: 'contained' },
         })
       } finally {
         server.close()

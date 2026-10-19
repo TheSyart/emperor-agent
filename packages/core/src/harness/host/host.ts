@@ -72,6 +72,8 @@ import {
   type InstalledGoal,
 } from '../goal'
 import { ClaudeCodeHooks, defaultHookConfigPaths } from '../hooks'
+import { containedPluginHookRunner } from '../hooks/contained'
+import type { UnsandboxedRequest } from '../../sandbox/consent'
 import { createJobTools, installJobsPromptSection, JobRegistry } from '../jobs'
 import { ComputerUseConfigStore } from '../computer-use/config'
 import {
@@ -369,7 +371,10 @@ export class HarnessHost {
     })
     this.sandboxBackend =
       options.sandboxBackend ??
-      new LocalSandbox({ protectedStateRoot: kept.paths.stateRoot })
+      new LocalSandbox({
+        protectedStateRoot: kept.paths.stateRoot,
+        backend: kept.containment,
+      })
     this.presets = new PermissionPresetService(this.sandbox, this.approval)
     this.compaction = new CompactionEngine(this.llm, new ToolResultPruner())
     this.subagents = new SubagentManager({
@@ -398,9 +403,15 @@ export class HarnessHost {
     ])
     this.hooks = new ClaudeCodeHooks({
       configPaths: defaultHookConfigPaths({ stateRoot: kept.paths.stateRoot }),
+      // A plugin's hooks run in the process containment (SEC-08).
+      pluginHookRunner: containedPluginHookRunner({
+        runtime: kept.processRuntime,
+        stateRoot: kept.paths.stateRoot,
+      }),
     })
     this.projectMcp = new ProjectMcpInstances({
-      // The one place a project instance's client is made (SEC-08 wraps it).
+      // The one place a project instance's client is made. Its servers are
+      // plugins': contained, refused when no sandbox can run (SEC-08).
       createClient: (projectRoot) =>
         new MCPClient(kept.paths.stateRoot, {
           sealer: kept.secretSealer,
@@ -751,6 +762,7 @@ export class HarnessHost {
     // (KRN-01). Then middleware (order matters): instructions, memory,
     // skills, compaction, hooks.
     middleware.preAssemble.push(async (input) => {
+      await this.askUnsandboxedServers(input.agent, input.signal)
       const projectRoot = this.projectRootOfAgent(input.agent)
       if (projectRoot !== null)
         await untilAborted(
@@ -1127,6 +1139,52 @@ export class HarnessHost {
     })
     this.kept.modelConfig = config
     this.applyModelConfig(config)
+  }
+
+  /**
+   * SEC-08: a user's MCP server that is waiting to run outside an
+   * unavailable sandbox is asked about once, on the ordinary approval card
+   * of the next step of a conversation the user is in (never a background
+   * turn, a subagent, or a session whose approvals are off). The answer is
+   * remembered per server and command; an allowed server starts in that
+   * step. A dismissed card asks again next time.
+   */
+  private async askUnsandboxedServers(
+    agent: Agent,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const consent = this.kept.unsandboxedConsent
+    if (consent.pending().length === 0) return
+    if (
+      this.rootOf(agent) !== agent ||
+      !agent.session.hasOpenTurn() ||
+      this.autoRejecting(agent) !== undefined ||
+      this.approval.effectivePolicy(agent.session) === 'never'
+    )
+      return
+    let allowed = false
+    for (const request of consent.pending()) {
+      if (signal.aborted) return
+      const outcome = await this.approval.request({
+        agent,
+        toolName: 'mcp_server',
+        reason: unsandboxedServerQuestion(request),
+        signal,
+      })
+      if (outcome === 'allowed-once') {
+        consent.resolve(request, 'allowed')
+        allowed = true
+      } else if (outcome === 'rejected') consent.resolve(request, 'denied')
+    }
+    if (!allowed) return
+    try {
+      await untilAborted(this.reloadMcp(), signal)
+    } catch (error: unknown) {
+      if (signal.aborted) throw error
+      logger.warn('MCP reload after an unsandboxed consent failed', {
+        error: String(error),
+      })
+    }
   }
 
   /** Reload the global servers (mcp_config.json and user-wide plugins). */
@@ -2332,6 +2390,16 @@ function turnOfMessage(
 }
 
 /** `work`, or the signal's reason as soon as it aborts. */
+/** The approval card text for running one MCP server outside the sandbox. */
+function unsandboxedServerQuestion(request: UnsandboxedRequest): string {
+  const command = [request.command, ...request.args].join(' ').slice(0, 240)
+  return (
+    `MCP 服务器「${request.name}」无法在进程沙箱中启动（${request.reason}）。` +
+    `允许它在沙箱外运行吗？它将能读写你的文件。命令：${command}。` +
+    '选择会按这个服务器记住，修改它的命令后会重新询问。'
+  )
+}
+
 async function untilAborted<T>(
   work: Promise<T>,
   signal: AbortSignal,

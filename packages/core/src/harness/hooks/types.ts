@@ -52,6 +52,12 @@ export interface MatcherGroup {
   hooks: CommandHook[]
   /** Extra environment for these hooks only (a plugin's `PLUGIN_ROOT`, `PLUGIN_DATA`). */
   env?: Record<string, string>
+  /** Set on a plugin's groups: they run in the process containment (SEC-08). */
+  plugin?: {
+    readonly pluginId: string
+    readonly root: string | null
+    readonly data: string | null
+  }
 }
 
 /**

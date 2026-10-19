@@ -909,3 +909,85 @@ describe('computer use diagnostics row', () => {
     })
   })
 })
+
+describe('process containment receipts row (SEC-08)', () => {
+  const row = (processRuntime: Record<string, unknown>) =>
+    diagnosticSections({ processRuntime } as never)
+      .find((section) => section.id === 'runtime')!
+      .rows.find((item) => item.id === 'process-containment')
+
+  it('shows the recent receipts: who ran, contained or not, and the policy', () => {
+    expect(row({ ownership: true })).toBeUndefined()
+    expect(
+      row({
+        containment: {
+          backend: 'seatbelt',
+          available: true,
+          recent: [
+            {
+              owner: 'mcp',
+              id: 'notes',
+              decision: 'user-allowed-unsandboxed',
+              backend: 'none',
+              policyHash: '0123456789ab',
+              status: 'running',
+              at: '2026-10-19T06:00:00.000Z',
+            },
+            {
+              owner: 'hook',
+              id: 'kit',
+              decision: 'refused',
+              backend: 'none',
+              policyHash: 'ba9876543210',
+              status: 'refused',
+              reason: '进程沙箱不可用：mock',
+              at: '2026-10-19T05:59:00.000Z',
+            },
+            {
+              owner: 'mcp',
+              id: 'files',
+              decision: 'contained',
+              backend: 'seatbelt',
+              policyHash: 'aaaaaaaaaaaa',
+              status: 'completed',
+              at: '2026-10-19T05:58:00.000Z',
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      label: '进程隔离回执',
+      value: '3 条 · 1 隔离 · 1 拒绝 · 1 经同意未隔离',
+      tone: 'warn',
+      detail:
+        'MCP notes 经同意未隔离 (none · 0123456789ab) · Hook kit 已拒绝 (none · ba9876543210)：进程沙箱不可用：mock · MCP files 已隔离 (seatbelt · aaaaaaaaaaaa)',
+    })
+    expect(
+      row({
+        containment: {
+          backend: 'seatbelt',
+          available: true,
+          recent: [
+            {
+              owner: 'environment',
+              id: 'managed_plan_x',
+              decision: 'contained',
+              backend: 'seatbelt',
+              policyHash: 'cccccccccccc',
+              status: 'completed',
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      value: '1 条 · 1 隔离',
+      tone: 'ok',
+      detail: '环境安装 managed_plan_x 已隔离 (seatbelt · cccccccccccc)',
+    })
+    expect(
+      row({
+        containment: { backend: 'seatbelt', available: true, recent: [] },
+      }),
+    ).toMatchObject({ value: '暂无', tone: 'muted' })
+  })
+})

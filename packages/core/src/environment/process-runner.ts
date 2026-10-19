@@ -1,11 +1,15 @@
 import { spawn, type SpawnOptions } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
+import type {
+  ContainmentPolicy,
+  ContainmentReceipt,
+  UnsandboxedConsent,
+} from '../sandbox/policy'
 import {
   OsSandboxController,
+  type PreparedContainedProcess,
   type ProcessContainmentController,
-  type ProcessContainmentPolicy,
-  type ProcessContainmentReceipt,
 } from './sandbox'
 
 const DEFAULT_TIMEOUT_MS = 5_000
@@ -77,16 +81,27 @@ export interface ManagedEnvironmentInstallAuthorization {
   authorizationId: string
 }
 
-export type ProcessHostAuthorization =
-  HostExecutionAuthorization | ManagedEnvironmentInstallAuthorization
+export type ProcessHostAuthorization = HostExecutionAuthorization
 
+/**
+ * Where an owned process runs (SEC-08): contained by a ContainmentPolicy —
+ * a managed install carries its plan authorization, bound to the exact
+ * argv and cwd — or, with an explicit run_command authorization, on the
+ * host. Nothing runs unconfined by default.
+ */
 export type ProcessExecutionBoundary =
-  | { kind: 'sandbox'; policy: ProcessContainmentPolicy }
+  | {
+      kind: 'sandbox'
+      policy: ContainmentPolicy
+      authorization?: ManagedEnvironmentInstallAuthorization
+    }
   | { kind: 'host'; authorization: ProcessHostAuthorization }
 
 export interface OwnedProcessRequest extends EnvironmentProcessRequest {
   execution: ProcessExecutionBoundary
-  onContainment?: (receipt: ProcessContainmentReceipt) => void | Promise<void>
+  /** Asked when the sandbox is unavailable and the policy's fallback is `ask-user`. */
+  consent?: UnsandboxedConsent | null
+  onContainment?: (receipt: ContainmentReceipt) => void | Promise<void>
   owner?: {
     kind:
       | 'app'
@@ -107,7 +122,7 @@ export interface OwnedProcessResult extends Omit<
   'status'
 > {
   status: OwnedProcessStatus
-  containment: ProcessContainmentReceipt
+  containment: ContainmentReceipt
   stdoutBytes?: number
   stderrBytes?: number
   stdoutTruncated?: boolean
@@ -294,8 +309,8 @@ export class NodeEnvironmentProcessRunner implements EnvironmentProcessRunner {
 }
 
 /**
- * Process runner with an explicit containment receipt. Callers must choose
- * required or preferred; an unavailable required backend never reaches spawn.
+ * Process runner with an explicit containment receipt; a refused start
+ * never reaches spawn.
  */
 export class NodeOwnedProcessRunner implements OwnedProcessRunner {
   private readonly sandbox: ProcessContainmentController
@@ -311,9 +326,9 @@ export class NodeOwnedProcessRunner implements OwnedProcessRunner {
   }
 
   async run(request: OwnedProcessRequest): Promise<OwnedProcessResult> {
-    const prepared = prepareOwnedProcessExecution(this.sandbox, request)
+    const prepared = await containOwnedProcess(this.sandbox, request)
     await request.onContainment?.(prepared.receipt)
-    if (prepared.receipt.decision === 'denied' || !prepared.executable) {
+    if (prepared.receipt.decision === 'refused' || !prepared.executable) {
       return {
         status: 'containment_unavailable',
         exitCode: null,
@@ -328,7 +343,7 @@ export class NodeOwnedProcessRunner implements OwnedProcessRunner {
       executable: prepared.executable,
       args: prepared.args,
       ...(request.cwd ? { cwd: request.cwd } : {}),
-      env: { ...request.env },
+      env: { ...request.env, ...prepared.env },
       ...(request.timeoutMs !== undefined
         ? { timeoutMs: request.timeoutMs }
         : {}),
@@ -346,68 +361,60 @@ export class NodeOwnedProcessRunner implements OwnedProcessRunner {
   }
 }
 
-export function prepareOwnedProcessExecution(
+/**
+ * The argv, environment and receipt one owned process starts with: contained
+ * by its policy (a managed install only when its authorization matches the
+ * exact request), or on the host with a valid run_command authorization.
+ */
+export async function containOwnedProcess(
   sandbox: ProcessContainmentController,
   request: OwnedProcessRequest,
-): {
-  executable: string | null
-  args: string[]
-  receipt: ProcessContainmentReceipt
-} {
+): Promise<PreparedContainedProcess> {
   const execution = request.execution
-  if (execution.kind === 'sandbox')
-    return sandbox.prepare(request.executable, request.args, execution.policy)
-  if (
-    isManagedEnvironmentInstallAuthorization(execution.authorization) &&
-    execution.authorization.operationFingerprint !==
-      managedEnvironmentOperationFingerprint({
-        executable: request.executable,
-        args: request.args,
-        cwd: request.cwd,
-      })
-  )
-    return deniedHostReceipt(
-      'managed environment authorization does not match process request',
+  if (execution.kind === 'sandbox') {
+    const authorization = execution.authorization
+    if (
+      authorization !== undefined &&
+      (!isManagedEnvironmentInstallAuthorization(authorization) ||
+        authorization.operationFingerprint !==
+          managedEnvironmentOperationFingerprint({
+            executable: request.executable,
+            args: request.args,
+            cwd: request.cwd,
+          }))
     )
-  if (
-    !isValidHostExecutionAuthorization(execution.authorization) &&
-    !isManagedEnvironmentInstallAuthorization(execution.authorization)
-  )
-    return deniedHostReceipt('valid host execution authorization is required')
+      return refusedReceipt(
+        'managed environment authorization does not match process request',
+      )
+    return await sandbox.contain(
+      request.executable,
+      request.args,
+      execution.policy,
+      request.consent ?? null,
+    )
+  }
+  if (!isValidHostExecutionAuthorization(execution.authorization))
+    return refusedReceipt('valid host execution authorization is required')
   const authorization = execution.authorization
-  const managed = isManagedEnvironmentInstallAuthorization(authorization)
-  const binding = managed
-    ? {
-        planId: authorization.planId,
-        recipeDigest: authorization.recipeDigest,
-        toolId: authorization.toolId,
-        toolVersion: authorization.toolVersion,
-      }
-    : { rule: authorization.rule }
   return {
     executable: request.executable,
     args: [...request.args],
+    env: {},
     receipt: {
-      decision: 'unsandboxed',
       backend: 'none',
-      capabilityStatus: 'not_required',
-      filesystem: 'unrestricted',
-      network: 'unrestricted',
-      processTree: true,
+      decision: 'user-allowed-unsandboxed',
       policyHash: createHash('sha256')
         .update(
           JSON.stringify({
             kind: 'host',
             fingerprint: authorization.operationFingerprint,
             source: authorization.source,
-            binding,
+            binding: { rule: authorization.rule },
           }),
           'utf8',
         )
         .digest('hex'),
-      reason: managed
-        ? 'authorized managed environment install'
-        : 'authorized host execution',
+      reason: 'authorized host execution',
     },
   }
 }
@@ -475,21 +482,14 @@ export function managedEnvironmentOperationFingerprint(input: {
     .digest('hex')
 }
 
-function deniedHostReceipt(reason: string): {
-  executable: null
-  args: []
-  receipt: ProcessContainmentReceipt
-} {
+function refusedReceipt(reason: string): PreparedContainedProcess {
   return {
     executable: null,
     args: [],
+    env: {},
     receipt: {
-      decision: 'denied',
       backend: 'none',
-      capabilityStatus: 'error',
-      filesystem: 'unavailable',
-      network: 'unavailable',
-      processTree: false,
+      decision: 'refused',
       policyHash: createHash('sha256').update(reason, 'utf8').digest('hex'),
       reason,
     },

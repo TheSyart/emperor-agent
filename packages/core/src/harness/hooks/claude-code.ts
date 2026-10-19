@@ -54,6 +54,11 @@ import {
 } from './events'
 import { matchesMatcher } from './matcher'
 import { mergeHookOutputs, type MergedHookOutcome } from './merge'
+import {
+  refusingPluginHookRunner,
+  type PluginHookRunner,
+  type PluginHookSource,
+} from './contained'
 import { DEFAULT_HOOK_TIMEOUT_MS, runHook } from './runner'
 import type { HookOutput } from './types'
 
@@ -86,6 +91,11 @@ export interface ClaudeCodeHooksOptions {
   maxStopContinuations?: number
   /** Resolves `transcript_path` for a session; `''` when omitted. */
   transcriptPath?: (session: Session) => string
+  /**
+   * Runs a plugin's hooks inside the process containment (SEC-08). Without
+   * one, plugin hooks are not run; the user's own hooks run directly.
+   */
+  pluginHookRunner?: PluginHookRunner
   logger?: Logger
 }
 
@@ -318,6 +328,7 @@ export class ClaudeCodeHooks {
         (set.config[event] ?? []).map((group) => ({
           ...group,
           env: { ...set.env },
+          plugin: pluginSourceOf(set),
         })),
       ),
     ]
@@ -631,7 +642,7 @@ export class ClaudeCodeHooks {
             ...(group.matcher !== undefined ? { matcher: group.matcher } : {}),
           })
         }
-        const { output, durationMs } = await runHook(hook, {
+        const hookOptions = {
           payload,
           env: group.env ? { ...env, ...group.env } : env,
           cwd,
@@ -639,7 +650,16 @@ export class ClaudeCodeHooks {
           trailingNewline: true,
           defaultTimeoutMs: this.defaultTimeoutMs,
           expectedEventName: point,
-        })
+        }
+        // A plugin's hook runs contained (SEC-08); the user's own directly.
+        const { output, durationMs } =
+          group.plugin === undefined
+            ? await runHook(hook, hookOptions)
+            : await (this.options.pluginHookRunner ?? refusingPluginHookRunner)(
+                hook,
+                { ...hookOptions, sessionId: session?.id ?? null },
+                group.plugin,
+              )
         outputs.push(output)
         if (output.updatedInput !== undefined)
           this.log.warn(
@@ -674,6 +694,14 @@ export class ClaudeCodeHooks {
       HOOKS_CONTEXT_PRODUCER,
       merged.additionalContext.join('\n\n'),
     )
+  }
+}
+
+function pluginSourceOf(set: PluginHookSet): PluginHookSource {
+  return {
+    pluginId: set.pluginId ?? set.id,
+    root: set.env.PLUGIN_ROOT ?? set.env.CLAUDE_PLUGIN_ROOT ?? null,
+    data: set.env.PLUGIN_DATA ?? set.env.CLAUDE_PLUGIN_DATA ?? null,
   }
 }
 
