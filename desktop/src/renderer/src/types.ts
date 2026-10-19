@@ -703,6 +703,23 @@ export interface ProcessRuntimeDiagnosticsPayload {
     maximumBytes?: number
     defaultStrategy?: string
   }
+  /** SEC-08: the newest containment decisions (processes/receipts.v1.json). */
+  containment?: {
+    backend?: string
+    available?: boolean
+    recent?: ContainmentReceiptDiagnosticsPayload[]
+  }
+}
+
+export interface ContainmentReceiptDiagnosticsPayload {
+  owner?: string
+  id?: string
+  decision?: 'contained' | 'refused' | 'user-allowed-unsandboxed' | string
+  backend?: string
+  policyHash?: string
+  status?: string
+  reason?: string
+  at?: string
 }
 
 export interface LifecycleServiceDiagnosticsPayload {
