@@ -1,9 +1,17 @@
 import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import {
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { ValidationError } from '../errors'
+import { createLocalKeySealer } from '../security/secret-sealer'
 import { createNodePersistenceAdapter } from '../store/persistence'
 import {
   activateModelEntry,
@@ -588,5 +596,164 @@ describe('model-config IO recovery', () => {
     )
     expect((await loadModelConfig(dir)).raw).toEqual(defaultModelConfig())
     expect(existsSync(path)).toBe(false)
+  })
+})
+
+describe('sealed API keys (SEC-06)', () => {
+  const plainV2 = (models: ModelConfigV2['models']): string =>
+    `${JSON.stringify({ schemaVersion: 2, activeModelId: models[0]!.entryId, models }, null, 2)}\n`
+
+  it('saves an entry with only an el1: sealed key on disk (card 1)', async () => {
+    const sealer = createLocalKeySealer(dir)
+    await saveModelEntry(
+      dir,
+      {
+        provider: 'openai',
+        protocol: 'openai',
+        modelId: 'gpt-5',
+        apiBase: 'https://api.openai.com/v1',
+        apiKey: 'sk-only-in-memory-9876',
+        contextWindowTokens: 128_000,
+        maxTokens: 8_192,
+      },
+      { sealer },
+    )
+    const disk = await readFile(join(dir, 'model_config.json'), 'utf8')
+    expect(disk).not.toContain('sk-only-in-memory-9876')
+    const stored = JSON.parse(disk) as ModelConfigV2
+    expect(stored.models[0]!.apiKey).toMatch(/^el1:[A-Za-z0-9+/]+=*$/)
+    // Loading with the sealer gives the key back for model calls.
+    const loaded = await loadModelConfig(dir, { sealer })
+    expect(loaded.models[0]!.apiKey).toBe('sk-only-in-memory-9876')
+    expect(loaded.raw.models[0]!.apiKey).toBe('sk-only-in-memory-9876')
+    expect(loaded.credentialsNeedingReentry).toEqual([])
+    // Saving again re-seals; the key never lands in clear text.
+    await saveModelEntry(
+      dir,
+      { entryId: loaded.models[0]!.entryId, reasoningEffort: 'high' },
+      { sealer },
+    )
+    expect(
+      await readFile(join(dir, 'model_config.json'), 'utf8'),
+    ).not.toContain('sk-only-in-memory')
+  })
+
+  it('reads an old plaintext file, seals it on first save and keeps a backup (card 2)', async () => {
+    const path = join(dir, 'model_config.json')
+    const legacy = plainV2([entry({ apiKey: 'sk-legacy-plain-1111' })])
+    await writeFile(path, legacy, 'utf8')
+    const sealer = createLocalKeySealer(dir)
+
+    const loaded = await loadModelConfig(dir, { sealer })
+    expect(loaded.models[0]!.apiKey).toBe('sk-legacy-plain-1111')
+    // Loading alone does not rewrite the keys.
+    expect(await readFile(path, 'utf8')).toContain('sk-legacy-plain-1111')
+
+    await activateModelEntry(dir, 'entry-openai', { sealer })
+    const disk = await readFile(path, 'utf8')
+    expect(disk).not.toContain('sk-legacy-plain-1111')
+    expect(
+      (JSON.parse(disk) as ModelConfigV2).models[0]!.apiKey?.startsWith('el1:'),
+    ).toBe(true)
+    const backups = (await readdir(dir)).filter((name) =>
+      name.startsWith('model_config.json.pre-seal-'),
+    )
+    expect(backups).toHaveLength(1)
+    // The file as it was before sealing (load only normalized its layout).
+    const backup = JSON.parse(
+      await readFile(join(dir, backups[0]!), 'utf8'),
+    ) as ModelConfigV2
+    expect(backup.models[0]!.apiKey).toBe('sk-legacy-plain-1111')
+    expect(backup.models[0]!.entryId).toBe('entry-openai')
+    expect((await stat(join(dir, backups[0]!))).mode & 0o777).toBe(0o600)
+    expect((await loadModelConfig(dir, { sealer })).models[0]!.apiKey).toBe(
+      'sk-legacy-plain-1111',
+    )
+    // Already sealed: later saves make no further backup.
+    await activateModelEntry(dir, 'entry-openai', { sealer })
+    expect(
+      (await readdir(dir)).filter((name) => name.includes('pre-seal')),
+    ).toHaveLength(1)
+  })
+
+  it('marks entries whose key file is gone for re-entry instead of isolating the file (card 3)', async () => {
+    const sealer = createLocalKeySealer(dir)
+    await saveModelConfig(
+      dir,
+      {
+        schemaVersion: 2,
+        activeModelId: 'entry-openai',
+        models: [
+          entry({ apiKey: 'sk-sealed-2222' }),
+          entry({
+            entryId: 'entry-other',
+            modelId: 'gpt-5-mini',
+            displayName: 'Mini',
+            apiKey: 'sk-sealed-3333',
+          }),
+        ],
+      },
+      { sealer },
+    )
+    // The local key file disappears (another machine, a cleared folder).
+    await rm(join(dir, 'computer-use', 'secrets'), { recursive: true })
+    const after = createLocalKeySealer(dir)
+    const loaded = await loadModelConfig(dir, { sealer: after })
+    expect(existsSync(join(dir, 'model_config.json'))).toBe(true)
+    expect(
+      (await readdir(dir)).some((name) => name.includes('.corrupt-')),
+    ).toBe(false)
+    expect(loaded.models.map((model) => model.modelId)).toEqual([
+      'gpt-5',
+      'gpt-5-mini',
+    ])
+    expect(loaded.models.every((model) => model.apiKey === null)).toBe(true)
+    expect(loaded.credentialsNeedingReentry.sort()).toEqual([
+      'entry-openai',
+      'entry-other',
+    ])
+
+    // Re-entering one key fixes that entry only; the other keeps asking.
+    await saveModelEntry(
+      dir,
+      { entryId: 'entry-openai', apiKey: 'sk-new-4444' },
+      { sealer: after },
+    )
+    const fixed = await loadModelConfig(dir, { sealer: after })
+    expect(findEntry(fixed, 'entry-openai')!.apiKey).toBe('sk-new-4444')
+    expect(fixed.credentialsNeedingReentry).toEqual(['entry-other'])
+    // Clearing the unreadable key on purpose removes it.
+    await saveModelEntry(
+      dir,
+      { entryId: 'entry-other', apiKey: null },
+      { sealer: after },
+    )
+    const cleared = await loadModelConfig(dir, { sealer: after })
+    expect(cleared.credentialsNeedingReentry).toEqual([])
+    expect(findEntry(cleared, 'entry-other')!.apiKey).toBeNull()
+  })
+
+  it('without a sealer keeps sealed values untouched and reports them as needing re-entry', async () => {
+    const sealer = createLocalKeySealer(dir)
+    await saveModelConfig(
+      dir,
+      {
+        schemaVersion: 2,
+        activeModelId: 'entry-openai',
+        models: [entry({ apiKey: 'sk-sealed-5555' })],
+      },
+      { sealer },
+    )
+    const sealedOnDisk = JSON.parse(
+      await readFile(join(dir, 'model_config.json'), 'utf8'),
+    ).models[0].apiKey as string
+    const bare = await loadModelConfig(dir)
+    expect(bare.models[0]!.apiKey).toBeNull()
+    expect(bare.credentialsNeedingReentry).toEqual(['entry-openai'])
+    await activateModelEntry(dir, 'entry-openai')
+    expect(
+      JSON.parse(await readFile(join(dir, 'model_config.json'), 'utf8'))
+        .models[0].apiKey,
+    ).toBe(sealedOnDisk)
   })
 })

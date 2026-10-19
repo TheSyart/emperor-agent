@@ -24,6 +24,9 @@ import {
   bootstrapEmperorHome,
   legacyDefaultStateRoot,
   loadBundledToolCatalog,
+  localSecretKeyPath,
+  sealerFromSecretStore,
+  type SecretSealer,
 } from '@emperor/core/host-capabilities'
 
 import { offerMoveToApplications } from './app-location'
@@ -226,6 +229,8 @@ let externalDownloads: ExternalDownloadLog | null = null
 // 设置 › 电脑操作 › Chrome 和 Edge: ~/.emperor/browser-extension.
 let browserExtension: BrowserExtensionService | null = null
 let credentialVault: CredentialVault | null = null
+/** Core seals model keys and MCP tokens with the vault's local key (SEC-06). */
+let coreSecretSealer: SecretSealer | null = null
 let dictation: DictationService | null = null
 let agentPreview: AgentPreview | null = null
 let desktopPreview: DesktopPreview | null = null
@@ -518,9 +523,12 @@ function createComputerUseHost(): void {
   // the Keychain. While vault entries still need a key that has gone, no new
   // key is made over them; Settings offers 清空 instead.
   const localSecrets = new LocalSecretStore({
-    keyPath: path.join(computerUseRoot, 'secrets', 'local.key'),
+    keyPath: localSecretKeyPath(config.stateRoot),
     sealedDataExists: () => credentialVault?.hasSealedData ?? true,
   })
+  // The same key (and the same lost-key rule) seals the API keys in
+  // model_config.json and MCP tokens in mcp_config.json.
+  coreSecretSealer = sealerFromSecretStore(localSecrets)
   credentialVault = new CredentialVault({
     path: path.join(computerUseRoot, 'vault.json'),
     storage: localSecrets,
@@ -1248,6 +1256,7 @@ async function startup(): Promise<void> {
         terminalHost: new NodePtyHost(),
         terminalEventSink: terminalEventBridge.sink(),
         webFetchClient,
+        ...(coreSecretSealer ? { secretSealer: coreSecretSealer } : {}),
       },
     })
     const core = coreApi

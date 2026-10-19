@@ -343,6 +343,13 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
               Key 已配置
             </StatusBadge>
             <StatusBadge
+              v-else-if="providerCredentialState(group) === 'reentry'"
+              tone="warn"
+              dot
+            >
+              凭据需要重新输入
+            </StatusBadge>
+            <StatusBadge
               v-else-if="providerCredentialState(group) === 'missing'"
               tone="warn"
               dot
@@ -405,6 +412,12 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
                       tone="accent"
                     >
                       当前
+                    </StatusBadge>
+                    <StatusBadge
+                      v-if="entry.credentialState === 'needs_reentry'"
+                      tone="warn"
+                    >
+                      凭据需要重新输入
                     </StatusBadge>
                   </span>
                   <span class="model-meta">

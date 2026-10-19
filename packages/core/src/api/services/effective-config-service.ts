@@ -42,8 +42,14 @@ export class CoreEffectiveConfigService {
     if (modelPolicy) resolutions.push(modelPolicy)
     resolutions.push(this.sandboxResolution())
     resolutions.push(
-      (await resolveMcpConfig(this.root, {}, { preserveCorrupt: false }))
-        .resolution,
+      // Sealed values stay sealed here: the view redacts them anyway.
+      (
+        await resolveMcpConfig(
+          this.root,
+          {},
+          { preserveCorrupt: false, unreadableSecrets: 'keep' },
+        )
+      ).resolution,
     )
     resolutions.push(...this.skillResolutions())
     return effectiveConfigSnapshot(resolutions)

@@ -397,7 +397,7 @@ export class CoreApi {
         },
         reloadMcp: () => host.reloadMcp(),
       },
-      { templatesDir: kept.templatesDir },
+      { templatesDir: kept.templatesDir, sealer: kept.secretSealer },
     )
     this.effectiveConfigService = new CoreEffectiveConfigService(
       this.paths.stateRoot,
@@ -420,6 +420,7 @@ export class CoreApi {
       },
     )
     this.modelService = new CoreModelService(this.paths.stateRoot, {
+      sealer: kept.secretSealer,
       refreshModelConfig: () => host.refreshModelConfig(),
       afterConfigSaved: () => this.onboardingService.start({ manual: false }),
     })
@@ -667,7 +668,9 @@ export class CoreApi {
       root: this.paths.delegationsRoot,
       loginShell: createLoginShellEnvironment(),
       resolveRoute: async (id, backend) => {
-        const config = await loadModelConfig(this.paths.modelConfigFile)
+        const config = await loadModelConfig(this.paths.modelConfigFile, {
+          sealer: kept.secretSealer,
+        })
         const entry = config.raw.models.find((entry) => entry.entryId === id)
         if (!entry?.apiKey)
           throw new DelegationError(

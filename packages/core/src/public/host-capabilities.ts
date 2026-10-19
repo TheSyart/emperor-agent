@@ -100,6 +100,13 @@ export type {
   LocalSecretProblem,
   LocalSecretStoreOptions,
 } from '../security/local-secret-store'
+export {
+  createLocalKeySealer,
+  localSecretKeyPath,
+  sealerFromSecretStore,
+  SecretSealError,
+} from '../security/secret-sealer'
+export type { SecretSealer, SecretStoreLike } from '../security/secret-sealer'
 export { loadBundledToolCatalog } from '../environment/catalog'
 export type { LoadedToolCatalog } from '../environment/catalog'
 export type {

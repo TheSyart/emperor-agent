@@ -15,6 +15,7 @@ import {
   type MCPConnectionSupervisorOptions,
 } from './supervisor'
 import type { OwnedProcessRuntime } from '../processes/runtime'
+import type { SecretSealer } from '../security/secret-sealer'
 
 export type MCPConnectionFactory = (
   cfg: ServerConfig,
@@ -56,6 +57,8 @@ export interface MCPClientOptions {
   readonly workspaceRoot?: (() => string) | null
   readonly ownerSessionId?: (() => string | null) | null
   readonly connectionFactory?: MCPConnectionFactory
+  /** Opens sealed `headers` / `env` values of `mcp_config.json` (SEC-06). */
+  readonly sealer?: SecretSealer | null
   readonly onStateChange?: (
     snapshot: MCPConnectionSnapshot,
   ) => void | Promise<void>
@@ -149,8 +152,14 @@ export class MCPClient {
       .executionEnvironment,
   ): Promise<void> {
     const config = executionEnvironment
-      ? await loadMcpConfigForEnvironment(this.root, executionEnvironment)
-      : await loadMcpConfig(this.root)
+      ? await loadMcpConfigForEnvironment(
+          this.root,
+          executionEnvironment,
+          this.opts.sealer,
+        )
+      : await loadMcpConfig(this.root, process.env, {
+          sealer: this.opts.sealer ?? null,
+        })
     this.executionEnvironment = executionEnvironment
     const desired = new Set<string>()
     const userNames = new Set(Object.keys(config.servers))
@@ -378,8 +387,9 @@ export class MCPClient {
     // Plugin servers live here, not in mcp_config.json.
     const plugin = this.pluginServers.get(serverName)
     if (plugin) return { ...plugin.config, name: plugin.key }
-    const config = (await loadMcpConfigForEnvironment(this.root, snapshot))
-      .servers[serverName]
+    const config = (
+      await loadMcpConfigForEnvironment(this.root, snapshot, this.opts.sealer)
+    ).servers[serverName]
     return config?.enabled ? config : null
   }
 }
@@ -434,10 +444,12 @@ export function invalidConfigReason(cfg: ServerConfig): string | null {
 async function loadMcpConfigForEnvironment(
   root: string,
   executionEnvironment: ExecutionEnvironment,
+  sealer: SecretSealer | null | undefined,
 ): Promise<MCPConfig> {
   return await loadMcpConfig(
     root,
     (name) => executionEnvironment.selectEnv([name])[name],
+    { sealer: sealer ?? null },
   )
 }
 

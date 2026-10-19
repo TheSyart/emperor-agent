@@ -10,7 +10,14 @@
  *   node scripts/e2e-cu.mjs --mode=settings   (after `npm run build`)
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import {
@@ -216,7 +223,7 @@ function until(
 
 // ---------------------------------------------------------------------------
 
-async function settings(page: Page): Promise<void> {
+async function settings(page: Page, home: string): Promise<void> {
   await check(
     page,
     'the nav lists the eleven sections in order',
@@ -397,6 +404,40 @@ async function settings(page: Page): Promise<void> {
     },
   )
 
+  // SEC-06: the plaintext key prepareHome wrote is read, shown by its last
+  // 4 characters only, and sealed by the first save (with a backup).
+  await check(
+    page,
+    'a saved model key shows only its last 4 characters and is sealed on save',
+    async () => {
+      const dialog = await openSection(page, 'model')
+      await dialog.getByRole('button', { name: '编辑 Fake Settings' }).click()
+      const key = dialog.getByLabel('API Key', { exact: true })
+      await key.waitFor()
+      const placeholder = await key.getAttribute('placeholder')
+      if (placeholder !== '已保存 ···fake，留空保留')
+        throw new Error(`placeholder ${placeholder}`)
+      if ((await key.inputValue()) !== '') throw new Error('key prefilled')
+      if ((await dialog.innerText()).includes('sk-fake'))
+        throw new Error('the key is shown')
+      await dialog.getByRole('button', { name: '保存模型' }).click()
+      const file = join(home, 'model_config.json')
+      await until(
+        () => /"apiKey":\s*"el1:/.test(readFileSync(file, 'utf8')),
+        10_000,
+        'the sealed key on disk',
+      )
+      const disk = readFileSync(file, 'utf8')
+      if (disk.includes('sk-fake')) throw new Error('plaintext key on disk')
+      const backups = readdirSync(home).filter((name) =>
+        name.startsWith('model_config.json.pre-seal-'),
+      )
+      if (backups.length !== 1)
+        throw new Error(`backups ${JSON.stringify(backups)}`)
+      return { placeholder, backups: backups.length }
+    },
+  )
+
   await check(page, 'a narrow window keeps every page in view', async () => {
     await page.setViewportSize({ width: 760, height: 820 })
     const widths: Record<string, { options: number; page: number }> = {}
@@ -431,7 +472,7 @@ async function main(): Promise<void> {
     prepareHome(home, model)
     const launched = await launch(home)
     app = launched.app
-    await settings(launched.page)
+    await settings(launched.page, home)
   } catch (error) {
     if (!(error instanceof Abort))
       report({

@@ -155,10 +155,25 @@ const inheritedKeyLost = computed(() => {
   )
 })
 
+/** The saved key cannot be opened any more (SEC-06): it has to be typed again. */
+const needsReentry = computed(
+  () => props.entry?.credentialState === 'needs_reentry',
+)
+
+/** Core sends `***` plus at most the last 4 characters, never the key. */
+const savedKeyTail = computed(() => {
+  const masked = props.entry?.apiKey ?? ''
+  return masked.startsWith('***') ? masked.slice(3, 7) : ''
+})
+
 const apiKeyPlaceholder = computed(() => {
   if (inheritsKey.value)
     return `沿用「${draft.value.credentialsFrom!.label}」的 API Key`
-  return isNew.value ? '输入 API Key' : '留空保留现有凭证'
+  if (isNew.value) return '输入 API Key'
+  if (needsReentry.value) return '凭据需要重新输入'
+  if (savedKeyTail.value) return `已保存 ···${savedKeyTail.value}，留空保留`
+  if (props.entry?.apiKey) return '已保存，留空保留'
+  return '留空保留现有凭证'
 })
 
 const apiKeyHint = computed(() => {
@@ -166,6 +181,7 @@ const apiKeyHint = computed(() => {
     return '留空即沿用同一供应商已保存的 Key；填写则改用新的 Key'
   if (inheritedKeyLost.value)
     return '协议或 API 地址已改变，需要重新填写 API Key'
+  if (needsReentry.value) return '保存这个 Key 的本机密钥已不可用，请重新填写'
   return isNew.value ? undefined : '留空则保留已保存的凭证'
 })
 

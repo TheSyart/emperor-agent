@@ -38,6 +38,7 @@ import {
   type ProviderSpec,
 } from '../../llm/catalog'
 import type { ProfileOnboardingActionResult } from '../../sessions/onboarding'
+import type { SecretSealer } from '../../security/secret-sealer'
 import {
   ModelDiscovery,
   type ConnectionFix,
@@ -58,6 +59,8 @@ export interface CoreModelServiceDeps {
     ProfileOnboardingActionResult | Promise<ProfileOnboardingActionResult>
   /** Test hook: model lists and connection checks (transport, cache). */
   discovery?: ModelDiscovery
+  /** Seals API keys in `model_config.json` (SEC-06); absent: left as written. */
+  sealer?: SecretSealer | null
 }
 
 export type ModelEntrySaveInput = Omit<ModelEntryUpdate, 'legacy'> & {
@@ -83,9 +86,12 @@ export interface ModelEntryPayload extends Omit<
   ModelEntryV2,
   'apiKey' | 'legacy'
 > {
+  /** `***` + the last 4 characters of a saved key, or '' (never the key). */
   apiKey: string
   effectiveDisplayName: string
   resolvedProfile: ResolvedModelProfile
+  /** The saved key cannot be opened (local key gone): Settings asks for it again. */
+  credentialState?: 'needs_reentry'
 }
 
 export interface CurrentModelPayload {
@@ -189,10 +195,17 @@ export class CoreModelService {
     this.discovery = deps.discovery ?? new ModelDiscovery()
   }
 
+  private get store() {
+    return { sealer: this.deps.sealer ?? null }
+  }
+
   async getConfig(): Promise<ModelConfigPayload> {
-    const config = await loadModelConfig(this.root)
+    const config = await loadModelConfig(this.root, this.store)
     const entry = activeEntry(config) ?? null
-    const models = config.raw.models.map((item) => modelEntryPayload(item))
+    const reentry = new Set(config.credentialsNeedingReentry)
+    const models = config.raw.models.map((item) =>
+      modelEntryPayload(item, reentry.has(item.entryId)),
+    )
     return {
       schemaVersion: 2,
       activeModelId: config.activeModelId,
@@ -205,7 +218,7 @@ export class CoreModelService {
   }
 
   async saveEntry(input: ModelEntrySaveInput): Promise<ModelConfigSavePayload> {
-    const before = await loadModelConfig(this.root)
+    const before = await loadModelConfig(this.root, this.store)
     const wasUsable = modelAvailability(before).usable
     const { credentialsFrom, ...fields } = input
     const update = normalizeEntrySecret(fields)
@@ -226,7 +239,7 @@ export class CoreModelService {
       throw new Error(
         `模型 ${prospectiveEntry.modelId} 不支持思考强度 ${prospectiveEntry.reasoningEffort}`,
       )
-    await saveModelEntry(this.root, update)
+    await saveModelEntry(this.root, update, this.store)
     return this.afterModelMutation(wasUsable)
   }
 
@@ -251,14 +264,14 @@ export class CoreModelService {
   }
 
   async deleteEntry(entryId: string): Promise<ModelConfigSavePayload> {
-    const before = await loadModelConfig(this.root)
-    await deleteModelEntry(this.root, requiredId(entryId))
+    const before = await loadModelConfig(this.root, this.store)
+    await deleteModelEntry(this.root, requiredId(entryId), this.store)
     return this.afterModelMutation(modelAvailability(before).usable)
   }
 
   async activate(entryId: string): Promise<ModelConfigSavePayload> {
-    const before = await loadModelConfig(this.root)
-    await activateModelEntry(this.root, requiredId(entryId))
+    const before = await loadModelConfig(this.root, this.store)
+    await activateModelEntry(this.root, requiredId(entryId), this.store)
     return this.afterModelMutation(modelAvailability(before).usable)
   }
 
@@ -266,7 +279,7 @@ export class CoreModelService {
     entryId: string,
     reasoningEffort: string | null,
   ): Promise<ModelConfigPayload> {
-    const config = await loadModelConfig(this.root)
+    const config = await loadModelConfig(this.root, this.store)
     const entry = findEntry(config, requiredId(entryId))
     if (!entry) throw new Error(`model entry not found: ${entryId}`)
     const profile = resolvedProfile(entry)
@@ -275,16 +288,17 @@ export class CoreModelService {
       !profile.reasoningEfforts.includes(reasoningEffort as any)
     )
       throw new Error(`模型 ${entry.modelId} 不支持思考强度 ${reasoningEffort}`)
-    await saveModelEntry(this.root, {
-      entryId: entry.entryId,
-      reasoningEffort,
-    })
+    await saveModelEntry(
+      this.root,
+      { entryId: entry.entryId, reasoningEffort },
+      this.store,
+    )
     await this.deps.refreshModelConfig?.()
     return this.getConfig()
   }
 
   async savePolicy(policy: ModelExecutionPolicy): Promise<ModelConfigPayload> {
-    await saveModelPolicy(this.root, policy)
+    await saveModelPolicy(this.root, policy, this.store)
     await this.deps.refreshModelConfig?.()
     return this.getConfig()
   }
@@ -369,7 +383,7 @@ export class CoreModelService {
   private async resolveConnection(
     input: ModelConnectionInput,
   ): Promise<ResolvedConnection> {
-    const config = await loadModelConfig(this.root)
+    const config = await loadModelConfig(this.root, this.store)
     const entry = credentialSource(config, input)
     const providerName = trimString(input.provider) || entry?.provider || ''
     const spec = findByName(providerName)
@@ -464,7 +478,7 @@ export class CoreModelService {
       return { ok: false, kind, error: "kind must be 'text' or 'vision'" }
     if (!entryId) return { ok: false, kind, error: 'entryId required' }
 
-    const config = await loadModelConfig(this.root)
+    const config = await loadModelConfig(this.root, this.store)
     const entry = findEntry(config, entryId)
     if (!entry)
       return { ok: false, kind, error: `model entry not found: ${entryId}` }
@@ -627,13 +641,17 @@ function resolvedProfile(
   })
 }
 
-function modelEntryPayload(entry: ModelEntryV2): ModelEntryPayload {
+function modelEntryPayload(
+  entry: ModelEntryV2,
+  needsReentry: boolean,
+): ModelEntryPayload {
   const { legacy: _legacy, ...safe } = entry
   return {
     ...safe,
-    apiKey: maskSecret(entry.apiKey),
+    apiKey: needsReentry ? '' : maskSecret(entry.apiKey),
     effectiveDisplayName: entry.displayName || entry.modelId,
     resolvedProfile: resolvedProfile(entry),
+    ...(needsReentry ? { credentialState: 'needs_reentry' as const } : {}),
   }
 }
 

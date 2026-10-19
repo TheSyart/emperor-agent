@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { dirname, extname, join, resolve } from 'node:path'
 import { ValidationError } from '../errors'
 import { PROVIDERS, findByName, normalizeApiBase } from '../llm/catalog'
+import { isSealedSecret, type SecretSealer } from '../security/secret-sealer'
 import { logger } from '../util/log'
 import {
   AtomicSnapshot,
@@ -15,6 +16,13 @@ import {
 export const MODEL_CONFIG_FILE = 'model_config.json'
 export const MODEL_CONFIG_V1_BACKUP_FILE = 'model_config.v1-backup.json'
 export const MODEL_CONFIG_EXAMPLE_FILE = 'model_config.example.json'
+/** The copy of a file that still held plaintext keys, made before sealing them (SEC-06). */
+export const MODEL_CONFIG_PRE_SEAL_PREFIX = `${MODEL_CONFIG_FILE}.pre-seal-`
+
+/** What a model entry's sealed `apiKey` is bound to: it opens only there. */
+export function modelApiKeyContext(entryId: string): string {
+  return `${MODEL_CONFIG_FILE}#models/${entryId}/apiKey`
+}
 
 export type ModelProtocol = 'openai' | 'anthropic'
 
@@ -126,6 +134,12 @@ export interface ModelConfig {
   models: ModelEntry[]
   policy: ModelExecutionPolicy
   raw: ModelConfigV2 & Record<string, unknown>
+  /**
+   * Entries whose sealed key cannot be opened (the local key file is gone
+   * or was replaced): their `apiKey` reads as null and Settings asks for it
+   * again. The sealed value stays on disk until re-entered or cleared.
+   */
+  credentialsNeedingReentry: string[]
   /** @deprecated compatibility view; never serialized. */
   defaults: AgentDefaults
   /** @deprecated compatibility view; never serialized. */
@@ -155,6 +169,11 @@ type RawRecord = Record<string, any>
 
 export interface ModelConfigPersistenceOptions {
   persistenceAdapter?: PersistenceAdapter
+  /**
+   * SEC-06: opens sealed `apiKey` values on load and seals keys on save.
+   * Absent: values stay as written, and a sealed one cannot be used.
+   */
+  sealer?: SecretSealer | null
 }
 
 const REMOVED_PROVIDERS = new Set([
@@ -507,8 +526,18 @@ function compatibilityEntry(entry: ModelEntryV2): ModelEntry {
   }
 }
 
-function runtimeConfig(raw: ModelConfigV2): ModelConfig {
+function runtimeConfig(
+  raw: ModelConfigV2,
+  unreadable: ReadonlyMap<string, string> = new Map(),
+): ModelConfig {
   const clean = structuredClone(raw)
+  const needingReentry = new Set(unreadable.keys())
+  // A sealed value that was not opened is never a usable key.
+  for (const entry of clean.models)
+    if (isSealedSecret(entry.apiKey)) {
+      needingReentry.add(entry.entryId)
+      entry.apiKey = null
+    }
   const models = clean.models.map(compatibilityEntry)
   const active = clean.activeModelId
     ? models.find((entry) => entry.entryId === clean.activeModelId)
@@ -538,6 +567,9 @@ function runtimeConfig(raw: ModelConfigV2): ModelConfig {
       clean.activeModelId,
     ),
     raw: clean as ModelConfigV2 & Record<string, unknown>,
+    credentialsNeedingReentry: clean.models
+      .map((entry) => entry.entryId)
+      .filter((entryId) => needingReentry.has(entryId)),
     defaults: {
       model: active?.entryId ?? '',
       provider: active?.provider ?? 'auto',
@@ -945,44 +977,183 @@ export async function loadModelConfig(
   if (loaded.schemaVersion !== 2) {
     await backupV1(path, source)
     const migrated = migrateV1(loaded)
-    await writeModelConfigSnapshot(path, migrated, opts.persistenceAdapter)
+    // The v1 backup above is this file's copy from before sealing.
+    await writeModelConfigSnapshot(
+      path,
+      sealKeysForDisk(migrated, new Map(), opts.sealer).raw,
+      opts.persistenceAdapter,
+    )
     return runtimeConfig(migrated)
   }
   const normalized = normalizeV2(loaded)
   try {
+    // Keys are written back exactly as stored (sealed or not); plaintext
+    // is sealed by the next save (SEC-06).
     if (JSON.stringify(JSON.parse(source)) !== JSON.stringify(normalized))
       await writeModelConfigSnapshot(path, normalized, opts.persistenceAdapter)
   } catch {
     // AtomicSnapshot 已负责隔离畸形文件；这里不重复恢复。
   }
-  return runtimeConfig(normalized)
+  const opened = openStoredKeys(normalized, opts.sealer)
+  return runtimeConfig(opened.config, opened.unreadable)
 }
 
 export async function saveModelConfig(
   rootOrFile: string,
   data: ModelConfigV2 | RawRecord,
-  opts: { validateComplete?: boolean } & ModelConfigPersistenceOptions = {},
+  opts: {
+    validateComplete?: boolean
+    /**
+     * Entries whose key the user cleared on purpose in this save. Only these
+     * drop a sealed key that cannot be opened; any other null keeps it.
+     */
+    clearedKeys?: readonly string[]
+  } & ModelConfigPersistenceOptions = {},
 ): Promise<ModelConfig> {
   const path = configPath(rootOrFile)
-  const merged = await preserveStoredApiKeys(path, data)
-  const config = parseModelConfig(merged)
+  const stored = await readStoredConfig(path)
+  const merged = preserveStoredApiKeys(
+    stored?.value,
+    data,
+    opts.sealer,
+    opts.clearedKeys ?? [],
+  )
+  if (!isRecord(merged)) throw new ValidationError('model_config 必须是对象')
+  const normalized =
+    merged.schemaVersion === 2 ? normalizeV2(merged) : migrateV1(merged)
+  const opened = openStoredKeys(normalized, opts.sealer)
+  const config = runtimeConfig(opened.config, opened.unreadable)
   if (opts.validateComplete) validateCompleteModelEntries(config.raw)
-  await writeModelConfigSnapshot(path, config.raw, opts.persistenceAdapter)
+  const disk = sealKeysForDisk(config.raw, opened.unreadable, opts.sealer)
+  if (disk.sealedPlaintext && stored && hasUnsealedKeys(stored.value))
+    await backupBeforeSealing(path, stored.source)
+  await writeModelConfigSnapshot(path, disk.raw, opts.persistenceAdapter)
   return config
 }
 
-async function preserveStoredApiKeys(
+async function readStoredConfig(
   path: string,
-  data: ModelConfigV2 | RawRecord,
-): Promise<ModelConfigV2 | RawRecord> {
-  if (!isRecord(data) || data.schemaVersion !== 2 || !existsSync(path))
-    return data
-  let stored: unknown
+): Promise<{ source: string; value: unknown } | null> {
+  if (!existsSync(path)) return null
   try {
-    stored = JSON.parse(await readFile(path, 'utf8'))
+    const source = await readFile(path, 'utf8')
+    return { source, value: JSON.parse(source) as unknown }
   } catch {
-    return data
+    return null
   }
+}
+
+/** Open each sealed key; the ones that do not open are reported, not lost. */
+function openStoredKeys(
+  raw: ModelConfigV2,
+  sealer: SecretSealer | null | undefined,
+): { config: ModelConfigV2; unreadable: Map<string, string> } {
+  const unreadable = new Map<string, string>()
+  const models = raw.models.map((entry) => {
+    if (!isSealedSecret(entry.apiKey)) return entry
+    const opened = openKey(entry.apiKey, entry.entryId, sealer)
+    if (opened !== null) return { ...entry, apiKey: opened }
+    unreadable.set(entry.entryId, entry.apiKey)
+    return { ...entry, apiKey: null }
+  })
+  return { config: { ...raw, models }, unreadable }
+}
+
+function openKey(
+  sealed: string,
+  entryId: string,
+  sealer: SecretSealer | null | undefined,
+): string | null {
+  if (!sealer) return null
+  try {
+    return sealer.open(sealed, modelApiKeyContext(entryId))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The document to write: plaintext keys sealed (when the sealer can seal),
+ * unreadable sealed keys put back as they were.
+ */
+function sealKeysForDisk(
+  raw: ModelConfigV2,
+  unreadable: ReadonlyMap<string, string>,
+  sealer: SecretSealer | null | undefined,
+): { raw: ModelConfigV2; sealedPlaintext: boolean } {
+  let sealedPlaintext = false
+  let warned = false
+  const canSeal = Boolean(sealer?.available)
+  const models = raw.models.map((entry) => {
+    const kept = unreadable.get(entry.entryId)
+    if (entry.apiKey === null)
+      return kept === undefined ? entry : { ...entry, apiKey: kept }
+    if (isSealedSecret(entry.apiKey) || !sealer) return entry
+    if (canSeal)
+      try {
+        const sealed = sealer.seal(
+          entry.apiKey,
+          modelApiKeyContext(entry.entryId),
+        )
+        sealedPlaintext = true
+        return { ...entry, apiKey: sealed }
+      } catch {
+        // Reported below; the key is kept rather than lost.
+      }
+    if (!warned) {
+      warned = true
+      logger.warn(
+        'Model API keys stay unsealed: the local key is not available',
+      )
+    }
+    return entry
+  })
+  return { raw: { ...raw, models }, sealedPlaintext }
+}
+
+/** Whether a stored document holds any key not yet sealed. */
+function hasUnsealedKeys(stored: unknown): boolean {
+  if (!isRecord(stored)) return false
+  if (stored.schemaVersion !== 2) return true
+  return (Array.isArray(stored.models) ? stored.models : []).some(
+    (entry) =>
+      isRecord(entry) &&
+      typeof entry.apiKey === 'string' &&
+      entry.apiKey.trim() !== '' &&
+      !isSealedSecret(entry.apiKey) &&
+      !isMaskedSecret(entry.apiKey),
+  )
+}
+
+/** `model_config.json.pre-seal-<ts>`: the file as it was, plaintext keys and all. */
+async function backupBeforeSealing(
+  path: string,
+  source: string,
+): Promise<void> {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const backupPath = join(
+    dirname(path),
+    `${MODEL_CONFIG_PRE_SEAL_PREFIX}${stamp}`,
+  )
+  let handle: Awaited<ReturnType<typeof open>> | undefined
+  try {
+    handle = await open(backupPath, 'wx', 0o600)
+    await handle.writeFile(source, 'utf8')
+    await handle.sync()
+  } catch (error: any) {
+    if (error?.code !== 'EEXIST') throw error
+  } finally {
+    await handle?.close()
+  }
+}
+
+function preserveStoredApiKeys(
+  stored: unknown,
+  data: ModelConfigV2 | RawRecord,
+  sealer: SecretSealer | null | undefined,
+  clearedKeys: readonly string[],
+): ModelConfigV2 | RawRecord {
+  if (!isRecord(data) || data.schemaVersion !== 2) return data
   if (!isRecord(stored) || stored.schemaVersion !== 2) return data
   const previous = new Map<string, RawRecord>()
   for (const item of Array.isArray(stored.models) ? stored.models : []) {
@@ -998,12 +1169,21 @@ async function preserveStoredApiKeys(
     const submitted = Object.prototype.hasOwnProperty.call(item, 'apiKey')
       ? item.apiKey
       : undefined
+    const entryId = optionalString(item.entryId) ?? ''
     if (
       submitted === undefined ||
       (typeof submitted === 'string' &&
         (!submitted.trim() || isMaskedSecret(submitted)))
     )
       item.apiKey = old.apiKey ?? null
+    else if (
+      submitted === null &&
+      isSealedSecret(old.apiKey) &&
+      !clearedKeys.includes(entryId) &&
+      openKey(old.apiKey, entryId, sealer) === null
+    )
+      // It read as null because it cannot be opened: keep asking for it.
+      item.apiKey = old.apiKey
   }
   return next
 }
@@ -1112,44 +1292,61 @@ export function updateModelPolicyConfig(
 export async function saveModelPolicy(
   rootOrFile: string,
   policy: ModelExecutionPolicy,
+  opts: ModelConfigPersistenceOptions = {},
 ): Promise<ModelConfig> {
-  const current = await loadModelConfig(rootOrFile)
+  const current = await loadModelConfig(rootOrFile, opts)
   return saveModelConfig(
     rootOrFile,
     updateModelPolicyConfig(current.raw, policy),
+    opts,
   )
 }
 
 export async function saveModelEntry(
   rootOrFile: string,
   update: ModelEntryUpdate,
+  opts: ModelConfigPersistenceOptions = {},
 ): Promise<ModelConfig> {
-  const current = await loadModelConfig(rootOrFile)
+  const current = await loadModelConfig(rootOrFile, opts)
+  const cleared =
+    update.entryId &&
+    Object.prototype.hasOwnProperty.call(update, 'apiKey') &&
+    update.apiKey === null
+      ? [update.entryId]
+      : []
   return saveModelConfig(
     rootOrFile,
     upsertModelEntryConfig(current.raw, update),
+    {
+      ...opts,
+      clearedKeys: cleared,
+    },
   )
 }
 
 export async function deleteModelEntry(
   rootOrFile: string,
   entryId: string,
+  opts: ModelConfigPersistenceOptions = {},
 ): Promise<ModelConfig> {
-  const current = await loadModelConfig(rootOrFile)
+  const current = await loadModelConfig(rootOrFile, opts)
   return saveModelConfig(
     rootOrFile,
     deleteModelEntryConfig(current.raw, entryId),
+    opts,
   )
 }
 
 export async function activateModelEntry(
   rootOrFile: string,
   entryId: string,
+  opts: ModelConfigPersistenceOptions = {},
 ): Promise<ModelConfig> {
-  const current = await loadModelConfig(rootOrFile)
+  const current = await loadModelConfig(rootOrFile, opts)
   return saveModelConfig(
     rootOrFile,
     activateModelEntryConfig(current.raw, entryId),
+    opts,
   )
 }
 
@@ -1186,20 +1383,25 @@ export async function markEntryVision(
   rootOrFile: string,
   entryId: string,
   value = true,
+  opts: ModelConfigPersistenceOptions = {},
 ): Promise<ModelConfig> {
-  const config = await loadModelConfig(rootOrFile)
+  const config = await loadModelConfig(rootOrFile, opts)
   const found = findEntry(config, entryId)
   if (!found)
     throw new ValidationError(
       `entry '${entryId}' not found in model_config.json`,
     )
-  return saveModelEntry(rootOrFile, {
-    entryId: found.entryId,
-    capabilityOverrides: {
-      ...found.capabilityOverrides,
-      vision: Boolean(value),
+  return saveModelEntry(
+    rootOrFile,
+    {
+      entryId: found.entryId,
+      capabilityOverrides: {
+        ...found.capabilityOverrides,
+        vision: Boolean(value),
+      },
     },
-  })
+    opts,
+  )
 }
 
 function reportModelConfigRecovery(info: {

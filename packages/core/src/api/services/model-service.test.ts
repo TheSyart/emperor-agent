@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -11,6 +11,7 @@ import { LlmClient } from '../../llm/client'
 import type { GenerateOptions } from '../../llm/types'
 import { ScriptedAdapter, type ScriptedReply } from '../../harness/testing'
 import { ModelDiscovery } from '../../model/discovery'
+import { createLocalKeySealer } from '../../security/secret-sealer'
 import { jsonResponse, scriptedFetch } from '../../model/discovery/testing'
 import { CoreModelService } from './model-service'
 
@@ -718,5 +719,53 @@ describe('CoreModelService connection probe (MOD-02)', () => {
       }),
     ).resolves.toMatchObject({ ok: false, code: 'AUTH' })
     expect(requests).toHaveLength(0)
+  })
+})
+
+describe('CoreModelService sealed keys (SEC-06)', () => {
+  it('saves through the service with a sealed key and shows only its last 4 characters (cards 1, 10)', async () => {
+    const root = tmp('emperor-model-service-sealed-')
+    const sealer = createLocalKeySealer(root)
+    const models = new CoreModelService(root, { sealer })
+    const payload = await models.saveEntry({
+      provider: 'openai',
+      protocol: 'openai',
+      modelId: 'gpt-5.2',
+      apiBase: 'https://api.openai.com/v1',
+      apiKey: 'sk-proj-abcdefghijklmnopWXYZ',
+      contextWindowTokens: 128_000,
+      maxTokens: 16_000,
+    })
+    const disk = readFileSync(join(root, 'model_config.json'), 'utf8')
+    expect(disk).not.toContain('sk-proj-abcdefghijklmnop')
+    expect(disk).toMatch(/"apiKey": "el1:/)
+    expect(payload.models[0]!.apiKey).toBe('***WXYZ')
+    expect(JSON.stringify(payload)).not.toContain('abcdefghijklmnop')
+    expect(JSON.stringify(payload)).not.toContain('el1:')
+    expect(payload.models[0]!.credentialState).toBeUndefined()
+    expect(payload.availability.usable).toBe(true)
+  })
+
+  it('shows 凭据需要重新输入 for entries whose local key is gone (card 3)', async () => {
+    const root = tmp('emperor-model-service-reentry-')
+    const sealer = createLocalKeySealer(root)
+    await new CoreModelService(root, { sealer }).saveEntry({
+      provider: 'openai',
+      protocol: 'openai',
+      modelId: 'gpt-5.2',
+      apiBase: 'https://api.openai.com/v1',
+      apiKey: 'sk-proj-lost-key-0000',
+      contextWindowTokens: 128_000,
+      maxTokens: 16_000,
+    })
+    rmSync(join(root, 'computer-use', 'secrets'), { recursive: true })
+    const payload = await new CoreModelService(root, {
+      sealer: createLocalKeySealer(root),
+    }).getConfig()
+    expect(payload.models).toHaveLength(1)
+    expect(payload.models[0]!.apiKey).toBe('')
+    expect(payload.models[0]!.credentialState).toBe('needs_reentry')
+    expect(payload.availability.usable).toBe(false)
+    expect(payload.availability.message).toContain('凭据需要重新输入')
   })
 })
