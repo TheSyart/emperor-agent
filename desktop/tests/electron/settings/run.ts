@@ -413,17 +413,36 @@ async function settings(page: Page, home: string): Promise<void> {
     page,
     'a saved model key shows only its last 4 characters and is sealed on save',
     async () => {
+      // MOD-05: the card shows the key's tail; 更换 Key (the card's ⋯)
+      // says which key it replaces; the model editor has no key field.
       const dialog = await openSection(page, 'model')
-      await dialog.getByRole('button', { name: '编辑 Fake Settings' }).click()
-      const key = dialog.getByLabel('API Key', { exact: true })
-      await key.waitFor()
-      const placeholder = await key.getAttribute('placeholder')
-      if (placeholder !== '已保存 ···fake，留空保留')
-        throw new Error(`placeholder ${placeholder}`)
-      if ((await key.inputValue()) !== '') throw new Error('key prefilled')
+      const card = dialog.locator('[data-provider]').first()
+      await card.waitFor()
+      if (!(await card.innerText()).includes('···fake'))
+        throw new Error('the key tail is not on the card')
       if ((await dialog.innerText()).includes('sk-fake'))
         throw new Error('the key is shown')
-      await dialog.getByRole('button', { name: '保存模型' }).click()
+      await card
+        .getByRole('button', { name: /的更多操作$/ })
+        .first()
+        .click()
+      await page.getByRole('menuitem', { name: '更换 Key' }).click()
+      const keyDialog = page.getByTestId('connection-key-dialog')
+      await keyDialog.waitFor()
+      const placeholder = (await keyDialog.innerText()).includes('当前 ···fake')
+        ? '当前 ···fake'
+        : ''
+      if (!placeholder) throw new Error('the key dialog does not name the key')
+      if ((await keyDialog.getByLabel('API Key').inputValue()) !== '')
+        throw new Error('key prefilled')
+      await keyDialog.getByRole('button', { name: '取消' }).click()
+      await keyDialog.waitFor({ state: 'hidden' })
+      await dialog.getByRole('button', { name: '编辑 Fake Settings' }).click()
+      const editor = dialog.getByTestId('model-editor')
+      await editor.waitFor()
+      if ((await editor.locator('input[type="password"]').count()) !== 0)
+        throw new Error('the editor still asks for the key')
+      await editor.getByRole('button', { name: '保存', exact: true }).click()
       const file = join(home, 'model_config.json')
       await until(
         () => /"apiKey":\s*"el1:/.test(readFileSync(file, 'utf8')),

@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  createSiblingEntryDraft,
-  credentialsInherited,
-  formatTokenCount,
-  toModelEntrySaveInput,
-} from '../components/settings/model/modelFormModel'
+import { formatTokenCount } from '../components/settings/model/modelFormModel'
 import type { ModelEntry, ProviderOption } from '../types'
 import {
   credentialSourceEntry,
@@ -156,47 +151,7 @@ describe('provider groups', () => {
   })
 })
 
-describe('sibling entry drafts', () => {
-  it('starts from the source endpoint and reuses its key until it changes', () => {
-    const source = entry({
-      entryId: 'main',
-      displayName: 'Main',
-      effectiveDisplayName: 'Main',
-      protocol: 'anthropic',
-      apiBase: 'https://api.deepseek.com/anthropic/',
-    })
-    const draft = createSiblingEntryDraft(deepseek, source)
-    expect(draft).toMatchObject({
-      provider: 'deepseek',
-      protocol: 'anthropic',
-      apiBase: 'https://api.deepseek.com/anthropic/',
-      modelId: '',
-      credentialsFrom: { entryId: 'main', label: 'Main' },
-    })
-    expect(draft.entryId).toBeUndefined()
-    draft.modelId = 'deepseek-reasoner'
-    draft.apiBase = 'https://api.deepseek.com/anthropic/v1/messages'
-    expect(credentialsInherited(draft)).toBe(true)
-    expect(toModelEntrySaveInput(draft)).toMatchObject({
-      credentialsFrom: 'main',
-    })
-
-    draft.apiKey = 'sk-typed'
-    expect(credentialsInherited(draft)).toBe(false)
-    expect(toModelEntrySaveInput(draft)).toMatchObject({ apiKey: 'sk-typed' })
-    expect(toModelEntrySaveInput(draft)).not.toHaveProperty('credentialsFrom')
-
-    draft.apiKey = ''
-    draft.apiBase = 'https://proxy.example'
-    expect(credentialsInherited(draft)).toBe(false)
-  })
-
-  it('has nothing to reuse when the source has no saved key', () => {
-    const draft = createSiblingEntryDraft(deepseek, entry({ apiKey: '' }))
-    expect(draft.credentialsFrom).toBeUndefined()
-    expect(credentialsInherited(draft)).toBe(false)
-  })
-
+describe('token counts', () => {
   it('formats token counts compactly', () => {
     expect(formatTokenCount(8_000)).toBe('8K')
     expect(formatTokenCount(131_072)).toBe('131K')

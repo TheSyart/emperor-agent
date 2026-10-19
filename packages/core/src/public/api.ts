@@ -39,11 +39,14 @@ export type {
   ModelDiscoveryInput,
   ModelDiscoveryPayload,
   ModelEntriesSaveInput,
+  ModelEntryLifecycle,
+  ModelEntryReplaceInput,
   ModelMetadataChange,
   ModelMetadataDiff,
   ModelMetadataRefreshInput,
   RejectedModelEntryPayload,
 } from '../api/services/model-service'
+export type { ModelTestRecord } from '../api/services/model-test-log'
 export type {
   ModelEntryDetected,
   ModelEntryLimits,

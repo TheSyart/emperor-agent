@@ -2,9 +2,12 @@
 /**
  * ModelPolicyGroup — Settings › 模型 › 执行与成本策略: the explicit, default-off
  * fallback model (switch, target, trigger conditions) and the per-Agent-turn
- * cost cap, as SettingsRows under one group. Edits stay local until 「保存策略」
- * (`model.savePolicy`); the group resets from the payload after a save or a
- * refresh.
+ * cost cap, as SettingsRows under one group. Every change saves at once
+ * (`model.savePolicy`; MOD-05): a switch or a choice when it changes, the
+ * cap when the field is left (or Enter). A backup switched on without a
+ * target waits for one. A model without prices is not covered by the cap:
+ * the group names it instead of stopping turns. The group resets from the
+ * payload after a save or a refresh.
  *
  * Props: payload (the model config payload).
  * Emits: updated(payload) after a successful save.
@@ -12,7 +15,6 @@
 import { computed, ref, watch } from 'vue'
 import { saveModelPolicy } from '../../../api/model'
 import type { ModelConfigPayload } from '../../../types'
-import Button from '../../ui/Button.vue'
 import {
   Select,
   SettingsGroup,
@@ -30,6 +32,7 @@ import {
   policyDraftsEqual,
   type ModelPolicyDraft,
 } from './modelFormModel'
+import { unpricedUnderCap } from './modelListModel'
 
 const props = defineProps<{ payload: ModelConfigPayload }>()
 const emit = defineEmits<{ updated: [payload: ModelConfigPayload] }>()
@@ -64,6 +67,13 @@ watch(
   { deep: true },
 )
 
+const unpriced = computed(() =>
+  unpricedUnderCap(props.payload).map(modelEntryLabel),
+)
+const waitingForTarget = computed(
+  () => draft.value.fallbackEnabled && !draft.value.fallbackEntryId,
+)
+
 watch(
   draft,
   () => {
@@ -73,8 +83,21 @@ watch(
   { deep: true },
 )
 
+/** Save the switches and choices as soon as they change. */
+watch(
+  () => [
+    draft.value.fallbackEnabled,
+    draft.value.fallbackEntryId,
+    draft.value.onRateLimit,
+    draft.value.onTransient,
+  ],
+  () => {
+    if (dirty.value && !waitingForTarget.value) void save()
+  },
+)
+
 async function save(): Promise<void> {
-  if (saving.value) return
+  if (saving.value || !dirty.value) return
   error.value = ''
   let policy
   try {
@@ -99,19 +122,11 @@ async function save(): Promise<void> {
 <template>
   <SettingsGroup
     title="执行与成本策略"
-    description="默认不会自动切换模型；以下策略只有保存后才生效。"
+    description="默认不会自动切换模型；改动立即生效。"
     data-testid="model-policy"
   >
     <template #actions>
       <Badge v-if="saved && !dirty" tone="ok" role="status"> 已保存 </Badge>
-      <Button
-        size="sm"
-        variant="secondary"
-        :disabled="saving || !dirty"
-        @click="save"
-      >
-        {{ saving ? '保存中…' : '保存策略' }}
-      </Button>
     </template>
 
     <SettingsRow
@@ -123,6 +138,9 @@ async function save(): Promise<void> {
     </SettingsRow>
     <template v-if="draft.fallbackEnabled">
       <SettingsRow title="切换到" dense>
+        <template v-if="waitingForTarget" #description
+          >选好备用模型后生效</template
+        >
         <Select
           v-model="draft.fallbackEntryId"
           :options="targetOptions"
@@ -143,11 +161,17 @@ async function save(): Promise<void> {
         <Switch :id="`${uid}-transient`" v-model="draft.onTransient" />
       </SettingsRow>
     </template>
-    <SettingsRow
-      title="每 Agent 轮成本上限"
-      description="启用前需为主模型和备用模型填写完整单价；未知成本不会按 0 计算，账本会标记为不完整。"
-      :label-for="`${uid}-cap`"
-    >
+    <SettingsRow title="每 Agent 轮成本上限" :label-for="`${uid}-cap`">
+      <template #description>
+        <span>按模型单价累计；未知成本不会按 0 计算，账本会标记为不完整。</span>
+        <span
+          v-for="name in unpriced"
+          :key="name"
+          class="unpriced"
+          data-unpriced
+          >「{{ name }}」没有单价，成本上限对它不生效</span
+        >
+      </template>
       <TextField
         :id="`${uid}-cap`"
         v-model="costCap"
@@ -158,6 +182,8 @@ async function save(): Promise<void> {
         inputmode="decimal"
         placeholder="不限制"
         size="sm"
+        @change="save"
+        @keydown.enter="save"
       >
         <template #trailing><span class="unit">USD</span></template>
       </TextField>
@@ -175,6 +201,11 @@ async function save(): Promise<void> {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   color: rgb(var(--label-tertiary));
+}
+
+.unpriced {
+  display: block;
+  color: rgb(var(--state-warn-label));
 }
 
 .policy-error {

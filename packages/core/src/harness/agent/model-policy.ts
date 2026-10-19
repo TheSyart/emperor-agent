@@ -196,13 +196,14 @@ export function costCapMiddleware(
     const cap = source.policy()?.cost.maxUsdPerAgentTurn
     if (cap === null || cap === undefined) return undefined
     const capUsdNanos = usdToNanos(cap)
+    // Usage on a route without prices has no cost to count: the cap does
+    // not apply to it (MOD-05; 设置 › 模型 says so) and the turn goes on.
     const { spentUsdNanos, unpricedRoutes } = turnCostUsdNanos(
       agent.session,
       turn,
       (routeId) => source.pricing(routeId),
     )
-    if (spentUsdNanos < capUsdNanos && unpricedRoutes.length === 0)
-      return undefined
+    if (spentUsdNanos < capUsdNanos) return undefined
     agent.session.append('llm/cost-cap', {
       turn,
       step,

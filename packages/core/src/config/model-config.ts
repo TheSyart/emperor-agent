@@ -432,7 +432,7 @@ function normalizePricing(value: unknown): ModelPricing | undefined {
   return result
 }
 
-function newEntryId(): string {
+export function newEntryId(): string {
   return `model-${randomUUID()}`
 }
 
@@ -757,17 +757,8 @@ function normalizeExecutionPolicy(
     if (entryId === activeModelId)
       throw new ValidationError('policy fallback 不能指向 active 模型')
   }
-  if (maxUsdPerAgentTurn !== null) {
-    const active = activeModelId ? byId.get(activeModelId) : null
-    if (!active?.pricing)
-      throw new ValidationError(
-        '启用 cost cap 前必须为 active 模型配置完整 pricing',
-      )
-    if (enabled && entryId && !byId.get(entryId)?.pricing)
-      throw new ValidationError(
-        '启用 cost cap 前必须为 fallback 模型配置完整 pricing',
-      )
-  }
+  // A cost cap is kept even when a referenced model has no prices: it just
+  // does not apply to that model (MOD-05).
   return {
     fallback: { enabled, entryId, triggerOn: [...triggerOn] },
     cost: { maxUsdPerAgentTurn },

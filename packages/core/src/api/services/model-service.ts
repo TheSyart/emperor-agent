@@ -9,6 +9,8 @@ import {
   findEntry,
   loadModelConfig,
   maskSecret,
+  newEntryId,
+  sameConnection,
   parseModelConfig,
   saveModelConfig,
   saveModelEntries,
@@ -33,6 +35,11 @@ import {
 } from '../../model/metadata/lookup'
 import type { ModelFacts, ModelFactsSource } from '../../model/metadata/types'
 import type { PersistenceAdapter } from '../../store/persistence'
+import {
+  ModelTestLog,
+  testFailureKind,
+  type ModelTestRecord,
+} from './model-test-log'
 import {
   modelAvailability,
   type ModelAvailability,
@@ -127,7 +134,10 @@ export interface ModelDefaultsInput {
   modelId: string
 }
 
-export type ModelEntrySaveInput = Omit<ModelEntryUpdate, 'legacy'> & {
+export type ModelEntrySaveInput = Omit<
+  ModelEntryUpdate,
+  'legacy' | 'sampling' | 'metadata'
+> & {
   /**
    * New entries only: copy the API key (and legacy extra headers) of this
    * saved entry instead of submitting one. The source must be the same
@@ -135,6 +145,16 @@ export type ModelEntrySaveInput = Omit<ModelEntryUpdate, 'legacy'> & {
    * endpoint it was not saved for.
    */
   credentialsFrom?: string
+  /** The editor's temperature (高级); null removes it (MOD-05). */
+  sampling?: { temperature?: number | null }
+  /** Fields the user set in the editor: metadata refreshes keep them. */
+  lockFields?: ModelMetadataField[]
+}
+
+export interface ModelEntryReplaceInput {
+  entryId: string
+  /** The model to use instead, on the same connection. */
+  modelId: string
 }
 
 export interface ModelProfilePreviewInput {
@@ -158,7 +178,16 @@ export interface ModelEntryPayload extends Omit<
   credentialState?: 'needs_reentry'
   /** Where the entry's facts came from; old entries read as manual, locked. */
   metadata: ModelEntryMetadata
+  /**
+   * The model's lifecycle: as saved, else what the bundled catalog knows
+   * (MOD-05: Settings offers the replacement of a retired model).
+   */
+  lifecycle?: ModelEntryLifecycle
+  /** The last connection test of this entry (model_tests.json). */
+  lastTest?: ModelTestRecord
 }
+
+export type ModelEntryLifecycle = NonNullable<ModelEntryMetadata['lifecycle']>
 
 export interface CurrentModelPayload {
   entryId: string
@@ -263,6 +292,12 @@ export class CoreModelService {
     this.discovery = deps.discovery ?? new ModelDiscovery()
   }
 
+  private get tests(): ModelTestLog {
+    return (this.testLog ??= new ModelTestLog(this.root))
+  }
+
+  private testLog: ModelTestLog | undefined
+
   private get store() {
     return {
       sealer: this.deps.sealer ?? null,
@@ -276,8 +311,9 @@ export class CoreModelService {
     const config = await loadModelConfig(this.root, this.store)
     const entry = activeEntry(config) ?? null
     const reentry = new Set(config.credentialsNeedingReentry)
+    const tests = await this.tests.all()
     const models = config.raw.models.map((item) =>
-      modelEntryPayload(item, reentry.has(item.entryId)),
+      modelEntryPayload(item, reentry.has(item.entryId), tests[item.entryId]),
     )
     return {
       schemaVersion: 2,
@@ -428,8 +464,27 @@ export class CoreModelService {
   async saveEntry(input: ModelEntrySaveInput): Promise<ModelConfigSavePayload> {
     const before = await loadModelConfig(this.root, this.store)
     const wasUsable = modelAvailability(before).usable
-    const { credentialsFrom, ...fields } = input
-    const update = normalizeEntrySecret(fields)
+    const { credentialsFrom, sampling, lockFields, ...fields } = input
+    const update: ModelEntryUpdate = normalizeEntrySecret(fields)
+    const existing = update.entryId
+      ? before.raw.models.find((entry) => entry.entryId === update.entryId)
+      : undefined
+    if (sampling !== undefined) {
+      const next = { ...existing?.sampling }
+      if (sampling.temperature === null) delete next.temperature
+      else if (sampling.temperature !== undefined)
+        next.temperature = sampling.temperature
+      update.sampling = next
+    }
+    if (lockFields?.length && existing) {
+      const metadata = effectiveMetadata(existing)
+      update.metadata = {
+        ...metadata,
+        userLocked: [
+          ...new Set([...(metadata.userLocked ?? []), ...lockFields]),
+        ],
+      }
+    }
     if (credentialsFrom)
       inheritCredentials(before.raw.models, update, credentialsFrom)
     const prospective = upsertModelEntryConfig(before.raw, update)
@@ -749,6 +804,7 @@ export class CoreModelService {
       })
       const sample = response.text.trim().slice(0, 200)
       const ok = kind === 'vision' ? visionOk(sample) : /pong/i.test(sample)
+      await this.rememberTest(config, entryId, kind, ok ? null : 'error')
       return {
         ok,
         kind,
@@ -760,6 +816,7 @@ export class CoreModelService {
         finishReason: response.finish.kind,
       }
     } catch (error) {
+      await this.rememberTest(config, entryId, kind, testFailureKind(error))
       return {
         ok: false,
         kind,
@@ -770,6 +827,81 @@ export class CoreModelService {
         provider,
       }
     }
+  }
+
+  /** Keep the outcome for 设置 › 模型's connection status; never fails a test. */
+  private async rememberTest(
+    config: Awaited<ReturnType<typeof loadModelConfig>>,
+    entryId: string,
+    kind: string,
+    failure: 'auth' | 'error' | null,
+  ): Promise<void> {
+    try {
+      await this.tests.record(
+        entryId,
+        {
+          ok: failure === null,
+          kind: kind === 'vision' ? 'vision' : 'text',
+          testedAt: new Date().toISOString(),
+          ...(failure ? { failure } : {}),
+        },
+        new Set(config.raw.models.map((entry) => entry.entryId)),
+      )
+    } catch {
+      // The status line falls back to 「未测试」.
+    }
+  }
+
+  /**
+   * Use another model of the same connection instead of `entryId` (MOD-05:
+   * a retired model's 「替换为 X」). The replacement takes the old entry's
+   * place in the list, the active model and the backup model; what the user
+   * set (locked fields, capability overrides, temperature, the key) stays,
+   * the rest comes from the catalog for the new model. One write.
+   */
+  async replaceEntry(
+    input: ModelEntryReplaceInput,
+  ): Promise<ModelConfigSavePayload & { replacedEntryId: string }> {
+    const before = await loadModelConfig(this.root, this.store)
+    const wasUsable = modelAvailability(before).usable
+    const replacedEntryId = await withModelConfigLock(this.root, async () => {
+      const config = await loadModelConfig(this.root, this.store)
+      const old = config.raw.models.find(
+        (entry) => entry.entryId === requiredId(input.entryId),
+      )
+      if (!old) throw new Error(`model entry not found: ${input.entryId}`)
+      const modelId = trimString(input.modelId)
+      if (!modelId) throw new Error('modelId required')
+      if (
+        config.raw.models.some(
+          (entry) =>
+            entry !== old &&
+            entry.modelId === modelId &&
+            sameConnection(entry, old),
+        )
+      )
+        throw new Error(`「${modelId}」已经添加在这个连接下`)
+      const next = replacementEntry(old, modelId)
+      const raw = config.raw
+      const policy = structuredClone(raw.policy)
+      if (policy?.fallback.entryId === old.entryId)
+        policy.fallback.entryId = next.entryId
+      await saveModelConfig(
+        this.root,
+        {
+          ...raw,
+          activeModelId:
+            raw.activeModelId === old.entryId
+              ? next.entryId
+              : raw.activeModelId,
+          models: raw.models.map((entry) => (entry === old ? next : entry)),
+          ...(policy ? { policy } : {}),
+        },
+        this.store,
+      )
+      return next.entryId
+    })
+    return { ...(await this.afterModelMutation(wasUsable)), replacedEntryId }
   }
 
   private async afterModelMutation(
@@ -853,16 +985,107 @@ function resolvedProfile(
 function modelEntryPayload(
   entry: ModelEntryV2,
   needsReentry: boolean,
+  lastTest?: ModelTestRecord,
 ): ModelEntryPayload {
   const { legacy: _legacy, ...safe } = entry
+  const lifecycle = entryLifecycle(entry)
   return {
     ...safe,
     apiKey: needsReentry ? '' : maskSecret(entry.apiKey),
     effectiveDisplayName: effectiveDisplayName(entry),
     resolvedProfile: resolvedProfile(entry),
     metadata: effectiveMetadata(entry),
+    ...(lifecycle ? { lifecycle } : {}),
+    ...(lastTest ? { lastTest } : {}),
     ...(needsReentry ? { credentialState: 'needs_reentry' as const } : {}),
   }
+}
+
+/** The saved lifecycle, else the bundled catalog's (retirements land there). */
+function entryLifecycle(entry: ModelEntryV2): ModelEntryLifecycle | undefined {
+  const saved = entry.metadata?.lifecycle
+  if (saved?.status) return { ...saved }
+  const facts = lookupModelFacts({
+    provider: entry.provider,
+    apiBase: entry.apiBase,
+    modelId: entry.modelId,
+  })
+  return facts.lifecycle ? { ...facts.lifecycle } : undefined
+}
+
+/** The entry for `modelId` that replaces `old` (see replaceEntry). */
+function replacementEntry(old: ModelEntryV2, modelId: string): ModelEntryV2 {
+  const facts = lookupModelFacts({
+    provider: old.provider,
+    apiBase: old.apiBase,
+    modelId,
+  })
+  const metadata = effectiveMetadata(old)
+  const locked = new Set(metadata.userLocked ?? [])
+  const next: ModelEntryV2 = {
+    ...structuredClone(old),
+    entryId: newEntryId(),
+    modelId,
+  }
+  if (!locked.has('displayName')) delete next.displayName
+  if (!locked.has('contextWindowTokens') && facts.contextWindowTokens)
+    next.contextWindowTokens = facts.contextWindowTokens
+  const maxTokens = defaultMaxTokens(facts)
+  if (!locked.has('maxTokens') && maxTokens) next.maxTokens = maxTokens
+  if (facts.maxInputTokens || facts.maxOutputTokens)
+    next.limits = stripUndefinedFacts({
+      maxInputTokens: facts.maxInputTokens,
+      maxOutputTokens: facts.maxOutputTokens,
+    })
+  else delete next.limits
+  if (!locked.has('capabilities'))
+    next.detected = stripUndefinedFacts({
+      toolCall: facts.capabilities.toolCall,
+      vision: facts.capabilities.vision,
+      reasoning: facts.capabilities.reasoning,
+      reasoningEfforts: facts.reasoning?.efforts,
+      defaultReasoningEffort: facts.reasoning?.defaultEffort,
+      reasoningControl: facts.reasoning?.control,
+      acceptsTemperature: facts.acceptsTemperature,
+      modalities: facts.modalities,
+      kind: facts.kind,
+    })
+  if (!locked.has('reasoningEffort')) next.reasoningEffort = null
+  if (!locked.has('pricing')) {
+    const price = facts.pricingUsdPerMTok
+    if (price?.input !== undefined && price.output !== undefined)
+      next.pricing = {
+        inputUsdPerMillionTokens: price.input,
+        outputUsdPerMillionTokens: price.output,
+        cacheReadUsdPerMillionTokens: price.cacheRead ?? 0,
+        cacheWriteUsdPerMillionTokens: price.cacheWrite ?? 0,
+      }
+    else delete next.pricing
+  }
+  if (facts.acceptsTemperature === false && next.sampling)
+    delete next.sampling.temperature
+  const { lifecycle: _lifecycle, ...rest } = metadata
+  next.metadata = {
+    ...rest,
+    ...(facts.name ? { name: facts.name } : {}),
+    source: facts.source,
+    catalogKey: facts.key,
+    catalogVersion: MODEL_CATALOG_INFO.sha256,
+    checkedAt: new Date().toISOString(),
+    ...(facts.lifecycle ? { lifecycle: { ...facts.lifecycle } } : {}),
+  }
+  return next
+}
+
+/**
+ * What a request asks for by default (T4 §3): min(上限, 32K); a model that
+ * always thinks, with ≥128K of output, min(上限, 64K); unknown 8,192.
+ */
+function defaultMaxTokens(facts: ModelFacts): number | undefined {
+  const limit = facts.maxOutputTokens
+  if (!limit) return undefined
+  const alwaysThinks = facts.reasoning?.control === 'always'
+  return Math.min(limit, alwaysThinks && limit >= 128_000 ? 64_000 : 32_000)
 }
 
 /** What refreshing one entry from the catalog would change (MOD-03). */
