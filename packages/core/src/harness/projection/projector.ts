@@ -435,6 +435,16 @@ export class SessionProjector {
               : { summary: event.data.error }),
         })
         break
+      case 'compaction/warning':
+        emit('agent_thought', {
+          thought_id: `compaction-warning:${event.seq}`,
+          stage: 'compaction',
+          label: '上下文接近上限',
+          status: 'error',
+          source: 'core',
+          summary: `自动压缩已连续失败 ${event.data.failures} 次。上下文接近上限，建议 /compact 或新开会话。`,
+        })
+        break
       case 'llm/retry':
         this.discardAttempt(emit)
         emit('agent_thought', {
