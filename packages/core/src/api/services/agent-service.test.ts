@@ -588,6 +588,16 @@ describe('unified child-agent read index', () => {
     expect(agentPhaseLabel(a.phase)).toBe('已中断')
     expect(a.needsExit).toBeUndefined()
     expect(b).toMatchObject({ phase: 'unknown', needsExit: true })
+    // Marked as ended: no longer 结果待确认.
+    stuck.runs['dgr-one']!.abandoned = { by: 'user', at: 40 }
+    stuck.runs['dgr-one']!.recoveryResolved = true
+    stuck.record!.availability = 'idle'
+    f.service.externalChanged(stuck)
+    const ended = f.service
+      .list(['root'])
+      .agents.find((r) => r.id === 'dlg-stuck')!
+    expect(ended.phase).toBe('interrupted')
+    expect(ended.needsExit).toBeUndefined()
     f.sessions.closeAll()
   })
 })

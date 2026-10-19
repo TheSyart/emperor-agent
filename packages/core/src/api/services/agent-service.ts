@@ -107,10 +107,11 @@ function externalView(state: DelegationState): AgentView | undefined {
         ? 'waiting'
         : p === 'completed'
           ? 'completed'
-          : p === 'failed' || p === 'cancelled'
-            ? 'failed'
-            : p === 'interrupted'
-              ? 'interrupted'
+          : // Marked as ended by the user, or cut off by a restart.
+            run?.abandoned || p === 'interrupted'
+            ? 'interrupted'
+            : p === 'failed' || p === 'cancelled'
+              ? 'failed'
               : p === 'outcome_unknown' || !p
                 ? 'unknown'
                 : 'running',
