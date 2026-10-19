@@ -10,6 +10,7 @@ import {
   Mic,
   MousePointerClick,
   Settings,
+  SlidersHorizontal,
   Webhook,
 } from 'lucide-vue-next'
 import type { SettingsModalSection } from './settingsSections'
@@ -26,4 +27,5 @@ export const SETTINGS_SECTION_ICONS: Record<SettingsModalSection, Component> = {
   tokens: Coins,
   pet: Cat,
   diagnostics: Activity,
+  advanced: SlidersHorizontal,
 }

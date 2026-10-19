@@ -111,9 +111,15 @@ describe('SettingsModal', () => {
     expect(dialog?.getAttribute('role')).toBe('dialog')
     expect(dialog?.textContent).toContain('设置')
     // 定时任务 and the 能力 tabs are full pages now; 配置 folded into 记忆;
-    // 子智能体, 电脑操作, 浏览器 and 语音 joined.
-    expect(dialog?.querySelectorAll('.nav-cell').length).toBe(11)
-    for (const joined of ['executors', 'computer', 'browser', 'voice'])
+    // 子智能体, 电脑操作, 浏览器, 语音 and 高级 joined.
+    expect(dialog?.querySelectorAll('.nav-cell').length).toBe(12)
+    for (const joined of [
+      'executors',
+      'computer',
+      'browser',
+      'voice',
+      'advanced',
+    ])
       expect(
         dialog?.querySelector(`.nav-cell[data-section="${joined}"]`),
       ).not.toBeNull()

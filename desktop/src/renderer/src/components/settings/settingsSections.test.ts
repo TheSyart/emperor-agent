@@ -34,6 +34,7 @@ describe('settings sections', () => {
       'tokens',
       'pet',
       'diagnostics',
+      'advanced',
     ])
     for (const key of SETTINGS_PAGE_SECTIONS) {
       expect(keys).not.toContain(key)
