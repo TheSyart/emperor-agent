@@ -41,6 +41,7 @@ describe('local config', () => {
         downloadDirectory: null,
         askWhereToSave: false,
       },
+      webTools: { webFetch: true, webSearch: true },
     })
 
     const loaded = await loadLocalConfig(dir)
@@ -217,6 +218,7 @@ describe('local config', () => {
       'browser',
       'desktopPet',
       'prompt',
+      'webTools',
       'webui',
     ])
   })
@@ -245,6 +247,7 @@ describe('local config', () => {
       'browser',
       'desktopPet',
       'prompt',
+      'webTools',
       'webui',
     ])
     expect(existsSync(path)).toBe(true)
@@ -256,7 +259,37 @@ describe('local config', () => {
     await saveLocalConfig(dir, loaded)
     expect(
       Object.keys(JSON.parse(await readFile(path, 'utf8'))).sort(),
-    ).toEqual(['browser', 'desktopPet', 'prompt', 'webui'])
+    ).toEqual(['browser', 'desktopPet', 'prompt', 'webTools', 'webui'])
+  })
+
+  it('keeps the network tool switches, defaulting both on', async () => {
+    const path = localConfigPath(dir)
+    expect((await loadLocalConfig(dir)).webTools).toEqual({
+      webFetch: true,
+      webSearch: true,
+    })
+    await writeFile(
+      path,
+      JSON.stringify({ webTools: { webFetch: false, webSearch: 'yes' } }),
+      'utf8',
+    )
+    const loaded = await loadLocalConfig(dir)
+    expect(loaded.webTools).toEqual({ webFetch: false, webSearch: true })
+    await saveLocalConfig(dir, {
+      ...loaded,
+      webTools: { webFetch: true, webSearch: false },
+    })
+    expect(JSON.parse(await readFile(path, 'utf8')).webTools).toEqual({
+      webFetch: true,
+      webSearch: false,
+    })
+    // Like `browser`, a save that leaves the switches out writes the defaults.
+    const { webTools: _dropped, ...withoutSwitches } = loaded
+    await saveLocalConfig(dir, withoutSwitches)
+    expect(JSON.parse(await readFile(path, 'utf8')).webTools).toEqual({
+      webFetch: true,
+      webSearch: true,
+    })
   })
 
   it('preserves corrupt config files and reports backups in diagnostics', async () => {

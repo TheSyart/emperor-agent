@@ -192,7 +192,7 @@ describe('plugin hooks', () => {
               matcher: '^mcp__my-files__read$',
               hooks: [{ command: 'files.sh' }],
             },
-            { matcher: 'WebFetch', hooks: [{ command: 'never.sh' }] },
+            { matcher: 'NotebookEdit', hooks: [{ command: 'never.sh' }] },
           ],
           SessionStart: [
             { matcher: 'startup', hooks: [{ command: 'start.sh' }] },

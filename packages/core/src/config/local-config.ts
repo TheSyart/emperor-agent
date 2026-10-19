@@ -32,6 +32,15 @@ export interface PromptPreferences {
 }
 
 /**
+ * 设置 › 高级 › 网络工具: whether the Agent gets `web_fetch` and (where the
+ * provider offers it) `web_search`. Both default on.
+ */
+export interface WebToolPreferences {
+  webFetch: boolean
+  webSearch: boolean
+}
+
+/**
  * `settings.json` preferences. Retired keys from the old kernel
  * (`permissions.rules`, `workspace.fileCheckpoints` / `workspace.gitRewind`,
  * `memory.hybridMemory`, `codeIntelligence`) are ignored when reading so old
@@ -42,11 +51,31 @@ export interface LocalConfig {
   desktopPet: DesktopPetPreferences
   prompt: PromptPreferences
   browser: BrowserPreferences
+  webTools: WebToolPreferences
 }
 
-/** What a save takes: a missing `browser` keeps its defaults. */
-export type LocalConfigInput = Omit<LocalConfig, 'browser'> & {
+/** What a save takes: a missing `browser` or `webTools` writes its defaults. */
+export type LocalConfigInput = Omit<LocalConfig, 'browser' | 'webTools'> & {
   browser?: BrowserPreferences
+  webTools?: WebToolPreferences
+}
+
+export function defaultWebToolPreferences(): WebToolPreferences {
+  return { webFetch: true, webSearch: true }
+}
+
+/** Each switch falls back to its default when missing or not a boolean. */
+export function normalizeWebToolPreferences(
+  value: unknown,
+): WebToolPreferences {
+  const data = objectOrEmpty(value)
+  const defaults = defaultWebToolPreferences()
+  return {
+    webFetch:
+      typeof data.webFetch === 'boolean' ? data.webFetch : defaults.webFetch,
+    webSearch:
+      typeof data.webSearch === 'boolean' ? data.webSearch : defaults.webSearch,
+  }
 }
 
 export function defaultBrowserPreferences(): BrowserPreferences {
@@ -100,6 +129,7 @@ function defaultLocalConfig(): LocalConfig {
     desktopPet: { enabled: false, autoStartWithWebui: true },
     prompt: { profile: 'technical' },
     browser: defaultBrowserPreferences(),
+    webTools: defaultWebToolPreferences(),
   }
 }
 
@@ -145,6 +175,7 @@ export function parseLocalConfig(
       profile: normalizePromptProfile(prompt.profile),
     },
     browser,
+    webTools: normalizeWebToolPreferences(data.webTools),
   }
 }
 
@@ -225,6 +256,7 @@ export async function saveLocalConfig(
       profile: normalizePromptProfile(config.prompt?.profile),
     },
     browser: normalizeBrowserPreferences(config.browser),
+    webTools: normalizeWebToolPreferences(config.webTools),
   }
   const shared = await sharedSettings(path, opts.persistenceAdapter)
   await localConfigSnapshot(path, opts.persistenceAdapter).write({

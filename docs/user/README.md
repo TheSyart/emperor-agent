@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：安装包用户、首次使用者<br>
-> 最后核验：2026-10-15<br>
+> 最后核验：2026-10-19<br>
 > 事实源：`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/sidebar/sidebarNav.ts`、`desktop/src/renderer/src/components/settings/settingsSections.ts` 与各设置分区（含 `ComputerUseSection.vue`）、Composer 与 CoreApi 用户入口
 
 这组文档按实际任务组织。你不需要先理解 CoreApi、runtime event 或磁盘 store。
@@ -53,6 +53,7 @@
 | 用量     | Token 统计、活跃度热力图、趋势、模型排名和缓存                                                                                                                                      | [诊断与排障](diagnostics-troubleshooting.md#常用状态入口)   |
 | 桌宠     | 启用或关闭 companion，预览动画                                                                                                                                                      | [定时任务、Hooks 与桌宠](automation-collaboration.md)       |
 | 诊断     | 顶部概览与需要关注的项目，下方是可折叠的运行时、环境工具、桌面、存储路径和配置                                                                                                      | [诊断与排障](diagnostics-troubleshooting.md)                |
+| 高级     | 网络工具：网页读取（`web_fetch`）与网页搜索（`web_search`，跟随当前模型是否使用 DeepSeek 官方 API）两个开关                                                                         | [Tools、Skills 与 MCP](tools-skills-mcp.md#tools)           |
 
 定时任务、插件、Skills、MCP 和工具已从设置弹窗移到上面的整页。旧的 `?settings=scheduler`、`?settings=plugins`、`?settings=skills`、`?settings=mcp`、`?settings=tools` 链接以及 `/plugins/*`、`/skills/<名称>`、`/mcp`、`/tools` 会自动跳到对应页面；原「配置」分区并入“记忆 › 用户档案”，`?settings=configs` 会打开「记忆」。
 
@@ -63,6 +64,6 @@
 - 当前公开安装包属于未签名 Preview。安装前阅读[安全说明](../release/unsigned-preview-notice.md)。
 - Preview 能力会保留明确限制。界面里存在组件或底层 service，不等于已经开放完整入口。
 - Agent 的文件写入和命令执行受当前权限预设（`read-only`、`workspace-write`、`danger-full-access`）约束；在前两种预设下，超出范围的操作需要你逐次批准。
-- 默认没有内置网页搜索或网页抓取工具；需要联网时通过 MCP、Skill 或命令完成，相关内容会离开本机。
+- Agent 默认可以用 `web_fetch` 读取公开网页；模型使用 DeepSeek 官方 API 时还可以用 `web_search` 搜索。网址和搜索词会离开本机，两者都可以在「设置 › 高级 › 网络工具」关闭，见 [Tools、Skills 与 MCP](tools-skills-mcp.md#tools)。
 
 产品首页见 [README](../../README.md)，开发者入口见 [开发指南](../development/README.md)。

@@ -62,6 +62,7 @@ const SECTION_BODIES: Record<SettingsModalSection, Component> = {
   tokens: defineAsyncComponent(() => import('./TokensSection.vue')),
   pet: defineAsyncComponent(() => import('./PetSection.vue')),
   diagnostics: defineAsyncComponent(() => import('./DiagnosticsSection.vue')),
+  advanced: defineAsyncComponent(() => import('./AdvancedSection.vue')),
 }
 
 const settings = useSettingsRoute()

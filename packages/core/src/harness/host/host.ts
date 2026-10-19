@@ -34,7 +34,7 @@ import {
   messageText,
   type UserMessage,
 } from '../../llm/message'
-import { routeFromEntry } from '../../llm/route'
+import { routeFromEntry, type RouteSpec } from '../../llm/route'
 import type { ContentBlock } from '../../llm/types'
 import {
   historyPage,
@@ -131,11 +131,7 @@ import {
 } from '../tools/builtin/mcp-config'
 import { createSchedulerTool } from '../tools/builtin/scheduler'
 import { createTodoTool } from '../tools/builtin/todo'
-import {
-  createWebSearchTool,
-  installWebSearchPromptSection,
-  type WebSearchBackend,
-} from '../tools/builtin/web-search'
+import type { WebSearchBackend } from '../tools/builtin/web-search'
 import { ToolRegistry } from '../tools/registry'
 import { createRepeatReminder } from '../tools/repeat-reminder'
 import type { ToolServices } from '../tools/services'
@@ -158,6 +154,7 @@ import {
 } from './session-views'
 import { REPAIR_CONTRIBUTORS } from './repair-contributors'
 import { generateSessionTitle } from './title'
+import { WebTools } from './web-tools'
 
 export type HostEventSink = (
   event: Record<string, unknown>,
@@ -168,8 +165,14 @@ export type RawSessionTap = (sessionId: string, event: SessionEvent) => void
 
 export interface HarnessHostOptions extends KeptServicesOptions {
   eventSink?: HostEventSink | null
-  /** Web search backend; `web_search` is only offered when one is configured. */
+  /**
+   * A host's own web search backend: `web_search` is offered with it
+   * whatever the provider. Without one, `web_search` exists only on
+   * DeepSeek's official API (its Search API).
+   */
   webSearch?: WebSearchBackend | null
+  /** Test hook: the transport for DeepSeek's Search API (default `fetch`). */
+  webSearchFetch?: typeof fetch
   /** Permission preset new sessions start with (default `workspace-write`). */
   defaultPreset?: string
   initializeMcp?: boolean
@@ -287,6 +290,8 @@ export class HarnessHost {
   readonly attachments: AttachmentStore
   readonly watchlist: WatchlistService
   readonly mcpTools: McpToolBridge
+  /** `web_fetch` / `web_search` and their switches (设置 › 高级 › 网络工具). */
+  readonly webTools: WebTools
   /** GUI control kernel; null on hosts without a computer-use port. */
   computerUse: InstalledComputerUse | null = null
   private computerUseConfig: ComputerUseConfigStore | null = null
@@ -402,6 +407,15 @@ export class HarnessHost {
       available: (owner) =>
         this.eventSink !== null && owner.source !== 'scheduler',
       timeoutMs: () => this.delegationQuestionTimeoutMs(),
+    })
+    this.webTools = new WebTools({
+      settings: kept.localConfig.webTools,
+      fetchClient: options.webFetchClient ?? null,
+      searchBackend: options.webSearch ?? null,
+      ...(options.webSearchFetch
+        ? { searchFetch: options.webSearchFetch }
+        : {}),
+      routeOf: (agent) => this.routeOf(agent),
     })
     this.goalInstall = this.compose(options)
   }
@@ -527,10 +541,7 @@ export class HarnessHost {
     tools.register(createTodoTool())
     tools.register(createAskUserQuestionTool(this.questions))
     tools.register(this.planMode.tool())
-    if (options.webSearch) {
-      tools.register(createWebSearchTool(options.webSearch))
-      installWebSearchPromptSection(prompt)
-    }
+    this.webTools.install(tools, prompt)
     const skills = {
       loaderFor: (agent: Agent | undefined) => this.skillsLoaderFor(agent),
     }
@@ -973,6 +984,18 @@ export class HarnessHost {
     const path = join(this.kept.templatesDir, 'agent', 'persona.md')
     if (existsSync(path)) return readFileSync(path, 'utf8').trim()
     return 'You are Emperor Agent, a coding agent. The runtime context names the model you run on and your working directory.'
+  }
+
+  /** The route an agent's next request goes to; no agent: the active route. */
+  private routeOf(agent: Agent | undefined): RouteSpec | undefined {
+    try {
+      return agent === undefined
+        ? this.llm.activeRoute()
+        : this.llm.route(agent.proposedCallConfig().provider)
+    } catch {
+      // No model configured yet.
+      return undefined
+    }
   }
 
   /** The model an agent is on (its own route, or this turn's fallback). */

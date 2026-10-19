@@ -78,6 +78,7 @@ export const RUNTIME_EVENT_NAMES = [
   'subagent_tool_call',
   'subagent_tool_error',
   'subagent_tool_result',
+  'web_tools_changed',
 ] as const
 
 export type RuntimeEventName = (typeof RUNTIME_EVENT_NAMES)[number]

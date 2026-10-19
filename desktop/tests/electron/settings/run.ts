@@ -45,6 +45,7 @@ const SECTIONS: ReadonlyArray<readonly [string, string]> = [
   ['tokens', '用量'],
   ['pet', '桌宠'],
   ['diagnostics', '诊断'],
+  ['advanced', '高级'],
 ]
 
 /** Sub pages: section, the 管理 control that opens it, its key and title. */
@@ -226,7 +227,7 @@ function until(
 async function settings(page: Page, home: string): Promise<void> {
   await check(
     page,
-    'the nav lists the eleven sections in order',
+    'the nav lists the twelve sections in order',
     async () => {
       const dialog = await openSettings(page)
       const keys = await dialog
@@ -435,6 +436,96 @@ async function settings(page: Page, home: string): Promise<void> {
       if (backups.length !== 1)
         throw new Error(`backups ${JSON.stringify(backups)}`)
       return { placeholder, backups: backups.length }
+    },
+  )
+
+  // KRN-08: the fake model is not DeepSeek's official API, so web_search
+  // is off and explained; web_fetch is on and its switch takes it out of
+  // 能力 › 工具 and puts it back.
+  await check(
+    page,
+    '高级 › 网络工具 takes web_fetch out of 能力 › 工具 and back',
+    async () => {
+      const listed = async (): Promise<string[]> => {
+        if (await dialogOf(page).isVisible()) {
+          await page.keyboard.press('Escape')
+          await dialogOf(page).waitFor({ state: 'hidden' })
+        }
+        await page
+          .getByRole('navigation', { name: '侧栏导航' })
+          .getByRole('button', { name: '能力', exact: true })
+          .click()
+        await page.getByRole('tab', { name: '工具', exact: true }).click()
+        await page.locator('.tool-row[data-tool="read"]').waitFor()
+        return await page
+          .locator('.tool-row')
+          .evaluateAll((rows) =>
+            rows.map((row) => row.getAttribute('data-tool') ?? ''),
+          )
+      }
+      const switchOf = (dialog: Locator, tool: string) =>
+        dialog.locator(`[role="switch"][data-tool="${tool}"]`)
+      const before = await listed()
+      if (!before.includes('web_fetch') || before.includes('web_search'))
+        throw new Error(`tools before ${JSON.stringify(before)}`)
+
+      let dialog = await openSection(page, 'advanced')
+      const fetchSwitch = switchOf(dialog, 'web_fetch')
+      const searchSwitch = switchOf(dialog, 'web_search')
+      await until(
+        async () => (await fetchSwitch.getAttribute('aria-checked')) === 'true',
+        10_000,
+        'web_fetch on',
+      )
+      const search = {
+        checked: await searchSwitch.getAttribute('aria-checked'),
+        disabled: await searchSwitch.isDisabled(),
+        reason: (
+          await searchSwitch
+            .locator('xpath=ancestor::*[contains(@class,"ds-settings-row")]')
+            .innerText()
+        ).replace(/\s+/g, ' '),
+      }
+      if (
+        search.checked !== 'false' ||
+        !search.disabled ||
+        !search.reason.includes('DeepSeek 官方 API')
+      )
+        throw new Error(`web_search ${JSON.stringify(search)}`)
+      // The modal fades in; shoot it once the fade is over.
+      await dialog.evaluate((element) =>
+        Promise.all(
+          element
+            .getAnimations({ subtree: true })
+            .map((motion) => motion.finished),
+        ),
+      )
+      await page.screenshot({ path: join(shots, 'advanced-network-tools.png') })
+      await fetchSwitch.click()
+      await until(
+        async () =>
+          (await fetchSwitch.getAttribute('aria-checked')) === 'false',
+        10_000,
+        'web_fetch off',
+      )
+      const off = await listed()
+      if (off.includes('web_fetch'))
+        throw new Error(`web_fetch still listed ${JSON.stringify(off)}`)
+
+      dialog = await openSection(page, 'advanced')
+      await switchOf(dialog, 'web_fetch').click()
+      await until(
+        async () =>
+          (await switchOf(dialog, 'web_fetch').getAttribute('aria-checked')) ===
+          'true',
+        10_000,
+        'web_fetch on again',
+      )
+      const on = await listed()
+      if (!on.includes('web_fetch'))
+        throw new Error(`web_fetch not back ${JSON.stringify(on)}`)
+      await page.keyboard.press('Escape').catch(() => undefined)
+      return { before: before.length, off: off.length, on: on.length, search }
     },
   )
 

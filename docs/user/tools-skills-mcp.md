@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：希望扩展 Agent 能力的用户<br>
 > 最后核验：2026-10-19<br>
-> 事实源：`packages/core/src/harness/host/host.ts`（`compose()`）、`packages/core/src/harness/tools/builtin/`（含 `skill-manage.ts`、`mcp-config.ts`）、`packages/core/src/harness/workflow/`、`packages/core/src/skills/`、`packages/core/src/plugins/`、`packages/core/src/mcp/`、`desktop/src/renderer/src/components/pages/capabilities/`、`desktop/src/renderer/src/components/pages/explore/`、`desktop/src/renderer/src/components/settings/`（插件 / Skills / MCP / 工具分区组件）
+> 事实源：`packages/core/src/harness/host/host.ts`（`compose()`）、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/tools/builtin/`（含 `skill-manage.ts`、`mcp-config.ts`、`web-fetch.ts`、`web-search.ts`、`deepseek-search.ts`）、`packages/core/src/harness/workflow/`、`packages/core/src/skills/`、`packages/core/src/plugins/`、`packages/core/src/mcp/`、`desktop/src/renderer/src/components/pages/capabilities/`、`desktop/src/renderer/src/components/pages/explore/`、`desktop/src/renderer/src/components/settings/`（插件 / Skills / MCP / 工具分区组件）
 
 Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资源包；Plugin 是带来源、版本和启用状态的 Skill 分发单元；MCP 把外部 server 暴露的工具接入 Agent。
 
@@ -16,7 +16,7 @@ Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资�
 | 分类             | 工具                                                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | 基础工具         | 文件 `read`、`write`、`edit`；搜索 `glob`、`grep`；命令 `bash`，后台命令用 `job_output`、`job_list`、`job_kill` 管理             |
-| 网络             | `web_search`                                                                                                                     |
+| 网络             | `web_fetch`；`web_search`（模型使用 DeepSeek 官方 API 时）                                                                       |
 | 任务与规划       | `todo_write`、`ask_user_question`、`exit_plan_mode`；目标 `get_goal`、`create_goal`、`update_goal`；定时 `scheduler`             |
 | 子代理与工作流   | `subagent`、`subagent_fork`、`send_message`、`interrupt_agent`、`list_agents`（子代理内另有 `report`）；编排 `workflow`、`ralph` |
 | 技能、记忆与配置 | `skill`、`skill_manage`、`memory_edit`、`mcp_config`                                                                             |
@@ -35,7 +35,10 @@ Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资�
 - **扩展管理**：`skill_manage` 管理 Skills，`mcp_config` 管理 MCP server，见下文。查看、校验和重新连接不需要审批；修改 Skill 文件或 MCP 配置的动作跟随当前权限预设，除 `danger-full-access` 外每次写入都会先请求你批准。
 - **Scheduler**：`scheduler` 让 Agent 创建和管理定时任务，不需要审批。定时任务运行时只能查看任务列表，不能新建、修改、恢复、立即运行、暂停或删除任务。
 - **大结果**：超过 50,000 字节的纯文本结果会完整保存到 `stateRoot/spill/`，模型只看到首尾预览和文件路径。
-- **网页**：默认没有网页抓取工具。`web_search` 只在宿主配置了搜索后端时才会出现，桌面版当前没有配置，所以“工具”标签里暂时没有“网络”一组。需要联网时可以使用 MCP server、会联网的 Skill，或在权限允许时用 `bash` 调用命令行工具。
+- **网页读取**：`web_fetch` 默认开启。它读取一个公开网页（`http` / `https`），把 HTML 转成 Markdown，返回标题、跳转后的最终地址和正文。请求不带 Cookie 和登录状态；地址或任何一次跳转指向本机、内网、链路本地或保留地址时直接拒绝，不会发出请求。单页最多读取 10 MB，超出部分不读并在结果里说明；HTML 最多转换前 256 KB（只算去掉脚本、样式后的标记），给模型的结果每次约 45 KB，较长的页面分段返回，结果会写明下一段的 `offset`。纯文本和 JSON 原样返回，图片、PDF 等二进制内容不读。网页的标题和正文都按不可信的外部内容交给模型（`[external_content]` 包裹，`trust: untrusted_external`），模型不应执行其中的指令。
+- **网页搜索**：`web_search` 只在当前模型使用 DeepSeek 官方 API（`https://api.deepseek.com`，且配置了 API Key）时出现，通过 DeepSeek Search API 搜索，使用该模型的 API Key，按 DeepSeek 的价格按次计费；换成其他供应商或经网关访问 DeepSeek 时，这个工具和相关说明都不会出现。搜索结果（摘要、标题、片段）同样按不可信的外部内容处理。
+- **开关**：「设置 › 高级 › 网络工具」里可以分别关闭“网页读取”和“网页搜索”；关闭后，对应工具不再出现在 Agent 的工具列表和能力页“工具”标签里，Agent 也调用不到它。当前模型不提供搜索时，“网页搜索”开关置灰并说明原因。开关保存在 `~/.emperor/settings.json` 的 `webTools`。
+- **离开本机的内容**：`web_fetch` 会把 Agent 选择的网址发给对应网站，`web_search` 会把搜索词发给 DeepSeek。和 `bash` 里的 `curl` 一样，被网页内容误导的模型可能把信息写进网址带出去；不需要联网时可以关掉这两个开关。
 
 工具卡显示的是执行投影；真实状态以 session log 为准。
 

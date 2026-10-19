@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、维护者<br>
 > 最后核验：2026-10-19<br>
-> 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/agent/`、`packages/core/src/session-log/`、`packages/core/src/llm/`、`packages/core/src/harness/compaction/`、`packages/core/src/mcp/`、`packages/core/src/skills/`
+> 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/agent/`、`packages/core/src/session-log/`、`packages/core/src/llm/`、`packages/core/src/harness/compaction/`、`packages/core/src/mcp/`、`packages/core/src/skills/`
 
 Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript 实现，采用 deepseek-harness standard 模式的语义，但不含插件框架：各子系统在 `HarnessHost.compose()` 中把自己的处理函数压入有序的 middleware 数组。`HarnessHost` 是唯一组合根，每个 session 持有一个 `Agent`。
 
@@ -82,6 +82,13 @@ turn/end
 `harness/agent/tool-calls.ts` 按模型顺序分组：连续的并发安全调用共享一个滚动池（默认最多 10 个并行），非并发安全调用单独执行并形成屏障；`tool/call` 事件和 pre-execute 按模型顺序发生，只有工具体重叠，post-execute 与 `tool/result` 严格按模型顺序提交。中止时尚未开始的调用得到合成的 `ABORTED_BEFORE_DISPATCH` 结果，保证每个调用都有结果。step 因内部故障抛错时（例如结果无法写入 log），所有还没有结果的调用在 `step/end` 之前补写错误结果：已记录 `tool/call` 的写 `TOOL_OUTCOME_UNKNOWN`（结果未知，只有只读或幂等的操作才应重试），从未开始的写 `TOOL_NOT_STARTED`；这与崩溃修复使用同一组结果（`session-log/repair.ts` 的 `ToolCallRecovery`），下一次请求因此不会带着悬空的工具调用。
 
 Post-execute 固定包含重复调用提醒（相同工具与参数连续出现时追加提示，不否决调用）、Hooks 的 PostToolUse，以及最后执行的大结果落盘：纯文本结果超过 50,000 字节时，完整文本写入 `stateRoot/spill/`，模型只看到首尾预览和文件路径。`read` 不参与落盘；界面可以通过 `tools.readResult` 读取落盘全文。
+
+### 网络工具
+
+`harness/host/web-tools.ts` 的 `WebTools` 在 `compose()` 里登记 `web_fetch` 与 `web_search`，开关来自 `settings.json` › `webTools`（默认都开），CoreApi 的 `tools.setNetworkSettings` 先保存再调用 `WebTools.update()`。两个工具都用 `ToolRegistry.register(…, { visible })` 注册：关闭或当前不可用时既不出现在工具清单（`skills.tools`、请求的 tools）里，也不能调用；对应的 `tool:web_fetch`（order 111）与 `tool:web_search`（order 110）提示段按同一可见性渲染为空，`web_search` 的说明只在 `web_fetch` 可见时提到它。
+
+- `web_fetch` 只在宿主提供 `webFetchClient` 时注册（桌面 main 总是提供；headless ACP 不提供）。请求经 `PublicHttpClient`（DNS 结果与每一跳都拒绝本机、私网、链路本地与保留地址，不带 Cookie），`overflow: 'truncate'` 读到 10 MiB 为止并标记截断；HTML 由 `network/html-markdown.ts` 先做线性的词法预处理（去掉脚本、样式、注释等，只保留 256 KiB 标记，估算嵌套深度，过深时退回纯文本），再交给 turndown。整个结果放进 `external-content.ts` 的不可信信封，模型可见部分保持在落盘阈值之下（信封把正文编码成一行 JSON，`read` 无法分页），长页面按 `offset` 分段。
+- `web_search` 在宿主注入搜索后端时总是可用，否则只在 agent 下一次请求的路由（`agent.proposedCallConfig().provider`；无 agent 时取当前活动路由）指向 `https://api.deepseek.com` 且有 API Key 时可见，每次调用用该路由的 Key 请求 DeepSeek Search API（`/v1/tools/search`），结果同样放进不可信信封。
 
 工具清单与语义见[工具与扩展能力](../user/tools-skills-mcp.md)，权限管线见[权限与 Plan 架构](control-and-permissions.md)。
 

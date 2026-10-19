@@ -71,6 +71,8 @@ export const CODEX_TOOL_NAMES = new Map<string, readonly string[]>([
   ['Grep', ['grep']],
   ['WebSearch', ['web_search']],
   ['web_search', ['web_search']],
+  ['WebFetch', ['web_fetch']],
+  ['web_fetch', ['web_fetch']],
   ['update_plan', ['todo_write']],
   ['TodoWrite', ['todo_write']],
   ['Agent', ['subagent', 'subagent_fork']],

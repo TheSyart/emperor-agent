@@ -22,6 +22,7 @@ export const SETTINGS_SECTIONS = [
   { key: 'tokens', label: '用量' },
   { key: 'pet', label: '桌宠' },
   { key: 'diagnostics', label: '诊断' },
+  { key: 'advanced', label: '高级' },
 ] as const
 
 /** A section the settings modal shows. */
