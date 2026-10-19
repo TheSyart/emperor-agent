@@ -21,7 +21,7 @@
   background: linear-gradient(
       90deg,
       transparent 0%,
-      rgb(var(--bg-base) / 0.6) 55%,
+      rgb(var(--surface-base) / 0.6) 55%,
       transparent 100%
     )
     0 0 / var(--ds-glare-band) 100% no-repeat;

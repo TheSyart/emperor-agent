@@ -117,7 +117,7 @@ defineProps<{ tools: readonly ToolSchema[] }>()
 
 .definition {
   padding: 0 0 var(--space-2) var(--space-7);
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-base));
 }
 
 .full-description {

@@ -1,11 +1,15 @@
 <script setup lang="ts">
 /**
- * Three-column shell frame (dsh ui-layout AppFrame): sidebar | center |
- * workspace grid tracks solved by columns.ts from the frame's own width.
- * Narrow frames (< 1024px) auto-collapse the sidebar to the 56px rail; the
- * workspace column stays mounted at width 0 when closed (and on full-page
- * routes, where `workspaceAvailable` is false). Drag handles use pointer
- * capture + rAF throttling against the width captured at drag start.
+ * The window shell (UI-S01; dsh ui-layout AppFrame): the permanent 56px icon
+ * rail, the sidebar on the canvas, then the conversation (or full page) and
+ * the workspace, each on its own `--surface-base` panel (radius 12) inside
+ * an 8px canvas gutter. No column draws a border. Grid tracks are solved by
+ * columns.ts from the frame's own width. Narrow frames (< 1024px) fold the
+ * sidebar (the rail stays); the folded sidebar and the closed workspace stay
+ * mounted at width 0, inert. With the sidebar folded the center panel starts
+ * after the traffic lights (`--shell-lights-clear`) instead of 8px after the
+ * rail. Drag handles sit on the gutters and use pointer capture + rAF
+ * throttling against the width captured at drag start; widths never animate.
  *
  * Props:
  * - workspaceAvailable? (default true) — false forces the column closed.
@@ -13,14 +17,16 @@
  *   concedes to (the Trajectory tab passes CENTER_MIN_TRAJECTORY).
  *
  * Slots:
- * - sidebar ({ collapsed, width, toggle }) — left column.
- * - default — center column (conversation / page).
- * - workspace ({ open }) — right column; kept mounted while closed.
+ * - rail ({ collapsed, toggle }) — the icon rail column.
+ * - sidebar ({ collapsed, width, toggle }) — left column (kept mounted).
+ * - default — center panel (conversation / page).
+ * - workspace ({ open }) — right panel; kept mounted while closed.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   CENTER_MIN_CHAT,
   computeColumns,
+  SHELL_GUTTER,
   SIDEBAR_AUTO_COLLAPSE,
   SIDEBAR_DEFAULT,
 } from './columns'
@@ -58,7 +64,7 @@ const columns = computed(() => {
   )
 })
 const gridStyle = computed(() => ({
-  gridTemplateColumns: `${columns.value.sidebar}px minmax(0, 1fr) ${columns.value.workspace}px`,
+  gridTemplateColumns: `${columns.value.rail}px ${columns.value.sidebar}px minmax(0, 1fr) ${columns.value.workspace}px`,
 }))
 
 function toggleSidebar(): void {
@@ -164,7 +170,14 @@ defineExpose({ toggleSidebar, columns })
     :data-dragging="dragging || undefined"
     :data-narrow="narrow || undefined"
   >
-    <div class="sidebar-col">
+    <div class="rail-col">
+      <slot name="rail" :collapsed="sidebarCollapsed" :toggle="toggleSidebar" />
+    </div>
+    <div
+      class="sidebar-col"
+      :aria-hidden="sidebarCollapsed || undefined"
+      :inert="sidebarCollapsed || undefined"
+    >
       <slot
         name="sidebar"
         :collapsed="sidebarCollapsed"
@@ -173,14 +186,18 @@ defineExpose({ toggleSidebar, columns })
       />
     </div>
     <main class="center-col">
-      <slot />
+      <div class="shell-panel" data-panel="center">
+        <slot />
+      </div>
     </main>
     <div
       class="workspace-col"
       :aria-hidden="columns.workspace === 0 || undefined"
       :inert="columns.workspace === 0 || undefined"
     >
-      <slot name="workspace" :open="columns.workspace > 0" />
+      <div class="shell-panel" data-panel="workspace">
+        <slot name="workspace" :open="columns.workspace > 0" />
+      </div>
     </div>
     <div
       v-if="!sidebarCollapsed"
@@ -190,7 +207,7 @@ defineExpose({ toggleSidebar, columns })
       aria-orientation="vertical"
       aria-label="调整侧栏宽度"
       tabindex="0"
-      :style="{ left: `${columns.sidebar}px` }"
+      :style="{ left: `${columns.rail + columns.sidebar}px` }"
       :data-dragging="dragging === 'sidebar' || undefined"
       @pointerdown="onPointerDown('sidebar', $event)"
       @pointermove="onPointerMove"
@@ -206,7 +223,7 @@ defineExpose({ toggleSidebar, columns })
       aria-orientation="vertical"
       aria-label="调整工作台宽度"
       tabindex="0"
-      :style="{ left: `${viewport - columns.workspace}px` }"
+      :style="{ left: `${viewport - columns.workspace - SHELL_GUTTER}px` }"
       :data-dragging="dragging === 'workspace' || undefined"
       @pointerdown="onPointerDown('workspace', $event)"
       @pointermove="onPointerMove"
@@ -219,6 +236,9 @@ defineExpose({ toggleSidebar, columns })
 </template>
 
 <style scoped>
+/* Canvas → panels: the rail and the sidebar sit on the canvas; the center
+   and workspace columns hold a panel inside the gutter (the gutter between
+   the two panels belongs to the center column). Widths never animate. */
 .app-frame {
   position: relative;
   display: grid;
@@ -226,51 +246,69 @@ defineExpose({ toggleSidebar, columns })
   width: 100%;
   height: 100dvh;
   overflow: hidden;
-  background: rgb(var(--bg-base));
-  transition: grid-template-columns var(--duration-ds-slow) var(--ease-in-out);
+  background: rgb(var(--surface-canvas));
 }
 
 .app-frame[data-dragging] {
-  transition: none;
   cursor: col-resize;
   user-select: none;
 }
 
-.sidebar-col {
-  min-width: 0;
-  overflow: hidden;
-  border-right: 1px solid var(--border-l1);
-  background: rgb(var(--sidebar-fill));
-}
-
-.center-col {
-  display: flex;
-  flex-direction: column;
+.rail-col,
+.sidebar-col,
+.center-col,
+.workspace-col {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
+.sidebar-col {
+  padding-top: var(--shell-gutter);
+}
+
+.center-col {
+  display: flex;
+  flex-direction: column;
+  padding: var(--shell-gutter);
+}
+
+/* Folded sidebar: the panel starts after the traffic lights. */
+.app-frame[data-sidebar-collapsed] .center-col {
+  padding-left: calc(var(--shell-lights-clear) - var(--rail-w));
+}
+
 .workspace-col {
-  min-width: 0;
-  overflow: hidden;
-  border-left: 1px solid var(--border-l2);
+  padding: var(--shell-gutter) var(--shell-gutter) var(--shell-gutter) 0;
 }
 
 .app-frame[data-workspace-collapsed] .workspace-col {
-  border-left: none;
+  padding: 0;
+}
+
+.shell-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--panel-radius);
+  background: rgb(var(--surface-base));
+  box-shadow: var(--panel-edge);
 }
 
 .handle {
   position: absolute;
-  top: 0;
+  top: var(--shell-gutter);
   bottom: 0;
   z-index: var(--z-raised);
-  width: var(--space-2);
-  margin-left: calc(0px - var(--space-1));
+  width: var(--shell-gutter);
   cursor: col-resize;
   outline: none;
   touch-action: none;
+  -webkit-app-region: no-drag;
 }
 
 .handle[data-side='workspace']::after {
@@ -278,12 +316,10 @@ defineExpose({ toggleSidebar, columns })
   position: absolute;
   top: 50%;
   left: 50%;
-  box-sizing: border-box;
-  width: var(--space-3);
+  width: var(--space-1);
   height: var(--space-8);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-cell);
-  background: rgb(var(--bg-layer-2));
+  border-radius: var(--r-full);
+  background: rgb(var(--stroke-solid-strong));
   opacity: 0;
   transform: translate(-50%, -50%);
   transition: opacity var(--duration-ds-slow) var(--ease-in-out);

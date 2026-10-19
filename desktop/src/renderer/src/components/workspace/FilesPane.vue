@@ -1198,7 +1198,7 @@ function message(value: unknown): string {
   color: rgb(var(--label-caption));
   text-align: right;
   user-select: none;
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-base));
 }
 
 .file-code-line code {

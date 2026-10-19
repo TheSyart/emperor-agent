@@ -136,7 +136,7 @@ const checksLabel = computed(() => {
   width: var(--space-2);
   height: var(--space-2);
   border-radius: var(--radius-pill);
-  box-shadow: 0 0 0 2px rgb(var(--bg-base));
+  box-shadow: 0 0 0 2px rgb(var(--surface-base));
 }
 
 .main {

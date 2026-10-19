@@ -29,6 +29,7 @@ import {
   goForward,
   installNavHistory,
 } from './components/shell/navHistory'
+import SidebarRail from './components/sidebar/SidebarRail.vue'
 import SidebarRoot from './components/sidebar/SidebarRoot.vue'
 import { useAgentTree } from './components/sidebar/agentTree'
 import { bindWorkspaceSnapshotSource } from './components/workspace/useWorkspaceSnapshot'
@@ -779,8 +780,17 @@ provideAppContext({
 
   <template v-else>
     <AppFrame :workspace-available="workspaceAvailable" :center-min="centerMin">
+      <template #rail="{ collapsed, toggle }">
+        <SidebarRail
+          :sidebar-collapsed="collapsed"
+          @new-chat="runSafely(newChatFromShortcut)"
+          @search="sidebar?.focusSearch()"
+          @toggle-sidebar="toggle"
+        />
+      </template>
       <template #sidebar="{ collapsed, width, toggle }">
         <SidebarRoot
+          v-show="!collapsed"
           ref="sidebar"
           :collapsed="collapsed"
           :width="width"

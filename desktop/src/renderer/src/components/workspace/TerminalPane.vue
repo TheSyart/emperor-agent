@@ -124,7 +124,8 @@ async function activate(
     fontSize: 12,
     scrollback: 10_000,
     theme: {
-      background: cssColor(style, '--bg', 'rgb(12 12 14)'),
+      // The workspace panel's surface (UI-S01).
+      background: cssColor(style, '--surface-base', 'rgb(26 26 25)'),
       foreground: cssColor(style, '--fg', 'rgb(238 238 241)'),
       cursor: cssColor(style, '--accent', 'rgb(99 153 255)'),
       selectionBackground: 'rgba(103, 167, 255, 0.28)',
@@ -418,7 +419,7 @@ function message(value: unknown): string {
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-base));
 }
 
 .terminal-tabs {
@@ -545,7 +546,7 @@ function message(value: unknown): string {
   flex: 1;
   padding: var(--space-2) var(--space-1) var(--space-1) var(--space-2);
   overflow: hidden;
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-base));
 }
 
 .terminal-surface :deep(.xterm) {
