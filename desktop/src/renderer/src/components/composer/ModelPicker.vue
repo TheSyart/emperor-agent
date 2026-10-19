@@ -40,6 +40,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   'select-model': [entryId: string]
   'select-reasoning': [value: string | null]
+  /** 添加模型… at the bottom of the model pane (MOD-04). */
+  'add-model': []
 }>()
 
 type Pane = 'root' | 'model' | 'effort'
@@ -229,6 +231,9 @@ function onKeydown(event: KeyboardEvent): void {
           variant="inline"
           title="没有匹配的模型"
         />
+        <MenuItem data-add-model @select="emit('add-model')">
+          添加模型…
+        </MenuItem>
       </template>
 
       <template v-else>

@@ -5479,13 +5479,131 @@ export async function installVisualCoreBridge(
                 ok: true,
                 provider: 'visual',
                 protocol: 'openai',
-                source: 'visual-fixture',
+                source: 'vendor_api',
+                truncated: false,
+                totalCount: 3,
                 models: [
-                  { id: 'visual-main', ownedBy: 'Visual Labs' },
-                  { id: 'visual-secondary', ownedBy: 'Visual Labs' },
-                  { id: 'visual-pro', ownedBy: 'Visual Research' },
+                  {
+                    id: 'visual-main',
+                    name: 'Visual Main',
+                    ownedBy: 'Visual Labs',
+                    kind: 'chat',
+                    family: 'visual',
+                    releaseDate: '2026-09-01',
+                    contextWindowTokens: 1_048_576,
+                    maxOutputTokens: 131_072,
+                    capabilities: {
+                      toolCall: true,
+                      vision: true,
+                      reasoning: true,
+                    },
+                    reasoning: {
+                      efforts: ['none', 'low', 'high'],
+                      defaultEffort: 'high',
+                      control: 'effort',
+                    },
+                    source: 'vendor_api',
+                    fieldSources: {},
+                  },
+                  {
+                    id: 'visual-secondary',
+                    ownedBy: 'Visual Labs',
+                    kind: 'chat',
+                    family: 'visual',
+                    releaseDate: '2026-03-01',
+                    contextWindowTokens: 128_000,
+                    maxOutputTokens: 16_384,
+                    capabilities: { toolCall: true },
+                    lifecycle: {
+                      status: 'deprecated',
+                      retiresAt: '2026-12-01',
+                    },
+                    source: 'catalog',
+                    fieldSources: {},
+                  },
+                  {
+                    id: 'visual-pro',
+                    ownedBy: 'Visual Research',
+                    kind: 'chat',
+                    family: 'visual-pro',
+                    releaseDate: '2026-08-15',
+                    contextWindowTokens: 262_144,
+                    maxOutputTokens: 131_072,
+                    capabilities: { toolCall: true, reasoning: true },
+                    reasoning: {
+                      efforts: ['low', 'high', 'max'],
+                      defaultEffort: 'max',
+                      control: 'always',
+                    },
+                    acceptsTemperature: false,
+                    source: 'catalog',
+                    fieldSources: {},
+                  },
                 ],
               }
+            case 'model.probeConnection': {
+              const input = (args[0] || {}) as any
+              if (input.provider === 'lm_studio')
+                return { ok: false, code: 'NETWORK', message: 'refused' }
+              return {
+                ok: true,
+                latencyMs: 42,
+                modelCount: input.provider === 'ollama' ? 2 : 3,
+                method: 'list',
+              }
+            }
+            case 'model.lookupDefaults':
+              return {
+                facts: {
+                  key: 'fallback',
+                  kind: 'chat',
+                  capabilities: {},
+                  source: 'fallback',
+                },
+                source: 'fallback',
+              }
+            case 'model.saveEntries': {
+              const input = (args[0] || {}) as any
+              const savedEntryIds: string[] = []
+              for (const entry of input.entries || []) {
+                const entryId =
+                  entry.entryId ||
+                  `visual-entry-${modelConfig.models.length + 1}`
+                const overrides = entry.capabilityOverrides || {}
+                modelConfig.models.push({
+                  ...visualModelEntry,
+                  ...entry,
+                  provider: input.connection.provider,
+                  protocol: input.connection.protocol,
+                  apiBase: input.connection.apiBase,
+                  entryId,
+                  apiKey: '',
+                  effectiveDisplayName: entry.displayName || entry.modelId,
+                  resolvedProfile: {
+                    ...visualModelEntry.resolvedProfile,
+                    toolCall:
+                      overrides.toolCall ?? entry.detected?.toolCall ?? true,
+                    vision: overrides.vision ?? entry.detected?.vision ?? false,
+                    reasoning:
+                      overrides.reasoning ?? entry.detected?.reasoning ?? false,
+                    contextWindowTokens: entry.contextWindowTokens,
+                    maxTokens: entry.maxTokens,
+                  },
+                })
+                savedEntryIds.push(entryId)
+              }
+              if (input.activateEntryId) {
+                modelConfig.activeModelId = input.activateEntryId
+                const active = modelConfig.models.find(
+                  (item: any) => item.entryId === input.activateEntryId,
+                )
+                modelConfig.current = active ? currentForEntry(active) : null
+              }
+              return {
+                ...JSON.parse(JSON.stringify(modelConfig)),
+                savedEntryIds,
+              }
+            }
             case 'model.test': {
               const body = (args[0] || {}) as any
               return {

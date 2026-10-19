@@ -14,6 +14,39 @@ const api = vi.hoisted(() => ({
   testModelEntry: vi.fn(),
 }))
 vi.mock('../../../api/model', () => api)
+// The dialog itself is tested in AddModelDialog.test.ts; here a stand-in
+// says how it was opened and can report a save.
+const dialogSaved = vi.hoisted(() => ({ result: null as unknown }))
+vi.mock('./AddModelDialog.vue', async () => {
+  const { defineComponent, h } = await import('vue')
+  return {
+    __esModule: true,
+    default: defineComponent({
+      props: { payload: Object, manageProvider: String },
+      emits: ['saved', 'update:open'],
+      setup(props, { emit }) {
+        return () =>
+          h(
+            'div',
+            {
+              'data-testid': 'add-model-dialog',
+              'data-manage': props.manageProvider ?? '',
+            },
+            h(
+              'button',
+              {
+                onClick: () => {
+                  emit('update:open', false)
+                  emit('saved', dialogSaved.result)
+                },
+              },
+              '模拟保存',
+            ),
+          )
+      },
+    }),
+  }
+})
 const { core } = vi.hoisted(() => ({ core: vi.fn() }))
 vi.mock('../../../api/http', () => ({ core }))
 
@@ -132,15 +165,6 @@ function input(label: string): HTMLInputElement {
   return control
 }
 
-async function pickProvider(name: string): Promise<void> {
-  const tile = container!.querySelector<HTMLButtonElement>(
-    `[data-testid="provider-picker"] button[title="${name}"]`,
-  )
-  if (!tile) throw new Error(`provider tile ${name} not found`)
-  tile.click()
-  await flush()
-}
-
 beforeEach(() => {
   api.resolveModelProfilePreview.mockResolvedValue(profile)
 })
@@ -201,50 +225,11 @@ describe('ModelSection', () => {
     expect(button('编辑 Main').getAttribute('aria-expanded')).toBe('false')
   })
 
-  it('opens the add card on first run and saves a new entry', async () => {
-    const saved = payload([entry({ entryId: 'new', displayName: 'Fresh' })])
-    api.saveModelEntry.mockResolvedValue(saved)
+  it('opens the add-model dialog by itself on first run (MOD-04)', async () => {
     await mount(payload([]))
-    expect(container!.querySelector('[data-testid="model-add-card"]')).not.toBe(
-      null,
-    )
-    // The add card starts at the provider picker, grouped by region.
-    const picker = container!.querySelector('[data-testid="provider-picker"]')!
-    expect(picker.textContent).toContain('国内厂商')
-    expect(picker.textContent).toContain('海外厂商')
-    await pickProvider('DeepSeek')
-
-    const modelId = input('模型 ID')
-    modelId.value = 'deepseek-chat'
-    modelId.dispatchEvent(new Event('input'))
-    await flush()
-    button('保存模型').click()
-    await flush()
-
-    expect(api.saveModelEntry).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: 'deepseek',
-        protocol: 'openai',
-        modelId: 'deepseek-chat',
-        apiBase: 'https://api.deepseek.com/v1',
-      }),
-    )
-    expect(boot.value!.modelConfig).toEqual(saved)
-    expect(container!.querySelector('[role="status"]')?.textContent).toContain(
-      '已保存「deepseek-chat」',
-    )
-    expect(
-      container!.querySelector('[data-testid="model-add-card"]'),
-    ).toBeNull()
-  })
-
-  it('blocks saving an incomplete draft with field errors', async () => {
-    await mount(payload([]))
-    await pickProvider('DeepSeek')
-    button('保存模型').click()
-    await flush()
-    expect(api.saveModelEntry).not.toHaveBeenCalled()
-    expect(container!.textContent).toContain('请填写模型 ID')
+    const dialog = document.querySelector('[data-testid="add-model-dialog"]')
+    expect(dialog).not.toBeNull()
+    expect(dialog!.getAttribute('data-manage')).toBe('')
   })
 
   it('groups entries under one card per provider with key status', async () => {
@@ -329,44 +314,49 @@ describe('ModelSection', () => {
     )
   })
 
-  it('adds a model under a provider reusing its saved key', async () => {
-    api.saveModelEntry.mockResolvedValue(payload([entry({})]))
+  it('opens 管理模型 for a provider in the dialog (MOD-04)', async () => {
     await mount(payload([entry({})]))
-    button('在 DeepSeek 下添加模型').click()
+    expect(
+      document.querySelector('[data-testid="add-model-dialog"]'),
+    ).toBeNull()
+    button('管理 DeepSeek 的模型').click()
     await flush()
-    const card = container!.querySelector('[data-provider="deepseek"]')!
-    expect(card.querySelector('[data-testid="model-add-card"]')).not.toBeNull()
-    expect(input('API Key').placeholder).toBe('沿用「Main」的 API Key')
-
-    const modelId = input('模型 ID')
-    modelId.value = 'deepseek-reasoner'
-    modelId.dispatchEvent(new Event('input'))
-    await flush()
-    button('保存模型').click()
-    await flush()
-    const saved = api.saveModelEntry.mock.calls[0]![0]
-    expect(saved).toMatchObject({
-      provider: 'deepseek',
-      modelId: 'deepseek-reasoner',
-      apiBase: 'https://api.deepseek.com/v1',
-      credentialsFrom: 'main',
-    })
-    expect(saved).not.toHaveProperty('apiKey')
-    expect(saved).not.toHaveProperty('entryId')
+    expect(
+      document
+        .querySelector('[data-testid="add-model-dialog"]')
+        ?.getAttribute('data-manage'),
+    ).toBe('deepseek')
   })
 
-  it('drops the reused key once the endpoint changes', async () => {
+  it('highlights the saved rows and tests the first new model once (MOD-04 11)', async () => {
+    const added = entry({
+      entryId: 'new-1',
+      displayName: 'Fresh',
+      effectiveDisplayName: 'Fresh',
+    })
+    dialogSaved.result = {
+      ...payload([entry({}), added]),
+      savedEntryIds: ['new-1'],
+    }
+    api.testModelEntry.mockResolvedValue({ ok: true, kind: 'text' })
     await mount(payload([entry({})]))
-    button('在 DeepSeek 下添加模型').click()
+    button('管理 DeepSeek 的模型').click()
     await flush()
-    const base = input('API 地址')
-    base.value = 'https://proxy.example/v1'
-    base.dispatchEvent(new Event('input'))
+    ;[...document.querySelectorAll('button')]
+      .find((item) => item.textContent === '模拟保存')!
+      .click()
     await flush()
-    expect(input('API Key').placeholder).toBe('输入 API Key')
-    expect(container!.textContent).toContain(
-      '协议或 API 地址已改变，需要重新填写 API Key',
-    )
+    expect(
+      document.querySelector('[data-testid="add-model-dialog"]'),
+    ).toBeNull()
+    expect(
+      container!
+        .querySelector('[data-entry-id="new-1"]')
+        ?.hasAttribute('data-highlight'),
+    ).toBe(true)
+    expect(api.testModelEntry).toHaveBeenCalledOnce()
+    expect(api.testModelEntry).toHaveBeenCalledWith('new-1', 'text')
+    expect(container!.textContent).toContain('「Fresh」测试通过')
   })
 
   it('deletes an entry only after the inline confirmation', async () => {
@@ -458,5 +448,16 @@ describe('ModelSection › entries that do not validate (MOD-03 9)', () => {
     } finally {
       answerConfirmsForTest(null)
     }
+  })
+})
+
+describe('ModelSection › 添加模型… from the composer (MOD-04)', () => {
+  it('opens the dialog when the composer asked for it', async () => {
+    const { requestAddModel } = await import('./addModelRequest')
+    requestAddModel()
+    await mount(payload([entry({})]))
+    expect(
+      document.querySelector('[data-testid="add-model-dialog"]'),
+    ).not.toBeNull()
   })
 })

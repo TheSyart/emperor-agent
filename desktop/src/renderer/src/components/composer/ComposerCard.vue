@@ -19,6 +19,8 @@
  * chat on screen; a change stops the recording, and a result that arrives
  * afterwards waits above the input of its own chat (插入 / 丢弃).
  */
+import { requestAddModel } from '../settings/model/addModelRequest'
+import { useSettingsRoute } from '../settings/useSettingsRoute'
 import Spinner from '../ui/Spinner.vue'
 import {
   computed,
@@ -219,6 +221,14 @@ function focusCard(event: MouseEvent): void {
 }
 
 defineExpose(controller.expose)
+
+const settingsRoute = useSettingsRoute()
+
+/** 添加模型… in the model menu: open 设置 › 模型 with the add dialog. */
+function addModel(): void {
+  requestAddModel()
+  void settingsRoute.openSettings('model')
+}
 </script>
 
 <template>
@@ -456,6 +466,7 @@ defineExpose(controller.expose)
             :title="modelTitle"
             @select-model="selectModel"
             @select-reasoning="selectReasoning"
+            @add-model="addModel"
           />
           <ContextMeter
             v-if="props.contextMax > 0"
