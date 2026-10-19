@@ -1,21 +1,35 @@
-/** LaunchServices bootstrap for the macOS native Computer Use helper. */
+/**
+ * LaunchServices bootstrap for the macOS native Computer Use helper.
+ *
+ * SEC-09 (MAIN-15): main listens on a fresh socket in its private run
+ * directory before the Helper starts, and hands the Helper a one-time
+ * secret on stdin (a FIFO main holds open; `open --stdin`), never in argv.
+ * The Helper connects and proves the secret (HMAC challenge, see
+ * `protocol/handshake.ts`); a peer that cannot is dropped while main keeps
+ * waiting. The Helper in turn checks main's code identity and proof.
+ */
 import { execFile as nodeExecFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
+import { constants as fsConstants } from 'node:fs'
 import {
   lstat,
   mkdir,
   chmod,
   mkdtemp,
+  open,
   readdir,
   realpath,
   rename,
   rm,
+  unlink,
+  type FileHandle,
 } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { createConnection, type Socket } from 'node:net'
+import { createServer, type Server, type Socket } from 'node:net'
 import { promisify } from 'node:util'
 import { UiError } from '../../../../packages/core/src/harness/computer-use/errors'
+import { launchSecretLine } from '../../../../packages/core/src/harness/computer-use/protocol/handshake'
 import { HelperClient } from './helper-client'
 
 const execFile = promisify(nodeExecFile)
@@ -33,7 +47,10 @@ export const MACOS_TOOLS = {
   plutil: '/usr/bin/plutil',
   ps: '/bin/ps',
   open: '/usr/bin/open',
+  mkfifo: '/usr/bin/mkfifo',
 } as const
+/** Peers that may be proving themselves at once; more are dropped. */
+const MAX_PENDING_PEERS = 8
 /** LaunchServices' registration tool; `-u <app>` forgets an app bundle. */
 export const LSREGISTER =
   '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
@@ -100,11 +117,10 @@ export interface MacosLauncherOptions {
   readonly uid?: number
   readonly pid?: number
   readonly appPath?: string
+  /** How long main waits for a Helper that proves the launch secret. */
   readonly connectTimeoutMs?: number
   /** Dependency injection for the LaunchServices invocation in tests. */
   readonly openApp?: (args: readonly string[]) => Promise<void>
-  /** Dependency injection for local socket connection in tests. */
-  readonly connectSocket?: (path: string) => Promise<Socket>
   /** Dependency injection for signed helper installation in launcher tests. */
   readonly installPackagedHelper?: (source: string) => Promise<string>
 }
@@ -122,21 +138,26 @@ function emperorHome(
   return options.stateRoot ?? join(options.home ?? homedir(), '.emperor')
 }
 
+/**
+ * Where main listens for the Helper: `<Emperor Home>/run/cu-<uid>[-<tag>].sock`,
+ * or the system temp directory when that path is too long for a socket.
+ * Each launch uses a fresh `tag`, so a stale or squatted path never matters.
+ */
 export function macosSocketLocation(
-  options: Pick<
-    MacosLauncherOptions,
-    'home' | 'stateRoot' | 'temp' | 'uid'
-  > = {},
+  options: Pick<MacosLauncherOptions, 'home' | 'stateRoot' | 'temp' | 'uid'> & {
+    readonly tag?: string
+  } = {},
 ): MacosSocketLocation {
   const uid = options.uid ?? process.getuid?.()
   if (uid === undefined || !Number.isSafeInteger(uid) || uid < 0)
     throw new UiError('DRIVER_UNAVAILABLE', 'Cannot determine local user ID')
+  const suffix = options.tag ? `-${options.tag}` : ''
   const primaryDirectory = join(emperorHome(options), 'run')
-  const primary = join(primaryDirectory, `cu-${uid}.sock`)
+  const primary = join(primaryDirectory, `cu-${uid}${suffix}.sock`)
   if (Buffer.byteLength(primary) <= SOCKET_PATH_LIMIT)
     return { directory: primaryDirectory, path: primary, temporary: false }
   const temporaryDirectory = join(options.temp ?? tmpdir(), `emperor-${uid}`)
-  const fallback = join(temporaryDirectory, 'cu.sock')
+  const fallback = join(temporaryDirectory, `cu${suffix}.sock`)
   if (Buffer.byteLength(fallback) > SOCKET_PATH_LIMIT)
     throw new UiError(
       'DRIVER_UNAVAILABLE',
@@ -547,26 +568,20 @@ export async function forgetHelperCopy(
   await system.execFile(LSREGISTER, ['-u', path], { timeout: 5_000 })
 }
 
-function connectSocket(path: string): Promise<Socket> {
-  return new Promise((resolveSocket, reject) => {
-    const socket = createConnection(path)
-    socket.once('connect', () => {
-      socket.removeListener('error', onError)
-      resolveSocket(socket)
+function listen(server: Server, path: string): Promise<void> {
+  return new Promise((resolveListen, reject) => {
+    server.once('error', reject)
+    server.listen(path, () => {
+      server.removeListener('error', reject)
+      resolveListen()
     })
-    const onError = (error: Error) => {
-      socket.destroy()
-      reject(error)
-    }
-    socket.once('error', onError)
   })
 }
 
-function sleep(milliseconds: number): Promise<void> {
-  return new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds))
-}
-
-/** Starts the helper and returns only after a validated hello/welcome handshake. */
+/**
+ * Starts the helper and returns only after it proved the launch secret and
+ * accepted main's proof (SEC-09). Listens first, then launches.
+ */
 export async function launchMacosHelper(
   options: MacosLauncherOptions,
 ): Promise<HelperClient> {
@@ -580,7 +595,8 @@ export async function launchMacosHelper(
     pid < 2
   )
     throw new UiError('DRIVER_UNAVAILABLE', 'Invalid helper process identity')
-  const location = macosSocketLocation(options)
+  const tag = randomBytes(4).toString('hex')
+  const location = macosSocketLocation({ ...options, tag })
   await secureDirectory(location.directory, uid)
   const sourceAppPath = macosHelperAppPath(options)
   const appPath =
@@ -590,53 +606,102 @@ export async function launchMacosHelper(
           ((source) => installPackagedMacosHelper(source, options))
         )(sourceAppPath)
       : sourceAppPath
-  const nonce = randomBytes(32).toString('hex')
-  const args = [
-    '-g',
-    '-n',
-    '-a',
-    appPath,
-    '--args',
-    '--parent-pid',
-    String(pid),
-    '--nonce',
-    nonce,
-    '--socket',
-    location.path,
-  ]
+  const secret = randomBytes(32)
+  const fifo = join(location.directory, `cu-${uid}-${tag}.in`)
+  const server = createServer()
+  const peers = new Set<Socket>()
+  let stdin: FileHandle | null = null
+  let winner: Socket | null = null
   try {
-    if (options.openApp) await options.openApp(args)
-    else await execFile(MACOS_TOOLS.open, args, { timeout: 10_000 })
-  } catch {
-    throw new UiError(
-      'DRIVER_UNAVAILABLE',
-      'LaunchServices could not start the Computer Use helper',
-    )
-  }
-  const deadline = Date.now() + (options.connectTimeoutMs ?? 8_000)
-  let delay = 50
-  for (;;) {
-    let socket: Socket
     try {
-      socket = await (options.connectSocket ?? connectSocket)(location.path)
+      await listen(server, location.path)
+      await chmod(location.path, 0o600)
+      // The secret waits in a FIFO only this user can open; main keeps it
+      // open for writing so LaunchServices can open it as the Helper's stdin.
+      await execFile(MACOS_TOOLS.mkfifo, ['-m', '600', fifo], {
+        timeout: 5_000,
+      })
+      stdin = await open(fifo, fsConstants.O_RDWR | fsConstants.O_NONBLOCK)
+      await stdin.write(launchSecretLine(secret))
     } catch {
-      if (Date.now() >= deadline)
-        throw new UiError(
-          'DRIVER_UNAVAILABLE',
-          'Computer Use helper did not open its socket',
+      throw new UiError(
+        'DRIVER_UNAVAILABLE',
+        'Could not prepare the Computer Use helper connection',
+      )
+    }
+    const authenticated = new Promise<HelperClient>((resolveClient) => {
+      server.on('connection', (socket) => {
+        socket.on('error', () => undefined)
+        if (winner !== null || peers.size >= MAX_PENDING_PEERS) {
+          socket.destroy()
+          return
+        }
+        peers.add(socket)
+        const client = new HelperClient(socket, { platform: 'macos', secret })
+        client.ready.then(
+          () => {
+            if (winner !== null) {
+              socket.destroy()
+              return
+            }
+            winner = socket
+            resolveClient(client)
+          },
+          () => {
+            // A peer that could not prove the secret: drop it, keep waiting.
+            peers.delete(socket)
+            socket.destroy()
+          },
         )
-      await sleep(Math.min(delay, Math.max(1, deadline - Date.now())))
-      delay = Math.min(delay * 2, 500)
-      continue
-    }
-    const client = new HelperClient(socket, { platform: 'macos', nonce })
+      })
+    })
+    const args = [
+      '-g',
+      '-n',
+      '-a',
+      appPath,
+      '--stdin',
+      fifo,
+      '--args',
+      '--parent-pid',
+      String(pid),
+      '--socket',
+      location.path,
+    ]
     try {
-      await client.ready
-      return client
-    } catch (error) {
-      socket.destroy()
-      // A connected peer with a bad greeting or version is not a startup race.
-      throw error
+      if (options.openApp) await options.openApp(args)
+      else await execFile(MACOS_TOOLS.open, args, { timeout: 10_000 })
+    } catch {
+      throw new UiError(
+        'DRIVER_UNAVAILABLE',
+        'LaunchServices could not start the Computer Use helper',
+      )
     }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new UiError(
+              'DRIVER_UNAVAILABLE',
+              'Computer Use helper did not connect and prove its launch secret',
+            ),
+          ),
+        options.connectTimeoutMs ?? 8_000,
+      )
+    })
+    try {
+      return await Promise.race([authenticated, deadline])
+    } finally {
+      clearTimeout(timer)
+    }
+  } finally {
+    // Nothing more may connect, and the secret leaves the disk.
+    server.close()
+    for (const peer of peers) if (peer !== winner) peer.destroy()
+    await unlink(location.path).catch(() => undefined)
+    await stdin?.close().catch(() => undefined)
+    await unlink(fifo).catch(() => undefined)
+    secret.fill(0)
   }
 }

@@ -1,0 +1,8 @@
+{
+  "$comment": "SEC-09 launch handshake, shared by the TypeScript and Swift test suites. main sends challenge{nonce: serverNonce}; the Helper answers hello{nonce: clientNonce, proof: HMAC-SHA256(secret, \"emperor-helper-hello\\0\" + serverNonce + \"\\0\" + clientNonce)}; main answers welcome{proof: HMAC-SHA256(secret, \"emperor-main-welcome\\0\" + serverNonce + \"\\0\" + clientNonce)}. All values are lowercase hex; the secret arrives on the Helper stdin as 64 hex digits and a newline.",
+  "secret": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "serverNonce": "5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5ec0ffee00c0ffee00c0ffee00c0ffee00",
+  "clientNonce": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c10badcafe0badcafe0badcafe0badcafe",
+  "helloProof": "a6de680245d341f7cc3d78af6c6c7c84c60831f19a56feefa170ea26b0ca94c0",
+  "welcomeProof": "3b995854f30fba63899f8e2b47fa9087ca51b2d321e504f197a8a2c20fb96d14"
+}

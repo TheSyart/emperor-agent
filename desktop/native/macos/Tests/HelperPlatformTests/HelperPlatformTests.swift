@@ -562,4 +562,58 @@ final class HelperPlatformTests: XCTestCase {
         XCTAssertEqual(appliedDespiteError, false)
         XCTAssertTrue(chromeValue)
     }
+
+    // SEC-09: the launch secret arrives on stdin, one line of 64 hex digits.
+    func testTheLaunchSecretIsReadFromALineOnStdin() throws {
+        var fds: [Int32] = [0, 0]
+        XCTAssertEqual(pipe(&fds), 0)
+        defer { close(fds[0]) }
+        let line = String(repeating: "ab", count: 32) + "\n"
+        XCTAssertEqual(line.withCString { Darwin.write(fds[1], $0, strlen($0)) }, line.utf8.count)
+        close(fds[1])
+        let secret = try LaunchSecretReader.read(fd: fds[0], timeoutMilliseconds: 1_000)
+        XCTAssertEqual(secret, Data(repeating: 0xab, count: 32))
+
+        var empty: [Int32] = [0, 0]
+        XCTAssertEqual(pipe(&empty), 0)
+        defer { close(empty[0]); close(empty[1]) }
+        XCTAssertThrowsError(try LaunchSecretReader.read(fd: empty[0], timeoutMilliseconds: 50))
+    }
+
+    // SEC-09: the Helper connects to main's socket only inside a private
+    // directory of this user, and only to a socket.
+    func testTheHelperConnectsOnlyToAPrivateSocketOfThisUser() throws {
+        let base = URL(fileURLWithPath: "/tmp").appendingPathComponent("emperor-uc-\(getpid())-\(UInt32.random(in: 0...UInt32.max))")
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: base) }
+        let path = base.appendingPathComponent("cu.sock").path
+        let listener = socket(AF_UNIX, SOCK_STREAM, 0)
+        XCTAssertGreaterThanOrEqual(listener, 0)
+        defer { close(listener) }
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &address.sun_path) { buffer in
+            let bytes = Array(path.utf8)
+            buffer.copyBytes(from: bytes)
+            buffer[bytes.count] = 0
+        }
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(listener, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        XCTAssertEqual(bound, 0)
+        XCTAssertEqual(Darwin.listen(listener, 4), 0)
+        let client = try UnixClient.connect(path: path)
+        close(client)
+
+        XCTAssertThrowsError(try UnixClient.connect(path: base.appendingPathComponent("missing.sock").path))
+        let plain = base.appendingPathComponent("plain").path
+        XCTAssertTrue(FileManager.default.createFile(atPath: plain, contents: Data()))
+        XCTAssertThrowsError(try UnixClient.connect(path: plain))
+        XCTAssertThrowsError(try UnixClient.connect(path: "relative/cu.sock"))
+        chmod(base.path, 0o755)
+        XCTAssertThrowsError(try UnixClient.connect(path: path))
+    }
 }

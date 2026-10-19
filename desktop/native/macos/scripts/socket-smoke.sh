@@ -2,8 +2,10 @@
 set -euo pipefail
 
 # Protocol and socket checks only: no permission request, no TCC change and
-# no synthetic keyboard or mouse input (act and act.fillSecret name a missing
-# target; input.releaseAll has nothing held to release).
+# no synthetic keyboard or mouse input (act.fillSecret names a missing
+# target; input.releaseAll has nothing held to release). The fixture app's
+# `Emperor Agent` plays main (SEC-09): it listens, hands the Helper its
+# launch secret on stdin and runs the challenge handshake.
 native_dir="$(cd "$(dirname "$0")/.." && pwd)"
 arch="$(uname -m)"
 mkdir -p "$native_dir/build/$arch"
@@ -29,8 +31,6 @@ helper="$app/Contents/Library/Helpers/Emperor Computer Helper.app"
 mkdir -p "$app/Contents/MacOS" "$(dirname "$helper")"
 cp -R "$fixture/helper-build/Emperor Computer Helper.app" "$helper"
 clang -Wall -Wextra -Werror "$native_dir/scripts/socket-smoke.c" -o "$app/Contents/MacOS/Emperor Agent"
-nonce="0123456789abcdef0123456789abcdef"
-"$app/Contents/MacOS/Emperor Agent" "$helper" "$socket_dir/bad.sock" "$nonce" --bad-nonce \
+chmod 700 "$socket_dir"
+"$app/Contents/MacOS/Emperor Agent" "$helper" "$socket_dir" \
   | tee "$native_dir/build/$arch/socket-smoke-output.txt"
-"$app/Contents/MacOS/Emperor Agent" "$helper" "$socket_dir/cu.sock" "$nonce" \
-  | tee -a "$native_dir/build/$arch/socket-smoke-output.txt"
