@@ -244,6 +244,17 @@ export const VAULT_MASTER_CHANNEL = 'emperor:computer-use:vault-master'
 export const VAULT_REVEAL_CHANNEL = 'emperor:computer-use:vault-reveal'
 /** 清空: drop every entry and the master password (and an unusable local key). */
 export const VAULT_RESET_CHANNEL = 'emperor:computer-use:vault-reset'
+/** 修复权限: make a local key that other users can read private again. */
+export const VAULT_REPAIR_KEY_CHANNEL = 'emperor:computer-use:vault-repair-key'
+/** 重新开始（先备份）: move an unreadable or newer vault.json aside. */
+export const VAULT_START_OVER_CHANNEL = 'emperor:computer-use:vault-start-over'
+/** 导出凭据备份: main asks where to save; the passphrase comes from Settings. */
+export const VAULT_EXPORT_CHANNEL = 'emperor:computer-use:vault-export'
+/** 导入 / 从备份恢复, step 1: main's own open dialog picks the file. */
+export const VAULT_IMPORT_PICK_CHANNEL =
+  'emperor:computer-use:vault-import-pick'
+/** Step 2: open the picked file with its passphrase and merge it in. */
+export const VAULT_IMPORT_CHANNEL = 'emperor:computer-use:vault-import'
 
 export interface AgentPreviewFrame {
   targetId: string

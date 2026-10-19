@@ -13,6 +13,7 @@ import {
   shell,
   type OpenDialogOptions,
   type Rectangle,
+  type SaveDialogOptions,
 } from 'electron'
 import { execFile } from 'node:child_process'
 import * as fs from 'node:fs'
@@ -106,7 +107,16 @@ import { nativeImageCodec } from './computer-use/images'
 import { DesktopComputerUsePort, hostPlatform } from './computer-use/port'
 import { AgentPreview } from './computer-use/preview'
 import { DesktopPreview, routedPreview } from './computer-use/desktop-preview'
-import { CredentialVault } from './computer-use/credential-vault'
+import {
+  BACKUP_EXTENSION,
+  CredentialVault,
+} from './computer-use/credential-vault'
+import {
+  backupFilePath,
+  defaultBackupName,
+  readBackupFile,
+  writeBackupFile,
+} from './computer-use/vault-backup-files'
 import { MacosDesktopDriver } from './computer-use/macos-desktop-driver'
 import {
   forgetHelperCopy,
@@ -567,10 +577,14 @@ function createComputerUseHost(): void {
   // The same key (and the same lost-key rule) seals the API keys in
   // model_config.json and MCP tokens in mcp_config.json.
   coreSecretSealer = sealerFromSecretStore(localSecrets)
+  // Never throws (SEC-09): a damaged or newer vault.json is kept as it is
+  // and only Computer Use credentials are unavailable until Settings fixes it.
   credentialVault = new CredentialVault({
     path: path.join(computerUseRoot, 'vault.json'),
     storage: localSecrets,
   })
+  if (credentialVault.problem)
+    console.warn(`Credential vault unavailable: ${credentialVault.problem}`)
   const driver = new EmbeddedBrowserDriver({
     electron: electronBrowserFactory(),
     images: nativeImageCodec,
@@ -1472,6 +1486,45 @@ async function startup(): Promise<void> {
         ipcMain,
         authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
         vault: credentialVault,
+        // 导出 / 导入凭据备份: paths come only from these dialogs.
+        backupFiles: {
+          chooseExportPath: async () => {
+            const options: SaveDialogOptions = {
+              title: '导出凭据备份',
+              buttonLabel: '导出',
+              defaultPath: path.join(
+                app.getPath('documents'),
+                defaultBackupName(new Date()),
+              ),
+              filters: [
+                { name: 'Emperor 凭据备份', extensions: [BACKUP_EXTENSION] },
+              ],
+              properties: ['createDirectory', 'showOverwriteConfirmation'],
+            }
+            const result = mainWindow
+              ? await dialog.showSaveDialog(mainWindow, options)
+              : await dialog.showSaveDialog(options)
+            return result.canceled || !result.filePath
+              ? null
+              : backupFilePath(result.filePath)
+          },
+          chooseImportPath: async () => {
+            const options: OpenDialogOptions = {
+              title: '选择凭据备份',
+              buttonLabel: '选择',
+              filters: [
+                { name: 'Emperor 凭据备份', extensions: [BACKUP_EXTENSION] },
+              ],
+              properties: ['openFile'],
+            }
+            const result = mainWindow
+              ? await dialog.showOpenDialog(mainWindow, options)
+              : await dialog.showOpenDialog(options)
+            return result.canceled ? null : (result.filePaths[0] ?? null)
+          },
+          read: readBackupFile,
+          write: writeBackupFile,
+        },
         authenticateReveal:
           process.platform === 'darwin'
             ? () =>
@@ -1487,7 +1540,7 @@ async function startup(): Promise<void> {
     registerAppProtocol()
     if (packagedSmoke) {
       // Local key and master password round trips, with no Keychain.
-      verifyPackagedSecrets(config.stateRoot)
+      await verifyPackagedSecrets(config.stateRoot)
       const attachment = await createPackagedSmokeAttachment(config.stateRoot)
       await runPackagedSmoke({
         core: coreApi,

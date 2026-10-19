@@ -43,11 +43,16 @@ import {
   REFERENCE_REVEAL_CHANNEL,
   SELECT_FILE_CHANNEL,
   SKILLS_OPEN_FOLDER_CHANNEL,
+  VAULT_EXPORT_CHANNEL,
+  VAULT_IMPORT_CHANNEL,
+  VAULT_IMPORT_PICK_CHANNEL,
   VAULT_LOCK_CHANNEL,
   VAULT_MASTER_CHANNEL,
   VAULT_REMOVE_CHANNEL,
+  VAULT_REPAIR_KEY_CHANNEL,
   VAULT_RESET_CHANNEL,
   VAULT_SAVE_CHANNEL,
+  VAULT_START_OVER_CHANNEL,
   VAULT_STATUS_CHANNEL,
   VAULT_UNLOCK_CHANNEL,
   VAULT_REVEAL_CHANNEL,
@@ -109,12 +114,43 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
     vaultUnlock: (password: string) =>
       ipcRenderer.invoke(VAULT_UNLOCK_CHANNEL, { password }),
     vaultLock: () => ipcRenderer.invoke(VAULT_LOCK_CHANNEL),
-    vaultSetMaster: (password: string | null) =>
-      ipcRenderer.invoke(VAULT_MASTER_CHANNEL, { password }),
+    /** set (typed twice) / change / remove; change and remove need the current one. */
+    vaultMaster: (request: {
+      action: 'set' | 'change' | 'remove'
+      currentPassword?: string
+      password?: string
+      confirmPassword?: string
+    }) =>
+      ipcRenderer.invoke(VAULT_MASTER_CHANNEL, {
+        action: request.action,
+        ...(request.currentPassword === undefined
+          ? {}
+          : { currentPassword: request.currentPassword }),
+        ...(request.password === undefined
+          ? {}
+          : { password: request.password }),
+        ...(request.confirmPassword === undefined
+          ? {}
+          : { confirmPassword: request.confirmPassword }),
+      }),
     vaultReveal: (handleId: string) =>
       ipcRenderer.invoke(VAULT_REVEAL_CHANNEL, { handleId }),
     /** 清空 (Settings confirms first): every entry and the master password. */
     vaultReset: () => ipcRenderer.invoke(VAULT_RESET_CHANNEL),
+    /** 修复权限: make the local key private again. */
+    vaultRepairKey: () => ipcRenderer.invoke(VAULT_REPAIR_KEY_CHANNEL),
+    /** 重新开始（先备份） (Settings confirms first). */
+    vaultStartOver: () => ipcRenderer.invoke(VAULT_START_OVER_CHANNEL),
+    /** 导出凭据备份: main asks where to save it. */
+    vaultExport: (passphrase: string, confirmPassphrase: string) =>
+      ipcRenderer.invoke(VAULT_EXPORT_CHANNEL, {
+        passphrase,
+        confirmPassphrase,
+      }),
+    /** Main's open dialog picks the backup; no path crosses IPC. */
+    vaultImportPick: () => ipcRenderer.invoke(VAULT_IMPORT_PICK_CHANNEL),
+    vaultImport: (passphrase: string) =>
+      ipcRenderer.invoke(VAULT_IMPORT_CHANNEL, { passphrase }),
     /** Address-bar submit only; main normalizes and may answer ok:false. */
     openBrowserUrl: (url: string) =>
       ipcRenderer.invoke(BROWSER_OPEN_CHANNEL, { url }),
