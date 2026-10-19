@@ -86,6 +86,9 @@ describe('scheduler model', () => {
     expect(schedulerMisfirePolicyLabel('invalid')).toBe('跳过（默认）')
     expect(schedulerRunStatusLabel('interrupted')).toBe('已中断')
     expect(schedulerRunStatusLabel('cancelled')).toBe('已取消')
+    // KRN-01: an approval a scheduled turn needed was rejected for it.
+    expect(schedulerRunStatusLabel('blocked')).toBe('需要审批，已拒绝')
+    expect(schedulerRunStatusTone('blocked')).toBe('warn')
     expect(schedulerRunStatusLabel(null)).toBe('-')
     expect(schedulerRunStatusTone('ok')).toBe('ok')
     expect(schedulerRunStatusTone('error')).toBe('error')

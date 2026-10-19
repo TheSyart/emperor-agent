@@ -41,6 +41,8 @@ export interface EmperorAcpSubmitInput {
   emit?: (event: Row) => void | Promise<void>
   /** Discard the prompt when no turn takes it (it must not run without its client). */
   unconsumed?: 'keep' | 'withdraw'
+  /** ACP answers interactions itself (it cancels them): they wait for it. */
+  interactionPolicy?: 'auto-reject' | 'wait'
 }
 
 export interface EmperorAcpCore {
@@ -71,10 +73,13 @@ export interface EmperorAcpCore {
     cancelInteraction(id: string): unknown
   }
   readonly chat: {
-    submit(input: EmperorAcpSubmitInput): Promise<{
+    /**
+     * One background turn in the ACP session (KRN-01): its scope comes from
+     * the session (its cwd), never from the session the desktop shows.
+     */
+    runBackground(input: EmperorAcpSubmitInput): Promise<{
       turnId: string | null
       content: string
-      activeSessionId: string | null
       /** `queued` / `discarded`: no turn took the prompt (KRN-02). */
       delivery?: string
       result?: { kind: string; reason?: string } | null
@@ -313,7 +318,7 @@ export class EmperorAcpAdapter {
     const pause = { interaction: null as Row | null }
     try {
       const submitted = this.track(
-        this.core.chat.submit({
+        this.core.chat.runBackground({
           content,
           sessionId: session.id,
           turnId,
@@ -321,6 +326,7 @@ export class EmperorAcpAdapter {
           source: 'acp',
           signal: controller.signal,
           unconsumed: 'withdraw',
+          interactionPolicy: 'wait',
           emit: async (event) => {
             if (active.phase !== 'running') return
             const name = cleanText(event.event)

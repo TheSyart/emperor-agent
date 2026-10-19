@@ -18,6 +18,9 @@ import {
   type PackageFiles,
 } from '../plugins/testing'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 let fixture: ApiFixture | null = null
 
 afterEach(async () => {
@@ -34,11 +37,14 @@ async function installKit(api: ApiFixture['api']) {
     }),
   )
   const preview = await api.plugins.inspect({ kind: 'local', path: source })
-  return api.plugins.install({
-    previewId: preview.previewId,
-    digest: preview.digest,
-    scope: 'user',
-  })
+  return api.plugins.install(
+    {
+      previewId: preview.previewId,
+      digest: preview.digest,
+      scope: 'user',
+    },
+    VIEW,
+  )
 }
 
 describe('plugins through CoreApi', () => {
@@ -50,11 +56,14 @@ describe('plugins through CoreApi', () => {
     expect(events).toContainEqual(
       expect.objectContaining({ event: 'plugins_changed', reason: 'plugins' }),
     )
-    const names = () => api.skills.list().skills.map((skill) => skill.name)
+    const names = () => api.skills.list(VIEW).skills.map((skill) => skill.name)
     expect(names()).toEqual(expect.arrayContaining(['hello', 'wave']))
-    const detail = await invokeCoreOperation(api, 'plugins.getDetail', [
-      { pluginId: 'hello-kit', scope: 'user' },
-    ])
+    const detail = await invokeCoreOperation(
+      api,
+      'plugins.getDetail',
+      [{ pluginId: 'hello-kit', scope: 'user' }],
+      { view: VIEW },
+    )
     expect(detail).toMatchObject({
       pluginId: 'hello-kit',
       format: 'portable',
@@ -66,11 +75,14 @@ describe('plugins through CoreApi', () => {
     })
 
     events.length = 0
-    api.plugins.setEnabled({
-      pluginId: 'hello-kit',
-      scope: 'user',
-      enabled: false,
-    })
+    api.plugins.setEnabled(
+      {
+        pluginId: 'hello-kit',
+        scope: 'user',
+        enabled: false,
+      },
+      VIEW,
+    )
     expect(events).toContainEqual(
       expect.objectContaining({ event: 'plugins_changed', reason: 'plugins' }),
     )
@@ -88,7 +100,10 @@ describe('plugins through CoreApi', () => {
     await installKit(api)
     expect(
       (
-        await api.plugins.getDetail({ pluginId: 'hello-kit', scope: 'user' })
+        await api.plugins.getDetail(
+          { pluginId: 'hello-kit', scope: 'user' },
+          VIEW,
+        )
       ).components.map(({ id, state, reason }) => [id, state, reason]),
     ).toEqual([
       ['hello', 'failed', '与个人的同名 Skill 冲突，未生效'],
@@ -99,7 +114,10 @@ describe('plugins through CoreApi', () => {
   it('rejects an unknown plugin with a stable code', async () => {
     fixture = await makeApi()
     await expect(
-      fixture!.api.plugins.getDetail({ pluginId: 'nobody', scope: 'user' }),
+      fixture!.api.plugins.getDetail(
+        { pluginId: 'nobody', scope: 'user' },
+        VIEW,
+      ),
     ).rejects.toMatchObject({ code: 'plugin_not_found' })
   })
 })
@@ -165,7 +183,7 @@ describe('packages shipped with Emperor through CoreApi', () => {
     const { api, stateRoot } = fixture
     const rows = () =>
       fixture!.api.plugins
-        .list()
+        .list(VIEW)
         .map(({ pluginId, scope, enabled, toggleable, uninstallable }) => [
           pluginId,
           scope,
@@ -178,13 +196,19 @@ describe('packages shipped with Emperor through CoreApi', () => {
       ['computer-use', 'managed', false, false, false],
       ['github', 'managed', true, true, false],
     ])
-    await invokeCoreOperation(api, 'plugins.setEnabled', [
-      { pluginId: 'github', scope: 'managed', enabled: false },
-    ])
+    await invokeCoreOperation(
+      api,
+      'plugins.setEnabled',
+      [{ pluginId: 'github', scope: 'managed', enabled: false }],
+      { view: VIEW },
+    )
     await expect(
-      invokeCoreOperation(api, 'plugins.uninstall', [
-        { pluginId: 'github', scope: 'managed' },
-      ]),
+      invokeCoreOperation(
+        api,
+        'plugins.uninstall',
+        [{ pluginId: 'github', scope: 'managed' }],
+        { view: VIEW },
+      ),
     ).rejects.toMatchObject({ code: 'plugin_managed_uninstall_denied' })
     await expect(
       invokeCoreOperation(api, 'plugins.install', [
@@ -218,11 +242,14 @@ describe('GitHub reads through CoreApi', () => {
     await expect(
       invokeCoreOperation(api, 'github.listIssues', [{ filter: 'assigned' }]),
     ).rejects.toMatchObject({ code: 'pull_request_gh_missing' })
-    await api.plugins.setEnabled({
-      pluginId: 'github',
-      scope: 'managed',
-      enabled: false,
-    })
+    await api.plugins.setEnabled(
+      {
+        pluginId: 'github',
+        scope: 'managed',
+        enabled: false,
+      },
+      VIEW,
+    )
     for (const [key, input] of [
       ['github.listIssues', {}],
       ['github.viewIssue', { repo: 'acme/widgets', number: 1 }],
@@ -247,10 +274,13 @@ describe('GitHub reads through CoreApi', () => {
       ),
     )
     fixture = await makeApi({ root, extra: NO_GH })
-    const detail = await fixture.api.plugins.getDetail({
-      pluginId: 'github',
-      scope: 'managed',
-    })
+    const detail = await fixture.api.plugins.getDetail(
+      {
+        pluginId: 'github',
+        scope: 'managed',
+      },
+      VIEW,
+    )
     expect(detail.components).toEqual([
       expect.objectContaining({
         kind: 'app',
@@ -277,10 +307,13 @@ describe('GitHub reads through CoreApi', () => {
     })
     expect(
       (
-        await fixture.api.plugins.getDetail({
-          pluginId: 'github',
-          scope: 'managed',
-        })
+        await fixture.api.plugins.getDetail(
+          {
+            pluginId: 'github',
+            scope: 'managed',
+          },
+          VIEW,
+        )
       ).components[0],
     ).toMatchObject({ state: 'available', reason: '已登录 octo-dev' })
 
@@ -298,17 +331,23 @@ describe('GitHub reads through CoreApi', () => {
       kind: 'local',
       path: source,
     })
-    await fixture.api.plugins.install({
-      previewId: preview.previewId,
-      digest: preview.digest,
-      scope: 'user',
-    })
+    await fixture.api.plugins.install(
+      {
+        previewId: preview.previewId,
+        digest: preview.digest,
+        scope: 'user',
+      },
+      VIEW,
+    )
     expect(
       (
-        await fixture.api.plugins.getDetail({
-          pluginId: 'lookalike',
-          scope: 'user',
-        })
+        await fixture.api.plugins.getDetail(
+          {
+            pluginId: 'lookalike',
+            scope: 'user',
+          },
+          VIEW,
+        )
       ).components,
     ).toEqual([
       expect.objectContaining({
@@ -338,11 +377,14 @@ describe('plugin MCP servers and hooks through CoreApi', () => {
       WHERE_KIT,
     )
     const preview = await api.plugins.inspect({ kind: 'local', path: source })
-    await api.plugins.install({
-      previewId: preview.previewId,
-      digest: preview.digest,
-      scope: 'user',
-    })
+    await api.plugins.install(
+      {
+        previewId: preview.previewId,
+        digest: preview.digest,
+        scope: 'user',
+      },
+      VIEW,
+    )
 
     // MCP: a real stdio server, started in the package with its variables.
     expect(api.host.tools.names()).toContain(TOOL)
@@ -355,13 +397,13 @@ describe('plugin MCP servers and hooks through CoreApi', () => {
       cwd: string
       root: string
     }
-    expect(api.skills.tools().find((tool) => tool.name === TOOL)).toMatchObject(
-      {
-        source: 'mcp',
-        server: 'where-kit-where',
-        plugin_id: 'where-kit',
-      },
-    )
+    expect(
+      api.skills.tools(VIEW).find((tool) => tool.name === TOOL),
+    ).toMatchObject({
+      source: 'mcp',
+      server: 'where-kit-where',
+      plugin_id: 'where-kit',
+    })
     const packageRoot = realpathSync(where.root)
     expect(
       packageRoot.startsWith(realpathSync(join(stateRoot, 'plugins', 'cache'))),
@@ -371,7 +413,10 @@ describe('plugin MCP servers and hooks through CoreApi', () => {
     expect(readFileSync(join(data, 'calls.log'), 'utf8')).toBe('one\n')
     expect(
       (
-        await api.plugins.getDetail({ pluginId: 'where-kit', scope: 'user' })
+        await api.plugins.getDetail(
+          { pluginId: 'where-kit', scope: 'user' },
+          VIEW,
+        )
       ).components.map(({ kind, state }) => [kind, state]),
     ).toEqual([
       ['mcp', 'running'],
@@ -384,11 +429,14 @@ describe('plugin MCP servers and hooks through CoreApi', () => {
     expect(readFileSync(join(data, 'hook.log'), 'utf8')).toBe(`${where.root}\n`)
 
     // Disabled: the tool and the hook are gone, and nothing new happens.
-    await api.plugins.setEnabled({
-      pluginId: 'where-kit',
-      scope: 'user',
-      enabled: false,
-    })
+    await api.plugins.setEnabled(
+      {
+        pluginId: 'where-kit',
+        scope: 'user',
+        enabled: false,
+      },
+      VIEW,
+    )
     expect(api.host.tools.names()).not.toContain(TOOL)
     expect(
       api.host.kept.mcpClient.pluginServerSnapshot('where-kit-where'),
@@ -399,11 +447,14 @@ describe('plugin MCP servers and hooks through CoreApi', () => {
     expect(readFileSync(join(data, 'calls.log'), 'utf8')).toBe('one\n')
 
     // Enabled again: registered exactly once.
-    await api.plugins.setEnabled({
-      pluginId: 'where-kit',
-      scope: 'user',
-      enabled: true,
-    })
+    await api.plugins.setEnabled(
+      {
+        pluginId: 'where-kit',
+        scope: 'user',
+        enabled: true,
+      },
+      VIEW,
+    )
     expect(api.host.tools.names().filter((name) => name === TOOL)).toHaveLength(
       1,
     )
@@ -439,12 +490,15 @@ describe('plugin MCP servers and hooks through CoreApi', () => {
       kind: 'url',
       url: 'https://plugins.example/where-kit.zip',
     })
-    await api.plugins.install({
-      previewId: preview.previewId,
-      digest: preview.digest,
-      scope: 'user',
-    })
-    expect(api.plugins.list()[0]).toMatchObject({
+    await api.plugins.install(
+      {
+        previewId: preview.previewId,
+        digest: preview.digest,
+        scope: 'user',
+      },
+      VIEW,
+    )
+    expect(api.plugins.list(VIEW)[0]).toMatchObject({
       activation: 'blocked_unverified',
     })
     expect(api.host.tools.names()).not.toContain(TOOL)
@@ -461,14 +515,21 @@ describe('plugin MCP servers and hooks through CoreApi', () => {
       WHERE_KIT,
     )
     const preview = await api.plugins.inspect({ kind: 'local', path: source })
-    await api.plugins.install({
-      previewId: preview.previewId,
-      digest: preview.digest,
-      scope: 'user',
-    })
+    await api.plugins.install(
+      {
+        previewId: preview.previewId,
+        digest: preview.digest,
+        scope: 'user',
+      },
+      VIEW,
+    )
     const tools = async () =>
-      (await api.plugins.getDetail({ pluginId: 'where-kit', scope: 'user' }))
-        .tools
+      (
+        await api.plugins.getDetail(
+          { pluginId: 'where-kit', scope: 'user' },
+          VIEW,
+        )
+      ).tools
 
     expect(await tools()).toEqual({
       note: null,
@@ -494,11 +555,14 @@ describe('plugin MCP servers and hooks through CoreApi', () => {
       ],
     })
 
-    await api.plugins.setEnabled({
-      pluginId: 'where-kit',
-      scope: 'user',
-      enabled: false,
-    })
+    await api.plugins.setEnabled(
+      {
+        pluginId: 'where-kit',
+        scope: 'user',
+        enabled: false,
+      },
+      VIEW,
+    )
     expect((await tools()).groups).toEqual([
       {
         id: 'where',

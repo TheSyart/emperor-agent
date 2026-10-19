@@ -69,7 +69,15 @@ function setup(
       supervisor: { connectTimeoutMs: 5_000, maxRestartAttempts: 1 },
     })
   cleanups.push(async () => await client.close())
-  const bridge = new McpToolBridge(client, registry)
+  const bridge = new McpToolBridge(
+    {
+      global: () => client.getTools(),
+      projects: () => [],
+      project: () => [],
+    },
+    registry,
+    () => null,
+  )
   let reloads = 0
   registry.register(
     createMcpConfigTool({

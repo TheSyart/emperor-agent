@@ -502,9 +502,7 @@ describe('credential vault settings', () => {
     button(ask, '备份并重新开始').click()
     await settle()
     expect(api.vaultStartOver).toHaveBeenCalledTimes(1)
-    expect(
-      root.querySelector('.ds-notice[data-tone="error"]'),
-    ).toBeNull()
+    expect(root.querySelector('.ds-notice[data-tone="error"]')).toBeNull()
     expect(root.textContent).toContain('vault.json.unreadable-1700000000000')
     expect(confirm).not.toHaveBeenCalled()
     confirm.mockRestore()

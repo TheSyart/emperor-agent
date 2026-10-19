@@ -4,9 +4,11 @@ export { coreOperationKeys, invokeCoreOperation } from '../api/operations'
 export type {
   CoreIpcErrorEnvelope,
   CoreOperationArgs,
+  CoreOperationContext,
   CoreOperationKey,
   CoreOperationResult,
 } from '../api/operations'
+export type { ViewScope } from '../harness/host/scope'
 export { CoreUnavailableError } from '../runtime/lifecycle'
 export { EnvironmentError } from '../environment/errors'
 export type {

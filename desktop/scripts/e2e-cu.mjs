@@ -2,7 +2,7 @@
 // Computer Use end-to-end runner: bundles tests/electron/harness/main.ts to
 // out-e2e/harness.cjs and runs it in real Electron (ELECTRON_RUN_AS_NODE
 // removed, Emperor Home isolated), then summarises the E2E-RESULT lines.
-//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|userbrowser|fullstack|real|references|references-real|plugins|userbrowser-app|settings|renderer-security]
+//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|userbrowser|browser-security|fullstack|real|references|references-real|plugins|userbrowser-app|settings|renderer-security]
 // `real` and `references-real` need EMPEROR_E2E_MODEL_CONFIG (a
 // model_config.json to copy). `references` runs the E-track suite (reply
 // links in a Build session); `references-real` asks a real model once.
@@ -12,7 +12,9 @@
 // the browsing history and your own downloads in the real app). `settings`
 // opens every settings section and sub page in the real app (F track).
 // `renderer-security` checks the main window's CSP, permissions, link and
-// remote image handling in the real app (SEC-05).
+// remote image handling in the real app (SEC-05). `browser-security` checks
+// imported cookies, typing next to cross-origin frames and the inbox
+// quarantine mark in real Electron (SEC-10).
 import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'

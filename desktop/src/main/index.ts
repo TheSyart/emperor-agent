@@ -133,6 +133,7 @@ import {
   localPairingCipher,
 } from './computer-use/nm-bridge-store'
 import { LocalSecretStore } from './local-secret-store'
+import { ImportedCookieStore } from './computer-use/imported-cookies'
 import { verifyPackagedSecrets } from './packaged-secrets-smoke'
 import {
   NmManifestRegistrar,
@@ -274,6 +275,8 @@ let externalDownloads: ExternalDownloadLog | null = null
 // 设置 › 电脑操作 › Chrome 和 Edge: ~/.emperor/browser-extension.
 let browserExtension: BrowserExtensionService | null = null
 let credentialVault: CredentialVault | null = null
+/** Cookies imported into persistent profiles, sealed (SEC-10). */
+let importedCookies: ImportedCookieStore | null = null
 /** Core seals model keys and MCP tokens with the vault's local key (SEC-06). */
 let coreSecretSealer: SecretSealer | null = null
 let dictation: DictationService | null = null
@@ -416,12 +419,9 @@ registerOpenPathIpc({
   authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
   sources: {
     emperorHome: () => config.stateRoot,
-    activeProject: () => {
-      const host = coreApi?.host
-      return host?.activeSession()?.project_path
-        ? host.activeWorkspaceRoot()
-        : null
-    },
+    // KRN-01: the renderer names the session; main keeps no focus.
+    sessionProject: (sessionId) =>
+      coreApi?.host.projectRootForSession(sessionId) ?? null,
     skillFolder: (name, sessionId) => {
       try {
         return coreApi?.skills.get(name, { sessionId }).root ?? null
@@ -585,11 +585,20 @@ function createComputerUseHost(): void {
   })
   if (credentialVault.problem)
     console.warn(`Credential vault unavailable: ${credentialVault.problem}`)
+  // Cookies imported from Chrome/Edge are sealed with the same key and set
+  // into a profile's session in memory only, never into Chromium's
+  // `Cookies` (SEC-10); profile folders stay out of Time Machine.
+  importedCookies = new ImportedCookieStore({
+    profilesRoot: path.join(config.stateRoot, 'browser', 'profiles'),
+    storage: localSecrets,
+    sessionFromPath: (directory) => session.fromPath(directory),
+  })
   const driver = new EmbeddedBrowserDriver({
     electron: electronBrowserFactory(),
     images: nativeImageCodec,
     platform: hostPlatform(process.platform),
     profilesRoot: path.join(config.stateRoot, 'browser', 'profiles'),
+    profileStorage: importedCookies,
     downloadsRoot: path.join(config.stateRoot, 'browser', 'downloads'),
     credentials: credentialVault,
     credentialVisibility: (targetId, visible) =>
@@ -1449,16 +1458,13 @@ async function startup(): Promise<void> {
                       profile.profileId === profileId &&
                       profile.kind === 'persistent',
                   ) ?? false,
-              // Cookies go into the chosen persistent profile's own session
-              // (same path as computer-use), then the store is flushed.
+              // Cookies go into the chosen persistent profile's session in
+              // memory and are sealed in its imported-cookies.el1; Chromium's
+              // `Cookies` never holds them (SEC-10).
               cookieSink: (profileId) => {
-                const store = session.fromPath(
-                  path.join(config.stateRoot, 'browser', 'profiles', profileId),
-                ).cookies
-                return {
-                  set: (cookie) => store.set(cookie),
-                  flush: () => store.flushStore(),
-                }
+                if (!importedCookies)
+                  throw new Error('browser profiles are not available')
+                return importedCookies.sinkFor(profileId)
               },
               log: (message, counts) =>
                 console.info(`[browser-import] ${message}`, counts),

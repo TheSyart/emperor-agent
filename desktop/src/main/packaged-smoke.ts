@@ -27,12 +27,12 @@ export const PACKAGED_PLUGIN_SKILLS = ['github']
 
 export interface PackagedSmokeCore {
   bootstrap(): Promise<unknown>
-  diagnostics: { get(): Promise<unknown> }
+  diagnostics: { get(view: { sessionId: string | null }): Promise<unknown> }
   environment: {
-    getStatus(input: {
-      forceRefresh: boolean
-      projectRoot: string
-    }): Promise<unknown>
+    getStatus(
+      input: { forceRefresh: boolean },
+      view: { sessionId: string | null },
+    ): Promise<unknown>
   }
   sessions: {
     create(input: { title: string; mode: 'build'; project_path: string }): {
@@ -254,16 +254,18 @@ export async function runPackagedSmoke(
         `packaged smoke requires exactly the built-in skills ${PACKAGED_BUILT_IN_SKILLS.join(', ')} and the shipped plugin skills ${PACKAGED_PLUGIN_SKILLS.join(', ')}`,
       )
 
-    const diagnostics = asRecord(await opts.core.diagnostics.get())
+    const diagnostics = asRecord(
+      await opts.core.diagnostics.get({ sessionId: null }),
+    )
     const sandbox = packagedSandboxReceipt(diagnostics.sandbox, opts.platform)
     const lifecycle = packagedLifecycleReceipt(
       asRecord(diagnostics.kernel).lifecycle,
     )
     const environmentBefore = asSmokeStatus(
-      await opts.core.environment.getStatus({
-        forceRefresh: true,
-        projectRoot: workspaceRoot,
-      }),
+      await opts.core.environment.getStatus(
+        { forceRefresh: true },
+        { sessionId: null },
+      ),
     )
     const jobsBefore = installJobCount(environmentBefore)
     if (jobsBefore !== 0)
@@ -297,10 +299,10 @@ export async function runPackagedSmoke(
           }
 
     const environmentAfter = asSmokeStatus(
-      await opts.core.environment.getStatus({
-        forceRefresh: true,
-        projectRoot: workspaceRoot,
-      }),
+      await opts.core.environment.getStatus(
+        { forceRefresh: true },
+        { sessionId: null },
+      ),
     )
     const jobsAfter = installJobCount(environmentAfter)
     if (jobsAfter !== jobsBefore)

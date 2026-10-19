@@ -6,6 +6,7 @@ import {
   type WebToolPreferences,
 } from '../../config/local-config'
 import type { WebToolsStatus } from '../../harness/host/web-tools'
+import type { ViewScope } from '../../harness/host/scope'
 
 export interface CoreWebToolsServiceDeps {
   stateRoot?: string | null
@@ -14,7 +15,7 @@ export interface CoreWebToolsServiceDeps {
     status(): WebToolsStatus
     update(settings: WebToolPreferences): void
   }
-  assertMutation?: (area: string, action: string) => void
+  assertMutation?: (area: string, action: string, view: ViewScope) => void
   /** The tool list changed: tell every window. */
   changed?: (status: WebToolsStatus) => void
 }
@@ -38,8 +39,11 @@ export class CoreWebToolsService {
     return this.deps.tools.status()
   }
 
-  async update(change: Partial<WebToolPreferences>): Promise<WebToolsStatus> {
-    this.deps.assertMutation?.('tools', 'network settings')
+  async update(
+    change: Partial<WebToolPreferences>,
+    view: ViewScope,
+  ): Promise<WebToolsStatus> {
+    this.deps.assertMutation?.('tools', 'network settings', view)
     const config = await loadLocalConfig(this.stateRoot)
     const webTools = normalizeWebToolPreferences({
       ...config.webTools,

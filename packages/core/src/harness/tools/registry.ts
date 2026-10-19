@@ -228,7 +228,8 @@ export class ToolRegistry {
         const definition = this.tools.get(name)!
         return {
           name,
-          description: definition.description,
+          description:
+            definition.descriptionFor?.(agent) ?? definition.description,
           parameters:
             definition.parametersFor?.(agent) ?? definition.parameters,
         }

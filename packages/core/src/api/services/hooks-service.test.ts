@@ -17,6 +17,9 @@ import {
 import type { SessionEvent } from '../../session-log/types'
 import { CoreHooksService } from './hooks-service'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 const roots: string[] = []
 const disposers: Array<() => Promise<void>> = []
 afterEach(async () => {
@@ -47,7 +50,7 @@ function fixture(options: { project?: boolean; events?: SessionEvent[] } = {}) {
   const service = new CoreHooksService({
     stateRoot,
     hooks,
-    activeProjectRoot: () => projectDir,
+    projectRoot: () => projectDir,
     assertMutation,
     sessionEvents: () => options.events ?? [],
   })
@@ -86,8 +89,8 @@ describe('CoreHooksService', () => {
   it('saves raw JSON atomically, reloads the bridge, and returns the new config', async () => {
     const f = fixture()
     const text = JSON.stringify(config, null, 2)
-    const saved = await f.service.saveConfig(text)
-    expect(f.assertMutation).toHaveBeenCalledWith('hooks', 'saveConfig')
+    const saved = await f.service.saveConfig(text, VIEW)
+    expect(f.assertMutation).toHaveBeenCalledWith('hooks', 'saveConfig', VIEW)
     expect(readFileSync(join(f.stateRoot, 'hooks.json'), 'utf8')).toBe(
       `${text}\n`,
     )
@@ -102,32 +105,37 @@ describe('CoreHooksService', () => {
 
   it('accepts object / { content } envelopes on save', async () => {
     const f = fixture()
-    await f.service.saveConfig({ config })
+    await f.service.saveConfig({ config }, VIEW)
     expect(
       JSON.parse(readFileSync(join(f.stateRoot, 'hooks.json'), 'utf8')),
     ).toEqual(config)
-    await f.service.saveConfig({ content: '{"hooks":{}}' })
+    await f.service.saveConfig({ content: '{"hooks":{}}' }, VIEW)
     expect((await f.service.getConfig()).events).toEqual({})
   })
 
   it('rejects invalid JSON and invalid matchers without touching the file', async () => {
     const f = fixture()
-    await f.service.saveConfig(config)
+    await f.service.saveConfig(config, VIEW)
     const before = readFileSync(join(f.stateRoot, 'hooks.json'), 'utf8')
-    await expect(f.service.saveConfig('{not json')).rejects.toMatchObject({
-      code: 'validation_error',
-    })
+    await expect(f.service.saveConfig('{not json', VIEW)).rejects.toMatchObject(
+      {
+        code: 'validation_error',
+      },
+    )
     await expect(
-      f.service.saveConfig({
-        hooks: {
-          PreToolUse: [
-            { matcher: '(', hooks: [{ type: 'command', command: 'x' }] },
-          ],
+      f.service.saveConfig(
+        {
+          hooks: {
+            PreToolUse: [
+              { matcher: '(', hooks: [{ type: 'command', command: 'x' }] },
+            ],
+          },
         },
-      }),
+        VIEW,
+      ),
     ).rejects.toMatchObject({ code: 'validation_error' })
     await expect(
-      f.service.saveConfig({ hooks: { Stop: {} } }),
+      f.service.saveConfig({ hooks: { Stop: {} } }, VIEW),
     ).rejects.toMatchObject({ code: 'validation_error' })
     expect(readFileSync(join(f.stateRoot, 'hooks.json'), 'utf8')).toBe(before)
   })
@@ -176,7 +184,7 @@ describe('CoreHooksService', () => {
 
   it('matches loaded hooks with Claude Code matcher semantics across global and project files', async () => {
     const f = fixture({ project: true })
-    await f.service.saveConfig(config)
+    await f.service.saveConfig(config, VIEW)
     writeFileSync(
       join(f.projectDir!, '.claude', 'settings.json'),
       JSON.stringify({
@@ -194,26 +202,35 @@ describe('CoreHooksService', () => {
     )
     f.hooks.reload()
 
-    const bash = await f.service.testMatch({
-      eventName: 'PreToolUse',
-      toolName: 'Bash',
-    })
+    const bash = await f.service.testMatch(
+      {
+        eventName: 'PreToolUse',
+        toolName: 'Bash',
+      },
+      VIEW,
+    )
     expect(bash.items.map((item) => item.command)).toEqual([
       'echo pre',
       `echo $CLAUDE_PROJECT_DIR ${f.projectDir}`,
     ])
-    const mcp = await f.service.testMatch({
-      eventName: 'PreToolUse',
-      query: 'mcp__fs__read',
-    })
+    const mcp = await f.service.testMatch(
+      {
+        eventName: 'PreToolUse',
+        query: 'mcp__fs__read',
+      },
+      VIEW,
+    )
     expect(mcp.items).toMatchObject([
       { index: 0, command: 'echo mcp', timeoutSec: 5, matcher: 'mcp__.*' },
       { index: 1 },
     ])
-    const bashy = await f.service.testMatch({
-      eventName: 'PreToolUse',
-      toolName: 'Bashy',
-    })
+    const bashy = await f.service.testMatch(
+      {
+        eventName: 'PreToolUse',
+        toolName: 'Bashy',
+      },
+      VIEW,
+    )
     expect(bashy.items.map((item) => item.command)).toEqual([
       `echo $CLAUDE_PROJECT_DIR ${f.projectDir}`,
     ])
@@ -224,31 +241,37 @@ describe('CoreHooksService', () => {
 
   it('test-runs one command hook with a sample payload on stdin', async () => {
     const f = fixture()
-    await f.service.saveConfig({
-      hooks: {
-        PreToolUse: [
-          {
-            matcher: 'Bash',
-            hooks: [
-              {
-                command: `cat; echo '{"decision":"block","reason":"nope"}' >&2; exit 2`,
-              },
-            ],
-          },
-        ],
+    await f.service.saveConfig(
+      {
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: 'Bash',
+              hooks: [
+                {
+                  command: `cat; echo '{"decision":"block","reason":"nope"}' >&2; exit 2`,
+                },
+              ],
+            },
+          ],
+        },
       },
-    })
+      VIEW,
+    )
     await expect(
-      f.service.testRun({ eventName: 'PreToolUse', toolName: 'Bash' }),
+      f.service.testRun({ eventName: 'PreToolUse', toolName: 'Bash' }, VIEW),
     ).rejects.toMatchObject({
       code: 'validation_error',
     })
-    const result = await f.service.testRun({
-      eventName: 'PreToolUse',
-      toolName: 'Bash',
-      confirmExecution: true,
-    })
-    expect(f.assertMutation).toHaveBeenCalledWith('hooks', 'testRun')
+    const result = await f.service.testRun(
+      {
+        eventName: 'PreToolUse',
+        toolName: 'Bash',
+        confirmExecution: true,
+      },
+      VIEW,
+    )
+    expect(f.assertMutation).toHaveBeenCalledWith('hooks', 'testRun', VIEW)
     expect(result).toMatchObject({
       eventName: 'PreToolUse',
       exitCode: 2,
@@ -260,29 +283,38 @@ describe('CoreHooksService', () => {
       cwd: f.stateRoot,
     })
 
-    const direct = await f.service.testRun({
-      eventName: 'Stop',
-      command: 'echo hi',
-      confirmExecution: true,
-    })
+    const direct = await f.service.testRun(
+      {
+        eventName: 'Stop',
+        command: 'echo hi',
+        confirmExecution: true,
+      },
+      VIEW,
+    )
     expect(direct).toMatchObject({ exitCode: 0, stdout: 'hi' })
     await expect(
-      f.service.testRun({
-        eventName: 'PreToolUse',
-        toolName: 'Write',
-        confirmExecution: true,
-      }),
+      f.service.testRun(
+        {
+          eventName: 'PreToolUse',
+          toolName: 'Write',
+          confirmExecution: true,
+        },
+        VIEW,
+      ),
     ).rejects.toMatchObject({ code: 'validation_error' })
   })
 
   it('enforces the test-run timeout', async () => {
     const f = fixture()
-    const result = await f.service.testRun({
-      eventName: 'Stop',
-      command: 'sleep 5',
-      timeoutMs: 100,
-      confirmExecution: true,
-    })
+    const result = await f.service.testRun(
+      {
+        eventName: 'Stop',
+        command: 'sleep 5',
+        timeoutMs: 100,
+        confirmExecution: true,
+      },
+      VIEW,
+    )
     expect(result.exitCode).toBeNull()
     expect(result.stderr).toContain('timed out')
   })
@@ -341,7 +373,7 @@ describe('CoreHooksService', () => {
       },
     ] as unknown as SessionEvent[]
     const f = fixture({ events })
-    const audit = await f.service.getAudit()
+    const audit = await f.service.getAudit({}, VIEW)
     expect(audit.total).toBe(2)
     expect(audit.records.map((record) => record.handlerId)).toEqual([
       'h2',
@@ -361,9 +393,9 @@ describe('CoreHooksService', () => {
       completedAt: 110,
     })
     expect(
-      (await f.service.getAudit({ outcome: 'block' })).records,
+      (await f.service.getAudit({ outcome: 'block' }, VIEW)).records,
     ).toHaveLength(1)
-    expect(await f.service.getAudit({ limit: 1 })).toMatchObject({
+    expect(await f.service.getAudit({ limit: 1 }, VIEW)).toMatchObject({
       cursor: '0',
       nextCursor: '1',
       total: 2,

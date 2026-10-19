@@ -210,10 +210,10 @@ export async function runRestartPhase(): Promise<void> {
   let sessionId = env.CU_RESTART_SESSION ?? ''
   const output: Summary = { phase }
   if (phase === 'before') {
-    const created = await api.computerUse.manageProfile({
-      action: 'create',
-      name: 'M2.7 restart',
-    })
+    const created = await api.computerUse.manageProfile(
+      { action: 'create', name: 'M2.7 restart' },
+      { sessionId: null },
+    )
     profileId = created.profile!.profileId
     sessionId = String(api.sessions.create({ title: 'M2.7 restart' }).id)
   } else {

@@ -4,10 +4,14 @@ import {
   invokeCoreOperation,
   type CoreApi,
   type CoreIpcErrorEnvelope,
+  type CoreOperationContext,
   type CoreOperationKey,
   type CoreOperationResult,
 } from '@emperor/core/api'
-import { channelForCoreOperation } from '../shared/ipc-contract'
+import {
+  channelForCoreOperation,
+  splitCoreCallEnvelope,
+} from '../shared/ipc-contract'
 
 export interface IpcMainLike {
   handle(
@@ -30,7 +34,14 @@ export function registerCoreIpc(
     ipcMain.handle(channelForCoreOperation(key), async (event, ...args) => {
       try {
         opts.authorize?.(event)
-        return await invokeOperation(coreApi, key, args)
+        // The session the renderer shows travels with the call (KRN-01).
+        const call = splitCoreCallEnvelope(args)
+        return await invokeOperation(
+          coreApi,
+          key,
+          call.args,
+          call.view === undefined ? {} : { view: call.view },
+        )
       } catch (error) {
         return safeIpcError(error, key)
       }
@@ -42,8 +53,9 @@ export async function invokeOperation(
   coreApi: CoreApiLike,
   operationKey: CoreOperationKey,
   args: unknown[],
+  context: CoreOperationContext = {},
 ): Promise<CoreOperationResult<typeof operationKey>> {
-  return invokeCoreOperation(coreApi, operationKey, args)
+  return invokeCoreOperation(coreApi, operationKey, args, context)
 }
 
 function safeIpcError(

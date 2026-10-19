@@ -39,10 +39,10 @@ import {
 import { useLazySessionConversation } from './composables/useLazySessionConversation'
 import { useShortcuts } from './composables/useShortcuts'
 import { useSettingsRoute } from './components/settings/useSettingsRoute'
-import ToastStack from './components/ui/ToastStack.vue'
 import {
   pushToast,
   showErrorToast,
+  visibleToasts,
   type ToastOptions,
 } from './components/ui/toasts'
 import { activeConfirm } from './components/ui/confirm'
@@ -95,6 +95,10 @@ const ModelSetupRequiredDialog = defineAsyncComponent(
   () => import('./components/onboarding/ModelSetupRequiredDialog.vue'),
 )
 // The confirm() dialog loads on the first request (confirm.ts queues it).
+// The toast stack's view loads with the first toast (the queue is eager).
+const ToastStack = defineAsyncComponent(
+  () => import('./components/ui/ToastStack.vue'),
+)
 const ConfirmHost = defineAsyncComponent(
   () => import('./components/ui/ConfirmHost.vue'),
 )
@@ -230,12 +234,13 @@ async function runGoalAction(
   reason = 'user_confirmed_cancel',
 ): Promise<GoalOperationResult> {
   const owner = sessionId.value
+  // The goal belongs to the session on screen; name it (KRN-01).
   const result =
     action === 'pause'
-      ? await core('goals.pause', goalId)
+      ? await core('goals.pause', goalId, owner)
       : action === 'resume'
-        ? await core('goals.resume', goalId)
-        : await core('goals.cancel', goalId, reason)
+        ? await core('goals.resume', goalId, owner)
+        : await core('goals.cancel', goalId, reason, owner)
   applyGoalResult(owner, result)
   showToast(
     action === 'pause'
@@ -802,7 +807,7 @@ provideAppContext({
     />
   </template>
 
-  <ToastStack />
+  <ToastStack v-if="visibleToasts.length" />
   <ConfirmHost v-if="activeConfirm" />
 </template>
 

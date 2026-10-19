@@ -159,6 +159,8 @@ interface EmperorBridge {
     operationKey: Key,
     ...args: CoreOperationArgs<Key>
   ) => Promise<CoreOperationResult<Key> | CoreIpcErrorEnvelope>
+  /** The session on screen; every core call carries it (KRN-01). */
+  setViewingSession?: (sessionId: string | null) => void
   onCoreEvent?: (listener: (event: unknown) => void) => () => void
   onSessionEvents?: (listener: (batch: SessionEventBatch) => void) => () => void
   onTerminalEvent?: (
@@ -532,6 +534,15 @@ export async function invokeCore<Key extends CoreOperationKey>(
     throw error
   }
   return result
+}
+
+/**
+ * Tell the bridge which session the window shows (null: none, such as a
+ * draft). Core reads it from each call instead of keeping a focus of its
+ * own (KRN-01).
+ */
+export function setViewingSession(sessionId: string | null): void {
+  bridge()?.setViewingSession?.(sessionId)
 }
 
 export function hasCoreBridge(): boolean {

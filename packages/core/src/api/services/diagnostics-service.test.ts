@@ -11,6 +11,9 @@ import { describe, expect, it } from 'vitest'
 import { resolveRuntimePaths } from '../../runtime/paths'
 import { CoreDiagnosticsService } from './diagnostics-service'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 function tmp(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
 }
@@ -99,7 +102,7 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       }),
     })
 
-    const payload = await service.payload()
+    const payload = await service.payload(VIEW)
 
     expect(existsSync(join(root, 'model_config.json'))).toBe(false)
     expect(existsSync(join(root, 'settings.json'))).toBe(true)
@@ -198,7 +201,7 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       }),
     })
 
-    const payload = await service.payload()
+    const payload = await service.payload(VIEW)
 
     expect(payload.paths).toMatchObject({ runtimeRoot: root, stateRoot })
     expect(payload.paths).toMatchObject({
@@ -246,7 +249,7 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       }),
     })
 
-    const payload = await service.payload()
+    const payload = await service.payload(VIEW)
 
     expect(payload.externalToolConfig).toMatchObject({
       mcporter: {
@@ -264,7 +267,7 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       environmentSummary: async () => {
         throw new Error('secret executable path')
       },
-    }).payload()
+    }).payload(VIEW)
 
     expect(payload.environment).toEqual({
       status: 'unavailable',
@@ -279,10 +282,9 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
   it('exposes the legacy state migration report when supplied, and a safe empty default otherwise', async () => {
     const root = tmp('emperor-diagnostics-legacy-migration-')
 
-    const withoutMigration = await new CoreDiagnosticsService(
-      root,
-      {},
-    ).payload()
+    const withoutMigration = await new CoreDiagnosticsService(root, {}).payload(
+      VIEW,
+    )
     expect(withoutMigration.legacyStateMigration).toEqual({
       legacyStateRoots: [],
       copied: 0,
@@ -314,7 +316,7 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
           },
         ],
       },
-    }).payload()
+    }).payload(VIEW)
     expect(withMigration.legacyStateMigration).toMatchObject({
       copied: 3,
       skipped: 1,
@@ -341,7 +343,7 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
 
   it('contains kernel/subagent probe failures and defaults them to empty', async () => {
     const root = tmp('emperor-diagnostics-kernel-')
-    const empty = await new CoreDiagnosticsService(root, {}).payload()
+    const empty = await new CoreDiagnosticsService(root, {}).payload(VIEW)
     expect(empty.subagents).toEqual([])
     expect(empty.kernel).toEqual({})
 
@@ -352,7 +354,7 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       kernel: () => {
         throw new Error('secret kernel detail')
       },
-    }).payload()
+    }).payload(VIEW)
     expect(failing.subagents).toEqual([])
     expect(failing.kernel).toMatchObject({ status: 'unavailable' })
     expect(JSON.stringify(failing.kernel)).not.toContain('secret')
@@ -366,7 +368,7 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
       },
     })
 
-    await expect(service.payload()).resolves.toMatchObject({
+    await expect(service.payload(VIEW)).resolves.toMatchObject({
       commandCatalog: {
         status: 'unavailable',
         error: {

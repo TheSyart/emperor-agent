@@ -104,6 +104,8 @@ interface InboxDownloadLike {
   readonly time: number
   readonly bytes: number
   readonly exists: boolean
+  /** The quarantine mark could not be set on the inbox file (SEC-10). */
+  readonly unmarked?: boolean
   /** From the user's own Chrome or Edge (RV-09): browser and outcome. */
   readonly browser?: string
   readonly state?: string
@@ -714,6 +716,7 @@ function agentDownloadView(entry: InboxDownloadLike): AgentDownloadView {
     time: entry.time,
     bytes: entry.bytes,
     exists: entry.exists,
+    ...(entry.unmarked === true ? { unmarked: true as const } : {}),
     ...externalDownloadFacts(entry),
   }
 }

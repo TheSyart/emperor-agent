@@ -113,7 +113,7 @@ Plan 模式与权限预设相互独立：在 Plan 模式中切换预设，只改
 
 ## CoreApi mutation guard
 
-`packages/core/src/api/mutation-guard.ts` 保护由界面发起的状态修改（Scheduler、Skills、Plugins、模型与 MCP 配置、Task 取消等）：当前 session 有待处理交互时返回 409，处于 Plan 模式时返回 403。Git 写操作另外通过 workspace mutation coordinator 按 worktree 串行。
+`packages/core/src/api/mutation-guard.ts` 保护由界面发起的状态修改（Scheduler、Skills、Plugins、模型与 MCP 配置、Task 取消等）：调用方显示的会话（每次调用带的 `view`，见 [Agent 执行链路](agent-runtime.md#选中会话只决定显示)）有待处理交互时返回 409，处于 Plan 模式时返回 403；界面没有显示会话（`view.sessionId` 为 null）时不拦截，进程内调用不带 `view` 时返回 `SESSION_REQUIRED`。外部子会话与任务的控制由所属会话自己的状态把关。Git 写操作另外通过 workspace mutation coordinator 按 worktree 串行。
 
 ## 用户直控 Terminal
 

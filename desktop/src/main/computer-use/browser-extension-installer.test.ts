@@ -198,6 +198,46 @@ describe('the extension folder', () => {
     expect((await folder.installed())?.version).toBe('0.3.0')
   })
 
+  it('re-hashes the real files at startup and reinstalls a tampered folder (SEC-10)', async () => {
+    const f = await fixture()
+    const folder = f.folder()
+    await folder.install()
+    const worker = join(f.target, 'service-worker.js')
+    // Same version, same stamp: only the file on disk changed.
+    await writeFile(worker, 'chrome.runtime.sendNativeMessage("evil")\n')
+    expect(await folder.upgrade()).toBe(true)
+    expect(await readFile(worker, 'utf8')).toBe('export {}\n')
+    // A file added next to the shipped ones, or a stamp that lies.
+    await writeFile(join(f.target, 'extra.js'), 'x\n')
+    expect(await folder.upgrade()).toBe(true)
+    expect(await tree(f.target)).not.toContain('extra.js')
+    await writeFile(
+      join(f.target, EXTENSION_STAMP),
+      JSON.stringify({ version: '0.2.0', digest: '0'.repeat(64) }),
+    )
+    expect(await folder.upgrade()).toBe(true)
+    // A folder whose stamp is gone is still Emperor's and is repaired.
+    await rm(join(f.target, EXTENSION_STAMP))
+    await writeFile(worker, 'tampered\n')
+    expect(await folder.upgrade()).toBe(true)
+    expect(await readFile(worker, 'utf8')).toBe('export {}\n')
+    // What Chrome writes for itself (`_metadata`) is not ours to hash.
+    await mkdir(join(f.target, '_metadata'))
+    await writeFile(join(f.target, '_metadata', 'computed_hashes.json'), '{}')
+    expect(await folder.upgrade()).toBe(false)
+  })
+
+  it('keeps the folder and its subfolders private (0700)', async () => {
+    const f = await fixture()
+    await f.folder().install()
+    expect((await lstat(f.target)).mode & 0o777).toBe(0o700)
+    expect((await lstat(join(f.target, 'icons'))).mode & 0o777).toBe(0o700)
+    // A folder an older Emperor left world-readable is tightened at startup.
+    await fsp.chmod(f.target, 0o755)
+    expect(await f.folder().upgrade()).toBe(false)
+    expect((await lstat(f.target)).mode & 0o777).toBe(0o700)
+  })
+
   it('refuses a bundle without a valid manifest', async () => {
     const f = await fixture()
     await writeFile(join(f.source, 'manifest.json'), '{"manifest_version":2}')
@@ -501,6 +541,45 @@ describe('the extension service', () => {
     )
     service.dispose()
     expect(fake.subscribed).toBe(false)
+  })
+
+  it('restores a tampered service-worker.js on restart and reloads the extension (SEC-10)', async () => {
+    const f = await fixture()
+    await f.folder().install()
+    const worker = join(f.target, 'service-worker.js')
+    await writeFile(worker, 'tampered()\n')
+    // The next launch: a new service on the same folder.
+    const fake = fakeBridge()
+    const service = new BrowserExtensionService({
+      folder: f.folder(),
+      bridge: fake.bridge,
+      homeDir: f.root,
+      detect: async () => [],
+    })
+    await service.start()
+    expect(await readFile(worker, 'utf8')).toBe('export {}\n')
+    // A connected extension of the same version may still run the old
+    // files: it is told to reload once.
+    fake.emit({
+      type: 'ready',
+      pairingId: 'p-1',
+      extensionId: 'oobcokoopgkhlhpohfdpelkafiidojjn',
+      workerEpoch: 1,
+      version: '0.2.0',
+    })
+    await vi.waitFor(() =>
+      expect(fake.calls).toEqual([['request', 'p-1', 'extension.reload']]),
+    )
+    fake.emit({
+      type: 'ready',
+      pairingId: 'p-1',
+      extensionId: 'oobcokoopgkhlhpohfdpelkafiidojjn',
+      workerEpoch: 2,
+      version: '0.2.0',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(fake.calls).toHaveLength(1)
+    service.dispose()
   })
 
   it('reveals the folder only once Emperor put it there', async () => {

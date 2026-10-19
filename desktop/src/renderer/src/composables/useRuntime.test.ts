@@ -1349,8 +1349,30 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
 
     await expect(runtime.stopActive()).resolves.toBe(true)
 
-    expect(calls).toEqual([['chat.stopRuntime', {}]])
+    // KRN-01: the stop names the session on screen (none here).
+    expect(calls).toEqual([['chat.stopRuntime', { sessionId: null }]])
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('names the session on screen when stopping, and tells the bridge which one it is', async () => {
+    const calls: unknown[][] = []
+    const viewing: Array<string | null> = []
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        calls.push(args)
+        return { cancelled: 1, active: [] }
+      },
+      setViewingSession: (sessionId: string | null) => {
+        viewing.push(sessionId)
+      },
+      onCoreEvent: () => () => {},
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.switchSession('s1')
+    await runtime.stopActive()
+
+    expect(viewing.at(-1)).toBe('s1')
+    expect(calls).toContainEqual(['chat.stopRuntime', { sessionId: 's1' }])
   })
 
   it('ignores the cancelled chat.submit rejection after stopActive has interrupted the UI', async () => {

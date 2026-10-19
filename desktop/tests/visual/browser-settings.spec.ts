@@ -120,7 +120,7 @@ for (const theme of ['dark', 'light'] as const) {
       '密码管理器',
     )
     await expect(page).toHaveURL(/page=passwords/)
-    await expect(groupTitles(dialog)).toHaveText(['保护', '已保存'])
+    await expect(groupTitles(dialog)).toHaveText(['保护', '已保存', '备份'])
     await expect(dialog).toContainText('GitHub')
     await expect(dialog).toContainText('公司邮箱')
     // Sealed with Emperor's own key, said plainly; no Keychain, no Touch ID.
@@ -145,7 +145,13 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(dialog.locator('input[type="password"]')).toHaveCount(0)
     await dialog.locator('[data-action="vault-set-master"]').click()
     const master = page.getByRole('dialog', { name: '设置主密码' })
-    await master.getByLabel('新的主密码').fill('correct horse battery')
+    await master
+      .getByLabel('新的主密码', { exact: true })
+      .fill('correct horse battery')
+    // Setting a master password asks for it twice (SEC-09).
+    await master
+      .getByLabel('再次输入新的主密码', { exact: true })
+      .fill('correct horse battery')
     await expect(master).not.toContainText('Touch ID')
     await expect(master.locator('input[type="checkbox"]')).toHaveCount(0)
     await shot(page, `passwords-master-${theme}`)

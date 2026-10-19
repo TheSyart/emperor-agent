@@ -69,8 +69,13 @@ export interface CommandApplicationServiceDeps {
   ): Promise<{ compacted: boolean; shadowedTokenCount?: number }>
   /** `host.stop(sessionId)`: true when a running turn was cancelled. */
   stop(sessionId: string): boolean
-  activateModel(entryId: string): Promise<unknown>
-  setReasoningEffort(entryId: string, effort: string): Promise<unknown>
+  /** Switch the model from a command typed in `sessionId` (its mutation guard). */
+  activateModel(entryId: string, sessionId: string): Promise<unknown>
+  setReasoningEffort(
+    entryId: string,
+    effort: string,
+    sessionId: string,
+  ): Promise<unknown>
   /** `host.setPermissionPreset(sessionId, preset)`; returns the control payload. */
   setPermissionPreset(
     sessionId: string,
@@ -197,7 +202,7 @@ export class CoreCommandApplicationService {
         (item) => item.entryId === tail || item.modelId === tail,
       )
       if (!model) return rejected('model_not_found', `找不到模型：${tail}`)
-      await this.deps.activateModel(model.entryId)
+      await this.deps.activateModel(model.entryId, sessionId)
       return completed(
         context,
         'model_activated',
@@ -208,7 +213,11 @@ export class CoreCommandApplicationService {
       const config = await this.deps.models.getConfig()
       if (!config.current)
         return rejected('model_unavailable', '当前没有可用模型。')
-      await this.deps.setReasoningEffort(config.current.entryId, tail)
+      await this.deps.setReasoningEffort(
+        config.current.entryId,
+        tail,
+        sessionId,
+      )
       return completed(
         context,
         'reasoning_updated',

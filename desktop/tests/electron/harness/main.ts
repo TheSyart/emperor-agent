@@ -10,13 +10,19 @@
  *                    profile isolation, restart recovery
  *   --mode=userbrowser  the user's built-in browser: temporary history and
  *                    clearing its data without touching Agent profiles
+ *   --mode=browser-security  SEC-10: imported cookies sealed and kept out of
+ *                    Chromium's cookie store, typing refused when a page
+ *                    moves the focus into a cross-origin iframe, the inbox
+ *                    quarantine mark (browser-security.ts)
  *
  * `--mode=restart_phase` is internal: one launch of the M2.7 restart case
- * (restart.ts), spawned by the extra suite.
+ * (restart.ts), spawned by the extra suite. `--mode=sec10_phase` is one
+ * process of the browser-security suite.
  */
 
 import { app, BaseWindow, WebContentsView } from 'electron'
 import { startFixtureSite } from '../fixtures/site'
+import { runBrowserSecurity, runSec10Phase } from './browser-security'
 import { runContract } from './contract'
 import { runExtra } from './extra'
 import { runRestartPhase } from './restart'
@@ -78,10 +84,30 @@ async function smoke(): Promise<void> {
   }
 }
 
-const mode = /--mode=(\w+)/.exec(process.argv.join(' '))?.[1] ?? 'smoke'
+const mode = /--mode=([\w-]+)/.exec(process.argv.join(' '))?.[1] ?? 'smoke'
 
 app.on('window-all-closed', () => undefined)
-if (mode === 'restart_phase') {
+if (mode === 'sec10_phase') {
+  // Its own userData under the suite's temporary directory.
+  const userData = process.env.SEC10_USER_DATA
+  if (userData) app.setPath('userData', userData)
+  // Quit normally so Chromium writes its stores as the app does at exit.
+  app
+    .whenReady()
+    .then(runSec10Phase)
+    .then(
+      () => app.quit(),
+      (error: unknown) => {
+        const text =
+          error instanceof Error
+            ? (error.stack ?? error.message)
+            : String(error)
+        process.stdout.write(`E2E-PHASE-ERROR ${JSON.stringify(text)}\n`, () =>
+          app.exit(1),
+        )
+      },
+    )
+} else if (mode === 'restart_phase') {
   // Both launches of the restart case share one userData, like the app.
   const userData = process.env.CU_RESTART_USER_DATA
   if (userData) app.setPath('userData', userData)
@@ -108,6 +134,7 @@ if (mode === 'restart_phase') {
       if (mode === 'contract') await runContract(report)
       else if (mode === 'extra') await runExtra(report)
       else if (mode === 'userbrowser') await runUserBrowser(report)
+      else if (mode === 'browser-security') await runBrowserSecurity(report)
       else await smoke()
     })
     .catch((error: unknown) => {

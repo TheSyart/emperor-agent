@@ -45,6 +45,8 @@ import type { Session } from '../../session-log/session'
 import { SessionLogStore, type SessionLogState } from '../../session-log/store'
 import type { SessionEvent } from '../../session-log/types'
 import type { SessionEntry } from '../../sessions/store'
+import { MCPClient } from '../../mcp/client'
+import { ProjectMcpInstances } from '../../mcp/project-instances'
 import type { FileSkillsLoader } from '../../skills/file-loader'
 import { logger } from '../../util/log'
 import { WatchlistService } from '../../watchlist/service'
@@ -90,6 +92,7 @@ import { agentInstructionsMiddleware } from '../prompt/agent-instructions'
 import { SystemPromptAssembler } from '../prompt/assembler'
 import { SessionProjector, type UiEvent } from '../projection/projector'
 import { createAskUserQuestionTool, UserQuestionService } from '../questions'
+import { UserQuestionDismissed } from '../questions/service'
 import { LocalSandbox, type SandboxBackend } from '../sandbox/backend'
 import { SandboxPolicyService, type SandboxMode } from '../sandbox/policy'
 import { SubagentManager } from '../subagent/manager'
@@ -153,6 +156,19 @@ import {
   type SubagentChildView,
 } from './session-views'
 import { REPAIR_CONTRIBUTORS } from './repair-contributors'
+import {
+  DEFAULT_BACKGROUND_TURN_TIMEOUT_MS,
+  realTimers,
+  scopeOfEntry,
+  SessionRequiredError,
+  type BackgroundTurnOptions,
+  type BackgroundTurnOutcome,
+  type HostTimers,
+  type InteractionPolicy,
+  type SessionScope,
+  type TurnResult,
+} from './scope'
+import type { ToolSchema } from '../../llm/types'
 import { generateSessionTitle } from './title'
 import { WebTools } from './web-tools'
 
@@ -188,6 +204,8 @@ export interface HarnessHostOptions extends KeptServicesOptions {
   computerUseSettings?: () => ComputerUseSettings
   /** The master switch changed (the desktop clears its pointer when off). */
   computerUseEnabledChanged?: (enabled: boolean) => void
+  /** Timers for deferred work (background turn limits, MCP idle stop); tests replace them. */
+  timers?: HostTimers
 }
 
 export interface SubmitInput {
@@ -213,14 +231,7 @@ export interface SubmitInput {
   unconsumed?: 'keep' | 'withdraw' | null
 }
 
-/** What one submitted message came to (KRN-02; the shape KRN-01 builds on). */
-export type TurnResult =
-  | { kind: 'completed'; content: string; turnId: string }
-  | { kind: 'error'; code: string; message: string; turnId: string }
-  /** `turnId` is null when the message was cancelled before a turn took it. */
-  | { kind: 'aborted'; by: 'user' | 'system'; turnId: string | null }
-  | { kind: 'blocked'; reason: 'cost-cap' | 'prompt-rejected'; turnId: string }
-  | { kind: 'not-consumed'; reason: HoldReason }
+export type { TurnResult } from './scope'
 
 export interface SubmitResult {
   sessionId: string
@@ -292,6 +303,8 @@ export class HarnessHost {
   readonly mcpTools: McpToolBridge
   /** `web_fetch` / `web_search` and their switches (设置 › 高级 › 网络工具). */
   readonly webTools: WebTools
+  /** Project-scoped MCP servers: one instance per project root (KRN-01). */
+  readonly projectMcp: ProjectMcpInstances
   /** GUI control kernel; null on hosts without a computer-use port. */
   computerUse: InstalledComputerUse | null = null
   private computerUseConfig: ComputerUseConfigStore | null = null
@@ -299,7 +312,12 @@ export class HarnessHost {
   private pluginReferences: PluginReferenceResolver | null = null
   private computerUseEnabledChanged: ((enabled: boolean) => void) | undefined
   readonly defaultPreset: string
-  activeSessionId: string | null = null
+  private readonly timers: HostTimers
+  /** Background turns per root session, for their interaction policy (KRN-01). */
+  private readonly backgroundTurns = new Map<string, BackgroundTurnState[]>()
+  /** Plugin ids whose global copy a project replaces with its own (set by CoreApi). */
+  private projectPluginOverrides: (projectRoot: string) => ReadonlySet<string> =
+    () => new Set()
   private readonly agents = new Map<string, Agent>()
   private readonly projectors = new Map<string, SessionProjector>()
   private readonly unsubscribes = new Map<string, () => void>()
@@ -317,6 +335,7 @@ export class HarnessHost {
     this.kept = kept
     this.eventSink = options.eventSink ?? null
     this.defaultPreset = options.defaultPreset ?? DEFAULT_PRESET
+    this.timers = options.timers ?? realTimers
     this.attachments = new AttachmentStore(kept.paths.stateRoot)
     this.llm =
       options.llm ??
@@ -380,7 +399,40 @@ export class HarnessHost {
     this.hooks = new ClaudeCodeHooks({
       configPaths: defaultHookConfigPaths({ stateRoot: kept.paths.stateRoot }),
     })
-    this.mcpTools = new McpToolBridge(kept.mcpClient, this.tools)
+    this.projectMcp = new ProjectMcpInstances({
+      // The one place a project instance's client is made (SEC-08 wraps it).
+      createClient: (projectRoot) =>
+        new MCPClient(kept.paths.stateRoot, {
+          sealer: kept.secretSealer,
+          processRuntime: kept.processRuntime,
+          workspaceRoot: projectRoot,
+          userServers: false,
+        }),
+      environment: async (projectRoot) => {
+        try {
+          return await kept.executionEnvironmentService.create({ projectRoot })
+        } catch (error: unknown) {
+          logger.warn('project MCP environment probe failed', {
+            error: String(error),
+          })
+          return null
+        }
+      },
+      reservedToolNames: () => this.mcpTools.reservedNames(),
+      onChanged: () => this.mcpTools.sync(),
+      timers: this.timers,
+    })
+    this.mcpTools = new McpToolBridge(
+      {
+        global: () => kept.mcpClient.getTools(),
+        projects: () => this.projectMcp.projects(),
+        project: (projectRoot) => this.projectMcp.tools(projectRoot),
+        hiddenInProject: (projectRoot) =>
+          this.projectPluginOverrides(projectRoot),
+      },
+      this.tools,
+      (agent) => this.projectRootOfAgent(agent),
+    )
     kept.mcpClient.setReservedToolNames(() => this.mcpTools.reservedNames())
     this.delegationInteractions = new DelegationInteractionBridge({
       pending: this.pending,
@@ -425,9 +477,6 @@ export class HarnessHost {
     const ref: { host?: HarnessHost } = {}
     const kept = await createKeptServices(options, {
       emit: (event) => ref.host?.emitHost(event),
-      activeSessionId: () => ref.host?.activeSessionId ?? null,
-      activeWorkspaceRoot: () =>
-        ref.host?.activeWorkspaceRoot() ?? resolve(options.root),
       refreshRuntimeContext: () => {},
     })
     const host = new HarnessHost(kept, options)
@@ -441,8 +490,28 @@ export class HarnessHost {
   private compose(options: HarnessHostOptions): InstalledGoal {
     const { tools, prompt, middleware } = this
     this.tools.setApprovalHandler((request) => this.approval.request(request))
-    this.approval.setAnswerer(this.pending.approvalAnswerer)
-    this.questions.setAnswerer(this.pending.questionAnswerer)
+    // A background turn nobody watches gets its approvals and questions
+    // rejected at once instead of waiting on a card (KRN-01).
+    this.approval.setAnswerer((request) => {
+      const background = this.autoRejecting(request.agent)
+      if (background === undefined)
+        return this.pending.approvalAnswerer(request)
+      background.rejected.push(request.toolName)
+      return Promise.resolve('rejected')
+    })
+    this.questions.setAnswerer((request) => {
+      const background = this.autoRejecting(request.agent)
+      if (background === undefined)
+        return this.pending.questionAnswerer(request)
+      const plan = request.intent?.kind === 'plan-review'
+      background.rejected.push(plan ? 'plan review' : 'ask_user_question')
+      if (plan) background.planRejected = true
+      return Promise.reject(
+        new UserQuestionDismissed(
+          'nobody can answer during a background turn; it was rejected',
+        ),
+      )
+    })
     this.planMode.setReviewer(
       async ({ agent, callId, plan, title, signal }) => {
         const outcome = await this.questions.ask({
@@ -677,7 +746,18 @@ export class HarnessHost {
       },
     })
     void createGoalTools
-    // Middleware (order matters): instructions, memory, skills, compaction, hooks.
+    // A step of a project session holds the project's MCP instance (started
+    // on first use) until its agent goes idle, before its tools are listed
+    // (KRN-01). Then middleware (order matters): instructions, memory,
+    // skills, compaction, hooks.
+    middleware.preAssemble.push(async (input) => {
+      const projectRoot = this.projectRootOfAgent(input.agent)
+      if (projectRoot !== null)
+        await untilAborted(
+          this.projectMcp.acquire(projectRoot, input.agent.id),
+          input.signal,
+        )
+    })
     middleware.preStep.push(
       agentInstructionsMiddleware({
         globalDir: this.kept.paths.stateRoot,
@@ -734,6 +814,7 @@ export class HarnessHost {
       },
       settled: (child) => {
         this.hooks.subagentStopped(child)
+        this.projectMcp.release(child.id)
       },
     })
     return goal
@@ -807,6 +888,17 @@ export class HarnessHost {
       tools: this.tools,
       prompt: this.prompt,
       pending: this.pending,
+      grantAnswerer: (request) => {
+        const root = this.agents.get(request.session.id)
+        const background =
+          root === undefined ? undefined : this.autoRejecting(root)
+        if (background === undefined) return this.pending.grantAnswerer(request)
+        background.rejected.push(request.toolName ?? 'computer use')
+        return Promise.resolve({
+          decision: 'denied',
+          backgroundAllowed: false,
+        })
+      },
       stateDir,
       profilesDir: browserStateDir(this.kept.paths.stateRoot),
       attachments: this.attachments,
@@ -882,29 +974,25 @@ export class HarnessHost {
 
   private async start(options: HarnessHostOptions): Promise<void> {
     this.kept.schedulerService.onJob = createSchedulerExecutor({
-      submitTurn: async (request) => {
-        const sessionId =
-          request.sessionId ??
-          this.activeSessionId ??
-          this.ensureDefaultSession().id
-        const result = await this.submit({
-          sessionId,
-          content: request.content,
-          displayContent: request.displayContent,
-          clientMessageId: request.clientMessageId,
-          source: 'scheduler',
-          scheduler: request.scheduler,
-          signal: request.signal,
-        })
-        // A prompt no turn took never ran: the run did not complete.
-        if (result.delivery === 'queued' || result.delivery === 'discarded')
-          throw new Error(
-            result.result?.kind === 'not-consumed'
-              ? `the scheduled prompt was not sent (${result.result.reason}); it waits in the session queue`
-              : 'the scheduled prompt was cancelled before it ran',
-          )
-        return result.content
-      },
+      // A scheduled turn runs in its own session, never moves the session in
+      // view, rejects approvals nobody can answer and stops after 30 minutes.
+      runTurn: async (request) =>
+        await this.runBackgroundTurn(
+          this.scopeFor(
+            request.sessionId ?? this.defaultBackgroundSession().id,
+          ),
+          request.content,
+          {
+            source: 'scheduler',
+            displayContent: request.displayContent,
+            clientMessageId: request.clientMessageId,
+            scheduler: request.scheduler,
+            signal: request.signal,
+            timeoutMs: DEFAULT_BACKGROUND_TURN_TIMEOUT_MS,
+            interactionPolicy: 'auto-reject',
+          },
+        ),
+      timeoutMs: DEFAULT_BACKGROUND_TURN_TIMEOUT_MS,
       hasPendingInteraction: (sessionId) =>
         sessionId === null ? false : this.pending.hasPending(sessionId),
       watchlistCheck: async (signal) => await this.watchlist.check(signal),
@@ -1041,9 +1129,10 @@ export class HarnessHost {
     this.applyModelConfig(config)
   }
 
+  /** Reload the global servers (mcp_config.json and user-wide plugins). */
   async reloadMcp(): Promise<void> {
     const environment = await this.kept.executionEnvironmentService.create({
-      projectRoot: this.activeWorkspaceRoot(),
+      projectRoot: this.chatWorkspace(),
     })
     this.ripgrepPath = environment.toolPaths.ripgrep
     await this.kept.mcpClient.reload(environment)
@@ -1073,12 +1162,42 @@ export class HarnessHost {
     return this.workspaceRootFor(this.kept.sessionStore.get(sessionId))
   }
 
-  activeWorkspaceRoot(): string {
-    return this.workspaceRootFor(
-      this.activeSessionId === null
-        ? null
-        : this.kept.sessionStore.get(this.activeSessionId),
-    )
+  /** One session's scope (KRN-01): its project and where its tools work. */
+  scopeFor(
+    sessionId: string | null | undefined,
+    operation = 'scope',
+  ): SessionScope {
+    const id = String(sessionId ?? '').trim()
+    if (!id) throw new SessionRequiredError(operation)
+    const entry = this.kept.sessionStore.get(id)
+    if (entry === null) throw new Error(`unknown session ${id}`)
+    return scopeOfEntry(entry, this.chatWorkspace())
+  }
+
+  /** The project an agent works in: its root session's (null for Chat). */
+  projectRootOfAgent(agent: Agent | undefined): string | null {
+    return agent === undefined
+      ? null
+      : this.projectRootFor(this.entryFor(agent))
+  }
+
+  /** Which plugins' global copies a project replaces (the plugin activation controller). */
+  setProjectPluginOverrides(
+    overrides: (projectRoot: string) => ReadonlySet<string>,
+  ): void {
+    this.projectPluginOverrides = overrides
+  }
+
+  /**
+   * The tools a session of `scope` sees, for views without an agent: the
+   * built-in tools and the global MCP tools, plus its project's MCP tools.
+   */
+  toolSchemasFor(scope: SessionScope | null): ToolSchema[] {
+    const mcp = new Set(this.mcpTools.names())
+    return [
+      ...this.tools.schemas().filter((schema) => !mcp.has(schema.name)),
+      ...this.mcpTools.schemasFor(scope?.projectRoot ?? null),
+    ].sort((left, right) => left.name.localeCompare(right.name))
   }
 
   /** The root (session-level) agent of an owner chain. */
@@ -1170,27 +1289,15 @@ export class HarnessHost {
     return current === undefined ? null : this.kept.sessionStore.get(current.id)
   }
 
-  activeSession(): SessionEntry | null {
-    return this.activeSessionId === null
-      ? null
-      : this.kept.sessionStore.get(this.activeSessionId)
-  }
-
-  activateSession(sessionId: string): SessionEntry {
-    const entry = this.kept.sessionStore.get(sessionId)
-    if (entry === null) throw new Error(`unknown session ${sessionId}`)
-    this.activeSessionId = sessionId
-    return entry
-  }
-
-  ensureDefaultSession(): SessionEntry {
-    const active = this.activeSession()
-    if (active !== null) return active
-    const existing = this.kept.sessionStore.list()[0]
-    const entry =
-      existing ?? this.kept.sessionStore.create('新会话', { mode: 'chat' })
-    this.activeSessionId = entry.id
-    return entry
+  /**
+   * Where a background turn without a session runs (a scheduler job created
+   * before jobs named their session): the most recent session, or a new one.
+   */
+  defaultBackgroundSession(): SessionEntry {
+    return (
+      this.kept.sessionStore.list()[0] ??
+      this.kept.sessionStore.create('新会话', { mode: 'chat' })
+    )
   }
 
   /** Project root whose Skills a session sees (Build sessions only). */
@@ -1287,6 +1394,7 @@ export class HarnessHost {
         if (agent.owner === undefined) this.announceQueueItem(sessionId, change)
       },
       status: (_agent, status) => {
+        if (status === 'idle') this.projectMcp.release(sessionId)
         if (status === 'idle' && agent.owner === undefined) {
           try {
             const last = agent.session.lastOf('assistant/message')
@@ -1485,9 +1593,140 @@ export class HarnessHost {
       }),
     )
   }
+  /**
+   * Deliver one user prompt to its session. Resolves when the turn that
+   * consumed it ended (or immediately for an interjection into a running
+   * turn). The session the user is looking at does not change (KRN-01).
+   */
   async submit(input: SubmitInput): Promise<SubmitResult> {
+    return await this.deliver(input)
+  }
+
+  /**
+   * Run one turn in the background (scheduler, ACP, onboarding): in
+   * the session `scope` names, never the one in view, with a typed result.
+   * `auto-reject` answers its approvals and questions with a rejection at
+   * once (the result is `blocked`); `timeoutMs` aborts it (`aborted` by
+   * `timeout`, or `blocked` on `interaction-timeout` when it was waiting on
+   * the user).
+   */
+  async runBackgroundTurn(
+    scope: SessionScope,
+    content: string,
+    options: BackgroundTurnOptions,
+  ): Promise<BackgroundTurnOutcome> {
+    const sessionId = this.scopeFor(
+      scope.sessionId,
+      'runBackgroundTurn',
+    ).sessionId
+    const policy: InteractionPolicy = options.interactionPolicy ?? 'wait'
+    let state: BackgroundTurnState | undefined
+    let root: Agent | undefined
+    let timer: unknown = null
+    let timedOut: 'idle' | 'waiting' | null = null
+    const emit = options.emit ?? null
+    const untap =
+      emit === null
+        ? null
+        : this.tap(async (event) => {
+            if (event.session_id === sessionId) await emit(event)
+          })
+    try {
+      const submitted = await this.deliver(
+        {
+          sessionId,
+          content,
+          displayContent: options.displayContent ?? null,
+          clientMessageId: options.clientMessageId ?? null,
+          source: options.source,
+          scheduler: options.scheduler ?? null,
+          uiHidden: options.uiHidden ?? null,
+          signal: options.signal ?? null,
+          unconsumed: options.unconsumed ?? null,
+          delivery: 'queue',
+        },
+        (messageId, agent) => {
+          root = agent
+          state = { messageId, policy, rejected: [], planRejected: false }
+          const states = this.backgroundTurns.get(agent.id) ?? []
+          states.push(state)
+          this.backgroundTurns.set(agent.id, states)
+          const limit = options.timeoutMs ?? null
+          if (limit !== null && limit > 0)
+            timer = this.timers.setTimeout(() => {
+              timedOut = this.pending.hasPending(sessionId) ? 'waiting' : 'idle'
+              agent.cancelMessage(messageId)
+            }, limit)
+        },
+      )
+      let result: TurnResult = submitted.result ?? {
+        kind: 'aborted',
+        by: 'system',
+        turnId: submitted.turnId,
+      }
+      if (timedOut !== null && result.kind === 'aborted')
+        result =
+          timedOut === 'waiting' && result.turnId !== null
+            ? {
+                kind: 'blocked',
+                reason: 'interaction-timeout',
+                turnId: result.turnId,
+              }
+            : { ...result, by: 'timeout' }
+      else if (
+        state !== undefined &&
+        state.rejected.length > 0 &&
+        result.kind === 'completed'
+      )
+        result = {
+          kind: 'blocked',
+          reason: state.planRejected ? 'plan-mode' : 'interaction-rejected',
+          turnId: result.turnId,
+          detail: [...new Set(state.rejected)].join('、'),
+        }
+      return {
+        sessionId,
+        messageId: submitted.messageId,
+        turnId: submitted.turnId,
+        content: submitted.content,
+        delivery: submitted.delivery,
+        result,
+      }
+    } finally {
+      if (timer !== null) this.timers.clearTimeout(timer)
+      if (root !== undefined && state !== undefined) {
+        const states = (this.backgroundTurns.get(root.id) ?? []).filter(
+          (item) => item !== state,
+        )
+        if (states.length > 0) this.backgroundTurns.set(root.id, states)
+        else this.backgroundTurns.delete(root.id)
+      }
+      untap?.()
+    }
+  }
+
+  /**
+   * The auto-rejecting background turn an agent's interaction belongs to:
+   * its root session's current turn is the one that took a background
+   * message with policy `auto-reject`.
+   */
+  private autoRejecting(agent: Agent): BackgroundTurnState | undefined {
+    const root = this.rootOf(agent)
+    const states = this.backgroundTurns.get(root.id)
+    if (states === undefined || !root.session.hasOpenTurn()) return undefined
+    const current = root.position.turn
+    return states.find(
+      (state) =>
+        state.policy === 'auto-reject' &&
+        turnOfMessage(root.session.events, state.messageId) === current,
+    )
+  }
+
+  private async deliver(
+    input: SubmitInput,
+    beforeSend?: (messageId: string, agent: Agent) => void,
+  ): Promise<SubmitResult> {
     const agent = this.agentFor(input.sessionId)
-    this.activeSessionId = input.sessionId
     const message: UserMessage = createUserMessage({
       content: this.userContent(input),
       source: { kind: 'user' },
@@ -1533,6 +1772,7 @@ export class HarnessHost {
       agent.cancelMessage(message.id)
     }
     const outcome = agent.outcome(message.id)
+    beforeSend?.(message.id, agent)
     input.signal?.addEventListener('abort', onAbort, { once: true })
     try {
       agent.followup(message)
@@ -1898,6 +2138,7 @@ export class HarnessHost {
    */
   unloadSession(sessionId: string): void {
     this.stop(sessionId)
+    this.projectMcp.release(sessionId)
     this.agents.get(sessionId)?.dispose()
     this.agents.delete(sessionId)
     this.unsubscribes.get(sessionId)?.()
@@ -1931,6 +2172,7 @@ export class HarnessHost {
     await this.jobs.dispose()
     await this.hooks.dispose()
     this.sessions.closeAll()
+    await this.projectMcp.close()
     this.mcpTools.dispose()
     try {
       await this.kept.schedulerService.stop?.('host closing')
@@ -2065,4 +2307,46 @@ function submitResultFor(
       result = { kind: 'completed', content: text, turnId }
   }
   return { ...base, turnId, content: text, delivery: 'completed', result }
+}
+
+/** A background turn's interaction policy and what it rejected. */
+interface BackgroundTurnState {
+  readonly messageId: string
+  readonly policy: InteractionPolicy
+  readonly rejected: string[]
+  planRejected: boolean
+}
+
+/** The turn that took a message (its `user/message`), if one did. */
+function turnOfMessage(
+  events: readonly SessionEvent[],
+  messageId: string,
+): number | undefined {
+  let turn: number | undefined
+  for (const event of events) {
+    if (event.type === 'turn/start') turn = event.data.turn
+    else if (event.type === 'user/message' && event.data.id === messageId)
+      return turn
+  }
+  return undefined
+}
+
+/** `work`, or the signal's reason as soon as it aborts. */
+async function untilAborted<T>(
+  work: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  if (signal.aborted) throw signal.reason
+  let onAbort: (() => void) | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        onAbort = () => reject(signal.reason)
+        signal.addEventListener('abort', onAbort, { once: true })
+      }),
+    ])
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort)
+  }
 }

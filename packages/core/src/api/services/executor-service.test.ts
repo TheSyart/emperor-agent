@@ -2,18 +2,27 @@ import { expect, it } from 'vitest'
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { makeApi } from '../test-helpers'
 import { invokeCoreOperation } from '../operations'
+
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
 it('lists local-login executor defaults and revision-fences configuration without credential fields', async () => {
   const { api } = await makeApi()
   try {
     const initial = api.executors.list()
     expect(initial.config?.profiles).toHaveLength(2)
-    const updated = await api.executors.configure({
-      expectedRevision: 0,
-      config: initial.config!,
-    })
+    const updated = await api.executors.configure(
+      {
+        expectedRevision: 0,
+        config: initial.config!,
+      },
+      VIEW,
+    )
     expect(updated.revision).toBe(1)
     await expect(
-      api.executors.configure({ expectedRevision: 0, config: initial.config! }),
+      api.executors.configure(
+        { expectedRevision: 0, config: initial.config! },
+        VIEW,
+      ),
     ).rejects.toThrow('STALE_REVISION')
     await expect(
       invokeCoreOperation(api, 'executors.configure', [
@@ -98,7 +107,10 @@ it('uses one runtime fact store for settings and parent routing, preserving evid
     expect(context).not.toContain('"nativeCapabilities"')
     const config = api.executorConfig.read()
     config.profiles[1]!.specialties = ['自定义调研']
-    await api.executors.configure({ expectedRevision: config.revision, config })
+    await api.executors.configure(
+      { expectedRevision: config.revision, config },
+      VIEW,
+    )
     expect(
       api.executors.list().profiles[1]!.runtime.nativeCapabilities.search
         .status,
@@ -175,7 +187,7 @@ it('resolves model credential references from the private state config rather th
       authVerified: false,
       capabilities: api.executorRegistry.capabilities('codex'),
     })
-    await api.executors.configure({ expectedRevision: 0, config })
+    await api.executors.configure({ expectedRevision: 0, config }, VIEW)
     const probe = await api.executors.probe({ profileId: profile.id })
     expect(probe.status).toBe('available')
     expect(JSON.stringify(probe)).not.toContain('route-fixture-secret')
@@ -188,10 +200,13 @@ it('persists bounded custom models with the executor revision and exposes model 
   try {
     const config = api.executorConfig.read()
     config.profiles[0]!.customModels = ['gateway/team-coder', 'gateway/backup']
-    const updated = await api.executors.configure({
-      expectedRevision: config.revision,
-      config,
-    })
+    const updated = await api.executors.configure(
+      {
+        expectedRevision: config.revision,
+        config,
+      },
+      VIEW,
+    )
     expect(api.executorConfig.read().profiles[0]!.customModels).toEqual([
       'gateway/team-coder',
       'gateway/backup',

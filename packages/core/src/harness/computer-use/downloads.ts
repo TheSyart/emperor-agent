@@ -1,9 +1,9 @@
 /**
  * Download rules shared by every browser driver (spec 00 §7.5) and by the
- * user's own browsing (设置 › 浏览器 › 下载): executables, installers and
- * macOS files that run a command or open a local app are refused, file
- * names are made safe for the download directory, and task ids become safe
- * bucket names.
+ * user's own browsing (设置 › 浏览器 › 下载): executables, installers, disk
+ * images, configuration profiles, loadable bundles, scripts and macOS files
+ * that run a command or open a local app are refused, file names are made
+ * safe for the download directory, and task ids become safe bucket names.
  */
 
 import { createHash } from 'node:crypto'
@@ -58,6 +58,19 @@ const EXECUTABLE_EXTENSIONS = new Set([
   'wsf',
   'xpi',
   'crx',
+  // SEC-10 (MAIN-23): disk images that mount, configuration profiles that
+  // install, Shortcuts, loadable bundles and scripts an interpreter runs.
+  'iso',
+  'img',
+  'sparseimage',
+  'mobileconfig',
+  'shortcut',
+  'plugin',
+  'bundle',
+  'saver',
+  'py',
+  'pl',
+  'rb',
   // macOS files that run a command or open a local app when opened.
   'action',
   'applescript',
@@ -88,6 +101,8 @@ const EXECUTABLE_MIME = [
   'application/java-archive',
   'application/vnd.android.package-archive',
   'application/x-chrome-extension',
+  'application/x-apple-aspen-config',
+  'application/x-iso9660-image',
 ]
 
 /** Whether a download looks like a program or installer (refused). */

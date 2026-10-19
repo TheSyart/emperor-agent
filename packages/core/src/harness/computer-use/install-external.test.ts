@@ -14,6 +14,9 @@ import type { UiCallerIdentity } from './identity'
 import { createExternalConfirmation } from './install'
 import { FakeComputerUsePort } from './testing/fake-port'
 
+/** The renderer shows no session (KRN-01 view scope). */
+const VIEW = { sessionId: null }
+
 const identity: UiCallerIdentity = {
   subject: 'session:owner',
   kind: 'session',
@@ -150,11 +153,16 @@ describe('Chrome/Edge settings through CoreApi', () => {
       siteToolsReason: expect.stringContaining('实验开关'),
     })
     expect(() =>
-      core.computerUse.setExternalBrowserSettings({ siteTools: true }),
+      core.computerUse.setExternalBrowserSettings({ siteTools: true }, VIEW),
     ).toThrow(/站点工具目前不可用/)
-    const saved = core.computerUse.setExternalBrowserSettings({
-      sites: [{ pattern: '*.Bank.example', browse: 'ask', download: 'block' }],
-    })
+    const saved = core.computerUse.setExternalBrowserSettings(
+      {
+        sites: [
+          { pattern: '*.Bank.example', browse: 'ask', download: 'block' },
+        ],
+      },
+      VIEW,
+    )
     expect(saved.sites).toEqual([
       { pattern: '*.bank.example', browse: 'ask', download: 'block' },
     ])
@@ -174,23 +182,28 @@ describe('Chrome/Edge settings through CoreApi', () => {
     const id = String(core.sessions.create({ title: 'Chat' }).id)
     core.sessions.activate(id)
     core.control.setMode('plan', id)
+    const view = { sessionId: id }
     expect(() =>
-      core.computerUse.setExternalBrowserSettings({
-        defaults: { download: 'allow' },
-      }),
+      core.computerUse.setExternalBrowserSettings(
+        { defaults: { download: 'allow' } },
+        view,
+      ),
     ).toThrow(/plan mode/)
     expect(
-      core.computerUse.setExternalBrowserSettings({
-        defaults: { browse: 'ask' },
-        sites: [
-          { pattern: 'evil.example', browse: 'block', download: 'block' },
-        ],
-        history: 'never',
-      }),
+      core.computerUse.setExternalBrowserSettings(
+        {
+          defaults: { browse: 'ask' },
+          sites: [
+            { pattern: 'evil.example', browse: 'block', download: 'block' },
+          ],
+          history: 'never',
+        },
+        view,
+      ),
     ).toMatchObject({ defaults: { browse: 'ask' }, history: 'never' })
     // Removing that block widens again.
     expect(() =>
-      core.computerUse.setExternalBrowserSettings({ sites: [] }),
+      core.computerUse.setExternalBrowserSettings({ sites: [] }, view),
     ).toThrow(/plan mode/)
   })
 
@@ -198,9 +211,12 @@ describe('Chrome/Edge settings through CoreApi', () => {
     const { api: core } = await api()
     let caught: unknown
     try {
-      core.computerUse.setExternalBrowserSettings({
-        sites: [{ pattern: 'not a site', browse: 'allow', download: 'ask' }],
-      })
+      core.computerUse.setExternalBrowserSettings(
+        {
+          sites: [{ pattern: 'not a site', browse: 'allow', download: 'ask' }],
+        },
+        VIEW,
+      )
     } catch (error) {
       caught = error
     }

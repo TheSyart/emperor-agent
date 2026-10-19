@@ -1039,6 +1039,15 @@ describe('download history IPC (设置 › 浏览器 › 下载)', () => {
         bytes: 0,
         exists: false,
       },
+      {
+        downloadId: 'dl_0123456789ad',
+        name: 'notes.txt',
+        path: '/Users/me/.emperor/browser/downloads/turn-3/notes.txt',
+        time: 0,
+        bytes: 5,
+        exists: true,
+        unmarked: true,
+      },
     ])
     registerDesktopCapabilityIpc({
       ipcMain: ipc,
@@ -1077,6 +1086,17 @@ describe('download history IPC (设置 › 浏览器 › 下载)', () => {
           time: 1,
           bytes: 0,
           exists: false,
+        },
+        // The quarantine mark could not be set (SEC-10): 未能标记来源.
+        {
+          id: 'dl_0123456789ad',
+          name: 'notes.txt',
+          site: '',
+          sessionId: null,
+          time: 0,
+          bytes: 5,
+          exists: true,
+          unmarked: true,
         },
       ],
     })

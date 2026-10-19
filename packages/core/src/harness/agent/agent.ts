@@ -631,6 +631,10 @@ export class Agent {
     if (this.phase.kind !== 'running')
       throw new Error(`agent "${this.id}": pre-step outside running phase`)
     const signal = this.phase.abort.signal
+    for (const hook of this.deps.middleware.preAssemble) {
+      await hook({ agent: this, ...position, signal })
+      signal.throwIfAborted()
+    }
     const assembly = this.deps.prompt.assemble({ agent: this, signal })
     signal.throwIfAborted()
     const sections = renderContextSections(assembly)

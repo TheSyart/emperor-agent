@@ -73,6 +73,7 @@ export function schedulerRunStatusLabel(status?: string | null): string {
   if (status === 'skipped') return '已跳过'
   if (status === 'cancelled') return '已取消'
   if (status === 'interrupted') return '已中断'
+  if (status === 'blocked') return '需要审批，已拒绝'
   if (status === 'running') return '运行中'
   return status || '-'
 }
@@ -83,7 +84,12 @@ export type SchedulerTone = 'ok' | 'warn' | 'error' | 'neutral' | 'accent'
 export function schedulerRunStatusTone(status?: string | null): SchedulerTone {
   if (status === 'ok') return 'ok'
   if (status === 'error') return 'error'
-  if (status === 'interrupted' || status === 'cancelled') return 'warn'
+  if (
+    status === 'interrupted' ||
+    status === 'cancelled' ||
+    status === 'blocked'
+  )
+    return 'warn'
   if (status === 'running') return 'accent'
   return 'neutral'
 }

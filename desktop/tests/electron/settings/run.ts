@@ -587,9 +587,9 @@ async function damagedVault(page: Page, home: string): Promise<void> {
       if (kept.length !== 1) throw new Error(`backups ${JSON.stringify(kept)}`)
       const copy = readFileSync(join(home, 'computer-use', kept[0]!), 'utf8')
       if (copy !== damaged) throw new Error('the backup differs')
-      const info = (
-        await dialog.locator('.ds-notice').allInnerTexts()
-      ).join(' ')
+      const info = (await dialog.locator('.ds-notice').allInnerTexts()).join(
+        ' ',
+      )
       if (!info.includes(kept[0]!)) throw new Error(`note ${info}`)
       return { backup: kept[0] }
     },

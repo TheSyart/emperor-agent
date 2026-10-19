@@ -12,8 +12,8 @@ import { OPEN_PATH_CHANNEL, type OpenPathTarget } from '../shared/ipc-contract'
 export interface OpenPathSources {
   /** Emperor Home (the state root main itself uses). */
   emperorHome(): string
-  /** The active session's bound project, if any. */
-  activeProject(): string | null
+  /** The Build project of a session (the one the page was opened from), if any. */
+  sessionProject(sessionId: string | null): string | null
   /** An installed Skill's folder in a session's scope, or null. */
   skillFolder(name: string, sessionId: string | null): string | null
   /** The rejected Skill folders and files Core lists for that scope. */
@@ -48,7 +48,7 @@ export function parseOpenPathTarget(payload: unknown): OpenPathTarget | null {
     case 'diagnostic':
       return record.rowId === 'global-state-root' ||
         record.rowId === 'active-project-path'
-        ? { kind: 'diagnostic', rowId: record.rowId }
+        ? { kind: 'diagnostic', rowId: record.rowId, sessionId }
         : null
     case 'skill':
       return typeof record.name === 'string' &&
@@ -76,7 +76,7 @@ export function resolveOpenPathTarget(
     case 'diagnostic':
       return target.rowId === 'global-state-root'
         ? sources.emperorHome() || null
-        : sources.activeProject() || null
+        : sources.sessionProject(target.sessionId ?? null) || null
     case 'skill':
       return sources.skillFolder(target.name, target.sessionId ?? null)
     case 'invalid-skill': {

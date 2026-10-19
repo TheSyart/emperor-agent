@@ -9,7 +9,11 @@
 
 import { mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import type { PluginHookSet } from '../harness/hooks/claude-code'
+import type { Agent } from '../harness/agent/agent'
+import type {
+  PluginHookScope,
+  PluginHookSet,
+} from '../harness/hooks/claude-code'
 import type { ClaudeCodeHookConfig } from '../harness/hooks/config'
 import type { MatcherGroup } from '../harness/hooks/types'
 import { SAFE_ENV_KEYS } from '../mcp/connection'
@@ -252,30 +256,79 @@ function escapeRegex(value: string): string {
 }
 
 export interface PluginActivationDeps {
-  /** The packages in effect (active and winning their scope) for the active project. */
-  readonly packages: () => readonly ActivePluginPackage[]
+  /**
+   * The packages in effect (active and winning their scope) for a project;
+   * `null` asks for what applies everywhere (user-wide and shipped).
+   */
+  readonly packages: (
+    projectRoot: string | null,
+  ) => readonly ActivePluginPackage[]
   readonly userServerNames: () => Promise<readonly string[]>
   readonly emperorHome: string
   readonly env: () => Readonly<Record<string, string | undefined>>
+  /** The global MCP client: user-wide and shipped plugins' servers. */
   readonly mcp: {
     setPluginServers(servers: readonly PluginMcpServer[]): boolean
     reload(): Promise<void>
     pluginServerSnapshot(key: string): MCPConnectionSnapshot | null
     pluginSkippedTools(key: string): string[]
   }
-  readonly hooks: { setPluginHooks(sets: readonly PluginHookSet[]): void }
+  /** Project instances: project-scoped plugins' servers (KRN-01). */
+  readonly projectMcp?: {
+    setServerResolver(
+      resolver: (projectRoot: string) => readonly PluginMcpServer[],
+    ): void
+    refresh(): Promise<void>
+    client(projectRoot: string):
+      | {
+          pluginServerSnapshot(key: string): MCPConnectionSnapshot | null
+          pluginSkippedTools(key: string): string[]
+        }
+      | undefined
+  }
+  readonly hooks: {
+    setPluginHooks(sets: readonly PluginHookSet[]): void
+    setPluginHookScope?(scope: PluginHookScope | null): void
+  }
+  /** The project an agent works in (its root session's); null for Chat. */
+  readonly projectOf?: (agent: Agent | undefined) => string | null
 }
+
+/** What a project's own (project- or local-scoped) plugins contribute. */
+interface ProjectContributions extends PluginContributions {
+  /** Plugin ids whose user-wide copy the project's copy replaces there. */
+  readonly hidden: ReadonlySet<string>
+}
+
+const PROJECT_SCOPES: ReadonlySet<PluginScope> = new Set(['project', 'local'])
 
 /**
  * Applies what active plugins contribute: MCP servers under their keys and
- * hook sets with their own variables. Runs are serialized; a run with no MCP
- * change never reconnects anything.
+ * hook sets with their own variables. User-wide and shipped plugins apply
+ * everywhere (the global MCP client, the global hook sets); a project's own
+ * plugins apply only to sessions of that project (its MCP instance, its
+ * hook sets), computed per project and never from the session in view
+ * (KRN-01). Runs are serialized; a run with no MCP change never reconnects
+ * anything.
  */
 export class PluginActivationController {
   private contributions: PluginContributions = { mcp: [], hooks: [] }
+  private readonly projects = new Map<string, ProjectContributions>()
+  private userNames: readonly string[] = []
   private chain: Promise<void> = Promise.resolve()
 
-  constructor(private readonly deps: PluginActivationDeps) {}
+  constructor(private readonly deps: PluginActivationDeps) {
+    deps.projectMcp?.setServerResolver((projectRoot) =>
+      this.servers(this.project(projectRoot).mcp),
+    )
+    deps.hooks.setPluginHookScope?.({
+      projectOf: (agent) => deps.projectOf?.(agent) ?? null,
+      project: (projectRoot) => {
+        const project = this.project(projectRoot)
+        return { sets: hookSets(project.hooks), hidden: project.hidden }
+      },
+    })
+  }
 
   sync(): Promise<void> {
     const run = this.chain.then(() => this.apply())
@@ -288,23 +341,42 @@ export class PluginActivationController {
     return this.chain
   }
 
-  /** Live facts of one plugin MCP server for the detail view (contract §2). */
+  /** Plugin ids whose user-wide copy a project replaces with its own there. */
+  replacedIn(projectRoot: string): ReadonlySet<string> {
+    return this.project(projectRoot).hidden
+  }
+
+  /**
+   * Live facts of one plugin MCP server for the detail view (contract §2);
+   * a project-scoped server is read from `projectRoot`'s instance.
+   */
   mcpServer(
     pluginId: string,
     scope: PluginScope,
     serverName: string,
+    projectRoot: string | null,
   ): PluginMcpRuntimeState | null {
-    const contribution = this.contribution(pluginId, scope, serverName)
+    const contribution = this.contribution(
+      pluginId,
+      scope,
+      serverName,
+      projectRoot,
+    )
     if (!contribution) return null
     if (contribution.blocked)
       return { state: 'connecting', blocked: contribution.blocked }
-    const snapshot = this.deps.mcp.pluginServerSnapshot(contribution.key)
+    const source = PROJECT_SCOPES.has(scope)
+      ? projectRoot === null
+        ? undefined
+        : this.deps.projectMcp?.client(projectRoot)
+      : this.deps.mcp
+    const snapshot = source?.pluginServerSnapshot(contribution.key) ?? null
     if (!snapshot) return null
     return {
       state: snapshot.state,
       toolCount: snapshot.toolCount,
       lastError: snapshot.lastError?.message ?? null,
-      skippedTools: this.deps.mcp.pluginSkippedTools(contribution.key),
+      skippedTools: source?.pluginSkippedTools(contribution.key) ?? [],
     }
   }
 
@@ -313,8 +385,14 @@ export class PluginActivationController {
     pluginId: string,
     scope: PluginScope,
     serverName: string,
+    projectRoot: string | null,
   ): string | null {
-    const contribution = this.contribution(pluginId, scope, serverName)
+    const contribution = this.contribution(
+      pluginId,
+      scope,
+      serverName,
+      projectRoot,
+    )
     return contribution?.config ? contribution.key : null
   }
 
@@ -322,8 +400,14 @@ export class PluginActivationController {
     pluginId: string,
     scope: PluginScope,
     serverName: string,
+    projectRoot: string | null,
   ): PluginMcpContribution | undefined {
-    return this.contributions.mcp.find(
+    const list = PROJECT_SCOPES.has(scope)
+      ? projectRoot === null
+        ? []
+        : this.project(projectRoot).mcp
+      : this.contributions.mcp
+    return list.find(
       (item) =>
         item.pluginId === pluginId &&
         item.scope === scope &&
@@ -331,33 +415,37 @@ export class PluginActivationController {
     )
   }
 
-  private async apply(): Promise<void> {
-    const packages = this.deps.packages()
-    // Data folders exist before anything that may write there starts.
-    for (const item of packages)
-      if (
-        item.resolved.hooks.some((hook) => hook.mapped) ||
-        item.resolved.mcpServers.some((server) => server.transport === 'stdio')
-      )
-        mkdirSync(pluginDataDirectory(this.deps.emperorHome, item.pluginId), {
-          recursive: true,
-          mode: 0o700,
-        })
+  /** A project's own contributions, computed once per sync. */
+  private project(projectRoot: string): ProjectContributions {
+    const root = resolve(projectRoot)
+    const cached = this.projects.get(root)
+    if (cached) return cached
+    const own = this.deps
+      .packages(root)
+      .filter((item) => PROJECT_SCOPES.has(item.scope))
+    this.ensureDataFolders(own)
     const contributions = pluginContributions({
-      packages,
-      userServerNames: await this.deps.userServerNames(),
+      packages: own,
+      // Keys never collide with a global server's, so a name means one server.
+      userServerNames: [
+        ...this.userNames,
+        ...this.contributions.mcp.map((item) => item.key),
+      ],
       emperorHome: this.deps.emperorHome,
       env: this.deps.env(),
     })
-    this.contributions = contributions
-    this.deps.hooks.setPluginHooks(
-      contributions.hooks.map((set) => ({
-        id: `${set.pluginId}@${set.scope}`,
-        env: set.env,
-        config: set.config,
-      })),
-    )
-    const servers = contributions.mcp.flatMap((item) =>
+    const project: ProjectContributions = {
+      ...contributions,
+      hidden: new Set(own.map((item) => item.pluginId)),
+    }
+    this.projects.set(root, project)
+    return project
+  }
+
+  private servers(
+    contributions: readonly PluginMcpContribution[],
+  ): PluginMcpServer[] {
+    return contributions.flatMap((item) =>
       item.config
         ? [
             {
@@ -369,6 +457,49 @@ export class PluginActivationController {
           ]
         : [],
     )
-    if (this.deps.mcp.setPluginServers(servers)) await this.deps.mcp.reload()
   }
+
+  private ensureDataFolders(packages: readonly ActivePluginPackage[]): void {
+    // Data folders exist before anything that may write there starts.
+    for (const item of packages)
+      if (
+        item.resolved.hooks.some((hook) => hook.mapped) ||
+        item.resolved.mcpServers.some((server) => server.transport === 'stdio')
+      )
+        mkdirSync(pluginDataDirectory(this.deps.emperorHome, item.pluginId), {
+          recursive: true,
+          mode: 0o700,
+        })
+  }
+
+  private async apply(): Promise<void> {
+    const packages = this.deps
+      .packages(null)
+      .filter((item) => !PROJECT_SCOPES.has(item.scope))
+    this.ensureDataFolders(packages)
+    this.userNames = await this.deps.userServerNames()
+    const contributions = pluginContributions({
+      packages,
+      userServerNames: this.userNames,
+      emperorHome: this.deps.emperorHome,
+      env: this.deps.env(),
+    })
+    this.contributions = contributions
+    this.projects.clear()
+    this.deps.hooks.setPluginHooks(hookSets(contributions.hooks))
+    if (this.deps.mcp.setPluginServers(this.servers(contributions.mcp)))
+      await this.deps.mcp.reload()
+    await this.deps.projectMcp?.refresh()
+  }
+}
+
+function hookSets(
+  contributions: readonly PluginHookContribution[],
+): PluginHookSet[] {
+  return contributions.map((set) => ({
+    id: `${set.pluginId}@${set.scope}`,
+    pluginId: set.pluginId,
+    env: set.env,
+    config: set.config,
+  }))
 }

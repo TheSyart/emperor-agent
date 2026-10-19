@@ -7,6 +7,9 @@ import type { WebFetchClient } from '../network/web-fetch-client'
 import { replyChunks, type ScriptedReply } from '../harness/testing'
 import { eventOf, makeApi, type ApiFixture } from './test-helpers'
 
+/** Settings changes come from the app, which names no session here. */
+const VIEW = { sessionId: null }
+
 // 设置 › 高级 › 网络工具 (KRN-08): web_fetch is on by default wherever the
 // host has a public HTTP client; web_search exists only on DeepSeek's
 // official API; each switch takes its tool out of 能力 › 工具 and out of
@@ -94,7 +97,7 @@ async function api(
 }
 
 function toolNames(fixture: ApiFixture): string[] {
-  return fixture.api.skills.tools().map((tool) => tool.name)
+  return fixture.api.skills.tools(VIEW).map((tool) => tool.name)
 }
 
 function offered(request: GenerateOptions | undefined): string[] {
@@ -221,7 +224,10 @@ describe('network tools', () => {
       expect.arrayContaining(['web_fetch', 'web_search']),
     )
 
-    const status = await core.tools.setNetworkSettings({ webFetch: false })
+    const status = await core.tools.setNetworkSettings(
+      { webFetch: false },
+      VIEW,
+    )
     expect(status.webFetch.enabled).toBe(false)
     expect(eventOf(events, 'web_tools_changed')).toBeDefined()
     expect(toolNames(fixture)).not.toContain('web_fetch')
@@ -235,7 +241,7 @@ describe('network tools', () => {
       'unknown tool \\"web_fetch\\"',
     )
 
-    await core.tools.setNetworkSettings({ webSearch: false })
+    await core.tools.setNetworkSettings({ webSearch: false }, VIEW)
     expect(toolNames(fixture)).not.toContain('web_search')
     await core.chat.submit({ content: 'three', sessionId })
     expect(offered(seen[3])).not.toContain('web_search')
@@ -252,10 +258,13 @@ describe('network tools', () => {
     const restarted = await api({ route: DEEPSEEK, stateRoot })
     expect(toolNames(restarted)).not.toContain('web_fetch')
     expect(toolNames(restarted)).not.toContain('web_search')
-    await restarted.api.tools.setNetworkSettings({
-      webFetch: true,
-      webSearch: true,
-    })
+    await restarted.api.tools.setNetworkSettings(
+      {
+        webFetch: true,
+        webSearch: true,
+      },
+      VIEW,
+    )
     expect(toolNames(restarted)).toEqual(
       expect.arrayContaining(['web_fetch', 'web_search']),
     )
