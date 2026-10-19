@@ -80,6 +80,8 @@ export function fixture(
   const mutations = new WorkspaceMutationCoordinator()
   const options: DelegationServiceOptions = {
     root: f.root,
+    // Keep startup marker cleanup away from the real /private/tmp.
+    boundaryMarkerDir: join(f.root, 'markers'),
     config: () => config,
     registry,
     adapters: new Map([['codex', adapter]]),

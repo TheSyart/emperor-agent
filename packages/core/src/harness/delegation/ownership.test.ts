@@ -43,12 +43,6 @@ it.skipIf(process.platform === 'win32')(
         }
         saveOwnership(f.root, owned)
       },
-      onObserved: (descendants) => {
-        if (owned) {
-          owned = { ...owned, descendants }
-          saveOwnership(f.root, owned)
-        }
-      },
       onExit: (exit) => {
         if (owned) saveOwnership(f.root, { ...owned, exit })
       },
@@ -119,26 +113,25 @@ it.skipIf(process.platform === 'win32')(
     f.cleanup()
   },
 )
-it.skipIf(process.platform === 'win32')(
-  'recovers a persisted detached descendant and prevents its delayed artifact write',
+it.skipIf(process.platform !== 'darwin')(
+  'diagnostics mode: recovery finds a detached descendant by its boundary and prevents its delayed write',
   async () => {
     const f = delegationTestDirectory(),
       late = join(f.root, 'delayed-artifact')
-    let owned: ProcessOwnership | undefined
     const nested =
       'console.log(JSON.stringify({ready:true,child:process.pid}));setTimeout(()=>{require("fs").writeFileSync(process.argv[1],"escaped");process.exit(0)},1200)'
     const code =
       'require("child_process").spawn(process.execPath,["-e",' +
       JSON.stringify(nested) +
       ',process.argv[1]],{detached:true,stdio:["ignore","inherit","inherit"]});setInterval(()=>{},1000)'
-    const h = await new ManagedAgentProcess().open({
+    const h = await new ManagedAgentProcess({ diagnostics: () => true }).open({
       executable: process.execPath,
       args: ['-e', code, late],
       cwd: f.root,
       env: process.env,
       policy: { mode: 'danger-full-access', workspaceRoot: f.root },
       onSpawn: async (identity) => {
-        owned = {
+        saveOwnership(f.root, {
           schemaVersion: 1,
           ...identity,
           delegationId: 'dlg-detached',
@@ -149,30 +142,27 @@ it.skipIf(process.platform === 'win32')(
           cwd: f.root,
           platform: process.platform,
           descendants: [],
-        }
-        saveOwnership(f.root, owned)
-      },
-      onObserved: (descendants) => {
-        if (owned) {
-          owned = { ...owned, descendants }
-          saveOwnership(f.root, owned)
-        }
+        })
       },
     })
+    let childPid = 0
     try {
-      let childPid = 0
       for await (const row of readJsonLines(h.stdout)) {
         childPid = Number(row.child)
         break
       }
-      await h.captureDescendants()
       const persisted = loadOwnership(f.root, 'dgr-detached')
-      expect(persisted.descendants.some((d) => d.pid === childPid)).toBe(true)
+      expect(persisted.boundary).toBeDefined()
       expect((await terminateRecordedProcess(persisted)).quiescent).toBe(true)
       await h.closed
       await new Promise((r) => setTimeout(r, 1400))
       expect(existsSync(late)).toBe(false)
     } finally {
+      try {
+        if (childPid) process.kill(childPid, 'SIGKILL')
+      } catch {
+        /* stopped */
+      }
       await h.terminate().catch(() => {})
       f.cleanup()
     }

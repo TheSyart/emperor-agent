@@ -57,6 +57,7 @@ const EXPECTED_OPERATIONS = [
   'control.get',
   'control.setMode',
   'control.setPermissionMode',
+  'delegations.abandon',
   'delegations.close',
   'delegations.collect',
   'delegations.get',

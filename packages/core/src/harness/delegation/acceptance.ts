@@ -13,6 +13,7 @@ import type { WorkspaceMutationCoordinator } from '../../workspace/mutation-coor
 import {
   ManagedAgentProcess,
   terminateRecordedProcess,
+  STOP_GRACE_MS,
   type ProcessExitReceipt,
 } from './process'
 import { workspaceMutationDomain } from '../../workspace/mutation-coordinator'
@@ -304,12 +305,6 @@ export class DelegationAcceptance {
                 }
                 saveOwnership(this.options.root, ownership)
               },
-              onObserved: (descendants) => {
-                if (ownership) {
-                  ownership = { ...ownership, descendants }
-                  saveOwnership(this.options.root, ownership)
-                }
-              },
               onExit: (exit) => {
                 if (ownership)
                   saveOwnership(this.options.root, { ...ownership, exit })
@@ -327,8 +322,12 @@ export class DelegationAcceptance {
             const abortWait = new Promise<ProcessExitReceipt>(
               (resolve) => (abortResolve = resolve),
             )
+            // terminate(): SIGTERM, five seconds, SIGKILL; then give up.
             const aborted = () => {
-              abortTimer = setTimeout(() => abortResolve(unknown), 2500)
+              abortTimer = setTimeout(
+                () => abortResolve(unknown),
+                STOP_GRACE_MS + 2000,
+              )
             }
             controller.signal.addEventListener('abort', aborted, { once: true })
             if (controller.signal.aborted) aborted()

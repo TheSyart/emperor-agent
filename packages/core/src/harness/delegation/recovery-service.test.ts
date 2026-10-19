@@ -36,7 +36,7 @@ it('reconciles a completed conversation without re-dispatch and resumes only a n
   )
   f.cleanup()
 })
-it('unknown sends are not replayed and retain quota and writer quarantine until proven recoverable', async () => {
+it('unknown sends are not replayed; the interrupted run keeps neither a slot nor the writer (AGT-04)', async () => {
   const f = fixture(),
     record = {
       ...fixtureDelegationRecord(),
@@ -69,23 +69,32 @@ it('unknown sends are not replayed and retain quota and writer quarantine until 
   const restarted = new DelegationService(f.options)
   await restarted.reconcile()
   const state = restarted.inspect(record.id)
+  // No process was recorded, so none can still be running.
   expect(state.runs['dgr-1']).toMatchObject({
-    phase: 'outcome_unknown',
-    quiescent: false,
+    phase: 'interrupted',
+    quiescent: true,
+    failureCode: 'APP_RESTARTED',
   })
   expect(state.messages['dgm-1']?.status).toBe('delivery_unknown')
   expect(f.adapter.submitted).toHaveLength(0)
-  expect(f.mutations.hasActiveWriter(f.root)).toBe(true)
+  expect(f.mutations.hasActiveWriter(f.root)).toBe(false)
   expect(restarted.budget.usage('task')).toMatchObject({
     runs: 1,
     unknownRuns: 1,
   })
+  // Its workspace lease is gone: the conversation cannot continue, and
+  // marking it as ended closes it instead of reopening it.
+  expect(state.record?.availability).toBe('needs_recovery')
   await expect(
-    restarted.recover(record.id, state.runs['dgr-1']!.revision - 1),
-  ).rejects.toThrow('STALE_REVISION')
-  await expect(
-    restarted.recover(record.id, state.runs['dgr-1']!.revision),
-  ).rejects.toThrow('OUTCOME_UNKNOWN')
+    restarted.send(record.id, {
+      messageId: 'dgm-2',
+      text: 'more',
+      delivery: 'queue',
+    }),
+  ).rejects.toThrow('NEEDS_RECOVERY')
+  await restarted.abandon(record.id, 'user')
+  expect(restarted.inspect(record.id).record?.availability).toBe('closed')
+  expect(restarted.hasOutstanding('root')).toBe(false)
   expect(f.adapter.submitted).toHaveLength(0)
   f.cleanup()
 })
@@ -256,6 +265,12 @@ it('requires native history inspection before releasing a proven stopped unknown
     runId: 'dgr-1',
     patch: { phase: 'running' },
   })
+  // The live process lost its protocol: stopped, outcome unknown.
+  await journal.append({
+    type: 'run-changed',
+    runId: 'dgr-1',
+    patch: { phase: 'outcome_unknown', quiescent: false, finishedAt: 2 },
+  })
   saveOwnership(f.root, {
     schemaVersion: 1,
     ...processIdentity,
@@ -281,11 +296,13 @@ it('requires native history inspection before releasing a proven stopped unknown
   const restarted = new DelegationService(f.options)
   await restarted.reconcile()
   let run = restarted.inspect(record.id).runs['dgr-1']!
+  // Its process is gone, so the workspace is not held; the result still
+  // needs a look at the native history before an explicit recovery.
   expect(run).toMatchObject({ phase: 'outcome_unknown', quiescent: true })
   await expect(restarted.recover(record.id, run.revision)).rejects.toThrow(
     'HISTORY_NOT_INSPECTED',
   )
-  expect(f.mutations.hasActiveWriter(f.root)).toBe(true)
+  expect(f.mutations.hasActiveWriter(f.root)).toBe(false)
   await restarted.inspectRecovery(record.id)
   expect(inspect).toHaveBeenCalledTimes(1)
   expect(f.adapter.submitted).toHaveLength(0)

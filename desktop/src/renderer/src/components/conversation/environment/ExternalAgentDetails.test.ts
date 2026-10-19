@@ -12,6 +12,7 @@ const api = vi.hoisted(() => ({
   validateDelegation: vi.fn(),
   integrateDelegation: vi.fn(),
   closeDelegation: vi.fn(),
+  abandonDelegation: vi.fn(),
   core: vi.fn(),
 }))
 vi.mock('../../../api/delegations', () => api)
@@ -169,18 +170,31 @@ it('keeps continuation and steer inputs out of task details and routes followup 
   expect(dom.textContent).toContain('主会话')
   expect(api.sendDelegationMessage).not.toHaveBeenCalled()
 })
-it('keeps paused execution inspectable without a direct scheduling recovery action', async () => {
+it('offers 标记为已结束 for a run without an outcome, instead of sending the user back to the root', async () => {
   const paused = state('codex', 'outcome_unknown')
   Object.assign(paused.record, {
     availability: 'needs_recovery',
     dispatchPaused: true,
   })
   api.getDelegation.mockResolvedValue(paused)
+  api.abandonDelegation.mockResolvedValue(paused.record)
   const dom = await mount()
   expect(dom.textContent).toContain('结果待确认')
   expect(dom.textContent).not.toContain('恢复调度')
-  expect(dom.textContent).toContain('返回主会话')
+  expect(dom.textContent).not.toContain('请返回主会话处理')
+  const end = dom.querySelector<HTMLButtonElement>('[data-abandon-run]')!
+  expect(end.textContent).toContain('标记为已结束')
+  end.click()
+  await settle()
+  expect(api.abandonDelegation).toHaveBeenCalledWith({
+    id: 'dlg-one',
+    sessionId: 'root',
+  })
   expect(api.recoverDelegation).not.toHaveBeenCalled()
+})
+it('does not offer 标记为已结束 for a run that settled normally', async () => {
+  const dom = await mount()
+  expect(dom.querySelector('[data-abandon-run]')).toBeNull()
 })
 it('shows passed host evidence and preserves a conflicting integration preview without an apply action', async () => {
   api.getDelegationReceipt.mockResolvedValue({

@@ -297,7 +297,7 @@
               },
               {
                 "name": "collect_agent",
-                "description": "Wait for a specific external run and collect its summary, structured output and delivery check state. Successful text results can be used directly. Check changed files before final delivery or integration; execution completion is not evidence that tests passed.",
+                "description": "Wait for a specific external run and collect its summary, structured output and delivery check state. Successful text results can be used directly. Check changed files before final delivery or integration; execution completion is not evidence that tests passed. If the last run ended without an outcome (Emperor or the computer restarted, or its stop could not be confirmed), abandon=true asks the user to mark it as ended, which releases its workspace and lets the task and any Goal move on.",
                 "parameters": {
                   "type": "object",
                   "properties": {
@@ -306,6 +306,10 @@
                     },
                     "expected_run_id": {
                       "type": "string"
+                    },
+                    "abandon": {
+                      "description": "Mark the run as ended as it is, after the user approves. Only for a run that has no outcome; a live run is stopped with interrupt_agent.",
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -2757,7 +2761,7 @@
                 },
                 {
                   "name": "collect_agent",
-                  "description": "Wait for a specific external run and collect its summary, structured output and delivery check state. Successful text results can be used directly. Check changed files before final delivery or integration; execution completion is not evidence that tests passed.",
+                  "description": "Wait for a specific external run and collect its summary, structured output and delivery check state. Successful text results can be used directly. Check changed files before final delivery or integration; execution completion is not evidence that tests passed. If the last run ended without an outcome (Emperor or the computer restarted, or its stop could not be confirmed), abandon=true asks the user to mark it as ended, which releases its workspace and lets the task and any Goal move on.",
                   "parameters": {
                     "type": "object",
                     "properties": {
@@ -2766,6 +2770,10 @@
                       },
                       "expected_run_id": {
                         "type": "string"
+                      },
+                      "abandon": {
+                        "description": "Mark the run as ended as it is, after the user approves. Only for a run that has no outcome; a live run is stopped with interrupt_agent.",
+                        "type": "boolean"
                       }
                     },
                     "required": [

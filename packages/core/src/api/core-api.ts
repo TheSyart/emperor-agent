@@ -699,6 +699,8 @@ export class CoreApi {
     })
     const executorProcesses = new ManagedAgentProcess({
       sandbox: host.sandboxBackend,
+      // 诊断模式: boundary markers and the native scanner (AGT-04).
+      diagnostics: () => this.executorConfig.read().diagnosticsMode === true,
     })
     const checkExecutorAuth = async (
       profile: Parameters<typeof executorRuntime.prepare>[0],
@@ -1339,10 +1341,9 @@ export class CoreApi {
         backend: state.record.backend,
       }),
     ) as DelegationProjection
-    const parent =
-      owner.parentAgentId === owner.rootSessionId
-        ? this.host.agentFor(owner.rootSessionId).session
-        : this.host.sessionLog(owner.parentAgentId)
+    // The log, not the agent: projecting a state change must not open a
+    // historical conversation or run its SessionStart hooks (AGT-04).
+    const parent = this.host.sessionLog(owner.parentAgentId)
     if (parent) {
       parent.append('delegation/projection', payload)
       this.host.sessions.flush(parent.id)

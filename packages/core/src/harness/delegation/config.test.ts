@@ -292,3 +292,23 @@ describe('external executors are opt-in (AGT-05)', () => {
     expect(config.upgradeNotice).toBe('external-default-off')
   })
 })
+it('keeps diagnostics mode off unless saved on, and writes the flag only when on', async () => {
+  const { defaultExecutorConfig } = await import('./config')
+  const root = mkdtempSync(join(tmpdir(), 'executor-diagnostics-'))
+  try {
+    const store = new ExecutorConfigStore(root)
+    expect(store.read().diagnosticsMode).toBeUndefined()
+    const on = store.update(store.read().revision, {
+      ...defaultExecutorConfig(),
+      diagnosticsMode: true,
+    })
+    expect(on.diagnosticsMode).toBe(true)
+    const off = store.update(on.revision, { ...on, diagnosticsMode: false })
+    expect(off.diagnosticsMode).toBeUndefined()
+    expect(readFileSync(join(root, 'config.json'), 'utf8')).not.toContain(
+      'diagnosticsMode',
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

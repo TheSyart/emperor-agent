@@ -21,8 +21,10 @@ import { nativeGeneratedImageRoot } from './image-proof'
 import { executorSpecialties } from './specialties'
 import { DelegationPolicy, type DelegationParentContext } from './policy'
 import { DelegationBudget, type BudgetLease } from './budget'
+import type { RunPhase } from './types'
 import { DelegationJournal } from './journal'
 import {
+  RUN_TRANSITIONS,
   safeDelegationKey,
   type DelegationState,
   type DelegationEvent,
@@ -47,7 +49,12 @@ import {
   loadOwnership,
   type ProcessOwnership,
 } from './ownership'
-import { terminateRecordedProcess } from './process'
+import {
+  cleanBoundaryMarkers,
+  currentBootTime,
+  terminateRecordedProcess,
+} from './process'
+import { delegationNeedsExit } from '../../runtime/agent-view'
 import { durableReplaceSync } from '../../store/persistence'
 import { codexAuthWritableFile, type CodexAuthLink } from './codex-auth'
 export interface DelegationServiceOptions {
@@ -104,6 +111,15 @@ export interface DelegationServiceOptions {
     spec: DelegationStart,
     signal?: AbortSignal,
   ) => Promise<boolean>
+  /**
+   * This boot of the computer (AGT-04); a run recorded under another one is
+   * interrupted without touching its old PID. Defaults to the real marker.
+   */
+  bootTime?: () => string | null
+  /** Where stale Seatbelt boundary markers are removed at startup. */
+  boundaryMarkerDir?: string
+  /** The wait between stop steps for a recovered process group (tests). */
+  stopGraceMs?: number
 }
 interface Entry {
   journal: DelegationJournal
@@ -114,7 +130,14 @@ interface Entry {
   inspectionController?: AbortController
   session?: ExecutorSession
   closing?: Promise<{ quiescent: boolean }>
-  held?: { workspace?: ResourceLease; budget?: BudgetLease; quiescent: boolean }
+  /** A run without an outcome: its workspace stays quarantined until it is resolved or ended. It never holds a budget slot (AGT-04). */
+  held?: { workspace?: ResourceLease; quiescent: boolean }
+  /**
+   * Loaded at startup, or its root was stopped: pending notices wait until
+   * the user resumes the root. In memory only, so a stop or a restart never
+   * rewrites settled conversations (AGT-04).
+   */
+  noticesHeld?: boolean
   stop: boolean
   /** The run limit (runTimeoutMs) stopped the current run. */
   timedOut?: boolean
@@ -164,98 +187,148 @@ export class DelegationService {
       return false
     }
   }
+  private bootTime(): string | null {
+    try {
+      return (this.options.bootTime ?? currentBootTime)()
+    } catch {
+      return null
+    }
+  }
+  private quarantine(record: DelegationRecord): ResourceLease | undefined {
+    return record.startSpec?.workspace !== 'shared-readonly'
+      ? this.options.mutations.resources.quarantine(
+          [workspaceMutationDomain(record.cwd)],
+          record.id,
+        )
+      : undefined
+  }
+  /**
+   * After a restart nothing of a run that was in flight can still talk to
+   * Emperor: stop its process group if it is still there. Another boot time
+   * means it is gone; a PID alive under another birth time was reused and is
+   * left alone, which leaves the run unresolved.
+   */
+  private async stopRecordedRun(
+    id: string,
+    run: DelegationRunRecord,
+    boot: string | null,
+  ): Promise<{
+    stopped: boolean
+    reason: 'APP_RESTARTED' | 'SYSTEM_RESTARTED'
+  }> {
+    if (!run.process) return { stopped: true, reason: 'APP_RESTARTED' }
+    if (run.process.bootTime && boot && run.process.bootTime !== boot)
+      return { stopped: true, reason: 'SYSTEM_RESTARTED' }
+    try {
+      const owned = loadOwnership(this.options.root, run.id)
+      if (
+        owned.delegationId !== id ||
+        owned.generation !== run.generation ||
+        owned.boundaryReceiptId !== run.process.boundaryReceiptId ||
+        owned.policyDigest !== run.process.policyDigest ||
+        owned.pid !== run.process.pid ||
+        owned.fingerprint !== run.process.fingerprint
+      )
+        return { stopped: false, reason: 'APP_RESTARTED' }
+      if (owned.bootTime && boot && owned.bootTime !== boot)
+        return { stopped: true, reason: 'SYSTEM_RESTARTED' }
+      const exit = await terminateRecordedProcess(owned, {
+        bootTime: boot,
+        ...(this.options.stopGraceMs === undefined
+          ? {}
+          : { graceMs: this.options.stopGraceMs }),
+      })
+      saveOwnership(this.options.root, { ...owned, exit })
+      return { stopped: exit.quiescent, reason: 'APP_RESTARTED' }
+    } catch {
+      return { stopped: false, reason: 'APP_RESTARTED' }
+    }
+  }
+  /**
+   * Startup: load every conversation and settle what a restart cut off. Only
+   * real state changes are appended; settled history is left as it is, and
+   * nothing here opens a root conversation (AGT-04, SUB-15).
+   */
   async reconcile(): Promise<RecoveryReport> {
     if (this.reconciled) return this.recoveryReport
     this.reconciled = true
+    if (this.options.boundaryMarkerDir || process.platform === 'darwin')
+      cleanBoundaryMarkers(
+        this.options.boundaryMarkerDir
+          ? { dir: this.options.boundaryMarkerDir }
+          : {},
+      )
+    const boot = this.bootTime()
     const recovery = new DelegationRecovery({
       root: this.options.root,
       attach: async (journal, original) => {
-        const id = original.record!.id
+        const record = original.record!,
+          id = record.id
         if (this.entries.has(id)) return
         const e: Entry = {
           journal,
           tail: Promise.resolve(),
           stop: true,
+          noticesHeld: true,
           waiters: new Set(),
         }
         this.entries.set(id, e)
-        await this.append(e, { type: 'dispatch-paused', paused: true })
-        const workspaceAvailable = this.workspaceAvailable(original.record!)
         for (const run of Object.values(original.runs)) {
-          let quiescent = run.quiescent ?? false
-          if (
-            (!TERMINAL_RUN_PHASES.has(run.phase) && run.phase !== 'queued') ||
-            (run.phase === 'outcome_unknown' && !run.recoveryResolved)
-          ) {
-            if (run.process) {
-              try {
-                const owned = loadOwnership(this.options.root, run.id)
-                if (
-                  owned.delegationId !== id ||
-                  owned.generation !== run.generation ||
-                  owned.boundaryReceiptId !== run.process.boundaryReceiptId ||
-                  owned.policyDigest !== run.process.policyDigest ||
-                  owned.pid !== run.process.pid ||
-                  owned.fingerprint !== run.process.fingerprint
-                )
-                  throw new DelegationError(
-                    'OWNER_MISMATCH',
-                    'stored process identity changed',
-                  )
-                const exit = await terminateRecordedProcess(owned)
-                saveOwnership(this.options.root, { ...owned, exit })
-                quiescent = exit.quiescent
-              } catch {
-                quiescent = false
-              }
-            }
-            // A lost protocol cannot establish native completion, even if the tree is now stopped.
-            await this.append(e, {
-              type: 'run-changed',
-              runId: run.id,
-              patch: {
-                phase: 'outcome_unknown',
-                quiescent,
-                finishedAt: Date.now(),
-                failureCode: 'CONNECTION_LOST',
-                acceptance: 'needs_user',
-              },
-            })
+          if (run.quotaReserved || run.startedAt !== undefined)
+            this.budget.restore(record.owner.taskScopeId, run.usage)
+          if (run.phase === 'queued') {
+            // Never dispatched: the queue waits for the user.
+            await this.append(e, { type: 'dispatch-paused', paused: true })
+            continue
           }
-          const current = e.journal.load().runs[run.id]!,
-            held =
-              (current.phase === 'outcome_unknown' &&
-                !current.recoveryResolved) ||
-              (!TERMINAL_RUN_PHASES.has(current.phase) &&
-                current.phase !== 'queued')
-          const budget =
-            run.quotaReserved || run.startedAt !== undefined
-              ? this.budget.restore(
-                  original.record!.owner.taskScopeId,
-                  original.record!.profileId,
-                  run.usage,
-                  held,
-                )
-              : undefined
-          if (held) {
-            const workspace =
-              original.record!.startSpec?.workspace !== 'shared-readonly'
-                ? this.options.mutations.resources.quarantine(
-                    [workspaceMutationDomain(original.record!.cwd)],
-                    id,
-                  )
-                : undefined
-            e.held = { budget, workspace, quiescent }
+          const unresolved =
+            run.phase === 'outcome_unknown' && !run.recoveryResolved
+          if (TERMINAL_RUN_PHASES.has(run.phase) && !unresolved) continue
+          const stop = await this.stopRecordedRun(id, run, boot)
+          if (unresolved) {
+            if (stop.stopped && run.quiescent !== true)
+              await this.append(e, {
+                type: 'run-changed',
+                runId: run.id,
+                patch: { quiescent: true },
+              })
+            e.held = stop.stopped
+              ? { quiescent: true }
+              : { quiescent: false, workspace: this.quarantine(record) }
+            continue
           }
+          // A run in flight when Emperor stopped: interrupted once its
+          // process is known to be gone, unresolved if it could not be.
+          await this.append(e, {
+            type: 'run-changed',
+            runId: run.id,
+            patch: stop.stopped
+              ? {
+                  phase: 'interrupted',
+                  quiescent: true,
+                  finishedAt: Date.now(),
+                  failureCode: run.failureCode ?? stop.reason,
+                }
+              : {
+                  phase: 'outcome_unknown',
+                  quiescent: false,
+                  finishedAt: Date.now(),
+                  failureCode: run.failureCode ?? 'OUTCOME_UNKNOWN',
+                  acceptance: 'needs_user',
+                },
+          })
+          if (!stop.stopped)
+            e.held = { quiescent: false, workspace: this.quarantine(record) }
+        }
+        for (const run of Object.values(e.journal.load().runs))
           if (
-            TERMINAL_RUN_PHASES.has(current.phase) &&
-            !original.outbox['dgn-' + run.id]
+            TERMINAL_RUN_PHASES.has(run.phase) &&
+            !e.journal.load().outbox['dgn-' + run.id]
           )
             await this.append(e, {
               type: 'outbox',
-              notice: settlementNotice(original.record!, current),
+              notice: settlementNotice(e.journal.load().record!, run),
             })
-        }
         for (const message of Object.values(e.journal.load().messages))
           if (message.status === 'sending')
             await this.append(e, {
@@ -266,12 +339,19 @@ export class DelegationService {
         for (const interaction of Object.values(e.journal.load().interactions))
           if (['pending', 'answering'].includes(interaction.state))
             await this.append(e, { ...interaction, state: 'cancelled' })
-        if (!workspaceAvailable)
+        // A conversation that owns a workspace must still own it; one that
+        // never got one, or is closed, has nothing to lose.
+        const current = e.journal.load().record!
+        if (
+          current.workspaceLeaseId &&
+          current.availability !== 'closed' &&
+          current.availability !== 'needs_recovery' &&
+          !this.workspaceAvailable(current)
+        )
           await this.append(e, {
             type: 'recovery',
             reason: 'workspace ownership is missing; existing files retained',
           })
-        const record = e.journal.load().record!
         if (record.clientRequestId && record.requestDigest) {
           const key = JSON.stringify([
             record.owner.rootSessionId,
@@ -369,12 +449,6 @@ export class DelegationService {
               descendants: [],
             }
             saveOwnership(this.options.root, ownership)
-          },
-          onProcessObserved: (descendants) => {
-            if (ownership) {
-              ownership = { ...ownership, descendants }
-              saveOwnership(this.options.root, ownership)
-            }
           },
           onProcessExit: (exit) => {
             if (ownership)
@@ -479,9 +553,9 @@ export class DelegationService {
       await this.append(e, { type: 'availability', availability: 'idle' })
       await this.append(e, { type: 'dispatch-paused', paused: false })
       e.held?.workspace?.release()
-      e.held?.budget?.release()
       e.held = undefined
       e.stop = false
+      e.noticesHeld = false
       return e.journal.load().record!
     })
   }
@@ -494,10 +568,17 @@ export class DelegationService {
             ? state.runs[state.record!.currentRunId]
             : undefined
         if (run && !TERMINAL_RUN_PHASES.has(run.phase)) continue
+        e.noticesHeld = false
+        // Appended only when it was paused (AGT-04: no change, no event).
         await this.serial(e, () =>
           this.append(e, { type: 'dispatch-paused', paused: false }),
         )
-        await this.dispatchNotices(state.record!.id)
+        if (
+          Object.values(state.outbox).some(
+            (notice) => !notice.delivered && notice.recipient !== 'collector',
+          )
+        )
+          await this.dispatchNotices(state.record!.id)
       }
   }
   async dispatchNotices(id: string): Promise<void> {
@@ -511,6 +592,7 @@ export class DelegationService {
         const outbox = new DelegationNoticeOutbox({
           ...this.options.notices!,
           canWake: (owner) =>
+            !e.noticesHeld &&
             !e.journal.load().record!.dispatchPaused &&
             this.options.notices!.canWake(owner),
           markDelivered: (noticeId) =>
@@ -604,8 +686,17 @@ export class DelegationService {
           Object.values(state.runs).some(
             (run) => !TERMINAL_RUN_PHASES.has(run.phase),
           ) ||
-          Object.values(state.messages).some((message) =>
-            ['queued', 'sending', 'delivery_unknown'].includes(message.status),
+          Object.values(state.messages).some(
+            (message) =>
+              message.status === 'queued' ||
+              message.status === 'sending' ||
+              // An unknown delivery is still pending only while its run is;
+              // after that it is history (never resent), not work (AGT-04).
+              (message.status === 'delivery_unknown' &&
+                (!message.runId ||
+                  !TERMINAL_RUN_PHASES.has(
+                    state.runs[message.runId]?.phase ?? 'running',
+                  ))),
           )),
     )
   }
@@ -694,6 +785,8 @@ export class DelegationService {
         record.availability === 'closed'
       )
         continue
+      // Marked as ended by the user (or the model, with approval): disposed.
+      if (run?.abandoned && TERMINAL_RUN_PHASES.has(run.phase)) continue
       const resultOnly =
         run?.receiptId &&
         run.acceptance === 'unverified' &&
@@ -783,32 +876,44 @@ export class DelegationService {
     const entries = [...this.entries.values()].filter(
       (e) => e.journal.load().record?.owner.rootSessionId === rootSessionId,
     )
-    for (const e of entries) {
-      e.stop = true
-      e.inspectionController?.abort()
-    }
+    for (const e of entries) e.inspectionController?.abort()
     await Promise.all(
       entries.map(async (e) => {
-        await this.serial(e, () =>
-          this.append(e, { type: 'dispatch-paused', paused: true }),
-        )
         const state = e.journal.load(),
           id = state.record!.id,
           run = state.record!.currentRunId
             ? state.runs[state.record!.currentRunId]
             : undefined
-        if (run && !TERMINAL_RUN_PHASES.has(run.phase))
-          await this.interrupt(id, run.id)
-        else
-          await this.serial(e, async () => {
-            for (const message of Object.values(e.journal.load().messages))
-              if (message.status === 'queued')
-                await this.append(e, {
-                  type: 'message-delivery',
-                  messageId: message.id,
-                  status: 'cancelled',
-                })
+        if (run && !TERMINAL_RUN_PHASES.has(run.phase)) {
+          // Its result must not wake the stopped parent by itself.
+          e.noticesHeld = true
+          await this.serial(e, () =>
+            this.append(e, { type: 'dispatch-paused', paused: true }),
+          )
+          // interrupt() sets e.stop and writes `cancelling` together (SUB-29).
+          await this.interrupt(id, run.id).catch((error) => {
+            if (
+              !(error instanceof DelegationError) ||
+              error.code !== 'STALE_RUN'
+            )
+              throw error
           })
+          return
+        }
+        // A settled conversation is not rewritten: its pending notices are
+        // held in memory and a queued message, if any, is cancelled
+        // (AGT-04: no event for every historical conversation on every stop).
+        await this.serial(e, async () => {
+          e.stop = true
+          e.noticesHeld = true
+          for (const message of Object.values(e.journal.load().messages))
+            if (message.status === 'queued')
+              await this.append(e, {
+                type: 'message-delivery',
+                messageId: message.id,
+                status: 'cancelled',
+              })
+        })
       }),
     )
     await auxiliary
@@ -830,7 +935,8 @@ export class DelegationService {
     return next
   }
   private async append(e: Entry, event: DelegationEvent): Promise<void> {
-    await e.journal.append(event)
+    // An event that changes nothing is not written, published or projected.
+    if (!(await e.journal.append(event)).changed) return
     const state = e.journal.load()
     if (event.type === 'message-delivery' && event.status === 'accepted') {
       const message = state.messages[event.messageId]
@@ -1194,6 +1300,7 @@ export class DelegationService {
       if (count >= this.options.config().limits.maxQueuedMessages)
         throw new DelegationError('QUEUE_LIMIT', 'queued message limit reached')
       e.stop = false
+      e.noticesHeld = false
       await this.append(e, { type: 'dispatch-paused', paused: false })
       await this.append(e, {
         type: 'message-enqueued',
@@ -1449,15 +1556,6 @@ export class DelegationService {
             process: { ...identity, boundaryReceiptId, policyDigest },
           })
         },
-        onProcessObserved: (descendants) => {
-          if (!ownership)
-            throw new DelegationError(
-              'OWNER_MISMATCH',
-              'process root was not persisted',
-            )
-          ownership = { ...ownership, descendants }
-          saveOwnership(this.options.root, ownership)
-        },
         onProcessExit: (exit) => {
           if (ownership) {
             ownership = { ...ownership, exit }
@@ -1681,99 +1779,117 @@ export class DelegationService {
         }
       }
       e.session = undefined
-      let current = e.journal.load().runs[activeRunId]!
-      if (current.phase === 'queued' && !e.stop) {
-        await this.change(e, activeRunId, { phase: 'preparing' })
-        current = e.journal.load().runs[activeRunId]!
-      }
-      const phase = !quiescent
-        ? 'outcome_unknown'
-        : e.inputFailure
-          ? 'interrupted'
-          : e.stop
-            ? status === 'completed'
-              ? 'completed'
-              : current.phase === 'queued'
-                ? 'cancelled'
-                : 'cancelled'
-            : status === 'completed'
-              ? 'completed'
-              : status === 'failed'
-                ? 'failed'
-                : status === 'interrupted'
-                  ? 'interrupted'
-                  : sent
-                    ? 'outcome_unknown'
-                    : 'failed'
-      if (phase === 'cancelled' && current.phase === 'preparing') {
-        await this.change(e, activeRunId, { phase: 'cancelling' })
-        current = e.journal.load().runs[activeRunId]!
-      }
-      if (
-        current.phase === 'waiting_input' &&
-        ['completed', 'failed'].includes(phase)
-      ) {
-        await this.change(e, activeRunId, { phase: 'running' })
-      }
-      if (current.phase === 'cancelling' && phase === 'failed')
-        failureCode = 'OUTCOME_UNKNOWN'
-      if (e.timedOut && phase === 'cancelled') failureCode = 'RUN_TIMEOUT'
-      const finalPhase =
-        current.phase === 'cancelling' && phase === 'failed'
+      let settledPhase: RunPhase | undefined
+      // One serial section from reading the run to writing its outcome: a
+      // stop sets e.stop and writes `cancelling` in its own section, so this
+      // sees both or neither (SUB-29).
+      await this.serial(e, async () => {
+        let current = e.journal.load().runs[activeRunId]!
+        const step = async (phase: RunPhase) => {
+          await this.append(e, {
+            type: 'run-changed',
+            runId: activeRunId,
+            patch: { phase },
+          })
+          current = e.journal.load().runs[activeRunId]!
+        }
+        if (current.phase === 'queued' && !e.stop) await step('preparing')
+        let phase: RunPhase = !quiescent
           ? 'outcome_unknown'
+          : e.inputFailure
+            ? 'interrupted'
+            : e.stop
+              ? status === 'completed'
+                ? 'completed'
+                : 'cancelled'
+              : status === 'completed'
+                ? 'completed'
+                : status === 'failed'
+                  ? 'failed'
+                  : status === 'interrupted'
+                    ? 'interrupted'
+                    : sent
+                      ? 'outcome_unknown'
+                      : 'failed'
+        if (current.phase === 'cancelling' && phase === 'failed') {
+          phase = 'outcome_unknown'
+          failureCode = 'OUTCOME_UNKNOWN'
+        }
+        if (e.timedOut && phase === 'cancelled') failureCode = 'RUN_TIMEOUT'
+        if (!TERMINAL_RUN_PHASES.has(current.phase)) {
+          // Reach the outcome through legal steps only.
+          if (
+            phase === 'cancelled' &&
+            ['preparing', 'running', 'waiting_input'].includes(current.phase)
+          )
+            await step('cancelling')
+          if (
+            current.phase === 'waiting_input' &&
+            (phase === 'completed' || phase === 'failed')
+          )
+            await step('running')
+          if (!RUN_TRANSITIONS[current.phase].includes(phase))
+            phase = current.phase === 'queued' ? 'cancelled' : 'outcome_unknown'
+        }
+        settledPhase = TERMINAL_RUN_PHASES.has(current.phase)
+          ? current.phase
           : phase
-      // A failure on an unverified protocol says so first (the summary is
-      // bounded from its start), so the user can tell a version problem from
-      // an ordinary task failure.
-      if (finalPhase === 'failed' && protocolNote)
-        summary = boundText(
-          protocolNote +
-            '. Install a verified version or update Emperor if this keeps failing.' +
-            (summary ? '\n\n' + summary : ''),
-          8192,
-        )
-      if (!accepted && sent)
-        await this.serial(e, () =>
-          this.append(e, {
+        // A failure on an unverified protocol says so first (the summary is
+        // bounded from its start), so the user can tell a version problem from
+        // an ordinary task failure.
+        if (settledPhase === 'failed' && protocolNote)
+          summary = boundText(
+            protocolNote +
+              '. Install a verified version or update Emperor if this keeps failing.' +
+              (summary ? '\n\n' + summary : ''),
+            8192,
+          )
+        if (!accepted && sent)
+          await this.append(e, {
             type: 'message-delivery',
             messageId,
             status: 'delivery_unknown',
-          }),
-        )
-      else if (!sent)
-        await this.serial(e, () =>
-          this.append(e, {
+          })
+        else if (!sent)
+          await this.append(e, {
             type: 'message-delivery',
             messageId,
             status: 'cancelled',
-          }),
-        )
-      // Unknown descendants keep both workspace and quota occupied until explicit recovery.
-      if (quiescent && finalPhase !== 'outcome_unknown') {
-        workspace?.release()
+          })
+        // The budget slot is free once the process is; a run whose stop
+        // could not be confirmed keeps only its workspace quarantined.
         budget?.release(sent ? usage : { estimatedUsd: 0 })
-      } else e.held = { workspace, budget, quiescent }
-      if (record.workspaceLeaseId) {
-        try {
-          this.options.workspaces.retain(record.workspaceLeaseId)
-        } catch {
-          /* Durable ownership intent still preserves the directory. */
+        if (quiescent && settledPhase !== 'outcome_unknown')
+          workspace?.release()
+        else e.held = { workspace, quiescent }
+        if (record.workspaceLeaseId) {
+          try {
+            this.options.workspaces.retain(record.workspaceLeaseId)
+          } catch {
+            /* Durable ownership intent still preserves the directory. */
+          }
         }
-      }
-      await this.change(e, activeRunId, {
-        phase: finalPhase,
-        quiescent,
-        finishedAt: Date.now(),
-        summary,
-        usage,
-        ...(structured === undefined ? {} : { structured }),
-        ...(e.inputFailure
-          ? { acceptance: 'needs_user' as const, failureCode: e.inputFailure }
-          : failureCode
-            ? { failureCode }
-            : {}),
-      })
-      await this.serial(e, async () => {
+        if (!TERMINAL_RUN_PHASES.has(current.phase))
+          await this.append(e, {
+            type: 'run-changed',
+            runId: activeRunId,
+            patch: {
+              phase: settledPhase,
+              quiescent,
+              finishedAt: Date.now(),
+              summary,
+              usage,
+              ...(structured === undefined ? {} : { structured }),
+              ...(e.inputFailure
+                ? {
+                    acceptance: 'needs_user' as const,
+                    failureCode: e.inputFailure,
+                  }
+                : failureCode
+                  ? { failureCode }
+                  : {}),
+            },
+          })
         for (const interaction of Object.values(e.journal.load().interactions))
           if (
             interaction.runId === activeRunId &&
@@ -1781,7 +1897,7 @@ export class DelegationService {
           )
             await this.append(e, { ...interaction, state: 'cancelled' })
       })
-      if (quiescent && finalPhase !== 'outcome_unknown') {
+      if (quiescent && settledPhase !== 'outcome_unknown') {
         try {
           await this.options.onSettled?.(id, activeRunId)
         } catch {
@@ -1925,32 +2041,20 @@ export class DelegationService {
     if (state.record!.currentRunId !== expectedRunId || !run)
       throw new DelegationError('STALE_RUN', 'interrupt target changed')
     if (TERMINAL_RUN_PHASES.has(run.phase)) return { requested: false }
-    e.stop = true
-    e.inputFailure ??= inputFailure
-    if (inputFailure && e.session) {
-      for (const request of Object.values(state.interactions))
-        if (request.runId === expectedRunId && request.state === 'pending')
-          await e.session
-            .answer({
-              requestId: request.requestId,
-              generation: request.generation,
-              kind: 'deny',
-              reason: inputFailure,
-            })
-            .catch(() => undefined)
-    }
-    await this.serial(e, async () => {
+    // e.stop and `cancelling` change together in one serial section, the
+    // same one that settles a finished turn (SUB-29).
+    const requested = await this.serial(e, async () => {
       const current = e.journal.load().runs[expectedRunId]!
+      if (TERMINAL_RUN_PHASES.has(current.phase)) return false
+      e.stop = true
+      e.inputFailure ??= inputFailure
       if (current.phase === 'queued')
         await this.append(e, {
           type: 'run-changed',
           runId: expectedRunId,
           patch: { phase: 'cancelled', finishedAt: Date.now() },
         })
-      else if (
-        !TERMINAL_RUN_PHASES.has(current.phase) &&
-        current.phase !== 'cancelling'
-      )
+      else if (current.phase !== 'cancelling')
         await this.append(e, {
           type: 'run-changed',
           runId: expectedRunId,
@@ -1963,7 +2067,21 @@ export class DelegationService {
             messageId: message.id,
             status: 'cancelled',
           })
+      return true
     })
+    if (!requested) return { requested: false }
+    if (inputFailure && e.session) {
+      for (const request of Object.values(e.journal.load().interactions))
+        if (request.runId === expectedRunId && request.state === 'pending')
+          await e.session
+            .answer({
+              requestId: request.requestId,
+              generation: request.generation,
+              kind: 'deny',
+              reason: inputFailure,
+            })
+            .catch(() => undefined)
+    }
     if (e.session) {
       const session = e.session
       try {
@@ -1981,6 +2099,67 @@ export class DelegationService {
       )
     await e.active
     return { requested: true }
+  }
+  /**
+   * 「标记为已结束」 (AGT-04): end a run that has no outcome, as it is. Its
+   * workspace quarantine is released (a budget slot was never held), its
+   * queue cancelled, and a Goal no longer waits for it. A run still live in
+   * this process is stopped instead, with interrupt.
+   */
+  async abandon(id: string, by: 'user' | 'model'): Promise<DelegationRecord> {
+    const e = this.entry(id)
+    return this.serial(e, async () => {
+      const state = e.journal.load(),
+        record = state.record!,
+        run = record.currentRunId ? state.runs[record.currentRunId] : undefined
+      if (e.active)
+        throw new DelegationError(
+          'ACTIVE_RUN',
+          'the run is still in progress; stop it instead',
+        )
+      if (
+        !run ||
+        !(
+          delegationNeedsExit(record, run) ||
+          !TERMINAL_RUN_PHASES.has(run.phase)
+        )
+      )
+        throw new DelegationError(
+          'NOTHING_TO_END',
+          'this task has no unfinished run to end',
+        )
+      // A quarantined group gets one last stop before its workspace is
+      // released; whatever the result, the user's decision stands.
+      if (e.held && !e.held.quiescent && run.process)
+        await this.stopRecordedRun(id, run, this.bootTime()).catch(
+          () => undefined,
+        )
+      const closeIt =
+        record.availability !== 'closed' &&
+        !!record.workspaceLeaseId &&
+        !this.workspaceAvailable(record)
+      await this.append(e, {
+        type: 'run-abandoned',
+        runId: run.id,
+        by,
+        at: Date.now(),
+      })
+      // Its workspace is gone: nothing can continue in this conversation.
+      if (closeIt)
+        await this.append(e, { type: 'availability', availability: 'closed' })
+      if (!e.journal.load().outbox['dgn-' + run.id])
+        await this.append(e, {
+          type: 'outbox',
+          notice: settlementNotice(
+            e.journal.load().record!,
+            e.journal.load().runs[run.id]!,
+          ),
+        })
+      e.held?.workspace?.release()
+      e.held = undefined
+      e.stop = false
+      return e.journal.load().record!
+    })
   }
   async bindIntegration(
     id: string,

@@ -371,7 +371,6 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
       closePromise = (async () => {
         closed = true
         releaseTurn?.()
-        await handle?.captureDescendants()
         if (rpc) {
           await Promise.allSettled(
             [...pending.values()].map((p) =>
@@ -617,7 +616,6 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
         signal: input.signal,
         secretValues: input.secretValues,
         onSpawn: input.onProcessStarted,
-        onObserved: input.onProcessObserved,
         onExit: input.onProcessExit,
       })
       await handle.started
@@ -918,7 +916,6 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
             'interrupt requires exact current turn',
           )
         let timer: ReturnType<typeof setTimeout> | undefined
-        await handle?.captureDescendants()
         try {
           await Promise.race([
             rpc!.request('turn/interrupt', {

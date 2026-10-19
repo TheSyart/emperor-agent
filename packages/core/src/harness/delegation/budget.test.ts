@@ -81,3 +81,15 @@ it('cancelled queued capacity never starts and does not strand later requests', 
   ;(await b.reserve('c', 'codex-default')).release()
   expect(b.usage('b').runs).toBe(0)
 })
+it('restored history counts toward a task but never holds a slot', async () => {
+  const b = new DelegationBudget(defaultExecutorConfig())
+  b.restore('a', { estimatedUsd: 2 })
+  b.restore('a', undefined)
+  expect(b.usage('a')).toMatchObject({
+    runs: 2,
+    knownEstimatedUsd: 2,
+    unknownRuns: 1,
+  })
+  // codex-default allows one run at a time; history does not take it.
+  ;(await b.reserve('b', 'codex-default')).release()
+})

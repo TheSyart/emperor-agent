@@ -4,11 +4,18 @@ import { createTestHarness, replyChunks } from '../testing'
 import { SubagentManager } from '../subagent/manager'
 import { SandboxPolicyService } from '../sandbox/policy'
 import { ApprovalService } from '../approval/service'
-import { createDelegationTools, type DelegationToolService } from './tools'
+import {
+  createDelegationTools,
+  type DelegationToolOptions,
+  type DelegationToolService,
+} from './tools'
 import { fixture as serviceFixture } from './service-test-fixture'
 import { fixtureDelegationRecord, fixtureDelegationRun } from './testing'
-import { DelegationError } from './types'
-function fixture(externalService?: DelegationToolService) {
+import { DelegationError, type DelegationRunRecord } from './types'
+function fixture(
+  externalService?: DelegationToolService,
+  approve?: DelegationToolOptions['approve'],
+) {
   const h = createTestHarness(),
     agents = new Map<string, Agent>()
   const manager = new SubagentManager({
@@ -37,9 +44,9 @@ function fixture(externalService?: DelegationToolService) {
   const root = h.agent('root')
   agents.set(root.id, root)
   const record = { ...fixtureDelegationRecord(), currentRunId: 'dgr-1' },
-    run = {
+    run: DelegationRunRecord = {
       ...fixtureDelegationRun(),
-      phase: 'completed' as const,
+      phase: 'completed',
       summary: 'external result',
     }
   const state = {
@@ -60,6 +67,7 @@ function fixture(externalService?: DelegationToolService) {
     })),
     interrupt: vi.fn(async () => ({ requested: true })),
     wait: vi.fn(async () => run),
+    abandon: vi.fn(async () => record),
   }
   for (const tool of createDelegationTools({
     internalManager: manager,
@@ -71,6 +79,7 @@ function fixture(externalService?: DelegationToolService) {
     }),
     canControl: (agent, owner) => agent.id === owner.parentAgentId,
     parentReadOnly: () => true,
+    ...(approve ? { approve } : {}),
   }))
     h.tools.register(tool)
   return {
@@ -78,6 +87,7 @@ function fixture(externalService?: DelegationToolService) {
     root,
     manager,
     service,
+    state,
     call: (name: string, args: unknown, agent = root) =>
       h.tools.execute({
         name,
@@ -284,4 +294,54 @@ it('dispatches one task envelope through the real tool and service and formats c
     await runtime.service.shutdown()
     runtime.cleanup()
   }
+})
+
+it('collect_agent ends a run that has no outcome only after the user approves', async () => {
+  const approve = vi.fn<NonNullable<DelegationToolOptions['approve']>>(
+    async () => 'rejected',
+  )
+  const f = fixture(undefined, approve)
+  f.state.runs['dgr-1']!.phase = 'outcome_unknown'
+  f.state.record.availability = 'needs_recovery'
+  const refused = await f.call('collect_agent', {
+    agent_id: 'dlg-test',
+    abandon: true,
+  })
+  expect(refused.isError).toBe(true)
+  expect(JSON.stringify(refused.content)).toContain('APPROVAL_REJECTED')
+  expect(approve).toHaveBeenCalledWith(
+    expect.objectContaining({
+      agent: f.root,
+      callId: 'call-collect_agent',
+      reason: expect.stringContaining('dlg-test'),
+    }),
+  )
+  expect(f.service.abandon).not.toHaveBeenCalled()
+  approve.mockResolvedValueOnce('allowed-once')
+  vi.mocked(f.service.abandon!).mockImplementationOnce(async () => {
+    f.state.runs['dgr-1']!.recoveryResolved = true
+    f.state.runs['dgr-1']!.abandoned = { by: 'model', at: 1 }
+    f.state.record.availability = 'idle'
+    return f.state.record
+  })
+  const ended = await f.call('collect_agent', {
+    agent_id: 'dlg-test',
+    abandon: true,
+  })
+  expect(ended.isError).toBe(false)
+  expect(f.service.abandon).toHaveBeenCalledWith('dlg-test', 'model')
+  expect(ended.meta).toMatchObject({ abandoned: true })
+})
+it('collect_agent does not ask to end a run that settled normally', async () => {
+  const approve = vi.fn<NonNullable<DelegationToolOptions['approve']>>(
+    async () => 'allowed-once',
+  )
+  const f = fixture(undefined, approve)
+  const result = await f.call('collect_agent', {
+    agent_id: 'dlg-test',
+    abandon: true,
+  })
+  expect(result.isError).toBe(true)
+  expect(JSON.stringify(result.content)).toContain('NOTHING_TO_END')
+  expect(approve).not.toHaveBeenCalled()
 })

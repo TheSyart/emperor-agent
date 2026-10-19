@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：贡献者、发布维护者<br>
 > 最后核验：2026-10-19<br>
-> 事实源：`packages/core/src/harness/delegation/adapters/`、`packages/core/src/harness/delegation/codex-auth.ts`、`packages/core/src/harness/delegation/login-shell.ts`、`packages/core/src/harness/delegation/compatibility.ts`、`packages/core/src/harness/delegation/executable.ts`、`packages/core/src/harness/delegation/protocol/`、`scripts/codex-protocol-digest.mjs`、`scripts/smoke-external-agents.mjs`、`desktop/tests/external-agents.e2e.mjs`、`desktop/electron-builder.yml`、`desktop/scripts/after-pack.cjs`
+> 事实源：`packages/core/src/harness/delegation/adapters/`、`packages/core/src/harness/delegation/process.ts`、`packages/core/src/harness/delegation/journal.ts`、`packages/core/src/harness/delegation/codex-auth.ts`、`packages/core/src/harness/delegation/login-shell.ts`、`packages/core/src/harness/delegation/compatibility.ts`、`packages/core/src/harness/delegation/executable.ts`、`packages/core/src/harness/delegation/protocol/`、`scripts/codex-protocol-digest.mjs`、`scripts/smoke-external-agents.mjs`、`desktop/tests/external-agents.e2e.mjs`、`desktop/electron-builder.yml`、`desktop/scripts/after-pack.cjs`
 
 ## 版本兼容：能力握手
 
@@ -14,9 +14,18 @@
 
 新增 Codex 版本：`node scripts/codex-protocol-digest.mjs` 检查本机 codex 的摘要是否已知；协议有变化且适配器已按新 schema 更新、contract 测试与真实两轮/问题/干预/取消/恢复证据通过后，`--write` 把依赖的 schema 文件与 `digest.json` 写入 `protocol/codex-<version>/`，再在 `compatibility.ts` 的 `KNOWN_CODEX_PROTOCOLS` 注册。同一 minor 的不同摘要可写进同一份 `digest.json` 的 `digests`；`registry.test.ts` 要求每个 `protocol/codex-*` 目录都已注册且摘要与签入文件一致。
 
-Claude 使用 SDK startup 与自定义 managed spawn，业务问题经过权限回调转换，内部 Agent/Task/MCP/后台调度被关闭。Codex 使用应用独占 stdio app-server：initialize、initialized、thread/start 或 resume、turn/start；没有共享桌面 daemon 或 exec fallback。收到中断 ACK 后仍要等待原生终态及进程静止；未知协议请求默认拒绝。
+Claude 使用 SDK startup 与自定义 managed spawn，业务问题经过权限回调转换，内部 Agent/Task/MCP/后台调度被关闭。Codex 使用应用独占 stdio app-server：initialize、initialized、thread/start 或 resume、turn/start；没有共享桌面 daemon 或 exec fallback。中断先发协议 interrupt（最多等 5 秒），之后 `session.close()` 调用 `handle.terminate()`；未知协议请求默认拒绝。
 
-源码运行 macOS helper 先执行 `node scripts/build-delegation-scanner.mjs`；Core pretest 与 desktop native build 会执行同一脚本。安装包携带已编译 helper，无需用户编译器。Preview 打包由 after-pack 做 ad-hoc 封签（带 hardened runtime，见[发布手册](../release/preview-release-runbook.md#不签名不等于不封签)），`app.asar.unpacked` 里的 Claude binary 保留 Anthropic 的原签名，不被重签；可选的正式发布签名流程独立保留。SDK 作为 main external 依赖，打包包含 SDK 和**当前构建架构**的 Claude binary：`electron-builder.yml` 的 `files` 与 `asarUnpack` 用 `${arch}` 只选 `claude-agent-sdk-darwin-${arch}`，binary 在 asar 外；after-pack 要求 SDK 与本架构 binary 存在且可执行，发现其他架构的 binary 即构建失败。跨架构打包（例如在 arm64 机器上打 x64）需要先安装对应架构的 SDK 平台包，否则 after-pack 报缺失。Codex 不由应用安装，需要本机 CLI 在支持范围内。
+## 进程与停止（AGT-04）
+
+- 只经 `ManagedAgentProcess` 启动：进程是自己进程组的组长（`detached`），句柄只有 `terminate()`（`SIGTERM` 给组，5 秒后 `SIGKILL`）和 `interrupt()`（`SIGINT`，5 秒后转 `terminate()`）。`closed` 收据的 `quiescent` 表示进程组已空；根进程退出后组里剩下的成员也按同样时间线停止。没有 `captureDescendants`、`onObserved` 或任何轮询；适配器不要再自己扫描进程。
+- 测试可用 `stopGraceMs` 缩短 5 秒间隔、用 `observeProcesses` 注入进程表（只在组还回应信号时读一次）。`identityMatches` 用来模拟无法核实身份、拒绝发信号的情况。
+- 读进程身份统一用 `processBirth(pid)` / `processTable()`（`LC_ALL=C`）；空出生时间永不匹配，进程表缺少 Emperor 自身即返回 null。ownership 记录带 `bootTime`（`currentBootTime()`），`terminateRecordedProcess(ownership, { bootTime, graceMs })` 遇到不同开机标记直接返回已停止、不发信号，PID 出生时间不符返回 `OWNER_MISMATCH`。
+- 诊断模式（执行器配置 `diagnosticsMode`）打开时，`ManagedAgentProcess` 的 `diagnostics()` 返回 true，才会写 `/private/tmp/emperor-boundary-<tag>-{denied,allowed}` 并在运行结束时用扫描器处理逃逸进程；扫描器缺失时静默跳过。`cleanBoundaryMarkers()` 在 `DelegationService.reconcile` 中删除超过一天的标记，服务测试用 `boundaryMarkerDir` 指向临时目录，避免碰真实 `/private/tmp`。
+- 委派日志在 `DelegationJournal` 内存中折叠，`append` 返回 `changed`；不改变状态的事件不写入，`DelegationService.append` 也不会为它调用 `onState`。新增事件类型时注意 fold 的结果要能区分「有变化」。`run-changed` 不会覆盖已结束轮次已有的 `failureCode`，也不会为没有变化的补丁增加 revision。
+- 结束一个没有结果的轮次走 `DelegationService.abandon(id, by)`（Core 操作 `delegations.abandon`，模型侧 `collect_agent({ abandon: true })` 经 `DelegationToolOptions.approve` 审批）。判断是否需要这个出口统一用 `delegationNeedsExit(record, run)`（`runtime/agent-view.ts`，renderer 也可用）。
+
+源码运行 macOS helper 先执行 `node scripts/build-delegation-scanner.mjs`；Core pretest 与 desktop native build 会执行同一脚本。安装包携带已编译 helper，无需用户编译器；它只在诊断模式下使用。Preview 打包由 after-pack 做 ad-hoc 封签（带 hardened runtime，见[发布手册](../release/preview-release-runbook.md#不签名不等于不封签)），`app.asar.unpacked` 里的 Claude binary 保留 Anthropic 的原签名，不被重签；可选的正式发布签名流程独立保留。SDK 作为 main external 依赖，打包包含 SDK 和**当前构建架构**的 Claude binary：`electron-builder.yml` 的 `files` 与 `asarUnpack` 用 `${arch}` 只选 `claude-agent-sdk-darwin-${arch}`，binary 在 asar 外；after-pack 要求 SDK 与本架构 binary 存在且可执行，发现其他架构的 binary 即构建失败。跨架构打包（例如在 arm64 机器上打 x64）需要先安装对应架构的 SDK 平台包，否则 after-pack 报缺失。Codex 不由应用安装，需要本机 CLI 在支持范围内。
 
 ## Codex 登录、长等待与续聊
 

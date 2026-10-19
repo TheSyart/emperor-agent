@@ -7,6 +7,7 @@ import {
   agentTitle,
   type AgentView,
   type AgentPhase,
+  delegationNeedsExit,
 } from '../../runtime/agent-view'
 
 type Started = SessionEvent<'subagent/started'>['data'] & {
@@ -106,14 +107,18 @@ function externalView(state: DelegationState): AgentView | undefined {
         ? 'waiting'
         : p === 'completed'
           ? 'completed'
-          : p === 'failed' || p === 'cancelled'
-            ? 'failed'
-            : p === 'outcome_unknown' || p === 'interrupted' || !p
-              ? 'unknown'
-              : 'running',
+          : // Marked as ended by the user, or cut off by a restart.
+            run?.abandoned || p === 'interrupted'
+            ? 'interrupted'
+            : p === 'failed' || p === 'cancelled'
+              ? 'failed'
+              : p === 'outcome_unknown' || !p
+                ? 'unknown'
+                : 'running',
     ...(r.availability === 'needs_recovery'
       ? { unavailable: 'needs_recovery' as const }
       : {}),
+    ...(delegationNeedsExit(r, run) ? { needsExit: true as const } : {}),
     createdAt: r.createdAt,
     updatedAt: run?.finishedAt ?? run?.startedAt ?? r.createdAt,
     ...(r.currentRunId ? { currentRunId: r.currentRunId } : {}),

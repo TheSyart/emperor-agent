@@ -916,6 +916,9 @@ export const CORE_OPERATION_REGISTRY = {
     ]),
     (api, [input]) => api.delegations.recover(input),
   ),
+  'delegations.abandon': operation(z.tuple([externalRef]), (api, [input]) =>
+    api.delegations.abandon(input),
+  ),
   'delegations.collect': operation(z.tuple([externalRunRef]), (api, [input]) =>
     api.delegations.collect(input),
   ),

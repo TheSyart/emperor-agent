@@ -84,6 +84,7 @@ export const executorConfigSchema = z
       .strict(),
     touchedAt: z.number().int().nonnegative().optional(),
     upgradeNotice: z.literal('external-default-off').optional(),
+    diagnosticsMode: z.boolean().optional(),
   })
   .strict()
   .superRefine((c, ctx) => {
@@ -233,6 +234,8 @@ export class ExecutorConfigStore {
     // Saving is the user's choice: later upgrades keep it, the notice is seen.
     next.touchedAt = Date.now()
     delete next.upgradeNotice
+    // Written only when on, so an older build can still read the file.
+    if (!next.diagnosticsMode) delete next.diagnosticsMode
     durableReplaceSync(this.file, JSON.stringify(next, null, 2) + '\n')
     return next
   }

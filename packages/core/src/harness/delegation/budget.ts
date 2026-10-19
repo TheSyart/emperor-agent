@@ -19,12 +19,11 @@ export class DelegationBudget {
   private lastScope: string | undefined
   private readonly scopeOrder: string[] = []
   constructor(private config: ExecutorConfig) {}
-  restore(
-    scope: string,
-    profile: string,
-    usage: { estimatedUsd?: number } | undefined,
-    held: boolean,
-  ): BudgetLease | undefined {
+  /**
+   * Count a run from history against its task's limits. It never occupies a
+   * concurrency slot: a run that needs recovery is not running (AGT-04).
+   */
+  restore(scope: string, usage: { estimatedUsd?: number } | undefined): void {
     const s = this.scopes.get(scope) ?? {
       runs: 0,
       knownEstimatedUsd: 0,
@@ -39,20 +38,6 @@ export class DelegationBudget {
       s.unknownRuns++
     else s.knownEstimatedUsd += usage.estimatedUsd
     this.scopes.set(scope, s)
-    if (!held) return undefined
-    this.active.set(profile, (this.active.get(profile) ?? 0) + 1)
-    let released = false
-    return {
-      release: () => {
-        if (released) return
-        released = true
-        this.active.set(
-          profile,
-          Math.max(0, (this.active.get(profile) ?? 1) - 1),
-        )
-        this.drain()
-      },
-    }
   }
   reconfigure(config: ExecutorConfig): void {
     this.config = config

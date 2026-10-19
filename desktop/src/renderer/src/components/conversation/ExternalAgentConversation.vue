@@ -19,6 +19,7 @@ import {
   agentTitle,
   agentSourceLabel,
   agentPhaseLabel,
+  delegationNeedsExit,
   type AgentView,
 } from '@emperor/core/runtime-contract'
 import { invokeCore, onCoreEvent } from '../../api/backend'
@@ -39,6 +40,7 @@ import {
   type ExternalConversationAvailability,
 } from './externalConversationAvailability'
 import {
+  abandonDelegation,
   getDelegation,
   interruptDelegation,
   type DelegationView,
@@ -117,6 +119,13 @@ const live = computed(() =>
     run.value?.phase ?? '',
   ),
 )
+/** The run ended without an outcome: offer 「标记为已结束」 (AGT-04). */
+const needsExit = computed(() =>
+  agent.value
+    ? agent.value.needsExit === true
+    : delegationNeedsExit(record.value, run.value),
+)
+const ending = ref(false)
 const phase = computed(() =>
   availability.value !== 'ready'
     ? externalConversationMessages[availability.value]
@@ -401,6 +410,22 @@ async function older() {
       olderLoading.value = false
   }
 }
+async function end() {
+  const sessionId = rootId.value,
+    id = delegationId.value,
+    current = generation
+  if (!controlsAvailable.value || !needsExit.value || ending.value) return
+  ending.value = true
+  error.value = ''
+  try {
+    await abandonDelegation({ id, sessionId })
+    if (current === generation) await feed?.refresh()
+  } catch (cause) {
+    if (current === generation) error.value = String(cause)
+  } finally {
+    if (current === generation) ending.value = false
+  }
+}
 async function stop() {
   const runId = run.value?.id,
     sessionId = rootId.value,
@@ -629,6 +654,15 @@ async function stop() {
             ? '返回主会话回答'
             : '返回主会话继续派工'
       }}</Button
+      ><Button
+        v-if="needsExit && controlsAvailable && !live"
+        data-abandon-child
+        size="sm"
+        variant="secondary"
+        title="这次运行没有正常结束（例如 Emperor 或电脑重启过）。标记为已结束会释放它占用的工作区，Goal 可以继续；保留的文件不受影响。"
+        :disabled="ending"
+        @click="end"
+        >{{ ending ? '正在结束…' : '标记为已结束' }}</Button
       ><Button
         v-if="live && controlsAvailable"
         data-stop-child

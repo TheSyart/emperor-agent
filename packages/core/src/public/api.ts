@@ -128,5 +128,6 @@ export {
   agentTitle,
   agentSourceLabel,
   agentPhaseLabel,
+  delegationNeedsExit,
 } from '../runtime/agent-view'
 export type { AgentView, AgentBackend, AgentPhase } from '../runtime/agent-view'

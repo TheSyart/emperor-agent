@@ -89,6 +89,8 @@ export type DelegationEvent =
       acceptance: DelegationRunRecord['acceptance']
     }
   | { type: 'recovery'; reason: string }
+  /** The run is ended as is: resolved, its queue cancelled (AGT-04). */
+  | { type: 'run-abandoned'; runId: string; by: 'user' | 'model'; at: number }
 export interface DelegationState {
   record?: DelegationRecord
   runs: Record<string, DelegationRunRecord>
@@ -100,9 +102,16 @@ export interface DelegationState {
   outbox: Record<string, DelegationNotice>
   lastSeq: number
 }
-const transitions: Record<RunPhase, readonly RunPhase[]> = {
+/** Legal run phase changes; the host settles a run only through these. */
+export const RUN_TRANSITIONS: Record<RunPhase, readonly RunPhase[]> = {
   queued: ['preparing', 'cancelled'],
-  preparing: ['running', 'cancelling', 'failed', 'outcome_unknown'],
+  preparing: [
+    'running',
+    'cancelling',
+    'failed',
+    'interrupted',
+    'outcome_unknown',
+  ],
   running: [
     'waiting_input',
     'cancelling',
@@ -146,6 +155,10 @@ export class DelegationFold {
   get state(): DelegationState {
     return structuredClone(this.value)
   }
+  /** Continue from an already folded state (a journal's in-memory copy). */
+  restore(state: DelegationState): void {
+    this.value = structuredClone(state)
+  }
   apply(entry: JournalEntry<DelegationEvent>): DelegationState {
     if (entry.seq !== this.value.lastSeq + 1)
       throw new DelegationError(
@@ -167,7 +180,9 @@ export class DelegationFold {
     }
     switch (e.type) {
       case 'dispatch-paused':
-        next.record!.dispatchPaused = e.paused
+        // Absent means not paused: resuming an unpaused record changes nothing.
+        if (Boolean(next.record!.dispatchPaused) !== e.paused)
+          next.record!.dispatchPaused = e.paused
         break
       case 'workspace-bound':
         if (!next.record)
@@ -248,13 +263,26 @@ export class DelegationFold {
         if (
           phase &&
           phase !== run.phase &&
-          !transitions[run.phase].includes(phase)
+          !RUN_TRANSITIONS[run.phase].includes(phase)
         )
           throw new DelegationError(
             'INVALID_TRANSITION',
             run.phase + ' -> ' + phase,
           )
-        Object.assign(run, e.patch)
+        const patch: typeof e.patch = { ...e.patch }
+        // The first failure reason of a settled run is kept: later restarts
+        // of older builds rewrote it to CONNECTION_LOST (SUB-33).
+        if (
+          TERMINAL_RUN_PHASES.has(run.phase) &&
+          run.failureCode &&
+          patch.failureCode !== undefined
+        )
+          delete patch.failureCode
+        const changed = (Object.keys(patch) as (keyof typeof patch)[]).some(
+          (key) => JSON.stringify(run[key]) !== JSON.stringify(patch[key]),
+        )
+        if (!changed) break
+        Object.assign(run, patch)
         run.revision++
         if (
           phase &&
@@ -324,6 +352,31 @@ export class DelegationFold {
       case 'recovery':
         next.record!.availability = 'needs_recovery'
         break
+      case 'run-abandoned': {
+        const run = requireRun(e.runId)
+        if (!TERMINAL_RUN_PHASES.has(run.phase)) {
+          run.phase = run.phase === 'queued' ? 'cancelled' : 'interrupted'
+          run.finishedAt ??= e.at
+        }
+        run.abandoned = { by: e.by, at: e.at }
+        run.recoveryResolved = true
+        run.revision++
+        for (const message of Object.values(next.messages))
+          if (
+            ['queued', 'sending', 'delivery_unknown'].includes(message.status)
+          )
+            message.status = 'cancelled'
+        for (const interaction of Object.values(next.interactions))
+          if (
+            interaction.runId === run.id &&
+            ['pending', 'answering'].includes(interaction.state)
+          )
+            interaction.state = 'cancelled'
+        if (next.record!.availability !== 'closed')
+          next.record!.availability = 'idle'
+        next.record!.dispatchPaused = false
+        break
+      }
       default:
         throw new DelegationError('JOURNAL_CORRUPT', 'unknown delegation event')
     }
