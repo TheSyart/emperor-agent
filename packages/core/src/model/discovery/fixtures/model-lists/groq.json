@@ -1,0 +1,48 @@
+{
+  "vendor": "groq",
+  "source": "Shape: console.groq.com/docs/api-reference#models-list (id, owned_by, active, context_window; research notes 2026-10-18). Values illustrative.",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://api.groq.com/openai/v1/models"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "object": "list",
+          "data": [
+            {
+              "id": "openai/gpt-oss-120b",
+              "object": "model",
+              "created": 1754408224,
+              "owned_by": "OpenAI",
+              "active": true,
+              "context_window": 131072,
+              "public_apps": null,
+              "max_completion_tokens": 65536
+            },
+            {
+              "id": "whisper-large-v3",
+              "object": "model",
+              "created": 1693721698,
+              "owned_by": "OpenAI",
+              "active": true,
+              "context_window": 448,
+              "public_apps": null
+            },
+            {
+              "id": "llama3-70b-8192",
+              "object": "model",
+              "created": 1693721698,
+              "owned_by": "Meta",
+              "active": false,
+              "context_window": 8192,
+              "public_apps": null
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

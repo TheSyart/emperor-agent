@@ -1,0 +1,99 @@
+{
+  "vendor": "ollama",
+  "source": "Shape: github.com/ollama/ollama docs/api.md (List Local Models, Show Model Information; checked 2026-10-19). num_ctx appears in `parameters` only when the Modelfile sets it.",
+  "exchanges": [
+    {
+      "request": { "method": "GET", "url": "http://localhost:11434/api/tags" },
+      "response": {
+        "status": 200,
+        "body": {
+          "models": [
+            {
+              "name": "qwen3:32b",
+              "model": "qwen3:32b",
+              "modified_at": "2026-10-01T12:00:00.000000+08:00",
+              "size": 20201253588,
+              "digest": "030ee887880f8a3e1fbc8f1ce2b5f4e7d06f5e4a9b0a33b0f3cbb2a8c3a8d4f1",
+              "details": {
+                "format": "gguf",
+                "family": "qwen3",
+                "families": ["qwen3"],
+                "parameter_size": "32.8B",
+                "quantization_level": "Q4_K_M"
+              }
+            },
+            {
+              "name": "nomic-embed-text:latest",
+              "model": "nomic-embed-text:latest",
+              "modified_at": "2026-09-01T12:00:00.000000+08:00",
+              "size": 274302450,
+              "digest": "0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f",
+              "details": {
+                "format": "gguf",
+                "family": "nomic-bert",
+                "families": ["nomic-bert"],
+                "parameter_size": "137M",
+                "quantization_level": "F16"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/show",
+        "body": { "model": "qwen3:32b" }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "modelfile": "FROM qwen3:32b\nPARAMETER num_ctx 16384",
+          "parameters": "num_ctx                        16384\nstop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"",
+          "template": "{{ .Prompt }}",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen3",
+            "families": ["qwen3"],
+            "parameter_size": "32.8B",
+            "quantization_level": "Q4_K_M"
+          },
+          "model_info": {
+            "general.architecture": "qwen3",
+            "general.parameter_count": 32762123264,
+            "qwen3.context_length": 40960
+          },
+          "capabilities": ["completion", "tools", "thinking"]
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/show",
+        "body": { "model": "nomic-embed-text:latest" }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "modelfile": "FROM nomic-embed-text:latest",
+          "template": "",
+          "details": {
+            "format": "gguf",
+            "family": "nomic-bert",
+            "families": ["nomic-bert"],
+            "parameter_size": "137M",
+            "quantization_level": "F16"
+          },
+          "model_info": {
+            "general.architecture": "nomic-bert",
+            "nomic-bert.context_length": 2048
+          },
+          "capabilities": ["embedding"]
+        }
+      }
+    }
+  ]
+}

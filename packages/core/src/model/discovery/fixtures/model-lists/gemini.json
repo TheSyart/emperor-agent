@@ -1,0 +1,83 @@
+{
+  "vendor": "gemini",
+  "source": "Shape: ai.google.dev/api/models#method:-models.list (Model resource; research notes 2026-10-18). Limits from the Gemini models page (2026-10-18). Split into two pages to exercise pageToken; no real key was used.",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "models": [
+            {
+              "name": "models/gemini-4-argon",
+              "baseModelId": "gemini-4-argon",
+              "version": "4",
+              "displayName": "Gemini 4 Argon",
+              "description": "Stable Gemini 4 model.",
+              "inputTokenLimit": 1048576,
+              "outputTokenLimit": 65536,
+              "supportedGenerationMethods": [
+                "generateContent",
+                "countTokens",
+                "createCachedContent",
+                "batchGenerateContent"
+              ],
+              "temperature": 1,
+              "maxTemperature": 2,
+              "topP": 0.95,
+              "topK": 64,
+              "thinking": true
+            },
+            {
+              "name": "models/gemini-3.8-flash",
+              "baseModelId": "gemini-3.8-flash",
+              "version": "3.8",
+              "displayName": "Gemini 3.8 Flash",
+              "inputTokenLimit": 1048576,
+              "outputTokenLimit": 65536,
+              "supportedGenerationMethods": ["generateContent", "countTokens"],
+              "thinking": true
+            },
+            {
+              "name": "models/gemini-embedding-001",
+              "version": "001",
+              "displayName": "Gemini Embedding 001",
+              "inputTokenLimit": 2048,
+              "outputTokenLimit": 1,
+              "supportedGenerationMethods": [
+                "embedContent",
+                "countTextTokens",
+                "countTokens"
+              ]
+            }
+          ],
+          "nextPageToken": "page-2-token"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&pageToken=page-2-token"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "models": [
+            {
+              "name": "models/imagen-4.0-generate-001",
+              "version": "001",
+              "displayName": "Imagen 4",
+              "inputTokenLimit": 480,
+              "outputTokenLimit": 8192,
+              "supportedGenerationMethods": ["predict"]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

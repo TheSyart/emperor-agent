@@ -1,0 +1,41 @@
+{
+  "vendor": "xai",
+  "source": "Shape: docs.x.ai/developers/rest-api-reference/inference/models (GET /v1/models: context_length, capabilities.reasoning_effort, prices in USD cents per 100M tokens; research notes 2026-10-18). Prices are kept but not read.",
+  "exchanges": [
+    {
+      "request": { "method": "GET", "url": "https://api.x.ai/v1/models" },
+      "response": {
+        "status": 200,
+        "body": {
+          "object": "list",
+          "data": [
+            {
+              "id": "grok-4.7",
+              "created": 1788000000,
+              "object": "model",
+              "owned_by": "xai",
+              "aliases": ["grok-4.7-latest"],
+              "context_length": 500000,
+              "capabilities": {
+                "reasoning_effort": ["low", "medium", "high", "xhigh"],
+                "default_reasoning_effort": "high"
+              },
+              "prices": {
+                "prompt_text_token_price": 20000,
+                "completion_text_token_price": 60000
+              },
+              "long_context_threshold": 200000
+            },
+            {
+              "id": "grok-build-0.1",
+              "created": 1786000000,
+              "object": "model",
+              "owned_by": "xai",
+              "context_length": 256000
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

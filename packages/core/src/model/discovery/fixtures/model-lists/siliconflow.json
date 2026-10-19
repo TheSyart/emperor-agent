@@ -1,0 +1,32 @@
+{
+  "vendor": "siliconflow",
+  "source": "Shape: docs.siliconflow.cn/cn/api-reference/models/get-model-list (type and sub_type are query filters; the response is id, object, created, owned_by only; research notes 2026-10-18).",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://api.siliconflow.cn/v1/models?type=text&sub_type=chat"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "object": "list",
+          "data": [
+            {
+              "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+              "object": "model",
+              "created": 0,
+              "owned_by": ""
+            },
+            {
+              "id": "deepseek-ai/DeepSeek-V3.2",
+              "object": "model",
+              "created": 0,
+              "owned_by": ""
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

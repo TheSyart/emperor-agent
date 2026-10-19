@@ -1,0 +1,84 @@
+{
+  "vendor": "mistral",
+  "source": "Shape: docs.mistral.ai OpenAPI BaseModelCard (capabilities, max_context_length, deprecation, deprecation_replacement_model, default_model_temperature, archived; research notes 2026-10-18). Values illustrative.",
+  "exchanges": [
+    {
+      "request": { "method": "GET", "url": "https://api.mistral.ai/v1/models" },
+      "response": {
+        "status": 200,
+        "body": {
+          "object": "list",
+          "data": [
+            {
+              "id": "mistral-large-4-0",
+              "object": "model",
+              "created": 1791244800,
+              "owned_by": "mistralai",
+              "capabilities": {
+                "completion_chat": true,
+                "function_calling": true,
+                "completion_fim": false,
+                "fine_tuning": false,
+                "vision": true,
+                "reasoning": false,
+                "ocr": false,
+                "classification": false,
+                "moderation": false,
+                "audio": false
+              },
+              "name": "mistral-large-4-0",
+              "description": "Mistral Large 4 (public preview).",
+              "max_context_length": 1048576,
+              "aliases": ["mistral-large-latest"],
+              "deprecation": null,
+              "deprecation_replacement_model": null,
+              "default_model_temperature": 0.3,
+              "type": "base"
+            },
+            {
+              "id": "mistral-embed",
+              "object": "model",
+              "created": 1700000000,
+              "owned_by": "mistralai",
+              "capabilities": {
+                "completion_chat": false,
+                "function_calling": false,
+                "completion_fim": false,
+                "fine_tuning": false,
+                "vision": false,
+                "classification": false
+              },
+              "max_context_length": 8192,
+              "type": "base"
+            },
+            {
+              "id": "magistral-medium-2509",
+              "object": "model",
+              "created": 1757000000,
+              "owned_by": "mistralai",
+              "capabilities": {
+                "completion_chat": true,
+                "function_calling": true,
+                "vision": true,
+                "reasoning": true
+              },
+              "max_context_length": 131072,
+              "deprecation": "2026-07-31T00:00:00Z",
+              "deprecation_replacement_model": "mistral-medium-latest",
+              "type": "base"
+            },
+            {
+              "id": "open-mistral-7b",
+              "object": "model",
+              "owned_by": "mistralai",
+              "capabilities": { "completion_chat": true },
+              "max_context_length": 32768,
+              "archived": true,
+              "type": "base"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
