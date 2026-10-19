@@ -30,7 +30,7 @@ const tooltip = useTooltip({
   delayMs: () => props.delayMs,
   enabled: () => !props.disabled && Boolean(props.label),
 })
-const { visible, position, listeners } = tooltip
+const { visible, position, side: bubbleSide, listeners } = tooltip
 </script>
 
 <template>
@@ -41,7 +41,7 @@ const { visible, position, listeners } = tooltip
     v-if="visible"
     :label="label"
     :shortcut="shortcut"
-    :side="side"
+    :side="bubbleSide"
     :position="position"
   />
 </template>

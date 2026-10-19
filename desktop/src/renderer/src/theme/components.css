@@ -41,6 +41,7 @@
   --list-inset: var(--space-4);
   --pane-header-h: 48px;
   --switch-thumb: 255 255 255;
+  --icon-button-lg: 36px;
 
   /* Materials and glass */
   --mask-blur: 2px;
