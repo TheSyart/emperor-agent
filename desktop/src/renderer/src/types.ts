@@ -195,6 +195,8 @@ export interface TokenStatsRow {
   output?: number
   cache_read?: number
   cache_create?: number
+  /** Reasoning tokens, counted apart from `output` by Core (KRN-05). */
+  reasoning?: number
   total?: number
   calls?: number
   provider?: string
@@ -410,6 +412,7 @@ export interface TokenUsageRecord {
   output: number
   cache_read: number
   cache_create: number
+  reasoning?: number
   total: number
 }
 

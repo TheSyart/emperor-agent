@@ -120,13 +120,23 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 
 ## 压缩
 
+**预算**（`compactionBudget`）：W 为上下文窗口，O 为请求的输出上限（最多 W / 2）。触发线 `floor(min(W × 0.8, W − O − 65536))`，窗口太小（约 120K 以下）、这一项不到 `0.45 × (W − O)` 时取后者；保留尾部 `0.16 × (W − O)`；摘要输出上限 `min(65536, O)`。`CompactionConfig.modelPolicies` 可按模型（可再限定路由）覆盖比例、余量与摘要上限。
+
+**计量**（`TokenMeter`）：文本按字符类别估算（CJK 表意文字与假名 1 字 ≈ 1 token，ASCII 4 字符 ≈ 1 token，其余 2 字符 ≈ 1 token），图片按路由计价（DeepSeek 14px patch 网格每张最多 1024；Anthropic `(w×h)/750`；OpenAI 512px tile；纯文本模型按占位文字），附件与截图的像素尺寸记在图片引用里。每次请求返回后用真实 usage 校准该会话的系数（指数平滑 α = 0.3，首个样本直接作为初值；与估算相差 4 倍以上的 usage 不采信）。上一次请求的 usage 属于未变的请求头时，它就是基线，只估算之后新增的部分。
+
 `harness/compaction/` 有三个触发点：
 
-1. **Step 前压力**：估算的上下文 token 数达到 `floor(contextWindow × 0.8)` 时，先用无模型的 pruner 截短超过 8,192 字符的旧工具结果，再重新测量；仍超出时对头部范围生成摘要，保留约 `contextWindow × 0.16` 的尾部内容。失败会记录但不中断 turn。
+1. **Step 前压力**：按下一次请求的路由（本 turn 已切到备用模型时按备用模型）计算预算，估算达到触发线时先用无模型的 pruner 截短超过 8,192 字符的旧工具结果（本 step 与上一 step 产生的结果模型还没读过，不截），再重新测量；仍超出时对头部范围生成摘要，保留尾部预算。失败会记录但不中断 turn，同一 agent 之后 3 次 step 前检查跳过；连续失败 3 次写 `compaction/warning`，界面提示「上下文接近上限，建议 /compact 或新开会话」。
 2. **上下文溢出重试**：请求返回 `CONTEXT_WINDOW_EXCEEDED` 时，先剪枝并以零保留预算摘要，只有表面确实缩小才重试。
 3. **手动 `/compact`**：通过 `agent.runMaintenance` 执行。
 
-摘要使用固定的 8 个章节（Primary Request and Intent、Key Technical Concepts、Files and Code、Errors and Fixes、Pending Jobs、Current Work、Next Step、Critical Context），以一条检查点 `user/message` 替换被压缩的范围。提交顺序为 `compaction/start` → 摘要调用 → `compaction/summary` → 检查点消息 → `compaction/end`。压缩只作用于 session log 的模型可见表面，不改写长期记忆。
+一次摘要请求放不下的范围（溢出恢复时一律）按块 map-reduce：每块不超过窗口的一半（溢出时不超过被拒请求的一半），只在没有未回填工具调用的位置切分，单条过大的消息保留头尾；各块的摘要最后合并成一份。摘要请求 `purpose: 'compaction'`，DeepSeek 与 pi-ai 路由都不开 thinking。
+
+摘要使用固定的 8 个章节（Primary Request and Intent、Key Technical Concepts、Files and Code、Errors and Fixes、Pending Jobs、Current Work、Next Step、Critical Context），以一条检查点 `user/message` 替换被压缩的范围。提交顺序为 `compaction/start` → 摘要调用（分块时多次）→ `compaction/summary`（usage 为各次之和）→ 检查点消息 → `compaction/end`。压缩只作用于 session log 的模型可见表面，不改写长期记忆。
+
+**图片卸载**：视觉路由的请求里图片超过该路由的内联预算（默认 base64 20 MiB，`RouteSpec.maxRequestImageBytes`）时，`buildRequest` 从最早的图片开始卸载到预算的一半，每个节点写一条 `image/offload {seq, reason}`；最新的那张不在这里卸载。`Session.deriveMessages()` 与 `deriveEventMessage()` 对已记录的节点发送占位文字，所以换模型、备用模型接手或重新打开会话后仍是卸载状态，压缩摘要看到的也一样。适配器自己的请求上限仍作为兜底。
+
+**Token 账本**：host 为每次对话请求和每次压缩摘要写一行 `tokens.jsonl`，计数互不重叠：`input`（不含缓存）、`output`（不含 reasoning）、`cache_read`、`cache_create`、`reasoning`，另有 provider、model、`model_entry_id` 与成本（模型条目的单价，没有时用内置目录的单价；单价未知时记为成本不完整）。旧账本里的 `prompt_tokens`、`prompt_cache_hit_tokens`、`completion_tokens`、`cache_*_input_tokens` 读取时换算成这五项。
 
 ## 长期上下文
 

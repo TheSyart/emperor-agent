@@ -13,6 +13,7 @@ import type {
 } from '@earendil-works/pi-ai'
 import {
   contentHasImage,
+  DEFAULT_REQUEST_IMAGE_BYTES,
   offloadRequestImages,
   type ImageResolver,
 } from '../../content'
@@ -22,7 +23,7 @@ import type { ContentBlock, GenerateOptions } from '../../types'
 import { toPiAssistant } from './replay'
 
 /** Base64 image payload bound per request before the oldest images are offloaded. */
-export const MAX_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024
+export const MAX_REQUEST_IMAGE_BYTES = DEFAULT_REQUEST_IMAGE_BYTES
 
 function flattenText(message: Message): string {
   return message.content

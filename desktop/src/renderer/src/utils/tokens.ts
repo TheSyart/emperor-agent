@@ -1,4 +1,55 @@
-import type { TokenStatsRow, TokensRange } from '../types'
+import type {
+  TokensPayload,
+  TokenStatsRow,
+  TokensRange,
+  TokenUsageRecord,
+} from '../types'
+
+function withReasoningInOutput<T extends TokenStatsRow | TokenUsageRecord>(
+  row: T,
+): T {
+  const reasoning = Number(row.reasoning) || 0
+  if (reasoning <= 0) return row
+  return { ...row, output: (Number(row.output) || 0) + reasoning }
+}
+
+function rowsWithReasoningInOutput(
+  rows: Record<string, TokenStatsRow>,
+): Record<string, TokenStatsRow> {
+  return Object.fromEntries(
+    Object.entries(rows).map(([key, row]) => [key, withReasoningInOutput(row)]),
+  )
+}
+
+/**
+ * Core counts reasoning apart from output (disjoint ledger fields); the
+ * usage page shows 输出 as everything the model generated, as providers
+ * bill it. Totals already include reasoning.
+ */
+export function displayTokensPayload(payload: TokensPayload): TokensPayload {
+  return {
+    ...payload,
+    totals: withReasoningInOutput(payload.totals),
+    byDate: rowsWithReasoningInOutput(payload.byDate),
+    byModel: rowsWithReasoningInOutput(payload.byModel),
+    byUsageType: rowsWithReasoningInOutput(payload.byUsageType),
+    byDateModel: Object.fromEntries(
+      Object.entries(payload.byDateModel).map(([date, rows]) => [
+        date,
+        rowsWithReasoningInOutput(rows),
+      ]),
+    ),
+    byHour: rowsWithReasoningInOutput(payload.byHour),
+    ...(payload.recentCalls === undefined
+      ? {}
+      : { recentCalls: payload.recentCalls.map(withReasoningInOutput) }),
+    ...(payload.recentCacheCalls === undefined
+      ? {}
+      : {
+          recentCacheCalls: payload.recentCacheCalls.map(withReasoningInOutput),
+        }),
+  }
+}
 
 export interface DateBucket {
   date: string

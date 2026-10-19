@@ -32,6 +32,11 @@ declare module '../../session-log/types' {
       /** Written by crash repair, not by the compaction itself. */
       repaired?: true
     }
+    /**
+     * Pre-step compaction failed `failures` times in a row: the context is
+     * nearly full and the user should `/compact` or start a new session.
+     */
+    'compaction/warning': { failures: number }
     /** Shadow price of one pruned tool result (precedes its replacement). */
     'compaction/prune': {
       shadowedRange: { start: number; end: number }

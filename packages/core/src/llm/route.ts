@@ -38,6 +38,8 @@ export interface RouteSpec {
   retryPolicy: ResolvedRetryPolicy
   /** Maximum provider idle time while one stream read is outstanding. */
   streamIdleTimeoutMs: number
+  /** Inline image budget per request in base64 bytes (default 20 MiB). */
+  maxRequestImageBytes?: number
 }
 
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000

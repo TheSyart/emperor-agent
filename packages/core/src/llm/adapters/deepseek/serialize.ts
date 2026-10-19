@@ -8,6 +8,7 @@
 
 import {
   contentHasImage,
+  DEFAULT_REQUEST_IMAGE_BYTES,
   offloadRequestImages,
   type ImageResolver,
 } from '../../content'
@@ -35,7 +36,7 @@ interface ResolvedThinking {
 }
 
 /** Base64 image payload bound per request before the oldest images are offloaded. */
-export const MAX_INLINE_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024
+export const MAX_INLINE_REQUEST_IMAGE_BYTES = DEFAULT_REQUEST_IMAGE_BYTES
 const TOOL_RESULT_IMAGE_TEXT = 'Attached image(s) from tool result:'
 
 function reasoningEffort(effort: string): 'off' | 'low' | 'high' | 'max' {
@@ -52,12 +53,16 @@ function reasoningEffort(effort: string): 'off' | 'low' | 'high' | 'max' {
   )
 }
 
-/** Resolve one legal thinking/effort pair without exposing `off` as a wire effort. */
+/**
+ * Resolve one legal thinking/effort pair without exposing `off` as a wire
+ * effort. Titles and compaction summaries are sent without thinking.
+ */
 function resolveThinking(
   options: GenerateOptions,
   defaults: RequestDefaults,
 ): ResolvedThinking {
-  if (options.purpose === 'session-title') return { thinking: 'disabled' }
+  if (options.purpose === 'session-title' || options.purpose === 'compaction')
+    return { thinking: 'disabled' }
   const effort =
     options.reasoningEffort === undefined
       ? defaults.reasoningEffort

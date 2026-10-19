@@ -4,7 +4,9 @@
  * Every current `tool/result` whose text exceeds `thresholdChars` keeps its
  * first `headChars` and last `tailChars` code points around a marker. Each
  * replacement is a surface `replace` of exactly that node, preceded by a
- * `compaction/prune` shadow-price event.
+ * `compaction/prune` shadow-price event. Results of the step being run and
+ * the step before it are never pruned: the model has not read them yet
+ * (CORE-28).
  */
 
 import { freezeMessage, type ToolResultMessage } from '../../llm/message'
@@ -109,29 +111,45 @@ export class ToolResultPruner {
     return pruned
   }
 
-  /** Prune every over-budget tool result on the current surface. */
-  pruneSession(session: Session): PruneResult {
+  /**
+   * Prune every over-budget tool result on the current surface, except
+   * those of the step `current` names and of the step before it.
+   */
+  pruneSession(
+    session: Session,
+    current?: { turn: number; step: number },
+  ): PruneResult {
     const candidates: number[] = []
     for (const seq of [...session.surface.nodes]) {
-      if (session.events[seq]?.type === 'tool/result') candidates.push(seq)
+      const event = session.events[seq]
+      if (event?.type !== 'tool/result') continue
+      if (
+        current !== undefined &&
+        event.data.turn === current.turn &&
+        event.data.step >= current.step - 1
+      )
+        continue
+      candidates.push(seq)
     }
     const result: PruneResult = { pruned: [], charsRemoved: 0 }
     for (const seq of candidates) {
       const event = session.events[seq]
       if (event?.type !== 'tool/result') continue
-      const block = event.data.message.content[0]
+      // The node as requests see it (an offloaded image stays offloaded).
+      const source = session.deriveEventMessage(event) as ToolResultMessage
+      const block = source.content[0]
       const content = this.pruneContent(block.content)
       if (content === null) continue
       const charsBefore = this.measureContent(block.content)
       const charsAfter = this.measureContent(content)
       const message = freezeMessage<ToolResultMessage>({
-        ...event.data.message,
+        ...source,
         content: [{ ...block, content }] as [typeof block],
       })
       session.append('compaction/prune', {
         shadowedRange: { start: seq, end: seq },
         shadowedSeqs: [seq],
-        shadowedTokenCount: estimateMessage(event.data.message),
+        shadowedTokenCount: estimateMessage(source),
       })
       const replacement = session.append(
         'tool/result',
