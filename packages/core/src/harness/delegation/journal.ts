@@ -44,11 +44,31 @@ const codec: JournalCodec<DelegationEvent> = {
     return e
   },
 }
+/** The file as last read or written by this instance. */
+interface JournalCache {
+  size: number
+  mtimeMs: number
+  fold: DelegationFold
+  /** Bytes of journal entries per run (and `control`), for the 8 MiB limit. */
+  sizes: Map<string, number>
+}
+const entryScope = (e: DelegationEvent) =>
+  'runId' in e ? e.runId : e.type === 'run-created' ? e.run.id : 'control'
+/** State as compared for "did this event change anything" (AGT-04). */
+const comparable = (state: DelegationState) =>
+  JSON.stringify({ ...state, lastSeq: 0 })
+/**
+ * One external conversation's control journal. State is folded in memory
+ * and re-read only when the file changed underneath (another instance, a
+ * repaired tail); an event that would not change the state is not appended
+ * (AGT-04, SUB-15).
+ */
 export class DelegationJournal {
   readonly path: string
   readonly snapshotPath: string
   private readonly adapter: SyncPersistenceAdapter
   private readonly storage: AppendOnlyJournalSync<DelegationEvent>
+  private cache?: JournalCache
   constructor(
     readonly root: string,
     readonly id: string,
@@ -104,28 +124,58 @@ export class DelegationJournal {
       )
     }
   }
-  load(): DelegationState {
-    return withPersistenceLockSync(
-      this.path + '.owner',
-      () => {
-        const fold = new DelegationFold()
-        for (const entry of this.replay()) fold.apply(entry)
-        return fold.state
-      },
-      { adapter: this.adapter },
+  private fileKey(): { size: number; mtimeMs: number } {
+    if (!this.adapter.exists(this.path)) return { size: -1, mtimeMs: -1 }
+    const stat = this.adapter.stat(this.path)
+    return { size: stat.size, mtimeMs: stat.mtimeMs }
+  }
+  /** The folded state, replaying the file only if it changed since. */
+  private current(): JournalCache {
+    const key = this.fileKey()
+    if (
+      this.cache &&
+      this.cache.size === key.size &&
+      this.cache.mtimeMs === key.mtimeMs
     )
+      return this.cache
+    this.cache = undefined
+    const fold = new DelegationFold(),
+      sizes = new Map<string, number>()
+    for (const entry of this.replay()) {
+      fold.apply(entry)
+      const scope = entryScope(entry.payload)
+      sizes.set(
+        scope,
+        (sizes.get(scope) ?? 0) +
+          Buffer.byteLength(JSON.stringify(entry), 'utf8'),
+      )
+    }
+    this.cache = { ...this.fileKey(), fold, sizes }
+    return this.cache
+  }
+  load(): DelegationState {
+    try {
+      return this.current().fold.state
+    } catch (error) {
+      this.cache = undefined
+      throw error
+    }
   }
   async append(
     event: DelegationEvent,
     _options: { flush?: boolean } = {},
-  ): Promise<{ seq: number; cacheWritten: boolean }> {
+  ): Promise<{ seq: number; cacheWritten: boolean; changed: boolean }> {
     return withPersistenceLockSync(
       this.path + '.owner',
       () => {
-        const entries = this.replay(),
-          fold = new DelegationFold()
-        for (const entry of entries) fold.apply(entry)
-        const current = fold.state
+        let cache: JournalCache
+        try {
+          cache = this.current()
+        } catch (error) {
+          this.cache = undefined
+          throw error
+        }
+        const current = cache.fold.state
         if (
           event.type === 'message-enqueued' &&
           current.messages[event.message.id]
@@ -136,29 +186,32 @@ export class DelegationJournal {
               'IDEMPOTENCY_CONFLICT',
               'message id has different content',
             )
-          return { seq: previous.seq!, cacheWritten: true }
+          return { seq: previous.seq!, cacheWritten: true, changed: false }
         }
         const encoded = codec.create(current.lastSeq + 1, event)
-        const scope = (e: DelegationEvent) =>
-          'runId' in e
-            ? e.runId
-            : e.type === 'run-created'
-              ? e.run.id
-              : 'control'
-        const size =
-          entries
-            .filter((e) => scope(e.payload) === scope(event))
-            .reduce(
-              (n, e) => n + Buffer.byteLength(JSON.stringify(e), 'utf8'),
-              0,
-            ) + Buffer.byteLength(JSON.stringify(encoded), 'utf8')
+        // Validate on a copy: a rejected event leaves the cache untouched.
+        const trial = new DelegationFold()
+        trial.restore(current)
+        const next = trial.apply(encoded)
+        if (comparable(next) === comparable(current))
+          return { seq: current.lastSeq, cacheWritten: true, changed: false }
+        const scope = entryScope(event),
+          bytes = Buffer.byteLength(JSON.stringify(encoded), 'utf8'),
+          size = (cache.sizes.get(scope) ?? 0) + bytes
         if (size > 8 * 1024 * 1024)
           throw new DelegationError(
             'OUTPUT_LIMIT',
             'delegation control journal limit exceeded',
           )
-        const next = fold.apply(encoded)
-        this.storage.appendAtSequence(event, encoded.seq)
+        try {
+          this.storage.appendAtSequence(event, encoded.seq)
+        } catch (error) {
+          this.cache = undefined
+          throw error
+        }
+        cache.fold = trial
+        cache.sizes.set(scope, size)
+        Object.assign(cache, this.fileKey())
         let cacheWritten = true
         try {
           durableReplaceSync(
@@ -173,7 +226,7 @@ export class DelegationJournal {
         } catch {
           cacheWritten = false
         } // The cache is reconstructible; the journal append is already durable.
-        return { seq: encoded.seq, cacheWritten }
+        return { seq: encoded.seq, cacheWritten, changed: true }
       },
       { adapter: this.adapter },
     )

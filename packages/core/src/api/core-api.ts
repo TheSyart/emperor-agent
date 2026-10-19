@@ -1330,10 +1330,9 @@ export class CoreApi {
         backend: state.record.backend,
       }),
     ) as DelegationProjection
-    const parent =
-      owner.parentAgentId === owner.rootSessionId
-        ? this.host.agentFor(owner.rootSessionId).session
-        : this.host.sessionLog(owner.parentAgentId)
+    // The log, not the agent: projecting a state change must not open a
+    // historical conversation or run its SessionStart hooks (AGT-04).
+    const parent = this.host.sessionLog(owner.parentAgentId)
     if (parent) {
       parent.append('delegation/projection', payload)
       this.host.sessions.flush(parent.id)

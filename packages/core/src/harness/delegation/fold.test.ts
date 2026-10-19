@@ -92,3 +92,45 @@ it('terminal metadata cannot reopen a closed conversation or idle a newer active
   )
   expect(fold.state.record?.availability).toBe('active')
 })
+describe('AGT-04 fold rules', () => {
+  const settled = (failureCode: string): DelegationEvent[] => [
+    { type: 'created', record: record() },
+    { type: 'run-created', run: run() },
+    { type: 'run-changed', runId: 'dgr-1', patch: { phase: 'preparing' } },
+    { type: 'run-changed', runId: 'dgr-1', patch: { phase: 'running' } },
+    {
+      type: 'run-changed',
+      runId: 'dgr-1',
+      patch: { phase: 'outcome_unknown', failureCode },
+    },
+  ]
+  it('keeps the first failure reason of a settled run', () => {
+    const fold = new DelegationFold()
+    // An older build rewrote it to CONNECTION_LOST on every start (SUB-33).
+    ;[
+      ...settled('OUTPUT_LIMIT'),
+      {
+        type: 'run-changed' as const,
+        runId: 'dgr-1',
+        patch: { failureCode: 'CONNECTION_LOST', quiescent: true },
+      },
+    ].forEach((e, i) => fold.apply(entry(i + 1, e)))
+    expect(fold.state.runs['dgr-1']).toMatchObject({
+      failureCode: 'OUTPUT_LIMIT',
+      quiescent: true,
+    })
+  })
+  it('does not bump the revision for a patch that changes nothing', () => {
+    const fold = new DelegationFold()
+    settled('OUTPUT_LIMIT').forEach((e, i) => fold.apply(entry(i + 1, e)))
+    const revision = fold.state.runs['dgr-1']!.revision
+    fold.apply(
+      entry(6, {
+        type: 'run-changed',
+        runId: 'dgr-1',
+        patch: { phase: 'outcome_unknown' },
+      }),
+    )
+    expect(fold.state.runs['dgr-1']!.revision).toBe(revision)
+  })
+})

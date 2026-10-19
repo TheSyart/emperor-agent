@@ -143,6 +143,9 @@ it('flushes output from cached ownership without rereading every durable delegat
   const original = f.api.delegationRuntime.list.bind(f.api.delegationRuntime)
   try {
     const rootId = String(f.api.sessions.create({ title: 'root' }).id)
+    // The root conversation that started the child (projections go to its
+    // log; they never open one, AGT-04).
+    f.api.host.agentFor(rootId)
     const state: DelegationState = {
       record: {
         ...fixtureDelegationRecord(),

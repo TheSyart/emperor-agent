@@ -183,7 +183,8 @@ it('scheduler and ordinary children share global quota; stable Goal identity ret
     await expect(
       service.verifyGoalCompletion({ id: 'g', revision: 9 }, 'root'),
     ).resolves.toBeUndefined()
-    expect(service.list().every((s) => s.record!.dispatchPaused)).toBe(true)
+    // Stopping the root does not rewrite settled conversations (AGT-04).
+    expect(service.list().some((s) => s.record!.dispatchPaused)).toBe(false)
   } finally {
     releases.forEach((release) => release())
     await service.shutdown()
