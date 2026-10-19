@@ -2,7 +2,7 @@
  * Conversation compaction (ported from dsh-compaction-basic).
  *
  * Budgets (DSH-4), for a window W and an output cap O (at most W / 2):
- * trigger = floor(min(W × 0.8, W − O − 65536)), never below 0.4 × (W − O);
+ * trigger = floor(min(W × 0.8, W − O − 65536)), never below 0.45 × (W − O);
  * retained tail = 0.16 × (W − O); summary output cap = min(65536, O). An
  * exact `modelPolicies` entry overrides these per model.
  *
@@ -174,8 +174,12 @@ export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = Object.freeze({
   modelPolicies: Object.freeze([]),
 })
 
-/** Lowest trigger as a share of W − O, for windows too small for the headroom. */
-const MIN_TRIGGER_RATIO = 0.4
+/**
+ * Lowest trigger as a share of W − O, for windows too small for the 64K
+ * headroom (below ~120K). The largest share that still leaves a 128K
+ * window with an 8K output cap on the headroom formula (54,000 < 54,464).
+ */
+const MIN_TRIGGER_RATIO = 0.45
 /** Output cap assumed when neither the request nor the route names one. */
 const FALLBACK_OUTPUT_TOKENS = 8_192
 
@@ -210,7 +214,7 @@ function policyFor(
 
 /**
  * trigger = floor(min(W × thresholdRatio, W − O − headroomTokens)), at
- * least 0.4 × (W − O); retain = 0.16 × (W − O); summary cap = min(65536, O).
+ * least 0.45 × (W − O); retain = 0.16 × (W − O); summary cap = min(65536, O).
  */
 export function compactionBudget(
   config: CompactionConfig,
@@ -310,7 +314,7 @@ export class CompactionEngine {
       const retain = policy.retainRatio ?? this.config.retainRatio
       if (retain >= Math.min(threshold, MIN_TRIGGER_RATIO))
         throw new Error(
-          'compaction: retainRatio must be below thresholdRatio and 0.4',
+          'compaction: retainRatio must be below thresholdRatio and 0.45',
         )
     }
   }

@@ -120,7 +120,7 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 
 ## 压缩
 
-**预算**（`compactionBudget`）：W 为上下文窗口，O 为请求的输出上限（最多 W / 2）。触发线 `floor(min(W × 0.8, W − O − 65536))`，窗口太小、这一项不到 `0.4 × (W − O)` 时取后者；保留尾部 `0.16 × (W − O)`；摘要输出上限 `min(65536, O)`。`CompactionConfig.modelPolicies` 可按模型（可再限定路由）覆盖比例、余量与摘要上限。
+**预算**（`compactionBudget`）：W 为上下文窗口，O 为请求的输出上限（最多 W / 2）。触发线 `floor(min(W × 0.8, W − O − 65536))`，窗口太小（约 120K 以下）、这一项不到 `0.45 × (W − O)` 时取后者；保留尾部 `0.16 × (W − O)`；摘要输出上限 `min(65536, O)`。`CompactionConfig.modelPolicies` 可按模型（可再限定路由）覆盖比例、余量与摘要上限。
 
 **计量**（`TokenMeter`）：文本按字符类别估算（CJK 表意文字与假名 1 字 ≈ 1 token，ASCII 4 字符 ≈ 1 token，其余 2 字符 ≈ 1 token），图片按路由计价（DeepSeek 14px patch 网格每张最多 1024；Anthropic `(w×h)/750`；OpenAI 512px tile；纯文本模型按占位文字），附件与截图的像素尺寸记在图片引用里。每次请求返回后用真实 usage 校准该会话的系数（指数平滑 α = 0.3，首个样本直接作为初值；与估算相差 4 倍以上的 usage 不采信）。上一次请求的 usage 属于未变的请求头时，它就是基线，只估算之后新增的部分。
 

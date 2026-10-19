@@ -43,7 +43,8 @@ describe('compactionBudget', () => {
       contextWindow: 32_000,
       maxOutputTokens: 8_000,
     })
-    expect(budget.triggerTokens).toBe(9_600)
+    // 0.45 × (32,000 − 8,000): the 64K headroom would leave nothing.
+    expect(budget.triggerTokens).toBe(10_800)
     expect(budget.retainTokens).toBe(3_840)
     expect(budget.retainTokens).toBeLessThan(budget.triggerTokens)
     // An output cap at or above the window cannot leave the window empty.
