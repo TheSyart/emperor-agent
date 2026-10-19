@@ -418,6 +418,11 @@ export interface AgentDownloadView {
   bytes: number
   exists: boolean
   /**
+   * An inbox file whose macOS source mark (`com.apple.quarantine`) could not
+   * be set (SEC-10): the list says 未能标记来源.
+   */
+  unmarked?: true
+  /**
    * Downloaded in the user's own Chrome or Edge (PLAN-CAP-001 RV-09): the
    * file stays in that browser's download folder (no file actions here).
    */

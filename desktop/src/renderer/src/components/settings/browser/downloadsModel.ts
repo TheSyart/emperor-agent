@@ -11,6 +11,8 @@ import {
 } from '../../workspace/browserModel'
 
 const GONE = '文件已移走或删除'
+/** The macOS source mark could not be set on an inbox file (SEC-10). */
+const UNMARKED = '未能标记来源'
 
 /** Why a download was stopped, short enough for a row. */
 const BLOCKED: Readonly<
@@ -75,10 +77,12 @@ export function agentDownloadDescription(
   now: number = Date.now(),
 ): string {
   if (view.browser !== undefined) return externalDescription(view, now)
+  if (!view.exists) return describe(view.site, view.time, GONE, now)
+  const size = formatDownloadSize(view.bytes)
   return describe(
     view.site,
     view.time,
-    view.exists ? formatDownloadSize(view.bytes) : GONE,
+    view.unmarked ? `${size} · ${UNMARKED}` : size,
     now,
   )
 }
