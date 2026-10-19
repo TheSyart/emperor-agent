@@ -85,7 +85,7 @@ export interface AppContext {
   sendMessage: (payload: string | ChatSendPayload) => boolean | Promise<boolean>
   manageQueuedPrompt: (
     promptId: string,
-    action: 'cancel' | 'interject',
+    action: 'cancel' | 'interject' | 'send',
   ) => Promise<boolean>
   sendInteractionAnswer: (
     interactionId: string,

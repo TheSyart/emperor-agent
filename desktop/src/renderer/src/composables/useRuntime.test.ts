@@ -155,6 +155,126 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(runtime.queuedPrompts.value).toEqual([])
   })
 
+  // KRN-02: a prompt left behind by a failed or stopped turn stays queued.
+  it('shows a held prompt as waiting to send when its queue state changes', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    let queue: Array<Record<string, unknown>> = []
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        if (args[0] === 'chat.listQueuedPrompts') return queue
+        return { ok: true }
+      },
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => undefined
+      },
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.connectSocket()
+    runtime.switchSession('s1')
+    await flushPromises()
+
+    queue = [
+      {
+        id: 'p1',
+        turnId: '',
+        clientMessageId: 'c1',
+        content: 'later',
+        displayContent: 'later',
+        delivery: 'queue',
+        supportsInterjection: true,
+        createdOrder: 0,
+        attachmentIds: [],
+        requestedSkills: [],
+        state: 'failed-previous',
+        reason: 'previous-turn-failed',
+      },
+    ]
+    emitCoreEvent(listener, {
+      event: 'queue_item_state',
+      seq: 0,
+      session_id: 's1',
+      prompt_id: 'p1',
+      state: 'failed-previous',
+      reason: 'previous-turn-failed',
+    })
+    await flushPromises()
+    expect(runtime.queuedPrompts.value).toEqual([
+      expect.objectContaining({
+        id: 'p1',
+        status: 'failed-previous',
+        holdReason: 'previous-turn-failed',
+      }),
+    ])
+
+    // A step reserving it takes it out of the tray without another read.
+    emitCoreEvent(listener, {
+      event: 'queue_item_state',
+      seq: 0,
+      session_id: 's1',
+      prompt_id: 'p1',
+      state: 'sending',
+    })
+    expect(runtime.queuedPrompts.value).toEqual([])
+  })
+
+  it('keeps a queued draft sent when the submit reports it still queued', async () => {
+    let resolveSubmit!: (value: unknown) => void
+    g.window = fakeWindow({
+      invokeCore: (...args: unknown[]) => {
+        if (args[0] === 'chat.submit')
+          return new Promise((resolve) => {
+            resolveSubmit = resolve
+          })
+        if (args[0] === 'chat.listQueuedPrompts') return Promise.resolve([])
+        return Promise.resolve({ ok: true })
+      },
+      onCoreEvent: () => () => {},
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.switchSession('s1')
+    await flushPromises()
+    runtime.busy.value = true
+    const outcome = runtime.sendMessage({
+      content: 'behind a failing turn',
+      delivery: 'queue',
+    })
+    resolveSubmit({
+      turnId: null,
+      messageId: 'm1',
+      content: '',
+      activeSessionId: 's1',
+      delivery: 'queued',
+      result: { kind: 'not-consumed', reason: 'previous-turn-failed' },
+    })
+    await expect(outcome).resolves.toBe(true)
+  })
+
+  it('sends a held prompt with the send action and re-reads the queue', async () => {
+    const calls: unknown[][] = []
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        calls.push(args)
+        if (args[0] === 'chat.listQueuedPrompts') return []
+        if (args[0] === 'chat.manageQueuedPrompt') return { ok: true }
+        return { ok: true }
+      },
+      onCoreEvent: () => () => {},
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.switchSession('s1')
+    await flushPromises()
+    const reads = () =>
+      calls.filter((call) => call[0] === 'chat.listQueuedPrompts').length
+    const before = reads()
+    await expect(runtime.manageQueuedPrompt('p1', 'send')).resolves.toBe(true)
+    expect(calls).toContainEqual([
+      'chat.manageQueuedPrompt',
+      { sessionId: 's1', promptId: 'p1', action: 'send' },
+    ])
+    expect(reads()).toBe(before + 1)
+  })
+
   it('applies live profile onboarding state changes to bootstrap', () => {
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({

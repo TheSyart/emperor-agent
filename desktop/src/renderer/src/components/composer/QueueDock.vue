@@ -3,7 +3,9 @@
  * QueueDock — dsh queue panel attached to the top of the composer card
  * (radius 12 12 0 0, tip fill, square bottom tucked under the card). A 36px
  * header counts the queued messages; each 36px row previews one message with
- * interject / edit / delete actions.
+ * interject / edit / delete actions. A message the agent did not run (the
+ * turn before it failed or was stopped, or the app restarted) waits as
+ * 「待发送」 with send / edit / discard actions instead (KRN-02).
  */
 import { computed, ref } from 'vue'
 import type { QueuedPromptItem } from '../../types'
@@ -16,7 +18,25 @@ const emit = defineEmits<{
   edit: [item: QueuedPromptItem]
   interject: [item: QueuedPromptItem]
   cancel: [item: QueuedPromptItem]
+  send: [item: QueuedPromptItem]
 }>()
+
+const HOLD_LABELS: Record<
+  NonNullable<QueuedPromptItem['holdReason']>,
+  string
+> = {
+  'previous-turn-failed': '待发送 · 上一轮失败',
+  'previous-turn-stopped': '待发送 · 上一轮已停止',
+  interrupted: '待发送 · 应用重启前未发出',
+}
+
+function held(item: QueuedPromptItem): boolean {
+  return item.status === 'failed-previous'
+}
+
+function holdLabel(item: QueuedPromptItem): string {
+  return item.holdReason ? HOLD_LABELS[item.holdReason] : '待发送'
+}
 
 const expanded = ref(true)
 const ordered = computed(() =>
@@ -29,7 +49,10 @@ const headline = computed(() => {
   const interjecting = ordered.value.some(
     (item) => item.status === 'interjecting',
   )
-  return interjecting ? `${count} 条消息准备插入` : `${count} 条消息排队中`
+  if (interjecting) return `${count} 条消息准备插入`
+  return ordered.value.every(held)
+    ? `${count} 条消息待发送`
+    : `${count} 条消息排队中`
 })
 </script>
 
@@ -57,6 +80,9 @@ const headline = computed(() => {
             <span v-if="item.status === 'interjecting'" class="state"
               >准备插入 ·</span
             >
+            <span v-else-if="held(item)" class="state held"
+              >{{ holdLabel(item) }} ·</span
+            >
             <ReferencedText
               v-if="item.content"
               :text="item.content"
@@ -64,7 +90,36 @@ const headline = computed(() => {
             />
             <template v-else>（附件消息）</template>
           </span>
-          <span class="actions">
+          <span v-if="held(item)" class="actions">
+            <button
+              type="button"
+              class="action"
+              title="发送"
+              aria-label="发送排队消息"
+              @click="emit('send', item)"
+            >
+              <DsSend :size="14" />
+            </button>
+            <button
+              type="button"
+              class="action"
+              title="编辑消息"
+              aria-label="编辑消息"
+              @click="emit('edit', item)"
+            >
+              <DsEdit :size="14" />
+            </button>
+            <button
+              type="button"
+              class="action"
+              title="丢弃"
+              aria-label="丢弃排队消息"
+              @click="emit('cancel', item)"
+            >
+              <DsTrash :size="14" />
+            </button>
+          </span>
+          <span v-else class="actions">
             <button
               type="button"
               class="action"
@@ -212,6 +267,11 @@ const headline = computed(() => {
 
 .state {
   color: rgb(var(--accent-strong));
+}
+
+.state.held {
+  color: rgb(var(--label-secondary));
+  font-weight: 500;
 }
 
 .actions {

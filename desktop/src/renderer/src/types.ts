@@ -1185,7 +1185,10 @@ export interface QueuedPromptItem {
   clientMessageId: string
   content: string
   delivery: 'queue' | 'interject'
-  status: 'queued' | 'interjecting'
+  /** `failed-previous`: not run (the turn before it failed or was stopped); waits for 发送 / 丢弃. */
+  status: 'queued' | 'interjecting' | 'failed-previous'
+  /** Why a `failed-previous` prompt waits (Core `QueuedPromptRecord.reason`). */
+  holdReason?: 'previous-turn-failed' | 'previous-turn-stopped' | 'interrupted'
   supportsInterjection: boolean
   createdOrder: number
   attachmentCount: number
