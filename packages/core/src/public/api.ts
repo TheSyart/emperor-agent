@@ -23,6 +23,20 @@ export type {
   ReasoningControl,
 } from '../model/metadata/lookup'
 export type {
+  ConnectionFix,
+  DiscoveredFactField,
+  DiscoveredModel,
+  DiscoveryErrorCode,
+  ParserId,
+  ProbeErrorCode,
+  ProbeResult,
+} from '../model/discovery'
+export type {
+  ModelConnectionInput,
+  ModelDiscoveryInput,
+  ModelDiscoveryPayload,
+} from '../api/services/model-service'
+export type {
   CompactionDecision,
   DiscardedItem,
 } from '../memory/compaction-models'

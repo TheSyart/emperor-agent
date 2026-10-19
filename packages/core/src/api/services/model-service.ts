@@ -38,12 +38,17 @@ import {
   type ProviderSpec,
 } from '../../llm/catalog'
 import type { ProfileOnboardingActionResult } from '../../sessions/onboarding'
+import {
+  ModelDiscovery,
+  type ConnectionFix,
+  type DiscoveredModel,
+  type DiscoveryConnection,
+  type DiscoveryErrorCode,
+  type ParserId,
+  type ProbeResult,
+} from '../../model/discovery'
 
 type Dict = Record<string, any>
-
-const MODEL_DISCOVERY_TIMEOUT_MS = 15_000
-const ANTHROPIC_MODELS_URL = 'https://api.anthropic.com/v1/models'
-const ANTHROPIC_VERSION = '2023-06-01'
 
 export interface CoreModelServiceDeps {
   /** Test hook: build the one-shot client used by `test()`. */
@@ -51,6 +56,8 @@ export interface CoreModelServiceDeps {
   refreshModelConfig?: () => void | Promise<void>
   afterConfigSaved?: () =>
     ProfileOnboardingActionResult | Promise<ProfileOnboardingActionResult>
+  /** Test hook: model lists and connection checks (transport, cache). */
+  discovery?: ModelDiscovery
 }
 
 export type ModelEntrySaveInput = Omit<ModelEntryUpdate, 'legacy'> & {
@@ -113,10 +120,30 @@ export interface ModelConfigSavePayload extends ModelConfigPayload {
   profileOnboarding?: ProfileOnboardingActionResult
 }
 
-export interface DiscoveredModel {
-  id: string
-  ownedBy?: string
-  created?: number | string
+export type { DiscoveredModel, ProbeResult } from '../../model/discovery'
+
+/**
+ * A connection as the add-model form holds it. The draft `apiKey` always
+ * wins; a stored key is used only when the draft key is empty or masked
+ * (`***…`) and `entryId` / `connectionId` points at a saved entry on the
+ * same provider, protocol and API base. `apiKey: null` means no key.
+ */
+export interface ModelConnectionInput {
+  entryId?: string
+  /** MOD-03 connection id; matched against entries that carry one. */
+  connectionId?: string
+  provider?: string
+  protocol?: ModelProtocol
+  apiBase?: string
+  apiKey?: string | null
+  extraHeaders?: Record<string, string>
+  /** Bailian (百炼) workspace, for its official model catalog. */
+  workspaceId?: string
+}
+
+export interface ModelDiscoveryInput extends ModelConnectionInput {
+  /** Skip the 15-minute cache. */
+  refresh?: boolean
 }
 
 export interface ModelDiscoveryPayload {
@@ -124,20 +151,42 @@ export interface ModelDiscoveryPayload {
   provider: string
   protocol: ModelProtocol
   apiBase: string | null
-  source: string
+  /** `catalog`: no list endpoint, the models are catalog recommendations. */
+  source: 'vendor_api' | 'catalog' | 'none'
+  parser: ParserId | null
   models: DiscoveredModel[]
-  code?: string
+  truncated: boolean
+  totalCount: number
+  droppedSecretLikeIds: number
+  cached: boolean
+  fetchedAt: string | null
+  fix?: ConnectionFix
+  code?: DiscoveryErrorCode
   message?: string
+  status?: number
 }
+
+type ResolvedConnection =
+  | { ok: true; connection: DiscoveryConnection; spec: ProviderSpec }
+  | {
+      ok: false
+      spec: ProviderSpec
+      protocol: ModelProtocol
+      apiBase: string
+      code: 'CREDENTIAL_REQUIRED' | 'MISSING_API_BASE' | 'NOT_COMPATIBLE'
+      message: string
+    }
 
 export class CoreModelService {
   readonly root: string
   private readonly deps: CoreModelServiceDeps
+  private readonly discovery: ModelDiscovery
   private profileOnboardingRequested = false
 
   constructor(root: string, deps: CoreModelServiceDeps) {
     this.root = resolve(root)
     this.deps = deps
+    this.discovery = deps.discovery ?? new ModelDiscovery()
   }
 
   async getConfig(): Promise<ModelConfigPayload> {
@@ -240,10 +289,88 @@ export class CoreModelService {
     return this.getConfig()
   }
 
-  async discoverModels(input: Dict): Promise<ModelDiscoveryPayload> {
+  /**
+   * The connection's models from the vendor's own list (all pages, merged
+   * with the bundled catalog), or catalog recommendations when the vendor
+   * has no list. Uses the draft connection (see `ModelConnectionInput`).
+   */
+  async discoverModels(
+    input: ModelDiscoveryInput,
+  ): Promise<ModelDiscoveryPayload> {
+    const resolved = await this.resolveConnection(input)
+    if (!resolved.ok)
+      return {
+        ok: false,
+        provider: resolved.spec.name,
+        protocol: resolved.protocol,
+        apiBase: resolved.apiBase || null,
+        source: 'none',
+        parser: null,
+        models: [],
+        truncated: false,
+        totalCount: 0,
+        droppedSecretLikeIds: 0,
+        cached: false,
+        fetchedAt: null,
+        code: resolved.code,
+        message: resolved.message,
+      }
+    const { connection } = resolved
+    const result = await this.discovery.discover(connection, {
+      refresh: input.refresh === true,
+    })
+    const base = {
+      provider: connection.provider,
+      protocol: connection.protocol,
+      apiBase: connection.apiBase,
+      parser: result.parser,
+    }
+    if (!result.ok)
+      return {
+        ...base,
+        ok: false,
+        source: 'none',
+        models: [],
+        truncated: false,
+        totalCount: 0,
+        droppedSecretLikeIds: 0,
+        cached: false,
+        fetchedAt: null,
+        code: result.code,
+        message: result.message,
+        ...(result.fix ? { fix: result.fix } : {}),
+        ...(result.status !== undefined ? { status: result.status } : {}),
+      }
+    const { ok: _ok, parser: _parser, ...listed } = result
+    return { ...base, ok: true, ...listed }
+  }
+
+  /**
+   * Check the draft connection with one cheap request (UI-29: the form's
+   * values, not the saved entry). Never sends a stored key to an address
+   * other than the one it was saved for, and never returns a key.
+   */
+  async probeConnection(input: ModelConnectionInput): Promise<ProbeResult> {
+    const resolved = await this.resolveConnection(input)
+    if (!resolved.ok)
+      return {
+        ok: false,
+        code:
+          resolved.code === 'CREDENTIAL_REQUIRED'
+            ? 'AUTH'
+            : resolved.code === 'MISSING_API_BASE'
+              ? 'WRONG_BASE'
+              : 'NOT_COMPATIBLE',
+        message: resolved.message,
+      }
+    return this.discovery.probe(resolved.connection)
+  }
+
+  private async resolveConnection(
+    input: ModelConnectionInput,
+  ): Promise<ResolvedConnection> {
     const config = await loadModelConfig(this.root)
-    const entryId = trimString(input.entryId)
-    const entry = entryId ? (findEntry(config, entryId) ?? null) : null
+    const entry = credentialSource(config, input)
     const providerName = trimString(input.provider) || entry?.provider || ''
     const spec = findByName(providerName)
     if (!spec) throw new Error(`provider 无效: ${providerName}`)
@@ -258,10 +385,12 @@ export class CoreModelService {
         `provider ${spec.name} 不支持 protocol: ${protocol ?? ''}`,
       )
 
-    const submittedBase = trimString(input.apiBase)
     const apiBase = normalizeApiBase(
       protocol,
-      submittedBase || entry?.apiBase || spec.apiBases[protocol] || '',
+      trimString(input.apiBase) ||
+        entry?.apiBase ||
+        spec.apiBases[protocol] ||
+        '',
     )
     const canReuseEntryCredentials = discoveryIdentityMatches(
       entry,
@@ -279,42 +408,53 @@ export class CoreModelService {
       entry,
       canReuseEntryCredentials,
     )
-    const discovery = spec.modelDiscovery[protocol] ?? 'unsupported'
+    const unavailable = (
+      code: 'CREDENTIAL_REQUIRED' | 'MISSING_API_BASE' | 'NOT_COMPATIBLE',
+      message: string,
+    ): ResolvedConnection => ({
+      ok: false,
+      spec,
+      protocol,
+      apiBase,
+      code,
+      message,
+    })
 
-    if (discovery === 'unsupported')
-      return discoveryUnavailable(
-        spec,
-        protocol,
-        apiBase,
-        'unsupported_protocol',
+    if ((spec.modelDiscovery[protocol] ?? 'unsupported') === 'unsupported')
+      return unavailable(
+        'NOT_COMPATIBLE',
         `${spec.displayName} 当前不支持通过 ${protocol} 自动获取模型列表，请手动填写模型 ID。`,
       )
-    if (!spec.isLocal && !spec.isOauth && !apiKey)
-      return discoveryUnavailable(
-        spec,
-        protocol,
-        apiBase,
-        'credential_required',
-        `请先填写 ${spec.displayName} 的 API Key 后再获取模型列表。`,
-      )
     if (!apiBase)
-      return discoveryUnavailable(
-        spec,
-        protocol,
-        apiBase,
-        'missing_api_base',
-        `请先填写 ${spec.displayName} 的 API Base 后再获取模型列表。`,
+      return unavailable(
+        'MISSING_API_BASE',
+        `请先填写 ${spec.displayName} 的 API 地址。`,
+      )
+    if (!isHttpUrl(apiBase))
+      return unavailable(
+        'MISSING_API_BASE',
+        `API 地址无效：需要 http:// 或 https:// 开头的完整地址。`,
+      )
+    // Local servers and custom gateways may need no key; everyone else does.
+    if (!spec.isLocal && !spec.isOauth && spec.name !== 'custom' && !apiKey)
+      return unavailable(
+        'CREDENTIAL_REQUIRED',
+        `请先填写 ${spec.displayName} 的 API Key。`,
       )
 
-    return discovery === 'anthropic'
-      ? discoverAnthropicModels(spec, protocol, apiBase, apiKey, extraHeaders)
-      : discoverOpenAiCompatibleModels(
-          spec,
-          protocol,
-          apiBase,
-          apiKey,
-          extraHeaders,
-        )
+    const workspaceId = trimString(input.workspaceId)
+    return {
+      ok: true,
+      spec,
+      connection: {
+        provider: spec.name,
+        protocol,
+        apiBase,
+        apiKey,
+        ...(Object.keys(extraHeaders).length ? { extraHeaders } : {}),
+        ...(workspaceId ? { workspaceId } : {}),
+      },
+    }
   }
 
   async test(body: { entryId?: string; kind?: string }): Promise<Dict> {
@@ -571,212 +711,6 @@ function discoveryExtraHeaders(
   )
 }
 
-async function discoverOpenAiCompatibleModels(
-  spec: ProviderSpec,
-  protocol: ModelProtocol,
-  apiBase: string | null,
-  apiKey: string,
-  extraHeaders: Record<string, string>,
-): Promise<ModelDiscoveryPayload> {
-  let last: ModelDiscoveryPayload | null = null
-  for (const url of openAiModelEndpointCandidates(apiBase || '')) {
-    try {
-      const response = await fetchWithTimeout(url, {
-        method: 'GET',
-        headers: discoveryHeaders(
-          extraHeaders,
-          apiKey ? { authorization: `Bearer ${apiKey}` } : {},
-        ),
-      })
-      if (!response.ok) {
-        last = discoveryUnavailable(
-          spec,
-          protocol,
-          apiBase,
-          codeForHttpStatus(response.status),
-          response.statusText || `HTTP ${response.status}`,
-        )
-        continue
-      }
-      return {
-        ok: true,
-        provider: spec.name,
-        protocol,
-        apiBase,
-        source: 'openai_compat',
-        models: parseDiscoveredModels(await response.json()),
-      }
-    } catch (error) {
-      last = discoveryUnavailable(
-        spec,
-        protocol,
-        apiBase,
-        codeForFetchError(error),
-        fetchErrorMessage(error),
-      )
-    }
-  }
-  return (
-    last ??
-    discoveryUnavailable(
-      spec,
-      protocol,
-      apiBase,
-      'no_endpoint',
-      '未找到可用的模型列表 endpoint。',
-    )
-  )
-}
-
-async function discoverAnthropicModels(
-  spec: ProviderSpec,
-  protocol: ModelProtocol,
-  apiBase: string | null,
-  apiKey: string,
-  extraHeaders: Record<string, string>,
-): Promise<ModelDiscoveryPayload> {
-  try {
-    const response = await fetchWithTimeout(anthropicModelsUrl(apiBase), {
-      method: 'GET',
-      headers: discoveryHeaders(extraHeaders, {
-        'x-api-key': apiKey,
-        'anthropic-version': ANTHROPIC_VERSION,
-      }),
-    })
-    if (!response.ok)
-      return discoveryUnavailable(
-        spec,
-        protocol,
-        apiBase,
-        codeForHttpStatus(response.status),
-        response.statusText || `HTTP ${response.status}`,
-      )
-    return {
-      ok: true,
-      provider: spec.name,
-      protocol,
-      apiBase,
-      source: 'anthropic',
-      models: parseDiscoveredModels(await response.json()),
-    }
-  } catch (error) {
-    return discoveryUnavailable(
-      spec,
-      protocol,
-      apiBase,
-      codeForFetchError(error),
-      fetchErrorMessage(error),
-    )
-  }
-}
-
-function discoveryUnavailable(
-  spec: ProviderSpec,
-  protocol: ModelProtocol,
-  apiBase: string | null,
-  code: string,
-  message: string,
-): ModelDiscoveryPayload {
-  return {
-    ok: false,
-    provider: spec.name,
-    protocol,
-    apiBase,
-    source: spec.modelDiscovery[protocol] ?? 'unsupported',
-    models: [],
-    code,
-    message,
-  }
-}
-
-async function fetchWithTimeout(
-  url: string,
-  init: RequestInit,
-): Promise<Response> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), MODEL_DISCOVERY_TIMEOUT_MS)
-  try {
-    return await fetch(url, { ...init, signal: controller.signal })
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-function discoveryHeaders(
-  extraHeaders: Record<string, string>,
-  defaults: Record<string, string>,
-): Headers {
-  const headers = new Headers({ accept: 'application/json', ...defaults })
-  for (const [key, value] of Object.entries(extraHeaders))
-    headers.set(key, value)
-  return headers
-}
-
-function openAiModelEndpointCandidates(apiBase: string): string[] {
-  const base = trimApiBase(apiBase)
-  return base ? [`${base}/models`] : []
-}
-
-function anthropicModelsUrl(apiBase: string | null): string {
-  const base = trimApiBase(apiBase || '')
-  if (!base) return ANTHROPIC_MODELS_URL
-  if (base.endsWith('/v1')) return `${base}/models`
-  return `${base}/v1/models`
-}
-
-function parseDiscoveredModels(body: unknown): DiscoveredModel[] {
-  const data = modelArray(body)
-  const seen = new Set<string>()
-  const out: DiscoveredModel[] = []
-  for (const raw of data) {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
-    const item = raw as Record<string, unknown>
-    const id =
-      trimString(item.id) || trimString(item.name) || trimString(item.model)
-    if (!id || seen.has(id)) continue
-    seen.add(id)
-    const model: DiscoveredModel = { id }
-    const ownedBy =
-      trimString(item.owned_by) ||
-      trimString(item.ownedBy) ||
-      trimString(item.owner)
-    const created = item.created ?? item.created_at ?? item.createdAt
-    if (ownedBy) model.ownedBy = ownedBy
-    if (typeof created === 'number' || typeof created === 'string')
-      model.created = created
-    out.push(model)
-  }
-  return out.sort((a, b) => a.id.localeCompare(b.id))
-}
-
-function modelArray(body: unknown): unknown[] {
-  if (Array.isArray(body)) return body
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return []
-  const record = body as Record<string, unknown>
-  if (Array.isArray(record.data)) return record.data
-  if (Array.isArray(record.models)) return record.models
-  return []
-}
-
-function codeForHttpStatus(status: number): string {
-  if (status === 401 || status === 403) return 'auth'
-  if (status === 429) return 'rate_limit'
-  if (status >= 500 || status === 408) return 'transient'
-  return 'request_failed'
-}
-
-function codeForFetchError(error: unknown): string {
-  return error instanceof Error && error.name === 'AbortError'
-    ? 'timeout'
-    : 'network_error'
-}
-
-function fetchErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.name === 'AbortError')
-    return '获取模型列表超时。'
-  return error instanceof Error ? error.message : String(error)
-}
-
 // 1×1 opaque red RGBA PNG. Keep the expected answer aligned with visionOk().
 const VISION_PROBE_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=='
@@ -806,12 +740,42 @@ function visionOk(sample: string): boolean {
   return normalized === 'red' || normalized === '红' || normalized === '红色'
 }
 
-function trimString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
+/**
+ * The saved entry whose key a masked draft may reuse: `entryId`, or the
+ * first entry carrying `connectionId` (entries gain one in MOD-03; until
+ * then a connection id finds nothing and no stored key is used).
+ */
+function credentialSource(
+  config: Awaited<ReturnType<typeof loadModelConfig>>,
+  input: ModelConnectionInput,
+): ModelEntry | null {
+  const entryId = trimString(input.entryId)
+  if (entryId) return findEntry(config, entryId) ?? null
+  const connectionId = trimString(input.connectionId)
+  if (!connectionId) return null
+  const raw = config.raw.models.find(
+    (item) =>
+      (item as unknown as Record<string, unknown>).connectionId ===
+      connectionId,
+  )
+  return raw ? (findEntry(config, raw.entryId) ?? null) : null
 }
 
-function trimApiBase(value: string): string {
-  return value.trim().replace(/\/+$/, '')
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      !url.username &&
+      !url.password
+    )
+  } catch {
+    return false
+  }
+}
+
+function trimString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
 }
 
 function recordValue(value: unknown): Record<string, unknown> | null {

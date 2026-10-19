@@ -17,7 +17,7 @@ describe('Core operation registry', () => {
     const descriptors = coreOperationDescriptors()
     const descriptorKeys = descriptors.map((entry) => entry.key)
 
-    expect(coreOperationKeys()).toHaveLength(201)
+    expect(coreOperationKeys()).toHaveLength(202)
     expect(coreOperationKeys()).toEqual(descriptorKeys)
     expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(descriptorKeys)
     expect(
@@ -450,6 +450,31 @@ describe('Core operation registry', () => {
         { entryId: 'entry-1', kind: 'vision' },
       ]),
     ).toEqual([{ entryId: 'entry-1', kind: 'vision' }])
+    // MOD-02: listing and probing take the form's draft connection.
+    const draft = {
+      provider: 'moonshot',
+      protocol: 'openai',
+      apiBase: 'https://api.moonshot.cn/v1',
+      apiKey: 'sk-draft',
+      connectionId: 'conn-1',
+      workspaceId: 'llm-ws01',
+    }
+    expect(
+      CORE_OPERATION_REGISTRY['model.probeConnection'].args.parse([draft]),
+    ).toEqual([draft])
+    expect(
+      CORE_OPERATION_REGISTRY['model.discoverModels'].args.parse([
+        { ...draft, refresh: true },
+      ]),
+    ).toEqual([{ ...draft, refresh: true }])
+    for (const bad of [
+      { ...draft, refresh: true },
+      { ...draft, apiKey: 42 },
+      { ...draft, workspaceId: 'x'.repeat(64) },
+    ])
+      expect(() =>
+        CORE_OPERATION_REGISTRY['model.probeConnection'].args.parse([bad]),
+      ).toThrow()
   })
 
   it('rejects malformed security-sensitive payloads before invoking CoreApi', () => {
