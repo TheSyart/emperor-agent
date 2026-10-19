@@ -33,7 +33,7 @@ Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript �
 
 系统提示词由 `templates/agent/persona.md` 与各子系统登记的 prompt section 组成；persona 之后固定有一段文件链接说明（`links`），让模型把希望用户点开的文件写成 Markdown 链接（可读名称加路径），对话里显示为带类型图标的链接。提示词本身保持稳定，以维持 provider 前缀缓存；persona 不写当前模型和工作目录，这两项与其他会变化的运行时信息（沙箱与审批策略、Plan 模式、Goal、委派说明）一起以 `form: 'snapshot'` 的上下文消息进入 log，只在内容变化时追加，所以切换模型不会改写提示词前缀。
 
-Pre-step middleware 的顺序是：工作区说明（AGENTS.md / CLAUDE.md）、长期记忆、Skill 目录、插件引用、压缩、重复调用提醒、Hooks，Plan 模式与 Goal 在各自 install 时加入。请求失败时 `retryMiddleware()` 负责按 route 的重试策略重试。
+每一步装配提示词（系统提示与工具列表）之前先运行 pre-assemble middleware：项目会话在这里取得所在项目的 MCP 实例，见「会话作用域」。Pre-step middleware 的顺序是：工作区说明（AGENTS.md / CLAUDE.md）、长期记忆、Skill 目录、插件引用、压缩、重复调用提醒、Hooks，Plan 模式与 Goal 在各自 install 时加入。请求失败时 `retryMiddleware()` 负责按 route 的重试策略重试。
 
 ## Turn 与 step
 
@@ -58,11 +58,33 @@ turn/end
 一条消息只有在它的 `user/message` 写进 log 之后才算被消费。在那之前它一直在 inbox 里（log 中有插入它的 `agent/inbox/spliced`），应用崩溃或退出后重新打开会话仍能找回。
 
 - **两阶段认领**：step 开始时 `inbox.claim()` 只预留本 step 要取的消息（全部可取的 `next-step`，新 turn 再加 `next-turn` 中第一条可取的），消息仍留在队列里，状态为 `sending`。所有 pre-step middleware 通过后才 `commit()`：被预留的消息在 `step/start` 之前以一条 `agent/inbox/spliced` 移出 inbox，紧接着写 `user/message`（同一个同步块，落在同一批写入里）。pre-step 被停止（例如压缩期间点停止）、被拒绝（成本上限、UserPromptSubmit Hook 拒绝）或抛错时 `release()`：消息原样留在队首，顺序不变，log 中不会出现它的 `user/message`。被某个 middleware 从本 step 剔除的已认领消息（例如过期的 Goal 轮次）显式丢弃。
-- **按消息结果**：每条消息有自己的结果（`Agent.outcome(id)`）。被消费的消息在消费它的 turn 的 `turn/end` 处得到结果，同一个 step 合并进入的多条消息（多条插话、开启 turn 的消息加上插话）得到同一个 turn；插话在 step 中途到达时进入下一个 step，结果仍是这个 turn。`HarnessHost.submit()` 据此返回 `TurnResult`：`completed`（带最终回复）、`error`（带错误码）、`aborted`（`by: user | system`）、`blocked`（`cost-cap` 或 `prompt-rejected`）、`not-consumed`（带原因）；`delivery` 为 `completed` 只表示有 turn 消费了这条消息，没有被消费的消息不会报告为 `completed`。submit 在那个 turn 完全结束（驱动空闲或进入下一个排队的 turn）后才返回，但不再等后面排队的 turn。
+- **按消息结果**：每条消息有自己的结果（`Agent.outcome(id)`）。被消费的消息在消费它的 turn 的 `turn/end` 处得到结果，同一个 step 合并进入的多条消息（多条插话、开启 turn 的消息加上插话）得到同一个 turn；插话在 step 中途到达时进入下一个 step，结果仍是这个 turn。`HarnessHost.submit()` 据此返回 `TurnResult`（`harness/host/scope.ts`）：`completed`（带最终回复）、`error`（带错误码）、`aborted`（`by: user | timeout | system`）、`blocked`（`cost-cap`、`prompt-rejected`，后台 turn 另有 `interaction-rejected`、`plan-mode`、`interaction-timeout`）、`not-consumed`（带原因）；`delivery` 为 `completed` 只表示有 turn 消费了这条消息，没有被消费的消息不会报告为 `completed`。submit 在那个 turn 完全结束（驱动空闲或进入下一个排队的 turn）后才返回，但不再等后面排队的 turn。
 - **待发送（held）**：turn 以 `error` 或 `blocked` 结束时，排在它后面的用户消息不会自动运行，结果为 `{ kind: 'not-consumed', reason: 'previous-turn-failed' }`，消息留在队列里，界面显示「待发送 · 上一轮失败」，用户点「发送」后像新消息一样运行，或点「丢弃」。停止时排队的用户消息（以及正在准备 step 时被停止的那条）同样保留为待发送，原因 `previous-turn-stopped`；重新打开会话时 inbox 中残留的用户消息都恢复为待发送，原因 `interrupted`。待发送的消息不会被后续认领取走，新发送的消息照常运行；它们也不算会话忙碌（命令照常可用），但 `/clear` 仍要求先处理。harness 上下文消息（后台任务、子代理通知等）不会被保留为待发送。
 - **按消息取消**：提交方的 AbortSignal 调用 `Agent.cancelMessage(id)`：消息还在排队（或待发送）时把它丢弃，结果为 `aborted`（`turnId` 为空）；已被某个 step 预留或已被当前 turn 消费时只取消那个 turn，排在后面的消息随后照常运行。ACP 与 onboarding 的隐藏提示以 `unconsumed: 'withdraw'` 提交：没有被消费时直接丢弃，不会留在队列里等一个已经离开的提交方；ACP 此时返回 `stopReason: "refusal"` 与 `_meta.emperor.notConsumed`。
 - **显式丢弃**：消息不经消费离开 inbox 时，splice 带 `outcome: 'canceled'`，随后写一条 `agent/inbox/discarded { messageIds, reason }`，`reason` 为 `user`（用户在队列里丢弃）、`cancelled`（提交方取消）、`stopped`（停止时丢弃 harness 上下文）或 `dropped`（pre-step 剔除）。不变量：每条进入过 inbox 的用户消息，要么在某条 `user/message` 里，要么仍在 inbox，要么出现在 `agent/inbox/discarded` 中。
 - **队列状态**：`queue_item_state`（host-only，见 [IPC 与 Runtime Events](ipc-and-runtime-events.md#两条管线的分工)）通知每条用户消息的 `queued`、`sending`、`failed-previous`、`discarded`；`chat.listQueuedPrompts` 列出 `queued` 与 `failed-previous` 的项（带 `reason`），正在 `sending` 的项不列出。
+
+## 会话作用域
+
+### 选中会话只决定显示
+
+- 界面正在看哪个会话，只决定界面显示什么。CoreApi 自己记着它（`focusedSessionId`）：只有 `activateSession()`（用户切换会话、`bootstrap({ sessionId })`、`/new` 等）写它，只有 `bootstrap()` 读它（界面的起始状态，结果的 `sessionId` 即这一项）。`HarnessHost` 没有焦点。`core-api-facade-architecture.test.ts` 断言除这两处之外没有代码读它，Core 源码里也没有 `activeSessionId`、`activeWorkspaceRoot` 一类的读取。
+- 其余依赖「哪个会话」的东西都显式拿到会话。`SessionScope { sessionId, projectRoot, workspaceRoot, kind }`（`harness/host/scope.ts`）由 `HarnessHost.scopeFor(sessionId)` 从会话索引算出：Build 会话的 `projectRoot` 是项目根，Chat 会话为 null；`workspaceRoot` 是文件与 Shell 工具的工作目录（项目或 Chat 工作区）。子代理用根会话的 scope；ACP 会话是以其 cwd 为项目的 Build 会话。
+- 界面发起的调用带上它显示的会话：preload 在每个 core 通道的参数前放调用上下文 `{ emperorCoreCall: 1, view: { sessionId } }`（renderer 切换会话时用 `setViewingSession` 更新，草稿为 null），main 取下后作为 `CoreOperationContext.view` 交给 operation，Core 与 main 都不记住它。Operation 的输入没写会话时用它（`tasks.*`、`skills.*`、`goals.*`、`delegations.*`、`memory.compact` 等）；mutation guard、插件列表与详情、Hooks 测试与审计、环境状态、诊断和记忆里与会话有关的字段也取它。进程内调用方（ACP、main、测试）要么写明会话，要么传 view。都没有时 Core 返回 `SESSION_REQUIRED`（`SessionRequiredError`）。`chat.stopRuntime`（不带 `taskId` 时）与 `processes.*` 只认输入里写明的 `sessionId`；renderer 停止时写明当前会话。
+- Mutation guard（`assertMutation(area, action, view)`）检查调用方显示的会话有没有待处理交互、是否处于 Plan 模式；`view.sessionId` 为 null（草稿或没有会话）时不拦截，另一个会话的状态不影响它。外部子会话的控制由所属根会话自己的状态把关。
+
+### 后台 turn
+
+- `HarnessHost.submit()` 不改变任何焦点。定时任务、ACP 与 onboarding 走 `HarnessHost.runBackgroundTurn(scope, content, options)`：在 scope 指明的会话里运行一轮，返回 `TurnResult`。`interactionPolicy: 'auto-reject'` 时，这一轮（含它的子代理）的审批、提问、Plan 审阅和电脑操作授权卡立即按拒绝处理，审批与问题照常写入 log；一轮完成但有被拒绝的交互时结果为 `blocked`（`interaction-rejected`，Plan 审阅被拒绝时为 `plan-mode`），`detail` 列出被拒绝的工具。`wait` 时交给界面，与桌面 turn 相同。`timeoutMs` 到时取消这一轮：结果为 `aborted`（`by: 'timeout'`），当时正等待界面回答的为 `blocked`（`interaction-timeout`）。「这一轮」指根会话当前 turn 正是消费了后台消息的那个 turn：后台消息排在桌面 turn 后面等待时，桌面 turn 的交互不受影响。
+- 定时任务的执行器（`harness/host/scheduler.ts`）用 `runBackgroundTurn`，默认超时 30 分钟、`auto-reject`，并把结果写进运行记录：completed → `ok`；error → `error`，记录 `errorCode`（例如 401/403 为 `AUTH`）；aborted → `cancelled`（超时的 `errorCode` 为 `TIMEOUT`）；blocked → `blocked`（界面显示「需要审批，已拒绝」，`error` 写明被拒绝的操作）；not-consumed → `error`（`NOT_CONSUMED`）。一次运行结束（包括超时）就离开 in-flight 集合，后续触发照常进行；`error` 与 `blocked` 发 `scheduler_run_error`（带 `status` 与 `code`）。没有绑定会话的旧任务在最近更新的会话（没有时新建一个）里运行，不改变界面显示；创建或编辑任务时，没有写明会话的任务绑定到创建者显示的会话（调用的 `view`）。
+- ACP 通过 `chat.runBackground` 提交（policy `wait`：ACP 自己取消交互并返回 refusal）；onboarding 访谈以 `wait` 运行，用户在访谈会话里回答。Goal 的轮次由会话自己的驱动器唤醒（`agent.followup`），从不经过 host 的提交，同样按所在会话的 scope 取得 MCP 工具与 Hooks。
+
+### MCP 与插件按 scope 生效
+
+- 全局 server：`mcp_config.json` 的 server，以及用户范围和随 Emperor 提供的插件的 server，在 host 自己的 `MCPClient` 中运行，stdio 工作目录与沙箱写入根为 Chat 工作区，不属于任何会话。
+- 项目实例：项目（`project`、`local` 范围）插件的 server 按项目根各有一个实例（`mcp/project-instances.ts` 的 `ProjectMcpInstances`；`start()` 是实例启动的唯一入口，客户端由 host 创建，只运行交给它的插件 server，不读 `mcp_config.json`），工作目录与沙箱写入根为该项目。会话的每一步在装配提示词之前（`middleware.preAssemble`）持有所在项目的实例（第一次使用时启动并等待连接结果），该 agent 空闲、子代理结束或会话删除时释放；没有任何持有者 5 分钟后停止，停止时它的工具先从所有会话的列表中移除。同一项目的多个会话共享一个实例，一个项目的实例启动失败只影响该项目。诊断的 `kernel.projectMcp` 列出各实例的项目、持有者数与状态。
+- 工具按 scope 过滤：`McpToolBridge` 对每个工具名只注册一次，按调用方 agent 所在项目选出服务它的 server（项目自己的实例优先；项目用自己范围的插件替换了用户范围的同一插件时，隐藏全局那一份）。Chat 会话只看到全局工具，A 项目的会话看不到 B 项目实例的工具；同名工具的描述与参数按调用方给出。项目插件的 server 键与全局 server 的键不会重名。
+- 插件 Hook 同样按 scope 计算：`ClaudeCodeHooks` 的全局集合来自用户范围和随 Emperor 提供的插件；项目会话另加该项目自己插件的集合（`setPluginHookScope`），全局集合中被项目替换的插件除外。Chat 会话不会触发任何项目的插件 Hook。`PluginActivationController` 对每个项目按需计算并缓存这些贡献，插件安装、启停、卸载后重算；切换显示的会话不触发任何重算，只发 `plugins_changed`（`reason: project`）让界面刷新列表。
 
 ## 模型调用
 
@@ -120,8 +142,8 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 ### MCP 连接
 
 - `mcp/client.ts` 按 server 创建连接（`mcp/connection.ts`）：`stdio` 通过受管子进程（`owned-stdio-transport.ts`）通信；`sse` 使用 SDK 的 SSE transport；`http` 先尝试 Streamable HTTP，初始握手失败时回退到 legacy SSE，认证失败不回退，`HttpConnection.activeTransport` 记录实际使用的传输。transport 未知或缺少 `command` / `url` 的 server 得到一个不会启动进程的无效配置连接并报告原因，不会回退为 `stdio`。
-- `mcp/supervisor.ts` 负责重连：传输失败按 1、4、16 秒退避，每次重建递增 generation，迟到的旧连接事件被忽略。`harness/host/mcp-tools.ts` 的 `McpToolBridge` 把已连接 server 的工具注册为 `mcp_<server>_<tool>`。
-- 插件贡献的 server 不进 `mcp_config.json`：`plugins/activation.ts` 从生效的插件包算出配置，经 `MCPClient.setPluginServers()` 交给 client，按契约的键（`sanitize(插件名-server 名)`，与用户 server 重名时加 6 位哈希）连接。工具名由 `mcp/plugin-names.ts` 生成，最长 64 个字符；与宿主已有工具（`McpToolBridge.reservedNames()`）或先注册的工具重名时跳过并记录。执行环境变化后按名字回查配置时，插件 server 从 client 自己的列表取回。插件 stdio server 的工作目录是插件目录，进程沙箱（`environment/sandbox.ts`）通过 `stateGrants` 只放行该插件的包（只读）和数据目录（读写），Emperor Home 其余内容仍不可访问。插件 Hook 由 `ClaudeCodeHooks.setPluginHooks()` 接在用户文件之后，每组带自己的 `PLUGIN_ROOT`、`PLUGIN_DATA`。安装、启停、卸载与活动项目切换后，CoreApi 重新计算并应用这些贡献，对应操作在应用完成后才返回。
+- `mcp/supervisor.ts` 负责重连：传输失败按 1、4、16 秒退避，每次重建递增 generation，迟到的旧连接事件被忽略。`harness/host/mcp-tools.ts` 的 `McpToolBridge` 把全局 server 与各项目实例已连接 server 的工具注册为 `mcp_<server>_<tool>`，按调用方的项目决定是否可见。
+- 插件贡献的 server 不进 `mcp_config.json`：`plugins/activation.ts` 从生效的插件包算出配置，经 `MCPClient.setPluginServers()` 交给 client，按契约的键（`sanitize(插件名-server 名)`，与用户 server 重名时加 6 位哈希）连接。工具名由 `mcp/plugin-names.ts` 生成，最长 64 个字符；与宿主已有工具（`McpToolBridge.reservedNames()`）或先注册的工具重名时跳过并记录。执行环境变化后按名字回查配置时，插件 server 从 client 自己的列表取回。插件 stdio server 的工作目录是插件目录，进程沙箱（`environment/sandbox.ts`）通过 `stateGrants` 只放行该插件的包（只读）和数据目录（读写），Emperor Home 其余内容仍不可访问。插件 Hook 接在用户文件之后，每组带自己的 `PLUGIN_ROOT`、`PLUGIN_DATA`。用户范围与随 Emperor 提供的插件进全局 client 与全局 Hook 集合，项目范围的插件进该项目的实例与 Hook 集合（见「会话作用域」）。安装、启停、卸载后 CoreApi 重新计算并应用这些贡献，对应操作在应用完成后才返回。
 - `mcp/import.ts` 的 `normalizeMcpImport()` 把 `mcpServers`、`servers`、`mcp.servers`、单个带 `name` 的 server 或裸“名称 → 配置”映射规范为 `mcp_config.json` 的 server 形状，JSONC 与片段经修复并给出警告。`mcp/manage.ts` 在此之上提供按名称合并（新增 / 覆盖 / 跳过，支持 dry-run）、启停与删除，CoreApi `mcp.*` 与 `mcp_config` 工具共用它；写入后由调用方重载 MCP，client 按 server diff，只重建变化的连接。
 
 ### 跟随权限预设的配置工具
@@ -154,6 +176,7 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 ## 修改时的同步面
 
 - 新 middleware：在 `harness/agent/middleware.ts` 的对应数组登记，并在 `HarnessHost.compose()` 中按顺序压入。
+- 新增依赖「哪个会话」的能力：显式接收会话或 `SessionScope`，从调用的 `view` 或输入取会话，不读 CoreApi 的 `focusedSessionId`（门面架构测试会失败）。
 - 新 session 事件类型：通过 `declare module '../../session-log/types'` 扩展 `SessionEventMap`，需要界面可见时同步 `harness/projection/`。
 - 新工具：见[扩展 Emperor Agent](../development/extending-emperor.md#新工具)。
 - 改变压缩、修复或 fork 语义时，同步 session-log 与 compaction 的测试。

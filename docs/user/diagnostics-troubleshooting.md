@@ -75,8 +75,8 @@ Token 用量、记忆和 Hooks 在设置的对应分区中查看；插件、Skil
 
 Diagnostics payload 中与内核相关的字段：
 
-- `kernel`：活动会话、正在运行的会话、当前模型 route、已注册工具名单，以及 `archivedLegacySessions`。
-- `workspacePolicy`：当前 workspace 根和沙箱模式。
+- `kernel`：打开诊断页时正在看的会话（`activeSessionId`）、正在运行的会话、当前模型 route、该会话可用的工具名单（含其项目的 MCP 工具）、各项目 MCP 实例（`projectMcp`），以及 `archivedLegacySessions`。
+- `workspacePolicy`：该会话的 workspace 根和沙箱模式。
 - `subagents`：子代理记录。
 - `mcp`：每个 server 的连接状态、generation 与工具数。
 - `optionalCapabilities`：可选能力登记（当前包括 `watchlist` 和 `computer_use`）。
