@@ -73,7 +73,13 @@ describe('renderer routes', () => {
     })
     expect((await resolve('/github/ci')).name).toBe('github-ci')
     expect((await resolve('/github')).name).toBe('github-issues')
-    expect((await resolve('/explore')).name).toBe('explore')
+  })
+
+  it('sends /explore to the recommendations on 能力 (UI-S08 3)', async () => {
+    const route = await resolve('/explore')
+    expect(route.name).toBe('capabilities')
+    expect(route.path).toBe('/capabilities')
+    expect(route.hash).toBe('#recommended')
   })
 
   it('tells conversation routes (workspace column) from pages', async () => {
@@ -86,7 +92,6 @@ describe('renderer routes', () => {
       'pulls',
       'github-issues',
       'github-ci',
-      'explore',
       undefined,
     ])
       expect(isConversationRoute(name)).toBe(false)

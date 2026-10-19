@@ -95,7 +95,6 @@ it('lists new chat, search, sessions and the pages on top; notifications and set
     '会话',
     '定时任务',
     '能力',
-    '探索',
     'Pull Request',
   ])
   expect(labels('[data-rail-group="foot"]')).toEqual(['通知', '设置'])

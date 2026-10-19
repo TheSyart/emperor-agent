@@ -12,16 +12,20 @@
  * The Skills tab keeps its open Skill in `?skill=`; switching tabs drops
  * that key and keeps any other query key.
  *
+ * The 推荐 block (CapabilityRecommendations, the former 探索 page) opens
+ * the body, filtered by the tab; `/explore` lands on it (`#recommended`).
+ *
  * Switching tabs unmounts the one shown, so an editor with unsaved edits
  * (MCP 配置) asks first (ui/useDirtyGuard, checked in a route-update guard,
  * which a tab click and a link both pass). Leaving the page keeps it alive,
  * edits included.
  */
-import { defineAsyncComponent, ref, watch, type Component } from 'vue'
+import { defineAsyncComponent, nextTick, ref, watch, type Component } from 'vue'
 import { onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import Tabs from '../../ui/Tabs.vue'
 import { provideDirtyGuard } from '../../ui/useDirtyGuard'
 import PageShell from '../PageShell.vue'
+import CapabilityRecommendations from './CapabilityRecommendations.vue'
 
 type CapabilitiesTab = 'plugins' | 'skills' | 'mcp' | 'tools'
 
@@ -69,6 +73,20 @@ watch(
   { immediate: true },
 )
 
+// `/explore` → `/capabilities#recommended`: bring the block into view.
+watch(
+  () => [route.name, route.hash] as const,
+  ([name, hash]) => {
+    if (name !== 'capabilities' || hash !== '#recommended') return
+    void nextTick(() =>
+      document
+        .getElementById('recommended')
+        ?.scrollIntoView?.({ block: 'start' }),
+    )
+  },
+  { immediate: true },
+)
+
 function select(value: string): void {
   const tab = normalizeTab(value)
   if (tab === active.value) return
@@ -98,6 +116,7 @@ function select(value: string): void {
         @update:model-value="select"
       />
     </template>
+    <CapabilityRecommendations :tab="active" />
     <component :is="BODIES[active]" :key="active" />
   </PageShell>
 </template>

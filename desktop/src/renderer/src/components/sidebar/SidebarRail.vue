@@ -3,7 +3,7 @@
  * The permanent 56px icon rail (UI-S01). Its top area is empty canvas that
  * holds the macOS traffic lights and moves the window (`data-app-drag`, no
  * control in it). Below: 新对话, 搜索, 会话, then the full pages — 定时任务,
- * 能力, 探索 (until UI-S08 folds it into 能力) and Pull Request (only while
+ * 能力 and Pull Request (only while
  * the GitHub plugin is on); at the foot the bell and 设置. Buttons are the
  * 36px IconButton with 20px glyphs and right-side tooltips; the entry of the
  * current route sits on `--surface-selected`.

@@ -1,10 +1,9 @@
-// The rail's page entries (UI-S01) and their glyphs. 探索 stays until UI-S08
-// folds it into 能力; Pull Request shows only while the GitHub plugin is on.
+// The rail's page entries (UI-S01) and their glyphs. 探索 is part of 能力
+// since UI-S08; Pull Request shows only while the GitHub plugin is on.
 import {
   Bell,
   Blocks,
   Clock,
-  Compass,
   GitPullRequest,
   MessageSquare,
 } from 'lucide-vue-next'
@@ -13,7 +12,7 @@ import type { RouteLocationRaw } from 'vue-router'
 
 export interface SidebarPageEntry {
   /** Route name the entry highlights for (router.ts). */
-  name: 'pulls' | 'scheduler' | 'capabilities' | 'explore'
+  name: 'pulls' | 'scheduler' | 'capabilities'
   label: string
   to: RouteLocationRaw
   icon: Component
@@ -34,7 +33,6 @@ export const SIDEBAR_PAGES: readonly SidebarPageEntry[] = [
     to: { name: 'capabilities' },
     icon: Blocks,
   },
-  { name: 'explore', label: '探索', to: { name: 'explore' }, icon: Compass },
   {
     name: 'pulls',
     label: 'Pull Request',
