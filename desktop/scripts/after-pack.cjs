@@ -6,7 +6,6 @@ const {
   rmSync,
 } = require('node:fs')
 const { join } = require('node:path')
-const { execFileSync } = require('node:child_process')
 const { extractFile, listPackage } = require('@electron/asar')
 const { validateRuntimeManifest } = require('./before-pack.cjs')
 const {
@@ -14,6 +13,31 @@ const {
   validatePreloadSource,
   validateRecoveryPreloadSource,
 } = require('./audit-preload.cjs')
+const {
+  electronBinaryPath,
+  flipPackagedFuses,
+  sealMacApp,
+  verifyMacHardening,
+} = require('./harden-package.cjs')
+
+/** Entitlements of the ad-hoc Preview seal (harden-package.cjs). */
+const PREVIEW_ENTITLEMENTS = {
+  app: join(__dirname, '..', 'build', 'entitlements.preview.mac.plist'),
+  electronHelper: join(
+    __dirname,
+    '..',
+    'build',
+    'entitlements.preview.mac.inherit.plist',
+  ),
+  dictation: join(
+    __dirname,
+    '..',
+    'native',
+    'macos',
+    'scripts',
+    'dictation-helper.entitlements',
+  ),
+}
 
 const PET_RESOURCE_FILES = [
   'event-mapper.js',
@@ -481,23 +505,32 @@ async function afterPack(context) {
   const arch = electronBuilderArch(context.arch)
   prunePackagedNodePty(resourcesRoot, platform, arch)
   validatePackagedAppResources(resourcesRoot, platform, arch)
-  // Preview has no developer certificate. Seal the bundle with an ad-hoc
-  // signature so the main executable has a stable bundle identifier and the
-  // helper can bind a local peer to this exact build's cdhash. This remains
-  // an untrusted Preview for Gatekeeper and needs TCC re-authorization after
-  // every changed build.
+  // SEC-04: no ELECTRON_RUN_AS_NODE, NODE_OPTIONS or --inspect, no app
+  // outside app.asar, and on macOS an asar whose header hash must match
+  // Info.plist. Flipped before any signature: it rewrites Electron's binary.
+  await flipPackagedFuses(
+    electronBinaryPath({
+      appOutDir: context.appOutDir,
+      platform,
+      productFilename: appInfo.productFilename,
+      executableName: context.packager.executableName,
+    }),
+    platform,
+  )
+  // Preview has no developer certificate. Seal the bundle ad hoc, every
+  // piece of code with the hardened runtime, so the main executable has a
+  // stable bundle identifier, the helper can bind a local peer to this exact
+  // build's cdhash, and no DYLD_* variable loads foreign code into a process
+  // that holds Emperor's TCC grants. This remains an untrusted Preview for
+  // Gatekeeper and needs TCC re-authorization after every changed build.
   if (
     platform === 'darwin' &&
     context.packager.config?.mac?.identity === null
   ) {
     const app = join(context.appOutDir, `${appInfo.productFilename}.app`)
-    execFileSync('codesign', ['--force', '--deep', '--sign', '-', app], {
-      stdio: 'inherit',
-    })
-    execFileSync('codesign', ['--verify', '--deep', '--strict', app], {
-      stdio: 'inherit',
-    })
+    sealMacApp(app, PREVIEW_ENTITLEMENTS)
     require('./after-sign.cjs').validateMacPackage(app, arch)
+    await verifyMacHardening(app)
   }
 }
 
@@ -513,3 +546,4 @@ module.exports.isAllowedNodeModuleEntry = isAllowedNodeModuleEntry
 module.exports.targetNodePtyFiles = targetNodePtyFiles
 module.exports.prunePackagedNodePty = prunePackagedNodePty
 module.exports.PET_RESOURCE_FILES = PET_RESOURCE_FILES
+module.exports.PREVIEW_ENTITLEMENTS = PREVIEW_ENTITLEMENTS

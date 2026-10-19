@@ -198,7 +198,9 @@ export class LocalSandbox implements SandboxBackend {
       runner === 'bwrap'
         ? ['bwrap', ...bwrapProfileArgs(policy)]
         : [
-            this.options.seatbeltExec ?? 'sandbox-exec',
+            // The host OS's own binary (tool-catalog-review.md): a
+            // sandbox-exec first on PATH would run commands unconfined.
+            this.options.seatbeltExec ?? '/usr/bin/sandbox-exec',
             ...seatbeltProfileArgs(policy, this.options.protectedStateRoot),
           ]
     return {

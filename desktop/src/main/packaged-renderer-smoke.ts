@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 const ATTACHMENT_CONTENT = 'emperor-packaged-renderer-smoke-v1'
 const ATTACHMENT_MONTH = '2099-01'
 const PRODUCTION_RENDERER_URL = 'app://bundle/index.html'
+const PRODUCTION_ORIGIN = 'app://bundle/'
 const DEEP_LINK_RENDERER_URL = 'app://bundle/chat/packaged-smoke'
 
 export interface PackagedSmokeWindowLike {
@@ -32,6 +33,11 @@ export interface PackagedRendererSecurity {
   devToolsDisabled: boolean
   /** The app menu has no reload, force reload or DevTools item. */
   productionMenu: boolean
+  /**
+   * SEC-04: the main window loads app://bundle whatever ELECTRON_RENDERER_URL
+   * says (the runner sets it to a local server that must see no request).
+   */
+  rendererUrlPinned: boolean
 }
 
 const DEVELOPMENT_MENU_ROLES = ['reload', 'forcereload', 'toggledevtools']
@@ -81,6 +87,8 @@ export async function createPackagedSmokeAttachment(
 
 export async function verifyPackagedRenderer(opts: {
   createWindow: () => PackagedSmokeWindowLike
+  /** What the real main window loads (renderer-url.ts mainRendererUrl). */
+  rendererUrl: string
   attachmentUrl: string
   attachmentContent: string
   chromiumSandboxDisabledForTest: boolean
@@ -102,7 +110,7 @@ export async function verifyPackagedRenderer(opts: {
   const win = opts.createWindow()
   const timeoutMs = Math.max(1, opts.timeoutMs ?? 15_000)
   try {
-    await withTimeout(win.loadURL(PRODUCTION_RENDERER_URL), timeoutMs)
+    await withTimeout(win.loadURL(opts.rendererUrl), timeoutMs)
     const probe = asRecord(
       await withTimeout(
         win.webContents.executeJavaScript(
@@ -136,6 +144,10 @@ export async function verifyPackagedRenderer(opts: {
       productionMenu:
         roles.length > 0 &&
         !roles.some((role) => DEVELOPMENT_MENU_ROLES.includes(role)),
+      rendererUrlPinned:
+        opts.rendererUrl === PRODUCTION_RENDERER_URL &&
+        typeof probe.href === 'string' &&
+        probe.href.startsWith(PRODUCTION_ORIGIN),
     }
     const preferences = opts.webPreferences
     const receipt: PackagedRendererSmokeReceipt = {
@@ -177,6 +189,7 @@ export async function verifyPackagedRenderer(opts: {
       !security.microphoneDenied && 'microphone',
       !security.devToolsDisabled && 'devtools',
       !security.productionMenu && 'menu',
+      !security.rendererUrlPinned && 'renderer-url',
     ].filter(Boolean)
     if (failed.length)
       throw new Error(
@@ -270,6 +283,7 @@ export function rendererProbeSource(
       cspMeta,
       evalBlocked,
       microphoneDenied,
+      href: location.href,
     }
   })()`
 }

@@ -16,6 +16,16 @@ function rendererSources(dir: string = rendererRoot): string[] {
 }
 
 describe('trusted renderer policy wiring', () => {
+  it('reads ELECTRON_RENDERER_URL only through the packaged-aware helper (SEC-04)', () => {
+    expect(source).not.toContain('process.env.ELECTRON_RENDERER_URL')
+    expect(source).toMatch(
+      /developmentUrl: developmentRendererUrl\(\{\s*isPackaged: app\.isPackaged,/,
+    )
+    expect(source).toMatch(
+      /mainWindow\.loadURL\(\s*mainRendererUrl\(\{ isPackaged: app\.isPackaged, env: process\.env \}\),?\s*\)/,
+    )
+  })
+
   it('guards navigation, redirects, frames and popups', () => {
     expect(source).toContain("contents.on('will-navigate'")
     expect(source).toContain("contents.on('will-frame-navigate'")

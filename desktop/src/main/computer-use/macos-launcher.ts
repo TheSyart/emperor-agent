@@ -23,6 +23,17 @@ const SOCKET_PATH_LIMIT = 103 // sockaddr_un.sun_path includes a NUL; macOS allo
 const HELPER_IDENTIFIER = 'com.emperor.agent.desktop.computer-helper'
 /** Installed helper copies live in directories named by their lowercase CDHash. */
 const CDHASH_DIRECTORY = /^[0-9a-f]{40}$/
+/**
+ * System tools by absolute path (SEC-04): an inherited PATH must not decide
+ * which `codesign` vouches for a helper or which `ditto` copies it.
+ */
+export const MACOS_TOOLS = {
+  codesign: '/usr/bin/codesign',
+  ditto: '/usr/bin/ditto',
+  plutil: '/usr/bin/plutil',
+  ps: '/bin/ps',
+  open: '/usr/bin/open',
+} as const
 /** LaunchServices' registration tool; `-u <app>` forgets an app bundle. */
 export const LSREGISTER =
   '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
@@ -196,6 +207,8 @@ export interface CodeIdentity {
   readonly team: string | null
   readonly cdHash: string
   readonly adHoc: boolean
+  /** Signed with the hardened runtime (`--options runtime`). */
+  readonly runtime: boolean
 }
 
 /** A bundle's verified code signature; also checks the dictation helper. */
@@ -204,11 +217,13 @@ export async function signedIdentity(
   system: MacosHelperInstallSystem = nodeInstallSystem,
 ): Promise<CodeIdentity> {
   try {
-    await system.execFile('codesign', ['--verify', '--strict', '--', path], {
-      timeout: 10_000,
-    })
+    await system.execFile(
+      MACOS_TOOLS.codesign,
+      ['--verify', '--strict', '--', path],
+      { timeout: 10_000 },
+    )
     const { stderr } = await system.execFile(
-      'codesign',
+      MACOS_TOOLS.codesign,
       ['--display', '--verbose=4', '--', path],
       { timeout: 10_000 },
     )
@@ -217,9 +232,11 @@ export async function signedIdentity(
     const cdHash = /^CDHash=([a-fA-F0-9]{40})$/m.exec(stderr)?.[1]
     const adHoc =
       /^CodeDirectory\b[^\n]*flags=0x[0-9a-f]+\([^\n]*\badhoc\b/m.test(stderr)
+    const runtime =
+      /^CodeDirectory\b[^\n]*flags=0x[0-9a-f]+\([^\n]*\bruntime\b/m.test(stderr)
     if (!identifier || !cdHash || (adHoc ? team !== null : team === null))
       throw new Error('Incomplete code signature')
-    return { identifier, team, cdHash: cdHash.toLowerCase(), adHoc }
+    return { identifier, team, cdHash: cdHash.toLowerCase(), adHoc, runtime }
   } catch {
     throw new UiError(
       'DRIVER_UNAVAILABLE',
@@ -309,9 +326,11 @@ async function removeStaleHelperCopies(
     // `comm` is each process's absolute executable path (LaunchServices
     // starts the helper by path), without arguments such as a launch nonce.
     // An unreadable process list means "in use" for every copy.
-    const { stdout } = await system.execFile('ps', ['-axww', '-o', 'comm='], {
-      timeout: 5_000,
-    })
+    const { stdout } = await system.execFile(
+      MACOS_TOOLS.ps,
+      ['-axww', '-o', 'comm='],
+      { timeout: 5_000 },
+    )
     const commands = stdout.split('\n').filter((line) => line.trim() !== '')
     if (commands.length === 0) return
     for (const path of stale) {
@@ -416,29 +435,38 @@ export async function installPackagedMacosHelper(
       // A downloaded Preview carries quarantine into every file; the user
       // has already let this app open, and this copy is resealed and checked
       // below. Kept, it would make Gatekeeper block the unnotarized helper.
-      await system.execFile('ditto', ['--noqtn', source, staged], {
+      await system.execFile(MACOS_TOOLS.ditto, ['--noqtn', source, staged], {
         timeout: 30_000,
       })
       const plist = join(staged, 'Contents', 'Info.plist')
-      await system.execFile('plutil', [
+      await system.execFile(MACOS_TOOLS.plutil, [
         '-replace',
         'EmperorExpectedMainExecutable',
         '-string',
         await fs.realpath(expectedExecutable),
         plist,
       ])
-      await system.execFile('plutil', [
+      await system.execFile(MACOS_TOOLS.plutil, [
         '-replace',
         'EmperorExpectedMainCDHash',
         '-string',
         parent.cdHash,
         plist,
       ])
-      await system.execFile('codesign', ['--force', '--sign', '-', staged], {
-        timeout: 10_000,
-      })
+      // The copy keeps the hardened runtime (SEC-04): without it any process
+      // of this user could inject a library through DYLD_* variables and act
+      // with the helper's Accessibility and Screen Recording grants.
+      await system.execFile(
+        MACOS_TOOLS.codesign,
+        ['--force', '--sign', '-', '--options', 'runtime', staged],
+        { timeout: 10_000 },
+      )
       const expected = await signedIdentity(staged, system)
-      if (expected.identifier !== HELPER_IDENTIFIER || !expected.adHoc)
+      if (
+        expected.identifier !== HELPER_IDENTIFIER ||
+        !expected.adHoc ||
+        !expected.runtime
+      )
         throw new UiError(
           'DRIVER_UNAVAILABLE',
           'Invalid Preview helper identity',
@@ -481,7 +509,7 @@ export async function installPackagedMacosHelper(
   const temporary = await fs.mkdtemp(join(installedRoot, '.pending-'))
   try {
     await system.execFile(
-      'ditto',
+      MACOS_TOOLS.ditto,
       [source, join(temporary, 'Emperor Computer Helper.app')],
       {
         timeout: 30_000,
@@ -509,6 +537,14 @@ export async function installPackagedMacosHelper(
   } finally {
     await fs.rm(temporary, { recursive: true, force: true })
   }
+}
+
+/** Has LaunchServices forget a helper copy (the packaged smoke's own). */
+export async function forgetHelperCopy(
+  path: string,
+  system: MacosHelperInstallSystem = nodeInstallSystem,
+): Promise<void> {
+  await system.execFile(LSREGISTER, ['-u', path], { timeout: 5_000 })
 }
 
 function connectSocket(path: string): Promise<Socket> {
@@ -570,7 +606,7 @@ export async function launchMacosHelper(
   ]
   try {
     if (options.openApp) await options.openApp(args)
-    else await execFile('open', args, { timeout: 10_000 })
+    else await execFile(MACOS_TOOLS.open, args, { timeout: 10_000 })
   } catch {
     throw new UiError(
       'DRIVER_UNAVAILABLE',

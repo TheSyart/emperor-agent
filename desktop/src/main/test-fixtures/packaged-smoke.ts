@@ -70,7 +70,17 @@ export function packagedSmokeFixture(
           microphoneDenied: true,
           devToolsDisabled: true,
           productionMenu: true,
+          rendererUrlPinned: true,
         },
+      },
+      helpers: {
+        ok: true,
+        mode: platform === 'darwin' ? 'macos' : 'not-macos',
+        computerUse: {
+          handshake: platform === 'darwin',
+          hardenedCopy: platform === 'darwin',
+        },
+        dictation: { available: platform === 'darwin' },
       },
     },
   }

@@ -19,6 +19,10 @@ export interface CurrentStableProcessIdentity {
   readonly processStartIdentity: StableProcessStartIdentity | null
 }
 
+/** System tools by absolute path (SEC-04): never whatever PATH finds first. */
+const SYSCTL = '/usr/sbin/sysctl'
+const PS = '/bin/ps'
+
 let currentProcessIdentityInitialized = false
 let cachedCurrentProcessIdentity: CurrentStableProcessIdentity
 
@@ -34,7 +38,7 @@ export function systemBootMarker(): string | null {
     if (process.platform === 'darwin') {
       try {
         const bootSessionUuid = execFileSync(
-          'sysctl',
+          SYSCTL,
           ['-n', 'kern.bootsessionuuid'],
           { encoding: 'utf8', timeout: 1_000 },
         )
@@ -49,7 +53,7 @@ export function systemBootMarker(): string | null {
       } catch {
         // Older Darwin variants may not expose kern.bootsessionuuid.
       }
-      const value = execFileSync('sysctl', ['-n', 'kern.boottime'], {
+      const value = execFileSync(SYSCTL, ['-n', 'kern.boottime'], {
         encoding: 'utf8',
         timeout: 1_000,
       })
@@ -99,7 +103,7 @@ export function stableProcessStartIdentity(
     }
     if (process.platform === 'darwin') {
       const uptimeBefore = uptime()
-      const elapsed = execFileSync('ps', ['-o', 'etime=', '-p', String(pid)], {
+      const elapsed = execFileSync(PS, ['-o', 'etime=', '-p', String(pid)], {
         encoding: 'utf8',
         timeout: 1_000,
       }).trim()

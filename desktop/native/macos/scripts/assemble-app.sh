@@ -43,7 +43,9 @@ PLIST
 if [[ -n "${EMPEROR_DEV_SIGN_IDENTITY:-}" ]]; then
   codesign --force --options runtime --timestamp=none --sign "$EMPEROR_DEV_SIGN_IDENTITY" "$app"
 else
-  codesign --force --sign - "$app"
+  # Ad hoc, but with the hardened runtime (SEC-04): no DYLD_* injection
+  # into the process that holds Accessibility and Screen Recording.
+  codesign --force --options runtime --sign - "$app"
 fi
 plutil -lint "$app/Contents/Info.plist"
 codesign --verify --strict "$app"

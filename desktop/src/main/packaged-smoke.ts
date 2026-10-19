@@ -1,9 +1,19 @@
 import { createHash } from 'node:crypto'
+import { existsSync, realpathSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { tmpdir, userInfo } from 'node:os'
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from 'node:path'
 import { searchProbe, writeJsonAtomic } from '@emperor/core/host-capabilities'
 import type { CoreApi } from '@emperor/core/api'
 import type { PackagedRendererSmokeReceipt } from './packaged-renderer-smoke'
+import type { PackagedHelpersSmokeReceipt } from './packaged-helpers-smoke'
 
 /** The built-in Skills a packaged runtime ships (sorted), nothing more. */
 export const PACKAGED_BUILT_IN_SKILLS = ['skill-creator']
@@ -67,6 +77,8 @@ export interface PackagedSmokeOptions {
     protectedStateDenied: true
   }>
   verifyRenderer(): Promise<PackagedRendererSmokeReceipt>
+  /** macOS: the helpers start and answer under the hardened runtime (SEC-04). */
+  verifyHelpers?(): Promise<PackagedHelpersSmokeReceipt>
 }
 
 export interface PackagedSmokeReceipt {
@@ -98,6 +110,7 @@ export interface PackagedSmokeReceipt {
       protectedStateDenied: boolean
     }
     renderer: PackagedRendererSmokeReceipt
+    helpers: PackagedHelpersSmokeReceipt
   }
   installJobs: { before: number; after: number }
   exitCode: 0 | 1
@@ -111,6 +124,95 @@ type SmokeStatus = {
   }
   activeJob?: unknown
   recentJobs?: unknown[]
+}
+
+/** EX_USAGE: the smoke flag was given without a disposable state root. */
+export const PACKAGED_SMOKE_REFUSED_EXIT = 64
+
+export type PackagedSmokeLaunch =
+  | { kind: 'none' }
+  | { kind: 'run'; receiptPath: string }
+  | { kind: 'refuse'; reason: string }
+
+/**
+ * The system's temporary directories, as real paths. Fixed per platform, not
+ * read from TMPDIR, so the environment cannot widen them; Windows has no
+ * fixed one and uses the TEMP directory.
+ */
+export function systemTempRoots(
+  platform: NodeJS.Platform | string = process.platform,
+): string[] {
+  if (platform === 'darwin') return ['/private/tmp', '/private/var/folders']
+  if (platform === 'linux') return ['/tmp', '/var/tmp', '/dev/shm']
+  if (platform === 'win32') return [tmpdir()]
+  return []
+}
+
+/**
+ * MAIN-28: the production binary accepts `--emperor-packaged-smoke` only for
+ * a state root inside the system temp directory, never the user's own
+ * `~/.emperor`; anything else is refused before any state is touched (the
+ * caller exits with PACKAGED_SMOKE_REFUSED_EXIT).
+ */
+export function packagedSmokeLaunch(
+  argv: readonly string[],
+  options: {
+    readonly stateRoot: string
+    readonly platform?: NodeJS.Platform | string
+    /** The user's home from the account database, not $HOME. */
+    readonly userHome?: string
+  },
+): PackagedSmokeLaunch {
+  if (!argv.includes('--emperor-packaged-smoke')) return { kind: 'none' }
+  let receiptPath: string
+  try {
+    receiptPath = parsePackagedSmokeArgs(argv)!.receiptPath
+  } catch (error) {
+    return { kind: 'refuse', reason: (error as Error).message }
+  }
+  if (!isAbsolute(options.stateRoot))
+    return {
+      kind: 'refuse',
+      reason: 'packaged smoke state root is not absolute',
+    }
+  const stateRoot = realPathOfFuture(options.stateRoot)
+  const temp = systemTempRoots(options.platform).map(realPathOfFuture)
+  if (!temp.some((root) => strictlyInside(root, stateRoot)))
+    return {
+      kind: 'refuse',
+      reason:
+        'packaged smoke needs EMPEROR_CONFIG_DIR inside the system temp directory',
+    }
+  const home = realPathOfFuture(options.userHome ?? userInfo().homedir)
+  if (containsPath(join(home, '.emperor'), stateRoot))
+    return {
+      kind: 'refuse',
+      reason: "packaged smoke never runs on the user's own ~/.emperor",
+    }
+  return { kind: 'run', receiptPath }
+}
+
+/** realpath of the longest existing prefix, plus the part not created yet. */
+function realPathOfFuture(path: string): string {
+  let existing = resolve(path)
+  const rest: string[] = []
+  while (!existsSync(existing)) {
+    const parent = dirname(existing)
+    if (parent === existing) break
+    rest.unshift(basename(existing))
+    existing = parent
+  }
+  try {
+    existing = realpathSync(existing)
+  } catch {
+    // Unreadable: compare the path as written.
+  }
+  return join(existing, ...rest)
+}
+
+function strictlyInside(parent: string, candidate: string): boolean {
+  const rel = relative(parent, candidate)
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
 }
 
 export function parsePackagedSmokeArgs(
@@ -207,6 +309,10 @@ export async function runPackagedSmoke(
       await opts.verifyRenderer(),
       opts.platform,
     )
+    const helpers =
+      opts.platform === 'darwin'
+        ? assertHelpersReceipt(await requiredHelpersProbe(opts)())
+        : notMacosHelpers()
 
     const receipt: PackagedSmokeReceipt = {
       ...base,
@@ -227,6 +333,7 @@ export async function runPackagedSmoke(
         terminal,
         seatbelt,
         renderer,
+        helpers,
       },
       installJobs: { before: jobsBefore, after: jobsAfter },
       exitCode: 0,
@@ -259,6 +366,11 @@ export async function runPackagedSmoke(
           protectedStateDenied: false,
         },
         renderer: failedRendererReceipt(),
+        helpers: {
+          ...notMacosHelpers(),
+          ok: false,
+          mode: opts.platform === 'darwin' ? 'macos' : 'not-macos',
+        },
       },
       installJobs: { before: 0, after: 0 },
       exitCode: 1,
@@ -278,6 +390,42 @@ function requiredSeatbeltProbe(
   if (!opts.verifySeatbelt)
     throw new Error('packaged macOS smoke requires a Seatbelt command probe')
   return opts.verifySeatbelt
+}
+
+function requiredHelpersProbe(
+  opts: PackagedSmokeOptions,
+): NonNullable<PackagedSmokeOptions['verifyHelpers']> {
+  if (!opts.verifyHelpers)
+    throw new Error('packaged macOS smoke requires the helper handshake probe')
+  return opts.verifyHelpers
+}
+
+function notMacosHelpers(): PackagedHelpersSmokeReceipt {
+  return {
+    ok: true,
+    mode: 'not-macos',
+    computerUse: { handshake: false, hardenedCopy: false },
+    dictation: { available: false },
+  }
+}
+
+function assertHelpersReceipt(
+  value: PackagedHelpersSmokeReceipt,
+): PackagedHelpersSmokeReceipt {
+  if (
+    value?.ok !== true ||
+    value.mode !== 'macos' ||
+    value.computerUse?.handshake !== true ||
+    value.computerUse.hardenedCopy !== true ||
+    value.dictation?.available !== true
+  )
+    throw new Error('packaged helper smoke receipt is invalid')
+  return {
+    ok: true,
+    mode: 'macos',
+    computerUse: { handshake: true, hardenedCopy: true },
+    dictation: { available: true },
+  }
 }
 
 function assertSeatbeltReceipt(value: {
@@ -505,7 +653,9 @@ function assertRendererReceipt(
     value.security.evalBlocked === true &&
     value.security.microphoneDenied === true &&
     value.security.devToolsDisabled === true &&
-    value.security.productionMenu === true
+    value.security.productionMenu === true &&
+    // SEC-04: ELECTRON_RENDERER_URL cannot move the packaged main window.
+    value.security.rendererUrlPinned === true
   if (!valid) throw new Error('packaged renderer sandbox receipt is invalid')
   if (
     value.chromiumSandbox === 'disabled-for-linux-test' &&
@@ -534,6 +684,7 @@ function assertRendererReceipt(
       microphoneDenied: true,
       devToolsDisabled: true,
       productionMenu: true,
+      rendererUrlPinned: true,
     },
   }
 }
@@ -559,6 +710,7 @@ function failedRendererReceipt(): PackagedRendererSmokeReceipt {
       microphoneDenied: false,
       devToolsDisabled: false,
       productionMenu: false,
+      rendererUrlPinned: false,
     },
   }
 }

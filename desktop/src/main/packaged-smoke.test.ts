@@ -3,8 +3,11 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import {
+  PACKAGED_SMOKE_REFUSED_EXIT,
+  packagedSmokeLaunch,
   parsePackagedSmokeArgs,
   runPackagedSmoke,
+  systemTempRoots,
   type PackagedSmokeCore,
 } from './packaged-smoke'
 
@@ -29,7 +32,17 @@ function rendererReceipt() {
       microphoneDenied: true,
       devToolsDisabled: true,
       productionMenu: true,
+      rendererUrlPinned: true,
     },
+  }
+}
+
+function helpersReceipt() {
+  return {
+    ok: true as const,
+    mode: 'macos' as const,
+    computerUse: { handshake: true, hardenedCopy: true },
+    dictation: { available: true },
   }
 }
 
@@ -106,6 +119,104 @@ function smokeFixture() {
   return { root, runtimeRoot, stateRoot, receiptPath }
 }
 
+describe('packaged smoke launch guard (SEC-04, MAIN-28)', () => {
+  const smoke = (receipt = path.join(os.tmpdir(), 'emperor-smoke.json')) => [
+    'Emperor Agent',
+    '--emperor-packaged-smoke',
+    '--emperor-smoke-receipt',
+    receipt,
+  ]
+  const realHome = os.userInfo().homedir
+
+  it('exits 64 (EX_USAGE) when it refuses', () => {
+    expect(PACKAGED_SMOKE_REFUSED_EXIT).toBe(64)
+  })
+
+  it('does nothing without the smoke flag', () => {
+    expect(
+      packagedSmokeLaunch(['Emperor Agent'], {
+        stateRoot: path.join(realHome, '.emperor'),
+      }),
+    ).toEqual({ kind: 'none' })
+  })
+
+  it('runs with a state root inside the system temp directory', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'emperor-smoke-guard-'))
+    try {
+      const receipt = path.join(root, 'receipt.json')
+      expect(
+        packagedSmokeLaunch(smoke(receipt), {
+          stateRoot: path.join(root, 'state'),
+        }),
+      ).toEqual({ kind: 'run', receiptPath: receipt })
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('7. refuses the real ~/.emperor and any state root outside temp', () => {
+    for (const stateRoot of [
+      path.join(realHome, '.emperor'),
+      path.join(realHome, 'Documents', 'emperor-smoke'),
+      '/opt/emperor-state',
+    ]) {
+      const launch = packagedSmokeLaunch(smoke(), { stateRoot })
+      expect(launch).toMatchObject({ kind: 'refuse' })
+      expect(
+        fs.existsSync(path.join(stateRoot, 'packaged-smoke-workspace')),
+      ).toBe(false)
+    }
+  })
+
+  it('refuses a temp path that leads out of temp through a symlink', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'emperor-smoke-guard-'))
+    try {
+      fs.symlinkSync(realHome, path.join(root, 'home'))
+      expect(
+        packagedSmokeLaunch(smoke(), {
+          stateRoot: path.join(root, 'home', '.emperor'),
+        }),
+      ).toMatchObject({ kind: 'refuse' })
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses the temp directory itself, the real home inside temp, and a bad receipt', () => {
+    const tempRoot = systemTempRoots(process.platform)[0]!
+    expect(packagedSmokeLaunch(smoke(), { stateRoot: tempRoot })).toMatchObject(
+      { kind: 'refuse' },
+    )
+    // Even a home under temp: its own ~/.emperor is never a smoke target.
+    expect(
+      packagedSmokeLaunch(smoke(), {
+        stateRoot: path.join(tempRoot, 'someone', '.emperor'),
+        userHome: path.join(tempRoot, 'someone'),
+      }),
+    ).toMatchObject({ kind: 'refuse' })
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'emperor-smoke-guard-'))
+    try {
+      for (const argv of [
+        ['Emperor Agent', '--emperor-packaged-smoke'],
+        smoke('relative.json'),
+      ])
+        expect(
+          packagedSmokeLaunch(argv, { stateRoot: path.join(root, 'state') }),
+        ).toMatchObject({ kind: 'refuse' })
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('knows the system temp directories of each platform', () => {
+    expect(systemTempRoots('darwin')).toEqual([
+      '/private/tmp',
+      '/private/var/folders',
+    ])
+    expect(systemTempRoots('linux')).toEqual(['/tmp', '/var/tmp', '/dev/shm'])
+  })
+})
+
 describe('packaged smoke contract', () => {
   it('only enables the fixed packaged smoke mode with an absolute receipt path', () => {
     const receiptPath = path.join(os.tmpdir(), 'emperor-smoke.json')
@@ -138,6 +249,7 @@ describe('packaged smoke contract', () => {
       commands: 18,
       protectedStateDenied: true as const,
     }))
+    const verifyHelpers = vi.fn(async () => helpersReceipt())
 
     const receipt = await runPackagedSmoke({
       core,
@@ -151,6 +263,7 @@ describe('packaged smoke contract', () => {
       arch: 'arm64',
       verifySeatbelt,
       verifyRenderer: async () => rendererReceipt(),
+      verifyHelpers,
     })
 
     expect(core.bootstrap).toHaveBeenCalledOnce()
@@ -193,7 +306,9 @@ describe('packaged smoke contract', () => {
         protectedStateDenied: true,
       },
       renderer: rendererReceipt(),
+      helpers: helpersReceipt(),
     })
+    expect(verifyHelpers).toHaveBeenCalledOnce()
     expect(verifySeatbelt).toHaveBeenCalledWith(
       path.join(fixture.stateRoot, 'packaged-smoke-workspace'),
       fixture.stateRoot,
@@ -361,6 +476,45 @@ describe('packaged smoke contract', () => {
       JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8')).operations
         .seatbelt,
     ).toMatchObject({ ok: false, protectedStateDenied: false })
+  })
+
+  it('fails closed when a macOS package does not prove its helpers (SEC-04)', async () => {
+    const seatbelt = async () => ({
+      ok: true as const,
+      mode: 'workspace-write' as const,
+      commands: 18,
+      protectedStateDenied: true as const,
+    })
+    for (const verifyHelpers of [
+      undefined,
+      async () => ({
+        ...helpersReceipt(),
+        computerUse: { handshake: true, hardenedCopy: false },
+      }),
+    ]) {
+      const fixture = smokeFixture()
+      const { core } = makeCore()
+      await expect(
+        runPackagedSmoke({
+          core,
+          runtimeRoot: fixture.runtimeRoot,
+          stateRoot: fixture.stateRoot,
+          receiptPath: fixture.receiptPath,
+          appVersion: '0.1.0',
+          runtimeRevision: 'a'.repeat(64),
+          commit: 'b'.repeat(40),
+          platform: 'darwin',
+          arch: 'arm64',
+          verifySeatbelt: seatbelt,
+          verifyRenderer: async () => rendererReceipt(),
+          ...(verifyHelpers ? { verifyHelpers } : {}),
+        }),
+      ).rejects.toThrow(/helper/i)
+      expect(
+        JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8')).operations
+          .helpers,
+      ).toMatchObject({ ok: false })
+    }
   })
 
   it('fails closed when a required lifecycle service is not ready', async () => {

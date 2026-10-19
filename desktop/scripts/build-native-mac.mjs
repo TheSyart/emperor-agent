@@ -26,7 +26,10 @@ if (process.platform === 'darwin') {
   mkdirSync(dirname(output), { recursive: true })
   for (const [command, args] of [
     ['swiftc', [source, '-o', output]],
-    ['codesign', ['-s', '-', '--force', output]],
+    [
+      '/usr/bin/codesign',
+      ['-s', '-', '--force', '--options', 'runtime', output],
+    ],
   ]) {
     const result = spawnSync(command, args, { stdio: 'inherit' })
     if (result.status !== 0)
