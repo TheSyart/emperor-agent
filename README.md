@@ -89,7 +89,7 @@ Build 会话绑定一个本地文件夹，适合代码、文档和其他项目�
 | `/permissions workspace-write`    | 默认。可以写当前 workspace 和临时目录；超出范围时逐次请求批准 |
 | `/permissions danger-full-access` | 不限制写入，也不弹出审批                                      |
 
-批准只对那一次工具调用有效。Shell 命令在 macOS（Seatbelt）和 Linux（bubblewrap）上由系统沙箱执行；其他平台没有沙箱后端，只有 `danger-full-access` 才能运行 Shell 命令。受限预设主要限制文件写入；macOS 还拒读 Emperor 的电脑操作状态与浏览器数据，并阻止部分系统 GUI 连接。普通文件读取和互联网访问仍不受此文件沙箱普遍限制。
+批准只对那一次工具调用有效。Shell 命令在 macOS（Seatbelt）和 Linux（bubblewrap）上由系统沙箱执行；其他平台没有沙箱后端，只有 `danger-full-access` 才能运行 Shell 命令。受限预设主要限制文件写入；macOS 还拒读 Emperor 的电脑操作状态与浏览器数据，并阻止部分系统 GUI 连接。普通文件读取和互联网访问仍不受此文件沙箱普遍限制。MCP stdio server、插件 Hook 和托管环境的安装命令跑在同一套进程沙箱里，但读取默认关闭，只开放系统与工具链目录、workspace 和各自需要的目录；沙箱不可用时插件的进程不启动，你自己的 MCP server 先问你一次。
 
 ### Plan：先规划再执行
 
@@ -243,9 +243,10 @@ Build 项目目录不会承载私有会话、记忆或附件数据。
   - Emperor Home 的 `computer-use/`、`browser/`，以及 `model_config.json`、`mcp_config.json`、`settings.json`、`hooks.json`（含备份）：任何预设下都不能读也不能改，提权也不行。Agent 改配置只能通过 `mcp_config`、`skill_manage` 等工具，或由你在设置页修改。
   - `~/.ssh`、`~/.aws`、`~/.config/gcloud`、`~/.docker/config.json`、`~/.netrc`、`~/.codex/auth.json`、`~/.claude/.credentials.json`：任何预设下都不能写；读取需要你批准一次提权，审批卡写明文件与理由，`danger-full-access` 下可以直接读。默认预设下经 SSH 的 `git push`、`aws`、`gcloud` 等命令因此需要批准一次。
   - macOS 受限 Shell 另对部分系统 GUI 连接做额外限制。
+- MCP stdio server、插件 Hook 和托管环境的安装命令与 Shell 共用同一套进程沙箱和上面这张表，并且默认读不到你的文件：只开放系统与工具链目录（含 `~/.npmrc`、uv / pip 配置）、workspace，以及各自需要的目录（MCP server 参数里的路径和它自己的缓存 `stateRoot/mcp/cache/<名称>`，插件 Hook 的数据目录）。沙箱不可用时插件的 server 与 Hook 不运行，你自己的 MCP server 先在对话里用审批卡问你一次、按 server 记住；每次启动的结果见「设置 › 诊断 › 进程隔离回执」。
 - 模型 API Key 与 MCP `headers`、`env` 中的 key / token / secret / authorization / password 类值加密后落盘（`el1:…`），设置页只显示 Key 的末 4 位。旧的明文文件在下一次保存时加密，原文件保留为 `*.pre-seal-<时间>` 备份（含明文，确认无误后可删除）。本地密钥丢失时，受影响的模型显示「凭据需要重新输入」，重新填写即可。
 - 子代理继承当前沙箱模式，但不能请求提权。
-- 记忆编辑、MCP 工具、Skill 加载和 Scheduler 工具不需要审批；只配置你信任的 MCP server。
+- 记忆编辑、MCP 工具、Skill 加载和 Scheduler 工具不需要审批；只配置你信任的 MCP server（它的进程在沙箱里，但它能读写你放进 workspace 和参数里的目录）。
 - Agent 用 `skill_manage` 修改 Skills、用 `mcp_config` 修改 MCP 配置时，除 `danger-full-access` 外每次写入都需要你批准。
 - 有待回答的问题或审批，或处于 Plan 模式时，你在界面上对定时任务、Skill、Plugin、模型和 MCP 配置的修改会被暂时拒绝；先回答或退出 Plan 再改。
 - 用户内置浏览器只加载不带账号密码的 `http(s)` 地址，拒绝网页权限请求；支持受文件类型、大小与保存位置规则约束的下载。浏览数据与 Agent 的持久 profile 分开，清除浏览数据不会删除下载好的文件。

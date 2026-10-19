@@ -198,6 +198,9 @@
 
 ### Security
 
+- MCP stdio server、插件 Hook 和托管环境的安装命令与 Agent 的 Shell 共用同一套进程沙箱（`sandbox/policy.ts`）：读取默认关闭，只开放系统与工具链目录、workspace 和各自需要的目录，写入限于 workspace 与各自的目录，Emperor 的设置文件和你的凭据始终读不到。`npx -y …`、`uvx …`、`node …`、`python …` 类 MCP server 在沙箱里能正常启动：每个 server 有自己的缓存目录 `stateRoot/mcp/cache/<名称>`（同时是 `npm_config_cache`、`UV_CACHE_DIR` 和 `TMPDIR`），第一次启动会重新下载一次。以前 MCP server 在沙箱里起不来，沙箱不可用时又会悄悄在沙箱外运行；现在插件的 server 与 Hook 拒绝运行并写明原因，你自己的 server 在下一次对话时用审批卡问你一次、按 server 记住。每次启动的结果记在 `processes/receipts.v1.json`，「设置 › 诊断 › 进程隔离回执」可以看到。Shell 的沙箱规则不变（golden 测试锁定）。
+- 插件 Hook 的 workspace 只读，只能写自己的数据目录；你在 `hooks.json` 里写的 Hook 不受影响。
+- `danger-full-access` 下的 Shell 在 macOS 的受保护路径守护起不来时不再执行命令（以前会不带守护直接运行）。
 - 从 Chrome/Edge 导入的 Cookie 不再写进 Chromium 的 Cookie 数据库（Emperor 不用钥匙串，那里只有固定口令保护）：改用 Emperor 本地密钥加密保存在 profile 文件夹的 `imported-cookies.el1`，使用时只放进浏览器内存。Agent 浏览中网站新设置的登录状态仍按 Chromium 默认方式保存；profile 文件夹已排除出 Time Machine。清空 profile 会一并删除导入的登录状态。升级前已经导入、留在 Chromium 数据库里的 Cookie 不会自动迁移，需要时清空那个 profile 再重新导入。
 - 网页在你要输入的字段获得焦点时把焦点挪进跨源 iframe，Agent 的输入、填写、按键和凭据代填会被拒绝（`FOCUS_IN_CROSS_ORIGIN_FRAME`），不再让 Emperor 卡死或崩溃；输入期间跨源 iframe 暂时不能获得焦点，一次输入最多 5 秒，超时后重新连接这个标签页。
 - Agent 下载收件箱里的文件带 macOS 来源标记（`com.apple.quarantine`），写不上时在「下载历史记录」标注「未能标记来源」。
