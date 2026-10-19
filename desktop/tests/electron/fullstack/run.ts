@@ -869,7 +869,7 @@ async function fullstack(
     'turning the Computer Use plugin off blocks the next action, and Settings follows',
     async () => {
       await page
-        .getByRole('navigation', { name: '侧栏导航' })
+        .getByRole('navigation', { name: '应用导航' })
         .getByRole('button', { name: '能力', exact: true })
         .click()
       await page.locator('[data-plugin-id="computer-use"]').first().click()

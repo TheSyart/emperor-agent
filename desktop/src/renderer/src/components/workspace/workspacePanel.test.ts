@@ -279,6 +279,23 @@ describe('WorkspacePanel', () => {
     expect(root.querySelector('.workspace-launcher')).not.toBeNull()
   })
 
+  it('heads the panel with a PaneHeader that lines up with the 46px bars (UI-S01)', async () => {
+    const root = mount()
+    await flush()
+    const header = root.querySelector<HTMLElement>(
+      '.workspace-panel > .ds-pane-header',
+    )!
+    expect(header).not.toBeNull()
+    expect(header.querySelector('.workspace-title')?.textContent).toBe('工作台')
+    expect(header.querySelector('.segments')).not.toBeNull()
+    expect(header.hasAttribute('data-app-drag')).toBe(true)
+    // 48px PaneHeader pulled up 2px: its bottom meets the 46px bars.
+    const source = (await import('./WorkspacePanel.vue?raw')).default
+    expect(source).toMatch(
+      /\.workspace-header\s*\{[^}]*margin-top:\s*calc\(var\(--shell-bar-h\) - var\(--pane-header-h\)\)/,
+    )
+  })
+
   it('closes the column through frameActions', async () => {
     const root = mount()
     await flush()

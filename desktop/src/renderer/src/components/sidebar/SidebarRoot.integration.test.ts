@@ -212,14 +212,40 @@ it('preserves main session actions and search without child rows', async () => {
 })
 
 async function chooseNewProjectFolder() {
-  root.querySelector<HTMLButtonElement>('[aria-label="新建项目会话"]')!.click()
+  root.querySelector<HTMLButtonElement>('[aria-label="项目操作"]')!.click()
   await settle()
   const item = [
     ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
-  ].find((el) => el.textContent?.includes('选择项目文件夹'))!
+  ].find((el) => el.textContent?.includes('使用现有文件夹'))!
   item.click()
   await settle()
 }
+
+it('holds only the brand bar, projects and chats (UI-S01)', async () => {
+  await mount('/chat/pinned')
+  const labels = [...root.querySelectorAll('button')].map((b) =>
+    b.getAttribute('aria-label'),
+  )
+  // New chat, search, the pages, the bell and settings live in the rail.
+  for (const moved of [
+    '新对话',
+    '新建项目会话',
+    '后退',
+    '前进',
+    '搜索',
+    '设置',
+    '定时任务',
+    '能力',
+  ])
+    expect(labels).not.toContain(moved)
+  expect(root.querySelector('nav[aria-label="侧栏导航"]')).toBeNull()
+  expect(root.querySelector('[data-testid="sidebar-theme-toggle"]')).toBeNull()
+  // The 46px top bar: brand and the collapse button, a drag region.
+  const bar = root.querySelector<HTMLElement>('.sidebar-bar')!
+  expect(bar.hasAttribute('data-app-drag')).toBe(true)
+  expect(bar.textContent).toContain('Emperor')
+  expect(bar.querySelector('[aria-label="收起侧栏"]')).not.toBeNull()
+})
 
 it('does nothing when the folder picker is cancelled (FIX-06 1)', async () => {
   mock.selectDirectory.mockResolvedValue(null)

@@ -15,6 +15,7 @@ import {
   systemBootMarker,
 } from '../util/stable-process-identity'
 import type { ProcessContainmentController } from '../environment/sandbox'
+import { processContainmentPolicy } from '../sandbox/presets'
 
 const owner = {
   kind: 'session' as const,
@@ -25,14 +26,14 @@ const owner = {
 function sandboxExecution(root: string) {
   return {
     kind: 'sandbox' as const,
-    policy: {
-      mode: 'preferred' as const,
-      workspaceRoot: root,
+    policy: processContainmentPolicy({
+      workspace: { root, access: 'write' },
       stateRoot: null,
-      tempRoot: root,
-      readOnlyRoots: [] as string[],
-      network: 'deny' as const,
-    },
+      tempDir: root,
+      network: 'deny',
+      fallback: 'refuse',
+      executables: [process.execPath],
+    }),
   }
 }
 
@@ -50,7 +51,7 @@ describe('OwnedProcessRuntime receipts', () => {
         processTree: true,
         reason: 'ready',
       }),
-      prepare: () => {
+      contain: () => {
         sandboxPrepareCalls += 1
         throw new Error('host execution must bypass sandbox preparation')
       },
@@ -81,7 +82,7 @@ describe('OwnedProcessRuntime receipts', () => {
     expect(result).toMatchObject({
       status: 'completed',
       stdout: 'host-runtime',
-      containment: { decision: 'unsandboxed', backend: 'none' },
+      containment: { decision: 'user-allowed-unsandboxed', backend: 'none' },
     })
     expect(sandboxPrepareCalls).toBe(0)
     expect(runtime.list()[0]).toMatchObject({
@@ -96,9 +97,8 @@ describe('OwnedProcessRuntime receipts', () => {
         },
       },
       containment: {
-        decision: 'unsandboxed',
-        filesystem: 'unrestricted',
-        network: 'unrestricted',
+        decision: 'user-allowed-unsandboxed',
+        reason: 'authorized host execution',
       },
     })
     expect(readFileSync(runtime.receiptsPath, 'utf8')).not.toContain(
@@ -121,7 +121,7 @@ describe('OwnedProcessRuntime receipts', () => {
         processTree: true,
         reason: 'ready',
       }),
-      prepare: () => {
+      contain: () => {
         throw new Error('unused')
       },
     }
@@ -171,6 +171,53 @@ describe('OwnedProcessRuntime receipts', () => {
     expect(runtime.list()[0]).toMatchObject({
       executionBoundary: { kind: 'sandbox', authorization: null },
     })
+  })
+
+  it('reads a pre-SEC-08 containment receipt in the new words', () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-owned-legacy-'))
+    const legacy = (containment: Record<string, unknown>) =>
+      ({ ...runningReceipt(), containment }) as unknown as OwnedProcessReceipt
+    const runtime = new OwnedProcessRuntime(root, {
+      initialReceipts: [
+        legacy({
+          decision: 'sandboxed',
+          backend: 'macos-seatbelt',
+          policyHash: 'a',
+        }),
+        {
+          ...legacy({
+            decision: 'unsandboxed',
+            backend: 'none',
+            policyHash: 'b',
+            reason: 'x',
+          }),
+          id: 'process_fixture_2',
+        },
+        {
+          ...legacy({
+            decision: 'denied',
+            backend: 'linux-bwrap',
+            policyHash: 'c',
+          }),
+          id: 'process_fixture_3',
+        },
+      ],
+    })
+    expect(runtime.list().map((receipt) => receipt.containment)).toEqual([
+      {
+        backend: 'seatbelt',
+        decision: 'contained',
+        policyHash: 'a',
+        reason: '',
+      },
+      {
+        backend: 'none',
+        decision: 'user-allowed-unsandboxed',
+        policyHash: 'b',
+        reason: 'x',
+      },
+      { backend: 'none', decision: 'refused', policyHash: 'c', reason: '' },
+    ])
   })
 
   it('persists owner, lease, cwd capability, sandbox and bounded quota without raw command data', async () => {
@@ -500,12 +547,8 @@ function runningReceipt(
       withinWorkspace: true,
     },
     containment: {
-      decision: 'sandboxed',
-      backend: 'linux-bwrap',
-      capabilityStatus: 'available',
-      filesystem: 'workspace-write',
-      network: 'denied',
-      processTree: true,
+      decision: 'contained',
+      backend: 'bwrap',
       policyHash: 'd'.repeat(64),
       reason: '',
     },

@@ -71,8 +71,19 @@ export class CoreEffectiveConfigService {
           },
           escalation: 'one-shot-approval',
         },
-        hooks: { containment: 'none', source: 'emperor-home/hooks.json' },
-        mcp: { containment: 'none', approval: 'never' },
+        // SEC-08: one containment (sandbox/policy.ts) for every process.
+        hooks: {
+          user: { containment: 'none', source: 'emperor-home/hooks.json' },
+          plugin: { containment: 'contained', fallback: 'refuse' },
+        },
+        mcp: {
+          containment: 'contained',
+          reads: 'toolchain-workspace-and-granted',
+          cache: 'emperor-home/mcp/cache/<server>',
+          fallback: { plugin: 'refuse', user: 'ask-user' },
+          approval: 'never',
+        },
+        environmentInstaller: { containment: 'contained', fallback: 'refuse' },
       },
       merge: (current) => ({ ...current }),
     })

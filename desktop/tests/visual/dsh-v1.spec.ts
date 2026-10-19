@@ -117,23 +117,29 @@ test('sidebar expanded vs collapsed rail', async ({ page }) => {
   await open(page, '/chat/build-ui')
   await expect(page.locator('.sidebar-root')).toBeVisible()
   const sidebar = (await page.locator('.sidebar-col').boundingBox())!
-  expect(Math.round(sidebar.width)).toBe(280)
+  expect(Math.round(sidebar.width)).toBe(236)
   await shot(page, 'sidebar-expanded')
 
+  // UI-S01: the rail is permanent; folding hides only the sidebar.
   await page.getByRole('button', { name: '收起侧栏' }).click()
-  await expect(page.locator('.sidebar-rail')).toBeVisible()
-  await page.waitForTimeout(400)
-  const rail = (await page.locator('.sidebar-col').boundingBox())!
+  await expect(page.locator('.sidebar-root')).toBeHidden()
+  const rail = (await page.locator('.app-rail').boundingBox())!
   expect(Math.round(rail.width)).toBe(56)
+  expect(
+    Math.round((await page.locator('.sidebar-col').boundingBox())!.width),
+  ).toBe(0)
   await shot(page, 'sidebar-rail')
 
-  await page.getByRole('button', { name: '展开侧栏' }).click()
+  await page
+    .locator('.app-rail')
+    .getByRole('button', { name: '会话', exact: true })
+    .click()
   await expect(page.locator('.sidebar-root')).toBeVisible()
 })
 
 test('sidebar search filters sessions', async ({ page }) => {
   await open(page, '/chat/build-ui')
-  // The capsule opens from the brand-row search icon (or ⌘K).
+  // The capsule opens from the rail's search button (or ⌘K).
   await page.getByRole('button', { name: '搜索', exact: true }).click()
   await page.getByLabel('搜索对话').fill('Visual')
   await expect(page.locator('.search-result').first()).toBeVisible()
@@ -144,7 +150,8 @@ test('narrow window auto-collapses the sidebar to the rail', async ({
   page,
 }) => {
   await open(page, '/chat/build-ui', { width: 900, height: 820 })
-  await expect(page.locator('.sidebar-rail')).toBeVisible()
+  await expect(page.locator('.app-rail')).toBeVisible()
+  await expect(page.locator('.sidebar-root')).toBeHidden()
   await expectNoHorizontalOverflow(page)
   await shot(page, 'narrow-900')
   await open(page, '/chat/chat-main', { width: 900, height: 820 })
@@ -444,7 +451,11 @@ test('a new chat sends to its own draft session, never the previous one', async 
   page,
 }) => {
   await open(page, '/chat/build-ui')
-  await page.locator('.new-session').click()
+  // The rail's 新对话 (UI-S01; it was the sidebar's 新对话 row).
+  await page
+    .locator('.app-rail')
+    .getByRole('button', { name: '新对话', exact: true })
+    .click()
   await expect(page).toHaveURL(/\/chat\/draft:/)
   await page.getByLabel('消息输入框').fill('这是新对话的第一条消息')
   await page.getByLabel('消息输入框').press('Enter')
@@ -476,7 +487,11 @@ test('a slash command run from a draft moves the view to the new session', async
   page,
 }) => {
   await open(page, '/chat/build-ui')
-  await page.locator('.new-session').click()
+  // The rail's 新对话 (UI-S01; it was the sidebar's 新对话 row).
+  await page
+    .locator('.app-rail')
+    .getByRole('button', { name: '新对话', exact: true })
+    .click()
   await expect(page).toHaveURL(/\/chat\/draft:/)
   await page.getByLabel('消息输入框').fill('/plan on')
   await page.getByLabel('消息输入框').press('Enter')

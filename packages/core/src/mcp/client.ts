@@ -14,8 +14,10 @@ import {
   type MCPConnectionSnapshot,
   type MCPConnectionSupervisorOptions,
 } from './supervisor'
-import type { OwnedProcessRuntime } from '../processes/runtime'
+import { OwnedProcessRuntime } from '../processes/runtime'
+import type { UnsandboxedConsentPort } from '../sandbox/consent'
 import type { SecretSealer } from '../security/secret-sealer'
+import type { McpServerSource } from './containment'
 
 export type MCPConnectionFactory = (
   cfg: ServerConfig,
@@ -53,7 +55,16 @@ export interface PluginMcpServer {
 }
 
 export interface MCPClientOptions {
+  /**
+   * Where stdio servers are born and contained (SEC-08). Without one the
+   * client makes its own over `root` (receipts in `<root>/processes`).
+   */
   readonly processRuntime?: OwnedProcessRuntime | null
+  /**
+   * Asks the user before one of their own servers (mcp_config.json) runs
+   * outside an unavailable sandbox. Without it such a server is refused.
+   */
+  readonly unsandboxedConsent?: UnsandboxedConsentPort | null
   /** Where stdio servers run and may write (the chat workspace, or a project root). */
   readonly workspaceRoot?: string | null
   /**
@@ -95,6 +106,9 @@ export class MCPClient {
   private readonly opts: MCPClientOptions
   private executionEnvironment: ExecutionEnvironment | null = null
   private initialized = false
+  /** Names in mcp_config.json at the last reload: the user's own servers. */
+  private userServerNames = new Set<string>()
+  private ownRuntime: OwnedProcessRuntime | null = null
 
   constructor(root: string, opts: MCPClientOptions = {}) {
     this.root = root
@@ -107,13 +121,28 @@ export class MCPClient {
           executionEnvironment,
           (snapshot) => this.configForSnapshot(config.name, snapshot),
           {
-            processRuntime: opts.processRuntime ?? null,
+            processRuntime: this.processRuntime(),
             workspaceRoot: opts.workspaceRoot ?? null,
             stateRoot: this.root,
             // Servers serve every session of their scope: no session owns them.
             ownerSessionId: null,
+            source: this.sourceOf(config.name),
+            consent: opts.unsandboxedConsent ?? null,
           },
         ))
+  }
+
+  private processRuntime(): OwnedProcessRuntime {
+    if (this.opts.processRuntime) return this.opts.processRuntime
+    this.ownRuntime ??= new OwnedProcessRuntime(this.root)
+    return this.ownRuntime
+  }
+
+  /** A server is the user's only when mcp_config.json names it; else a plugin's. */
+  private sourceOf(name: string): McpServerSource {
+    return this.opts.userServers !== false && this.userServerNames.has(name)
+      ? 'user'
+      : 'plugin'
   }
 
   /**
@@ -172,6 +201,7 @@ export class MCPClient {
     this.executionEnvironment = executionEnvironment
     const desired = new Set<string>()
     const userNames = new Set(Object.keys(config.servers))
+    this.userServerNames = userNames
     const plugins = [...this.pluginServers.values()]
       // A user server that later took the same name wins until keys are recomputed.
       .filter((server) => !userNames.has(server.key))
@@ -417,6 +447,8 @@ function createConnection(
     workspaceRoot: string | null
     stateRoot: string
     ownerSessionId: string | null
+    source?: McpServerSource
+    consent?: UnsandboxedConsentPort | null
   } = {
     processRuntime: null,
     workspaceRoot: null,
@@ -435,6 +467,8 @@ function createConnection(
     workspaceRoot: owned.workspaceRoot,
     stateRoot: owned.stateRoot,
     ownerSessionId: owned.ownerSessionId,
+    source: owned.source ?? 'plugin',
+    consent: owned.consent ?? null,
   })
 }
 

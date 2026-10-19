@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 // DS-03 (PLAN-V020): foundation and action components — Button, IconButton,
 // LinkButton, Icon, Spinner, Skeleton, Kbd — and the rules they enforce.
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { createApp, h, nextTick, type Component } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Button from './Button.vue'
@@ -150,6 +152,62 @@ describe('IconButton', () => {
       variant: 'primary',
       shape: 'circle',
     })
+  })
+
+  it('opens its tooltip below when the window top leaves no room (UI-S01 top bars)', async () => {
+    const root = mount(() => h(IconButton, { label: '工作台' }, () => 'w'))
+    const button = root.querySelector('button')!
+    const at = (top: number) =>
+      vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({
+        x: 100,
+        y: top,
+        top,
+        left: 100,
+        right: 128,
+        bottom: top + 28,
+        width: 28,
+        height: 28,
+        toJSON: () => ({}),
+      })
+    at(17)
+    button.dispatchEvent(new Event('pointerenter'))
+    vi.advanceTimersByTime(500)
+    await nextTick()
+    let bubble = document.body.querySelector<HTMLElement>('[role="tooltip"]')!
+    expect(bubble.dataset.side).toBe('bottom')
+    expect(bubble.style.top).toBe(`${17 + 28 + 6}px`)
+    button.dispatchEvent(new Event('pointerleave'))
+    await nextTick()
+    at(300)
+    button.dispatchEvent(new Event('pointerenter'))
+    vi.advanceTimersByTime(500)
+    await nextTick()
+    bubble = document.body.querySelector<HTMLElement>('[role="tooltip"]')!
+    expect(bubble.dataset.side).toBe('top')
+  })
+
+  it('has the 36px rail size and a selected state on --surface-selected (UI-S01)', async () => {
+    const root = mount(() =>
+      h('div', [
+        h(IconButton, { label: '会话', size: 'lg', selected: true }),
+        h(IconButton, { label: '能力', size: 'lg' }),
+      ]),
+    )
+    const [on, off] = [...root.querySelectorAll('button')]
+    expect(on!.dataset).toMatchObject({ size: 'lg', selected: 'true' })
+    expect(off!.hasAttribute('data-selected')).toBe(false)
+    const source = (await import('./IconButton.vue?raw')).default
+    expect(source).toMatch(
+      /\[data-size='lg'\]\s*\{[^}]*width:\s*var\(--icon-button-lg\)[^}]*height:\s*var\(--icon-button-lg\)/,
+    )
+    expect(source).toMatch(
+      /\[data-selected\][^{]*\{[^}]*background:\s*rgb\(var\(--surface-selected\)\)/,
+    )
+    const tokens = readFileSync(
+      join(__dirname, '../../theme/components.css'),
+      'utf8',
+    )
+    expect(tokens).toMatch(/--icon-button-lg:\s*36px;/)
   })
 })
 

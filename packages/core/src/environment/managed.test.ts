@@ -250,8 +250,15 @@ describe('ManagedEnvironmentService', () => {
       ['doctor', '--json'],
     ])
     for (const request of runner.requests) {
+      // SEC-08: every recipe command runs contained, carrying its plan.
       expect(request.execution).toMatchObject({
-        kind: 'host',
+        kind: 'sandbox',
+        policy: {
+          read: { deny: [stateRoot] },
+          network: 'allow',
+          fallback: 'refuse',
+          protectedPaths: { stateRoot, credentialReads: 'deny' },
+        },
         authorization: {
           toolName: 'manage_environment',
           planId: preview.planId,
@@ -573,14 +580,10 @@ class RecordingInstallerRunner implements OwnedProcessRunner {
       durationMs: 1,
       error: null,
       containment: {
-        decision: 'unsandboxed',
-        backend: 'none',
-        capabilityStatus: 'not_required',
-        filesystem: 'unrestricted',
-        network: 'unrestricted',
-        processTree: true,
+        decision: 'contained',
+        backend: 'seatbelt',
         policyHash: 'a'.repeat(64),
-        reason: 'authorized managed environment install',
+        reason: '',
       },
     }
   }

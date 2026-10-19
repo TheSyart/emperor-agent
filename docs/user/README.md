@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：安装包用户、首次使用者<br>
 > 最后核验：2026-10-19<br>
-> 事实源：`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/sidebar/sidebarNav.ts`、`desktop/src/renderer/src/components/settings/settingsSections.ts` 与各设置分区（含 `ComputerUseSection.vue`）、Composer 与 CoreApi 用户入口
+> 事实源：`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/sidebar/sidebarNav.ts`、`desktop/src/renderer/src/components/sidebar/SidebarRail.vue`、`desktop/src/renderer/src/components/settings/settingsSections.ts` 与各设置分区（含 `ComputerUseSection.vue`）、Composer 与 CoreApi 用户入口
 
 这组文档按实际任务组织。你不需要先理解 CoreApi、runtime event 或磁盘 store。
 
@@ -20,26 +20,25 @@
    - 输入框麦克风与本机识别，见 [语音听写](chat-build.md#语音听写)。
 8. [诊断与排障](diagnostics-troubleshooting.md)：无法启动、模型失败或状态不一致时从哪里查。
 
-## 侧栏入口
+## 图标栏与侧栏
 
-左侧会话栏从上到下依次是：
+窗口没有系统标题栏：左上角的红绿灯在最左侧的图标栏顶部，拖动图标栏顶部、侧栏顶部或对话顶栏的空白处可以移动窗口。
 
-- 收起按钮与后退 / 前进；
-- Emperor 标志与名称、搜索对话和通知铃铛；
-- 「新对话」（右侧的 `+` 在项目中新建会话），以及四个整页入口：
+最左侧是一直显示的图标栏，从上到下是「新对话」（⌘N）、「搜索」（⌘K）、「会话」，以及几个整页入口；底部是通知铃铛和「设置」：
 
-| 入口         | 用途                                                                    | 详细说明                                                       |
-| ------------ | ----------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Pull Request | 通过本机 GitHub CLI 只读浏览 PR；启用 GitHub 插件后还可查看 Issue 和 CI | [Chat 与 Build](chat-build.md#pull-request)                    |
-| 定时任务     | 创建、编辑、暂停、恢复、立即运行和删除定时任务                          | [定时任务、Hooks 与桌宠](automation-collaboration.md#定时任务) |
-| 能力         | 插件 / Skills / MCP / 工具四个标签：安装、导入、启停、删除和查看工具    | [Tools、Skills 与 MCP](tools-skills-mcp.md)                    |
-| 探索         | 应用内置的精选 Skills 与 MCP server，安装前先预览                       | [Tools、Skills 与 MCP](tools-skills-mcp.md#探索)               |
+| 入口         | 用途                                                                              | 详细说明                                                       |
+| ------------ | --------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| 会话         | 在对话页时收起或展开侧栏（⌘B）；在整页时回到当前会话                              | [Chat 与 Build](chat-build.md#侧栏与会话操作)                  |
+| 定时任务     | 创建、编辑、暂停、恢复、立即运行和删除定时任务                                    | [定时任务、Hooks 与桌宠](automation-collaboration.md#定时任务) |
+| 能力         | 插件 / Skills / MCP / 工具四个标签：安装、导入、启停、删除和查看工具              | [Tools、Skills 与 MCP](tools-skills-mcp.md)                    |
+| 探索         | 应用内置的精选 Skills 与 MCP server，安装前先预览                                 | [Tools、Skills 与 MCP](tools-skills-mcp.md#探索)               |
+| Pull Request | 只在 GitHub 插件启用时显示：通过本机 GitHub CLI 只读浏览 PR，并可查看 Issue 和 CI | [Chat 与 Build](chat-build.md#pull-request)                    |
 
-再往下是「置顶」「项目」「对话」三组会话，底部是「设置」和明暗切换按钮（跟随系统在「设置 › 常规 › 外观」中选择）。侧栏和会话操作见 [Chat 与 Build](chat-build.md#侧栏与会话操作)。
+图标栏右侧的侧栏只放会话：顶部是 Emperor 标志与收起按钮，下面是「置顶」「项目」「对话」三组会话。明暗主题在「设置 › 常规 › 外观」中选择。侧栏和会话操作见 [Chat 与 Build](chat-build.md#侧栏与会话操作)。
 
 ## 设置弹窗
 
-点击侧栏底部的「设置」打开设置弹窗。左侧导航分四组：「常规」，「智能」（模型、子智能体、记忆），「操控」（电脑操作、浏览器、语音），「系统」（用量、高级）。右上角是当前分区的操作，例如「添加模型」或「保存」；会自己刷新的分区（记忆、电脑操作）没有刷新按钮。分区里带「›」的行点开是二级页，标题变成「分区 › 页面」，点分区名回到上一级。
+点击图标栏底部的「设置」打开设置弹窗。左侧导航分四组：「常规」，「智能」（模型、子智能体、记忆），「操控」（电脑操作、浏览器、语音），「系统」（用量、高级）。右上角是当前分区的操作，例如「添加模型」或「保存」；会自己刷新的分区（记忆、电脑操作）没有刷新按钮。分区里带「›」的行点开是二级页，标题变成「分区 › 页面」，点分区名回到上一级。
 
 编辑中的内容（长期记忆、用户档案、Hooks 的 `hooks.json`、模型编辑、能力 › MCP 的 JSON）没有保存时，关闭弹窗、按 Esc、点遮罩、切换分区或二级页都会先问「放弃未保存的修改？」：选「放弃」才离开，「继续编辑」留在原处。后台刷新（例如一轮对话结束后记忆重新读取）只更新没有改过的草稿。
 

@@ -557,9 +557,14 @@ function diagnosticError(
   error: MCPConnectionError,
 ): MCPConnectionDiagnosticError {
   const code = error.code as MCPConnectionErrorCode
-  // Configuration errors are composed locally from names only (no secrets).
-  if (code === 'mcp_config_invalid')
-    return { code, message: error.message.slice(0, 240) }
+  // Configuration and sandbox errors are composed locally from names and
+  // the host's sandbox probe only (no secrets).
+  if (
+    code === 'mcp_config_invalid' ||
+    code === 'mcp_sandbox_refused' ||
+    code === 'mcp_sandbox_consent_required'
+  )
+    return { code, message: error.message.slice(0, 400) }
   return { code, message: diagnosticMessage(code) }
 }
 
@@ -573,6 +578,10 @@ function diagnosticMessage(code: MCPConnectionErrorCode): string {
   if (code === 'mcp_unavailable') return 'MCP server is unavailable'
   if (code === 'mcp_config_invalid')
     return 'MCP server configuration is invalid'
+  if (code === 'mcp_sandbox_refused')
+    return 'MCP server was refused by the process sandbox'
+  if (code === 'mcp_sandbox_consent_required')
+    return 'MCP server is waiting for the user to allow it outside the sandbox'
   return 'MCP server connection failed'
 }
 

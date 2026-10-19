@@ -7,8 +7,8 @@
 
 Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资源包；Plugin 是带来源、版本和启用状态的 Skill 分发单元；MCP 把外部 server 暴露的工具接入 Agent。
 
-- 侧栏的「能力」打开能力页（`/capabilities`），用“插件 / Skills / MCP / 工具”四个标签分别管理 Plugin、Skill、MCP server，并查看注册给 Agent 的工具；
-- 侧栏的「探索」列出应用内置的一小组精选 Skills 和 MCP server，见[探索](#探索)；
+- 图标栏的「能力」打开能力页（`/capabilities`），用“插件 / Skills / MCP / 工具”四个标签分别管理 Plugin、Skill、MCP server，并查看注册给 Agent 的工具；
+- 图标栏的「探索」列出应用内置的一小组精选 Skills 和 MCP server，见[探索](#探索)；
 - 能力页的“工具”标签（`/capabilities/tools`）按用途分类查看 Emperor 内建的工具。
 
 ## Tools
@@ -141,8 +141,8 @@ Emperor 自带两个 Plugin：GitHub 和 Computer Use，在插件列表里标为
 已安装的 Plugin 可以启用、停用或卸载。已激活 Plugin 的成员这样接入：
 
 - **Skill**：进入 Skill 目录。项目范围的 Plugin 只在该项目的会话里可见。
-- **MCP server**：以「插件名-server 名」为名字连接，工具名为 `mcp_<这个名字>_<工具名>`，最长 64 个字符，超长时截短并加一段哈希。与你自己的 server 重名时只改插件这一侧；与已有工具重名的插件工具不注册，原因写在插件详情里。stdio server 在插件目录里运行，在沙箱中只能读自己的插件目录、写自己的数据目录（`stateRoot/plugins/data/<插件名>`），读不到 Emperor Home 里的其他内容。配置里除 `${PLUGIN_ROOT}`、`${PLUGIN_DATA}` 和少数系统变量（如 `HOME`、`PATH`）外的 `${变量}` 不会展开，这样的 server 显示为「需要连接」，不会启动。
-- **Hook**：旧格式 Plugin 的 Hook 与你自己的 `hooks.json` 写法相同。可移植格式和 Codex 格式的 Hook 只有事件、匹配条件都能对应到 Emperor 时才运行：事件限 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`SubagentStart`、`SubagentStop`；匹配条件只能是工具名的简单并列（例如 `Bash|Write`，会对应到 Emperor 的 `bash`、`edit`、`write`），一般正则、`WebFetch` 这类 Emperor 没有的工具、后台运行的 Hook 都不运行，并在详情里说明原因。Hook 命令可以用 `PLUGIN_ROOT`、`PLUGIN_DATA` 环境变量。
+- **MCP server**：以「插件名-server 名」为名字连接，工具名为 `mcp_<这个名字>_<工具名>`，最长 64 个字符，超长时截短并加一段哈希。与你自己的 server 重名时只改插件这一侧；与已有工具重名的插件工具不注册，原因写在插件详情里。stdio server 在插件目录里运行，与 Shell 用同一套进程沙箱：能读系统与工具链（node、python、uv 等）、当前 workspace 和自己的插件目录，能写 workspace、自己的数据目录（`stateRoot/plugins/data/<插件名>`）和自己的缓存目录，读不到 Emperor Home 里的其他内容和你的凭据文件。沙箱不可用时插件的 server 不启动，详情里写明原因。配置里除 `${PLUGIN_ROOT}`、`${PLUGIN_DATA}` 和少数系统变量（如 `HOME`、`PATH`）外的 `${变量}` 不会展开，这样的 server 显示为「需要连接」，不会启动。
+- **Hook**：旧格式 Plugin 的 Hook 与你自己的 `hooks.json` 写法相同。可移植格式和 Codex 格式的 Hook 只有事件、匹配条件都能对应到 Emperor 时才运行：事件限 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`SubagentStart`、`SubagentStop`；匹配条件只能是工具名的简单并列（例如 `Bash|Write`，会对应到 Emperor 的 `bash`、`edit`、`write`），一般正则、`WebFetch` 这类 Emperor 没有的工具、后台运行的 Hook 都不运行，并在详情里说明原因。Hook 命令可以用 `PLUGIN_ROOT`、`PLUGIN_DATA` 环境变量。插件的 Hook 在进程沙箱里运行：workspace 只读，能写自己的数据目录和 `stateRoot/plugins/tmp/<插件名>`（它的 `TMPDIR`），读不到 Emperor 的设置文件和你的凭据；沙箱不可用时不运行（按 Hook 失败处理，工具调用照常继续）。你自己 `hooks.json` 里的 Hook 不受影响。
 - **应用连接**：自带 GitHub 插件的「GitHub（本机 gh）」和 Computer Use 插件的三个驱动按上文显示真实状态；其他插件的应用连接暂不支持，详情里列出。
 
 停用或卸载后，这个 Plugin 的 MCP server 立即断开，Hook 不再运行。Plugin 的 MCP server 和 Hook 不写入你的 `mcp_config.json` 或 `hooks.json`，也不在「能力 › MCP」里显示；项目范围的 Plugin 跟随当前会话所在的项目。
@@ -186,6 +186,18 @@ Emperor 只读取自己的 MCP 配置文件 `stateRoot/mcp_config.json`（默认
 - `${ENV_NAME}`：从执行环境展开环境变量，适合放置 API Key。
 - `tool_overrides` 和 `defaults`：补充只读、独占等工具属性，以及 `call_timeout_ms` 请求超时。
 
+### stdio server 的进程沙箱
+
+stdio server 与 Agent 的 Shell 共用同一套进程沙箱（macOS 上是 Seatbelt）：
+
+- 能读：系统目录、`PATH` 里的目录和 node / python / uv 等工具的安装目录、你的 `~/.npmrc` 与 uv / pip 配置（镜像设置照常生效）、当前 workspace、命令参数里写的绝对路径（目录可读写；文件则开放它所在的项目目录供读取）和 server 的工作目录；
+- 能写：当前 workspace、参数里的目录、工作目录，以及这个 server 自己的缓存目录 `stateRoot/mcp/cache/<名称>`——它同时是 `npm_config_cache`、`UV_CACHE_DIR` 和 `TMPDIR`，所以 `npx -y …`、`uvx …` 类 server 能正常下载和启动；
+- 读写不到：Emperor Home 里的其他内容（会话、设置文件、凭据库）、`~/.ssh` 等凭据文件，以及上面没列出的你自己的文件。
+
+第一次启动一个 `npx` / `uvx` server 要把包下载进它自己的新缓存，可能超过连接时限而显示失败；下载会在后台继续，稍后重新连接即可。
+
+沙箱不可用时（例如系统的 `sandbox-exec` 无法运行），你自己的 server 不会悄悄在沙箱外启动：卡片显示「等待确认」，下一次对话开始一步之前会弹出审批卡，写明 server、原因和命令。选「允许本次」后它在沙箱外运行，选择按 server 记住；修改它的命令后会重新询问。插件带来的 server 在这种情况下一律不启动。每次启动的结果记录在「设置 › 诊断 › 进程隔离回执」。
+
 ### 管理已有 server
 
 每个 server 显示为一张卡片，包含连接状态、传输方式、工具数和启用开关。展开后可以查看地址或启动命令、请求头和环境变量的键名、最近的错误（含错误码）以及已发现的工具，也可以删除该 server；删除会从配置中移除它并断开连接。
@@ -207,11 +219,11 @@ Agent 被要求只通过 `mcp_config` 添加 server，不使用 mcporter，也�
 
 ### MCP 工具
 
-每个已连接 server 的工具注册为 `mcp_<server>_<tool>`，参数按 server 声明转发，由 server 自行校验。MCP 工具不经过文件沙箱，也不需要审批；声明为只读且非独占的工具可以与其他并发安全的调用同时执行。
+每个已连接 server 的工具注册为 `mcp_<server>_<tool>`，参数按 server 声明转发，由 server 自行校验。MCP 工具调用本身不经过文件沙箱，也不需要审批（stdio server 进程在上文的进程沙箱里运行）；声明为只读且非独占的工具可以与其他并发安全的调用同时执行。
 
 ## 探索
 
-侧栏的「探索」（`/explore`）以卡片列出一小组随应用发布的精选条目，可以搜索，并按“全部 / Skills / MCP / 插件”筛选：
+图标栏的「探索」（`/explore`）以卡片列出一小组随应用发布的精选条目，可以搜索，并按“全部 / Skills / MCP / 插件”筛选：
 
 - Skills：来自 [anthropics/skills](https://github.com/anthropics/skills) 的若干 Skill；
 - MCP：[modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers) 中的几个本地 server，以及一个无需 API 密钥的远程 server。标签会注明需要 Node.js 或 uv 等本机依赖。

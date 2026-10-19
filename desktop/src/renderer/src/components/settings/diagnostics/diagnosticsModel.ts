@@ -15,6 +15,7 @@ import type {
   ProjectLegacyPrivateDataPayload,
   PromptSnapshotsDiagnosticsPayload,
   ProcessRuntimeDiagnosticsPayload,
+  ContainmentReceiptDiagnosticsPayload,
   RuntimeStats,
   SchedulerDiagnosticsPayload,
   SandboxCapabilityDiagnosticsPayload,
@@ -134,6 +135,9 @@ export function diagnosticRows(
         workspacePolicyRow(diagnostics.workspacePolicy),
         sandboxCapabilityRow(diagnostics.sandbox),
         processRuntimeRow(diagnostics.processRuntime),
+        ...(diagnostics.processRuntime?.containment
+          ? [containmentReceiptsRow(diagnostics.processRuntime.containment)]
+          : []),
         lifecycleRow(diagnostics.lifecycle),
         subagentSupervisorRow(diagnostics.subagents),
         agentDefinitionsRow(diagnostics.agentDefinitions),
@@ -1130,6 +1134,59 @@ function processRuntimeRow(
         ])
       : '未返回详细信息',
     tone: !runtime ? 'muted' : ready ? 'ok' : 'error',
+  }
+}
+
+const CONTAINMENT_OWNERS: Record<string, string> = {
+  mcp: 'MCP',
+  hook: 'Hook',
+  environment: '环境安装',
+}
+
+const CONTAINMENT_DECISIONS: Record<string, string> = {
+  contained: '已隔离',
+  refused: '已拒绝',
+  'user-allowed-unsandboxed': '经同意未隔离',
+}
+
+/**
+ * SEC-08: the newest process containment receipts — who ran, whether it ran
+ * in the sandbox, was refused or ran outside it with the user's consent,
+ * and the policy hash. Anything not contained makes the row a warning.
+ */
+function containmentReceiptsRow(
+  containment: NonNullable<ProcessRuntimeDiagnosticsPayload['containment']>,
+): DiagnosticRow {
+  const recent = containment.recent ?? []
+  const count = (decision: string) =>
+    recent.filter((item) => item.decision === decision).length
+  const contained = count('contained')
+  const refused = count('refused')
+  const allowed = count('user-allowed-unsandboxed')
+  const describe = (item: ContainmentReceiptDiagnosticsPayload) => {
+    const owner =
+      CONTAINMENT_OWNERS[String(item.owner)] ?? String(item.owner || '进程')
+    const decision =
+      CONTAINMENT_DECISIONS[String(item.decision)] ??
+      String(item.decision || 'unknown')
+    const facts = `${owner} ${String(item.id || '')} ${decision} (${String(item.backend || 'none')} · ${String(item.policyHash || '')})`
+    return item.decision === 'refused' && item.reason
+      ? `${facts}：${item.reason}`
+      : facts
+  }
+  return {
+    id: 'process-containment',
+    label: '进程隔离回执',
+    value: recent.length
+      ? joinParts([
+          `${recent.length} 条`,
+          contained ? `${contained} 隔离` : '',
+          refused ? `${refused} 拒绝` : '',
+          allowed ? `${allowed} 经同意未隔离` : '',
+        ])
+      : '暂无',
+    detail: recent.slice(0, 5).map(describe).join(' · '),
+    tone: !recent.length ? 'muted' : refused || allowed ? 'warn' : 'ok',
   }
 }
 

@@ -25,6 +25,8 @@ import {
   missingSkillRequirementsFromStatus,
 } from '../../environment/probe'
 import { OsSandboxController } from '../../environment/sandbox'
+import { UnsandboxedConsentRegistry } from '../../sandbox/consent'
+import { ContainmentBackend } from '../../sandbox/policy'
 import { ExecutionEnvironmentService } from '../../environment/snapshot'
 import { MCPClient } from '../../mcp/client'
 import { MemoryStore } from '../../memory/store'
@@ -98,6 +100,11 @@ export interface KeptServicesOptions {
    * Core uses its own implementation over the same key file.
    */
   secretSealer?: SecretSealer | null
+  /**
+   * The one process containment (SEC-08) for the Shell, MCP stdio servers,
+   * plugin hooks and the environment installer; tests replace it.
+   */
+  containmentBackend?: ContainmentBackend
 }
 
 export interface KeptServices {
@@ -118,8 +125,12 @@ export interface KeptServices {
   environmentCatalog: LoadedToolCatalog
   environmentProbe: EnvironmentProbe
   executionEnvironmentService: ExecutionEnvironmentService
+  /** The one process containment backend (SEC-08). */
+  containment: ContainmentBackend
   processSandbox: OsSandboxController
   processRuntime: OwnedProcessRuntime
+  /** The user's answers for running their MCP servers outside an unavailable sandbox. */
+  unsandboxedConsent: UnsandboxedConsentRegistry
   skillManager: SkillManager
   skillInstallService: SkillInstallService
   managedEnvironmentService: ManagedEnvironmentService
@@ -211,10 +222,12 @@ export async function createKeptServices(
     environmentRoot: paths.environmentRoot,
     scratchRoot: join(paths.sessionsRoot, '.scratch'),
   })
-  const processSandbox = new OsSandboxController()
+  const containment = opts.containmentBackend ?? new ContainmentBackend()
+  const processSandbox = new OsSandboxController({ backend: containment })
   const processRuntime = new OwnedProcessRuntime(paths.stateRoot, {
     sandbox: processSandbox,
   })
+  const unsandboxedConsent = new UnsandboxedConsentRegistry(paths.stateRoot)
   const skillManager = new SkillManager({
     runtimeRoot: root,
     stateRoot: paths.stateRoot,
@@ -298,6 +311,7 @@ export async function createKeptServices(
   const mcpClient = new MCPClient(paths.stateRoot, {
     sealer: secretSealer,
     processRuntime,
+    unsandboxedConsent,
     workspaceRoot: chatWorkspace,
     onStateChange: async (snapshot) => {
       await hooks.emit({
@@ -322,8 +336,10 @@ export async function createKeptServices(
     environmentCatalog,
     environmentProbe,
     executionEnvironmentService,
+    containment,
     processSandbox,
     processRuntime,
+    unsandboxedConsent,
     skillManager,
     skillInstallService,
     managedEnvironmentService,

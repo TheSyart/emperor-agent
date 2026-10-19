@@ -4,8 +4,10 @@ import {
   CENTER_MIN_TRAJECTORY,
   computeColumns,
   INSPECTOR_DEFAULT,
-  SIDEBAR_COLLAPSED,
+  RAIL_WIDTH,
   SIDEBAR_DEFAULT,
+  SIDEBAR_MAX,
+  SIDEBAR_MIN,
   WORKSPACE_DEFAULT,
   WORKSPACE_MAX,
   WORKSPACE_MIN,
@@ -23,56 +25,70 @@ import {
   type FrameStorage,
 } from './frameState'
 
-describe('column solver (dsh concession chain)', () => {
-  it('keeps preferred widths when everything fits', () => {
-    expect(computeColumns(1440, 280, 560)).toEqual({
-      sidebar: 280,
-      center: 600,
+describe('column solver (rail + concession chain, UI-S01)', () => {
+  it('keeps preferred widths when everything fits; the rail is always 56', () => {
+    expect(RAIL_WIDTH).toBe(56)
+    expect(computeColumns(1440, 236, 560)).toEqual({
+      rail: 56,
+      sidebar: 236,
+      center: 588,
       workspace: 560,
     })
   })
 
-  it('renders a closed sidebar as the 56px rail', () => {
-    expect(computeColumns(1440, 0, 0).sidebar).toBe(SIDEBAR_COLLAPSED)
+  it('closes the sidebar to nothing beside the permanent rail', () => {
+    expect(computeColumns(1440, 0, 0)).toEqual({
+      rail: 56,
+      sidebar: 0,
+      center: 1384,
+      workspace: 0,
+    })
   })
 
   it('shrinks the workspace toward its minimum before auto-closing it', () => {
-    const shrunk = computeColumns(280 + CENTER_MIN_CHAT + 400, 280, 600)
+    const shrunk = computeColumns(56 + 236 + CENTER_MIN_CHAT + 400, 236, 600)
     expect(shrunk).toEqual({
-      sidebar: 280,
+      rail: 56,
+      sidebar: 236,
       center: CENTER_MIN_CHAT,
       workspace: 400,
     })
-    const closed = computeColumns(1000, 280, 600)
+    const closed = computeColumns(1000, 236, 600)
     expect(closed.workspace).toBe(0)
-    expect(closed.center).toBe(720)
+    expect(closed.center).toBe(708)
   })
 
   it('concedes to the center floor it is given (chat 480, trajectory 640)', () => {
     expect(CENTER_MIN_CHAT).toBe(480)
     expect(CENTER_MIN_TRAJECTORY).toBe(640)
-    // 1280 − 280 − 560 = 440: under both floors.
-    expect(computeColumns(1280, 280, 560)).toEqual({
-      sidebar: 280,
+    // 1280 − 56 − 236 − 560 = 428: under both floors.
+    expect(computeColumns(1280, 236, 560)).toEqual({
+      rail: 56,
+      sidebar: 236,
       center: 480,
-      workspace: 520,
+      workspace: 508,
     })
-    expect(computeColumns(1280, 280, 560, CENTER_MIN_TRAJECTORY)).toEqual({
-      sidebar: 280,
+    expect(computeColumns(1360, 236, 560, CENTER_MIN_TRAJECTORY)).toEqual({
+      rail: 56,
+      sidebar: 236,
       center: 640,
-      workspace: 360,
+      workspace: 428,
     })
     // The trajectory floor closes the column where chat still fits it.
-    expect(computeColumns(1200, 280, 560).workspace).toBe(440)
+    expect(computeColumns(1200, 236, 560).workspace).toBe(428)
     expect(
-      computeColumns(1200, 280, 560, CENTER_MIN_TRAJECTORY).workspace,
+      computeColumns(1200, 236, 560, CENTER_MIN_TRAJECTORY).workspace,
     ).toBe(0)
   })
 
-  it('clamps out-of-range preferences', () => {
-    expect(computeColumns(3000, 9999, 10).sidebar).toBe(420)
-    expect(computeColumns(3000, 280, 10).workspace).toBe(WORKSPACE_MIN)
-    expect(computeColumns(3000, 280, 5000).workspace).toBe(WORKSPACE_MAX)
+  it('clamps out-of-range preferences (sidebar 200–360)', () => {
+    expect(SIDEBAR_MIN).toBe(200)
+    expect(SIDEBAR_MAX).toBe(360)
+    expect(SIDEBAR_DEFAULT).toBe(236)
+    expect(computeColumns(3000, 9999, 10).sidebar).toBe(360)
+    expect(computeColumns(3000, 50, 0).sidebar).toBe(200)
+    expect(computeColumns(3000, 236, 10).workspace).toBe(WORKSPACE_MIN)
+    expect(computeColumns(3000, 236, 5000).workspace).toBe(WORKSPACE_MAX)
   })
 })
 
@@ -193,6 +209,20 @@ describe('frame state', () => {
     const state = defaultFrameState()
     frameActions.setEnvCardWide(state, true)
     expect(serializeFrameState(state)).not.toContain('Wide')
+  })
+
+  it('moves the pre-0.2 default sidebar width (280) to the new default (UI-S01)', () => {
+    expect(restoreFrameState(JSON.stringify({ sidebar: 280 })).sidebar).toBe(
+      SIDEBAR_DEFAULT,
+    )
+    expect(restoreFrameState(JSON.stringify({ sidebar: 300 })).sidebar).toBe(
+      300,
+    )
+    expect(restoreFrameState(JSON.stringify({ sidebar: 420 })).sidebar).toBe(
+      SIDEBAR_MAX,
+    )
+    expect(restoreFrameState(JSON.stringify({ sidebar: 0 })).sidebar).toBe(0)
+    expect(defaultFrameState().sidebar).toBe(236)
   })
 
   it('restores the retired 电脑 pane as the launcher', () => {

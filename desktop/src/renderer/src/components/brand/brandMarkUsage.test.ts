@@ -23,10 +23,9 @@ describe('brand mark usage', () => {
   })
 
   it('keeps key brand surfaces on project logo assets instead of brandIcon', () => {
-    const files = [
-      'components/sidebar/SidebarBrandRow.vue',
-      'components/sidebar/SidebarRail.vue',
-    ]
+    // The rail's top holds the traffic lights (UI-S01): the mark lives in
+    // the sidebar's brand bar only.
+    const files = ['components/sidebar/SidebarBrandRow.vue']
 
     for (const file of files) {
       const source = readRenderer(file)
