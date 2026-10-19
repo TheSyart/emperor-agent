@@ -382,6 +382,64 @@ describe('PublicHttpClient', () => {
     expect(closed).toBe(2)
   })
 
+  it('keeps the first maxBytes and marks the body truncated when asked to', async () => {
+    const transport = new FakeTransport()
+    let closed = 0
+    const onClose = () => {
+      closed += 1
+    }
+    let pulled = 0
+    const endless: PublicHttpTransportResponse = {
+      statusCode: 200,
+      headers: {},
+      body: (async function* () {
+        for (;;) {
+          pulled += 1
+          yield Buffer.alloc(700, 'x')
+        }
+      })(),
+      close: onClose,
+    }
+    transport.responses.push(
+      // A declared length over the cap is read up to the cap, not refused.
+      response({
+        contentLength: 4096,
+        chunks: [Buffer.alloc(2048, 'a'), Buffer.alloc(2048, 'b')],
+        onClose,
+      }),
+      endless,
+      response({ chunks: [Buffer.alloc(1024, 'c')], onClose }),
+    )
+    const client = new PublicHttpClient({
+      transport,
+      resolve: async () => [{ address: '93.184.216.34', family: 4 }],
+    })
+    const truncating = (url: string) => ({
+      ...request(url, 1024),
+      overflow: 'truncate' as const,
+    })
+
+    const declared = await client.get(truncating('https://example.com/a'))
+    if (isPublicHttpRedirectResponse(declared)) throw new Error('redirect')
+    expect(declared.body.byteLength).toBe(1024)
+    expect(Buffer.from(declared.body).toString()).toBe('a'.repeat(1024))
+    expect(declared.truncated).toBe(true)
+
+    const streamed = await client.get(truncating('https://example.com/b'))
+    if (isPublicHttpRedirectResponse(streamed)) throw new Error('redirect')
+    expect(streamed.body.byteLength).toBe(1024)
+    expect(streamed.truncated).toBe(true)
+    // Reading stops at the cap: the endless body is not drained.
+    expect(pulled).toBe(2)
+
+    // Exactly at the cap is complete, not truncated.
+    const exact = await client.get(truncating('https://example.com/c'))
+    if (isPublicHttpRedirectResponse(exact)) throw new Error('redirect')
+    expect(exact.body.byteLength).toBe(1024)
+    expect(exact.truncated).toBe(false)
+    expect(closed).toBe(3)
+  })
+
   it('rejects a request cancelled before DNS or transport work', async () => {
     const transport = new FakeTransport()
     const controller = new AbortController()
