@@ -3,8 +3,9 @@
  * every settings section and sub page opens, the 「分区 › 页面」 breadcrumb
  * leads back, switching sections leaves a sub page, the Computer Use
  * plugin's driver groups deep link to their settings pages, and a narrow
- * window keeps the pages without horizontal scrolling. Screenshots of every page
- * land in out-e2e/settings/.
+ * window keeps the pages without horizontal scrolling. A relaunch with a
+ * damaged vault.json still starts and 密码管理器 offers 重新开始（先备份）
+ * (SEC-09). Screenshots of every page land in out-e2e/settings/.
  * Prints `E2E-RESULT {json}` lines like the other Electron suites.
  *
  *   node scripts/e2e-cu.mjs --mode=settings   (after `npm run build`)
@@ -463,6 +464,47 @@ async function settings(page: Page, home: string): Promise<void> {
   })
 }
 
+/**
+ * SEC-09 test 1: an unreadable vault.json no longer stops Emperor. The app
+ * starts, 密码管理器 says 凭据库无法读取, and 重新开始（先备份） keeps the
+ * damaged file byte for byte beside a new, empty vault.
+ */
+async function damagedVault(page: Page, home: string): Promise<void> {
+  await check(
+    page,
+    'a damaged vault.json still starts and is kept by 重新开始（先备份）',
+    async () => {
+      const vault = join(home, 'computer-use', 'vault.json')
+      const damaged = readFileSync(vault, 'utf8')
+      const dialog = await openSection(page, 'browser')
+      await dialog.locator('[data-action="manage-passwords"]').click()
+      const notice = dialog.locator('.ds-settings-notice[data-tone="error"]')
+      await notice.waitFor({ timeout: 10_000 })
+      const text = await notice.innerText()
+      if (!text.includes('凭据库无法读取')) throw new Error(`notice ${text}`)
+      if (readFileSync(vault, 'utf8') !== damaged)
+        throw new Error('the damaged file changed')
+      await page.screenshot({ path: join(shots, 'vault-unreadable.png') })
+      await notice.getByRole('button', { name: '重新开始（先备份）' }).click()
+      const confirm = page.getByRole('dialog', { name: '重新开始（先备份）' })
+      await confirm.waitFor()
+      await confirm.getByRole('button', { name: '备份并重新开始' }).click()
+      await notice.waitFor({ state: 'hidden', timeout: 10_000 })
+      const kept = readdirSync(join(home, 'computer-use')).filter((name) =>
+        name.startsWith('vault.json.unreadable-'),
+      )
+      if (kept.length !== 1) throw new Error(`backups ${JSON.stringify(kept)}`)
+      const copy = readFileSync(join(home, 'computer-use', kept[0]!), 'utf8')
+      if (copy !== damaged) throw new Error('the backup differs')
+      const info = (
+        await dialog.locator('.ds-settings-notice').allInnerTexts()
+      ).join(' ')
+      if (!info.includes(kept[0]!)) throw new Error(`note ${info}`)
+      return { backup: kept[0] }
+    },
+  )
+}
+
 async function main(): Promise<void> {
   mkdirSync(shots, { recursive: true })
   const model = await startFakeModel({ agentTool: 'read' })
@@ -473,6 +515,18 @@ async function main(): Promise<void> {
     const launched = await launch(home)
     app = launched.app
     await settings(launched.page, home)
+    // Relaunch on the same Emperor Home with a damaged vault.json.
+    await app.close()
+    app = null
+    mkdirSync(join(home, 'computer-use'), { recursive: true, mode: 0o700 })
+    writeFileSync(
+      join(home, 'computer-use', 'vault.json'),
+      '{"version":3,"entries":[{"handleId":',
+      { mode: 0o600 },
+    )
+    const relaunched = await launch(home)
+    app = relaunched.app
+    await damagedVault(relaunched.page, home)
   } catch (error) {
     if (!(error instanceof Abort))
       report({
