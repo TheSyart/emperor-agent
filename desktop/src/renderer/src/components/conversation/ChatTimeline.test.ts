@@ -7,6 +7,10 @@ import { ConversationStore } from '../../conversation/store'
 import type { SessionHistoryPage } from '@emperor/core/runtime-contract'
 import ChatTimeline from './ChatTimeline.vue'
 import { buildAgentTree, useAgentTree } from '../sidebar/agentTree'
+import {
+  reloadUiPreferences,
+  setUiPreference,
+} from '../../composables/useUiPreferences'
 import { createFixtureStore, type FixtureStore } from './gallery/fixtureStore'
 import { showcaseScenario, streamingScenario } from './gallery/scenarios'
 import {
@@ -41,7 +45,16 @@ afterEach(() => {
   app = null
   fixture = null
   delete useAgentTree().trees['native-root']
+  localStorage.clear()
+  reloadUiPreferences()
 })
+
+/** Open the (single) process group of the mounted timeline. */
+async function openProcess(root: HTMLElement): Promise<void> {
+  const header = root.querySelector<HTMLElement>('[data-process-header]')
+  if (header?.getAttribute('aria-expanded') === 'false') header.click()
+  await settle()
+}
 
 async function settle(rounds = 20): Promise<void> {
   for (let index = 0; index < rounds; index++) {
@@ -133,6 +146,8 @@ describe('ChatTimeline over the recorded kernel log', () => {
   )
 
   it('shows an external agents partial output and tools before native completion', async () => {
+    // The turn is still running: list its steps instead of the live line.
+    setUiPreference('processDisplay', 'expanded')
     const log = new LogBuilder()
     log.add('turn/start', { turn: 1 })
     log.add('step/start', { turn: 1, step: 1 })
@@ -195,6 +210,7 @@ describe('ChatTimeline over the recorded kernel log', () => {
     })
   })
   it('keeps a continued external run on its creation name and stable dlg route', async () => {
+    setUiPreference('processDisplay', 'expanded')
     const log = new LogBuilder()
     log.add('turn/start', { turn: 1 })
     log.add('step/start', { turn: 1, step: 1 })
@@ -227,6 +243,7 @@ describe('ChatTimeline over the recorded kernel log', () => {
     expect(root.querySelector('[data-agent-details]')?.closest('a')).toBeNull()
   })
   it('resolves native continuation identity and creation title from the shared root tree without a new started event', async () => {
+    setUiPreference('processDisplay', 'expanded')
     const log = new LogBuilder()
     log.add('turn/start', { turn: 1 })
     log.add('step/start', { turn: 1, step: 1 })
@@ -278,7 +295,9 @@ describe('ChatTimeline over the recorded kernel log', () => {
     )
     entry.click()
     expect(opened).toEqual(['sub-existing'])
-    root.querySelector<HTMLButtonElement>('[data-disclosure-row]')!.click()
+    root
+      .querySelector<HTMLButtonElement>('.tool-row [data-disclosure-row]')!
+      .click()
     await settle()
     expect(root.textContent).toContain('different followup task')
     useAgentTree().trees['native-root'].byId['sub-existing'].rootSessionId =
@@ -297,13 +316,23 @@ describe('ChatTimeline over the recorded kernel log', () => {
       })),
     ])
     await settle()
-    const kinds = [
-      ...root.querySelectorAll<HTMLElement>('[data-chat-flow-kind]'),
-    ].map((el) => el.dataset.chatFlowKind)
-    expect(kinds).toEqual([
+    const kinds = () =>
+      [...root.querySelectorAll<HTMLElement>('[data-chat-flow-kind]')].map(
+        (el) => el.dataset.chatFlowKind,
+      )
+    // UI-S03: the finished turn's steps fold into one process row; context
+    // injections are hidden until 显示系统步骤.
+    expect(kinds()).toEqual([
       'user',
-      'context',
-      'context',
+      'process',
+      'assistant',
+      'turnTail',
+      'compaction',
+    ])
+    await openProcess(root)
+    expect(kinds()).toEqual([
+      'user',
+      'process',
       'retry',
       'assistant',
       'tool',
@@ -345,6 +374,7 @@ describe('ChatTimeline over the recorded kernel log', () => {
       },
     )
     await settle()
+    await openProcess(root)
     root.querySelector<HTMLButtonElement>('[data-agent-entry]')?.click()
     expect(opened).toHaveLength(1)
     expect(opened[0]).toMatch(/^sub-/)
@@ -370,6 +400,11 @@ describe('ChatTimeline live flow', () => {
     expect(root.querySelector('.turn-status')?.textContent).toContain('思考中')
     fixture!.emit(session.id, session.live ?? [])
     await settle()
+    // UI-S03: the running process is one live line, the status line itself.
+    const live = root.querySelector('[data-process-group][data-live]')
+    expect(live?.textContent).toContain('正在读取 store.ts')
+    expect(root.querySelector('.turn-status')).toBeNull()
+    await openProcess(root)
     expect(root.querySelector('.reasoning')).not.toBeNull()
     expect(root.textContent).toContain('会话持久化分三层')
     expect(
@@ -377,7 +412,6 @@ describe('ChatTimeline live flow', () => {
         .querySelector('.tool-row[data-call-id="live_read"]')
         ?.getAttribute('data-state'),
     ).toBe('running')
-    expect(root.querySelector('.turn-status')?.textContent).toContain('读取中')
   })
 
   it('renders the showcase turn with its tail and final markdown', async () => {
@@ -387,6 +421,7 @@ describe('ChatTimeline live flow', () => {
     expect(root.querySelector('[data-turn-tail]')).not.toBeNull()
     expect(root.querySelector('.ds-md table')).not.toBeNull()
     expect(root.querySelector('.ds-md .ds-code')).not.toBeNull()
+    await openProcess(root)
     const lint = root.querySelector('.tool-row[data-call-id="call_lint"]')
     expect(lint?.getAttribute('data-state')).toBe('error')
   })

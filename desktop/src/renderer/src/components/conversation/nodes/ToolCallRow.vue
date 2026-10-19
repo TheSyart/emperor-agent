@@ -1,16 +1,19 @@
 <script setup lang="ts">
 /**
- * ToolCallRow — dsh ToolRow: one 24px line `[icon] 标题 · 摘要`; the icon
- * crossfades to a chevron on hover; running plays the glare sweep; error /
- * interrupted swap the icon for a Dot and an error row's summary is
- * the failure's first line in the danger color. The expanded body is the
- * registry's tool view (collapsed by default) with a hover-revealed
- * Inspect pill that jumps to the trajectory.
+ * ToolCallRow — one 28px line `[icon] 标题 · 摘要` (UI-S03): icon 14 text-3,
+ * title 13 text-2, summary 13 text-3; the icon crossfades to a chevron on
+ * hover; running plays the glare sweep; error / interrupted swap the icon
+ * for a Dot and an error row's summary is the failure's first line in the
+ * danger color. The expanded body (indented 22px like a thinking body) is
+ * the registry's tool view with a hover-revealed Inspect pill that jumps to
+ * the trajectory. A `preparing` row (DSH-23) is the call the model is still
+ * writing: the arguments parsed so far and 「准备中」, nothing to expand.
  *
- * Props: data (tool node data), nodeKey. Emits via chat context:
+ * Props: data (tool node data), agent?, preparing?. Emits via chat context:
  * inspect(callId).
  */
 import { computed } from 'vue'
+import { useUiPreferences } from '../../../composables/useUiPreferences'
 import type { AgentView } from '@emperor/core/api'
 import type { ToolChatData } from '../../../conversation/types'
 import { DsInspect } from '../../icons/ds'
@@ -22,14 +25,20 @@ import { TOOL_BODIES } from '../tools/bodies'
 import { toolView } from '../tools/registry'
 import { argsOf, errorSummary, toolRowState } from '../tools/toolModel'
 
-const props = defineProps<{ data: ToolChatData; agent?: AgentView }>()
+const props = withDefaults(
+  defineProps<{ data: ToolChatData; agent?: AgentView; preparing?: boolean }>(),
+  { agent: undefined, preparing: false },
+)
 const { actions } = useChatContext()
+const { preferences } = useUiPreferences()
 
 /** Bodies that only render result material (nothing to show while running). */
 const RESULT_ONLY = new Set(['read', 'glob', 'grep', 'web', 'job', 'skill'])
 
 const view = computed(() => toolView(props.data.name, props.data, props.agent))
-const state = computed(() => toolRowState(props.data))
+const state = computed(() =>
+  props.preparing ? 'preparing' : toolRowState(props.data),
+)
 const backend = computed(
   () => props.data.externalAgent?.backend ?? argsOf(props.data).backend,
 )
@@ -43,7 +52,15 @@ const suffixTone = computed(() =>
   suffix.value === null ? null : (view.value.suffixTone?.(props.data) ?? null),
 )
 const expandable = computed(
-  () => !(props.data.status === 'running' && RESULT_ONLY.has(view.value.body)),
+  () =>
+    !props.preparing &&
+    !(props.data.status === 'running' && RESULT_ONLY.has(view.value.body)),
+)
+/** The trajectory holds the full arguments only when it is shown (UI-S09). */
+const truncatedNote = computed(() =>
+  preferences.value.showTrajectory
+    ? '参数过长，已截断显示；在轨迹中查看完整内容'
+    : '参数过长，已截断显示',
 )
 const open = useExpansion(
   () => `tool:${props.data.callId}`,
@@ -52,6 +69,8 @@ const open = useExpansion(
 const body = computed(() => TOOL_BODIES[view.value.body])
 const stateLabel = computed(() => {
   switch (state.value) {
+    case 'preparing':
+      return '准备中'
     case 'running':
       return '运行中'
     case 'error':
@@ -70,13 +89,16 @@ const stateLabel = computed(() => {
     :data-state="state"
     :data-tool="data.name"
     :data-call-id="data.callId"
+    :data-preparing="preparing || undefined"
   >
-    <span v-if="stateLabel" class="sr-only">{{ stateLabel }}</span>
+    <span v-if="stateLabel && !preparing" class="sr-only">{{
+      stateLabel
+    }}</span>
     <DisclosureRow
       v-model:open="open"
       :title="title"
       :expandable="expandable"
-      :running="state === 'running'"
+      :running="state === 'running' || state === 'preparing'"
       :tone="failure !== null ? 'error' : 'default'"
     >
       <template #icon>
@@ -116,9 +138,12 @@ const stateLabel = computed(() => {
           >
         </span>
       </template>
+      <template v-if="preparing" #trailing>
+        <span class="preparing ds-shimmer" data-tone="neutral">准备中</span>
+      </template>
       <div class="body-wrap">
         <div v-if="data.argsTruncated" class="truncated-note">
-          参数过长，已截断显示；完整内容可在 Trajectory 中查看。
+          {{ truncatedNote }}
         </div>
         <component :is="body" :data="data" />
         <button
@@ -139,14 +164,6 @@ const stateLabel = computed(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
-}
-
-.tool-row :deep(.title) {
-  color: rgb(var(--label-secondary));
-}
-
-.tool-row :deep(.body) {
-  padding-left: 0;
 }
 
 .summary-line {
@@ -186,15 +203,18 @@ const stateLabel = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 0;
-  padding: var(--space-1) 0 var(--space-0-5) var(--space-1);
+  padding: var(--space-1) 0 var(--space-0-5);
   min-width: 0;
 }
 
 .truncated-note {
   margin-bottom: var(--space-1);
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-  color: rgb(var(--warn));
+  font: var(--type-caption) var(--font-sans);
+  color: rgb(var(--text-3));
+}
+
+.preparing {
+  font: var(--type-caption) var(--font-sans);
 }
 
 .inspect {

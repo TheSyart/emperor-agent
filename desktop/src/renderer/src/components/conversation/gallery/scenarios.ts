@@ -1185,6 +1185,134 @@ export function turnFilesScenario(now = Date.now()): Scenario {
   }
 }
 
+/**
+ * DSH-23: the model is writing an `edit` call — the file name is complete,
+ * the replacement is still arriving (the replay stops mid-arguments).
+ */
+export function preparingScenario(now = Date.now()): Scenario {
+  const log = new ShowcaseLog(now - 2_000)
+  log.user('把登录卡片改成响应式宽度。')
+  log.turnStart(1)
+  log.stepStart(1, 1)
+  const cut = log.events.length
+  const chunk = (value: unknown): void => {
+    log.add('assistant/chunk', { turn: 1, step: 1, chunk: value })
+  }
+  chunk({ type: 'block-start', index: 0, blockType: 'reasoning' })
+  chunk({ type: 'reasoning-delta', index: 0, text: '直接改样式里的宽度。' })
+  chunk({
+    type: 'block-end',
+    index: 0,
+    block: { type: 'reasoning', text: '直接改样式里的宽度。' },
+  })
+  chunk({ type: 'block-start', index: 1, blockType: 'tool-call' })
+  const args = JSON.stringify({
+    file_path: 'src/components/LoginForm.vue',
+    old_string: '.login-card {\n  width: 480px;\n}'.repeat(8),
+    new_string: '.login-card {\n  width: min(480px, 100%);\n}',
+  })
+  for (let index = 0; index < args.length - 20; index += 8)
+    chunk({
+      type: 'tool-call-delta',
+      index: 1,
+      id: 'prep_edit',
+      name: 'edit',
+      argumentsDelta: args.slice(index, index + 8),
+    })
+  return {
+    id: 'preparing',
+    label: '准备工具调用',
+    sessions: [
+      {
+        id: 'preparing',
+        events: log.events.slice(0, cut),
+        live: log.events.slice(cut),
+      },
+    ],
+  }
+}
+
+/** UI-S03 scroll check: 500 finished turns, each with a process group. */
+export function longProcessScenario(now = Date.now()): Scenario {
+  const log = new ShowcaseLog(now - 48 * 3600_000)
+  for (let turn = 1; turn <= 500; turn++) {
+    log.user(`第 ${turn} 轮：检查 module-${turn}。`)
+    log.turnStart(turn)
+    log.toolStep(
+      turn,
+      1,
+      [{ reasoning: `看看 module-${turn} 的导出。` }],
+      [
+        {
+          id: `lp_${turn}`,
+          name: 'grep',
+          args: { pattern: 'export ', path: `src/module-${turn}` },
+          result: `Found 1 match\n\nsrc/module-${turn}/index.ts\nLine 1: export * from './core'`,
+        },
+      ],
+    )
+    log.stepStart(turn, 2)
+    log.stream(turn, 2, [{ text: `module-${turn} 没有问题。` }], {
+      firstTokenMs: 200,
+    })
+    log.stepEnd(turn, 2)
+    log.turnEnd(turn)
+  }
+  return {
+    id: 'long-process',
+    label: '500 轮',
+    sessions: [{ id: 'long-process', events: log.events }],
+  }
+}
+
+/** UI-S03 typography: a long prompt with a file, a reply with headings. */
+export function typographyScenario(now = Date.now()): Scenario {
+  const log = new ShowcaseLog(now - 3 * 60_000)
+  log.user(
+    '帮我整理一下登录页这次改动的说明：为什么会在移动端横向溢出、改了哪些文件、怎么验证，最好写成可以直接贴进 PR 描述的样子，标题层级清楚一点。',
+    {
+      attachments: [
+        {
+          id: 'att-notes',
+          name: 'login-notes.md',
+          mime: 'text/markdown',
+          size: 2_310,
+          kind: 'file',
+        },
+      ],
+    },
+  )
+  log.turnStart(1)
+  log.stepStart(1, 1)
+  log.stream(1, 1, [
+    {
+      text: [
+        '# 登录页移动端布局修复',
+        '',
+        '问题出在 [布局说明](docs/login-layout.md) 里记下的固定宽度：`.login-card` 写死了 `width: 480px`，375px 宽的屏幕会横向溢出。',
+        '',
+        '改成 `min(480px, 100%)` 之后，外边距用 `clamp()` 收紧，参见 [MDN · min()](https://developer.mozilla.org/docs/Web/CSS/min)。',
+        '',
+        '## 改动的文件',
+        '',
+        '- `LoginForm.vue`：卡片宽度与外边距',
+        '- `LoginForm.spec.ts`：提交态与禁用态',
+        '',
+        '### 怎么验证',
+        '',
+        '在 375 × 812 的视口里打开登录页，页面不再出现横向滚动条。',
+      ].join('\n'),
+    },
+  ])
+  log.stepEnd(1, 1)
+  log.turnEnd(1)
+  return {
+    id: 'typography',
+    label: '排版',
+    sessions: [{ id: 'typography', events: log.events }],
+  }
+}
+
 export const SCENARIO_BUILDERS: Record<string, (now: number) => Scenario> = {
   showcase: showcaseScenario,
   notices: noticesScenario,
@@ -1198,6 +1326,9 @@ export const SCENARIO_BUILDERS: Record<string, (now: number) => Scenario> = {
   long: longScenario,
   links: linksScenario,
   'turn-files': turnFilesScenario,
+  preparing: preparingScenario,
+  'long-process': longProcessScenario,
+  typography: typographyScenario,
 }
 
 /** History page over one fixture session (cut at turn boundaries). */

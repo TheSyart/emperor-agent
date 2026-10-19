@@ -49,7 +49,7 @@ const summary = computed(() =>
 </script>
 
 <template>
-  <div class="hook-row">
+  <div class="hook-row" data-process-step>
     <DisclosureRow
       v-model:open="open"
       title="Hook"

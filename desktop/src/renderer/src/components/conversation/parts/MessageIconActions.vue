@@ -2,9 +2,10 @@
 /**
  * MessageIconActions — dsh 28px icon action row under a message: copy
  * (check swap after writing), optional edit, and a hover-revealed caption
- * (`14:05 · 用时 12s · 首字 0.8s · 34 tok/s`) before (user) or after
+ * (`14:05 · 用时 12 秒 · 首字 0.8s · 34 tok/s`) before (user) or after
  * (assistant) the icons. The caption fades in when the nearest
- * `[data-time-hover-root]` ancestor is hovered or focused.
+ * `[data-time-hover-root]` ancestor is hovered, focused or `data-revealed`
+ * (the turn tail, while its turn is hovered).
  *
  * Props: text, time?, runMs?, ttftMs?, tokensPerSecond?, clock, editable?.
  * Emits: edit(text).
@@ -155,6 +156,7 @@ const caption = computed(() => {
   }
 
   [data-time-hover-root]:hover .ds-msg-caption,
+  [data-time-hover-root][data-revealed] .ds-msg-caption,
   [data-time-hover-root]:focus-within .ds-msg-caption {
     opacity: 1;
   }

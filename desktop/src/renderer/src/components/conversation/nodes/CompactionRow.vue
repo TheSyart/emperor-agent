@@ -39,7 +39,7 @@ const summary = computed(() => {
 </script>
 
 <template>
-  <div class="compaction" :data-status="data.status">
+  <div class="compaction" data-process-step :data-status="data.status">
     <button
       type="button"
       class="row"

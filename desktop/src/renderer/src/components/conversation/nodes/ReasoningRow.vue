@@ -55,7 +55,11 @@ watch(
 </script>
 
 <template>
-  <div class="reasoning" :data-state="running ? 'running' : 'ok'">
+  <div
+    class="reasoning"
+    data-process-step
+    :data-state="running ? 'running' : 'ok'"
+  >
     <span v-if="running" class="sr-only">思考中</span>
     <DisclosureRow v-model:open="open" title="思考" :running="running">
       <template #icon><DsThink :size="14" /></template>

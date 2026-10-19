@@ -23,7 +23,7 @@ const trigger = computed(
 </script>
 
 <template>
-  <div class="fallback">
+  <div class="fallback" data-process-step>
     <button
       type="button"
       class="summary"
