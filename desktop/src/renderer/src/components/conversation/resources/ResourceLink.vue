@@ -1,4 +1,9 @@
 <script setup lang="ts">
+/**
+ * ResourceLink — an inline reference in a reply: a 12px source icon (file
+ * type, or the site icon when 显示网站图标 is on) and the name in
+ * `--text-link` (UI-S03).
+ */
 import { useChatContext } from '../chatContext'
 import ResourceIcon from './ResourceIcon.vue'
 import { requestResourceOpen } from './resourceEvents'
@@ -12,7 +17,7 @@ const { sessionId } = useChatContext()
       :href="resource.href"
       :title="resource.href"
       @click.prevent="requestResourceOpen(resource, sessionId())"
-      ><ResourceIcon :resource="resource" :size="16" /><span>{{
+      ><ResourceIcon :resource="resource" :size="12" /><span>{{
         resource.label
       }}</span></a
     ></span
@@ -27,7 +32,7 @@ const { sessionId } = useChatContext()
   border-radius: var(--radius-xs);
   background: transparent;
   vertical-align: baseline;
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   font-weight: 500;
   line-height: 1.85;
 }
