@@ -1106,6 +1106,24 @@ describe('CoreApi tasks and tools', () => {
 })
 
 describe('CoreApi goals', () => {
+  it('starts a goal from a draft in the real session it creates (FIX-06)', async () => {
+    const { api } = await setup({ replies: [{ text: 'round one' }] })
+    const started = await api.goals.start({
+      sessionId: 'draft:fix06',
+      clientDraftId: 'draft:fix06',
+      draftSession: { mode: 'chat', project: {} },
+      objective: 'ship from a draft',
+    })
+    const real = started.sessionId!
+    expect(real).toBeTruthy()
+    expect(real.startsWith('draft:')).toBe(false)
+    expect(api.host.kept.sessionStore.get(real)).toBeTruthy()
+    expect(await api.goals.list({ sessionId: real })).toEqual([
+      expect.objectContaining({ id: started.goal!.id }),
+    ])
+    await api.host.agentFor(real).whenIdle()
+  })
+
   it('starts, lists, pauses, resumes, and cancels a goal', async () => {
     const { api, adapter, events } = await setup({
       replies: [{ text: 'round one' }, { text: 'round two' }],

@@ -60,6 +60,31 @@ describe('GoalService facade', () => {
     })
   })
 
+  it('starts the goal in the session a draft becomes, and says which (FIX-06)', async () => {
+    const f = fixture()
+    f.materializeSession.mockResolvedValueOnce({ id: 'session-real' } as never)
+    const result = await f.service.start({
+      sessionId: 'draft:abc',
+      clientDraftId: 'draft:abc',
+      objective: 'ship it',
+    })
+    expect(result.sessionId).toBe('session-real')
+    expect(f.agentFor).toHaveBeenCalledWith('session-real')
+    expect(f.agentFor).not.toHaveBeenCalledWith('draft:abc')
+    await expect(
+      f.service.list({ sessionId: 'session-real' }),
+    ).resolves.toEqual([result.goal])
+  })
+
+  it('names the session it started in when nothing was materialized', async () => {
+    const f = fixture()
+    const result = await f.service.start({
+      sessionId: 'session-1',
+      objective: 'ship it',
+    })
+    expect(result.sessionId).toBe('session-1')
+  })
+
   it('rejects an empty objective and a second non-complete goal', async () => {
     const f = fixture()
     await expect(

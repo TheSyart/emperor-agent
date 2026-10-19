@@ -68,6 +68,7 @@ import { useRuntime } from './composables/useRuntime'
 import { useSession } from './composables/useSession'
 import { useTokens } from './composables/useTokens'
 import { useSlashCommands } from './composables/useSlashCommands'
+import { createGoalStarter } from './composables/goalStart'
 import { createGoalCaptureController } from './composables/goalCapture'
 import { provideAppContext } from './composables/useAppContext'
 import { followPluginList } from './composables/pluginListSync'
@@ -205,32 +206,13 @@ function applyGoalResult(owner: string, result: GoalOperationResult) {
     boot.value.goals = { active: result.goal }
 }
 
-async function startGoal(objective: string): Promise<GoalOperationResult> {
-  const owner = sessionId.value
-  const draft = sessionStore.isDraftSessionId(owner)
-    ? sessionStore.getSession(owner)
-    : null
-  const result = await core('goals.start', {
-    objective,
-    sessionId: owner,
-    ...(draft
-      ? {
-          clientDraftId: owner,
-          draftSession: {
-            mode:
-              draft.mode === 'build' ? ('build' as const) : ('chat' as const),
-            project: {
-              project_id: draft.project_id ?? null,
-              project_path: draft.project_path ?? null,
-              project_name: draft.project_name ?? null,
-            },
-          },
-        }
-      : {}),
-  })
-  applyGoalResult(sessionId.value, result)
-  return result
-}
+const startGoal = createGoalStarter({
+  currentSessionId: () => sessionId.value,
+  draftFor: (id) =>
+    sessionStore.isDraftSessionId(id) ? sessionStore.getSession(id) : null,
+  start: (request) => core('goals.start', request),
+  apply: applyGoalResult,
+})
 
 const goalCapture = createGoalCaptureController({
   currentSessionId: () => sessionId.value,

@@ -25,6 +25,11 @@ export interface GoalOperationResult {
   accepted: boolean
   /** Post-mutation goal; `null` after a cancel (clear). */
   goal: GoalView | null
+  /**
+   * `goals.start`: the session the goal lives in — the real session a
+   * draft id was materialized into, otherwise the requested one.
+   */
+  sessionId?: string
   /** Tombstone ref written by a cancel. */
   cleared?: GoalRef
 }
@@ -38,12 +43,15 @@ export interface GoalServiceDeps {
   agentFor(sessionId: string): Agent
   goalView(sessionId: string): GoalPayload | null
   activeSessionId(): string | null
-  /** Materialize a draft session before the first goal starts in it. */
+  /**
+   * Materialize a draft session before the first goal starts in it;
+   * resolves the session the draft became (a real session id).
+   */
   materializeSession?(input: {
     sessionId: string
     clientDraftId?: string | null
     draftSession?: unknown
-  }): Promise<unknown>
+  }): Promise<{ id: string } | null | undefined>
 }
 
 export class GoalServiceError extends EmperorError {
@@ -63,8 +71,9 @@ export class GoalService {
         'goal_objective_invalid',
         'Goal 目标不能为空。',
       )
+    let target = sessionId
     if (this.deps.materializeSession) {
-      await this.deps.materializeSession({
+      const materialized = await this.deps.materializeSession({
         sessionId,
         ...(input.clientDraftId !== undefined
           ? { clientDraftId: input.clientDraftId }
@@ -73,8 +82,11 @@ export class GoalService {
           ? { draftSession: input.draftSession }
           : {}),
       })
+      // A draft id becomes a new session; the goal belongs there.
+      if (typeof materialized?.id === 'string' && materialized.id)
+        target = materialized.id
     }
-    const agent = this.deps.agentFor(sessionId)
+    const agent = this.deps.agentFor(target)
     const maxRounds = input.maxRounds ?? undefined
     const goal = this.deps.goals.create(
       agent,
@@ -84,7 +96,7 @@ export class GoalService {
       },
       'user',
     )
-    return { accepted: true, goal }
+    return { accepted: true, goal, sessionId: target }
   }
 
   async replace(_input: unknown): Promise<never> {

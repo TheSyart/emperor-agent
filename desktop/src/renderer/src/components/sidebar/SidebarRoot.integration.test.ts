@@ -7,13 +7,22 @@ import SidebarRoot from './SidebarRoot.vue'
 import { useAgentTree } from './agentTree'
 import { defaultSidebarState } from '../../runtime/sidebarModel'
 
-const mock = vi.hoisted(() => ({ core: vi.fn(), session: {} as any }))
+const mock = vi.hoisted(() => ({
+  core: vi.fn(),
+  session: {} as any,
+  selectDirectory: vi.fn(),
+  context: {} as Record<string, unknown>,
+}))
 vi.mock('../../api/http', () => ({ core: mock.core }))
+vi.mock('../../api/backend', async (original) => ({
+  ...(await original<typeof import('../../api/backend')>()),
+  selectDirectory: mock.selectDirectory,
+}))
 vi.mock('../../composables/useSession', () => ({
   useSession: () => mock.session,
 }))
 vi.mock('../../composables/useAppContext', () => ({
-  useAppContext: () => ({ showToast: vi.fn(), sessionRuntimeStates: {} }),
+  useAppContext: () => mock.context,
 }))
 
 let app: App | undefined
@@ -37,6 +46,11 @@ const agent = (
 let agents: AgentView[]
 
 beforeEach(() => {
+  mock.context = {
+    showToast: vi.fn(),
+    showError: vi.fn(),
+    sessionRuntimeStates: {},
+  }
   store.sync([])
   for (const id of Object.keys(store.expanded)) delete store.expanded[id]
   for (const id of Object.keys(store.showAll)) delete store.showAll[id]
@@ -181,4 +195,72 @@ it('preserves main session actions and search without child rows', async () => {
   expect(root.querySelector('[data-agent-id]')).toBeNull()
   ;(root.querySelector('[aria-label="搜索对话"]') as HTMLButtonElement)?.click()
   await settle()
+})
+
+async function chooseNewProjectFolder() {
+  root.querySelector<HTMLButtonElement>('[aria-label="新建项目会话"]')!.click()
+  await settle()
+  const item = [
+    ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ].find((el) => el.textContent?.includes('选择项目文件夹'))!
+  item.click()
+  await settle()
+}
+
+it('does nothing when the folder picker is cancelled (FIX-06 1)', async () => {
+  mock.selectDirectory.mockResolvedValue(null)
+  await mount('/chat/pinned')
+  await chooseNewProjectFolder()
+  expect(mock.selectDirectory).toHaveBeenCalledOnce()
+  expect(mock.context.showError).not.toHaveBeenCalled()
+  expect(mock.context.showToast).not.toHaveBeenCalled()
+  expect(mock.core).not.toHaveBeenCalledWith(
+    'projects.resolve',
+    expect.anything(),
+  )
+})
+
+it('keeps saved pins when the sidebar state could not load (FIX-06 5)', async () => {
+  const base = mock.core.getMockImplementation()!
+  mock.core.mockImplementation(async (key: string, input: unknown) => {
+    if (key === 'sidebar.get') throw new Error('disk busy')
+    return base(key, input)
+  })
+  await mount('/chat/pinned')
+  const { useSidebarState } = await import('./useSidebarState')
+  const state = useSidebarState({
+    sessions: mock.session.sessions,
+    projects: mock.session.projects,
+    showToast: mock.context.showToast as (message: string) => void,
+  })
+  await state.load()
+  expect(state.status.value).toBe('failed')
+  state.togglePin('chat-root')
+  await settle()
+  expect(mock.core).not.toHaveBeenCalledWith('sidebar.patch', expect.anything())
+  expect(mock.context.showToast).toHaveBeenCalledWith(
+    expect.stringContaining('侧栏'),
+  )
+})
+
+it('pins normally once the sidebar state has loaded (FIX-06 6)', async () => {
+  await mount('/chat/pinned')
+  const { useSidebarState } = await import('./useSidebarState')
+  const state = useSidebarState({
+    sessions: mock.session.sessions,
+    projects: mock.session.projects,
+    showToast: mock.context.showToast as (message: string) => void,
+  })
+  expect(state.status.value).toBe('unloaded')
+  state.togglePin('chat-root')
+  await settle()
+  expect(mock.core).not.toHaveBeenCalledWith('sidebar.patch', expect.anything())
+  await state.load()
+  expect(state.status.value).toBe('loaded')
+  state.togglePin('chat-root')
+  await settle()
+  expect(mock.core).toHaveBeenCalledWith(
+    'sidebar.patch',
+    expect.objectContaining({ pinned_session_ids: ['chat-root', 'pinned'] }),
+  )
 })

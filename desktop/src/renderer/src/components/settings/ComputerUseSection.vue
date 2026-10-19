@@ -42,7 +42,7 @@ import {
   macHelperStatus,
   onCoreEvent,
 } from '../../api/backend'
-import { core } from '../../api/http'
+import { core, withCoreDeadline } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
 import Button from '../ui/Button.vue'
 import {
@@ -79,6 +79,8 @@ const { page, open: openPage } = useSettingsPages({
 const status = ref<ComputerUseStatusView | null>(null)
 const loaded = ref(false)
 const busy = ref(false)
+/** The master switch's own request; other actions never block it. */
+const switching = ref(false)
 const error = ref('')
 const helper = ref<MacHelperStatus | null>(null)
 
@@ -193,12 +195,14 @@ async function loadStatus(): Promise<void> {
   }
 }
 
+// Every action gives up after 30 s (a stuck Helper or IPC), so the page
+// never stays disabled; the error names the timeout.
 async function act(task: () => Promise<unknown>): Promise<void> {
   if (busy.value) return
   busy.value = true
   error.value = ''
   try {
-    await task()
+    await withCoreDeadline(task())
     await reload()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
@@ -207,9 +211,20 @@ async function act(task: () => Promise<unknown>): Promise<void> {
   }
 }
 
-function setEnabled(next: boolean): void {
-  if (next === enabled.value) return
-  void act(() => core('computerUse.setEnabled', next))
+// The master switch is the emergency stop: it works while another action
+// (重新连接, a permission request) is still waiting.
+async function setEnabled(next: boolean): Promise<void> {
+  if (next === enabled.value || switching.value) return
+  switching.value = true
+  error.value = ''
+  try {
+    await withCoreDeadline(core('computerUse.setEnabled', next))
+    await reload()
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    switching.value = false
+  }
 }
 
 function setDriverEnabled(
@@ -422,7 +437,7 @@ onBeforeUnmount(() => {
           <Switch
             id="computer-use-enabled"
             :model-value="enabled"
-            :disabled="busy || !supported"
+            :disabled="switching || !supported"
             aria-label="电脑操作"
             @update:model-value="setEnabled"
           />
