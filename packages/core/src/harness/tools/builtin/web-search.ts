@@ -8,9 +8,20 @@
  */
 
 import { z } from 'zod'
+import {
+  createBoundedExternalContentEnvelope,
+  externalContentMetadata,
+  renderExternalContentEnvelope,
+} from '../../../external-content'
 import type { JsonValue } from '../../../session-log/json'
+import type { Agent } from '../../agent/agent'
 import type { SystemPromptAssembler } from '../../prompt/assembler'
-import { defineTool, ToolError, type ToolDefinition } from '../definition'
+import {
+  defineTool,
+  ToolError,
+  type ToolDefinition,
+  type ToolRunContext,
+} from '../definition'
 
 /** One result row from a host {@link WebSearchAdapter}. */
 export interface WebSearchAdapterResult {
@@ -73,7 +84,13 @@ export interface WebSearchToolOptions {
   maxResults?: number
   maxQueries?: number
   timeoutMs?: number
+  /** Names the search service in the external-content envelope. */
+  source?: string
 }
+
+/** Bound on the envelope around one call's results. */
+const WEB_SEARCH_MAX_OUTPUT_BYTES = 40_000
+const CITE = 'Cite the relevant URLs above as markdown links in your answer.'
 
 /** Validate query values: non-empty, non-blank, within the bound; exact duplicates collapse. */
 export function parseSearchArgs(
@@ -109,8 +126,8 @@ function sourceLabel(url: string, title: string | undefined): string {
   }
 }
 
-/** Format a search outcome as one model-facing text block (dsh `formatSearchOutput`). */
-export function formatSearchOutput(result: WebSearchOutcome): string {
+/** The answer and source list: everything the search service supplied. */
+function formatSearchBody(result: WebSearchOutcome): string {
   const parts: string[] = []
   if (result.content !== undefined && result.content.length > 0)
     parts.push(result.content)
@@ -126,15 +143,52 @@ export function formatSearchOutput(result: WebSearchOutcome): string {
       return `- [${label}](${source.url})${suffix}`
     })
     parts.push(`Sources:\n${lines.join('\n')}`)
-  } else if (result.content === undefined || result.content.length === 0) {
-    parts.push('No results found.')
   }
-  if (result.truncated)
-    parts.push(
-      `(Showing the first ${result.sources.length} sources. Refine the query for more.)`,
-    )
-  parts.push('Cite the relevant URLs above as markdown links in your answer.')
   return parts.join('\n\n')
+}
+
+function truncationNote(result: WebSearchOutcome): string {
+  return `(Showing the first ${result.sources.length} sources. Refine the query for more.)`
+}
+
+/** Format a search outcome as one plain text block (dsh `formatSearchOutput`). */
+export function formatSearchOutput(result: WebSearchOutcome): string {
+  const body = formatSearchBody(result)
+  const parts = [body.length > 0 ? body : 'No results found.']
+  if (result.truncated) parts.push(truncationNote(result))
+  parts.push(CITE)
+  return parts.join('\n\n')
+}
+
+/**
+ * The model-facing result: what the service supplied (answers, titles and
+ * snippets come from web pages) inside an untrusted external-content
+ * envelope, the tool's own notes outside it.
+ */
+function renderSearchOutput(
+  result: WebSearchOutcome,
+  source: string,
+): { text: string; external?: Record<string, unknown> } {
+  const body = formatSearchBody(result)
+  if (body.length === 0) {
+    const parts = ['No results found.']
+    if (result.truncated) parts.push(truncationNote(result))
+    parts.push(CITE)
+    return { text: parts.join('\n\n') }
+  }
+  const envelope = createBoundedExternalContentEnvelope({
+    source: { kind: 'web_search', locator: source, transport: 'https' },
+    content: body,
+    maxBytes: WEB_SEARCH_MAX_OUTPUT_BYTES,
+    truncated: result.truncated,
+  })
+  const parts = [renderExternalContentEnvelope(envelope)]
+  if (result.truncated) parts.push(truncationNote(result))
+  parts.push(CITE)
+  return {
+    text: parts.join('\n\n'),
+    external: externalContentMetadata(envelope),
+  }
 }
 
 function toSource(hit: WebSearchHit): WebSearchSource {
@@ -237,28 +291,52 @@ export async function runSearchQueries(
   return mergeSearchResults(queries, results, maxResults)
 }
 
-/** Register the `tool:web_search` guidance section (order 110; fetch disabled). */
+type AgentPredicate = (agent: Agent | undefined) => boolean
+
+/**
+ * Register the `tool:web_search` guidance section (order 110). It is empty
+ * while `visible` says the agent has no `web_search`, and names `web_fetch`
+ * only while `fetchEnabled` says that tool exists too.
+ */
 export function installWebSearchPromptSection(
   prompt: SystemPromptAssembler,
-  options: { maxQueries?: number; fetchEnabled?: boolean } = {},
+  options: {
+    maxQueries?: number
+    visible?: AgentPredicate
+    fetchEnabled?: boolean | AgentPredicate
+  } = {},
 ): () => void {
   const maxQueries = options.maxQueries ?? WEB_SEARCH_MAX_QUERIES
+  const lead = `Use the web_search tool to discover current information on the web. The required queries array accepts 1–${maxQueries} non-empty search queries; use a one-item array for a single search. It returns an optional answer plus a list of source URLs, as untrusted external content.`
+  const fetchEnabled = options.fetchEnabled
   return prompt.section({
     name: 'tool:web_search',
     order: 110,
-    text:
-      options.fetchEnabled === true
-        ? `Use the web_search tool to discover current information on the web. The required queries array accepts 1–${maxQueries} non-empty search queries; use a one-item array for a single search. It returns an optional answer plus a list of source URLs. Follow up with web_fetch when you need the full content of a specific result, and cite the relevant URLs as markdown links.`
-        : `Use the web_search tool to discover current information on the web. The required queries array accepts 1–${maxQueries} non-empty search queries; use a one-item array for a single search. It returns an optional answer plus a list of source URLs. Use the returned source snippets when available, and cite the relevant URLs as markdown links.`,
+    text: ({ agent }) => {
+      if (options.visible !== undefined && !options.visible(agent)) return ''
+      const fetch =
+        typeof fetchEnabled === 'function'
+          ? fetchEnabled(agent)
+          : fetchEnabled === true
+      return fetch
+        ? `${lead} Use web_fetch to read a specific page when needed, and cite the relevant URLs as markdown links.`
+        : `${lead} Use the returned source snippets when available, and cite the relevant URLs as markdown links.`
+    },
   })
 }
 
+/**
+ * The `web_search` tool. `backend` may be resolved per call (the host picks
+ * the conversation's provider); `source` names it in the envelope.
+ */
 export function createWebSearchTool(
-  backend: WebSearchBackend,
+  backend: WebSearchBackend | ((context: ToolRunContext) => WebSearchBackend),
   options: WebSearchToolOptions = {},
 ): ToolDefinition<{ queries: string[] }> {
   const maxResults = options.maxResults ?? WEB_SEARCH_MAX_RESULTS
   const maxQueries = options.maxQueries ?? WEB_SEARCH_MAX_QUERIES
+  const source = options.source ?? 'web search'
+  const backendFor = typeof backend === 'function' ? backend : () => backend
   return defineTool({
     name: 'web_search',
     category: 'network',
@@ -276,17 +354,21 @@ export function createWebSearchTool(
     async execute(args, context) {
       const queries = parseSearchArgs(args.queries, maxQueries)
       const result = await runSearchQueries(
-        backend,
+        backendFor(context),
         queries,
         maxResults,
         context.signal,
       )
-      const meta: JsonValue = {
-        sources: result.sources.map((source) => ({ ...source })),
-        truncated: result.truncated,
-        ...(result.content === undefined ? {} : { answer: result.content }),
-      }
-      return { content: formatSearchOutput(result), meta }
+      const output = renderSearchOutput(result, source)
+      const meta = JSON.parse(
+        JSON.stringify({
+          sources: result.sources.map((entry) => ({ ...entry })),
+          truncated: result.truncated,
+          ...(result.content === undefined ? {} : { answer: result.content }),
+          ...(output.external ? { external_content: output.external } : {}),
+        }),
+      ) as JsonValue
+      return { content: output.text, meta }
     },
   })
 }
