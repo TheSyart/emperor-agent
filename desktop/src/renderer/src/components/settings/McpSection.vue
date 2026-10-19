@@ -204,7 +204,7 @@ async function toggle(name: string, enabled: boolean) {
     ctx.showToast(enabled ? `已启用 ${name}` : `已停用 ${name}`)
     await refreshTools()
   } catch (error) {
-    ctx.showToast(messageOf(error))
+    ctx.showError(error)
   } finally {
     delete busy[name]
     delete enabledOverride[name]

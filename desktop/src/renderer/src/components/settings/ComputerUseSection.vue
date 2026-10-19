@@ -27,6 +27,7 @@
  * refreshes on the host's `computer_use_changed` events. Switching off
  * never waits on a pending card (Core does not guard it).
  */
+import { confirm } from '../ui/confirm'
 import type { ComputerUseStatusView } from '@emperor/core/runtime-contract'
 import type {
   MacHelperPermission,
@@ -224,11 +225,14 @@ function acknowledgeRetiredApps(): void {
   void act(() => core('computerUse.acknowledgeRetiredApps'))
 }
 
-function clearScreenshots(): void {
+async function clearScreenshots(): Promise<void> {
   if (
-    !window.confirm(
-      '删除电脑操作保存的全部截图？对话记录里的截图将显示为「附件已清除」。',
-    )
+    !(await confirm({
+      title: '删除全部截图？',
+      body: '删除电脑操作保存的全部截图。对话记录里的截图将显示为「附件已清除」。',
+      confirmLabel: '删除',
+      tone: 'danger',
+    }))
   )
     return
   void act(() => core('computerUse.clearScreenshots', {}))
@@ -258,14 +262,17 @@ const PERMISSION_LABELS: Record<MacHelperPermission, string> = {
   'screen-recording': '屏幕录制',
 }
 
-function resetPermissions(): void {
+async function resetPermissions(): Promise<void> {
   const targets = resettable.value
   if (targets.length === 0) return
   const labels = targets.map((item) => PERMISSION_LABELS[item]).join('和')
   if (
-    !window.confirm(
-      `重置 Emperor Computer Helper 的${labels}授权并登记当前版本？之后需要在系统设置里重新打开开关。`,
-    )
+    !(await confirm({
+      title: `重置${labels}授权？`,
+      body: `重置 Emperor Computer Helper 的${labels}授权并登记当前版本。之后需要在系统设置里重新打开开关。`,
+      confirmLabel: '重置',
+      tone: 'danger',
+    }))
   )
     return
   void act(async () => {

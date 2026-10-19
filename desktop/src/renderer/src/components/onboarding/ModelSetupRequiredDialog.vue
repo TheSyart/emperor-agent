@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+/**
+ * First-run dialog shown while no model is configured. A modal layer
+ * (ui/modalStack: Escape closes it as 稍后) with the shared focus trap:
+ * focus starts on 配置模型, Tab stays inside, the app behind is inert.
+ */
+import { computed, ref } from 'vue'
+import { useModalLayer } from '../ui/modalStack'
+import { useFocusTrap } from '../ui/useFocusTrap'
 import { actionIcons, navIcon } from '../../icons'
 import heroUrl from '../../../../../../assets/generated/model-setup-modal-hero-v2.png'
 import wordmarkUrl from '../../../../../../assets/generated/emperoragent-wordmark.png'
@@ -16,6 +23,11 @@ const emit = defineEmits<{
 }>()
 
 const content = computed(() => buildModelSetupDialogContent(props.message))
+const backdrop = ref<HTMLElement | null>(null)
+const dialog = ref<HTMLElement | null>(null)
+const open = computed(() => props.open)
+useModalLayer(open, () => emit('close'))
+useFocusTrap(dialog, open, { layer: () => backdrop.value })
 const modelIcon = navIcon('model')
 const closeIcon = actionIcons.close
 </script>
@@ -23,10 +35,12 @@ const closeIcon = actionIcons.close
 <template>
   <div
     v-if="open"
+    ref="backdrop"
     class="onboarding-backdrop model-setup-backdrop"
     role="presentation"
   >
     <section
+      ref="dialog"
       class="model-setup-modal"
       role="dialog"
       aria-modal="true"
@@ -38,6 +52,7 @@ const closeIcon = actionIcons.close
         type="button"
         title="关闭"
         aria-label="关闭"
+        data-dismiss
         @click="emit('close')"
       >
         <component :is="closeIcon" :size="16" />
@@ -71,6 +86,7 @@ const closeIcon = actionIcons.close
             <button
               class="tool-button ink asset-button primary-action"
               type="button"
+              data-autofocus
               @click="emit('configure')"
             >
               <component :is="modelIcon" class="action-icon" :size="16" />

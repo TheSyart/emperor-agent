@@ -190,7 +190,9 @@ test('scheduler row menu runs, pauses, resumes, creates and deletes', async ({
 
   menu = await openJobMenu(page, shell, 'job_daily_digest')
   await menu.locator('[data-menu-item="run"]').click()
-  await expect(page.getByRole('status')).toContainText('已手动运行任务')
+  await expect(
+    page.getByRole('status').filter({ hasText: '已手动运行任务' }),
+  ).toBeVisible()
 
   // Protected system jobs: run / pause only.
   menu = await openJobMenu(page, shell, 'memory-maintenance')

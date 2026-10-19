@@ -8,6 +8,14 @@ import {
   type SettingsHeaderHost,
 } from '../settingsHeader'
 import PasswordManagerPage from './PasswordManagerPage.vue'
+import { answerConfirmsForTest } from '../../ui/confirm'
+
+/** Answer confirm() without the dialog host; returns the responder mock. */
+function mockConfirm() {
+  const responder = vi.fn((): boolean => false)
+  answerConfirmsForTest(responder)
+  return responder
+}
 
 const api = vi.hoisted(() => ({
   vaultStatus: vi.fn(),
@@ -140,6 +148,7 @@ async function submit(_root: HTMLElement): Promise<void> {
 }
 
 afterEach(() => {
+  answerConfirmsForTest(null)
   app?.unmount()
   container?.remove()
   app = null
@@ -221,7 +230,7 @@ describe('credential vault settings', () => {
     expect(addAction()).toBeUndefined()
     expect(button(root, '编辑').disabled).toBe(true)
     expect(button(root, '查看密码').disabled).toBe(true)
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const confirm = mockConfirm().mockReturnValue(false)
     button(notice as HTMLElement, '清空').click()
     await settle()
     expect(confirm).toHaveBeenCalledTimes(1)
@@ -233,7 +242,6 @@ describe('credential vault settings', () => {
     expect(api.vaultReset).toHaveBeenCalledTimes(1)
     expect(root.querySelector('.ds-settings-notice')).toBeNull()
     expect(addAction()).toBeDefined()
-    confirm.mockRestore()
   })
 
   it('names a key file that fails its checks', async () => {

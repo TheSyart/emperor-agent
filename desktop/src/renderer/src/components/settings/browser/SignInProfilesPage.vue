@@ -7,6 +7,7 @@
  * first, close the profile's tabs and revoke the site permissions tied to
  * it. The user's own browsing (the 浏览器 pane) never uses these.
  */
+import { confirm } from '../../ui/confirm'
 import type { BrowserProfileView } from '@emperor/core/runtime-contract'
 import { Plus } from 'lucide-vue-next'
 import { computed, onMounted, ref } from 'vue'
@@ -84,13 +85,21 @@ async function submit(): Promise<void> {
   if (saved) dialog.value = null
 }
 
-function clear(profile: BrowserProfileView, remove: boolean): void {
+async function clear(
+  profile: BrowserProfileView,
+  remove: boolean,
+): Promise<void> {
   if (
-    !window.confirm(
-      remove
-        ? `删除「${profile.name}」及其浏览数据，并撤销关联授权？`
-        : `清空「${profile.name}」的浏览数据，并撤销关联授权？`,
-    )
+    !(await confirm({
+      title: remove
+        ? `删除「${profile.name}」？`
+        : `清空「${profile.name}」的浏览数据？`,
+      body: remove
+        ? '删除这个登录档案及其浏览数据，并撤销关联授权。'
+        : '清空这个登录档案的浏览数据，并撤销关联授权。',
+      confirmLabel: remove ? '删除' : '清空',
+      tone: 'danger',
+    }))
   )
     return
   void run(() =>

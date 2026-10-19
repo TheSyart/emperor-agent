@@ -190,6 +190,13 @@ async function closeSettings(page: Page): Promise<void> {
   await page.getByRole('dialog', { name: '设置' }).waitFor({ state: 'hidden' })
 }
 
+/** Answer the in-app confirm() dialog (ui/ConfirmHost) with its button. */
+async function confirmInApp(page: Page, label: string): Promise<void> {
+  const confirm = page.locator('.ds-modal [role="dialog"]')
+  await confirm.getByRole('button', { name: label, exact: true }).click()
+  await confirm.waitFor({ state: 'hidden' })
+}
+
 /**
  * 已开启 / 已关闭 from the master switch, or what the card names when it is
  * neither simply on nor off (不可用).
@@ -526,14 +533,12 @@ async function fullstack(
 
       await dialog.getByTestId('settings-crumb').click()
       await openBrowserPage(page, 'manage-profiles')
-      page.once('dialog', (prompt) => {
-        void prompt.accept()
-      })
       const row = dialog
         .locator('.ds-settings-row')
         .filter({ hasText: 'E2E profile' })
         .first()
       await row.getByRole('button', { name: '清空' }).click()
+      await confirmInApp(page, '清空')
       await until(
         async () => {
           const afterClear = await core<Array<{ profileId: string }>>(
@@ -547,10 +552,8 @@ async function fullstack(
         5_000,
         'profile clear and permission revocation',
       )
-      page.once('dialog', (prompt) => {
-        void prompt.accept()
-      })
       await row.getByRole('button', { name: '删除' }).click()
+      await confirmInApp(page, '删除')
       await closeSettings(page)
       return {
         profileCreated: true,
@@ -839,15 +842,13 @@ async function fullstack(
       if (scan(home)) throw new Error('password appeared in Emperor Home files')
       const dialog = await openBrowserSettings(page)
       await openBrowserPage(page, 'manage-passwords')
-      page.once('dialog', (prompt) => {
-        void prompt.accept()
-      })
       await dialog
         .locator('.ds-settings-row')
         .filter({ hasText: 'E2E credential' })
         .first()
         .getByRole('button', { name: '删除' })
         .click()
+      await confirmInApp(page, '删除')
       await until(
         async () =>
           (await dialog

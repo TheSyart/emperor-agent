@@ -10,6 +10,7 @@
  *   focuses it once the status has loaded (requestWorkspace focus 'commit').
  * Emits: commitFocused — that request has been handled.
  */
+import { confirm } from '../ui/confirm'
 import Spinner from '../ui/Spinner.vue'
 import IconButton from '../ui/IconButton.vue'
 import type {
@@ -303,7 +304,14 @@ async function unstage(paths: string[]): Promise<void> {
 
 async function discard(file: GitFileStatus): Promise<void> {
   if (!status.value || gitWritesDisabled.value) return
-  if (!window.confirm(`丢弃 ${file.path} 的未提交修改？操作前会保存恢复快照。`))
+  if (
+    !(await confirm({
+      title: `丢弃 ${file.path} 的未提交修改？`,
+      body: '操作前会保存恢复快照。',
+      confirmLabel: '丢弃',
+      tone: 'danger',
+    }))
+  )
     return
   await mutate(() =>
     core('git.discard', {
@@ -330,7 +338,8 @@ async function commit(): Promise<void> {
 }
 
 async function fetchRemote(): Promise<void> {
-  if (!window.confirm('从远端获取最新引用？')) return
+  if (!(await confirm({ title: '从远端获取最新引用？', confirmLabel: '获取' })))
+    return
   await mutate(() =>
     core('git.fetch', { sessionId: props.sessionId, confirmed: true }),
   )
@@ -340,7 +349,11 @@ async function pull(): Promise<void> {
   if (
     !status.value ||
     gitWritesDisabled.value ||
-    !window.confirm('以 fast-forward only 拉取当前分支？')
+    !(await confirm({
+      title: '拉取当前分支？',
+      body: '只做 fast-forward，不会产生合并提交。',
+      confirmLabel: '拉取',
+    }))
   )
     return
   await mutate(() =>
@@ -356,7 +369,7 @@ async function push(): Promise<void> {
   if (
     !status.value ||
     gitWritesDisabled.value ||
-    !window.confirm('推送当前分支到远端？')
+    !(await confirm({ title: '推送当前分支到远端？', confirmLabel: '推送' }))
   )
     return
   await mutate(() =>
@@ -386,7 +399,8 @@ async function createBranch(): Promise<void> {
 async function switchBranch(name: string): Promise<void> {
   if (!status.value || gitWritesDisabled.value || name === status.value.branch)
     return
-  if (!window.confirm(`切换到分支 ${name}？`)) return
+  if (!(await confirm({ title: `切换到分支 ${name}？`, confirmLabel: '切换' })))
+    return
   await mutate(() =>
     core('git.switchBranch', {
       sessionId: props.sessionId,
@@ -400,7 +414,13 @@ async function switchBranch(name: string): Promise<void> {
 async function enterWorktree(): Promise<void> {
   const name = worktreeName.value.trim()
   if (!status.value || gitWritesDisabled.value || !name) return
-  if (!window.confirm(`创建并进入临时 worktree ${name}？`)) return
+  if (
+    !(await confirm({
+      title: `创建并进入临时 worktree ${name}？`,
+      confirmLabel: '创建',
+    }))
+  )
+    return
   await mutate(async () => {
     const result = await core('git.enterWorktree', {
       sessionId: props.sessionId,
@@ -417,11 +437,20 @@ async function exitWorktree(action: 'keep' | 'remove'): Promise<void> {
   if (!status.value || gitWritesDisabled.value || !activeWorktree.value) return
   const remove = action === 'remove'
   if (
-    !window.confirm(
+    !(await confirm(
       remove
-        ? `删除 Emperor 创建的 worktree ${activeWorktree.value.path}？存在修改或未推送提交时会拒绝。`
-        : '退出当前临时 worktree，并保留其目录和分支？',
-    )
+        ? {
+            title: '删除这个 worktree？',
+            body: `删除 Emperor 创建的 worktree ${activeWorktree.value.path}。存在修改或未推送提交时会拒绝。`,
+            confirmLabel: '删除',
+            tone: 'danger',
+          }
+        : {
+            title: '退出当前临时 worktree？',
+            body: '保留它的目录和分支。',
+            confirmLabel: '退出',
+          },
+    ))
   )
     return
   await mutate(async () => {
@@ -457,11 +486,18 @@ async function publishPullRequestNow(): Promise<void> {
     !status.value ||
     gitWritesDisabled.value ||
     !pullRequestTitle.value.trim() ||
-    !window.confirm(
+    !(await confirm(
       pullRequest.value
-        ? `更新 Pull Request #${pullRequest.value.number}？`
-        : '发布当前分支的 Pull Request？此操作不会自动提交或推送。',
-    )
+        ? {
+            title: `更新 Pull Request #${pullRequest.value.number}？`,
+            confirmLabel: '更新',
+          }
+        : {
+            title: '发布当前分支的 Pull Request？',
+            body: '此操作不会自动提交或推送。',
+            confirmLabel: '发布',
+          },
+    ))
   )
     return
   loading.value = true
@@ -488,9 +524,10 @@ async function readyPullRequestNow(): Promise<void> {
     !status.value ||
     !pullRequest.value ||
     gitWritesDisabled.value ||
-    !window.confirm(
-      `将 Pull Request #${pullRequest.value.number} 标记为 Ready？`,
-    )
+    !(await confirm({
+      title: `将 Pull Request #${pullRequest.value.number} 标记为 Ready？`,
+      confirmLabel: '标记',
+    }))
   )
     return
   await runPullRequestMutation(() =>
@@ -508,9 +545,11 @@ async function mergePullRequestNow(method: 'merge' | 'squash' | 'rebase') {
     !status.value ||
     !pullRequest.value ||
     gitWritesDisabled.value ||
-    !window.confirm(
-      `以 ${method} 合并 Pull Request #${pullRequest.value.number}？必要检查必须已通过。`,
-    )
+    !(await confirm({
+      title: `以 ${method} 合并 Pull Request #${pullRequest.value.number}？`,
+      body: '必要检查必须已通过。',
+      confirmLabel: '合并',
+    }))
   )
     return
   await runPullRequestMutation(() =>
@@ -530,7 +569,11 @@ async function closePullRequestNow(): Promise<void> {
     !status.value ||
     !pullRequest.value ||
     gitWritesDisabled.value ||
-    !window.confirm(`关闭 Pull Request #${pullRequest.value.number}？`)
+    !(await confirm({
+      title: `关闭 Pull Request #${pullRequest.value.number}？`,
+      confirmLabel: '关闭',
+      tone: 'danger',
+    }))
   )
     return
   await runPullRequestMutation(() =>

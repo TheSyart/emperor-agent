@@ -42,6 +42,8 @@ export interface SlashCommandDeps {
   /** Load the command list when it is still empty, waiting at most `timeoutMs`. */
   ensureCommands?: (timeoutMs: number) => Promise<void>
   showToast: (message: string) => void
+  /** Sticky error toast with 「复制详情」 (App: showError); else showToast. */
+  showError?: (error: unknown) => void
   refreshAll: () => Promise<void>
   openCommandSurface: (
     surface: CommandSurface,
@@ -154,7 +156,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
       if (result.status === 'queued') scheduleQueuedResultPoll(request)
       return result
     } catch (error) {
-      deps.showToast(displayError(error))
+      reportError(deps, error)
       return null
     }
   }
@@ -182,7 +184,7 @@ export function useSlashCommands(deps: SlashCommandDeps) {
         await projectInvocationResult(result)
       } catch (error) {
         queuedPolls.delete(request.invocationId)
-        deps.showToast(displayError(error))
+        reportError(deps, error)
       }
     }
     queuedPolls.set(request.invocationId, globalThis.setTimeout(poll, 750))
@@ -330,6 +332,14 @@ function permissionLabel(preset: PermissionPreset): string {
   if (preset === 'danger-full-access') return '完全访问'
   if (preset === 'read-only') return '只读'
   return '工作区可写'
+}
+
+function reportError(
+  deps: Pick<SlashCommandDeps, 'showToast' | 'showError'>,
+  error: unknown,
+): void {
+  if (deps.showError) deps.showError(error)
+  else deps.showToast(displayError(error))
 }
 
 function displayError(error: unknown): string {

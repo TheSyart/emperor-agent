@@ -781,7 +781,7 @@ async function stopChild(): Promise<void> {
     }
   } catch (error) {
     stoppingChild.value = false
-    ctx.showToast(error instanceof Error ? error.message : String(error))
+    ctx.showError(error)
   }
 }
 
@@ -792,7 +792,7 @@ async function runGoalStatusAction(action: GoalCardAction): Promise<void> {
   try {
     await ctx.runGoalAction(goal.id, action)
   } catch (error) {
-    ctx.showToast(error instanceof Error ? error.message : String(error))
+    ctx.showError(error)
   } finally {
     goalActionPending.value = null
   }
@@ -812,7 +812,7 @@ async function startGoalWithLifecycle(outcome: string): Promise<void> {
   try {
     await ctx.startGoalWithLifecycle(outcome)
   } catch (error) {
-    ctx.showToast(error instanceof Error ? error.message : String(error))
+    ctx.showError(error)
   }
 }
 

@@ -193,7 +193,7 @@ for (const theme of ['dark', 'light'] as const) {
     await page.keyboard.press('Escape')
 
     await card.locator('.context-meter .trigger').click()
-    await expect(page.locator('.context-meter .panel')).toBeVisible()
+    await expect(page.getByRole('dialog', { name: '上下文用量' })).toBeVisible()
     await shot(page, `composer-context-${theme}`)
   })
 }
@@ -728,7 +728,9 @@ test('model editor adds a new entry', async ({ page }) => {
       .click()
   }
   await expect(page.getByText('Visual Added').first()).toBeVisible()
-  await expect(page.getByRole('status')).toContainText('已保存「Visual Added」')
+  await expect(
+    page.getByRole('status').filter({ hasText: '已保存「Visual Added」' }),
+  ).toBeVisible()
 })
 
 test('model added under a provider reuses its key', async ({ page }) => {
@@ -761,9 +763,9 @@ test('model row deletes after an inline confirmation', async ({ page }) => {
   await expect(page.getByText('确认删除？')).toBeVisible()
   await page.getByRole('button', { name: '确认删除 Claude Visual' }).click()
   await expect(page.locator('[data-entry-id="anthropic-entry"]')).toHaveCount(0)
-  await expect(page.getByRole('status')).toContainText(
-    '已删除「Claude Visual」',
-  )
+  await expect(
+    page.getByRole('status').filter({ hasText: '已删除「Claude Visual」' }),
+  ).toBeVisible()
 })
 
 // ── Settings › 模型 and the 能力 page (native sections) ───────────────

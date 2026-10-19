@@ -60,7 +60,7 @@ describe('image viewer', () => {
     await nextTick()
     expect(imageViewer.value).toBeNull()
     expect(document.querySelector('.image-lightbox')).toBeNull()
-    expect(host.inert).toBe(false)
+    expect(host.hasAttribute('inert')).toBe(false)
     expect(document.activeElement).toBe(trigger)
   })
 
@@ -101,6 +101,56 @@ describe('image viewer', () => {
     await nextTick()
     await nextTick()
     expect(imageViewer.value).toBeNull()
+  })
+
+  it('moves between images with the arrow keys, keeps Tab inside and closes on Escape (DS-05)', async () => {
+    const trigger = document.createElement('button')
+    document.body.append(trigger)
+    trigger.focus()
+    openImageViewer({
+      owner: 's1',
+      items: [
+        { id: '1', name: '一.png', src: 'data:image/png;base64,AAAA' },
+        { id: '2', name: '二.png', src: 'data:image/png;base64,AAAA' },
+      ],
+    })
+    const host = document.createElement('div')
+    document.body.append(host)
+    app = createApp(ImageLightbox)
+    app.mount(host)
+    for (let i = 0; i < 4; i++) await nextTick()
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!
+    const press = (key: string, init: KeyboardEventInit = {}) => {
+      const event = new KeyboardEvent('keydown', {
+        key,
+        bubbles: true,
+        cancelable: true,
+        ...init,
+      })
+      ;(document.activeElement ?? document.body).dispatchEvent(event)
+      return event
+    }
+    expect(document.activeElement?.getAttribute('aria-label')).toBe(
+      '关闭图片预览',
+    )
+    press('ArrowRight')
+    await nextTick()
+    expect(dialog.textContent).toContain('二.png')
+    press('ArrowLeft')
+    await nextTick()
+    expect(dialog.textContent).toContain('一.png')
+    // Tab wraps from the last control back into the viewer.
+    const buttons = [
+      ...dialog.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
+    ]
+    buttons.at(-1)!.focus()
+    expect(press('Tab').defaultPrevented).toBe(true)
+    expect(dialog.contains(document.activeElement)).toBe(true)
+    expect(host.hasAttribute('inert')).toBe(true)
+    press('Escape')
+    for (let i = 0; i < 3; i++) await nextTick()
+    expect(imageViewer.value).toBeNull()
+    expect(document.activeElement).toBe(trigger)
   })
 })
 

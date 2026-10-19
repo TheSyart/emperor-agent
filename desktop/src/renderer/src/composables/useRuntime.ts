@@ -102,6 +102,8 @@ export function useRuntime(options: {
   refreshMemory: (shouldToast?: boolean) => Promise<void>
   refreshCommands: () => Promise<void>
   showToast: (message: string) => void
+  /** Sticky error toast with 「复制详情」 (App: showError); else showToast. */
+  showError?: (error: unknown) => void
   resolveDraftSession?: (id: string) => SessionInfo | undefined
   onSessionCreated?: (
     event: Extract<WsEvent, { event: 'session_created' }>,
@@ -454,7 +456,7 @@ export function useRuntime(options: {
             void refreshQueuedPrompts(activeSessionId)
             return
           }
-          options.showToast(displayError(err))
+          reportError(err)
           return
         }
         // A turn that failed after its message was taken stays sent.
@@ -531,7 +533,7 @@ export function useRuntime(options: {
           : {}),
       }))
     } catch (error) {
-      options.showToast(displayError(error))
+      reportError(error)
     }
   }
 
@@ -566,7 +568,7 @@ export function useRuntime(options: {
       )
       return true
     } catch (error) {
-      options.showToast(displayError(error))
+      reportError(error)
       await refreshQueuedPrompts()
       return false
     }
@@ -702,7 +704,7 @@ export function useRuntime(options: {
 
   async function handleControlPayloadError(error: unknown) {
     updatePending()
-    options.showToast(displayError(error))
+    reportError(error)
     await refreshControlAndSessions()
   }
 
@@ -719,6 +721,11 @@ export function useRuntime(options: {
       // Keep the original control error as the visible failure; refresh is best-effort.
     }
     await options.refreshSessions?.().catch(() => undefined)
+  }
+
+  function reportError(error: unknown): void {
+    if (options.showError) options.showError(error)
+    else options.showToast(displayError(error))
   }
 
   function displayError(error: unknown) {

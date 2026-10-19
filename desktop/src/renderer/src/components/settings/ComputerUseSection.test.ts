@@ -9,6 +9,14 @@ import {
   type SettingsHeaderHost,
 } from './settingsHeader'
 import ComputerUseSection from './ComputerUseSection.vue'
+import { answerConfirmsForTest } from '../ui/confirm'
+
+/** Answer confirm() without the dialog host; returns the responder mock. */
+function mockConfirm() {
+  const responder = vi.fn((): boolean => false)
+  answerConfirmsForTest(responder)
+  return responder
+}
 
 const { core, helperStatus, requestPermission, resetPermission, reconnect } =
   vi.hoisted(() => ({
@@ -133,6 +141,7 @@ function button(root: ParentNode, text: string): HTMLButtonElement {
 }
 
 afterEach(() => {
+  answerConfirmsForTest(null)
   app?.unmount()
   app = null
   container?.remove()
@@ -263,7 +272,7 @@ describe('ComputerUseSection main page', () => {
   it('requires a second confirmation before resetting a denied grant', async () => {
     resetPermission.mockResolvedValue({ reset: true })
     requestPermission.mockResolvedValue({ opened: true })
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const confirm = mockConfirm().mockReturnValue(false)
     const root = await mount({}, accessibilityOff)
     const reset = button(root, '重置授权')
     reset.click()
@@ -281,7 +290,7 @@ describe('ComputerUseSection main page', () => {
   it('registers the current recording helper after reset and preserves working Accessibility', async () => {
     resetPermission.mockResolvedValue({ reset: true })
     requestPermission.mockResolvedValue({ opened: true })
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mockConfirm().mockReturnValue(true)
     const root = await mount(
       {},
       {
@@ -431,7 +440,7 @@ describe('ComputerUseSection main page', () => {
   })
 
   it('clears saved screenshots after a confirmation', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const confirm = mockConfirm().mockReturnValue(false)
     const root = await mount()
     const clear = root.querySelector<HTMLButtonElement>(
       '[data-testid="computer-use-clear-screenshots"]',

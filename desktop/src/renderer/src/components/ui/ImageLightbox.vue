@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   ChevronLeft,
   ChevronRight,
@@ -17,6 +17,7 @@ import {
 import { closeImageViewer, imageViewer } from './imageViewer'
 import { fitScale, panBounds, zoomAt } from './imageViewerGeometry'
 import { pushModalLayer } from './modalStack'
+import { useFocusTrap } from './useFocusTrap'
 import { requestWorkspace } from '../workspace/workspaceState'
 
 const root = ref<HTMLElement | null>(null)
@@ -44,7 +45,12 @@ let drag: {
 let moved = false
 let observer: ResizeObserver | null = null
 let releaseLayer = () => {}
-const inertElements: { element: HTMLElement; inert: boolean }[] = []
+// Tab stays in the viewer and the page behind is inert; imageViewer.ts
+// gives focus back to the thumbnail that opened it.
+useFocusTrap(root, () => true, {
+  initialFocus: () => closeButton.value,
+  restoreFocus: false,
+})
 const imageStyle = computed(() => ({
   width: `${natural.value.width}px`,
   height: `${natural.value.height}px`,
@@ -183,17 +189,6 @@ function keydown(event: KeyboardEvent) {
   } else if (event.key === '-') {
     event.preventDefault()
     zoom(scale.value / 1.25)
-  } else if (event.key === 'Tab') {
-    const buttons = [
-      ...root.value!.querySelectorAll<HTMLButtonElement>(
-        'button:not(:disabled)',
-      ),
-    ]
-    const current = buttons.indexOf(document.activeElement as HTMLButtonElement)
-    event.preventDefault()
-    buttons[
-      (current + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length
-    ]?.focus()
   }
 }
 watch(
@@ -212,25 +207,17 @@ watch(imageViewer, (next, previous) => {
 })
 onMounted(() => {
   releaseLayer = pushModalLayer({ onEscape: closeImageViewer })
-  for (const element of document.body.children) {
-    if (!(element instanceof HTMLElement) || element.contains(root.value))
-      continue
-    inertElements.push({ element, inert: Boolean(element.inert) })
-    element.inert = true
-  }
   if (typeof ResizeObserver !== 'undefined') {
     observer = new ResizeObserver(measure)
     if (stage.value) observer.observe(stage.value)
   }
   window.addEventListener('resize', measure)
   measure()
-  void nextTick(() => closeButton.value?.focus())
 })
 onBeforeUnmount(() => {
   observer?.disconnect()
   window.removeEventListener('resize', measure)
   releaseLayer()
-  for (const { element, inert } of inertElements) element.inert = inert
 })
 </script>
 <template>

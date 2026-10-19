@@ -172,12 +172,11 @@ for (const theme of ['dark', 'light'] as const) {
     )
     await noHorizontalOverflow(page)
     await shot(page, `passwords-key-missing-${theme}`)
-    // 清空 asks first; accepting starts the vault over.
-    page.once('dialog', (prompt) => {
-      expect(prompt.message()).toContain('无法恢复')
-      void prompt.accept()
-    })
+    // 清空 asks first; confirming starts the vault over.
     await notice.getByRole('button', { name: '清空' }).click()
+    const confirm = page.locator('.ds-modal [role="dialog"]')
+    await expect(confirm).toContainText('无法恢复')
+    await confirm.getByRole('button', { name: '清空', exact: true }).click()
     await expect(notice).toHaveCount(0)
     await expect(dialog).toContainText('还没有保存的密码')
     await expect(dialog.locator('[data-action="add-credential"]')).toBeVisible()

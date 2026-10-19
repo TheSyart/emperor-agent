@@ -539,14 +539,12 @@ for (const theme of ['dark', 'light'] as const) {
     await record.getByRole('button', { name: '关闭' }).click()
     await expect(record).toHaveCount(0)
 
-    // Stopping a workflow run asks first; dismissing keeps it running.
-    let confirmText = ''
-    page.once('dialog', (confirm) => {
-      confirmText = confirm.message()
-      void confirm.dismiss()
-    })
+    // Stopping a workflow run asks first; 取消 keeps it running.
     await workflow.getByRole('button', { name: '停止：修复视觉回归' }).click()
-    expect(confirmText).toContain('停止工作流「修复视觉回归」')
+    const confirm = page.locator('.ds-modal [role="dialog"]')
+    await expect(confirm).toContainText('停止工作流「修复视觉回归」')
+    await confirm.getByRole('button', { name: '取消', exact: true }).click()
+    await expect(confirm).toHaveCount(0)
     await expect(workflow.locator('.task-dot')).toHaveAttribute(
       'data-status',
       'running',

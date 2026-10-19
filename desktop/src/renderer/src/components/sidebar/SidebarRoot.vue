@@ -215,16 +215,13 @@ async function newProjectSession(project: SidebarProjectGroup) {
   openSession(session.id)
 }
 
-async function pickBuildProject(kind: 'empty' | 'existing') {
+async function pickBuildProject() {
   if (creatingBuild.value) return
   creatingBuild.value = true
   try {
-    const picked = await selectDirectory()
-    const fallbackLabel =
-      kind === 'empty'
-        ? '输入已创建的空白项目文件夹路径'
-        : '输入要绑定的项目文件夹路径'
-    const path = (picked || window.prompt(fallbackLabel) || '').trim()
+    // Cancelling the folder picker does nothing (Electron has no
+    // window.prompt; the old typed-path fallback threw into a toast).
+    const path = ((await selectDirectory()) ?? '').trim()
     if (!path) return
     const project = await resolveProject(path)
     const session = await create({
@@ -234,7 +231,7 @@ async function pickBuildProject(kind: 'empty' | 'existing') {
     })
     openSession(session.id)
   } catch (err) {
-    ctx.showToast(err instanceof Error ? err.message : String(err))
+    ctx.showError(err)
   } finally {
     creatingBuild.value = false
   }
@@ -561,10 +558,7 @@ defineExpose({ focusSearch })
         </MenuItem>
         <MenuItem variant="separator" />
       </template>
-      <MenuItem
-        :disabled="creatingBuild"
-        @select="pickBuildProject('existing')"
-      >
+      <MenuItem :disabled="creatingBuild" @select="pickBuildProject()">
         选择项目文件夹…
       </MenuItem>
     </Menu>
@@ -575,13 +569,10 @@ defineExpose({ focusSearch })
       :width="200"
       label="项目操作"
     >
-      <MenuItem :disabled="creatingBuild" @select="pickBuildProject('empty')">
+      <MenuItem :disabled="creatingBuild" @select="pickBuildProject()">
         新建空白项目
       </MenuItem>
-      <MenuItem
-        :disabled="creatingBuild"
-        @select="pickBuildProject('existing')"
-      >
+      <MenuItem :disabled="creatingBuild" @select="pickBuildProject()">
         使用现有文件夹
       </MenuItem>
       <MenuItem variant="separator" />

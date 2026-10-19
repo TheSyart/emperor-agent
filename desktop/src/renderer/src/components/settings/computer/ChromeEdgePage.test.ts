@@ -6,6 +6,14 @@ import type {
   BrowserPairingStatus,
 } from '../../../../../shared/ipc-contract'
 import ChromeEdgePage from './ChromeEdgePage.vue'
+import { answerConfirmsForTest } from '../../ui/confirm'
+
+/** Answer confirm() without the dialog host; returns the responder mock. */
+function mockConfirm() {
+  const responder = vi.fn((): boolean => false)
+  answerConfirmsForTest(responder)
+  return responder
+}
 
 const api = vi.hoisted(() => ({
   pairings: vi.fn(),
@@ -151,6 +159,7 @@ const stepStates = (root: HTMLElement) =>
   )
 
 afterEach(() => {
+  answerConfirmsForTest(null)
   app?.unmount()
   container?.remove()
   app = null
@@ -301,7 +310,7 @@ describe('Chrome 和 Edge page', () => {
     expect(text(root, '[data-connection="edge"]')).toContain(
       '这台 Mac 没有安装 Edge',
     )
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false)
+    const confirm = mockConfirm().mockReturnValueOnce(false)
     button(root, '断开 Google Chrome').click()
     await settle()
     expect(confirm).toHaveBeenCalledOnce()
@@ -328,7 +337,7 @@ describe('Chrome 和 Edge page', () => {
     )
     api.status.mockResolvedValue(extension(true, { extension: 'loaded' }))
     api.revoke.mockResolvedValue(true)
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mockConfirm().mockReturnValue(true)
     const { root } = mount()
     await settle()
     expect(text(root, '[data-testid="chrome-status"]')).toBe('已安装 · 未连接')
@@ -348,7 +357,7 @@ describe('Chrome 和 Edge page', () => {
       uninstalled: 1,
       status: extension(false),
     })
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false)
+    const confirm = mockConfirm().mockReturnValueOnce(false)
     const { root } = mount()
     await settle()
     const remove = root.querySelector<HTMLButtonElement>(

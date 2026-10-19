@@ -9,6 +9,7 @@
  * checks, a notice on top offers 清空 (after a confirmation). Credential
  * values travel only over the trusted preload → main IPC.
  */
+import { confirm } from '../../ui/confirm'
 import { Plus } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
@@ -180,8 +181,16 @@ function save(): void {
   })
 }
 
-function remove(handleId: string): void {
-  if (!window.confirm('确定删除这个凭据？删除后无法恢复。')) return
+async function remove(handleId: string): Promise<void> {
+  if (
+    !(await confirm({
+      title: '删除这个凭据？',
+      body: '删除后无法恢复。',
+      confirmLabel: '删除',
+      tone: 'danger',
+    }))
+  )
+    return
   void run(async () => {
     await vaultRemove(handleId)
     if (editing.value === handleId) resetForm()
@@ -229,11 +238,14 @@ function setMaster(): void {
 }
 
 /** 清空: the way out when the local key is lost or fails its checks. */
-function reset(): void {
+async function reset(): Promise<void> {
   if (
-    !window.confirm(
-      '清空后，已保存的密码和主密码都会删除，无法恢复。确定清空？',
-    )
+    !(await confirm({
+      title: '清空密码库？',
+      body: '已保存的密码和主密码都会删除，无法恢复。',
+      confirmLabel: '清空',
+      tone: 'danger',
+    }))
   )
     return
   hidePassword()

@@ -20,6 +20,7 @@
  * Pairings are polled every 2 s while mounted (ComputerUseSection keeps it
  * mounted, hidden, for the summary).
  */
+import { confirm } from '../../ui/confirm'
 import type {
   BrowserExtensionStatus,
   BrowserPairingStatus,
@@ -221,11 +222,14 @@ function install(showSteps = false): void {
   })
 }
 
-function remove(): void {
+async function remove(): Promise<void> {
   if (
-    !window.confirm(
-      '移除扩展程序？已连接的浏览器会自动卸载它，Emperor 会删除扩展文件夹和所有配对。没打开的浏览器，请之后在它的扩展页手动移除。',
-    )
+    !(await confirm({
+      title: '移除扩展程序？',
+      body: '已连接的浏览器会自动卸载它，Emperor 会删除扩展文件夹和所有配对。没打开的浏览器，请之后在它的扩展页手动移除。',
+      confirmLabel: '移除',
+      tone: 'danger',
+    }))
   )
     return
   void act(async () => {
@@ -279,17 +283,21 @@ function deny(pairingId: string): void {
   })
 }
 
-function rowAction(row: ConnectionRow): void {
+async function rowAction(row: ConnectionRow): Promise<void> {
   if (row.action === 'setup') {
     stepsWanted.value = true
     return
   }
   if (!row.pairingId) return
   const pairingId = row.pairingId
+  const verb = row.action === 'disconnect' ? '断开' : '撤销'
   if (
-    !window.confirm(
-      `${row.action === 'disconnect' ? '断开' : '撤销'} ${row.title}？之后要在扩展里重新连接 Emperor。`,
-    )
+    !(await confirm({
+      title: `${verb} ${row.title}？`,
+      body: '之后要在扩展里重新连接 Emperor。',
+      confirmLabel: verb,
+      tone: 'danger',
+    }))
   )
     return
   void act(async () => {

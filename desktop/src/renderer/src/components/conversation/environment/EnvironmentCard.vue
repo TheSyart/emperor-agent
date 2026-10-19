@@ -40,6 +40,7 @@
  * title (the project name; '' for 环境信息).
  * Emits: reveal(nodeKey), open-subagent(sessionId), close.
  */
+import { confirm } from '../../ui/confirm'
 import {
   ArrowUpRight,
   ChevronDown,
@@ -302,7 +303,7 @@ async function runGit(action: () => Promise<unknown>): Promise<void> {
   try {
     await action()
   } catch (cause) {
-    ctx.showToast(message(cause))
+    ctx.showError(cause)
   } finally {
     gitBusy.value = false
     void workspace.refresh()
@@ -337,7 +338,13 @@ const worktreeMenu = ref(false)
 async function enterWorktree(): Promise<void> {
   const status = git.value
   if (!status || writesDisabled.value || activeWorktree.value) return
-  if (!window.confirm('创建并进入临时 worktree？')) return
+  if (
+    !(await confirm({
+      title: '创建并进入临时 worktree？',
+      confirmLabel: '创建',
+    }))
+  )
+    return
   await runGit(() =>
     core('git.enterWorktree', {
       sessionId: props.sessionId,
@@ -352,11 +359,20 @@ async function exitWorktree(action: 'keep' | 'remove'): Promise<void> {
   const worktree = activeWorktree.value
   if (!status || !worktree || writesDisabled.value) return
   if (
-    !window.confirm(
+    !(await confirm(
       action === 'remove'
-        ? `删除 Emperor 创建的 worktree ${worktree.path}？存在修改或未推送提交时会拒绝。`
-        : '退出当前临时 worktree，并保留其目录和分支？',
-    )
+        ? {
+            title: '删除这个 worktree？',
+            body: `删除 Emperor 创建的 worktree ${worktree.path}。存在修改或未推送提交时会拒绝。`,
+            confirmLabel: '删除',
+            tone: 'danger',
+          }
+        : {
+            title: '退出当前临时 worktree？',
+            body: '保留它的目录和分支。',
+            confirmLabel: '退出',
+          },
+    ))
   )
     return
   await runGit(() =>
@@ -397,7 +413,8 @@ async function toggleBranchMenu(): Promise<void> {
 async function switchBranch(name: string): Promise<void> {
   const status = git.value
   if (!status || writesDisabled.value || name === status.branch) return
-  if (!window.confirm(`切换到分支 ${name}？`)) return
+  if (!(await confirm({ title: `切换到分支 ${name}？`, confirmLabel: '切换' })))
+    return
   await runGit(() =>
     core('git.switchBranch', {
       sessionId: props.sessionId,
@@ -453,7 +470,7 @@ async function openCompare(): Promise<void> {
   try {
     await openLink(url)
   } catch (cause) {
-    ctx.showToast(message(cause))
+    ctx.showError(cause)
   }
 }
 
@@ -598,9 +615,12 @@ async function stopTask(line: BackgroundTaskLine): Promise<void> {
   if (!line.stoppable || stopping.value.has(line.id)) return
   if (
     line.confirmStop &&
-    !window.confirm(
-      `停止工作流「${line.label}」？它正在运行的子智能体也会一起停止。`,
-    )
+    !(await confirm({
+      title: `停止工作流「${line.label}」？`,
+      body: '它正在运行的子智能体也会一起停止。',
+      confirmLabel: '停止',
+      tone: 'danger',
+    }))
   )
     return
   stopping.value = new Set([...stopping.value, line.id])
@@ -609,7 +629,7 @@ async function stopTask(line: BackgroundTaskLine): Promise<void> {
       reason: 'user_stopped_from_environment_card',
     })
   } catch (cause) {
-    ctx.showToast(message(cause))
+    ctx.showError(cause)
   }
   await loadTasks()
   const next = new Set(stopping.value)

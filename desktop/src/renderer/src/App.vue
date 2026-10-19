@@ -39,9 +39,14 @@ import {
 import { useLazySessionConversation } from './composables/useLazySessionConversation'
 import { useShortcuts } from './composables/useShortcuts'
 import { useSettingsRoute } from './components/settings/useSettingsRoute'
-import Toast from './components/ui/Toast.vue'
+import ToastStack from './components/ui/ToastStack.vue'
+import {
+  pushToast,
+  showErrorToast,
+  type ToastOptions,
+} from './components/ui/toasts'
+import { activeConfirm } from './components/ui/confirm'
 import { isConversationRoute, sessionLocation } from './router'
-import ModelSetupRequiredDialog from './components/onboarding/ModelSetupRequiredDialog.vue'
 import { shouldShowModelSetupPrompt } from './components/onboarding/modelSetupDialogModel'
 import { runInitialStartup } from './appStartup'
 import { buildSlashPaletteItems } from './commands'
@@ -84,20 +89,29 @@ const WorkspacePanel = defineAsyncComponent(
 const SettingsModal = defineAsyncComponent(
   () => import('./components/settings/SettingsModal.vue'),
 )
+// Shown only while no model is configured.
+const ModelSetupRequiredDialog = defineAsyncComponent(
+  () => import('./components/onboarding/ModelSetupRequiredDialog.vue'),
+)
+// The confirm() dialog loads on the first request (confirm.ts queues it).
+const ConfirmHost = defineAsyncComponent(
+  () => import('./components/ui/ConfirmHost.vue'),
+)
 
 const router = useRouter()
 const route = useRoute()
 const settingsRoute = useSettingsRoute()
 const agentTree = useAgentTree()
-const toast = ref('')
-const toastOpen = ref(false)
 const modelSetupPromptOpen = ref(false)
 const modelSetupDismissed = ref(false)
 const commandDescriptors = ref<CommandDescriptor[]>([])
 
-function showToast(message: string) {
-  toast.value = message
-  toastOpen.value = Boolean(message)
+function showToast(message: string, options?: ToastOptions) {
+  pushToast(message, options)
+}
+
+function showError(error: unknown, context?: string) {
+  showErrorToast(error, context)
 }
 
 function closeModelSetupPrompt() {
@@ -137,6 +151,7 @@ const runtime = useRuntime({
   refreshMemory,
   refreshCommands: () => loadCommands(),
   showToast,
+  showError,
   resolveDraftSession: sessionStore.getSession,
   onSessionCreated: sessionStore.applySessionCreatedEvent,
   onSessionTitleUpdated: sessionStore.applySessionTitleUpdatedEvent,
@@ -446,7 +461,7 @@ async function runSafely(task: () => Promise<void>) {
   try {
     await task()
   } catch (err) {
-    showToast(err instanceof Error ? err.message : String(err))
+    showError(err)
   }
 }
 
@@ -476,6 +491,7 @@ const {
   openCommandSurface,
   activateTransitionedSession,
   showToast,
+  showError,
   currentGoal: () => currentGoal.value,
   startGoal,
   runGoalAction,
@@ -749,6 +765,7 @@ provideAppContext({
   startGoal,
   submitFromComposer,
   showToast,
+  showError,
   runSafely,
   tokens: tokensData,
   tokensLoading,
@@ -795,6 +812,7 @@ provideAppContext({
     <ImageViewerHost :owner="viewedSessionId" />
     <SettingsModal />
     <ModelSetupRequiredDialog
+      v-if="modelSetupPromptOpen"
       :open="modelSetupPromptOpen"
       :message="modelSetupMessage"
       @close="closeModelSetupPrompt"
@@ -802,7 +820,8 @@ provideAppContext({
     />
   </template>
 
-  <Toast v-model:open="toastOpen" :message="toast" />
+  <ToastStack />
+  <ConfirmHost v-if="activeConfirm" />
 </template>
 
 <style scoped>

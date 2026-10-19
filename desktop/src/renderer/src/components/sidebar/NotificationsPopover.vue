@@ -4,10 +4,11 @@
  * source glyph, title, detail and relative time; clicking one marks it read
  * and navigates: a session → its conversation, a git receipt → that
  * session with the workspace 「审查」 pane, a scheduler run → /scheduler.
- * Positioned like ui/Menu (chat/floatingMenu), dismissed on outside
- * click / focus and Escape.
+ * The shell is ui/Popover: anchored under the bell, dismissed on outside
+ * click / focus and Escape (focus goes back to the bell).
  */
 import Button from '../ui/Button.vue'
+import Popover from '../ui/Popover.vue'
 import {
   CircleAlert,
   CircleCheck,
@@ -21,7 +22,6 @@ import {
   onBeforeUnmount,
   onMounted,
   ref,
-  toRef,
   type Component,
 } from 'vue'
 import { useRouter } from 'vue-router'
@@ -31,31 +31,20 @@ import {
   notificationRelativeTime,
   type AppNotification,
 } from '../../runtime/notifications'
-import { useFloatingMenu } from '../chat/floatingMenu'
 import { requestWorkspace } from '../workspace/workspaceState'
 
-const props = defineProps<{ anchor: HTMLElement | null }>()
+defineProps<{ anchor: HTMLElement | null }>()
 const open = defineModel<boolean>('open', { default: false })
 
 const router = useRouter()
 const { items, unreadCount, markRead, markAllRead, clear } = useNotifications()
-const panel = ref<HTMLElement | null>(null)
+const popover = ref<InstanceType<typeof Popover> | null>(null)
 const now = ref(Date.now())
 let clock: ReturnType<typeof setInterval> | undefined
 
 function close(): void {
   open.value = false
 }
-
-const floating = useFloatingMenu({
-  open,
-  button: toRef(props, 'anchor'),
-  menu: panel,
-  fallbackWidth: 340,
-  fallbackHeight: 320,
-  onClose: close,
-  prefer: () => 'bottom',
-})
 
 const rows = computed(() =>
   items.value.map((item) => ({
@@ -83,21 +72,9 @@ async function openItem(item: AppNotification): Promise<void> {
   if (target.type === 'review') requestWorkspace({ pane: 'review' })
 }
 
-// Escape closes the popover wherever focus is: 清空 / 全部已读 disable
-// themselves once used, and a disabled button drops focus to <body>, so a
-// listener on the panel alone would stop hearing the key. Capture phase, so
-// the popover (the topmost floating layer) wins over card / page handlers.
-function onDocumentKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Escape' || event.defaultPrevented) return
-  event.preventDefault()
-  event.stopPropagation()
-  close()
-  props.anchor?.focus()
-}
-
 /** Keep keyboard focus inside the panel after a header action disables itself. */
 function afterHeaderAction(): void {
-  void nextTick(() => panel.value?.focus())
+  void nextTick(() => popover.value?.panel?.focus())
 }
 
 function clearAll(): void {
@@ -110,89 +87,62 @@ function readAll(): void {
   afterHeaderAction()
 }
 
-onMounted(async () => {
+onMounted(() => {
   clock = setInterval(() => {
     now.value = Date.now()
   }, 30_000)
-  document.addEventListener('keydown', onDocumentKeydown, true)
-  await nextTick()
-  floating.position()
-  floating.addListeners()
 })
 
 onBeforeUnmount(() => {
   clearInterval(clock)
-  document.removeEventListener('keydown', onDocumentKeydown, true)
-  floating.removeListeners()
 })
 </script>
 
 <template>
-  <Teleport to="body">
-    <div
-      ref="panel"
-      class="notifications ds-fade-in"
-      role="dialog"
-      aria-label="通知"
-      tabindex="-1"
-      :style="floating.style.value"
-    >
-      <header class="head">
-        <span class="heading">通知</span>
-        <Button size="sm" :disabled="!unreadCount" @click="readAll()">
-          全部已读
-        </Button>
-        <Button size="sm" :disabled="!items.length" @click="clearAll()">
-          清空
-        </Button>
-      </header>
-      <ul v-if="rows.length" class="list">
-        <li v-for="{ item, time } in rows" :key="item.key">
-          <button
-            type="button"
-            class="row"
-            :data-unread="!item.read || undefined"
-            :data-tone="item.tone"
-            @click="openItem(item)"
-          >
-            <component :is="glyph(item)" :size="16" class="glyph" />
-            <span class="body">
-              <span class="title">{{ item.title }}</span>
-              <span v-if="item.detail" class="detail">{{ item.detail }}</span>
-            </span>
-            <span class="meta">
-              <span class="time">{{ time }}</span>
-              <span v-if="!item.read" class="unread" aria-hidden="true" />
-            </span>
-          </button>
-        </li>
-      </ul>
-      <div v-else class="empty">暂无通知</div>
-    </div>
-  </Teleport>
+  <Popover
+    ref="popover"
+    v-model:open="open"
+    class="notifications"
+    :anchor="anchor"
+    label="通知"
+    :width="340"
+    :padded="false"
+  >
+    <header class="head">
+      <span class="heading">通知</span>
+      <Button size="sm" :disabled="!unreadCount" @click="readAll()">
+        全部已读
+      </Button>
+      <Button size="sm" :disabled="!items.length" @click="clearAll()">
+        清空
+      </Button>
+    </header>
+    <ul v-if="rows.length" class="list">
+      <li v-for="{ item, time } in rows" :key="item.key">
+        <button
+          type="button"
+          class="row"
+          :data-unread="!item.read || undefined"
+          :data-tone="item.tone"
+          @click="openItem(item)"
+        >
+          <component :is="glyph(item)" :size="16" class="glyph" />
+          <span class="body">
+            <span class="title">{{ item.title }}</span>
+            <span v-if="item.detail" class="detail">{{ item.detail }}</span>
+          </span>
+          <span class="meta">
+            <span class="time">{{ time }}</span>
+            <span v-if="!item.read" class="unread" aria-hidden="true" />
+          </span>
+        </button>
+      </li>
+    </ul>
+    <div v-else class="empty">暂无通知</div>
+  </Popover>
 </template>
 
 <style scoped>
-.notifications {
-  position: fixed;
-  z-index: var(--z-menu);
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  width: 340px;
-  padding: var(--space-1);
-  border: 1px solid var(--border-inverted);
-  border-radius: var(--radius-card);
-  background: rgb(var(--menu-fill));
-  box-shadow: var(--shadow-lv3);
-  color: rgb(var(--label-primary));
-}
-
-/* Focus only parks here after a header action; the panel is not a control. */
-.notifications:focus {
-  outline: none;
-}
-
 .head {
   display: flex;
   flex: none;

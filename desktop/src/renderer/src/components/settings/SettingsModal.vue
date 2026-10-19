@@ -8,8 +8,9 @@
  * Mounted once in App.vue as `<SettingsModal />` (no props). Close paths:
  * the header close button, a mask click and Escape. Escape goes through the
  * shared modal stack (ui/modalStack.ts), so a dialog opened on top of the
- * panel (ui/Modal) closes first and alone. Focus moves to the panel on open
- * and returns to the previously focused element on close.
+ * panel (ui/Modal) closes first and alone. Focus (ui/useFocusTrap) moves to
+ * the panel on open, Tab stays inside it, the app behind is inert, and
+ * closing returns focus to the previously focused element.
  *
  * Layout: 188px nav rail + content column. The content column is a 54px
  * header (section title, the section's header actions, close) over the
@@ -41,6 +42,7 @@ import {
 } from 'vue'
 import { DsChevronRight, DsClose } from '../icons/ds'
 import { useModalLayer } from '../ui/modalStack'
+import { useFocusTrap } from '../ui/useFocusTrap'
 import SettingsHeaderBar from './SettingsHeaderBar.vue'
 import SettingsNav from './SettingsNav.vue'
 import { provideSettingsHeader } from './settingsHeader'
@@ -74,10 +76,10 @@ const header = provideSettingsHeader({
 
 const titleId = 'settings-modal-title'
 const sectionTitleId = 'settings-section-title'
+const overlay = ref<HTMLElement | null>(null)
 const panel = ref<HTMLElement | null>(null)
 const options = ref<HTMLElement | null>(null)
 const crumb = ref<HTMLButtonElement | null>(null)
-let restoreFocus: HTMLElement | null = null
 
 const body = computed(() => SECTION_BODIES[section.value])
 const sectionLabel = computed(
@@ -98,6 +100,10 @@ function select(target: SettingsModalSection) {
 }
 
 useModalLayer(open, close)
+useFocusTrap(panel, open, {
+  initialFocus: () => panel.value,
+  layer: () => overlay.value,
+})
 
 watch(
   () => header.page.value,
@@ -116,30 +122,11 @@ watch(
     })
   },
 )
-
-watch(
-  open,
-  (value, previous) => {
-    if (typeof document === 'undefined') return
-    if (value) {
-      if (!previous) {
-        const active = document.activeElement
-        restoreFocus = active instanceof HTMLElement ? active : null
-      }
-      void nextTick(() => panel.value?.focus({ preventScroll: true }))
-    } else {
-      const target = restoreFocus
-      restoreFocus = null
-      if (target?.isConnected) target.focus({ preventScroll: true })
-    }
-  },
-  { immediate: true },
-)
 </script>
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="settings-overlay" role="presentation">
+    <div v-if="open" ref="overlay" class="settings-overlay" role="presentation">
       <div class="settings-mask" aria-hidden="true" @click="close" />
       <div
         ref="panel"
