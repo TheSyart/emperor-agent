@@ -227,6 +227,8 @@ Release 在创建 Core 前由 `bootstrapEmperorHome()` 执行默认根迁移：
 
 更早的仓库内布局由 `migrate-state-root.ts` 兼容处理：只复制、不删除，不覆盖已有文件；每次迁移写入 `migrations/state-root-migration.json` 与 `migration-log.jsonl`。
 
+`settings.json` 的 `sessions.defaultPermission`（`read-only` / `workspace-write` / `danger-full-access`，默认 `workspace-write`）是新会话起始的权限预设；已经有日志的会话保留自己的预设。不认识的值读作默认值。
+
 `settings.json` 中旧内核的 `permissions.rules`、`workspace.fileCheckpoints`、`workspace.gitRewind`、`memory.hybridMemory` 和 `codeIntelligence` 在读取时被忽略，保存时不再写回。
 
 ## 诊断字段速查

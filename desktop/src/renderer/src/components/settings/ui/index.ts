@@ -9,7 +9,7 @@
  *
  * 2. The shell owns the chrome. The 54px header already shows the section
  *    title (never render another heading/title bar), the options area pads
- *    0 24px 24px, caps content at 720px (564px in the default 800px panel)
+ *    0 24px 24px, caps content at 720px (632px in the default 880px panel)
  *    and scrolls vertically. Never set overflow-x: hidden; long values wrap
  *    (overflow-wrap: anywhere) or scroll inside their own box (CodeEditor).
  *
