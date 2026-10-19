@@ -1032,9 +1032,9 @@ function replacementEntry(old: ModelEntryV2, modelId: string): ModelEntryV2 {
     next.contextWindowTokens = facts.contextWindowTokens
   const maxTokens = defaultMaxTokens(facts)
   if (!locked.has('maxTokens') && maxTokens) next.maxTokens = maxTokens
-  if (facts.contextWindowTokens || facts.maxOutputTokens)
+  if (facts.maxInputTokens || facts.maxOutputTokens)
     next.limits = stripUndefinedFacts({
-      contextWindowTokens: facts.contextWindowTokens,
+      maxInputTokens: facts.maxInputTokens,
       maxOutputTokens: facts.maxOutputTokens,
     })
   else delete next.limits

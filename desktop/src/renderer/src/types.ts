@@ -14,9 +14,12 @@ import type {
   MemoryScope as CoreMemoryScope,
   CoreOperationResult,
   ModelEntryDetected,
+  ModelEntryLifecycle,
   ModelEntryLimits,
   ModelEntryMetadata,
   ModelEntrySampling,
+  ModelMetadataField,
+  ModelTestRecord,
   RejectedModelEntryPayload,
 } from '@emperor/core/api'
 import type {
@@ -122,9 +125,12 @@ export interface McpStatusPayload {
 // Hooks: Claude Code `hooks.json` payloads owned by Core `hooks.*`.
 export type {
   ModelEntryDetected,
+  ModelEntryLifecycle,
   ModelEntryLimits,
   ModelEntryMetadata,
   ModelEntrySampling,
+  ModelMetadataField,
+  ModelTestRecord,
   RejectedModelEntryPayload,
 }
 export type HooksConfigPayload = CoreHooksConfigPayload
@@ -459,6 +465,10 @@ export interface ModelEntry {
   /** Where the facts came from; old entries read as manual and locked. */
   metadata?: ModelEntryMetadata
   sampling?: ModelEntrySampling
+  /** Saved or catalog lifecycle: a retired model offers its replacement. */
+  lifecycle?: ModelEntryLifecycle
+  /** The last connection test of this entry (MOD-05). */
+  lastTest?: ModelTestRecord
 }
 
 export interface ModelPricing {
@@ -517,6 +527,10 @@ export interface ModelEntrySaveInput {
   pricing?: ModelPricing | null
   /** New entries only: reuse this saved entry's key (same endpoint). */
   credentialsFrom?: string
+  /** The editor's temperature (高级); null removes it (MOD-05). */
+  sampling?: { temperature?: number | null }
+  /** Fields the user changed: metadata refreshes leave them alone. */
+  lockFields?: ModelMetadataField[]
 }
 
 export interface ModelProfilePreviewInput {

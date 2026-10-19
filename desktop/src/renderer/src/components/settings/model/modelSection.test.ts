@@ -3,6 +3,7 @@ import { createApp, h, nextTick, ref, type App } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { APP_CONTEXT_KEY } from '../../../composables/useAppContext'
 import type { ModelConfigPayload, ModelEntry } from '../../../types'
+import { answerConfirmsForTest } from '../../ui/confirm'
 import ModelSection from '../ModelSection.vue'
 
 const api = vi.hoisted(() => ({
@@ -165,11 +166,55 @@ function input(label: string): HTMLInputElement {
   return control
 }
 
+/** Pick `item` from the 「⋯」 menu named `label` (it opens on body). */
+async function menu(label: string, item: string): Promise<void> {
+  button(label).click()
+  await flush()
+  const choice = [
+    ...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ].find((entry) => entry.textContent?.trim() === item)
+  if (!choice) throw new Error(`menu item ${item} not found`)
+  choice.click()
+  await flush()
+}
+
+/** Any control by the text of the label that names it. */
+function labelled(label: string): HTMLElement {
+  const target = [...container!.querySelectorAll('label')].find(
+    (candidate) => candidate.textContent?.trim() === label,
+  )
+  const id = target?.getAttribute('for')
+  const control = id ? document.getElementById(id) : null
+  if (!control) throw new Error(`control ${label} not found`)
+  return control
+}
+
+/** A control inside an open dialog, by its visible label. */
+function dialogField(dialog: Element, label: string): HTMLInputElement {
+  const target = [...dialog.querySelectorAll('label')].find(
+    (candidate) => candidate.textContent?.trim() === label,
+  )
+  const id = target?.getAttribute('for')
+  const control = id ? document.getElementById(id) : null
+  if (!(control instanceof HTMLInputElement))
+    throw new Error(`dialog field ${label} not found`)
+  return control
+}
+
+function dialogButton(dialog: Element, text: string): HTMLButtonElement {
+  const match = [...dialog.querySelectorAll('button')].find(
+    (candidate) => candidate.textContent?.trim() === text,
+  )
+  if (!match) throw new Error(`dialog button ${text} not found`)
+  return match
+}
+
 beforeEach(() => {
   api.resolveModelProfilePreview.mockResolvedValue(profile)
 })
 
 afterEach(() => {
+  answerConfirmsForTest(null)
   app?.unmount()
   app = null
   container?.remove()
@@ -191,13 +236,13 @@ describe('ModelSection', () => {
     expect(editor.querySelector('[data-testid="model-editor"]')).not.toBeNull()
     expect(document.querySelector('[role="dialog"]')).toBeNull()
     for (const text of [
-      'OpenAI Chat Completions',
-      'Anthropic Messages',
-      '获取模型',
+      '显示名',
+      '上下文',
+      '每次输出',
+      '思考强度',
       '工具调用',
       '图片输入',
       '思考模式',
-      '连通测试',
     ])
       expect(editor.textContent).toContain(text)
   })
@@ -260,19 +305,19 @@ describe('ModelSection', () => {
       'anthropic',
     ])
     const deepseek = cards[0]!
-    expect(deepseek.textContent).toContain('2 个模型')
     expect(deepseek.textContent).toContain('缺少 API Key')
-    expect(deepseek.textContent).toContain('api.deepseek.com · OpenAI')
+    expect(deepseek.textContent).toContain('api.deepseek.com')
     expect(deepseek.querySelector('[data-entry-id="main"]')).not.toBeNull()
     expect(deepseek.querySelector('[data-entry-id="reasoner"]')).not.toBeNull()
-    expect(cards[1]!.textContent).toContain('Key 已配置')
-    expect(cards[1]!.textContent).toContain('1 个模型')
+    expect(
+      cards[1]!.querySelector('[data-connection-status]')?.textContent,
+    ).toContain('未测试')
     // Capability tags and the context window read from the resolved profile.
     const row = deepseek.querySelector('[data-entry-id="main"]')!
     expect(row.textContent).toContain('工具')
     expect(row.textContent).toContain('思考')
     expect(row.textContent).not.toContain('识图')
-    expect(row.textContent).toContain('128K 上下文')
+    expect(row.textContent).toContain('128K / 8K')
   })
 
   it('shows a saved key only by its last 4 characters and asks to re-enter a lost one (SEC-06)', async () => {
@@ -291,7 +336,8 @@ describe('ModelSection', () => {
     )
     const card = container!.querySelector('[data-provider="deepseek"]')!
     expect(card.textContent).toContain('凭据需要重新输入')
-    expect(card.textContent).not.toContain('Key 已配置')
+    expect(card.textContent).toContain('···WXYZ')
+    expect(container!.textContent).not.toContain('***WXYZ')
     expect(card.querySelector('[data-entry-id="lost"]')!.textContent).toContain(
       '凭据需要重新输入',
     )
@@ -299,17 +345,20 @@ describe('ModelSection', () => {
       card.querySelector('[data-entry-id="main"]')!.textContent,
     ).not.toContain('凭据需要重新输入')
 
+    // The key is changed for the connection, not in the model editor.
     button('编辑 Main').click()
     await flush()
-    const key = input('API Key')
-    expect(key.value).toBe('')
-    expect(key.placeholder).toBe('已保存 ···WXYZ，留空保留')
-    expect(container!.textContent).not.toContain('***WXYZ')
-
-    button('编辑 Lost').click()
-    await flush()
-    expect(input('API Key').placeholder).toBe('凭据需要重新输入')
-    expect(container!.textContent).toContain(
+    expect(
+      container!.querySelector(
+        '[data-testid="model-editor"] input[type="password"]',
+      ),
+    ).toBeNull()
+    await menu('DeepSeek 的更多操作', '更换 Key')
+    const dialog = document.querySelector(
+      '[data-testid="connection-key-dialog"]',
+    )!
+    expect(dialog.textContent).toContain('当前 ···WXYZ')
+    expect(dialog.textContent).toContain(
       '保存这个 Key 的本机密钥已不可用，请重新填写',
     )
   })
@@ -359,27 +408,30 @@ describe('ModelSection', () => {
     expect(container!.textContent).toContain('「Fresh」测试通过')
   })
 
-  it('deletes an entry only after the inline confirmation', async () => {
+  it('deletes an entry from its 「⋯」 after a confirmation', async () => {
     const second = entry({
       entryId: 'b',
       displayName: 'Backup',
       effectiveDisplayName: 'Backup',
     })
+    const responder = vi.fn((): boolean => false)
+    answerConfirmsForTest(responder)
     api.deleteModelEntry.mockResolvedValue(payload([entry({})]))
     await mount(payload([entry({}), second]))
 
-    button('删除 Backup').click()
-    await flush()
+    await menu('Backup 的更多操作', '删除')
+    expect(responder).toHaveBeenCalledWith(
+      expect.objectContaining({ tone: 'danger' }),
+    )
     expect(api.deleteModelEntry).not.toHaveBeenCalled()
-    expect(container!.textContent).toContain('确认删除？')
 
-    button('确认删除 Backup').click()
-    await flush()
+    responder.mockReturnValue(true)
+    await menu('Backup 的更多操作', '删除')
     expect(api.deleteModelEntry).toHaveBeenCalledWith('b')
     expect(container!.querySelector('[data-entry-id="b"]')).toBeNull()
   })
 
-  it('saves the execution policy from its rows', async () => {
+  it('saves the execution policy as soon as a row changes (MOD-05 7)', async () => {
     const config = payload([
       entry({}),
       entry({ entryId: 'b', displayName: 'B' }),
@@ -389,17 +441,26 @@ describe('ModelSection', () => {
     const policy = container!.querySelector('[data-testid="model-policy"]')!
     expect(policy.textContent).toContain('默认不会自动切换模型')
     expect(policy.textContent).toContain('每 Agent 轮成本上限')
+    expect(() => button('保存策略')).toThrow()
 
     const cap = input('每 Agent 轮成本上限')
     cap.value = '0.25'
     cap.dispatchEvent(new Event('input'))
     await flush()
-    button('保存策略').click()
+    expect(api.saveModelPolicy).not.toHaveBeenCalled()
+    cap.dispatchEvent(new Event('change'))
     await flush()
-    expect(api.saveModelPolicy).toHaveBeenCalledWith({
+    expect(api.saveModelPolicy).toHaveBeenCalledOnce()
+    expect(api.saveModelPolicy).toHaveBeenLastCalledWith({
       fallback: { enabled: false, entryId: null, triggerOn: ['rate_limit'] },
       cost: { maxUsdPerAgentTurn: 0.25 },
     })
+
+    labelled('备用模型').click()
+    await flush()
+    // Switching the backup on needs a target first: nothing to save yet.
+    expect(api.saveModelPolicy).toHaveBeenCalledOnce()
+    expect(policy.textContent).toContain('选好备用模型后生效')
   })
 })
 
@@ -459,5 +520,276 @@ describe('ModelSection › 添加模型… from the composer (MOD-04)', () => {
     expect(
       document.querySelector('[data-testid="add-model-dialog"]'),
     ).not.toBeNull()
+  })
+})
+
+describe('ModelSection (MOD-05)', () => {
+  const three = () => [
+    entry({ apiKey: '***WXYZ', connectionId: 'conn-ds' }),
+    entry({
+      entryId: 'pro',
+      modelId: 'deepseek-v4-pro',
+      displayName: '',
+      effectiveDisplayName: 'DeepSeek V4 Pro',
+      apiKey: '***WXYZ',
+      connectionId: 'conn-ds',
+    }),
+    entry({
+      entryId: 'flash',
+      modelId: 'deepseek-flash',
+      displayName: '',
+      effectiveDisplayName: 'DeepSeek V4.1 Flash',
+      apiKey: '***WXYZ',
+      connectionId: 'conn-ds',
+    }),
+  ]
+
+  it('shows one card for the three models of a connection, with its status (1)', async () => {
+    const days = 3 * 24 * 60 * 60 * 1000
+    const models = three()
+    models[1]!.lastTest = {
+      ok: false,
+      kind: 'text',
+      failure: 'auth',
+      testedAt: new Date(Date.now() - days).toISOString(),
+    }
+    await mount(payload(models))
+    const cards = container!.querySelectorAll('[data-provider]')
+    expect(cards).toHaveLength(1)
+    const card = cards[0]!
+    expect(card.querySelectorAll('[data-entry-id]')).toHaveLength(3)
+    expect(card.textContent).toContain('···WXYZ')
+    expect(card.textContent).toContain('api.deepseek.com')
+    expect(card.querySelector('[data-connection-status]')?.textContent).toBe(
+      'Key 无效 · 3 天前测试',
+    )
+    // Each row: name, id, capabilities, context / output, thinking.
+    const row = card.querySelector('[data-entry-id="pro"]')!
+    expect(row.textContent).toContain('DeepSeek V4 Pro')
+    expect(row.textContent).toContain('deepseek-v4-pro')
+    expect(row.textContent).toContain('128K / 8K')
+    expect(row.textContent).toContain('工具')
+    for (const action of ['测试', '编辑'])
+      expect(
+        row.querySelector(`[aria-label="${action} DeepSeek V4 Pro"]`),
+      ).not.toBeNull()
+    expect(
+      row.querySelector('[aria-label="DeepSeek V4 Pro 的更多操作"]'),
+    ).not.toBeNull()
+  })
+
+  it('reads 已连接 after a passing test and 未测试 before any', async () => {
+    const models = three()
+    await mount(payload(models))
+    expect(
+      container!.querySelector('[data-connection-status]')?.textContent,
+    ).toBe('未测试')
+    app?.unmount()
+    container?.remove()
+    models[0]!.lastTest = {
+      ok: true,
+      kind: 'text',
+      testedAt: new Date().toISOString(),
+    }
+    await mount(payload(models))
+    expect(
+      container!.querySelector('[data-connection-status]')?.textContent,
+    ).toBe('已连接')
+  })
+
+  it('changes the key of every model on the connection with one call (2)', async () => {
+    const responder = vi.fn((): boolean => true)
+    answerConfirmsForTest(responder)
+    core.mockResolvedValue({ ...payload(three()), updated: 3 })
+    await mount(payload(three()))
+    await menu('DeepSeek 的更多操作', '更换 Key')
+    const dialog = document.querySelector(
+      '[data-testid="connection-key-dialog"]',
+    )!
+    const key = dialogField(dialog, 'API Key')
+    key.value = 'sk-new-key'
+    key.dispatchEvent(new Event('input'))
+    await flush()
+    dialogButton(dialog, '更新').click()
+    await flush()
+    expect(responder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining('将同时更新 3 个模型'),
+      }),
+    )
+    const calls = core.mock.calls.filter(
+      ([operation]) => operation === 'model.updateConnection',
+    )
+    expect(calls).toEqual([
+      ['model.updateConnection', { entryId: 'main', apiKey: 'sk-new-key' }],
+    ])
+    expect(
+      document.querySelector('[data-testid="connection-key-dialog"]'),
+    ).toBeNull()
+  })
+
+  it('shows what a metadata refresh changes and applies it on 应用 (3)', async () => {
+    const diffs = [
+      {
+        entryId: 'main',
+        modelId: 'deepseek-chat',
+        source: 'catalog',
+        changes: [
+          { field: 'contextWindowTokens', from: 128_000, to: 1_048_576 },
+        ],
+      },
+      {
+        entryId: 'pro',
+        modelId: 'deepseek-v4-pro',
+        source: 'catalog',
+        changes: [],
+      },
+    ]
+    core.mockImplementation(
+      async (operation: string, input?: { apply?: boolean }) => {
+        if (operation === 'model.refreshMetadata')
+          return { diffs, applied: Boolean(input?.apply) }
+        if (operation === 'model.getConfig') return payload(three())
+        return {}
+      },
+    )
+    await mount(payload(three()))
+    await menu('DeepSeek 的更多操作', '刷新模型资料')
+    const dialog = document.querySelector(
+      '[data-testid="metadata-refresh-dialog"]',
+    )!
+    expect(core).toHaveBeenCalledWith('model.refreshMetadata', {
+      entryIds: ['main', 'pro', 'flash'],
+    })
+    const change = dialog.querySelector(
+      '[data-change="main:contextWindowTokens"]',
+    )
+    expect(change?.textContent).toContain('上下文')
+    expect(change?.textContent).toContain('128K')
+    expect(change?.textContent).toContain('1.05M')
+    expect(dialog.textContent).toContain('你设置过的值不会改')
+    dialogButton(dialog, '应用').click()
+    await flush()
+    expect(core).toHaveBeenCalledWith('model.refreshMetadata', {
+      entryIds: ['main', 'pro', 'flash'],
+      apply: true,
+    })
+    expect(core).toHaveBeenCalledWith('model.getConfig')
+  })
+
+  it('offers the replacement of a retired model and makes it the current one (4)', async () => {
+    const models = three()
+    models[0]!.lifecycle = {
+      status: 'retired',
+      retiresAt: '2026-07-24',
+      replacement: 'deepseek-flash-next',
+    }
+    const replaced = {
+      ...payload([
+        entry({ entryId: 'next', modelId: 'deepseek-flash-next' }),
+        ...models.slice(1),
+      ]),
+      activeModelId: 'next',
+      replacedEntryId: 'next',
+    }
+    core.mockResolvedValue(replaced)
+    await mount(payload(models))
+    const row = container!.querySelector('[data-entry-id="main"]')!
+    const note = row.querySelector('[data-lifecycle="retired"]')!
+    expect(note.textContent).toContain('已于 2026-07-24 退役')
+    button('替换为 deepseek-flash-next').click()
+    await flush()
+    expect(core).toHaveBeenCalledWith('model.replaceEntry', {
+      entryId: 'main',
+      modelId: 'deepseek-flash-next',
+    })
+    expect((boot.value?.modelConfig as ModelConfigPayload).activeModelId).toBe(
+      'next',
+    )
+    expect(container!.querySelector('[data-entry-id="next"]')).not.toBeNull()
+  })
+
+  it('opens the editor on the model itself; the connection is read-only (5)', async () => {
+    await mount(payload(three()))
+    button('编辑 Main').click()
+    await flush()
+    const editor = container!.querySelector('[data-testid="model-editor"]')!
+    expect(editor.querySelector('input[type="password"]')).toBeNull()
+    expect(editor.querySelector('input[type="url"]')).toBeNull()
+    const connection = editor.querySelector(
+      '[data-testid="model-editor-connection"]',
+    )!
+    expect(connection.textContent).toContain('api.deepseek.com')
+    expect(
+      [...connection.querySelectorAll('button')].map((item) =>
+        item.textContent?.trim(),
+      ),
+    ).toContain('编辑地址')
+    // 温度 and 单价 wait behind 高级.
+    expect(editor.textContent).not.toContain('温度')
+    expect(editor.textContent).not.toContain('普通输入')
+    const advanced = [...editor.querySelectorAll('button')].find(
+      (item) => item.textContent?.trim() === '高级',
+    )!
+    advanced.click()
+    await flush()
+    expect(editor.textContent).toContain('温度')
+    expect(editor.textContent).toContain('普通输入')
+    // Every number says where it came from.
+    expect(
+      editor.querySelector('[data-source="contextWindowTokens"]')?.textContent,
+    ).toBeTruthy()
+  })
+
+  it('offers 200K and 1M for the context and 128K for the output (6)', async () => {
+    api.saveModelEntry.mockResolvedValue(payload(three()))
+    await mount(payload(three()))
+    button('编辑 Main').click()
+    await flush()
+    const editor = container!.querySelector('[data-testid="model-editor"]')!
+    const presets = (name: string) =>
+      [...editor.querySelectorAll(`[aria-label="${name}"] [role="radio"]`)].map(
+        (item) => item.textContent?.trim(),
+      )
+    expect(presets('上下文预设')).toEqual(
+      expect.arrayContaining(['200K', '1M']),
+    )
+    expect(presets('每次输出预设')).toEqual(
+      expect.arrayContaining(['32K', '128K']),
+    )
+    const million = [
+      ...editor.querySelectorAll<HTMLElement>(
+        '[aria-label="上下文预设"] [role="radio"]',
+      ),
+    ].find((item) => item.textContent?.trim() === '1M')!
+    million.click()
+    await flush()
+    const save = [...editor.querySelectorAll('button')].find(
+      (item) => item.textContent?.trim() === '保存',
+    )!
+    save.click()
+    await flush()
+    expect(api.saveModelEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entryId: 'main',
+        contextWindowTokens: 1_000_000,
+        lockFields: ['contextWindowTokens'],
+      }),
+    )
+    // The connection is not part of an editor save.
+    const sent = api.saveModelEntry.mock.calls[0]![0] as Record<string, unknown>
+    expect(sent).not.toHaveProperty('apiKey')
+    expect(sent).not.toHaveProperty('apiBase')
+  })
+
+  it('says the cost cap does not apply to a model without prices (8)', async () => {
+    const config = payload(three())
+    config.policy = {
+      ...config.policy,
+      cost: { maxUsdPerAgentTurn: 0.5 },
+    }
+    await mount(config)
+    const policy = container!.querySelector('[data-testid="model-policy"]')!
+    expect(policy.textContent).toContain('「Main」没有单价，成本上限对它不生效')
   })
 })
