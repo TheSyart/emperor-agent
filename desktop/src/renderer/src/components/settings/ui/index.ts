@@ -69,6 +69,8 @@
  *      first, then the rest. When something is wrong, show one
  *      Notice at the top (tone warn / error / info, with the fix
  *      buttons) instead of status rows; a page that is fine shows none.
+ *    - A row that opens a sub page or a list is a SettingsLinkRow (the whole
+ *      row is the button, a chevron at the end).
  *    - SettingsRow: text left / control right; `layout="stacked"` puts the
  *      control under the text; `dense` for list rows; `#eyebrow` for a small
  *      label above the title (⚠ 风险升高). Rows stack automatically when
@@ -102,6 +104,7 @@ export { default as Checkbox } from '../../ui/Checkbox.vue'
 export { default as SettingsTable } from './SettingsTable.vue'
 export { default as SettingsTableRow } from './SettingsTableRow.vue'
 export { default as SettingsRow } from './SettingsRow.vue'
+export { default as SettingsLinkRow } from './SettingsLinkRow.vue'
 export { default as SettingsCard } from './SettingsCard.vue'
 export { default as Field } from '../../ui/Field.vue'
 export { default as TextField } from '../../ui/TextField.vue'

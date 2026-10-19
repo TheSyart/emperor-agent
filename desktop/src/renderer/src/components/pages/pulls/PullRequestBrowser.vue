@@ -258,7 +258,7 @@ watch(selectedKey, () => {
       :status="status"
       :busy="statusLoading"
       @retry="refresh"
-      @diagnose="openSettings('diagnostics')"
+      @diagnose="openSettings('advanced', 'diagnostics')"
     />
 
     <div

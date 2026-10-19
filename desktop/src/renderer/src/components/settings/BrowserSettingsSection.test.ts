@@ -181,9 +181,10 @@ describe('BrowserSettingsSection', () => {
         (title) => title.textContent?.trim(),
       ),
     ).toEqual(['常规', '自动填充和密码', '下载', '浏览器权限'])
-    // What stays and what went (设置 › 浏览器, 2026-09-30).
+    // What stays and what went (设置 › 浏览器, 2026-09-30). Where a web
+    // link opens moved to 常规 › 会话 › 网页链接 (UI-S07).
+    expect(() => row(root, '网页 URL 和链接打开位置')).toThrow()
     for (const title of [
-      '网页 URL 和链接打开位置',
       '本地 URL 打开位置',
       '显示完整网址',
       '浏览数据',
@@ -231,11 +232,9 @@ describe('BrowserSettingsSection', () => {
       expect(root.textContent).not.toContain(gone)
   })
 
-  it('shows the stored settings: web links in the system browser, local ones here', async () => {
+  it('shows the stored settings: local links here', async () => {
     const root = await mount()
-    expect(control(root, 'browser-link-target').textContent).toContain(
-      '系统默认浏览器',
-    )
+    expect(root.querySelector('#browser-link-target')).toBeNull()
     expect(control(root, 'browser-local-target').textContent).toContain(
       'Emperor',
     )
@@ -249,14 +248,12 @@ describe('BrowserSettingsSection', () => {
 
   it('saves each change at once', async () => {
     const root = await mount()
-    await pick(root, 'browser-link-target', 'Emperor')
     await pick(root, 'browser-local-target', '系统默认浏览器')
     control(root, 'browser-full-url').click()
     await settle()
     control(root, 'browser-history').click()
     await settle()
     expect(calls.filter(([key]) => key === 'browser.setPreferences')).toEqual([
-      ['browser.setPreferences', { linkTarget: 'builtin' }],
       ['browser.setPreferences', { localTarget: 'system' }],
       ['browser.setPreferences', { showFullUrl: false }],
       ['browser.setPreferences', { history: false }],
@@ -461,11 +458,11 @@ describe('BrowserSettingsSection', () => {
     for (const listener of coreListeners)
       listener({
         event: 'browser_preferences_changed',
-        preferences: { ...stored, linkTarget: 'builtin' },
+        preferences: { ...stored, localTarget: 'system' },
       })
     await settle()
-    expect(control(root, 'browser-link-target').textContent).toContain(
-      'Emperor',
+    expect(control(root, 'browser-local-target').textContent).toContain(
+      '系统默认浏览器',
     )
   })
 })

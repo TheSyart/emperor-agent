@@ -117,6 +117,7 @@ function openTab(tab: 'mcp' | 'plugins'): void {
     <SettingsGroup
       v-for="group in groups"
       :key="group.id"
+      plain
       :data-group="group.id"
     >
       <template #title>

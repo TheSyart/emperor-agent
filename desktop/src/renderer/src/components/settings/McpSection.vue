@@ -24,6 +24,7 @@ import {
   shallowRef,
   watch,
 } from 'vue'
+import { useDirtyGuard } from '../ui/useDirtyGuard'
 import Button from '../ui/Button.vue'
 import Modal from '../ui/Modal.vue'
 import { DsApi, DsPlus } from '../icons/ds'
@@ -253,6 +254,8 @@ const draftBase = ref('')
 const draftError = ref('')
 const saving = ref(false)
 const dirty = computed(() => draft.value !== draftBase.value)
+// Another 能力 tab or leaving the page drops the draft: ask first.
+useDirtyGuard('MCP 配置', dirty)
 
 watch(
   config,

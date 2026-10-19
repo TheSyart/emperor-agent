@@ -90,6 +90,11 @@ import { CoreEffectiveConfigService } from './services/effective-config-service'
 import type { BrowserPreferences } from '../config/local-config'
 import { CoreBrowserPreferencesService } from './services/browser-preferences-service'
 import { CoreWebToolsService } from './services/web-tools-service'
+import {
+  CoreSessionDefaultsService,
+  type SessionDefaults,
+} from './services/session-defaults-service'
+import type { SessionPermission } from '../config/local-config'
 import type { WebToolsStatus } from '../harness/host/web-tools'
 import type { WebToolPreferences } from '../config/local-config'
 import { CoreDesktopPetService } from './services/desktop-pet-service'
@@ -309,6 +314,7 @@ export class CoreApi {
   readonly desktopPetService: CoreDesktopPetService
   readonly browserPreferencesService: CoreBrowserPreferencesService
   readonly webToolsService: CoreWebToolsService
+  readonly sessionDefaultsService: CoreSessionDefaultsService
   readonly diagnosticsService: CoreDiagnosticsService
   readonly environmentService: CoreEnvironmentService
   readonly hooksService: CoreHooksService
@@ -434,6 +440,12 @@ export class CoreApi {
           host.emitHost({ event: 'browser_preferences_changed', preferences }),
       },
     )
+    this.sessionDefaultsService = new CoreSessionDefaultsService(this.root, {
+      stateRoot: this.paths.stateRoot,
+      host,
+      assertMutation: (area, action, view) =>
+        this.assertMutation(area, action, view),
+    })
     this.webToolsService = new CoreWebToolsService(this.root, {
       stateRoot: this.paths.stateRoot,
       tools: host.webTools,
@@ -2071,6 +2083,13 @@ export class CoreApi {
     delete: (sessionId: string): Promise<Dict> =>
       this.sessionApplicationService.delete(sessionId),
     listDeleted: () => this.sessionApplicationService.listDeleted(),
+    /** 设置 › 常规 › 会话: the permission preset a new session starts in. */
+    defaults: (): SessionDefaults => this.sessionDefaultsService.get(),
+    setDefaults: (
+      change: { permission: SessionPermission },
+      view: ViewScope,
+    ): Promise<SessionDefaults> =>
+      this.sessionDefaultsService.update(change, view),
     restoreDeleted: (sessionId: string) =>
       this.sessionApplicationService.restoreDeleted(sessionId),
     purgeDeleted: (sessionId: string) =>

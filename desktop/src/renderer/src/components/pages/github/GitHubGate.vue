@@ -51,7 +51,7 @@ function openPlugin(): void {
     :busy="busy"
     :subject="subject"
     @retry="emit('retry')"
-    @diagnose="openSettings('diagnostics')"
+    @diagnose="openSettings('advanced', 'diagnostics')"
   />
   <p v-else-if="!status" class="hint" role="status">正在检查 GitHub CLI…</p>
   <slot v-else />

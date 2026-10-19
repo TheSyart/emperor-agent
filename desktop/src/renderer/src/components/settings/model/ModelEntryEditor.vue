@@ -16,6 +16,7 @@
  */
 import Spinner from '../../ui/Spinner.vue'
 import { computed, onMounted, ref, watch } from 'vue'
+import { useDirtyGuard } from '../../ui/useDirtyGuard'
 import { Eye, EyeOff } from 'lucide-vue-next'
 import {
   discoverProviderModels,
@@ -115,6 +116,12 @@ function initialDraft(): ModelEntryDraft {
 }
 
 const draft = ref<ModelEntryDraft>(initialDraft())
+/** The draft as opened, to tell an edit from a look (unsaved-edit guard). */
+const opened = JSON.stringify(draft.value)
+useDirtyGuard(
+  () => draft.value.displayName || draft.value.modelId || '模型设置',
+  () => !saving.value && JSON.stringify(draft.value) !== opened,
+)
 const choosingProvider = ref(false)
 const showApiKey = ref(false)
 const saving = ref(false)

@@ -311,7 +311,8 @@ export class HarnessHost {
   /** What `@plugin` gestures learn about a plugin (set by CoreApi's plugin service). */
   private pluginReferences: PluginReferenceResolver | null = null
   private computerUseEnabledChanged: ((enabled: boolean) => void) | undefined
-  readonly defaultPreset: string
+  /** The preset a session without a log starts in (设置 › 常规 › 会话). */
+  private defaultPresetId: string
   private readonly timers: HostTimers
   /** Background turns per root session, for their interaction policy (KRN-01). */
   private readonly backgroundTurns = new Map<string, BackgroundTurnState[]>()
@@ -334,7 +335,10 @@ export class HarnessHost {
   private constructor(kept: KeptServices, options: HarnessHostOptions) {
     this.kept = kept
     this.eventSink = options.eventSink ?? null
-    this.defaultPreset = options.defaultPreset ?? DEFAULT_PRESET
+    this.defaultPresetId =
+      options.defaultPreset ??
+      kept.localConfig?.sessions?.defaultPermission ??
+      DEFAULT_PRESET
     this.timers = options.timers ?? realTimers
     this.attachments = new AttachmentStore(kept.paths.stateRoot)
     this.llm =
@@ -1913,6 +1917,16 @@ export class HarnessHost {
   }
 
   // ── control ─────────────────────────────────────────────────────────
+
+  get defaultPreset(): string {
+    return this.defaultPresetId
+  }
+
+  /** Sessions opened from now on (and drafts) start in `preset`. */
+  setDefaultPreset(preset: string): void {
+    this.presets.spec(preset)
+    this.defaultPresetId = preset
+  }
 
   controlPayload(sessionId: string | null): Record<string, unknown> {
     if (sessionId === null || !this.kept.sessionStore.get(sessionId)) {

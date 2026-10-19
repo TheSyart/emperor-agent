@@ -716,6 +716,33 @@ describe('diagnostics settings model', () => {
     ).toContain('legacy-state-migration')
   })
 
+  it('opens 运行时 with the app facts that left 常规 (UI-S07)', () => {
+    const [runtime] = diagnosticSections(
+      { runtime: { events: 3 } },
+      { app: { service: '在线', model: 'deepseek-flash', projects: 2 } },
+    )
+    expect(
+      runtime?.rows.slice(0, 3).map((row) => [row.label, row.value]),
+    ).toEqual([
+      ['服务状态', '在线'],
+      ['当前模型', 'deepseek-flash'],
+      ['已绑定项目', '2 个'],
+    ])
+    expect(runtime?.rows[0]?.tone).toBe('ok')
+    const [offline] = diagnosticSections(
+      {},
+      { app: { service: '服务不可用', model: '', projects: 0 } },
+    )
+    expect(offline?.rows[0]?.tone).toBe('error')
+    expect(offline?.rows[1]?.value).toBe('未配置')
+    // Without app facts the card is what Core returned.
+    expect(
+      diagnosticSections({ runtime: { events: 3 } })[0]?.rows.map(
+        (row) => row.id,
+      ),
+    ).not.toContain('app-service')
+  })
+
   it('puts the runtime root first in 存储路径, one row when it holds the resources', () => {
     const paths = (payload: Record<string, unknown>) =>
       diagnosticSections(payload as never).find(

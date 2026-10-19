@@ -42,6 +42,7 @@ describe('local config', () => {
         askWhereToSave: false,
       },
       webTools: { webFetch: true, webSearch: true },
+      sessions: { defaultPermission: 'workspace-write' },
     })
 
     const loaded = await loadLocalConfig(dir)
@@ -218,6 +219,7 @@ describe('local config', () => {
       'browser',
       'desktopPet',
       'prompt',
+      'sessions',
       'webTools',
       'webui',
     ])
@@ -247,6 +249,7 @@ describe('local config', () => {
       'browser',
       'desktopPet',
       'prompt',
+      'sessions',
       'webTools',
       'webui',
     ])
@@ -259,7 +262,14 @@ describe('local config', () => {
     await saveLocalConfig(dir, loaded)
     expect(
       Object.keys(JSON.parse(await readFile(path, 'utf8'))).sort(),
-    ).toEqual(['browser', 'desktopPet', 'prompt', 'webTools', 'webui'])
+    ).toEqual([
+      'browser',
+      'desktopPet',
+      'prompt',
+      'sessions',
+      'webTools',
+      'webui',
+    ])
   })
 
   it('keeps the network tool switches, defaulting both on', async () => {
@@ -290,6 +300,32 @@ describe('local config', () => {
       webFetch: true,
       webSearch: true,
     })
+  })
+
+  it('keeps the new-session permission, defaulting to workspace-write', async () => {
+    const path = localConfigPath(dir)
+    expect((await loadLocalConfig(dir)).sessions).toEqual({
+      defaultPermission: 'workspace-write',
+    })
+    await writeFile(
+      path,
+      JSON.stringify({ sessions: { defaultPermission: 'root' } }),
+      'utf8',
+    )
+    expect((await loadLocalConfig(dir)).sessions).toEqual({
+      defaultPermission: 'workspace-write',
+    })
+    const loaded = await loadLocalConfig(dir)
+    await saveLocalConfig(dir, {
+      ...loaded,
+      sessions: { defaultPermission: 'read-only' },
+    })
+    expect(JSON.parse(await readFile(path, 'utf8')).sessions).toEqual({
+      defaultPermission: 'read-only',
+    })
+    expect((await loadLocalConfig(dir)).sessions.defaultPermission).toBe(
+      'read-only',
+    )
   })
 
   it('preserves corrupt config files and reports backups in diagnostics', async () => {

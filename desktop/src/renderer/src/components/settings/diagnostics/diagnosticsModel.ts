@@ -190,6 +190,7 @@ export const DIAGNOSTIC_SECTION_TITLES: Readonly<
  */
 export function diagnosticSections(
   payload: DiagnosticsPayload | null | undefined,
+  options: { app?: DiagnosticAppFacts } = {},
 ): DiagnosticSection[] {
   const diagnostics = payload || {}
   const groups = diagnosticRows(diagnostics)
@@ -199,7 +200,7 @@ export function diagnosticSections(
     {
       id: 'runtime',
       title: DIAGNOSTIC_SECTION_TITLES.runtime,
-      rows: rows('runtime'),
+      rows: [...appRows(options.app), ...rows('runtime')],
     },
     {
       id: 'desktop',
@@ -239,6 +240,49 @@ export function diagnosticSections(
       hidden: section.rows.length - visible.length,
     }
   })
+}
+
+/**
+ * What the renderer knows about the app (UI-S07: these rows used to open
+ * 设置 › 常规): the local service state (ctx.runtimeText), the current
+ * model and the number of bound projects.
+ */
+export interface DiagnosticAppFacts {
+  service: string
+  model: string
+  projects: number
+}
+
+function appRows(app: DiagnosticAppFacts | undefined): DiagnosticRow[] {
+  if (!app) return []
+  const tone: DiagnosticTone = /不可用|异常|失败/.test(app.service)
+    ? 'error'
+    : /在线|运行|办差/.test(app.service)
+      ? 'ok'
+      : 'warn'
+  return [
+    {
+      id: 'app-service',
+      label: '服务状态',
+      value: app.service || '未知',
+      detail: tone === 'ok' ? '' : '本地 Agent 服务没有就绪',
+      tone,
+    },
+    {
+      id: 'app-model',
+      label: '当前模型',
+      value: app.model || '未配置',
+      detail: app.model ? '' : '在 设置 › 模型 添加一个模型',
+      tone: app.model ? 'ok' : 'warn',
+    },
+    {
+      id: 'app-projects',
+      label: '已绑定项目',
+      value: `${app.projects} 个`,
+      detail: '',
+      tone: 'ok',
+    },
+  ]
 }
 
 function notReturned(row: DiagnosticRow): boolean {

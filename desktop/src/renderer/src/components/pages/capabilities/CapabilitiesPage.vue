@@ -11,10 +11,16 @@
  *
  * The Skills tab keeps its open Skill in `?skill=`; switching tabs drops
  * that key and keeps any other query key.
+ *
+ * Switching tabs unmounts the one shown, so an editor with unsaved edits
+ * (MCP 配置) asks first (ui/useDirtyGuard, checked in a route-update guard,
+ * which a tab click and a link both pass). Leaving the page keeps it alive,
+ * edits included.
  */
 import { defineAsyncComponent, ref, watch, type Component } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import Tabs from '../../ui/Tabs.vue'
+import { provideDirtyGuard } from '../../ui/useDirtyGuard'
 import PageShell from '../PageShell.vue'
 
 type CapabilitiesTab = 'plugins' | 'skills' | 'mcp' | 'tools'
@@ -40,6 +46,14 @@ const BODIES: Record<CapabilitiesTab, Component> = {
 const route = useRoute()
 const router = useRouter()
 const active = ref<CapabilitiesTab>('plugins')
+const guard = provideDirtyGuard()
+
+onBeforeRouteUpdate((to, from) =>
+  to.name === from.name &&
+  normalizeTab(to.params.tab) === normalizeTab(from.params.tab)
+    ? true
+    : guard.confirmDiscard(),
+)
 
 function normalizeTab(value: unknown): CapabilitiesTab {
   const raw = Array.isArray(value) ? value[0] : value

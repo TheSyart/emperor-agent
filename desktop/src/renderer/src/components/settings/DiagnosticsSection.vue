@@ -73,7 +73,18 @@ const openCards = reactive<Partial<Record<CardId, boolean>>>({})
 const current = computed(
   () => diagnostics.value || ctx.boot.value?.diagnostics || null,
 )
-const sections = computed(() => diagnosticSections(current.value))
+const sections = computed(() =>
+  diagnosticSections(current.value, {
+    app: {
+      service: ctx.runtimeText(),
+      model:
+        ctx.boot.value?.modelConfig?.current?.modelId ||
+        ctx.boot.value?.model ||
+        '',
+      projects: ctx.boot.value?.projects?.length || 0,
+    },
+  }),
+)
 const environmentItems = computed(() =>
   environmentDiagnosticItems(environment.value),
 )

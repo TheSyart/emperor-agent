@@ -29,7 +29,7 @@ import PluginRow from './plugins/PluginRow.vue'
 import { usePluginInstall, type PluginSummary } from './plugins/pluginInstall'
 import { filterPlugins, groupPlugins, pluginKey } from './plugins/pluginsModel'
 import { usePluginSelection } from './plugins/usePluginSelection'
-import { refreshAction, useSettingsHeader } from './settingsHeader'
+import { useSettingsHeader } from './settingsHeader'
 import { EmptyState, SearchField, SettingsSection } from './ui'
 
 const ctx = useAppContext()
@@ -89,9 +89,10 @@ onBeforeUnmount(() => {
   if (pending !== null) clearTimeout(pending)
 })
 
+// No refresh action: the list follows plugins_changed and reloads when the
+// page is shown again.
 useSettingsHeader({
   actions: () => [
-    refreshAction(() => ctx.refreshAll(), { title: '刷新插件列表' }),
     {
       id: 'install-plugin',
       label: '安装',

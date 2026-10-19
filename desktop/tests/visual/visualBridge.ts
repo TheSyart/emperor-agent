@@ -4710,6 +4710,12 @@ export async function installVisualCoreBridge(
               return sessions
             case 'sessions.listDeleted':
               return []
+            case 'sessions.defaults':
+              return { permission: 'workspace-write' }
+            case 'sessions.setDefaults':
+              return {
+                permission: (args[0] as { permission: string }).permission,
+              }
             case 'sessions.activate':
               return { active: args[0], complete: true }
             case 'sessions.history': {

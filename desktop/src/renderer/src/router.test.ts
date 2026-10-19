@@ -139,31 +139,47 @@ describe('renderer routes', () => {
   )
 
   it.each([
-    ['/settings', 'general'],
-    ['/settings/model', 'model'],
-    ['/settings/appearance', 'general'],
-    ['/settings/archived', 'general'],
-    ['/settings/hooks', 'hooks'],
-    ['/model', 'model'],
+    ['/settings', 'general', undefined],
+    ['/settings/model', 'model', undefined],
+    ['/settings/appearance', 'general', undefined],
+    ['/settings/archived', 'general', 'archived'],
+    // Hooks and 诊断 are sub pages of 高级; 桌宠 is a switch in 常规 (UI-S07).
+    ['/settings/hooks', 'advanced', 'hooks'],
+    ['/settings/diagnostics', 'advanced', 'diagnostics'],
+    ['/model', 'model', undefined],
     // 配置 (USER.local.md) is edited in 记忆 › 用户档案 now.
-    ['/configs', 'memory'],
-    ['/settings/configs', 'memory'],
-    ['/pet', 'pet'],
-    ['/memory', 'memory'],
-    ['/tokens', 'tokens'],
+    ['/configs', 'memory', undefined],
+    ['/settings/configs', 'memory', undefined],
+    ['/pet', 'general', undefined],
+    ['/memory', 'memory', undefined],
+    ['/tokens', 'tokens', undefined],
   ])(
     'redirects legacy page %s into the settings modal (%s)',
-    async (path, section) => {
+    async (path, section, page) => {
       const route = await resolve(path)
       expect(route.path).toBe('/chat')
       expect(route.query.settings).toBe(section)
+      expect(route.query.page).toBe(page)
     },
   )
 
   it('keeps the settings modal for sections that stayed there', async () => {
-    const route = await resolve('/chat/s1?settings=hooks')
+    const route = await resolve('/chat/s1?settings=model&foo=1')
     expect(route.path).toBe('/chat/s1')
-    expect(route.query.settings).toBe('hooks')
+    expect(route.query).toEqual({ settings: 'model', foo: '1' })
+  })
+
+  it.each([
+    ['/chat/s1?settings=hooks', { settings: 'advanced', page: 'hooks' }],
+    [
+      '/chat/s1?settings=diagnostics&foo=1',
+      { settings: 'advanced', page: 'diagnostics', foo: '1' },
+    ],
+    ['/chat/s1?settings=pet&page=detail', { settings: 'general' }],
+  ])('opens the folded section %s where it lives now', async (path, query) => {
+    const route = await resolve(path)
+    expect(route.path).toBe('/chat/s1')
+    expect(route.query).toEqual(query)
   })
 
   it('redirects the retired team route and unknown paths to chat', async () => {

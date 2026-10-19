@@ -11,16 +11,22 @@ import type {
 } from '../../../types'
 import type { DefinitionItem } from '../ui'
 
-export type MemoryTab =
-  'long_term' | 'profile' | 'episodes' | 'watchlist' | 'versions'
+/** The two editors of 设置 › 记忆 (UI-S07). */
+export type MemoryTab = 'long_term' | 'profile'
 
 export const MEMORY_TABS: Array<{ value: MemoryTab; label: string }> = [
-  { value: 'long_term', label: '长期' },
+  { value: 'long_term', label: '长期记忆' },
   { value: 'profile', label: '用户档案' },
-  { value: 'episodes', label: '情景' },
-  { value: 'watchlist', label: 'Watchlist' },
-  { value: 'versions', label: '版本' },
 ]
+
+/** Sub pages: the version list, and the two files most people never edit. */
+export const MEMORY_PAGES = {
+  history: '历史',
+  episodes: '情景记忆',
+  watchlist: 'Watchlist',
+} as const
+
+export type MemoryPage = keyof typeof MEMORY_PAGES
 
 export const USER_PROFILE_PATH = 'memory/profile/USER.local.md'
 export const WATCHLIST_PATH = 'memory/watchlist.md'

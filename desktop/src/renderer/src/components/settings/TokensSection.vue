@@ -1,10 +1,11 @@
 <script setup lang="ts">
 /**
- * Settings › 用量 — native section after the dsh token-usage dashboard:
- * a range Segmented (全部 / 30 天 / 7 天) with the report time, four Metric
- * tiles (总 / 输入 / 输出 Token, 缓存命中率), a view switch and the view:
+ * Settings › 用量 (UI-S07). The main page: a range Segmented (全部 / 30 天 /
+ * 7 天) with the report time, four Metric tiles (总 / 输入 / 输出 Token,
+ * 缓存命中率), the trend (width:100% SVG lines by model, top 5 + 其他, or
+ * by token type) and a row into 「详细」 (sub page `details`), which keeps
+ * the range and switches between:
  * - 活跃度: fluid 53-week heatmap + session / message / peak-hour facts;
- * - 趋势: width:100% SVG lines by model (top 5 + 其他) or by token type;
  * - 模型: ranking rows (sortable) instead of the wide model table;
  * - 缓存: cache-efficiency meter, cache trend, cache rankings by model and
  *   usage type, and recent cache calls as rows.
@@ -14,8 +15,20 @@ import { computed, onMounted, ref } from 'vue'
 import { useAppContext } from '../../composables/useAppContext'
 import { formatNumber, formatTokenCompact } from '../../utils/format'
 import { formatPercent } from '../../utils/tokens'
-import { EmptyState, Metric, Segmented, Select, SettingsSection } from './ui'
-import { refreshAction, useSettingsHeader } from './settingsHeader'
+import {
+  EmptyState,
+  Metric,
+  Segmented,
+  Select,
+  SettingsGroup,
+  SettingsLinkRow,
+  SettingsSection,
+} from './ui'
+import {
+  refreshAction,
+  useSettingsHeader,
+  useSettingsPages,
+} from './settingsHeader'
 import TokenHeatmap from './tokens/TokenHeatmap.vue'
 import TokenRankingList from './tokens/TokenRankingList.vue'
 import TokenTrendChart from './tokens/TokenTrendChart.vue'
@@ -47,8 +60,11 @@ import {
 import type { TokensRange } from '../../types'
 
 const ctx = useAppContext()
+const { page, open: openPage } = useSettingsPages({ details: '详细' })
 const range = ref<TokensRange>('all')
-const view = ref<UsageView>('activity')
+/** The view of 「详细」 (the trend lives on the main page). */
+const view = ref<Exclude<UsageView, 'trend'>>('activity')
+const DETAIL_VIEWS = VIEW_OPTIONS.filter((option) => option.value !== 'trend')
 const trendMode = ref<TrendMode>('model')
 const sort = ref<RankSort>('total')
 
@@ -143,152 +159,166 @@ function partWidth(value: number, total: number) {
         />
       </div>
 
-      <Segmented
-        v-model="view"
-        class="views"
-        :options="VIEW_OPTIONS"
-        size="md"
-        block
-        aria-label="用量视图"
-      />
+      <template v-if="page === 'details'">
+        <Segmented
+          v-model="view"
+          class="views"
+          :options="DETAIL_VIEWS"
+          size="md"
+          block
+          aria-label="用量视图"
+        />
 
-      <section v-if="view === 'activity'" class="panel" data-view="activity">
-        <div class="heading">
-          <h3>Token 活跃度</h3>
-          <span class="caption">近 53 周 · 每格一天</span>
-        </div>
-        <TokenHeatmap :view="heatmap" label="近一年每日 Token 活跃热力图" />
-        <dl class="facts">
-          <div
-            v-for="item in facts"
-            :key="item.label"
-            class="fact"
-            :title="item.title"
-          >
-            <dt>{{ item.label }}</dt>
-            <dd>{{ item.value }}</dd>
+        <section v-if="view === 'activity'" class="panel" data-view="activity">
+          <div class="heading">
+            <h3>Token 活跃度</h3>
+            <span class="caption">近 53 周 · 每格一天</span>
           </div>
-        </dl>
-      </section>
+          <TokenHeatmap :view="heatmap" label="近一年每日 Token 活跃热力图" />
+          <dl class="facts">
+            <div
+              v-for="item in facts"
+              :key="item.label"
+              class="fact"
+              :title="item.title"
+            >
+              <dt>{{ item.label }}</dt>
+              <dd>{{ item.value }}</dd>
+            </div>
+          </dl>
+        </section>
 
-      <section v-else-if="view === 'trend'" class="panel" data-view="trend">
-        <div class="heading">
-          <h3>用量趋势</h3>
-          <Segmented
-            v-model="trendMode"
-            :options="TREND_MODE_OPTIONS"
-            aria-label="趋势分组"
+        <section v-else-if="view === 'models'" class="panel" data-view="models">
+          <div class="heading">
+            <h3>模型排名</h3>
+            <Select
+              v-model="sort"
+              :options="SORT_OPTIONS"
+              size="sm"
+              aria-label="排序方式"
+            />
+          </div>
+          <TokenRankingList
+            :items="ranking"
+            :label="`${rangeLabel}模型用量排名`"
           />
-        </div>
-        <TokenTrendChart
-          :data="trend"
-          :label="`${rangeLabel}每日 Token 用量趋势`"
-        />
-      </section>
+        </section>
 
-      <section v-else-if="view === 'models'" class="panel" data-view="models">
-        <div class="heading">
-          <h3>模型排名</h3>
-          <Select
-            v-model="sort"
-            :options="SORT_OPTIONS"
-            size="sm"
-            aria-label="排序方式"
-          />
-        </div>
-        <TokenRankingList
-          :items="ranking"
-          :label="`${rangeLabel}模型用量排名`"
-        />
-      </section>
-
-      <section v-else class="panel" data-view="cache">
-        <div class="heading">
-          <h3>输入缓存效率</h3>
-          <strong class="rate">{{
-            formatPercent(composition.cacheHit, composition.inputTotal)
-          }}</strong>
-        </div>
-        <div
-          class="meter"
-          role="img"
-          :aria-label="
-            composition.parts
-              .map((part) => `${part.label} ${formatTokenCompact(part.value)}`)
-              .join('，')
-          "
-        >
-          <span
-            v-for="part in composition.parts"
-            :key="part.key"
-            :style="{
-              width: partWidth(part.value, composition.total),
-              background: part.color,
-            }"
-            :title="`${part.label}: ${formatNumber(part.value)} tokens`"
-          />
-        </div>
-        <div class="meter-legend">
-          <span
-            v-for="part in composition.parts"
-            :key="part.key"
-            class="legend-item"
+        <section v-else class="panel" data-view="cache">
+          <div class="heading">
+            <h3>输入缓存效率</h3>
+            <strong class="rate">{{
+              formatPercent(composition.cacheHit, composition.inputTotal)
+            }}</strong>
+          </div>
+          <div
+            class="meter"
+            role="img"
+            :aria-label="
+              composition.parts
+                .map(
+                  (part) => `${part.label} ${formatTokenCompact(part.value)}`,
+                )
+                .join('，')
+            "
           >
-            <i :style="{ background: part.color }" />
-            {{ part.label }}
-            <strong :title="`${formatNumber(part.value)} tokens`">{{
-              formatTokenCompact(part.value)
-            }}</strong>
-          </span>
-        </div>
-
-        <div class="heading sub">
-          <h3>缓存趋势</h3>
-          <span class="caption">每日 KV Cache 读取 / 写入</span>
-        </div>
-        <TokenTrendChart
-          :data="cacheLines"
-          :label="`${rangeLabel}每日缓存趋势`"
-        />
-
-        <div class="heading sub">
-          <h3>按模型</h3>
-          <span class="caption">{{ cacheModels.length }} 个模型</span>
-        </div>
-        <TokenRankingList
-          :items="cacheModels"
-          label="模型缓存排名"
-          empty-text="暂无模型产生缓存记录。"
-        />
-
-        <div class="heading sub">
-          <h3>按用途</h3>
-          <span class="caption">全部时间 · {{ cacheUsage.length }} 类</span>
-        </div>
-        <TokenRankingList
-          :items="cacheUsage"
-          label="用途缓存排名"
-          empty-text="暂无用途维度缓存记录。"
-        />
-
-        <div class="heading sub">
-          <h3>最近缓存调用</h3>
-          <span class="caption">tokens.jsonl 中最新的命中 / 写入记录</span>
-        </div>
-        <p v-if="!recent.length" class="muted">还没有最近缓存调用。</p>
-        <ul v-else class="recent" aria-label="最近缓存调用">
-          <li v-for="row in recent" :key="row.key" class="recent-row">
-            <span class="recent-time">{{ row.time }}</span>
-            <span class="recent-main">
-              <strong :title="row.model">{{ row.model }}</strong>
-              <small>{{ row.usage }} · {{ row.detail }}</small>
+            <span
+              v-for="part in composition.parts"
+              :key="part.key"
+              :style="{
+                width: partWidth(part.value, composition.total),
+                background: part.color,
+              }"
+              :title="`${part.label}: ${formatNumber(part.value)} tokens`"
+            />
+          </div>
+          <div class="meter-legend">
+            <span
+              v-for="part in composition.parts"
+              :key="part.key"
+              class="legend-item"
+            >
+              <i :style="{ background: part.color }" />
+              {{ part.label }}
+              <strong :title="`${formatNumber(part.value)} tokens`">{{
+                formatTokenCompact(part.value)
+              }}</strong>
             </span>
-            <strong class="recent-total" :title="row.totalTitle">{{
-              row.total
-            }}</strong>
-          </li>
-        </ul>
-      </section>
+          </div>
+
+          <div class="heading sub">
+            <h3>缓存趋势</h3>
+            <span class="caption">每日 KV Cache 读取 / 写入</span>
+          </div>
+          <TokenTrendChart
+            :data="cacheLines"
+            :label="`${rangeLabel}每日缓存趋势`"
+          />
+
+          <div class="heading sub">
+            <h3>按模型</h3>
+            <span class="caption">{{ cacheModels.length }} 个模型</span>
+          </div>
+          <TokenRankingList
+            :items="cacheModels"
+            label="模型缓存排名"
+            empty-text="暂无模型产生缓存记录。"
+          />
+
+          <div class="heading sub">
+            <h3>按用途</h3>
+            <span class="caption">全部时间 · {{ cacheUsage.length }} 类</span>
+          </div>
+          <TokenRankingList
+            :items="cacheUsage"
+            label="用途缓存排名"
+            empty-text="暂无用途维度缓存记录。"
+          />
+
+          <div class="heading sub">
+            <h3>最近缓存调用</h3>
+            <span class="caption">tokens.jsonl 中最新的命中 / 写入记录</span>
+          </div>
+          <p v-if="!recent.length" class="muted">还没有最近缓存调用。</p>
+          <ul v-else class="recent" aria-label="最近缓存调用">
+            <li v-for="row in recent" :key="row.key" class="recent-row">
+              <span class="recent-time">{{ row.time }}</span>
+              <span class="recent-main">
+                <strong :title="row.model">{{ row.model }}</strong>
+                <small>{{ row.usage }} · {{ row.detail }}</small>
+              </span>
+              <strong class="recent-total" :title="row.totalTitle">{{
+                row.total
+              }}</strong>
+            </li>
+          </ul>
+        </section>
+      </template>
+
+      <template v-else>
+        <section class="panel" data-view="trend">
+          <div class="heading">
+            <h3>用量趋势</h3>
+            <Segmented
+              v-model="trendMode"
+              :options="TREND_MODE_OPTIONS"
+              aria-label="趋势分组"
+            />
+          </div>
+          <TokenTrendChart
+            :data="trend"
+            :label="`${rangeLabel}每日 Token 用量趋势`"
+          />
+        </section>
+        <SettingsGroup>
+          <SettingsLinkRow
+            title="详细"
+            description="活跃度热力图、模型排名与缓存效率"
+            data-testid="usage-details"
+            @click="openPage('details')"
+          />
+        </SettingsGroup>
+      </template>
     </div>
   </SettingsSection>
 </template>
