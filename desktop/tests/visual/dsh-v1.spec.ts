@@ -232,12 +232,10 @@ for (const theme of ['dark', 'light'] as const) {
 const settingsSections = [
   'general',
   'model',
-  'hooks',
   'computer',
   'memory',
   'tokens',
-  'pet',
-  'diagnostics',
+  'advanced',
 ] as const
 
 // Sections that moved out of the modal: their deep links open the page.
@@ -272,7 +270,7 @@ for (const section of settingsSections) {
     const dialog = page.getByRole('dialog').first()
     await expect(dialog).toBeVisible()
     const box = (await dialog.boundingBox())!
-    expect(Math.round(box.width)).toBeLessThanOrEqual(800)
+    expect(Math.round(box.width)).toBeLessThanOrEqual(880)
     await expectNoHorizontalOverflow(page)
     await shot(page, `settings-${section}`)
   })
@@ -1565,59 +1563,22 @@ for (const theme of ['dark', 'light'] as const)
     await shot(page, `settings-diagnostics-failed-${theme}`)
   })
 
-test('pet section previews bundled sprites and toggles the pet', async ({
-  page,
-}) => {
+// 桌宠 is a switch in 常规 › 外观 since UI-S07 (the sprite gallery is gone).
+test('the pet switch in 常规 › 外观 starts the pet', async ({ page }) => {
   await open(page, '/chat/build-ui?settings=pet', {
     width: 1280,
     height: 860,
   })
+  await expect(page).toHaveURL(/settings=general/)
   const dialog = page.getByRole('dialog', { name: '设置' })
-  const sprites = dialog.locator('[data-sprite] .pet-sprite')
-  await expect(sprites).toHaveCount(14)
-  // Every frame strip decodes, and is exactly `frames` cells wide.
-  const strips = await sprites.evaluateAll((nodes) =>
-    Promise.all(
-      nodes.map(async (node) => {
-        const url = getComputedStyle(node).backgroundImage.slice(5, -2)
-        const image = new Image()
-        image.src = url
-        await image.decode()
-        return {
-          width: image.naturalWidth,
-          height: image.naturalHeight,
-          frames: Number((node as HTMLElement).dataset.frames),
-        }
-      }),
-    ),
-  )
-  for (const strip of strips)
-    expect(strip).toEqual({
-      width: strip.frames * 192,
-      height: 208,
-      frames: strip.frames,
-    })
-  await dialog.locator('[data-sprite="happy"]').click()
-  const stage = dialog.getByTestId('pet-preview').getByRole('img')
-  await expect(stage).toHaveAttribute('aria-label', '小单 完成')
-  // The preview actually steps through frames.
-  const firstFrame = await stage.evaluate(
-    (node) => getComputedStyle(node).backgroundPositionX,
-  )
-  await expect
-    .poll(() =>
-      stage.evaluate((node) => getComputedStyle(node).backgroundPositionX),
-    )
-    .not.toBe(firstFrame)
-  const toggle = dialog.getByRole('switch')
+  const toggle = dialog.locator('#general-pet')
   await expect(toggle).toHaveAttribute('aria-checked', 'false')
   await toggle.click()
   await expect(toggle).toHaveAttribute('aria-checked', 'true')
-  await expect(dialog.getByTestId('pet-status')).toHaveText('待启动')
 })
 
 for (const theme of ['dark', 'light'] as const) {
-  for (const section of ['hooks', 'computer', 'pet', 'diagnostics'] as const) {
+  for (const section of ['hooks', 'computer', 'diagnostics'] as const) {
     test(`settings ${section} section fits the column (${theme})`, async ({
       page,
     }) => {

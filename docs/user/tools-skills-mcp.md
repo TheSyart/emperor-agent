@@ -68,7 +68,7 @@ Skills 文件夹中直接放置的 `<name>.md` 文件，只要 frontmatter 同�
 | 3      | Plugin | 已启用并激活的 Plugin 内的 Skills                            | 只读     |
 | 4      | 内置   | 应用内置的 `runtimeRoot/skills`（目前是 `skill-creator`）    | 只读     |
 
-同名时高优先级覆盖低优先级。每个 Build 项目只看到自己的项目 Skill；Chat 会话和其他项目看不到它。当前生效来源可在“设置 → 诊断”的“配置”分组中核对 `skills.<name>` 行。
+同名时高优先级覆盖低优先级。每个 Build 项目只看到自己的项目 Skill；Chat 会话和其他项目看不到它。当前生效来源可在“设置 → 高级 → 诊断”的“配置”分组中核对 `skills.<name>` 行。
 
 ### 名称与校验规则
 
@@ -230,4 +230,4 @@ Agent 被要求只通过 `mcp_config` 添加 server，不使用 mcporter，也�
 - Agent 的文件、搜索和 Shell 工具读不到 `mcp_config.json`；它只能通过 `mcp_config` 工具查看名称、地址与字段名，看不到字段值。
 - 不要把 API Key 直接写进可提交的项目文件，优先使用 `${ENV_NAME}`。MCP 标签读取配置时保留 `${ENV_NAME}`，把 args、env、headers、URL 中其余字面字符串显示为 `[REDACTED]`；保存原始配置时，未改动的掩码只从同一 server 同一字段回填，没有旧值的掩码会被拒绝。
 
-排查加载问题时，先看能力页“MCP”标签中该 server 卡片的状态和最近错误，再检查配置 JSON、执行环境和“设置 → 诊断”。
+排查加载问题时，先看能力页“MCP”标签中该 server 卡片的状态和最近错误，再检查配置 JSON、执行环境和“设置 → 高级 → 诊断”。
