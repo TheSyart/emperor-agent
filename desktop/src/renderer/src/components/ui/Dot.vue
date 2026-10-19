@@ -30,7 +30,6 @@ withDefaults(
 <style scoped>
 .ds-dot {
   --dot-color: var(--ok);
-  position: relative;
   display: inline-block;
   flex: none;
   width: var(--dot-md);
@@ -60,29 +59,21 @@ withDefaults(
   --dot-color: var(--text-4);
 }
 
+/* The pulse is a fading ring of box-shadow, so the dot needs no position
+   of its own and callers may place it absolutely. */
 .ds-dot[data-state='running'] {
   --dot-color: var(--accent);
-}
-
-.ds-dot[data-state='running']::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: rgb(var(--dot-color));
   animation: ds-dot-pulse 1.6s var(--ease-standard) infinite;
 }
 
 @keyframes ds-dot-pulse {
   0% {
-    opacity: 0.55;
-    transform: scale(1);
+    box-shadow: 0 0 0 0 rgb(var(--dot-color) / 0.55);
   }
 
   70%,
   100% {
-    opacity: 0;
-    transform: scale(2.4);
+    box-shadow: 0 0 0 var(--dot-sm) rgb(var(--dot-color) / 0);
   }
 }
 </style>

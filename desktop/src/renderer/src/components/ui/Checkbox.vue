@@ -53,20 +53,22 @@ function onChange(event: Event) {
     :data-state="state"
     :data-disabled="disabled || undefined"
   >
-    <input
-      :id="control.id.value"
-      class="native"
-      type="checkbox"
-      :checked="model"
-      :indeterminate="indeterminate"
-      :disabled="disabled"
-      :aria-label="ariaLabel"
-      :aria-describedby="control.describedBy.value"
-      @change="onChange"
-    />
-    <span class="box" aria-hidden="true">
-      <Icon v-if="state === 'checked'" name="check" size="xs" />
-      <Icon v-else-if="state === 'mixed'" name="minus" size="xs" />
+    <span class="control">
+      <input
+        :id="control.id.value"
+        class="native"
+        type="checkbox"
+        :checked="model"
+        :indeterminate="indeterminate"
+        :disabled="disabled"
+        :aria-label="ariaLabel"
+        :aria-describedby="control.describedBy.value"
+        @change="onChange"
+      />
+      <span class="box" aria-hidden="true">
+        <Icon v-if="state === 'checked'" name="check" size="xs" />
+        <Icon v-else-if="state === 'mixed'" name="minus" size="xs" />
+      </span>
     </span>
     <span v-if="$slots.default || label" class="label"
       ><slot>{{ label }}</slot></span
@@ -91,13 +93,23 @@ function onChange(event: Event) {
   cursor: default;
 }
 
+/* The native box lies invisibly over the drawn one, so a click (or an
+   automation tool) lands on the real checkbox. */
+.control {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+}
+
 .native {
   position: absolute;
-  width: 1px;
-  height: 1px;
+  inset: 0;
+  z-index: var(--z-raised);
+  width: 100%;
+  height: 100%;
   margin: 0;
   opacity: 0;
-  pointer-events: none;
+  cursor: inherit;
 }
 
 .box {

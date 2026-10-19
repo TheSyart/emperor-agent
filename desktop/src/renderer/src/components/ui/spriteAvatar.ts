@@ -4,8 +4,11 @@
  * call to the device-pixel size the avatar is drawn at, then painted into a
  * canvas of exactly that size: the page never keeps the whole sheet on
  * screen or rescales it on every paint. Crops are shared per portrait and
- * size; a sheet is let go shortly after its last pending crop.
+ * size; a sheet is let go shortly after its last pending crop. Moving the
+ * window to a screen with another pixel ratio redraws at the new size.
  */
+import { ref } from 'vue'
+
 export type SpriteRect = readonly [number, number, number, number]
 
 export interface SpriteLayout {
@@ -32,13 +35,34 @@ export function portraitLayout(rect: SpriteRect, pixels: number): SpriteLayout {
   }
 }
 
-/** Device pixels for a CSS size on this screen (capped at 4×). */
+function currentRatio(): number {
+  return typeof window !== 'undefined' && window.devicePixelRatio > 0
+    ? window.devicePixelRatio
+    : 1
+}
+
+/** Bumped when the window moves to a screen with another pixel ratio. */
+const ratioChanges = ref(0)
+
+function watchRatio(): void {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function')
+    return
+  const query = window.matchMedia(`(resolution: ${currentRatio()}dppx)`)
+  query.addEventListener?.(
+    'change',
+    () => {
+      ratioChanges.value += 1
+      watchRatio()
+    },
+    { once: true },
+  )
+}
+watchRatio()
+
+/** Device pixels for a CSS size on this screen (capped at 4×); reactive. */
 export function spritePixels(size: number): number {
-  const ratio =
-    typeof window !== 'undefined' && window.devicePixelRatio > 0
-      ? window.devicePixelRatio
-      : 1
-  return Math.round(size * Math.min(ratio, 4))
+  void ratioChanges.value
+  return Math.round(size * Math.min(currentRatio(), 4))
 }
 
 /** Canvas cropping needs createImageBitmap (absent in jsdom and old engines). */

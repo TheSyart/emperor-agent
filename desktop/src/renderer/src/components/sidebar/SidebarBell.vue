@@ -37,7 +37,7 @@ const label = computed(() =>
     @click="open = !open"
   >
     <component :is="SIDEBAR_ICONS.bell" :size="rail ? 18 : 16" />
-    <Dot v-if="unreadCount" class="unread" state="error" size="sm" />
+    <Dot v-if="unreadCount" class="dot" state="error" size="sm" />
   </IconButton>
   <NotificationsPopover v-if="open" v-model:open="open" :anchor="anchor" />
 </template>
@@ -76,7 +76,7 @@ const label = computed(() =>
   box-shadow: 0 0 0 2px rgb(var(--focus-ring) / 0.5);
 }
 
-.unread {
+.dot {
   position: absolute;
   top: 22%;
   right: 22%;
