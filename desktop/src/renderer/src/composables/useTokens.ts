@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { core } from '../api/http'
 import type { TokensPayload } from '../types'
+import { displayTokensPayload } from '../utils/tokens'
 
 export function useTokens(showToast: (message: string) => void) {
   const data = ref<TokensPayload | null>(null)
@@ -11,7 +12,7 @@ export function useTokens(showToast: (message: string) => void) {
     try {
       loading.value = true
       error.value = ''
-      data.value = await core('memory.tokens')
+      data.value = displayTokensPayload(await core('memory.tokens'))
       if (!silent) showToast('Token 统计已刷新')
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)

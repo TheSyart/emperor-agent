@@ -36,7 +36,8 @@ import {
 } from '../../llm/message'
 import { routeFromEntry, type RouteSpec } from '../../llm/route'
 import { imageDimensions } from '../../attachments/image-dimensions'
-import type { ContentBlock } from '../../llm/types'
+import type { ContentBlock, TokenUsage } from '../../llm/types'
+import { entryPrices, ledgerUsage, usageCostUsd } from '../../model/usage-cost'
 import {
   historyPage,
   type HistoryPageOptions,
@@ -1572,21 +1573,47 @@ export class HarnessHost {
     }
   }
 
+  /**
+   * One token-ledger row per model call that reported usage: conversation
+   * steps and compaction summaries, with disjoint counts, the entry's
+   * provider and the cost from its (or the catalog's) price (CORE-18).
+   */
   private trackUsage(agent: Agent, event: SessionEvent): void {
-    if (event.type !== 'assistant/message' || event.data.usage === undefined)
-      return
-    const usage = event.data.usage
+    let call:
+      | { usage: TokenUsage; routeId: string; model: string; type: string }
+      | undefined
+    if (event.type === 'assistant/message' && event.data.usage !== undefined)
+      call = {
+        usage: event.data.usage,
+        routeId: event.data.message.source.provider,
+        model: event.data.message.source.model,
+        type: agent.owner === undefined ? 'main_agent' : 'subagent',
+      }
+    else if (
+      event.type === 'compaction/summary' &&
+      event.data.usage !== undefined
+    )
+      call = {
+        usage: event.data.usage,
+        routeId: event.data.provider,
+        model: event.data.model,
+        type: 'compaction',
+      }
+    if (call === undefined) return
     try {
+      const entry = findEntry(this.kept.modelConfig, call.routeId)
+      const counts = ledgerUsage(call.usage)
       this.kept.tokenTracker.record(
-        event.data.message.source.model,
+        call.model,
+        { ...counts },
         {
-          prompt_tokens: usage.inputTokens + (usage.cacheReadTokens ?? 0),
-          completion_tokens: usage.outputTokens,
-          prompt_cache_hit_tokens: usage.cacheReadTokens ?? 0,
-        },
-        {
-          usageType: agent.owner === undefined ? 'main_agent' : 'subagent',
-          modelEntryId: event.data.message.source.provider,
+          provider: entry?.provider ?? null,
+          usageType: call.type,
+          modelEntryId: call.routeId,
+          costUsd:
+            entry === undefined
+              ? null
+              : usageCostUsd(counts, entryPrices(entry)),
         },
       )
     } catch {

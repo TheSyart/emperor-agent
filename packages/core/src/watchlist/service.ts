@@ -2,6 +2,7 @@ import { nowTs } from '../util/time'
 import type { TokenTracker } from '../memory/token-tracker'
 import type { LlmClient } from '../llm/client'
 import { createUserMessage } from '../llm/message'
+import { ledgerUsage } from '../model/usage-cost'
 import {
   decisionPrompt,
   parseWatchlistDecision,
@@ -99,11 +100,7 @@ export class WatchlistService {
     if (usage)
       this.tokenTracker?.record(
         base.model,
-        {
-          prompt_tokens: usage.inputTokens + (usage.cacheReadTokens ?? 0),
-          completion_tokens: usage.outputTokens,
-          prompt_cache_hit_tokens: usage.cacheReadTokens ?? 0,
-        },
+        { ...ledgerUsage(usage) },
         {
           provider: base.provider,
           usageType: 'watchlist_check',
