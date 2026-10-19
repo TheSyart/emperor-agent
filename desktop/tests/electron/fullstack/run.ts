@@ -393,6 +393,16 @@ async function launch(
     .setViewportSize({ width: 1440, height: 900 })
     .catch(() => undefined)
   await page.locator('.app-frame').waitFor({ timeout: 60_000 })
+  // UI-S03: a turn's steps fold into one line. This suite reads the tool
+  // rows themselves, so it lists them (处理过程 = 始终展开).
+  await page.evaluate(() =>
+    localStorage.setItem(
+      'emperor.ui.prefs.v1',
+      JSON.stringify({ processDisplay: 'expanded' }),
+    ),
+  )
+  await page.reload()
+  await page.locator('.app-frame').waitFor({ timeout: 60_000 })
   return { app, page }
 }
 

@@ -1859,6 +1859,15 @@ async function realModel(page: Page): Promise<void> {
     async () => {
       const site = await startFixtureSite()
       try {
+        // UI-S03: the finished turn folds its steps; list the tool rows.
+        await page.evaluate(() =>
+          localStorage.setItem(
+            'emperor.ui.prefs.v1',
+            JSON.stringify({ processDisplay: 'expanded' }),
+          ),
+        )
+        await page.reload()
+        await page.locator('.app-frame').waitFor({ timeout: 60_000 })
         await core(page, 'computerUse.setEnabled', true)
         const box = page.getByLabel('消息输入框').first()
         await box.click()

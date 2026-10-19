@@ -48,6 +48,16 @@ async function open(
   await expect(page.locator('.app-frame')).toBeVisible()
 }
 
+/** UI-S03: list every turn's steps instead of the folded process line. */
+async function listProcessSteps(page: Page) {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'emperor.ui.prefs.v1',
+      JSON.stringify({ processDisplay: 'expanded' }),
+    )
+  })
+}
+
 async function shot(page: Page, name: string) {
   await page.waitForTimeout(250)
   await page.screenshot({
@@ -436,9 +446,11 @@ test('sending a message shows the user bubble at once and streams the reply', as
   expect(Date.now() - sentAt).toBeLessThan(2_000)
   await expect(root).toHaveAttribute('data-phase', 'active')
   await expect(page.locator('.turn-status')).toBeVisible()
+  // UI-S03: the running steps are one live line naming the current step.
   await expect(
-    page.locator('.tool-row[data-call-id="call_reply_read"]'),
-  ).toBeVisible({ timeout: 15_000 })
+    page.locator('[data-process-group][data-live] [data-process-header]'),
+  ).toContainText('读取', { timeout: 15_000 })
+  await expect(page.locator('.turn-status')).toBeHidden()
   await shot(page, 'app-send-streaming')
   await expect(page.getByText('界面改动都集中在')).toBeVisible({
     timeout: 20_000,
@@ -506,6 +518,7 @@ for (const theme of ['dark', 'light'] as const) {
   test(`tool row Inspect opens the trajectory inspector (${theme})`, async ({
     page,
   }) => {
+    await listProcessSteps(page)
     await open(page, '/chat/build-ui', { theme })
     const row = page.locator('.tool-row[data-call-id="call_grep"]')
     await row.scrollIntoViewIfNeeded()
@@ -618,6 +631,7 @@ test('plan takeover approves the plan and returns the composer', async ({
 test('subagent row opens the child session and the breadcrumb returns', async ({
   page,
 }) => {
+  await listProcessSteps(page)
   await open(page, '/chat/build-ui')
   const line = page.locator('[data-subagent-line]').first()
   await line.scrollIntoViewIfNeeded()
@@ -641,6 +655,7 @@ test('nested depth-3 subagent: breadcrumb chain and read-only composer', async (
   page,
 }) => {
   await installNestedSubagentFixture(page)
+  await listProcessSteps(page)
   await open(page, `/chat/${NESTED_IDS.kid2}`)
   const crumbs = page.locator('.conversation-header .crumbs .crumb')
   await expect(crumbs).toHaveText(['构建 Visual UI', '调研子任务', '深入检索'])
