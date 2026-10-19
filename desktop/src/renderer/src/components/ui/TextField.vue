@@ -1,27 +1,29 @@
 <script setup lang="ts">
 /**
- * TextField — single-line settings input (dsh fields: 34px, r8, l2 border
- * on layer-3, 13/20; focus = accent border; invalid = error border).
- * Picks up id / aria wiring from a surrounding <Field>.
+ * TextField — a single-line input (DS-04): 32px (sm 28), r-sm, a hairline
+ * on the field fill, 13/20 text; focus draws --focus-ring, invalid an
+ * error line. Picks up id / aria wiring from a surrounding <Field>.
  *
  * Props:
  * - modelValue (v-model): string.
- * - type: 'text' (default) | 'password' | 'url' | 'number' | 'email'.
+ * - type: 'text' (default) | 'password' | 'url' | 'number' | 'email' |
+ *   'datetime-local'.
  * - placeholder?, disabled?, readonly?, invalid?, id?.
  * - monospace?: code font (paths, ids, URLs).
- * - size: 'md' (34px, default) | 'sm' (28px, dense rows).
- * Slots: `leading` / `trailing` (16px glyphs or tiny buttons inside the box).
- * Other attributes (name, autocomplete, inputmode, aria-label, listeners such
- * as @keydown.enter / @blur) land on the <input>; class / style on the box.
+ * - size: 'md' (32px, default) | 'sm' (28px, dense rows).
+ * Slots: `leading` / `trailing` (16px glyphs or tiny buttons in the box).
+ * Other attributes (name, autocomplete, inputmode, aria-label, listeners
+ * such as @keydown.enter / @blur) land on the <input>; class / style on the
+ * box. Exposes focus(), select() and the input element.
  */
-import { computed, useAttrs } from 'vue'
+import { computed, ref, useAttrs } from 'vue'
 import { useFieldControl } from './fieldContext'
 
 defineOptions({ inheritAttrs: false })
 
 const props = withDefaults(
   defineProps<{
-    type?: 'text' | 'password' | 'url' | 'number' | 'email'
+    type?: 'text' | 'password' | 'url' | 'number' | 'email' | 'datetime-local'
     placeholder?: string
     disabled?: boolean
     readonly?: boolean
@@ -44,7 +46,8 @@ const props = withDefaults(
 
 const model = defineModel<string>({ default: '' })
 const attrs = useAttrs()
-const control = useFieldControl(props, 'settings-text')
+const control = useFieldControl(props, 'ds-text')
+const input = ref<HTMLInputElement | null>(null)
 
 const boxAttrs = computed(() => ({ class: attrs.class, style: attrs.style }))
 const inputAttrs = computed(() => {
@@ -52,6 +55,12 @@ const inputAttrs = computed(() => {
   delete rest.class
   delete rest.style
   return rest
+})
+
+defineExpose({
+  focus: () => input.value?.focus(),
+  select: () => input.value?.select(),
+  input,
 })
 </script>
 
@@ -67,6 +76,7 @@ const inputAttrs = computed(() => {
     <input
       v-bind="inputAttrs"
       :id="control.id.value"
+      ref="input"
       v-model="model"
       class="input"
       :class="{ mono: monospace }"
@@ -88,25 +98,35 @@ const inputAttrs = computed(() => {
   gap: var(--space-1-5);
   width: 100%;
   min-width: 0;
-  height: calc(var(--space-8) + 2px);
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-row);
-  background: rgb(var(--bg-layer-3));
-  transition: border-color var(--duration-ds-fast) ease;
+  height: var(--field-h);
+  padding: 0 var(--space-2-5);
+  border-radius: var(--r-sm);
+  background: rgb(var(--field-fill));
+  box-shadow: inset 0 0 0 0.5px var(--stroke-3);
+  transition: box-shadow var(--motion-fast) var(--ease-standard);
 }
 
 .ds-text-field[data-size='sm'] {
-  height: var(--space-7);
-  padding: 0 var(--space-2-5);
+  height: var(--field-h-sm);
+  padding: 0 var(--space-2);
 }
 
 .ds-text-field:focus-within {
-  border-color: rgb(var(--accent-fill));
+  box-shadow:
+    inset 0 0 0 0.5px var(--stroke-3),
+    0 0 0 2px rgb(var(--surface-base)),
+    0 0 0 4px rgb(var(--focus-ring) / 0.55);
 }
 
 .ds-text-field[data-invalid] {
-  border-color: rgb(var(--state-error));
+  box-shadow: inset 0 0 0 1px rgb(var(--error));
+}
+
+.ds-text-field[data-invalid]:focus-within {
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--error)),
+    0 0 0 2px rgb(var(--surface-base)),
+    0 0 0 4px rgb(var(--focus-ring) / 0.55);
 }
 
 .ds-text-field[data-disabled] {
@@ -124,10 +144,8 @@ const inputAttrs = computed(() => {
   outline: none;
   background: transparent;
   box-shadow: none;
-  font: inherit;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
+  font: var(--weight-regular) var(--type-footnote) var(--font-sans);
 }
 
 .input.mono {
@@ -136,11 +154,11 @@ const inputAttrs = computed(() => {
 }
 
 .input::placeholder {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-4));
 }
 
 .input:disabled {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: default;
 }
 
@@ -149,6 +167,6 @@ const inputAttrs = computed(() => {
   flex: none;
   align-items: center;
   gap: var(--space-1);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

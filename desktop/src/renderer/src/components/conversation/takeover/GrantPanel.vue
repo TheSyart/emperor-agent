@@ -14,7 +14,7 @@ import { foldOnEscape } from './takeoverModel'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { ControlInteraction } from '../../../types'
 import { useAppContext } from '../../../composables/useAppContext'
-import Segmented from '../../settings/ui/Segmented.vue'
+import Segmented from '../../ui/Segmented.vue'
 import Button from '../../ui/Button.vue'
 import { GRANT_DENY, grantAnswer, grantPresentation } from './grantModel'
 

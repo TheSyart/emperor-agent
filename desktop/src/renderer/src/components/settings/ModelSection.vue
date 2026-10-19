@@ -270,8 +270,7 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
     <EmptyState
       v-if="!payload"
       title="正在读取模型配置…"
-      variant="plain"
-      compact
+      variant="inline"
     />
     <template v-else>
       <p v-if="notice" class="notice" role="status">{{ notice }}</p>
@@ -480,6 +479,7 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
           v-if="!entries.length && !adding"
           title="还没有模型"
           description="添加一个模型后即可开始对话。"
+          framed
         >
           <Button size="sm" variant="secondary" @click="openAdd">
             添加第一个模型

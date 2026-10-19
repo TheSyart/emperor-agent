@@ -19,17 +19,19 @@ import {
   Menu,
   MenuItem,
   Modal,
-  Pill,
+  Badge,
+  Dot,
   ReadBlock,
   SearchBlock,
   Shimmer,
-  StateDot,
   Tabs,
+  Tag,
   TerminalBlock,
   Toast,
   Tooltip,
   WebBlock,
 } from './index'
+import UiGalleryComponents from './UiGalleryComponents.vue'
 
 const icons = DS_ICON_NAMES.map((name) => ({
   name,
@@ -173,7 +175,7 @@ const jsonSample = {
         summary="npm test --workspace @emperor/core"
         running
       >
-        <template #icon><StateDot state="ongoing" /></template>
+        <template #icon><Dot state="running" /></template>
       </DisclosureRow>
       <DisclosureRow
         v-model:open="rowOpen"
@@ -182,7 +184,9 @@ const jsonSample = {
       >
         <template #icon><DsIcons.DsBrowse :size="16" /></template>
         <template #trailing>
-          <Pill interactive><DsIcons.DsInspect :size="12" /> Inspect</Pill>
+          <Tag label="Inspect">
+            <template #leading><DsIcons.DsInspect :size="12" /></template>
+          </Tag>
         </template>
         <InOutCard
           :input="{ path: 'theme/dark.css', limit: 40 }"
@@ -195,11 +199,12 @@ const jsonSample = {
         tone="error"
         :expandable="false"
       >
-        <template #icon><StateDot state="error" /></template>
+        <template #icon><Dot state="error" /></template>
       </DisclosureRow>
       <div class="dots">
-        <StateDot state="ok" /> ok <StateDot state="warn" /> warn
-        <StateDot state="error" /> error <StateDot state="ongoing" /> ongoing
+        <Dot state="ok" /> ok <Dot state="warn" /> warn
+        <Dot state="error" /> error <Dot state="running" /> running
+        <Dot state="idle" /> idle
         <Shimmer text="Working…" />
         <ElapsedClock :started-at="clockStart" :ended-at="clockStart + 65000" />
         <Shimmer text="Thinking" tone="neutral" />
@@ -223,10 +228,10 @@ const jsonSample = {
         </Chip>
         <Chip tone="accent">Gold chip</Chip>
         <Chip disabled>Disabled</Chip>
-        <Pill>Pill</Pill>
-        <Pill active>Active</Pill>
-        <Pill tone="approval">待审批</Pill>
-        <Pill tone="danger">退出码 1</Pill>
+        <Badge>Badge</Badge>
+        <Tag label="Selected" selected />
+        <Badge tone="attention">待审批</Badge>
+        <Badge tone="error">退出码 1</Badge>
         <Tooltip label="Tooltip text" side="bottom">
           <IconButton label="Settings"><DsIcons.DsSettings /></IconButton>
         </Tooltip>
@@ -289,6 +294,8 @@ const jsonSample = {
         />
       </div>
     </section>
+
+    <UiGalleryComponents />
 
     <section class="panel blocks">
       <h2>Blocks</h2>

@@ -275,6 +275,7 @@ useSettingsHeader({
       v-if="!memory"
       title="暂无记忆数据"
       description="本地 Agent 服务就绪后会显示长期记忆、情景记忆与版本快照。"
+      framed
     />
     <SettingsGroup v-else fill :data-tab="tab">
       <MemoryEditorPane
@@ -322,6 +323,7 @@ useSettingsHeader({
           v-if="!episodes.length"
           title="还没有情景记忆"
           description="每天的对话摘要会按日期写入情景记忆。"
+          framed
         />
         <MemoryEditorPane
           v-else-if="episode"
@@ -344,8 +346,7 @@ useSettingsHeader({
         <EmptyState
           v-else
           :title="episodeLoading ? '加载情景记忆中…' : '选择一个日期'"
-          variant="plain"
-          compact
+          variant="inline"
         >
           <Select
             v-if="!episodeLoading"

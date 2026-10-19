@@ -115,8 +115,7 @@ const url = computed({
           v-if="state.busy"
           title="正在检查 Plugin…"
           description="读取清单并计算内容摘要。"
-          variant="plain"
-          compact
+          variant="inline"
         />
         <p v-else-if="state.error" class="error" role="alert">
           {{ state.error }}

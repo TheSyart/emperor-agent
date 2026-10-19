@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * TextArea — multi-line prose input with the TextField look (l2 border on
- * layer-3, r8, 13/20, accent focus border, error border when invalid).
- * Grows with its content between `minRows` and `maxRows`, then scrolls.
- * Picks up id / aria wiring from a surrounding <Field>.
+ * TextArea — multi-line prose input with the TextField look (DS-04): r-sm,
+ * a hairline on the field fill, 13/20, --focus-ring on focus, an error line
+ * when invalid. Grows with its content between `minRows` and `maxRows`,
+ * then scrolls. Picks up id / aria wiring from a surrounding <Field>.
  *
  * Props:
  * - modelValue (v-model): string.
@@ -36,7 +36,7 @@ const props = withDefaults(
 )
 
 const model = defineModel<string>({ default: '' })
-const control = useFieldControl(props, 'settings-textarea')
+const control = useFieldControl(props, 'ds-textarea')
 
 const rows = computed(() => {
   const lines = model.value ? model.value.split('\n').length : 1
@@ -66,36 +66,43 @@ const rows = computed(() => {
   min-width: 0;
   /* rows sizes the box; line-height + padding keep it exact */
   height: auto;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-row);
+  padding: var(--space-1-5) var(--space-2-5);
+  border: none;
+  border-radius: var(--r-sm);
   outline: none;
-  background: rgb(var(--bg-layer-3));
-  box-shadow: none;
-  font: inherit;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--label-primary));
+  background: rgb(var(--field-fill));
+  box-shadow: inset 0 0 0 0.5px var(--stroke-3);
+  color: rgb(var(--text-1));
+  font: var(--weight-regular) var(--type-footnote) var(--font-sans);
   resize: vertical;
-  transition: border-color var(--duration-ds-fast) ease;
+  transition: box-shadow var(--motion-fast) var(--ease-standard);
 }
 
 .ds-text-area:focus {
-  border-color: rgb(var(--accent-fill));
-  box-shadow: none;
+  box-shadow:
+    inset 0 0 0 0.5px var(--stroke-3),
+    0 0 0 2px rgb(var(--surface-base)),
+    0 0 0 4px rgb(var(--focus-ring) / 0.55);
 }
 
 .ds-text-area[data-invalid] {
-  border-color: rgb(var(--state-error));
+  box-shadow: inset 0 0 0 1px rgb(var(--error));
+}
+
+.ds-text-area[data-invalid]:focus {
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--error)),
+    0 0 0 2px rgb(var(--surface-base)),
+    0 0 0 4px rgb(var(--focus-ring) / 0.55);
 }
 
 .ds-text-area::placeholder {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-4));
 }
 
 .ds-text-area:disabled {
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: default;
 }
 </style>

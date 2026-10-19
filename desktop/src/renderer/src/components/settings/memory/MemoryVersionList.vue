@@ -72,6 +72,7 @@ function unchanged(detail: MemoryVersionDetail) {
       v-if="!versions.length"
       title="还没有版本快照"
       description="保存或恢复记忆文件时会自动留下快照。"
+      framed
     />
     <SettingsCard
       v-for="version in versions"

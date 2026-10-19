@@ -49,8 +49,7 @@ useSettingsHeader({
     <EmptyState
       v-if="loading && !payload"
       title="加载 Hooks 中…"
-      variant="plain"
-      compact
+      variant="inline"
     />
     <HooksConfigTab v-else-if="activeTab === 'config'" />
     <HooksTestTab v-else-if="activeTab === 'test'" />

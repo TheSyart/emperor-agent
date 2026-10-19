@@ -99,7 +99,7 @@ onBeforeUnmount(() => unsubscribe())
     <SettingsNotice v-if="error" tone="error" :title="error" />
     <SettingsNotice v-else-if="notice" tone="info" :title="notice" />
     <SettingsGroup title="你的下载">
-      <EmptyState v-if="!mine.length" compact title="暂无" />
+      <EmptyState v-if="!mine.length" title="暂无" variant="inline" framed />
       <SettingsRow
         v-for="item in mine"
         :key="item.id"
@@ -139,7 +139,7 @@ onBeforeUnmount(() => unsubscribe())
       title="Emperor 的下载"
       description="Emperor 在对话里下载的文件。内置浏览器的先放进收件箱，按「下载保留时间」自动删除；Chrome 和 Edge 的留在浏览器自己的下载文件夹。"
     >
-      <EmptyState v-if="!emperor.length" compact title="暂无" />
+      <EmptyState v-if="!emperor.length" title="暂无" variant="inline" framed />
       <SettingsRow
         v-for="item in emperor"
         :key="item.id"

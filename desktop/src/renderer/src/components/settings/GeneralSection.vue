@@ -171,15 +171,15 @@ function archivedMeta(session: SessionInfo) {
         v-if="archivedLoading && !archivedSessions.length"
         class="archive-empty"
         title="加载归档对话中…"
-        variant="plain"
-        compact
+        variant="inline"
       />
       <EmptyState
         v-else-if="!archivedSessions.length"
         class="archive-empty"
         title="暂无归档对话。"
         description="在侧边栏会话菜单中选择「归档」即可收进这里。"
-        compact
+        variant="inline"
+        framed
       />
       <template v-else>
         <SettingsRow

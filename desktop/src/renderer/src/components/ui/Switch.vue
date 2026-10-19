@@ -1,9 +1,10 @@
 <script setup lang="ts">
 /**
- * Switch — dsh on/off toggle (38×22 pill; off = translucent neutral track
- * so it reads on white and dark panels alike, on = Emperor gold; 16px white
- * thumb slides 16px). role="switch" with
- * aria-checked; Space / Enter toggle (native button).
+ * Switch — on/off toggle (DS-04: 38×22 pill; off = translucent neutral
+ * track so it reads on white and dark panels alike, on = Emperor gold, one
+ * of the few places gold is used; a 16px white thumb slides 16px).
+ * role="switch" with aria-checked; Space / Enter toggle (native button);
+ * focus draws --focus-ring.
  *
  * Props:
  * - modelValue (v-model): boolean.
@@ -51,18 +52,16 @@ function toggle() {
   width: calc(var(--space-8) + var(--space-1-5));
   height: calc(var(--space-5) + 2px);
   padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius-pill);
-  background: var(--interactive-bg-hover-strong);
+  border: none;
+  border-radius: var(--r-full);
+  outline: none;
+  background: var(--surface-hover-strong);
   cursor: pointer;
-  transition:
-    background-color var(--duration-ds) ease,
-    border-color var(--duration-ds) ease;
+  transition: background-color var(--motion-base) var(--ease-standard);
 }
 
 .ds-switch[data-on] {
-  border-color: transparent;
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
 }
 
 .ds-switch:disabled {
@@ -71,20 +70,21 @@ function toggle() {
 }
 
 .ds-switch:focus-visible {
-  outline: 2px solid rgb(var(--focus-ring));
-  outline-offset: 2px;
+  box-shadow:
+    0 0 0 2px rgb(var(--surface-base)),
+    0 0 0 4px rgb(var(--focus-ring) / 0.55);
 }
 
 .thumb {
   position: absolute;
-  top: 2px;
-  left: 2px;
+  top: calc(var(--space-1) - 1px);
+  left: calc(var(--space-1) - 1px);
   width: var(--space-4);
   height: var(--space-4);
-  border-radius: var(--radius-pill);
-  background: rgb(var(--nb-00));
-  box-shadow: var(--shadow-lv1);
-  transition: transform var(--duration-ds) var(--ease-in-out);
+  border-radius: var(--r-full);
+  background: rgb(var(--switch-thumb));
+  box-shadow: 0 1px 2px rgb(var(--shadow-color) / 0.2);
+  transition: transform var(--motion-base) var(--ease-standard);
 }
 
 .ds-switch[data-on] .thumb {

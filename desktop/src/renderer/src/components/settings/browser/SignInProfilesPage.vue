@@ -134,9 +134,10 @@ onMounted(() => {
     <SettingsGroup title="持久 profile">
       <EmptyState
         v-if="!persistent.length"
-        compact
         title="还没有持久 profile"
         description="点右上角的「新建」创建一个，或从 Chrome 导入登录。"
+        variant="inline"
+        framed
       />
       <SettingsRow
         v-for="profile in persistent"

@@ -20,7 +20,7 @@
  * Exposes: focus().
  */
 import { computed, ref } from 'vue'
-import { useFieldControl } from './fieldContext'
+import { useFieldControl } from '../../ui/fieldContext'
 
 const props = withDefaults(
   defineProps<{

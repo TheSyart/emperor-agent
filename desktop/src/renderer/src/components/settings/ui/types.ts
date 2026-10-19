@@ -1,20 +1,6 @@
 /** Shared option / item shapes for the settings primitives. */
 
-/** One Select option (value + label, optional description line). */
-export interface SelectOption<V extends string | number = string> {
-  value: V
-  label: string
-  description?: string
-  disabled?: boolean
-}
-
-/** One Segmented option. `icon` is a 14px glyph component. */
-export interface SegmentedOption<V extends string | number = string> {
-  value: V
-  label: string
-  icon?: import('vue').Component
-  disabled?: boolean
-}
+export type { SegmentedOption, SelectOption } from '../../ui/inputTypes'
 
 /** One DefinitionList entry. */
 export interface DefinitionItem {

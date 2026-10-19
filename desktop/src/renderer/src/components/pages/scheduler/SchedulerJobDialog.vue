@@ -195,7 +195,7 @@ function submit() {
             <p v-if="run.error" class="run-error">{{ run.error }}</p>
           </li>
         </ul>
-        <EmptyState v-else title="暂无运行记录" variant="plain" compact />
+        <EmptyState v-else title="暂无运行记录" variant="inline" />
       </section>
     </div>
 

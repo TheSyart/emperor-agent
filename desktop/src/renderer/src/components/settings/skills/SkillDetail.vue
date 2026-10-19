@@ -282,6 +282,7 @@ defineExpose({ reload: () => load(false), dirty })
       v-if="loadError && !detail"
       title="无法打开这个 Skill"
       :description="loadError"
+      framed
     >
       <Button size="sm" variant="secondary" @click="load()">重试</Button>
     </EmptyState>

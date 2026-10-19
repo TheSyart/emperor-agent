@@ -1,23 +1,29 @@
 <script setup lang="ts">
 /**
- * SearchField — dsh inventory search box: 36px, r8, l2 border on layer-1,
- * leading 16px search glyph (12px inset), 13/20 text, accent border + soft
- * ring on focus, and a clear button once there is text. Escape clears a
- * non-empty query (and is then stopped so it does not close the modal).
+ * SearchField — the one search box (DS-04): 32px (sm 28), r-sm, a hairline
+ * on the field fill, a leading search glyph, 13/20 text, --focus-ring on
+ * focus, and a clear button once there is text. Escape clears a non-empty
+ * query and stops there (so it does not close the surrounding popover or
+ * dialog); on an empty box Escape goes through to the owner.
  *
  * Props:
  * - modelValue (v-model): the query.
  * - placeholder (default 「搜索」); also the accessible name unless
  *   `ariaLabel` is given.
  * - ariaLabel?, disabled?, id?.
- * - size: 'md' (36px, default) | 'sm' (30px).
+ * - size: 'md' (32px, default) | 'sm' (28px).
  * Slots: `trailing` (a count / filter chip before the clear button).
+ * Other attributes and listeners (@keydown, @blur, @input, data-*) land on
+ * the <input>; class / style on the box.
  * Emits: update:modelValue, clear.
- * Exposes: focus().
+ * Exposes: focus(), blur(), select() and the input element.
  */
-import { ref } from 'vue'
-import { DsClose, DsSearch } from '../../icons/ds'
+import { computed, ref, useAttrs } from 'vue'
+import IconButton from './IconButton.vue'
+import Icon from './Icon.vue'
 import { useFieldControl } from './fieldContext'
+
+defineOptions({ inheritAttrs: false })
 
 const props = withDefaults(
   defineProps<{
@@ -38,8 +44,17 @@ const props = withDefaults(
 
 const model = defineModel<string>({ default: '' })
 const emit = defineEmits<{ clear: [] }>()
-const control = useFieldControl(props, 'settings-search')
+const attrs = useAttrs()
+const control = useFieldControl(props, 'ds-search')
 const input = ref<HTMLInputElement | null>(null)
+
+const boxAttrs = computed(() => ({ class: attrs.class, style: attrs.style }))
+const inputAttrs = computed(() => {
+  const rest: Record<string, unknown> = { ...attrs }
+  delete rest.class
+  delete rest.style
+  return rest
+})
 
 function clear() {
   model.value = ''
@@ -47,24 +62,32 @@ function clear() {
   input.value?.focus()
 }
 
-function onKeydown(event: KeyboardEvent) {
+function onEscape(event: KeyboardEvent) {
   if (event.key !== 'Escape' || !model.value) return
   event.preventDefault()
   event.stopPropagation()
   clear()
 }
 
-defineExpose({ focus: () => input.value?.focus() })
+defineExpose({
+  focus: () => input.value?.focus(),
+  blur: () => input.value?.blur(),
+  select: () => input.value?.select(),
+  input,
+})
 </script>
 
 <template>
   <div
     class="ds-search-field"
+    v-bind="boxAttrs"
     :data-size="size"
     :data-disabled="disabled || undefined"
+    :data-filled="model ? true : undefined"
   >
-    <DsSearch :size="14" class="glyph" />
+    <Icon name="search" size="sm" class="glyph" />
     <input
+      v-bind="inputAttrs"
       :id="control.id.value"
       ref="input"
       v-model="model"
@@ -76,50 +99,51 @@ defineExpose({ focus: () => input.value?.focus() })
       :disabled="disabled"
       autocomplete="off"
       spellcheck="false"
-      @keydown="onKeydown"
+      @keydown="onEscape"
     />
     <span v-if="$slots.trailing" class="trailing"
       ><slot name="trailing"
     /></span>
-    <button
+    <IconButton
       v-if="model && !disabled"
-      type="button"
       class="clear"
-      aria-label="清除搜索"
-      title="清除"
+      size="xs"
+      shape="circle"
+      label="清除搜索"
+      :tooltip="false"
       @click="clear"
     >
-      <DsClose :size="12" />
-    </button>
+      <Icon name="close" size="xs" />
+    </IconButton>
   </div>
 </template>
 
 <style scoped>
 .ds-search-field {
-  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
   width: 100%;
   min-width: 0;
-  height: calc(var(--space-8) + var(--space-1));
-  padding: 0 var(--space-1-5) 0 var(--space-3);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-row);
-  background: rgb(var(--bg-layer-1));
-  color: rgb(var(--label-tertiary));
-  transition:
-    border-color var(--duration-ds-fast) ease,
-    box-shadow var(--duration-ds-fast) ease;
+  height: var(--field-h);
+  padding: 0 var(--space-1-5) 0 var(--space-2-5);
+  border-radius: var(--r-sm);
+  background: rgb(var(--field-fill));
+  box-shadow: inset 0 0 0 0.5px var(--stroke-3);
+  color: rgb(var(--text-3));
+  transition: box-shadow var(--motion-fast) var(--ease-standard);
 }
 
 .ds-search-field[data-size='sm'] {
-  height: calc(var(--space-7) + 2px);
+  height: var(--field-h-sm);
+  padding-left: var(--space-2);
 }
 
 .ds-search-field:focus-within {
-  border-color: rgb(var(--accent-fill));
-  box-shadow: 0 0 0 2px rgb(var(--accent-fill) / 0.18);
+  box-shadow:
+    inset 0 0 0 0.5px var(--stroke-3),
+    0 0 0 2px rgb(var(--surface-base)),
+    0 0 0 4px rgb(var(--focus-ring) / 0.55);
 }
 
 .ds-search-field[data-disabled] {
@@ -140,14 +164,12 @@ defineExpose({ focus: () => input.value?.focus() })
   outline: none;
   background: transparent;
   box-shadow: none;
-  font: inherit;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
+  font: var(--weight-regular) var(--type-footnote) var(--font-sans);
 }
 
 .input::placeholder {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-4));
 }
 
 .input::-webkit-search-cancel-button {
@@ -159,32 +181,11 @@ defineExpose({ focus: () => input.value?.focus() })
   flex: none;
   align-items: center;
   gap: var(--space-1);
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
+  font: var(--weight-regular) var(--type-caption) var(--font-sans);
   font-variant-numeric: tabular-nums;
 }
 
 .clear {
-  display: inline-grid;
   flex: none;
-  place-items: center;
-  width: var(--space-6);
-  height: var(--space-6);
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: rgb(var(--label-tertiary));
-  cursor: pointer;
-}
-
-.clear:hover {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-primary));
-}
-
-.clear:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px rgb(var(--focus-ring) / 0.5);
 }
 </style>

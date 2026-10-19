@@ -106,12 +106,12 @@ function openTab(tab: 'mcp' | 'plugins'): void {
       v-if="!tools.length"
       title="还没有注册的工具"
       description="Agent 启动后会在这里列出内建工具。"
+      framed
     />
     <EmptyState
       v-else-if="!filtered.length"
       title="没有匹配的工具"
-      variant="plain"
-      compact
+      variant="inline"
     />
     <SettingsGroup
       v-for="group in groups"

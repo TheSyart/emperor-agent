@@ -1,9 +1,9 @@
 <script setup lang="ts" generic="T extends string | number">
 /**
- * Select — dsh settings selector pill (LanguageRow: 36px, r18, selector
- * fill, 14/22, 12px gap, 14px caption chevron) opening a ui/Menu dropdown
- * whose rows can carry a description; the current option shows a check.
- * Picks up id / aria wiring from a surrounding <Field>.
+ * Select — a selector button (DS-04: 32px, r-sm, a hairline on the field
+ * fill, 13/20, a 14px chevron) opening a ui/Menu dropdown whose rows can
+ * carry a description; the current option shows a check. Picks up id /
+ * aria wiring from a surrounding <Field>.
  *
  * Keyboard: ArrowDown / ArrowUp / Enter / Space on the trigger open the menu
  * with the current option focused; ArrowUp / ArrowDown / Home / End move
@@ -14,19 +14,19 @@
  * - modelValue (v-model): the selected option value.
  * - options: SelectOption[] ({ value, label, description?, disabled? }).
  * - placeholder? (shown when nothing matches), disabled?, invalid?, id?.
- * - size: 'md' (36px, default) | 'sm' (28px capsule for dense rows).
+ * - size: 'md' (32px, default) | 'sm' (28px for dense rows).
  * - block?: stretch the trigger to the container width.
  * - ariaLabel?: accessible name when no <Field> / row label points here.
  * Emits: update:modelValue, change(value).
  * Other attributes (class, data-*, listeners) land on the trigger button.
  */
 import { computed, nextTick, ref } from 'vue'
-import Menu from '../../ui/Menu.vue'
-import MenuItem from '../../ui/MenuItem.vue'
-import { DsChevronDown } from '../../icons/ds'
+import Menu from './Menu.vue'
+import MenuItem from './MenuItem.vue'
+import Icon from './Icon.vue'
 import { useFieldControl } from './fieldContext'
-import type { SelectOption } from './types'
-import { useSurface } from '../../ui/surface'
+import type { SelectOption } from './inputTypes'
+import { useSurface } from './surface'
 
 defineOptions({ inheritAttrs: false })
 
@@ -153,7 +153,7 @@ function onListKeydown(event: KeyboardEvent) {
     @keydown="onTriggerKeydown"
   >
     <span class="value">{{ current?.label ?? placeholder }}</span>
-    <DsChevronDown :size="14" class="chevron" />
+    <Icon name="chevron-down" size="sm" class="chevron" />
   </button>
   <Menu
     v-model:open="open"
@@ -183,34 +183,32 @@ function onListKeydown(event: KeyboardEvent) {
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--space-2);
   flex: none;
   min-width: 0;
   max-width: 100%;
-  height: calc(var(--space-8) + var(--space-1));
-  padding: 0 var(--space-3-5);
-  border: 1px solid transparent;
-  border-radius: var(--radius-pill);
-  background: rgb(var(--selector-fill));
-  font: inherit;
-  font-size: var(--fs-s);
-  line-height: var(--lh-s);
-  color: rgb(var(--label-primary));
+  height: var(--field-h);
+  padding: 0 var(--space-2) 0 var(--space-2-5);
+  border: none;
+  border-radius: var(--r-sm);
+  background: rgb(var(--field-fill));
+  box-shadow: inset 0 0 0 0.5px var(--stroke-3);
+  color: rgb(var(--text-1));
+  font: var(--weight-regular) var(--type-footnote) var(--font-sans);
   cursor: pointer;
-  transition: background-color var(--duration-ds-fast) ease;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
 }
 
 .ds-select[data-in-card] {
-  border-color: var(--border-l2);
   background: rgb(var(--settings-card-control-fill));
 }
 
 .ds-select[data-size='sm'] {
-  gap: var(--space-2);
-  height: var(--space-7);
-  padding: 0 var(--space-2-5) 0 var(--space-3);
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
+  height: var(--field-h-sm);
+  padding: 0 var(--space-1-5) 0 var(--space-2);
+  font: var(--weight-regular) var(--type-caption) var(--font-sans);
 }
 
 .ds-select[data-block] {
@@ -219,16 +217,19 @@ function onListKeydown(event: KeyboardEvent) {
 
 .ds-select:hover:not(:disabled),
 .ds-select[aria-expanded='true'] {
-  background: var(--interactive-bg-hover);
+  background-image: linear-gradient(var(--surface-hover), var(--surface-hover));
 }
 
 .ds-select:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px rgb(var(--focus-ring) / 0.5);
+  box-shadow:
+    inset 0 0 0 0.5px var(--stroke-3),
+    0 0 0 2px rgb(var(--surface-base)),
+    0 0 0 4px rgb(var(--focus-ring) / 0.55);
 }
 
 .ds-select[data-invalid] {
-  border-color: rgb(var(--state-error));
+  box-shadow: inset 0 0 0 1px rgb(var(--error));
 }
 
 .ds-select:disabled {
@@ -244,13 +245,13 @@ function onListKeydown(event: KeyboardEvent) {
 }
 
 .ds-select[data-placeholder] .value {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-caption));
-  transition: transform var(--duration-ds-fast) var(--ease-in-out);
+  color: rgb(var(--text-3));
+  transition: transform var(--motion-fast) var(--ease-standard);
 }
 
 .ds-select[aria-expanded='true'] .chevron {

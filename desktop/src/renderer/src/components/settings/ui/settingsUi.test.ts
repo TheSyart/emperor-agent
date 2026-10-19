@@ -423,7 +423,7 @@ describe('card layout', () => {
   it('gives empty states and selects the card look inside a card group', () => {
     const root = mount(() =>
       h(SettingsGroup, { title: '名单' }, () => [
-        h(EmptyState, { title: '暂无' }),
+        h(EmptyState, { title: '暂无', framed: true }),
         h(SettingsRow, { title: '语言' }, () =>
           h(Select, {
             modelValue: 'zh',
@@ -434,7 +434,7 @@ describe('card layout', () => {
       ]),
     )
     const empty = root.querySelector('.ds-empty-state')!
-    expect(empty.getAttribute('data-variant')).toBe('plain')
+    expect(empty.hasAttribute('data-framed')).toBe(false)
     expect(empty.hasAttribute('data-in-card')).toBe(true)
     expect(root.querySelector('.ds-select')!.hasAttribute('data-in-card')).toBe(
       true,

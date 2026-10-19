@@ -172,7 +172,7 @@ const remote = computed(() => form.value.transport !== 'stdio')
   color: rgb(var(--label-tertiary));
 }
 
-.transport > .ds-segmented {
+.transport > .ds-tabs {
   align-self: flex-start;
 }
 

@@ -188,6 +188,7 @@ function clearFilters() {
         title="暂无精选插件"
         description="目录里还没有经过核实的插件。可以在「能力」页的「插件」标签从本地文件夹、zip 或 HTTPS 地址安装。"
         data-testid="explore-empty"
+        framed
       >
         <Button
           size="sm"
@@ -199,10 +200,11 @@ function clearFilters() {
       </EmptyState>
       <EmptyState
         v-else
-        compact
         title="没有匹配的条目"
         description="换个关键词或类型试试。"
         data-testid="explore-empty"
+        variant="inline"
+        framed
       >
         <Button size="sm" variant="secondary" @click="clearFilters">
           清除筛选

@@ -34,14 +34,12 @@ const jobs = computed(() => props.status?.recentJobs ?? [])
     <EmptyState
       v-if="loading && !status"
       title="正在检测开发环境…"
-      variant="plain"
-      compact
+      variant="inline"
     />
     <EmptyState
       v-else-if="!sections.length"
       :title="error ? '没有检测结果' : '没有需要检测的工具'"
-      variant="plain"
-      compact
+      variant="inline"
     />
 
     <template v-for="section in sections" :key="section.id">

@@ -155,9 +155,10 @@ onMounted(() => {
     <SettingsGroup title="已放行">
       <EmptyState
         v-if="!permissions.length"
-        compact
         title="暂无"
         description="点右上角的「放行」为一个网站开放权限。"
+        variant="inline"
+        framed
       />
       <SettingsRow
         v-for="(permission, index) in permissions"

@@ -23,8 +23,8 @@ import IconButton from '../../ui/IconButton.vue'
 import Menu from '../../ui/Menu.vue'
 import MenuItem from '../../ui/MenuItem.vue'
 import Tabs from '../../ui/Tabs.vue'
-import EmptyState from '../../settings/ui/EmptyState.vue'
-import SearchField from '../../settings/ui/SearchField.vue'
+import EmptyState from '../../ui/EmptyState.vue'
+import SearchField from '../../ui/SearchField.vue'
 import PullRequestRow from './PullRequestRow.vue'
 import { pullIcons } from './pullIcons'
 import {
@@ -241,7 +241,6 @@ const showFooter = computed(
 
       <EmptyState
         v-else-if="error && !groups.length"
-        variant="plain"
         title="无法读取 Pull Request"
         :description="error.message"
       >
@@ -253,7 +252,6 @@ const showFooter = computed(
       <EmptyState
         v-else-if="!groups.length"
         class="list-empty"
-        variant="plain"
         :title="emptyMessage"
       />
 

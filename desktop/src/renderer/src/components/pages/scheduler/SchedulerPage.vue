@@ -323,6 +323,7 @@ function clearSearch() {
         :icon="DsClock"
         title="还没有定时任务"
         description="定时任务会在指定时间把提示词交给主 Agent 执行，比如每天汇总进展或每周整理周报。"
+        framed
       >
         <Button size="sm" variant="secondary" @click="openCreate()">
           <template #icon><DsPlus :size="14" /></template>
@@ -331,9 +332,10 @@ function clearSearch() {
       </EmptyState>
       <EmptyState
         v-else
-        compact
         title="没有匹配的任务"
         description="换个关键词或状态试试。"
+        variant="inline"
+        framed
       >
         <Button size="sm" variant="secondary" @click="clearSearch">
           清除筛选

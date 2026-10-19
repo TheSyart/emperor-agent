@@ -277,6 +277,7 @@ const actions = computed(() =>
           v-if="detailError && !shown"
           title="无法读取这次运行"
           :description="detailError"
+          framed
         >
           <Button size="sm" variant="secondary" @click="loadDetail"
             >重试</Button
@@ -374,8 +375,7 @@ const actions = computed(() =>
           v-if="!repo"
           title="选择一个仓库"
           description="输入 GitHub 仓库（owner/name），查看它的 Actions 运行记录。"
-          variant="plain"
-          compact
+          variant="inline"
         />
         <template v-else>
           <p v-if="listError" class="error" role="alert">{{ listError }}</p>
@@ -386,8 +386,7 @@ const actions = computed(() =>
             v-else-if="rows && !rows.items.length"
             title="没有运行记录"
             description="这个仓库还没有 GitHub Actions 运行记录，或没有启用 Actions。"
-            variant="plain"
-            compact
+            variant="inline"
           />
           <ul
             v-else-if="rows"

@@ -5,6 +5,12 @@ export interface TabItem {
   id: string
   label: string
   disabled?: boolean
+  /** A 14px glyph before the label. */
+  icon?: import('vue').Component
+  /** A count badge after the label (filters). */
+  count?: number
+  /** Editor tabs: a close button (emits `close`). */
+  closable?: boolean
 }
 
 /** One line of a ReadBlock window. */

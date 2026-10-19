@@ -211,6 +211,7 @@ const actions = computed(() =>
           v-if="detailError && !shown"
           title="无法读取这个 Issue"
           :description="detailError"
+          framed
         >
           <Button size="sm" variant="secondary" @click="loadDetail"
             >重试</Button
@@ -285,8 +286,7 @@ const actions = computed(() =>
               ? '别人在你名下仓库里开的 Issue，在「我的仓库」里查看。'
               : undefined
           "
-          variant="plain"
-          compact
+          variant="inline"
         />
         <ul v-else-if="list" class="rows" :aria-busy="listLoading || undefined">
           <li v-for="item in list.items" :key="`${item.repo}#${item.number}`">

@@ -408,6 +408,7 @@ const facts = [
               <EmptyState
                 title="还没有 MCP 服务器"
                 description="粘贴 Claude / Cursor / VS Code 的配置，或手动填写 URL 与命令。"
+                framed
               >
                 <Button size="sm" variant="secondary">粘贴 JSON</Button>
                 <Button size="sm" variant="primary">添加服务器</Button>
@@ -415,7 +416,8 @@ const facts = [
               <EmptyState
                 title="暂无归档对话。"
                 description="compact 变体：列表内的单行空状态"
-                compact
+                variant="inline"
+                framed
               />
             </SettingsGroup>
 

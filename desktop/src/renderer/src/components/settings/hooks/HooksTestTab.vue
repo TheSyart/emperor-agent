@@ -110,13 +110,15 @@ const resultJson = computed(() =>
         class="result-empty"
         title="尚未运行"
         description="选择事件并填写匹配查询后点「匹配」。"
-        compact
+        variant="inline"
+        framed
       />
       <EmptyState
         v-else-if="!matchResult.items.length"
         class="result-empty"
         title="无匹配命令"
-        compact
+        variant="inline"
+        framed
       />
       <template v-else>
         <SettingsRow

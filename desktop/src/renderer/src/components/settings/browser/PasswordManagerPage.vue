@@ -340,9 +340,10 @@ onBeforeUnmount(hidePassword)
     >
       <EmptyState
         v-if="!status?.handles.length"
-        compact
         title="还没有保存的密码"
         description="点右上角的「添加」保存一个。"
+        variant="inline"
+        framed
       />
       <SettingsRow
         v-for="handle in status?.handles ?? []"

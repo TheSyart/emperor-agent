@@ -24,7 +24,7 @@ import type {
 import { APP_CONTEXT_KEY } from '../../../composables/useAppContext'
 import Button from '../../ui/Button.vue'
 import Tabs from '../../ui/Tabs.vue'
-import EmptyState from '../../settings/ui/EmptyState.vue'
+import EmptyState from '../../ui/EmptyState.vue'
 import StatusBadge from '../../settings/ui/StatusBadge.vue'
 import { checkOutcomeIcons, pullIcons } from './pullIcons'
 import {
@@ -155,14 +155,12 @@ function openOnGithub(): void {
     <EmptyState
       v-if="notFound"
       class="detail-state"
-      variant="plain"
       title="找不到这个 Pull Request"
       :description="entry.error?.message"
     />
     <EmptyState
       v-else-if="failed && !head.title"
       class="detail-state"
-      variant="plain"
       title="无法读取 Pull Request"
       :description="entry.error?.message"
     >

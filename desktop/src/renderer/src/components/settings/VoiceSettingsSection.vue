@@ -128,6 +128,7 @@ onBeforeUnmount(() => {
       v-if="!supported"
       title="暂不支持"
       :description="status?.reason ?? '听写目前只支持 macOS'"
+      framed
     />
     <template v-else>
       <SettingsNotice

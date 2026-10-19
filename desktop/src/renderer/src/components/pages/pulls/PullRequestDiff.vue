@@ -14,7 +14,7 @@ import { computed, nextTick, shallowRef, watch } from 'vue'
 import type { PullRequestDiffResult } from '../../../api/pullRequests'
 import Button from '../../ui/Button.vue'
 import DiffBlock from '../../ui/DiffBlock.vue'
-import EmptyState from '../../settings/ui/EmptyState.vue'
+import EmptyState from '../../ui/EmptyState.vue'
 import StatusBadge from '../../settings/ui/StatusBadge.vue'
 import { pullIcons } from './pullIcons'
 import {
@@ -117,7 +117,6 @@ function emptyNote(file: PullDiffFile): string {
 
     <EmptyState
       v-else-if="entry.error && !entry.data"
-      variant="plain"
       title="无法加载 diff"
       :description="entry.error.message"
     >
@@ -134,7 +133,6 @@ function emptyNote(file: PullDiffFile): string {
 
       <EmptyState
         v-if="!files.length"
-        variant="plain"
         title="这个 Pull Request 没有文件改动"
       />
 

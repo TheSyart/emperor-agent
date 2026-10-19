@@ -1,8 +1,9 @@
 /**
- * Field → control channel. <Field> provides the control id, the ids that
- * describe it (hint / error) and the invalid flag; TextField, TextArea,
- * CodeEditor, Select and SearchField inject it so a label, hint and error
- * wire up (for / aria-describedby / aria-invalid) without manual ids.
+ * Field → control channel (DS-04). <Field> provides the control id, the ids
+ * that describe it (hint / error) and the invalid flag; TextField,
+ * TextArea, CodeEditor, Select, SearchField and Checkbox inject it so a
+ * label, hint and error wire up (for / aria-describedby / aria-invalid)
+ * without manual ids.
  */
 import { computed, inject, type ComputedRef, type InjectionKey } from 'vue'
 
@@ -12,12 +13,11 @@ export interface FieldContext {
   invalid: ComputedRef<boolean>
 }
 
-export const FIELD_CONTEXT: InjectionKey<FieldContext> =
-  Symbol('settings-field')
+export const FIELD_CONTEXT: InjectionKey<FieldContext> = Symbol('ds-field')
 
 let seq = 0
 
-/** Unique DOM id for settings controls (stable per component instance). */
+/** Unique DOM id for a control (stable per component instance). */
 export function settingsId(prefix: string): string {
   seq += 1
   return `${prefix}-${seq}`

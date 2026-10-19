@@ -223,6 +223,7 @@ defineExpose({ reload: load })
       v-if="loadError && !shown"
       title="无法打开这个插件"
       :description="loadError"
+      framed
     >
       <Button size="sm" variant="secondary" @click="load()">重试</Button>
     </EmptyState>

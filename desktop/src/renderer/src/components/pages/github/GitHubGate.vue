@@ -12,7 +12,7 @@
 import { useRouter } from 'vue-router'
 import type { PullRequestBrowserStatus } from '../../../api/pullRequests'
 import Button from '../../ui/Button.vue'
-import EmptyState from '../../settings/ui/EmptyState.vue'
+import EmptyState from '../../ui/EmptyState.vue'
 import { useSettingsRoute } from '../../settings/useSettingsRoute'
 import PullRequestUnavailable from '../pulls/PullRequestUnavailable.vue'
 import { GITHUB_PLUGIN_LOCATION } from './githubModel'
@@ -39,6 +39,7 @@ function openPlugin(): void {
     title="GitHub 插件已停用"
     description="启用后，可以在这里查看 Issue 和 CI 运行记录。"
     data-github-disabled
+    framed
   >
     <Button size="sm" variant="secondary" @click="openPlugin">
       打开 GitHub 插件
