@@ -11,6 +11,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter, type LocationQuery } from 'vue-router'
 import {
   modalSettingsSection,
+  settingsAlias,
   type SettingsSectionKey,
 } from './settingsSections'
 
@@ -43,8 +44,16 @@ export function useSettingsRoute() {
 
   const open = computed(() => route.query.settings != null)
   const section = computed(() => modalSettingsSection(route.query.settings))
-  /** The sub page the route names; the section decides whether it has one. */
-  const page = computed(() => settingsPageKey(route.query.page))
+  /**
+   * The sub page the route names (or the one a folded section's old key
+   * stands for); the section decides whether it has one.
+   */
+  const page = computed(
+    () =>
+      settingsPageKey(route.query.page) ??
+      settingsAlias(route.query.settings)?.page ??
+      null,
+  )
 
   function openSettings(
     target: SettingsSectionKey = 'general',

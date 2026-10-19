@@ -6,6 +6,7 @@ import { installVisualCoreBridge } from './visualBridge'
 
 // Settings shell (SettingsModal header actions, options column, container
 // breakpoints) and the reference native section (常规) on the real app.
+// UI-S07: 880 × min(720, 100vh − 80), a 200px nav in four groups.
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'settings-shell')
 
 test.beforeAll(() => {
@@ -45,21 +46,18 @@ for (const theme of ['dark', 'light'] as const) {
     page,
   }) => {
     const dialog = await openSettings(page, 'general', { theme })
-    await expect(dialog.getByText('visual-main')).toBeVisible()
-    // Header action from useSettingsHeader, rendered by the shell.
+    // 外观 opens the page: the theme as one segmented control (UI-S07).
+    const options = dialog.locator('[aria-label="主题"] [role="radio"]')
+    await expect(options).toHaveText(['跟随系统', '浅色', '深色'])
     await expect(
-      dialog.getByRole('button', { name: '刷新归档与最近删除' }),
-    ).toBeVisible()
-    // The three appearance cubes share one row in the 564px column.
-    const cubes = dialog.locator('[data-theme-option]')
-    await expect(cubes).toHaveCount(3)
-    const tops = await cubes.evaluateAll((els) =>
-      els.map((el) => Math.round(el.getBoundingClientRect().top)),
-    )
-    expect(new Set(tops).size).toBe(1)
+      dialog.getByRole('radio', { name: theme === 'dark' ? '深色' : '浅色' }),
+    ).toHaveAttribute('aria-checked', 'true')
+    for (const group of ['appearance', 'session', 'developer', 'conversations'])
+      await expect(dialog.locator(`[data-group="${group}"]`)).toBeVisible()
+    // 常规 has no header action of its own.
     await expect(
-      dialog.locator(`[data-theme-option="${theme}"]`),
-    ).toHaveAttribute('aria-pressed', 'true')
+      dialog.locator('.settings-header [data-action="refresh"]'),
+    ).toHaveCount(0)
     await noHorizontalOverflow(page)
     await page.waitForTimeout(200)
     await page.screenshot({
@@ -74,20 +72,20 @@ test('follow-system theme tracks prefers-color-scheme live', async ({
 }) => {
   await page.emulateMedia({ colorScheme: 'light' })
   const dialog = await openSettings(page, 'general')
-  await dialog.locator('[data-theme-option="system"]').click()
+  await dialog.getByRole('radio', { name: '跟随系统' }).click()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
   expect(await page.evaluate(() => localStorage.getItem('emperor.theme'))).toBe(
     'system',
   )
   await page.emulateMedia({ colorScheme: 'dark' })
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
-  await expect(dialog.locator('[data-theme-option="system"]')).toHaveAttribute(
-    'aria-pressed',
+  await expect(dialog.getByRole('radio', { name: '跟随系统' })).toHaveAttribute(
+    'aria-checked',
     'true',
   )
 
   // An explicit pick stops following the OS.
-  await dialog.locator('[data-theme-option="light"]').click()
+  await dialog.getByRole('radio', { name: '浅色' }).click()
   await page.emulateMedia({ colorScheme: 'dark' })
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
 })
@@ -103,20 +101,21 @@ test('narrow window folds the nav rail into a top strip', async ({ page }) => {
   expect(bounds.x).toBeGreaterThanOrEqual(0)
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(391)
   await noHorizontalOverflow(page)
-  await nav.getByRole('button', { name: '诊断', exact: true }).click()
-  await expect(page).toHaveURL(/settings=diagnostics/)
+  await nav.getByRole('button', { name: '高级', exact: true }).click()
+  await expect(page).toHaveURL(/settings=advanced/)
   await page.waitForTimeout(200)
   await page.screenshot({
-    path: resolve(screenshotDir, 'narrow-diagnostics.png'),
+    path: resolve(screenshotDir, 'narrow-advanced.png'),
     animations: 'disabled',
   })
 })
 
-test('content-heavy sections keep the 564px column without overflow', async ({
+test('content-heavy sections keep the 632px column without overflow', async ({
   page,
 }) => {
   // Scheduler left the modal for its own page (/scheduler). 浏览器 and 语音
-  // are cards from edge to edge of the column (RV-05).
+  // are cards from edge to edge of the column (RV-05). 诊断 is a sub page of
+  // 高级 now (UI-S07).
   for (const section of [
     'memory',
     'tokens',
@@ -127,7 +126,7 @@ test('content-heavy sections keep the 564px column without overflow', async ({
     const dialog = await openSettings(page, section)
     const options = dialog.locator('.settings-options')
     await expect(options).toBeVisible()
-    // Content never exceeds the 564px column (800 − 188 − 2 × 24).
+    // Content never exceeds the 632px column (880 − 200 − 2 × 24).
     const width = await options.evaluate((el) => {
       const style = getComputedStyle(el)
       return (
@@ -136,14 +135,14 @@ test('content-heavy sections keep the 564px column without overflow', async ({
         parseFloat(style.paddingRight)
       )
     })
-    expect(Math.round(width)).toBe(564)
+    expect(Math.round(width)).toBe(632)
     // Every card group spans the column.
     const cards = await options
       .locator('.ds-settings-group[data-card] > .content')
       .evaluateAll((els) =>
         els.map((el) => Math.round(el.getBoundingClientRect().width)),
       )
-    for (const card of cards) expect(card).toBe(564)
+    for (const card of cards) expect(card).toBe(632)
     await noHorizontalOverflow(page)
   }
 })

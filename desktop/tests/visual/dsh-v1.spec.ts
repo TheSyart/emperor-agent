@@ -239,12 +239,10 @@ for (const theme of ['dark', 'light'] as const) {
 const settingsSections = [
   'general',
   'model',
-  'hooks',
   'computer',
   'memory',
   'tokens',
-  'pet',
-  'diagnostics',
+  'advanced',
 ] as const
 
 // Sections that moved out of the modal: their deep links open the page.
@@ -279,7 +277,7 @@ for (const section of settingsSections) {
     const dialog = page.getByRole('dialog').first()
     await expect(dialog).toBeVisible()
     const box = (await dialog.boundingBox())!
-    expect(Math.round(box.width)).toBeLessThanOrEqual(800)
+    expect(Math.round(box.width)).toBeLessThanOrEqual(880)
     await expectNoHorizontalOverflow(page)
     await shot(page, `settings-${section}`)
   })
@@ -1580,59 +1578,22 @@ for (const theme of ['dark', 'light'] as const)
     await shot(page, `settings-diagnostics-failed-${theme}`)
   })
 
-test('pet section previews bundled sprites and toggles the pet', async ({
-  page,
-}) => {
+// 桌宠 is a switch in 常规 › 外观 since UI-S07 (the sprite gallery is gone).
+test('the pet switch in 常规 › 外观 starts the pet', async ({ page }) => {
   await open(page, '/chat/build-ui?settings=pet', {
     width: 1280,
     height: 860,
   })
+  await expect(page).toHaveURL(/settings=general/)
   const dialog = page.getByRole('dialog', { name: '设置' })
-  const sprites = dialog.locator('[data-sprite] .pet-sprite')
-  await expect(sprites).toHaveCount(14)
-  // Every frame strip decodes, and is exactly `frames` cells wide.
-  const strips = await sprites.evaluateAll((nodes) =>
-    Promise.all(
-      nodes.map(async (node) => {
-        const url = getComputedStyle(node).backgroundImage.slice(5, -2)
-        const image = new Image()
-        image.src = url
-        await image.decode()
-        return {
-          width: image.naturalWidth,
-          height: image.naturalHeight,
-          frames: Number((node as HTMLElement).dataset.frames),
-        }
-      }),
-    ),
-  )
-  for (const strip of strips)
-    expect(strip).toEqual({
-      width: strip.frames * 192,
-      height: 208,
-      frames: strip.frames,
-    })
-  await dialog.locator('[data-sprite="happy"]').click()
-  const stage = dialog.getByTestId('pet-preview').getByRole('img')
-  await expect(stage).toHaveAttribute('aria-label', '小单 完成')
-  // The preview actually steps through frames.
-  const firstFrame = await stage.evaluate(
-    (node) => getComputedStyle(node).backgroundPositionX,
-  )
-  await expect
-    .poll(() =>
-      stage.evaluate((node) => getComputedStyle(node).backgroundPositionX),
-    )
-    .not.toBe(firstFrame)
-  const toggle = dialog.getByRole('switch')
+  const toggle = dialog.locator('#general-pet')
   await expect(toggle).toHaveAttribute('aria-checked', 'false')
   await toggle.click()
   await expect(toggle).toHaveAttribute('aria-checked', 'true')
-  await expect(dialog.getByTestId('pet-status')).toHaveText('待启动')
 })
 
 for (const theme of ['dark', 'light'] as const) {
-  for (const section of ['hooks', 'computer', 'pet', 'diagnostics'] as const) {
+  for (const section of ['hooks', 'computer', 'diagnostics'] as const) {
     test(`settings ${section} section fits the column (${theme})`, async ({
       page,
     }) => {
@@ -1817,8 +1778,9 @@ for (const theme of ['dark', 'light'] as const) {
       theme,
     })
     const dialog = page.getByRole('dialog', { name: '设置' })
+    // Two editors (UI-S07); 历史 on the editor, the rest under 更多.
     const tabs = dialog.getByRole('radiogroup', { name: '记忆类型' })
-    await expect(tabs.getByRole('radio')).toHaveCount(5)
+    await expect(tabs.getByRole('radio')).toHaveText(['长期记忆', '用户档案'])
     const editor = dialog.getByRole('textbox', { name: /MEMORY|AGENTS/ })
     await expect(editor).toBeVisible()
     // The editor takes the remaining height of the options column.
@@ -1833,7 +1795,8 @@ for (const theme of ['dark', 'light'] as const) {
     await shot(page, `settings-memory-overview-${theme}`)
     await dialog.getByRole('button', { name: /上下文概览/ }).click()
 
-    await tabs.getByRole('radio', { name: '版本' }).click()
+    await dialog.getByTestId('memory-history').click()
+    await expect(dialog.getByTestId('settings-page-title')).toHaveText('历史')
     const versions = dialog.locator('[data-version-id]')
     await expect(versions).toHaveCount(3)
     await versions
@@ -1843,15 +1806,20 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(versions.first().locator('[data-diff]')).toBeVisible()
     await expectOptionsFit(page)
     await shot(page, `settings-memory-versions-${theme}`)
+    await dialog.getByTestId('settings-crumb').click()
 
-    await tabs.getByRole('radio', { name: '情景' }).click()
+    const more = dialog.locator('[data-action="more"]')
+    await more.click()
+    await page.locator('[data-menu-item="episodes"]').click()
     await expect(
       dialog.getByRole('textbox', { name: /2026-06-26/ }),
     ).toHaveValue(/# 2026-06-26/)
     await expect(dialog.getByRole('button', { name: '选择日期' })).toBeVisible()
     await shot(page, `settings-memory-episodes-${theme}`)
+    await dialog.getByTestId('settings-crumb').click()
 
-    await tabs.getByRole('radio', { name: 'Watchlist' }).click()
+    await more.click()
+    await page.locator('[data-menu-item="watchlist"]').click()
     await expect(
       dialog.locator('[data-action="check-watchlist"]'),
     ).toBeVisible()
@@ -1891,6 +1859,17 @@ for (const theme of ['dark', 'light'] as const) {
     const dialog = page.getByRole('dialog', { name: '设置' })
     const metrics = dialog.getByTestId('token-metrics')
     await expect(metrics.locator('[data-metric]')).toHaveCount(4)
+    // The main page: metrics and the trend (UI-S07).
+    const chart = dialog.locator('.token-trend-chart svg.chart')
+    await expect(chart).toBeVisible()
+    await dialog
+      .getByRole('slider', { name: /Token 用量趋势日期/ })
+      .hover({ position: { x: 300, y: 120 } })
+    await expectOptionsFit(page)
+    await shot(page, `settings-tokens-trend-${theme}`)
+
+    // 详细: the heatmap, the ranking and the cache view.
+    await dialog.getByTestId('usage-details').click()
     const grid = dialog.getByRole('grid', { name: /热力图/ })
     await expect(grid.locator('[data-cell-index]')).toHaveCount(53 * 7)
     // Fluid heatmap: spans the column and keeps square cells.
@@ -1903,15 +1882,6 @@ for (const theme of ['dark', 'light'] as const) {
     await shot(page, `settings-tokens-${theme}`)
 
     const views = dialog.getByRole('radiogroup', { name: '用量视图' })
-    await views.getByRole('radio', { name: '趋势' }).click()
-    const chart = dialog.locator('.token-trend-chart svg.chart')
-    await expect(chart).toBeVisible()
-    await dialog
-      .getByRole('slider', { name: /Token 用量趋势日期/ })
-      .hover({ position: { x: 300, y: 120 } })
-    await expectOptionsFit(page)
-    await shot(page, `settings-tokens-trend-${theme}`)
-
     await views.getByRole('radio', { name: '模型' }).click()
     const ranking = dialog.getByRole('list', { name: /模型用量排名/ })
     await expect(ranking.getByRole('listitem')).toHaveCount(5)
@@ -1949,11 +1919,13 @@ test('scheduler page / memory / tokens fit a narrow panel', async ({
     await expect(dialog).toBeVisible()
     if (section === 'scheduler')
       await expect(dialog.locator('.job-row').first()).toBeVisible()
-    if (section === 'tokens')
+    if (section === 'tokens') {
+      await dialog.getByTestId('usage-details').click()
       await dialog
         .getByRole('radiogroup', { name: '用量视图' })
         .getByRole('radio', { name: '模型' })
         .click()
+    }
     await expectOptionsFit(page)
     await shot(page, `settings-${section}-narrow`)
   }

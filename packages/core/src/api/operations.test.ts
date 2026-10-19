@@ -17,7 +17,7 @@ describe('Core operation registry', () => {
     const descriptors = coreOperationDescriptors()
     const descriptorKeys = descriptors.map((entry) => entry.key)
 
-    expect(coreOperationKeys()).toHaveLength(213)
+    expect(coreOperationKeys()).toHaveLength(215)
     expect(coreOperationKeys()).toEqual(descriptorKeys)
     expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(descriptorKeys)
     expect(
@@ -68,6 +68,8 @@ describe('Core operation registry', () => {
         'sessions.watch',
         'tools.networkSettings',
         'tools.setNetworkSettings',
+        'sessions.defaults',
+        'sessions.setDefaults',
       ]),
     )
     for (const retired of [
@@ -124,6 +126,22 @@ describe('Core operation registry', () => {
       { downloadDirectory: '/tmp/a\0b' },
       { downloadDirectory: `/${'x'.repeat(5000)}` },
       { askWhereToSave: 'yes' },
+    ])
+      expect(() => args.parse([bad]), JSON.stringify(bad)).toThrow()
+  })
+
+  it('validates the new-session permission change (UI-S07)', () => {
+    const args = CORE_OPERATION_REGISTRY['sessions.setDefaults'].args
+    for (const permission of [
+      'read-only',
+      'workspace-write',
+      'danger-full-access',
+    ])
+      expect(args.parse([{ permission }])).toEqual([{ permission }])
+    for (const bad of [
+      { permission: 'root' },
+      { permission: 'read-only', extra: true },
+      {},
     ])
       expect(() => args.parse([bad]), JSON.stringify(bad)).toThrow()
   })

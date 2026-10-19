@@ -33,19 +33,16 @@ const desktop = resolve(__dirname, '..')
 const shots = join(desktop, 'out-e2e', 'settings')
 const SUITE = 'settings'
 
-/** The nav, in order (settingsSections.ts). */
+/** The nav, in order (settingsSections.ts; four groups since UI-S07). */
 const SECTIONS: ReadonlyArray<readonly [string, string]> = [
   ['general', '常规'],
   ['model', '模型'],
   ['executors', '子智能体'],
-  ['hooks', 'Hooks'],
+  ['memory', '记忆'],
   ['computer', '电脑操作'],
   ['browser', '浏览器'],
   ['voice', '语音'],
-  ['memory', '记忆'],
   ['tokens', '用量'],
-  ['pet', '桌宠'],
-  ['diagnostics', '诊断'],
   ['advanced', '高级'],
 ]
 
@@ -63,6 +60,10 @@ const SUB_PAGES: ReadonlyArray<
   ['browser', '[data-action="manage-profiles"]', 'profiles', '登录状态'],
   ['browser', '[data-action="manage-downloads"]', 'downloads', '下载历史记录'],
   ['browser', '[data-action="manage-sites"]', 'sites', '网站设置'],
+  // Hooks and 诊断 left the nav for 高级 (UI-S07); 已归档对话 for a row in 常规.
+  ['advanced', '[data-advanced-page="hooks"]', 'hooks', 'Hooks'],
+  ['advanced', '[data-advanced-page="diagnostics"]', 'diagnostics', '诊断'],
+  ['general', '[data-testid="open-archived"]', 'archived', '已归档对话'],
 ]
 
 interface Result {
@@ -228,7 +229,7 @@ function until(
 async function settings(page: Page, home: string): Promise<void> {
   await check(
     page,
-    'the nav lists the twelve sections in order',
+    'the nav lists the nine sections in order',
     async () => {
       const dialog = await openSettings(page)
       const keys = await dialog

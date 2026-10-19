@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：使用自动化能力的用户<br>
 > 最后核验：2026-10-19<br>
-> 事实源：`packages/core/src/scheduler/`、`packages/core/src/harness/host/scheduler.ts`、`packages/core/src/harness/hooks/`、`packages/core/src/api/services/hooks-service.ts`、`packages/core/src/watchlist/`、DesktopPet service、`desktop/src/renderer/src/components/pages/scheduler/`、`desktop/src/renderer/src/components/settings/`（Hooks / 记忆 / 桌宠分区）
+> 事实源：`packages/core/src/scheduler/`、`packages/core/src/harness/host/scheduler.ts`、`packages/core/src/harness/hooks/`、`packages/core/src/api/services/hooks-service.ts`、`packages/core/src/watchlist/`、DesktopPet service、`desktop/src/renderer/src/components/pages/scheduler/`、`desktop/src/renderer/src/components/settings/`（高级 › Hooks、记忆、常规 › 外观 › 桌宠）
 
 本页介绍预览阶段的自动化能力。它们都通过与普通对话相同的内核运行，不获得额外权限。
 
@@ -44,7 +44,7 @@
 
 ## Hooks
 
-入口是“设置 → Hooks”。Hooks 在指定事件发生时自动运行命令，配置写在 `hooks.json` 中，只支持 `command` 类型的 handler。
+入口是“设置 → 高级 → Hooks”。Hooks 在指定事件发生时自动运行命令，配置写在 `hooks.json` 中，只支持 `command` 类型的 handler。
 
 - 配置文件：`stateRoot/hooks.json`，按“事件 → matcher 分组 → hooks”组织，可以在“配置”标签编辑；保存时会校验并立即重新加载。
 - 支持的事件：`SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`SubagentStart`、`SubagentStop`。其他事件和非 `command` 类型的 handler 会被忽略，页面会列出被跳过的项。
@@ -62,7 +62,7 @@
 
 Hook 输出中的 `updatedInput`、`systemMessage` 和 `continue: false` 会被解析并记录警告，但不会生效。Hook 不能放宽权限预设或沙箱。
 
-“设置 → Hooks”分为三个标签：
+“设置 → 高级 → Hooks”分为三个标签：
 
 - **配置**：查看已加载的配置文件、加载错误和各事件的命令数，编辑 `hooks.json`，支持「还原」「校验」「保存」（⌘S 保存）。
 - **测试**：选择事件并输入 matcher 查询，查看会匹配到的命令；对某条命令点击「执行」后还需「确认执行」才会真正运行，结果显示决定、退出码和耗时。编辑器中尚未保存的内容也按当前内容匹配和运行。
@@ -72,11 +72,11 @@ Hook 输出中的 `updatedInput`、`systemMessage` 和 `continue: false` 会被�
 
 ## Watchlist
 
-Watchlist 由 `memory/watchlist.md` 定义，在“设置 → 记忆”的“Watchlist”标签中编辑。可以在该标签点击右上角的「手动检查」，也可以由定时任务中的 `watchlist-check` 系统任务定期检查；判断需要处理时会发起一轮普通 Agent turn。它不提供 Slack、邮件或社交平台连接器。
+Watchlist 由 `memory/watchlist.md` 定义，在“设置 → 记忆”右上角「更多 › Watchlist」中编辑。可以在该页点击右上角的「手动检查」，也可以由定时任务中的 `watchlist-check` 系统任务定期检查；判断需要处理时会发起一轮普通 Agent turn。它不提供 Slack、邮件或社交平台连接器。
 
 ## 桌宠 companion
 
-“设置 → 桌宠”可以启用或关闭 companion，默认关闭；页面还可以预览各运行状态的动画，并显示启动方式和最近的窗口错误。窗口由主 Electron 进程托管。桌宠只投影空闲、工作等状态，不能代替真实的任务状态，也不能直接修改 Core 状态。
+“设置 → 常规 → 外观 → 桌宠”可以启用或关闭 companion，默认关闭；窗口出错时开关下方显示最近的错误。窗口由主 Electron 进程托管。桌宠只投影空闲、工作等状态，不能代替真实的任务状态，也不能直接修改 Core 状态。
 
 ## 外部执行器与长任务
 

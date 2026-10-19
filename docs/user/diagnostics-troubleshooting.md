@@ -5,7 +5,7 @@
 > 最后核验：2026-10-19<br>
 > 事实源：`packages/core/src/api/services/diagnostics-service.ts`、`packages/core/src/session-log/`、`packages/core/src/environment/tool-catalog.json`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/renderer/src/components/settings/DiagnosticsSection.vue` 与 `diagnostics/`、`desktop/src/renderer/src/components/pages/pulls/`、当前构建与运行脚本
 
-先进入“设置 → 诊断”。页面顶部是一张概览卡：一句结论（一切正常时是「运行正常」，否则是「n 项需要关注」「n 项异常」加「其余都正常」），下面只列需要关注的项目（异常在前），点一项会展开它所在的分组并滚到那里。读取诊断或探测环境失败时，概览上方出现一张提醒卡写明原因。右上角「复制报告」把整页复制成纯文本，便于反馈问题；刷新会重新读取诊断并重新探测环境。
+先进入“设置 → 高级 → 诊断”。页面顶部是一张概览卡：一句结论（一切正常时是「运行正常」，否则是「n 项需要关注」「n 项异常」加「其余都正常」），下面只列需要关注的项目（异常在前），点一项会展开它所在的分组并滚到那里。读取诊断或探测环境失败时，概览上方出现一张提醒卡写明原因。右上角「复制报告」把整页复制成纯文本，便于反馈问题；刷新会重新读取诊断并重新探测环境。
 
 概览下方是五个默认折叠的分组，标题下写着项数；只有含需要关注项目的分组，标题旁才显示「n 项需要关注」或「n 项异常」。展开后，正常的项目只显示值（鼠标停在名称上可以看到详情），需要关注的项目用颜色标出，并在名称下写明原因：
 
@@ -54,7 +54,7 @@
 | 桌面输入提示 `TARGET_NOT_VISIBLE`                 | Helper 已尝试将目标窗口置前，但目标 App、焦点窗口或模态窗口仍不符合绑定目标。`reason=target-app-not-frontmost` 表示目标 App 未在最前；`target-window-not-focused` 表示绑定窗口没有焦点；`frontmost-app-unverified` 表示无法确认当前最前的 App（例如刚启动的应用），为安全起见未派发。检查当前桌面和模态窗口，恢复后重新观察；输入尚未派发，不应盲目重试。            |
 | 桌面按键或鼠标动作返回 `observed`，但画面未达预期 | `observed` 只表示派发后检测到目标版本变化；其他界面变化也可能触发。重新观察并核对具体控件或文件结果；若预期效果未出现，停止该动作流程并报告，不能仅凭 `observed` 宣称成功。                                                                                                                                                                                          |
 | 动作提示 `OUTCOME_UNKNOWN`                        | 操作可能已经发生；先直接检查目标页面或窗口，不要重放发送、删除、付款或凭据填写                                                                                                                                                                                                                                                                                       |
-| Hooks 不生效                                      | 设置 → Hooks 的“配置”校验结果、“测试”标签的 matcher 匹配与运行结果、handler 是否为 `command` 类型                                                                                                                                                                                                                                                                    |
+| Hooks 不生效                                      | 设置 → 高级 → Hooks 的“配置”校验结果、“测试”标签的 matcher 匹配与运行结果、handler 是否为 `command` 类型                                                                                                                                                                                                                                                             |
 
 Finder 的内联重命名框有时不提供所属窗口。Helper 只有在辅助功能命中、前台焦点及当前可见的物理窗口都指向已绑定 Finder 窗口时才允许输入；任一条件不能确认，就会在派发前返回 `TARGET_NOT_VISIBLE`。本机曾出现 Finder 编辑框可见、但系统命中测试落在通知层的情况；把测试窗口移到无遮挡的桌面空间后，同一签名 Helper 完成了新建和命名。此时 `reason=target-input-point-unverified` 表示 Finder 编辑框虽已获焦点，但系统无法确认输入点仍属于该窗口。遇到这种拒绝时，先移开目标窗口或等待遮挡消失，再重新观察，不要放宽身份检查或反复点同一位置。每步动作后仍须重新观察：按下新建快捷键或输入名称的 `observed` 不等于文件名已经提交。若提交键收到 `STALE_TARGET`，先确认没有派发，再重新观察并核对当前编辑状态；无法确认时停止，不要盲目重复按键或改用坐标点击。
 
@@ -83,7 +83,7 @@ Diagnostics payload 中与内核相关的字段：
 
 ## 有效配置与来源
 
-“设置 → 诊断”的“配置”分组列出从现有事实源即时计算的配置项：模型执行策略、沙箱策略和 MCP 配置各一行，显示是否生效、最终来源和覆盖层数；当前可见的 `skills.<name>` 合并为一行「Skills 配置」，有来源不受信任或被拒绝的 Skill 时列出名称。Build 会话的项目 Skill 来源为 project；切回 Chat 后回到 user 或 builtin。「复制报告」中包含这些行。
+“设置 → 高级 → 诊断”的“配置”分组列出从现有事实源即时计算的配置项：模型执行策略、沙箱策略和 MCP 配置各一行，显示是否生效、最终来源和覆盖层数；当前可见的 `skills.<name>` 合并为一行「Skills 配置」，有来源不受信任或被拒绝的 Skill 时列出名称。Build 会话的项目 Skill 来源为 project；切回 Chat 后回到 user 或 builtin。「复制报告」中包含这些行。
 
 MCP 的 args、env、headers 和 URL 在有效配置里统一显示为 `[REDACTED]`。有效配置是只读解释面，不是新配置文件；修改仍回到原入口（`settings.json`、能力页的 MCP 标签、Skill 目录）。
 
@@ -121,7 +121,7 @@ CoreApi 的 `tasks.*` 把后台 job（`bash` 的后台命令）、子代理会�
 
 「Pull Request」页（包括 GitHub 插件的 Issue、CI 标签）和「审查」中的 PR 操作都依赖本机的 GitHub CLI。`gh` 是签名工具目录中的可选工具，要求 2.40.0 或更高版本；Emperor 只探测它，不会替你安装或登录。
 
-1. 在“设置 → 诊断 → 环境工具”的“当前项目”分组中查看 `gh` 的状态和版本。
+1. 在“设置 → 高级 → 诊断 → 环境工具”的“当前项目”分组中查看 `gh` 的状态和版本。
 2. 未安装时按平台安装：macOS 用 Homebrew（`brew install gh`），Windows 用 winget（`winget install GitHub.cli`），Linux 按 [GitHub CLI 官方安装说明](https://github.com/cli/cli/blob/trunk/docs/install_linux.md) 安装。
 3. 在终端运行 `gh auth login` 完成登录。Build 会话可以直接使用右侧工作台的「终端」。
 4. 回到 Pull Request 页点「重新检测」，或刷新诊断页。

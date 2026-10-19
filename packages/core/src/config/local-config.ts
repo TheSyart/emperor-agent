@@ -40,6 +40,48 @@ export interface WebToolPreferences {
   webSearch: boolean
 }
 
+/** The permission presets a session can start in (harness/approval/presets). */
+export const SESSION_PERMISSIONS = [
+  'read-only',
+  'workspace-write',
+  'danger-full-access',
+] as const
+
+export type SessionPermission = (typeof SESSION_PERMISSIONS)[number]
+
+/**
+ * 设置 › 常规 › 会话 › 新会话的权限: the preset a session starts in. Sessions
+ * that already have a log keep theirs.
+ */
+export interface SessionPreferences {
+  defaultPermission: SessionPermission
+}
+
+export function defaultSessionPreferences(): SessionPreferences {
+  return { defaultPermission: 'workspace-write' }
+}
+
+export function isSessionPermission(
+  value: unknown,
+): value is SessionPermission {
+  return (
+    typeof value === 'string' &&
+    (SESSION_PERMISSIONS as readonly string[]).includes(value)
+  )
+}
+
+/** An unknown preset falls back to the default. */
+export function normalizeSessionPreferences(
+  value: unknown,
+): SessionPreferences {
+  const data = objectOrEmpty(value)
+  return {
+    defaultPermission: isSessionPermission(data.defaultPermission)
+      ? data.defaultPermission
+      : defaultSessionPreferences().defaultPermission,
+  }
+}
+
 /**
  * `settings.json` preferences. Retired keys from the old kernel
  * (`permissions.rules`, `workspace.fileCheckpoints` / `workspace.gitRewind`,
@@ -52,12 +94,20 @@ export interface LocalConfig {
   prompt: PromptPreferences
   browser: BrowserPreferences
   webTools: WebToolPreferences
+  sessions: SessionPreferences
 }
 
-/** What a save takes: a missing `browser` or `webTools` writes its defaults. */
-export type LocalConfigInput = Omit<LocalConfig, 'browser' | 'webTools'> & {
+/**
+ * What a save takes: a missing `browser`, `webTools` or `sessions` writes
+ * its defaults.
+ */
+export type LocalConfigInput = Omit<
+  LocalConfig,
+  'browser' | 'webTools' | 'sessions'
+> & {
   browser?: BrowserPreferences
   webTools?: WebToolPreferences
+  sessions?: SessionPreferences
 }
 
 export function defaultWebToolPreferences(): WebToolPreferences {
@@ -130,6 +180,7 @@ function defaultLocalConfig(): LocalConfig {
     prompt: { profile: 'technical' },
     browser: defaultBrowserPreferences(),
     webTools: defaultWebToolPreferences(),
+    sessions: defaultSessionPreferences(),
   }
 }
 
@@ -176,6 +227,7 @@ export function parseLocalConfig(
     },
     browser,
     webTools: normalizeWebToolPreferences(data.webTools),
+    sessions: normalizeSessionPreferences(data.sessions),
   }
 }
 
@@ -257,6 +309,7 @@ export async function saveLocalConfig(
     },
     browser: normalizeBrowserPreferences(config.browser),
     webTools: normalizeWebToolPreferences(config.webTools),
+    sessions: normalizeSessionPreferences(config.sessions),
   }
   const shared = await sharedSettings(path, opts.persistenceAdapter)
   await localConfigSnapshot(path, opts.persistenceAdapter).write({

@@ -78,9 +78,8 @@ for (const theme of ['dark', 'light'] as const) {
       '下载',
       '浏览器权限',
     ])
-    await expect(dialog.locator('#browser-link-target')).toContainText(
-      '系统默认浏览器',
-    )
+    // Where a web link opens is 常规 › 会话 › 网页链接 (UI-S07).
+    await expect(dialog.locator('#browser-link-target')).toHaveCount(0)
     await expect(dialog.locator('#browser-local-target')).toContainText(
       'Emperor',
     )

@@ -6,8 +6,8 @@
  * - the control card: whether Emperor may operate the built-in browser
  *   (computer use's embedded-browser driver; greyed out, with a way there,
  *   while 电脑操作 is off);
- * - 常规: where a clicked web link and a link to this machine open, the
- *   address bar, clearing the browsing data (its outcome is a badge in the
+ * - 常规: where a link to this machine opens (a clicked web link: 设置 ›
+ *   常规 › 会话 › 网页链接), the address bar, clearing the browsing data (its outcome is a badge in the
  *   row) and the temporary history of the user's own browsing (the
  *   workspace 浏览器 pane, a memory-only session);
  * - 自动填充和密码: 密码管理器 and 登录状态 (sub pages), with 导入… beside
@@ -266,22 +266,6 @@ onBeforeUnmount(() => {
     </SettingsCard>
 
     <SettingsGroup title="常规">
-      <SettingsRow
-        title="网页 URL 和链接打开位置"
-        description="在会话、Pull Request 等界面点击的网页链接"
-        label-for="browser-link-target"
-      >
-        <Select
-          id="browser-link-target"
-          size="sm"
-          :model-value="preferences.linkTarget"
-          :options="LINK_TARGETS"
-          :disabled="saving"
-          @update:model-value="
-            (value?: Target) => value && save({ linkTarget: value })
-          "
-        />
-      </SettingsRow>
       <SettingsRow title="本地 URL 打开位置" label-for="browser-local-target">
         <template #description>
           <span>localhost 等本机开发站点</span>

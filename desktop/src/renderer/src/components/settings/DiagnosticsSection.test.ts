@@ -77,7 +77,8 @@ async function mount(): Promise<HTMLDivElement> {
   document.body.append(container)
   app = createApp({ render: () => h(DiagnosticsSection) })
   app.provide(APP_CONTEXT_KEY, {
-    boot: ref(null),
+    boot: ref({ model: 'deepseek-flash', projects: [{}, {}] }),
+    runtimeText: () => '在线',
     runSafely: async (task: () => Promise<void>) => task(),
   } as never)
   app.provide(SETTINGS_HEADER_KEY, createSettingsHeader())

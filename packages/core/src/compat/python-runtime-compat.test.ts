@@ -28,6 +28,7 @@ describe('Python runtime data compatibility (MIG-REL-003)', () => {
       'browser',
       'desktopPet',
       'prompt',
+      'sessions',
       'webTools',
       'webui',
     ])

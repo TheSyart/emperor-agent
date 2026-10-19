@@ -12,6 +12,26 @@ import { createSettingsHeader, SETTINGS_HEADER_KEY } from './settingsHeader'
 const { core } = vi.hoisted(() => ({ core: vi.fn() }))
 vi.mock('../../api/http', () => ({ core }))
 
+// UI-S07: Hooks and 诊断 are 高级's sub pages; their bodies are stand-ins.
+vi.mock('./HooksSection.vue', async () => {
+  const { defineComponent, h } = await import('vue')
+  return {
+    __esModule: true,
+    default: defineComponent({
+      render: () => h('p', { 'data-testid': 'hooks-body' }, 'Hooks'),
+    }),
+  }
+})
+vi.mock('./DiagnosticsSection.vue', async () => {
+  const { defineComponent, h } = await import('vue')
+  return {
+    __esModule: true,
+    default: defineComponent({
+      render: () => h('p', { 'data-testid': 'diagnostics-body' }, '诊断'),
+    }),
+  }
+})
+
 type Status = {
   webFetch: { enabled: boolean; available: boolean }
   webSearch: {
@@ -55,11 +75,13 @@ async function mount(): Promise<HTMLDivElement> {
     boot,
     runSafely: async (task: () => Promise<void>) => task(),
   } as never)
-  app.provide(SETTINGS_HEADER_KEY, createSettingsHeader())
+  app.provide(SETTINGS_HEADER_KEY, header)
   app.mount(root)
   await settle()
   return root
 }
+
+let header = createSettingsHeader()
 
 function toggle(element: HTMLElement, tool: string): HTMLButtonElement {
   const found = element.querySelector<HTMLButtonElement>(
@@ -76,6 +98,7 @@ function rowText(element: HTMLElement, tool: string): string {
 }
 
 beforeEach(() => {
+  header = createSettingsHeader()
   core.mockReset()
   boot.value = { tools: [{ name: 'web_fetch' }, { name: 'web_search' }] }
 })
@@ -167,5 +190,35 @@ describe('设置 › 高级 › 网络工具', () => {
     expect(toggle(element, 'web_search').getAttribute('aria-checked')).toBe(
       'true',
     )
+  })
+})
+
+describe('设置 › 高级 sub pages (UI-S07)', () => {
+  beforeEach(() => {
+    core.mockImplementation(async (operation: string) => {
+      if (operation === 'tools.networkSettings') return status({})
+      throw new Error(`unexpected ${operation}`)
+    })
+  })
+
+  it.each([
+    ['hooks', 'Hooks', 'hooks-body'],
+    ['diagnostics', '诊断', 'diagnostics-body'],
+  ])('opens %s from its row', async (page, title, body) => {
+    const element = await mount()
+    expect(element.querySelector(`[data-testid="${body}"]`)).toBeNull()
+    const entry = element.querySelector<HTMLButtonElement>(
+      `[data-advanced-page="${page}"]`,
+    )
+    expect(entry?.textContent).toContain(title)
+    entry?.click()
+    for (let i = 0; i < 4; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await settle()
+    }
+    expect(header.page.value).toBe(page)
+    expect(header.trail.value).toBe(title)
+    expect(element.querySelector(`[data-testid="${body}"]`)).not.toBeNull()
+    expect(element.textContent).not.toContain('网页读取')
   })
 })

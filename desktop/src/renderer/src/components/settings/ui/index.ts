@@ -9,7 +9,7 @@
  *
  * 2. The shell owns the chrome. The 54px header already shows the section
  *    title (never render another heading/title bar), the options area pads
- *    0 24px 24px, caps content at 720px (564px in the default 800px panel)
+ *    0 24px 24px, caps content at 720px (632px in the default 880px panel)
  *    and scrolls vertically. Never set overflow-x: hidden; long values wrap
  *    (overflow-wrap: anywhere) or scroll inside their own box (CodeEditor).
  *
@@ -69,6 +69,10 @@
  *      first, then the rest. When something is wrong, show one
  *      Notice at the top (tone warn / error / info, with the fix
  *      buttons) instead of status rows; a page that is fine shows none.
+ *    - A row that opens a sub page or a list is a SettingsLinkRow (the whole
+ *      row is the button, a chevron at the end). A list row keeps one main
+ *      action as a Button; the rest, deletes included, go in its
+ *      SettingsRowMenu (「⋯」).
  *    - SettingsRow: text left / control right; `layout="stacked"` puts the
  *      control under the text; `dense` for list rows; `#eyebrow` for a small
  *      label above the title (⚠ 风险升高). Rows stack automatically when
@@ -102,6 +106,8 @@ export { default as Checkbox } from '../../ui/Checkbox.vue'
 export { default as SettingsTable } from './SettingsTable.vue'
 export { default as SettingsTableRow } from './SettingsTableRow.vue'
 export { default as SettingsRow } from './SettingsRow.vue'
+export { default as SettingsLinkRow } from './SettingsLinkRow.vue'
+export { default as SettingsRowMenu } from './SettingsRowMenu.vue'
 export { default as SettingsCard } from './SettingsCard.vue'
 export { default as Field } from '../../ui/Field.vue'
 export { default as TextField } from '../../ui/TextField.vue'
@@ -119,6 +125,7 @@ export type {
   DefinitionItem,
   SegmentedOption,
   SelectOption,
+  SettingsRowMenuItem,
   SettingsTableColumn,
 } from './types'
 export {

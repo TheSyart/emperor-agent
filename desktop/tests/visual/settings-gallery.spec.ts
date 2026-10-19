@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 // Settings primitives gallery: dev-only `?settings-gallery` mount (main.ts)
-// rendering every components/settings/ui primitive in a mock 564px column.
+// rendering every components/settings/ui primitive in a mock 632px column.
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'settings-gallery')
 
 test.beforeAll(() => {
@@ -17,16 +17,16 @@ for (const theme of ['dark', 'light'] as const) {
     await page.addInitScript((value) => {
       localStorage.setItem('emperor.theme', value)
     }, theme)
-    await page.setViewportSize({ width: 900, height: 900 })
+    await page.setViewportSize({ width: 960, height: 900 })
     await page.goto('/?settings-gallery')
     const gallery = page.getByTestId('settings-gallery')
     await expect(gallery).toBeVisible()
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
 
-    // The options column is 564px wide (800 − 188 nav − 2 × 24 padding).
+    // The options column is 632px wide (880 − 200 nav − 2 × 24 padding).
     const section = gallery.locator('.ds-settings-section').first()
     const box = (await section.boundingBox())!
-    expect(Math.round(box.width)).toBe(564)
+    expect(Math.round(box.width)).toBe(632)
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - window.innerWidth,
     )

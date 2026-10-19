@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * SettingsGallery — dev-only showcase of the settings primitives inside a
- * mock settings panel (188px nav + 54px header + 564px options column), so
+ * mock settings panel (200px nav + 54px header + 632px options column), so
  * they are judged at their real width. Mounted by main.ts on
  * `?settings-gallery`; captured by tests/visual/settings-gallery.spec.ts in
  * light and dark.
@@ -166,7 +166,11 @@ const facts = [
 <template>
   <div class="gallery" data-testid="settings-gallery">
     <div class="panel">
-      <SettingsNav active="hooks" title-id="gallery-title" @select="() => {}" />
+      <SettingsNav
+        active="advanced"
+        title-id="gallery-title"
+        @select="() => {}"
+      />
       <div class="content">
         <div class="header">
           <h2 class="title">组件库</h2>
@@ -179,7 +183,7 @@ const facts = [
         </div>
         <div class="options">
           <SettingsSection
-            intro="设置分区的基础组件：行、分组、卡片、表单、展示。所有尺寸按 dsh 设置面板，内容区 564px。"
+            intro="设置分区的基础组件：行、分组、卡片、表单、展示。所有尺寸按设置面板，内容区 632px。"
           >
             <Notice
               tone="warn"
@@ -491,7 +495,7 @@ const facts = [
 .panel {
   container: settings-panel / inline-size;
   display: flex;
-  width: 800px;
+  width: 880px;
   max-width: 100%;
   overflow: hidden;
   border-radius: var(--radius-modal);

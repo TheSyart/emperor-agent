@@ -1972,6 +1972,22 @@ export const CORE_OPERATION_REGISTRY = {
   'sessions.listDeleted': operation(z.tuple([]), (api) =>
     api.sessions.listDeleted(),
   ),
+  'sessions.defaults': operation(z.tuple([]), (api) => api.sessions.defaults()),
+  'sessions.setDefaults': operation(
+    z.tuple([
+      z
+        .object({
+          permission: z.enum([
+            'read-only',
+            'workspace-write',
+            'danger-full-access',
+          ]),
+        })
+        .strict(),
+    ]),
+    (api, [change], ctx) =>
+      api.sessions.setDefaults(change, viewOf(ctx, 'sessions.setDefaults')),
+  ),
   'sessions.restoreDeleted': operation(z.tuple([idSchema]), (api, [id]) =>
     api.sessions.restoreDeleted(id),
   ),

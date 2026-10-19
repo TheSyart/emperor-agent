@@ -1,6 +1,10 @@
 <script setup lang="ts">
 /**
- * Settings › 高级 — settings most people leave alone.
+ * Settings › 高级 — settings most people leave alone (UI-S07): 网络工具 on
+ * the main page, and rows into the sub pages Hooks (`page=hooks`,
+ * HooksSection) and 诊断 (`page=diagnostics`, DiagnosticsSection), which
+ * bring their own header actions. Old `?settings=hooks|diagnostics` links
+ * land on those sub pages (settingsAlias).
  *
  * 网络工具 (KRN-08, settings.json › webTools): the Agent's two web tools.
  * - 网页读取 (`web_fetch`): public pages as Markdown through main's public
@@ -13,22 +17,33 @@
  * is reloaded. A failed save leaves the switch where it was and says why.
  */
 import type { CoreOperationResult } from '@emperor/core/api'
-import { computed, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import { core } from '../../api/http'
 import { useAppContext } from '../../composables/useAppContext'
+import { useSettingsPages } from './settingsHeader'
 import {
   refreshAction,
   SettingsGroup,
+  SettingsLinkRow,
   SettingsRow,
   SettingsSection,
   Switch,
   useSettingsHeader,
 } from './ui'
 
+const HooksSection = defineAsyncComponent(() => import('./HooksSection.vue'))
+const DiagnosticsSection = defineAsyncComponent(
+  () => import('./DiagnosticsSection.vue'),
+)
+
 type NetworkTools = CoreOperationResult<'tools.networkSettings'>
 type Tool = 'webFetch' | 'webSearch'
 
 const ctx = useAppContext()
+const { page, open: openPage } = useSettingsPages({
+  hooks: 'Hooks',
+  diagnostics: '诊断',
+})
 const status = ref<NetworkTools | null>(null)
 const busy = ref<Tool | null>(null)
 const error = ref('')
@@ -99,15 +114,21 @@ function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
 }
 
+// A sub page brings its own actions.
 useSettingsHeader({
-  actions: () => [refreshAction(() => load(), { label: '刷新网络工具状态' })],
+  actions: () =>
+    page.value === null
+      ? [refreshAction(() => load(), { label: '刷新网络工具状态' })]
+      : [],
 })
 
 onMounted(() => void load())
 </script>
 
 <template>
-  <SettingsSection>
+  <HooksSection v-if="page === 'hooks'" />
+  <DiagnosticsSection v-else-if="page === 'diagnostics'" />
+  <SettingsSection v-else>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <SettingsGroup
       title="网络工具"
@@ -140,6 +161,20 @@ onMounted(() => void load())
           @update:model-value="(value: boolean) => set('webSearch', value)"
         />
       </SettingsRow>
+    </SettingsGroup>
+    <SettingsGroup title="自动化与排查" data-group="advanced-pages">
+      <SettingsLinkRow
+        title="Hooks"
+        description="在指定事件发生时自动运行命令：编辑 hooks.json、测试匹配、查看运行记录"
+        data-advanced-page="hooks"
+        @click="openPage('hooks')"
+      />
+      <SettingsLinkRow
+        title="诊断"
+        description="运行时、环境、存储路径与配置的状态；出问题时复制报告"
+        data-advanced-page="diagnostics"
+        @click="openPage('diagnostics')"
+      />
     </SettingsGroup>
   </SettingsSection>
 </template>

@@ -114,9 +114,11 @@ export function createHooksController() {
       auditHistory.value = []
       selectedAudit.value = null
       selectedEventName.value ||= nextMetadata.events?.[0]?.eventName ?? ''
-      draft.value = hooksEditorSeed(nextPayload)
-      dirty.value = false
-      validation.value = null
+      // A reload keeps an edited draft (UI-S07); 「还原」 drops it.
+      if (!dirty.value) {
+        draft.value = hooksEditorSeed(nextPayload)
+        validation.value = null
+      }
     } catch (cause) {
       error.value = messageOf(cause)
     } finally {

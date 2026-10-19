@@ -159,7 +159,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(rows(page)).toHaveCount(0)
     await shot(page, `gh-missing-${theme}`)
     await page.getByRole('button', { name: '前往诊断' }).click()
-    await expect(page).toHaveURL(/settings=diagnostics/)
+    await expect(page).toHaveURL(/settings=advanced&page=diagnostics/)
   })
 
   test(`gh not logged in (${theme})`, async ({ page }) => {

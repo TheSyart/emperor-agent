@@ -54,11 +54,7 @@ import {
   Badge,
   Switch,
 } from './ui'
-import {
-  refreshAction,
-  useSettingsHeader,
-  useSettingsPages,
-} from './settingsHeader'
+import { useSettingsPages } from './settingsHeader'
 import {
   computerUseHeadline,
   desktopNotice,
@@ -307,8 +303,8 @@ function refreshOnReturn(): void {
     void ctx.runSafely(reload)
 }
 
-useSettingsHeader({ actions: () => [refreshAction(() => reload())] })
-
+// No header refresh: the page reloads on computer_use_changed and when the
+// window comes back from System Settings.
 let unsubscribe = () => {}
 let timer: ReturnType<typeof setTimeout> | null = null
 

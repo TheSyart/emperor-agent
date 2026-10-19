@@ -11,6 +11,7 @@ import {
 } from 'vue-router'
 import {
   normalizeSettingsSection,
+  settingsAlias,
   type SettingsSectionKey,
 } from './components/settings/settingsSections'
 
@@ -145,13 +146,18 @@ export const routeRecords: RouteRecordRaw[] = [
   // Retired standalone pages: deep links open the settings modal instead.
   {
     path: '/settings/:section?',
-    redirect: settingsRedirect((to) =>
-      normalizeSettingsSection(firstParam(to.params.section)),
+    redirect: settingsRedirect(
+      (to) => normalizeSettingsSection(firstParam(to.params.section)),
+      (to): Record<string, string> => {
+        const page = settingsAlias(firstParam(to.params.section))?.page
+        return page ? { page } : {}
+      },
     ),
   },
   { path: '/model', redirect: settingsRedirect('model') },
   { path: '/configs', redirect: settingsRedirect('memory') },
-  { path: '/pet', redirect: settingsRedirect('pet') },
+  // 桌宠 is a switch in 常规 › 外观 now.
+  { path: '/pet', redirect: settingsRedirect('general') },
   { path: '/memory', redirect: settingsRedirect('memory') },
   { path: '/tokens', redirect: settingsRedirect('tokens') },
   { path: '/team', redirect: '/chat' },
@@ -169,12 +175,26 @@ const SETTINGS_PAGE_PATHS: Record<string, string> = {
 
 /**
  * Where a `?settings=<section>` link of a section that became a page goes
- * (null: stay). Other query keys carry over; `skill` only for Skills.
+ * (null: stay). Other query keys carry over; `skill` only for Skills. A
+ * section folded into another one (Hooks, 诊断 → 高级; 桌宠 → 常规) opens
+ * there, on its sub page when it has one.
  */
 export function settingsPageRedirect(
-  to: Pick<RouteLocationNormalized, 'query'>,
+  to: Pick<RouteLocationNormalized, 'query' | 'path'>,
 ): RouteLocationRaw | null {
   const section = firstParam(to.query.settings)
+  const alias = settingsAlias(section)
+  if (alias) {
+    const { settings: _settings, page: _page, ...rest } = to.query
+    return {
+      path: to.path,
+      query: {
+        ...rest,
+        settings: alias.section,
+        ...(alias.page ? { page: alias.page } : {}),
+      },
+    }
+  }
   const path = SETTINGS_PAGE_PATHS[section]
   if (!path) return null
   const { settings: _settings, page: _page, skill, ...rest } = to.query
