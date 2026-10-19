@@ -24,6 +24,7 @@
     "package:dir": "electron-builder --dir --publish never --config electron-builder.preview.cjs",
     "package:smoke": "node scripts/run-packaged-smoke.cjs",
     "package:verify": "npm run package:dir && npm run package:smoke",
+    "package:probe": "node scripts/probe-packaged-hardening.cjs",
     "terminal:smoke": "node scripts/fix-node-pty-permissions.cjs && node scripts/smoke-node-pty.cjs",
     "dist:mac": "cd .. && scripts/build_desktop_release.sh",
     "dist:linux": "npm run build && electron-builder --linux AppImage --publish never",

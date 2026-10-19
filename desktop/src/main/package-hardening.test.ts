@@ -393,11 +393,19 @@ describe('ad-hoc hardened-runtime seal (SEC-04)', () => {
     )
   })
 
-  it('declares @electron/fuses at an exact version', () => {
+  it('declares @electron/fuses at an exact version, and the hardening probes', () => {
     const pkg = JSON.parse(read('package.json')) as {
       devDependencies: Record<string, string>
+      scripts: Record<string, string>
     }
     expect(pkg.devDependencies['@electron/fuses']).toBe('1.8.0')
+    expect(pkg.scripts['package:probe']).toBe(
+      'node scripts/probe-packaged-hardening.cjs',
+    )
+    const probe = read('scripts/probe-packaged-hardening.cjs')
+    // Every launch it makes uses a synthetic home and temp state.
+    expect(probe).toContain('CFFIXED_USER_HOME: home')
+    expect(probe).not.toMatch(/\.\.\.process\.env/)
     function read(file: string) {
       return fs.readFileSync(path.join(desktopRoot, file), 'utf8')
     }
