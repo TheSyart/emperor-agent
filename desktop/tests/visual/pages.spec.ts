@@ -6,9 +6,10 @@ import { installVisualCoreBridge } from './visualBridge'
 
 // Full pages that left the settings modal: 定时任务 (/scheduler: tabs, rows,
 // row menu, edit / create dialog), 能力 (/capabilities: 插件 / Skills / MCP /
-// 工具 tabs),
-// 探索 (/explore: catalog grid, filters, the Skill and MCP install dialogs)
-// and the settings modal without those four sections — both themes.
+// 工具 tabs, with the 推荐 block that replaced /explore: the picks, the
+// Skill and MCP install dialogs) and the settings modal without those
+// sections — both themes. UI-S08: every page is 880 wide and the GitHub tabs
+// keep their title in place.
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'pages')
 
 test.beforeAll(() => {
@@ -284,76 +285,57 @@ for (const theme of ['dark', 'light'] as const) {
   })
 }
 
-// ── 探索 ────────────────────────────────────────────────────────────────
+// ── 能力 › 推荐 (the former 探索, UI-S08) ────────────────────────────────
 
-function cards(shell: Locator) {
-  return shell.locator('.explore-card')
+function picks(shell: Locator) {
+  return shell.locator('[data-recommendation]')
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`explore page grid and filters (${theme})`, async ({ page }) => {
-    const shell = await open(page, '/explore', { theme })
-    await expect(
-      shell.getByRole('heading', { name: '探索', level: 1 }),
-    ).toBeVisible()
-    await expect(cards(shell)).toHaveCount(8)
-    // Two columns at this width.
-    const tops = await cards(shell).evaluateAll((els) =>
-      els.slice(0, 2).map((el) => Math.round(el.getBoundingClientRect().top)),
-    )
-    expect(tops[0]).toBe(tops[1])
-    await expectPageFits(page)
-    await shot(page, `explore-${theme}`)
-
-    const chips = shell.getByRole('radiogroup', { name: '按类型筛选' })
-    await chips.locator('[data-filter="skill"]').click()
-    await expect(cards(shell)).toHaveCount(4)
-    await chips.locator('[data-filter="mcp"]').click()
-    await expect(cards(shell)).toHaveCount(4)
-    await expect(chips.locator('[data-filter="mcp"]')).toHaveAttribute(
-      'aria-checked',
-      'true',
-    )
-    await shot(page, `explore-mcp-${theme}`)
-    await chips.locator('[data-filter="plugin"]').click()
-    await expect(cards(shell)).toHaveCount(0)
-    await expect(shell.getByTestId('explore-empty')).toContainText(
-      '暂无精选插件',
-    )
-    await shot(page, `explore-plugins-empty-${theme}`)
-
-    await chips.locator('[data-filter="all"]').click()
-    await shell.getByRole('searchbox').fill('Playwright')
-    await expect(cards(shell)).toHaveCount(1)
-    await expect(
-      shell.locator('[data-entry-id="anthropic-webapp-testing"]'),
-    ).toBeVisible()
-
-    await shell
-      .locator('[data-entry-id="anthropic-webapp-testing"]')
-      .locator('[data-action="homepage"]')
-      .click()
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () =>
-            (window as unknown as { __visualExternal?: string[] })
-              .__visualExternal ?? [],
-        ),
-      )
-      .toContain(
-        'https://github.com/anthropics/skills/tree/main/skills/webapp-testing',
-      )
-  })
-
-  test(`explore install dialogs: Skill and MCP (${theme})`, async ({
+  test(`能力 opens with 推荐, filtered by the tab (${theme})`, async ({
     page,
   }) => {
     const shell = await open(page, '/explore', { theme })
+    // /explore lands on 能力's 推荐 block.
+    await expect(page).toHaveURL(/\/capabilities(\?[^#]*)?#recommended$/)
+    await expect(
+      shell.getByRole('heading', { name: '能力', level: 1 }),
+    ).toBeVisible()
+    const block = shell.getByTestId('capability-recommendations')
+    await expect(block).toBeVisible()
+    await expect(picks(shell)).toHaveCount(6)
+    // A card is an icon, a name, one line and 安装 — no type badge, no tags.
+    const first = picks(shell).first()
+    await expect(first.locator('.recommendation-icon')).toBeVisible()
+    await expect(first.locator('.ds-badge, .ds-tag')).toHaveCount(0)
+    await expect(first.getByRole('button')).toHaveCount(1)
+    await expectPageFits(page)
+    await shot(page, `capabilities-recommended-${theme}`)
+
+    await shell.getByRole('tab', { name: 'Skills' }).click()
+    await expect(picks(shell)).toHaveCount(4)
+    await expect(picks(shell).first()).toHaveAttribute('data-kind', 'skill')
+    await shell.getByRole('tab', { name: 'MCP' }).click()
+    await expect(picks(shell)).toHaveCount(4)
+    await expect(picks(shell).first()).toHaveAttribute('data-kind', 'mcp')
+    await shell.getByRole('tab', { name: '工具' }).click()
+    await expect(block).toHaveCount(0)
+    // The rail has no 探索 any more.
+    await expect(
+      page
+        .getByRole('navigation', { name: '应用导航' })
+        .getByRole('button', { name: '探索' }),
+    ).toHaveCount(0)
+  })
+
+  test(`推荐 installs: Skill and MCP (${theme})`, async ({ page }) => {
+    const shell = await open(page, '/capabilities/skills', { theme })
 
     // Skill → the URL import dialog, prefilled; importing needs 「导入」.
-    const builder = shell.locator('[data-entry-id="anthropic-mcp-builder"]')
-    await builder.locator('[data-action="install"]').click()
+    const builder = shell.locator(
+      '[data-recommendation="anthropic-mcp-builder"]',
+    )
+    await builder.getByRole('button').click()
     const importer = page.getByRole('dialog', { name: '导入 Skill' })
     await expect(importer).toBeVisible()
     await expect(
@@ -362,34 +344,81 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(importer.getByLabel('链接')).toHaveValue(
       'https://github.com/anthropics/skills/tree/main/skills/mcp-builder',
     )
-    await shot(page, `explore-install-skill-${theme}`)
+    await shot(page, `recommended-install-skill-${theme}`)
     await importer.getByTestId('skill-import-submit').click()
     await expect(importer.getByTestId('skill-import-result')).toContainText(
       '已导入 Skill「mcp-builder」',
     )
     await importer.locator('[data-action="done"]').click()
     await expect(importer).toBeHidden()
-    await expect(builder.locator('[data-action="install"]')).toHaveText(
-      '已安装',
-    )
+    await expect(builder.getByRole('button')).toHaveText('已安装')
 
     // MCP → the add dialog with the entry JSON and its dry-run preview.
-    const memory = shell.locator('[data-entry-id="mcp-memory"]')
-    await memory.locator('[data-action="install"]').click()
+    await shell.getByRole('tab', { name: 'MCP' }).click()
+    const memory = shell.locator('[data-recommendation="mcp-memory"]')
+    await memory.getByRole('button').click()
     const add = page.getByRole('dialog', { name: '添加 MCP 服务器' })
     await expect(add).toBeVisible()
     await expect(add.getByLabel('配置 JSON')).toHaveValue(
       /@modelcontextprotocol\/server-memory/,
     )
-    const row = add.locator('.row[data-server="memory"]')
-    await expect(row).toContainText('新增')
-    await shot(page, `explore-install-mcp-${theme}`)
+    await expect(add.locator('.row[data-server="memory"]')).toContainText(
+      '新增',
+    )
+    await shot(page, `recommended-install-mcp-${theme}`)
     await add.getByRole('button', { name: '导入', exact: true }).click()
     await expect(add).toBeHidden()
-    await expect(memory.locator('[data-action="install"]')).toHaveText('已安装')
-    await expect(shell).toBeVisible()
+    await expect(memory.getByRole('button')).toHaveText('已安装')
   })
 }
+
+// ── Page frame (UI-S08) ──────────────────────────────────────────────────
+
+test('every page body is 880 wide and the title is 20/600', async ({
+  page,
+}) => {
+  for (const path of ['/scheduler', '/capabilities', '/github/issues']) {
+    await open(page, path, { theme: 'light', width: 1440, height: 900 })
+    const body = page.locator('.page-shell .page-body').first()
+    const width = await body.evaluate((el) =>
+      Math.round(el.getBoundingClientRect().width),
+    )
+    expect(width, path).toBe(880)
+    const title = page.locator('.page-shell .page-title').first()
+    await expect(title).toHaveCSS('font-size', '20px')
+    await expect(title).toHaveCSS('font-weight', '600')
+  }
+})
+
+test('the GitHub tabs keep their title in place (UI-S08 1)', async ({
+  page,
+}) => {
+  const spots: Record<string, unknown> = {}
+  for (const path of ['/pulls', '/github/issues', '/github/ci']) {
+    await open(page, path, { theme: 'dark', width: 1440, height: 900 })
+    const title = page.locator('.page-shell .page-title').first()
+    await expect(title).toHaveText('GitHub')
+    const tabs = page.locator('.page-shell .page-tabs').first()
+    const [t, b] = await Promise.all([title.boundingBox(), tabs.boundingBox()])
+    spots[path] = {
+      title: [Math.round(t!.x), Math.round(t!.y)],
+      tabs: [Math.round(b!.x), Math.round(b!.y), Math.round(b!.width)],
+    }
+  }
+  expect(spots['/github/issues']).toEqual(spots['/pulls'])
+  expect(spots['/github/ci']).toEqual(spots['/pulls'])
+})
+
+test('定时任务 keeps the service note behind ⓘ (UI-S08 5)', async ({
+  page,
+}) => {
+  await open(page, '/scheduler', { theme: 'light', width: 1280, height: 860 })
+  await expect(page.getByTestId('scheduler-summary')).toBeVisible()
+  await expect(page.getByText('最多补跑一次')).toHaveCount(0)
+  await page.getByRole('button', { name: '关于定时任务服务' }).click()
+  await expect(page.getByText(/最多补跑一次/)).toBeVisible()
+  await shot(page, 'scheduler-note-light')
+})
 
 // ── Settings modal without the page sections ───────────────────────────
 
@@ -445,23 +474,23 @@ test('moved settings links open their pages', async ({ page }) => {
 })
 
 test('pages fit a narrow window', async ({ page }) => {
-  for (const path of ['/scheduler', '/capabilities/skills', '/explore']) {
+  for (const path of ['/scheduler', '/capabilities/skills', '/capabilities']) {
     await open(page, path, { theme: 'light', width: 700, height: 820 })
     await expectPageFits(page)
   }
-  await shot(page, 'explore-700-light')
-  const shell = await open(page, '/explore', {
+  await shot(page, 'capabilities-700-light')
+  const shell = await open(page, '/capabilities', {
     theme: 'light',
     width: 480,
     height: 820,
   })
   await expectPageFits(page)
-  // One card per row below the two-column breakpoint.
-  const lefts = await cards(shell).evaluateAll((els) =>
+  // One pick per row when narrow.
+  const lefts = await picks(shell).evaluateAll((els) =>
     els.slice(0, 2).map((el) => Math.round(el.getBoundingClientRect().left)),
   )
   expect(lefts[0]).toBe(lefts[1])
-  await shot(page, 'explore-narrow-light')
+  await shot(page, 'capabilities-narrow-light')
   await open(page, '/scheduler', { theme: 'light', width: 700, height: 820 })
   await shot(page, 'scheduler-narrow-light')
 })

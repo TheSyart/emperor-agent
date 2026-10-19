@@ -127,7 +127,11 @@ export const routeRecords: RouteRecordRaw[] = [
   // 探索 is the 推荐 block of 能力 now (UI-S08).
   {
     path: '/explore',
-    redirect: { path: '/capabilities', hash: '#recommended' },
+    redirect: (to) => ({
+      path: '/capabilities',
+      query: to.query,
+      hash: '#recommended',
+    }),
   },
   {
     path: '/skills/:name?',
