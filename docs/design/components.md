@@ -9,15 +9,16 @@
 
 ## 基础与操作
 
-| 组件       | 用途与变体                                                                                       |
-| ---------- | ------------------------------------------------------------------------------------------------ |
-| Icon       | 统一图标注册表，尺寸 xs 12 / sm 14 / md 16 / lg 20，线条 1.5；不接受刻度以外的尺寸               |
-| Button     | primary（金色，每屏最多一个）/ secondary / ghost / danger（只在确认场景）；sm 28 / md 32 / lg 40 |
-| IconButton | 只有图标的按钮，xs 20 / sm 28 / md 32；必须有 `label`，提示走 Tooltip，不用原生 title            |
-| LinkButton | 行内文字按钮，`--text-link`                                                                      |
-| Spinner    | sm / md，neutral / accent；减少动态效果时不旋转                                                  |
-| Skeleton   | 行、块、圆                                                                                       |
-| Kbd        | 快捷键提示                                                                                       |
+| 组件       | 用途与变体                                                                                                                                                                             |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Icon       | 统一图标注册表，尺寸 xs 12 / sm 14 / md 16 / lg 20，线条 1.5；不接受刻度以外的尺寸                                                                                                     |
+| Button     | primary（金色，每屏最多一个）/ secondary / ghost / danger（只在确认场景）；sm 28 / md 32 / lg 40                                                                                       |
+| IconButton | 只有图标的按钮，xs 20 / sm 28 / md 32 / lg 36（图标栏）；必须有 `label`，提示走 Tooltip，不用原生 title；`selected` 画 `--surface-selected`（导航条的当前项，aria-current 由调用方给） |
+| LinkButton | 行内文字按钮，`--text-link`                                                                                                                                                            |
+| Spinner    | sm / md，neutral / accent；减少动态效果时不旋转                                                                                                                                        |
+| Skeleton   | 行、块、圆                                                                                                                                                                             |
+| Kbd        | 快捷键提示                                                                                                                                                                             |
+| Tooltip    | 悬停与聚焦气泡（Tooltip 与 IconButton 共用 `useTooltip`），可带快捷键；`top` 气泡离窗口顶边不足 40px 时改在下方（无标题栏窗口的顶栏），贴左右边时收回窗口内                            |
 
 ## 显示
 
@@ -39,7 +40,7 @@
 | Surface            | 面板级容器：raised（默认，比面板高一级 + 细线）/ sunken（代码、凹陷区）/ overlay（浮层 + 层级阴影）；`pad` none / sm 12 / md 16；`radius` md 12 / lg 16；`interactive` 加悬停与焦点（配 `as="button"`）                             |
 | EmptyState         | block（20px 图标 + 标题 + 描述 + 按钮，居中）/ inline（单行，可带一个尾部操作）；`framed` 画虚线框，放在卡片里时自动去掉                                                                                                            |
 | Notice             | 提示条：左侧图标 + 标题 + 说明 + 可选操作；tone 与 Badge 相同，warn / error 以 role=alert 播报。只在问题存在时出现                                                                                                                  |
-| PaneHeader         | 面板顶栏，固定 48px：标题 + 可选 Tabs + 右侧操作；长标题截断，高度不随内容变化                                                                                                                                                      |
+| PaneHeader         | 面板顶栏，固定 48px：标题 + 可选 Tabs + 右侧操作；长标题截断，高度不随内容变化。工作台用它做顶栏，上移 2px 与 46px 的列顶栏对齐（见[外壳布局](layout.md)）                                                                          |
 
 ## 输入
 
