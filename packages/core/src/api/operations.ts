@@ -1796,15 +1796,18 @@ export const CORE_OPERATION_REGISTRY = {
   ),
   'model.saveEntries': operation(
     z.tuple([modelEntriesSaveSchema]),
-    (api, [input]) => api.model.saveEntries(input),
+    (api, [input], ctx) =>
+      api.model.saveEntries(input, viewOf(ctx, 'model.saveEntries')),
   ),
   'model.updateConnection': operation(
     z.tuple([modelConnectionUpdateSchema]),
-    (api, [input]) => api.model.updateConnection(input),
+    (api, [input], ctx) =>
+      api.model.updateConnection(input, viewOf(ctx, 'model.updateConnection')),
   ),
   'model.refreshMetadata': operation(
     z.tuple([modelMetadataRefreshSchema]),
-    (api, [input]) => api.model.refreshMetadata(input),
+    (api, [input], ctx) =>
+      api.model.refreshMetadata(input, viewOf(ctx, 'model.refreshMetadata')),
   ),
   'model.lookupDefaults': operation(
     z.tuple([modelDefaultsSchema]),
@@ -1812,7 +1815,8 @@ export const CORE_OPERATION_REGISTRY = {
   ),
   'model.discardRejected': operation(
     z.tuple([modelRejectedKeySchema]),
-    (api, [input]) => api.model.discardRejected(input),
+    (api, [input], ctx) =>
+      api.model.discardRejected(input, viewOf(ctx, 'model.discardRejected')),
   ),
   'model.savePolicy': operation(
     z.tuple([modelExecutionPolicySchema]),

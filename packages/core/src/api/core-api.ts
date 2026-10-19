@@ -1775,15 +1775,17 @@ export class CoreApi {
     },
     saveEntries: async (
       input: Parameters<CoreModelService['saveEntries']>[0],
+      view: ViewScope,
     ) => {
-      this.assertMutation('model', 'saveEntries')
+      this.assertMutation('model', 'saveEntries', view)
       await this.hooksService.authorizeConfigChange('model.saveEntries', input)
       return this.modelService.saveEntries(input)
     },
     updateConnection: async (
       input: Parameters<CoreModelService['updateConnection']>[0],
+      view: ViewScope,
     ) => {
-      this.assertMutation('model', 'updateConnection')
+      this.assertMutation('model', 'updateConnection', view)
       await this.hooksService.authorizeConfigChange('model.updateConnection', {
         ...input,
         apiKey: input.apiKey ? '***' : input.apiKey,
@@ -1792,10 +1794,11 @@ export class CoreApi {
     },
     refreshMetadata: async (
       input: Parameters<CoreModelService['refreshMetadata']>[0],
+      view: ViewScope,
     ) => {
       // A preview only reads; applying writes the file.
       if (input.apply) {
-        this.assertMutation('model', 'refreshMetadata')
+        this.assertMutation('model', 'refreshMetadata', view)
         await this.hooksService.authorizeConfigChange(
           'model.refreshMetadata',
           input,
@@ -1806,8 +1809,8 @@ export class CoreApi {
     lookupDefaults: (
       input: Parameters<CoreModelService['lookupDefaults']>[0],
     ) => this.modelService.lookupDefaults(input),
-    discardRejected: async ({ key }: { key: string }) => {
-      this.assertMutation('model', 'discardRejected')
+    discardRejected: async ({ key }: { key: string }, view: ViewScope) => {
+      this.assertMutation('model', 'discardRejected', view)
       await this.hooksService.authorizeConfigChange('model.discardRejected', {
         key,
       })
