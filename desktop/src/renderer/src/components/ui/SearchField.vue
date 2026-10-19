@@ -20,7 +20,7 @@
  */
 import { computed, ref, useAttrs } from 'vue'
 import IconButton from './IconButton.vue'
-import Icon from './Icon.vue'
+import { DsClose, DsSearch } from '../icons/ds'
 import { useFieldControl } from './fieldContext'
 
 defineOptions({ inheritAttrs: false })
@@ -85,7 +85,7 @@ defineExpose({
     :data-disabled="disabled || undefined"
     :data-filled="model ? true : undefined"
   >
-    <Icon name="search" size="sm" class="glyph" />
+    <DsSearch :size="14" class="glyph" aria-hidden="true" />
     <input
       v-bind="inputAttrs"
       :id="control.id.value"
@@ -113,7 +113,7 @@ defineExpose({
       :tooltip="false"
       @click="clear"
     >
-      <Icon name="close" size="xs" />
+      <DsClose :size="12" aria-hidden="true" />
     </IconButton>
   </div>
 </template>

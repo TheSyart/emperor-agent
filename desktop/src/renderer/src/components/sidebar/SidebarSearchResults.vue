@@ -4,7 +4,6 @@
  * capsule has a query). ↑ / ↓ / Enter are handled by the capsule input; a
  * mousedown here never steals its focus.
  */
-import EmptyState from '../ui/EmptyState.vue'
 import type { SidebarSearchResult } from '../../runtime/sidebarModel'
 
 defineProps<{ results: SidebarSearchResult[]; selectedIndex: number }>()
@@ -26,12 +25,7 @@ const emit = defineEmits<{ hover: [index: number]; open: [id: string] }>()
       <span class="search-title">{{ result.title }}</span>
       <span class="search-meta">{{ result.subtitle }}</span>
     </button>
-    <EmptyState
-      v-if="!results.length"
-      class="empty"
-      variant="inline"
-      title="没有匹配的会话"
-    />
+    <div v-if="!results.length" class="empty">没有匹配的会话</div>
   </div>
 </template>
 
@@ -84,6 +78,9 @@ const emit = defineEmits<{ hover: [index: number]; open: [id: string] }>()
 }
 
 .empty {
-  margin: 0 var(--space-2);
+  padding: var(--space-2);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  color: rgb(var(--label-caption));
 }
 </style>

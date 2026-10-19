@@ -10,7 +10,6 @@
  * owned by AppFrame; this fills the column it is given. The persisted
  * layout (sorts, orders, pins) lives in useSidebarState.
  */
-import EmptyState from '../ui/EmptyState.vue'
 import { elementOf } from '../ui/elementOf'
 import IconButton from '../ui/IconButton.vue'
 import SearchField from '../ui/SearchField.vue'
@@ -383,7 +382,7 @@ defineExpose({ focusSearch })
     />
 
     <div class="region">
-      <div v-if="loading && !sessions.length" class="loading">加载中…</div>
+      <div v-if="loading && !sessions.length" class="empty">加载中…</div>
 
       <SidebarSearchResults
         v-else-if="searching"
@@ -470,20 +469,14 @@ defineExpose({ focusSearch })
                     "
                   />
                 </template>
-                <EmptyState
-                  v-if="!project.sessions.length"
-                  class="empty nested"
-                  variant="inline"
-                  title="暂无会话"
-                />
+                <div v-if="!project.sessions.length" class="empty nested">
+                  暂无会话
+                </div>
               </template>
             </template>
-            <EmptyState
-              v-if="!grouped.projects.length"
-              class="empty"
-              variant="inline"
-              title="还没有绑定项目"
-            />
+            <div v-if="!grouped.projects.length" class="empty">
+              还没有绑定项目
+            </div>
           </template>
         </section>
 
@@ -525,12 +518,7 @@ defineExpose({ focusSearch })
                 />
               </template>
             </template>
-            <EmptyState
-              v-if="!grouped.chats.length"
-              class="empty"
-              variant="inline"
-              title="暂无对话"
-            />
+            <div v-if="!grouped.chats.length" class="empty">暂无对话</div>
           </template>
         </section>
       </div>
@@ -699,18 +687,14 @@ defineExpose({ focusSearch })
   color: rgb(var(--label-caption));
 }
 
-.loading {
+.empty {
   padding: var(--space-2);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   color: rgb(var(--label-caption));
 }
 
-.empty {
-  margin: 0 var(--space-2);
-}
-
 .empty.nested {
-  margin-left: calc(var(--space-2) + var(--space-5) + 2px);
+  padding-left: calc(var(--space-2) + var(--space-5) + 2px);
 }
 </style>

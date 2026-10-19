@@ -10,7 +10,7 @@
  * Emits: click, remove.
  */
 import { computed } from 'vue'
-import Icon from './Icon.vue'
+import { DsClose } from '../icons/ds'
 
 const props = withDefaults(
   defineProps<{
@@ -72,7 +72,7 @@ function onKeydown(event: KeyboardEvent) {
       :aria-label="removeName"
       @click.stop="emit('remove')"
     >
-      <Icon name="close" size="xs" />
+      <DsClose :size="12" />
     </button>
   </span>
 </template>

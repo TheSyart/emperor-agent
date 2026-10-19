@@ -8,34 +8,38 @@
  *         something is missing) | error (an action failed) | attention
  * warn / error announce as role=alert, the others as role=status.
  *
- * Props: tone, title?, description? (or the default slot), icon? (a
- * registry name overriding the tone's glyph).
+ * Props: tone, title?, description? (or the default slot), icon? (a 16px
+ * glyph component overriding the tone's glyph).
  * Slots: default (description), `actions` (Button size="sm").
  */
-import { computed } from 'vue'
-import Icon from './Icon.vue'
+import { computed, type Component } from 'vue'
+import { CircleAlert, CircleCheck, Info } from 'lucide-vue-next'
+import { DsWarning } from '../icons/ds'
 
 const props = withDefaults(
   defineProps<{
     tone?: 'neutral' | 'accent' | 'ok' | 'warn' | 'error' | 'attention' | 'info'
     title?: string
     description?: string
-    icon?: string
+    icon?: Component
   }>(),
   { tone: 'warn', title: undefined, description: undefined, icon: undefined },
 )
 
-const TONE_ICONS: Record<string, string> = {
-  neutral: 'info',
-  accent: 'info',
-  ok: 'circle-check',
-  warn: 'warning',
-  error: 'circle-alert',
-  attention: 'warning',
-  info: 'info',
+// Direct glyph imports keep the whole icon registry out of the bundles
+// that carry a Notice.
+const TONE_ICONS: Record<string, Component> = {
+  neutral: Info,
+  accent: Info,
+  ok: CircleCheck,
+  warn: DsWarning,
+  error: CircleAlert,
+  attention: DsWarning,
+  info: Info,
 }
 
 const glyph = computed(() => props.icon ?? TONE_ICONS[props.tone]!)
+const lucide = computed(() => glyph.value !== DsWarning)
 </script>
 
 <template>
@@ -44,7 +48,13 @@ const glyph = computed(() => props.icon ?? TONE_ICONS[props.tone]!)
     :data-tone="tone"
     :role="tone === 'warn' || tone === 'error' ? 'alert' : 'status'"
   >
-    <Icon :name="glyph" size="md" class="icon" />
+    <component
+      :is="glyph"
+      class="icon"
+      :size="16"
+      v-bind="lucide ? { 'stroke-width': 1.5 } : {}"
+      aria-hidden="true"
+    />
     <div class="body">
       <p v-if="title" class="title">{{ title }}</p>
       <div v-if="$slots.default || description" class="description">

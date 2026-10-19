@@ -21,7 +21,7 @@
  * aria-label and other attributes land on the strip.
  */
 import Badge from './Badge.vue'
-import Icon from './Icon.vue'
+import { DsClose } from '../icons/ds'
 import type { TabItem } from './blockTypes'
 
 const props = withDefaults(
@@ -122,7 +122,7 @@ function onKeydown(event: KeyboardEvent, tab: TabItem) {
         :disabled="tab.disabled"
         @click.stop="emit('close', tab.id)"
       >
-        <Icon name="close" size="xs" />
+        <DsClose :size="12" />
       </button>
     </span>
   </div>

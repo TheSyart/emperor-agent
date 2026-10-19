@@ -13,7 +13,8 @@
  * Emits: update:modelValue, update:indeterminate, change(value).
  */
 import { computed } from 'vue'
-import Icon from './Icon.vue'
+import { Minus } from 'lucide-vue-next'
+import { DsCheck } from '../icons/ds'
 import { useFieldControl } from './fieldContext'
 
 const props = withDefaults(
@@ -66,8 +67,8 @@ function onChange(event: Event) {
         @change="onChange"
       />
       <span class="box" aria-hidden="true">
-        <Icon v-if="state === 'checked'" name="check" size="xs" />
-        <Icon v-else-if="state === 'mixed'" name="minus" size="xs" />
+        <DsCheck v-if="state === 'checked'" :size="12" />
+        <Minus v-else-if="state === 'mixed'" :size="12" :stroke-width="2" />
       </span>
     </span>
     <span v-if="$slots.default || label" class="label"

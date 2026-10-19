@@ -23,7 +23,7 @@
 import { computed, nextTick, ref } from 'vue'
 import Menu from './Menu.vue'
 import MenuItem from './MenuItem.vue'
-import Icon from './Icon.vue'
+import { DsChevronDown } from '../icons/ds'
 import { useFieldControl } from './fieldContext'
 import type { SelectOption } from './inputTypes'
 import { useSurface } from './surface'
@@ -153,7 +153,7 @@ function onListKeydown(event: KeyboardEvent) {
     @keydown="onTriggerKeydown"
   >
     <span class="value">{{ current?.label ?? placeholder }}</span>
-    <Icon name="chevron-down" size="sm" class="chevron" />
+    <DsChevronDown :size="14" class="chevron" />
   </button>
   <Menu
     v-model:open="open"
