@@ -280,17 +280,20 @@ describe('model execution policy', () => {
     })
   })
 
-  it('refuses to continue a capped turn on a route without pricing', async () => {
+  // MOD-05 8: a route without prices cannot be capped; the turn goes on
+  // (设置 › 模型 says the cap does not apply to that model).
+  it('keeps going on a route without pricing: the cap cannot apply', async () => {
     const h = harness(
-      [{ tools: [{ name: 'missing_tool' }] }, { text: 'never reached' }],
+      [{ tools: [{ name: 'missing_tool' }] }, { text: 'done' }],
       { ...defaultModelExecutionPolicy(), cost: { maxUsdPerAgentTurn: 5 } },
     )
     const agent = h.agent()
     agent.followup(userText('go'))
     await agent.whenIdle()
-    expect(agent.session.lastOf('llm/cost-cap')?.data.unpricedRoutes).toEqual([
-      'test-route',
-    ])
-    expect(h.adapter.requests).toHaveLength(1)
+    expect(agent.session.lastOf('llm/cost-cap')).toBeUndefined()
+    expect(h.adapter.requests).toHaveLength(2)
+    expect(agent.session.lastOf('turn/end')?.data.reason).toEqual({
+      kind: 'completed',
+    })
   })
 })

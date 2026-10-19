@@ -253,6 +253,15 @@ const modelExecutionPolicySchema = z
       .strict(),
   })
   .strict()
+/** Fields a user can lock against metadata refreshes (MOD-03). */
+const modelMetadataFieldSchema = z.enum([
+  'contextWindowTokens',
+  'maxTokens',
+  'pricing',
+  'capabilities',
+  'reasoningEffort',
+  'displayName',
+])
 const modelEntrySaveSchema = z
   .object({
     entryId: idSchema.optional(),
@@ -268,7 +277,17 @@ const modelEntrySaveSchema = z
     maxTokens: z.number().int().positive().optional(),
     reasoningEffort: z.string().trim().nullable().optional(),
     credentialsFrom: idSchema.optional(),
+    // MOD-05: the editor's temperature (null removes it) and the fields the
+    // user changed, which metadata refreshes then leave alone.
+    sampling: z
+      .object({ temperature: z.number().min(0).max(2).nullable().optional() })
+      .strict()
+      .optional(),
+    lockFields: z.array(modelMetadataFieldSchema).max(6).optional(),
   })
+  .strict()
+const modelEntryReplaceSchema = z
+  .object({ entryId: idSchema, modelId: z.string().trim().min(1).max(200) })
   .strict()
 const modelEntryIdSchema = z.object({ entryId: idSchema }).strict()
 const modelReasoningEffortSchema = z
@@ -335,18 +354,7 @@ const modelEntryFactsShape = {
       catalogKey: z.string().optional(),
       catalogVersion: z.string().optional(),
       checkedAt: z.string().optional(),
-      userLocked: z
-        .array(
-          z.enum([
-            'contextWindowTokens',
-            'maxTokens',
-            'pricing',
-            'capabilities',
-            'reasoningEffort',
-            'displayName',
-          ]),
-        )
-        .optional(),
+      userLocked: z.array(modelMetadataFieldSchema).optional(),
       pricingSource: z.enum(['catalog', 'vendor_api', 'manual']).optional(),
       lifecycle: z
         .object({
@@ -1808,6 +1816,11 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([modelMetadataRefreshSchema]),
     (api, [input], ctx) =>
       api.model.refreshMetadata(input, viewOf(ctx, 'model.refreshMetadata')),
+  ),
+  'model.replaceEntry': operation(
+    z.tuple([modelEntryReplaceSchema]),
+    (api, [input], ctx) =>
+      api.model.replaceEntry(input, viewOf(ctx, 'model.replaceEntry')),
   ),
   'model.lookupDefaults': operation(
     z.tuple([modelDefaultsSchema]),

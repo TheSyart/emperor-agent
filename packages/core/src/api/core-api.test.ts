@@ -158,6 +158,7 @@ const EXPECTED_OPERATIONS = [
   'model.lookupDefaults',
   'model.probeConnection',
   'model.refreshMetadata',
+  'model.replaceEntry',
   'model.resolveProfile',
   'model.saveEntries',
   'model.saveEntry',

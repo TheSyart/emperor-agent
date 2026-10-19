@@ -17,7 +17,7 @@ describe('Core operation registry', () => {
     const descriptors = coreOperationDescriptors()
     const descriptorKeys = descriptors.map((entry) => entry.key)
 
-    expect(coreOperationKeys()).toHaveLength(215)
+    expect(coreOperationKeys()).toHaveLength(216)
     expect(coreOperationKeys()).toEqual(descriptorKeys)
     expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(descriptorKeys)
     expect(
@@ -70,6 +70,7 @@ describe('Core operation registry', () => {
         'tools.setNetworkSettings',
         'sessions.defaults',
         'sessions.setDefaults',
+        'model.replaceEntry',
       ]),
     )
     for (const retired of [
@@ -144,6 +145,38 @@ describe('Core operation registry', () => {
       {},
     ])
       expect(() => args.parse([bad]), JSON.stringify(bad)).toThrow()
+  })
+
+  it('validates the simplified model editor and the replacement (MOD-05)', () => {
+    const save = CORE_OPERATION_REGISTRY['model.saveEntry'].args
+    expect(
+      save.parse([
+        {
+          entryId: 'pro',
+          sampling: { temperature: 0.7 },
+          lockFields: ['contextWindowTokens', 'maxTokens'],
+        },
+      ]),
+    ).toEqual([
+      {
+        entryId: 'pro',
+        sampling: { temperature: 0.7 },
+        lockFields: ['contextWindowTokens', 'maxTokens'],
+      },
+    ])
+    expect(
+      save.parse([{ entryId: 'pro', sampling: { temperature: null } }]),
+    ).toEqual([{ entryId: 'pro', sampling: { temperature: null } }])
+    for (const bad of [
+      { entryId: 'pro', sampling: { temperature: 3 } },
+      { entryId: 'pro', lockFields: ['apiKey'] },
+    ])
+      expect(() => save.parse([bad]), JSON.stringify(bad)).toThrow()
+    const replace = CORE_OPERATION_REGISTRY['model.replaceEntry'].args
+    expect(
+      replace.parse([{ entryId: 'chat', modelId: 'deepseek-flash' }]),
+    ).toEqual([{ entryId: 'chat', modelId: 'deepseek-flash' }])
+    expect(() => replace.parse([{ entryId: 'chat' }])).toThrow()
   })
 
   it('validates the turn file record operations', () => {

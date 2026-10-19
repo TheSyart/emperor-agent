@@ -1818,6 +1818,14 @@ export class CoreApi {
       }
       return this.modelService.refreshMetadata(input)
     },
+    replaceEntry: async (
+      input: Parameters<CoreModelService['replaceEntry']>[0],
+      view: ViewScope,
+    ) => {
+      this.assertMutation('model', 'replaceEntry', view)
+      await this.hooksService.authorizeConfigChange('model.replaceEntry', input)
+      return this.modelService.replaceEntry(input)
+    },
     lookupDefaults: (
       input: Parameters<CoreModelService['lookupDefaults']>[0],
     ) => this.modelService.lookupDefaults(input),
