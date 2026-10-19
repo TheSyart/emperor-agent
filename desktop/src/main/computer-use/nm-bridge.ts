@@ -44,7 +44,17 @@ import {
 } from './nm-bridge-agent'
 
 const BROWSER_TO_MAIN_MAX = 64 * 1024 * 1024
+/**
+ * Before a connection authenticates it only pairs or proves a pairing, in
+ * frames of a few hundred bytes: anything over 64 KiB drops it (SEC-10).
+ */
+const PRE_AUTH_FRAME_MAX = 64 * 1024
 const MAIN_TO_BROWSER_MAX = 1024 * 1024
+/** Pairings waiting for the user at once, across all connections. */
+const MAX_PENDING_PAIRINGS = 3
+/** `pair.begin` requests accepted per sliding minute. */
+const MAX_PAIRINGS_PER_MINUTE = 6
+const PAIRING_WINDOW_MS = 60_000
 const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -192,6 +202,8 @@ export interface NmBridgeOptions {
   readonly heartbeatMs?: number
   /** Delay before retrying a socket held by another Emperor. 0 disables retry. */
   readonly retryMs?: number
+  /** Clock for the pairing rate limit (tests). */
+  readonly now?: () => number
 }
 
 interface PendingResponse {
@@ -268,7 +280,9 @@ class NmConnection {
       const length = LITTLE_ENDIAN
         ? this.buffer.readUInt32LE(0)
         : this.buffer.readUInt32BE(0)
-      if (length === 0 || length > BROWSER_TO_MAIN_MAX) {
+      // Decided on the header alone: an oversized body is never buffered.
+      const limit = this.traffic ? BROWSER_TO_MAIN_MAX : PRE_AUTH_FRAME_MAX
+      if (length === 0 || length > limit) {
         this.socket.destroy()
         return
       }
@@ -359,6 +373,8 @@ class NmConnection {
       if (this.pendingPair || this.pendingAuth || this.pairing)
         throw codeError('PERMISSION_DENIED')
       const pair = createPair(params as unknown as PairOffer)
+      // Each pairing asks the user; a flood of them is refused (SEC-10).
+      if (!this.bridge.admitPairing()) throw codeError('PERMISSION_DENIED')
       const browser = pairingBrowser(params.browser)
       this.pendingPair = {
         ...pair,
@@ -777,6 +793,9 @@ export class NmBridgeServer {
   private startAttempt: Promise<boolean> | null = null
   private stopping = false
   private readonly ownedOperations = new Set<Promise<unknown>>()
+  private readonly now: () => number
+  /** When accepted `pair.begin` requests arrived, oldest first. */
+  private readonly pairingStarts: number[] = []
 
   constructor(options: NmBridgeOptions) {
     this.socketPath = options.socketPath ?? defaultNmSocketPath()
@@ -784,6 +803,31 @@ export class NmBridgeServer {
     this.manifests = options.manifests ?? null
     this.heartbeatMs = options.heartbeatMs ?? 5_000
     this.retryMs = options.retryMs ?? 5_000
+    this.now = options.now ?? Date.now
+  }
+
+  /**
+   * Whether a new pairing may start (SEC-10, MAIN-31): at most 3 wait for
+   * the user at once and at most 6 start in any minute. Counts it if so.
+   */
+  admitPairing(): boolean {
+    const now = this.now()
+    while (
+      this.pairingStarts.length > 0 &&
+      this.pairingStarts[0]! <= now - PAIRING_WINDOW_MS
+    )
+      this.pairingStarts.shift()
+    if (
+      this.pendingPairings().length >= MAX_PENDING_PAIRINGS ||
+      this.pairingStarts.length >= MAX_PAIRINGS_PER_MINUTE
+    ) {
+      console.warn(
+        'Native Messaging: too many pairing requests; one was refused',
+      )
+      return false
+    }
+    this.pairingStarts.push(now)
+    return true
   }
 
   subscribe(listener: (event: NmBridgeEvent) => void): () => void {

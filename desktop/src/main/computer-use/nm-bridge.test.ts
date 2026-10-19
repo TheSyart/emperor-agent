@@ -558,6 +558,149 @@ describe.skipIf(process.platform !== 'darwin')(
       expect(records.has('pairing-1')).toBe(true)
     })
 
+    it('drops a connection that sends a frame over 64 KiB before it authenticates (SEC-10)', async () => {
+      directory = await mkdtemp(join(tmpdir(), 'eanm-test-'))
+      await chmod(directory, 0o700)
+      bridge = new NmBridgeServer({
+        pairings: memoryPairings(new Map()),
+        socketPath: join(directory, 'nm.sock'),
+        heartbeatMs: 0,
+      })
+      await bridge.start()
+      client = await connect(bridge.socketPath)
+      const closed = new Promise<void>((resolve) =>
+        client!.socket.once('close', () => resolve()),
+      )
+      // A 1 MiB frame: the header alone is enough to refuse it.
+      const header = Buffer.alloc(4)
+      if (littleEndian) header.writeUInt32LE(1024 * 1024)
+      else header.writeUInt32BE(1024 * 1024)
+      client.socket.write(Buffer.concat([header, Buffer.alloc(1024, 0x20)]))
+      await expect(
+        Promise.race([
+          closed.then(() => 'closed'),
+          new Promise((resolve) => setTimeout(() => resolve('open'), 2_000)),
+        ]),
+      ).resolves.toBe('closed')
+      // A frame of exactly 64 KiB is still read (and refused as malformed
+      // JSON the usual way), so the limit is the frame size, not the socket.
+      const other = await connect(bridge.socketPath)
+      const body = Buffer.alloc(64 * 1024, 0x20)
+      body.write('{"type":"event","name":"pair.displayed","data":{}}')
+      const prefix = Buffer.alloc(4)
+      if (littleEndian) prefix.writeUInt32LE(body.length)
+      else prefix.writeUInt32BE(body.length)
+      const otherClosed = new Promise<void>((resolve) =>
+        other.socket.once('close', () => resolve()),
+      )
+      other.socket.write(Buffer.concat([prefix, body]))
+      // pair.displayed without a pending pairing is a protocol error: the
+      // frame was parsed (not dropped for its size) and the socket closes.
+      await otherClosed
+      other.socket.destroy()
+    })
+
+    /** A bridge with a settable clock and a raw `pair.begin` sender. */
+    async function pairingBridge() {
+      directory = await mkdtemp(join(tmpdir(), 'eanm-test-'))
+      await chmod(directory, 0o700)
+      const clock = { now: 1_000_000 }
+      const server = new NmBridgeServer({
+        pairings: memoryPairings(new Map()),
+        socketPath: join(directory, 'nm.sock'),
+        heartbeatMs: 0,
+        now: () => clock.now,
+      })
+      bridge = server
+      await server.start()
+      const ext: any = await import(
+        /* @vite-ignore */ new URL(
+          '../../../extension/crypto.js',
+          import.meta.url,
+        ).href
+      )
+      const clients: Client[] = []
+      const begin = async (id: number) => {
+        const offer = await ext.createPairOffer('a'.repeat(32))
+        const next = await connect(server.socketPath)
+        clients.push(next)
+        next.send({
+          type: 'request',
+          id,
+          method: 'pair.begin',
+          params: {
+            protocol: 1,
+            extensionId: offer.extensionId,
+            publicKey: offer.publicKey,
+            nonce: offer.nonce,
+          },
+          deadlineMs: 15000,
+        })
+        return { client: next, answer: await next.next() }
+      }
+      /** The extension gave up: its pending pairing goes with the socket. */
+      const drop = async (item: { client: Client }) => {
+        const pending = server.pendingPairings().length
+        item.client.socket.destroy()
+        await eventually(() => server.pendingPairings().length < pending)
+      }
+      return {
+        server,
+        clock,
+        begin,
+        drop,
+        close: () => {
+          for (const item of clients) item.socket.destroy()
+        },
+      }
+    }
+
+    it('holds at most 3 pairings waiting for the user (SEC-10)', async () => {
+      const t = await pairingBridge()
+      try {
+        const waiting = [await t.begin(1), await t.begin(2), await t.begin(3)]
+        for (const item of waiting)
+          expect(item.answer).toMatchObject({ ok: true })
+        expect(t.server.pendingPairings()).toHaveLength(3)
+        const fourth = await t.begin(4)
+        expect(fourth.answer).toMatchObject({
+          id: 4,
+          ok: false,
+          error: { code: 'PERMISSION_DENIED' },
+        })
+        expect(t.server.pendingPairings()).toHaveLength(3)
+        // One answered or gone: there is room again.
+        await t.drop(waiting[0]!)
+        expect((await t.begin(5)).answer).toMatchObject({ id: 5, ok: true })
+      } finally {
+        t.close()
+      }
+    })
+
+    it('refuses the seventh pair.begin within one minute (SEC-10)', async () => {
+      const t = await pairingBridge()
+      try {
+        for (let id = 1; id <= 6; id++) {
+          const item = await t.begin(id)
+          expect(item.answer).toMatchObject({ id, ok: true })
+          await t.drop(item)
+          t.clock.now += 5_000
+        }
+        const seventh = await t.begin(7)
+        expect(seventh.answer).toMatchObject({
+          id: 7,
+          ok: false,
+          error: { code: 'PERMISSION_DENIED' },
+        })
+        expect(t.server.pendingPairings()).toHaveLength(0)
+        // A minute after the first one, a pairing may start again.
+        t.clock.now = 1_000_000 + 60_001
+        expect((await t.begin(8)).answer).toMatchObject({ id: 8, ok: true })
+      } finally {
+        t.close()
+      }
+    })
+
     it('records only chrome or edge as the browser that paired', async () => {
       const records = new Map<string, BrowserPairing>()
       directory = await mkdtemp(join(tmpdir(), 'eanm-test-'))
