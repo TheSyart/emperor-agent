@@ -73,6 +73,15 @@ export function packagedSmokeFixture(
           rendererUrlPinned: true,
         },
       },
+      helpers: {
+        ok: true,
+        mode: platform === 'darwin' ? 'macos' : 'not-macos',
+        computerUse: {
+          handshake: platform === 'darwin',
+          hardenedCopy: platform === 'darwin',
+        },
+        dictation: { available: platform === 'darwin' },
+      },
     },
   }
 }

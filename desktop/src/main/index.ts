@@ -91,10 +91,14 @@ import { DesktopPreview, routedPreview } from './computer-use/desktop-preview'
 import { CredentialVault } from './computer-use/credential-vault'
 import { MacosDesktopDriver } from './computer-use/macos-desktop-driver'
 import {
+  forgetHelperCopy,
+  installPackagedMacosHelper,
   launchMacosHelper,
   macosHelperAppPath,
   packagedMacosAppIsAdHoc,
+  signedIdentity,
 } from './computer-use/macos-launcher'
+import { verifyPackagedHelpers } from './packaged-helpers-smoke'
 import { NmBridgeServer } from './computer-use/nm-bridge'
 import {
   EncryptedFilePairingStore,
@@ -1415,6 +1419,28 @@ async function startup(): Promise<void> {
             releaseWindow: () => {
               mainWindow = null
             },
+          })
+        },
+        verifyHelpers: () => {
+          const helperSource = macosHelperAppPath({
+            packaged: true,
+            resourcesPath: process.resourcesPath,
+          })
+          return verifyPackagedHelpers({
+            computerHelperStatus: async () => {
+              if (!nativeDesktop)
+                throw new Error('the Computer Use helper is missing')
+              return await nativeDesktop.status()
+            },
+            installedComputerHelper: () =>
+              installPackagedMacosHelper(helperSource),
+            identity: (target) => signedIdentity(target),
+            release: async () => {
+              await nativeDesktop?.shutdown()
+            },
+            forget: (installed) => forgetHelperCopy(installed),
+            dictationStatus: () =>
+              (dictation ?? createDictationService()).status(),
           })
         },
       })

@@ -37,6 +37,15 @@ function rendererReceipt() {
   }
 }
 
+function helpersReceipt() {
+  return {
+    ok: true as const,
+    mode: 'macos' as const,
+    computerUse: { handshake: true, hardenedCopy: true },
+    dictation: { available: true },
+  }
+}
+
 function makeCore(overrides: Partial<PackagedSmokeCore> = {}) {
   const getStatus = vi.fn(async () => ({
     status: {
@@ -240,6 +249,7 @@ describe('packaged smoke contract', () => {
       commands: 18,
       protectedStateDenied: true as const,
     }))
+    const verifyHelpers = vi.fn(async () => helpersReceipt())
 
     const receipt = await runPackagedSmoke({
       core,
@@ -253,6 +263,7 @@ describe('packaged smoke contract', () => {
       arch: 'arm64',
       verifySeatbelt,
       verifyRenderer: async () => rendererReceipt(),
+      verifyHelpers,
     })
 
     expect(core.bootstrap).toHaveBeenCalledOnce()
@@ -295,7 +306,9 @@ describe('packaged smoke contract', () => {
         protectedStateDenied: true,
       },
       renderer: rendererReceipt(),
+      helpers: helpersReceipt(),
     })
+    expect(verifyHelpers).toHaveBeenCalledOnce()
     expect(verifySeatbelt).toHaveBeenCalledWith(
       path.join(fixture.stateRoot, 'packaged-smoke-workspace'),
       fixture.stateRoot,
@@ -463,6 +476,45 @@ describe('packaged smoke contract', () => {
       JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8')).operations
         .seatbelt,
     ).toMatchObject({ ok: false, protectedStateDenied: false })
+  })
+
+  it('fails closed when a macOS package does not prove its helpers (SEC-04)', async () => {
+    const seatbelt = async () => ({
+      ok: true as const,
+      mode: 'workspace-write' as const,
+      commands: 18,
+      protectedStateDenied: true as const,
+    })
+    for (const verifyHelpers of [
+      undefined,
+      async () => ({
+        ...helpersReceipt(),
+        computerUse: { handshake: true, hardenedCopy: false },
+      }),
+    ]) {
+      const fixture = smokeFixture()
+      const { core } = makeCore()
+      await expect(
+        runPackagedSmoke({
+          core,
+          runtimeRoot: fixture.runtimeRoot,
+          stateRoot: fixture.stateRoot,
+          receiptPath: fixture.receiptPath,
+          appVersion: '0.1.0',
+          runtimeRevision: 'a'.repeat(64),
+          commit: 'b'.repeat(40),
+          platform: 'darwin',
+          arch: 'arm64',
+          verifySeatbelt: seatbelt,
+          verifyRenderer: async () => rendererReceipt(),
+          ...(verifyHelpers ? { verifyHelpers } : {}),
+        }),
+      ).rejects.toThrow(/helper/i)
+      expect(
+        JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8')).operations
+          .helpers,
+      ).toMatchObject({ ok: false })
+    }
   })
 
   it('fails closed when a required lifecycle service is not ready', async () => {

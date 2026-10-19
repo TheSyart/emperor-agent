@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { spawn } = require('node:child_process')
+const { createServer } = require('node:http')
 const {
   existsSync,
   mkdirSync,
@@ -13,6 +14,11 @@ const {
 } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
+const {
+  packagedFuses,
+  readPackagedFuses,
+  verifyMacHardening,
+} = require('./harden-package.cjs')
 
 const desktopRoot = resolve(__dirname, '..')
 const repoRoot = resolve(desktopRoot, '..')
@@ -40,36 +46,94 @@ if (process.platform === 'linux') {
   args.unshift('--no-sandbox')
 }
 
-run(appPath, args, smokeEnvironment()).then(
-  ({ code, stdout, stderr }) => {
-    try {
-      if (code !== 0)
-        throw new Error(
-          `packaged smoke exited ${code}\n${bounded(stderr || stdout)}`,
-        )
-      const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'))
-      validateReceipt(receipt)
-      const outputDir = join(desktopRoot, 'dist', 'packaged-smoke')
-      const outputPath = join(
-        outputDir,
-        `${receipt.platform}-${receipt.arch}.json`,
-      )
-      mkdirSync(outputDir, { recursive: true })
-      writeAtomic(outputPath, receipt)
-      console.log(`packaged smoke passed: ${outputPath}`)
-      rmSync(tempRoot, { recursive: true, force: true })
-    } catch (error) {
-      console.error(error instanceof Error ? error.message : String(error))
-      console.error(`smoke workspace retained for inspection: ${tempRoot}`)
-      process.exitCode = 1
-    }
-  },
-  (error) => {
-    console.error(error instanceof Error ? error.message : String(error))
-    console.error(`smoke workspace retained for inspection: ${tempRoot}`)
-    process.exitCode = 1
-  },
-)
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error))
+  console.error(`smoke workspace retained for inspection: ${tempRoot}`)
+  process.exitCode = 1
+})
+
+async function main() {
+  // SEC-04: the package itself first. Unsigned is not unsealed: the seal,
+  // the hardened runtime and the fuses must all be in place.
+  const seal = await verifyPackage(appPath)
+  // A packaged app must not load the page ELECTRON_RENDERER_URL names; this
+  // server stands in for it and must see no request.
+  const decoy = await startDecoyRenderer()
+  let result
+  try {
+    result = await run(
+      appPath,
+      args,
+      smokeEnvironment({ ELECTRON_RENDERER_URL: decoy.url }),
+    )
+  } finally {
+    await decoy.close()
+  }
+  const { code, stdout, stderr } = result
+  if (code !== 0)
+    throw new Error(
+      `packaged smoke exited ${code}\n${bounded(stderr || stdout)}`,
+    )
+  if (decoy.requests() !== 0)
+    throw new Error(
+      `packaged app requested ELECTRON_RENDERER_URL ${decoy.requests()} time(s)`,
+    )
+  const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'))
+  validateReceipt(receipt)
+  receipt.package = seal
+  const outputDir = join(desktopRoot, 'dist', 'packaged-smoke')
+  const outputPath = join(outputDir, `${receipt.platform}-${receipt.arch}.json`)
+  mkdirSync(outputDir, { recursive: true })
+  writeAtomic(outputPath, receipt)
+  console.log(`packaged smoke passed: ${outputPath}`)
+  rmSync(tempRoot, { recursive: true, force: true })
+}
+
+/**
+ * macOS: codesign --verify --deep --strict, identifier, hardened runtime and
+ * entitlements of every piece of Emperor's code, and the fuses. Elsewhere:
+ * the fuses of the executable.
+ */
+async function verifyPackage(executable) {
+  if (process.platform === 'darwin') {
+    const app = resolve(executable, '..', '..', '..')
+    if (!app.endsWith('.app'))
+      throw new Error(`packaged executable is not inside an app: ${executable}`)
+    return await verifyMacHardening(app)
+  }
+  const fuses = await readPackagedFuses(executable)
+  const expected = packagedFuses(process.platform)
+  const wrong = Object.keys(expected).filter(
+    (name) => fuses[name] !== expected[name],
+  )
+  if (wrong.length)
+    throw new Error(`packaged app fuses are wrong: ${wrong.join(', ')}`)
+  return { fuses }
+}
+
+function startDecoyRenderer() {
+  let requests = 0
+  const server = createServer((request, response) => {
+    requests++
+    response.writeHead(200, { 'content-type': 'text/html' })
+    response.end('<!doctype html><title>decoy</title>')
+  })
+  return new Promise((resolvePromise, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address()
+      resolvePromise({
+        url: `http://127.0.0.1:${port}/`,
+        requests: () => requests,
+        close: () =>
+          new Promise((done) => {
+            server.closeAllConnections?.()
+            server.close(() => done())
+          }),
+      })
+    })
+  })
+}
 
 function resolveAppPath(argv) {
   const explicitIndex = argv.indexOf('--app')
@@ -111,13 +175,16 @@ function resolveAppPath(argv) {
   return existing[0]
 }
 
-function smokeEnvironment() {
+function smokeEnvironment(extra = {}) {
   const env = {
+    ...extra,
     // A synthetic HOME on every platform, macOS included: Emperor's secrets
     // use its own key under the state root, so nothing may need the user's
     // login Keychain (the app's local-key and master-password round trip
     // fails the smoke if something does).
     HOME: homeRoot,
+    // macOS: NSHomeDirectory too (AppKit saved state, caches), not only $HOME.
+    ...(process.platform === 'darwin' ? { CFFIXED_USER_HOME: homeRoot } : {}),
     USERPROFILE: homeRoot,
     EMPEROR_CONFIG_DIR: stateRoot,
     EMPEROR_BUILD_COMMIT: readGitCommit(repoRoot),
@@ -207,6 +274,14 @@ function validateReceipt(receipt) {
   }
   if (
     receipt.platform === 'darwin' &&
+    (receipt.operations.helpers?.ok !== true ||
+      receipt.operations.helpers.computerUse?.handshake !== true ||
+      receipt.operations.helpers.computerUse?.hardenedCopy !== true ||
+      receipt.operations.helpers.dictation?.available !== true)
+  )
+    throw new Error('packaged macOS helpers did not answer (SEC-04)')
+  if (
+    receipt.platform === 'darwin' &&
     (receipt.operations.seatbelt.mode !== 'workspace-write' ||
       receipt.operations.seatbelt.commands < 18 ||
       receipt.operations.seatbelt.protectedStateDenied !== true)
@@ -224,6 +299,7 @@ function validateReceipt(receipt) {
     renderer.webPreferences?.sandbox !== true ||
     renderer.webPreferences?.contextIsolation !== true ||
     renderer.webPreferences?.nodeIntegration !== false ||
+    renderer.security?.rendererUrlPinned !== true ||
     !['enabled', 'disabled-for-linux-test'].includes(
       renderer.chromiumSandbox,
     ) ||

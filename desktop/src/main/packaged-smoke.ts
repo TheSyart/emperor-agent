@@ -13,6 +13,7 @@ import {
 import { searchProbe, writeJsonAtomic } from '@emperor/core/host-capabilities'
 import type { CoreApi } from '@emperor/core/api'
 import type { PackagedRendererSmokeReceipt } from './packaged-renderer-smoke'
+import type { PackagedHelpersSmokeReceipt } from './packaged-helpers-smoke'
 
 /** The built-in Skills a packaged runtime ships (sorted), nothing more. */
 export const PACKAGED_BUILT_IN_SKILLS = ['skill-creator']
@@ -76,6 +77,8 @@ export interface PackagedSmokeOptions {
     protectedStateDenied: true
   }>
   verifyRenderer(): Promise<PackagedRendererSmokeReceipt>
+  /** macOS: the helpers start and answer under the hardened runtime (SEC-04). */
+  verifyHelpers?(): Promise<PackagedHelpersSmokeReceipt>
 }
 
 export interface PackagedSmokeReceipt {
@@ -107,6 +110,7 @@ export interface PackagedSmokeReceipt {
       protectedStateDenied: boolean
     }
     renderer: PackagedRendererSmokeReceipt
+    helpers: PackagedHelpersSmokeReceipt
   }
   installJobs: { before: number; after: number }
   exitCode: 0 | 1
@@ -305,6 +309,10 @@ export async function runPackagedSmoke(
       await opts.verifyRenderer(),
       opts.platform,
     )
+    const helpers =
+      opts.platform === 'darwin'
+        ? assertHelpersReceipt(await requiredHelpersProbe(opts)())
+        : notMacosHelpers()
 
     const receipt: PackagedSmokeReceipt = {
       ...base,
@@ -325,6 +333,7 @@ export async function runPackagedSmoke(
         terminal,
         seatbelt,
         renderer,
+        helpers,
       },
       installJobs: { before: jobsBefore, after: jobsAfter },
       exitCode: 0,
@@ -357,6 +366,11 @@ export async function runPackagedSmoke(
           protectedStateDenied: false,
         },
         renderer: failedRendererReceipt(),
+        helpers: {
+          ...notMacosHelpers(),
+          ok: false,
+          mode: opts.platform === 'darwin' ? 'macos' : 'not-macos',
+        },
       },
       installJobs: { before: 0, after: 0 },
       exitCode: 1,
@@ -376,6 +390,42 @@ function requiredSeatbeltProbe(
   if (!opts.verifySeatbelt)
     throw new Error('packaged macOS smoke requires a Seatbelt command probe')
   return opts.verifySeatbelt
+}
+
+function requiredHelpersProbe(
+  opts: PackagedSmokeOptions,
+): NonNullable<PackagedSmokeOptions['verifyHelpers']> {
+  if (!opts.verifyHelpers)
+    throw new Error('packaged macOS smoke requires the helper handshake probe')
+  return opts.verifyHelpers
+}
+
+function notMacosHelpers(): PackagedHelpersSmokeReceipt {
+  return {
+    ok: true,
+    mode: 'not-macos',
+    computerUse: { handshake: false, hardenedCopy: false },
+    dictation: { available: false },
+  }
+}
+
+function assertHelpersReceipt(
+  value: PackagedHelpersSmokeReceipt,
+): PackagedHelpersSmokeReceipt {
+  if (
+    value?.ok !== true ||
+    value.mode !== 'macos' ||
+    value.computerUse?.handshake !== true ||
+    value.computerUse.hardenedCopy !== true ||
+    value.dictation?.available !== true
+  )
+    throw new Error('packaged helper smoke receipt is invalid')
+  return {
+    ok: true,
+    mode: 'macos',
+    computerUse: { handshake: true, hardenedCopy: true },
+    dictation: { available: true },
+  }
 }
 
 function assertSeatbeltReceipt(value: {

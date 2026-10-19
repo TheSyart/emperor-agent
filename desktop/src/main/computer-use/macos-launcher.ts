@@ -527,6 +527,14 @@ export async function installPackagedMacosHelper(
   }
 }
 
+/** Has LaunchServices forget a helper copy (the packaged smoke's own). */
+export async function forgetHelperCopy(
+  path: string,
+  system: MacosHelperInstallSystem = nodeInstallSystem,
+): Promise<void> {
+  await system.execFile(LSREGISTER, ['-u', path], { timeout: 5_000 })
+}
+
 function connectSocket(path: string): Promise<Socket> {
   return new Promise((resolveSocket, reject) => {
     const socket = createConnection(path)
