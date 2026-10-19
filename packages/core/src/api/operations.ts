@@ -1627,6 +1627,15 @@ export const CORE_OPERATION_REGISTRY = {
   'sessions.delete': operation(z.tuple([idSchema]), (api, [id]) =>
     api.sessions.delete(id),
   ),
+  'sessions.listDeleted': operation(z.tuple([]), (api) =>
+    api.sessions.listDeleted(),
+  ),
+  'sessions.restoreDeleted': operation(z.tuple([idSchema]), (api, [id]) =>
+    api.sessions.restoreDeleted(id),
+  ),
+  'sessions.purgeDeleted': operation(z.tuple([idSchema]), (api, [id]) =>
+    api.sessions.purgeDeleted(id),
+  ),
   'sessions.event': operation(z.tuple([sessionEventSchema]), (api, [input]) =>
     api.sessions.event(input),
   ),

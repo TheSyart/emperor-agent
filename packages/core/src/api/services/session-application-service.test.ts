@@ -17,16 +17,16 @@ function setup(overrides: Partial<SessionApplicationServiceDeps> = {}) {
   const deps: SessionApplicationServiceDeps = {
     sessions,
     resolveProject: (path) => ({ id: 'project_1', path, name: 'demo' }),
-    endSession: vi.fn(async (sessionId: string, reason: string) => {
-      calls.push(`end:${sessionId}:${reason}`)
+    unloadSession: vi.fn((sessionId: string) => {
+      calls.push(`unload:${sessionId}`)
+    }),
+    forgetTurnFiles: vi.fn(async (sessionId: string) => {
+      calls.push(`turn-files:${sessionId}`)
     }),
     closeTerminals: vi.fn((sessionId: string) => {
       calls.push(`terminals:${sessionId}`)
     }),
     activateSession: vi.fn((sessionId: string) => sessions.get(sessionId)!),
-    deleteSessionLog: vi.fn((sessionId: string) => {
-      calls.push(`log:${sessionId}`)
-    }),
     ...overrides,
   }
   return {
@@ -69,18 +69,35 @@ describe('CoreSessionApplicationService', () => {
     expect(stopSession).toHaveBeenCalledTimes(1)
   })
 
-  it('ends the kernel session, removes the entry, terminals and session log on delete', async () => {
+  it('unloads the kernel session, trashes the entry and closes terminals on delete', async () => {
     const { service, sessions, calls } = setup()
     const doomed = service.create({ title: 'Doomed' })
     service.create({ title: 'Keeper' })
 
-    await expect(service.delete(doomed.id)).resolves.toEqual({ deleted: true })
+    await expect(service.delete(doomed.id)).resolves.toMatchObject({
+      deleted: true,
+      restorable: true,
+    })
     expect(sessions.get(doomed.id)).toBeNull()
-    expect(calls).toEqual([
-      `end:${doomed.id}:deleted`,
-      `terminals:${doomed.id}`,
-      `log:${doomed.id}`,
-    ])
+    expect(calls).toEqual([`unload:${doomed.id}`, `terminals:${doomed.id}`])
+    expect(service.listDeleted().map((item) => item.id)).toEqual([doomed.id])
+    await expect(service.restoreDeleted(doomed.id)).resolves.toMatchObject({
+      id: doomed.id,
+      title: 'Doomed',
+    })
+    await expect(service.restoreDeleted(doomed.id)).rejects.toThrow('无法恢复')
+  })
+
+  it('purges a trashed build session with its project snapshots', async () => {
+    const { service, calls } = setup()
+    service.create({ title: 'Keeper' })
+    const build = service.create({ mode: 'build', project_path: '/tmp/demo' })
+    await service.delete(build.id)
+    await expect(service.purgeDeleted(build.id)).resolves.toEqual({
+      purged: true,
+    })
+    expect(calls.at(-1)).toBe(`turn-files:${build.id}`)
+    expect(service.listDeleted()).toEqual([])
   })
 
   it('refuses to delete the last persisted session or an unknown one', async () => {
@@ -92,8 +109,7 @@ describe('CoreSessionApplicationService', () => {
     await expect(service.delete('missing')).rejects.toThrow(
       'cannot delete session',
     )
-    expect(deps.endSession).not.toHaveBeenCalled()
-    expect(deps.deleteSessionLog).not.toHaveBeenCalled()
+    expect(deps.unloadSession).not.toHaveBeenCalled()
   })
 
   it('activates a session through the host', () => {

@@ -165,3 +165,44 @@ describe('TerminalService', () => {
     expect(replay.chunks.map((chunk) => chunk.data).join('')).toBe('丁戊')
   })
 })
+
+describe('TerminalService busy (FIX-01)', () => {
+  function service(host: PtyHost) {
+    return new TerminalService({
+      host,
+      resolveProject: (sessionId) => ({
+        sessionId,
+        projectRoot: '/workspace/project',
+      }),
+      shell: () => ({ executable: '/bin/zsh', args: ['-l'] }),
+      env: () => ({}),
+    })
+  }
+
+  it('reports busy while a program other than the shell is in front', () => {
+    const host = new FakePtyHost()
+    const terminals = service(host)
+    const terminal = terminals.create({ sessionId: 's1', cols: 80, rows: 24 })
+    let foreground = 'zsh'
+    host.handles[0]!.foregroundProcess = () => foreground
+    expect(terminals.list({ sessionId: 's1' })[0]).toMatchObject({
+      id: terminal.id,
+      busy: false,
+    })
+    foreground = 'node'
+    expect(terminals.list({ sessionId: 's1' })[0]?.busy).toBe(true)
+    // A login shell can show up as -zsh.
+    foreground = '-zsh'
+    expect(terminals.list({ sessionId: 's1' })[0]?.busy).toBe(false)
+  })
+
+  it('is never busy after exit or when the host cannot tell', () => {
+    const host = new FakePtyHost()
+    const terminals = service(host)
+    terminals.create({ sessionId: 's1', cols: 80, rows: 24 })
+    expect(terminals.list({ sessionId: 's1' })[0]?.busy).toBe(false)
+    host.handles[0]!.foregroundProcess = () => 'node'
+    host.handles[0]!.emitExit?.({ exitCode: 0 })
+    expect(terminals.list({ sessionId: 's1' })[0]?.busy).toBe(false)
+  })
+})

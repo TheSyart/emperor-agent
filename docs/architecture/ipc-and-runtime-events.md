@@ -31,25 +31,25 @@ Operation 的名称与参数 schema 定义在 `packages/core/src/api/operations.
 
 ## 主要 operation 分组
 
-| 分组                                                                                                           | 用途                                                                                                  |
-| -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `chat.*`                                                                                                       | 提交消息、列出和管理排队消息、停止运行                                                                |
-| `sessions.*`、`sidebar.*`                                                                                      | 会话列表、创建、重命名/归档、删除、激活；原始历史分页、祖先链、子代理列表、watch 集合；侧栏布局       |
-| `control.*`                                                                                                    | 读取控制状态、切换权限预设与 Plan 模式、回答交互                                                      |
-| `commands.*`                                                                                                   | Slash command 列表、补全、调用                                                                        |
-| `goals.*`                                                                                                      | 当前 session 的 Goal                                                                                  |
-| `tasks.*`                                                                                                      | 后台 job 与子代理会话（列表、详情、transcript、等待、读取输出、取消）                                 |
-| `tools.readResult`                                                                                             | 读取落盘到 `stateRoot/spill/` 的完整工具结果                                                          |
-| `tools.networkSettings`、`tools.setNetworkSettings`                                                            | 「设置 › 高级 › 网络工具」：`web_fetch` / `web_search` 的开关与可用性，变更后广播 `web_tools_changed` |
-| `runtime.replay`                                                                                               | 按 session 重放 UiEvent（不用于 Chat 渲染）                                                           |
-| `model.*`、`config.*`、`mcp.*`                                                                                 | 模型、`settings.json`、MCP 配置与状态、按名称导入 / 启停 / 删除 MCP server                            |
-| `memory.*`、`hooks.*`                                                                                          | 记忆、Watchlist、压缩与上下文解释；Hooks 配置、测试与审计                                             |
-| `skills.*`、`plugins.*`                                                                                        | Skill 列表、详情、保存、删除、复制为个人、导入与校验；Plugin 检查、安装、启停与卸载                   |
-| `workspace.*`、`git.*`、`files.*`、`terminals.*`、`references.*`                                               | 右侧工作台与环境信息卡                                                                                |
-| `pullRequests.*`                                                                                               | 全局只读 Pull Request 查询：gh 状态、按筛选搜索、详情与 diff                                          |
-| `github.*`                                                                                                     | GitHub 插件的只读 Issue 与 CI 查询：Issue 列表与详情、Actions 运行列表与详情                          |
-| `scheduler.*`                                                                                                  | 定时任务                                                                                              |
-| `environment.*`、`diagnostics.*`、`processes.*`、`onboarding.*`、`desktopPet.*`、`attachments.*`、`projects.*` | 其他宿主能力                                                                                          |
+| 分组                                                                                                           | 用途                                                                                                                                                                                            |
+| -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chat.*`                                                                                                       | 提交消息、列出和管理排队消息、停止运行                                                                                                                                                          |
+| `sessions.*`、`sidebar.*`                                                                                      | 会话列表、创建、重命名/归档、删除（移入 `sessions/.trash`，`listDeleted` / `restoreDeleted` / `purgeDeleted`，30 天后启动时清除）、激活；原始历史分页、祖先链、子代理列表、watch 集合；侧栏布局 |
+| `control.*`                                                                                                    | 读取控制状态、切换权限预设与 Plan 模式、回答交互                                                                                                                                                |
+| `commands.*`                                                                                                   | Slash command 列表、补全、调用                                                                                                                                                                  |
+| `goals.*`                                                                                                      | 当前 session 的 Goal                                                                                                                                                                            |
+| `tasks.*`                                                                                                      | 后台 job 与子代理会话（列表、详情、transcript、等待、读取输出、取消）                                                                                                                           |
+| `tools.readResult`                                                                                             | 读取落盘到 `stateRoot/spill/` 的完整工具结果                                                                                                                                                    |
+| `tools.networkSettings`、`tools.setNetworkSettings`                                                            | 「设置 › 高级 › 网络工具」：`web_fetch` / `web_search` 的开关与可用性，变更后广播 `web_tools_changed`                                                                                           |
+| `runtime.replay`                                                                                               | 按 session 重放 UiEvent（不用于 Chat 渲染）                                                                                                                                                     |
+| `model.*`、`config.*`、`mcp.*`                                                                                 | 模型、`settings.json`、MCP 配置与状态、按名称导入 / 启停 / 删除 MCP server                                                                                                                      |
+| `memory.*`、`hooks.*`                                                                                          | 记忆、Watchlist、压缩与上下文解释；Hooks 配置、测试与审计                                                                                                                                       |
+| `skills.*`、`plugins.*`                                                                                        | Skill 列表、详情、保存、删除、复制为个人、导入与校验；Plugin 检查、安装、启停与卸载                                                                                                             |
+| `workspace.*`、`git.*`、`files.*`、`terminals.*`、`references.*`                                               | 右侧工作台与环境信息卡                                                                                                                                                                          |
+| `pullRequests.*`                                                                                               | 全局只读 Pull Request 查询：gh 状态、按筛选搜索、详情与 diff                                                                                                                                    |
+| `github.*`                                                                                                     | GitHub 插件的只读 Issue 与 CI 查询：Issue 列表与详情、Actions 运行列表与详情                                                                                                                    |
+| `scheduler.*`                                                                                                  | 定时任务                                                                                                                                                                                        |
+| `environment.*`、`diagnostics.*`、`processes.*`、`onboarding.*`、`desktopPet.*`、`attachments.*`、`projects.*` | 其他宿主能力                                                                                                                                                                                    |
 
 会修改状态的 operation 经过 CoreApi mutation guard：当前 session 有待处理交互时返回 409，处于 Plan 模式时返回 403。
 
@@ -70,7 +70,7 @@ Operation 的名称与参数 schema 定义在 `packages/core/src/api/operations.
 - **回合改动记录**（`packages/core/src/harness/host/turn-files.ts`，Git 机制在 `workspace/turn-snapshots.ts`）：
   - **快照时机**：Build 项目在 Git 中时，一轮里第一次可能写文件的调用（`write`、`edit`、shell、`skill_manage`、`mcp_*`，根会话或子代理发起）先等一次影子快照；根会话的 turn 结束时再拍一次。
   - **快照做法**：复制用户 index 为临时 index，执行 `add -A`、`write-tree`、`commit-tree`，不改用户的 index 和文件。未跟踪文件超过 10 MB 的排除，并标为过大。单次快照限时 5 秒，超时本轮记为未记录。
-  - **记录**：有改动时写 `turn/files` 事件，两次快照留在 `refs/emperor/turns/<会话>/<回合>/{before,after}`。每个会话保留最近 50 轮，删除会话时一并删除；普通 `git push` 不会推送这些引用。
+  - **记录**：有改动时写 `turn/files` 事件，两次快照留在 `refs/emperor/turns/<会话>/<回合>/{before,after}`。每个会话保留最近 50 轮，会话被永久删除（最近删除里永久删除或 30 天到期）时一并删除；普通 `git push` 不会推送这些引用。
   - **非 Git 目录**：只统计 Emperor 文件工具的写入，`mode` 为 `tools`，不能撤销。
   - **查看与撤销**：`workspace.turnDiff({ sessionId, turn, path })` 返回一个文件在两次快照间的 diff（上限 2 MiB）。`workspace.revertTurn({ sessionId, turn, paths? })` 只恢复仍与回合结束时一致的文件，其余记 `changed-since`；快照已清理的记 `missing`。撤销结果写 `turn/files-reverted`，每轮只能撤销一次。
   - **撤销限制**：同一工作区有 Agent 运行时拒绝撤销；撤销与快照都经 workspace mutation coordinator，与 `git.*` 写操作串行。

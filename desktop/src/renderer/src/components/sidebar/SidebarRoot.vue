@@ -60,6 +60,7 @@ const {
   create,
   resolveProject,
   remove,
+  restoreDeleted,
   rename,
   archive,
   isDraftSessionId,
@@ -248,32 +249,61 @@ function firstOtherSession(id: string): SessionInfo | undefined {
   )
 }
 
+/** How long 「撤销」 stays offered after a delete (FIX-01). */
+const UNDO_DELETE_MS = 10_000
+
 async function doDelete(id: string) {
   if (!isDraftSessionId(id) && !canDeletePersistedSession.value) {
     ctx.showToast('至少保留一个持久化会话')
     return
   }
+  const draft = isDraftSessionId(id)
+  const title = sessions.value.find((s) => s.id === id)?.title || '会话'
   const wasActive = activeId.value === id
+  const wasPinned = layout.state.value.pinned_session_ids.includes(id)
   const next = firstOtherSession(id)
   const removed = await remove(id)
   if (!removed) {
-    ctx.showToast(sessionActionError.value || '删除会话失败')
+    ctx.showError(sessionActionError.value || '未知错误', '删除失败')
+    return
+  }
+  layout.forgetPinned(id)
+  if (wasActive && next) openSession(next.id)
+  if (draft) return
+  // Deleted sessions wait in 最近删除 (30 days); undo puts this one back.
+  ctx.showToast(`已删除「${title}」`, {
+    durationMs: UNDO_DELETE_MS,
+    action: {
+      label: '撤销',
+      run: async () => {
+        const restored = await restoreDeleted(id)
+        if (!restored) {
+          ctx.showError(sessionActionError.value || '未知错误', '撤销删除失败')
+          return
+        }
+        if (wasPinned) layout.togglePin(id)
+        if (wasActive) openSession(id)
+      },
+    },
+  })
+}
+
+async function doArchive(id: string) {
+  const wasActive = activeId.value === id
+  const next = firstOtherSession(id)
+  // A failed archive leaves the pin and the page alone and says why.
+  if (!(await archive(id, true))) {
+    ctx.showError(sessionActionError.value || '未知错误', '归档失败')
     return
   }
   layout.forgetPinned(id)
   if (wasActive && next) openSession(next.id)
 }
 
-async function doArchive(id: string) {
-  const wasActive = activeId.value === id
-  const next = firstOtherSession(id)
-  await archive(id, true)
-  layout.forgetPinned(id)
-  if (wasActive && next) openSession(next.id)
-}
-
 async function doRename(id: string, title: string) {
-  await rename(id, title)
+  // The row keeps its old title (it changes only on success).
+  if (!(await rename(id, title)))
+    ctx.showError(sessionActionError.value || '未知错误', '重命名失败')
 }
 
 function focusSearch() {

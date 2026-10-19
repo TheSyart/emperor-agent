@@ -1,17 +1,28 @@
 import { CoreMutationGuardError } from '../mutation-guard'
-import type { SessionEntry, SessionStore } from '../../sessions/store'
+import type {
+  SessionEntry,
+  SessionStore,
+  TrashedSession,
+} from '../../sessions/store'
+
+/** How long a deleted session stays in 最近删除 before it is purged. */
+export const SESSION_TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 
 type Dict = Record<string, unknown>
 
 export interface SessionApplicationServiceDeps {
   sessions: SessionStore
   resolveProject(projectPath: string): Dict
-  /** Stop the session's agent and drop it from the kernel (host.stop + host.deleteSession). */
-  endSession(sessionId: string, reason: string): Promise<void>
+  /**
+   * Stop the session's agent and drop it from the kernel, closing its log
+   * without removing it (host.unloadSession): a deleted session can be
+   * restored until the trash is emptied.
+   */
+  unloadSession(sessionId: string): void
+  /** Drop a purged session's kept turn snapshots (turnFiles.forgetSession). */
+  forgetTurnFiles(sessionId: string, projectRoot: string | null): Promise<void>
   closeTerminals(sessionId: string): void
   activateSession(sessionId: string): SessionEntry
-  /** Remove the session's durable log (goals/jobs/plans live there now). */
-  deleteSessionLog(sessionId: string): void
   /** Optional: interrupt a running turn when the session is archived (host.stop). */
   stopSession?(sessionId: string, reason: string): void
   /** Optional: the session was deleted or archived and left the sidebar list. */
@@ -75,7 +86,15 @@ export class CoreSessionApplicationService {
     return entry
   }
 
-  async delete(sessionId: string): Promise<{ deleted: true }> {
+  /**
+   * Soft delete (FIX-01): the session leaves the list and moves to the
+   * trash with its log, attachments and turn snapshots; restoreDeleted()
+   * brings it back unchanged, purgeDeleted() (or the 30-day expiry)
+   * removes it for good.
+   */
+  async delete(
+    sessionId: string,
+  ): Promise<{ deleted: true; restorable: true; restorableUntil: string }> {
     if (!this.deps.sessions.get(sessionId))
       throw new Error('cannot delete session')
     if (this.deps.sessions.list({ includeArchived: true }).length <= 1)
@@ -83,13 +102,62 @@ export class CoreSessionApplicationService {
         409,
         'Cannot delete the last persisted session.',
       )
-    await this.deps.endSession(sessionId, 'deleted')
-    if (!this.deps.sessions.delete(sessionId))
+    this.deps.unloadSession(sessionId)
+    const deletedAt = new Date()
+    if (!this.deps.sessions.trash(sessionId, deletedAt.toISOString()))
       throw new Error('cannot delete session')
     this.deps.closeTerminals(sessionId)
-    this.deps.deleteSessionLog(sessionId)
     this.deps.sessionLeftList?.(sessionId)
-    return { deleted: true }
+    return {
+      deleted: true,
+      restorable: true,
+      restorableUntil: new Date(
+        deletedAt.getTime() + SESSION_TRASH_RETENTION_MS,
+      ).toISOString(),
+    }
+  }
+
+  /** Deleted sessions still in the trash (设置 › 常规 › 最近删除). */
+  listDeleted(): TrashedSession[] {
+    return this.deps.sessions.listTrashed()
+  }
+
+  /** Undo a delete: the session returns exactly as it was. */
+  async restoreDeleted(sessionId: string): Promise<SessionEntry> {
+    const entry = this.deps.sessions.restoreTrashed(sessionId)
+    if (!entry) throw new Error('该会话已不在最近删除中，无法恢复')
+    return entry
+  }
+
+  /** Delete a trashed session for good (its turn snapshots too). */
+  async purgeDeleted(sessionId: string): Promise<{ purged: true }> {
+    const record = this.deps.sessions.purgeTrashed(sessionId)
+    if (!record) throw new Error('该会话已不在最近删除中')
+    await this.forgetTurnFiles(record)
+    return { purged: true }
+  }
+
+  /** Purge trash entries deleted more than 30 days before `now`. */
+  async purgeExpiredDeleted(now = Date.now()): Promise<string[]> {
+    const purged: string[] = []
+    for (const id of this.deps.sessions.trashedBefore(
+      now - SESSION_TRASH_RETENTION_MS,
+    )) {
+      const record = this.deps.sessions.purgeTrashed(id)
+      if (!record) continue
+      await this.forgetTurnFiles(record)
+      purged.push(id)
+    }
+    return purged
+  }
+
+  private async forgetTurnFiles(record: TrashedSession): Promise<void> {
+    await this.deps
+      .forgetTurnFiles(
+        record.id,
+        record.mode === 'build' ? record.project_path : null,
+      )
+      .catch(() => undefined)
   }
 
   activate(sessionId: string): {

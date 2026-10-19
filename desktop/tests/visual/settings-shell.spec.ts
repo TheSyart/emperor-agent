@@ -48,7 +48,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(dialog.getByText('visual-main')).toBeVisible()
     // Header action from useSettingsHeader, rendered by the shell.
     await expect(
-      dialog.getByRole('button', { name: '刷新归档对话' }),
+      dialog.getByRole('button', { name: '刷新归档与最近删除' }),
     ).toBeVisible()
     // The three appearance cubes share one row in the 564px column.
     const cubes = dialog.locator('[data-theme-option]')

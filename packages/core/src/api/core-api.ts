@@ -1083,17 +1083,15 @@ export class CoreApi {
       sessions: kept.sessionStore,
       resolveProject: (projectPath) =>
         kept.projectStore.resolve(projectPath) as unknown as Dict,
-      endSession: async (sessionId) => {
-        await this.turnFiles.forgetSession(sessionId)
-        host.deleteSession(sessionId)
-      },
+      unloadSession: (sessionId) => host.unloadSession(sessionId),
+      forgetTurnFiles: (sessionId, projectRoot) =>
+        this.turnFiles.forgetSession(sessionId, projectRoot),
       stopSession: (sessionId) => {
         host.stop(sessionId)
       },
       closeTerminals: (sessionId) =>
         this.terminalService.closeSession(sessionId),
       activateSession: (sessionId) => this.activateSession(sessionId),
-      deleteSessionLog: (sessionId) => host.sessions.delete(sessionId),
       sessionLeftList: (sessionId) => this.unpinSidebarSession(sessionId),
     })
     this.workspaceApplicationService = new CoreWorkspaceApplicationService({
@@ -1278,6 +1276,14 @@ export class CoreApi {
       await api.delegationRuntime.probeProfiles()
       await api.sessionTransitionService.recover()
       await api.syncPlugins()
+      // 最近删除 keeps a deleted session for 30 days (FIX-01).
+      await api.sessionApplicationService
+        .purgeExpiredDeleted()
+        .catch((error: unknown) =>
+          logger.warn('purging expired deleted sessions failed', {
+            error: String(error),
+          }),
+        )
       return api
     } catch (error) {
       if (api) await api.close().catch(() => {})
@@ -1915,8 +1921,16 @@ export class CoreApi {
       sessionId: string,
       patch: string | { title?: string | null; archived?: boolean | null },
     ) => this.sessionApplicationService.rename(sessionId, patch),
+    /** Soft delete: the session goes to 最近删除 and can be restored. */
     delete: (sessionId: string): Promise<Dict> =>
       this.sessionApplicationService.delete(sessionId),
+    listDeleted: () => this.sessionApplicationService.listDeleted(),
+    restoreDeleted: (sessionId: string) =>
+      this.sessionApplicationService.restoreDeleted(sessionId),
+    purgeDeleted: (sessionId: string) =>
+      this.sessionApplicationService.purgeDeleted(sessionId),
+    purgeExpiredDeleted: (now?: number) =>
+      this.sessionApplicationService.purgeExpiredDeleted(now),
     activate: (sessionId: string) =>
       this.sessionApplicationService.activate(sessionId),
     /** One message-boundary page of a session's raw log, sanitized for the wire. */

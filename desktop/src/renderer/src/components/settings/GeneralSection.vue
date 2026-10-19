@@ -2,9 +2,11 @@
 /**
  * GeneralSection — Settings › 常规, the reference native section built on
  * components/settings/ui: runtime facts as SettingsRows, the dsh appearance
- * cubes (light / dark / follow system via useTheme) and the archived
- * conversation list (restore / delete through useSession). The archive list
- * reloads from the header refresh action.
+ * cubes (light / dark / follow system via useTheme), the archived
+ * conversation list (restore / delete through useSession) and 最近删除
+ * (FIX-01: deleted sessions kept 30 days, restore or delete for good after
+ * a confirmation). Both lists reload from the header refresh action; a
+ * list that failed to load says so with 重试 instead of looking empty.
  */
 import { computed, onMounted, ref, type Component } from 'vue'
 import Button from '../ui/Button.vue'
@@ -12,17 +14,19 @@ import { DsDark, DsFollowSystem, DsLight } from '../icons/ds'
 import {
   EmptyState,
   SettingsGroup,
+  SettingsNotice,
   SettingsRow,
   SettingsSection,
   StatusBadge,
   Switch,
 } from './ui'
+import { confirm } from '../ui/confirm'
 import { refreshAction, useSettingsHeader } from './settingsHeader'
 import { useAppContext } from '../../composables/useAppContext'
 import { useSession } from '../../composables/useSession'
 import { useTheme, type ThemePreference } from '../../composables/useTheme'
 import { useUiPreferences } from '../../composables/useUiPreferences'
-import type { SessionInfo } from '../../types'
+import type { DeletedSessionInfo, SessionInfo } from '../../types'
 
 const ctx = useAppContext()
 const sessions = useSession()
@@ -31,6 +35,9 @@ const { preferences: uiPrefs, setUiPreference } = useUiPreferences()
 
 const archivedSessions = ref<SessionInfo[]>([])
 const archivedLoading = ref(false)
+const archivedError = ref('')
+const deletedSessions = ref<DeletedSessionInfo[]>([])
+const deletedError = ref('')
 
 const currentModel = computed(
   () =>
@@ -60,13 +67,20 @@ const themes: { key: ThemePreference; label: string; icon: Component }[] = [
 
 useSettingsHeader({
   actions: () => [
-    refreshAction(() => loadArchived(), { title: '刷新归档对话' }),
+    refreshAction(() => Promise.all([loadArchived(), loadDeleted()]), {
+      title: '刷新归档与最近删除',
+    }),
   ],
 })
 
 onMounted(() => {
   void loadArchived()
+  void loadDeleted()
 })
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
 
 async function loadArchived() {
   archivedLoading.value = true
@@ -74,11 +88,54 @@ async function loadArchived() {
     archivedSessions.value = (await sessions.loadArchived()).filter(
       (session) => session.archived_at,
     )
-  } catch {
-    archivedSessions.value = []
+    archivedError.value = ''
+  } catch (error) {
+    archivedError.value = messageOf(error) || '无法读取归档对话'
   } finally {
     archivedLoading.value = false
   }
+}
+
+async function loadDeleted() {
+  try {
+    deletedSessions.value = await sessions.listDeleted()
+    deletedError.value = ''
+  } catch (error) {
+    deletedError.value = messageOf(error) || '无法读取最近删除'
+  }
+}
+
+async function restoreDeleted(item: DeletedSessionInfo) {
+  if (!(await sessions.restoreDeleted(item.id))) {
+    ctx.showError(sessions.sessionActionError.value || '未知错误', '恢复失败')
+    return
+  }
+  ctx.showToast(`已恢复「${item.title}」`)
+  await loadDeleted()
+}
+
+async function purgeDeleted(item: DeletedSessionInfo) {
+  if (
+    !(await confirm({
+      title: `永久删除「${item.title}」？`,
+      body: '对话记录、附件和回合快照都会删除，无法恢复。',
+      confirmLabel: '永久删除',
+      tone: 'danger',
+    }))
+  )
+    return
+  if (!(await sessions.purgeDeleted(item.id))) {
+    ctx.showError(sessions.sessionActionError.value || '未知错误', '删除失败')
+    return
+  }
+  await loadDeleted()
+}
+
+function deletedMeta(item: DeletedSessionInfo) {
+  const day = item.deleted_at.slice(0, 10)
+  return item.project_name
+    ? `${item.project_name} · ${day} 删除`
+    : `${day} 删除`
 }
 
 async function restoreArchived(id: string) {
@@ -93,10 +150,14 @@ async function restoreArchived(id: string) {
 
 async function deleteArchived(id: string) {
   const ok = await sessions.remove(id)
-  if (ok)
-    archivedSessions.value = archivedSessions.value.filter(
-      (session) => session.id !== id,
-    )
+  if (!ok) {
+    ctx.showError(sessions.sessionActionError.value || '未知错误', '删除失败')
+    return
+  }
+  archivedSessions.value = archivedSessions.value.filter(
+    (session) => session.id !== id,
+  )
+  await loadDeleted()
 }
 
 function archivedMeta(session: SessionInfo) {
@@ -166,9 +227,25 @@ function archivedMeta(session: SessionInfo) {
       </SettingsRow>
     </SettingsGroup>
 
-    <SettingsGroup title="已归档对话" description="恢复后会重新出现在主侧边栏">
+    <SettingsGroup
+      title="已归档对话"
+      description="恢复后会重新出现在主侧边栏"
+      data-group="archived"
+    >
+      <SettingsNotice
+        v-if="archivedError"
+        tone="error"
+        title="无法读取归档对话"
+        :description="archivedError"
+      >
+        <template #actions>
+          <Button size="sm" variant="secondary" @click="loadArchived()"
+            >重试</Button
+          >
+        </template>
+      </SettingsNotice>
       <EmptyState
-        v-if="archivedLoading && !archivedSessions.length"
+        v-else-if="archivedLoading && !archivedSessions.length"
         class="archive-empty"
         title="加载归档对话中…"
         variant="plain"
@@ -203,6 +280,48 @@ function archivedMeta(session: SessionInfo) {
             @click="deleteArchived(session.id)"
           >
             删除
+          </Button>
+        </SettingsRow>
+      </template>
+    </SettingsGroup>
+
+    <SettingsGroup
+      title="最近删除"
+      description="删除的对话保留 30 天，可以恢复；之后自动清除"
+      data-group="deleted"
+    >
+      <SettingsNotice
+        v-if="deletedError"
+        tone="error"
+        title="无法读取最近删除"
+        :description="deletedError"
+      >
+        <template #actions>
+          <Button size="sm" variant="secondary" @click="loadDeleted()"
+            >重试</Button
+          >
+        </template>
+      </SettingsNotice>
+      <EmptyState
+        v-else-if="!deletedSessions.length"
+        class="archive-empty"
+        title="最近没有删除的对话。"
+        compact
+      />
+      <template v-else>
+        <SettingsRow
+          v-for="item in deletedSessions"
+          :key="item.id"
+          :title="item.title"
+          :description="deletedMeta(item)"
+          dense
+          data-testid="deleted-session"
+        >
+          <Button size="sm" variant="secondary" @click="restoreDeleted(item)">
+            恢复
+          </Button>
+          <Button size="sm" variant="danger" @click="purgeDeleted(item)">
+            永久删除
           </Button>
         </SettingsRow>
       </template>

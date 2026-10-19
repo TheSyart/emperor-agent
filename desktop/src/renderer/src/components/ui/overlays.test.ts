@@ -364,6 +364,37 @@ describe('toast queue', () => {
     expect(visibleToasts.value).toHaveLength(0)
   })
 
+  it('offers an action such as 撤销 for its own duration, then closes (FIX-01)', async () => {
+    mount(() => h(ToastStack))
+    const undo = vi.fn()
+    pushToast('已删除「草稿」', {
+      action: { label: '撤销', run: undo },
+      durationMs: 10_000,
+    })
+    await settle()
+    const toast = document.querySelector<HTMLElement>('.ds-toast')!
+    const button = [...toast.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === '撤销',
+    )!
+    vi.advanceTimersByTime(9_000)
+    await settle()
+    expect(document.querySelector('.ds-toast')).not.toBeNull()
+    button.click()
+    await settle()
+    expect(undo).toHaveBeenCalledOnce()
+    expect(document.querySelector('.ds-toast')).toBeNull()
+
+    pushToast('已删除「另一个」', {
+      action: { label: '撤销', run: undo },
+      durationMs: 10_000,
+    })
+    await settle()
+    vi.advanceTimersByTime(10_000)
+    await settle()
+    expect(document.querySelector('.ds-toast')).toBeNull()
+    expect(undo).toHaveBeenCalledOnce()
+  })
+
   it('ignores an empty message', () => {
     pushToast('')
     expect(visibleToasts.value).toHaveLength(0)

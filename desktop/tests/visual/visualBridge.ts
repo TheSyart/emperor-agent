@@ -4708,6 +4708,8 @@ export async function installVisualCoreBridge(
               }
             case 'sessions.list':
               return sessions
+            case 'sessions.listDeleted':
+              return []
             case 'sessions.activate':
               return { active: args[0], complete: true }
             case 'sessions.history': {

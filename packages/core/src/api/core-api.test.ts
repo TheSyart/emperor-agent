@@ -195,7 +195,10 @@ const EXPECTED_OPERATIONS = [
   'sessions.history',
   'sessions.lineage',
   'sessions.list',
+  'sessions.listDeleted',
+  'sessions.purgeDeleted',
   'sessions.rename',
+  'sessions.restoreDeleted',
   'sessions.watch',
   'sidebar.get',
   'sidebar.patch',
@@ -1291,19 +1294,64 @@ describe('CoreApi commands', () => {
 })
 
 describe('CoreApi sessions and kept services', () => {
-  it('deletes a session and its log', async () => {
+  it('moves a deleted session to the trash, and undo brings it back byte for byte (FIX-01 1)', async () => {
     const { api } = await setup({ replies: [{ text: 'hello' }] })
     const keep = session(api, 'Keep')
     const doomed = session(api, 'Doomed')
     await api.chat.submit({ content: 'hi', sessionId: doomed })
-    expect(api.host.sessions.has(doomed)).toBe(true)
+    await api.host.agentFor(doomed).whenIdle()
+    await api.host.sessions.flush(doomed, { sync: true })
+    const logPath = join(
+      api.host.kept.sessionStore.sessionDir(doomed),
+      'log.jsonl',
+    )
+    const bytes = readFileSync(logPath)
     const forget = vi.spyOn(api.turnFiles, 'forgetSession')
-    await api.sessions.delete(doomed)
-    // Its kept turn snapshots go first, while the project is still known.
-    expect(forget).toHaveBeenCalledWith(doomed)
+    const result = await api.sessions.delete(doomed)
+    expect(result).toMatchObject({ deleted: true, restorable: true })
+    // Snapshots stay until the trash is emptied, so undo keeps revert.
+    expect(forget).not.toHaveBeenCalled()
     expect(api.host.sessions.has(doomed)).toBe(false)
     expect(api.host.kept.sessionStore.get(doomed)).toBeNull()
     expect(api.host.kept.sessionStore.get(keep)).not.toBeNull()
+    expect(api.sessions.listDeleted()).toEqual([
+      expect.objectContaining({ id: doomed, title: 'Doomed' }),
+    ])
+    const restored = await api.sessions.restoreDeleted(doomed)
+    expect(restored.id).toBe(doomed)
+    expect(readFileSync(logPath).equals(bytes)).toBe(true)
+    expect(api.sessions.listDeleted()).toEqual([])
+    expect(api.host.agentFor(doomed).session.events.length).toBeGreaterThan(0)
+  })
+
+  it('keeps a deleted session in 最近删除 until it is purged (FIX-01 2)', async () => {
+    const { api } = await setup()
+    session(api, 'Keep')
+    const doomed = session(api, 'Doomed')
+    await api.sessions.delete(doomed)
+    expect(api.sessions.listDeleted().map((item) => item.id)).toEqual([doomed])
+    const forget = vi.spyOn(api.turnFiles, 'forgetSession')
+    await api.sessions.purgeDeleted(doomed)
+    expect(forget).toHaveBeenCalledWith(doomed, null)
+    expect(api.sessions.listDeleted()).toEqual([])
+    await expect(api.sessions.restoreDeleted(doomed)).rejects.toThrow()
+  })
+
+  it('empties trash entries older than 30 days (FIX-01 3)', async () => {
+    const { api } = await setup()
+    session(api, 'Keep')
+    const old = session(api, 'Old')
+    const fresh = session(api, 'Fresh')
+    await api.sessions.delete(old)
+    await api.sessions.delete(fresh)
+    const store = api.host.kept.sessionStore
+    // Backdate the first deletion past the 30-day window.
+    store.trash(store.restoreTrashed(old)!.id, '2026-08-01T00:00:00.000Z')
+    const purged = await api.sessions.purgeExpiredDeleted(
+      Date.parse('2026-10-19T00:00:00.000Z'),
+    )
+    expect(purged).toEqual([old])
+    expect(api.sessions.listDeleted().map((item) => item.id)).toEqual([fresh])
   })
 
   it('returns structured scheduler payloads and rejects non agent_turn payloads', async () => {

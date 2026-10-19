@@ -108,6 +108,7 @@ describe('workspace snapshot safe projections', () => {
       createdAt: 1,
       exited: false,
       exitCode: null,
+      busy: false,
     })
 
     expect(process).toEqual({

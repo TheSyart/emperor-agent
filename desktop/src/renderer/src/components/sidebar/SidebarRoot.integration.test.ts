@@ -77,6 +77,20 @@ beforeEach(() => {
     loading: ref(false),
     canDeletePersistedSession: ref(true),
     load: vi.fn(),
+    sessionActionError: ref(''),
+    remove: vi.fn(async (id: string) => {
+      mock.session.sessions.value = mock.session.sessions.value.filter(
+        (s: { id: string }) => s.id !== id,
+      )
+      return true
+    }),
+    restoreDeleted: vi.fn(async (id: string) => {
+      const entry = sessions.find((s) => s.id === id)!
+      mock.session.sessions.value = [entry, ...mock.session.sessions.value]
+      return entry
+    }),
+    archive: vi.fn(async () => true),
+    rename: vi.fn(async () => true),
     isDraftSessionId: (id: string) => id.startsWith('draft:'),
     getSession: (id: string) => sessions.find((s) => s.id === id),
   }
@@ -263,4 +277,72 @@ it('pins normally once the sidebar state has loaded (FIX-06 6)', async () => {
     'sidebar.patch',
     expect.objectContaining({ pinned_session_ids: ['chat-root', 'pinned'] }),
   )
+})
+
+async function rowAction(title: string, action: string) {
+  const row = [...root.querySelectorAll<HTMLElement>('.session-row')].find(
+    (el) => el.getAttribute('title') === title,
+  )!
+  row.querySelector<HTMLButtonElement>('[aria-label="会话操作"]')!.click()
+  await settle()
+  ;[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+    .find((el) => el.textContent?.trim() === action)!
+    .click()
+  await settle()
+}
+
+it('deletes with an undo toast that brings the session back (FIX-01 1)', async () => {
+  const { visibleToasts, resetToastsForTest } = await import('../ui/toasts')
+  resetToastsForTest()
+  mock.context.showToast = (message: string, options?: object) =>
+    import('../ui/toasts').then(({ pushToast }) => pushToast(message, options))
+  await mount('/chat/chat-root')
+  await rowAction('chat-root', '删除')
+  expect(mock.session.remove).toHaveBeenCalledWith('chat-root')
+  await settle()
+  const toast = visibleToasts.value.find((item) =>
+    item.message.includes('已删除「chat-root」'),
+  )!
+  expect(toast.action?.label).toBe('撤销')
+  await toast.action!.run()
+  await settle()
+  expect(mock.session.restoreDeleted).toHaveBeenCalledWith('chat-root')
+  expect(
+    mock.session.sessions.value.map((s: { id: string }) => s.id),
+  ).toContain('chat-root')
+  resetToastsForTest()
+})
+
+it('keeps the pin and the page when archiving fails, and says why (FIX-01 6)', async () => {
+  mock.session.archive.mockImplementation(async () => {
+    mock.session.sessionActionError.value = '磁盘只读'
+    return false
+  })
+  const router = await mount('/chat/pinned')
+  await rowAction('pinned', '归档')
+  expect(mock.session.archive).toHaveBeenCalledWith('pinned', true)
+  expect(mock.context.showError).toHaveBeenCalledWith('磁盘只读', '归档失败')
+  expect(router.currentRoute.value.params.sessionId).toBe('pinned')
+  expect(mock.core).not.toHaveBeenCalledWith('sidebar.patch', expect.anything())
+})
+
+it('reports a failed rename and keeps the old title (FIX-01 7)', async () => {
+  mock.session.rename.mockImplementation(async () => {
+    mock.session.sessionActionError.value = '标题太长'
+    return false
+  })
+  await mount('/chat/pinned')
+  await rowAction('chat-root', '重命名')
+  const input = root.querySelector<HTMLInputElement>('[aria-label="会话标题"]')!
+  input.value = '新标题'
+  input.dispatchEvent(new Event('input'))
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
+  await settle()
+  expect(mock.session.rename).toHaveBeenCalledWith('chat-root', '新标题')
+  expect(mock.context.showError).toHaveBeenCalledWith('标题太长', '重命名失败')
+  expect(
+    [...root.querySelectorAll('.session-row')].some(
+      (el) => el.getAttribute('title') === 'chat-root',
+    ),
+  ).toBe(true)
 })
