@@ -165,7 +165,6 @@ function input(label: string): HTMLInputElement {
   return control
 }
 
-
 beforeEach(() => {
   api.resolveModelProfilePreview.mockResolvedValue(profile)
 })
