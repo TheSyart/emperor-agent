@@ -183,8 +183,8 @@ describe('诊断', () => {
       ),
     ).toEqual(['runtime', 'environment', 'desktop', 'paths', 'config'])
     const badges = (id: string) =>
-      [...card(root, id).querySelectorAll('.head .ds-badge')].map(
-        (badge) => badge.textContent?.trim(),
+      [...card(root, id).querySelectorAll('.head .ds-badge')].map((badge) =>
+        badge.textContent?.trim(),
       )
     expect(badges('runtime')).toEqual(['1 项需要关注'])
     expect(badges('environment')).toEqual(['1 项需要关注'])
@@ -261,9 +261,7 @@ describe('诊断', () => {
       return undefined
     })
     const root = await mount()
-    const notices = [
-      ...root.querySelectorAll<HTMLElement>('.ds-notice'),
-    ]
+    const notices = [...root.querySelectorAll<HTMLElement>('.ds-notice')]
     expect(notices.map((notice) => notice.dataset.tone)).toEqual([
       'error',
       'error',

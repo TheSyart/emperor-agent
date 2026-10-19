@@ -236,9 +236,9 @@ describe('下载历史记录', () => {
     expect(root.querySelector('[role="status"]')?.textContent).toContain(
       '已移到工作区',
     )
-    expect(
-      root.querySelector<HTMLElement>('.ds-notice')?.dataset.tone,
-    ).toBe('info')
+    expect(root.querySelector<HTMLElement>('.ds-notice')?.dataset.tone).toBe(
+      'info',
+    )
     click(rowOf(root, 'dl_0123456789ab'), '另存为…')
     await settle()
     expect(bridge.agentDownloadReveal).toHaveBeenCalledWith('dl_0123456789ab')

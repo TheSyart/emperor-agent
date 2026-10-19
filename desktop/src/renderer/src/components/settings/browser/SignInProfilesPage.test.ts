@@ -155,9 +155,8 @@ describe('登录状态', () => {
       document.body.querySelector('.profile-form [role="alert"]')?.textContent,
     ).toBe('名称已存在')
     expect(
-      document.body.querySelector<HTMLElement>(
-        '.profile-form .ds-notice',
-      )?.dataset.tone,
+      document.body.querySelector<HTMLElement>('.profile-form .ds-notice')
+        ?.dataset.tone,
     ).toBe('error')
   })
 
