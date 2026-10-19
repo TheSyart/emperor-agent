@@ -192,7 +192,7 @@ function archivedMeta(session: SessionInfo) {
         >
           <Button
             size="sm"
-            variant="outline"
+            variant="secondary"
             @click="restoreArchived(session.id)"
           >
             恢复

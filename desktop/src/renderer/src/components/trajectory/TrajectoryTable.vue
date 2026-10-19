@@ -13,6 +13,7 @@
  * Emits: record-select(index) (direct row selection), clear (whitespace
  * click: clears selection and the timeline range).
  */
+import Spinner from '../ui/Spinner.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 // @ts-expect-error vue-virtual-scroller v2 beta 无类型声明（见 shims）
 import { RecycleScroller } from 'vue-virtual-scroller'
@@ -463,9 +464,7 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
         <span v-if="openState === 'error'" class="error-text">{{
           controller.windowState.value.error ?? 'Failed to load trajectory'
         }}</span>
-        <template v-else>
-          <span class="spinner" aria-hidden="true" />Loading trajectory…
-        </template>
+        <template v-else> <Spinner size="sm" />Loading trajectory… </template>
       </div>
       <div v-if="hasMore" class="history-row" data-history-load>
         <button
@@ -474,7 +473,7 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
           :disabled="loadingOlder"
           @click.stop="loadOlder"
         >
-          <span v-if="loadingOlder" class="spinner" aria-hidden="true" />
+          <Spinner v-if="loadingOlder" size="sm" />
           {{
             loadingOlder ? 'Loading earlier history…' : 'Load earlier history'
           }}
@@ -641,22 +640,6 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
 
 .history-button:disabled {
   cursor: default;
-}
-
-.spinner {
-  width: 10px;
-  height: 10px;
-  box-sizing: border-box;
-  border: 1.5px solid var(--border-l2);
-  border-top-color: rgb(var(--accent-fill));
-  border-radius: 50%;
-  animation: traj-spin 700ms linear infinite;
-}
-
-@keyframes traj-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .empty {

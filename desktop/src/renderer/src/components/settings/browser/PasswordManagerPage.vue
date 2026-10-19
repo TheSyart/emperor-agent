@@ -298,7 +298,7 @@ onBeforeUnmount(hidePassword)
           <template v-if="status.locked">
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               :disabled="busy"
               data-action="vault-unlock"
               @click="openProtect('unlock')"
@@ -308,14 +308,14 @@ onBeforeUnmount(hidePassword)
           <template v-else-if="status.hasMasterPassword">
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               :disabled="busy"
               @click="run(vaultLock)"
               >锁定</Button
             >
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               :disabled="busy"
               data-action="vault-change-master"
               @click="openProtect('change')"
@@ -325,7 +325,7 @@ onBeforeUnmount(hidePassword)
           <Button
             v-else
             size="sm"
-            variant="outline"
+            variant="secondary"
             :disabled="busy"
             data-action="vault-set-master"
             @click="openProtect('set')"
@@ -367,14 +367,14 @@ onBeforeUnmount(hidePassword)
         <Button
           v-if="handle.fields.includes('password')"
           size="sm"
-          variant="outline"
+          variant="secondary"
           :disabled="busy || !writable"
           @click="reveal(handle.handleId)"
           >查看密码</Button
         >
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           :disabled="busy || !writable"
           @click="edit(handle)"
           >编辑</Button
@@ -426,7 +426,7 @@ onBeforeUnmount(hidePassword)
         </p>
       </form>
       <template #footer>
-        <Button variant="outline" type="button" @click="protect = null"
+        <Button variant="secondary" type="button" @click="protect = null"
           >取消</Button
         >
         <Button
@@ -514,7 +514,9 @@ onBeforeUnmount(hidePassword)
         </p>
       </form>
       <template #footer>
-        <Button variant="outline" type="button" @click="resetForm">取消</Button>
+        <Button variant="secondary" type="button" @click="resetForm"
+          >取消</Button
+        >
         <Button
           variant="primary"
           type="submit"

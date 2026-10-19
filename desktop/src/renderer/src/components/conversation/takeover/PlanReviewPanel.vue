@@ -85,7 +85,12 @@ function onCommentKeydown(event: KeyboardEvent) {
       <div class="strip">
         <span class="dot" aria-hidden="true" />
         <span class="strip-label">计划待确认</span>
-        <IconButton label="忽略" round class="strip-close" @click="cancel">
+        <IconButton
+          shape="circle"
+          label="忽略"
+          class="strip-close"
+          @click="cancel"
+        >
           <DsClose :size="14" />
         </IconButton>
       </div>
@@ -108,7 +113,7 @@ function onCommentKeydown(event: KeyboardEvent) {
         />
         <div class="actions">
           <Button
-            variant="outline"
+            variant="secondary"
             data-action="comment"
             :disabled="!canComment"
             @click="keepPlanning"
@@ -116,7 +121,7 @@ function onCommentKeydown(event: KeyboardEvent) {
             继续规划
           </Button>
           <Button
-            variant="primary"
+            variant="secondary"
             data-action="approve"
             :disabled="busy"
             @click="approve"

@@ -351,7 +351,7 @@ onBeforeUnmount(() => {
       <template #actions>
         <Button
           size="sm"
-          :variant="hero.installPrimary ? 'primary' : 'outline'"
+          :variant="hero.installPrimary ? 'primary' : 'secondary'"
           :disabled="busy"
           data-action="install-extension"
           @click="install()"
@@ -388,7 +388,7 @@ onBeforeUnmount(() => {
         <template #actions>
           <Button
             size="sm"
-            variant="outline"
+            variant="secondary"
             :disabled="busy"
             data-action="reinstall-extension"
             @click="install(true)"
@@ -441,7 +441,7 @@ onBeforeUnmount(() => {
         >
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           :disabled="busy"
           :aria-label="`拒绝配对 ${browserName(item.browser)}`"
           @click="deny(item.pairingId)"
@@ -466,7 +466,7 @@ onBeforeUnmount(() => {
         <Button
           v-if="row.action"
           size="sm"
-          variant="outline"
+          variant="secondary"
           :disabled="busy"
           :aria-label="`${ROW_ACTIONS[row.action]} ${row.title}`"
           @click="rowAction(row)"

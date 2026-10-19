@@ -253,7 +253,7 @@ onBeforeUnmount(() => {
         <Button
           v-if="status?.supported && !masterOn"
           size="sm"
-          variant="outline"
+          variant="secondary"
           @click="openComputerUse"
           >打开电脑操作</Button
         >
@@ -339,7 +339,7 @@ onBeforeUnmount(() => {
           >清除失败</StatusBadge
         >
         <Button
-          variant="outline"
+          variant="secondary"
           size="sm"
           data-action="clear-browser-data"
           :disabled="clearing === 'running'"
@@ -366,7 +366,7 @@ onBeforeUnmount(() => {
       <template #actions>
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           data-testid="open-import"
           @click="importOpen = true"
           >导入…</Button
@@ -378,7 +378,7 @@ onBeforeUnmount(() => {
       >
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           data-action="manage-passwords"
           @click="openPage('passwords')"
           >管理</Button
@@ -390,7 +390,7 @@ onBeforeUnmount(() => {
       >
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           data-action="manage-profiles"
           @click="openPage('profiles')"
           >管理</Button
@@ -410,7 +410,7 @@ onBeforeUnmount(() => {
         </template>
         <Button
           v-if="preferences.downloadDirectory"
-          variant="outline"
+          variant="secondary"
           size="sm"
           data-action="reset-download-folder"
           :disabled="saving"
@@ -418,7 +418,7 @@ onBeforeUnmount(() => {
           >恢复默认</Button
         >
         <Button
-          variant="outline"
+          variant="secondary"
           size="sm"
           data-action="change-download-folder"
           :disabled="saving || choosingFolder"
@@ -443,7 +443,7 @@ onBeforeUnmount(() => {
       <SettingsRow title="下载历史记录" description="你的下载和 Emperor 的下载">
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           data-action="manage-downloads"
           @click="openPage('downloads')"
           >管理</Button
@@ -473,7 +473,7 @@ onBeforeUnmount(() => {
       >
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           data-action="manage-sites"
           @click="openPage('sites')"
           >管理</Button

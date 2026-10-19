@@ -191,7 +191,7 @@ function clearFilters() {
       >
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           @click="router.push('/capabilities')"
         >
           前往能力页
@@ -204,7 +204,7 @@ function clearFilters() {
         description="换个关键词或类型试试。"
         data-testid="explore-empty"
       >
-        <Button size="sm" variant="outline" @click="clearFilters">
+        <Button size="sm" variant="secondary" @click="clearFilters">
           清除筛选
         </Button>
       </EmptyState>

@@ -271,7 +271,7 @@ onBeforeUnmount(() => {
         <Button
           data-open-output
           size="sm"
-          variant="outline"
+          variant="secondary"
           @click="showOutput = true"
           >查看输出</Button
         >
@@ -456,7 +456,7 @@ onBeforeUnmount(() => {
                 />我已审查上面的结果树</label
               ><Button
                 size="sm"
-                variant="outline"
+                variant="secondary"
                 :disabled="busy || active"
                 @click="verify"
                 >{{ verifying ? '验证中…' : '运行宿主验证' }}</Button
@@ -466,7 +466,7 @@ onBeforeUnmount(() => {
           <div v-if="hasFileDelivery" class="external-actions">
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               :disabled="busy || acceptance !== 'passed'"
               @click="makePreview"
               >生成整合预览</Button

@@ -14,6 +14,7 @@
  * - providerOptions: Provider catalog from the model config payload.
  * Emits: saved(payload, label) after `model.saveEntry`; cancel.
  */
+import Spinner from '../../ui/Spinner.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { Eye, EyeOff } from 'lucide-vue-next'
 import {
@@ -526,7 +527,7 @@ function cancel(): void {
           <span class="provider-name">{{ selectedProviderLabel }}</span>
           <Button
             size="sm"
-            variant="outline"
+            variant="secondary"
             :aria-expanded="choosingProvider"
             aria-label="更换供应商"
             @click="choosingProvider = !choosingProvider"
@@ -605,7 +606,7 @@ function cancel(): void {
           />
           <Button
             size="sm"
-            variant="outline"
+            variant="secondary"
             :disabled="!canDiscover || discovering"
             :title="
               canDiscover ? undefined : '当前 Provider 不支持获取模型列表'
@@ -613,7 +614,8 @@ function cancel(): void {
             @click="discoverModels"
           >
             <template #icon>
-              <DsRefresh :size="14" :class="{ spinning: discovering }" />
+              <Spinner v-if="discovering" size="sm" />
+              <DsRefresh v-else :size="14" />
             </template>
             {{ discovering ? '获取中…' : '获取模型' }}
           </Button>
@@ -767,7 +769,7 @@ function cancel(): void {
       <div class="test-row">
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           :disabled="Boolean(testing)"
           @click="runTest('text')"
         >
@@ -775,7 +777,7 @@ function cancel(): void {
         </Button>
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           :disabled="Boolean(testing)"
           @click="runTest('vision')"
         >
@@ -803,7 +805,7 @@ function cancel(): void {
 
     <div class="editor-footer">
       <p v-if="saveError" class="footer-error" role="alert">{{ saveError }}</p>
-      <Button size="sm" variant="outline" :disabled="saving" @click="cancel">
+      <Button size="sm" variant="secondary" :disabled="saving" @click="cancel">
         取消
       </Button>
       <Button size="sm" variant="primary" :disabled="saving" @click="save">
@@ -928,16 +930,6 @@ function cancel(): void {
 
 .hint-warn {
   color: rgb(var(--state-warn-label));
-}
-
-.spinning {
-  animation: model-editor-spin 0.9s linear infinite;
-}
-
-@keyframes model-editor-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .candidates {

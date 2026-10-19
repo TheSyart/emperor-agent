@@ -159,7 +159,7 @@ const validationState = computed(() => {
           <div class="actions">
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               :disabled="saving || !dirty"
               @click="resetDraft"
             >
@@ -167,7 +167,7 @@ const validationState = computed(() => {
             </Button>
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               :disabled="saving"
               @click="validate"
             >

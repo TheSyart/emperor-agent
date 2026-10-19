@@ -10,6 +10,7 @@
  * back through the composer controller (switch-model /
  * set-reasoning-effort).
  */
+import IconButton from '../ui/IconButton.vue'
 import { computed, nextTick, ref, watch } from 'vue'
 import type { ModelEntry, ProviderOption } from '../../types'
 import { DsChevronLeft, DsChevronRight, DsThink } from '../icons/ds'
@@ -173,16 +174,16 @@ function onKeydown(event: KeyboardEvent): void {
 
       <template v-else-if="pane === 'model'">
         <div class="pane-head">
-          <button
+          <IconButton
             v-if="hasEffort"
-            type="button"
             class="back"
             data-pane-back
-            aria-label="返回"
+            label="返回"
+            size="xs"
             @click="show('root')"
           >
             <DsChevronLeft :size="14" />
-          </button>
+          </IconButton>
           <span class="pane-title">模型 · 下一轮生效</span>
         </div>
         <input
@@ -225,15 +226,15 @@ function onKeydown(event: KeyboardEvent): void {
 
       <template v-else>
         <div class="pane-head">
-          <button
-            type="button"
+          <IconButton
             class="back"
             data-pane-back
-            aria-label="返回"
+            label="返回"
+            size="xs"
             @click="show('root')"
           >
             <DsChevronLeft :size="14" />
-          </button>
+          </IconButton>
           <span class="pane-title">思考强度</span>
         </div>
         <div role="group" aria-label="思考强度">

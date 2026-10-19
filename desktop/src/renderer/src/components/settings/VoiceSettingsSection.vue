@@ -143,7 +143,7 @@ onBeforeUnmount(() => {
             v-for="action in notice.actions"
             :key="action.kind === 'open' ? action.pane : action.kind"
             size="sm"
-            variant="outline"
+            variant="secondary"
             @click="runNoticeAction(action)"
             >{{ action.label }}</Button
           >

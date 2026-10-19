@@ -146,7 +146,7 @@ async function submit() {
     </div>
 
     <template #footer>
-      <Button variant="outline" @click="open = false">取消</Button>
+      <Button variant="secondary" @click="open = false">取消</Button>
       <Button
         variant="primary"
         data-testid="mcp-import-submit"

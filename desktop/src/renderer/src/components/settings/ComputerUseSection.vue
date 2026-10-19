@@ -341,7 +341,7 @@ onBeforeUnmount(() => {
           <template #actions>
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               :disabled="busy"
               @click="acknowledgeRetiredApps"
               >知道了</Button
@@ -377,7 +377,7 @@ onBeforeUnmount(() => {
             <Button
               v-if="notice.restart"
               size="sm"
-              variant="outline"
+              variant="secondary"
               :disabled="busy"
               data-testid="mac-helper-restart"
               @click="reconnectHelper"
@@ -464,7 +464,7 @@ onBeforeUnmount(() => {
           <div class="cu-control">
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               data-testid="browser-pairing-manage"
               @click="openPage('chrome')"
               >管理</Button
@@ -514,7 +514,7 @@ onBeforeUnmount(() => {
         >
           <Button
             size="sm"
-            variant="outline"
+            variant="secondary"
             :disabled="busy || screenshots.empty"
             data-testid="computer-use-clear-screenshots"
             @click="clearScreenshots"

@@ -198,8 +198,8 @@ function onKeydown(event: KeyboardEvent) {
         </div>
         <div class="header-actions">
           <IconButton
+            shape="circle"
             :label="minimized ? '展开' : '收起'"
-            round
             class="small-icon"
             :disabled="busy"
             :aria-expanded="!minimized"
@@ -209,8 +209,8 @@ function onKeydown(event: KeyboardEvent) {
             <DsChevronDown v-else :size="14" />
           </IconButton>
           <IconButton
+            shape="circle"
             :label="isProfileOnboarding ? '稍后再说' : '忽略'"
-            round
             class="small-icon"
             :disabled="busy"
             @click="cancel"
@@ -305,8 +305,8 @@ function onKeydown(event: KeyboardEvent) {
         <footer class="footer">
           <div v-if="total > 1" class="pager">
             <IconButton
+              shape="circle"
               label="上一题"
-              round
               class="small-icon"
               :disabled="index === 0 || busy"
               @click="go(-1)"
@@ -315,8 +315,8 @@ function onKeydown(event: KeyboardEvent) {
             </IconButton>
             <span class="progress">{{ index + 1 }} / {{ total }}</span>
             <IconButton
+              shape="circle"
               label="下一题"
-              round
               class="small-icon"
               :disabled="isLast || !canContinue || busy"
               @click="go(1)"
@@ -339,7 +339,7 @@ function onKeydown(event: KeyboardEvent) {
               不再提醒
             </Button>
             <Button
-              variant="primary"
+              variant="secondary"
               data-action="submit"
               :disabled="primaryDisabled"
               @click="submitOrNext"

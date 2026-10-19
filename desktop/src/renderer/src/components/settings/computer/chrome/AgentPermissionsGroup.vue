@@ -153,7 +153,7 @@ onMounted(async () => {
     <template #actions>
       <Button
         size="sm"
-        variant="outline"
+        variant="secondary"
         data-action="add-site-rule"
         :disabled="settings === null || saving"
         @click="openDialog"
@@ -257,7 +257,7 @@ onMounted(async () => {
       </Field>
     </form>
     <template #footer>
-      <Button variant="outline" type="button" @click="dialogOpen = false"
+      <Button variant="secondary" type="button" @click="dialogOpen = false"
         >取消</Button
       >
       <Button

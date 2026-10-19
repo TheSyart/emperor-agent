@@ -1013,7 +1013,7 @@ async function cancelQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           <Button size="sm" variant="ghost" @click="ctx.skipProfileInterview"
             >不再提醒</Button
           >
-          <Button size="sm" variant="accent" @click="ctx.startProfileInterview"
+          <Button size="sm" variant="primary" @click="ctx.startProfileInterview"
             >开始访谈</Button
           >
         </div>

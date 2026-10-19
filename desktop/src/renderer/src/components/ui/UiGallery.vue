@@ -230,11 +230,13 @@ const jsonSample = {
         <Tooltip label="Tooltip text" side="bottom">
           <IconButton label="Settings"><DsIcons.DsSettings /></IconButton>
         </Tooltip>
-        <IconButton label="Sidebar" round><DsIcons.DsPanelLeft /></IconButton>
-        <IconButton label="Send" :size="34" variant="primary">
+        <IconButton shape="circle" label="Sidebar"
+          ><DsIcons.DsPanelLeft
+        /></IconButton>
+        <IconButton shape="circle" label="Send" size="md" variant="primary">
           <DsIcons.DsArrowUp />
         </IconButton>
-        <IconButton label="Stop" :size="34" variant="contrast">
+        <IconButton shape="circle" label="Stop" size="md" variant="tonal">
           <DsIcons.DsStopSquare />
         </IconButton>
         <span ref="menuAnchor" class="menu-anchor">

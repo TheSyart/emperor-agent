@@ -188,7 +188,7 @@ const facts = [
             >
               <template #actions>
                 <Button size="sm" variant="primary">请求权限</Button>
-                <Button size="sm" variant="outline">打开系统设置</Button>
+                <Button size="sm" variant="secondary">打开系统设置</Button>
               </template>
             </SettingsNotice>
             <SettingsHero
@@ -199,7 +199,7 @@ const facts = [
                 <StatusBadge tone="ok" dot>已连接 1 个浏览器</StatusBadge>
               </template>
               <template #actions>
-                <Button size="sm" variant="outline">重新安装扩展程序</Button>
+                <Button size="sm" variant="secondary">重新安装扩展程序</Button>
               </template>
             </SettingsHero>
             <SettingsGroup
@@ -361,7 +361,7 @@ const facts = [
                 <DefinitionList :items="facts" />
                 <template #footer>
                   <Button size="sm" variant="danger">删除</Button>
-                  <Button size="sm" variant="outline">取消</Button>
+                  <Button size="sm" variant="secondary">取消</Button>
                   <Button size="sm" variant="primary">保存</Button>
                 </template>
               </SettingsCard>
@@ -387,7 +387,7 @@ const facts = [
                 variant="outline"
               >
                 <template #actions>
-                  <Button size="sm" variant="outline">编辑</Button>
+                  <Button size="sm" variant="secondary">编辑</Button>
                 </template>
               </SettingsCard>
               <SettingsCard variant="filled">
@@ -395,7 +395,7 @@ const facts = [
                   <TextField v-model="name" />
                 </Field>
                 <template #footer>
-                  <Button size="sm" variant="outline">取消</Button>
+                  <Button size="sm" variant="secondary">取消</Button>
                   <Button size="sm" variant="primary">添加</Button>
                 </template>
               </SettingsCard>
@@ -409,7 +409,7 @@ const facts = [
                 title="还没有 MCP 服务器"
                 description="粘贴 Claude / Cursor / VS Code 的配置，或手动填写 URL 与命令。"
               >
-                <Button size="sm" variant="outline">粘贴 JSON</Button>
+                <Button size="sm" variant="secondary">粘贴 JSON</Button>
                 <Button size="sm" variant="primary">添加服务器</Button>
               </EmptyState>
               <EmptyState

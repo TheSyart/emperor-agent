@@ -96,7 +96,7 @@ function save(): void {
       }}</kbd>
       <Button
         size="sm"
-        variant="outline"
+        variant="secondary"
         :disabled="busy"
         :data-testid="idFor('edit')"
         @click="start"

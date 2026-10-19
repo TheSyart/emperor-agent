@@ -78,7 +78,7 @@ const title = computed(() =>
       </Button>
       <Button
         size="sm"
-        variant="outline"
+        variant="secondary"
         :disabled="busy"
         @click="emit('retry')"
       >

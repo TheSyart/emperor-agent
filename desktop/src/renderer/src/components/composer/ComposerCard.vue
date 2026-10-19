@@ -19,7 +19,14 @@
  * chat on screen; a change stops the recording, and a result that arrives
  * afterwards waits above the input of its own chat (插入 / 丢弃).
  */
-import { computed, nextTick, ref, watch } from 'vue'
+import Spinner from '../ui/Spinner.vue'
+import {
+  computed,
+  nextTick,
+  ref,
+  watch,
+  type ComponentPublicInstance,
+} from 'vue'
 import AttachmentChip from '../chat/AttachmentChip.vue'
 import CapabilityPicker from '../chat/CapabilityPicker.vue'
 import {
@@ -32,7 +39,6 @@ import {
 import {
   DsArrowUp,
   DsGoal,
-  DsLoading,
   DsPaperclip,
   DsPlan,
   DsPlus,
@@ -42,7 +48,8 @@ import {
 } from '../icons/ds'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
-import Tooltip from '../ui/Tooltip.vue'
+import Button from '../ui/Button.vue'
+import IconButton from '../ui/IconButton.vue'
 import ContextMeter from './ContextMeter.vue'
 import ComposerEditor from './editor/ComposerEditor.vue'
 import DictationBar from './DictationBar.vue'
@@ -170,6 +177,11 @@ function editorKeydown(event: KeyboardEvent): void {
 
 const addOpen = ref(false)
 const addAnchor = ref<HTMLElement | null>(null)
+/** The <button> behind a component ref (Menu anchors to an element). */
+function anchorElement(instance: unknown): HTMLElement | null {
+  const el = (instance as ComponentPublicInstance | null)?.$el
+  return el instanceof HTMLElement ? el : null
+}
 
 const placeholder = computed(() =>
   props.busy
@@ -266,7 +278,7 @@ defineExpose(controller.expose)
           class="uploading"
           :title="name"
         >
-          <DsLoading :size="14" class="spin" />
+          <Spinner size="sm" />
           <span>{{ name }}</span>
         </div>
       </div>
@@ -279,22 +291,21 @@ defineExpose(controller.expose)
         <span class="dictation-kept-text"
           >听写结果还没放进输入框：{{ dictationKept }}</span
         >
-        <button
-          type="button"
-          class="dictation-kept-action"
+        <Button
+          size="sm"
+          variant="secondary"
           aria-label="插入听写内容"
           @click="dictation.insertKept()"
         >
           插入
-        </button>
-        <button
-          type="button"
-          class="dictation-kept-action"
+        </Button>
+        <Button
+          size="sm"
           aria-label="丢弃听写内容"
           @click="dictation.discardKept()"
         >
           丢弃
-        </button>
+        </Button>
       </div>
 
       <div
@@ -306,28 +317,15 @@ defineExpose(controller.expose)
         <span class="composer-notice-text"
           >消息里可能包含密钥（API Key、令牌或私钥）</span
         >
-        <button
-          type="button"
-          class="composer-notice-action"
-          data-primary
+        <Button
+          size="sm"
+          variant="secondary"
           @click="resolveSecretPrompt('mask')"
         >
           遮掩后发送
-        </button>
-        <button
-          type="button"
-          class="composer-notice-action"
-          @click="resolveSecretPrompt('send')"
-        >
-          仍然发送
-        </button>
-        <button
-          type="button"
-          class="composer-notice-action"
-          @click="resolveSecretPrompt('cancel')"
-        >
-          取消
-        </button>
+        </Button>
+        <Button size="sm" @click="resolveSecretPrompt('send')">仍然发送</Button>
+        <Button size="sm" @click="resolveSecretPrompt('cancel')">取消</Button>
       </div>
       <div
         v-else-if="unknownSlashHint"
@@ -402,33 +400,32 @@ defineExpose(controller.expose)
           @cancel="dictation.cancel()"
           @stop="dictation.stop()"
         />
-        <Tooltip label="结束听写并发送">
-          <button
-            type="button"
-            class="primary"
-            aria-label="结束听写并发送"
-            :disabled="dictationSendDisabled"
-            @click="dictation.stopAndSend()"
-          >
-            <DsLoading v-if="dictationSending" :size="18" class="spin" />
-            <DsArrowUp v-else :size="18" />
-          </button>
-        </Tooltip>
+        <IconButton
+          label="结束听写并发送"
+          size="md"
+          variant="primary"
+          shape="circle"
+          :disabled="dictationSendDisabled"
+          @click="dictation.stopAndSend()"
+        >
+          <Spinner v-if="dictationSending" size="md" />
+          <DsArrowUp v-else :size="16" />
+        </IconButton>
       </div>
       <div v-else class="row">
         <div class="tools">
-          <button
-            ref="addAnchor"
-            type="button"
-            class="add"
-            aria-label="添加附件与能力"
-            title="添加附件与能力"
+          <IconButton
+            :ref="(c) => (addAnchor = anchorElement(c))"
+            label="添加附件与能力"
+            size="md"
+            shape="circle"
+            :active="addOpen"
             :aria-expanded="addOpen"
             :disabled="goalCaptureStarting"
             @click="addOpen = !addOpen"
           >
             <DsPlus :size="16" />
-          </button>
+          </IconButton>
           <div class="modes">
             <PermissionChip
               :options="modeOptions"
@@ -472,46 +469,47 @@ defineExpose(controller.expose)
             @start="dictation.toggle()"
           />
           <template v-if="props.busy">
-            <button
+            <IconButton
               v-if="hasDraft"
-              type="button"
-              class="primary secondary"
+              :label="
+                props.queueOccupied ? COMPOSER_QUEUE_FULL_MESSAGE : '加入队列'
+              "
+              size="md"
+              variant="tonal"
+              shape="circle"
               :disabled="sendDisabled"
-              :title="
-                props.queueOccupied ? COMPOSER_QUEUE_FULL_MESSAGE : '加入队列'
-              "
-              :aria-label="
-                props.queueOccupied ? COMPOSER_QUEUE_FULL_MESSAGE : '加入队列'
-              "
               @click="submit('queue')"
             >
               <DsQueue :size="16" />
-            </button>
-            <button
-              type="button"
-              class="primary"
-              :title="stopPresentation.title"
-              :aria-label="stopPresentation.label"
+            </IconButton>
+            <IconButton
+              :label="stopPresentation.label"
+              :tooltip="stopPresentation.title"
+              size="md"
+              variant="tonal"
+              shape="circle"
               @click="emit('stop')"
             >
               <DsStopSquare :size="16" />
-            </button>
+            </IconButton>
           </template>
-          <button
+          <IconButton
             v-else
             type="submit"
-            class="primary"
-            :disabled="sendDisabled"
-            :title="
+            :label="goalCaptureStarting ? '正在启动 Goal' : '发送'"
+            :tooltip="
               goalCaptureStarting
                 ? '正在启动 Goal'
                 : props.sendBlockedReason || '发送'
             "
-            :aria-label="goalCaptureStarting ? '正在启动 Goal' : '发送'"
+            size="md"
+            variant="primary"
+            shape="circle"
+            :disabled="sendDisabled"
           >
-            <DsLoading v-if="goalCaptureStarting" :size="18" class="spin" />
-            <DsArrowUp v-else :size="18" />
-          </button>
+            <Spinner v-if="goalCaptureStarting" size="md" />
+            <DsArrowUp v-else :size="16" />
+          </IconButton>
         </div>
       </div>
     </form>
@@ -623,22 +621,6 @@ defineExpose(controller.expose)
   white-space: nowrap;
 }
 
-.dictation-kept-action {
-  flex: none;
-  padding: var(--space-0-5) var(--space-2);
-  border: none;
-  border-radius: var(--radius-pill);
-  background: rgb(var(--selector-fill));
-  color: rgb(var(--label-primary));
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-  cursor: pointer;
-}
-
-.dictation-kept-action:hover {
-  background: rgb(var(--interactive-bg-hover-solid));
-}
-
 /* One line above the input: a /word that will go out as text, or the key prompt. */
 .composer-notice {
   flex-wrap: wrap;
@@ -652,26 +634,6 @@ defineExpose(controller.expose)
 .composer-notice-text {
   flex: 1;
   min-width: 0;
-}
-
-.composer-notice-action {
-  flex: none;
-  padding: var(--space-0-5) var(--space-2);
-  border: none;
-  border-radius: var(--radius-pill);
-  background: rgb(var(--selector-fill));
-  color: rgb(var(--label-primary));
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-  cursor: pointer;
-}
-
-.composer-notice-action[data-primary] {
-  font-weight: 600;
-}
-
-.composer-notice-action:hover {
-  background: rgb(var(--interactive-bg-hover-solid));
 }
 
 .uploading {
@@ -799,79 +761,5 @@ defineExpose(controller.expose)
   flex: none;
   gap: var(--space-3);
   margin-left: auto;
-}
-
-.add {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: var(--space-7);
-  height: var(--space-7);
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: rgb(var(--selector-fill));
-  color: rgb(var(--label-primary));
-  cursor: pointer;
-}
-
-.add:hover:not(:disabled),
-.add[aria-expanded='true'] {
-  background: rgb(var(--interactive-bg-hover-solid));
-}
-
-.add:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.primary {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: calc(var(--space-8) + 2px);
-  height: calc(var(--space-8) + 2px);
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: rgb(var(--accent-fill));
-  color: rgb(var(--accent-fg));
-  cursor: pointer;
-  transform: translateY(-2px);
-  transition: background-color var(--duration-ds-fast) ease;
-}
-
-.primary:hover:not(:disabled) {
-  background: rgb(var(--accent-hover));
-}
-
-.primary:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.primary:focus-visible,
-.add:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px rgb(var(--focus-ring) / 0.5);
-}
-
-.primary.secondary {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-primary));
-}
-
-.primary.secondary:hover:not(:disabled) {
-  background: var(--interactive-bg-active);
-}
-
-.spin {
-  animation: composer-spin 1s linear infinite;
-}
-
-@keyframes composer-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 </style>

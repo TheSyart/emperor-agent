@@ -148,14 +148,14 @@ onMounted(() => {
       >
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           :disabled="busy"
           @click="openDialog(profile)"
           >重命名</Button
         >
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           :disabled="busy"
           @click="clear(profile, false)"
           >清空</Button
@@ -191,7 +191,7 @@ onMounted(() => {
         </Field>
       </form>
       <template #footer>
-        <Button variant="outline" type="button" @click="dialog = null"
+        <Button variant="secondary" type="button" @click="dialog = null"
           >取消</Button
         >
         <Button

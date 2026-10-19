@@ -512,10 +512,8 @@ describe('the recording bar (RV-06)', () => {
     const composer = mount()
     await startByButton(composer)
     vi.useFakeTimers()
-    // The pointer comes over the button (Tooltip listens on its wrapper).
-    composer
-      .button('停止听写')!
-      .parentElement!.dispatchEvent(new Event('pointerenter'))
+    // The pointer comes over the button (IconButton's own tooltip).
+    composer.button('停止听写')!.dispatchEvent(new Event('pointerenter'))
     vi.advanceTimersByTime(500)
     vi.useRealTimers()
     await settle()

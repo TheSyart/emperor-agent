@@ -40,7 +40,7 @@ function openPlugin(): void {
     description="启用后，可以在这里查看 Issue 和 CI 运行记录。"
     data-github-disabled
   >
-    <Button size="sm" variant="outline" @click="openPlugin">
+    <Button size="sm" variant="secondary" @click="openPlugin">
       打开 GitHub 插件
     </Button>
   </EmptyState>

@@ -146,7 +146,9 @@ const url = computed({
 
     <template #footer>
       <template v-if="state.step === 'url'">
-        <Button variant="outline" size="sm" @click="flow.close()">取消</Button>
+        <Button variant="secondary" size="sm" @click="flow.close()"
+          >取消</Button
+        >
         <Button
           variant="primary"
           size="sm"
@@ -158,12 +160,14 @@ const url = computed({
         </Button>
       </template>
       <template v-else-if="!preview">
-        <Button variant="outline" size="sm" @click="flow.close()">
+        <Button variant="secondary" size="sm" @click="flow.close()">
           {{ state.busy ? '取消' : '关闭' }}
         </Button>
       </template>
       <template v-else>
-        <Button variant="outline" size="sm" @click="flow.close()">取消</Button>
+        <Button variant="secondary" size="sm" @click="flow.close()"
+          >取消</Button
+        >
         <Button
           variant="primary"
           size="sm"

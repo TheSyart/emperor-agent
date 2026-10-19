@@ -250,7 +250,7 @@ async function persistFilesTreeWidth(): Promise<void> {
       >
         <House :size="16" />
       </IconButton>
-      <IconButton label="关闭工作台" round @click="close">
+      <IconButton shape="circle" label="关闭工作台" @click="close">
         <DsClose :size="14" />
       </IconButton>
     </header>

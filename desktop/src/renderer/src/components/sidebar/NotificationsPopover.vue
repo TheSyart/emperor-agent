@@ -7,6 +7,7 @@
  * Positioned like ui/Menu (chat/floatingMenu), dismissed on outside
  * click / focus and Escape.
  */
+import Button from '../ui/Button.vue'
 import {
   CircleAlert,
   CircleCheck,
@@ -138,22 +139,12 @@ onBeforeUnmount(() => {
     >
       <header class="head">
         <span class="heading">通知</span>
-        <button
-          type="button"
-          class="head-action"
-          :disabled="!unreadCount"
-          @click="readAll()"
-        >
+        <Button size="sm" :disabled="!unreadCount" @click="readAll()">
           全部已读
-        </button>
-        <button
-          type="button"
-          class="head-action"
-          :disabled="!items.length"
-          @click="clearAll()"
-        >
+        </Button>
+        <Button size="sm" :disabled="!items.length" @click="clearAll()">
           清空
-        </button>
+        </Button>
       </header>
       <ul v-if="rows.length" class="list">
         <li v-for="{ item, time } in rows" :key="item.key">

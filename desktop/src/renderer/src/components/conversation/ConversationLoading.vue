@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DsLoading } from '../icons/ds'
+import Spinner from '../ui/Spinner.vue'
 </script>
 
 <template>
@@ -17,9 +17,7 @@ import { DsLoading } from '../icons/ds'
         <div class="line shape" />
       </div>
     </div>
-    <span class="label"
-      ><DsLoading :size="14" class="spin" />正在读取会话记录…</span
-    >
+    <span class="label"><Spinner size="sm" />正在读取会话记录…</span>
   </div>
 </template>
 
@@ -68,20 +66,12 @@ import { DsLoading } from '../icons/ds'
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
-.spin {
-  animation: conversation-loading-spin 0.9s linear infinite;
-}
 @keyframes conversation-loading-pulse {
   from {
     opacity: 0.45;
   }
   to {
     opacity: 1;
-  }
-}
-@keyframes conversation-loading-spin {
-  to {
-    transform: rotate(360deg);
   }
 }
 </style>

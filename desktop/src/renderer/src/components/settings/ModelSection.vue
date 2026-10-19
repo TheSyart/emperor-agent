@@ -295,7 +295,7 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
             <Button
               v-if="topAdd.step === 'pick' && entries.length"
               size="sm"
-              variant="outline"
+              variant="secondary"
               @click="closeAdd"
             >
               取消
@@ -357,7 +357,7 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
           <template #actions>
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               :aria-label="`在 ${group.label} 下添加模型`"
               :aria-expanded="addingIn(group)"
               @click="
@@ -426,7 +426,7 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
                     <span class="confirm-text">确认删除？</span>
                     <Button
                       size="sm"
-                      variant="outline"
+                      variant="secondary"
                       :disabled="deletingId === entry.entryId"
                       @click="confirmingDelete = null"
                     >
@@ -481,7 +481,7 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
           title="还没有模型"
           description="添加一个模型后即可开始对话。"
         >
-          <Button size="sm" variant="outline" @click="openAdd">
+          <Button size="sm" variant="secondary" @click="openAdd">
             添加第一个模型
           </Button>
         </EmptyState>

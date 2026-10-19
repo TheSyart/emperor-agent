@@ -10,6 +10,8 @@
  * owned by AppFrame; this fills the column it is given. The persisted
  * layout (sorts, orders, pins) lives in useSidebarState.
  */
+import { elementOf } from '../ui/elementOf'
+import IconButton from '../ui/IconButton.vue'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { selectDirectory } from '../../api/backend'
@@ -382,16 +384,17 @@ defineExpose({ focusSearch })
         @keydown.esc.prevent="escapeSearch"
         @blur="onSearchBlur"
       />
-      <button
+      <IconButton
         v-if="searching"
-        type="button"
         class="search-clear"
-        aria-label="清除搜索"
+        label="清除搜索"
+        size="xs"
+        :tooltip="false"
         @mousedown.prevent
         @click="clearSearch"
       >
         <DsClose :size="12" />
-      </button>
+      </IconButton>
     </label>
 
     <div class="region">
@@ -441,16 +444,17 @@ defineExpose({ focusSearch })
             v-model:collapsed="projectsCollapsed"
             label="项目"
           >
-            <button
-              ref="projectMenuAnchor"
-              type="button"
+            <IconButton
+              :ref="(c) => (projectMenuAnchor = elementOf(c))"
               class="head-button"
-              aria-label="项目操作"
+              label="项目操作"
+              size="xs"
+              :active="projectMenuOpen"
               :aria-expanded="projectMenuOpen"
               @click="projectMenuOpen = !projectMenuOpen"
             >
               <DsPlus :size="16" />
-            </button>
+            </IconButton>
           </SidebarSectionHeader>
           <template v-if="!projectsCollapsed">
             <template v-for="project in grouped.projects" :key="project.id">
@@ -497,16 +501,17 @@ defineExpose({ focusSearch })
           class="section"
         >
           <SidebarSectionHeader v-model:collapsed="chatsCollapsed" label="对话">
-            <button
-              ref="chatMenuAnchor"
-              type="button"
+            <IconButton
+              :ref="(c) => (chatMenuAnchor = elementOf(c))"
               class="head-button"
-              aria-label="对话排序"
+              label="对话排序"
+              size="xs"
+              :active="chatMenuOpen"
               :aria-expanded="chatMenuOpen"
               @click="chatMenuOpen = !chatMenuOpen"
             >
               <DsMore :size="16" />
-            </button>
+            </IconButton>
           </SidebarSectionHeader>
           <template v-if="!chatsCollapsed">
             <template v-for="group in chatDayGroups" :key="group.key">

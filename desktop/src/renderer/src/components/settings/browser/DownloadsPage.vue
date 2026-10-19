@@ -111,14 +111,14 @@ onBeforeUnmount(() => unsubscribe())
         <template v-if="finished(item)">
           <Button
             size="sm"
-            variant="outline"
+            variant="secondary"
             :disabled="busy"
             @click="run(() => openUserDownload(item.id))"
             >打开</Button
           >
           <Button
             size="sm"
-            variant="outline"
+            variant="secondary"
             :disabled="busy"
             @click="run(() => revealUserDownload(item.id))"
             >在访达中显示</Button
@@ -127,7 +127,7 @@ onBeforeUnmount(() => unsubscribe())
         <Button
           v-if="item.state !== 'progressing'"
           size="sm"
-          variant="outline"
+          variant="secondary"
           :disabled="busy"
           :aria-label="`从列表移除 ${item.name}`"
           @click="run(() => removeUserDownload(item.id))"
@@ -151,7 +151,7 @@ onBeforeUnmount(() => unsubscribe())
         <template v-if="item.exists">
           <Button
             size="sm"
-            variant="outline"
+            variant="secondary"
             :disabled="busy"
             @click="run(() => revealAgentDownload(item.id))"
             >在访达中显示</Button
@@ -159,7 +159,7 @@ onBeforeUnmount(() => unsubscribe())
           <Button
             v-if="item.sessionId"
             size="sm"
-            variant="outline"
+            variant="secondary"
             :disabled="busy"
             @click="
               run(
@@ -171,7 +171,7 @@ onBeforeUnmount(() => unsubscribe())
           >
           <Button
             size="sm"
-            variant="outline"
+            variant="secondary"
             :disabled="busy"
             @click="
               run(

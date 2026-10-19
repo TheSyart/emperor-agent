@@ -63,7 +63,7 @@ const titleId = computed(() => `explore-card-${props.entry.id}`)
         </IconButton>
         <Button
           size="sm"
-          :variant="installed ? 'ghost' : 'outline'"
+          :variant="installed ? 'ghost' : 'secondary'"
           :disabled="installed"
           data-action="install"
           :aria-label="

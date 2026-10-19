@@ -166,7 +166,7 @@ function openOnGithub(): void {
       title="无法读取 Pull Request"
       :description="entry.error?.message"
     >
-      <Button size="sm" variant="outline" @click="emit('retry')">重试</Button>
+      <Button size="sm" variant="secondary" @click="emit('retry')">重试</Button>
     </EmptyState>
 
     <template v-else>
@@ -180,7 +180,7 @@ function openOnGithub(): void {
           <Button
             class="open-github"
             size="sm"
-            variant="outline"
+            variant="secondary"
             @click="openOnGithub"
           >
             在 GitHub 打开

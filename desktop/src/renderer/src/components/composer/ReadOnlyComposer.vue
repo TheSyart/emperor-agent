@@ -8,6 +8,7 @@
  * Props: parentTitle?, running? (child turn open), stopping? (request sent).
  * Emits: back, stop, root.
  */
+import Button from '../ui/Button.vue'
 withDefaults(
   defineProps<{
     parentTitle?: string
@@ -27,21 +28,19 @@ const emit = defineEmits<{ back: []; stop: []; root: [] }>()
         >。</template
       ></span
     >
-    <button
+    <Button
       v-if="running"
-      type="button"
-      class="back stop"
-      :disabled="stopping"
+      size="sm"
+      variant="danger"
+      :loading="stopping"
       @click="emit('stop')"
     >
       {{ stopping ? '正在停止…' : '停止子智能体' }}
-    </button>
-    <button type="button" class="back" @click="emit('root')">
+    </Button>
+    <Button size="sm" variant="secondary" @click="emit('root')">
       返回主会话继续派工
-    </button>
-    <button type="button" class="back" @click="emit('back')">
-      返回父智能体
-    </button>
+    </Button>
+    <Button size="sm" @click="emit('back')">返回父智能体</Button>
   </div>
 </template>
 

@@ -473,7 +473,7 @@ async function stop() {
         ><Button
           v-if="run && controlsAvailable"
           size="sm"
-          variant="outline"
+          variant="secondary"
           @click="detailsRunId = run.id"
           >任务详情</Button
         >
@@ -571,7 +571,7 @@ async function stop() {
                 <Button
                   v-if="controlsAvailable"
                   size="sm"
-                  variant="outline"
+                  variant="secondary"
                   @click="detailsRunId = item.runId"
                   >任务详情</Button
                 >

@@ -5,6 +5,7 @@
  * header counts the queued messages; each 36px row previews one message with
  * interject / edit / delete actions.
  */
+import IconButton from '../ui/IconButton.vue'
 import { computed, ref } from 'vue'
 import type { QueuedPromptItem } from '../../types'
 import { DsChevronDown, DsEdit, DsQueue, DsSend, DsTrash } from '../icons/ds'
@@ -65,38 +66,29 @@ const headline = computed(() => {
             <template v-else>（附件消息）</template>
           </span>
           <span class="actions">
-            <button
-              type="button"
-              class="action"
-              :disabled="!item.supportsInterjection"
-              :title="
+            <IconButton
+              label="插入当前执行"
+              :tooltip="
                 item.supportsInterjection
                   ? '插入当前执行'
                   : '包含附件或 Skill 的消息不支持插入当前执行'
               "
-              aria-label="插入当前执行"
+              size="xs"
+              :disabled="!item.supportsInterjection"
               @click="emit('interject', item)"
             >
               <DsSend :size="14" />
-            </button>
-            <button
-              type="button"
-              class="action"
-              title="编辑消息"
-              aria-label="编辑消息"
-              @click="emit('edit', item)"
-            >
+            </IconButton>
+            <IconButton label="编辑消息" size="xs" @click="emit('edit', item)">
               <DsEdit :size="14" />
-            </button>
-            <button
-              type="button"
-              class="action"
-              title="删除排队消息"
-              aria-label="删除排队消息"
+            </IconButton>
+            <IconButton
+              label="删除排队消息"
+              size="xs"
               @click="emit('cancel', item)"
             >
               <DsTrash :size="14" />
-            </button>
+            </IconButton>
           </span>
         </li>
       </ul>

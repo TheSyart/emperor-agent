@@ -137,7 +137,7 @@ const resultJson = computed(() =>
           </template>
           <Button
             size="sm"
-            variant="outline"
+            variant="secondary"
             :title="`执行 ${item.command}`"
             :disabled="testing"
             @click="requestRun(item)"

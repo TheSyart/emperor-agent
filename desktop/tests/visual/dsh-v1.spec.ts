@@ -332,7 +332,9 @@ test.describe('a11y media-feature degradation', () => {
   }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await open(page, '/chat/chat-main')
-    await expect(page.locator('.composer-root .primary')).toBeVisible()
+    await expect(
+      page.locator('.composer-root .ds-icon-button[data-variant="primary"]'),
+    ).toBeVisible()
     const fast = await page.evaluate(() =>
       getComputedStyle(document.documentElement).getPropertyValue(
         '--duration-fast',
@@ -340,7 +342,9 @@ test.describe('a11y media-feature degradation', () => {
     )
     expect(fast.trim()).toBe('1ms')
     const durations = await page.evaluate(() => {
-      const el = document.querySelector('.composer-root .primary')
+      const el = document.querySelector(
+        '.composer-root .ds-icon-button[data-variant="primary"]',
+      )
       return el ? getComputedStyle(el).transitionDuration : null
     })
     expect(durations).not.toBeNull()

@@ -121,7 +121,7 @@ function emptyNote(file: PullDiffFile): string {
       title="无法加载 diff"
       :description="entry.error.message"
     >
-      <Button size="sm" variant="outline" @click="emit('retry')">重试</Button>
+      <Button size="sm" variant="secondary" @click="emit('retry')">重试</Button>
     </EmptyState>
 
     <template v-else-if="entry.data">

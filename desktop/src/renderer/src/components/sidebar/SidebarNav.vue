@@ -4,6 +4,8 @@
  * then the full pages — Pull Request, 定时任务, 插件, 探索 — highlighted by
  * the current route name.
  */
+import { elementOf } from '../ui/elementOf'
+import IconButton from '../ui/IconButton.vue'
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { DsNewChat, DsPlus } from '../icons/ds'
@@ -44,17 +46,16 @@ function newProject(): void {
         <DsNewChat :size="16" class="nav-icon" />
         <span class="nav-label">新对话</span>
       </button>
-      <button
-        ref="addButton"
-        type="button"
+      <IconButton
+        :ref="(c) => (addButton = elementOf(c))"
         class="nav-add"
-        aria-label="新建项目会话"
-        title="新建项目会话"
+        label="新建项目会话"
+        size="xs"
         :aria-expanded="projectMenuOpen"
         @click="newProject"
       >
         <DsPlus :size="14" />
-      </button>
+      </IconButton>
     </div>
     <div v-for="entry in SIDEBAR_PAGES" :key="entry.name" class="nav-row">
       <button

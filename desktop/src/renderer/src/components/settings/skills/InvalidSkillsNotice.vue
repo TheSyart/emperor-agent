@@ -87,7 +87,7 @@ const listId = 'invalid-skills-list'
           <template #footer>
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               data-action="open-folder"
               @click="emit('openFolder', item)"
             >

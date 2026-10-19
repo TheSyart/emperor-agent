@@ -156,7 +156,7 @@ test('the recording bar in a narrow window', async ({ page }) => {
   const send = (await page
     .getByRole('button', { name: '结束听写并发送' })
     .boundingBox())!
-  expect(send.width).toBe(34)
+  expect(send.width).toBe(32)
   expect(send.x + send.width).toBeLessThanOrEqual(card.x + card.width)
   await shotComposer(page, 'recording-bar-narrow-dark')
 })

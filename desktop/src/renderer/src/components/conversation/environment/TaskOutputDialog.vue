@@ -163,7 +163,7 @@ function onOpen(open: boolean): void {
       <Button
         v-if="!eof"
         size="sm"
-        variant="outline"
+        variant="secondary"
         :disabled="loading"
         @click="load(false)"
       >

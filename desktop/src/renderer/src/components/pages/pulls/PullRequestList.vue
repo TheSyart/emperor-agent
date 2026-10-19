@@ -245,7 +245,7 @@ const showFooter = computed(
         title="无法读取 Pull Request"
         :description="error.message"
       >
-        <Button size="sm" variant="outline" @click="emit('retry')">
+        <Button size="sm" variant="secondary" @click="emit('retry')">
           重试
         </Button>
       </EmptyState>

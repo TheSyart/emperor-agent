@@ -324,7 +324,7 @@ function clearSearch() {
         title="还没有定时任务"
         description="定时任务会在指定时间把提示词交给主 Agent 执行，比如每天汇总进展或每周整理周报。"
       >
-        <Button size="sm" variant="outline" @click="openCreate()">
+        <Button size="sm" variant="secondary" @click="openCreate()">
           <template #icon><DsPlus :size="14" /></template>
           新建任务
         </Button>
@@ -335,7 +335,7 @@ function clearSearch() {
         title="没有匹配的任务"
         description="换个关键词或状态试试。"
       >
-        <Button size="sm" variant="outline" @click="clearSearch">
+        <Button size="sm" variant="secondary" @click="clearSearch">
           清除筛选
         </Button>
       </EmptyState>
@@ -428,7 +428,7 @@ function clearSearch() {
       description="任务和它的运行历史都会删除，无法撤销。"
     >
       <template #footer>
-        <Button variant="outline" @click="pendingDelete = null">取消</Button>
+        <Button variant="secondary" @click="pendingDelete = null">取消</Button>
         <Button
           variant="danger"
           data-action="confirm-delete"

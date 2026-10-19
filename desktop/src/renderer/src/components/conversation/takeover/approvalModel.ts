@@ -27,7 +27,8 @@ export interface ApprovalPresentation {
   operations: ApprovalOperation[]
 }
 
-export type ApprovalActionVariant = 'danger' | 'outline' | 'primary'
+/** Button variants: approval cards keep gold out (docs/design/color.md). */
+export type ApprovalActionVariant = 'danger' | 'ghost' | 'secondary'
 
 export interface ApprovalAction {
   key: string
@@ -231,7 +232,7 @@ export function approvalActions(
   return [
     ...deny.map((option) => toAction(option, 'danger')),
     ...allow.map((option, index) =>
-      toAction(option, index === allow.length - 1 ? 'primary' : 'outline'),
+      toAction(option, index === allow.length - 1 ? 'secondary' : 'ghost'),
     ),
   ]
 }

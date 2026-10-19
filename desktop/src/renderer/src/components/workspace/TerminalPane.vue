@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IconButton from '../ui/IconButton.vue'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
@@ -362,24 +363,25 @@ function message(value: unknown): string {
           <span>{{ item.title || `Terminal ${index + 1}` }}</span>
           <span v-if="item.exited" class="sr-only">已退出</span>
         </button>
-        <button
-          type="button"
+        <IconButton
           class="terminal-tab-close"
-          :aria-label="`关闭 ${item.title || `Terminal ${index + 1}`}`"
+          :label="`关闭 ${item.title || `Terminal ${index + 1}`}`"
+          :tooltip="false"
+          size="xs"
           @click="closeTerminal(item.id)"
         >
           <X :size="12" />
-        </button>
+        </IconButton>
       </div>
-      <button
-        type="button"
+      <IconButton
         class="terminal-new-tab"
+        label="新建终端"
+        size="xs"
         :disabled="terminals.length >= 8"
-        aria-label="新建终端"
         @click="createTerminal()"
       >
         <Plus :size="14" />
-      </button>
+      </IconButton>
     </div>
     <div v-if="error" class="terminal-error" role="alert">{{ error }}</div>
     <button

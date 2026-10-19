@@ -321,7 +321,7 @@ watch(
       </template>
     </div>
     <template #footer>
-      <Button variant="outline" type="button" @click="close">
+      <Button variant="secondary" type="button" @click="close">
         {{ result ? '完成' : '取消' }}
       </Button>
       <Button

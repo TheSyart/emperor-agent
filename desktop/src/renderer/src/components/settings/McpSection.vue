@@ -313,7 +313,9 @@ async function saveDraft() {
         title="无法读取 MCP 配置"
         :description="loadError"
       >
-        <Button size="sm" variant="outline" @click="refresh(true)">重试</Button>
+        <Button size="sm" variant="secondary" @click="refresh(true)"
+          >重试</Button
+        >
       </EmptyState>
       <p v-else-if="!config" class="loading">正在读取 MCP 配置…</p>
       <EmptyState
@@ -326,7 +328,7 @@ async function saveDraft() {
           <span class="empty-text">{{ EMPTY_DESCRIPTION }}</span>
           <code class="empty-example">{{ EXAMPLE_SNIPPET }}</code>
         </template>
-        <Button size="sm" variant="outline" @click="addOpen = true">
+        <Button size="sm" variant="secondary" @click="addOpen = true">
           <template #icon><DsPlus :size="14" /></template>
           添加服务器
         </Button>
@@ -379,7 +381,7 @@ async function saveDraft() {
           >
             还原
           </Button>
-          <Button size="sm" variant="outline" @click="formatDraft">
+          <Button size="sm" variant="secondary" @click="formatDraft">
             格式化
           </Button>
           <Button
@@ -405,7 +407,7 @@ async function saveDraft() {
         {{ removeError }}
       </p>
       <template #footer>
-        <Button variant="outline" @click="removing = null">取消</Button>
+        <Button variant="secondary" @click="removing = null">取消</Button>
         <Button
           variant="danger"
           data-testid="mcp-remove-confirm"

@@ -5,7 +5,8 @@
  */
 import { computed, defineAsyncComponent, ref } from 'vue'
 import { useNotifications } from '../../composables/useNotifications'
-import Tooltip from '../ui/Tooltip.vue'
+import IconButton from '../ui/IconButton.vue'
+import { elementOf } from '../ui/elementOf'
 import { SIDEBAR_ICONS } from './sidebarNav'
 
 const NotificationsPopover = defineAsyncComponent(
@@ -23,26 +24,20 @@ const label = computed(() =>
 </script>
 
 <template>
-  <Tooltip
-    label="通知"
+  <IconButton
+    :ref="(c) => (anchor = elementOf(c))"
+    class="bell"
+    :data-rail="rail || undefined"
+    :label="label"
+    :tooltip="open ? false : '通知'"
     :side="rail ? 'right' : 'bottom'"
-    :delay-ms="500"
-    :disabled="open"
+    aria-haspopup="dialog"
+    :aria-expanded="open"
+    @click="open = !open"
   >
-    <button
-      ref="anchor"
-      type="button"
-      class="bell"
-      :data-rail="rail || undefined"
-      :aria-label="label"
-      aria-haspopup="dialog"
-      :aria-expanded="open"
-      @click="open = !open"
-    >
-      <component :is="SIDEBAR_ICONS.bell" :size="rail ? 18 : 16" />
-      <span v-if="unreadCount" class="dot" aria-hidden="true" />
-    </button>
-  </Tooltip>
+    <component :is="SIDEBAR_ICONS.bell" :size="rail ? 18 : 16" />
+    <span v-if="unreadCount" class="dot" aria-hidden="true" />
+  </IconButton>
   <NotificationsPopover v-if="open" v-model:open="open" :anchor="anchor" />
 </template>
 

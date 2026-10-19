@@ -277,7 +277,7 @@ onBeforeUnmount(() => {
       </div>
       <div class="actions">
         <Button
-          variant="accent"
+          variant="primary"
           size="sm"
           :disabled="reference?.available === false"
           @click="emit('open')"
@@ -291,7 +291,7 @@ onBeforeUnmount(() => {
         ><Button
           v-if="internal"
           size="sm"
-          variant="outline"
+          variant="secondary"
           @click="emit('open-internal')"
           >在 Emperor 查看</Button
         ><Button size="sm" @click="copy"><Copy :size="13" />复制地址</Button>

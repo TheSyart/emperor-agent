@@ -10,6 +10,8 @@
  *   focuses it once the status has loaded (requestWorkspace focus 'commit').
  * Emits: commitFocused — that request has been handled.
  */
+import Spinner from '../ui/Spinner.vue'
+import IconButton from '../ui/IconButton.vue'
 import type {
   GitFileStatus,
   GitStatusResult,
@@ -634,14 +636,10 @@ function friendlyPullRequestError(value: unknown): string {
         <GitBranch :size="14" class="workspace-eyebrow" aria-hidden="true" />
         <strong>{{ status?.branch || 'Git' }}</strong>
       </div>
-      <button
-        type="button"
-        class="workspace-icon-button"
-        aria-label="刷新 Git 状态"
-        @click="refresh"
-      >
-        <RefreshCw :size="15" :class="{ 'animate-spin': loading }" />
-      </button>
+      <IconButton label="刷新 Git 状态" :disabled="loading" @click="refresh">
+        <Spinner v-if="loading" size="sm" />
+        <RefreshCw v-else :size="15" />
+      </IconButton>
     </div>
 
     <div v-if="!hasProject" class="workspace-empty-state">

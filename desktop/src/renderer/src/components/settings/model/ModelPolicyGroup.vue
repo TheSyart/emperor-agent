@@ -108,7 +108,7 @@ async function save(): Promise<void> {
       </StatusBadge>
       <Button
         size="sm"
-        variant="outline"
+        variant="secondary"
         :disabled="saving || !dirty"
         @click="save"
       >

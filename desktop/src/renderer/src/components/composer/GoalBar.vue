@@ -4,13 +4,15 @@
  * composer card: goal glyph, phase label, objective, round/elapsed meta and
  * pause / resume / clear (two-step) actions.
  */
+import IconButton from '../ui/IconButton.vue'
+import Spinner from '../ui/Spinner.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { RuntimeGoalView } from '../../types'
 import {
   toGoalStatusBarViewModel,
   type GoalCardAction,
 } from '../../runtime/goalRender'
-import { DsGoal, DsLoading, DsTrash } from '../icons/ds'
+import { DsGoal, DsTrash } from '../icons/ds'
 
 const props = defineProps<{
   goal: RuntimeGoalView
@@ -76,23 +78,17 @@ function actionLabel(action: GoalCardAction): string {
         >{{ model.roundLabel }} · {{ model.elapsedLabel }}</span
       >
       <div class="actions">
-        <button
+        <IconButton
           v-for="action in model.actions"
           :key="action"
-          type="button"
           class="icon"
           :data-danger="(action === 'cancel' && confirmCancel) || undefined"
-          :aria-label="actionLabel(action)"
-          :title="actionLabel(action)"
+          :label="actionLabel(action)"
+          size="xs"
           :disabled="Boolean(actionPending)"
           @click="runAction(action)"
         >
-          <DsLoading
-            v-if="actionPending === action"
-            :size="14"
-            class="spin"
-            aria-hidden="true"
-          />
+          <Spinner v-if="actionPending === action" size="sm" />
           <svg
             v-else-if="action === 'resume'"
             width="14"
@@ -127,7 +123,7 @@ function actionLabel(action: GoalCardAction): string {
             />
           </svg>
           <DsTrash v-else :size="14" aria-hidden="true" />
-        </button>
+        </IconButton>
       </div>
     </div>
     <p v-if="model.notice" class="notice">{{ model.notice }}</p>
@@ -221,16 +217,6 @@ function actionLabel(action: GoalCardAction): string {
 .icon:disabled {
   opacity: 0.4;
   cursor: default;
-}
-
-.spin {
-  animation: goal-spin 1s linear infinite;
-}
-
-@keyframes goal-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .notice {

@@ -8,6 +8,7 @@
  * Props: shortcut (a label such as ⇧⌘D), disabled?.
  * Emits: start.
  */
+import IconButton from '../ui/IconButton.vue'
 import { DsMic } from '../icons/ds'
 
 defineProps<{ shortcut: string; disabled?: boolean }>()
@@ -15,16 +16,17 @@ const emit = defineEmits<{ start: [] }>()
 </script>
 
 <template>
-  <button
-    type="button"
+  <IconButton
     class="dictation-mic"
-    aria-label="听写"
-    :title="`听写（${shortcut}）`"
+    label="听写"
+    :shortcut="shortcut"
+    size="md"
+    shape="circle"
     :disabled="disabled"
     @click="emit('start')"
   >
     <DsMic :size="16" />
-  </button>
+  </IconButton>
 </template>
 
 <style scoped>

@@ -1,0 +1,19 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Button > renders four variants in three sizes (32 is the default height) 1`] = `
+[
+  "primary:sm",
+  "primary:md",
+  "primary:lg",
+  "secondary:sm",
+  "secondary:md",
+  "secondary:lg",
+  "ghost:sm",
+  "ghost:md",
+  "ghost:lg",
+  "danger:sm",
+  "danger:md",
+  "danger:lg",
+  "ghost:md",
+]
+`;

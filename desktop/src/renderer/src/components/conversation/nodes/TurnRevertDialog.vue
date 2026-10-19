@@ -106,7 +106,7 @@ async function confirm(): Promise<void> {
     </ul>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <template #footer>
-      <Button variant="outline" :disabled="busy" @click="open = false">
+      <Button variant="secondary" :disabled="busy" @click="open = false">
         取消
       </Button>
       <Button

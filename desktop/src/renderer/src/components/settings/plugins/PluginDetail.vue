@@ -224,7 +224,7 @@ defineExpose({ reload: load })
       title="无法打开这个插件"
       :description="loadError"
     >
-      <Button size="sm" variant="outline" @click="load()">重试</Button>
+      <Button size="sm" variant="secondary" @click="load()">重试</Button>
     </EmptyState>
 
     <template v-else-if="shown">
@@ -265,7 +265,7 @@ defineExpose({ reload: load })
             <span class="prompt-text">{{ prompt }}</span>
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               data-action="try-prompt"
               :disabled="busy !== null"
               @click="tryPrompt(prompt)"
@@ -283,7 +283,7 @@ defineExpose({ reload: load })
         </p>
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           data-action="open-computer-settings"
           @click="openSettings('computer')"
         >

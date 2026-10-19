@@ -16,6 +16,8 @@
  * Emits: treeWidth(px) once a column resize settles.
  * Exposes: openPath(path, line?) — open (or activate) a file at a line.
  */
+import LinkButton from '../ui/LinkButton.vue'
+import Button from '../ui/Button.vue'
 import type { WorkspaceFileEntry, FilePreviewResult } from '@emperor/core/api'
 import {
   ChevronDown,
@@ -657,14 +659,15 @@ function message(value: unknown): string {
               <DocumentIcon :path="tab.preview.name" :size="13" />
               <span>{{ tab.preview.name }}</span>
             </button>
-            <button
-              type="button"
+            <IconButton
               class="file-tab-close"
-              :aria-label="`关闭 ${tab.preview.name}`"
+              :label="`关闭 ${tab.preview.name}`"
+              :tooltip="false"
+              size="xs"
               @click="closeTab(tab.key)"
             >
               <X :size="12" />
-            </button>
+            </IconButton>
           </div>
           <div
             v-if="showDraftTab && hasProject"
@@ -680,15 +683,16 @@ function message(value: unknown): string {
             >
               <span>打开文件</span>
             </button>
-            <button
+            <IconButton
               v-if="tabs.length"
-              type="button"
               class="file-tab-close"
-              aria-label="关闭 打开文件"
+              label="关闭 打开文件"
+              :tooltip="false"
+              size="xs"
               @click="closeDraft"
             >
               <X :size="12" />
-            </button>
+            </IconButton>
           </div>
         </div>
         <IconButton v-if="hasProject" label="打开文件" @click="startOpenFile">
@@ -725,23 +729,24 @@ function message(value: unknown): string {
           <IconButton label="刷新文件" :disabled="loading" @click="refreshFile"
             ><RefreshCw :size="13"
           /></IconButton>
-          <button
+          <Button
             v-if="
               activeTab.preview.revealable && !sessionId.startsWith('draft:')
             "
             class="source-toggle"
+            size="sm"
             @click="revealFile"
           >
             Finder
-          </button>
-          <button
+          </Button>
+          <Button
             v-if="isMarkdown"
-            type="button"
             class="source-toggle"
+            size="sm"
             @click="toggleSourceMode"
           >
             {{ activeTab.sourceMode ? '预览' : '源码' }}
-          </button>
+          </Button>
           <IconButton label="复制相对路径" @click="copyPath(true)">
             <Copy :size="13" />
           </IconButton>
@@ -760,9 +765,7 @@ function message(value: unknown): string {
         <p v-if="loading" class="files-muted" role="status">正在读取文件…</p>
         <div v-if="openError" class="files-inline-error" role="alert">
           {{ openError }}
-          <button v-if="activeTab" type="button" @click="refreshFile">
-            重试
-          </button>
+          <LinkButton v-if="activeTab" @click="refreshFile">重试</LinkButton>
         </div>
         <template v-if="activeTab && !openError">
           <button

@@ -343,7 +343,7 @@ const deleteDialogOpen = computed({
         <Button size="sm" variant="primary" @click="pasteOpen = true">
           粘贴 SKILL.md
         </Button>
-        <Button size="sm" variant="outline" @click="openFolder('user')">
+        <Button size="sm" variant="secondary" @click="openFolder('user')">
           打开 Skills 文件夹
         </Button>
       </EmptyState>
@@ -353,7 +353,7 @@ const deleteDialogOpen = computed({
         title="没有匹配的 Skill"
         description="换个关键词或来源试试。"
       >
-        <Button size="sm" variant="outline" @click="clearFilters">
+        <Button size="sm" variant="secondary" @click="clearFilters">
           清除筛选
         </Button>
       </EmptyState>

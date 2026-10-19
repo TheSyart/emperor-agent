@@ -89,7 +89,7 @@ function unchanged(detail: MemoryVersionDetail) {
       <template #actions>
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           :disabled="busy"
           :aria-label="`恢复 ${version.label || version.relPath}`"
           @click="emit('restore', version.id)"

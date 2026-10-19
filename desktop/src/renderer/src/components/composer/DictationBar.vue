@@ -12,10 +12,11 @@
  * first), shortcut (a label such as ⇧⌘D).
  * Emits: cancel, stop.
  */
+import IconButton from '../ui/IconButton.vue'
+import Spinner from '../ui/Spinner.vue'
 import { computed } from 'vue'
 import { useReducedMotion } from '../../composables/useReducedMotion'
-import { DsClose, DsLoading, DsStopSquare } from '../icons/ds'
-import Tooltip from '../ui/Tooltip.vue'
+import { DsClose, DsStopSquare } from '../icons/ds'
 import type { DictationPhase } from './composerDictation'
 import { dictationWaveSlots } from './dictationWave'
 
@@ -42,16 +43,14 @@ const live = computed(() =>
 
 <template>
   <div class="dictation-bar" :data-phase="phase">
-    <Tooltip label="取消听写">
-      <button
-        type="button"
-        class="dictation-cancel"
-        aria-label="取消听写"
-        @click="emit('cancel')"
-      >
-        <DsClose :size="14" />
-      </button>
-    </Tooltip>
+    <IconButton
+      class="dictation-cancel"
+      label="取消听写"
+      shape="circle"
+      @click="emit('cancel')"
+    >
+      <DsClose :size="14" />
+    </IconButton>
     <div class="dictation-wave" aria-hidden="true">
       <i
         v-for="(level, index) in slots"
@@ -60,18 +59,18 @@ const live = computed(() =>
         :style="level === null ? undefined : { '--dictation-level': level }"
       />
     </div>
-    <Tooltip label="停止听写" :shortcut="shortcut">
-      <button
-        type="button"
-        class="dictation-stop"
-        aria-label="停止听写"
-        :disabled="!listening"
-        @click="emit('stop')"
-      >
-        <DsStopSquare v-if="listening" :size="12" />
-        <DsLoading v-else :size="14" class="dictation-spin" />
-      </button>
-    </Tooltip>
+    <IconButton
+      class="dictation-stop"
+      label="停止听写"
+      :shortcut="shortcut"
+      shape="circle"
+      variant="tonal"
+      :disabled="!listening"
+      @click="emit('stop')"
+    >
+      <DsStopSquare v-if="listening" :size="12" />
+      <Spinner v-else size="sm" />
+    </IconButton>
     <span class="dictation-live" aria-live="polite">{{ live }}</span>
   </div>
 </template>
@@ -157,10 +156,6 @@ const live = computed(() =>
   background: rgb(var(--label-caption));
 }
 
-.dictation-spin {
-  animation: dictation-spin 1s linear infinite;
-}
-
 .dictation-live {
   position: absolute;
   width: 1px;
@@ -168,11 +163,5 @@ const live = computed(() =>
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
-}
-
-@keyframes dictation-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 </style>

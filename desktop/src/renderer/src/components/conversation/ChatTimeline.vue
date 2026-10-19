@@ -16,6 +16,7 @@
  * Exposes: scrollToBottom(), scrollToKey(key) — reveal a row near the top
  * (the list is virtualized, so rows off screen are reachable only here).
  */
+import Spinner from '../ui/Spinner.vue'
 import {
   computed,
   effectScope,
@@ -35,7 +36,7 @@ import {
   type ConversationHandle,
   type ConversationStore,
 } from '../../conversation/store'
-import { DsChevronDown, DsLoading } from '../icons/ds'
+import { DsChevronDown } from '../icons/ds'
 import ChatNodeSeat from './ChatNodeSeat.vue'
 import { createExpansionStore, provideChatContext } from './chatContext'
 import TurnStatus from './TurnStatus.vue'
@@ -332,7 +333,7 @@ defineExpose({ scrollToBottom, scrollToKey })
       <div ref="column" class="column" data-chat-flow>
         <div v-if="hasMore || loadingOlder" class="older">
           <span v-if="loadingOlder" class="older-loading" role="status">
-            <DsLoading :size="14" class="spin" />
+            <Spinner size="sm" />
             正在加载更早的消息…
           </span>
           <button v-else type="button" class="older-button" @click="loadOlder">
@@ -447,16 +448,6 @@ defineExpose({ scrollToBottom, scrollToKey })
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   color: rgb(var(--label-tertiary));
-}
-
-.spin {
-  animation: chat-timeline-spin 0.9s linear infinite;
-}
-
-@keyframes chat-timeline-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .open-error {

@@ -86,7 +86,7 @@ function copyLabel(address: ExtensionAddress): string {
       </template>
       <Button
         size="sm"
-        variant="outline"
+        variant="secondary"
         :disabled="busy || !folder.ready"
         data-action="reveal-extension"
         @click="emit('reveal')"
@@ -96,7 +96,7 @@ function copyLabel(address: ExtensionAddress): string {
       </Button>
       <Button
         size="sm"
-        variant="outline"
+        variant="secondary"
         :disabled="!folder.ready"
         data-action="copy-extension-path"
         @click="emit('copy', folder.path, 'path')"
@@ -132,7 +132,7 @@ function copyLabel(address: ExtensionAddress): string {
         v-for="address in addresses"
         :key="address.url"
         size="sm"
-        variant="outline"
+        variant="secondary"
         :data-action="`copy-${address.browser}-address`"
         @click="emit('copy', address.url, address.url)"
       >

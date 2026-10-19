@@ -201,7 +201,9 @@ function submit() {
 
     <template #footer>
       <template v-if="creating">
-        <Button size="sm" variant="outline" @click="open = false">取消</Button>
+        <Button size="sm" variant="secondary" @click="open = false"
+          >取消</Button
+        >
         <Button
           size="sm"
           variant="primary"
@@ -214,7 +216,7 @@ function submit() {
       </template>
       <template v-else-if="confirmDelete">
         <span class="confirm">删除定时任务「{{ job?.name }}」？</span>
-        <Button size="sm" variant="outline" @click="confirmDelete = false">
+        <Button size="sm" variant="secondary" @click="confirmDelete = false">
           取消
         </Button>
         <Button
@@ -241,7 +243,7 @@ function submit() {
         </Button>
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           :disabled="busy"
           data-action="run-job"
           @click="emit('run')"

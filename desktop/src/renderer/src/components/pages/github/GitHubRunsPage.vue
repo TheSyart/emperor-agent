@@ -266,7 +266,7 @@ const actions = computed(() =>
           <Button
             v-if="shown"
             size="sm"
-            variant="outline"
+            variant="secondary"
             @click="openOnGitHub(shown.run.url)"
           >
             <template #icon><DsGlobe :size="14" /></template>
@@ -278,7 +278,9 @@ const actions = computed(() =>
           title="无法读取这次运行"
           :description="detailError"
         >
-          <Button size="sm" variant="outline" @click="loadDetail">重试</Button>
+          <Button size="sm" variant="secondary" @click="loadDetail"
+            >重试</Button
+          >
         </EmptyState>
         <p v-else-if="!shown" class="hint" role="status">正在读取…</p>
         <template v-else>
@@ -355,7 +357,7 @@ const actions = computed(() =>
             spellcheck="false"
             autocomplete="off"
           />
-          <Button size="sm" variant="outline" type="submit">查看</Button>
+          <Button size="sm" variant="secondary" type="submit">查看</Button>
           <Button
             v-if="projectRepo && projectRepo !== repo"
             size="sm"

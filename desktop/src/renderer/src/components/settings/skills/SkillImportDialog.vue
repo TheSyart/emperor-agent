@@ -171,7 +171,7 @@ function openSkill(name: string) {
             placeholder="未选择文件夹"
             aria-label="文件夹路径"
           />
-          <Button size="sm" variant="outline" @click="pickFolder">
+          <Button size="sm" variant="secondary" @click="pickFolder">
             更换…
           </Button>
         </div>
@@ -190,7 +190,7 @@ function openSkill(name: string) {
             placeholder="未选择文件"
             aria-label="zip 文件路径"
           />
-          <Button size="sm" variant="outline" @click="pickZip">
+          <Button size="sm" variant="secondary" @click="pickZip">
             选择文件…
           </Button>
         </div>
@@ -244,7 +244,7 @@ function openSkill(name: string) {
         完成
       </Button>
       <template v-else>
-        <Button variant="outline" :disabled="importing" @click="open = false">
+        <Button variant="secondary" :disabled="importing" @click="open = false">
           取消
         </Button>
         <Button

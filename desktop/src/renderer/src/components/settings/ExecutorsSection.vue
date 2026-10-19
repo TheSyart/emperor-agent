@@ -628,7 +628,7 @@ onBeforeUnmount(() => {
       <span>有未保存的修改。重新读取会丢弃这些修改。</span
       ><Button
         size="sm"
-        variant="outline"
+        variant="secondary"
         data-discard-executor-edits
         :disabled="busy || loading"
         @click="load(true, true)"
@@ -647,7 +647,7 @@ onBeforeUnmount(() => {
         计费。升级前它们按旧版默认开启，你没有改过这项设置，所以已关闭；需要时在下面打开，首次派工前会在对话中征得你的同意。</span
       ><Button
         size="sm"
-        variant="outline"
+        variant="secondary"
         data-dismiss-upgrade-notice
         :disabled="busy || loading"
         @click="dismissNotice"
@@ -889,7 +889,7 @@ onBeforeUnmount(() => {
                       >取消</Button
                     ><Button
                       size="sm"
-                      variant="outline"
+                      variant="secondary"
                       data-add-custom-model
                       :disabled="busy || loading || !!modelError(row.profile)"
                       @click="addModel(row.profile)"

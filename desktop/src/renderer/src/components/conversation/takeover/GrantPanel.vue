@@ -121,7 +121,7 @@ function send(optionId: string) {
           拒绝
         </Button>
         <Button
-          variant="primary"
+          variant="secondary"
           :data-option-id="scope"
           :disabled="answered || scope === ''"
           @click="send(scope)"

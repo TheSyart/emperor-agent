@@ -151,7 +151,7 @@ function openFile(path: string): void {
             </Button>
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               data-action="review"
               @click="review()"
             >

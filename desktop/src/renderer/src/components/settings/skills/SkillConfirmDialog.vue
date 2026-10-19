@@ -43,7 +43,7 @@ const emit = defineEmits<{ confirm: [] }>()
   >
     <p v-if="detail" class="detail">{{ detail }}</p>
     <template #footer>
-      <Button variant="outline" :disabled="busy" @click="open = false">
+      <Button variant="secondary" :disabled="busy" @click="open = false">
         取消
       </Button>
       <Button

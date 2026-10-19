@@ -265,7 +265,7 @@ describe('ApprovalPanel', () => {
     const deny = button(root, '拒绝')
     const allow = button(root, '允许本次')
     expect(deny.dataset.variant).toBe('danger')
-    expect(allow.dataset.variant).toBe('primary')
+    expect(allow.dataset.variant).toBe('secondary')
     allow.click()
     await nextTick()
     expect(ctx.sendInteractionAnswer).toHaveBeenCalledWith('approval_1', {
@@ -314,8 +314,8 @@ describe('ApprovalPanel', () => {
     )
     expect(actions.map((a) => [a.label, a.variant])).toEqual([
       ['拒绝', 'danger'],
-      ['本次允许', 'outline'],
-      ['总是允许', 'primary'],
+      ['本次允许', 'ghost'],
+      ['总是允许', 'secondary'],
     ])
   })
 
@@ -365,8 +365,8 @@ describe('ApprovalPanel', () => {
     expect(root.querySelector('.command')?.textContent).toBe('Review parser')
     expect(approvalActions(consent).map((a) => [a.label, a.variant])).toEqual([
       ['不允许', 'danger'],
-      ['本次允许', 'outline'],
-      ['以后都允许', 'primary'],
+      ['本次允许', 'ghost'],
+      ['以后都允许', 'secondary'],
     ])
     button(root, '以后都允许').click()
     await nextTick()

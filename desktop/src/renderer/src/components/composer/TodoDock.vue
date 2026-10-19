@@ -4,9 +4,10 @@
  * 36px collapsed row): checklist glyph, progress summary with the current
  * in-progress item, expandable item list with status glyphs.
  */
+import Spinner from '../ui/Spinner.vue'
 import { computed, ref } from 'vue'
 import type { TodoItem } from '../../types'
-import { DsCheck, DsChecklist, DsChevronDown, DsLoading } from '../icons/ds'
+import { DsCheck, DsChecklist, DsChevronDown } from '../icons/ds'
 
 const props = defineProps<{ todos: TodoItem[] }>()
 
@@ -51,11 +52,7 @@ const summary = computed(() => {
         >
           <span class="glyph" aria-hidden="true">
             <DsCheck v-if="item.status === 'completed'" :size="14" />
-            <DsLoading
-              v-else-if="item.status === 'in_progress'"
-              :size="14"
-              class="spin"
-            />
+            <Spinner v-else-if="item.status === 'in_progress'" size="sm" />
             <span v-else class="pending-marker" />
           </span>
           <span class="content" :title="item.content">{{ item.content }}</span>
@@ -180,16 +177,6 @@ const summary = computed(() => {
   height: var(--space-3);
   border: 1.5px solid currentColor;
   border-radius: var(--radius-pill);
-}
-
-.spin {
-  animation: todo-spin 1s linear infinite;
-}
-
-@keyframes todo-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .content {

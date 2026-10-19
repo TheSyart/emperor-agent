@@ -309,7 +309,7 @@ useSettingsHeader({
           <Button
             v-if="onboarding?.canStart"
             size="sm"
-            variant="outline"
+            variant="secondary"
             @click="ctx.runSafely(() => ctx.startProfileInterview())"
           >
             {{ onboarding.status === 'skipped' ? '重新开始' : '开始访谈' }}
