@@ -39,6 +39,8 @@ export interface EmperorAcpSubmitInput {
   source: string
   signal: AbortSignal
   emit?: (event: Row) => void | Promise<void>
+  /** Discard the prompt when no turn takes it (it must not run without its client). */
+  unconsumed?: 'keep' | 'withdraw'
 }
 
 export interface EmperorAcpCore {
@@ -73,6 +75,9 @@ export interface EmperorAcpCore {
       turnId: string | null
       content: string
       activeSessionId: string | null
+      /** `queued` / `discarded`: no turn took the prompt (KRN-02). */
+      delivery?: string
+      result?: { kind: string; reason?: string } | null
     }>
   }
 }
@@ -315,6 +320,7 @@ export class EmperorAcpAdapter {
           clientMessageId: turnId,
           source: 'acp',
           signal: controller.signal,
+          unconsumed: 'withdraw',
           emit: async (event) => {
             if (active.phase !== 'running') return
             const name = cleanText(event.event)
@@ -350,6 +356,12 @@ export class EmperorAcpAdapter {
       if (pause.interaction) {
         active.phase = 'completed'
         return pausedResponse(active, pause.interaction)
+      }
+      if (result.result?.kind === 'not-consumed') {
+        // The turn before it failed or was stopped: the prompt never ran
+        // (and was withdrawn from the queue).
+        active.phase = 'failed'
+        return notConsumedResponse(active, result.result.reason)
       }
       active.phase = 'completed'
       return {
@@ -472,6 +484,22 @@ function cancelledResponse(active: ActivePrompt): PromptResponse {
       emperor: {
         requestId: active.requestKey,
         turnId: active.turnId,
+      },
+    },
+  }
+}
+
+function notConsumedResponse(
+  active: ActivePrompt,
+  reason: string | undefined,
+): PromptResponse {
+  return {
+    stopReason: 'refusal',
+    _meta: {
+      emperor: {
+        requestId: active.requestKey,
+        turnId: active.turnId,
+        notConsumed: reason ?? 'not-consumed',
       },
     },
   }
