@@ -35,7 +35,7 @@ Emperor 随包带一份模型元数据目录：在不联网、不调用厂商接
 7. **家族规则**（只对 `chat`）：`family-rules.ts` 中按规范化 id 匹配的正则。
 8. **兜底**：只给出类型，能力全部为未知。
 
-`source` 如实标注来源：`catalog`（快照或覆盖层）、`family_rule`、`fallback`；`vendor_api` 留给厂商列表接口（尚未实现）。`key` 对应地为 `models.dev:<provider>/<id>`、`emperor:<provider>/<id>`（只由覆盖层定义的条目）、`family:<规则 id>` 或 `fallback`。
+`source` 如实标注来源：`catalog`（快照或覆盖层）、`family_rule`、`fallback`；`vendor_api` 是厂商列表接口读到的值，由[厂商模型列表](vendor-model-apis.md)在合并时标注。`key` 对应地为 `models.dev:<provider>/<id>`、`emperor:<provider>/<id>`（只由覆盖层定义的条目）、`family:<规则 id>` 或 `fallback`。
 
 不变量：查询是纯函数，同一输入在同一快照下结果确定，每次返回新的对象；能力三态，`undefined` 表示未知，不按名称猜测为真。兜底结果不带任何数值，界面与默认值计算自行套用保守默认值。
 

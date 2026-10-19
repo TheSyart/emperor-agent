@@ -62,6 +62,8 @@
 
 - [设计规范首页](design/README.md)
 - [插件 Logo 设计规范](design/plugin-logos.md)
+- [模型元数据规范](design/model-metadata.md)
+- [厂商模型列表接口规范](design/vendor-model-apis.md)
 
 ### 发布与安全
 
