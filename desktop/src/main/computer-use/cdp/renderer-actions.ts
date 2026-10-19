@@ -19,9 +19,17 @@ export interface RendererPage {
   readonly worlds: IsolatedWorlds
   /** The main frame, for page-level scrolling and focus checks. */
   readonly mainFrameId: string | null
-  /** Cross-origin (OOPIF) frames are attached to this page. */
-  readonly crossOriginFrames: boolean
+  /** How long one keyboard action may take in all (default 5 s). */
+  readonly inputTimeoutMs?: number
+  /**
+   * A keyboard action ran out of time: the driver drops this page's CDP
+   * session and attaches a new one (SEC-10).
+   */
+  onInputTimeout?(): void
 }
+
+/** Total time for one keyboard action: focus, checks and every insert. */
+export const INPUT_TIMEOUT_MS = 5_000
 
 export interface FieldState {
   secret: boolean
@@ -136,24 +144,131 @@ export function assertTypable(target: RefTarget): void {
     )
 }
 
-/** Keys without a ref go to the focused element: refuse if that is an OOPIF. */
-export async function assertFocusInPage(
+/**
+ * The focus is (or was moved by the page) inside a cross-origin frame:
+ * nothing is typed (SEC-10, MAIN-8). Text there would hang Electron (E-B3).
+ */
+function focusInCrossOriginFrame(): UiError {
+  return new UiError(
+    'CAPABILITY_DISABLED',
+    'the focus is inside a cross-origin frame (the page may have moved it there); nothing was typed',
+    {
+      reason: 'FOCUS_IN_CROSS_ORIGIN_FRAME',
+      hint: 'Observe again and click a field of the page itself, or ask the user with ask_user_question to do this step in their own browser.',
+    },
+  )
+}
+
+/**
+ * The input guard of one keyboard action (SEC-10, MAIN-8). Where keys go is
+ * asked in the page itself, in the same call that focuses the field, so the
+ * page's focus handlers have already run; frames the page cannot read are
+ * fenced (made inert) while it types, and asked again before every insert
+ * or key. A same-origin frame's field is focused there and then checked
+ * from the page frame, which decides where keys go.
+ */
+export class KeyboardGuard {
+  private readonly fenced = new Set<string>()
+
+  constructor(
+    private readonly page: RendererPage,
+    private readonly signal: AbortSignal,
+  ) {}
+
+  private get mainFrame(): string {
+    return this.page.mainFrameId ?? ''
+  }
+
+  /** Focus a field (selecting its text) and check where keys went. */
+  async focus(target: RefTarget, selectAll: boolean): Promise<void> {
+    const result = await this.page.worlds.callOnElement<{
+      focused: boolean
+      frame: boolean
+    }>(
+      target.frameId,
+      target.backendNodeId,
+      'focusForInput',
+      [selectAll],
+      this.signal,
+    )
+    if (result.frame) throw focusInCrossOriginFrame()
+    this.fenced.add(target.frameId)
+    if (target.frameId !== this.mainFrame) await this.check()
+  }
+
+  /** Right before an insert or a key: the focus is still in the page. */
+  async check(): Promise<void> {
+    const result = await this.page.worlds.callInFrame<{ frame: boolean }>(
+      this.mainFrame,
+      'inputFocus',
+      [],
+      this.signal,
+    )
+    if (result.frame) throw focusInCrossOriginFrame()
+    this.fenced.add(this.mainFrame)
+  }
+
+  /** Lift the fence, page frame first; never fails the action. */
+  async release(): Promise<void> {
+    const frames = [...this.fenced].sort((a, b) =>
+      a === this.mainFrame ? -1 : b === this.mainFrame ? 1 : 0,
+    )
+    for (const frameId of frames)
+      await this.page.worlds
+        .callInFrame(
+          frameId,
+          'releaseInputFence',
+          [],
+          AbortSignal.timeout(2_000),
+        )
+        .catch(() => undefined)
+  }
+}
+
+/**
+ * Run one keyboard action under its guard and a total deadline
+ * (`INPUT_TIMEOUT_MS`). Past the deadline every pending CDP command is
+ * aborted, the page's CDP session is rebuilt (`onInputTimeout`) and the
+ * action reports OUTCOME_UNKNOWN: part of the text may have arrived.
+ */
+export async function withKeyboard<T>(
   page: RendererPage,
   signal: AbortSignal,
-): Promise<void> {
-  if (!page.crossOriginFrames) return
-  const inFrame = await page.worlds
-    .callInFrame<boolean>(page.mainFrameId ?? '', 'activeIsFrame', [], signal)
-    .catch(() => true)
-  if (inFrame)
+  body: (keys: KeyboardGuard, signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const limit = page.inputTimeoutMs ?? INPUT_TIMEOUT_MS
+  const controller = new AbortController()
+  const forward = (): void => controller.abort()
+  if (signal.aborted) controller.abort()
+  else signal.addEventListener('abort', forward, { once: true })
+  let timedOut = false
+  let rebuilt = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, limit)
+  const keys = new KeyboardGuard(page, controller.signal)
+  try {
+    return await body(keys, controller.signal)
+  } catch (error) {
+    if (!timedOut) throw error
+    rebuilt = true
+    page.onInputTimeout?.()
     throw new UiError(
-      'CAPABILITY_DISABLED',
-      'the focus is inside a cross-origin frame; typing there is not available yet',
+      'OUTCOME_UNKNOWN',
+      `typing did not finish within ${limit / 1000} s; the tab's debugger connection was rebuilt`,
       {
-        reason: 'cross-origin-frame-input',
-        hint: 'Click a field of the page itself first, or ask the user to type it in their own browser.',
+        reason: 'input-timeout',
+        hint: 'Observe the page before typing again: part of the text may have arrived.',
+        cause: error,
       },
     )
+  } finally {
+    clearTimeout(timer)
+    signal.removeEventListener('abort', forward)
+    // A rebuilt session lifts the fence itself.
+    if (!rebuilt) await keys.release()
+  }
 }
 
 export async function fieldState(
@@ -355,29 +470,28 @@ export async function fillTarget(
     throw new UiError('INVALID_REQUEST', `${ref} is not a text field`)
   if (field.disabled || field.readOnly)
     throw new UiError('INVALID_REQUEST', `${ref} is disabled or read-only`)
-  await page.worlds.callOnElement(
-    target.frameId,
-    target.backendNodeId,
-    'focusAndSelectAll',
-    [],
-    signal,
-  )
-  // Measured after focusing, which scrolls the field into view.
-  const landing = await landingOf(page, target, hooks, signal)
-  hooks.dispatched()
-  if (landing !== null) hooks.landed?.(landing)
-  if (text === '') await pressStroke(page.cdp, parseKey('Delete'), signal)
-  else await page.cdp.send('Input.insertText', { text }, { signal })
-  const after = await fieldState(page, target, signal)
-  return {
-    changes: [`${target.name || ref} filled (${text.length} chars)`],
-    warnings:
-      after.value === text
-        ? []
-        : [
-            'the field shows a different value after filling (the page may reformat input)',
-          ],
-  }
+  return await withKeyboard(page, signal, async (keys, inputSignal) => {
+    await keys.focus(target, true)
+    // Measured after focusing, which scrolls the field into view.
+    const landing = await landingOf(page, target, hooks, inputSignal)
+    hooks.dispatched()
+    if (landing !== null) hooks.landed?.(landing)
+    await keys.check()
+    if (text === '')
+      await pressStroke(page.cdp, parseKey('Delete'), inputSignal)
+    else
+      await page.cdp.send('Input.insertText', { text }, { signal: inputSignal })
+    const after = await fieldState(page, target, inputSignal)
+    return {
+      changes: [`${target.name || ref} filled (${text.length} chars)`],
+      warnings:
+        after.value === text
+          ? []
+          : [
+              'the field shows a different value after filling (the page may reformat input)',
+            ],
+    }
+  })
 }
 
 /** Type into a ref (or the focused element); a line break is Enter. */
@@ -397,21 +511,25 @@ export async function typeText(
         'secret fields cannot be typed into',
         { reason: 'secret-field' },
       )
-    await page.worlds.callOnElement(
-      target.frameId,
-      target.backendNodeId,
-      'focus',
-      [],
-      signal,
-    )
-  } else await assertFocusInPage(page, signal)
-  hooks.dispatched()
-  for (const part of text.split(/(\n)/)) {
-    if (part === '') continue
-    if (part === '\n') await pressStroke(page.cdp, parseKey('Enter'), signal)
-    else await page.cdp.send('Input.insertText', { text: part }, { signal })
   }
-  return [`typed ${text.length} chars`]
+  return await withKeyboard(page, signal, async (keys, inputSignal) => {
+    if (target !== undefined) await keys.focus(target, false)
+    else await keys.check()
+    hooks.dispatched()
+    for (const part of text.split(/(\n)/)) {
+      if (part === '') continue
+      await keys.check()
+      if (part === '\n')
+        await pressStroke(page.cdp, parseKey('Enter'), inputSignal)
+      else
+        await page.cdp.send(
+          'Input.insertText',
+          { text: part },
+          { signal: inputSignal },
+        )
+    }
+    return [`typed ${text.length} chars`]
+  })
 }
 
 /** A key name as a stroke; an unknown name is the caller's mistake. */
@@ -439,19 +557,15 @@ export async function pressKey(
   hooks: ActHooks,
   signal: AbortSignal,
 ): Promise<string[]> {
-  if (target !== undefined) {
-    assertTypable(target)
-    await page.worlds.callOnElement(
-      target.frameId,
-      target.backendNodeId,
-      'focus',
-      [],
-      signal,
-    )
-  } else await assertFocusInPage(page, signal)
-  hooks.dispatched()
-  await pressStroke(page.cdp, stroke, signal)
-  return [`pressed ${key}`]
+  if (target !== undefined) assertTypable(target)
+  return await withKeyboard(page, signal, async (keys, inputSignal) => {
+    if (target !== undefined) await keys.focus(target, false)
+    else await keys.check()
+    hooks.dispatched()
+    await keys.check()
+    await pressStroke(page.cdp, stroke, inputSignal)
+    return [`pressed ${key}`]
+  })
 }
 
 /** Choose a drop-down option by its label. */

@@ -779,12 +779,20 @@ const CASES: Record<string, Case> = {
       for (const [name, result] of Object.entries({
         'typeText into the frame field': refused.typeText,
         'press on the frame field': refused.press,
+      }))
+        check(
+          result.code === 'CAPABILITY_DISABLED' &&
+            result.reason === 'cross-origin-frame-input',
+          `${name}: ${JSON.stringify(result)}`,
+        )
+      // SEC-10: keys without a ref are checked against where the focus is.
+      for (const [name, result] of Object.entries({
         'typeText with focus in the frame': unfocused.typeText,
         'press with focus in the frame': unfocused.press,
       }))
         check(
           result.code === 'CAPABILITY_DISABLED' &&
-            result.reason === 'cross-origin-frame-input',
+            result.reason === 'FOCUS_IN_CROSS_ORIGIN_FRAME',
           `${name}: ${JSON.stringify(result)}`,
         )
       const after = await observe(driver, target)
