@@ -32,13 +32,13 @@ import type {
 } from '../../../types'
 import Button from '../../ui/Button.vue'
 import IconButton from '../../ui/IconButton.vue'
-import ProviderLogo from '../../ui/ProviderLogo.vue'
+import Avatar from '../../ui/Avatar.vue'
 import { DsRefresh } from '../../icons/ds'
 import {
   Field,
   Segmented,
   Select,
-  StatusBadge,
+  Badge,
   Switch,
   TextField,
   settingsId,
@@ -519,10 +519,11 @@ function cancel(): void {
       <h4 class="block-title">连接</h4>
       <Field label="供应商" :error="errors.provider">
         <div class="provider-row" data-testid="model-editor-provider">
-          <ProviderLogo
+          <Avatar
+            kind="logo"
             :icon-id="selectedProvider.iconId || draft.provider"
             :label="selectedProviderLabel"
-            size="sm"
+            :size="24"
           />
           <span class="provider-name">{{ selectedProviderLabel }}</span>
           <Button
@@ -783,15 +784,15 @@ function cancel(): void {
         >
           {{ testing === 'vision' ? '测试中…' : '测试图片' }}
         </Button>
-        <StatusBadge
+        <Badge
           v-if="testResult?.ok"
           tone="ok"
-          dot
+          variant="dot-label"
           role="status"
           data-testid="model-test-result"
         >
           {{ testSummary }}
-        </StatusBadge>
+        </Badge>
       </div>
       <p
         v-if="testResult && !testResult.ok"

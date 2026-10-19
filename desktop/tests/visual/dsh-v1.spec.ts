@@ -987,7 +987,9 @@ test.describe('plugin logos on a high-density screen', () => {
     }) => {
       await open(page, '/capabilities', { width: 1280, height: 860, theme })
       const shell = fullPage(page)
-      const github = shell.locator('[data-plugin-id="github"] img.plugin-logo')
+      const github = shell.locator(
+        '[data-plugin-id="github"] .ds-avatar[data-shown="image"] img',
+      )
       await expect(github).toBeVisible()
       // Loaded, not broken.
       expect(
@@ -995,16 +997,18 @@ test.describe('plugin logos on a high-density screen', () => {
           (image) => (image as HTMLImageElement).naturalWidth,
         ),
       ).toBe(384)
-      // An address that cannot load falls back to the monogram tile.
+      // An address that cannot load falls back to the colour tile.
       await expect(
         shell.locator(
-          '[data-plugin-id="acme/release-notes"] .plugin-logo.monogram',
+          '[data-plugin-id="acme/release-notes"] .ds-avatar[data-shown="color"]',
         ),
       ).toBeVisible()
       await shot(page, `plugins-logos-list-${theme}`)
 
       const sources = await shell
-        .locator('[data-plugin-group="preinstalled"] img.plugin-logo')
+        .locator(
+          '[data-plugin-group="preinstalled"] .ds-avatar[data-shown="image"] img',
+        )
         .evaluateAll((images) =>
           images.map((image) => (image as HTMLImageElement).src),
         )
@@ -1481,13 +1485,13 @@ test('diagnostics section reports environment status and re-detects', async ({
   // One overview card first: the state as badges, one conclusion, then the
   // issues. No number tiles, no lead-in, no notice while requests work.
   const overview = dialog.getByTestId('diagnostics-overview')
-  await expect(overview.locator('.summary .ds-status-badge')).toHaveText([
+  await expect(overview.locator('.summary .ds-badge')).toHaveText([
     '3 项需要关注',
   ])
   await expect(overview.locator('.conclusion')).toHaveText('其余都正常')
   await expect(dialog.locator('.ds-metric')).toHaveCount(0)
   await expect(dialog.locator('.ds-settings-section .intro')).toHaveCount(0)
-  await expect(dialog.locator('.ds-settings-notice')).toHaveCount(0)
+  await expect(dialog.locator('.ds-notice')).toHaveCount(0)
   const issues = overview.getByRole('list', { name: '需要关注' })
   await expect(issues.locator('[data-issue="environment-node"]')).toContainText(
     '环境工具 · node',
@@ -1503,7 +1507,7 @@ test('diagnostics section reports environment status and re-detects', async ({
   await expect(cards).toHaveCount(5)
   await expect(dialog.getByTestId('environment-section')).toHaveCount(0)
   const badges = (id: string) =>
-    dialog.locator(`[data-diagnostic-card="${id}"] .head .ds-status-badge`)
+    dialog.locator(`[data-diagnostic-card="${id}"] .head .ds-badge`)
   await expect(badges('environment')).toHaveText(['2 项需要关注'])
   await expect(badges('desktop')).toHaveText(['1 项需要关注'])
   for (const id of ['runtime', 'paths', 'config'])
@@ -1523,7 +1527,7 @@ test('diagnostics section reports environment status and re-detects', async ({
   await expect(
     environment.getByTestId('environment-tool-git').locator('.value'),
   ).toHaveText('2.55.0')
-  await expect(environment.locator('.ds-status-badge')).toHaveCount(0)
+  await expect(environment.locator('.ds-badge')).toHaveCount(0)
   await expect(
     environment.getByText('blocked-visual Skill 需要 Python'),
   ).toBeVisible()
@@ -1554,7 +1558,7 @@ test('diagnostics section reports environment status and re-detects', async ({
   await expect(runtime.getByText('定时任务存储')).toBeVisible()
   await expect(runtime.getByText('Owned Process Runtime')).toHaveCount(0)
   await expect(runtime.getByText(/另有 \d+ 项未返回数据/)).toBeVisible()
-  await expect(runtime.locator('.body .ds-status-badge')).toHaveCount(0)
+  await expect(runtime.locator('.body .ds-badge')).toHaveCount(0)
   await shot(page, 'settings-diagnostics-runtime')
 
   // 存储路径 starts with the runtime root, as a path.
@@ -1601,7 +1605,7 @@ for (const theme of ['dark', 'light'] as const)
       theme,
     })
     const dialog = page.getByRole('dialog', { name: '设置' })
-    const notice = dialog.locator('.ds-settings-notice')
+    const notice = dialog.locator('.ds-notice')
     await expect(notice).toHaveCount(1)
     await expect(notice).toHaveAttribute('data-tone', 'error')
     await expect(notice).toContainText('环境检测失败')

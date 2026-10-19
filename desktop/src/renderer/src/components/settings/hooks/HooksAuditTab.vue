@@ -15,7 +15,7 @@ import {
   Select,
   SettingsCard,
   SettingsGroup,
-  StatusBadge,
+  Badge,
   type DefinitionItem,
   type SelectOption,
 } from '../ui'
@@ -124,9 +124,9 @@ function details(record: HookAuditRecordPayload): DefinitionItem[] {
         @update:open="toggleAudit(record, $event)"
       >
         <template #meta>
-          <StatusBadge :tone="hookOutcomeTone(record.outcome)" dot>
+          <Badge :tone="hookOutcomeTone(record.outcome)" variant="dot-label">
             {{ record.outcome || 'none' }}
-          </StatusBadge>
+          </Badge>
         </template>
         <template #actions>
           <code class="duration">{{ record.durationMs ?? '—' }}ms</code>

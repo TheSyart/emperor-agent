@@ -14,7 +14,7 @@ import {
   SettingsGroup,
   SettingsRow,
   SettingsSection,
-  StatusBadge,
+  Badge,
   Switch,
 } from './ui'
 import { refreshAction, useSettingsHeader } from './settingsHeader'
@@ -108,9 +108,13 @@ function archivedMeta(session: SessionInfo) {
   <SettingsSection>
     <SettingsGroup>
       <SettingsRow title="运行状态" description="当前本地 Agent 服务状态">
-        <StatusBadge :tone="runtime.tone" dot data-testid="runtime-status">
+        <Badge
+          :tone="runtime.tone"
+          variant="dot-label"
+          data-testid="runtime-status"
+        >
           {{ runtime.text }}
-        </StatusBadge>
+        </Badge>
       </SettingsRow>
       <SettingsRow
         title="当前模型"

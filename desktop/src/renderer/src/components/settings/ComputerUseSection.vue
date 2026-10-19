@@ -47,10 +47,10 @@ import Button from '../ui/Button.vue'
 import {
   SettingsCard,
   SettingsGroup,
-  SettingsNotice,
+  Notice,
   SettingsRow,
   SettingsSection,
-  StatusBadge,
+  Badge,
   Switch,
 } from './ui'
 import {
@@ -321,13 +321,13 @@ onBeforeUnmount(() => {
   <SettingsSection>
     <template v-if="page === null">
       <div v-if="anyNotice" class="cu-notices">
-        <SettingsNotice
+        <Notice
           v-if="error"
           tone="error"
           title="操作没有完成"
           :description="error"
         />
-        <SettingsNotice
+        <Notice
           v-if="retiredApps.length"
           tone="info"
           title="这些应用现在也可以由 Emperor 操作"
@@ -347,15 +347,15 @@ onBeforeUnmount(() => {
               >知道了</Button
             >
           </template>
-        </SettingsNotice>
-        <SettingsNotice
+        </Notice>
+        <Notice
           v-if="scopedRetired"
           tone="info"
           title="电脑操作已关闭"
           description="电脑操作改为由 AI 连续操作，不再逐项授权。你之前选择的「逐项授权」已停用；确认后重新打开即可。"
           data-testid="computer-use-scoped-retired"
         />
-        <SettingsNotice
+        <Notice
           v-if="notice"
           :title="notice.title"
           :description="notice.description"
@@ -393,7 +393,7 @@ onBeforeUnmount(() => {
               >重新连接</Button
             >
           </template>
-        </SettingsNotice>
+        </Notice>
       </div>
 
       <SettingsCard
@@ -404,11 +404,11 @@ onBeforeUnmount(() => {
       >
         <template #leading><MousePointerClick :size="18" /></template>
         <template v-if="cardBadge" #meta>
-          <StatusBadge
+          <Badge
             :tone="cardBadge.tone"
-            dot
+            variant="dot-label"
             data-testid="computer-use-status"
-            >{{ cardBadge.text }}</StatusBadge
+            >{{ cardBadge.text }}</Badge
           >
         </template>
         <template #actions>
@@ -429,9 +429,7 @@ onBeforeUnmount(() => {
           data-driver="desktop"
         >
           <template v-if="desktopRow.stage !== '可用'" #badge>
-            <StatusBadge :tone="desktopRow.tone">{{
-              desktopRow.stage
-            }}</StatusBadge>
+            <Badge :tone="desktopRow.tone">{{ desktopRow.stage }}</Badge>
           </template>
           <template #description>
             <span :class="{ 'cu-warn': desktopText.warn }">{{
@@ -452,9 +450,7 @@ onBeforeUnmount(() => {
           data-driver="external-browser"
         >
           <template v-if="chromeRow.stage !== '可用'" #badge>
-            <StatusBadge :tone="chromeRow.tone">{{
-              chromeRow.stage
-            }}</StatusBadge>
+            <Badge :tone="chromeRow.tone">{{ chromeRow.stage }}</Badge>
           </template>
           <template #description>
             <span data-testid="browser-pairing-summary">{{
@@ -501,9 +497,11 @@ onBeforeUnmount(() => {
           :description="row.description"
           :data-permission="row.id"
         >
-          <StatusBadge :tone="row.tone" :dot="row.tone === 'ok'">{{
-            row.badge
-          }}</StatusBadge>
+          <Badge
+            :tone="row.tone"
+            :variant="row.tone === 'ok' ? 'dot-label' : 'soft'"
+            >{{ row.badge }}</Badge
+          >
         </SettingsRow>
       </SettingsGroup>
 

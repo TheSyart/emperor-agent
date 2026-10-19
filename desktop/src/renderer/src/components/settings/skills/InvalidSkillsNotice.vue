@@ -15,7 +15,7 @@ import { reactive } from 'vue'
 import Button from '../../ui/Button.vue'
 import { DsChevronDown, DsFolderOpen, DsTrash, DsWarning } from '../../icons/ds'
 import type { InvalidSkillInfo } from '../../../types'
-import { DefinitionList, SettingsCard, StatusBadge } from '../ui'
+import { DefinitionList, SettingsCard, Badge } from '../ui'
 import SkillIssues from './SkillIssues.vue'
 import { invalidSkillDeleteTarget, skillSourceLabel } from './skillsModel'
 
@@ -68,7 +68,7 @@ const listId = 'invalid-skills-list'
           :data-invalid-skill="item.name"
         >
           <template #meta>
-            <StatusBadge>{{ skillSourceLabel(item) }}</StatusBadge>
+            <Badge>{{ skillSourceLabel(item) }}</Badge>
           </template>
           <template #description>
             <span class="reason">{{ item.reason }}</span>

@@ -13,7 +13,7 @@ import {
   SettingsGroup,
   SettingsRow,
   SettingsSection,
-  StatusBadge,
+  Badge,
   Switch,
 } from './ui'
 import { useAppContext } from '../../composables/useAppContext'
@@ -76,9 +76,13 @@ function setEnabled(next: boolean) {
       <div class="hero-text">
         <div class="hero-title">
           <span class="name">{{ PET_NAME }}</span>
-          <StatusBadge :tone="status.tone" dot data-testid="pet-status">
+          <Badge
+            :tone="status.tone"
+            variant="dot-label"
+            data-testid="pet-status"
+          >
             {{ status.text }}
-          </StatusBadge>
+          </Badge>
         </div>
         <p class="hero-description">
           Electron 桌面伴侣：跟随 Agent

@@ -15,7 +15,7 @@
 import { computed } from 'vue'
 import Button from '../../ui/Button.vue'
 import { DsTrash } from '../../icons/ds'
-import { DefinitionList, SettingsCard, StatusBadge, Switch } from '../ui'
+import { DefinitionList, SettingsCard, Badge, Switch } from '../ui'
 import {
   mcpEmptyToolsText,
   mcpServerFacts,
@@ -57,7 +57,7 @@ function onToggle(value: boolean) {
       />
     </template>
     <template #meta>
-      <StatusBadge mono>{{ mcpTransportLabel(server.transport) }}</StatusBadge>
+      <Badge mono>{{ mcpTransportLabel(server.transport) }}</Badge>
     </template>
     <template #description>
       <span class="summary" :data-tone="server.tone" :title="summary">

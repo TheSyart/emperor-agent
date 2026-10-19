@@ -25,7 +25,7 @@ import { APP_CONTEXT_KEY } from '../../../composables/useAppContext'
 import Button from '../../ui/Button.vue'
 import Tabs from '../../ui/Tabs.vue'
 import EmptyState from '../../ui/EmptyState.vue'
-import StatusBadge from '../../settings/ui/StatusBadge.vue'
+import Badge from '../../ui/Badge.vue'
 import { checkOutcomeIcons, pullIcons } from './pullIcons'
 import {
   checkOutcomeLabel,
@@ -186,9 +186,9 @@ function openOnGithub(): void {
           </Button>
         </div>
         <div class="meta-row">
-          <StatusBadge :tone="badge.tone" dot data-pr-state>
+          <Badge :tone="badge.tone" variant="dot-label" data-pr-state>
             {{ badge.label }}
-          </StatusBadge>
+          </Badge>
           <span class="repo">{{ head.repo }}</span>
           <span v-if="head.headRefName" class="branches">
             <code class="ref">{{ head.headRefName }}</code>

@@ -9,7 +9,7 @@
  * Props: memory (MemoryPayload | null).
  */
 import { computed, ref } from 'vue'
-import { DefinitionList, SettingsCard, StatusBadge } from '../ui'
+import { DefinitionList, SettingsCard, Badge } from '../ui'
 import { contextGroups, contextSummary } from './memoryModel'
 import type { MemoryPayload } from '../../../types'
 
@@ -31,7 +31,7 @@ const attention = computed(() => groups.value.some((group) => group.warn))
     :disabled="!groups.length"
   >
     <template #meta>
-      <StatusBadge v-if="attention" tone="warn" dot>需关注</StatusBadge>
+      <Badge v-if="attention" tone="warn" variant="dot-label">需关注</Badge>
     </template>
     <div class="groups">
       <section
@@ -42,7 +42,7 @@ const attention = computed(() => groups.value.some((group) => group.warn))
       >
         <h4 class="group-title">
           {{ group.title }}
-          <StatusBadge v-if="group.warn" tone="warn">需关注</StatusBadge>
+          <Badge v-if="group.warn" tone="warn">需关注</Badge>
         </h4>
         <DefinitionList :items="group.items" :label-width="64" />
       </section>

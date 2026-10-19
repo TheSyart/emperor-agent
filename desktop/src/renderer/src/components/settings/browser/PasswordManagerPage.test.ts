@@ -212,7 +212,7 @@ describe('credential vault settings', () => {
     )
     api.vaultReset.mockResolvedValue(undefined)
     const root = await mount()
-    const notice = root.querySelector('.ds-settings-notice')
+    const notice = root.querySelector('.ds-notice')
     expect(notice?.getAttribute('data-tone')).toBe('error')
     expect(notice?.textContent).toContain('已保存的密码无法解密')
     expect(notice?.textContent).toContain('本地密钥')
@@ -231,7 +231,7 @@ describe('credential vault settings', () => {
     button(notice as HTMLElement, '清空').click()
     await settle()
     expect(api.vaultReset).toHaveBeenCalledTimes(1)
-    expect(root.querySelector('.ds-settings-notice')).toBeNull()
+    expect(root.querySelector('.ds-notice')).toBeNull()
     expect(addAction()).toBeDefined()
     confirm.mockRestore()
   })
@@ -241,7 +241,7 @@ describe('credential vault settings', () => {
       status({ available: false, problem: 'key-invalid', handles: [] }),
     )
     const root = await mount()
-    const notice = root.querySelector('.ds-settings-notice')
+    const notice = root.querySelector('.ds-notice')
     expect(notice?.textContent).toContain('权限或属主不对')
     expect(button(notice as HTMLElement, '清空')).toBeTruthy()
   })
@@ -261,7 +261,7 @@ describe('credential vault settings', () => {
     expect(root.textContent).toContain('基础')
     expect(root.textContent).toContain('建议设置主密码')
     expect(root.textContent).not.toContain('钥匙串')
-    expect(root.querySelector('.ds-settings-notice')).toBeNull()
+    expect(root.querySelector('.ds-notice')).toBeNull()
     expect(root.textContent).toContain('尚未代填')
     expect(root.textContent).toContain('上次代填 2026')
 
@@ -412,7 +412,7 @@ describe('credential vault settings', () => {
       '凭据库已锁定，请先用主密码解锁。',
     )
     // A notice at the top of the page, not a loose line.
-    const notice = root.querySelector<HTMLElement>('.ds-settings-notice')
+    const notice = root.querySelector<HTMLElement>('.ds-notice')
     expect(notice?.dataset.tone).toBe('error')
     expect(
       root.querySelector('.ds-settings-section > .body')?.firstElementChild,

@@ -257,17 +257,15 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(envCard.locator('[data-row="plan"]')).toContainText('2/4')
     const agents = envCard.locator('[data-section="subagents"] .row.agent')
     await expect(agents).toHaveCount(3)
-    const portrait = agents.first().locator('.subagent-avatar')
+    const portrait = agents.first().locator('.ds-avatar[data-kind="sprite"]')
     await expect(portrait).toHaveAttribute('data-avatar', /^[ABCD]0[1-9]$/)
-    await expect(portrait.locator('image')).toHaveAttribute(
-      'href',
-      /-sheet\.webp/,
-    )
-    await expect(portrait.locator('image')).toHaveAttribute(
-      'clip-path',
-      /^url\(#portrait-/,
-    )
-    await expect(portrait.locator('clipPath rect')).toHaveCount(1)
+    // The portrait is cropped into a canvas at the drawn size (DS-04).
+    const { size, width, dpr } = await portrait.evaluate((node) => ({
+      size: Number((node as HTMLElement).dataset.size),
+      width: node.querySelector('canvas')?.width,
+      dpr: window.devicePixelRatio,
+    }))
+    expect(width).toBe(Math.round(size * dpr))
     await expect(
       envCard.getByRole('button', { name: '再显示 2 个' }),
     ).toBeVisible()

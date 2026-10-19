@@ -14,8 +14,8 @@
  * - maxLines (default 16).
  */
 import { computed, ref } from 'vue'
-import StateDot from './StateDot.vue'
-import Pill from './Pill.vue'
+import Dot from './Dot.vue'
+import Badge from './Badge.vue'
 import { ansiClasses, parseAnsiLines } from './ansi'
 import { capRows, DEFAULT_BLOCK_MAX_LINES, headTailCap } from './headTailCap'
 import { useCopyFeedback } from './useCopyFeedback'
@@ -80,14 +80,14 @@ const { copied, copy } = useCopyFeedback(() => props.output ?? '')
           :key="index"
           class="prompt-line"
         >
-          <StateDot v-if="index === 0" :state="status.dot" class="run-state" />
+          <Dot v-if="index === 0" :state="status.dot" class="run-state" />
           <span class="cwd">{{
             index > 0 || cwd === undefined ? '$' : promptLabel(cwd, home)
           }}</span>
           <span class="command" v-text="line" />
         </div>
       </div>
-      <Pill v-if="status.pill" class="status">{{ status.pill }}</Pill>
+      <Badge v-if="status.pill" class="status">{{ status.pill }}</Badge>
       <button
         v-if="!running && !empty"
         type="button"

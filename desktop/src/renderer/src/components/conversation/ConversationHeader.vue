@@ -12,7 +12,7 @@
  * hidden there, so its toggle does too.
  */
 import { PanelRight, PictureInPicture2 } from 'lucide-vue-next'
-import SubagentAvatar from '../ui/SubagentAvatar.vue'
+import Avatar from '../ui/Avatar.vue'
 import IconButton from '../ui/IconButton.vue'
 import type { HeaderCrumb } from './conversationModel'
 
@@ -47,9 +47,10 @@ const tabs = [
       <nav v-if="!slim" class="crumbs" aria-label="会话路径">
         <template v-for="(crumb, index) in crumbs" :key="crumb.id">
           <span v-if="index > 0" class="sep" aria-hidden="true">/</span>
-          <SubagentAvatar
+          <Avatar
+            kind="sprite"
             v-if="crumb.nativeSessionId"
-            :session-id="crumb.nativeSessionId"
+            :id="crumb.nativeSessionId"
             :size="24"
           />
           <button

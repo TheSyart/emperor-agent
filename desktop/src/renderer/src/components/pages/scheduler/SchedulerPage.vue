@@ -32,7 +32,7 @@ import { DsClock, DsPlus, DsSparkle } from '../../icons/ds'
 import {
   EmptyState,
   SearchField,
-  StatusBadge,
+  Badge,
   refreshAction,
   type SettingsHeaderAction,
 } from '../../settings/ui'
@@ -344,13 +344,13 @@ function clearSearch() {
 
       <footer class="service">
         <div class="summary-line" data-testid="scheduler-summary">
-          <StatusBadge
+          <Badge
             class="summary-badge"
             :tone="running ? 'ok' : 'neutral'"
-            dot
+            variant="dot-label"
           >
             {{ running ? '服务运行中' : '服务已停止' }}
-          </StatusBadge>
+          </Badge>
           <span
             v-for="item in summary"
             :key="item.text"

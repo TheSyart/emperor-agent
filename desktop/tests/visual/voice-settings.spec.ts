@@ -54,7 +54,7 @@ for (const theme of ['dark', 'light'] as const) {
     const dialog = await openVoice(page, { theme })
     // A working helper and two granted permissions need no decision: 听写
     // first, the permissions as one line in the last card, no notice.
-    await expect(dialog.locator('.ds-settings-notice')).toHaveCount(0)
+    await expect(dialog.locator('.ds-notice')).toHaveCount(0)
     await expect(dialog.locator('.ds-settings-section .intro')).toHaveCount(0)
     await expect(
       dialog.locator('.ds-settings-group > .head .title'),

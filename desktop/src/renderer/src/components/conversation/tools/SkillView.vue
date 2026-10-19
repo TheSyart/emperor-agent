@@ -2,7 +2,7 @@
 /** SkillView — loaded skill (name, source) with its instructions preview. */
 import { computed } from 'vue'
 import type { ToolChatData } from '../../../conversation/types'
-import Pill from '../../ui/Pill.vue'
+import Badge from '../../ui/Badge.vue'
 import InOutCard from '../../ui/InOutCard.vue'
 import { metaOf, resultText } from './toolModel'
 
@@ -13,7 +13,7 @@ const meta = computed(() => metaOf(props.data))
 <template>
   <div class="skill-view">
     <div v-if="meta" class="facts">
-      <Pill>{{ meta.name }}</Pill>
+      <Badge>{{ meta.name }}</Badge>
       <span v-if="meta.source" class="source">{{ meta.source }}</span>
       <span v-if="meta.root" class="root">{{ meta.root }}</span>
     </div>

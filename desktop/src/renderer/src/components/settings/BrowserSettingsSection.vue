@@ -2,7 +2,7 @@
 /**
  * Settings › 浏览器 — everything about Emperor's built-in browser, laid out
  * like Codex's 浏览器 settings, one card per group (no lead-in paragraph):
- * - a SettingsNotice first, only while a computer use call failed;
+ * - a Notice first, only while a computer use call failed;
  * - the control card: whether Emperor may operate the built-in browser
  *   (computer use's embedded-browser driver; greyed out, with a way there,
  *   while 电脑操作 is off);
@@ -49,10 +49,10 @@ import {
   Select,
   SettingsCard,
   SettingsGroup,
-  SettingsNotice,
+  Notice,
   SettingsRow,
   SettingsSection,
-  StatusBadge,
+  Badge,
   Switch,
   type SelectOption,
 } from './ui'
@@ -235,7 +235,7 @@ onBeforeUnmount(() => {
   <DownloadsPage v-else-if="page === 'downloads'" />
   <SiteSettingsPage v-else-if="page === 'sites'" />
   <SettingsSection v-else>
-    <SettingsNotice v-if="error" tone="error" :title="error" />
+    <Notice v-if="error" tone="error" :title="error" />
     <SettingsCard
       class="agent-card"
       data-testid="browser-agent-card"
@@ -245,9 +245,7 @@ onBeforeUnmount(() => {
     >
       <template #leading><Globe :size="18" /></template>
       <template v-if="agentStage" #meta>
-        <StatusBadge :tone="agentStage.tone">{{
-          agentStage.stage
-        }}</StatusBadge>
+        <Badge :tone="agentStage.tone">{{ agentStage.stage }}</Badge>
       </template>
       <template #actions>
         <Button
@@ -323,20 +321,20 @@ onBeforeUnmount(() => {
             >清除 Cookie、网站数据、缓存、浏览历史和下载记录</template
           >
         </template>
-        <StatusBadge
+        <Badge
           v-if="clearing === 'done'"
           tone="ok"
-          dot
+          variant="dot-label"
           data-clear-status
           role="status"
-          >已清除</StatusBadge
+          >已清除</Badge
         >
-        <StatusBadge
+        <Badge
           v-else-if="clearing === 'failed'"
           tone="error"
-          dot
+          variant="dot-label"
           data-clear-status
-          >清除失败</StatusBadge
+          >清除失败</Badge
         >
         <Button
           variant="secondary"

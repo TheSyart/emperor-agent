@@ -34,7 +34,7 @@ import {
   SettingsCard,
   SettingsGroup,
   SettingsSection,
-  StatusBadge,
+  Badge,
 } from './ui'
 import { refreshAction, useSettingsHeader } from './settingsHeader'
 import { onPageReactivated } from '../pages/pageLifecycle'
@@ -362,7 +362,7 @@ async function saveDraft() {
         description="密钥显示为 [REDACTED]，保存时会保留原值。"
       >
         <template #meta>
-          <StatusBadge v-if="dirty" tone="warn">未保存</StatusBadge>
+          <Badge v-if="dirty" tone="warn">未保存</Badge>
         </template>
         <Field :error="draftError">
           <CodeEditor

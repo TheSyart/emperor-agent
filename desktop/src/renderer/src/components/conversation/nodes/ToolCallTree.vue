@@ -17,7 +17,7 @@ import { useChatContext } from '../chatContext'
 import { subagentStatusLabel, toolView } from '../tools/registry'
 import { lastLine, nativeAgentTarget } from '../tools/toolModel'
 import { useAgentTree } from '../../sidebar/agentTree'
-import SubagentAvatar from '../../ui/SubagentAvatar.vue'
+import Avatar from '../../ui/Avatar.vue'
 import ToolCallRow from './ToolCallRow.vue'
 import WorkflowRunPanel from './WorkflowRunPanel.vue'
 import ExternalAgentStream from '../tools/ExternalAgentStream.vue'
@@ -136,9 +136,10 @@ const hasChildren = computed(
         :href="entryHref"
         @click="openAgent"
       >
-        <SubagentAvatar
+        <Avatar
+          kind="sprite"
           v-if="nativeId && !data.externalAgent"
-          :session-id="nativeId"
+          :id="nativeId"
           :size="24"
         />
         {{ entryTitle }}
@@ -212,10 +213,11 @@ const hasChildren = computed(
         :data-status="data.subagent.status"
       >
         <span class="sub-leading agent-leading"
-          ><SubagentAvatar
+          ><Avatar
+            kind="sprite"
             :id="data.subagent.subagentId"
             :status="subagentStatus"
-            :size="22"
+            :size="24"
         /></span>
         <span class="sub-title">{{ subagentStatusLabel(data) }}</span>
         <template v-if="subagentLine">
@@ -263,7 +265,7 @@ const hasChildren = computed(
 .agent-entry:hover {
   text-decoration: underline;
 }
-.agent-entry > span:not(.subagent-avatar) {
+.agent-entry > span:not(.ds-avatar) {
   color: rgb(var(--label-tertiary));
   font-size: var(--fs-xs);
   margin-left: var(--space-2);

@@ -17,7 +17,7 @@ import {
   saveAgentDownloadAs,
 } from '../../../api/backend'
 import type { ToolChatData } from '../../../conversation/types'
-import Pill from '../../ui/Pill.vue'
+import Badge from '../../ui/Badge.vue'
 import {
   previewShownTargets,
   requestPreviewFocus,
@@ -112,14 +112,14 @@ async function moveDownload(): Promise<void> {
 <template>
   <div class="cu-view" data-testid="computer-use-view">
     <div v-if="meta" class="badges">
-      <Pill v-if="meta.driver">{{
+      <Badge v-if="meta.driver">{{
         DRIVER_LABEL[meta.driver] ?? meta.driver
-      }}</Pill>
-      <Pill v-if="meta.granted" tone="accent">授权 · {{ meta.granted }}</Pill>
-      <Pill
+      }}</Badge>
+      <Badge v-if="meta.granted" tone="accent">授权 · {{ meta.granted }}</Badge>
+      <Badge
         v-if="meta.outcome && !unknown"
-        :tone="meta.outcome === 'observed' ? 'default' : 'approval'"
-        >{{ OUTCOME_LABEL[meta.outcome] ?? meta.outcome }}</Pill
+        :tone="meta.outcome === 'observed' ? 'neutral' : 'attention'"
+        >{{ OUTCOME_LABEL[meta.outcome] ?? meta.outcome }}</Badge
       >
       <button
         v-if="previewTarget"

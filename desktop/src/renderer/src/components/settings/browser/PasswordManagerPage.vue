@@ -29,10 +29,10 @@ import { useSettingsHeader } from '../settingsHeader'
 import {
   EmptyState,
   SettingsGroup,
-  SettingsNotice,
+  Notice,
   SettingsRow,
   SettingsSection,
-  StatusBadge,
+  Badge,
 } from '../ui'
 import {
   TOTP_WARNING,
@@ -256,7 +256,7 @@ onBeforeUnmount(hidePassword)
   <SettingsSection
     intro="Emperor 操作网页和 App 时用来代填的账号密码，每次代填前都会请你确认。"
   >
-    <SettingsNotice
+    <Notice
       v-if="problem"
       tone="error"
       :title="problem.title"
@@ -272,22 +272,18 @@ onBeforeUnmount(hidePassword)
           >清空</Button
         >
       </template>
-    </SettingsNotice>
-    <SettingsNotice v-if="pageError" tone="error" :title="pageError" />
+    </Notice>
+    <Notice v-if="pageError" tone="error" :title="pageError" />
     <SettingsGroup title="保护">
       <SettingsRow title="保护状态" :description="availability.description">
-        <StatusBadge :tone="availability.tone">{{
-          availability.badge
-        }}</StatusBadge>
+        <Badge :tone="availability.tone">{{ availability.badge }}</Badge>
       </SettingsRow>
       <SettingsRow
         v-if="encryption"
         title="加密方式"
         :description="encryption.description"
       >
-        <StatusBadge :tone="encryption.tone">{{
-          encryption.badge
-        }}</StatusBadge>
+        <Badge :tone="encryption.tone">{{ encryption.badge }}</Badge>
       </SettingsRow>
       <SettingsRow
         v-if="status?.available"
@@ -401,7 +397,7 @@ onBeforeUnmount(hidePassword)
         autocomplete="off"
         @submit.prevent="submitProtect"
       >
-        <SettingsNotice v-if="error" tone="error" :title="error" />
+        <Notice v-if="error" tone="error" :title="error" />
         <label v-if="protect === 'unlock'"
           >主密码<input
             v-model="master"
@@ -451,7 +447,7 @@ onBeforeUnmount(hidePassword)
         autocomplete="off"
         @submit.prevent="save"
       >
-        <SettingsNotice v-if="error" tone="error" :title="error" />
+        <Notice v-if="error" tone="error" :title="error" />
         <label
           >名称<input v-model="form.label" required maxlength="120"
         /></label>

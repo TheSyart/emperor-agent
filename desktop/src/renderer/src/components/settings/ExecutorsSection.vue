@@ -30,9 +30,9 @@ import {
 } from './ui'
 import Button from '../ui/Button.vue'
 import SettingsCard from './ui/SettingsCard.vue'
-import StatusBadge from './ui/StatusBadge.vue'
+import Badge from '../ui/Badge.vue'
 import { DsChevronDown, DsRefresh } from '../icons/ds'
-import ProviderLogo from '../ui/ProviderLogo.vue'
+import Avatar from '../ui/Avatar.vue'
 import SubagentAvatarPreview from '../ui/SubagentAvatarPreview.vue'
 const config = ref<ExecutorConfig | null>(null),
   runtimes = ref<Record<string, ExecutorRuntimeFacts | undefined>>({}),
@@ -664,9 +664,7 @@ onBeforeUnmount(() => {
       <SettingsCard class="agent-card local-card" data-settings-agent="local">
         <template #leading><SubagentAvatarPreview /></template
         ><template #title><h3>本地</h3></template
-        ><template #meta
-          ><StatusBadge tone="accent">内置</StatusBadge></template
-        >
+        ><template #meta><Badge tone="accent">内置</Badge></template>
         <template #description
           ><span>{{ localIntro }}</span></template
         >
@@ -685,20 +683,21 @@ onBeforeUnmount(() => {
         :data-settings-agent="row.backend"
       >
         <template #leading
-          ><ProviderLogo
+          ><Avatar
+            kind="logo"
             :icon-id="row.backend"
             :label="row.name"
-            size="lg" /></template
+            :size="40" /></template
         ><template #title
           ><h3>{{ row.name }}</h3></template
         >
         <template #meta
-          ><StatusBadge
+          ><Badge
             class="readiness"
             :tone="row.profile ? readinessTone(row.profile) : 'neutral'"
             >{{
               row.profile ? label(row.profile) : loading ? '读取中…' : '未配置'
-            }}</StatusBadge
+            }}</Badge
           ></template
         >
         <template #description
@@ -799,11 +798,11 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div class="specialty-tags" data-specialties>
-              <StatusBadge
+              <Badge
                 v-for="(text, i) in executorSpecialties(row.profile)"
                 :key="i"
                 class="specialty-tag"
-                >{{ text }}</StatusBadge
+                >{{ text }}</Badge
               ><span
                 v-if="!executorSpecialties(row.profile).length"
                 class="muted"
@@ -934,14 +933,14 @@ onBeforeUnmount(() => {
                 class="ability-item"
               >
                 <span>{{ kind === 'search' ? '搜索' : '生图' }}</span
-                ><StatusBadge
+                ><Badge
                   :tone="capabilityTone(capability(row.profile, kind).status)"
                   :data-native-capability="kind"
                   :data-status="capability(row.profile, kind).status"
                   :title="capabilityDetail(row.profile, kind)"
                   >{{
                     capabilityLabels[capability(row.profile, kind).status]
-                  }}</StatusBadge
+                  }}</Badge
                 >
               </div>
             </div>
@@ -1235,7 +1234,7 @@ onBeforeUnmount(() => {
   margin-top: var(--space-2);
   min-width: 0;
 }
-.specialty-tag.ds-status-badge {
+.specialty-tag.ds-badge {
   flex: 0 1 auto;
   font-size: var(--fs-xxs);
   font-weight: 400;
@@ -1350,7 +1349,7 @@ onBeforeUnmount(() => {
   font-size: var(--fs-xxs);
   line-height: 20px;
 }
-.ability-item .ds-status-badge {
+.ability-item .ds-badge {
   font-size: var(--fs-xxxs);
   min-height: 21px;
   font-weight: 450;

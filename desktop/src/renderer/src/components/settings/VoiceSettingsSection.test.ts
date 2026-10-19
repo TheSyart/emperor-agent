@@ -92,7 +92,7 @@ function groupTitle(group: HTMLElement): string | undefined {
 }
 
 function notice(root: HTMLElement): HTMLElement | null {
-  return root.querySelector<HTMLElement>('.ds-settings-notice')
+  return root.querySelector<HTMLElement>('.ds-notice')
 }
 
 function noticeButton(root: HTMLElement, label: string): HTMLButtonElement {

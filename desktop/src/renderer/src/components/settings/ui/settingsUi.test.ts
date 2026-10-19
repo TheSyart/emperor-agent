@@ -2,6 +2,7 @@
 import { createApp, defineComponent, h, nextTick, ref, type App } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  Badge,
   CodeEditor,
   DefinitionList,
   EmptyState,
@@ -13,12 +14,11 @@ import {
   SettingsCard,
   SettingsGroup,
   SettingsHero,
-  SettingsNotice,
+  Notice,
   SettingsRow,
   SettingsSection,
   SettingsTable,
   SettingsTableRow,
-  StatusBadge,
   Switch,
   TextArea,
   TextField,
@@ -364,7 +364,7 @@ describe('display primitives', () => {
             { term: '错误', value: null },
           ],
         }),
-        h(StatusBadge, { tone: 'ok', dot: true }, () => '已连接'),
+        h(Badge, { tone: 'ok', variant: 'dot-label' }, () => '已连接'),
         h(Metric, { label: '请求', value: 12, unit: '次', tone: 'error' }),
         h(EmptyState, { title: '暂无', description: '去添加' }),
       ]),
@@ -374,7 +374,7 @@ describe('display primitives', () => {
     )
     expect(values).toEqual(['https://x', '—'])
     expect(root.querySelector('dd')?.dataset.mono).toBe('true')
-    const badge = root.querySelector('.ds-status-badge')!
+    const badge = root.querySelector('.ds-badge')!
     expect(badge.getAttribute('data-tone')).toBe('ok')
     expect(badge.querySelector('.badge-dot')).not.toBeNull()
     expect(root.querySelector('.ds-metric .value')?.textContent).toContain('12')
@@ -501,17 +501,17 @@ describe('card layout', () => {
     const root = mount(() =>
       h('div', null, [
         h(
-          SettingsNotice,
+          Notice,
           { tone: 'warn', title: '还缺 2 项系统权限' },
           {
             default: () => '辅助功能和屏幕录制要授予 Helper。',
             actions: () => h('button', { type: 'button' }, '请求权限'),
           },
         ),
-        h(SettingsNotice, { tone: 'info', title: '这些应用现在可以操作了' }),
+        h(Notice, { tone: 'info', title: '这些应用现在可以操作了' }),
       ]),
     )
-    const [warn, info] = [...root.querySelectorAll('.ds-settings-notice')]
+    const [warn, info] = [...root.querySelectorAll('.ds-notice')]
     expect(warn.getAttribute('data-tone')).toBe('warn')
     expect(warn.getAttribute('role')).toBe('alert')
     expect(warn.querySelector('.title')?.textContent).toBe('还缺 2 项系统权限')
@@ -527,14 +527,14 @@ describe('card layout', () => {
         SettingsHero,
         { title: 'Chrome 和 Edge', description: '扩展 0.2.0' },
         {
-          badge: () => h(StatusBadge, { tone: 'ok' }, () => '已连接'),
+          badge: () => h(Badge, { tone: 'ok' }, () => '已连接'),
           actions: () => h('button', { type: 'button' }, '移除扩展程序'),
         },
       ),
     )
     const hero = root.querySelector('.ds-settings-hero')!
     expect(hero.querySelector('h2.title')?.textContent).toBe('Chrome 和 Edge')
-    expect(hero.querySelector('.meta .ds-status-badge')?.textContent).toContain(
+    expect(hero.querySelector('.meta .ds-badge')?.textContent).toContain(
       '已连接',
     )
     expect(hero.querySelector('.meta .description')?.textContent).toBe(

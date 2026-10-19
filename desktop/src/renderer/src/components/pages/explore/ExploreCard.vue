@@ -11,7 +11,7 @@ import { computed } from 'vue'
 import { ExternalLink, Plug, Puzzle, Sparkles } from 'lucide-vue-next'
 import Button from '../../ui/Button.vue'
 import IconButton from '../../ui/IconButton.vue'
-import { StatusBadge } from '../../settings/ui'
+import { Badge } from '../../settings/ui'
 import { EXPLORE_KIND_LABELS, type ExploreEntry } from './exploreModel'
 
 const props = withDefaults(
@@ -41,9 +41,7 @@ const titleId = computed(() => `explore-card-${props.entry.id}`)
         <h3 :id="titleId" class="name">{{ entry.name }}</h3>
         <span class="publisher">{{ entry.publisher }}</span>
       </div>
-      <StatusBadge class="kind">{{
-        EXPLORE_KIND_LABELS[entry.kind]
-      }}</StatusBadge>
+      <Badge class="kind">{{ EXPLORE_KIND_LABELS[entry.kind] }}</Badge>
     </div>
     <p class="description">{{ entry.description }}</p>
     <p v-if="entry.kind === 'plugin'" class="note">

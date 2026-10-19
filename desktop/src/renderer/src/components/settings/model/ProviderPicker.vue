@@ -12,7 +12,7 @@
  */
 import { computed, ref } from 'vue'
 import type { ProviderOption } from '../../../types'
-import ProviderLogo from '../../ui/ProviderLogo.vue'
+import Avatar from '../../ui/Avatar.vue'
 import { SearchField } from '../ui'
 import {
   providerDisplayName,
@@ -77,10 +77,11 @@ function tileParts(option: ProviderOption): { name: string; caption: string } {
           :aria-label="tileLabel(option)"
           @click="emit('pick', option.name)"
         >
-          <ProviderLogo
+          <Avatar
+            kind="logo"
             :icon-id="option.iconId || option.name"
             :label="providerDisplayName(option.name, option)"
-            size="sm"
+            :size="24"
           />
           <span class="tile-text">
             <span class="tile-name">{{ tileParts(option).name }}</span>

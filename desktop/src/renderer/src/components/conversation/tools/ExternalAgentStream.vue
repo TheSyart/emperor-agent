@@ -5,8 +5,8 @@ import type { ToolExternalAgentView } from '../../../conversation/types'
 import { provideDelegationLinks } from '../delegationLinks'
 import { useChatContext, useExpansion } from '../chatContext'
 import ConversationMarkdown from '../parts/ConversationMarkdown.vue'
-import StateDot from '../../ui/StateDot.vue'
-import ProviderLogo from '../../ui/ProviderLogo.vue'
+import Dot from '../../ui/Dot.vue'
+import Avatar from '../../ui/Avatar.vue'
 const props = defineProps<{ run: ToolExternalAgentView; callId: string }>()
 const chat = useChatContext()
 const { click, links } = provideDelegationLinks(() => ({
@@ -63,14 +63,15 @@ watch(
       :aria-expanded="open"
       @click="open = !open"
     >
-      <ProviderLogo
+      <Avatar
+        kind="logo"
         :icon-id="run.backend"
         :label="agentSourceLabel(run.backend)"
-        size="xs"
+        :size="16"
         :data-agent-logo="run.backend"
       />
-      <StateDot
-        :state="live ? 'ongoing' : run.phase === 'completed' ? 'ok' : 'warn'"
+      <Dot
+        :state="live ? 'running' : run.phase === 'completed' ? 'ok' : 'warn'"
       />
       <strong>{{ agentTitle(run.title, run.backend) }}</strong>
       <span>{{ agentSourceLabel(run.backend) }}</span>

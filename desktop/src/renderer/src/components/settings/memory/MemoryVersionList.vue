@@ -15,7 +15,7 @@
 import { ref, watch } from 'vue'
 import Button from '../../ui/Button.vue'
 import DiffBlock from '../../ui/DiffBlock.vue'
-import { EmptyState, SettingsCard, StatusBadge } from '../ui'
+import { EmptyState, SettingsCard, Badge } from '../ui'
 import { formatBytes, versionDescription } from './memoryModel'
 import type { MemoryVersion, MemoryVersionDetail } from '../../../types'
 
@@ -85,7 +85,7 @@ function unchanged(detail: MemoryVersionDetail) {
       @update:open="setOpen(version, $event)"
     >
       <template #meta>
-        <StatusBadge mono>{{ formatBytes(version.bytes) }}</StatusBadge>
+        <Badge mono>{{ formatBytes(version.bytes) }}</Badge>
       </template>
       <template #actions>
         <Button

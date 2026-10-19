@@ -78,7 +78,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(dialog.locator('[data-permission="all"]')).toContainText(
       '已允许',
     )
-    await expect(dialog.locator('.ds-settings-notice')).toHaveCount(0)
+    await expect(dialog.locator('.ds-notice')).toHaveCount(0)
     await expect(dialog).toContainText('已保存 14 张，共 9.0 MB')
     // No app lists and no emergency stop (2026-10-01).
     for (const gone of ['高级', '紧急停止', '立即停止', '不让 Emperor 操作'])

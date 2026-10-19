@@ -15,7 +15,8 @@ import DocumentIcon from '../../ui/DocumentIcon.vue'
 import { DsSkill } from '../../icons/ds'
 import type { DisplayResource } from './resourceModel'
 import { APP_CONTEXT_KEY } from '../../../composables/useAppContext'
-import PluginLogo from '../../settings/plugins/PluginLogo.vue'
+import { nearestAvatarSize } from '../../ui/avatar'
+import Avatar from '../../ui/Avatar.vue'
 import { useChatContext } from '../chatContext'
 import { loadSiteIcon, whenVisible } from './siteIcons'
 const props = withDefaults(
@@ -95,11 +96,12 @@ const site = computed(() => {
 })
 </script>
 <template>
-  <PluginLogo
+  <Avatar
+    kind="logo"
     v-if="resource.kind === 'plugin'"
-    :name="resource.label"
-    :logo="pluginLogo"
-    :size="size"
+    :label="resource.label"
+    :src="pluginLogo"
+    :size="nearestAvatarSize(size)"
   />
   <span
     v-else-if="resource.kind === 'web'"

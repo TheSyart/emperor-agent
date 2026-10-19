@@ -15,7 +15,7 @@ import {
   Select,
   SettingsGroup,
   SettingsRow,
-  StatusBadge,
+  Badge,
   TextField,
   type SelectOption,
 } from '../ui'
@@ -190,13 +190,16 @@ const resultJson = computed(() =>
     >
       <div class="result">
         <div class="result-badges">
-          <StatusBadge :tone="hookOutcomeTone(testResult.decision)" dot>
+          <Badge
+            :tone="hookOutcomeTone(testResult.decision)"
+            variant="dot-label"
+          >
             decision {{ testResult.decision || '—' }}
-          </StatusBadge>
-          <StatusBadge :tone="hookExitTone(testResult.exitCode)" mono>
+          </Badge>
+          <Badge :tone="hookExitTone(testResult.exitCode)" mono>
             exit {{ testResult.exitCode ?? '—' }}
-          </StatusBadge>
-          <StatusBadge mono>{{ testResult.durationMs }}ms</StatusBadge>
+          </Badge>
+          <Badge mono>{{ testResult.durationMs }}ms</Badge>
         </div>
         <pre class="result-json">{{ resultJson }}</pre>
       </div>

@@ -13,8 +13,7 @@ import {
   agentLocation,
   visibleAgentChildren,
 } from '../../sidebar/agentTree'
-import SubagentAvatar from '../../ui/SubagentAvatar.vue'
-import ProviderLogo from '../../ui/ProviderLogo.vue'
+import Avatar from '../../ui/Avatar.vue'
 import { abandonDelegation } from '../../../api/delegations'
 const props = defineProps<{ rootSessionId: string; agents?: AgentView[] }>()
 const route = useRoute()
@@ -112,16 +111,18 @@ async function end(agent: AgentView) {
         :aria-current="currentId === agent.id ? 'page' : undefined"
         @click="router.push(agentLocation(agent))"
       >
-        <SubagentAvatar
+        <Avatar
+          kind="sprite"
           v-if="agent.backend === 'internal'"
-          :session-id="agent.id"
+          :id="agent.id"
           :size="28"
         />
-        <ProviderLogo
+        <Avatar
+          kind="logo"
           v-else
           :icon-id="agent.backend"
           :label="agentSourceLabel(agent.backend)"
-          size="xs"
+          :size="16"
           :data-agent-logo="agent.backend"
         />
         <span class="agent-copy"

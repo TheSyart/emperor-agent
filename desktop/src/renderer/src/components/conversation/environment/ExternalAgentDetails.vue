@@ -22,7 +22,7 @@ import {
 import { onCoreEvent } from '../../../api/backend'
 import Modal from '../../ui/Modal.vue'
 import Button from '../../ui/Button.vue'
-import ProviderLogo from '../../ui/ProviderLogo.vue'
+import Avatar from '../../ui/Avatar.vue'
 import TaskOutputDialog from './TaskOutputDialog.vue'
 const props = defineProps<{
   runId: string
@@ -274,11 +274,12 @@ onBeforeUnmount(() => {
               record?.backend ?? 'codex',
             )
           }}</strong
-          ><ProviderLogo
+          ><Avatar
+            kind="logo"
             v-if="record"
             :icon-id="record.backend"
             :label="agentSourceLabel(record.backend)"
-            size="xs"
+            :size="16"
             :data-agent-logo="record.backend"
           /><span v-if="record">{{ agentSourceLabel(record.backend) }}</span
           ><span v-if="receipt"> · {{ receipt.version }}</span>

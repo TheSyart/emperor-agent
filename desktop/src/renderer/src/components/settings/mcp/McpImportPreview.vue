@@ -9,7 +9,7 @@
  * Emits: overwrite(name, value).
  */
 import { DsWarning } from '../../icons/ds'
-import { StatusBadge } from '../ui'
+import { Badge } from '../ui'
 import {
   mcpPreviewKindLabel,
   mcpPreviewKindTone,
@@ -56,12 +56,10 @@ function onOverwrite(name: string, event: Event) {
         >
           <div class="row-main">
             <span class="name">{{ row.name }}</span>
-            <StatusBadge mono>{{
-              mcpTransportLabel(row.transport)
-            }}</StatusBadge>
-            <StatusBadge :tone="mcpPreviewKindTone(row.kind)">
+            <Badge mono>{{ mcpTransportLabel(row.transport) }}</Badge>
+            <Badge :tone="mcpPreviewKindTone(row.kind)">
               {{ mcpPreviewKindLabel(row.kind) }}
-            </StatusBadge>
+            </Badge>
             <label v-if="row.overwritable" class="overwrite">
               <input
                 type="checkbox"

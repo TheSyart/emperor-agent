@@ -8,7 +8,7 @@
 import { computed } from 'vue'
 import type { ToolChatData } from '../../../conversation/types'
 import InOutCard from '../../ui/InOutCard.vue'
-import StateDot from '../../ui/StateDot.vue'
+import Dot from '../../ui/Dot.vue'
 import TerminalBlock from '../../ui/TerminalBlock.vue'
 import {
   JOB_STATUS_LABEL,
@@ -31,7 +31,7 @@ const job = computed(() => props.data.job)
 const jobDot = computed(() => {
   switch (job.value?.status) {
     case 'running':
-      return 'ongoing' as const
+      return 'running' as const
     case 'completed':
       return job.value.exitCode !== undefined && job.value.exitCode !== 0
         ? ('error' as const)
@@ -70,7 +70,7 @@ const jobDot = computed(() => {
         :exit-code="job?.exitCode"
       />
       <div class="job-line">
-        <StateDot :state="jobDot" />
+        <Dot :state="jobDot" />
         <span class="job-title">后台任务</span>
         <code class="job-id">{{ shell.jobId ?? job?.jobId }}</code>
         <span class="job-status">{{

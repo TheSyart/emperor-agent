@@ -31,12 +31,7 @@ import {
 import { useAppContext } from '../../../composables/useAppContext'
 import { DsChevronLeft, DsChevronRight, DsGlobe } from '../../icons/ds'
 import Button from '../../ui/Button.vue'
-import {
-  EmptyState,
-  SearchField,
-  Segmented,
-  StatusBadge,
-} from '../../settings/ui'
+import { EmptyState, SearchField, Segmented, Badge } from '../../settings/ui'
 import { refreshAction } from '../../settings/settingsHeader'
 import PageShell from '../PageShell.vue'
 import { onPageReactivated } from '../pageLifecycle'
@@ -222,9 +217,9 @@ const actions = computed(() =>
           <header class="head">
             <h2 class="title">{{ shown.title }}</h2>
             <div class="meta">
-              <StatusBadge v-if="badge" :tone="badge.tone" dot>
+              <Badge v-if="badge" :tone="badge.tone" variant="dot-label">
                 {{ badge.label }}
-              </StatusBadge>
+              </Badge>
               <span>{{ shown.repo }}#{{ shown.number }}</span>
               <span>
                 {{ shown.author }} 创建于

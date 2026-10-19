@@ -2,10 +2,9 @@
 import { createApp, h, nextTick, ref } from 'vue'
 import { afterEach, describe, expect, it } from 'vitest'
 import DisclosureRow from './DisclosureRow.vue'
-import StateDot from './StateDot.vue'
+import Dot from './Dot.vue'
 import DiffBlock from './DiffBlock.vue'
 import Tabs from './Tabs.vue'
-import { stateDotClasses, stateFromStatus, chaseDelayMs } from './stateDot'
 import { formatElapsed } from './elapsed'
 import { headTailCap, capRows } from './headTailCap'
 import { parseAnsiLines, ansiClasses } from './ansi'
@@ -77,28 +76,20 @@ describe('DisclosureRow', () => {
   })
 })
 
-describe('StateDot', () => {
-  it('maps states to classes and renders the ongoing chase', () => {
-    expect(stateDotClasses('ok')).toEqual(['ds-state-dot', 'ds-state-dot--ok'])
-    expect(stateDotClasses('error')).toContain('ds-state-dot--error')
-    expect(chaseDelayMs(0)).toBe(-1000)
-    expect(stateFromStatus('running')).toBe('ongoing')
-    expect(stateFromStatus('failed')).toBe('error')
-    expect(stateFromStatus('interrupted')).toBe('warn')
-    expect(stateFromStatus(undefined)).toBe('ok')
-
+describe('Dot', () => {
+  it('renders a state and stays decorative without a label', () => {
     const root = mount(() =>
       h('div', [
-        h(StateDot, { state: 'warn' }),
-        h(StateDot, { state: 'ongoing', size: 12 }),
+        h(Dot, { state: 'warn' }),
+        h(Dot, { state: 'running', size: 'sm', label: '运行中' }),
       ]),
     )
-    const solid = root.querySelector('span.ds-state-dot')!
-    expect(solid.classList.contains('ds-state-dot--warn')).toBe(true)
-    expect(solid.getAttribute('aria-hidden')).toBe('true')
-    const chase = root.querySelector('svg.ds-state-dot--ongoing')!
-    expect(chase.getAttribute('width')).toBe('12')
-    expect(chase.querySelectorAll('rect.ds-chase-cell')).toHaveLength(8)
+    const [warn, running] = [...root.querySelectorAll<HTMLElement>('.ds-dot')]
+    expect(warn!.dataset.state).toBe('warn')
+    expect(warn!.getAttribute('aria-hidden')).toBe('true')
+    expect(running!.dataset.size).toBe('sm')
+    expect(running!.getAttribute('role')).toBe('img')
+    expect(running!.getAttribute('aria-label')).toBe('运行中')
   })
 })
 
@@ -212,7 +203,7 @@ describe('pure helpers', () => {
   it('labels terminal prompts and exit status', () => {
     expect(promptLabel('/Users/me/project/', '/Users/me')).toBe('project')
     expect(promptLabel('/Users/me', '/Users/me/')).toBe('~')
-    expect(terminalStatus(true, undefined, undefined).dot).toBe('ongoing')
+    expect(terminalStatus(true, undefined, undefined).dot).toBe('running')
     expect(terminalStatus(false, 2, undefined)).toMatchObject({
       dot: 'error',
       pill: '退出码 2',

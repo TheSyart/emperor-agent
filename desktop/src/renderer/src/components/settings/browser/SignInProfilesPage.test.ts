@@ -156,7 +156,7 @@ describe('登录状态', () => {
     ).toBe('名称已存在')
     expect(
       document.body.querySelector<HTMLElement>(
-        '.profile-form .ds-settings-notice',
+        '.profile-form .ds-notice',
       )?.dataset.tone,
     ).toBe('error')
   })
@@ -164,7 +164,7 @@ describe('登录状态', () => {
   it('says why the profiles could not be read, in a notice at the top', async () => {
     core.mockRejectedValue(new Error('电脑操作服务没有响应'))
     const root = await mount()
-    const notice = root.querySelector<HTMLElement>('.ds-settings-notice')
+    const notice = root.querySelector<HTMLElement>('.ds-notice')
     expect(notice?.dataset.tone).toBe('error')
     expect(notice?.textContent).toContain('电脑操作服务没有响应')
     expect(

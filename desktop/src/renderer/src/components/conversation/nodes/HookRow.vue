@@ -8,7 +8,7 @@ import { computed } from 'vue'
 import type { HookChatNode } from '../../../conversation/types'
 import { DsCode } from '../../icons/ds'
 import DisclosureRow from '../../ui/DisclosureRow.vue'
-import StateDot from '../../ui/StateDot.vue'
+import Dot from '../../ui/Dot.vue'
 import { useExpansion } from '../chatContext'
 
 const props = defineProps<{ node: HookChatNode }>()
@@ -58,7 +58,7 @@ const summary = computed(() =>
       :tone="blocked ? 'error' : 'default'"
     >
       <template #icon>
-        <StateDot v-if="blocked" state="error" />
+        <Dot v-if="blocked" state="error" />
         <DsCode v-else :size="14" />
       </template>
       <dl class="facts">

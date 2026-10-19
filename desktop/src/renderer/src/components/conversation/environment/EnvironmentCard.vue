@@ -83,7 +83,7 @@ import IconButton from '../../ui/IconButton.vue'
 import EnvironmentAgents from './EnvironmentAgents.vue'
 import Menu from '../../ui/Menu.vue'
 import MenuItem from '../../ui/MenuItem.vue'
-import SubagentAvatar from '../../ui/SubagentAvatar.vue'
+import Avatar from '../../ui/Avatar.vue'
 import type { AgentView } from '@emperor/core/api'
 import {
   backgroundTaskLines,
@@ -698,9 +698,10 @@ function openLauncher(): void {
     aria-label="环境信息"
   >
     <header class="card-head">
-      <SubagentAvatar
+      <Avatar
+        kind="sprite"
         v-if="nativeSessionId"
-        :session-id="nativeSessionId"
+        :id="nativeSessionId"
         :size="24"
       />
       <h2 class="card-title" :title="title || '环境信息'">

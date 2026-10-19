@@ -25,7 +25,7 @@ import {
   Select,
   SettingsGroup,
   SettingsRow,
-  StatusBadge,
+  Badge,
   Switch,
   type SelectOption,
 } from '../../ui'
@@ -105,7 +105,7 @@ onMounted(async () => {
       data-row="site-tools"
     >
       <template v-if="settings && !settings.siteToolsAvailable" #badge>
-        <StatusBadge>不可用</StatusBadge>
+        <Badge>不可用</Badge>
       </template>
       <Switch
         id="external-site-tools"

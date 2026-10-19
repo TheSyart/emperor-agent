@@ -23,7 +23,7 @@ import { core } from '../../../api/http'
 import { useAppContext } from '../../../composables/useAppContext'
 import { DsChevronLeft, DsChevronRight, DsGlobe } from '../../icons/ds'
 import Button from '../../ui/Button.vue'
-import { EmptyState, StatusBadge, TextField } from '../../settings/ui'
+import { EmptyState, Badge, TextField } from '../../settings/ui'
 import { refreshAction } from '../../settings/settingsHeader'
 import PageShell from '../PageShell.vue'
 import { onPageReactivated } from '../pageLifecycle'
@@ -288,9 +288,13 @@ const actions = computed(() =>
           <header class="head">
             <h2 class="title">{{ shown.run.title || shown.run.name }}</h2>
             <div class="meta">
-              <StatusBadge v-if="shownOutcome" :tone="shownOutcome.tone" dot>
+              <Badge
+                v-if="shownOutcome"
+                :tone="shownOutcome.tone"
+                variant="dot-label"
+              >
                 {{ shownOutcome.label }}
-              </StatusBadge>
+              </Badge>
               <span>{{ selected.repo }}</span>
               <span>
                 {{ runMeta(shown.run) }} ·
@@ -307,9 +311,9 @@ const actions = computed(() =>
               :data-job="job.id"
             >
               <div class="job-head">
-                <StatusBadge :tone="runOutcome(job).tone" dot>
+                <Badge :tone="runOutcome(job).tone" variant="dot-label">
                   {{ runOutcome(job).label }}
-                </StatusBadge>
+                </Badge>
                 <span class="job-name">{{ job.name }}</span>
                 <span
                   v-if="durationZh(job.startedAt, job.completedAt)"
@@ -401,9 +405,9 @@ const actions = computed(() =>
                 @click="open(item)"
               >
                 <span class="outcome">
-                  <StatusBadge :tone="runOutcome(item).tone" dot>
+                  <Badge :tone="runOutcome(item).tone" variant="dot-label">
                     {{ runOutcome(item).label }}
-                  </StatusBadge>
+                  </Badge>
                 </span>
                 <span class="main">
                   <span class="row-title">{{ item.title || item.name }}</span>

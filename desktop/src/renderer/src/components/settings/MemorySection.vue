@@ -22,7 +22,7 @@ import {
   SettingsGroup,
   SettingsRow,
   SettingsSection,
-  StatusBadge,
+  Badge,
   type SelectOption,
   type SettingsHeaderAction,
 } from './ui'
@@ -304,9 +304,9 @@ useSettingsHeader({
           dense
           :divider="false"
         >
-          <StatusBadge :tone="onboardingTone(onboarding?.status)" dot>
+          <Badge :tone="onboardingTone(onboarding?.status)" variant="dot-label">
             {{ onboardingLabel(onboarding?.status) }}
-          </StatusBadge>
+          </Badge>
           <Button
             v-if="onboarding?.canStart"
             size="sm"

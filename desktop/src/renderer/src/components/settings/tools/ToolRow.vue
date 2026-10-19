@@ -12,7 +12,7 @@
 import { computed } from 'vue'
 import type { ToolInfo } from '../../../types'
 import { DsChevronDown } from '../../icons/ds'
-import { CodeEditor, StatusBadge, settingsId } from '../ui'
+import { CodeEditor, Badge, settingsId } from '../ui'
 import { toolParams, toolSchemaText, toolSummary } from './toolSchema'
 
 const props = defineProps<{ tool: ToolInfo }>()
@@ -50,12 +50,10 @@ const source = computed(() =>
     <div v-if="open" :id="`${uid}-details`" class="details">
       <p v-if="tool.description" class="description">{{ tool.description }}</p>
       <div class="traits">
-        <StatusBadge v-if="source" mono>{{ source }}</StatusBadge>
-        <StatusBadge v-if="tool.read_only" tone="ok">只读</StatusBadge>
-        <StatusBadge v-if="tool.concurrency_safe" tone="ok"
-          >并发安全</StatusBadge
-        >
-        <StatusBadge v-if="tool.exclusive" tone="warn">独占</StatusBadge>
+        <Badge v-if="source" mono>{{ source }}</Badge>
+        <Badge v-if="tool.read_only" tone="ok">只读</Badge>
+        <Badge v-if="tool.concurrency_safe" tone="ok">并发安全</Badge>
+        <Badge v-if="tool.exclusive" tone="warn">独占</Badge>
       </div>
 
       <div class="block">
@@ -67,10 +65,8 @@ const source = computed(() =>
           <li v-for="param in params" :key="param.name" class="param">
             <span class="param-head">
               <code class="param-name">{{ param.name }}</code>
-              <StatusBadge mono>{{ param.type }}</StatusBadge>
-              <StatusBadge v-if="param.required" tone="accent"
-                >必填</StatusBadge
-              >
+              <Badge mono>{{ param.type }}</Badge>
+              <Badge v-if="param.required" tone="accent">必填</Badge>
             </span>
             <span v-if="param.description" class="param-description">
               {{ param.description }}

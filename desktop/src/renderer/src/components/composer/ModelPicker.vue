@@ -18,7 +18,7 @@ import { groupEntriesByProvider } from '../../model/providerGroups'
 import Chip from '../ui/Chip.vue'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
-import ProviderLogo from '../ui/ProviderLogo.vue'
+import Avatar from '../ui/Avatar.vue'
 
 /** Entries above this count get a search box in the model list. */
 const SEARCH_THRESHOLD = 6
@@ -134,10 +134,11 @@ function onKeydown(event: KeyboardEvent): void {
       @click="open = !open"
     >
       <template v-if="activeGroup" #icon>
-        <ProviderLogo
+        <Avatar
+          kind="logo"
           :icon-id="activeGroup.iconId"
           :label="activeGroup.label"
-          size="xs"
+          :size="16"
         />
       </template>
       <span class="name">{{ label }}</span>
@@ -149,11 +150,12 @@ function onKeydown(event: KeyboardEvent): void {
       <template v-if="pane === 'root'">
         <MenuItem keep-open @select="show('model')">
           <template #icon>
-            <ProviderLogo
+            <Avatar
+              kind="logo"
               v-if="activeGroup"
               :icon-id="activeGroup.iconId"
               :label="activeGroup.label"
-              size="xs"
+              :size="16"
             />
           </template>
           模型
@@ -203,10 +205,11 @@ function onKeydown(event: KeyboardEvent): void {
           :aria-label="group.label"
         >
           <div class="group-title">
-            <ProviderLogo
+            <Avatar
+              kind="logo"
               :icon-id="group.iconId"
               :label="group.label"
-              size="xs"
+              :size="16"
             />
             <span>{{ group.label }}</span>
           </div>

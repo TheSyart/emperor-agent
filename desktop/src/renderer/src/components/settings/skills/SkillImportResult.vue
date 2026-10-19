@@ -1,14 +1,14 @@
 <script setup lang="ts">
 /**
  * SkillImportResult — what a folder / zip / URL import did: a headline
- * StatusBadge, one row per imported Skill (name, scope, 已覆盖, warnings,
+ * Badge, one row per imported Skill (name, scope, 已覆盖, warnings,
  * 「查看」 to open its detail) and one row per failure (name or folder, the
  * reason). Same-name conflicts carry a note; the dialog offers 「覆盖」.
  *
  * Props: summary (SkillImportSummary). Emits: select(name).
  */
 import Button from '../../ui/Button.vue'
-import { StatusBadge } from '../ui'
+import { Badge } from '../ui'
 import SkillIssues from './SkillIssues.vue'
 import type { SkillImportSummary } from './skillsModel'
 
@@ -22,9 +22,9 @@ const emit = defineEmits<{ select: [name: string] }>()
     aria-label="导入结果"
     data-testid="skill-import-result"
   >
-    <StatusBadge :tone="summary.tone" dot class="headline">
+    <Badge :tone="summary.tone" variant="dot-label" class="headline">
       {{ summary.headline }}
-    </StatusBadge>
+    </Badge>
     <ul v-if="summary.imported.length" class="rows" aria-label="已导入">
       <li
         v-for="entry in summary.imported"
@@ -33,8 +33,8 @@ const emit = defineEmits<{ select: [name: string] }>()
       >
         <div class="row-head">
           <span class="name">{{ entry.name }}</span>
-          <StatusBadge>{{ entry.scopeLabel }}</StatusBadge>
-          <StatusBadge v-if="entry.replaced" tone="warn">已覆盖</StatusBadge>
+          <Badge>{{ entry.scopeLabel }}</Badge>
+          <Badge v-if="entry.replaced" tone="warn">已覆盖</Badge>
           <Button
             size="sm"
             variant="ghost"
@@ -58,9 +58,9 @@ const emit = defineEmits<{ select: [name: string] }>()
       >
         <div class="row-head">
           <span class="name">{{ entry.name || entry.path }}</span>
-          <StatusBadge :tone="entry.conflict ? 'warn' : 'error'">
+          <Badge :tone="entry.conflict ? 'warn' : 'error'">
             {{ entry.conflict ? '同名已存在' : '未导入' }}
-          </StatusBadge>
+          </Badge>
         </div>
         <p v-if="entry.name && entry.path !== '.'" class="path">
           {{ entry.path }}

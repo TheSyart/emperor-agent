@@ -22,7 +22,7 @@ import {
   EmptyState,
   Field,
   Select,
-  StatusBadge,
+  Badge,
   TextField,
   type DefinitionItem,
 } from '../ui'
@@ -125,9 +125,9 @@ const url = computed({
       <template v-else>
         <DefinitionList :items="facts" />
         <div v-if="chips.length" class="chips" aria-label="包含的能力">
-          <StatusBadge v-for="chip in chips" :key="chip" mono>
+          <Badge v-for="chip in chips" :key="chip" mono>
             {{ chip }}
-          </StatusBadge>
+          </Badge>
         </div>
         <Field label="安装范围">
           <Select v-model="scope" :options="PLUGIN_SCOPE_OPTIONS" block />

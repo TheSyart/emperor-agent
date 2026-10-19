@@ -24,7 +24,7 @@ import {
   CodeEditor,
   Field,
   Select,
-  StatusBadge,
+  Badge,
   TextField,
   type SelectOption,
 } from '../ui'
@@ -187,14 +187,14 @@ async function submit(overwrite = false) {
     <div class="paste-dialog">
       <Field label="SKILL.md">
         <template #badge>
-          <StatusBadge
+          <Badge
             v-if="badge"
             :tone="badge.tone"
-            dot
+            variant="dot-label"
             data-testid="skill-paste-validation"
           >
             {{ badge.label }}
-          </StatusBadge>
+          </Badge>
         </template>
         <CodeEditor
           v-model="content"

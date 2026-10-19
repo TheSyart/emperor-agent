@@ -30,14 +30,14 @@ import { DsChevronLeft, DsNewChat, DsSettings, DsTrash } from '../../icons/ds'
 import Button from '../../ui/Button.vue'
 import SkillConfirmDialog from '../skills/SkillConfirmDialog.vue'
 import ToolRow from '../tools/ToolRow.vue'
-import { DefinitionList, EmptyState, StatusBadge, Switch } from '../ui'
+import { DefinitionList, EmptyState, Badge, Switch } from '../ui'
 import { useSettingsRoute } from '../useSettingsRoute'
 import {
   activationState,
   type PluginDetail,
   type PluginSummary,
 } from './pluginInstall'
-import PluginLogo from './PluginLogo.vue'
+import Avatar from '../../ui/Avatar.vue'
 import {
   componentStateBadge,
   isComputerUsePlugin,
@@ -230,14 +230,14 @@ defineExpose({ reload: load })
 
     <template v-else-if="shown">
       <header class="hero">
-        <PluginLogo :name="title" :logo="shown.logo" :size="56" />
+        <Avatar kind="logo" :label="title" :src="shown.logo" :size="40" />
         <div class="hero-text">
           <div class="title-line">
             <h3 class="name">{{ title }}</h3>
-            <StatusBadge>{{ pluginSourceTag(shown) }}</StatusBadge>
-            <StatusBadge v-if="state" :tone="state.tone" dot>
+            <Badge>{{ pluginSourceTag(shown) }}</Badge>
+            <Badge v-if="state" :tone="state.tone" variant="dot-label">
               {{ state.label }}
-            </StatusBadge>
+            </Badge>
           </div>
           <p class="description">{{ shown.description || '没有描述' }}</p>
           <p class="byline">
@@ -314,9 +314,12 @@ defineExpose({ reload: load })
             >
               <div class="member-head">
                 <span class="member-title">{{ item.title }}</span>
-                <StatusBadge :tone="componentStateBadge(item.state).tone" dot>
+                <Badge
+                  :tone="componentStateBadge(item.state).tone"
+                  variant="dot-label"
+                >
                   {{ componentStateBadge(item.state).label }}
-                </StatusBadge>
+                </Badge>
               </div>
               <p
                 v-if="item.description"

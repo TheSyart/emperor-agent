@@ -37,13 +37,7 @@ import {
 } from '../../../api/backend'
 import Button from '../../ui/Button.vue'
 import { writeClipboard } from '../../ui/useCopyFeedback'
-import {
-  SettingsGroup,
-  SettingsHero,
-  SettingsNotice,
-  SettingsRow,
-  StatusBadge,
-} from '../ui'
+import { SettingsGroup, SettingsHero, Notice, SettingsRow, Badge } from '../ui'
 import ExtensionInstallSteps from './ExtensionInstallSteps.vue'
 import {
   browserName,
@@ -341,11 +335,11 @@ onBeforeUnmount(() => {
   <div class="chrome-edge" data-testid="chrome-edge-page">
     <SettingsHero title="Chrome 和 Edge" :description="hero.description">
       <template #badge>
-        <StatusBadge
+        <Badge
           :tone="hero.tone"
-          :dot="hero.dot"
+          :variant="hero.dot ? 'dot-label' : 'soft'"
           data-testid="chrome-status"
-          >{{ hero.badge }}</StatusBadge
+          >{{ hero.badge }}</Badge
         >
       </template>
       <template #actions>
@@ -370,14 +364,14 @@ onBeforeUnmount(() => {
     </SettingsHero>
 
     <div v-if="notice || elsewhere" class="notices">
-      <SettingsNotice
+      <Notice
         v-if="notice"
         :tone="notice.tone"
         :title="notice.title"
         :description="notice.description"
         data-testid="chrome-notice"
       />
-      <SettingsNotice
+      <Notice
         v-if="elsewhere"
         title="扩展是从另一个文件夹加载的"
         data-testid="chrome-elsewhere"
@@ -395,7 +389,7 @@ onBeforeUnmount(() => {
             >重新安装</Button
           >
         </template>
-      </SettingsNotice>
+      </Notice>
     </div>
 
     <ExtensionInstallSteps
@@ -423,7 +417,7 @@ onBeforeUnmount(() => {
         :data-pending="item.pairingId"
       >
         <template #badge>
-          <StatusBadge tone="warn">等待确认</StatusBadge>
+          <Badge tone="warn">等待确认</Badge>
         </template>
         <template #description>
           {{ browserName(item.browser) }} ·

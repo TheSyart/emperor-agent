@@ -206,7 +206,7 @@ describe('下载历史记录', () => {
     click(rowOf(root, 'ud_0123456789ab'), '打开')
     await settle()
     // One notice at the top of the page, in the error tone.
-    const notice = root.querySelector<HTMLElement>('.ds-settings-notice')
+    const notice = root.querySelector<HTMLElement>('.ds-notice')
     expect(notice?.dataset.tone).toBe('error')
     expect(notice?.getAttribute('role')).toBe('alert')
     expect(notice?.textContent).toContain('没有可以打开它的应用')
@@ -237,7 +237,7 @@ describe('下载历史记录', () => {
       '已移到工作区',
     )
     expect(
-      root.querySelector<HTMLElement>('.ds-settings-notice')?.dataset.tone,
+      root.querySelector<HTMLElement>('.ds-notice')?.dataset.tone,
     ).toBe('info')
     click(rowOf(root, 'dl_0123456789ab'), '另存为…')
     await settle()
