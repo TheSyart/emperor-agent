@@ -3,12 +3,12 @@
 > 文档状态：Active<br>
 > 面向读者：希望扩展 Agent 能力的用户<br>
 > 最后核验：2026-10-19<br>
-> 事实源：`packages/core/src/harness/host/host.ts`（`compose()`）、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/tools/builtin/`（含 `skill-manage.ts`、`mcp-config.ts`、`web-fetch.ts`、`web-search.ts`、`deepseek-search.ts`）、`packages/core/src/harness/workflow/`、`packages/core/src/skills/`、`packages/core/src/plugins/`、`packages/core/src/mcp/`、`desktop/src/renderer/src/components/pages/capabilities/`、`desktop/src/renderer/src/components/pages/explore/`、`desktop/src/renderer/src/components/settings/`（插件 / Skills / MCP / 工具分区组件）
+> 事实源：`packages/core/src/harness/host/host.ts`（`compose()`）、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/tools/builtin/`（含 `skill-manage.ts`、`mcp-config.ts`、`web-fetch.ts`、`web-search.ts`、`deepseek-search.ts`）、`packages/core/src/harness/workflow/`、`packages/core/src/skills/`、`packages/core/src/plugins/`、`packages/core/src/mcp/`、`desktop/src/renderer/src/components/pages/capabilities/`、`desktop/src/renderer/src/components/pages/explore/`（目录与安装流程）、`desktop/src/renderer/src/components/settings/`（插件 / Skills / MCP / 工具分区组件）
 
 Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资源包；Plugin 是带来源、版本和启用状态的 Skill 分发单元；MCP 把外部 server 暴露的工具接入 Agent。
 
 - 图标栏的「能力」打开能力页（`/capabilities`），用“插件 / Skills / MCP / 工具”四个标签分别管理 Plugin、Skill、MCP server，并查看注册给 Agent 的工具；
-- 图标栏的「探索」列出应用内置的一小组精选 Skills 和 MCP server，见[探索](#探索)；
+- 「能力」页顶部的「推荐」列出应用内置的一小组精选 Skills 和 MCP server，见[推荐](#推荐)；
 - 能力页的“工具”标签（`/capabilities/tools`）按用途分类查看 Emperor 内建的工具。
 
 ## Tools
@@ -221,16 +221,16 @@ Agent 被要求只通过 `mcp_config` 添加 server，不使用 mcporter，也�
 
 每个已连接 server 的工具注册为 `mcp_<server>_<tool>`，参数按 server 声明转发，由 server 自行校验。MCP 工具调用本身不经过文件沙箱，也不需要审批（stdio server 进程在上文的进程沙箱里运行）；声明为只读且非独占的工具可以与其他并发安全的调用同时执行。
 
-## 探索
+## 推荐
 
-图标栏的「探索」（`/explore`）以卡片列出一小组随应用发布的精选条目，可以搜索，并按“全部 / Skills / MCP / 插件”筛选：
+「能力」页每个标签的顶部有「推荐」：随应用发布的一小组精选条目，「插件」标签列出前几个，「Skills」「MCP」标签只列这一类，「工具」标签不显示。原来的「探索」页并入了这里，旧的 `/explore` 链接会打开「能力」并滚到「推荐」。每张卡只有图标、名称、一行说明和「安装」：
 
 - Skills：来自 [anthropics/skills](https://github.com/anthropics/skills) 的若干 Skill；
 - MCP：[modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers) 中的几个本地 server，以及一个无需 API 密钥的远程 server。标签会注明需要 Node.js 或 uv 等本机依赖。
 
 目录随应用版本更新，不从网络实时拉取；当前还没有精选 Plugin。已安装的 Skill 或 MCP server 显示「已安装」。
 
-「安装」不会直接写入任何东西，而是打开与能力页相同的确认对话框：Skill 进入 URL 导入对话框并选择保存位置，MCP 进入添加对话框，先预览将要新增、覆盖或跳过的 server，确认「导入」后才写入。「主页」在系统浏览器中打开条目的来源页面，安装前可以先查看。
+「安装」不会直接写入任何东西，而是打开与能力页相同的确认对话框：Skill 进入 URL 导入对话框（链接即条目的来源页面）并选择保存位置，MCP 进入添加对话框，先预览将要新增、覆盖或跳过的 server，确认「导入」后才写入。
 
 ## 安全边界
 

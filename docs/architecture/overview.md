@@ -83,7 +83,7 @@ Renderer 外壳是 `components/shell/AppFrame.vue` 的网格：常驻的 56px �
 | `/pulls/:owner?/:repo?/:number?`                   | Pull Request                               | 不显示     |
 | `/github/issues/:owner?/:repo?/:number?`           | GitHub 插件的 Issue 标签                   | 不显示     |
 | `/github/ci/:owner?/:repo?/:runId?`                | GitHub 插件的 CI 标签                      | 不显示     |
-| `/explore`                                         | 探索                                       | 不显示     |
+| `/explore`                                         | 转到 `/capabilities#recommended`（推荐）   | —          |
 
 设置弹窗由当前路由上的 `?settings=<分区>` 查询参数打开，对话页和整页都可以叠加它。定时任务、插件、Skills、MCP 与工具已从弹窗移到整页：`?settings=scheduler|plugins|skills|mcp|tools` 由全局 `beforeEach` 守卫转到对应页面，旧的 `/plugins/:tab?` 转到 `/capabilities/:tab`，`/skills/:name?` 转到 `/capabilities/skills?skill=<name>`，`/mcp`、`/tools` 转到对应标签；原「配置」分区并入“记忆 › 用户档案”，`?settings=configs` 打开「记忆」；其余旧的独立设置路由仍转成 `/chat?settings=<分区>`。
 

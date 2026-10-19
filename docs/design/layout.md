@@ -41,7 +41,7 @@ macOS 上主窗口隐藏系统标题栏（`titleBarStyle: 'hiddenInset'`），�
 | 中栏   | 会话头第一行（`.conversation-header > .title-row`） | 46；空白新对话的浮动头同样 46                             |
 | 工作台 | `PaneHeader`                                        | 48，上移 2px（`margin-top: 46 − 48`），底边与其他顶栏对齐 |
 
-整页（定时任务、能力、Pull Request、探索）目前没有顶栏，标题在页面内容里（UI-S08 统一 PageShell）。
+整页（定时任务、能力、GitHub）没有顶栏，标题在页面内容里（PageShell）：内容宽 880、居中，标题 20/600，页签在标题下。Pull Request 是唯一占满宽度的页面，但它的标题行和页签仍在同一个 880 列、同一高度，所以 GitHub 的 PR / Issue / CI 三个标签切换时标题不动。
 
 ## 拖拽区
 
@@ -54,7 +54,7 @@ macOS 上主窗口隐藏系统标题栏（`titleBarStyle: 'hiddenInset'`），�
 
 ## 图标栏
 
-- 从上到下：新对话（⌘N）、搜索（⌘K）、会话、定时任务、能力、探索（UI-S08 并入能力后移除）、Pull Request（只在 GitHub 插件启用时出现）；底部是通知铃铛和设置。
+- 从上到下：新对话（⌘N）、搜索（⌘K）、会话、定时任务、能力（原「探索」是能力页的「推荐」）、Pull Request（只在 GitHub 插件启用时出现）；底部是通知铃铛和设置。
 - 按钮是 IconButton `size="lg"`（36，`--icon-button-lg`），图标 20，提示在右侧。当前路由的入口画 `--surface-selected`（IconButton `selected`），并带 `aria-current="page"`。
 - 「会话」在对话路由上一直是选中状态：点击收起或展开侧栏（⌘B）；在整页上点击回到当前会话。
 - 后退 / 前进不再有按钮，用 ⌘[ / ⌘]。
