@@ -242,12 +242,8 @@ const note = computed(() => lifecycleNote(props.entry))
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-  padding: var(--space-1-5) var(--space-2-5);
-  border-radius: var(--radius-row);
-  background: rgb(var(--state-warn-soft));
+  gap: var(--space-1) var(--space-3);
+  margin-top: var(--space-1-5);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   color: rgb(var(--state-warn-label));
