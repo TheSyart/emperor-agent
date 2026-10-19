@@ -1,10 +1,12 @@
 /**
  * Shared plumbing for the fs tools: the factory-owned state, session cwd
  * resolution, sandbox policy/escalation, the in-process write fence, the
- * refusal of Emperor's private state, and model-facing remediation of
+ * protected-path table (Emperor's private state and config files, the
+ * user's credential files), and model-facing remediation of
  * guarded-mutation failures.
  */
 
+import { homedir } from 'node:os'
 import {
   canonicalPath,
   escalationHintMarker,
@@ -17,8 +19,14 @@ import {
 } from '../../../sandbox/policy'
 import { approveEscalation } from '../../../sandbox/escalation'
 import {
-  isProtectedStatePath,
+  classifyProtectedPath,
+  homeDisplayPath,
+  PROTECTED_CONFIG_REASON,
+  PROTECTED_CREDENTIAL_READ_REASON,
+  PROTECTED_CREDENTIAL_WRITE_REASON,
   PROTECTED_STATE_REASON,
+  type ProtectedPathClass,
+  type ProtectedPathScope,
 } from '../../../sandbox/protected-state'
 import type { ToolRunContext } from '../../definition'
 import type { ToolServices } from '../../services'
@@ -71,26 +79,30 @@ export function sessionCwd(
 }
 
 /**
- * The policy for one mutation: the session's standing policy, or — when the
- * call carries `sandbox_permissions` + `justification` — the approved wider
- * mode for this call only (approval asked before anything executes).
+ * The policy and target for one mutation: the session's standing policy,
+ * or — when the call carries `sandbox_permissions` + `justification` — the
+ * approved wider mode for this call only (approval asked before anything
+ * executes). A protected path is refused first, before anyone is asked.
  */
 export async function resolveMutationPolicy(
   state: FsToolState,
   toolName: 'write' | 'edit',
   args: FsEscalationArgs,
   context: ToolRunContext,
-): Promise<SandboxExecutionPolicy> {
+  filePath: string,
+): Promise<{ policy: SandboxExecutionPolicy; resolved: FsTarget }> {
   validateEscalationArgs(args.sandbox_permissions, args.justification)
   const session = context.agent?.session
   const standing = state.services.sandbox.resolve(
     session === undefined ? {} : { session },
   )
+  const resolved = await resolveTarget(standing.workspaceRoot, filePath)
+  await refuseProtected(state, resolved, toolName)
   if (
     args.sandbox_permissions === undefined ||
     args.justification === undefined
   )
-    return standing
+    return { policy: standing, resolved }
   const mode = await approveEscalation(
     {
       requestedMode: args.sandbox_permissions,
@@ -106,10 +118,15 @@ export async function resolveMutationPolicy(
       signal: context.signal,
     },
   )
-  return state.services.sandbox.resolve({
+  const policy = state.services.sandbox.resolve({
     ...(session === undefined ? {} : { session }),
     mode,
   })
+  if (policy.workspaceRoot === standing.workspaceRoot)
+    return { policy, resolved }
+  const wider = await resolveTarget(policy.workspaceRoot, filePath)
+  await refuseProtected(state, wider, toolName)
+  return { policy, resolved: wider }
 }
 
 function sandboxDenied(
@@ -155,23 +172,99 @@ export async function fenceTarget(
   throw sandboxDenied(policy, toolName, target)
 }
 
+function protectedScope(state: FsToolState): ProtectedPathScope | null {
+  const stateRoot = state.services.protectedStateRoot
+  if (stateRoot === undefined) return null
+  return { stateRoot, home: state.services.protectedHome ?? homedir() }
+}
+
+const REFUSAL_REASONS: Record<ProtectedPathClass, string> = {
+  state: PROTECTED_STATE_REASON,
+  config: PROTECTED_CONFIG_REASON,
+  credential: PROTECTED_CREDENTIAL_WRITE_REASON,
+}
+
 /**
- * Refuse Emperor's private state (sandbox/protected-state.ts): its
- * `computer-use/` and `browser/` directories, by real path, in every sandbox
- * mode. No escalation is offered; a wider mode would not change the answer.
+ * Refuse the protected-path table (sandbox/protected-state.ts) for a write
+ * or an edit, by real path, in every sandbox mode: Emperor's private state
+ * and config files, and the user's credential files. No escalation is
+ * offered; a wider mode would not change the answer.
  */
 export async function refuseProtected(
   state: FsToolState,
   target: FsTarget,
-  verb: 'read' | 'write' | 'edit',
+  verb: 'write' | 'edit',
 ): Promise<void> {
-  const stateRoot = state.services.protectedStateRoot
-  if (stateRoot === undefined) return
-  if (await isProtectedStatePath(target.targetKey, stateRoot))
+  const scope = protectedScope(state)
+  if (scope === null) return
+  const found = await classifyProtectedPath(target.targetKey, scope)
+  if (found !== null)
     throw new FsError(
-      `cannot ${verb} "${target.displayPath}": ${PROTECTED_STATE_REASON}`,
+      `cannot ${verb} "${target.displayPath}": ${REFUSAL_REASONS[found]}`,
       'FS_PROTECTED_PATH',
     )
+}
+
+/**
+ * `read` of a protected path: Emperor's private state and config files are
+ * refused in every mode; a credential file is read under danger-full-access
+ * only, a standing one or one escalation the user approves for this call,
+ * whose prompt names the file.
+ */
+export async function authorizeRead(
+  state: FsToolState,
+  target: FsTarget,
+  args: FsEscalationArgs,
+  context: ToolRunContext,
+): Promise<void> {
+  validateEscalationArgs(args.sandbox_permissions, args.justification)
+  const scope = protectedScope(state)
+  if (scope === null) return
+  const found = await classifyProtectedPath(target.targetKey, scope)
+  if (found === null) return
+  if (found !== 'credential')
+    throw new FsError(
+      `cannot read "${target.displayPath}": ${REFUSAL_REASONS[found]}`,
+      'FS_PROTECTED_PATH',
+    )
+  const session = context.agent?.session
+  const standing = state.services.sandbox.resolve(
+    session === undefined ? {} : { session },
+  )
+  if (standing.mode === 'danger-full-access') return
+  if (
+    args.sandbox_permissions === undefined ||
+    args.justification === undefined
+  )
+    throw new FsError(
+      `${sandboxDenialMarker(standing.mode)}\ncannot read "${target.displayPath}": ${PROTECTED_CREDENTIAL_READ_REASON}`,
+      'FS_SANDBOX_DENIED',
+    )
+  if (args.sandbox_permissions !== 'danger-full-access')
+    throw new FsError(
+      `cannot read "${target.displayPath}": reading credentials needs sandbox_permissions="danger-full-access"`,
+      'FS_SANDBOX_DENIED',
+    )
+  const shown = homeDisplayPath(target.displayPath, scope.home)
+  await approveEscalation(
+    {
+      requestedMode: args.sandbox_permissions,
+      justification: args.justification,
+      effectiveMode: standing.mode,
+      subject: 'read',
+      reads:
+        shown === target.displayPath
+          ? homeDisplayPath(target.targetKey, scope.home)
+          : shown,
+    },
+    {
+      service: state.services.approval,
+      agent: context.agent,
+      callId: context.callId,
+      toolName: 'read',
+      signal: context.signal,
+    },
+  )
 }
 
 const REMEDIES: Partial<Record<string, string>> = {

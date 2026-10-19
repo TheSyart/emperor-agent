@@ -6,6 +6,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -526,6 +527,141 @@ describe.skipIf(!new LocalSandbox().available())(
       } finally {
         rmSync(outside, { recursive: true, force: true })
       }
+    })
+  },
+)
+
+describe.skipIf(process.platform !== 'darwin')(
+  'bash and protected paths under the real sandbox (SEC-06)',
+  () => {
+    function protectedFixture(answer: 'rejected' | 'allowed-once') {
+      const home = join(root, 'home')
+      const state = join(home, '.emperor')
+      mkdirSync(join(home, '.ssh'), { recursive: true })
+      mkdirSync(state, { recursive: true })
+      writeFileSync(join(home, '.ssh', 'id_rsa'), 'SSH-KEY-FIXTURE')
+      writeFileSync(join(state, 'model_config.json'), 'MODEL-CONFIG-FIXTURE')
+      const asked: string[] = []
+      const approval = new ApprovalService()
+      approval.setAnswerer(async (request) => {
+        asked.push(request.reason ?? '')
+        return answer
+      })
+      const svc: ToolServices = {
+        ...services(
+          'workspace-write',
+          new LocalSandbox({ protectedStateRoot: state, protectedHome: home }),
+          approval,
+        ),
+        protectedStateRoot: state,
+        protectedHome: home,
+        // `~` in the command is the fixture home, never the real one.
+        shellEnv: () => ({ ...process.env, HOME: home }),
+      }
+      return { home, state, asked, svc }
+    }
+
+    function results(agent: { session: { events: readonly any[] } }) {
+      return agent.session.events
+        .filter((event) => event.type === 'tool/result')
+        .map((event) => textOf(event.data.message.content[0].content))
+    }
+
+    function harnessWith(svc: ToolServices, replies: ScriptedReply[]) {
+      const h = createTestHarness({ replies })
+      h.tools.register(createShellTool(svc, { platform: 'linux' }) as never)
+      h.sessions.create({ id: 's1', cwd: workspace })
+      return h.agent('s1')
+    }
+
+    it('cat ~/.ssh/id_rsa is denied, the escalation names the file, and a rejection is an error (card 7)', async () => {
+      const f = protectedFixture('rejected')
+      const agent = harnessWith(f.svc, [
+        {
+          tools: [
+            {
+              id: 'c1',
+              name: 'bash',
+              args: { command: 'cat ~/.ssh/id_rsa', description: 'Show key' },
+            },
+          ],
+        },
+        {
+          tools: [
+            {
+              id: 'c2',
+              name: 'bash',
+              args: {
+                command: 'cat ~/.ssh/id_rsa',
+                description: 'Show key',
+                sandbox_permissions: 'danger-full-access',
+                justification: 'Need the deploy key.',
+              },
+            },
+          ],
+        },
+        { text: 'stopped' },
+      ])
+      agent.followup(userText('go'))
+      await agent.whenIdle()
+      const [denied, rejected] = results(agent)
+      expect(denied).toContain(
+        '[sandbox: file access denied under workspace-write mode]',
+      )
+      expect(denied).toContain('[sandbox: escalation available')
+      expect(denied).not.toContain('SSH-KEY-FIXTURE')
+      expect(f.asked).toEqual([
+        'escalate sandbox to danger-full-access to read credentials (~/.ssh/id_rsa): Need the deploy key.',
+      ])
+      expect(rejected).toContain(
+        'the user rejected escalating this command to "danger-full-access"',
+      )
+      expect(rejected).not.toContain('SSH-KEY-FIXTURE')
+    })
+
+    it('an approved escalation reads the credential but never Emperor config', async () => {
+      const f = protectedFixture('allowed-once')
+      const config = join(f.state, 'model_config.json')
+      const agent = harnessWith(f.svc, [
+        {
+          tools: [
+            {
+              id: 'c1',
+              name: 'bash',
+              args: {
+                command: 'cat ~/.ssh/id_rsa',
+                description: 'Show key',
+                sandbox_permissions: 'danger-full-access',
+                justification: 'Need the deploy key.',
+              },
+            },
+          ],
+        },
+        {
+          tools: [
+            {
+              id: 'c2',
+              name: 'bash',
+              args: {
+                command: `cat ${config}`,
+                description: 'Show model config',
+                sandbox_permissions: 'danger-full-access',
+                justification: 'Look at the model settings.',
+              },
+            },
+          ],
+        },
+        { text: 'done' },
+      ])
+      agent.followup(userText('go'))
+      await agent.whenIdle()
+      const [key, refused] = results(agent)
+      expect(key).toBe('SSH-KEY-FIXTURE')
+      expect(refused).not.toContain('MODEL-CONFIG-FIXTURE')
+      expect(refused).toContain('Operation not permitted')
+      expect(refused).toContain("[sandbox: Emperor's protected paths")
+      // No wider mode exists: no escalation hint after a full-access denial.
+      expect(refused).not.toContain('[sandbox: escalation available')
     })
   },
 )

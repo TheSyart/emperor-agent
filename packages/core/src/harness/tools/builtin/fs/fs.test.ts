@@ -81,6 +81,7 @@ function fixture(
     answer?: ApprovalOutcome
     cwd?: string
     protectedStateRoot?: string
+    protectedHome?: string
   } = {},
 ): Fixture {
   const approvals: string[] = []
@@ -109,6 +110,9 @@ function fixture(
     ...(options.protectedStateRoot === undefined
       ? {}
       : { protectedStateRoot: options.protectedStateRoot }),
+    ...(options.protectedHome === undefined
+      ? {}
+      : { protectedHome: options.protectedHome }),
   }
   const fs = createFsTools(services)
   const registry = new ToolRegistry()
@@ -915,6 +919,152 @@ describe("Emperor's private state", () => {
       expect(readFileSync(vault, 'utf8')).toBe('sealed-vault-17')
       // No escalation is offered: a wider mode would not help.
       expect(text(replaced)).not.toContain('[sandbox:')
+      expect(f.approvals).toEqual([])
+    }
+  })
+})
+
+describe('protected config files and credentials (SEC-06)', () => {
+  /** Emperor Home inside a fixture home, as ~/.emperor sits in ~. */
+  function homeFixture(): { home: string; state: string } {
+    const home = join(staging, 'home')
+    const state = join(home, '.emperor')
+    mkdirSync(join(state, 'computer-use'), { recursive: true })
+    mkdirSync(join(home, '.ssh'), { recursive: true })
+    mkdirSync(join(home, '.aws'), { recursive: true })
+    writeFileSync(join(state, 'model_config.json'), '{"apiKey":"el1:abc"}')
+    writeFileSync(join(state, 'mcp_config.json'), '{"servers":{}}')
+    writeFileSync(join(state, 'settings.json'), '{}')
+    writeFileSync(join(state, 'hooks.json'), '{}')
+    writeFileSync(
+      join(state, 'model_config.json.pre-seal-2026'),
+      '{"apiKey":"sk-plain"}',
+    )
+    writeFileSync(join(home, '.ssh', 'id_rsa'), 'PRIVATE-KEY-FIXTURE')
+    writeFileSync(join(home, '.aws', 'credentials'), 'AWS-FIXTURE')
+    return { home, state }
+  }
+
+  it('read refuses ~/.emperor/model_config.json and the other config files in every mode (card 5)', async () => {
+    const { home, state } = homeFixture()
+    for (const mode of [
+      'read-only',
+      'workspace-write',
+      'danger-full-access',
+    ] as SandboxMode[]) {
+      const f = fixture({
+        mode,
+        answer: 'allowed-once',
+        protectedStateRoot: state,
+        protectedHome: home,
+      })
+      for (const name of [
+        'model_config.json',
+        'mcp_config.json',
+        'settings.json',
+        'hooks.json',
+        'model_config.json.pre-seal-2026',
+      ]) {
+        const result = await f.call('read', { file_path: join(state, name) })
+        expect(result.isError, `${mode} ${name}`).toBe(true)
+        expect(codeOf(result), `${mode} ${name}`).toBe('FS_PROTECTED_PATH')
+        expect(text(result)).not.toContain('sk-plain')
+        // An approved escalation does not open them either.
+        const escalated = await f.call('read', {
+          file_path: join(state, name),
+          sandbox_permissions: 'danger-full-access',
+          justification: 'I want to see the model settings.',
+        })
+        expect(codeOf(escalated), `${mode} ${name} escalated`).toBe(
+          'FS_PROTECTED_PATH',
+        )
+      }
+      const written = await f.call('write', {
+        file_path: join(state, 'hooks.json'),
+        content: '{"hooks":{}}',
+        sandbox_permissions:
+          mode === 'danger-full-access' ? undefined : 'danger-full-access',
+        justification:
+          mode === 'danger-full-access' ? undefined : 'Change hooks.',
+      })
+      expect(codeOf(written), mode).toBe('FS_PROTECTED_PATH')
+      expect(readFileSync(join(state, 'hooks.json'), 'utf8')).toBe('{}')
+      expect(f.approvals, mode).toEqual([])
+    }
+  })
+
+  it('reading a credential file needs an approved escalation that names the file', async () => {
+    const { home, state } = homeFixture()
+    const key = join(home, '.ssh', 'id_rsa')
+    const denied = fixture({ protectedStateRoot: state, protectedHome: home })
+    const plain = await denied.call('read', { file_path: key })
+    expect(codeOf(plain)).toBe('FS_SANDBOX_DENIED')
+    expect(text(plain)).toContain(sandboxDenialMarker('workspace-write'))
+    expect(text(plain)).toContain('danger-full-access')
+    expect(text(plain)).not.toContain('PRIVATE-KEY-FIXTURE')
+    expect(denied.approvals).toEqual([])
+
+    const rejected = await denied.call('read', {
+      file_path: key,
+      sandbox_permissions: 'danger-full-access',
+      justification: 'Check which key the deploy uses.',
+    })
+    expect(rejected.isError).toBe(true)
+    expect(text(rejected)).toContain('rejected')
+    expect(text(rejected)).not.toContain('PRIVATE-KEY-FIXTURE')
+    expect(denied.approvals).toEqual([
+      'read: escalate sandbox to danger-full-access to read credentials (~/.ssh/id_rsa): Check which key the deploy uses.',
+    ])
+
+    const allowed = fixture({
+      answer: 'allowed-once',
+      protectedStateRoot: state,
+      protectedHome: home,
+    })
+    const opened = await allowed.call('read', {
+      file_path: key,
+      sandbox_permissions: 'danger-full-access',
+      justification: 'Check which key the deploy uses.',
+    })
+    expect(opened.isError).toBe(false)
+    expect(text(opened)).toContain('PRIVATE-KEY-FIXTURE')
+
+    // A standing full-access session reads it without asking.
+    const full = fixture({
+      mode: 'danger-full-access',
+      protectedStateRoot: state,
+      protectedHome: home,
+    })
+    const read = await full.call('read', {
+      file_path: join(home, '.aws', 'credentials'),
+    })
+    expect(read.isError).toBe(false)
+    expect(full.approvals).toEqual([])
+  })
+
+  it('never writes a credential file, even with full access', async () => {
+    const { home, state } = homeFixture()
+    for (const mode of [
+      'workspace-write',
+      'danger-full-access',
+    ] as SandboxMode[]) {
+      const f = fixture({
+        mode,
+        answer: 'allowed-once',
+        protectedStateRoot: state,
+        protectedHome: home,
+      })
+      const planted = await f.call('write', {
+        file_path: join(home, '.ssh', 'authorized_keys'),
+        content: 'ssh-ed25519 AAAA attacker',
+      })
+      expect(codeOf(planted), mode).toBe('FS_PROTECTED_PATH')
+      expect(existsSync(join(home, '.ssh', 'authorized_keys'))).toBe(false)
+      const netrc = await f.call('write', {
+        file_path: join(home, '.netrc'),
+        content: 'machine x login y password z',
+      })
+      expect(codeOf(netrc), mode).toBe('FS_PROTECTED_PATH')
       expect(f.approvals).toEqual([])
     }
   })

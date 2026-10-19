@@ -10,6 +10,11 @@ import type { ApprovalOutcome, ApprovalService } from '../../approval/service'
 import { McpToolBridge } from '../../host/mcp-tools'
 import { SystemPromptAssembler } from '../../prompt/assembler'
 import { SandboxPolicyService, type SandboxMode } from '../../sandbox/policy'
+import {
+  createLocalKeySealer,
+  type SecretSealer,
+} from '../../../security/secret-sealer'
+import { createFsTools } from './fs'
 import { textOf } from '../definition'
 import { ToolRegistry } from '../registry'
 import {
@@ -39,6 +44,7 @@ function setup(
     answer?: ApprovalOutcome
     config?: Record<string, unknown>
     client?: MCPClient
+    sealer?: SecretSealer
   } = {},
 ) {
   const stateRoot = mkdtempSync(join(tmpdir(), 'emperor-mcp-config-tool-'))
@@ -59,6 +65,7 @@ function setup(
   const client =
     options.client ??
     new MCPClient(stateRoot, {
+      ...(options.sealer ? { sealer: options.sealer } : {}),
       supervisor: { connectTimeoutMs: 5_000, maxRestartAttempts: 1 },
     })
   cleanups.push(async () => await client.close())
@@ -67,6 +74,7 @@ function setup(
   registry.register(
     createMcpConfigTool({
       stateRoot,
+      ...(options.sealer ? { sealer: options.sealer } : {}),
       sandbox: new SandboxPolicyService({
         defaultMode: 'workspace-write',
         workspaceRoot: stateRoot,
@@ -113,6 +121,72 @@ async function fixture(): Promise<McpHttpFixture> {
 }
 
 describe('mcp_config tool', () => {
+  it('still reads and writes the config through Core while file tools cannot open it (card 8)', async () => {
+    const server = await startMcpHttpFixture({
+      requireHeader: { name: 'Authorization', value: 'Bearer tool-token-42' },
+    })
+    cleanups.push(async () => await server.close())
+    const sealerRoot = mkdtempSync(join(tmpdir(), 'emperor-mcp-tool-key-'))
+    const f = setup({
+      mode: 'danger-full-access',
+      sealer: createLocalKeySealer(sealerRoot),
+    })
+    const added = await f.call({
+      action: 'add',
+      config: {
+        mcpServers: {
+          secured: {
+            type: 'http',
+            url: server.url,
+            headers: { Authorization: 'Bearer tool-token-42' },
+          },
+        },
+      },
+    })
+    expect(added.isError).toBe(false)
+    expect(added.text).toContain('secured: ready')
+    const header = (
+      f.stored().servers.secured!.headers as Record<string, string>
+    ).Authorization!
+    expect(header).toMatch(/^el1:/)
+    const listed = await f.call({ action: 'list' })
+    expect(listed.text).toContain('- secured [http] ready · 1 tools')
+    expect(listed.text).toContain('header Authorization')
+    expect(listed.text).not.toContain('tool-token-42')
+    expect((await f.call({ action: 'disable', name: 'secured' })).isError).toBe(
+      false,
+    )
+    expect(f.stored().servers.secured!.enabled).toBe(false)
+
+    // The Agent's file tools refuse the same file in every mode.
+    const fs = createFsTools({
+      sandbox: new SandboxPolicyService({
+        defaultMode: 'danger-full-access',
+        workspaceRoot: f.stateRoot,
+      }),
+      sandboxBackend: {
+        confine() {
+          throw new Error('unused')
+        },
+      },
+      approval: {} as ApprovalService,
+      spillRoot: join(f.stateRoot, 'spill'),
+      protectedStateRoot: f.stateRoot,
+      protectedHome: join(f.stateRoot, 'no-home'),
+    })
+    const files = new ToolRegistry()
+    files.register(fs.read)
+    const read = await files.execute({
+      callId: 'r1',
+      name: 'read',
+      arguments: { file_path: join(f.stateRoot, 'mcp_config.json') },
+      agent: fakeAgent(f.stateRoot, 'danger-full-access'),
+      signal: new AbortController().signal,
+    })
+    expect(read.isError).toBe(true)
+    expect(read.error?.info?.code).toBe('FS_PROTECTED_PATH')
+  })
+
   it('asks for approval under workspace-write, then adds, reloads, and registers the server tools', async () => {
     const server = await fixture()
     const f = setup({ mode: 'workspace-write' })

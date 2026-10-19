@@ -1,12 +1,26 @@
 import { spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { createServer } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { LocalSandbox, seatbeltProfileArgs } from './backend'
-import { protectedStateDirs } from './protected-state'
+import {
+  classifyConfinedStderr,
+  LocalSandbox,
+  seatbeltGuardArgs,
+  seatbeltProfileArgs,
+} from './backend'
+import type { SandboxPolicy } from './policy'
+import { protectedEntries } from './protected-state'
 
 describe('Computer Use Seatbelt confinement', () => {
   it('denies Shell reads of exactly the directories the file tools refuse', () => {
@@ -18,10 +32,19 @@ describe('Computer Use Seatbelt confinement', () => {
         { mode: 'workspace-write', workspaceRoot: root },
         state,
       )[1]!
+      // SEC-06: reads and writes, and the rest of the table beside them.
       const denied = [
-        ...profile.matchAll(/\(deny file-read\* \(subpath "([^"]+)"\)\)/g),
-      ].map((match) => match[1])
-      expect(denied).toEqual(protectedStateDirs(state))
+        ...profile.matchAll(
+          /\(deny file-read\* file-write\* \(subpath "([^"]+)"\)\)/g,
+        ),
+      ]
+        .map((match) => match[1]!)
+        .filter((path) => path.startsWith(realpathSync(state)))
+      expect(denied).toEqual(
+        protectedEntries({ stateRoot: state, home: homedir() })
+          .filter((entry) => entry.class === 'state')
+          .map((entry) => entry.path),
+      )
       expect(denied).toHaveLength(2)
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -407,6 +430,253 @@ describe('host-granted single-file writes', () => {
         expect(write(join(home, 'auth.json.tmp')).status).not.toBe(0)
       } finally {
         rmSync(root, { recursive: true, force: true })
+      }
+    },
+  )
+})
+
+describe('protected paths in Shell (SEC-06)', () => {
+  /** Emperor Home inside a fixture home, as ~/.emperor sits in ~. */
+  function fixture() {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'emperor-sec06-')))
+    const home = join(root, 'home')
+    const state = join(home, '.emperor')
+    const workspace = join(root, 'ws')
+    mkdirSync(join(state, 'computer-use'), { recursive: true })
+    mkdirSync(join(home, '.ssh'), { recursive: true })
+    mkdirSync(join(home, '.codex'), { recursive: true })
+    mkdirSync(workspace)
+    writeFileSync(join(state, 'model_config.json'), 'MODEL-CONFIG-FIXTURE')
+    writeFileSync(join(state, 'mcp_config.json'), 'MCP-CONFIG-FIXTURE')
+    writeFileSync(join(state, 'settings.json'), '{}')
+    writeFileSync(join(state, 'computer-use', 'vault.json'), 'VAULT-FIXTURE')
+    writeFileSync(join(home, '.ssh', 'id_rsa'), 'SSH-KEY-FIXTURE')
+    writeFileSync(join(home, '.codex', 'auth.json'), 'CODEX-AUTH-FIXTURE')
+    const sandbox = new LocalSandbox({
+      protectedStateRoot: state,
+      protectedHome: home,
+    })
+    const run = (
+      command: string,
+      mode: 'read-only' | 'workspace-write' | 'danger-full-access',
+      extra: Partial<SandboxPolicy> = {},
+    ) => {
+      const argv = ['/bin/sh', '-c', command]
+      const wrapped =
+        mode === 'danger-full-access'
+          ? (sandbox.guard(argv) ?? { argv })
+          : sandbox.confine(argv, { mode, workspaceRoot: workspace, ...extra })
+      return spawnSync(wrapped.argv[0]!, wrapped.argv.slice(1), {
+        cwd: workspace,
+        encoding: 'utf8',
+        timeout: 10_000,
+      })
+    }
+    return { root, home, state, workspace, sandbox, run }
+  }
+
+  it('writes the table into the Seatbelt profile', () => {
+    const f = fixture()
+    try {
+      const profile = seatbeltProfileArgs(
+        { mode: 'workspace-write', workspaceRoot: f.workspace },
+        f.state,
+        f.home,
+      )[1]!
+      expect(profile).toContain(
+        `(deny file-read* file-write* (subpath "${join(f.state, 'computer-use')}"))`,
+      )
+      expect(profile).toContain(
+        `(deny file-read* file-write* (subpath "${join(f.home, '.ssh')}"))`,
+      )
+      expect(profile).toMatch(
+        /\(deny file-read\* file-write\* \(regex "\^.*model_config\|mcp_config/,
+      )
+      const guard = seatbeltGuardArgs(f.state, f.home)[1]!
+      expect(guard).toContain('(allow default)')
+      expect(guard).not.toContain('(deny file-write*)')
+      expect(guard).toContain(
+        `(deny file-write* (subpath "${join(f.home, '.ssh')}"))`,
+      )
+      expect(guard).not.toContain(
+        `(deny file-read* file-write* (subpath "${join(f.home, '.ssh')}"))`,
+      )
+    } finally {
+      rmSync(f.root, { recursive: true, force: true })
+    }
+  })
+
+  it.skipIf(process.platform !== 'darwin')(
+    'reports a full-access denial only when it names a protected path',
+    () => {
+      const f = fixture()
+      try {
+        const guarded = f.sandbox.guard(['/bin/true'])!
+        const denied = (line: string) =>
+          classifyConfinedStderr(guarded, line, 1).denied
+        expect(
+          denied(
+            `cat: ${join(f.state, 'model_config.json')}: Operation not permitted`,
+          ),
+        ).toBe(true)
+        expect(
+          denied(
+            `sh: ${join(f.home, '.ssh', 'config')}: Operation not permitted`,
+          ),
+        ).toBe(true)
+        // Privacy-protected folders and root-owned files say the same words.
+        expect(
+          denied('ls: /Users/someone/Library/Mail: Operation not permitted'),
+        ).toBe(false)
+        expect(denied('rm: /System/x: Operation not permitted')).toBe(false)
+      } finally {
+        rmSync(f.root, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it.skipIf(process.platform !== 'darwin')(
+    'cat ~/.emperor/model_config.json is denied by Seatbelt, with or without escalation (card 6)',
+    () => {
+      const f = fixture()
+      try {
+        for (const mode of [
+          'read-only',
+          'workspace-write',
+          'danger-full-access',
+        ] as const) {
+          for (const name of ['model_config.json', 'mcp_config.json']) {
+            const result = f.run(
+              `cat ${JSON.stringify(join(f.state, name))}`,
+              mode,
+            )
+            expect(result.status, `${mode} ${name}`).not.toBe(0)
+            expect(result.stdout).not.toContain('CONFIG-FIXTURE')
+            expect(result.stderr).toContain('Operation not permitted')
+          }
+          const vault = f.run(
+            `cat ${JSON.stringify(join(f.state, 'computer-use', 'vault.json'))}`,
+            mode,
+          )
+          expect(vault.stdout, mode).not.toContain('VAULT-FIXTURE')
+          // Overwriting a config file or moving Emperor Home aside fails too.
+          expect(
+            f.run(
+              `printf x > ${JSON.stringify(join(f.state, 'settings.json'))}`,
+              mode,
+            ).status,
+            mode,
+          ).not.toBe(0)
+          expect(
+            f.run(
+              `mv ${JSON.stringify(f.state)} ${JSON.stringify(`${f.state}-moved`)}`,
+              mode,
+            ).status,
+            mode,
+          ).not.toBe(0)
+          expect(existsSync(join(f.state, 'model_config.json'))).toBe(true)
+        }
+        // The rest of Emperor Home and ordinary work stay as they were.
+        writeFileSync(join(f.state, 'notes.txt'), 'NOTES')
+        expect(
+          f.run(
+            `cat ${JSON.stringify(join(f.state, 'notes.txt'))}`,
+            'danger-full-access',
+          ).stdout,
+        ).toBe('NOTES')
+        expect(
+          f.run(
+            `printf ok > ${JSON.stringify(join(f.workspace, 'out.txt'))}`,
+            'workspace-write',
+          ).status,
+        ).toBe(0)
+      } finally {
+        rmSync(f.root, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it.skipIf(process.platform !== 'darwin')(
+    'credential files: confined reads are denied, full access reads them, nobody writes them',
+    () => {
+      const f = fixture()
+      const key = JSON.stringify(join(f.home, '.ssh', 'id_rsa'))
+      try {
+        for (const mode of ['read-only', 'workspace-write'] as const) {
+          const read = f.run(`cat ${key}`, mode)
+          expect(read.status, mode).not.toBe(0)
+          expect(read.stdout).not.toContain('SSH-KEY-FIXTURE')
+        }
+        expect(f.run(`cat ${key}`, 'danger-full-access').stdout).toBe(
+          'SSH-KEY-FIXTURE',
+        )
+        const planted = f.run(
+          `printf attacker >> ${JSON.stringify(join(f.home, '.ssh', 'authorized_keys'))}`,
+          'danger-full-access',
+        )
+        expect(planted.status).not.toBe(0)
+        expect(existsSync(join(f.home, '.ssh', 'authorized_keys'))).toBe(false)
+        // A workspace that is the home folder itself still cannot reach them.
+        const atHome = f.sandbox.confine(
+          ['/bin/cat', join(f.home, '.ssh', 'id_rsa')],
+          {
+            mode: 'workspace-write',
+            workspaceRoot: f.home,
+          },
+        )
+        const homeRead = spawnSync(atHome.argv[0]!, atHome.argv.slice(1), {
+          encoding: 'utf8',
+          timeout: 10_000,
+        })
+        expect(homeRead.stdout).not.toContain('SSH-KEY-FIXTURE')
+      } finally {
+        rmSync(f.root, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it.skipIf(process.platform !== 'darwin')(
+    "keeps the Codex child's own auth.json grant working (AGT-03)",
+    () => {
+      const f = fixture()
+      const auth = join(f.home, '.codex', 'auth.json')
+      try {
+        // The Agent's Shell: no grant, so no read.
+        expect(
+          f.run(`cat ${JSON.stringify(auth)}`, 'read-only').stdout,
+        ).not.toContain('CODEX-AUTH-FIXTURE')
+        // The Codex process Emperor launches: host-granted, read and rewrite.
+        const tmp = join(f.root, 'tmp')
+        mkdirSync(tmp)
+        const granted = {
+          privateTempRoot: tmp,
+          runtimeStateRoots: [join(f.root, 'runtime')],
+          writableFiles: [auth],
+        }
+        expect(
+          f.run(`cat ${JSON.stringify(auth)}`, 'read-only', granted).stdout,
+        ).toBe('CODEX-AUTH-FIXTURE')
+        expect(
+          f.run(
+            `printf refreshed > ${JSON.stringify(auth)}`,
+            'read-only',
+            granted,
+          ).status,
+        ).toBe(0)
+        expect(readFileSync(auth, 'utf8')).toBe('refreshed')
+        // The grant never reaches Emperor's own config files.
+        expect(
+          f.run(
+            `cat ${JSON.stringify(join(f.state, 'model_config.json'))}`,
+            'read-only',
+            {
+              ...granted,
+              writableFiles: [auth, join(f.state, 'model_config.json')],
+            },
+          ).stdout,
+        ).not.toContain('MODEL-CONFIG-FIXTURE')
+      } finally {
+        rmSync(f.root, { recursive: true, force: true })
       }
     },
   )

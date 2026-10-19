@@ -28,9 +28,13 @@ export interface ToolServices {
   /** Resolve a bundled binary (e.g. ripgrep) path; undefined → rely on PATH. */
   resolveBinary?: (name: 'rg') => string | undefined
   /**
-   * Emperor Home, whose `computer-use/` and `browser/` no file or search tool
-   * may read or change (sandbox/protected-state.ts; Seatbelt keeps Shell out
-   * of the same directories). Absent: nothing is protected (tests, probes).
+   * Emperor Home, anchor of the protected-path table (sandbox/
+   * protected-state.ts): its private state and config files no file or
+   * search tool may read or change, and the user's credential files are
+   * read only under danger-full-access. Seatbelt keeps Shell to the same
+   * table. Absent: nothing is protected (tests, probes).
    */
   protectedStateRoot?: string
+  /** The home folder the credential paths hang off; defaults to the user's. */
+  protectedHome?: string
 }

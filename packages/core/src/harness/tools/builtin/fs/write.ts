@@ -14,7 +14,6 @@ import {
   normalizeLineEndings,
   probe,
   readTextForDiff,
-  resolveTarget,
   writeFileAtomic,
 } from './fsio'
 import {
@@ -61,9 +60,13 @@ export function createWriteTool(state: FsToolState): ToolDefinition<WriteArgs> {
     async execute(args, context) {
       if (args.file_path.trim().length === 0)
         throw new Error('file_path must be a non-empty string')
-      const policy = await resolveMutationPolicy(state, 'write', args, context)
-      const resolved = await resolveTarget(policy.workspaceRoot, args.file_path)
-      await refuseProtected(state, resolved, 'write')
+      const { policy, resolved } = await resolveMutationPolicy(
+        state,
+        'write',
+        args,
+        context,
+        args.file_path,
+      )
       const sessionId = sessionIdOf(context)
       const intent = state.observations.writeIntent(sessionId, resolved)
       try {
