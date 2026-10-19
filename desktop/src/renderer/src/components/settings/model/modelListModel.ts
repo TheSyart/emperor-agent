@@ -124,11 +124,12 @@ export function lifecycleNote(entry: ModelEntry): {
  * and the backup when it is on. Empty while no cap is set.
  */
 export function unpricedUnderCap(payload: ModelConfigPayload): ModelEntry[] {
-  if (payload.policy.cost.maxUsdPerAgentTurn == null) return []
+  const policy = payload.policy
+  if (policy?.cost?.maxUsdPerAgentTurn == null) return []
   const ids = new Set<string>()
   if (payload.activeModelId) ids.add(payload.activeModelId)
-  const fallback = payload.policy.fallback
-  if (fallback.enabled && fallback.entryId) ids.add(fallback.entryId)
+  const fallback = policy.fallback
+  if (fallback?.enabled && fallback.entryId) ids.add(fallback.entryId)
   return payload.models.filter(
     (entry) => ids.has(entry.entryId) && !entry.pricing,
   )

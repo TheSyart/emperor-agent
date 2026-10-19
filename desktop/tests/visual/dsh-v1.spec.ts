@@ -679,9 +679,9 @@ async function expectWithinViewport(
   await expectNoHorizontalOverflow(page)
 }
 
-test('model editor discovers candidates, edits an entry and tests the connection', async ({
-  page,
-}) => {
+// MOD-05: the editor edits a saved model (new ones come from the add-model
+// dialog); the connection is read-only there, tests run from the row.
+test('model editor edits a saved model; the row tests it', async ({ page }) => {
   await open(page, '/chat/build-ui?settings=model', {
     width: 1280,
     height: 860,
@@ -689,41 +689,44 @@ test('model editor discovers candidates, edits an entry and tests the connection
   await page.getByRole('button', { name: '编辑 Visual Local' }).click()
   // The editor expands inside the row card: no nested dialog.
   const row = page.locator('[data-entry-id="visual-entry"]')
-  await expect(row.getByTestId('model-editor')).toBeVisible()
+  const editor = row.getByTestId('model-editor')
+  await expect(editor).toBeVisible()
   await expect(page.getByRole('dialog')).toHaveCount(1)
-  await page.getByRole('button', { name: '获取模型' }).click()
-  await expect(page.getByText('已获取 3 个模型')).toBeVisible()
-  const candidates = page.getByRole('group', { name: '候选模型' })
-  await expect(candidates.getByRole('button')).toHaveCount(3)
-
-  const modelId = page.getByLabel('模型 ID')
-  await candidates.getByRole('button', { name: 'visual-pro' }).click()
-  await expect(modelId).toHaveValue('visual-pro')
-  const reasoning = page.getByLabel('思考强度')
-  await expect(reasoning).toBeEnabled()
-  await modelId.fill('private-model-v2')
-  await expect(modelId).toHaveValue('private-model-v2')
-  await expect(reasoning).toBeDisabled()
-  await expect(page.getByRole('button', { name: '保存模型' })).toBeEnabled()
+  await expect(editor.getByTestId('model-editor-connection')).toBeVisible()
+  await expect(editor.locator('input[type="password"]')).toHaveCount(0)
+  await expect(editor.getByLabel('上下文', { exact: true })).toBeVisible()
+  await expect(editor.getByLabel('每次输出', { exact: true })).toBeVisible()
+  await editor
+    .getByRole('radiogroup', { name: '上下文预设' })
+    .getByRole('radio', { name: '200K' })
+    .click()
+  await expect(editor.getByLabel('上下文', { exact: true })).toHaveValue(
+    '200000',
+  )
+  await editor.getByRole('button', { name: '高级' }).click()
+  await expect(editor.getByLabel('温度')).toBeVisible()
   await expectNoHorizontalOverflow(page)
   await shot(page, 'settings-model-editor')
 
-  await page.getByRole('button', { name: '测试文本' }).click()
-  await expect(page.getByText('通过 · 42ms')).toBeVisible()
-  await row.getByTestId('model-connection-test').scrollIntoViewIfNeeded()
+  await row.getByRole('button', { name: '测试 Visual Local' }).click()
+  await expect(row.getByText('通过 · 42ms')).toBeVisible()
   await shot(page, 'settings-model-editor-tested')
 })
 
 // Adding models goes through the three-step dialog (models.spec.ts, MOD-04).
 
-test('model row deletes after an inline confirmation', async ({ page }) => {
+test('model row deletes from its ⋯ after a confirmation', async ({ page }) => {
   await open(page, '/chat/build-ui?settings=model', {
     width: 1280,
     height: 860,
   })
-  await page.getByRole('button', { name: '删除 Claude Visual' }).click()
-  await expect(page.getByText('确认删除？')).toBeVisible()
-  await page.getByRole('button', { name: '确认删除 Claude Visual' }).click()
+  await page.getByRole('button', { name: 'Claude Visual 的更多操作' }).click()
+  await page.getByRole('menuitem', { name: '删除' }).click()
+  const confirmDialog = page.getByRole('dialog', {
+    name: '删除「Claude Visual」？',
+  })
+  await expect(confirmDialog).toBeVisible()
+  await confirmDialog.getByRole('button', { name: '删除' }).click()
   await expect(page.locator('[data-entry-id="anthropic-entry"]')).toHaveCount(0)
   await expect(
     page.getByRole('status').filter({ hasText: '已删除「Claude Visual」' }),

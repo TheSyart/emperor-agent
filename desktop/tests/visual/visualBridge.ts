@@ -352,6 +352,12 @@ export async function installVisualCoreBridge(
         apiBase: 'https://api.anthropic.com',
         apiKey: '***a1b2',
         reasoningEffort: 'medium',
+        lastTest: {
+          ok: false,
+          kind: 'text',
+          failure: 'auth',
+          testedAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+        },
       }
       const visualHaikuEntry = {
         ...visualSecondaryEntry,
@@ -380,6 +386,17 @@ export async function installVisualCoreBridge(
           ...visualModelEntry.resolvedProfile,
           vision: false,
           contextWindowTokens: 1000000,
+        },
+        // MOD-05: the catalog knows it is retired; the last test passed.
+        lifecycle: {
+          status: 'retired',
+          retiresAt: '2026-07-24',
+          replacement: 'deepseek-flash',
+        },
+        lastTest: {
+          ok: true,
+          kind: 'text',
+          testedAt: new Date(Date.now() - 60_000).toISOString(),
         },
       }
       const catalogOption = (
@@ -5557,6 +5574,93 @@ export async function installVisualCoreBridge(
                 modelCount: input.provider === 'ollama' ? 2 : 3,
                 method: 'list',
               }
+            }
+            case 'model.updateConnection': {
+              const input = (args[0] || {}) as any
+              const lead = modelConfig.models.find(
+                (entry: any) => entry.entryId === input.entryId,
+              )
+              let updated = 0
+              for (const entry of modelConfig.models)
+                if (lead && entry.provider === lead.provider) {
+                  if (input.apiKey)
+                    entry.apiKey = `***${String(input.apiKey).slice(-4)}`
+                  if (input.apiBase) entry.apiBase = input.apiBase
+                  updated += 1
+                }
+              // Real IPC structured-clones results (see model.saveEntry).
+              return JSON.parse(JSON.stringify({ ...modelConfig, updated }))
+            }
+            case 'model.refreshMetadata': {
+              const input = (args[0] || {}) as any
+              const diffs = (input.entryIds || []).map((entryId: string) => {
+                const entry = modelConfig.models.find(
+                  (item: any) => item.entryId === entryId,
+                )
+                return {
+                  entryId,
+                  modelId: entry?.modelId ?? entryId,
+                  source: 'catalog',
+                  changes:
+                    entry?.provider === 'anthropic'
+                      ? [
+                          {
+                            field: 'contextWindowTokens',
+                            from: entry.contextWindowTokens,
+                            to: 1_000_000,
+                          },
+                          {
+                            field: 'maxTokens',
+                            from: entry.maxTokens,
+                            to: 32_000,
+                          },
+                        ]
+                      : [],
+                }
+              })
+              if (input.apply)
+                for (const diff of diffs)
+                  for (const change of diff.changes) {
+                    const entry = modelConfig.models.find(
+                      (item: any) => item.entryId === diff.entryId,
+                    )
+                    if (entry) entry[change.field] = change.to
+                  }
+              return { diffs, applied: Boolean(input.apply) }
+            }
+            case 'model.replaceEntry': {
+              const input = (args[0] || {}) as any
+              const index = modelConfig.models.findIndex(
+                (entry: any) => entry.entryId === input.entryId,
+              )
+              const old = modelConfig.models[index]
+              const next = {
+                ...old,
+                entryId: `${input.modelId}-entry`,
+                modelId: input.modelId,
+                displayName: '',
+                effectiveDisplayName: 'DeepSeek V4.1 Flash',
+                contextWindowTokens: 1_048_576,
+                maxTokens: 32_000,
+                lifecycle: undefined,
+                resolvedProfile: {
+                  ...old.resolvedProfile,
+                  vision: true,
+                  contextWindowTokens: 1_048_576,
+                  maxTokens: 32_000,
+                },
+              }
+              modelConfig.models = modelConfig.models.map((entry: any) =>
+                entry === old ? next : entry,
+              )
+              if (modelConfig.activeModelId === old.entryId)
+                modelConfig.activeModelId = next.entryId
+              return JSON.parse(
+                JSON.stringify({
+                  ...modelConfig,
+                  replacedEntryId: next.entryId,
+                }),
+              )
             }
             case 'model.lookupDefaults':
               return {

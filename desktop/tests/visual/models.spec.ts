@@ -131,3 +131,66 @@ test('管理模型 opens the provider at step 2 with its models checked', async 
   )
   await shot(page, 'manage-pick-dark-1280')
 })
+
+// MOD-05: the model list — a card per provider with the connection's state,
+// its ⋯ (更换 Key, 刷新模型资料), rows with a retired model's replacement.
+for (const theme of ['dark', 'light'] as const) {
+  test(`model list: cards, menus and a retired model (${theme})`, async ({
+    page,
+  }) => {
+    const settings = await openModels(page, theme, 1280)
+    const deepseek = settings.locator('[data-provider="deepseek"]')
+    await expect(deepseek.locator('[data-connection-status]')).toHaveText(
+      '已连接',
+    )
+    await expect(deepseek).toContainText('···c3d4')
+    await expect(
+      settings
+        .locator('[data-provider="anthropic"]')
+        .locator('[data-connection-status]'),
+    ).toHaveText('Key 无效 · 2 天前测试')
+    const retired = deepseek.locator('[data-lifecycle="retired"]')
+    await expect(retired).toContainText('已于 2026-07-24 退役')
+    await noHorizontalOverflow(page)
+    await shot(page, `model-list-${theme}`)
+
+    // 更换 Key names how many models change.
+    await settings.getByRole('button', { name: 'Anthropic 的更多操作' }).click()
+    await page.getByRole('menuitem', { name: '更换 Key' }).click()
+    const keyDialog = page.getByTestId('connection-key-dialog')
+    await expect(keyDialog).toContainText('当前 ···a1b2')
+    await keyDialog.getByLabel('API Key').fill('sk-ant-visual-new')
+    await keyDialog.getByRole('button', { name: '更新' }).click()
+    const confirmDialog = page.getByRole('dialog', {
+      name: '更换「Anthropic」的 Key？',
+    })
+    await expect(confirmDialog).toContainText('将同时更新 2 个模型')
+    await shot(page, `model-change-key-${theme}`)
+    await confirmDialog.getByRole('button', { name: '更新' }).click()
+    await expect(keyDialog).toHaveCount(0)
+    await expect(settings.locator('[data-provider="anthropic"]')).toContainText(
+      '···-new',
+    )
+
+    // 刷新模型资料 shows the differences first.
+    await settings.getByRole('button', { name: 'Anthropic 的更多操作' }).click()
+    await page.getByRole('menuitem', { name: '刷新模型资料' }).click()
+    const refresh = page.getByTestId('metadata-refresh-dialog')
+    await expect(
+      refresh.locator('[data-change="anthropic-entry:contextWindowTokens"]'),
+    ).toContainText('1M')
+    await shot(page, `model-refresh-${theme}`)
+    await refresh.getByRole('button', { name: '应用' }).click()
+    await expect(refresh).toHaveCount(0)
+
+    // The retired DeepSeek model is replaced in place.
+    await deepseek
+      .getByRole('button', { name: '替换为 deepseek-flash' })
+      .click()
+    await expect(
+      deepseek.locator('[data-entry-id="deepseek-flash-entry"]'),
+    ).toBeVisible()
+    await expect(deepseek.locator('[data-lifecycle]')).toHaveCount(0)
+    await shot(page, `model-replaced-${theme}`)
+  })
+}

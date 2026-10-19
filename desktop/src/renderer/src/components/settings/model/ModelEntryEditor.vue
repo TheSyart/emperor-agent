@@ -358,7 +358,7 @@ onMounted(() => {
       />
     </Field>
 
-    <div class="grid-2">
+    <div class="limits">
       <Field label="上下文">
         <TextField
           v-model="contextText"
@@ -526,6 +526,12 @@ onMounted(() => {
 .connection-text {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.limits {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
 .grid-2 {
