@@ -1181,7 +1181,12 @@ async function conversationResources(
         )
         if (missing.length)
           throw new Error(`real site icons missing: ${missing.join(', ')}`)
-        if (icons.some((icon) => icon.gap < 5.9 || icon.renderedWidth < 15))
+        // UI-S03: the source icon in front of a link is 12px, 6px from it.
+        if (
+          icons.some(
+            (icon) => icon.gap < 5.9 || Math.round(icon.renderedWidth) !== 12,
+          )
+        )
           throw new Error(
             `website icon spacing is cramped: ${JSON.stringify(icons)}`,
           )
