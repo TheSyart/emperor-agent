@@ -13,6 +13,11 @@ import type {
   GoalOperationResult as CoreGoalOperationResult,
   MemoryScope as CoreMemoryScope,
   CoreOperationResult,
+  ModelEntryDetected,
+  ModelEntryLimits,
+  ModelEntryMetadata,
+  ModelEntrySampling,
+  RejectedModelEntryPayload,
 } from '@emperor/core/api'
 import type {
   RuntimeEvent as CoreRuntimeEvent,
@@ -115,6 +120,13 @@ export interface McpStatusPayload {
 }
 
 // Hooks: Claude Code `hooks.json` payloads owned by Core `hooks.*`.
+export type {
+  ModelEntryDetected,
+  ModelEntryLimits,
+  ModelEntryMetadata,
+  ModelEntrySampling,
+  RejectedModelEntryPayload,
+}
 export type HooksConfigPayload = CoreHooksConfigPayload
 export type HooksValidationPayload = CoreHooksValidationPayload
 export type HooksMetadataPayload = CoreHooksMetadataPayload
@@ -440,6 +452,13 @@ export interface ModelEntry {
   reasoningEffort: string | null
   pricing?: ModelPricing
   resolvedProfile: ResolvedModelProfile
+  /** Entries on one connection share it (MOD-03). */
+  connectionId?: string
+  limits?: ModelEntryLimits
+  detected?: ModelEntryDetected
+  /** Where the facts came from; old entries read as manual and locked. */
+  metadata?: ModelEntryMetadata
+  sampling?: ModelEntrySampling
 }
 
 export interface ModelPricing {
@@ -466,7 +485,7 @@ export interface ModelCapabilityOverrides {
   reasoning?: boolean
 }
 
-export type CapabilitySource = 'override' | 'inferred' | 'default'
+export type CapabilitySource = 'override' | 'detected' | 'inferred' | 'default'
 
 export interface ResolvedModelProfile {
   toolCall: boolean
@@ -618,6 +637,8 @@ export interface ModelConfigPayload {
   availability: ModelAvailability
   providerOptions: ProviderOption[]
   profileOnboarding?: ProfileOnboardingActionResult
+  /** Entries in model_config.json that do not validate (MOD-03). */
+  rejectedEntries?: RejectedModelEntryPayload[]
 }
 
 export interface DesktopPetPayload {

@@ -49,11 +49,14 @@ import {
 import { refreshAction, useSettingsHeader } from './settingsHeader'
 import {
   EmptyState,
+  Notice,
   SettingsCard,
   SettingsGroup,
   SettingsSection,
   Badge,
 } from './ui'
+import { confirm } from '../ui/confirm'
+import type { RejectedModelEntryPayload } from '../../types'
 
 /**
  * The add flow: `pick` shows the provider picker; `form` the new-entry
@@ -75,6 +78,8 @@ const payload = computed<ModelConfigPayload | null>(
   () => ctx.boot.value?.modelConfig ?? null,
 )
 const entries = computed(() => payload.value?.models ?? [])
+/** Entries in model_config.json that do not validate (MOD-03). */
+const rejected = computed(() => payload.value?.rejectedEntries ?? [])
 const providerOptions = computed<ProviderOption[]>(
   () => payload.value?.providerOptions ?? [],
 )
@@ -247,6 +252,30 @@ function askDelete(entry: ModelEntry): void {
   confirmingDelete.value = entry.entryId
 }
 
+function rejectedLabel(item: RejectedModelEntryPayload): string {
+  return item.modelId || item.entryId || `第 ${item.index + 1} 个条目`
+}
+
+/** Remove an entry that does not validate from model_config.json. */
+async function discardRejected(item: RejectedModelEntryPayload): Promise<void> {
+  if (
+    !(await confirm({
+      title: `删除无法读取的「${rejectedLabel(item)}」？`,
+      body: '这个条目会从 model_config.json 里删掉，无法恢复。其余模型不受影响。',
+      confirmLabel: '删除',
+      tone: 'danger',
+    }))
+  )
+    return
+  listError.value = ''
+  try {
+    await applyPayload(await core('model.discardRejected', { key: item.key }))
+    notice.value = `已删除「${rejectedLabel(item)}」`
+  } catch (error) {
+    listError.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
 async function confirmDelete(entry: ModelEntry): Promise<void> {
   if (deletingId.value) return
   deletingId.value = entry.entryId
@@ -271,6 +300,24 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
     <template v-else>
       <p v-if="notice" class="notice" role="status">{{ notice }}</p>
       <p v-if="listError" class="list-error" role="alert">{{ listError }}</p>
+      <Notice
+        v-if="rejected.length"
+        tone="warn"
+        :title="`有 ${rejected.length} 个模型条目无法读取`"
+        data-testid="model-rejected"
+      >
+        model_config.json
+        里的这些条目不完整或格式不对，已先跳过，其余模型照常可用。可以删掉它们；要继续使用，就重新添加这个模型。
+        <ul class="rejected-list">
+          <li v-for="item in rejected" :key="item.key">
+            <span class="rejected-name">{{ rejectedLabel(item) }}</span>
+            <span class="rejected-reason">{{ item.reason }}</span>
+            <Button size="sm" variant="secondary" @click="discardRejected(item)"
+              >删除</Button
+            >
+          </li>
+        </ul>
+      </Notice>
 
       <SettingsGroup variant="stack" data-testid="model-entries">
         <SettingsCard
@@ -649,5 +696,32 @@ async function confirmDelete(entry: ModelEntry): Promise<void> {
   line-height: var(--lh-xxs);
   color: rgb(var(--label-secondary));
   white-space: nowrap;
+}
+
+.rejected-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rejected-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.rejected-name {
+  flex: none;
+  font-weight: 500;
+}
+
+.rejected-reason {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: rgb(var(--text-2));
 }
 </style>
