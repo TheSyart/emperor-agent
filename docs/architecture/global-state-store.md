@@ -33,7 +33,7 @@
 
 退出时先同步写完会话记录（`CoreApi.flushAll()`），再关闭 Core；5 秒内没关完时，同步终止进程运行时登记的全部子进程树和终端（`CoreApi.forceStop()`），然后退出。
 
-Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，路径过长时退到系统临时目录）与 `native-helpers/` 副本跟随 Emperor Home。Chrome/Edge 的 Native Messaging socket 固定在 `~/.emperor/run/nm-<uid>.sock`：浏览器拉起的 host 按设计只信任这一个位置，所以使用自定义 `EMPEROR_CONFIG_DIR` 的实例不会接管扩展连接。
+Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>-<随机>.sock`，由 main 每次启动 Helper 前新建并监听，Helper 证明了一次性密钥后即删除；路径过长时退到系统临时目录）、传递该密钥的 FIFO（同目录 `cu-<uid>-<随机>.in`，0600，握手结束即删除）与 `native-helpers/` 副本跟随 Emperor Home。Chrome/Edge 的 Native Messaging socket 固定在 `~/.emperor/run/nm-<uid>.sock`：浏览器拉起的 host 按设计只信任这一个位置，所以使用自定义 `EMPEROR_CONFIG_DIR` 的实例不会接管扩展连接。
 
 ```text
 ~/.emperor/
@@ -107,8 +107,11 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，路径过�
     retired-protected-apps.json  # 升级前「不让 Emperor 操作的应用」，设置页提示一次后删除
     grants.json              # 授权记录（会话与定时授权已退役，加载时丢弃）；不含凭据明文；损坏时隔离，从空授权开始
     screenshots.json         # 截图配额清单（附件 ID、会话、大小、时间）
-    vault.json               # 凭据库（版本 2）：本地密钥加密，可再加主密码；读到钥匙串时代的版本 1 即删除
-    secrets/local.key        # Emperor 本地密钥（32 字节，目录 0700、文件 0600），取代 macOS 钥匙串；也加密模型 Key 与 MCP 令牌
+    vault.json               # 凭据库（版本 3）：本地密钥加密，可再加主密码；每个字段以条目的 {handleId, bindings, fillMode, field} 为关联数据；版本 2 可解封时迁移；读到钥匙串时代的版本 1 即删除；读不出或版本更高时原样保留，只读降级
+    vault.json.v2-backup-<ms>        # 版本 2 → 3 迁移前的原文件（0600）
+    vault.json.unreadable-<ms>       # 「重新开始（先备份）」或导入时移开的损坏文件（0600）；更高版本的为 .newer-<ms>
+    vault.json.before-import-<ms>    # 导入凭据备份前的凭据库（0600）
+    secrets/local.key        # Emperor 本地密钥（32 字节；文件与目录须属于当前用户且 (mode & 0o077) == 0，组和其他人有权限时停用，等用户「修复权限」；link(2) 发布后 fsync 目录），取代 macOS 钥匙串；也加密模型 Key 与 MCP 令牌
     browser-pairings/pairings.json  # 外部浏览器配对（版本 2，本地密钥加密，记录可带 chrome/edge）；版本 1 即删除
     external-site-rules.json # Chrome/Edge 的智能体权限（浏览、下载的默认与按网站例外）和历史记录、站点工具设置（0600）
     external-downloads.json  # 「Emperor 的下载」里来自 Chrome/Edge 的记录（最新 200 条，0600；文件留在浏览器的下载文件夹）

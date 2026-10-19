@@ -66,6 +66,7 @@ Chat 会话的 workspace 是 `stateRoot/workspace/` 下的可写目录；Build �
 - `model_config.json`：每条 `apiKey` 以 `model_config.json#models/<entryId>/apiKey` 为上下文加密。读取时解开，运行时视图与模型路由只见明文；明文 Key 照常读取，第一次保存时加密，加密前把原文件复制为 `model_config.json.pre-seal-<时间>`（0600）。解不开的条目（密钥丢失或被替换）`apiKey` 读作 null、记入 `ModelConfig.credentialsNeedingReentry`，设置页显示「凭据需要重新输入」，可用性判定给出同样的提示；文件不被隔离，其余条目照常可用，密文保留到重新填写或用户明确清除为止。sealer 不可用时（凭据库仍需旧密钥）明文保持明文并记日志，不阻塞保存。
 - `mcp_config.json`：`headers`、`env` 中名字匹配 `/(key|token|secret|authorization|password)/i` 的值以 `mcp_config.json#servers/<名>/<headers|env>/<字段>` 为上下文加密；只引用环境变量的值（`${VAR}`、`Bearer ${VAR}`）不加密。连接时解开；解不开的值在连接时丢弃（server 报认证失败，不发送密文），在编辑器往返与具名修改里原样保留。第一次加密时同样保留 `mcp_config.json.pre-seal-<时间>`。
 - 设置页的 Key 只以 `***` 加末 4 位到达 renderer，编辑器占位显示「已保存 ···1234」。
+- 本地密钥文件与其目录的检查（SEC-09）：须为当前用户所有且 `(mode & 0o077) === 0`，任意只属于本人的权限（如 `chmod -R 700` 后的 0700）都可用；组或其他人有权限时为 `key-permissions`，sealer 不可用、凭据库停用，直到用户在密码管理器点「修复权限」（`LocalSecretStore.repairPermissions`，只改权限，属主或内容不对的仍是 `key-invalid`）。新密钥 `link(2)` 发布后 fsync 所在目录。凭据库导入备份时只在没有本地密钥的地方安装备份里的密钥（`installKey`），从不覆盖已有密钥，所以已加密的模型 Key 与 MCP 令牌不会因为导入而解不开。
 
 ## Git 控制文件与 Emperor 内部 Git
 
