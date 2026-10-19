@@ -63,6 +63,7 @@ import {
   type InboxTarget,
   type QueueChange,
 } from './inbox'
+import { offloadImages } from './image-offload'
 import type { AgentMiddleware, PreStepDecision } from './middleware'
 import { RuntimeContextProjection } from './runtime-context'
 import { executeToolCalls } from './tool-calls'
@@ -1009,6 +1010,9 @@ export class Agent {
     ) {
       session.append('request/context', requestContext)
     }
+    // Images past the route's inline budget leave the requests for good (logged).
+    if (prepared?.imageBudgetBytes !== undefined)
+      offloadImages(session, prepared.imageBudgetBytes)
     signal.throwIfAborted()
     const request: GenerateOptions = {
       ...header.config,

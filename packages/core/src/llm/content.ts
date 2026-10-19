@@ -90,6 +90,28 @@ export function projectClearedImages(
 }
 
 /**
+ * One message with every image (nested tool-result images included)
+ * replaced by {@link OFFLOADED_IMAGE_TEXT}: how a logged `image/offload`
+ * projects its node (KRN-05).
+ */
+export function offloadMessageImages<T extends Message>(message: T): T {
+  if (!contentHasImage(message.content)) return message
+  const content = mapImages(message.content, () => ({
+    type: 'text',
+    text: OFFLOADED_IMAGE_TEXT,
+  }))
+  return { ...message, content }
+}
+
+/** Base64 bytes one image adds to a request. */
+export function requestImageBytes(ref: ImageAttachmentRef): number {
+  return Math.ceil(ref.bytes / 3) * 4
+}
+
+/** Default per-request bound on inline image bytes (base64), before the oldest are offloaded. */
+export const DEFAULT_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024
+
+/**
  * Replace the oldest images (base64 size accounting) until the accumulated
  * payload fits `maxBytes`. Deterministic from durable order; durable messages
  * are never mutated.
@@ -103,7 +125,7 @@ export function offloadRequestImages(
   const collect = (blocks: readonly ContentBlock[]): void => {
     for (const block of blocks) {
       if (block.type === 'image')
-        lengths.push(Math.ceil(block.attachment.bytes / 3) * 4)
+        lengths.push(requestImageBytes(block.attachment))
       else if (block.type === 'tool-result') collect(block.content)
     }
   }

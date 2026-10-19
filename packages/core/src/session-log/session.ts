@@ -5,10 +5,12 @@
  * `append()` snapshots the payload as lossless JSON, freezes the event,
  * validates surface metadata, pushes it, and then notifies listeners (a
  * listener failure never reaches the appender). Derived views fold
- * incrementally: request header, request context, and `deriveMessages()`.
+ * incrementally: request header, request context, offloaded images, and
+ * `deriveMessages()`.
  */
 
 import { isAbsolute } from 'node:path'
+import { offloadMessageImages } from '../llm/content'
 import { deepFreeze } from '../llm/freeze'
 import type { Message } from '../llm/message'
 import { logger as log } from '../util/log'
@@ -288,31 +290,65 @@ export class Session {
     return this.contextFold
   }
 
+  private readonly offloaded = new Set<number>()
+  private readonly offloadedMessages = new Map<number, Message>()
+  private offloadFoldSeq = 0
+
+  /** Surface nodes whose images a logged `image/offload` replaced (KRN-05). */
+  offloadedImages(): ReadonlySet<number> {
+    if (this.offloadFoldSeq < this.log.length) {
+      for (const event of this.log.slice(this.offloadFoldSeq)) {
+        if (event.type === 'image/offload') this.offloaded.add(event.data.seq)
+      }
+      this.offloadFoldSeq = this.log.length
+    }
+    return this.offloaded
+  }
+
   private derived: Message[] = []
   private derivedNodes = 0
   private derivedGeneration = 0
+  private derivedOffloads = 0
 
   /** The model-visible message list: surface nodes mapped to messages. */
   deriveMessages(): Message[] {
     const nodes = this.surface.nodes
     const generation = this.surface.replaceGeneration
-    if (generation !== this.derivedGeneration) {
+    const offloads = this.offloadedImages().size
+    if (
+      generation !== this.derivedGeneration ||
+      offloads !== this.derivedOffloads
+    ) {
       this.derived = []
       this.derivedNodes = 0
       this.derivedGeneration = generation
+      this.derivedOffloads = offloads
     }
     for (const seq of nodes.slice(this.derivedNodes)) {
       const event = this.log[seq]
-      const message = event === undefined ? null : deriveEventMessage(event)
+      const message =
+        event === undefined ? null : this.deriveEventMessage(event)
       if (message) this.derived.push(message)
     }
     this.derivedNodes = nodes.length
     return [...this.derived]
   }
 
-  /** Per-event projection used by incremental consumers (same rule as {@link deriveMessages}). */
+  /**
+   * Per-event projection used by incremental consumers (same rule as
+   * {@link deriveMessages}): the node's message, with its images replaced
+   * by a placeholder once an `image/offload` names it.
+   */
   deriveEventMessage(event: SessionEvent): Message | null {
-    return deriveEventMessage(event)
+    const message = deriveEventMessage(event)
+    if (message === null || !this.offloadedImages().has(event.seq))
+      return message
+    let projected = this.offloadedMessages.get(event.seq)
+    if (projected === undefined) {
+      projected = deepFreeze(offloadMessageImages(message))
+      this.offloadedMessages.set(event.seq, projected)
+    }
+    return projected
   }
 
   /** Last event of a type, scanning backward. */
