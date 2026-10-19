@@ -1763,8 +1763,9 @@ for (const theme of ['dark', 'light'] as const) {
       theme,
     })
     const dialog = page.getByRole('dialog', { name: '设置' })
+    // Two editors (UI-S07); 历史 on the editor, the rest under 更多.
     const tabs = dialog.getByRole('radiogroup', { name: '记忆类型' })
-    await expect(tabs.getByRole('radio')).toHaveCount(5)
+    await expect(tabs.getByRole('radio')).toHaveText(['长期记忆', '用户档案'])
     const editor = dialog.getByRole('textbox', { name: /MEMORY|AGENTS/ })
     await expect(editor).toBeVisible()
     // The editor takes the remaining height of the options column.
@@ -1779,7 +1780,8 @@ for (const theme of ['dark', 'light'] as const) {
     await shot(page, `settings-memory-overview-${theme}`)
     await dialog.getByRole('button', { name: /上下文概览/ }).click()
 
-    await tabs.getByRole('radio', { name: '版本' }).click()
+    await dialog.getByTestId('memory-history').click()
+    await expect(dialog.getByTestId('settings-page-title')).toHaveText('历史')
     const versions = dialog.locator('[data-version-id]')
     await expect(versions).toHaveCount(3)
     await versions
@@ -1789,15 +1791,20 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(versions.first().locator('[data-diff]')).toBeVisible()
     await expectOptionsFit(page)
     await shot(page, `settings-memory-versions-${theme}`)
+    await dialog.getByTestId('settings-crumb').click()
 
-    await tabs.getByRole('radio', { name: '情景' }).click()
+    const more = dialog.locator('[data-action="more"]')
+    await more.click()
+    await page.locator('[data-menu-item="episodes"]').click()
     await expect(
       dialog.getByRole('textbox', { name: /2026-06-26/ }),
     ).toHaveValue(/# 2026-06-26/)
     await expect(dialog.getByRole('button', { name: '选择日期' })).toBeVisible()
     await shot(page, `settings-memory-episodes-${theme}`)
+    await dialog.getByTestId('settings-crumb').click()
 
-    await tabs.getByRole('radio', { name: 'Watchlist' }).click()
+    await more.click()
+    await page.locator('[data-menu-item="watchlist"]').click()
     await expect(
       dialog.locator('[data-action="check-watchlist"]'),
     ).toBeVisible()
@@ -1837,6 +1844,17 @@ for (const theme of ['dark', 'light'] as const) {
     const dialog = page.getByRole('dialog', { name: '设置' })
     const metrics = dialog.getByTestId('token-metrics')
     await expect(metrics.locator('[data-metric]')).toHaveCount(4)
+    // The main page: metrics and the trend (UI-S07).
+    const chart = dialog.locator('.token-trend-chart svg.chart')
+    await expect(chart).toBeVisible()
+    await dialog
+      .getByRole('slider', { name: /Token 用量趋势日期/ })
+      .hover({ position: { x: 300, y: 120 } })
+    await expectOptionsFit(page)
+    await shot(page, `settings-tokens-trend-${theme}`)
+
+    // 详细: the heatmap, the ranking and the cache view.
+    await dialog.getByTestId('usage-details').click()
     const grid = dialog.getByRole('grid', { name: /热力图/ })
     await expect(grid.locator('[data-cell-index]')).toHaveCount(53 * 7)
     // Fluid heatmap: spans the column and keeps square cells.
@@ -1849,15 +1867,6 @@ for (const theme of ['dark', 'light'] as const) {
     await shot(page, `settings-tokens-${theme}`)
 
     const views = dialog.getByRole('radiogroup', { name: '用量视图' })
-    await views.getByRole('radio', { name: '趋势' }).click()
-    const chart = dialog.locator('.token-trend-chart svg.chart')
-    await expect(chart).toBeVisible()
-    await dialog
-      .getByRole('slider', { name: /Token 用量趋势日期/ })
-      .hover({ position: { x: 300, y: 120 } })
-    await expectOptionsFit(page)
-    await shot(page, `settings-tokens-trend-${theme}`)
-
     await views.getByRole('radio', { name: '模型' }).click()
     const ranking = dialog.getByRole('list', { name: /模型用量排名/ })
     await expect(ranking.getByRole('listitem')).toHaveCount(5)
@@ -1895,11 +1904,13 @@ test('scheduler page / memory / tokens fit a narrow panel', async ({
     await expect(dialog).toBeVisible()
     if (section === 'scheduler')
       await expect(dialog.locator('.job-row').first()).toBeVisible()
-    if (section === 'tokens')
+    if (section === 'tokens') {
+      await dialog.getByTestId('usage-details').click()
       await dialog
         .getByRole('radiogroup', { name: '用量视图' })
         .getByRole('radio', { name: '模型' })
         .click()
+    }
     await expectOptionsFit(page)
     await shot(page, `settings-${section}-narrow`)
   }

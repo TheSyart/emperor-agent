@@ -402,12 +402,16 @@ for (const theme of ['dark', 'light'] as const) {
     const dialog = page.getByRole('dialog', { name: '设置' })
     await expect(dialog).toBeVisible()
     const nav = dialog.getByRole('navigation', { name: '设置分区' })
-    await expect(nav.getByRole('button')).toHaveCount(10)
-    for (const label of ['Hooks', '电脑操作', '浏览器', '语音', '记忆', '诊断'])
+    // Four groups, nine sections (UI-S07).
+    await expect(nav.getByRole('button')).toHaveCount(9)
+    for (const label of ['电脑操作', '浏览器', '语音', '记忆', '高级'])
       await expect(
         nav.getByRole('button', { name: label, exact: true }),
       ).toBeVisible()
     for (const label of [
+      'Hooks',
+      '诊断',
+      '桌宠',
       '插件',
       'Skills',
       'MCP',

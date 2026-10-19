@@ -17,7 +17,7 @@ for (const theme of ['dark', 'light'] as const) {
     await page.addInitScript((value) => {
       localStorage.setItem('emperor.theme', value)
     }, theme)
-    await page.setViewportSize({ width: 900, height: 900 })
+    await page.setViewportSize({ width: 960, height: 900 })
     await page.goto('/?settings-gallery')
     const gallery = page.getByTestId('settings-gallery')
     await expect(gallery).toBeVisible()
