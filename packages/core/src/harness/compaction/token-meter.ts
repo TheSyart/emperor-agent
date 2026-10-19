@@ -1,52 +1,76 @@
 /**
- * Token meter (ported from dsh-token-meter).
+ * Token meter (ported from dsh-token-meter; KRN-05 pricing and calibration).
  *
- * Heuristic: ceil(chars / 4) per text, + 4 per block, + 4 per role; header
- * cost = system prompt + JSON of the tools. When the latest successful call's
- * provider usage belongs to an unchanged request header, that usage is the
- * baseline and only surface nodes added (or replaced) since are estimated;
- * otherwise the whole request is estimated.
+ * Heuristic: text by character class (CJK ideographs and kana ≈ 1 token,
+ * ASCII ≈ 4 characters, anything else ≈ 2), images by the pricing of the
+ * route that sees them, + 4 per block, + 4 per role; header cost = system
+ * prompt + JSON of the tools. Every heuristic figure is scaled by the
+ * session's calibration: an exponential moving average (α = 0.3) of
+ * provider usage ÷ heuristic price over its calls, seeded by the first
+ * believable one. When the latest successful call's provider usage belongs
+ * to an unchanged request header, that usage is the baseline and only
+ * surface nodes added (or replaced) since are estimated; otherwise the
+ * whole request is estimated.
  */
 
+import { offloadMessageImages } from '../../llm/content'
 import type { ContentBlock, Message, TokenUsage } from '../../llm/types'
+import {
+  estimateImageTokens,
+  estimateTextTokens,
+  type ImagePricing,
+} from '../../llm/token-estimate'
 import { headerEquals } from '../../session-log/request-header'
 import type { Session } from '../../session-log/session'
 import { deriveEventMessage, isSurfaceEvent } from '../../session-log/surface'
 import type { EpochHeader, SessionEvent } from '../../session-log/types'
 
-const CHARS_PER_TOKEN = 4
 const BLOCK_OVERHEAD = 4
 export const ROLE_OVERHEAD = 4
+/** Weight of the newest usage sample in the session's calibration. */
+export const CALIBRATION_ALPHA = 0.3
+/** Usage ÷ heuristic outside this band cannot belong to the request: ignored. */
+const CALIBRATION_MIN_RATIO = 0.25
+const CALIBRATION_MAX_RATIO = 4
+/** Image pricing when the route is unknown (Emperor's default provider). */
+export const DEFAULT_IMAGE_PRICING: ImagePricing = 'deepseek'
 
-export function estimateContent(blocks: readonly ContentBlock[]): number {
+export function estimateContent(
+  blocks: readonly ContentBlock[],
+  pricing: ImagePricing = DEFAULT_IMAGE_PRICING,
+): number {
   let tokens = 0
   for (const block of blocks) {
     switch (block.type) {
       case 'text':
       case 'reasoning':
-        tokens +=
-          Math.ceil(block.text.length / CHARS_PER_TOKEN) + BLOCK_OVERHEAD
+        tokens += estimateTextTokens(block.text) + BLOCK_OVERHEAD
         break
       case 'tool-call':
         tokens +=
-          Math.ceil(block.name.length / CHARS_PER_TOKEN) +
-          Math.ceil(block.arguments.length / CHARS_PER_TOKEN) +
+          estimateTextTokens(block.name) +
+          estimateTextTokens(block.arguments) +
           BLOCK_OVERHEAD
         break
       case 'tool-result':
-        tokens += estimateContent(block.content) + BLOCK_OVERHEAD
+        tokens += estimateContent(block.content, pricing) + BLOCK_OVERHEAD
+        break
+      case 'image':
+        tokens +=
+          estimateImageTokens(block.attachment, pricing) + BLOCK_OVERHEAD
         break
       default:
-        tokens +=
-          BLOCK_OVERHEAD +
-          Math.ceil(JSON.stringify(block).length / CHARS_PER_TOKEN)
+        tokens += BLOCK_OVERHEAD + estimateTextTokens(JSON.stringify(block))
     }
   }
   return tokens
 }
 
-export function estimateMessage(message: Pick<Message, 'content'>): number {
-  return estimateContent(message.content) + ROLE_OVERHEAD
+export function estimateMessage(
+  message: Pick<Message, 'content'>,
+  pricing: ImagePricing = DEFAULT_IMAGE_PRICING,
+): number {
+  return estimateContent(message.content, pricing) + ROLE_OVERHEAD
 }
 
 export function estimateHeader(header: EpochHeader | undefined): number {
@@ -54,12 +78,11 @@ export function estimateHeader(header: EpochHeader | undefined): number {
   const system =
     header.system === undefined
       ? 0
-      : Math.ceil(header.system.length / CHARS_PER_TOKEN) + ROLE_OVERHEAD
+      : estimateTextTokens(header.system) + ROLE_OVERHEAD
   const tools =
     header.tools === undefined || header.tools.length === 0
       ? 0
-      : Math.ceil(JSON.stringify(header.tools).length / CHARS_PER_TOKEN) +
-        BLOCK_OVERHEAD
+      : estimateTextTokens(JSON.stringify(header.tools)) + BLOCK_OVERHEAD
   return system + tools
 }
 
@@ -90,35 +113,47 @@ export interface TokenMeasurement {
   surfaceDeltaTokens: number
   /** Request + response pressure. */
   totalTokens: number
-  /** Heuristic surface total (= sum of nodes). */
+  /** Calibrated heuristic surface total (≈ sum of nodes). */
   surfaceTokens: number
+  /** Calibrated per-node prices. */
   nodes: TokenSurfaceNode[]
+  /** Provider tokens per heuristic token for this session (1 before any usage). */
+  calibration: number
 }
 
 interface Anchor {
   header: EpochHeader | undefined
+  /** Raw surface price at the anchor. */
   surfaceTokens: number
-  baseline: Exclude<TokenBaseline, { kind: 'none' }>
+  usage?: TokenUsage
 }
 
 interface FoldState {
   consumed: number
+  pricing: ImagePricing
   header: EpochHeader | undefined
+  /** Raw (uncalibrated) node prices. */
   nodes: TokenSurfaceNode[]
   surfaceTokens: number
   anchor: Anchor | undefined
+  offloaded: Set<number>
+  calibration: number
+  samples: number
 }
 
-function nodeTokens(event: SessionEvent): number {
-  const message = deriveEventMessage(event)
-  return message === null ? 0 : estimateMessage(message)
+export interface TokenMeterOptions {
+  /** Image pricing of the route the session's next request goes to. */
+  imagePricing?: (session: Session) => ImagePricing
 }
 
 export class TokenMeter {
   private readonly states = new WeakMap<Session, FoldState>()
 
+  constructor(private readonly options: TokenMeterOptions = {}) {}
+
   measure(session: Session, requestHeader?: EpochHeader): TokenMeasurement {
     const state = this.sync(session)
+    const scale = state.calibration
     const header = requestHeader ?? state.header
     const anchor = state.anchor
     let baseline: TokenBaseline
@@ -128,16 +163,24 @@ export class TokenMeter {
       (anchor.header === undefined || header === undefined
         ? anchor.header === header
         : headerEquals(anchor.header, header))
-    if (anchor !== undefined && sameHeader) {
-      baseline = anchor.baseline
-      surfaceDeltaTokens = state.surfaceTokens - anchor.surfaceTokens
+    if (anchor?.usage !== undefined && sameHeader) {
+      baseline = {
+        kind: 'usage',
+        tokens: usageTokens(anchor.usage),
+        usage: anchor.usage,
+      }
+      surfaceDeltaTokens = Math.round(
+        scale * (state.surfaceTokens - anchor.surfaceTokens),
+      )
     } else if (header === undefined && state.surfaceTokens === 0) {
       baseline = { kind: 'none', tokens: 0 }
       surfaceDeltaTokens = 0
     } else {
       baseline = {
         kind: 'estimated',
-        tokens: estimateHeader(header) + state.surfaceTokens,
+        tokens: Math.round(
+          scale * (estimateHeader(header) + state.surfaceTokens),
+        ),
       }
       surfaceDeltaTokens = 0
     }
@@ -146,39 +189,83 @@ export class TokenMeter {
       baseline,
       surfaceDeltaTokens,
       totalTokens: Math.max(0, baseline.tokens + surfaceDeltaTokens),
-      surfaceTokens: state.surfaceTokens,
-      nodes: state.nodes.map((node) => ({ ...node })),
+      surfaceTokens: Math.round(scale * state.surfaceTokens),
+      nodes: state.nodes.map((node) => ({
+        seq: node.seq,
+        tokens: Math.round(scale * node.tokens),
+      })),
+      calibration: scale,
     }
   }
 
-  estimateMessage(message: Pick<Message, 'content'>): number {
-    return estimateMessage(message)
+  /** Price of a message not (yet) in the log; calibrated for `session` when given. */
+  estimateMessage(
+    message: Pick<Message, 'content'>,
+    session?: Session,
+  ): number {
+    if (session === undefined) return estimateMessage(message)
+    const state = this.sync(session)
+    return Math.round(
+      state.calibration * estimateMessage(message, state.pricing),
+    )
   }
 
   private sync(session: Session): FoldState {
+    const pricing =
+      this.options.imagePricing?.(session) ?? DEFAULT_IMAGE_PRICING
     let state = this.states.get(session)
-    if (state === undefined) {
+    // Another route prices images differently: re-price the whole log.
+    if (state === undefined || state.pricing !== pricing) {
       state = {
         consumed: 0,
+        pricing,
         header: undefined,
         nodes: [],
         surfaceTokens: 0,
         anchor: undefined,
+        offloaded: new Set(),
+        calibration: 1,
+        samples: 0,
       }
       this.states.set(session, state)
     }
     const events = session.events
     while (state.consumed < events.length) {
-      this.fold(state, events[state.consumed]!)
+      this.fold(state, events[state.consumed]!, events)
       state.consumed += 1
     }
     return state
   }
 
-  private fold(state: FoldState, event: SessionEvent): void {
+  private nodeTokens(state: FoldState, event: SessionEvent): number {
+    const message = deriveEventMessage(event)
+    if (message === null) return 0
+    return estimateMessage(
+      state.offloaded.has(event.seq) ? offloadMessageImages(message) : message,
+      state.pricing,
+    )
+  }
+
+  private fold(
+    state: FoldState,
+    event: SessionEvent,
+    events: readonly SessionEvent[],
+  ): void {
     if (event.type === 'request/header') state.header = event.data.header
+    if (event.type === 'image/offload') {
+      const seq = event.data.seq
+      state.offloaded.add(seq)
+      const node = state.nodes.find((candidate) => candidate.seq === seq)
+      const source = events[seq]
+      if (node !== undefined && source !== undefined) {
+        const tokens = this.nodeTokens(state, source)
+        state.surfaceTokens += tokens - node.tokens
+        node.tokens = tokens
+      }
+      return
+    }
     if (!isSurfaceEvent(event)) return
-    const tokens = nodeTokens(event)
+    const tokens = this.nodeTokens(state, event)
     if (event.surfaceOp === 'append') {
       state.nodes.push({ seq: event.seq, tokens })
       state.surfaceTokens += tokens
@@ -198,20 +285,28 @@ export class TokenMeter {
     if (event.type === 'assistant/message') {
       const usage = event.data.usage
       const estimated = estimateHeader(state.header) + state.surfaceTokens
-      state.anchor =
-        usage !== undefined &&
+      const ratio =
+        usage === undefined || estimated <= 0
+          ? undefined
+          : usageTokens(usage) / estimated
+      const believable =
+        ratio !== undefined &&
         state.header !== undefined &&
-        usageTokens(usage) >= estimated
-          ? {
-              header: state.header,
-              surfaceTokens: state.surfaceTokens,
-              baseline: { kind: 'usage', tokens: usageTokens(usage), usage },
-            }
-          : {
-              header: state.header,
-              surfaceTokens: state.surfaceTokens,
-              baseline: { kind: 'estimated', tokens: estimated },
-            }
+        ratio >= CALIBRATION_MIN_RATIO &&
+        ratio <= CALIBRATION_MAX_RATIO
+      if (believable) {
+        state.calibration =
+          state.samples === 0
+            ? ratio
+            : CALIBRATION_ALPHA * ratio +
+              (1 - CALIBRATION_ALPHA) * state.calibration
+        state.samples += 1
+      }
+      state.anchor = {
+        header: state.header,
+        surfaceTokens: state.surfaceTokens,
+        ...(believable && usage !== undefined ? { usage } : {}),
+      }
     }
   }
 }
