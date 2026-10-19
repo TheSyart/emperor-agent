@@ -264,11 +264,15 @@ describe('the old modules are adapters (SEC-08 acceptance)', () => {
   it('generates profiles in one place only', () => {
     const source = (path: string) =>
       readFileSync(join(__dirname, '..', path), 'utf8')
-    for (const path of ['harness/sandbox/backend.ts']) {
+    for (const path of [
+      'harness/sandbox/backend.ts',
+      'environment/sandbox.ts',
+    ]) {
       const text = source(path)
       expect(text, path).not.toMatch(/\((?:allow|deny|version) /)
       expect(text, path).not.toContain('--ro-bind')
       expect(text, path).not.toContain('--unshare')
     }
+    expect(source('environment/sandbox.ts')).not.toContain("'preferred'")
   })
 })

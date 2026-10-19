@@ -1,6 +1,7 @@
 // Bridge specs: real tiny shell hooks in tmp dirs driven end-to-end
 // through the scripted-model test harness.
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -21,6 +22,7 @@ import {
 import { defineTool } from '../tools/definition'
 import { ClaudeCodeHooks, type ClaudeCodeHooksOptions } from './claude-code'
 import { defaultHookConfigPaths, parseClaudeCodeConfig } from './config'
+import { runHook } from './runner'
 
 type Hooks = Record<
   string,
@@ -601,6 +603,11 @@ describe.skipIf(process.platform === 'win32')(
             { tools: [{ id: 'c2', name: 'echo', args: { value: 'y' } }] },
             { text: 'done' },
           ],
+          // This bridge test runs plugin hooks directly, on purpose; the host
+          // runs them contained (contained.test.ts, SEC-08).
+          bridge: {
+            pluginHookRunner: (hook, options) => runHook(hook, options),
+          },
         },
       )
       const hooksJson = readFileSync(join(dir, 'hooks.json'), 'utf8')
@@ -644,6 +651,38 @@ describe.skipIf(process.platform === 'win32')(
       expect(calls).toEqual(['x', 'y'])
       // The user's file is never rewritten.
       expect(readFileSync(join(dir, 'hooks.json'), 'utf8')).toBe(hooksJson)
+    })
+
+    it('does not run a plugin hook when no containment runner is composed (SEC-08)', async () => {
+      const calls: string[] = []
+      const { h, agent, dir, bridge } = setup(
+        {},
+        {
+          replies: [
+            { tools: [{ id: 'c1', name: 'echo', args: { value: 'x' } }] },
+            { text: 'done' },
+          ],
+        },
+      )
+      bridge.setPluginHooks([
+        {
+          id: 'kit@user',
+          env: { PLUGIN_ROOT: '/plugins/kit', PLUGIN_DATA: '/data/kit' },
+          config: {
+            PreToolUse: [
+              {
+                matcher: 'echo',
+                hooks: [{ command: 'echo plugin > ran.txt' }],
+              },
+            ],
+          },
+        },
+      ])
+      h.tools.register(echoTool(calls))
+      agent.followup(userText('go'))
+      await agent.whenIdle()
+      expect(calls).toEqual(['x'])
+      expect(existsSync(join(dir, 'ran.txt'))).toBe(false)
     })
 
     it('uninstall removes every registered handler', () => {

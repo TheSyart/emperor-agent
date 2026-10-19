@@ -35,6 +35,7 @@ import {
   type OwnedProcessRequest,
   type OwnedProcessRunner,
 } from './process-runner'
+import { processContainmentPolicy } from '../sandbox/presets'
 import { EnvironmentStore } from './store'
 import { extractBoundedZip } from './zip'
 
@@ -577,6 +578,7 @@ export class ManagedEnvironmentService {
           ['-m', 'venv', target],
           sourceRoot,
           env,
+          target,
         )
         const venvPython =
           this.platform === 'win32'
@@ -595,6 +597,7 @@ export class ManagedEnvironmentService {
           ],
           sourceRoot,
           env,
+          target,
         )
       } else if (candidate.recipeKind === 'npm_prefix') {
         const npm =
@@ -616,6 +619,7 @@ export class ManagedEnvironmentService {
           ],
           sourceRoot,
           env,
+          target,
         )
       } else {
         copyDirectory(sourceRoot, target)
@@ -647,6 +651,7 @@ export class ManagedEnvironmentService {
         verificationArgs,
         target,
         env,
+        target,
       )
       this.commitActivation({
         preview: input.preview,
@@ -671,6 +676,12 @@ export class ManagedEnvironmentService {
     }
   }
 
+  /**
+   * Run one recipe command inside the process containment (SEC-08): the
+   * plan folder, the install target and the tool's data folder are
+   * writable, Emperor Home and everything else outside the toolchain stay
+   * closed, network allowed (pip, npm). With no sandbox nothing runs.
+   */
   private async runAuthorized(
     input: {
       preview: ManagedEnvironmentInstallPreview
@@ -682,6 +693,7 @@ export class ManagedEnvironmentService {
     args: string[],
     cwd: string,
     env: Record<string, string>,
+    target?: string,
   ) {
     if (!isAbsolute(executable))
       throw new Error('managed installer executable must be absolute')
@@ -703,15 +715,46 @@ export class ManagedEnvironmentService {
       sessionId: input.sessionId,
       authorizationId: input.preview.planId,
     }
+    const planRoot = this.planRoot(input.preview.planId)
+    const tempDir = join(planRoot, 'tmp')
+    const cacheDir = join(planRoot, 'cache')
+    mkdirSync(tempDir, { recursive: true, mode: 0o700 })
+    mkdirSync(cacheDir, { recursive: true, mode: 0o700 })
+    const dataVariable = input.candidate.dataRootEnvironmentVariable
+    const dataRoot =
+      input.candidate.dataRootMode === 'managed' && dataVariable
+        ? env[dataVariable]
+        : undefined
+    const policy = processContainmentPolicy({
+      workspace: null,
+      stateRoot: this.stateRoot,
+      read: [planRoot, ...(target ? [target] : [])],
+      write: [
+        planRoot,
+        ...(target ? [target] : []),
+        ...(dataRoot ? [dataRoot] : []),
+      ],
+      tempDir,
+      network: 'allow',
+      fallback: 'refuse',
+      executables: [executable],
+      env,
+      ...(env.HOME ? { home: env.HOME } : {}),
+    })
     const request: OwnedProcessRequest = {
       executable,
       args,
       cwd,
-      env,
+      env: {
+        ...env,
+        npm_config_cache: join(cacheDir, 'npm'),
+        PIP_CACHE_DIR: join(cacheDir, 'pip'),
+        UV_CACHE_DIR: join(cacheDir, 'uv'),
+      },
       timeoutMs: 30 * 60 * 1_000,
       maxOutputBytes: 1024 * 1024,
       signal: input.signal,
-      execution: { kind: 'host', authorization },
+      execution: { kind: 'sandbox', policy, authorization },
       owner: {
         kind: 'environment',
         id: input.preview.planId,
@@ -722,7 +765,7 @@ export class ManagedEnvironmentService {
     if (
       result.status !== 'completed' ||
       result.exitCode !== 0 ||
-      result.containment.decision !== 'unsandboxed'
+      result.containment.decision !== 'contained'
     )
       throw new Error(
         `managed install process failed: ${result.status}/${String(result.exitCode)} ${boundedOutput(result.stderr || result.error || '')}`,

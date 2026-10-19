@@ -6,8 +6,9 @@
  * minutes). The servers of `mcp_config.json` and of user-wide plugins are
  * global and live in the host's own client, not here.
  *
- * `start()` is the one place an instance comes up, so process isolation
- * (SEC-08) can wrap it.
+ * `start()` is the one place an instance comes up. Every stdio server of an
+ * instance is a plugin's, so its transport runs it in the process
+ * containment with `fallback: 'refuse'` (SEC-08, mcp/containment.ts).
  */
 
 import { resolve } from 'node:path'
