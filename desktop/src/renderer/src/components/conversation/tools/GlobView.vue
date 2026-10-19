@@ -2,7 +2,7 @@
 /** GlobView — matched paths through SearchBlock. */
 import { computed } from 'vue'
 import type { ToolChatData } from '../../../conversation/types'
-import InOutCard from '../../ui/InOutCard.vue'
+import IoBlock from '../../ui/IoBlock.vue'
 import SearchBlock from '../../ui/SearchBlock.vue'
 import { globCard, resultText } from './toolModel'
 
@@ -18,7 +18,7 @@ const card = computed(() => globCard(props.data))
     :truncated="card.truncated"
     :total="card.total"
   />
-  <InOutCard
+  <IoBlock
     v-else-if="data.result"
     :output="resultText(data)"
     :error="data.result.isError"

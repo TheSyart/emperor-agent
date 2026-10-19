@@ -14,7 +14,7 @@ import {
   DisclosureRow,
   ElapsedClock,
   IconButton,
-  InOutCard,
+  IoBlock,
   JsonTree,
   Menu,
   MenuItem,
@@ -188,7 +188,7 @@ const jsonSample = {
             <template #leading><DsIcons.DsInspect :size="12" /></template>
           </Tag>
         </template>
-        <InOutCard
+        <IoBlock
           :input="{ path: 'theme/dark.css', limit: 40 }"
           :output="'bg-base → nb-950\nbg-layer-1 → nb-875'"
         />
