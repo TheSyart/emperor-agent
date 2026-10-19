@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-19<br>
+> 最后核验：2026-10-20<br>
 > 事实源：`desktop/src/renderer/src/theme/`、`desktop/src/renderer/src/components/ui/`、`desktop/src/renderer/src/style-audit.test.ts`、`desktop/src/renderer/src/feature-style-owners.json`、`assets/generated/`
 
 本目录集中维护 Emperor Agent 的设计规范，包括品牌与图形资源、界面主题与样式、插件 Logo、模型元数据目录等。系统怎样运转见[架构文档](../architecture/overview.md)，怎样开发和扩展见[开发指南](../development/README.md)；根目录 README 只链接到这里，不复制规范正文。
@@ -19,6 +19,7 @@
 | [浮层规范](overlays.md)                      | 模态弹窗的焦点与 Esc、确认框、轻提示队列、锚定面板                 |
 | [组件规范](components.md)                    | `components/ui/` 每个组件的用途、变体、键盘行为与反例              |
 | [外壳布局](layout.md)                        | 画布 + 面板、图标栏与侧栏、顶栏对齐、红绿灯与拖拽区、列宽与断点    |
+| [会话流](conversation.md)                    | 过程组折叠、工具行与准备中的调用、气泡与正文、轮末操作、展开动效   |
 
 ## 现有的设计事实源
 

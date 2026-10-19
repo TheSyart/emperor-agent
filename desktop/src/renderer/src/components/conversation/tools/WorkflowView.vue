@@ -7,7 +7,7 @@
 import { computed } from 'vue'
 import type { ToolChatData } from '../../../conversation/types'
 import CodeBlock from '../../ui/CodeBlock.vue'
-import InOutCard from '../../ui/InOutCard.vue'
+import IoBlock from '../../ui/IoBlock.vue'
 import { argsOf, resultText, stringArg } from './toolModel'
 
 const props = defineProps<{ data: ToolChatData }>()
@@ -24,7 +24,7 @@ const output = computed(() =>
 <template>
   <div class="workflow-view">
     <CodeBlock v-if="script" :code="script" lang="javascript" small />
-    <InOutCard
+    <IoBlock
       :input="objective"
       :output="output"
       :error="data.result?.isError === true"

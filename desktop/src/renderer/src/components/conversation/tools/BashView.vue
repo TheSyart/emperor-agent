@@ -7,7 +7,7 @@
  */
 import { computed } from 'vue'
 import type { ToolChatData } from '../../../conversation/types'
-import InOutCard from '../../ui/InOutCard.vue'
+import IoBlock from '../../ui/IoBlock.vue'
 import Dot from '../../ui/Dot.vue'
 import TerminalBlock from '../../ui/TerminalBlock.vue'
 import {
@@ -46,7 +46,7 @@ const jobDot = computed(() => {
 
 <template>
   <div class="bash-view">
-    <InOutCard
+    <IoBlock
       v-if="failedWithoutOutput"
       :input="command"
       :output="resultText(data)"

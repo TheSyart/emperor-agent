@@ -1,12 +1,17 @@
 <script setup lang="ts">
 /**
  * AssistantStep — one model step (dsh AssistantMarkdown): blocks in order —
- * markdown text (16/28), reasoning as the Think row, consecutive images as
- * one gallery; tool-call heads render as their own tool rows. An
- * interrupted step ends with a quiet "已停止" tag. Settled text-only steps
- * that are not followed by their turn tail get a hover copy action.
+ * markdown text (15/26, no container), reasoning as the Think row,
+ * consecutive images as one gallery, 12px apart; tool-call heads render as
+ * their own tool rows. An interrupted step ends with a quiet "已停止" tag.
+ * Settled text-only steps that are not followed by their turn tail get a
+ * hover copy action.
  *
- * Props: node (assistant), closing (the turn tail follows this row).
+ * A turn's answer is split across two seats (UI-S03): its thinking joins the
+ * process group (`part="reasoning"`), the rest renders after the folded line
+ * (`part="answer"`).
+ *
+ * Props: node (assistant), closing (the turn tail follows this row), part.
  */
 import { computed } from 'vue'
 import { useChatContext } from '../chatContext'
@@ -21,10 +26,15 @@ import JsonTree from '../../ui/JsonTree.vue'
 import ConversationMarkdown from '../parts/ConversationMarkdown.vue'
 import MessageIconActions from '../parts/MessageIconActions.vue'
 import ReasoningRow from './ReasoningRow.vue'
+import { reasoningShown } from '../processModel'
 
 const props = withDefaults(
-  defineProps<{ node: AssistantChatNode; closing?: boolean }>(),
-  { closing: false },
+  defineProps<{
+    node: AssistantChatNode
+    closing?: boolean
+    part?: 'reasoning' | 'answer'
+  }>(),
+  { closing: false, part: undefined },
 )
 
 const { sessionId } = useChatContext()
@@ -79,9 +89,12 @@ const rendered = computed<Rendered[]>(() => {
   const blocks = props.node.data.blocks
   const out: Rendered[] = []
   const lastIndex = blocks.length - 1
+  const thinking = props.part !== 'answer'
+  const answer = props.part !== 'reasoning'
   for (let index = 0; index < blocks.length; index++) {
     const block = blocks[index]
     if (block === undefined) continue
+    if (block.kind === 'reasoning' ? !thinking : !answer) continue
     switch (block.kind) {
       case 'text':
         if (block.text.trim() !== '' || index === lastIndex)
@@ -93,7 +106,7 @@ const rendered = computed<Rendered[]>(() => {
           })
         break
       case 'reasoning':
-        if (block.text.trim() !== '' || index === lastIndex)
+        if (reasoningShown(blocks, index, streaming.value))
           out.push({
             kind: 'reasoning',
             key: `r${index}`,
@@ -121,9 +134,13 @@ const rendered = computed<Rendered[]>(() => {
   return out
 })
 
-const interrupted = computed(() => props.node.data.status === 'interrupted')
+const interrupted = computed(
+  () => props.node.data.status === 'interrupted' && props.part !== 'reasoning',
+)
 const visible = computed(
-  () => rendered.value.length > 0 || streaming.value || interrupted.value,
+  () =>
+    rendered.value.length > 0 ||
+    (props.part !== 'reasoning' && (streaming.value || interrupted.value)),
 )
 const plainText = computed(() =>
   props.node.data.blocks
@@ -135,6 +152,7 @@ const showActions = computed(
   () =>
     !streaming.value &&
     !props.closing &&
+    props.part !== 'reasoning' &&
     plainText.value !== '' &&
     !props.node.data.blocks.some((block) => block.kind === 'tool-call'),
 )
@@ -231,14 +249,14 @@ const showActions = computed(
   display: flex;
   flex-direction: column;
   min-width: 0;
-  font: var(--font-md);
-  color: rgb(var(--label-primary));
+  font: var(--type-body) var(--font-sans);
+  color: rgb(var(--text-1));
 }
 
 .body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
   min-width: 0;
 }
 

@@ -2,7 +2,7 @@
 /** GenericToolCard — fallback body: arguments IN / result OUT (JsonTree). */
 import { computed } from 'vue'
 import type { ToolChatData } from '../../../conversation/types'
-import JsonIoCard from './JsonIoCard.vue'
+import IoBlock from '../../ui/IoBlock.vue'
 import { parseToolArgs, resultValue } from './toolModel'
 
 const props = defineProps<{ data: ToolChatData }>()
@@ -15,10 +15,10 @@ const output = computed(() =>
 </script>
 
 <template>
-  <JsonIoCard
+  <IoBlock
     :input="input"
     :output="output"
-    :has-output="data.result !== undefined"
     :error="data.result?.isError === true"
+    tree
   />
 </template>

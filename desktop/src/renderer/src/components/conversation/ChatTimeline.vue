@@ -2,19 +2,24 @@
 /**
  * ChatTimeline — dsh ChatView over the raw-event conversation projection:
  * one keyed, virtualized list (DynamicScroller, page mode inside our own
- * scroller) of chat nodes, each dispatched by ChatNodeSeat; content column
- * max 748px centered with the 16px flow gap; bottom-follow while the
- * reader is pinned (a new user row always re-pins); a 34px floating
- * back-to-bottom button otherwise; older pages load when the reader reaches
- * the top, keeping the same row in place; TurnStatus closes the flow while
- * a turn runs.
+ * scroller) of timeline rows (processModel): chat nodes, each dispatched by
+ * ChatNodeSeat, and one ProcessGroup per turn holding the steps between the
+ * prompt and the answer (UI-S03). Content column max 748px centered with the
+ * 16px flow gap; bottom-follow while the reader is pinned (a new user row
+ * always re-pins); a 34px floating back-to-bottom button otherwise; older
+ * pages load when the reader reaches the top, keeping the same row in place;
+ * a group the reader opens or folds keeps its line in place. While a turn
+ * runs, its live process line is the status line; TurnStatus closes the flow
+ * only when there is none (waiting for the first token, the answer
+ * streaming).
  *
  * Props: sessionId; store? (injected ConversationStore — tests/gallery).
  * Emits: inspect(callId), open-subagent(sessionId), edit-message(text),
  * first-visible(key | null) — the topmost visible row, reported once per
  * frame while the reader scrolls (the turn scrubber's active tick).
  * Exposes: scrollToBottom(), scrollToKey(key) — reveal a row near the top
- * (the list is virtualized, so rows off screen are reachable only here).
+ * (the list is virtualized, so rows off screen are reachable only here; a
+ * step inside a folded process group opens the group first).
  */
 import Spinner from '../ui/Spinner.vue'
 import {
@@ -37,15 +42,20 @@ import {
   type ConversationStore,
 } from '../../conversation/store'
 import { DsChevronDown } from '../icons/ds'
+import { useUiPreferences } from '../../composables/useUiPreferences'
 import ChatNodeSeat from './ChatNodeSeat.vue'
 import { createExpansionStore, provideChatContext } from './chatContext'
 import TurnStatus from './TurnStatus.vue'
 import ConversationLoading from './ConversationLoading.vue'
+import ProcessGroup from './nodes/ProcessGroup.vue'
 import {
-  closingAssistantKeys,
-  isAtBottom,
-  turnStatusLabel,
-} from './timelineModel'
+  processExpansionKey,
+  rowIndexOf,
+  rowNodeKey,
+  timelineRowsOf,
+  type TimelineRow,
+} from './processModel'
+import { isAtBottom, turnStatusLabel } from './timelineModel'
 
 const props = withDefaults(
   defineProps<{
@@ -62,16 +72,22 @@ const emit = defineEmits<{
   'first-visible': [key: string | null]
 }>()
 
+const expansion = createExpansionStore()
+/** The turn under the pointer (turn tails show their actions). */
+const hoverTurn = ref<number | null>(null)
 provideChatContext({
   actions: {
     inspect: (callId) => emit('inspect', callId),
     openSubagent: (sessionId) => emit('open-subagent', sessionId),
     editMessage: (text) => emit('edit-message', text),
+    holdRow,
   },
-  expansion: createExpansionStore(),
+  expansion,
   sessionId: () => props.sessionId,
   rootSessionId: () => props.rootSessionId ?? props.sessionId,
+  hoverTurn: () => hoverTurn.value,
 })
+const { preferences } = useUiPreferences()
 
 // ── conversation handle (re-opened when the session changes) ────────────
 const handle = shallowRef<ConversationHandle | null>(null)
@@ -95,13 +111,37 @@ onBeforeUnmount(() => scope?.stop())
 const order = computed(() => handle.value?.order.value ?? [])
 const snapshot = computed(() => handle.value?.snapshot.value)
 const windowState = computed(() => handle.value?.window.value)
-const items = computed(() => order.value.map((id) => ({ id })))
-const closingKeys = computed(() =>
-  snapshot.value === undefined
-    ? new Set<string>()
-    : closingAssistantKeys(order.value, snapshot.value.nodes),
+
+// Rows are rebuilt per published snapshot (one pass over the order) and
+// keep their identity while nothing structural moves, so streaming deltas
+// re-render only the rows they touch.
+let previousRows: readonly TimelineRow[] | undefined
+const rows = computed<readonly TimelineRow[]>(() => {
+  const current = snapshot.value
+  if (current === undefined) return (previousRows = [])
+  previousRows = timelineRowsOf(
+    current,
+    { showSystemSteps: preferences.value.showSystemSteps },
+    previousRows,
+  )
+  return previousRows
+})
+const rowIndex = computed(() => rowIndexOf(rows.value))
+const itemCache = new WeakMap<TimelineRow, { id: string; row: TimelineRow }>()
+const items = computed(() =>
+  rows.value.map((row) => {
+    let item = itemCache.get(row)
+    if (item === undefined) {
+      item = { id: row.id, row }
+      itemCache.set(row, item)
+    }
+    return item
+  }),
 )
 const running = computed(() => snapshot.value?.running === true)
+const liveProcess = computed(() =>
+  rows.value.some((row) => row.kind === 'process' && row.live),
+)
 const statusLabel = computed(() =>
   snapshot.value === undefined ? '' : turnStatusLabel(snapshot.value),
 )
@@ -125,6 +165,8 @@ interface PagingAnchor {
   until: number
   /** Set by scrollToKey: paging keeps the revealed row, not the top one. */
   reveal?: true
+  /** Set by holdRow: following resumes only if the reader is still at the floor. */
+  hold?: true
 }
 
 /** Offset (px) a revealed row keeps below the scroller top (its padding). */
@@ -186,6 +228,7 @@ function restoreAnchor(): void {
   const el = scroller.value
   if (el === null || anchor === null) return
   if (Date.now() > anchor.until) {
+    if (anchor.hold) following.value = isAtBottom(el)
     anchor = null
     return
   }
@@ -223,20 +266,52 @@ function onScroll(): void {
   reportFirstVisible()
 }
 
+/**
+ * Keep row `key` at its place on screen while its height changes (a group
+ * the reader opens or folds, animating for 200ms).
+ */
+function holdRow(key: string): void {
+  const el = scroller.value
+  const row = findRow(key)
+  if (el === null || row === null) return
+  following.value = false
+  anchor = { key, top: rowTop(row, el), until: Date.now() + 600, hold: true }
+}
+
 // ── first visible row / reveal ──────────────────────────────────────────
 let visibleQueued = false
 let lastVisibleKey: string | null | undefined
+
+/** The chat node a row anchor stands for (a process group: its first step). */
+function nodeKeyOf(anchorKey: string): string {
+  const index = rowIndex.value.get(anchorKey)
+  const row = index === undefined ? undefined : rows.value[index]
+  return row?.id === anchorKey ? rowNodeKey(row) : anchorKey
+}
 
 function reportFirstVisible(): void {
   if (visibleQueued) return
   visibleQueued = true
   nextFrame(() => {
     visibleQueued = false
-    const key = captureAnchor()?.key ?? null
+    const anchorKey = captureAnchor()?.key
+    const key = anchorKey === undefined ? null : nodeKeyOf(anchorKey)
     if (key === lastVisibleKey) return
     lastVisibleKey = key
     emit('first-visible', key)
   })
+}
+
+/** Open the folded process group holding node `key` (no-op otherwise). */
+function openGroupOf(key: string): void {
+  const index = rowIndex.value.get(key)
+  const row = index === undefined ? undefined : rows.value[index]
+  if (row?.kind !== 'process' || row.id === key) return
+  const { key: expansionKey } = processExpansionKey(
+    row,
+    preferences.value.processDisplay,
+  )
+  expansion.set(expansionKey, true)
 }
 
 /**
@@ -247,11 +322,12 @@ function reportFirstVisible(): void {
  */
 function scrollToKey(key: string): boolean {
   const el = scroller.value
-  const index = order.value.indexOf(key)
+  const index = rowIndex.value.get(key) ?? -1
   if (el === null || index < 0) return false
+  openGroupOf(key)
   following.value = false
   anchor = { key, top: REVEAL_OFFSET, until: Date.now() + 1500, reveal: true }
-  const row = findRow(key)
+  const row = findRow(key) ?? findRow(rows.value[index]?.id ?? key)
   if (row !== null) {
     el.scrollTop += rowTop(row, el) - REVEAL_OFFSET
     observedTop = el.scrollTop
@@ -315,9 +391,21 @@ watch(
     anchor = null
     lastKey = undefined
     lastVisibleKey = undefined
+    hoverTurn.value = null
     void nextTick(pinToBottom)
   },
 )
+
+// ── hovered turn ────────────────────────────────────────────────────────
+function onPointerOver(event: Event): void {
+  const target = event.target
+  const seat =
+    target instanceof Element
+      ? target.closest<HTMLElement>('[data-chat-turn]')
+      : null
+  const turn = seat?.dataset.chatTurn
+  hoverTurn.value = turn === undefined || turn === '' ? null : Number(turn)
+}
 
 defineExpose({ scrollToBottom, scrollToKey })
 </script>
@@ -330,7 +418,13 @@ defineExpose({ scrollToBottom, scrollToKey })
       data-conversation-scroll
       @scroll.passive="onScroll"
     >
-      <div ref="column" class="column" data-chat-flow>
+      <div
+        ref="column"
+        class="column"
+        data-chat-flow
+        @pointerover="onPointerOver"
+        @pointerleave="hoverTurn = null"
+      >
         <div v-if="hasMore || loadingOlder" class="older">
           <span v-if="loadingOlder" class="older-loading" role="status">
             <Spinner size="sm" />
@@ -360,17 +454,25 @@ defineExpose({ scrollToBottom, scrollToKey })
         >
           <template #default="{ item, active }">
             <DynamicScrollerItem :item="item" :active="active">
-              <ChatNodeSeat
-                v-if="handle"
-                :handle="handle"
-                :node-key="item.id"
-                :closing="closingKeys.has(item.id)"
-              />
+              <template v-if="handle">
+                <ProcessGroup
+                  v-if="item.row.kind === 'process'"
+                  :handle="handle"
+                  :row="item.row"
+                />
+                <ChatNodeSeat
+                  v-else
+                  :handle="handle"
+                  :node-key="item.id"
+                  :closing="item.row.closing === true"
+                  :part="item.row.answerOnly ? 'answer' : undefined"
+                />
+              </template>
             </DynamicScrollerItem>
           </template>
         </DynamicScroller>
         <TurnStatus
-          v-if="running"
+          v-if="running && !liveProcess"
           :label="statusLabel"
           :started-at="snapshot?.turnStatus?.startedAt ?? null"
         />

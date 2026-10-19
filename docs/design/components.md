@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-19<br>
+> 最后核验：2026-10-20<br>
 > 事实源：`desktop/src/renderer/src/components/ui/`（组件与 `display.test.ts`、`actions.test.ts`）、`desktop/src/renderer/src/theme/components.css`；开发模式下打开 `?ui-gallery` 查看全部组件与状态
 
 界面控件统一来自 `components/ui/`。组件只用 [设计令牌](tokens.md) 的 L2/L3 令牌，深浅两套主题都成立；可交互的控件都能用键盘操作，焦点统一画 `--focus-ring`。下面只写已经实现的组件；新增变体先改组件和这里，再在页面里用。
@@ -40,6 +40,8 @@
 | Surface            | 面板级容器：raised（默认，比面板高一级 + 细线）/ sunken（代码、凹陷区）/ overlay（浮层 + 层级阴影）；`pad` none / sm 12 / md 16；`radius` md 12 / lg 16；`interactive` 加悬停与焦点（配 `as="button"`）                             |
 | EmptyState         | block（20px 图标 + 标题 + 描述 + 按钮，居中）/ inline（单行，可带一个尾部操作）；`framed` 画虚线框，放在卡片里时自动去掉                                                                                                            |
 | Notice             | 提示条：左侧图标 + 标题 + 说明 + 可选操作；tone 与 Badge 相同，warn / error 以 role=alert 播报。只在问题存在时出现                                                                                                                  |
+| DisclosureRow      | 会话流里的 28px 可折叠行：14px 图标（悬停换成箭头）、13px 标题与摘要、「·」分隔、可选尾部操作；正文左缩进 22px，展开收起用 CollapseTransition（见[会话流](conversation.md)）                                                        |
+| IoBlock            | 工具展开后的 IN / OUT 块：`--surface-raised`、`--r-md`、无边框，每段最高 150px，过长时「展开全部」；`tree` 把对象显示为 JsonTree（未知工具的通用正文）                                                                              |
 | PaneHeader         | 面板顶栏，固定 48px：标题 + 可选 Tabs + 右侧操作；长标题截断，高度不随内容变化。工作台用它做顶栏，上移 2px 与 46px 的列顶栏对齐（见[外壳布局](layout.md)）                                                                          |
 
 ## 输入

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { deepEqual } from './assembler'
 import { chatSnapshotOf, createConversationAssembler } from './chatSnapshot'
+import { TOOL_DRAFT_LIMIT } from './events'
 import {
   describeNodes,
   LogBuilder,
@@ -190,7 +191,8 @@ describe('assistant streaming', () => {
     expect(running.data.blocks).toEqual([
       { kind: 'reasoning', text: 'think' },
       { kind: 'text', text: 'Hello' },
-      { kind: 'tool-call', callId: 'c1', name: 'bash' },
+      // DSH-23: the arguments streamed so far ride along while preparing.
+      { kind: 'tool-call', callId: 'c1', name: 'bash', draft: '{"co' },
     ])
     expect(running.data.usage).toEqual({ inputTokens: 5, outputTokens: 7 })
 
@@ -233,8 +235,66 @@ describe('assistant streaming', () => {
     const running = nodeOf(replay(log.events).snapshot, 'assistant')
     expect(running.data.blocks).toEqual([
       { kind: 'text', text: 'Listing.' },
-      { kind: 'tool-call', callId: 'c1', name: 'bash' },
+      {
+        kind: 'tool-call',
+        callId: 'c1',
+        name: 'bash',
+        draft: '{"command":"ls"}',
+      },
     ])
+  })
+
+  it('keeps a capped draft of the streamed arguments until the message lands (DSH-23)', () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.chunk(1, 1, { type: 'block-start', index: 0, blockType: 'tool-call' })
+    log.chunk(1, 1, {
+      type: 'tool-call-delta',
+      index: 0,
+      id: 'c1',
+      name: 'write',
+      argumentsDelta: '{"file_path":"a.ts","content":"',
+    })
+    log.chunk(1, 1, {
+      type: 'tool-call-delta',
+      index: 0,
+      id: 'c1',
+      name: 'write',
+      argumentsDelta: 'x'.repeat(TOOL_DRAFT_LIMIT * 2),
+    })
+    const draft = (): string | undefined => {
+      // A step holding only a call is a hidden node: read it by kind.
+      const node = [...replay(log.events).snapshot.nodes.values()].find(
+        (item) => item.kind === 'assistant',
+      )
+      const block = node?.kind === 'assistant' ? node.data.blocks[0] : undefined
+      return block?.kind === 'tool-call' ? block.draft : undefined
+    }
+    expect(draft()?.startsWith('{"file_path":"a.ts","content":"x')).toBe(true)
+    expect(draft()).toHaveLength(TOOL_DRAFT_LIMIT)
+    // block-end carries the assembled call: the draft is its capped arguments.
+    log.chunk(1, 1, {
+      type: 'block-end',
+      index: 0,
+      block: {
+        type: 'tool-call',
+        id: 'c1',
+        name: 'write',
+        arguments: '{"file_path":"a.ts","content":"short"}',
+      },
+    })
+    expect(draft()).toBe('{"file_path":"a.ts","content":"short"}')
+    log.message(1, 1, [
+      {
+        type: 'tool-call',
+        id: 'c1',
+        name: 'write',
+        arguments: '{"file_path":"a.ts","content":"short"}',
+      },
+    ])
+    expect(draft()).toBeUndefined()
+    expectConverges(log)
   })
 
   it('discards the failed attempt on llm/retry and shows the retry row', () => {

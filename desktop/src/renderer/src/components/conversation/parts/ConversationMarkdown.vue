@@ -1,7 +1,11 @@
 <script setup lang="ts">
 /**
- * ConversationMarkdown — dsh MarkdownText look (16/28 body, 24/22/20/16
- * headings, 15/25 tables, inline code radius 6, 2px caption blockquote).
+ * ConversationMarkdown — the reply's prose (UI-S03): no container, 15/26
+ * body with 12px between paragraphs, headings on `--md-h1/h2/h3` (20/18/16,
+ * all below the page title), 14/22 tables, inline code radius 6, 2px
+ * caption blockquote. Links and inline references use `--text-link` with a
+ * 12px source icon in front (a file type icon, or the site icon when 设置 ›
+ * 常规 › 显示网站图标 is on).
  * Prose renders through useMarkdown; fenced code through ui/CodeBlock (an
  * unclosed trailing fence while streaming is still a code block). Local
  * file and web links read as a type icon plus an accent name (contract §4):
@@ -67,11 +71,11 @@ const segments = computed<Segment[]>(() =>
 .ds-md {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
   min-width: 0;
   overflow-wrap: anywhere;
-  font: var(--font-md);
-  color: rgb(var(--label-primary));
+  font: var(--type-body) var(--font-sans);
+  color: rgb(var(--text-1));
 }
 .ds-md > :deep(.resource-card) {
   margin: 0;
@@ -86,7 +90,7 @@ const segments = computed<Segment[]>(() =>
 }
 
 .ds-md :deep(p) {
-  margin: var(--space-4) 0;
+  margin: var(--space-3) 0;
 }
 .ds-md :deep(.md-image-preview) {
   display: block;
@@ -102,23 +106,23 @@ const segments = computed<Segment[]>(() =>
 }
 
 .ds-md :deep(h1) {
-  margin: var(--space-8) 0 var(--space-4);
-  font: 700 24px / 34px var(--font-sans);
+  margin: var(--space-6) 0 var(--space-3);
+  font: var(--weight-semibold) var(--md-h1) var(--font-sans);
 }
 
 .ds-md :deep(h2) {
-  margin: var(--space-8) 0 var(--space-4);
-  font: 700 22px / 32px var(--font-sans);
+  margin: var(--space-6) 0 var(--space-3);
+  font: var(--weight-semibold) var(--md-h2) var(--font-sans);
 }
 
 .ds-md :deep(h3) {
-  margin: var(--space-8) 0 var(--space-4);
-  font: 700 20px / 30px var(--font-sans);
+  margin: var(--space-5) 0 var(--space-2);
+  font: var(--weight-semibold) var(--md-h3) var(--font-sans);
 }
 
 .ds-md :deep(:is(h4, h5, h6)) {
-  margin: var(--space-4) 0;
-  font: 600 var(--fs-md) / var(--lh-md) var(--font-sans);
+  margin: var(--space-3) 0;
+  font: var(--weight-semibold) var(--type-body) var(--font-sans);
 }
 
 .ds-md :deep(:is(h4, h5, h6) + :is(ul, ol)) {
@@ -126,7 +130,7 @@ const segments = computed<Segment[]>(() =>
 }
 
 .ds-md :deep(a) {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   text-decoration: none;
 }
 
@@ -146,10 +150,10 @@ const segments = computed<Segment[]>(() =>
 .ds-md :deep(a.md-link-chip::before) {
   content: '' / '';
   display: inline-block;
-  width: 1em;
-  height: 1em;
-  margin-inline-end: 0.25em;
-  vertical-align: -0.14em;
+  width: var(--icon-xs);
+  height: var(--icon-xs);
+  margin-inline-end: var(--space-1);
+  vertical-align: -0.06em;
   background-color: rgb(var(--md-link-ink, var(--label-secondary)));
   -webkit-mask: var(--md-link-ico) center / contain no-repeat;
   mask: var(--md-link-ico) center / contain no-repeat;
@@ -267,8 +271,8 @@ const segments = computed<Segment[]>(() =>
   outline-offset: 3px;
 }
 .ds-md :deep(a.md-link-chip[data-md-link='web']::before) {
-  width: var(--space-4);
-  height: var(--space-4);
+  width: var(--icon-xs);
+  height: var(--icon-xs);
   margin-inline-end: var(--space-1-5);
 }
 .ds-md :deep(a.md-link-chip[data-resource-kind='github']::before) {
@@ -278,7 +282,7 @@ const segments = computed<Segment[]>(() =>
   content: attr(data-site-letter) / '';
   mask: none;
   background: rgb(var(--accent-fill) / 0.14);
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   border-radius: var(--radius-xs);
   font: 600 0.7em/1.4 var(--font-sans);
   text-align: center;
@@ -290,8 +294,8 @@ const segments = computed<Segment[]>(() =>
 .ds-md :deep(img.site-icon) {
   display: inline-block;
   flex: none;
-  width: var(--space-4);
-  height: var(--space-4);
+  width: var(--icon-xs);
+  height: var(--icon-xs);
   margin: 0 var(--space-1-5) 0 0;
   vertical-align: -0.125em;
   object-fit: contain;
@@ -300,7 +304,7 @@ const segments = computed<Segment[]>(() =>
 }
 
 .ds-md :deep(:is(ul, ol)) {
-  margin: var(--space-4) 0;
+  margin: var(--space-3) 0;
   padding-left: calc(var(--space-4) + var(--space-0-5));
 }
 
@@ -337,7 +341,7 @@ const segments = computed<Segment[]>(() =>
 }
 
 .ds-md :deep(blockquote) {
-  margin: var(--space-4) 0;
+  margin: var(--space-3) 0;
   padding-left: var(--space-3-5);
   border-left: 2px solid rgb(var(--label-caption));
   color: rgb(var(--label-secondary));
@@ -352,7 +356,7 @@ const segments = computed<Segment[]>(() =>
 }
 
 .ds-md :deep(.ds-md-html pre) {
-  margin: var(--space-4) 0;
+  margin: var(--space-3) 0;
   padding: var(--space-4);
   overflow: auto;
   border-radius: var(--radius-card);
@@ -362,7 +366,7 @@ const segments = computed<Segment[]>(() =>
 
 .ds-md :deep(table) {
   width: 100%;
-  margin: var(--space-4) 0;
+  margin: var(--space-3) 0;
   border-collapse: collapse;
 }
 
@@ -376,17 +380,17 @@ const segments = computed<Segment[]>(() =>
 
 .ds-md :deep(th) {
   min-width: 100px;
-  padding: var(--space-2-5) var(--space-4);
+  padding: var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--border-l3);
-  font: 500 calc(var(--fs-base) - 1px) / 25px var(--font-sans);
+  font: var(--weight-medium) var(--type-body-sm) var(--font-sans);
   text-align: start;
 }
 
 .ds-md :deep(td) {
   min-width: 100px;
-  padding: var(--space-2-5) var(--space-4);
+  padding: var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--border-l2);
-  font: 400 calc(var(--fs-base) - 1px) / 25px var(--font-sans);
+  font: var(--weight-regular) var(--type-body-sm) var(--font-sans);
 }
 
 .ds-md :deep(:is(th, td):first-child) {
