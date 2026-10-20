@@ -98,8 +98,14 @@ import { DEBUG_SWITCH_REFUSED_EXIT, refusedDebugSwitch } from './debug-switches'
 import { verifyPackagedSeatbelt } from './packaged-seatbelt-smoke'
 import {
   createPackagedSmokeAttachment,
+  traversalHostSecret,
   verifyPackagedRenderer,
 } from './packaged-renderer-smoke'
+import { verifyWindowReopen } from './packaged-window-smoke'
+import {
+  runPackagedUpgradeSmoke,
+  verifySessionShown,
+} from './packaged-upgrade-smoke'
 import {
   createTrustedRendererPolicy,
   type TrustedRendererPolicy,
@@ -282,7 +288,9 @@ if (smokeLaunch.kind === 'refuse') {
   process.exit(PACKAGED_SMOKE_REFUSED_EXIT)
 }
 const packagedSmoke =
-  smokeLaunch.kind === 'run' ? { receiptPath: smokeLaunch.receiptPath } : null
+  smokeLaunch.kind === 'run'
+    ? { receiptPath: smokeLaunch.receiptPath, scenario: smokeLaunch.scenario }
+    : null
 // Chromium's profile (Local Storage, caches) stays with the smoke's state,
 // not in the installed app's Application Support folder.
 if (packagedSmoke)
@@ -1260,6 +1268,39 @@ function onScreen(
   )
 }
 
+/** The packaged smoke's hidden window with the main window's preferences. */
+function smokeWindow(): BrowserWindow {
+  const win = new BrowserWindow({
+    show: false,
+    backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors),
+    webPreferences: mainWindowWebPreferences(mainDir, {
+      packaged: app.isPackaged,
+    }),
+  })
+  mainWindow = win
+  secureWindowNavigation(win, trustedRendererPolicy)
+  win.once('closed', () => {
+    if (mainWindow === win) mainWindow = null
+  })
+  return win
+}
+
+/** Resolves with the window once its page finished loading (smoke). */
+function windowLoaded(win: BrowserWindow): Promise<BrowserWindow> {
+  return new Promise((resolve) => {
+    win.webContents.once('did-finish-load', () => resolve(win))
+  })
+}
+
+/** Closes a window and resolves on its `closed` event (smoke). */
+function windowClosed(win: BrowserWindow): Promise<void> {
+  return new Promise((resolve) => {
+    if (win.isDestroyed()) return resolve()
+    win.once('closed', () => resolve())
+    win.close()
+  })
+}
+
 function createWindow(): void {
   const boundsPath = mainBoundsPath()
   mainWindow = new BrowserWindow({
@@ -1818,82 +1859,127 @@ async function startup(): Promise<void> {
       })
     registerAppProtocol()
     if (packagedSmoke) {
-      // Local key and master password round trips, with no Keychain.
-      await verifyPackagedSecrets(config.stateRoot)
-      const attachment = await createPackagedSmokeAttachment(config.stateRoot)
-      await runPackagedSmoke({
-        core: coreApi,
-        runtimeRoot: config.runtimeRoot,
-        stateRoot: config.stateRoot,
-        receiptPath: packagedSmoke.receiptPath,
-        appVersion: app.getVersion(),
-        runtimeRevision: packagedRuntimeRevision,
-        commit: process.env.EMPEROR_BUILD_COMMIT || 'local',
-        platform: process.platform,
-        arch: process.arch,
-        verifySeatbelt: verifyPackagedSeatbelt,
-        verifyRenderer: () => {
-          const webPreferences = mainWindowWebPreferences(mainDir, {
-            packaged: app.isPackaged,
-          })
-          return verifyPackagedRenderer({
-            createWindow: () => {
-              const win = new BrowserWindow({
-                show: false,
-                backgroundColor: windowBackground(
-                  nativeTheme.shouldUseDarkColors,
-                ),
-                webPreferences,
-              })
-              mainWindow = win
-              secureWindowNavigation(win, trustedRendererPolicy)
-              return win
-            },
-            // The URL the real main window loads, from the same helper.
-            rendererUrl: mainRendererUrl({
-              isPackaged: app.isPackaged,
-              env: process.env,
+      // SEC-04: the helpers start and answer under the hardened runtime; the
+      // check also shuts the Computer Use helper down and forgets its copy.
+      const smokeHelpers = () => {
+        const helperSource = macosHelperAppPath({
+          packaged: true,
+          resourcesPath: process.resourcesPath,
+        })
+        return verifyPackagedHelpers({
+          computerHelperStatus: async () => {
+            if (!nativeDesktop)
+              throw new Error('the Computer Use helper is missing')
+            return await nativeDesktop.status()
+          },
+          // The copy the driver launched: it lives in the Emperor Home
+          // (EMPEROR_CONFIG_DIR), so forget() reaches its registration.
+          installedComputerHelper: () =>
+            installPackagedMacosHelper(helperSource, {
+              stateRoot: config.stateRoot,
             }),
-            attachmentUrl: attachment.url,
-            attachmentContent: attachment.content,
-            chromiumSandboxDisabledForTest:
-              process.argv.includes('--no-sandbox'),
-            webPreferences,
-            security: {
-              expectedCsp: RENDERER_CSP,
-              applicationMenuRoles: () => menuRoles(Menu.getApplicationMenu()),
-            },
-            releaseWindow: () => {
-              mainWindow = null
-            },
-          })
-        },
-        verifyHelpers: () => {
-          const helperSource = macosHelperAppPath({
-            packaged: true,
-            resourcesPath: process.resourcesPath,
-          })
-          return verifyPackagedHelpers({
-            computerHelperStatus: async () => {
-              if (!nativeDesktop)
-                throw new Error('the Computer Use helper is missing')
-              return await nativeDesktop.status()
-            },
-            installedComputerHelper: () =>
-              installPackagedMacosHelper(helperSource),
-            identity: (target) => signedIdentity(target),
-            release: async () => {
-              await nativeDesktop?.shutdown()
-            },
-            forget: (installed) => forgetHelperCopy(installed),
-            dictationStatus: () =>
-              (dictation ?? createDictationService()).status(),
-          })
-        },
-      })
-      await coreApi.close()
-      coreApi = null
-      app.exit(0)
+          identity: (target) => signedIdentity(target),
+          release: async () => {
+            await nativeDesktop?.shutdown()
+          },
+          forget: (installed) => forgetHelperCopy(installed),
+          dictationStatus: () =>
+            (dictation ?? createDictationService()).status(),
+        })
+      }
+      if (packagedSmoke.scenario === 'upgrade') {
+        // REL-04: started on a copy of the 0.1.0-preview.4 fixture home.
+        await runPackagedUpgradeSmoke({
+          core,
+          receiptPath: packagedSmoke.receiptPath,
+          showSession: (sessionId, text) =>
+            verifySessionShown({
+              createWindow: smokeWindow,
+              sessionId,
+              text,
+            }),
+        })
+        if (process.platform === 'darwin') await smokeHelpers()
+      } else {
+        // Local key and master password round trips, with no Keychain.
+        await verifyPackagedSecrets(config.stateRoot)
+        const attachment = await createPackagedSmokeAttachment(config.stateRoot)
+        await runPackagedSmoke({
+          core,
+          runtimeRoot: config.runtimeRoot,
+          stateRoot: config.stateRoot,
+          receiptPath: packagedSmoke.receiptPath,
+          appVersion: app.getVersion(),
+          runtimeRevision: packagedRuntimeRevision,
+          commit: process.env.EMPEROR_BUILD_COMMIT || 'local',
+          platform: process.platform,
+          arch: process.arch,
+          verifySeatbelt: verifyPackagedSeatbelt,
+          verifyRenderer: () => {
+            const webPreferences = mainWindowWebPreferences(mainDir, {
+              packaged: app.isPackaged,
+            })
+            return verifyPackagedRenderer({
+              createWindow: () => {
+                const win = new BrowserWindow({
+                  show: false,
+                  backgroundColor: windowBackground(
+                    nativeTheme.shouldUseDarkColors,
+                  ),
+                  webPreferences,
+                })
+                mainWindow = win
+                secureWindowNavigation(win, trustedRendererPolicy)
+                return win
+              },
+              // The URL the real main window loads, from the same helper.
+              rendererUrl: mainRendererUrl({
+                isPackaged: app.isPackaged,
+                env: process.env,
+              }),
+              attachmentUrl: attachment.url,
+              attachmentContent: attachment.content,
+              // REL-04: what an app:// request outside its root would return.
+              traversal: {
+                canary: attachment.traversalCanary,
+                hostSecret: traversalHostSecret(),
+              },
+              chromiumSandboxDisabledForTest:
+                process.argv.includes('--no-sandbox'),
+              webPreferences,
+              security: {
+                expectedCsp: RENDERER_CSP,
+                applicationMenuRoles: () =>
+                  menuRoles(Menu.getApplicationMenu()),
+              },
+              releaseWindow: () => {
+                mainWindow = null
+              },
+            })
+          },
+          // REL-04: the real main window closes and comes back (activate).
+          verifyWindows: () =>
+            verifyWindowReopen({
+              open: async () => {
+                runtimeReady = true
+                createWindow()
+                return await windowLoaded(mainWindow!)
+              },
+              close: (win) => windowClosed(win as BrowserWindow),
+              reopen: async () => {
+                app.emit('activate')
+                if (!mainWindow) throw new Error('activate opened no window')
+                return await windowLoaded(mainWindow)
+              },
+              current: () => mainWindow,
+            }),
+          verifyHelpers: smokeHelpers,
+        })
+      }
+      // REL-04: leave the way Cmd+Q does (before-quit flushes and closes
+      // Core, will-quit writes "quit" to main.log); the runner checks it.
+      mainLog.info('packaged smoke finished; quitting')
+      app.quit()
       return
     }
   } catch (err) {

@@ -8,6 +8,7 @@ const {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -20,10 +21,22 @@ const {
   verifyMacHardening,
 } = require('./harden-package.cjs')
 const { checkStartupLog } = require('./packaged-log-check.cjs')
+const {
+  UPGRADE_FIXTURE,
+  checkCleanQuit,
+  checkUpgradeReceipt,
+  launchServicesLeftovers,
+  nmHostHandshake,
+  prepareUpgradeHome,
+  waitForNoLeftovers,
+} = require('./packaged-smoke-extras.cjs')
 
 const desktopRoot = resolve(__dirname, '..')
 const repoRoot = resolve(desktopRoot, '..')
 const appPath = resolveAppPath(process.argv.slice(2))
+// Not the real path: macOS sockets allow 104 bytes, and the helper socket
+// under this folder (or under TMPDIR, which is this folder) fits only with
+// the shorter /var/folders form. The leftover check uses both forms.
 const tempRoot = mkdtempSync(join(tmpdir(), 'emperor-packaged-smoke-'))
 const stateRoot = join(tempRoot, 'state')
 const homeRoot = join(tempRoot, 'home')
@@ -31,6 +44,10 @@ const emptyBin = join(tempRoot, 'empty-bin')
 const appDataRoot = join(homeRoot, 'AppData', 'Roaming')
 const localAppDataRoot = join(homeRoot, 'AppData', 'Local')
 const receiptPath = join(tempRoot, 'receipt.json')
+// REL-04: the second launch, on a copy of a 0.1.0-preview.4 Emperor Home.
+// No longer than `state`: the helper socket path limit above.
+const upgradeStateRoot = join(tempRoot, 'up')
+const upgradeReceiptPath = join(tempRoot, 'upgrade-receipt.json')
 mkdirSync(stateRoot, { recursive: true })
 mkdirSync(homeRoot, { recursive: true })
 mkdirSync(emptyBin, { recursive: true })
@@ -57,16 +74,50 @@ async function main() {
   // SEC-04: the package itself first. Unsigned is not unsealed: the seal,
   // the hardened runtime and the fuses must all be in place.
   const seal = await verifyPackage(appPath)
+  // REL-04: the Native Messaging host answers Chrome's framing under the
+  // hardened runtime. CI runs no Emperor, so there the handshake may not skip.
+  const nmHost =
+    process.platform === 'darwin'
+      ? await nmHostHandshake(
+          join(
+            bundlePath(appPath),
+            'Contents',
+            'Library',
+            'Helpers',
+            'emperor-nm-host',
+          ),
+          { required: process.env.CI === 'true' },
+        )
+      : { ok: true, skipped: 'not macOS' }
   // A packaged app must not load the page ELECTRON_RENDERER_URL names; this
   // server stands in for it and must see no request.
   const decoy = await startDecoyRenderer()
   let result
+  let upgradeResult
+  let upgradeManifest
   try {
     result = await run(
       appPath,
       args,
       smokeEnvironment({ ELECTRON_RENDERER_URL: decoy.url }),
     )
+    if (result.code === 0) {
+      upgradeManifest = prepareUpgradeHome(UPGRADE_FIXTURE, upgradeStateRoot)
+      upgradeResult = await run(
+        appPath,
+        [
+          ...args.map((arg) =>
+            arg === receiptPath ? upgradeReceiptPath : arg,
+          ),
+          '--emperor-smoke-scenario',
+          'upgrade',
+        ],
+        smokeEnvironment(
+          { ELECTRON_RENDERER_URL: decoy.url },
+          upgradeStateRoot,
+        ),
+      )
+    }
   } finally {
     await decoy.close()
   }
@@ -82,9 +133,42 @@ async function main() {
   const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'))
   validateReceipt(receipt)
   receipt.package = seal
+  receipt.nmHost = nmHost
   // REL-01: the packaged app wrote its startup record to main.log.
   const log = checkStartupLog(stateRoot)
   receipt.mainLog = { bytes: log.bytes, startLine: log.startLine }
+  // REL-04: it left the way Cmd+Q does, and nothing of it kept running.
+  const quit = { fresh: checkCleanQuit(stateRoot).quitLine }
+  await assertNothingLeftRunning()
+
+  // REL-04: the same build on a 0.1.0-preview.4 Emperor Home.
+  if (upgradeResult.code !== 0)
+    throw new Error(
+      `packaged smoke on the 0.1.0-preview.4 home exited ${upgradeResult.code}\n${bounded(upgradeResult.stderr || upgradeResult.stdout)}`,
+    )
+  const upgrade = JSON.parse(readFileSync(upgradeReceiptPath, 'utf8'))
+  checkUpgradeReceipt(upgrade, upgradeManifest)
+  checkStartupLog(upgradeStateRoot)
+  quit.upgrade = checkCleanQuit(upgradeStateRoot).quitLine
+  await assertNothingLeftRunning()
+  // SEC-04/REL-04: the helper copies this smoke launched left LaunchServices.
+  const registered = launchServicesLeftovers([
+    `${tempRoot}/`,
+    `${realpathSync(tempRoot)}/`,
+  ])
+  if (registered.length)
+    throw new Error(
+      `helper copies still registered with LaunchServices:\n${registered.join('\n')}`,
+    )
+  receipt.quit = quit
+  receipt.upgrade = {
+    fromVersion: upgradeManifest.appVersion,
+    sessions: upgrade.sessions,
+    model: upgrade.model,
+    memoryLineKept: true,
+  }
+  if (JSON.stringify(receipt).includes(tempRoot))
+    throw new Error('packaged smoke receipt contains private host paths')
   const outputDir = join(desktopRoot, 'dist', 'packaged-smoke')
   const outputPath = join(outputDir, `${receipt.platform}-${receipt.arch}.json`)
   mkdirSync(outputDir, { recursive: true })
@@ -113,6 +197,26 @@ async function verifyPackage(executable) {
   if (wrong.length)
     throw new Error(`packaged app fuses are wrong: ${wrong.join(', ')}`)
   return { fuses }
+}
+
+/** The .app around a packaged executable (macOS), else its folder. */
+function bundlePath(executable) {
+  return process.platform === 'darwin'
+    ? resolve(executable, '..', '..', '..')
+    : resolve(executable, '..')
+}
+
+/** No process of the app bundle or of the smoke folder outlives the app. */
+async function assertNothingLeftRunning() {
+  const left = await waitForNoLeftovers([
+    `${bundlePath(appPath)}/`,
+    `${tempRoot}/`,
+    `${realpathSync(tempRoot)}/`,
+  ])
+  if (left.length)
+    throw new Error(
+      `processes still running after the packaged app quit:\n${left.join('\n')}`,
+    )
 }
 
 function startDecoyRenderer() {
@@ -179,7 +283,7 @@ function resolveAppPath(argv) {
   return existing[0]
 }
 
-function smokeEnvironment(extra = {}) {
+function smokeEnvironment(extra = {}, root = stateRoot) {
   const env = {
     ...extra,
     // A synthetic HOME on every platform, macOS included: Emperor's secrets
@@ -190,7 +294,7 @@ function smokeEnvironment(extra = {}) {
     // macOS: NSHomeDirectory too (AppKit saved state, caches), not only $HOME.
     ...(process.platform === 'darwin' ? { CFFIXED_USER_HOME: homeRoot } : {}),
     USERPROFILE: homeRoot,
-    EMPEROR_CONFIG_DIR: stateRoot,
+    EMPEROR_CONFIG_DIR: root,
     // The packaged app checks every model request against its log (KRN-13).
     EMPEROR_ASSERT_INVARIANT: '1',
     EMPEROR_BUILD_COMMIT: readGitCommit(repoRoot),
@@ -274,6 +378,7 @@ function validateReceipt(receipt) {
     'terminal',
     'seatbelt',
     'renderer',
+    'windows',
   ]) {
     if (receipt.operations?.[name]?.ok !== true)
       throw new Error(`packaged smoke operation failed: ${name}`)
@@ -306,6 +411,7 @@ function validateReceipt(receipt) {
     renderer.webPreferences?.contextIsolation !== true ||
     renderer.webPreferences?.nodeIntegration !== false ||
     renderer.security?.rendererUrlPinned !== true ||
+    renderer.security?.protocolTraversalRefused !== true ||
     !['enabled', 'disabled-for-linux-test'].includes(
       renderer.chromiumSandbox,
     ) ||
