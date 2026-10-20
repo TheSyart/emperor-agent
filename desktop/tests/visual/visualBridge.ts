@@ -4761,6 +4761,22 @@ export async function installVisualCoreBridge(
                 lastSeq: raw?.events.at(-1)?.seq ?? -1,
               }
             }
+            case 'sessions.search': {
+              // Content search (UI-S02 palette): one canned hit.
+              const query = (args[0] as { query: string }).query
+              return {
+                hits: query.includes('设计稿')
+                  ? [
+                      {
+                        sessionId: 'chat-main',
+                        title: '普通对话',
+                        role: 'assistant',
+                        snippet: '…对照设计稿，侧栏的间距应该收紧到 8px…',
+                      },
+                    ]
+                  : [],
+              }
+            }
             case 'sessions.lineage':
               return lineageOf((args[0] as { sessionId: string }).sessionId)
             case 'sessions.children':
