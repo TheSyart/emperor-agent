@@ -292,8 +292,9 @@ async function openBuildSession(
           filePaths: [dir],
         })) as typeof dialog.showOpenDialog
       }, project)
-      await page.getByRole('button', { name: '新建项目会话' }).click()
-      await page.getByRole('menuitem', { name: '选择项目文件夹…' }).click()
+      // UI-S01: projects are opened from the 项目 header's 「+」 menu.
+      await page.getByRole('button', { name: '项目操作' }).click()
+      await page.getByRole('menuitem', { name: '使用现有文件夹' }).click()
       await page.getByLabel('消息输入框').first().waitFor({ timeout: 10_000 })
     },
     { critical: true },

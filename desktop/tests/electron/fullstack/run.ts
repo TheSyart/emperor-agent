@@ -533,8 +533,9 @@ async function fullstack(
       const sealedVault = JSON.parse(
         readFileSync(join(home, 'computer-use', 'vault.json'), 'utf8'),
       ) as { version?: number }
+      // SEC-09 writes version 3 (every field bound to its entry).
       if (
-        sealedVault.version !== 2 ||
+        (sealedVault.version ?? 0) < 3 ||
         statSync(join(home, 'computer-use', 'secrets', 'local.key')).size !== 32
       )
         throw new Error('vault is not sealed with the local key')
