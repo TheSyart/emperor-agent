@@ -1,8 +1,11 @@
+import { createHash } from 'node:crypto'
 import {
+  existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
@@ -576,6 +579,25 @@ describe('plugin MCP servers and hooks through CoreApi', () => {
   })
 })
 
+/** A plugin whose hook logs every bash call into its data folder. */
+const HOOK_KIT: PackageFiles = portablePackage('hook-kit', {
+  'hooks/hooks.json': {
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: 'Bash',
+          hooks: [
+            {
+              type: 'command',
+              command: 'echo fired >> "$PLUGIN_DATA/hook.log"',
+            },
+          ],
+        },
+      ],
+    },
+  },
+})
+
 async function installAs(
   api: ApiFixture['api'],
   files: PackageFiles,
@@ -591,7 +613,127 @@ async function installAs(
   )
 }
 
+function projectIntents(stateRoot: string, project: string): string {
+  const id = createHash('sha256')
+    .update(realpathSync(project), 'utf8')
+    .digest('hex')
+    .slice(0, 16)
+  return join(stateRoot, 'projects', id, 'plugins.json')
+}
+
 describe('plugin trust through CoreApi (SEC-07)', () => {
+  it('6–7: the Agent writing .emperor/settings.json only suggests; the user’s confirmation enables it, kept in stateRoot', async () => {
+    fixture = await makeApi({
+      replies: [
+        // In project B the Agent turns the plugin on in the repository file.
+        {
+          tools: [
+            {
+              id: 'w1',
+              name: 'write',
+              args: {
+                file_path: '.emperor/settings.json',
+                content: '{"enabledPlugins":{"hook-kit":true}}\n',
+              },
+            },
+          ],
+        },
+        ...bashTurn('b1'),
+        ...bashTurn('b2'),
+      ],
+    })
+    const { api, stateRoot } = fixture
+    const projectA = realpathSync(tmp('emperor-sec07-a-'))
+    const projectB = realpathSync(tmp('emperor-sec07-b-'))
+    const a = api.sessions.create({
+      title: 'A',
+      mode: 'build',
+      project_path: projectA,
+    })
+    const b = api.sessions.create({
+      title: 'B',
+      mode: 'build',
+      project_path: projectB,
+    })
+    const viewB = { sessionId: String(b.id) }
+    await installAs(api, HOOK_KIT, 'hook-kit', 'project', {
+      sessionId: String(a.id),
+    })
+    const log = join(stateRoot, 'plugins', 'data', 'hook-kit', 'hook.log')
+    const row = async () =>
+      (
+        await invokeCoreOperation(api, 'plugins.list', [], { view: viewB })
+      ).find(
+        (plugin) =>
+          plugin.pluginId === 'hook-kit' && plugin.scope === 'project',
+      )!
+
+    await api.chat.submit({ content: 'turn it on', sessionId: String(b.id) })
+    expect(
+      readFileSync(join(projectB, '.emperor', 'settings.json'), 'utf8'),
+    ).toContain('hook-kit')
+    // The bash call after the write: the plugin's hook did not run.
+    expect(existsSync(log)).toBe(false)
+    expect(await row()).toMatchObject({
+      enabled: false,
+      activation: 'disabled',
+      suggested: true,
+    })
+
+    await invokeCoreOperation(
+      api,
+      'plugins.setEnabled',
+      [{ pluginId: 'hook-kit', scope: 'project', enabled: true }],
+      { view: viewB },
+    )
+    expect(await row()).toMatchObject({ enabled: true, activation: 'active' })
+    expect((await row()).suggested).toBeFalsy()
+    expect(
+      JSON.parse(readFileSync(projectIntents(stateRoot, projectB), 'utf8')),
+    ).toMatchObject({ enabledPlugins: { project: { 'hook-kit': true } } })
+    expect(
+      readFileSync(join(projectB, '.emperor', 'settings.json'), 'utf8'),
+    ).toBe('{"enabledPlugins":{"hook-kit":true}}\n')
+
+    await api.chat.submit({ content: 'again', sessionId: String(b.id) })
+    expect(readFileSync(log, 'utf8')).toBe('fired\n')
+  })
+
+  it('8: a project’s choice from before 0.2 moves to stateRoot at the first start and stays enabled', async () => {
+    const root = tmp('emperor-sec07-upgrade-')
+    const stateRoot = join(root, 'home')
+    fixture = await makeApi({ root, stateRoot })
+    const project = realpathSync(tmp('emperor-sec07-old-'))
+    const session = fixture.api.sessions.create({
+      title: 'Old',
+      mode: 'build',
+      project_path: project,
+    })
+    const view = { sessionId: String(session.id) }
+    await installAs(fixture.api, HOOK_KIT, 'hook-kit', 'project', view)
+    await fixture.api.close()
+    fixture = null
+    // What 0.1 left: the choice in the project's own file, none in stateRoot,
+    // and no record that the move already ran.
+    rmSync(projectIntents(stateRoot, project), { force: true })
+    rmSync(join(stateRoot, 'plugins', 'project-intents-migration.json'), {
+      force: true,
+    })
+    mkdirSync(join(project, '.emperor'), { recursive: true })
+    writeFileSync(
+      join(project, '.emperor', 'settings.json'),
+      JSON.stringify({ enabledPlugins: { 'hook-kit': true } }),
+    )
+
+    fixture = await makeApi({ root, stateRoot })
+    const plugin = fixture.api.plugins
+      .list(view)
+      .find((item) => item.pluginId === 'hook-kit')!
+    expect(plugin).toMatchObject({ enabled: true, activation: 'active' })
+    expect(plugin.suggested).toBeFalsy()
+    expect(existsSync(projectIntents(stateRoot, project))).toBe(true)
+  })
+
   it('2, 3: a plugin hook gets the variables its manifest declares and not the credentials; a failure reaches the detail', async () => {
     vi.stubEnv('SEC07_DECLARED', 'declared-value')
     vi.stubEnv('OPENAI_API_KEY', 'sk-sec07-core-api')

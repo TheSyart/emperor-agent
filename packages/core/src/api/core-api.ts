@@ -566,6 +566,9 @@ export class CoreApi {
           ),
       },
       onChanged: () => this.pluginsChanged(),
+      // Pre-0.2 project choices move to stateRoot once (SEC-07).
+      knownProjects: () =>
+        kept.projectStore.list().map((project) => project.project_path),
     })
     // A plugin hook starting or stopping to fail re-reads its detail.
     host.pluginHookHealth.onChange(() => this.emitPluginsChanged('hooks'))

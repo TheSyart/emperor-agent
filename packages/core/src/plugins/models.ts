@@ -177,6 +177,11 @@ export interface PluginSummary {
   readonly effective: boolean
   readonly toggleable: boolean
   readonly uninstallable: boolean
+  /**
+   * A project row the repository's `.emperor/settings.json` asks to enable
+   * and the user has not decided on yet (SEC-07); absent otherwise.
+   */
+  readonly suggested?: boolean
   /** Real member counts (contract §2). */
   readonly capabilities: {
     readonly skills: number
