@@ -191,6 +191,8 @@ function smokeEnvironment(extra = {}) {
     ...(process.platform === 'darwin' ? { CFFIXED_USER_HOME: homeRoot } : {}),
     USERPROFILE: homeRoot,
     EMPEROR_CONFIG_DIR: stateRoot,
+    // The packaged app checks every model request against its log (KRN-13).
+    EMPEROR_ASSERT_INVARIANT: '1',
     EMPEROR_BUILD_COMMIT: readGitCommit(repoRoot),
     EMPEROR_SMOKE_NODE: process.execPath,
     EMPEROR_SMOKE_NPM_CLI: process.env.npm_execpath || '',

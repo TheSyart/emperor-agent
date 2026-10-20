@@ -9,6 +9,13 @@ export const configureExecutors = (
 ) => invokeCore('executors.configure', input)
 export const probeExecutor = (input: CoreOperationArgs<'executors.probe'>[0]) =>
   invokeCore('executors.probe', input)
+/** 设置令牌 (AGT-02): the token goes to Core once and never comes back. */
+export const setExecutorCredential = (
+  input: CoreOperationArgs<'executors.setCredential'>[0],
+) => invokeCore('executors.setCredential', input)
+export const clearExecutorCredential = (
+  input: CoreOperationArgs<'executors.clearCredential'>[0],
+) => invokeCore('executors.clearCredential', input)
 export const getDelegation = (input: CoreOperationArgs<'delegations.get'>[0]) =>
   invokeCore('delegations.get', input)
 export const getDelegationReceipt = (

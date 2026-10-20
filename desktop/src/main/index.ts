@@ -26,10 +26,12 @@ import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { CoreApi } from '@emperor/core/api'
 import {
+  applyPendingHomeRestore,
   bootstrapEmperorHome,
   legacyDefaultStateRoot,
   loadBundledToolCatalog,
   localSecretKeyPath,
+  runPendingDataMigrations,
   sealerFromSecretStore,
   setCoreLogSink,
   type SecretSealer,
@@ -44,6 +46,7 @@ import {
   registerDiagnosticsBundleIpc,
 } from './diagnostics-bundle-ipc'
 import { electronFrameworkBinary, readFuseStates } from './fuse-state'
+import { registerHomeBackupIpc, type HomeBackupStore } from './home-backup-ipc'
 
 import { offerMoveToApplications } from './app-location'
 import { resolveConfig } from './config'
@@ -532,6 +535,33 @@ registerDiagnosticsBundleIpc({
   bundles: diagnosticsBundles,
   chooseTarget: (name) => chooseBundleTarget(name, mainWindow),
   reveal: (target) => shell.showItemInFolder(target),
+  homeDir: os.homedir(),
+})
+
+// REL-03 设置 › 高级 › 存储 › 备份与恢复: its code loads on first use.
+let homeBackups: HomeBackupStore | null = null
+registerHomeBackupIpc({
+  ipcMain,
+  authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
+  backups: async () => {
+    if (homeBackups) return homeBackups
+    const { HomeBackups } = await import('./home-backup')
+    homeBackups = new HomeBackups({
+      home: config.stateRoot,
+      tempDir: app.getPath('temp'),
+      appVersion: app.getVersion(),
+      vault: () => credentialVault,
+      sealer: () => coreSecretSealer,
+    })
+    return homeBackups
+  },
+  chooseTarget: (name) => chooseHomeBackupFile(name, 'save'),
+  chooseBackup: () => chooseHomeBackupFile('', 'open'),
+  reveal: (target) => shell.showItemInFolder(target),
+  relaunch: () => {
+    app.relaunch()
+    app.quit()
+  },
   homeDir: os.homedir(),
 })
 
@@ -1025,6 +1055,39 @@ async function chooseBundleTarget(
     owner && !owner.isDestroyed()
       ? await dialog.showSaveDialog(owner, options)
       : await dialog.showSaveDialog(options)
+  return result.canceled || !result.filePath ? null : result.filePath
+}
+
+/** Main's own save / open dialog for a `.emperor-backup.zip` (REL-03). */
+async function chooseHomeBackupFile(
+  name: string,
+  kind: 'save' | 'open',
+): Promise<string | null> {
+  const owner = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
+  const filters = [{ name: 'Emperor 备份', extensions: ['zip'] }]
+  if (kind === 'open') {
+    const options: OpenDialogOptions = {
+      title: '从备份恢复',
+      buttonLabel: '选择',
+      defaultPath: app.getPath('documents'),
+      filters,
+      properties: ['openFile'],
+    }
+    const result = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options)
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  }
+  const options: SaveDialogOptions = {
+    title: '导出备份',
+    buttonLabel: '导出',
+    defaultPath: path.join(app.getPath('documents'), name),
+    filters,
+    properties: ['createDirectory', 'showOverwriteConfirmation'],
+  }
+  const result = owner
+    ? await dialog.showSaveDialog(owner, options)
+    : await dialog.showSaveDialog(options)
   return result.canceled || !result.filePath ? null : result.filePath
 }
 
@@ -1523,7 +1586,19 @@ async function startup(): Promise<void> {
           : null,
       })
     }
+    // REL-03: a restore 设置 › 存储 scheduled is applied before anything
+    // opens the home; then the data migrations the home is behind on.
+    const restored = await applyPendingHomeRestore(config.stateRoot).catch(
+      (error: unknown) => {
+        console.warn(`Restore from backup failed: ${String(error)}`)
+        return null
+      },
+    )
+    if (restored) console.info(`Restore from backup ${restored.status}`)
     prepareMainRuntime()
+    await runPendingDataMigrations(config.stateRoot, {
+      appVersion: app.getVersion(),
+    })
     createComputerUseHost()
     userDownloads = createUserDownloads()
     // The Chrome/Edge bridge is optional: if another Emperor holds its
@@ -1542,6 +1617,10 @@ async function startup(): Promise<void> {
       sessionEventBridge,
       authorizeIpc: (event) => trustedRendererPolicy.authorizeIpc(event),
       coreOptions: {
+        // Development builds check every model request against its session
+        // log (KRN-13); production leaves it to EMPEROR_ASSERT_INVARIANT=1.
+        assertRequestInvariant:
+          !app.isPackaged || process.env.EMPEROR_ASSERT_INVARIANT === '1',
         verifyGeneratedImage: (bytes) => {
           const image = nativeImage.createFromBuffer(Buffer.from(bytes))
           const size = image.getSize()
@@ -1577,6 +1656,17 @@ async function startup(): Promise<void> {
         webFetchClient,
         logDirectory: logLocation.dir,
         ...(coreSecretSealer ? { secretSealer: coreSecretSealer } : {}),
+        // Dev-build e2e only: external executors look for sign-ins in this
+        // folder instead of ~/.claude and never run the login shell (AGT-02).
+        ...(!app.isPackaged && process.env.EMPEROR_E2E_EXECUTOR_HOME
+          ? {
+              executorHome: {
+                home: process.env.EMPEROR_E2E_EXECUTOR_HOME,
+                environment: { PATH: process.env.PATH ?? '' },
+                loginShell: { read: async () => ({}) },
+              },
+            }
+          : {}),
       },
     })
     const core = coreApi

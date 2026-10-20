@@ -86,6 +86,12 @@ type VisualBridge = {
   exportDiagnosticsBundle?: (id: string) => Promise<unknown>
   revealDiagnosticsBundle?: (id: string) => Promise<unknown>
   discardDiagnosticsBundle?: (id: string) => Promise<unknown>
+  planHomeBackup?: () => Promise<unknown>
+  exportHomeBackup?: (input: Record<string, unknown>) => Promise<unknown>
+  revealHomeBackup?: () => Promise<unknown>
+  openHomeBackup?: () => Promise<unknown>
+  restoreHomeBackup?: (id: string, passphrase?: string) => Promise<unknown>
+  discardHomeBackup?: (id: string) => Promise<unknown>
 }
 
 declare global {
@@ -220,6 +226,127 @@ export async function installVisualCoreBridge(
         visualAgentTab !== null
       if (visualTheme === 'light' || visualTheme === 'dark')
         localStorage.setItem('emperor.theme', visualTheme)
+      // AGT-02: `?visualExecutors=signed-out|expired|soon|token` gives
+      // 设置 › 子智能体 an enabled Claude Code in that sign-in state.
+      const visualExecutorsMode = visualParams.get('visualExecutors')
+      const visualExecutorProfiles = [
+        {
+          id: 'claude-default',
+          backend: 'claude-code',
+          enabled: true,
+          executableSource: 'bundled',
+          executablePath: 'claude',
+          authRef: { kind: 'managed-cli-login' },
+          stateDirectoryId: 'claude-default',
+          concurrencyLimit: 1,
+        },
+        {
+          id: 'codex-default',
+          backend: 'codex',
+          enabled: false,
+          executablePath: 'codex',
+          authRef: { kind: 'managed-cli-login' },
+          stateDirectoryId: 'codex-default',
+          concurrencyLimit: 1,
+        },
+      ]
+      let visualExecutorConfig: Record<string, unknown> = {
+        schemaVersion: 1,
+        revision: 3,
+        touchedAt: 1,
+        profiles: visualExecutorProfiles,
+        limits: {
+          globalConcurrency: 2,
+          maxQueuedMessages: 16,
+          maxRunsPerTask: 32,
+          maxDepth: 3,
+          runTimeoutMs: 1800000,
+          questionTimeoutMs: 900000,
+          estimatedBudgetUsd: 10,
+        },
+      }
+      const visualClaudeAuth = (mode: string | null) =>
+        mode === 'token'
+          ? { source: 'emperor', kind: 'oauth-token', last4: 'a1b2' }
+          : mode === 'soon'
+            ? {
+                source: 'credentials-file',
+                kind: 'oauth-token',
+                expiresAt: Date.now() + 6 * 60_000,
+                expiresSoon: true,
+              }
+            : mode === 'expired'
+              ? {
+                  source: null,
+                  problem: 'expired',
+                  expiresAt: Date.now() - 3_600_000,
+                }
+              : { source: null, problem: 'missing' }
+      const visualExecutorProbe = (id: string, mode: string | null) => {
+        const base = {
+          checkedAt: Date.now(),
+          authVerified: false,
+          executableVersion: id === 'codex-default' ? '0.153.4' : '2.1.281',
+          capabilities: {
+            persistentSession: true,
+            queuedFollowup: true,
+            steer: id === 'codex-default',
+            interrupt: true,
+            questions: true,
+            structuredOutput: true,
+            processBoundary: 'os',
+            usage: 'tokens',
+          },
+        }
+        if (id === 'codex-default')
+          return { ...base, status: 'available', localAuthChecked: true }
+        const auth = visualClaudeAuth(mode)
+        return auth.source
+          ? {
+              ...base,
+              status: 'available',
+              localAuthChecked: true,
+              executableSource: 'bundled',
+              auth,
+            }
+          : {
+              ...base,
+              status: 'needs_auth',
+              localAuthChecked: false,
+              executableSource: 'bundled',
+              diagnostic:
+                auth.problem === 'expired' ? 'AUTH_EXPIRED' : 'AUTH_REQUIRED',
+              auth,
+            }
+      }
+      let visualClaudeMode = visualExecutorsMode
+      const visualExecutorList = () => ({
+        config: visualExecutorConfig,
+        diagnostic: null,
+        profiles: visualExecutorProfiles.map((profile) => ({
+          profile,
+          probe: visualExecutorProbe(profile.id, visualClaudeMode),
+          specialties: [],
+          runtime: {
+            profileId: profile.id,
+            reportedModel: null,
+            configuredModel: null,
+            modelSource: null,
+            provider: null,
+            advertisedTools: null,
+            observedTools: [],
+            hostAllowedTools: [],
+            nativeCapabilities: {
+              search: { status: 'unverified' },
+              imageGeneration: {
+                status:
+                  profile.backend === 'codex' ? 'unverified' : 'unsupported',
+              },
+            },
+          },
+          consent: null,
+        })),
+      })
       const project = {
         project_id: 'visual_project',
         project_path: projectDir,
@@ -1578,6 +1705,58 @@ export async function installVisualCoreBridge(
         ledger: 1_572_864,
         delegations: 9_437_184,
         other: 412_090_368,
+      }
+      // REL-03 `storage.versions`: `?visualDataVersions=newer` has two files
+      // a newer Emperor wrote; `=downgrade` also ran 0.3.0 last time.
+      function visualDataVersions() {
+        const mode = visualParams.get('visualDataVersions') ?? ''
+        const newer = mode === 'newer' || mode === 'downgrade'
+        const file = (
+          id: string,
+          path: string,
+          label: string,
+          version: number,
+          supported: number,
+          owner = 'core',
+        ) => ({
+          id,
+          path,
+          label,
+          owner,
+          version,
+          supported,
+          state: version > supported ? 'newer' : 'ok',
+        })
+        return {
+          appVersion: '0.2.0',
+          lastRunVersion: '0.2.0',
+          previousRunVersion: mode === 'downgrade' ? '0.3.0' : '0.2.0',
+          downgradedFrom: mode === 'downgrade' ? '0.3.0' : null,
+          dataVersion: 1,
+          supportedDataVersion: 1,
+          files: [
+            file('installation', 'installation.json', '安装信息', 1, 1),
+            file('settings', 'settings.json', '设置', newer ? 2 : 1, 1),
+            file(
+              'modelConfig',
+              'model_config.json',
+              '模型配置',
+              newer ? 3 : 2,
+              2,
+            ),
+            file('mcpConfig', 'mcp_config.json', 'MCP 服务器', 1, 1),
+            file('scheduler', 'scheduler/jobs.json', '定时任务', 1, 1),
+            file(
+              'vault',
+              'computer-use/vault.json',
+              '密码管理器',
+              3,
+              3,
+              'desktop',
+            ),
+          ],
+          lastRestore: null,
+        }
       }
       function visualStorageUsage() {
         const categories = Object.entries(visualStorage).map(([id, bytes]) => ({
@@ -4446,6 +4625,113 @@ export async function installVisualCoreBridge(
           ).__visualDiagnosticsDiscarded ??= []).push(id)
           return { ok: true }
         },
+        // REL-03 备份与恢复: main counts the backup, asks where to save it
+        // (here: always ~/Documents), opens a backup the user picked and
+        // restarts after a restore. Calls are recorded for the specs.
+        planHomeBackup: async () => ({
+          ok: true,
+          plan: {
+            name: 'Emperor 备份 2026-10-20',
+            categories: [
+              {
+                id: 'config',
+                title: '设置与配置',
+                description: '设置、模型、MCP、Hooks 与子智能体设置',
+                files: 7,
+                bytes: 48_213,
+                optional: false,
+              },
+              {
+                id: 'memory',
+                title: '记忆',
+                description: '长期记忆、用户档案与版本历史',
+                files: 18,
+                bytes: 1_204_118,
+                optional: false,
+              },
+              {
+                id: 'extensions',
+                title: 'Skills、插件与智能体',
+                description: '你安装和编写的 Skills、插件与自定义智能体',
+                files: 214,
+                bytes: 9_437_184,
+                optional: false,
+              },
+              {
+                id: 'projects',
+                title: '项目与定时任务',
+                description: '项目设置和定时任务',
+                files: 6,
+                bytes: 22_016,
+                optional: false,
+              },
+              {
+                id: 'sessions',
+                title: '会话',
+                description: '会话记录、附件与用量记录',
+                files: 1_204,
+                bytes: 128_974_848,
+                optional: true,
+              },
+            ],
+            excluded: [
+              '浏览器登录资料与缓存',
+              'Agent 下载的文件',
+              '日志',
+              '受管环境工具',
+              '运行时与临时文件',
+            ],
+            vault: { state: 'ready', entries: 4 },
+          },
+        }),
+        exportHomeBackup: async (input: Record<string, unknown>) => {
+          ;((
+            window as unknown as {
+              __visualHomeBackupExports?: Array<Record<string, unknown>>
+            }
+          ).__visualHomeBackupExports ??= []).push({ ...input })
+          return {
+            ok: true,
+            name: 'Emperor 备份 2026-10-20.emperor-backup.zip',
+            location: '~/Documents',
+            credentials: typeof input.passphrase === 'string',
+          }
+        },
+        revealHomeBackup: async () => ({ ok: true }),
+        openHomeBackup: async () => ({
+          ok: true,
+          backup: {
+            id: 'r_0123456789ab',
+            name: 'Emperor 备份 2026-10-19.emperor-backup.zip',
+            createdAt: '2026-10-19T08:00:00.000Z',
+            appVersion: '0.2.0',
+            categories: [
+              'config',
+              'memory',
+              'extensions',
+              'projects',
+              'sessions',
+            ],
+            credentials: true,
+            files: 1_449,
+            bytes: 139_685_379,
+            newer: false,
+          },
+        }),
+        restoreHomeBackup: async (id: string, passphrase?: string) => {
+          ;((
+            window as unknown as {
+              __visualHomeBackupRestores?: Array<Record<string, unknown>>
+            }
+          ).__visualHomeBackupRestores ??= []).push({ id, passphrase })
+          return { ok: true }
+        },
+        discardHomeBackup: async (id: string) => {
+          ;((
+            window as unknown as { __visualHomeBackupDiscarded?: string[] }
+          ).__visualHomeBackupDiscarded ??= []).push(id)
+          return { ok: true }
+        },
         openPath: async (target: VisualOpenPathTarget) => {
           // Main resolves these through Core; the harness records what the
           // renderer asked for (an invalid Skill's folder, a Skill, a row).
@@ -5066,6 +5352,8 @@ export async function installVisualCoreBridge(
             // 设置 › 高级 › 任务预算 (KRN-03): the defaults, saved in memory.
             case 'storage.usage':
               return visualStorageUsage()
+            case 'storage.versions':
+              return visualDataVersions()
             case 'storage.clean': {
               const freed = visualStorage.spill - 4_194_304
               visualStorage.spill = 4_194_304
@@ -7657,6 +7945,48 @@ export async function installVisualCoreBridge(
                 sites,
               }
               return visualExternalBrowser
+            }
+            case 'executors.list':
+              return visualExecutorsMode ? visualExecutorList() : {}
+            case 'executors.probe': {
+              if (!visualExecutorsMode) return {}
+              const input = (args[0] || {}) as { profileId?: string }
+              return visualExecutorProbe(
+                String(input.profileId),
+                visualClaudeMode,
+              )
+            }
+            case 'executors.models': {
+              if (!visualExecutorsMode) return {}
+              const input = (args[0] || {}) as { profileId?: string }
+              return {
+                profileId: input.profileId,
+                models: [],
+                configuredModel: null,
+                provider: 'anthropic',
+                checkedAt: Date.now(),
+                diagnostic: null,
+              }
+            }
+            case 'executors.configure': {
+              if (!visualExecutorsMode) return {}
+              const input = (args[0] || {}) as { config?: object }
+              visualExecutorConfig = {
+                ...(input.config as Record<string, unknown>),
+                revision: Number(visualExecutorConfig.revision) + 1,
+              }
+              return visualExecutorConfig
+            }
+            case 'executors.setCredential':
+            case 'executors.clearCredential': {
+              if (!visualExecutorsMode) return {}
+              visualClaudeMode =
+                operationKey === 'executors.setCredential'
+                  ? 'token'
+                  : 'signed-out'
+              return {
+                probe: visualExecutorProbe('claude-default', visualClaudeMode),
+              }
             }
             default:
               return {}

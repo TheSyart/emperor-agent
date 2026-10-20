@@ -98,3 +98,42 @@ describe('CoreApi application facade ownership', () => {
     expect(workspaceService).not.toContain('controlManager.planStore')
   })
 })
+
+describe('one composition root (KRN-13)', () => {
+  it('1 · CoreApi plugs into the kernel through the host’s ports, never its tools or hooks', () => {
+    const source = readFileSync(
+      new URL('./core-api.ts', import.meta.url),
+      'utf8',
+    )
+    expect(source.match(/\bhost\.tools\b/g) ?? []).toEqual([])
+    expect(source.match(/\bhost\.hooks\b/g) ?? []).toEqual([])
+    // Each extension is registered once, in one call.
+    expect(source.match(/\bhost\.extend\(/g) ?? []).toHaveLength(1)
+    for (const retired of [
+      'setPluginReferenceResolver',
+      'setProjectPluginOverrides',
+      'setWorktreeResolver',
+      'setWorkspaceAccessLeaseProvider',
+      'turnFiles.install(',
+    ])
+      expect(source).not.toContain(retired)
+  })
+
+  it('3 · dead code is gone and nothing refers to it', () => {
+    const sources = coreSources().map(({ path, text }) => ({
+      path: path.split('/src/').pop()!,
+      text,
+    }))
+    const found = (pattern: RegExp) =>
+      sources.filter(({ text }) => pattern.test(text)).map(({ path }) => path)
+    expect(found(/\bLifecycleSupervisor\b|\bLifecycleStartupError\b/)).toEqual(
+      [],
+    )
+    expect(found(/\bpreviewInstall\b|\bconfirmInstall\b/)).toEqual([])
+    expect(found(/\brefreshRuntimeContext\b/)).toEqual([])
+    expect(found(/void createGoalTools\b/)).toEqual([])
+    expect(sources.some(({ path }) => path === 'runtime/lifecycle.ts')).toBe(
+      false,
+    )
+  })
+})

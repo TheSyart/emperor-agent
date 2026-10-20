@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -8,9 +9,11 @@ import {
   unlinkSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import {
   DelegationError,
+  ExecutorAuthError,
+  type ExecutorAuthState,
   type ExecutorBilling,
   type ExecutorProfile,
 } from './types'
@@ -28,6 +31,12 @@ import {
   type CodexAuthLink,
 } from './codex-auth'
 import type { LoginShellEnvironment } from './login-shell'
+import {
+  DEFAULT_DEVELOPMENT_ENVIRONMENT,
+  developmentEnvironment,
+  type DevelopmentEnvironmentSettings,
+} from './dev-environment'
+import type { SecretSealer } from '../../security/secret-sealer'
 /** The one long-lived private directory every login probe of a profile reuses. */
 export const PROBE_RUNTIME_ID = 'probe'
 export interface PreparedRuntime {
@@ -43,6 +52,8 @@ export interface PreparedRuntime {
    * login is a subscription; any API key or credential route is API billing.
    */
   billing: ExecutorBilling
+  /** Claude Code: where its credential came from, or why there is none. */
+  auth?: ExecutorAuthState
 }
 export interface ExecutorCredential {
   apiKey: string
@@ -76,6 +87,15 @@ export class ExecutorRuntimeService {
       ) => Promise<ExecutorCredential>
       /** Provider keys exported in ~/.zshrc (absent from a Dock launch). */
       loginShell?: LoginShellEnvironment
+      /** Where tokens pasted into 设置 › 子智能体 live (AGT-02), read first. */
+      claudeTokens?: { root: string; sealer: SecretSealer }
+      /** What a task's environment passes through (设置 › 子智能体 › 高级, AGT-08). */
+      developmentEnvironment?: () => DevelopmentEnvironmentSettings
+      /** Test hooks: the git identity and gh token readers. */
+      readGitIdentity?: (
+        home: string,
+      ) => Promise<{ name?: string; email?: string }>
+      readGhToken?: (home: string) => Promise<string | null>
     },
   ) {}
   /**
@@ -108,7 +128,8 @@ export class ExecutorRuntimeService {
     options: { allowUnauthenticatedConfig?: boolean } = {},
   ): Promise<PreparedRuntime> {
     let authenticationAvailable = true,
-      codexAuth: CodexAuthLink | undefined
+      codexAuth: CodexAuthLink | undefined,
+      auth: ExecutorAuthState | undefined
     safeDelegationKey(profile.stateDirectoryId)
     safeDelegationKey(id)
     const runtimeRoot = join(
@@ -168,6 +189,7 @@ export class ExecutorRuntimeService {
           'selected route has no credential',
         )
       if (profile.backend === 'claude-code') {
+        auth = { source: 'model-route', kind: 'api-key' }
         environment.ANTHROPIC_API_KEY = credential.apiKey
         if (credential.baseUrl)
           environment.ANTHROPIC_BASE_URL = credential.baseUrl
@@ -207,13 +229,27 @@ export class ExecutorRuntimeService {
           )
         }
       }
+      // The credential comes from one source, in AGT-02's order.
+      const {
+        resolveClaudeCredential,
+        isClaudeCredentialKey,
+        signInMissing,
+        ClaudeTokenStore,
+      } = await import('./claude-auth')
+      const tokens = this.options.claudeTokens
+      const resolved = await resolveClaudeCredential({
+        stored: () =>
+          tokens ? new ClaudeTokenStore(tokens).read(profile.id) : null,
+        settingsEnv: configured,
+        configDirectory: sourceDirectory,
+        ambient,
+        loginShell: this.options.loginShell,
+      })
+      auth = resolved.auth
       const keys = new Set([
-        'ANTHROPIC_API_KEY',
-        'ANTHROPIC_AUTH_TOKEN',
         'ANTHROPIC_BASE_URL',
         'ANTHROPIC_MODEL',
         'ANTHROPIC_DEFAULT_MODEL',
-        'CLAUDE_CODE_OAUTH_TOKEN',
         'ANTHROPIC_CUSTOM_MODEL_OPTION',
         ...[...Object.keys(configured), ...Object.keys(ambient)].filter((k) =>
           /^ANTHROPIC_DEFAULT_[A-Z0-9_]+_MODEL(?:_NAME)?$/.test(k),
@@ -223,6 +259,9 @@ export class ExecutorRuntimeService {
         const value = ambient[key] ?? configured[key]
         if (typeof value === 'string' && value) environment[key] = value
       }
+      for (const [key, value] of Object.entries(resolved.variables))
+        if (isClaudeCredentialKey(key) || !environment[key])
+          environment[key] = value
       const model =
         profile.defaultModel ??
         environment.ANTHROPIC_MODEL ??
@@ -247,37 +286,9 @@ export class ExecutorRuntimeService {
           join(environment.CLAUDE_CONFIG_DIR!, 'settings.json'),
           JSON.stringify(modelSettings),
         )
-      if (
-        !environment.ANTHROPIC_API_KEY &&
-        !environment.ANTHROPIC_AUTH_TOKEN &&
-        !environment.CLAUDE_CODE_OAUTH_TOKEN
-      ) {
-        const path = join(sourceDirectory, '.credentials.json')
-        if (existsSync(path)) {
-          try {
-            const d = JSON.parse(readFileSync(path, 'utf8')) as {
-              claudeAiOauth?: { accessToken?: string }
-            }
-            if (d.claudeAiOauth?.accessToken)
-              environment.CLAUDE_CODE_OAUTH_TOKEN = d.claudeAiOauth.accessToken
-          } catch {
-            throw new DelegationError(
-              'AUTH_REQUIRED',
-              'managed Claude credential file is invalid',
-            )
-          }
-        }
-      }
-      if (
-        !environment.ANTHROPIC_API_KEY &&
-        !environment.ANTHROPIC_AUTH_TOKEN &&
-        !environment.CLAUDE_CODE_OAUTH_TOKEN
-      ) {
+      if (!auth.source) {
         if (!options.allowUnauthenticatedConfig)
-          throw new DelegationError(
-            'AUTH_REQUIRED',
-            'managed Claude login has no resolvable credential',
-          )
+          throw new ExecutorAuthError(auth, signInMissing(auth))
         authenticationAvailable = false
       }
     } else {
@@ -373,6 +384,48 @@ export class ExecutorRuntimeService {
         : codexAuth
           ? 'subscription'
           : 'api'
+    // The task's development environment (AGT-08): not for the login probe,
+    // which only lists models.
+    if (id !== PROBE_RUNTIME_ID) {
+      const dev = await developmentEnvironment({
+        settings:
+          this.options.developmentEnvironment?.() ??
+          DEFAULT_DEVELOPMENT_ENVIRONMENT,
+        ambient,
+        home: this.options.home ?? homedir(),
+        ...(this.options.loginShell
+          ? { loginShell: this.options.loginShell }
+          : {}),
+        ...(this.options.readGitIdentity
+          ? { readGitIdentity: this.options.readGitIdentity }
+          : {}),
+        ...(this.options.readGhToken
+          ? { readGhToken: this.options.readGhToken }
+          : {}),
+      })
+      for (const key of dev.remove) delete environment[key]
+      Object.assign(environment, dev.env)
+      if (dev.pathPrefix.length)
+        environment.PATH = [...dev.pathPrefix, environment.PATH]
+          .filter(Boolean)
+          .join(delimiter)
+      credentialSecrets.push(...dev.secrets)
+      // Claude Code scrubs *_TOKEN from its Bash (AGT-02), so gh also gets
+      // a private hosts.yml in the task's own config folder; it goes away
+      // with the switch.
+      const ghHosts = join(environment.XDG_CONFIG_HOME!, 'gh', 'hosts.yml')
+      if (dev.env.GH_TOKEN) {
+        mkdirSync(join(environment.XDG_CONFIG_HOME!, 'gh'), {
+          recursive: true,
+          mode: 0o700,
+        })
+        durableReplaceSync(
+          ghHosts,
+          `github.com:\n    oauth_token: ${dev.env.GH_TOKEN}\n    git_protocol: https\n`,
+        )
+        chmodSync(ghHosts, 0o600)
+      } else if (existsSync(ghHosts)) unlinkSync(ghHosts)
+    }
     const secretValues = [
       ...credentialSecrets,
       ...Object.entries(environment)
@@ -387,6 +440,7 @@ export class ExecutorRuntimeService {
       authenticationAvailable,
       ...(codexAuth ? { codexAuth } : {}),
       billing,
+      ...(auth ? { auth } : {}),
     }
   }
 }

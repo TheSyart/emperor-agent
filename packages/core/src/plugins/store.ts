@@ -16,6 +16,7 @@ const EMPTY_INSTALLED: InstalledPluginsFileV1 = {
 
 const INSTALLED_CODEC: SnapshotCodec<InstalledPluginsFileV1> = {
   schemaVersion: 1,
+  versionKey: 'schemaVersion',
   encode(value) {
     return value
   },

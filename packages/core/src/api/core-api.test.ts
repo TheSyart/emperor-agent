@@ -83,10 +83,12 @@ const EXPECTED_OPERATIONS = [
   'environment.getInstallLog',
   'environment.getStatus',
   'environment.install',
+  'executors.clearCredential',
   'executors.configure',
   'executors.list',
   'executors.models',
   'executors.probe',
+  'executors.setCredential',
   'files.list',
   'files.preview',
   'files.read',
@@ -231,6 +233,7 @@ const EXPECTED_OPERATIONS = [
   'skills.validate',
   'storage.clean',
   'storage.usage',
+  'storage.versions',
   'tasks.budget',
   'tasks.cancel',
   'tasks.get',
@@ -1727,7 +1730,7 @@ describe('CoreApi sessions and kept services', () => {
     expect(saved).toMatchObject({ events: { PreToolUse: 1 }, errors: [] })
     expect(
       JSON.parse(readFileSync(join(stateRoot, 'hooks.json'), 'utf8')),
-    ).toEqual(config)
+    ).toEqual({ version: 1, ...config })
     expect((await api.hooks.getConfig()).content).toContain('PreToolUse')
     await expect(api.hooks.saveConfig('{not json', VIEW)).rejects.toThrow()
     expect(api.hooks.getMetadata()).toMatchObject({ format: 'claude-code' })

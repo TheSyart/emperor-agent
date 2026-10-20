@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import {
   DelegationError,
   TERMINAL_RUN_PHASES,
+  DEFAULT_CLAUDE_MAX_TURNS,
+  type ExecutorAuthState,
   type ExecutorConfig,
   type DelegationOwner,
   type DelegationStart,
@@ -39,7 +41,7 @@ import type {
   DelegationQuestion,
   DelegationQuestionOutcome,
 } from './interactions'
-import type { ExecutorRegistry } from './registry'
+import { checkSignIn, type ExecutorRegistry } from './registry'
 import type { DelegationWorkspaceService } from '../../workspace/delegation-workspaces'
 import type { DelegationResults } from '../../workspace/delegation-results'
 import {
@@ -67,6 +69,14 @@ export interface DelegationServiceOptions {
   root: string
   config: () => ExecutorConfig
   registry: Pick<ExecutorRegistry, 'requireAvailable' | 'capabilities'>
+  /**
+   * Claude Code's sign-in (AGT-02): resolves what was found, throws
+   * ExecutorAuthError without a usable credential. Checked with the
+   * version at startup and before a dispatch asks the user.
+   */
+  checkAuth?: (
+    profile: ExecutorProfile,
+  ) => Promise<ExecutorAuthState | undefined>
   adapters: Map<string, ExecutorAdapter>
   parent: (owner: DelegationOwner) => DelegationParentContext
   workspaces: Pick<
@@ -679,6 +689,9 @@ export class DelegationService {
           let probe: ExecutorProbe
           try {
             probe = await this.options.registry.requireAvailable(profile)
+            const check = this.options.checkAuth
+            if (check && profile.backend === 'claude-code')
+              probe = (await checkSignIn(probe, () => check(profile))).probe
           } catch (error) {
             probe = {
               status:
@@ -930,7 +943,12 @@ export class DelegationService {
         facts.configuredModel ??
         'CLI default'
     const parts = [
-      'status=' + (probe?.status ?? 'unchecked'),
+      'status=' +
+        (probe?.status === 'needs_auth'
+          ? 'unavailable (not signed in' +
+            (probe.auth?.problem === 'expired' ? ', token expired' : '') +
+            '; do not dispatch: the user sets a token in Settings › 子智能体)'
+          : (probe?.status ?? 'unchecked')),
       ...(probe?.compatibility === 'unverified'
         ? ['protocol unverified (a failure may be the version)']
         : []),
@@ -1141,7 +1159,17 @@ export class DelegationService {
       config.limits.maxDepth,
     )
     const profile = this.profile(spec)
-    const probe = await this.options.registry.requireAvailable(profile, signal)
+    let probe = await this.options.registry.requireAvailable(profile, signal)
+    // Not signed in: fail now, before the user is asked (AGT-02).
+    const check = this.options.checkAuth
+    if (check && profile.backend === 'claude-code') {
+      const signIn = await checkSignIn(probe, () => check(profile))
+      probe = signIn.probe
+      if (signIn.error) {
+        this.facts.setProbe(profile, probe)
+        throw signIn.error
+      }
+    }
     if (
       this.options.consent &&
       !(await this.options.consent(owner, profile, spec, signal))
@@ -1661,6 +1689,11 @@ export class DelegationService {
         },
         outputSchema: spec.outputSchema,
         usageBaseline,
+        ...(record.backend === 'claude-code' && {
+          maxTurns:
+            this.options.config().limits.claudeMaxTurns ??
+            DEFAULT_CLAUDE_MAX_TURNS,
+        }),
         ...(billing === 'api'
           ? { budgetUsd: this.budget.remainingUsd(record.owner.taskScopeId) }
           : {}),
@@ -1867,7 +1900,8 @@ export class DelegationService {
         if (event.type === 'turn_finished') {
           status = event.status
           structured = event.structured
-          if (event.status === 'failed') failureCode = 'EXECUTOR_TURN_FAILED'
+          if (event.status === 'failed')
+            failureCode = event.failureCode ?? 'EXECUTOR_TURN_FAILED'
           summary = boundText(event.text ?? event.error ?? summary, 8192)
           break
         }

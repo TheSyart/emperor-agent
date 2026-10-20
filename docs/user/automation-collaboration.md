@@ -113,6 +113,24 @@ Claude Code 和 Codex 子智能体默认关闭，因为它们会使用你自己�
 
 Codex 登录：Codex 子智能体与你自己的 Codex 共用 `~/.codex/auth.json` 这一份登录，不再复制令牌，子任务刷新登录后你自己的 Codex 也拿到新令牌，不会被登出。同一时间只有一个 Codex 子任务在运行，另一个会排队等待。使用 API Key 的 Codex 只把密钥作为环境变量传给子任务。Emperor 从程序坞或访达启动时，也会读取你在 `~/.zshrc` 里导出的自定义提供方密钥（例如 Azure 的 `AZURE_OPENAI_API_KEY`），Azure 的 `api-version` 等查询参数也会保留。
 
+Claude Code 登录：在「设置 › 子智能体 › Claude Code」的「登录」一栏点「设置令牌」。
+
+- 订阅账号（Pro、Max 等）：在终端运行 `claude setup-token`，按提示在浏览器里登录，把它打印出的长期令牌（以 `sk-ant-oat` 开头）粘贴进来。
+- API Key：选「API Key」，粘贴 `ANTHROPIC_API_KEY`（以 `sk-ant-api` 开头，在 Anthropic Console 创建）。
+- 令牌只保存在这台 Mac 上，用 Emperor 自己的本地密钥加密（与模型 Key、密码管理器用同一把），保存后立即生效；页面只显示「已设置 · 末 4 位」，不会再显示令牌本身。「更换令牌」「移除令牌」在同一栏。
+
+Emperor 按这个顺序找 Claude Code 的登录，用第一个找到的，不把几处的密钥混在一起：① 你在 Emperor 里设置的令牌；② `~/.claude/settings.json` 里 `env` 的 `CLAUDE_CODE_OAUTH_TOKEN` 或 `ANTHROPIC_API_KEY`；③ `~/.claude/.credentials.json`（只用其中的访问令牌）；④ 启动 Emperor 时的环境变量，以及登录 shell（例如 `~/.zshrc`）里导出的这几个变量——从程序坞或访达启动时，Emperor 会在需要时运行一次登录 shell 读取它们，最多等 3 秒。Emperor 不读取 macOS 钥匙串，所以在终端里用 `/login` 登录、只存在钥匙串里的账号，需要按上面的方法设置令牌。「登录」一栏写明当前用的是哪一处。
+
+`.credentials.json` 里的访问令牌有效期很短：过期后显示「令牌已过期」，过期前 10 分钟显示「令牌即将过期」（长任务可能中途失败）；改用 `claude setup-token` 的长期令牌可以避免。没有任何可用登录时，Claude Code 显示「需要登录配置」，主会话也会被告知它不可用，不会再向它派工。
+
+Claude Code 子任务失败时，任务详情写明原因和下一步：「登录令牌已失效或过期」（401，重新设置令牌）、「被限流了」（429 或订阅额度用尽，稍后再试）、「账户余额或计费状态不允许继续调用」（检查 Anthropic Console 的余额与付款方式）、「达到了这次运行的最多轮数」、「对话超出了模型的上下文长度」（把任务拆小或新开子智能体），其他情况为「子智能体这一轮执行失败」并附执行器报告。
+
+开发环境：子智能体在自己隔离的主目录里运行，读不到你的 `~/.gitconfig`、SSH 密钥、nvm 等工具链和 gh 登录。「设置 › 子智能体 › 高级 › 开发环境」逐项决定带上哪些：「Git 身份」（提交时用你 git 配置里的姓名和邮箱）和「网络代理」默认打开；「SSH 代理」（经你的 SSH agent 访问远端仓库，不复制密钥）、「开发工具链」（nvm 的默认 node、volta、rustup / cargo、pyenv）和「允许子智能体使用 GitHub 登录」（把 `gh auth token` 的令牌交给子任务，并在它私有的 gh 配置里写一份，Claude Code 的 Bash 也能用 gh）默认关闭，按需打开。从程序坞启动 Emperor 时，这些变量从你的登录 shell 读取。仓库里的 `CLAUDE.md`、`AGENTS.md` 会作为说明交给 Claude Code，`AGENTS.md` 的摘要会附在 Codex 的任务简报里；仓库的 `.claude/settings.json` 不会被加载（其中的权限放行规则可能绕过 Emperor 的审批）。
+
+每次运行最多轮数：Claude Code 一次运行默认最多调用模型 200 轮，可在「设置 › 子智能体 › 高级 › 每次运行最多轮数」改为 50–1000。用完时这次运行结束，主会话可以发消息让它接着做。
+
+Claude Code 子任务里执行的命令（Bash）拿不到它自己的登录令牌或 API Key，任务里的提示注入无法用 `printenv` 读走这些凭据。
+
 长时间等待：Codex 子智能体向你提问后，过几分钟再回答也不会超时；长时间没有输出的命令（例如构建）也不会被中途停止。只有超过运行上限（默认 30 分钟）时才会停止，结果里写明原因是超时。多轮对话、输出很长的 Codex 子智能体也可以继续派工。
 
 版本：Claude Code 默认使用随 Emperor 发布的版本，本机 claude 自动更新不会影响它；在「设置 › 子智能体 › Claude Code › 查看详情」打开「使用本机安装的 claude」后改用本机版本，需要 2.1 或更高。Codex 使用本机安装的 CLI，需要与 Emperor 验证过的版本同属一个次版本（目前是 0.153.x）；同一次版本但协议有变化时显示「可能不兼容」，仍然可以运行，失败时结果里会注明可能是版本原因；其他版本显示「版本不兼容」和需要的版本范围。

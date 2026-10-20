@@ -277,6 +277,21 @@ main 在 `index.ts` 顶部、任何模块写日志之前（REL-01）：
   - 恢复页没有 Core，用同一个 `DiagnosticsBundles` 与导出函数，经 `emperor:bootstrap-recovery:action` 的 `prepare_diagnostics`、`export_diagnostics`、`discard_diagnostics`（第二个参数 `{ id }`）完成同样的流程。
 - `emperor:open-path` 的 `{ kind: 'diagnostic', rowId: 'logs-path' }` 打开日志目录；Core 经 `CoreApiCreateOptions.logDirectory` 在诊断的 `paths.logsRoot` 里报告它。
 
+### 备份与恢复
+
+「设置 › 高级 › 存储 › 备份与恢复」（REL-03）的通道只对受信主窗口开放（`home-backup-ipc.ts`），路径不过 IPC：保存与打开都由 main 自己的对话框选择（默认「文稿」），打开后的备份只按 `r_` + 12 位十六进制的 id 寻址。备份代码在第一次使用时加载（`./home-backup` 与 Core 的 `loadHomeBackupModule()`，都不在主 bundle 里）。
+
+- `planHomeBackup()` → `emperor:home-backup:plan`：`{ ok: true, plan: { name, categories, excluded, vault: { state: 'empty' | 'ready' | 'locked' | 'unavailable', entries } } }`；
+- `exportHomeBackup({ includeSessions, passphrase?, confirmation? })` → `emperor:home-backup:export`：只转发这三个字段（口令最长 1024）；main 弹保存框，返回 `{ ok: true, name, location, credentials }`（`location` 用 `~`），取消时 `{ ok: false, canceled: true }`；凭据库错误为 `[credential-vault:<reason>] …`，界面用密码管理器的文案；
+- `revealHomeBackup()` → `emperor:home-backup:reveal`：只对这个窗口最近一次导出的文件 `showItemInFolder`；
+- `openHomeBackup()` → `emperor:home-backup:open`：main 弹打开框，解压并校验，返回 `{ ok: true, backup: { id, name, createdAt, appVersion, categories, credentials, files, bytes, newer } }`；
+- `restoreHomeBackup(id, passphrase?)` → `emperor:home-backup:restore`：有口令时先导入凭据库，再安排恢复，回复 `{ ok: true }` 之后 main `app.relaunch()` 并退出；口令错误时 `{ ok: false, error }`，什么都不变；
+- `discardHomeBackup(id)` → `emperor:home-backup:discard`：删除打开但没有恢复的解压目录。
+
+下次启动时 main 在取得数据目录锁之后、`bootstrapEmperorHome` 之前调用 `applyPendingHomeRestore`，之后调用 `runPendingDataMigrations`，然后才创建 Core（见[全局私有存储根架构](global-state-store.md#备份与恢复rel-03)）。
+
+Core 的只读 operation `storage.versions` 返回运行版本（`appVersion`、`lastRunVersion`、`previousRunVersion`、`downgradedFrom`）、数据版本、清单中每个文件的状态与最近一次恢复；界面在启动时读取它显示降级提示与恢复结果。版本更高的文件被写入时，Core 抛 `data_file_newer`（「这个文件来自更新版本的 Emperor，当前版本只读：<文件名>」），经 `toSafe()` 原样到达界面。
+
 ## 渲染层防护
 
 主窗口按「渲染层可能被注入脚本」设计防线（SEC-05），每一层都不依赖其他层：

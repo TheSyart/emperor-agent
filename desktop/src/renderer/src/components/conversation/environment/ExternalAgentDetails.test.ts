@@ -352,3 +352,46 @@ it('shows the chain again under 高级 › 验证后再应用 (AGT-06)', async (
   expect(dom.textContent).toContain('文件交付与检查')
   expect(dom.textContent).toContain('收集成果')
 })
+
+// AGT-02: Claude's failures arrive with a code; the details say the reason
+// in Chinese and what to do next.
+async function failedWith(code: string) {
+  app?.unmount()
+  root?.remove()
+  withRun({ phase: 'failed', failureCode: code, summary: 'API Error' })
+  const body = await mount()
+  const note = body.querySelector<HTMLElement>('[data-failure-code]')!
+  const configureButton = [
+    ...body.querySelectorAll<HTMLButtonElement>('button'),
+  ].find((b) => b.textContent?.includes('打开执行器设置'))
+  return { note, configureButton }
+}
+it('6 · AUTH_EXPIRED says the sign-in expired and how to sign in again', async () => {
+  const { note, configureButton } = await failedWith('AUTH_EXPIRED')
+  expect(note.dataset.failureCode).toBe('AUTH_EXPIRED')
+  expect(note.textContent).toContain('登录令牌已失效或过期')
+  expect(note.textContent).toContain('claude setup-token')
+  expect(note.textContent).toContain('设置令牌')
+  expect(note.textContent).not.toContain('auth login')
+  expect(configureButton).toBeTruthy()
+})
+it('7 · RATE_LIMITED says it hit a rate or usage limit and to wait', async () => {
+  const { note } = await failedWith('RATE_LIMITED')
+  expect(note.textContent).toContain('限流')
+  expect(note.textContent).toContain('稍后')
+})
+it('8 · MAX_TURNS names the limit and where to raise it', async () => {
+  const { note, configureButton } = await failedWith('MAX_TURNS')
+  expect(note.textContent).toContain('最多轮数')
+  expect(note.textContent).toContain('设置 › 子智能体 › 高级')
+  expect(configureButton).toBeTruthy()
+})
+it.each([
+  ['BILLING', '余额'],
+  ['CONTEXT_OVERFLOW', '上下文'],
+  ['EXECUTOR_TURN_FAILED', '执行失败'],
+])('names %s in Chinese with a next step', async (code, text) => {
+  const { note } = await failedWith(code)
+  expect(note.textContent).toContain(text)
+  expect(note.querySelector('[data-failure-next]')!.textContent).not.toBe('')
+})

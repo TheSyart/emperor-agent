@@ -27,6 +27,7 @@ import {
 } from '../workspace/file-preview'
 import type { RuntimePaths } from '../runtime/paths'
 import { HarnessHost, type HarnessHostOptions } from '../harness/host/host'
+import type { WorkspaceAccessLeaseProvider } from '../harness/tools/registry'
 import {
   SessionRequiredError,
   type BackgroundTurnOptions,
@@ -144,6 +145,7 @@ import {
   type RetentionReport,
   type StorageUsage,
 } from '../storage/retention'
+import type { DataVersionsReport } from '../storage/data-files'
 import { searchSessionLogs, type SessionSearchHit } from '../sessions/search'
 import { CoreWorkspaceApplicationService } from './services/workspace-application-service'
 import {
@@ -183,7 +185,10 @@ import { TurnSnapshots } from '../workspace/turn-snapshots'
 import { DelegationWorkspaceService } from '../workspace/delegation-workspaces'
 import { SnapshotService } from '../workspace/delegation-snapshot'
 import { DelegationResults } from '../workspace/delegation-results'
-import { ExecutorConfigStore } from '../harness/delegation/config'
+import {
+  developmentEnvironmentOf,
+  ExecutorConfigStore,
+} from '../harness/delegation/config'
 import { ExecutorFactsStore } from '../harness/delegation/facts'
 import { CoreExecutorService } from './services/executor-service'
 import {
@@ -210,7 +215,10 @@ import { ExecutorRegistry } from '../harness/delegation/registry'
 import { DelegationService } from '../harness/delegation/service'
 import { ExecutorRuntimeService } from '../harness/delegation/runtime'
 import { ExecutorConsentStore } from '../harness/delegation/consent'
-import { createLoginShellEnvironment } from '../harness/delegation/login-shell'
+import {
+  createLoginShellEnvironment,
+  type LoginShellEnvironment,
+} from '../harness/delegation/login-shell'
 import { ExecutorModelCatalogService } from '../harness/delegation/models'
 import { nativeGeneratedImageRoot } from '../harness/delegation/image-proof'
 import { ClaudeExecutorAdapter } from '../harness/delegation/adapters/claude'
@@ -265,6 +273,15 @@ export interface CoreApiCreateOptions extends HarnessHostOptions {
   enableFirstRunOnboarding?: boolean
   /** Where the host writes its logs (REL-01); diagnostics show it. */
   logDirectory?: string | null
+  /**
+   * Test hook: the home, environment and login shell external executors
+   * read sign-ins from (defaults: the user's own).
+   */
+  executorHome?: {
+    home?: string
+    environment?: NodeJS.ProcessEnv
+    loginShell?: LoginShellEnvironment
+  } | null
   /** Test hook: the GitHub CLI seen by Pull Request, Issue and CI reads. */
   github?: Partial<
     Pick<
@@ -394,6 +411,8 @@ export class CoreApi {
   /** Retention sweep and 设置 › 高级 › 存储 (KRN-12). */
   readonly retention: RetentionService
   private retentionAtStartup: Promise<void> | null = null
+  /** The release running (REL-03 `storage.versions`). */
+  private readonly appVersion: string
   readonly workspaceApplicationService: CoreWorkspaceApplicationService
   readonly commandApplicationService: CoreCommandApplicationService
   readonly sessionTransitionService: SessionTransitionService
@@ -444,7 +463,6 @@ export class CoreApi {
     this.configService = new CoreConfigService(
       this.paths.stateRoot,
       {
-        refreshRuntimeContext: () => {},
         reconcileProfileOnboarding: () => {
           this.onboardingService.reconcile()
         },
@@ -501,7 +519,7 @@ export class CoreApi {
     })
     this.hooksService = new CoreHooksService({
       stateRoot: this.paths.stateRoot,
-      hooks: host.hooks,
+      hooks: host.hookConfig,
       projectRoot: (view) => this.viewProjectRoot(view),
       assertMutation: (area, action, view) =>
         this.assertMutation(area, action, view),
@@ -522,7 +540,6 @@ export class CoreApi {
       sessionLog: (sessionId) => host.sessionLog(sessionId),
       compactNow: (sessionId) => host.compactNow(sessionId),
       measureContext: (sessionId) => host.measureContext(sessionId),
-      refreshRuntimeContext: () => {},
       schedulerService: kept.schedulerService,
     })
     this.pluginService = new PluginApplicationService({
@@ -615,19 +632,9 @@ export class CoreApi {
         pluginSkippedTools: (key) => kept.mcpClient.pluginSkippedTools(key),
       },
       projectMcp: host.projectMcp,
-      hooks: host.hooks,
+      hooks: host.pluginHooks,
       projectOf: (agent) => host.projectRootOfAgent(agent),
     })
-    host.setProjectPluginOverrides((projectRoot) =>
-      this.pluginActivation.replacedIn(projectRoot),
-    )
-    kept.skillLoaders.setPluginSkillsResolver((projectRoot) =>
-      this.pluginService.enabledSkillRoots(projectRoot),
-    )
-    // `@plugin` gestures read the plugin service (E-track contract §3).
-    host.setPluginReferenceResolver((id, agent) =>
-      this.pluginReference(id, host.projectRootOfAgent(agent)),
-    )
     this.skillService = new CoreSkillService(this.paths.stateRoot, {
       runtimeRoot: this.paths.runtimeRoot,
       manager: kept.skillManager,
@@ -648,7 +655,7 @@ export class CoreApi {
             // lists them); every other builtin names its category.
             if (Object.hasOwn(GUI_TOOL_CATALOG, schema.name))
               return { ...schema, pluginId: COMPUTER_USE_PLUGIN_ID }
-            const category = host.tools.get(schema.name)?.category
+            const category = host.toolCategory(schema.name)
             return category === undefined ? schema : { ...schema, category }
           }
           return {
@@ -661,8 +668,8 @@ export class CoreApi {
       library: kept.skillLibrary,
       // `null` = chat (no project Skills); callers always name the session.
       projectRootFor: (sessionId) => host.projectRootForSession(sessionId),
-      refreshRuntimeContext: () => {},
     })
+    this.appVersion = opts.appVersion ?? '0.0.0-dev'
     this.environmentService = new CoreEnvironmentService({
       stateRoot: this.paths.stateRoot,
       catalog: kept.environmentCatalog,
@@ -681,10 +688,6 @@ export class CoreApi {
       managedEnvironment: kept.managedEnvironmentService,
     })
     this.workspaceBindings = new WorkspaceBindingStore(this.paths.stateRoot)
-    // A session in a managed worktree works there (KRN-11).
-    host.setWorktreeResolver((sessionId, projectRoot) =>
-      this.workspaceBindings.resolve(sessionId, projectRoot),
-    )
     this.gitReceipts = new GitOperationReceiptStore(this.paths.stateRoot)
     const resolveWorkspaceProject = (sessionId: string) => {
       const session = this.requireReadableSession(sessionId, 'workspace') as {
@@ -773,9 +776,23 @@ export class CoreApi {
       this.paths.delegationsRoot,
       opts.verifyGeneratedImage,
     )
+    // Claude tokens pasted in 设置 › 子智能体, under the local key (AGT-02).
+    const claudeTokens = {
+      root: this.paths.delegationsRoot,
+      sealer: kept.secretSealer,
+    }
+    const executorHome = opts.executorHome ?? {}
     const executorRuntime = new ExecutorRuntimeService({
       root: this.paths.delegationsRoot,
-      loginShell: createLoginShellEnvironment(),
+      ...(executorHome.home ? { home: executorHome.home } : {}),
+      ...(executorHome.environment
+        ? { environment: executorHome.environment }
+        : {}),
+      loginShell: executorHome.loginShell ?? createLoginShellEnvironment(),
+      claudeTokens,
+      // 设置 › 子智能体 › 高级 › 开发环境 (AGT-08).
+      developmentEnvironment: () =>
+        developmentEnvironmentOf(this.executorConfig.read()),
       resolveRoute: async (id, backend) => {
         const config = await loadModelConfig(this.paths.modelConfigFile, {
           sealer: kept.secretSealer,
@@ -817,6 +834,7 @@ export class CoreApi {
     ) => {
       const runtime = await executorRuntime.probe(profile)
       this.executorFacts.bind(profile, runtime.environment)
+      return runtime.auth
     }
     const externalWorkspaces = new DelegationWorkspaceService({
       root: this.paths.delegationsRoot,
@@ -838,6 +856,7 @@ export class CoreApi {
       root: this.paths.delegationsRoot,
       config: () => this.executorConfig.read(),
       registry: this.executorRegistry,
+      checkAuth: checkExecutorAuth,
       adapters: new Map<string, ExecutorAdapter>([
         [
           'claude-code',
@@ -1020,6 +1039,7 @@ export class CoreApi {
       refresh: () => this.delegationRuntime.probeProfiles(),
       checkAuth: checkExecutorAuth,
       consent: executorConsent,
+      claudeTokens,
     })
     host.delegationQuestionTimeoutMs = () => {
       try {
@@ -1035,7 +1055,7 @@ export class CoreApi {
         return null
       }
     }
-    host.tools.setWorkspaceAccessLeaseProvider({
+    const workspaceAccess: WorkspaceAccessLeaseProvider = {
       acquire: async (call) => {
         if (!mayWriteFiles(call.name)) return undefined
         const root = host.sandbox.resolve({
@@ -1063,7 +1083,7 @@ export class CoreApi {
           },
         )
       },
-    })
+    }
     this.turnFiles = new TurnFileRecorder({
       snapshots: new TurnSnapshots({
         exec: (cwd, args, options) => turnGit.execute(cwd, args, options),
@@ -1100,7 +1120,21 @@ export class CoreApi {
       runExclusive: (workspaceRoot, owner, action) =>
         this.workspaceMutations.runExclusive(workspaceRoot, owner, action),
     })
-    this.turnFiles.install(host)
+    // Everything CoreApi plugs into the kernel, in one registration (KRN-13).
+    host.extend({
+      turnFiles: this.turnFiles,
+      workspaceAccess,
+      pluginOverrides: (projectRoot) =>
+        this.pluginActivation.replacedIn(projectRoot),
+      pluginSkills: (projectRoot) =>
+        this.pluginService.enabledSkillRoots(projectRoot),
+      // `@plugin` gestures read the plugin service (E-track contract §3).
+      pluginReferences: (id, agent) =>
+        this.pluginReference(id, host.projectRootOfAgent(agent)),
+      // A session in a managed worktree works there (KRN-11).
+      worktrees: (sessionId, projectRoot) =>
+        this.workspaceBindings.resolve(sessionId, projectRoot),
+    })
     this.appConnections = new AppConnectionRegistry({
       [appConnectionKey(GITHUB_APP)]: {
         check: async () =>
@@ -3466,6 +3500,11 @@ export class CoreApi {
       const report = await this.retention.sweep()
       return { report, usage: await this.retention.usage() }
     },
+    /** REL-03: the runs, the data version, files a newer Emperor wrote. */
+    versions: async (): Promise<DataVersionsReport> => {
+      const { dataVersionsReport } = await import('../storage/data-files')
+      return dataVersionsReport(this.paths.stateRoot, this.appVersion)
+    },
   }
 
   readonly tools = {
@@ -4056,7 +4095,7 @@ export class CoreApi {
       check('process-runtime', () =>
         Boolean(kept.processRuntime.capabilityReport()),
       ),
-      check('harness-kernel', () => this.host.tools.schemas().length > 0),
+      check('harness-kernel', () => this.host.toolCount() > 0),
       check(
         'mcp',
         () => kept.mcpClient.snapshot().initialized === true,

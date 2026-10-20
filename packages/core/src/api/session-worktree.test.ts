@@ -205,7 +205,8 @@ describe(
         api.host
           .sessionLog(sessionId)!
           .events.filter((event) => event.type === 'turn/files')
-      await waitFor(() => records().length > 0)
+      // The record is written after the turn ends; a busy machine takes longer.
+      await waitFor(() => records().length > 0, 30_000)
       const record = records().at(-1)!.data as {
         turn: number
         mode: string

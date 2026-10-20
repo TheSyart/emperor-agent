@@ -533,3 +533,35 @@ it('two Codex processes on the same login never run at the same time', async () 
   await session.close()
   f.cleanup()
 })
+
+it('7 · the Codex brief carries the project’s AGENTS.md summary and the development environment (AGT-08)', async () => {
+  const f = fixture()
+  writeFileSync(
+    join(f.root, 'AGENTS.md'),
+    '# Agents\nNever touch generated/.\n',
+  )
+  const session = await f.adapter.open({
+    ...f.input,
+    environment: {
+      ...f.input.environment,
+      GIT_AUTHOR_NAME: 'Ada Lovelace',
+      SSH_AUTH_SOCK: '/tmp/agent.sock',
+      NVM_DIR: '/Users/ada/.nvm',
+      HTTPS_PROXY: 'http://proxy.example:8080',
+    },
+  })
+  const params = f.calls[2]!.params as {
+    developerInstructions: string
+    config: Record<string, unknown>
+  }
+  expect(params.developerInstructions).toContain('AGENTS.md')
+  expect(params.developerInstructions).toContain('Never touch generated/.')
+  expect(params.config['shell_environment_policy.set']).toMatchObject({
+    GIT_AUTHOR_NAME: 'Ada Lovelace',
+    SSH_AUTH_SOCK: '/tmp/agent.sock',
+    NVM_DIR: '/Users/ada/.nvm',
+    HTTPS_PROXY: 'http://proxy.example:8080',
+  })
+  await session.close()
+  f.cleanup()
+})

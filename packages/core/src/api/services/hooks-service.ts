@@ -14,7 +14,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, open, rename, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { OperationRetiredError, ValidationError } from '../../errors'
-import type { ClaudeCodeHooks } from '../../harness/hooks/claude-code'
+import type { HookConfigPort } from '../../harness/host/host'
 import {
   CLAUDE_HOOK_EVENTS,
   parseClaudeCodeConfig,
@@ -24,6 +24,7 @@ import {
 import { matchesMatcher } from '../../harness/hooks/matcher'
 import { runHook } from '../../harness/hooks/runner'
 import type { SessionEvent } from '../../session-log/types'
+import { assertNotNewerSync } from '../../store/persistence'
 
 type Dict = Record<string, unknown>
 
@@ -31,7 +32,7 @@ export interface CoreHooksServiceDeps {
   /** Emperor Home; the editable config is `<stateRoot>/hooks.json`. */
   stateRoot: string
   /** The live bridge; reloaded after every successful save. */
-  hooks: ClaudeCodeHooks
+  hooks: HookConfigPort
   /**
    * The Build project of the session the caller shows (substitutes
    * `${CLAUDE_PROJECT_DIR}`, test-run cwd); null for Chat (KRN-01).
@@ -190,10 +191,9 @@ export class CoreHooksService {
       throw new ValidationError(
         `hooks.json 无效：${validation.errors.join('；')}`,
       )
-    await writeTextAtomic(
-      this.configPath,
-      text.endsWith('\n') ? text : `${text}\n`,
-    )
+    // REL-03: never over a newer Emperor's file; the file says its version.
+    assertNotNewerSync(this.configPath, 'version', HOOKS_FILE_VERSION)
+    await writeTextAtomic(this.configPath, versionedText(text))
     this.deps.hooks.reload()
     return await this.getConfig()
   }
@@ -401,7 +401,7 @@ export class CoreHooksService {
       events,
       skipped: parsed.skipped,
       unknownEvents: Object.keys(hooksMap).filter(
-        (event) => !isSupportedEvent(event),
+        (event) => !isSupportedEvent(event) && event !== 'version',
       ),
       errors,
     }
@@ -598,6 +598,17 @@ function requiredEvent(input: Dict): ClaudeHookEvent {
 
 function isSupportedEvent(value: string): value is ClaudeHookEvent {
   return (CLAUDE_HOOK_EVENTS as readonly string[]).includes(value)
+}
+
+const HOOKS_FILE_VERSION = 1
+
+/** The saved text with `"version": 1` first (the rest as typed). */
+function versionedText(text: string): string {
+  const value = JSON.parse(text) as Record<string, unknown>
+  if (value.version === HOOKS_FILE_VERSION)
+    return text.endsWith('\n') ? text : `${text}\n`
+  const { version: _drop, ...rest } = value
+  return `${JSON.stringify({ version: HOOKS_FILE_VERSION, ...rest }, null, 2)}\n`
 }
 
 function configText(raw: unknown): string {

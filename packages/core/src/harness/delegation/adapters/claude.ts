@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import {
+  DEFAULT_CLAUDE_MAX_TURNS,
   DelegationError,
   type ExecutorAdapter,
   type ExecutorOpenInput,
@@ -32,6 +33,7 @@ import { AsyncQueue } from './async-queue'
 import { readClaudeSessionHistory } from './claude-history'
 import { CLAUDE_HOST_TOOLS, publicReferences } from '../facts'
 import { claudeInitIssue } from '../compatibility'
+import { projectInstructions } from '../dev-environment'
 import {
   bundledClaudeExecutable,
   claudeExecutableSource,
@@ -41,6 +43,36 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {}
+}
+/**
+ * Why a Claude turn failed (AGT-02), from the SDK result's subtype,
+ * `terminal_reason`, `api_error_status` and text.
+ */
+function claudeFailureCode(m: Record<string, unknown>, text: string): string {
+  const status = m.api_error_status,
+    reason = m.terminal_reason
+  if (m.subtype === 'error_max_turns' || reason === 'max_turns')
+    return 'MAX_TURNS'
+  if (
+    ['prompt_too_long', 'blocking_limit', 'rapid_refill_breaker'].includes(
+      reason as string,
+    ) ||
+    /prompt is too long|context (?:length|window)/i.test(text)
+  )
+    return 'CONTEXT_OVERFLOW'
+  if (
+    status === 402 ||
+    /credit balance|billing|insufficient (?:credit|funds|quota)/i.test(text)
+  )
+    return 'BILLING'
+  if (
+    status === 401 ||
+    /authenticat|api[ _-]?key|oauth token|\/login/i.test(text)
+  )
+    return 'AUTH_EXPIRED'
+  if (status === 429 || /rate[ _]limit|usage limit|\b429\b/i.test(text))
+    return 'RATE_LIMITED'
+  return 'EXECUTOR_TURN_FAILED'
 }
 export function normalizeClaudeMessage(
   raw: unknown,
@@ -224,17 +256,22 @@ export function normalizeClaudeMessage(
         ...(typeof m.result === 'string' ? { text: m.result } : {}),
         ...(structured === undefined ? {} : { structured }),
       })
-    else
+    else {
+      const text = [
+        ...(typeof m.result === 'string' ? [m.result] : []),
+        ...(Array.isArray(m.errors)
+          ? m.errors.filter((x) => typeof x === 'string')
+          : []),
+      ]
+        .join('; ')
+        .slice(0, 4096)
       events.push({
         type: 'turn_finished',
         status: 'failed',
-        error: Array.isArray(m.errors)
-          ? m.errors
-              .filter((x) => typeof x === 'string')
-              .join('; ')
-              .slice(0, 4096)
-          : 'Claude execution failed',
+        error: text || 'Claude execution failed',
+        failureCode: claudeFailureCode(m, text),
       })
+    }
   }
   return events
 }
@@ -446,7 +483,16 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
             SUBAGENT_IDENTITY,
             SUBAGENT_HANDOFF,
             EXTERNAL_REPORT_TRANSPORT,
-          ].join('\n\n'),
+            // The repository's CLAUDE.md as text, not its settings: project
+            // settings could pre-approve tools past canUseTool (AGT-08).
+            projectInstructions(input.cwd, [
+              'CLAUDE.md',
+              join('.claude', 'CLAUDE.md'),
+              'AGENTS.md',
+            ]),
+          ]
+            .filter((part): part is string => Boolean(part))
+            .join('\n\n'),
         },
         persistSession: true,
         includePartialMessages: true,
@@ -495,7 +541,7 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
         skills: [],
         mcpServers: {},
         strictMcpConfig: true,
-        maxTurns: 64,
+        maxTurns: input.maxTurns ?? DEFAULT_CLAUDE_MAX_TURNS,
         // API billing only: what the task may still spend (AGT-07). A
         // subscription's cost is nominal and is not capped here.
         ...(input.budgetUsd !== undefined && input.budgetUsd > 0
@@ -602,6 +648,10 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
               ...input.environment,
               CLAUDE_CODE_ENTRYPOINT: 'sdk-ts',
               CLAUDE_CODE_STARTUP_FAILURE_RESULTS: '1',
+              // The CLI's Bash, hooks and MCP children do not inherit its
+              // credentials (AGT-02); it also pins the permission mode to
+              // `default`, which is the mode requested above.
+              CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
             },
             signal: input.signal,
             policy: input.policy,

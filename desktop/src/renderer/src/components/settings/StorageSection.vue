@@ -8,12 +8,17 @@
  *   of it.
  * - 占用: the total, then one row per category Core measures
  *   (`storage.usage`: allocated bytes, the way `du` counts them).
+ * - 备份与恢复 (REL-03): 导出… (BackupExportDialog) and 选择备份… (main's
+ *   open dialog, then BackupRestoreDialog); both dialogs load on demand.
+ * - Files a newer Emperor wrote (`storage.versions`): one Notice naming
+ *   them — 「这个文件来自更新版本的 Emperor，当前版本只读」.
  * Header action: 刷新 (measure again). A failed request shows one Notice.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import Button from '../ui/Button.vue'
 import { confirm } from '../ui/confirm'
 import { core } from '../../api/http'
+import { openHomeBackup, type HomeBackupView } from '../../api/homeBackup'
 import { shortenHomePaths } from './diagnostics/diagnosticsModel'
 import {
   STORAGE_CATEGORY_TEXT,
@@ -21,6 +26,12 @@ import {
   formatStorageBytes,
   type StorageUsage,
 } from './storage/storageModel'
+import {
+  backupErrorText,
+  newerFiles,
+  newerFilesNotice,
+  type DataVersions,
+} from './storage/backupModel'
 import {
   Notice,
   refreshAction,
@@ -30,6 +41,18 @@ import {
   useSettingsHeader,
 } from './ui'
 
+const BackupExportDialog = defineAsyncComponent(
+  () => import('./storage/BackupExportDialog.vue'),
+)
+const BackupRestoreDialog = defineAsyncComponent(
+  () => import('./storage/BackupRestoreDialog.vue'),
+)
+
+const EXPORT_DESCRIPTION =
+  '把设置、记忆、Skills、项目和会话打包成一个 .emperor-backup.zip。密码管理器只在设了备份口令时才放进去。'
+const RESTORE_DESCRIPTION =
+  '选择一个 .emperor-backup.zip。恢复前，当前数据会自动移到 Emperor Home 的 migrations 文件夹，然后 Emperor 重新启动。'
+
 const CLEAN_DESCRIPTION =
   '删除 30 天没有变化、且不属于任何会话的溢出文件，到期的「最近删除」会话，记忆版本索引之外的快照，以及会话已删除的委派留下的隔离目录和临时文件。对话、附件与设置不受影响。'
 
@@ -38,6 +61,16 @@ const loading = ref(false)
 const cleaning = ref(false)
 const failure = ref<{ title: string; detail: string } | null>(null)
 const summary = ref('')
+const versions = ref<DataVersions | null>(null)
+const exportOpen = ref(false)
+const restoreOpen = ref(false)
+const restoreView = ref<HomeBackupView | null>(null)
+const opening = ref(false)
+
+const readOnly = computed(() => {
+  const files = newerFiles(versions.value)
+  return files.length ? newerFilesNotice(files) : null
+})
 
 const rows = computed(() =>
   (usage.value?.categories ?? []).map((item) => ({
@@ -62,6 +95,34 @@ async function load(): Promise<void> {
     failure.value = { title: '没能读取存储占用', detail: message(cause) }
   } finally {
     loading.value = false
+  }
+}
+
+async function loadVersions(): Promise<void> {
+  try {
+    versions.value = await core('storage.versions')
+  } catch {
+    // The notice is extra: without the report the page works as before.
+  }
+}
+
+async function pickBackup(): Promise<void> {
+  if (opening.value) return
+  opening.value = true
+  try {
+    const opened = await openHomeBackup()
+    if (opened) {
+      restoreView.value = opened
+      restoreOpen.value = true
+    }
+    if (failure.value?.title === '没能打开这个备份') failure.value = null
+  } catch (cause) {
+    failure.value = {
+      title: '没能打开这个备份',
+      detail: backupErrorText(cause),
+    }
+  } finally {
+    opening.value = false
   }
 }
 
@@ -98,11 +159,22 @@ useSettingsHeader({
   ],
 })
 
-onMounted(() => void load())
+onMounted(() => {
+  void load()
+  void loadVersions()
+})
 </script>
 
 <template>
   <SettingsSection>
+    <Notice
+      v-if="readOnly"
+      class="storage-notice"
+      tone="warn"
+      data-storage-readonly
+      :title="readOnly.title"
+      :description="readOnly.description"
+    />
     <Notice
       v-if="failure"
       class="storage-notice"
@@ -127,6 +199,30 @@ onMounted(() => void load())
         {{ summary }}
       </p>
     </SettingsGroup>
+    <SettingsGroup title="备份与恢复" data-group="storage-backup">
+      <SettingsRow title="导出备份" :description="EXPORT_DESCRIPTION">
+        <Button
+          size="sm"
+          variant="secondary"
+          data-backup-export
+          @click="exportOpen = true"
+        >
+          导出…
+        </Button>
+      </SettingsRow>
+      <SettingsRow title="从备份恢复" :description="RESTORE_DESCRIPTION">
+        <Button
+          size="sm"
+          variant="secondary"
+          data-backup-restore
+          :loading="opening"
+          :disabled="opening"
+          @click="pickBackup"
+        >
+          选择备份…
+        </Button>
+      </SettingsRow>
+    </SettingsGroup>
     <SettingsGroup
       title="占用"
       :description="usageDescription"
@@ -147,6 +243,12 @@ onMounted(() => void load())
         <span class="size">{{ row.size }}</span>
       </SettingsRow>
     </SettingsGroup>
+    <BackupExportDialog v-if="exportOpen" v-model:open="exportOpen" />
+    <BackupRestoreDialog
+      v-if="restoreView"
+      v-model:open="restoreOpen"
+      :backup="restoreView"
+    />
   </SettingsSection>
 </template>
 

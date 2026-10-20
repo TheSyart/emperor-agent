@@ -104,6 +104,13 @@ export async function makeApi(
     eventSink: (event) => {
       events.push(event)
     },
+    // External executors look for sign-ins in a temporary home, never the
+    // user's ~/.claude or ~/.codex, and never run the login shell.
+    executorHome: {
+      home: join(root, 'executor-home'),
+      environment: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
+      loginShell: { read: async () => ({}) },
+    },
     ...options.extra,
   })
   ref.api = api

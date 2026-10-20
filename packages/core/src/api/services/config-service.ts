@@ -22,7 +22,6 @@ export interface UserConfigPayload {
 }
 
 export interface CoreConfigServiceHooks {
-  refreshRuntimeContext?: () => void
   reconcileProfileOnboarding?: () => void
   reloadMcp?: () => void | Promise<void>
 }
@@ -75,7 +74,6 @@ export class CoreConfigService {
       throw new Error('save_user_config requires at least one ## section')
     if (!result.ok)
       throw new Error(`save_user_config rejected: ${result.errors.join(', ')}`)
-    this.hooks.refreshRuntimeContext?.()
     this.hooks.reconcileProfileOnboarding?.()
     return this.getUserConfig()
   }

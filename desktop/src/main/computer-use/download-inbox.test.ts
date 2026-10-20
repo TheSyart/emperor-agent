@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   statSync,
   unlinkSync,
   utimesSync,
@@ -263,6 +264,34 @@ describe('download inbox across restarts', () => {
     await expect(
       again.moveTo(record.downloadId, 'relative/dir'),
     ).resolves.toBeUndefined()
+  })
+
+  it('never writes over an index a newer Emperor wrote (REL-03)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'emperor-inbox-newer-'))
+    const indexPath = join(root, '.index.json')
+    const newer = JSON.stringify({ version: 2, entries: [], futureOnly: 1 })
+    writeFileSync(indexPath, newer)
+    const box = new DownloadInbox({
+      root,
+      indexPath,
+      hashFile: async () => 'c'.repeat(64),
+    })
+    const item = new FakeItem('later.csv')
+    const record = await box.receive(
+      'tab_1',
+      { ...request, ownerSessionId: 's1' },
+      async () => {
+        expect(box.offer('tab_1', event(), item)).toBe('accepted')
+        writeFileSync(item.savePath, 'x\n')
+        item.progress(2)
+        item.finish()
+      },
+      new AbortController().signal,
+    )
+    expect(record.state).toBe('completed')
+    // This process still knows the file; the newer index stays as it was.
+    expect(box.pathOf(record.downloadId)).toBe(item.savePath)
+    expect(readFileSync(indexPath, 'utf8')).toBe(newer)
   })
 })
 

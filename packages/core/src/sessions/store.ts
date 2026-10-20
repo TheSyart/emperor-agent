@@ -16,6 +16,7 @@ import {
   type JournalCodec,
   type SnapshotCodec,
   type SyncPersistenceAdapter,
+  DataFileNewerError,
 } from '../store/persistence'
 import { SESSION_TRASH_DIR } from '../session-log/store'
 
@@ -114,6 +115,7 @@ export class SessionStore {
     legacyBackupPath: null,
   }
   private cache: SessionIndexCache | null = null
+  private indexReadOnly = false
   /** meta.jsonl records per session, to know when to compact. */
   private readonly metaLines = new Map<string, number>()
 
@@ -516,7 +518,15 @@ export class SessionStore {
   }
 
   private save(items: SessionEntry[]): void {
-    this.indexSnapshot().write(items)
+    // A newer Emperor's index.json (REL-03) stays as it is: this run keeps
+    // its index in memory (it is rebuilt from the session folders anyway).
+    if (!this.indexReadOnly)
+      try {
+        this.indexSnapshot().write(items)
+      } catch (error) {
+        if (!(error instanceof DataFileNewerError)) throw error
+        this.indexReadOnly = true
+      }
     this.cache = {
       byId: new Map(items.map((item) => [item.id, item])),
       sorted: sortByUpdated([...items]),
@@ -833,6 +843,7 @@ function sessionIndexCodec(
 ): SnapshotCodec<SessionEntry[]> {
   return {
     schemaVersion: VERSION,
+    versionKey: 'version',
     encode(items) {
       return items
         .map((item) =>

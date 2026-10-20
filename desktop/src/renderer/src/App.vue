@@ -51,6 +51,7 @@ import { activeConfirm } from './components/ui/confirm'
 import { isConversationRoute, sessionLocation } from './router'
 import { shouldShowModelSetupPrompt } from './components/onboarding/modelSetupDialogModel'
 import { runInitialStartup } from './appStartup'
+import { showDataNotices } from './appDataNotices'
 import { buildSlashPaletteItems } from './commands'
 import { createCommandCatalogLoader } from './commandCatalog'
 import {
@@ -324,6 +325,12 @@ onMounted(async () => {
     connectSocket,
   })
   startupDone.value = true
+  // REL-03: an older Emperor than last time, or a restore just applied.
+  void showDataNotices({
+    load: () => core('storage.versions'),
+    toast: pushToast,
+    openStorage: () => void settingsRoute.openSettings('advanced', 'storage'),
+  })
   await loadCommands()
 })
 

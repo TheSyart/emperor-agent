@@ -30,6 +30,8 @@ describe('local config', () => {
       await readFile(join(dir, 'settings.json'), 'utf8'),
     )
     expect(onDisk).toEqual({
+      // REL-03: settings.json says which version wrote it.
+      version: 1,
       webui: { host: '127.0.0.2', port: 9999, openBrowser: true },
       desktopPet: { enabled: true, autoStartWithWebui: false },
       prompt: { profile: 'classic' },
@@ -277,6 +279,7 @@ describe('local config', () => {
       'prompt',
       'sessions',
       'taskBudget',
+      'version',
       'webTools',
       'webui',
     ])

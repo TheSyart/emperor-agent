@@ -33,7 +33,10 @@ import { MemoryStore } from '../../memory/store'
 import { TokenTracker } from '../../memory/token-tracker'
 import { OwnedProcessRuntime } from '../../processes/runtime'
 import { ProjectStore } from '../../projects/store'
-import { bootstrapEmperorHome } from '../../runtime/installation'
+import {
+  bootstrapEmperorHome,
+  runPendingDataMigrations,
+} from '../../runtime/installation'
 import {
   migrateLegacyStateRoot,
   type LegacyStateMigrationResult,
@@ -149,7 +152,6 @@ export interface KeptServices {
 export interface KeptServiceHooks {
   /** Host event sink (non-session events: scheduler, MCP, environment, skills). */
   emit(event: Record<string, unknown>): Promise<void> | void
-  refreshRuntimeContext(): void
 }
 
 export async function createKeptServices(
@@ -173,6 +175,9 @@ export async function createKeptServices(
         paths.stateRootSource === 'default' ? legacyDefaultStateRoot() : null,
       appVersion: opts.appVersion ?? '0.0.0-headless',
       runtimeRevision: opts.runtimeRevision ?? environmentCatalog.revision,
+    })
+    await runPendingDataMigrations(paths.stateRoot, {
+      ...(opts.appVersion ? { appVersion: opts.appVersion } : {}),
     })
   }
   ensureRuntimeStateDirs(paths)
@@ -251,12 +256,6 @@ export async function createKeptServices(
   const managedEnvironmentService = new ManagedEnvironmentService({
     stateRoot: paths.stateRoot,
     skillManager,
-    processRunner: processRuntime,
-    onEnvironmentChanged: async () => {
-      environmentProbe.invalidate()
-      hooks.refreshRuntimeContext()
-      await skillInstallService.reconcileBlocked()
-    },
     onInstallEvent: async (event) => {
       const name =
         event.phase === 'started'
@@ -286,7 +285,6 @@ export async function createKeptServices(
   const skillChangeDetector = new SkillChangeDetector(
     [paths.userSkillsRoot],
     async ({ catalogVersion }) => {
-      hooks.refreshRuntimeContext()
       await hooks.emit({
         event: 'skill_catalog_changed',
         catalog_version: catalogVersion,

@@ -1092,6 +1092,36 @@ export const CORE_OPERATION_REGISTRY = {
     (api, [input], ctx) =>
       api.executors.configure(input, viewOf(ctx, 'executors.configure')),
   ),
+  // AGT-02: a Claude token pasted in 设置 › 子智能体; one line, no spaces.
+  'executors.setCredential': operation(
+    z.tuple([
+      z
+        .object({
+          profileId: z.string().min(1).max(64),
+          kind: z.enum(['oauth-token', 'api-key']),
+          token: z
+            .string()
+            .trim()
+            .min(8)
+            .max(4096)
+            .regex(/^[\x21-\x7e]+$/),
+        })
+        .strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.executors.setCredential(
+        input,
+        viewOf(ctx, 'executors.setCredential'),
+      ),
+  ),
+  'executors.clearCredential': operation(
+    z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),
+    (api, [input], ctx) =>
+      api.executors.clearCredential(
+        input,
+        viewOf(ctx, 'executors.clearCredential'),
+      ),
+  ),
   'delegations.get': operation(z.tuple([externalRef]), (api, [input], ctx) =>
     api.delegations.get(withSession(input, ctx, 'delegations.get')),
   ),
@@ -2170,6 +2200,7 @@ export const CORE_OPERATION_REGISTRY = {
   'storage.clean': operation(z.tuple([]), (api, _args, ctx) =>
     api.storage.clean(viewOf(ctx, 'storage.clean')),
   ),
+  'storage.versions': operation(z.tuple([]), (api) => api.storage.versions()),
   'tasks.budget': operation(z.tuple([]), (api) => api.tasks.budget()),
   'tasks.setBudget': operation(
     z.tuple([
