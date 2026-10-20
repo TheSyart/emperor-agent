@@ -11,7 +11,7 @@ import {
 } from './composerControls'
 
 describe('composer control model', () => {
-  it('renders queue and stop actions while busy; interjection lives in the status bar', () => {
+  it('renders queue and stop actions while busy; interjection lives in the queue tray', () => {
     const source = readFileSync(
       fileURLToPath(new URL('../composer/ComposerCard.vue', import.meta.url)),
       'utf8',
@@ -29,9 +29,7 @@ describe('composer control model', () => {
     expect(source).toContain(':disabled="goalCaptureStarting"')
     expect(source).not.toContain('等待当前任务结束后再添加')
     const queue = readFileSync(
-      fileURLToPath(
-        new URL('../composer/StatusQueueSection.vue', import.meta.url),
-      ),
+      fileURLToPath(new URL('../composer/QueueDock.vue', import.meta.url)),
       'utf8',
     )
     expect(queue).toContain('编辑消息')

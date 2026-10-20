@@ -1,16 +1,14 @@
 <script setup lang="ts">
 /**
- * ModelPicker — the composer's model control (UI-S04): a 28px trigger
- * (provider logo + 「模型名 · 思考强度」 + chevron) opening an upward
- * two-level menu. The root pane has two rows, 「模型 › name」 and
- * 「思考强度 › level」; each drills into its list. The model list is grouped
- * by provider (sticky logo + name headers) with a search box once there
- * are many entries; a model without reasoning choices opens straight on the
- * model list. Every pane ends with 添加模型… and the context usage of this
- * chat (used / window, percent and a bar — what the old context ring
- * showed). Escape backs out of a list to the root before closing; ↑ / ↓
- * move between rows. Selection flows back through the composer controller
- * (switch-model / set-reasoning-effort).
+ * ModelPicker — dsh ModelSelect: a 28px trigger (provider logo + model name
+ * + caption effort + chevron) opening an upward two-level menu. The root
+ * pane has two rows, 「模型 › name」 and 「思考强度 › level」; each drills into
+ * its list. The model list is grouped by provider (sticky logo + name
+ * headers) with a search box once there are many entries; a model without
+ * reasoning choices opens straight on the model list. Escape backs out of a
+ * list to the root before closing; ↑ / ↓ move between rows. Selection flows
+ * back through the composer controller (switch-model /
+ * set-reasoning-effort).
  */
 import EmptyState from '../ui/EmptyState.vue'
 import IconButton from '../ui/IconButton.vue'
@@ -35,9 +33,6 @@ const props = defineProps<{
   reasoningValue: string
   reasoningOptions: Array<{ value: string | null; label: string }>
   providerOptions: readonly ProviderOption[]
-  /** Context used by this chat and the model's window (tokens; 0: unknown). */
-  contextUsed?: number
-  contextMax?: number
   disabled?: boolean
   title?: string
 }>()
@@ -71,18 +66,6 @@ const activeGroup = computed(() =>
     : undefined,
 )
 const searchable = computed(() => entries.value.length > SEARCH_THRESHOLD)
-const usage = computed(() => {
-  const max = props.contextMax ?? 0
-  if (max <= 0) return null
-  const used = Math.max(0, props.contextUsed ?? 0)
-  const percent = Math.min(100, Math.round((used / max) * 100))
-  return {
-    used: formatTokens(used),
-    max: formatTokens(max),
-    percent,
-    tone: percent >= 90 ? 'danger' : percent >= 75 ? 'warn' : 'normal',
-  }
-})
 const groups = computed(() => {
   const needle = query.value.trim().toLowerCase()
   const visible = needle
@@ -92,12 +75,6 @@ const groups = computed(() => {
     : entries.value
   return groupEntriesByProvider(visible, props.providerOptions)
 })
-
-function formatTokens(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
-  return String(Math.round(value))
-}
 
 function entryLabel(entry: ModelEntry): string {
   return entry.effectiveDisplayName || entry.modelId || '模型'
@@ -120,9 +97,8 @@ async function show(next: Pane): Promise<void> {
 }
 
 function rows(): HTMLElement[] {
-  const root = panes.value?.closest('[role="menu"]') ?? panes.value
   return [
-    ...(root?.querySelectorAll<HTMLElement>(
+    ...(panes.value?.querySelectorAll<HTMLElement>(
       '[role="menuitem"]:not(:disabled), [data-pane-back], input',
     ) ?? []),
   ]
@@ -170,7 +146,7 @@ function onKeydown(event: KeyboardEvent): void {
         />
       </template>
       <span class="name">{{ label }}</span>
-      <span v-if="showEffort" class="effort">&nbsp;· {{ reasoningLabel }}</span>
+      <span v-if="showEffort" class="effort">{{ reasoningLabel }}</span>
     </Chip>
   </span>
   <Menu v-model:open="open" :anchor="anchor" :width="300" label="模型与思考">
@@ -255,6 +231,9 @@ function onKeydown(event: KeyboardEvent): void {
           variant="inline"
           title="没有匹配的模型"
         />
+        <MenuItem data-add-model @select="emit('add-model')">
+          添加模型…
+        </MenuItem>
       </template>
 
       <template v-else>
@@ -283,31 +262,6 @@ function onKeydown(event: KeyboardEvent): void {
         </div>
       </template>
     </div>
-    <template #footer>
-      <div @keydown="onKeydown">
-        <MenuItem data-add-model @select="emit('add-model')">
-          添加模型…
-        </MenuItem>
-        <div
-          v-if="usage"
-          class="usage"
-          role="group"
-          aria-label="上下文用量"
-          :data-tone="usage.tone"
-        >
-          <div class="usage-line">
-            <span>上下文</span>
-            <span class="usage-figures"
-              >{{ usage.used }} / {{ usage.max }}</span
-            >
-            <span class="usage-percent">已用 {{ usage.percent }}%</span>
-          </div>
-          <div class="usage-bar" data-usage-bar>
-            <span :style="{ width: `${usage.percent}%` }" />
-          </div>
-        </div>
-      </div>
-    </template>
   </Menu>
 </template>
 
@@ -329,56 +283,8 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 .effort {
-  flex: none;
-  color: rgb(var(--text-3));
-}
-
-.usage {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1-5);
-  padding: var(--space-2) var(--space-2-5) var(--space-1-5);
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-  color: rgb(var(--text-3));
-}
-
-.usage-line {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.usage-figures {
-  font-variant-numeric: tabular-nums;
-  color: rgb(var(--text-2));
-}
-
-.usage-percent {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-}
-
-.usage-bar {
-  display: flex;
-  height: var(--space-1);
-  overflow: hidden;
-  border-radius: var(--radius-pill);
-  background: var(--surface-hover);
-}
-
-.usage-bar > span {
-  min-width: 2px;
-  height: 100%;
-  background: rgb(var(--text-3));
-}
-
-.usage[data-tone='warn'] .usage-bar > span {
-  background: rgb(var(--warn));
-}
-
-.usage[data-tone='danger'] .usage-bar > span {
-  background: rgb(var(--error));
+  margin-left: var(--space-1);
+  color: rgb(var(--label-caption));
 }
 
 .panes {

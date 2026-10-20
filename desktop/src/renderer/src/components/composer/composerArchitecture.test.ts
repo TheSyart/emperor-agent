@@ -48,12 +48,12 @@ describe('ComposerCard controller/view ownership', () => {
     expect(card).toContain('defineExpose(controller.expose)')
     expect(card).toContain(':disabled="sendDisabled"')
     expect(card).toContain('<PermissionChip')
+    expect(card).toContain('<PlanChip')
     expect(card).toContain('<ModelPicker')
+    expect(card).toContain('<ContextMeter')
     expect(card).toContain("emit('dismiss-lifecycle')")
     expect(card).toContain("emit('activate-plan')")
-    // UI-S04: Plan lives in the permission menu, usage in the model menu.
-    expect(card).not.toContain('<PlanChip')
-    expect(card).not.toContain('<ContextMeter')
+    expect(card).toContain("emit('activate-goal')")
   })
 
   it('switches models by entry id and keeps reasoning choices distinct', () => {
@@ -87,8 +87,6 @@ describe('UI-S04: the old text box is gone', () => {
       ['rich', 'Input'].join(''),
       ['@skill', '(${'].join(''),
       ['@mcp', '(${'].join(''),
-      ['Plan', 'Chip'].join(''),
-      ['Context', 'Meter'].join(''),
       ['legacy', 'InputRequested'].join(''),
     ]
     const self = relative(REPO, __filename)

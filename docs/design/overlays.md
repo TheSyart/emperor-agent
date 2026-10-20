@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：前端开发者、设计者<br>
-> 最后核验：2026-10-20<br>
+> 最后核验：2026-10-19<br>
 > 事实源：`desktop/src/renderer/src/components/ui/`（`useFocusTrap.ts`、`modalStack.ts`、`Modal.vue`、`confirm.ts`、`ConfirmHost.vue`、`toasts.ts`、`ToastStack.vue`、`Popover.vue`）、`components/ui/overlays.test.ts`
 
 Emperor 的浮层分四类：模态弹窗、确认框、轻提示（toast）和锚定面板（popover）。每类只有一个实现，界面不再各写一套。
@@ -59,7 +59,7 @@ if (
 
 ## 锚定面板
 
-`ui/Popover` 用于点击后在触发按钮旁展开的非模态面板，现有使用者：侧栏通知、输入框上方的状态条（见[输入框](composer.md)）。
+`ui/Popover` 用于点击后在触发按钮旁展开的非模态面板，现有使用者：侧栏通知、输入框的上下文用量。
 
 - 菜单表面（`--menu-fill`，圆角 12，lv3 阴影），`role="dialog"` 并带 `label`。
 - 默认在触发元素下方展开，`placement="top"` 在上方；空间不够时翻到另一侧，右边缘对齐。

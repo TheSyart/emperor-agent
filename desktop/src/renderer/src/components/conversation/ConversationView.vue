@@ -4,12 +4,11 @@
  * (breadcrumb, 对话 | 轨迹 tabs, environment-card and workspace toggles),
  * the view area (the raw-log ChatTimeline with the turn scrubber, or the
  * trajectory view with its inspector column), the environment card seat
- * (Chat tab, active phase), and the composer seat: the one-line status bar
- * (changes / todos / goal / queue, UI-S04) above the ComposerCard, or a
- * takeover card while an interaction is pending. A blank chat renders the
- * hero phase: the same seat centered with the headline (and, once, the
- * profile-interview offer under the composer), under a slim header that
- * keeps the two toggles.
+ * (Chat tab, active phase), and the composer seat: docks (changes pill /
+ * todo / goal / queue) above the ComposerCard, or a takeover card while an
+ * interaction is pending. A blank chat renders the hero phase: the same seat
+ * centered with the headline (and, once, the profile-interview offer under
+ * the composer, UI-S04), under a slim header that keeps the two toggles.
  *
  * The environment card floats at the top right of the view area. From a
  * 1120px conversation column (container query) the chat body and the
@@ -72,10 +71,13 @@ import type {
   QueuedPromptItem,
   TodoItem,
 } from '../../types'
+import ChangesPill from '../composer/ChangesPill.vue'
 import ComposerCard from '../composer/ComposerCard.vue'
-import ComposerStatusBar from '../composer/ComposerStatusBar.vue'
+import GoalBar from '../composer/GoalBar.vue'
+import QueueDock from '../composer/QueueDock.vue'
 import { draftHandoff, takeDraftHandoff } from '../chat/draftHandoff'
 import ReadOnlyComposer from '../composer/ReadOnlyComposer.vue'
+import TodoDock from '../composer/TodoDock.vue'
 import { frameActions, useFrameState } from '../shell/frameState'
 import { useAgentTree } from '../sidebar/agentTree'
 import { requestWorkspace } from '../workspace/workspaceState'
@@ -853,9 +855,9 @@ async function runGoalStatusAction(action: GoalCardAction): Promise<void> {
 }
 
 /**
- * 编辑 a goal (the status bar): `/goal edit <objective>` goes into the
- * composer to be changed and sent; Core edits the goal in place (same id,
- * rounds kept).
+ * 编辑 a goal (GoalBar): `/goal edit <objective>` goes into the composer
+ * to be changed and sent; Core edits the goal in place (same id, rounds
+ * kept).
  */
 function editGoal(): void {
   const goal = activeGoal.value
@@ -1072,22 +1074,28 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         @stop="stopChild"
       />
       <div v-else class="stack">
-        <ComposerStatusBar
-          :session-id="viewingId || ''"
-          :build="buildSession && Boolean(viewingId)"
-          :todos="latestTodos"
+        <ChangesPill
+          v-if="!takeoverOpen && viewingId"
+          :session-id="viewingId"
+          :build="buildSession"
+        />
+        <TodoDock v-if="!takeoverOpen" :todos="latestTodos" />
+        <GoalBar
+          v-if="activeGoal"
           :goal="activeGoal"
-          :goal-action-pending="goalActionPending"
-          :queue="ctx.queuedPrompts.value"
-          :takeover="takeoverOpen"
-          @goal-action="runGoalStatusAction"
-          @goal-edit="editGoal"
+          :action-pending="goalActionPending"
+          @action="runGoalStatusAction"
+          @edit="editGoal"
+        />
+        <TakeoverSeat v-if="takeover" :interaction="pendingInteraction" />
+        <QueueDock
+          v-if="!takeoverOpen"
+          :items="ctx.queuedPrompts.value"
           @edit="editQueuedPrompt"
           @interject="interjectQueuedPrompt"
           @cancel="cancelQueuedPrompt"
           @send="sendQueuedPrompt"
         />
-        <TakeoverSeat v-if="takeover" :interaction="pendingInteraction" />
         <ComposerCard
           v-show="!takeoverOpen"
           ref="composer"

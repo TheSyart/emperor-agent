@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 /**
- * UI-S04: the composer's bottom bar has four controls — + (attachments,
- * Skills and plugins, a screenshot), the permission chip (shield + short
- * name; its menu holds the three presets and the Plan 模式 switch), the
- * model chip (「模型名 · 思考强度」; its menu ends with 添加模型… and the
- * context usage) and send, which is the microphone while the composer is
- * empty. The Plan capsule and the context ring are gone.
+ * UI-S04 (reduced by the user on 2026-10-20: Codex is a reference for
+ * visual quality only; Emperor keeps its own layout): the bottom bar keeps
+ * + (attachments, Skills and plugins, a screenshot, Plan 模式, Goal 模式),
+ * the permission chip (presets only) with the Plan capsule beside it, the
+ * model chip with 添加模型…, the context ring, and the send slot — which is
+ * the microphone while the composer is empty.
  */
 import { createApp, h, nextTick, reactive, type App } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -216,21 +216,18 @@ afterEach(() => {
 })
 
 describe('the composer bottom bar', () => {
-  it('1 · has exactly four controls on an empty composer: + 权限 模型 麦克风', async () => {
+  it('1 · keeps its own bar, with the microphone in the send slot: + 权限 模型 上下文 麦克风', async () => {
     const { root } = mount()
     await settle()
     expect(focusable(root)).toEqual([
       '添加附件与能力',
-      '执行权限 · 工作区可写',
+      '工作区',
       '模型与思考',
+      '上下文 12.0k / 128.0k，已用 9%',
       '听写',
     ])
-    expect(root.querySelector('.plan-chip')).toBeNull()
-    expect(root.querySelector('.context-meter')).toBeNull()
-    // The permission chip is the shield and the short name.
-    const chip = barButton(root, '执行权限 · 工作区可写')
-    expect(chip.textContent?.trim()).toBe('工作区')
-    expect(chip.querySelector('svg')).not.toBeNull()
+    // No send key next to the microphone while there is nothing to send.
+    expect(bottomBar(root).querySelector('[aria-label="发送"]')).toBeNull()
   })
 
   it('puts send where the microphone was once there is a draft', async () => {
@@ -240,8 +237,9 @@ describe('the composer bottom bar', () => {
     await settle()
     expect(focusable(root)).toEqual([
       '添加附件与能力',
-      '执行权限 · 工作区可写',
+      '工作区',
       '模型与思考',
+      '上下文 12.0k / 128.0k，已用 9%',
       '发送',
     ])
     expect(barButton(root, '发送').getAttribute('data-variant')).toBe('primary')
@@ -267,90 +265,80 @@ describe('the composer bottom bar', () => {
     expect(barButton(root, '停止')).toBeTruthy()
   })
 
-  it('2 · switches Plan 模式 on and off from the permission menu', async () => {
+  it('2 · (dropped by the user: Plan stays the capsule and the + menu item) keeps the permission menu to the presets', async () => {
     const { root, props } = mount()
     await settle()
-    barButton(root, '执行权限 · 工作区可写').click()
-    await settle()
-    let menu = openMenu('执行权限')
-    expect(menuItems(menu)).toEqual(['只读', '工作区可写', '完全访问'])
-    let plan = menu.querySelector<HTMLButtonElement>(
-      '[role="switch"][aria-label="Plan 模式"]',
+    const chip = bottomBar(root).querySelector<HTMLButtonElement>(
+      '.permission-chip button',
     )!
-    expect(plan.getAttribute('aria-checked')).toBe('false')
-    plan.click()
+    chip.click()
     await settle()
-    expect(props.onActivatePlan).toHaveBeenCalledOnce()
-    expect(props.onDismissLifecycle).not.toHaveBeenCalled()
-
-    // Core turned Plan on: the chip says so and the switch turns it off.
+    const menu = openMenu('执行权限')
+    expect(menuItems(menu)).toEqual(['只读', '工作区可写', '完全访问'])
+    expect(menu.querySelector('[role="switch"]')).toBeNull()
+    // Plan on: the capsule beside the chip, and × leaves Plan.
     props.control = { ...control, plan: true }
     props.lifecycleMode = 'plan'
     await settle()
-    const chip = barButton(root, '执行权限 · 工作区可写 · Plan 模式')
-    expect(chip.textContent?.replace(/\s+/g, ' ').trim()).toBe('工作区 · Plan')
-    if (!document.querySelector('[role="menu"][aria-label="执行权限"]')) {
-      chip.click()
-      await settle()
-    }
-    menu = openMenu('执行权限')
-    expect(menu.textContent).toContain('规划结束后使用')
-    plan = menu.querySelector<HTMLButtonElement>(
-      '[role="switch"][aria-label="Plan 模式"]',
-    )!
-    expect(plan.getAttribute('aria-checked')).toBe('true')
-    plan.click()
-    await settle()
+    const capsule = barButton(root, '退出 Plan')
+    expect(capsule.textContent?.trim()).toBe('Plan')
+    capsule.click()
     expect(props.onDismissLifecycle).toHaveBeenCalledOnce()
-    expect(props.onActivatePlan).toHaveBeenCalledOnce()
   })
 
-  it('3 · shows the context usage and 添加模型… in the model menu', async () => {
+  it('3 · (dropped by the user: the context ring stays) shows the usage from the ring, and 添加模型… in the model menu', async () => {
     const { root } = mount()
     await settle()
-    const chip = barButton(root, '模型与思考')
-    expect(chip.textContent?.replace(/\s+/g, ' ').trim()).toBe(
-      'Claude Sonnet · High',
+    barButton(root, '上下文 12.0k / 128.0k，已用 9%').click()
+    await settle()
+    const usage = document.querySelector<HTMLElement>(
+      '[role="dialog"][aria-label="上下文用量"]',
     )
-    chip.click()
+    expect(usage?.textContent).toContain('12.0k / 128.0k')
+    expect(usage?.textContent).toContain('9%')
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    )
+    await settle()
+    barButton(root, '模型与思考').click()
     await settle()
     const menu = openMenu('模型与思考')
-    const usage = menu.querySelector<HTMLElement>(
-      '[role="group"][aria-label="上下文用量"]',
-    )
-    expect(usage).not.toBeNull()
-    expect(usage!.textContent).toContain('12.0k / 128.0k')
-    expect(usage!.textContent).toContain('已用 9%')
-    expect(
-      usage!.querySelector<HTMLElement>('[data-usage-bar] > span')?.style.width,
-    ).toBe('9%')
+    expect(menu.querySelector('[aria-label="上下文用量"]')).toBeNull()
+    // A model with reasoning choices opens on the root pane: drill in.
+    ;[...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+      .find((item) => item.textContent?.includes('模型'))!
+      .click()
+    await settle()
     expect(menu.querySelector('[data-add-model]')?.textContent?.trim()).toBe(
       '添加模型…',
     )
   })
 
-  it('leaves the usage out when the context window is unknown', async () => {
+  it('has no context ring when the context window is unknown', async () => {
     const { root } = mount({ contextMax: 0 })
     await settle()
-    barButton(root, '模型与思考').click()
-    await settle()
-    expect(
-      openMenu('模型与思考').querySelector('[aria-label="上下文用量"]'),
-    ).toBeNull()
+    expect(root.querySelector('.context-meter')).toBeNull()
   })
 })
 
 describe('the + menu', () => {
-  it('offers attachments, Skills and plugins, and a screenshot — no Plan or Goal', async () => {
-    const { root } = mount()
+  it('offers attachments, Skills and plugins, a screenshot, then Plan and Goal', async () => {
+    const { root, props } = mount()
     await settle()
     barButton(root, '添加附件与能力').click()
     await settle()
-    expect(menuItems(openMenu('添加'))).toEqual([
+    const menu = openMenu('添加')
+    expect(menuItems(menu)).toEqual([
       '上传图片或文件',
       '插入 Skill 或插件',
       '截图',
+      'Plan 模式',
+      'Goal 模式',
     ])
+    ;[...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+      .find((item) => item.textContent?.includes('Plan 模式'))!
+      .click()
+    expect(props.onActivatePlan).toHaveBeenCalledOnce()
   })
 
   it('has no screenshot where it cannot be taken', async () => {
@@ -404,23 +392,5 @@ describe('the + menu', () => {
     await take()
     expect(api.uploads).toHaveLength(0)
     expect(props.onError).toHaveBeenCalledWith('没有屏幕录制权限')
-  })
-})
-
-describe('Goal capture without the Plan capsule', () => {
-  it('says what to type above the draft and cancels from there', async () => {
-    const { root, props } = mount({
-      lifecycleMode: 'goal',
-      goalCaptureStatus: 'armed',
-    })
-    await settle()
-    const notice = root.querySelector<HTMLElement>('.goal-capture')
-    expect(notice?.textContent).toContain('描述要持续完成的目标，发送后开始')
-    ;[...notice!.querySelectorAll<HTMLButtonElement>('button')]
-      .find((item) => item.textContent?.trim() === '取消')!
-      .click()
-    expect(props.onDismissLifecycle).toHaveBeenCalledOnce()
-    // Still four controls in the bar.
-    expect(focusable(root)).toHaveLength(4)
   })
 })

@@ -1,14 +1,16 @@
-import { expect, test, type Locator, type Page } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { installVisualCoreBridge } from './visualBridge'
 
-// UI-S04: the composer — four controls in the bottom bar (+, permission
-// with the Plan switch, model with the context usage, send / mic), the
-// single-line status bar that replaced the four docks and expands into
-// sections, and the profile-interview prompt that shows once on the hero.
-// Raised fill, r-xl 24, dark elev-1, light hairline + elev-1; the input
-// area of a one-line draft is at least 56px tall.
+// UI-S04, reduced by the user on 2026-10-20 (Codex is a reference for
+// visual quality only; Emperor keeps its own layout): the composer keeps
+// its bar (+, permission, Plan capsule, model, context ring) with the
+// microphone in the send slot while the composer is empty; the card has
+// the new look (raised fill, r-xl 24, dark elev-1, light hairline +
+// elev-1, a 56px input area); the queue dock sends or discards a message
+// held after 上一轮失败 (KRN-02); the profile-interview offer shows once on
+// the empty chat's hero.
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'composer')
 
 test.beforeAll(() => {
@@ -55,9 +57,8 @@ async function shot(page: Page, name: string) {
 
 const card = (page: Page) => page.locator('.composer-root form.card')
 const bar = (page: Page) => page.locator('.composer-root .composer-bar')
-const statusBar = (page: Page) => page.locator('.composer-status-bar')
-const statusPanel = (page: Page) =>
-  page.getByRole('dialog', { name: '输入框状态' })
+const queueDock = (page: Page) =>
+  page.getByRole('region', { name: '待处理消息队列' })
 
 /** The bottom bar's keyboard stops, by accessible name, in order. */
 async function barControls(page: Page): Promise<string[]> {
@@ -82,41 +83,27 @@ async function barControls(page: Page): Promise<string[]> {
   )
 }
 
-async function oneLine(locator: Locator) {
-  const lines = await locator.evaluate((element) => {
-    const style = getComputedStyle(element)
-    const line = parseFloat(style.lineHeight) || 20
-    const inner =
-      element.clientHeight -
-      parseFloat(style.paddingTop) -
-      parseFloat(style.paddingBottom)
-    return Math.round(inner / line)
-  })
-  expect(lines).toBe(1)
-}
-
 for (const theme of ['dark', 'light'] as const) {
-  test(`1 · four controls on an empty composer: + 权限 模型 麦克风 (${theme})`, async ({
+  test(`1 · the bar keeps its controls; the mic holds the send slot while empty (${theme})`, async ({
     page,
   }) => {
     await open(page, '/chat/build-ui?visualDictation=live', { theme })
-    expect(await barControls(page)).toEqual([
+    const controls = await barControls(page)
+    expect(controls.slice(0, 3)).toEqual([
       '添加附件与能力',
-      '执行权限 · 工作区可写',
+      '工作区',
       '模型与思考',
-      '听写',
     ])
-    await expect(page.locator('.plan-chip')).toHaveCount(0)
-    await expect(page.locator('.context-meter')).toHaveCount(0)
+    expect(controls[3]).toMatch(/^上下文 /)
+    expect(controls[4]).toBe('听写')
+    expect(controls).toHaveLength(5)
     // A draft: send takes the mic's place (gold, the one accent here).
     await page.locator('.composer-editor-input').click()
     await page.keyboard.type('看一下构建')
-    expect(await barControls(page)).toEqual([
-      '添加附件与能力',
-      '执行权限 · 工作区可写',
-      '模型与思考',
-      '发送',
-    ])
+    expect((await barControls(page)).at(-1)).toBe('发送')
+    await expect(
+      bar(page).getByRole('button', { name: '听写', exact: true }),
+    ).toHaveCount(0)
   })
 
   test(`10 · the composer card: raised, r-xl 24, elevation, 56px input area (${theme})`, async ({
@@ -153,126 +140,21 @@ for (const theme of ['dark', 'light'] as const) {
     })
     await shot(page, `composer-${theme}`)
   })
+}
 
-  test(`2 · the permission menu holds the presets and the Plan switch (${theme})`, async ({
-    page,
-  }) => {
-    await open(page, '/chat/build-ui', { theme })
-    const chip = bar(page).getByRole('button', { name: /^执行权限/ })
-    await expect(chip).toHaveText('工作区')
-    await chip.click()
-    const menu = page.getByRole('menu', { name: '执行权限' })
-    await expect(menu.getByRole('menuitem')).toHaveText([
-      /只读/,
-      /工作区可写/,
-      /完全访问/,
-    ])
-    const plan = menu.getByRole('switch', { name: 'Plan 模式' })
-    await expect(plan).toHaveAttribute('aria-checked', 'false')
-    await shot(page, `permission-menu-${theme}`)
-    await plan.click()
-    // Core turned Plan on: the chip says so, the switch is on.
-    await expect(chip).toHaveText(/工作区\s*·\s*Plan/)
-    if (!(await menu.isVisible())) await chip.click()
-    await expect(
-      page
-        .getByRole('menu', { name: '执行权限' })
-        .getByRole('switch', { name: 'Plan 模式' }),
-    ).toHaveAttribute('aria-checked', 'true')
-    await shot(page, `permission-menu-plan-${theme}`)
-    await page
-      .getByRole('menu', { name: '执行权限' })
-      .getByRole('switch', { name: 'Plan 模式' })
-      .click()
-    await expect(chip).toHaveText('工作区')
-  })
-
-  test(`3 · the model menu shows the context usage and 添加模型… (${theme})`, async ({
-    page,
-  }) => {
-    await open(page, '/chat/build-ui', { theme })
-    const chip = bar(page).getByRole('button', { name: '模型与思考' })
-    await chip.click()
-    const menu = page.getByRole('menu', { name: '模型与思考' })
-    const usage = menu.getByRole('group', { name: '上下文用量' })
-    await expect(usage).toContainText('12.0k')
-    await expect(usage).toContainText(/已用 \d+%/)
-    await expect(
-      menu.getByRole('menuitem', { name: '添加模型…' }),
-    ).toBeVisible()
-    await shot(page, `model-menu-${theme}`)
-  })
-
-  test(`5 · the status bar is one line and expands into sections (${theme})`, async ({
-    page,
-  }) => {
-    await open(
-      page,
-      '/chat/build-ui?visualTodos=on&visualGoal=active&visualQueue=held',
-      { theme },
-    )
-    await expect(statusBar(page)).toHaveText(
-      /3 个文件已更改\s*\+18\s*−4\s*·\s*待办 2\/4\s*·\s*目标进行中\s*·\s*1 条待发送/,
-    )
-    await oneLine(statusBar(page).locator('.line'))
-    // The bar sits right above the card, no wider than it.
-    const barBox = (await statusBar(page).boundingBox())!
-    const cardBox = (await card(page).boundingBox())!
-    expect(barBox.y + barBox.height).toBeLessThanOrEqual(cardBox.y + 1)
-    expect(barBox.width).toBeLessThanOrEqual(cardBox.width + 1)
-    await shot(page, `status-bar-${theme}`)
-
-    await statusBar(page).click()
-    const panel = statusPanel(page)
-    await expect(panel).toBeVisible()
-    await expect(panel.locator('section')).toHaveCount(4)
-    await expect(panel.getByRole('region', { name: '改动' })).toContainText(
-      '3 个文件已更改',
-    )
-    await expect(panel.getByRole('region', { name: '待办' })).toContainText(
-      '重做输入框与 Dock',
-    )
-    await expect(panel.getByRole('region', { name: '目标' })).toContainText(
-      '让 Composer 的 Goal 生命周期清晰、可控并且可恢复',
-    )
-    await expect(
-      panel.getByRole('region', { name: '待处理消息队列' }),
-    ).toContainText('待发送 · 上一轮失败')
-    await shot(page, `status-expanded-${theme}`)
-
-    // 目标 › 暂停 goes to Core, and the bar follows.
-    await panel
-      .getByRole('region', { name: '目标' })
-      .getByRole('button', { name: '暂停 Goal' })
-      .click()
-    await expect(statusBar(page)).toContainText('目标已暂停')
-
-    // 改动 › 审查 opens the review pane.
-    await statusPanel(page)
-      .getByRole('region', { name: '改动' })
-      .getByRole('button', { name: '审查' })
-      .click()
-    await expect(
-      page.locator('.workspace-col .workspace-body'),
-    ).toHaveAttribute('data-pane', 'review')
-  })
-
-  test(`6 · a message held after 上一轮失败 is sent from the status bar (${theme})`, async ({
+for (const theme of ['dark', 'light'] as const) {
+  test(`6 · the queue dock sends a message held after 上一轮失败 (${theme})`, async ({
     page,
   }) => {
     await open(page, '/chat/build-ui?visualQueue=held', { theme })
-    await expect(statusBar(page)).toHaveText(
-      /3 个文件已更改\s*\+18\s*−4\s*·\s*1 条待发送/,
-    )
-    await statusBar(page).click()
-    const queue = statusPanel(page).getByRole('region', {
-      name: '待处理消息队列',
-    })
-    await expect(queue).toContainText('待发送 · 上一轮失败')
+    const dock = queueDock(page)
+    await expect(dock).toContainText('1 条消息待发送')
+    await expect(dock).toContainText('待发送 · 上一轮失败')
     await expect(
-      queue.getByRole('button', { name: '插入当前执行' }),
+      dock.getByRole('button', { name: '插入当前执行' }),
     ).toHaveCount(0)
-    await queue.getByRole('button', { name: '发送排队消息' }).click()
+    await shot(page, `queue-held-${theme}`)
+    await dock.getByRole('button', { name: '发送排队消息' }).click()
     await expect
       .poll(() =>
         page.evaluate(
@@ -285,20 +167,13 @@ for (const theme of ['dark', 'light'] as const) {
         ),
       )
       .toEqual(['send'])
-    // The queue part leaves the bar; the workspace changes stay.
-    await expect(statusBar(page)).toHaveText(
-      /^\s*3 个文件已更改\s*\+18\s*−4\s*$/,
-    )
+    await expect(dock).toHaveCount(0)
   })
 }
 
-test('6 · a held message can be discarded', async ({ page }) => {
+test('6 · the queue dock discards a held message', async ({ page }) => {
   await open(page, '/chat/build-ui?visualQueue=held')
-  await statusBar(page).click()
-  const queue = statusPanel(page).getByRole('region', {
-    name: '待处理消息队列',
-  })
-  await queue.getByRole('button', { name: '丢弃排队消息' }).click()
+  await queueDock(page).getByRole('button', { name: '丢弃排队消息' }).click()
   await expect
     .poll(() =>
       page.evaluate(
@@ -311,22 +186,7 @@ test('6 · a held message can be discarded', async ({ page }) => {
       ),
     )
     .toEqual(['cancel'])
-  await expect(statusBar(page)).not.toContainText('待发送')
-})
-
-test('4 · no status bar when there is nothing to report', async ({ page }) => {
-  // A plain chat: no changes, todos, goal or queue.
-  await open(page, '/chat/chat-main')
-  await expect(page.locator('.composer-status')).toHaveCount(0)
-  await expect(statusBar(page)).toHaveCount(0)
-  for (const dock of [
-    '.changes-pill',
-    '.todo-dock',
-    '.goal-dock',
-    '.queue-dock',
-    '.notice-dock',
-  ])
-    await expect(page.locator(dock)).toHaveCount(0)
+  await expect(queueDock(page)).toHaveCount(0)
 })
 
 test('the profile interview is offered once, on the hero only', async ({

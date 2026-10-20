@@ -1,20 +1,15 @@
 <script setup lang="ts">
 /**
- * ComposerCard — the chat composer (UI-S04): a raised card (r-xl 24; dark
- * `--elev-1`, light hairline + `--elev-1`, `--composer-edge`) with the rich
- * editor above a bottom bar of exactly four controls:
- *
- * - `+`: 上传图片或文件, 插入 Skill 或插件 (the chip list), 截图 (macOS).
- * - PermissionChip: the shield and the preset's short name; its menu holds
- *   the three presets and the Plan 模式 switch.
- * - ModelPicker: 「模型名 · 思考强度」; its menu ends with 添加模型… and the
- *   chat's context usage.
- * - The send slot: the microphone while the composer is empty (where
- *   dictation exists), send once there is a draft, stop while a turn runs
- *   (with 加入队列 beside it once there is a draft).
- *
- * The input area of a one-line draft is at least 56px tall. All behaviour
- * lives in composerController.ts — this is its view.
+ * ComposerCard — the chat composer: a raised card (UI-S04 look: r-xl 24,
+ * `--composer-fill`, `--composer-edge` — dark `--elev-1`, light hairline +
+ * `--elev-1`) with the rich editor above the bottom bar. Left: `+` (上传图片
+ * 或文件, 插入 Skill 或插件, 截图 on macOS, Plan 模式, Goal 模式),
+ * PermissionChip, PlanChip; right: ModelPicker, ContextMeter and the send
+ * slot — the microphone while the composer is empty (where dictation
+ * exists), send once there is a draft, stop while a turn runs (with 加入
+ * 队列 beside it once there is a draft). The input area of a one-line draft
+ * is at least 56px tall. All behaviour lives in composerController.ts —
+ * this is its view.
  *
  * Dictation (VO-03, composerDictation.ts): the mic and the shortcut from
  * 设置 › 语音, on macOS. While it records, the recording bar takes the
@@ -23,9 +18,6 @@
  * `dictationChat` names the chat on screen; a change stops the recording,
  * and a result that arrives afterwards waits above the input of its own
  * chat (插入 / 丢弃).
- *
- * Goal capture (`/goal` with no outcome): a line above the input says what
- * to type, with 取消.
  */
 import { Camera } from 'lucide-vue-next'
 import {
@@ -47,7 +39,9 @@ import {
 } from '../chat/composerController'
 import {
   DsArrowUp,
+  DsGoal,
   DsPaperclip,
+  DsPlan,
   DsPlus,
   DsQueue,
   DsSkill,
@@ -60,10 +54,12 @@ import IconButton from '../ui/IconButton.vue'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
 import Spinner from '../ui/Spinner.vue'
+import ContextMeter from './ContextMeter.vue'
 import DictationBar from './DictationBar.vue'
 import DictationButton from './DictationButton.vue'
 import ModelPicker from './ModelPicker.vue'
 import PermissionChip from './PermissionChip.vue'
+import PlanChip from './PlanChip.vue'
 import { useComposerDictation } from './composerDictation'
 import ComposerEditor from './editor/ComposerEditor.vue'
 
@@ -204,11 +200,6 @@ const placeholder = computed(() =>
             : '继续对话，/ 调用技能，@ 引用插件'),
 )
 
-function togglePlan(on: boolean): void {
-  if (on) emit('activate-plan')
-  else if (props.lifecycleMode === 'plan') emit('dismiss-lifecycle')
-}
-
 function focusCard(event: MouseEvent): void {
   const target = event.target as HTMLElement
   if (
@@ -340,24 +331,6 @@ function addModel(): void {
       >
         <span class="composer-notice-text">{{ unknownSlashHint }}</span>
       </div>
-      <div
-        v-else-if="goalCaptureActive && lifecycleMode === 'goal'"
-        class="accessory composer-notice goal-capture"
-        role="status"
-      >
-        <span class="composer-notice-text">{{
-          goalCaptureStarting
-            ? '正在启动 Goal…'
-            : 'Goal：描述要持续完成的目标，发送后开始'
-        }}</span>
-        <Button
-          size="sm"
-          :disabled="goalCaptureStarting"
-          @click="emit('dismiss-lifecycle')"
-        >
-          取消
-        </Button>
-      </div>
 
       <ComposerEditor
         ref="editor"
@@ -409,11 +382,15 @@ function addModel(): void {
         <PermissionChip
           :options="modeOptions"
           :current="currentMode"
-          :plan="planEnabled"
-          :disabled="props.busy || goalCaptureStarting"
+          :disabled="props.busy"
+          :after-plan="planEnabled"
           :title="modeTitle"
           @select="selectMode"
-          @plan="togglePlan"
+        />
+        <PlanChip
+          :mode="props.lifecycleMode ?? null"
+          :busy="props.busy || goalCaptureStarting"
+          @dismiss="emit('dismiss-lifecycle')"
         />
         <span class="spacer" />
         <ModelPicker
@@ -425,13 +402,16 @@ function addModel(): void {
           :reasoning-value="currentReasoningValue"
           :reasoning-options="reasoningOptions"
           :provider-options="props.providerOptions"
-          :context-used="props.contextUsed"
-          :context-max="props.contextMax"
           :disabled="props.busy"
           :title="modelTitle"
           @select-model="selectModel"
           @select-reasoning="selectReasoning"
           @add-model="addModel"
+        />
+        <ContextMeter
+          v-if="props.contextMax > 0"
+          :used="props.contextUsed"
+          :max="props.contextMax"
         />
         <DictationButton
           v-if="micInSendSlot"
@@ -496,6 +476,23 @@ function addModel(): void {
       <MenuItem v-if="canScreenshot" @select="takeScreenshot">
         <template #icon><Camera :size="16" :stroke-width="1.5" /></template>
         截图
+      </MenuItem>
+      <MenuItem variant="separator" />
+      <MenuItem
+        :disabled="props.busy || props.lifecycleMode === 'plan'"
+        description="先规划，确认后再执行"
+        @select="emit('activate-plan')"
+      >
+        <template #icon><DsPlan :size="16" /></template>
+        Plan 模式
+      </MenuItem>
+      <MenuItem
+        :disabled="props.busy || props.lifecycleMode === 'goal'"
+        description="持续推进直到目标完成"
+        @select="emit('activate-goal')"
+      >
+        <template #icon><DsGoal :size="16" /></template>
+        Goal 模式
       </MenuItem>
     </Menu>
   </div>
@@ -576,8 +573,8 @@ function addModel(): void {
   white-space: nowrap;
 }
 
-/* One line above the input: a /word that will go out as text, the key
-   prompt, or what to type for a Goal. */
+/* One line above the input: a /word that will go out as text, or the key
+   prompt. */
 .composer-notice {
   flex-wrap: wrap;
   gap: var(--space-1-5);
@@ -612,8 +609,8 @@ function addModel(): void {
   text-overflow: ellipsis;
 }
 
-/* The four controls: + and permission on the left, model and the send
-   slot on the right. */
+/* + with the permission and Plan chips on the left; model, context and the
+   send slot on the right. */
 .composer-bar {
   display: flex;
   align-items: center;
