@@ -299,40 +299,51 @@ test('settings modal light + legacy route redirect', async ({ page }) => {
 })
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`workspace launcher and panes (${theme})`, async ({ page }) => {
+  test(`workspace empty state and panes (${theme})`, async ({ page }) => {
     await open(page, '/chat/build-ui?visualProgress=final', { theme })
     const toggle = page.getByRole('button', { name: '工作台', exact: true })
     await expect(toggle).toHaveAttribute('aria-pressed', 'false')
     await toggle.click()
     await expect(toggle).toHaveAttribute('aria-pressed', 'true')
     const workspace = page.locator('.workspace-col')
-    const launcher = workspace.locator('.workspace-launcher')
-    await expect(launcher).toBeVisible()
+    // No history yet: the four pane entries (UI-S06; no launcher home).
+    const start = workspace.locator('.workspace-start')
+    await expect(start).toBeVisible()
     // 审查 / 终端 / 文件 / 浏览器 (the 电脑 pane left for the conversation
     // preview, CU-02).
-    await expect(launcher.locator('.launcher-row')).toHaveCount(4)
+    await expect(start.locator('.start-entry')).toHaveCount(4)
     await expect(
-      launcher.locator('.launcher-row[data-pane="browser"]'),
+      start.locator('.start-entry[data-pane="browser"]'),
     ).toBeEnabled()
     await page.waitForTimeout(400)
     const box = (await workspace.boundingBox())!
     expect(Math.round(box.width)).toBeGreaterThanOrEqual(360)
-    await shot(page, `workspace-launcher-${theme}`)
+    await shot(page, `workspace-start-${theme}`)
     for (const pane of ['review', 'terminal', 'files', 'browser']) {
-      const segment = workspace.locator(`.segments [data-pane="${pane}"]`)
+      const segment = workspace.locator(
+        `.workspace-panes [data-tab-id="${pane}"]`,
+      )
       if (await segment.isDisabled()) continue
       await segment.click()
-      await expect(segment).toHaveAttribute('aria-pressed', 'true')
+      await expect(segment).toHaveAttribute('aria-selected', 'true')
       await expect(workspace.locator('.workspace-body')).toHaveAttribute(
         'data-pane',
         pane,
       )
       await shot(page, `workspace-${pane}-${theme}`)
     }
-    await workspace.getByRole('button', { name: '工作台首页' }).click()
-    await expect(launcher).toBeVisible()
+    await expect(
+      workspace.getByRole('button', { name: '工作台首页' }),
+    ).toHaveCount(0)
     await workspace.getByRole('button', { name: '关闭工作台' }).click()
     await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    // Reopening shows the pane used last, not the empty state.
+    await toggle.click()
+    await expect(workspace.locator('.workspace-body')).toHaveAttribute(
+      'data-pane',
+      'browser',
+    )
+    await expect(start).toHaveCount(0)
   })
 }
 

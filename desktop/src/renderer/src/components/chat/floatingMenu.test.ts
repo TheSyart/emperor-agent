@@ -60,4 +60,28 @@ describe('floatingMenuLayout', () => {
     expect(layout.placement).toBe('top')
     expect(layout.top).toBe(392)
   })
+
+  it('aligns left edges when asked (a menu under a button at a pane start)', () => {
+    const layout = floatingMenuLayout({
+      buttonRect: { top: 60, bottom: 88, right: 860, left: 776 },
+      menuWidth: 256,
+      menuHeight: 200,
+      viewportWidth: 1440,
+      viewportHeight: 900,
+      prefer: 'bottom',
+      align: 'start',
+    })
+    expect(layout.left).toBe(776)
+    // Still kept inside the window.
+    expect(
+      floatingMenuLayout({
+        buttonRect: { top: 60, bottom: 88, right: 1430, left: 1300 },
+        menuWidth: 256,
+        menuHeight: 200,
+        viewportWidth: 1440,
+        viewportHeight: 900,
+        align: 'start',
+      }).left,
+    ).toBe(1440 - 256 - 12)
+  })
 })

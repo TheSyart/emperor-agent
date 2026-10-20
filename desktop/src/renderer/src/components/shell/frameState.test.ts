@@ -118,6 +118,24 @@ describe('frame state', () => {
     expect(state.workspace).toBe(0)
   })
 
+  it('opens on the pane used last: no pane (launcher) never replaces one (UI-S06)', () => {
+    const state = defaultFrameState()
+    // Nothing chosen yet: the empty state with the four panes.
+    frameActions.openWorkspace(state, 'launcher')
+    expect(state.workspacePane).toBe('launcher')
+    frameActions.setWorkspacePane(state, 'terminal')
+    frameActions.closeWorkspace(state)
+    // 打开工作台 (environment card) asks for no particular pane.
+    frameActions.openWorkspace(state, 'launcher')
+    expect(state.workspace).toBeGreaterThan(0)
+    expect(state.workspacePane).toBe('terminal')
+    frameActions.setWorkspacePane(state, 'launcher')
+    expect(state.workspacePane).toBe('terminal')
+    frameActions.toggleWorkspace(state, 'launcher')
+    expect(state.workspace).toBe(0)
+    expect(state.workspacePane).toBe('terminal')
+  })
+
   it('shows the environment card beside a wide chat until closed, on demand when narrow', () => {
     const state = defaultFrameState()
     expect(state.envCard).toBe('auto')

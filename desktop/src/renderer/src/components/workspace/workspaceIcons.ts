@@ -1,4 +1,4 @@
-// Glyphs of the right workspace panes (launcher rows, header segments).
+// Glyphs of the right workspace panes (the empty state's pane entries).
 import {
   FileText,
   GitCompareArrows,

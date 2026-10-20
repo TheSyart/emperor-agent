@@ -38,6 +38,10 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { _electron, type ElectronApplication, type Page } from 'playwright-core'
 import { startFixtureSite } from '../fixtures/site'
+
+/** 文件's tabs (UI-S06: the shared editor tab bar, no draft tab). */
+const FILE_TABS = '.files-pane .workspace-tab-bar .tab-item'
+const ACTIVE_FILE_TAB = `${FILE_TABS}[data-active]`
 import {
   startFakeModel,
   type ChatRequest,
@@ -376,7 +380,7 @@ async function documentLinks(
       const active = page.locator('.file-code-line.reference-line-active')
       await active.waitFor({ timeout: 10_000 })
       const line = await active.getAttribute('data-line')
-      const tab = (await page.locator('.file-tab.active').innerText()).trim()
+      const tab = (await page.locator(ACTIVE_FILE_TAB).innerText()).trim()
       if (line !== '2' || !tab.includes('app.ts'))
         throw new Error(`line ${line}, tab ${tab}`)
       return { tab, line }
@@ -402,12 +406,12 @@ async function documentLinks(
   })
 
   await check(page, 'a missing file opens nothing', async () => {
-    const before = (await page.locator('.file-tab.active').innerText()).trim()
+    const before = (await page.locator(ACTIVE_FILE_TAB).innerText()).trim()
     // aria-disabled: Playwright would wait for it to become enabled.
     await link(page, 'src/old.ts').click({ force: true })
     await page.waitForTimeout(800)
-    const after = (await page.locator('.file-tab.active').innerText()).trim()
-    const tabs = await page.locator('.file-tab').count()
+    const after = (await page.locator(ACTIVE_FILE_TAB).innerText()).trim()
+    const tabs = await page.locator(FILE_TABS).count()
     if (after !== before) throw new Error(`active tab moved to ${after}`)
     if (
       (await link(page, 'src/old.ts').getAttribute('data-md-state')) !==
@@ -587,6 +591,71 @@ async function turnFileRecord(
     )
     await page.screenshot({ path: join(shots, 'turn-review.png') })
   })
+
+  await check(
+    page,
+    '审查 lists the changes in 未暂存 and its 分支名 ▾ menu holds every Git action',
+    async () => {
+      // UI-S06: back from the turn's review to the working tree.
+      const back = page.locator('.turn-review [aria-label="返回审查"]')
+      if (await back.isVisible()) await back.click()
+      const pane = page.locator('.git-review-pane')
+      await pane.waitFor({ timeout: 10_000 })
+      const unstaged = pane.locator('[data-group="unstaged"] .change-row')
+      await until(
+        async () => (await unstaged.count()) >= 3,
+        10_000,
+        'the turn’s changes in 未暂存',
+      )
+      const paths = await unstaged.evaluateAll((rows) =>
+        rows.map((row) => (row as HTMLElement).dataset.path ?? ''),
+      )
+      for (const path of ['docs/guide.md', 'src/app.ts', 'src/new.ts'])
+        if (!paths.includes(path)) throw new Error(`未暂存: ${paths}`)
+      if (await pane.locator('[data-group="staged"]').count())
+        throw new Error('an empty 已暂存 group is drawn')
+      await pane.locator('button[data-branch-menu]').click()
+      const menu = page.getByRole('menu', { name: 'Git 操作' })
+      await menu.waitFor({ timeout: 5_000 })
+      const actions = await menu
+        .locator('[data-action]')
+        .evaluateAll((items) =>
+          items.map((item) => (item as HTMLElement).dataset.action ?? ''),
+        )
+      const expected = [
+        'switch-branch',
+        'create-branch',
+        'fetch',
+        'pull',
+        'push',
+        'compare',
+        'enter-worktree',
+      ]
+      if (JSON.stringify(actions) !== JSON.stringify(expected))
+        throw new Error(`menu: ${actions}`)
+      await page.waitForTimeout(300) // let the menu finish fading in
+      await page.screenshot({ path: join(shots, 'review-branch-menu.png') })
+      await page.keyboard.press('Escape')
+      await menu.waitFor({ state: 'hidden', timeout: 5_000 })
+      // The working-tree diff comes from Git, under the row.
+      await unstaged
+        .filter({ hasText: 'app.ts' })
+        .locator('.change-main')
+        .click()
+      await until(
+        async () =>
+          (await pane.locator('.change-diff').innerText()).includes(
+            'export const fourth = 4',
+          ),
+        10_000,
+        'the app.ts diff under its row',
+      )
+      const pr = await pane.locator('[data-pr-line]').count()
+      if (pr !== 1) throw new Error(`Pull Request lines: ${pr}`)
+      await page.screenshot({ path: join(shots, 'review-pane.png') })
+      return { paths, actions }
+    },
+  )
 
   await check(
     page,
@@ -1219,7 +1288,7 @@ async function conversationResources(
           10_000,
           'resource line 2',
         )
-        const tab = page.locator('.file-tab.active')
+        const tab = page.locator(ACTIVE_FILE_TAB)
         if (!(await tab.innerText()).includes('资源示例.ts'))
           throw new Error('the card opened the wrong file')
         if (
@@ -1236,7 +1305,7 @@ async function conversationResources(
         if (await page.locator('[data-resource-dialog]').count())
           throw new Error('the missing-file click opened an unrelated resource')
         if (
-          !(await page.locator('.file-tab.active').innerText()).includes(
+          !(await page.locator(ACTIVE_FILE_TAB).innerText()).includes(
             '资源示例.ts',
           )
         )
@@ -1617,7 +1686,9 @@ async function conversationResources(
         )
         if (await pane.locator('.file-tree-column').count())
           throw new Error('ordinary Chat exposed a project tree')
-        await pane.getByRole('button', { name: 'Finder', exact: true }).click()
+        await pane
+          .getByRole('button', { name: '在访达中显示', exact: true })
+          .click()
         await until(
           async () =>
             (await resourceObservation(app)).revealed.length ===
@@ -1850,7 +1921,7 @@ async function realModel(page: Page): Promise<void> {
         .at(-1) ?? ''
     await until(
       async () =>
-        (await page.locator('.file-tab.active').innerText()).includes(name),
+        (await page.locator(ACTIVE_FILE_TAB).innerText()).includes(name),
       10_000,
       `${name} open in 文件`,
     )

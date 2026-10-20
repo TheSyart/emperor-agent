@@ -42,7 +42,7 @@
 | Notice             | 提示条：左侧图标 + 标题 + 说明 + 可选操作；tone 与 Badge 相同，warn / error 以 role=alert 播报。只在问题存在时出现                                                                                                                  |
 | DisclosureRow      | 会话流里的 28px 可折叠行：14px 图标（悬停换成箭头）、13px 标题与摘要、「·」分隔、可选尾部操作；正文左缩进 22px，展开收起用 CollapseTransition（见[会话流](conversation.md)）                                                        |
 | IoBlock            | 工具展开后的 IN / OUT 块：`--surface-raised`、`--r-md`、无边框，每段最高 150px，过长时「展开全部」；`tree` 把对象显示为 JsonTree（未知工具的通用正文）                                                                              |
-| PaneHeader         | 面板顶栏，固定 48px：标题 + 可选 Tabs + 右侧操作；长标题截断，高度不随内容变化。工作台用它做顶栏，上移 2px 与会话头 46px 的第一行底边对齐（见[外壳布局](layout.md)）                                                                |
+| PaneHeader         | 面板顶栏，固定 48px：标题 + 可选 Tabs + 右侧操作；长标题截断，高度不随内容变化。工作台用它做顶栏，上移 2px 与会话头 46px 的第一行底边对齐，左侧是 segmented 面板切换、右侧关闭，不放标题（见[外壳布局](layout.md)）                 |
 
 ## 输入
 
@@ -59,7 +59,11 @@
 
 ## 页签
 
-Tabs 一个组件三种外观：underline（页面与面板视图，选中项是一级文字 + 500 字重 + 2px 横线，不用金色）、segmented（筛选，可带数字）、editor（文件与终端，`closable` 的页签有 × 按钮，Delete 关闭）。左右方向键、Home / End 移动并选中，跳过停用的页签。
+Tabs 一个组件三种外观：underline（页面与面板视图，选中项是一级文字 + 500 字重 + 2px 横线，不用金色）、segmented（筛选与工作台的面板切换，可带数字）、editor（文件与终端，`closable` 的页签有 × 按钮，Delete 关闭）。左右方向键、Home / End 移动并选中，跳过停用的页签。页签可带 `title`（悬停说明：完整路径、停用的原因），写在页签外层，停用的页签也能显示。
+
+工作台的「文件」与「终端」共用 `workspace/WorkspaceTabBar`：editor 页签条放在 `--surface-canvas` 上，选中的页签用面板的 `--surface-base` 与下方内容连成一片，条底一条 0.5px 发丝线；「+」紧跟在最后一个页签后，面板自己的操作在最右。两个面板的页签条不各写一套。
+
+Menu 与 Popover 默认右边缘对齐触发按钮；触发按钮在面板左侧（例如「审查」的「分支名 ▾」）时用 `align="start"` 左对齐，不向左盖住相邻的栏。
 
 ## 反例
 

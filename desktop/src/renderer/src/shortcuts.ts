@@ -1,7 +1,7 @@
 /**
  * App keyboard shortcuts: one pure binding table + matcher (unit-tested).
  * `composables/useShortcuts.ts` installs the single window listener; the
- * workspace launcher renders its kbd chips from the same table.
+ * workspace empty state renders its kbd chips from the same table.
  *
  * Rules:
  * - Every binding carries ⌘ (`mod`, Ctrl off macOS) or a literal ⌃ (`ctrl`);
