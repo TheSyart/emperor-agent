@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
 > 最后核验：2026-10-19<br>
-> 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/SidebarRail.vue`、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/theme/base.css`、`desktop/src/main/window-chrome.ts`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）；测试 `AppFrame.test.ts`、`SidebarRail.test.ts`、`window-chrome.test.ts`、`desktop/tests/visual/shell.spec.ts`、`desktop/tests/electron/shell/run.ts`、`desktop/tests/visual/settings-groups.spec.ts`
+> 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/`（`SidebarRail.vue`、`SidebarRoot.vue`、`SessionRow.vue`、`CommandPalette.vue`）、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/theme/base.css`、`desktop/src/main/window-chrome.ts`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）；测试 `AppFrame.test.ts`、`SidebarRail.test.ts`、`window-chrome.test.ts`、`desktop/tests/visual/shell.spec.ts`、`desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/electron/shell/run.ts`、`desktop/tests/visual/settings-groups.spec.ts`
 
 主窗口是「画布 + 面板」：窗口底色是 `--surface-canvas`，图标栏和侧栏直接画在画布上；中间的对话（或整页）和右侧工作台各是一块面板。层级靠明度区分，画布上不画任何列边框。
 
@@ -54,14 +54,22 @@ macOS 上主窗口隐藏系统标题栏（`titleBarStyle: 'hiddenInset'`），�
 
 ## 图标栏
 
-- 从上到下：新对话（⌘N）、搜索（⌘K）、会话、定时任务、能力（原「探索」是能力页的「推荐」）、Pull Request（只在 GitHub 插件启用时出现）；底部是通知铃铛和设置。
+- 从上到下：新对话（⌘N）、搜索（⌘K，打开居中的命令面板 `CommandPalette`，侧栏里没有搜索框）、会话、定时任务、能力（原「探索」是能力页的「推荐」）、Pull Request（只在 GitHub 插件启用时出现）；底部是通知铃铛和设置。
 - 按钮是 IconButton `size="lg"`（36，`--icon-button-lg`），图标 20，提示在右侧。当前路由的入口画 `--surface-selected`（IconButton `selected`），并带 `aria-current="page"`。
 - 「会话」在对话路由上一直是选中状态：点击收起或展开侧栏（⌘B）；在整页上点击回到当前会话。
 - 后退 / 前进不再有按钮，用 ⌘[ / ⌘]。
 
+## 侧栏
+
+- 从上到下：顶栏、置顶（总在最上方）、项目、对话。对话按 `updated_at` 分「今天 / 昨天 / 更早」三组；手动排序时不分组。
+- 会话行是 `SessionRow`：32 高、圆角 8、16px 状态槽。选中画 `--surface-selected`，标题 500 字重。状态槽：运行中是金色呼吸点（Dot `running`），等待回答或审批是 `--attention` 点，有新进展是 `ok` 点。
+- 行内不显示日期。相对时间（12px 三级文字，「3 小时」「2 个月」「1 年」）和「⋯」组成悬停层（`data-hover-layer`），只在悬停、焦点在行内或菜单打开时出现。
+- 焦点在会话行上时，↑ / ↓ 把焦点移到相邻的行，并打开那个会话。
+- 搜索是图标栏打开的 `CommandPalette`：居中、宽 560、距顶 14vh；标题即时匹配（`searchSidebarSessions`），停顿 250ms 后用 Core `sessions.search` 补上内容命中（只搜用户消息和模型回答），每个会话一条，带片段。
+
 ## 收起与断点
 
-- 视口宽度小于 1024px 时侧栏自动收起，图标栏仍在；收起的侧栏保持挂载（宽度 0、`inert`），展开时保留搜索与分组的折叠状态。
+- 视口宽度小于 1024px 时侧栏自动收起，图标栏仍在；收起的侧栏保持挂载（宽度 0、`inert`），展开时保留分组的折叠状态。
 - 空间不够时，工作台先缩到 360，再自动关闭；只改渲染宽度，不改用户保存的宽度（`columns.ts` 的让位链）。
 - 列宽变化不做过渡动画：拖动时宽度逐帧跟随，收起和展开立即生效。
 - 0.2 之前保存的默认侧栏宽度 280 读取时换成新的默认 236；其他宽度夹到 200–360。
