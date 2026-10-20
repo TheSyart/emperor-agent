@@ -312,3 +312,24 @@ it('never writes through a folder that became a link in the project', async () =
   expect(outcome.conflicts).toEqual(['src/a.txt', 'src/new.ts'])
   expect(existsSync(join(outside, 'src', 'new.ts'))).toBe(false)
 })
+
+it('two applies at once: the second sees the first already done', async () => {
+  const f = fixture({ script: writes(CHILD_EDIT) })
+  const record = await f.start()
+  const run = await f.settle(record.id)
+  const [first, second] = await Promise.allSettled([
+    f.service.applyResult(record.id, run.id, 'user'),
+    f.service.applyResult(record.id, run.id, 'model'),
+  ])
+  expect(first).toMatchObject({
+    status: 'fulfilled',
+    value: { state: 'applied' },
+  })
+  expect(second).toMatchObject({ status: 'rejected' })
+  expect(String((second as PromiseRejectedResult).reason)).toContain(
+    'RESULT_SETTLED',
+  )
+  expect(f.service.inspect(record.id).runs[run.id]!.result!.totals.files).toBe(
+    2,
+  )
+})

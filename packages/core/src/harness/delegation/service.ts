@@ -195,6 +195,7 @@ export class DelegationService {
   >()
   private readonly rootEpochs = new Map<string, number>()
   private readonly goalProofs = new Map<string, string>()
+  private readonly resultLocks = new Map<string, Promise<unknown>>()
   readonly facts: ExecutorFactsStore
   private shutdownPromise?: Promise<void>
   private disposed = false
@@ -2400,7 +2401,29 @@ export class DelegationService {
    * workspace. A conflict writes nothing and keeps the result; otherwise
    * the result's worktree and refs go and only its undo record stays.
    */
-  async applyResult(
+  applyResult(
+    id: string,
+    runId: string,
+    by: 'user' | 'model',
+  ): Promise<DelegationResult> {
+    return this.underResultLock(id, () => this.applyNow(id, runId, by))
+  }
+  /**
+   * One decision about a delegation's result at a time (a click and the
+   * model's collect_agent may race): each reads the state it acts on
+   * inside the lock.
+   */
+  private underResultLock<T>(id: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.resultLocks.get(id) ?? Promise.resolve()
+    const next = previous.catch(() => undefined).then(task)
+    const tail = next.catch(() => undefined)
+    this.resultLocks.set(id, tail)
+    void tail.then(() => {
+      if (this.resultLocks.get(id) === tail) this.resultLocks.delete(id)
+    })
+    return next
+  }
+  private async applyNow(
     id: string,
     runId: string,
     by: 'user' | 'model',
@@ -2452,7 +2475,14 @@ export class DelegationService {
     return applied
   }
   /** 丢弃 (AGT-06): the result goes, the project is left as it is. */
-  async discardResult(
+  discardResult(
+    id: string,
+    runId: string,
+    by: 'user' | 'model',
+  ): Promise<DelegationResult> {
+    return this.underResultLock(id, () => this.discardNow(id, runId, by))
+  }
+  private async discardNow(
     id: string,
     runId: string,
     by: 'user' | 'model',
@@ -2475,7 +2505,10 @@ export class DelegationService {
     return discarded
   }
   /** 撤销 after 应用到项目 (AGT-06): files nobody changed since go back. */
-  async undoResult(id: string, runId: string): Promise<DelegationResult> {
+  undoResult(id: string, runId: string): Promise<DelegationResult> {
+    return this.underResultLock(id, () => this.undoNow(id, runId))
+  }
+  private async undoNow(id: string, runId: string): Promise<DelegationResult> {
     const { e, record, result, results } = this.resultOf(id, runId)
     if (result.state !== 'applied' || !result.undo)
       throw new DelegationError(
