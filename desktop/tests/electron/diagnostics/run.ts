@@ -349,11 +349,21 @@ async function workingApp(
       5_000,
       'the render-process-gone line',
     )
-    const dumps = filesUnder(crashpad)
-      .filter((file) => file.endsWith('.dmp'))
-      .map((file) => relative(home, file))
+    const fresh = filesUnder(crashpad).filter(
+      (file) => file.endsWith('.dmp') && !before.includes(file),
+    )
+    // A minidump, not an empty marker: it starts with the MDMP signature.
+    await until(
+      () =>
+        fresh.length > 0 &&
+        readFileSync(fresh[0]!).subarray(0, 4).toString('latin1') === 'MDMP',
+      10_000,
+      'the MDMP signature',
+    )
+    const dumps = fresh.map((file) => relative(home, file))
     return {
       dumps,
+      bytes: readFileSync(fresh[0]!).length,
       line: read(mainLog)
         .split('\n')
         .find((entry) => entry.includes('renderer process gone')),
