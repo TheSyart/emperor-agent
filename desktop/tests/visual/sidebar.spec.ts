@@ -150,8 +150,10 @@ for (const theme of ['dark', 'light'] as const) {
       root.getByRole('button', { name: 'Emperor 菜单' }),
     ).toHaveCount(0)
     const nav = rail(page)
-    for (const label of ['新对话', 'Pull Request', '定时任务', '能力', '探索'])
+    for (const label of ['新对话', 'Pull Request', '定时任务', '能力'])
       await expect(nav.getByRole('button', { name: label })).toBeVisible()
+    // 探索 is 能力's 推荐 block since UI-S08.
+    await expect(nav.getByRole('button', { name: '探索' })).toHaveCount(0)
     // On a conversation only 会话 is current.
     await expect(nav.locator('[aria-current="page"]')).toHaveCount(1)
     await expect(
@@ -178,7 +180,6 @@ for (const theme of ['dark', 'light'] as const) {
       'Pull Request',
       '定时任务',
       '能力',
-      '探索',
       '设置',
     ])
       await expect(
@@ -291,14 +292,14 @@ for (const theme of ['dark', 'light'] as const) {
   test(`back / forward shortcuts (${theme})`, async ({ page }) => {
     // UI-S01: no buttons any more; ⌘[ / ⌘] walk the shared nav history.
     await open(page, '/chat/build-ui', { theme })
-    await rail(page).getByRole('button', { name: '探索' }).click()
-    await expect(page).toHaveURL(/\/explore/)
+    await rail(page).getByRole('button', { name: '能力' }).click()
+    await expect(page).toHaveURL(/\/capabilities/)
     await page.locator('.app-frame').click({ position: { x: 600, y: 4 } })
     await page.keyboard.press('ControlOrMeta+[')
     await expect(page).toHaveURL(/\/chat\/build-ui/)
     await shot(page, `history-${theme}`)
     await page.keyboard.press('ControlOrMeta+]')
-    await expect(page).toHaveURL(/\/explore/)
+    await expect(page).toHaveURL(/\/capabilities/)
   })
 }
 

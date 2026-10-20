@@ -296,4 +296,19 @@ describe('SchedulerPage', () => {
     )
     expect(ctx.showToast).toHaveBeenCalledWith('定时任务已创建：每周回顾')
   })
+
+  it('keeps the service note behind ⓘ (UI-S08 5)', async () => {
+    await mount()
+    const footer = document.querySelector<HTMLElement>(
+      '[data-testid="scheduler-summary"]',
+    )!
+    expect(footer.textContent).toContain('服务运行中')
+    expect(document.body.textContent).not.toContain('最多补跑一次')
+    const info = document.querySelector<HTMLButtonElement>(
+      '[aria-label="关于定时任务服务"]',
+    )!
+    info.click()
+    await flush()
+    expect(document.body.textContent).toContain('最多补跑一次')
+  })
 })

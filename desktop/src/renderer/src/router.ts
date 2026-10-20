@@ -28,7 +28,6 @@ const GitHubIssuesPage = () =>
   import('./components/pages/github/GitHubIssuesPage.vue')
 const GitHubRunsPage = () =>
   import('./components/pages/github/GitHubRunsPage.vue')
-const ExplorePage = () => import('./components/pages/explore/ExplorePage.vue')
 
 /** Routes that render inside the conversation shell (workspace available). */
 export const CONVERSATION_ROUTE_NAMES: readonly string[] = [
@@ -125,11 +124,14 @@ export const routeRecords: RouteRecordRaw[] = [
     meta: { label: 'CI', page: true },
   },
   { path: '/github', redirect: '/github/issues' },
+  // 探索 is the 推荐 block of 能力 now (UI-S08).
   {
     path: '/explore',
-    name: 'explore',
-    component: ExplorePage,
-    meta: { label: '探索', page: true },
+    redirect: (to) => ({
+      path: '/capabilities',
+      query: to.query,
+      hash: '#recommended',
+    }),
   },
   {
     path: '/skills/:name?',

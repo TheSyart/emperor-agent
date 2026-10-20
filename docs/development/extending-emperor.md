@@ -135,7 +135,7 @@ MCP 工具不需要注册代码：`McpToolBridge` 会把每个已连接 server �
 
 ### 新整页
 
-定时任务、插件、Pull Request 和探索是整页路由，写法以 `components/pages/PageShell.vue` 与现有页面为准：
+定时任务、能力、Pull Request（以及 GitHub 的 Issue、CI 标签）是整页路由，写法以 `components/pages/PageShell.vue` 与现有页面为准：
 
 - 在 `desktop/src/renderer/src/router.ts` 用 `() => import(...)` 懒加载页面组件并给路由命名，`meta` 带 `label` 与 `page: true`。整页的路由名不在 `CONVERSATION_ROUTE_NAMES` 中，`App.vue` 因此不显示右侧工作台，工作台相关快捷键也不响应。
 - 页面根组件渲染 `PageShell`：`title`、可选 `subtitle`、页面自己的标题栏操作 `actions`，以及 `tabs` 插槽。默认布局是最宽 880px、整体滚动的内容列；列表 + 详情这类双栏页面传 `fill`，取消宽度上限和外层滚动，由内部各栏自行滚动（参照 Pull Request 页）。`PageShell` 提供设置标题栏宿主并声明 `settings-panel` 容器，复用的设置分区无需修改。

@@ -5,8 +5,9 @@
  * search field, the 全部 / 已开启 / 已暂停 / 已完成 tabs and one
  * SchedulerJobRow per job. A row opens SchedulerJobDialog (edit); its ⋯
  * menu runs / pauses / resumes / deletes (delete asks first; protected
- * system jobs cannot be deleted). The service line (running, concurrency,
- * queue) and the shutdown / misfire policy sit under the list.
+ * system jobs cannot be deleted). One service line (running, concurrency,
+ * queue) sits under the list; the shutdown / misfire policy is behind its
+ * ⓘ (UI-S08).
  *
  * Data: `boot.scheduler`, reloaded with `scheduler.get` on mount and every
  * time the kept-alive page is shown again; runtime `scheduler_*` events keep
@@ -23,10 +24,13 @@ import {
 } from 'vue'
 import { core } from '../../../api/http'
 import { useAppContext } from '../../../composables/useAppContext'
+import { Info } from 'lucide-vue-next'
 import Button from '../../ui/Button.vue'
+import IconButton from '../../ui/IconButton.vue'
 import Menu from '../../ui/Menu.vue'
 import MenuItem from '../../ui/MenuItem.vue'
 import Modal from '../../ui/Modal.vue'
+import Popover from '../../ui/Popover.vue'
 import Tabs from '../../ui/Tabs.vue'
 import { DsClock, DsPlus, DsSparkle } from '../../icons/ds'
 import {
@@ -65,6 +69,9 @@ const CLOCK_TICK_MS = 30_000
 
 const ctx = useAppContext()
 const busy = ref(false)
+/** The service note behind the footer's ⓘ (UI-S08: folded by default). */
+const noteOpen = ref(false)
+const noteAnchor = ref<HTMLElement | null>(null)
 const query = ref('')
 const filter = ref<SchedulerFilter>('all')
 const now = ref(Date.now())
@@ -359,9 +366,28 @@ function clearSearch() {
           >
             {{ item.text }}
           </span>
+          <span ref="noteAnchor" class="summary-info">
+            <IconButton
+              size="xs"
+              label="关于定时任务服务"
+              :tooltip="false"
+              :aria-expanded="noteOpen"
+              @click="noteOpen = !noteOpen"
+            >
+              <Info :size="13" />
+            </IconButton>
+          </span>
         </div>
-        <p class="policy">{{ POLICY_NOTE }}</p>
       </footer>
+      <Popover
+        v-model:open="noteOpen"
+        :anchor="noteAnchor"
+        label="关于定时任务服务"
+        :width="300"
+        placement="top"
+      >
+        <p class="policy">{{ POLICY_NOTE }}</p>
+      </Popover>
     </div>
 
     <Menu
@@ -516,6 +542,11 @@ function clearSearch() {
   width: var(--space-5);
   color: rgb(var(--label-dimmed));
   text-align: center;
+}
+
+.summary-info {
+  display: inline-flex;
+  margin-left: var(--space-1-5);
 }
 
 .policy {

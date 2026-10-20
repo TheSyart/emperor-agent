@@ -55,7 +55,6 @@ describe('sidebar nav', () => {
     expect(SIDEBAR_PAGES.map((entry) => entry.label)).toEqual([
       '定时任务',
       '能力',
-      '探索',
       'Pull Request',
     ])
     expect(
