@@ -105,9 +105,9 @@ describe('MCP stdio as a long-lived stream (KRN-04)', () => {
     await expect(call('big', { size: 20 * 1024 * 1024 }, 4000)).rejects.toThrow(
       /timed out/,
     )
-    expect(errors.some((error) => /too large|16 MiB/i.test(error.message))).toBe(
-      true,
-    )
+    expect(
+      errors.some((error) => /too large|16 MiB/i.test(error.message)),
+    ).toBe(true)
     await call('ping')
     expect(runtime.list({ activeOnly: true })).toHaveLength(1)
   }, 60_000)
