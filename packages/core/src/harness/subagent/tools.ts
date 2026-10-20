@@ -65,6 +65,8 @@ function stopReasonError(settlement: SubagentSettlement): string | undefined {
       return 'subagent declined the task'
     case 'interrupted':
       return 'subagent run was interrupted'
+    case 'budget':
+      return 'subagent run stopped at the task budget'
   }
 }
 

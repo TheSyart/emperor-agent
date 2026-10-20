@@ -72,14 +72,15 @@ export type TurnResult =
   | {
       kind: 'blocked'
       /**
-       * `cost-cap`: the per-turn cost cap; `prompt-rejected`: a
-       * UserPromptSubmit hook refused the prompt; `interaction-rejected`: a
-       * background turn's approval or question was rejected for it;
-       * `plan-mode`: its plan review was; `interaction-timeout`: it timed
-       * out waiting on one.
+       * `cost-cap`: the task's cost cap (KRN-03); `step-limit`: the turn
+       * reached its step budget; `prompt-rejected`: a UserPromptSubmit hook
+       * refused the prompt; `interaction-rejected`: a background turn's
+       * approval or question was rejected for it; `plan-mode`: its plan
+       * review was; `interaction-timeout`: it timed out waiting on one.
        */
       reason:
         | 'cost-cap'
+        | 'step-limit'
         | 'prompt-rejected'
         | 'interaction-rejected'
         | 'interaction-timeout'

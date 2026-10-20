@@ -43,6 +43,13 @@ describe('local config', () => {
       },
       webTools: { webFetch: true, webSearch: true },
       sessions: { defaultPermission: 'workspace-write' },
+      taskBudget: {
+        maxSteps: 400,
+        maxBackgroundSteps: 120,
+        maxActiveAgents: 8,
+        maxTotalAgents: 64,
+        maxNoticeWakes: 32,
+      },
     })
 
     const loaded = await loadLocalConfig(dir)
@@ -220,6 +227,7 @@ describe('local config', () => {
       'desktopPet',
       'prompt',
       'sessions',
+      'taskBudget',
       'webTools',
       'webui',
     ])
@@ -250,6 +258,7 @@ describe('local config', () => {
       'desktopPet',
       'prompt',
       'sessions',
+      'taskBudget',
       'webTools',
       'webui',
     ])
@@ -267,6 +276,7 @@ describe('local config', () => {
       'desktopPet',
       'prompt',
       'sessions',
+      'taskBudget',
       'webTools',
       'webui',
     ])
@@ -300,6 +310,42 @@ describe('local config', () => {
       webFetch: true,
       webSearch: true,
     })
+  })
+
+  it('keeps the task budget, each value falling back to its default (KRN-03)', async () => {
+    const path = localConfigPath(dir)
+    const defaults = {
+      maxSteps: 400,
+      maxBackgroundSteps: 120,
+      maxActiveAgents: 8,
+      maxTotalAgents: 64,
+      maxNoticeWakes: 32,
+    }
+    expect((await loadLocalConfig(dir)).taskBudget).toEqual(defaults)
+    await writeFile(
+      path,
+      JSON.stringify({
+        taskBudget: {
+          maxSteps: 50,
+          maxBackgroundSteps: 2.5,
+          maxActiveAgents: 0,
+          maxTotalAgents: '9',
+          maxNoticeWakes: 0,
+        },
+      }),
+      'utf8',
+    )
+    const loaded = await loadLocalConfig(dir)
+    expect(loaded.taskBudget).toEqual({
+      ...defaults,
+      maxSteps: 50,
+      maxNoticeWakes: 0,
+    })
+    const { taskBudget: _dropped, ...withoutBudget } = loaded
+    await saveLocalConfig(dir, withoutBudget)
+    expect(JSON.parse(await readFile(path, 'utf8')).taskBudget).toEqual(
+      defaults,
+    )
   })
 
   it('keeps the new-session permission, defaulting to workspace-write', async () => {

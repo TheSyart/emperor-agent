@@ -65,6 +65,7 @@ export type {
   SessionHeader,
   SurfaceOp,
   TodoItem,
+  TurnBudgetReason,
   TurnEndReason,
 } from '../session-log/types'
 export type {

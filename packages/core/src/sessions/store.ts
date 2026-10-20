@@ -510,6 +510,13 @@ export class SessionStore {
     }
   }
 
+  /** A deleted session's directory in the trash; null when it is not there. */
+  trashedDir(sessionId: string): string | null {
+    if (!this.isTrashId(sessionId)) return null
+    const dir = this.trashDir(sessionId)
+    return existsSync(dir) ? dir : null
+  }
+
   private trashDir(sessionId: string): string {
     return join(this.sessionsDir, TRASH_DIR, sessionId)
   }

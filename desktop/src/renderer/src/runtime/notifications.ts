@@ -209,7 +209,8 @@ export type RuntimeNotice =
       kind: 'turn'
       key: string
       sessionId: string
-      outcome: 'completed' | 'error'
+      /** `budget`: the task budget stopped it (KRN-03). */
+      outcome: 'completed' | 'error' | 'budget'
       at: number
     }
   | {
@@ -295,7 +296,12 @@ export function runtimeNoticeFromEvent(
         kind: 'turn',
         key: `turn:${owner}:${turn}`,
         sessionId: owner,
-        outcome: reason === 'error' ? 'error' : 'completed',
+        outcome:
+          reason === 'error'
+            ? 'error'
+            : reason === 'budget'
+              ? 'budget'
+              : 'completed',
         at,
       }
     }
@@ -370,9 +376,19 @@ export function notificationFromNotice(
     return {
       key: notice.key,
       kind: 'turn',
-      tone: notice.outcome === 'error' ? 'error' : 'success',
+      tone:
+        notice.outcome === 'error'
+          ? 'error'
+          : notice.outcome === 'budget'
+            ? 'warning'
+            : 'success',
       title,
-      detail: notice.outcome === 'error' ? '回合出错' : '回合已完成',
+      detail:
+        notice.outcome === 'error'
+          ? '回合出错'
+          : notice.outcome === 'budget'
+            ? '已达到任务预算，已停止'
+            : '回合已完成',
       createdAt: notice.at,
       target: { type: 'session', sessionId: notice.sessionId },
     }

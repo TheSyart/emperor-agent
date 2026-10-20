@@ -9,25 +9,23 @@
  *   and re-requests. A request-config handler then routes every remaining
  *   request of that turn to the fallback entry; the next turn starts on the
  *   primary route again (the old per-turn semantics).
- * - Cost cap: a pre-step handler sums the priced usage of the current turn's
- *   assistant messages and rejects the next step once the sum reached
- *   `policy.cost.maxUsdPerAgentTurn` (logged as `llm/cost-cap`).
+ * - Cost cap: `policy.cost.maxUsdPerAgentTurn` is now one task's cap over
+ *   the root and every subagent, failed attempts included, kept by the
+ *   host's task tree (KRN-03, `host/task-tree.ts`). `llm/cost-cap` stays
+ *   declared for logs written before it.
  */
 
 import { randomUUID } from 'node:crypto'
 import type {
   ModelExecutionPolicy,
   ModelFallbackTrigger,
-  ModelPricing,
 } from '../../config/model-config'
 import type { LlmClient } from '../../llm/client'
 import { EMPTY_RESPONSE_CODE } from '../../llm/error'
 import type { LlmFailure } from '../../llm/types'
-import { calculateUsageCost, usdToNanos } from '../../model/execution-policy'
 import type { Session } from '../../session-log/session'
 import type { Agent } from './agent'
 import type {
-  PreStepMiddleware,
   RequestConfigMiddleware,
   RequestErrorMiddleware,
 } from './middleware'
@@ -44,7 +42,7 @@ declare module '../../session-log/types' {
       trigger: ModelFallbackTrigger
       failure: LlmFailure
     }
-    /** The turn's priced usage reached the per-turn cost cap; the turn stops. */
+    /** Logs before KRN-03: the turn's priced usage reached the per-turn cost cap. */
     'llm/cost-cap': {
       turn: number
       step: number
@@ -59,8 +57,6 @@ declare module '../../session-log/types' {
 export interface ModelPolicySource {
   /** The current saved policy (re-read on every decision). */
   policy(): ModelExecutionPolicy | undefined
-  /** Pricing of one route (model entry id), when configured. */
-  pricing(routeId: string): ModelPricing | undefined
 }
 
 const TRANSIENT_CODES: ReadonlySet<string> = new Set([
@@ -110,37 +106,6 @@ export function currentModel(agent: Agent, llm: LlmClient): string {
     : llm.route(fallback.to).modelId
 }
 
-/** Priced cost (nano-USD) of one turn's assistant messages so far. */
-export function turnCostUsdNanos(
-  session: Session,
-  turn: number,
-  pricing: (routeId: string) => ModelPricing | undefined,
-): { spentUsdNanos: number; unpricedRoutes: string[] } {
-  let spentUsdNanos = 0
-  const unpriced = new Set<string>()
-  const events = session.events
-  for (let index = events.length - 1; index >= 0; index--) {
-    const event = events[index]!
-    if (event.type === 'turn/start' && event.data.turn === turn) break
-    if (event.type !== 'assistant/message' || event.data.turn !== turn) continue
-    const usage = event.data.usage
-    if (usage === undefined) continue
-    const route = event.data.message.source.provider
-    const cost = calculateUsageCost(
-      {
-        input: usage.inputTokens,
-        output: usage.outputTokens,
-        cache_read: usage.cacheReadTokens ?? 0,
-        cache_create: usage.cacheWriteTokens ?? 0,
-      },
-      pricing(route),
-    )
-    if (cost.costUsdNanos === null) unpriced.add(route)
-    else spentUsdNanos += cost.costUsdNanos
-  }
-  return { spentUsdNanos, unpricedRoutes: [...unpriced] }
-}
-
 export function fallbackErrorMiddleware(
   source: ModelPolicySource,
   llm: LlmClient,
@@ -186,31 +151,5 @@ export function fallbackConfigMiddleware(
     } catch {
       return undefined
     }
-  }
-}
-
-export function costCapMiddleware(
-  source: ModelPolicySource,
-): PreStepMiddleware {
-  return ({ agent, turn, step }) => {
-    const cap = source.policy()?.cost.maxUsdPerAgentTurn
-    if (cap === null || cap === undefined) return undefined
-    const capUsdNanos = usdToNanos(cap)
-    // Usage on a route without prices has no cost to count: the cap does
-    // not apply to it (MOD-05; 设置 › 模型 says so) and the turn goes on.
-    const { spentUsdNanos, unpricedRoutes } = turnCostUsdNanos(
-      agent.session,
-      turn,
-      (routeId) => source.pricing(routeId),
-    )
-    if (spentUsdNanos < capUsdNanos) return undefined
-    agent.session.append('llm/cost-cap', {
-      turn,
-      step,
-      capUsdNanos,
-      spentUsdNanos,
-      ...(unpricedRoutes.length === 0 ? {} : { unpricedRoutes }),
-    })
-    return { kind: 'reject' }
   }
 }

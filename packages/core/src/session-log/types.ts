@@ -66,6 +66,24 @@ export type TurnEndReason =
   | { kind: 'interrupted' }
   /** The user dismissed the plan review to reply; the turn ends without another request. */
   | { kind: 'plan-dismissed' }
+  /** The task budget stopped the turn before its next step (KRN-03). */
+  | TurnBudgetReason
+
+/**
+ * Which budget ended a turn (KRN-03): its steps (`maxSteps`, the limit that
+ * applied), or the task's priced spend over the root and every subagent,
+ * failed attempts included (`unpricedRoutes`: usage that could not be
+ * priced, so the cap could not be kept).
+ */
+export type TurnBudgetReason =
+  | { kind: 'budget'; limit: 'steps'; maxSteps: number }
+  | {
+      kind: 'budget'
+      limit: 'cost'
+      capUsdNanos: number
+      spentUsdNanos: number
+      unpricedRoutes?: string[]
+    }
 
 export interface TodoItem {
   content: string

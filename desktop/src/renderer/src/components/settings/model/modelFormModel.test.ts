@@ -146,7 +146,7 @@ describe('model execution policy draft', () => {
       '请选择备用模型',
     )
     expect(() => buildModelPolicy({ ...draft, costCapUsd: '0' })).toThrow(
-      '每 Agent 轮成本上限必须是正数',
+      '每个任务的费用上限必须是正数',
     )
     expect(
       buildModelPolicy({ ...draft, costCapUsd: ' ' }).cost.maxUsdPerAgentTurn,

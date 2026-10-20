@@ -440,10 +440,10 @@ describe('ModelSection', () => {
     await mount(config)
     const policy = container!.querySelector('[data-testid="model-policy"]')!
     expect(policy.textContent).toContain('默认不会自动切换模型')
-    expect(policy.textContent).toContain('每 Agent 轮成本上限')
+    expect(policy.textContent).toContain('每个任务的费用上限')
     expect(() => button('保存策略')).toThrow()
 
-    const cap = input('每 Agent 轮成本上限')
+    const cap = input('每个任务的费用上限')
     cap.value = '0.25'
     cap.dispatchEvent(new Event('input'))
     await flush()

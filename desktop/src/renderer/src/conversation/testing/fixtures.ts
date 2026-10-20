@@ -140,6 +140,8 @@ export function describeNode(node: ChatNode): string {
       return `hook[${node.data.status}]: ${node.data.point}`
     case 'fallback':
       return `fallback: ${node.data.from} -> ${node.data.to}`
+    case 'turnBudget':
+      return `turnBudget: turn ${node.data.turn} ${node.data.reason.limit}`
     case 'costCap':
       return `costCap: turn ${node.data.turn}`
     case 'workflowRun':

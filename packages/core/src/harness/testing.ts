@@ -11,6 +11,9 @@ import { resolveRetryPolicy } from '../llm/retry-policy'
 import type { RouteSpec } from '../llm/route'
 import type { GenerateOptions, StreamChunk, TokenUsage } from '../llm/types'
 import { SessionLogStore } from '../session-log/store'
+import { defaultTaskBudgetSettings } from '../config/local-config'
+import type { ModelPricing } from '../config/model-config'
+import { TaskTree, type TaskBudget } from './host/task-tree'
 import { Agent, type AgentOptions } from './agent/agent'
 import { createMiddleware, type AgentMiddleware } from './agent/middleware'
 import { retryMiddleware } from './agent/retry'
@@ -233,4 +236,30 @@ export function createTestHarness(
       )
     },
   }
+}
+
+/**
+ * One task tree's budget on a bare harness (KRN-03): usage is charged after
+ * every request and a spent budget ends the turn, as on the host. Every
+ * agent of the harness charges this one tree; `rootId` is the agent whose
+ * wakes the spent cost budget holds back.
+ */
+export function withTaskBudget(
+  h: TestHarness,
+  rootId: string,
+  budget: Partial<TaskBudget> = {},
+  pricing?: ModelPricing,
+): TaskTree {
+  const tree = new TaskTree(rootId, {
+    budget: () => ({ ...defaultTaskBudgetSettings(), ...budget }),
+    pricing: () => pricing,
+    background: () => false,
+    disposeJobs: async () => {},
+    disposeChildren: () => {},
+  })
+  h.middleware.requestEnd.push(({ provider, usage, attempt }) => {
+    tree.charge({ routeId: provider, usage }, attempt)
+  })
+  h.middleware.budget.push(({ agent, step }) => tree.check(agent, step))
+  return tree
 }

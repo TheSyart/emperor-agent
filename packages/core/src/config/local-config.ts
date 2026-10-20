@@ -40,6 +40,77 @@ export interface WebToolPreferences {
   webSearch: boolean
 }
 
+/**
+ * 设置 › 高级 › 任务预算 (KRN-03): what one task — a user's message and all
+ * the work it starts — may take. Steps are per turn; the other three count
+ * subagents of the whole task tree. The cost cap is the model policy's.
+ */
+export interface TaskBudgetSettings {
+  /** Steps one turn of a conversation may take. */
+  maxSteps: number
+  /** Steps one turn of a scheduled run or a goal round may take. */
+  maxBackgroundSteps: number
+  /** Subagents running at once (more wait for a free slot). */
+  maxActiveAgents: number
+  /** Subagents one task may start (more are refused). */
+  maxTotalAgents: number
+  /** Times subagent results may wake their idle parent in one task. */
+  maxNoticeWakes: number
+}
+
+/** Each budget's accepted range (whole numbers). */
+export const TASK_BUDGET_LIMITS: Record<
+  keyof TaskBudgetSettings,
+  { min: number; max: number }
+> = {
+  maxSteps: { min: 1, max: 10_000 },
+  maxBackgroundSteps: { min: 1, max: 10_000 },
+  maxActiveAgents: { min: 1, max: 64 },
+  maxTotalAgents: { min: 1, max: 1_000 },
+  maxNoticeWakes: { min: 0, max: 1_000 },
+}
+
+export function defaultTaskBudgetSettings(): TaskBudgetSettings {
+  return {
+    maxSteps: 400,
+    maxBackgroundSteps: 120,
+    maxActiveAgents: 8,
+    maxTotalAgents: 64,
+    maxNoticeWakes: 32,
+  }
+}
+
+/** Whether `value` is an accepted value of budget `key`. */
+export function validTaskBudgetValue(
+  key: keyof TaskBudgetSettings,
+  value: unknown,
+): value is number {
+  const range = TASK_BUDGET_LIMITS[key]
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= range.min &&
+    value <= range.max
+  )
+}
+
+/** Each budget falls back to its default when missing or out of range. */
+export function normalizeTaskBudgetSettings(
+  value: unknown,
+): TaskBudgetSettings {
+  const data = objectOrEmpty(value)
+  const defaults = defaultTaskBudgetSettings()
+  const pick = (key: keyof TaskBudgetSettings): number =>
+    validTaskBudgetValue(key, data[key]) ? data[key] : defaults[key]
+  return {
+    maxSteps: pick('maxSteps'),
+    maxBackgroundSteps: pick('maxBackgroundSteps'),
+    maxActiveAgents: pick('maxActiveAgents'),
+    maxTotalAgents: pick('maxTotalAgents'),
+    maxNoticeWakes: pick('maxNoticeWakes'),
+  }
+}
+
 /** The permission presets a session can start in (harness/approval/presets). */
 export const SESSION_PERMISSIONS = [
   'read-only',
@@ -95,19 +166,21 @@ export interface LocalConfig {
   browser: BrowserPreferences
   webTools: WebToolPreferences
   sessions: SessionPreferences
+  taskBudget: TaskBudgetSettings
 }
 
 /**
- * What a save takes: a missing `browser`, `webTools` or `sessions` writes
- * its defaults.
+ * What a save takes: a missing `browser`, `webTools`, `sessions` or
+ * `taskBudget` writes its defaults.
  */
 export type LocalConfigInput = Omit<
   LocalConfig,
-  'browser' | 'webTools' | 'sessions'
+  'browser' | 'webTools' | 'sessions' | 'taskBudget'
 > & {
   browser?: BrowserPreferences
   webTools?: WebToolPreferences
   sessions?: SessionPreferences
+  taskBudget?: TaskBudgetSettings
 }
 
 export function defaultWebToolPreferences(): WebToolPreferences {
@@ -181,6 +254,7 @@ function defaultLocalConfig(): LocalConfig {
     browser: defaultBrowserPreferences(),
     webTools: defaultWebToolPreferences(),
     sessions: defaultSessionPreferences(),
+    taskBudget: defaultTaskBudgetSettings(),
   }
 }
 
@@ -228,6 +302,7 @@ export function parseLocalConfig(
     browser,
     webTools: normalizeWebToolPreferences(data.webTools),
     sessions: normalizeSessionPreferences(data.sessions),
+    taskBudget: normalizeTaskBudgetSettings(data.taskBudget),
   }
 }
 
@@ -310,6 +385,7 @@ export async function saveLocalConfig(
     browser: normalizeBrowserPreferences(config.browser),
     webTools: normalizeWebToolPreferences(config.webTools),
     sessions: normalizeSessionPreferences(config.sessions),
+    taskBudget: normalizeTaskBudgetSettings(config.taskBudget),
   }
   const shared = await sharedSettings(path, opts.persistenceAdapter)
   await localConfigSnapshot(path, opts.persistenceAdapter).write({

@@ -416,6 +416,22 @@ export class SessionLogStore {
     return session
   }
 
+  /**
+   * The events of session `id`'s log stored at `path` (e.g. in the trash),
+   * read only; empty when it is missing or unreadable.
+   */
+  readEventsAt(id: string, path: string): SessionEvent[] {
+    try {
+      return existsSync(path) ? parseLog(id, readFileSync(path)).events : []
+    } catch (error: unknown) {
+      logger.warn('session log: could not read a stored log', {
+        session: id,
+        error: String(error),
+      })
+      return []
+    }
+  }
+
   /** Read durable facts without attaching, crash repair, or writing to the log. */
   readSnapshot(id: string): Session {
     const live = this.get(id)
