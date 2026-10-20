@@ -41,9 +41,7 @@ describe('brand mark usage', () => {
       'utf8',
     )
     const favicon = readRenderer('../public/favicon.svg')
-    const component = pathData(
-      readRenderer('components/brand/BrandMark.vue'),
-    )
+    const component = pathData(readRenderer('components/brand/BrandMark.vue'))
     const [frame, node, crown, ...half] = pathData(asset)
 
     expect(favicon).toBe(asset)
