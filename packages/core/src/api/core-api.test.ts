@@ -136,6 +136,7 @@ const EXPECTED_OPERATIONS = [
   'mcp.importServers',
   'mcp.removeServer',
   'mcp.saveConfig',
+  'mcp.serverLog',
   'mcp.setServerEnabled',
   'mcp.status',
   'memory.checkWatchlist',

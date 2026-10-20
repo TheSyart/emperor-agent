@@ -133,6 +133,7 @@ import {
 } from '../plugins/service'
 import { loadMcpConfig } from '../mcp/config'
 import { logger } from '../util/log'
+import { redactLogText } from '../util/redaction'
 import { EmperorError, OperationRetiredError } from '../errors'
 import {
   CoreSessionApplicationService,
@@ -1806,6 +1807,14 @@ export class CoreApi {
   readonly mcp = {
     getConfig: () => this.configService.getMcpConfig(),
     status: () => this.host.kept.mcpClient.snapshot(),
+    /** A server's last 200 stderr lines, redacted like the logs (KRN-04); null: not running. */
+    serverLog: (input: { name: string }) => {
+      const text = this.host.kept.mcpClient.serverStderr(input.name)
+      return {
+        name: input.name,
+        text: text === null ? null : redactLogText(text),
+      }
+    },
     saveConfig: async (raw: Dict, view: ViewScope) => {
       // Saving MCP config lets MCPClient spawn servers.*.command; guard it like any mutation.
       this.assertMutation('mcp', 'saveConfig', view)
