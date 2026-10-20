@@ -33,6 +33,7 @@ import { AsyncQueue } from './async-queue'
 import { readClaudeSessionHistory } from './claude-history'
 import { CLAUDE_HOST_TOOLS, publicReferences } from '../facts'
 import { claudeInitIssue } from '../compatibility'
+import { projectInstructions } from '../dev-environment'
 import {
   bundledClaudeExecutable,
   claudeExecutableSource,
@@ -482,7 +483,16 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
             SUBAGENT_IDENTITY,
             SUBAGENT_HANDOFF,
             EXTERNAL_REPORT_TRANSPORT,
-          ].join('\n\n'),
+            // The repository's CLAUDE.md as text, not its settings: project
+            // settings could pre-approve tools past canUseTool (AGT-08).
+            projectInstructions(input.cwd, [
+              'CLAUDE.md',
+              join('.claude', 'CLAUDE.md'),
+              'AGENTS.md',
+            ]),
+          ]
+            .filter((part): part is string => Boolean(part))
+            .join('\n\n'),
         },
         persistSession: true,
         includePartialMessages: true,

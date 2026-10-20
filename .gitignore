@@ -92,3 +92,6 @@ pnpm-debug.log*
 /packages/*/.team/
 
 /packages/core/native/build/
+
+# Per-worktree Playwright config (a private port); never committed
+desktop/playwright.local.config.ts

@@ -1,4 +1,8 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import {
+  DEFAULT_DEVELOPMENT_ENVIRONMENT,
+  type DevelopmentEnvironmentSettings,
+} from './dev-environment'
 import { isAbsolute, join } from 'node:path'
 import { z } from 'zod'
 import {
@@ -92,6 +96,17 @@ export const executorConfigSchema = z
     upgradeNotice: z.literal('external-default-off').optional(),
     diagnosticsMode: z.boolean().optional(),
     verifyBeforeApply: z.boolean().optional(),
+    // 设置 › 子智能体 › 高级 › 开发环境 (AGT-08).
+    developmentEnvironment: z
+      .object({
+        gitIdentity: z.boolean(),
+        proxy: z.boolean(),
+        sshAgent: z.boolean(),
+        toolchains: z.boolean(),
+        github: z.boolean(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((c, ctx) => {
@@ -246,7 +261,35 @@ export class ExecutorConfigStore {
     if (!next.verifyBeforeApply) delete next.verifyBeforeApply
     if (next.limits.claudeMaxTurns === DEFAULT_CLAUDE_MAX_TURNS)
       delete next.limits.claudeMaxTurns
+    if (
+      next.developmentEnvironment &&
+      sameDevelopmentEnvironment(
+        next.developmentEnvironment,
+        DEFAULT_DEVELOPMENT_ENVIRONMENT,
+      )
+    )
+      delete next.developmentEnvironment
     durableReplaceSync(this.file, JSON.stringify(next, null, 2) + '\n')
     return next
   }
+}
+
+/** What a task's environment passes through: the saved switches, else the defaults. */
+export function developmentEnvironmentOf(
+  config: Pick<ExecutorConfig, 'developmentEnvironment'>,
+): DevelopmentEnvironmentSettings {
+  return config.developmentEnvironment ?? DEFAULT_DEVELOPMENT_ENVIRONMENT
+}
+
+function sameDevelopmentEnvironment(
+  left: DevelopmentEnvironmentSettings,
+  right: DevelopmentEnvironmentSettings,
+): boolean {
+  return (
+    left.gitIdentity === right.gitIdentity &&
+    left.proxy === right.proxy &&
+    left.sshAgent === right.sshAgent &&
+    left.toolchains === right.toolchains &&
+    left.github === right.github
+  )
 }
