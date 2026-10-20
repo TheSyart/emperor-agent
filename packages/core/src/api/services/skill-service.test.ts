@@ -157,12 +157,8 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
       'skill-creator',
       'name: skill-creator\ndescription: Create skills.',
     )
-    let refreshes = 0
     const service = new CoreSkillService(stateRoot, {
       runtimeRoot,
-      refreshRuntimeContext: () => {
-        refreshes += 1
-      },
     })
 
     const listed = service.list()
@@ -207,7 +203,6 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
     expect(
       readFileSync(join(stateRoot, 'skills', 'writer', 'SKILL.md'), 'utf8'),
     ).toBe('---\nname: writer\ndescription: Write docs\n---\n\n# Writer\n')
-    expect(refreshes).toBe(1)
 
     writeFileSync(
       join(stateRoot, 'skills', 'installed.v1.json'),
@@ -234,7 +229,6 @@ describe('CoreSkillService (MIG-IPC-007)', () => {
       schemaVersion: 1,
       skills: { retained: { name: 'retained', status: 'blocked' } },
     })
-    expect(refreshes).toBe(2)
     expect(() => service.save('../bad', '# Bad')).toThrow(/Skill name/)
     expect(() =>
       service.save('writer', '---\nname: other\ndescription: x\n---\n'),

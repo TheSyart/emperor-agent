@@ -9,7 +9,6 @@ export type {
   CoreOperationResult,
 } from '../api/operations'
 export type { ViewScope } from '../harness/host/scope'
-export { CoreUnavailableError } from '../runtime/lifecycle'
 export { EnvironmentError } from '../environment/errors'
 export type {
   CommandCompletion,

@@ -36,7 +36,44 @@ import {
   isPathInside,
   parseSkillFrontmatter,
   SKILL_FILE,
+  type SkillFolderCheck,
 } from './validate'
+
+/**
+ * Folder checks by path, valid while the folder and its SKILL.md keep their
+ * time and size (KRN-13): every step and every skill tool call scans the
+ * Skill sources, and re-reading and re-validating every SKILL.md each time
+ * was the cost. An edit, a new or a removed file at the top of the folder
+ * is seen at once, with or without the folder watcher.
+ */
+const folderChecks = new Map<string, { key: string; check: SkillFolderCheck }>()
+const FOLDER_CHECK_CACHE_LIMIT = 2_000
+let folderCheckCount = 0
+
+/** How many Skill folders were really checked (not served from the cache). */
+export function skillFolderChecks(): number {
+  return folderCheckCount
+}
+
+function cachedFolderCheck(path: string, folderName: string): SkillFolderCheck {
+  let key: string
+  try {
+    const folder = statSync(path)
+    const file = statSync(join(path, SKILL_FILE))
+    key = `${folderName}|${folder.mtimeMs}|${file.mtimeMs}|${file.size}|${file.ino}`
+  } catch {
+    key = ''
+  }
+  const cached = key ? folderChecks.get(path) : undefined
+  if (cached && cached.key === key) return cached.check
+  folderCheckCount += 1
+  const check = checkSkillFolder(path, { folderName })
+  if (key) {
+    if (folderChecks.size >= FOLDER_CHECK_CACHE_LIMIT) folderChecks.clear()
+    folderChecks.set(path, { key, check })
+  }
+  return check
+}
 
 export type SkillSourceKind = 'project' | 'user' | 'plugin' | 'builtin'
 
@@ -277,7 +314,7 @@ export function scanSkillSource(source: SkillSourceDir): {
     }
     if (stat.isDirectory() || stat.isSymbolicLink()) {
       if (stat.isSymbolicLink() && !isDirectoryTarget(path)) continue
-      const check = checkSkillFolder(path, { folderName: entry })
+      const check = cachedFolderCheck(path, entry)
       if (!check.valid) {
         if (stat.isDirectory() && !existsSync(join(path, SKILL_FILE))) continue // plain folder without SKILL.md: not a Skill attempt
         invalid.push({

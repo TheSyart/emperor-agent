@@ -14,7 +14,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, open, rename, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { OperationRetiredError, ValidationError } from '../../errors'
-import type { ClaudeCodeHooks } from '../../harness/hooks/claude-code'
+import type { HookConfigPort } from '../../harness/host/host'
 import {
   CLAUDE_HOOK_EVENTS,
   parseClaudeCodeConfig,
@@ -31,7 +31,7 @@ export interface CoreHooksServiceDeps {
   /** Emperor Home; the editable config is `<stateRoot>/hooks.json`. */
   stateRoot: string
   /** The live bridge; reloaded after every successful save. */
-  hooks: ClaudeCodeHooks
+  hooks: HookConfigPort
   /**
    * The Build project of the session the caller shows (substitutes
    * `${CLAUDE_PROJECT_DIR}`, test-run cwd); null for Chat (KRN-01).

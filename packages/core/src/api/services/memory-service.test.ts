@@ -81,7 +81,6 @@ interface Harness {
   deps: CoreMemoryServiceDeps
   service: CoreMemoryService
   logs: Map<string, Session>
-  refreshes: () => number
   /** The session the caller names (what the UI shows: KRN-01 passes it explicitly). */
   setActive: (id: string | null) => void
   active: () => string | null
@@ -108,7 +107,6 @@ function makeService(): Harness {
   })
   const logs = new Map<string, Session>()
   let active: string | null = null
-  let refreshCount = 0
   const compactCalls: string[] = []
   let compactImpl: CoreMemoryServiceDeps['compactNow'] = async () => ({
     compacted: false,
@@ -127,16 +125,12 @@ function makeService(): Harness {
       return await compactImpl(id)
     },
     measureContext: () => measurement,
-    refreshRuntimeContext: () => {
-      refreshCount += 1
-    },
   }
   return {
     root,
     deps,
     service: new CoreMemoryService(deps),
     logs,
-    refreshes: () => refreshCount,
     setActive: (id) => {
       active = id
     },
@@ -310,8 +304,8 @@ describe('CoreMemoryService (harness kernel)', () => {
     )
   })
 
-  it('saves global memory through section patches, restores versions, checks the watchlist, and refreshes runtime context', async () => {
-    const { root, deps, service, refreshes } = makeService()
+  it('saves global memory through section patches, restores versions, checks the watchlist', async () => {
+    const { root, deps, service } = makeService()
     deps.sharedMemory.writeMemory(
       '# Global Long-Term Memory\n\n## Cross-Project Decisions\n- keep this\n\n## Open Questions\n- old question\n',
     )
@@ -329,12 +323,10 @@ describe('CoreMemoryService (harness kernel)', () => {
     expect(
       readFileSync(join(root, 'memory', 'patch-ledger.jsonl'), 'utf8'),
     ).toContain('save_global_memory')
-    expect(refreshes()).toBe(1)
 
     expect(() => service.saveMemory('plain memory text')).toThrow(
       'save_memory requires at least one ## section',
     )
-    expect(refreshes()).toBe(1)
 
     expect(() => service.getEpisode('bad-date')).toThrow(
       'episode date must be YYYY-MM-DD',
@@ -366,7 +358,6 @@ describe('CoreMemoryService (harness kernel)', () => {
       restored: { path: 'memory/MEMORY.local.md', content: initial },
       memory: { long_term: initial },
     })
-    expect(refreshes()).toBe(2)
 
     service.saveWatchlist('- [ ] active item')
     expect(service.getWatchlist()).toMatchObject({
@@ -454,7 +445,6 @@ describe('CoreMemoryService (harness kernel)', () => {
     })
 
     expect(h.compactCalls).toEqual([session.id])
-    expect(h.refreshes()).toBe(1)
     expect(payload).toMatchObject({
       status: 'compacted',
       count: 6,

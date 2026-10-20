@@ -248,6 +248,45 @@ describe('importSkills', () => {
     },
   )
 
+  it('skips the symbolic links of a GitHub archive and lists them (KRN-13)', async () => {
+    const { target } = workspace()
+    const archive = zip([
+      { name: 'skills-main/skills/pdf/SKILL.md', data: skillText('pdf') },
+      { name: 'skills-main/skills/pdf/notes.md', data: '# Notes\n' },
+      {
+        name: 'skills-main/skills/pdf/docs',
+        data: '../../shared/docs',
+        unixMode: 0o120777,
+      },
+      {
+        name: 'skills-main/LICENSE',
+        data: 'COPYING',
+        unixMode: 0o120644,
+      },
+    ])
+    const result = await importSkills({
+      source: { kind: 'url', url: 'https://github.com/acme/skills' },
+      targetDir: target,
+      scope: 'user',
+      fetchClient: {
+        get: async (request: PublicHttpRequest) => ({
+          url: request.url,
+          status: 200,
+          headers: {},
+          body: archive,
+        }),
+      },
+    })
+    expect(result.errors).toEqual([])
+    expect(result.imported).toHaveLength(1)
+    const [pdf] = result.imported
+    expect(pdf!.name).toBe('pdf')
+    expect(pdf!.warnings.join('\n')).toMatch(/docs/)
+    expect(pdf!.warnings.join('\n')).toMatch(/符号链接|symbolic link/i)
+    expect(existsSync(join(pdf!.path, 'notes.md'))).toBe(true)
+    expect(existsSync(join(pdf!.path, 'docs'))).toBe(false)
+  })
+
   it('downloads a GitHub folder link through the injected https client', async () => {
     const { target } = workspace()
     const archive = zip([
@@ -321,7 +360,9 @@ describe('importSkills', () => {
   })
 })
 
-function zip(entries: Array<{ name: string; data: string | Buffer }>): Buffer {
+function zip(
+  entries: Array<{ name: string; data: string | Buffer; unixMode?: number }>,
+): Buffer {
   const localParts: Buffer[] = []
   const centralParts: Buffer[] = []
   let localOffset = 0
@@ -347,7 +388,7 @@ function zip(entries: Array<{ name: string; data: string | Buffer }>): Buffer {
     central.writeUInt32LE(data.byteLength, 20)
     central.writeUInt32LE(data.byteLength, 24)
     central.writeUInt16LE(name.byteLength, 28)
-    central.writeUInt32LE((0o100644 << 16) >>> 0, 38)
+    central.writeUInt32LE(((entry.unixMode ?? 0o100644) << 16) >>> 0, 38)
     central.writeUInt32LE(localOffset, 42)
     centralParts.push(central, name)
     localOffset += local.byteLength + name.byteLength + data.byteLength
