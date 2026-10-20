@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import * as runtimeEvents from '../runtime/events'
+import { logger } from '../util/log'
 import { cleanString } from '../util/strings'
 import { resolveStartupMisfire } from './misfire'
 import {
@@ -26,11 +27,20 @@ import {
   SchedulerRunPoolLimits,
 } from './run-pool'
 import {
+  SchedulerLockHeld,
   SchedulerStore,
   SchedulerStoreCorrupt,
   SchedulerStoreData,
 } from './store'
 import { defaultSystemJobs } from './system-jobs'
+
+/**
+ * How late a timer may fire and still count as the trigger it was armed for
+ * (KRN-10). Later than this the computer was asleep (or the process stalled)
+ * across the trigger, and the job's misfire policy decides, as on a cold
+ * start.
+ */
+export const SCHEDULER_WAKE_GRACE_MS = 60_000
 
 export type SchedulerTimerCallback = () => void | Promise<void>
 export type SchedulerSetTimer = (
@@ -81,6 +91,10 @@ export interface SchedulerStatusPayload {
   enabled: number
   nextRunAtMs: number | null
   lastError: string | null
+  /** Why the last start failed (KRN-10); null once a start succeeds. */
+  startError: string | null
+  /** Job entries set aside in `jobs.rejected.json` by this process. */
+  rejectedJobs: number
   active: number
   queued: number
   maxConcurrentRuns: number
@@ -124,6 +138,7 @@ export class SchedulerService {
   private timer: unknown = null
   private stopping: Promise<void> | null = null
   private shutdownReason: string | null = null
+  private startError: string | null = null
   private readonly inFlightJobIds = new Set<string>()
   private readonly runSettlements = new Map<string, Promise<void>>()
 
@@ -155,7 +170,11 @@ export class SchedulerService {
       opts.setTimer ??
       ((callback, delayMs) =>
         setTimeout(() => {
-          void callback()
+          void Promise.resolve()
+            .then(callback)
+            .catch((error: unknown) =>
+              logger.warn('scheduler tick failed', { error: String(error) }),
+            )
         }, delayMs))
     this.clearTimer =
       opts.clearTimer ??
@@ -167,10 +186,44 @@ export class SchedulerService {
     this.taskTerminal = opts.taskTerminal ?? (() => null)
   }
 
+  /**
+   * Take `scheduler.lock`, reconcile what a restart left behind and arm the
+   * timer. A failure is kept for diagnostics (`status().startError`) and
+   * rethrown; the lock is given back. While another process holds the lock,
+   * start is tried again after the longest sleep, so the scheduler takes
+   * over when that process exits.
+   */
   async start(): Promise<void> {
     if (this.running) return
     if (this.stopping) await this.stopping
     if (this.running) return
+    try {
+      this.store.acquireLock(this.timeFunc())
+      this.startRunning()
+      this.startError = null
+    } catch (error) {
+      this.store.releaseLock()
+      this.startError = String(error instanceof Error ? error.message : error)
+      if (error instanceof SchedulerLockHeld) this.retryStartLater()
+      throw error
+    }
+  }
+
+  /** Why the last start failed, or null (KRN-10; 诊断 shows it). */
+  startFailure(): string | null {
+    return this.startError
+  }
+
+  private retryStartLater(): void {
+    if (this.timer !== null) this.clearTimer(this.timer)
+    this.timer = this.setTimer(async () => {
+      this.timer = null
+      if (this.running || this.stopping) return
+      await this.start().catch(() => undefined)
+    }, this.maxSleepMs)
+  }
+
+  private startRunning(): void {
     if (!this.accepting) this.runPool = new SchedulerRunPool(this.runPoolLimits)
 
     const data = this.store.load({ allowLastGood: false })
@@ -228,6 +281,8 @@ export class SchedulerService {
       enabled: enabled.length,
       nextRunAtMs: this.nextWakeMs(jobs),
       lastError: errors.at(-1)?.state.last_error ?? null,
+      startError: this.startFailure(),
+      rejectedJobs: this.store.rejectedCount(),
       active: pool.active,
       queued: pool.queued,
       maxConcurrentRuns: this.runPool.limits.maxConcurrentRuns,
@@ -377,13 +432,28 @@ export class SchedulerService {
     return admission.accepted
   }
 
+  /**
+   * One timer tick: admit every due job, then re-arm the timer whatever
+   * happened (a tick that throws, or finds the store corrupt, still leaves
+   * the next one armed).
+   */
   async onTimer(): Promise<void> {
     if (!this.accepting) return
+    let settlements: Promise<void>[] = []
+    try {
+      settlements = this.admitDueJobs()
+    } finally {
+      this.armTimer()
+    }
+    await Promise.allSettled(settlements)
+  }
+
+  private admitDueJobs(): Promise<void>[] {
     let data: SchedulerStoreData
     try {
       data = this.store.load()
     } catch (error) {
-      if (error instanceof SchedulerStoreCorrupt) return
+      if (error instanceof SchedulerStoreCorrupt) return []
       throw error
     }
     const current = this.timeFunc()
@@ -404,6 +474,11 @@ export class SchedulerService {
     for (const job of dueJobs) {
       if (this.inFlightJobIds.has(job.id)) continue
       const scheduledForMs = job.state.next_run_at_ms!
+      if (current - scheduledForMs > SCHEDULER_WAKE_GRACE_MS) {
+        const settled = this.admitWakeMisfire(job, current)
+        if (settled) settlements.push(settled)
+        continue
+      }
       const activeRun = this.newActiveRun(job, {
         trigger: SchedulerRunTrigger.TIMER,
         scheduledForMs,
@@ -420,8 +495,52 @@ export class SchedulerService {
         this.admitDurableRun(job, activeRun, false, true).settled,
       )
     }
-    this.armTimer()
-    await Promise.allSettled(settlements)
+    return settlements
+  }
+
+  /**
+   * The trigger passed while the computer was asleep (CORE-29): the job's
+   * misfire policy decides, the same way as on a cold start — 「跳过」 records
+   * a skipped run and moves on, 「补跑一次」 / 「最近一次」 run once.
+   */
+  private admitWakeMisfire(
+    job: SchedulerJob,
+    current: number,
+  ): Promise<void> | null {
+    const decision = resolveStartupMisfire(
+      job.schedule,
+      job.misfire_policy,
+      job.state.next_run_at_ms,
+      current,
+    )
+    if (decision.kind === 'none') return null
+    if (decision.kind === 'skip') {
+      job.state.recordRun({
+        ...newRunIdentity(),
+        runAtMs: current,
+        scheduledForMs: decision.scheduledForMs,
+        trigger: SchedulerRunTrigger.MISFIRE,
+        misfirePolicy: job.misfire_policy,
+        missedCount: decision.window.missedCount,
+        countCapped: decision.window.countCapped,
+        status: SchedulerStatus.SKIPPED,
+        error: 'missed while the computer was asleep; skipped by policy',
+      })
+      job.state.next_run_at_ms = decision.window.nextFutureMs
+      if (job.schedule.kind === 'at') job.enabled = false
+      job.updated_at_ms = current
+      this.store.appendAction('update', { job })
+      return null
+    }
+    const activeRun = this.newActiveRun(job, {
+      trigger: SchedulerRunTrigger.MISFIRE,
+      scheduledForMs: decision.scheduledForMs,
+      misfirePolicy: job.misfire_policy,
+      missedCount: decision.window.missedCount,
+      countCapped: decision.window.countCapped,
+      resumeNextRunAtMs: decision.window.nextFutureMs,
+    })
+    return this.admitDurableRun(job, activeRun, false, true).settled
   }
 
   private async performStop(
@@ -435,6 +554,7 @@ export class SchedulerService {
       this.clearTimer(this.timer)
       this.timer = null
     }
+    this.store.releaseLock()
     const settlements = [...this.runSettlements.values()]
     await this.runPool.shutdown(reason, signal)
     if (signal?.aborted) return
@@ -844,7 +964,15 @@ export class SchedulerService {
   private armTimer(data?: SchedulerStoreData): void {
     if (!this.running || !this.accepting) return
     if (this.timer !== null) this.clearTimer(this.timer)
-    const jobs = data?.jobs ?? this.store.listJobs({ includeDisabled: true })
+    let jobs: SchedulerJob[] = []
+    try {
+      jobs = data?.jobs ?? this.store.listJobs({ includeDisabled: true })
+    } catch (error) {
+      // Unreadable now: wake after the longest sleep and look again.
+      logger.warn('scheduler could not read jobs to arm its timer', {
+        error: String(error),
+      })
+    }
     const nextWake = this.nextWakeMs(jobs)
     const delayMs =
       nextWake === null
