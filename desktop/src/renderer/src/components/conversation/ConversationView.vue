@@ -4,11 +4,12 @@
  * (breadcrumb, 对话 | 轨迹 tabs, environment-card and workspace toggles),
  * the view area (the raw-log ChatTimeline with the turn scrubber, or the
  * trajectory view with its inspector column), the environment card seat
- * (Chat tab, active phase), and the composer seat: docks (changes pill /
- * todo / goal / queue) above the ComposerCard, or a takeover card while an
- * interaction is pending. A blank chat renders the hero phase: the same seat
- * centered with the headline, under a slim header that keeps the two
- * toggles.
+ * (Chat tab, active phase), and the composer seat: the one-line status bar
+ * (changes / todos / goal / queue, UI-S04) above the ComposerCard, or a
+ * takeover card while an interaction is pending. A blank chat renders the
+ * hero phase: the same seat centered with the headline (and, once, the
+ * profile-interview offer under the composer), under a slim header that
+ * keeps the two toggles.
  *
  * The environment card floats at the top right of the view area. From a
  * 1120px conversation column (container query) the chat body and the
@@ -71,21 +72,18 @@ import type {
   QueuedPromptItem,
   TodoItem,
 } from '../../types'
-import ChangesPill from '../composer/ChangesPill.vue'
 import ComposerCard from '../composer/ComposerCard.vue'
-import GoalBar from '../composer/GoalBar.vue'
-import QueueDock from '../composer/QueueDock.vue'
+import ComposerStatusBar from '../composer/ComposerStatusBar.vue'
 import { draftHandoff, takeDraftHandoff } from '../chat/draftHandoff'
 import ReadOnlyComposer from '../composer/ReadOnlyComposer.vue'
-import TodoDock from '../composer/TodoDock.vue'
 import { frameActions, useFrameState } from '../shell/frameState'
-import Button from '../ui/Button.vue'
 import { useAgentTree } from '../sidebar/agentTree'
 import { requestWorkspace } from '../workspace/workspaceState'
 import { useSettingsRoute } from '../settings/useSettingsRoute'
 import ChatTimeline from './ChatTimeline.vue'
 import ConversationHeader from './ConversationHeader.vue'
 import EmptyHero from './EmptyHero.vue'
+import HeroProfilePrompt from './HeroProfilePrompt.vue'
 import {
   conversationCrumbs,
   conversationPhase,
@@ -430,11 +428,6 @@ const takeoverOpen = computed(
   () =>
     takeover.value !== null &&
     !isTakeoverMinimized(takeover.value.interaction.id),
-)
-const showProfileOnboardingPrompt = computed(
-  () =>
-    ctx.boot.value?.profileOnboarding?.status === 'pending' &&
-    !pendingInteraction.value,
 )
 const activeGoal = computed(() => {
   const owner = ctx.sessionId.value
@@ -859,6 +852,29 @@ async function runGoalStatusAction(action: GoalCardAction): Promise<void> {
   }
 }
 
+/**
+ * 编辑 a paused goal (the status bar): Core cannot rewrite an objective, so
+ * the goal is cleared and its objective goes back into the composer, armed
+ * as a new goal to be described again.
+ */
+async function editGoal(): Promise<void> {
+  const goal = activeGoal.value
+  if (!goal || goalActionPending.value) return
+  const objective = goal.objective
+  goalActionPending.value = 'cancel'
+  try {
+    await ctx.runGoalAction(goal.id, 'cancel', 'user_edit_goal')
+  } catch (error) {
+    ctx.showError(error)
+    return
+  } finally {
+    goalActionPending.value = null
+  }
+  const result = await ctx.activateGoalCapture()
+  if (!result.ok && result.error) ctx.showToast(result.error)
+  if (result.ok) composer.value?.setDraft(objective)
+}
+
 async function activatePlan(): Promise<void> {
   const result = await ctx.activatePlan()
   if (!result.ok && result.error) ctx.showToast(result.error)
@@ -1068,43 +1084,22 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         @stop="stopChild"
       />
       <div v-else class="stack">
-        <div
-          v-if="showProfileOnboardingPrompt"
-          class="notice-dock"
-          role="status"
-        >
-          <span class="notice-copy">
-            <strong>补充个人偏好</strong>
-            <span>用一个简短访谈设置称呼、沟通方式和工作偏好。</span>
-          </span>
-          <Button size="sm" variant="ghost" @click="ctx.skipProfileInterview"
-            >不再提醒</Button
-          >
-          <Button size="sm" variant="primary" @click="ctx.startProfileInterview"
-            >开始访谈</Button
-          >
-        </div>
-        <ChangesPill
-          v-if="!takeoverOpen && viewingId"
-          :session-id="viewingId"
-          :build="buildSession"
-        />
-        <TodoDock v-if="!takeoverOpen" :todos="latestTodos" />
-        <GoalBar
-          v-if="activeGoal"
+        <ComposerStatusBar
+          :session-id="viewingId || ''"
+          :build="buildSession && Boolean(viewingId)"
+          :todos="latestTodos"
           :goal="activeGoal"
-          :action-pending="goalActionPending"
-          @action="runGoalStatusAction"
-        />
-        <TakeoverSeat v-if="takeover" :interaction="pendingInteraction" />
-        <QueueDock
-          v-if="!takeoverOpen"
-          :items="ctx.queuedPrompts.value"
+          :goal-action-pending="goalActionPending"
+          :queue="ctx.queuedPrompts.value"
+          :takeover="takeoverOpen"
+          @goal-action="runGoalStatusAction"
+          @goal-edit="editGoal"
           @edit="editQueuedPrompt"
           @interject="interjectQueuedPrompt"
           @cancel="cancelQueuedPrompt"
           @send="sendQueuedPrompt"
         />
+        <TakeoverSeat v-if="takeover" :interaction="pendingInteraction" />
         <ComposerCard
           v-show="!takeoverOpen"
           ref="composer"
@@ -1147,6 +1142,11 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           @error="ctx.showToast"
         />
       </div>
+      <HeroProfilePrompt
+        v-if="phase === 'hero' && !child"
+        :session-id="viewingId || ''"
+        :blocked="Boolean(pendingInteraction)"
+      />
     </div>
   </section>
 </template>
@@ -1265,44 +1265,5 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
     calc(var(--composer-card-max) + 2 * var(--composer-clearance)),
     100%
   );
-}
-
-.notice-dock {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  box-sizing: border-box;
-  width: calc(100% - 2 * var(--composer-clearance) - 4 * var(--dock-inset));
-  max-width: calc(var(--composer-card-max) - 4 * var(--dock-inset));
-  min-height: 36px;
-  margin: 0 auto;
-  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
-  border: 1px solid var(--border-l1);
-  border-radius: var(--radius-card);
-  background: rgb(var(--tip-fill));
-}
-
-.notice-copy {
-  display: flex;
-  flex: 1;
-  align-items: baseline;
-  gap: var(--space-2);
-  min-width: 0;
-  overflow: hidden;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
-  white-space: nowrap;
-}
-
-.notice-copy strong {
-  flex: none;
-  color: rgb(var(--label-primary));
-  font-weight: 500;
-}
-
-.notice-copy span {
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 </style>

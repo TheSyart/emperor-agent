@@ -11,7 +11,7 @@ import {
 } from './composerControls'
 
 describe('composer control model', () => {
-  it('renders queue and stop actions while busy; interjection lives in the queue tray', () => {
+  it('renders queue and stop actions while busy; interjection lives in the status bar', () => {
     const source = readFileSync(
       fileURLToPath(new URL('../composer/ComposerCard.vue', import.meta.url)),
       'utf8',
@@ -19,22 +19,24 @@ describe('composer control model', () => {
     expect(source).toContain("submit('queue')")
     expect(source).not.toContain("submit('interject')")
     expect(source).toContain("emit('stop')")
-    const textarea = source.match(/<textarea[\s\S]*?\/>/)?.[0] || ''
-    expect(textarea).toContain(
+    // The editor stays writable while a turn runs (only blocked by a
+    // starting goal or a pending answer).
+    const editor = source.match(/<ComposerEditor[\s\S]*?\/>/)?.[0] || ''
+    expect(editor).toContain(
       ':disabled="goalCaptureStarting || props.interactionBlocked"',
     )
-    expect(textarea).not.toContain(
-      ':disabled="props.busy || goalCaptureStarting"',
-    )
+    expect(editor).not.toContain('props.busy')
     expect(source).toContain(':disabled="goalCaptureStarting"')
     expect(source).not.toContain('等待当前任务结束后再添加')
-    const queueTray = readFileSync(
-      fileURLToPath(new URL('../composer/QueueDock.vue', import.meta.url)),
+    const queue = readFileSync(
+      fileURLToPath(
+        new URL('../composer/StatusQueueSection.vue', import.meta.url),
+      ),
       'utf8',
     )
-    expect(queueTray).toContain('编辑消息')
-    expect(queueTray).toContain('插入当前执行')
-    expect(queueTray).toContain('删除')
+    expect(queue).toContain('编辑消息')
+    expect(queue).toContain('插入当前执行')
+    expect(queue).toContain('删除')
   })
 
   it('enables busy queue delivery for text or attachments', () => {

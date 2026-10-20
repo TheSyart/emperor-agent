@@ -5,27 +5,41 @@ import { describe, expect, it } from 'vitest'
 const source = readFileSync(join(__dirname, 'ConversationView.vue'), 'utf8')
 
 describe('ConversationView composer seat integration', () => {
-  it('replaces the composer with the takeover card and keeps the goal bar visible', () => {
+  it('replaces the composer with the takeover card and keeps the goal in the status bar', () => {
     expect(source).toContain('activeTakeover(pendingInteraction.value)')
     expect(source).toContain('<TakeoverSeat v-if="takeover"')
     expect(source).toContain('v-show="!takeoverOpen"')
-    expect(source).toContain('<GoalBar')
-    expect(source).toContain('@action="runGoalStatusAction"')
+    expect(source).toContain(':takeover="takeoverOpen"')
+    expect(source).toContain('@goal-action="runGoalStatusAction"')
     expect(source).toContain(
       ':interaction-blocked="Boolean(pendingInteraction)"',
     )
   })
 
-  it('docks the queue above the composer card and enforces the single slot', () => {
-    expect(source).toContain('<QueueDock')
+  it('UI-S04: one status bar above the composer instead of four docks', () => {
+    expect(source).toContain('<ComposerStatusBar')
+    for (const dock of ['<ChangesPill', '<TodoDock', '<GoalBar', '<QueueDock'])
+      expect(source).not.toContain(dock)
+    expect(source).toContain(':queue="ctx.queuedPrompts.value"')
+    expect(source).toContain(':todos="latestTodos"')
     expect(source).toContain(
       ':queue-occupied="Boolean(ctx.queuedPrompts.value.length)"',
     )
+    // 编辑 a goal: clear it and describe it again in the composer.
+    expect(source).toContain('@goal-edit="editGoal"')
+    expect(source).toContain("'user_edit_goal'")
+    expect(source).toContain('ctx.activateGoalCapture()')
   })
 
-  it('sends a held prompt (待发送) from the queue dock', () => {
+  it('sends a held prompt (待发送) from the status bar', () => {
     expect(source).toContain('@send="sendQueuedPrompt"')
     expect(source).toContain("ctx.manageQueuedPrompt(item.id, 'send')")
+  })
+
+  it('UI-S04: offers the profile interview only on the hero', () => {
+    expect(source).not.toContain('notice-dock')
+    expect(source).not.toContain('showProfileOnboardingPrompt')
+    expect(source).toMatch(/<HeroProfilePrompt\s+v-if="phase === 'hero'/)
   })
 
   it('returns the send outcome to the composer, which restores a refused draft', () => {
@@ -123,8 +137,7 @@ describe('ConversationView composer seat integration', () => {
     expect(source).toContain('padding-inline-end: calc(var(--env-card-width)')
   })
 
-  it('docks the changes pill and seats the async turn scrubber', () => {
-    expect(source).toContain('<ChangesPill')
+  it('seats the async turn scrubber', () => {
     expect(source).toContain("import('./TurnScrubber.vue')")
     expect(source).toContain('ticks.length >= SCRUBBER_MIN_TURNS')
     expect(source).toContain('timeline.value?.scrollToKey(key)')
