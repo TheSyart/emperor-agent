@@ -1,7 +1,19 @@
 <script setup lang="ts">
+/**
+ * 子智能体 on the environment card (UI-S05): one row with up to three faces
+ * and 「1 运行 · 3 完成」; clicking it lists the agents in place (active plus
+ * recent, five at first). The list opens by itself when the viewed page is
+ * one of them. 「标记为已结束」 stays on an external task with no outcome.
+ */
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { agentAncestry } from './environmentAgentsModel'
+import { Users } from 'lucide-vue-next'
+import {
+  agentAncestry,
+  agentStack,
+  agentSummary,
+} from './environmentAgentsModel'
+import EnvironmentRow from './EnvironmentRow.vue'
 import {
   agentTitle,
   agentSourceLabel,
@@ -20,6 +32,7 @@ const route = useRoute()
 const router = useRouter()
 const model = useAgentTree()
 const all = ref(false)
+const open = ref(false)
 const readableRoot = computed(() =>
   props.rootSessionId && !/^(sub-|dlg-|dgr-|draft:)/.test(props.rootSessionId)
     ? props.rootSessionId
@@ -38,15 +51,13 @@ function refreshRoot() {
 }
 const agents = computed(() => props.agents ?? tree.value?.agents ?? [])
 const visible = computed(() => visibleAgentChildren(agents.value, all.value))
-const active = computed(
-  () =>
-    agents.value.filter((a) => a.phase === 'running' || a.phase === 'waiting')
-      .length,
-)
+const summary = computed(() => agentSummary(agents.value))
+const faces = computed(() => agentStack(agents.value))
 watch(
   () => props.rootSessionId,
   (root) => {
     all.value = false
+    open.value = false
     if (root && !props.agents) refreshRoot()
   },
   { immediate: true },
@@ -63,8 +74,9 @@ watch(
       ? `${props.rootSessionId}:${currentId.value}`
       : '',
   (selection) => {
+    if (!selection) return
+    open.value = true
     if (
-      selection &&
       !visibleAgentChildren(agents.value, false).some(
         (agent) => agent.id === currentId.value,
       )
@@ -99,54 +111,98 @@ async function end(agent: AgentView) {
     class="agents-section"
     data-section="subagents"
   >
-    <h3>
-      子智能体 <span v-if="active">{{ active }} 个活动中</span>
-    </h3>
-    <div v-for="agent in visible" :key="agent.id" class="agent-entry">
-      <button
-        type="button"
-        class="agent-row"
-        :data-agent-id="agent.id"
-        :title="ancestry(agent).text"
-        :aria-current="currentId === agent.id ? 'page' : undefined"
-        @click="router.push(agentLocation(agent))"
-      >
-        <Avatar
-          kind="sprite"
-          v-if="agent.backend === 'internal'"
-          :id="agent.id"
-          :size="28"
-        />
-        <Avatar
-          kind="logo"
-          v-else
-          :icon-id="agent.backend"
-          :label="agentSourceLabel(agent.backend)"
-          :size="16"
-          :data-agent-logo="agent.backend"
-        />
-        <span class="agent-copy"
-          ><strong>{{ agentTitle(agent.title, agent.backend) }}</strong
-          ><small>{{ agentSourceLabel(agent.backend) }}</small
-          ><small v-if="ancestry(agent).unavailable" data-unavailable-parent>{{
-            ancestry(agent).unavailable
-          }}</small></span
+    <EnvironmentRow
+      v-if="agents.length"
+      data-row="agents"
+      label="子智能体"
+      :value="summary"
+      :status="faces[0]?.phase === 'running' ? 'running' : undefined"
+      :expanded="open"
+      aria-controls="env-card-agents"
+      @click="open = !open"
+    >
+      <template #lead>
+        <span class="faces">
+          <template v-for="agent in faces" :key="agent.id">
+            <Avatar
+              v-if="agent.backend === 'internal'"
+              kind="sprite"
+              :id="agent.id"
+              :size="22"
+              data-agent-face
+            />
+            <Avatar
+              v-else
+              kind="logo"
+              :icon-id="agent.backend"
+              :label="agentSourceLabel(agent.backend)"
+              :size="16"
+              data-agent-face
+            />
+          </template>
+          <Users v-if="!faces.length" :size="15" />
+        </span>
+      </template>
+    </EnvironmentRow>
+    <div v-if="open" id="env-card-agents" class="agent-list">
+      <div v-for="agent in visible" :key="agent.id" class="agent-entry">
+        <button
+          type="button"
+          class="agent-row"
+          :data-agent-id="agent.id"
+          :title="ancestry(agent).text"
+          :aria-current="currentId === agent.id ? 'page' : undefined"
+          @click="router.push(agentLocation(agent))"
         >
-        <span class="agent-phase">{{ agentPhaseLabel(agent.phase) }}</span>
-      </button>
+          <Avatar
+            kind="sprite"
+            v-if="agent.backend === 'internal'"
+            :id="agent.id"
+            :size="28"
+          />
+          <Avatar
+            kind="logo"
+            v-else
+            :icon-id="agent.backend"
+            :label="agentSourceLabel(agent.backend)"
+            :size="16"
+            :data-agent-logo="agent.backend"
+          />
+          <span class="agent-copy"
+            ><strong>{{ agentTitle(agent.title, agent.backend) }}</strong
+            ><small>{{ agentSourceLabel(agent.backend) }}</small
+            ><small
+              v-if="ancestry(agent).unavailable"
+              data-unavailable-parent
+              >{{ ancestry(agent).unavailable }}</small
+            ></span
+          >
+          <span class="agent-phase">{{ agentPhaseLabel(agent.phase) }}</span>
+        </button>
+        <button
+          v-if="agent.needsExit && readableRoot"
+          type="button"
+          class="agent-end"
+          :data-abandon-agent="agent.id"
+          title="这次运行没有正常结束。确认不再需要后，标记为已结束会释放它占用的工作区，Goal 可以继续。"
+          :disabled="ending !== null"
+          @click="end(agent)"
+        >
+          {{ ending === agent.id ? '正在结束…' : '标记为已结束' }}
+        </button>
+      </div>
+      <p v-if="endError" class="agents-error" role="alert">{{ endError }}</p>
       <button
-        v-if="agent.needsExit && readableRoot"
+        v-if="agents.length > 5"
         type="button"
-        class="agent-end"
-        :data-abandon-agent="agent.id"
-        title="这次运行没有正常结束。确认不再需要后，标记为已结束会释放它占用的工作区，Goal 可以继续。"
-        :disabled="ending !== null"
-        @click="end(agent)"
+        class="agent-more"
+        data-show-all-agents
+        :aria-expanded="all"
+        @click="all = !all"
       >
-        {{ ending === agent.id ? '正在结束…' : '标记为已结束' }}
+        {{ all ? '收起' : '显示全部子智能体' }}
       </button>
     </div>
-    <p v-if="endError" class="agents-error" role="alert">{{ endError }}</p>
     <p v-if="error" class="agents-error" role="alert">
       {{ error }}
       <button
@@ -158,35 +214,29 @@ async function end(agent: AgentView) {
         重试
       </button>
     </p>
-    <button
-      v-if="agents.length > 5"
-      type="button"
-      class="agent-more"
-      data-show-all-agents
-      :aria-expanded="all"
-      @click="all = !all"
-    >
-      {{ all ? '收起' : '显示全部子智能体' }}
-    </button>
   </section>
 </template>
 <style scoped>
-.agents-section {
-  padding: var(--space-1) var(--space-2);
-  border-top: 1px solid var(--border-l1);
+.faces {
+  display: inline-flex;
+  align-items: center;
+}
+/* Overlapping faces, each ringed in the card fill. */
+.faces > * + * {
+  margin-left: calc(-1 * var(--space-1-5));
+}
+.faces > * {
+  border-radius: var(--r-full);
+  box-shadow: 0 0 0 1.5px rgb(var(--env-card-fill));
+}
+.agent-list {
+  padding: var(--space-0-5) 0 var(--space-1) var(--space-2);
 }
 .agents-error {
-  color: rgb(var(--label-secondary));
-  font-size: var(--fs-xs);
-}
-h3 {
-  margin: 0 0 var(--space-1);
-  color: rgb(var(--label-tertiary));
-  font-size: var(--fs-xxs);
-  font-weight: 500;
-}
-h3 span {
-  margin-left: var(--space-2);
+  margin: 0;
+  padding: 0 var(--space-2);
+  color: rgb(var(--text-2));
+  font: var(--font-xs);
 }
 .agent-row {
   display: flex;
