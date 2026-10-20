@@ -66,7 +66,13 @@ export interface ExecutorLimits {
    * (AGT-07); absent: {@link DEFAULT_UNPRICED_TOKENS_PER_TASK}.
    */
   maxUnpricedTokensPerTask?: number
+  /**
+   * Claude Code's turns per run (SDK `maxTurns`), 50–1000; absent:
+   * {@link DEFAULT_CLAUDE_MAX_TURNS}. Settings › 子智能体 › 高级 (AGT-02).
+   */
+  claudeMaxTurns?: number
 }
+export const DEFAULT_CLAUDE_MAX_TURNS = 200
 /** The token cap for unpriced API runs when the config sets none. */
 export const DEFAULT_UNPRICED_TOKENS_PER_TASK = 2_000_000
 /**
@@ -137,7 +143,34 @@ export interface ExecutorProbe {
   checkedAt: number
   authVerified: boolean
   localAuthChecked?: boolean
+  /** Claude Code: the sign-in the check found, or why there is none (AGT-02). */
+  auth?: ExecutorAuthState
   diagnostic?: string
+}
+/**
+ * Where Claude Code's credential comes from (AGT-02), in the order the
+ * sources are read: a token pasted into Emperor, ~/.claude/settings.json
+ * `env`, `.credentials.json`, the environment Emperor started with, the
+ * login shell. Never the macOS Keychain.
+ */
+export interface ExecutorAuthState {
+  source:
+    | 'emperor'
+    | 'settings'
+    | 'credentials-file'
+    | 'environment'
+    | 'login-shell'
+    | 'model-route'
+    | null
+  kind?: 'oauth-token' | 'api-key' | 'auth-token'
+  /** Emperor's own token: its last four characters, for 已设置 · 末 4 位. */
+  last4?: string
+  /** Set when there is no usable credential. */
+  problem?: 'missing' | 'expired' | 'unreadable'
+  /** `.credentials.json`'s expiry (epoch ms). */
+  expiresAt?: number
+  /** It expires within ten minutes: still used, with a warning. */
+  expiresSoon?: boolean
 }
 export type NativeCapabilityStatus =
   | 'unverified'
@@ -311,6 +344,8 @@ export interface ExecutorOpenInput {
   usageBaseline?: { estimatedUsd?: number }
   /** What an API-billed run may still spend (Claude's maxBudgetUsd). */
   budgetUsd?: number
+  /** Claude Code's turns per run (AGT-02). */
+  maxTurns?: number
   policy: SandboxExecutionPolicy
   runtimeRoot: string
   secretValues?: readonly string[]
@@ -396,6 +431,8 @@ export type ExecutorEventPayload =
       text?: string
       structured?: unknown
       error?: string
+      /** Why a failed turn failed (AGT-02); absent: EXECUTOR_TURN_FAILED. */
+      failureCode?: string
     }
   | { type: 'transport_error'; code: string; message: string }
 export type NormalizedExecutorEvent = ExecutorEventPayload & {
@@ -475,7 +512,11 @@ export class DelegationError extends Error {
         'inspect_retained_results',
       ],
       AUTH_REQUIRED: [
-        '执行器认证不可用，请在执行器设置中重新配置。',
+        '执行器没有可用的登录，请在 设置 › 子智能体 设置令牌。',
+        'configure_executor',
+      ],
+      AUTH_EXPIRED: [
+        '执行器的登录令牌已过期，请在 设置 › 子智能体 重新设置令牌。',
         'configure_executor',
       ],
       EXECUTOR_MISSING: [
@@ -503,6 +544,15 @@ export class DelegationError extends Error {
   }
 }
 
+/** No usable credential; `auth` says what the check found (AGT-02). */
+export class ExecutorAuthError extends DelegationError {
+  constructor(
+    readonly auth: ExecutorAuthState,
+    detail: string,
+  ) {
+    super(auth.problem === 'expired' ? 'AUTH_EXPIRED' : 'AUTH_REQUIRED', detail)
+  }
+}
 export interface ExecutorModelCandidate {
   id: string
   name: string

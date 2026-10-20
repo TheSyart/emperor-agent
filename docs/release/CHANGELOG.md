@@ -6,6 +6,7 @@
 
 ### Changed
 
+- Claude Code 子智能体可以直接在「设置 › 子智能体 › Claude Code」里登录：订阅账号在终端运行 `claude setup-token` 后把令牌粘贴进来，API Key 用户粘贴 `ANTHROPIC_API_KEY`，令牌用本地密钥加密保存、只显示末 4 位；也会依次读取 `~/.claude/settings.json`、`.credentials.json`（过期前 10 分钟提示）和登录 shell 里导出的令牌，不读取钥匙串。没有登录时主会话不再派工给它；失败时任务详情写明原因（令牌过期、限流、余额、最多轮数、上下文过长）和下一步；每次运行最多轮数默认 200，可在「高级」里改；子任务里的命令拿不到 Claude 的凭据。
 - 更稳更省：Emperor 启动时清理上次崩溃留下的子进程（只清理确认是自己启动的那个，PID 被别的程序复用时不动）；DeepSeek 在流式回复中途返回的错误（如限流）现在会如实报错，而不是显示一条空回复；从 GitHub 导入 Skill 时，仓库里的符号链接被跳过并在结果里列出，不再整个导入失败；每一步不再重读所有 Skill 文件，Skill 多时更快。
 - DeepSeek 官方地址默认改走 Anthropic Messages 接口：思考内容连同签名原样带回下一轮，思考强度按 low / high / max 发送（medium 按 high，设置和输入框里有提示），图片经 Files API 上传一次后复用（失败时改为内嵌）；旧会话可以直接继续。自定义网关仍走 Chat Completions，官方地址也可以在「设置 → 模型 → 编辑 → 高级 › 接口」切回。
 - Build 会话进入 worktree 后，Agent 也真正在 worktree 里工作：Shell 命令、文件工具、沙箱可写范围、回合改动记录与撤销、「审查」都跟着切到 worktree，Agent 会收到工作目录变化的提示；离开 worktree 后回到原项目目录，重启后会话仍在 worktree 里（之前进入 worktree 只改了「审查」看到的目录，Agent 仍在原 checkout 里读写）。

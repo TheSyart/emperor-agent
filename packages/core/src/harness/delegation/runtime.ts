@@ -11,6 +11,8 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
   DelegationError,
+  ExecutorAuthError,
+  type ExecutorAuthState,
   type ExecutorBilling,
   type ExecutorProfile,
 } from './types'
@@ -28,6 +30,7 @@ import {
   type CodexAuthLink,
 } from './codex-auth'
 import type { LoginShellEnvironment } from './login-shell'
+import type { SecretSealer } from '../../security/secret-sealer'
 /** The one long-lived private directory every login probe of a profile reuses. */
 export const PROBE_RUNTIME_ID = 'probe'
 export interface PreparedRuntime {
@@ -43,6 +46,8 @@ export interface PreparedRuntime {
    * login is a subscription; any API key or credential route is API billing.
    */
   billing: ExecutorBilling
+  /** Claude Code: where its credential came from, or why there is none. */
+  auth?: ExecutorAuthState
 }
 export interface ExecutorCredential {
   apiKey: string
@@ -76,6 +81,8 @@ export class ExecutorRuntimeService {
       ) => Promise<ExecutorCredential>
       /** Provider keys exported in ~/.zshrc (absent from a Dock launch). */
       loginShell?: LoginShellEnvironment
+      /** Where tokens pasted into 设置 › 子智能体 live (AGT-02), read first. */
+      claudeTokens?: { root: string; sealer: SecretSealer }
     },
   ) {}
   /**
@@ -108,7 +115,8 @@ export class ExecutorRuntimeService {
     options: { allowUnauthenticatedConfig?: boolean } = {},
   ): Promise<PreparedRuntime> {
     let authenticationAvailable = true,
-      codexAuth: CodexAuthLink | undefined
+      codexAuth: CodexAuthLink | undefined,
+      auth: ExecutorAuthState | undefined
     safeDelegationKey(profile.stateDirectoryId)
     safeDelegationKey(id)
     const runtimeRoot = join(
@@ -168,6 +176,7 @@ export class ExecutorRuntimeService {
           'selected route has no credential',
         )
       if (profile.backend === 'claude-code') {
+        auth = { source: 'model-route', kind: 'api-key' }
         environment.ANTHROPIC_API_KEY = credential.apiKey
         if (credential.baseUrl)
           environment.ANTHROPIC_BASE_URL = credential.baseUrl
@@ -207,13 +216,27 @@ export class ExecutorRuntimeService {
           )
         }
       }
+      // The credential comes from one source, in AGT-02's order.
+      const {
+        resolveClaudeCredential,
+        isClaudeCredentialKey,
+        signInMissing,
+        ClaudeTokenStore,
+      } = await import('./claude-auth')
+      const tokens = this.options.claudeTokens
+      const resolved = await resolveClaudeCredential({
+        stored: () =>
+          tokens ? new ClaudeTokenStore(tokens).read(profile.id) : null,
+        settingsEnv: configured,
+        configDirectory: sourceDirectory,
+        ambient,
+        loginShell: this.options.loginShell,
+      })
+      auth = resolved.auth
       const keys = new Set([
-        'ANTHROPIC_API_KEY',
-        'ANTHROPIC_AUTH_TOKEN',
         'ANTHROPIC_BASE_URL',
         'ANTHROPIC_MODEL',
         'ANTHROPIC_DEFAULT_MODEL',
-        'CLAUDE_CODE_OAUTH_TOKEN',
         'ANTHROPIC_CUSTOM_MODEL_OPTION',
         ...[...Object.keys(configured), ...Object.keys(ambient)].filter((k) =>
           /^ANTHROPIC_DEFAULT_[A-Z0-9_]+_MODEL(?:_NAME)?$/.test(k),
@@ -223,6 +246,9 @@ export class ExecutorRuntimeService {
         const value = ambient[key] ?? configured[key]
         if (typeof value === 'string' && value) environment[key] = value
       }
+      for (const [key, value] of Object.entries(resolved.variables))
+        if (isClaudeCredentialKey(key) || !environment[key])
+          environment[key] = value
       const model =
         profile.defaultModel ??
         environment.ANTHROPIC_MODEL ??
@@ -247,37 +273,9 @@ export class ExecutorRuntimeService {
           join(environment.CLAUDE_CONFIG_DIR!, 'settings.json'),
           JSON.stringify(modelSettings),
         )
-      if (
-        !environment.ANTHROPIC_API_KEY &&
-        !environment.ANTHROPIC_AUTH_TOKEN &&
-        !environment.CLAUDE_CODE_OAUTH_TOKEN
-      ) {
-        const path = join(sourceDirectory, '.credentials.json')
-        if (existsSync(path)) {
-          try {
-            const d = JSON.parse(readFileSync(path, 'utf8')) as {
-              claudeAiOauth?: { accessToken?: string }
-            }
-            if (d.claudeAiOauth?.accessToken)
-              environment.CLAUDE_CODE_OAUTH_TOKEN = d.claudeAiOauth.accessToken
-          } catch {
-            throw new DelegationError(
-              'AUTH_REQUIRED',
-              'managed Claude credential file is invalid',
-            )
-          }
-        }
-      }
-      if (
-        !environment.ANTHROPIC_API_KEY &&
-        !environment.ANTHROPIC_AUTH_TOKEN &&
-        !environment.CLAUDE_CODE_OAUTH_TOKEN
-      ) {
+      if (!auth.source) {
         if (!options.allowUnauthenticatedConfig)
-          throw new DelegationError(
-            'AUTH_REQUIRED',
-            'managed Claude login has no resolvable credential',
-          )
+          throw new ExecutorAuthError(auth, signInMissing(auth))
         authenticationAvailable = false
       }
     } else {
@@ -387,6 +385,7 @@ export class ExecutorRuntimeService {
       authenticationAvailable,
       ...(codexAuth ? { codexAuth } : {}),
       billing,
+      ...(auth ? { auth } : {}),
     }
   }
 }

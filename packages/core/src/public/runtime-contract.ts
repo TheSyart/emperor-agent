@@ -91,6 +91,7 @@ export type {
   ExecutorModelCandidate,
   ExecutorProfile,
   ExecutorProbe,
+  ExecutorAuthState,
   ExecutorCapabilities,
   ExecutorRuntimeFacts,
   NativeCapabilityStatus,
