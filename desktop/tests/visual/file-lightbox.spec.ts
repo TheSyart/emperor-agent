@@ -187,5 +187,7 @@ test('child session files and images follow the viewed owner without activating 
   await expect(page.locator('.image-lightbox')).toBeVisible()
   await page.keyboard.press('Escape')
   // The child's attachment opens as a tab in the parent's Files pane.
-  await expect(page.locator('.files-pane .file-tab.active')).toBeVisible()
+  await expect(
+    page.locator('.files-pane .workspace-tab-bar .tab-item[data-active]'),
+  ).toBeVisible()
 })
