@@ -571,3 +571,61 @@ it('inherits Claude model alias mappings from the process environment', async ()
     f.cleanup()
   }
 })
+
+it('AGT-08 · the task environment follows the 开发环境 switches; gh sign-in survives Claude’s credential scrub as a private hosts.yml', async () => {
+  const f = delegationTestDirectory()
+  try {
+    let settings = {
+      gitIdentity: true,
+      proxy: true,
+      sshAgent: false,
+      toolchains: false,
+      github: true,
+    }
+    const service = new ExecutorRuntimeService({
+      root: f.root,
+      home: f.root,
+      environment: {
+        PATH: '/usr/bin:/bin',
+        HTTPS_PROXY: 'http://proxy.example:8080',
+      },
+      resolveRoute: async () => ({ apiKey: 'fixture-key' }),
+      developmentEnvironment: () => settings,
+      readGitIdentity: async () => ({
+        name: 'Ada Lovelace',
+        email: 'ada@example.com',
+      }),
+      readGhToken: async () => 'gho_fixture_token_value',
+    })
+    const profile = {
+      ...defaultExecutorConfig().profiles[0]!,
+      authRef: { kind: 'model-route' as const, routeId: 'fixture' },
+    }
+    const runtime = await service.prepare(profile, 'dlg-dev-env')
+    expect(runtime.environment).toMatchObject({
+      GIT_AUTHOR_NAME: 'Ada Lovelace',
+      GIT_COMMITTER_EMAIL: 'ada@example.com',
+      HTTPS_PROXY: 'http://proxy.example:8080',
+      GH_TOKEN: 'gho_fixture_token_value',
+    })
+    expect(runtime.secretValues).toContain('gho_fixture_token_value')
+    const hosts = join(runtime.environment.XDG_CONFIG_HOME!, 'gh', 'hosts.yml')
+    expect(readFileSync(hosts, 'utf8')).toContain(
+      'oauth_token: gho_fixture_token_value',
+    )
+    expect(lstatSync(hosts).mode & 0o777).toBe(0o600)
+
+    // GitHub and the proxy off: no token anywhere, no proxy variable.
+    settings = { ...settings, github: false, proxy: false }
+    const again = await service.prepare(profile, 'dlg-dev-env')
+    expect(again.environment.GH_TOKEN).toBeUndefined()
+    expect(again.environment.HTTPS_PROXY).toBeUndefined()
+    expect(existsSync(hosts)).toBe(false)
+
+    // The login probe lists models only: none of this is prepared for it.
+    const probe = await service.probe(profile)
+    expect(probe.environment.GIT_AUTHOR_NAME).toBeUndefined()
+  } finally {
+    f.cleanup()
+  }
+})

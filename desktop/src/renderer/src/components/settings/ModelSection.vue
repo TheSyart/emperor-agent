@@ -609,7 +609,7 @@ async function discardRejected(item: RejectedModelEntryPayload): Promise<void> {
 
 .endpoint {
   font: var(--font-code-small);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 
@@ -638,7 +638,7 @@ async function discardRejected(item: RejectedModelEntryPayload): Promise<void> {
 
 .rejected-name {
   flex: none;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .rejected-reason {

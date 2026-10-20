@@ -39,10 +39,10 @@ defineProps<{ projectName?: string }>()
   align-items: center;
   gap: var(--space-2-5);
   margin: 0;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: 26px;
   line-height: var(--space-8);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   letter-spacing: 0.01em;
 }
 
@@ -55,12 +55,12 @@ defineProps<{ projectName?: string }>()
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .project strong {
-  color: rgb(var(--label-secondary));
-  font-weight: 500;
+  color: rgb(var(--text-2));
+  font-weight: var(--weight-medium);
 }
 
 .glow {
@@ -71,8 +71,8 @@ defineProps<{ projectName?: string }>()
   aspect-ratio: 1051 / 468;
   background: radial-gradient(
     closest-side,
-    rgb(var(--accent-fill) / 0.16),
-    rgb(var(--accent-fill) / 0.06) 55%,
+    rgb(var(--accent) / 0.16),
+    rgb(var(--accent) / 0.06) 55%,
     transparent
   );
   transform: translate(-50%, -30%);

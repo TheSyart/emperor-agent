@@ -113,8 +113,8 @@ const collapsible = computed(
   gap: var(--space-0-5) var(--space-2);
   min-height: 42px;
   padding: var(--space-1-5) var(--space-2);
-  border-bottom: 1px solid var(--border-l1);
-  border-radius: var(--radius-xs);
+  border-bottom: 1px solid var(--stroke-1);
+  border-radius: var(--r-xs);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
   outline: none;
@@ -125,7 +125,7 @@ const collapsible = computed(
 }
 
 .row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .row:focus-visible {
@@ -133,7 +133,7 @@ const collapsible = computed(
 }
 
 .rank {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
 }
 
@@ -153,35 +153,35 @@ const collapsible = computed(
 .name strong {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
 }
 
 .name small {
   margin-top: var(--space-0-5);
   font-size: var(--fs-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .bar {
   height: var(--space-1);
   overflow: hidden;
   border-radius: var(--radius-pill);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .bar i {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
 }
 
 .value {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
   font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
@@ -190,7 +190,7 @@ const collapsible = computed(
 .detail {
   grid-column: 2 / -1;
   min-width: 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
@@ -200,18 +200,18 @@ const collapsible = computed(
   min-height: var(--space-7);
   margin-top: var(--space-2);
   padding: 0 var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
   background: transparent;
   font: inherit;
   font-size: var(--fs-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
 }
 
 .expand:hover {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-primary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-1));
 }
 
 .expand:focus-visible {

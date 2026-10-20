@@ -378,7 +378,7 @@ function openCall(callId: string): void {
                   <span>{{
                     trajectoryMessageSourceLabel(cell.messageSource)
                   }}</span>
-                  <DsChevronRight :size="11" class="nav-icon" />
+                  <DsChevronRight :size="12" class="nav-icon" />
                 </button>
               </dd>
             </div>
@@ -395,7 +395,7 @@ function openCall(callId: string): void {
                   @click="c.selectRequest(requestTarget)"
                 >
                   <span>Request #{{ requestNumber }}</span>
-                  <DsChevronRight :size="11" class="nav-icon" />
+                  <DsChevronRight :size="12" class="nav-icon" />
                 </button>
                 <button
                   v-if="parents.message !== undefined"
@@ -405,7 +405,7 @@ function openCall(callId: string): void {
                   @click="c.openRecordSummary(parents.message)"
                 >
                   <span>Assistant Message</span>
-                  <DsChevronRight :size="11" class="nav-icon" />
+                  <DsChevronRight :size="12" class="nav-icon" />
                 </button>
                 <button
                   v-if="parents.tool !== undefined"
@@ -415,7 +415,7 @@ function openCall(callId: string): void {
                   @click="c.openRecordSummary(parents.tool)"
                 >
                   <span>Tool Call</span>
-                  <DsChevronRight :size="11" class="nav-icon" />
+                  <DsChevronRight :size="12" class="nav-icon" />
                 </button>
               </dd>
             </div>
@@ -430,7 +430,7 @@ function openCall(callId: string): void {
                 @click="emit('open-subagent', cell.childSessionId)"
               >
                 <span>Open child session</span>
-                <DsChevronRight :size="11" class="nav-icon" />
+                <DsChevronRight :size="12" class="nav-icon" />
               </button>
             </dd>
           </div>
@@ -527,13 +527,13 @@ function openCall(callId: string): void {
 .no-payload {
   margin: 0;
   padding: var(--space-4) var(--space-3-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xs);
 }
 
 .load-full {
   margin-left: var(--space-2);
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   text-decoration: underline;
   font: inherit;
 }
@@ -542,7 +542,7 @@ function openCall(callId: string): void {
 }
 .load-error {
   margin-left: var(--space-2);
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 .full-payload pre {
   margin: var(--space-2) var(--space-3-5) 0;
@@ -558,10 +558,10 @@ function openCall(callId: string): void {
 .notice {
   margin: var(--space-2) var(--space-3-5) 0;
   padding: var(--space-1-5) var(--space-2-5);
-  border: 1px solid color-mix(in srgb, rgb(var(--approval)) 40%, transparent);
+  border: 1px solid color-mix(in srgb, rgb(var(--attention)) 40%, transparent);
   border-radius: var(--radius-row);
   color: rgb(var(--approval-strong));
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
   font: var(--font-xxs);
 }
 
@@ -576,7 +576,7 @@ function openCall(callId: string): void {
   gap: 1px;
   padding: 0;
   border: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   background: transparent;
   cursor: pointer;
   font: inherit;
@@ -584,7 +584,7 @@ function openCall(callId: string): void {
 
 .nav-link:hover,
 .nav-link:focus-visible {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .nav-link:focus-visible {
@@ -593,11 +593,11 @@ function openCall(callId: string): void {
 }
 
 .nav-icon {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .nav-link:hover .nav-icon {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .sections {

@@ -278,7 +278,7 @@ function startManual(id = ''): void {
 .family-label {
   margin: 0 0 var(--space-1);
   font-size: var(--fs-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-3));
 }
 
@@ -314,7 +314,7 @@ function startManual(id = ''): void {
 
 .name {
   font-size: var(--fs-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .id {

@@ -40,7 +40,7 @@ const output = computed(() => {
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
   background: rgb(var(--code-block-bg));
 }
@@ -54,7 +54,7 @@ const output = computed(() => {
 
 .label {
   font: var(--font-code-small);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .prompt {
@@ -62,7 +62,7 @@ const output = computed(() => {
   overflow-y: auto;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -76,10 +76,10 @@ const output = computed(() => {
   gap: var(--space-2);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .output[data-error] :deep(.ds-md) {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 </style>

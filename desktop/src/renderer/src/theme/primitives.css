@@ -1,31 +1,10 @@
 /* ── L1 primitives (DS-01) ──
-   Theme-agnostic raw values: the current neutral scale, the target ink /
-   paper / gold palette, and every size, radius, type, spacing, z-index and
-   motion scale. Only L2 (semantic.*.css) may reference colour primitives;
+   Theme-agnostic raw values: the ink / paper / gold palette, the raw
+   shadows, and every size, radius, type, spacing, z-index and motion
+   scale. Only L2 (semantic.*.css) may reference colour primitives;
    components use L2/L3 (style-audit enforces it). Colours are RGB triplets
    for rgb(var(--x) / alpha). */
 :root {
-  --nb-00: 255 255 255;
-  --nb-50: 249 250 251;
-  --nb-75: 241 243 245;
-  --nb-100: 235 238 242;
-  --nb-150: 233 236 242;
-  --nb-200: 225 229 238;
-  --nb-300: 207 211 214;
-  --nb-400: 173 178 184;
-  --nb-500: 151 157 166;
-  --nb-600: 129 133 140;
-  --nb-700: 97 102 107;
-  --nb-750: 67 69 74;
-  --nb-800: 53 54 56;
-  --nb-850: 44 44 46;
-  --nb-875: 35 35 36;
-  --nb-900: 27 27 28;
-  --nb-950: 21 21 23;
-  --nb-1000: 15 17 21;
-  --approval: 245 158 11;
-  --state-ok: 34 197 94;
-  --state-warn: 245 158 11;
   --shadow-lv1: 0 2px 4px 0 rgb(0 0 0 / 0.05);
   --shadow-lv2: 0 4px 12px 0 rgb(0 0 0 / 0.02), 0 2px 8px 0 rgb(0 0 0 / 0.04);
   --shadow-lv3:
@@ -69,10 +48,6 @@
   --font-md: var(--fs-md) / var(--lh-md) var(--font-sans);
   --font-code: var(--fs-code) / var(--lh-code) var(--font-mono);
   --font-code-small: var(--fs-xxs) / var(--lh-xxs) var(--font-mono);
-  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
-  --duration-ds-fast: 100ms;
-  --duration-ds: 200ms;
-  --duration-ds-slow: 300ms;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;

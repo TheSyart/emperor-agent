@@ -84,7 +84,7 @@ watch(
 }
 
 .reasoning :deep(.title) {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .summary-text {
@@ -102,7 +102,7 @@ watch(
   padding: var(--space-1) 0;
   font-size: var(--fs-s);
   line-height: var(--lh-base);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   white-space: pre-wrap;
   word-break: break-word;
 }

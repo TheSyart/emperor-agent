@@ -422,8 +422,9 @@ async function sharedSettings(
 
 const LOCAL_CONFIG_CODEC: SnapshotCodec<LocalConfig> = {
   schemaVersion: 1,
+  versionKey: 'version',
   encode(value) {
-    return value
+    return { version: 1, ...value }
   },
   decode(input) {
     return {

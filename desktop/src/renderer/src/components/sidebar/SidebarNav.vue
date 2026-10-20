@@ -113,13 +113,13 @@ function newProject(): void {
   border-radius: var(--r-md);
   background: rgb(var(--surface-raised));
   box-shadow: var(--elev-1);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-align: left;
   cursor: pointer;
-  transition: box-shadow var(--duration-ds) var(--ease-in-out);
+  transition: box-shadow var(--motion-base) var(--ease-standard);
 }
 
 .new-chat:hover {
@@ -134,7 +134,7 @@ function newProject(): void {
 
 .new-chat-icon {
   flex: none;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .new-chat-label {
@@ -148,10 +148,10 @@ function newProject(): void {
 .new-chat-key {
   flex: none;
   font-size: var(--fs-xxs);
-  font-weight: 400;
-  color: rgb(var(--label-caption));
+  font-weight: var(--weight-regular);
+  color: rgb(var(--text-3));
   opacity: 0;
-  transition: opacity var(--duration-ds) var(--ease-in-out);
+  transition: opacity var(--motion-base) var(--ease-standard);
 }
 
 .new-chat:hover .new-chat-key,
@@ -161,7 +161,7 @@ function newProject(): void {
 
 .nav-add {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 /* The full pages, one step quieter than the sessions below. */
@@ -181,7 +181,7 @@ function newProject(): void {
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   text-align: left;
@@ -189,24 +189,24 @@ function newProject(): void {
 }
 
 .nav-item:hover {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-primary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-1));
 }
 
 .nav-item[aria-current='page'] {
   background: rgb(var(--surface-selected));
-  color: rgb(var(--label-primary));
-  font-weight: 500;
+  color: rgb(var(--text-1));
+  font-weight: var(--weight-medium);
 }
 
 .nav-icon {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .nav-item:hover .nav-icon,
 .nav-item[aria-current='page'] .nav-icon {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .nav-label {

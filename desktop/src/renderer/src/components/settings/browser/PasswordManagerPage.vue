@@ -967,7 +967,7 @@ onBeforeUnmount(hidePassword)
   display: grid;
   gap: var(--space-1);
   font-size: var(--fs-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 .vault-revealed {
   width: auto;
@@ -975,7 +975,7 @@ onBeforeUnmount(hidePassword)
 }
 .vault-inline .vault-check {
   font-size: var(--fs-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   white-space: nowrap;
 }
 .vault-warning {
@@ -989,6 +989,6 @@ onBeforeUnmount(hidePassword)
 .vault-note {
   margin: 0;
   font-size: var(--fs-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

@@ -52,7 +52,7 @@ const problem = computed(
   display: block;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 400;
+  font-weight: var(--weight-regular);
 }
 
 /* One or two lines of why; the full text is the tooltip. */
@@ -68,7 +68,7 @@ const problem = computed(
   min-width: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-variant-numeric: tabular-nums;
   text-align: right;
   overflow-wrap: anywhere;
@@ -81,20 +81,20 @@ const problem = computed(
 }
 
 .value[data-tone='warn'] {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--state-warn-label));
 }
 
 .value[data-tone='error'] {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--state-error-label));
 }
 
 .value[data-tone='muted'] {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .value[data-tone='running'] {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 </style>

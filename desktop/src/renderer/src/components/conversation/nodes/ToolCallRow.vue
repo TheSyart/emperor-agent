@@ -181,9 +181,9 @@ const stateLabel = computed(() => {
 }
 
 .summary-text[data-path] {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-decoration: underline;
-  text-decoration-color: rgb(var(--label-caption));
+  text-decoration-color: rgb(var(--text-3));
   text-underline-offset: 3px;
 }
 
@@ -194,7 +194,7 @@ const stateLabel = computed(() => {
 
 .summary-suffix[data-tone='warn'] {
   color: rgb(var(--warn));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .summary-suffix[data-tone='accent'] {
@@ -226,15 +226,15 @@ const stateLabel = computed(() => {
   gap: var(--space-1);
   margin: var(--space-1) 0 var(--space-0-5);
   padding: var(--space-0-5) var(--space-2);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
   background: rgb(var(--surface-base));
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxxs);
   line-height: 16px;
   cursor: pointer;
   opacity: 0;
-  transition: opacity var(--duration-ds-fast) ease;
+  transition: opacity var(--motion-fast) ease;
 }
 
 .tool-row:hover .inspect,
@@ -243,8 +243,8 @@ const stateLabel = computed(() => {
 }
 
 .inspect:hover {
-  background: var(--interactive-bg-hover-solid);
-  color: rgb(var(--label-primary));
+  background: var(--surface-hover-solid);
+  color: rgb(var(--text-1));
 }
 
 .sr-only {

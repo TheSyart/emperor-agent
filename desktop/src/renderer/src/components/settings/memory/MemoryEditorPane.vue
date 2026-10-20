@@ -109,7 +109,7 @@ const modes: SegmentedOption<Mode>[] = [
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -127,22 +127,22 @@ const modes: SegmentedOption<Mode>[] = [
   flex: 1 1 auto;
   min-height: calc(var(--lh-xxs) * 12);
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
-  background: rgb(var(--bg-layer-3));
+  background: rgb(var(--surface-overlay));
   overflow-wrap: anywhere;
 }
 
 .empty {
   margin: 0;
   font-size: var(--fs-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .note {
   margin: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

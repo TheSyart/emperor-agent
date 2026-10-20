@@ -96,27 +96,27 @@ const live = computed(() =>
   border: none;
   border-radius: var(--radius-pill);
   cursor: pointer;
-  transition: background-color var(--duration-ds-fast) ease;
+  transition: background-color var(--motion-fast) ease;
 }
 
 .dictation-cancel {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-secondary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-2));
 }
 
 .dictation-cancel:hover {
-  background: var(--interactive-bg-active);
-  color: rgb(var(--label-primary));
+  background: var(--surface-active);
+  color: rgb(var(--text-1));
 }
 
 .dictation-stop {
-  background: rgb(var(--label-primary));
+  background: rgb(var(--text-1));
   color: rgb(var(--composer-fill));
 }
 
 .dictation-stop:disabled {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-secondary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-2));
   cursor: default;
 }
 
@@ -147,13 +147,13 @@ const live = computed(() =>
 .dictation-wave > .bar {
   height: calc(var(--space-1) + var(--dictation-level) * var(--space-6));
   border-radius: 2px;
-  background: rgb(var(--label-secondary));
+  background: rgb(var(--text-2));
 }
 
 .dictation-wave > .dot {
   height: 3px;
   border-radius: var(--radius-pill);
-  background: rgb(var(--label-caption));
+  background: rgb(var(--text-3));
 }
 
 .dictation-live {

@@ -140,7 +140,7 @@ async function create(): Promise<void> {
       @select="showBranches"
     >
       切换分支
-      <template #icon><GitBranch :size="15" /></template>
+      <template #icon><GitBranch :size="16" /></template>
     </MenuItem>
     <MenuItem
       data-action="create-branch"
@@ -148,7 +148,7 @@ async function create(): Promise<void> {
       @select="showCreate"
     >
       新建分支…
-      <template #icon><GitBranchPlus :size="15" /></template>
+      <template #icon><GitBranchPlus :size="16" /></template>
     </MenuItem>
     <MenuItem variant="separator" />
     <MenuItem
@@ -158,7 +158,7 @@ async function create(): Promise<void> {
       @select="review.fetchRemote"
     >
       Fetch
-      <template #icon><RefreshCw :size="15" /></template>
+      <template #icon><RefreshCw :size="16" /></template>
     </MenuItem>
     <MenuItem
       data-action="pull"
@@ -167,7 +167,7 @@ async function create(): Promise<void> {
       @select="review.pull"
     >
       Pull
-      <template #icon><ArrowDownToLine :size="15" /></template>
+      <template #icon><ArrowDownToLine :size="16" /></template>
     </MenuItem>
     <MenuItem
       data-action="push"
@@ -176,7 +176,7 @@ async function create(): Promise<void> {
       @select="review.push"
     >
       Push
-      <template #icon><ArrowUpFromLine :size="15" /></template>
+      <template #icon><ArrowUpFromLine :size="16" /></template>
     </MenuItem>
     <MenuItem variant="separator" />
     <MenuItem
@@ -186,7 +186,7 @@ async function create(): Promise<void> {
       @select="review.openUrl(compare.url)"
     >
       比较分支
-      <template #icon><GitCompareArrows :size="15" /></template>
+      <template #icon><GitCompareArrows :size="16" /></template>
       <template #trailing>
         <ArrowUpRight v-if="compare.url" :size="14" class="trailing" />
       </template>
@@ -200,7 +200,7 @@ async function create(): Promise<void> {
         @select="review.exitWorktree('keep')"
       >
         离开 worktree
-        <template #icon><LogOut :size="15" /></template>
+        <template #icon><LogOut :size="16" /></template>
       </MenuItem>
       <MenuItem
         data-action="remove-worktree"
@@ -210,7 +210,7 @@ async function create(): Promise<void> {
         @select="review.exitWorktree('remove')"
       >
         安全删除 worktree
-        <template #icon><Trash2 :size="15" /></template>
+        <template #icon><Trash2 :size="16" /></template>
       </MenuItem>
     </template>
     <MenuItem
@@ -221,7 +221,7 @@ async function create(): Promise<void> {
       @select="review.enterWorktree"
     >
       新建并进入 worktree
-      <template #icon><FolderGit2 :size="15" /></template>
+      <template #icon><FolderGit2 :size="16" /></template>
     </MenuItem>
     <template v-if="blockedReason" #footer>
       <p class="menu-note">{{ blockedReason }}</p>

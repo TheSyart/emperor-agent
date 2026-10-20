@@ -63,11 +63,11 @@ defineProps<{ title: string; description?: string; value?: string }>()
   right: var(--space-4);
   bottom: 0;
   left: var(--space-4);
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 .ds-settings-link-row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .ds-settings-link-row:focus-visible {
@@ -86,15 +86,15 @@ defineProps<{ title: string; description?: string; value?: string }>()
 .title {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
 .description {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
   text-wrap: pretty;
 }
@@ -103,13 +103,13 @@ defineProps<{ title: string; description?: string; value?: string }>()
   flex: none;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

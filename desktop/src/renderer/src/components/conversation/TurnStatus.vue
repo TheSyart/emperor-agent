@@ -48,6 +48,6 @@ const showClock = computed(() => now.value - anchor.value >= CLOCK_AFTER_MS)
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-variant-numeric: tabular-nums;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 </style>

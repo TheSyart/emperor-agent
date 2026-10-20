@@ -145,6 +145,7 @@ import {
   type RetentionReport,
   type StorageUsage,
 } from '../storage/retention'
+import type { DataVersionsReport } from '../storage/data-files'
 import { searchSessionLogs, type SessionSearchHit } from '../sessions/search'
 import { CoreWorkspaceApplicationService } from './services/workspace-application-service'
 import {
@@ -184,7 +185,10 @@ import { TurnSnapshots } from '../workspace/turn-snapshots'
 import { DelegationWorkspaceService } from '../workspace/delegation-workspaces'
 import { SnapshotService } from '../workspace/delegation-snapshot'
 import { DelegationResults } from '../workspace/delegation-results'
-import { ExecutorConfigStore } from '../harness/delegation/config'
+import {
+  developmentEnvironmentOf,
+  ExecutorConfigStore,
+} from '../harness/delegation/config'
 import { ExecutorFactsStore } from '../harness/delegation/facts'
 import { CoreExecutorService } from './services/executor-service'
 import {
@@ -407,6 +411,8 @@ export class CoreApi {
   /** Retention sweep and 设置 › 高级 › 存储 (KRN-12). */
   readonly retention: RetentionService
   private retentionAtStartup: Promise<void> | null = null
+  /** The release running (REL-03 `storage.versions`). */
+  private readonly appVersion: string
   readonly workspaceApplicationService: CoreWorkspaceApplicationService
   readonly commandApplicationService: CoreCommandApplicationService
   readonly sessionTransitionService: SessionTransitionService
@@ -663,6 +669,7 @@ export class CoreApi {
       // `null` = chat (no project Skills); callers always name the session.
       projectRootFor: (sessionId) => host.projectRootForSession(sessionId),
     })
+    this.appVersion = opts.appVersion ?? '0.0.0-dev'
     this.environmentService = new CoreEnvironmentService({
       stateRoot: this.paths.stateRoot,
       catalog: kept.environmentCatalog,
@@ -783,6 +790,9 @@ export class CoreApi {
         : {}),
       loginShell: executorHome.loginShell ?? createLoginShellEnvironment(),
       claudeTokens,
+      // 设置 › 子智能体 › 高级 › 开发环境 (AGT-08).
+      developmentEnvironment: () =>
+        developmentEnvironmentOf(this.executorConfig.read()),
       resolveRoute: async (id, backend) => {
         const config = await loadModelConfig(this.paths.modelConfigFile, {
           sealer: kept.secretSealer,
@@ -3489,6 +3499,11 @@ export class CoreApi {
       this.assertMutation('storage', 'clean', view)
       const report = await this.retention.sweep()
       return { report, usage: await this.retention.usage() }
+    },
+    /** REL-03: the runs, the data version, files a newer Emperor wrote. */
+    versions: async (): Promise<DataVersionsReport> => {
+      const { dataVersionsReport } = await import('../storage/data-files')
+      return dataVersionsReport(this.paths.stateRoot, this.appVersion)
     },
   }
 

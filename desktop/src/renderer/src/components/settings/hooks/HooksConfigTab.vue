@@ -208,7 +208,7 @@ const validationState = computed(() => {
 
 .path {
   font: var(--font-code-small);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 
@@ -234,7 +234,7 @@ const validationState = computed(() => {
   gap: var(--space-3);
   min-width: 0;
   padding: var(--space-2-5) 0;
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .event-name {
@@ -242,7 +242,7 @@ const validationState = computed(() => {
   overflow: hidden;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -261,7 +261,7 @@ const validationState = computed(() => {
   margin: 0;
   padding: 0;
   list-style: none;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
 }
 
@@ -273,12 +273,12 @@ const validationState = computed(() => {
   padding: var(--space-2) var(--space-3);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
 }
 
 .issue + .issue {
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .issue-kind {
@@ -304,7 +304,7 @@ const validationState = computed(() => {
 .muted {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .actions {
@@ -318,7 +318,7 @@ const validationState = computed(() => {
   margin: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 </style>

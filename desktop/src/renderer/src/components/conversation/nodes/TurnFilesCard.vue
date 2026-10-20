@@ -228,9 +228,9 @@ function openFile(path: string): void {
 .turn-files {
   container-type: inline-size;
   overflow: hidden;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-elevated));
+  background: rgb(var(--surface-base));
   font-size: var(--fs-s);
   line-height: var(--lh-s);
 }
@@ -241,7 +241,7 @@ function openFile(path: string): void {
   gap: var(--space-2);
   margin: 0;
   padding: var(--space-3) var(--space-4);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .head {
@@ -265,10 +265,10 @@ function openFile(path: string): void {
   flex: none;
   width: calc(var(--space-8) + var(--space-2));
   height: calc(var(--space-8) + var(--space-2));
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
-  background: rgb(var(--bg));
-  color: rgb(var(--label-secondary));
+  background: rgb(var(--surface-canvas));
+  color: rgb(var(--text-2));
 }
 
 .summary-text {
@@ -282,14 +282,14 @@ function openFile(path: string): void {
 }
 
 .headline {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   overflow-wrap: anywhere;
 }
 
 .scope-info {
   display: inline-flex;
-  border-radius: var(--radius-xs);
-  color: rgb(var(--label-tertiary));
+  border-radius: var(--r-xs);
+  color: rgb(var(--text-3));
   cursor: help;
 }
 
@@ -317,7 +317,7 @@ function openFile(path: string): void {
 }
 
 .del {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .actions {
@@ -329,15 +329,15 @@ function openFile(path: string): void {
 }
 
 .reverted {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xs);
 }
 
 .files {
   margin: 0;
   padding: var(--space-1) 0;
-  border-top: 1px solid var(--border-l2);
-  background: rgb(var(--bg) / 0.3);
+  border-top: 1px solid var(--stroke-2);
+  background: rgb(var(--surface-canvas) / 0.3);
   list-style: none;
 }
 
@@ -350,7 +350,7 @@ function openFile(path: string): void {
   padding: var(--space-2-5) var(--space-4);
   border: 0;
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-s);
   text-align: start;
@@ -358,7 +358,7 @@ function openFile(path: string): void {
 }
 
 .file:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .file:focus-visible {
@@ -378,11 +378,11 @@ function openFile(path: string): void {
 }
 
 .dir {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .name {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .file-meta {
@@ -390,7 +390,7 @@ function openFile(path: string): void {
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-top: var(--space-0-5);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   overflow-wrap: anywhere;
@@ -409,7 +409,7 @@ function openFile(path: string): void {
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2);
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -420,21 +420,21 @@ function openFile(path: string): void {
   gap: var(--space-1-5);
   padding: var(--space-2-5) var(--space-4);
   border: 0;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: inherit;
   cursor: pointer;
 }
 
 .more:hover {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
+  color: rgb(var(--text-1));
+  background: var(--surface-hover);
 }
 
 .limit {
   padding: var(--space-2) var(--space-4);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
 }
 

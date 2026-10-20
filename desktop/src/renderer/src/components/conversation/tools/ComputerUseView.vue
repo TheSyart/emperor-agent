@@ -286,14 +286,14 @@ button.shot {
 }
 
 .title {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-s);
   line-height: 22px;
   overflow-wrap: anywhere;
 }
 
 .url {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   line-height: 18px;
@@ -303,15 +303,15 @@ button.shot {
 .mismatch {
   padding: var(--space-2) var(--space-2-5);
   border-radius: var(--radius-card);
-  background: rgb(var(--danger-soft));
-  color: rgb(var(--danger));
+  background: rgb(var(--error-soft));
+  color: rgb(var(--error));
   font-size: var(--fs-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   line-height: 20px;
 }
 
 .records-text {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: 20px;
 }
@@ -323,7 +323,7 @@ button.shot {
   gap: var(--space-0-5);
   padding: var(--space-2) var(--space-2-5);
   border-radius: var(--radius-card);
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
   color: rgb(var(--approval-line));
   font-size: var(--fs-xs);
   line-height: 20px;
@@ -334,11 +334,11 @@ button.shot {
 }
 
 .message {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .hint {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .download {
@@ -347,7 +347,7 @@ button.shot {
   align-items: baseline;
   gap: var(--space-1) var(--space-2);
   padding: var(--space-2) var(--space-2-5);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
   font-size: var(--fs-xs);
   line-height: 20px;
@@ -357,17 +357,17 @@ button.shot {
 .download[data-state='too-large'],
 .download[data-state='interrupted'],
 .download[data-state='timed-out'] {
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
 }
 
 .download-name {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
 
 .download-meta {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .download-reveal {
@@ -386,14 +386,14 @@ button.shot {
 
 .download-error {
   flex-basis: 100%;
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .shot {
   display: block;
   align-self: flex-start;
   max-width: 100%;
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-row);
   overflow: hidden;
   background: rgb(var(--code-block-bg));

@@ -375,7 +375,7 @@ function applyBatch(): void {
 }
 
 .block-name {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .block-id {

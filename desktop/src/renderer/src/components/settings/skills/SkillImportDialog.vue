@@ -271,7 +271,7 @@ function openSkill(name: string) {
 
 .tabs {
   margin-top: calc(var(--space-3) * -1);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .picker {
@@ -283,6 +283,6 @@ function openSkill(name: string) {
 
 .result {
   padding-top: var(--space-3);
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 </style>

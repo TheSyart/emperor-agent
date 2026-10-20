@@ -701,9 +701,9 @@ defineExpose({ focusSearch })
   min-width: 0;
   padding: var(--space-1-5) var(--space-3);
   background: rgb(var(--sidebar-fill));
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-s);
-  animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
+  animation: ds-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .head-button {
@@ -717,20 +717,20 @@ defineExpose({ focusSearch })
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
 }
 
 .head-button:hover,
 .head-button[aria-expanded='true'] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .search {
   flex: none;
   width: auto;
   margin: 0 var(--space-0-5) var(--space-2);
-  animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
+  animation: ds-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .region {
@@ -757,14 +757,14 @@ defineExpose({ focusSearch })
   padding: var(--space-2) var(--space-2) var(--space-1);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .empty {
   padding: var(--space-2);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .empty.nested {

@@ -38,21 +38,21 @@ const collapsed = defineModel<boolean>('collapsed', { default: false })
 .section-label {
   padding: 0 var(--space-1);
   border: none;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   cursor: pointer;
 }
 
 .section-label:hover {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .section-label[aria-expanded='false'] {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 /* Trailing actions (+, ⋯) only while the header is hovered or focused, or
@@ -62,7 +62,7 @@ const collapsed = defineModel<boolean>('collapsed', { default: false })
   align-items: center;
   gap: var(--space-1);
   opacity: 0;
-  transition: opacity var(--duration-ds) var(--ease-in-out);
+  transition: opacity var(--motion-base) var(--ease-standard);
 }
 
 .section-header:hover .section-actions,

@@ -142,17 +142,17 @@ const site = computed(() => {
   display: inline-grid;
   place-items: center;
   flex: none;
-  border-radius: var(--radius-xs);
-  background: rgb(var(--accent-fill) / 0.1);
-  color: rgb(var(--accent-strong));
-  font: 600 0.65rem/1 var(--font-sans);
+  border-radius: var(--r-xs);
+  background: rgb(var(--accent) / 0.1);
+  color: rgb(var(--text-link));
+  font: var(--weight-semibold) 0.65rem/1 var(--font-sans);
 }
 .site-icon {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
-  border-radius: var(--radius-xs);
-  background: rgb(var(--nb-00));
+  border-radius: var(--r-xs);
+  background: rgb(var(--site-icon-plate));
 }
 </style>

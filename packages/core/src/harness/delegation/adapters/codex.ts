@@ -21,6 +21,10 @@ import { jsonSchema } from '../../tools/json-schema'
 import { publicReferences } from '../facts'
 import { codexUserAgentIssue } from '../compatibility'
 import {
+  DEVELOPMENT_ENVIRONMENT_KEYS,
+  projectInstructions,
+} from '../dev-environment'
+import {
   acquireCodexAuth,
   CODEX_FILE_CREDENTIALS,
   type CodexAuthLease,
@@ -72,11 +76,23 @@ const featureConfig = Object.fromEntries([
 export function codexThreadParams(
   input: ExecutorOpenInput,
 ): Record<string, unknown> {
+  // Codex's shell inherits nothing: it gets the basics and the task's
+  // development environment (AGT-08: git identity, proxies, SSH, toolchains).
   const shellEnvironment = Object.fromEntries(
-    ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'TEMP', 'TMP'].flatMap(
-      (key) => (input.environment[key] ? [[key, input.environment[key]!]] : []),
+    [
+      'PATH',
+      'HOME',
+      'LANG',
+      'LC_ALL',
+      'TMPDIR',
+      'TEMP',
+      'TMP',
+      ...DEVELOPMENT_ENVIRONMENT_KEYS,
+    ].flatMap((key) =>
+      input.environment[key] ? [[key, input.environment[key]!]] : [],
     ),
   )
+  const agents = projectInstructions(input.cwd, ['AGENTS.md'], 8_192)
   return {
     cwd: input.cwd,
     approvalPolicy: 'never',
@@ -99,7 +115,8 @@ export function codexThreadParams(
       'The host OS enforces your workspace permission boundary. ' +
       (input.policy.mode === 'read-only'
         ? 'The source workspace is readonly; review only.'
-        : 'Deliver changes as files. Do not commit or change Git metadata.'),
+        : 'Deliver changes as files. Do not commit or change Git metadata.') +
+      (agents ? `\n\n${agents}` : ''),
   }
 }
 /** One `TokenUsageBreakdown` of `thread/tokenUsage/updated`. */

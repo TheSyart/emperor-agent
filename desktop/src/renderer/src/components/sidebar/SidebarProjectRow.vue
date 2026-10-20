@@ -61,14 +61,14 @@ const emit = defineEmits<{ toggle: []; 'new-session': [] }>()
   height: var(--space-8);
   padding: 0 var(--space-2);
   border-radius: var(--radius-row);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   cursor: pointer;
   user-select: none;
   outline: none;
 }
 
 .project-row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .project-row:focus-visible {
@@ -82,13 +82,13 @@ const emit = defineEmits<{ toggle: []; 'new-session': [] }>()
   justify-content: center;
   width: var(--space-4);
   height: var(--space-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .slot .chevron {
   display: none;
-  color: rgb(var(--label-caption));
-  transition: transform var(--duration-ds) var(--ease-in-out);
+  color: rgb(var(--text-3));
+  transition: transform var(--motion-base) var(--ease-standard);
 }
 
 .slot .chevron[data-open] {
@@ -122,14 +122,14 @@ const emit = defineEmits<{ toggle: []; 'new-session': [] }>()
   height: var(--space-5);
   padding: 0;
   border: none;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: pointer;
 }
 
 .row-action:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .project-row:hover .row-action,
@@ -142,7 +142,7 @@ const emit = defineEmits<{ toggle: []; 'new-session': [] }>()
   min-width: var(--space-4);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   text-align: right;
   font-variant-numeric: tabular-nums;
 }

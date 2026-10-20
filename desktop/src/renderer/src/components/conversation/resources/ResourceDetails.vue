@@ -229,7 +229,7 @@ onBeforeUnmount(() => {
       >
         <p>{{ previewReason }}</p>
         <Button size="sm" @click="load"
-          ><RefreshCw :size="13" />重新加载</Button
+          ><RefreshCw :size="14" />重新加载</Button
         >
       </div>
       <button
@@ -271,7 +271,7 @@ onBeforeUnmount(() => {
           type="button"
           @click="emit('reveal', use.nodeKey)"
         >
-          <LocateFixed :size="13" />{{ PROVENANCE_LABEL[use.provenance] }} ·
+          <LocateFixed :size="14" />{{ PROVENANCE_LABEL[use.provenance] }} ·
           定位出处
         </button>
       </div>
@@ -294,7 +294,7 @@ onBeforeUnmount(() => {
           variant="secondary"
           @click="emit('open-internal')"
           >在 Emperor 查看</Button
-        ><Button size="sm" @click="copy"><Copy :size="13" />复制地址</Button>
+        ><Button size="sm" @click="copy"><Copy :size="14" />复制地址</Button>
       </div>
       <p v-if="copyStatus" class="notice" role="status">{{ copyStatus }}</p>
     </div>
@@ -309,13 +309,13 @@ onBeforeUnmount(() => {
 }
 .resource-details {
   min-width: 0;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 .identity {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xs);
 }
 .identity img {
@@ -325,18 +325,18 @@ onBeforeUnmount(() => {
 }
 .resource-details h2 {
   margin: var(--space-3) 0;
-  font: 600 20px/1.5 var(--font-sans);
+  font: var(--weight-semibold) 20px/1.5 var(--font-sans);
   overflow-wrap: anywhere;
 }
 .description {
   margin: var(--space-3) 0;
   font: var(--font-s);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .status[data-tone='danger'] {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 .status[data-tone='ok'] {
   color: rgb(var(--ok));
@@ -344,14 +344,14 @@ onBeforeUnmount(() => {
 .status {
   display: inline-block;
   padding: var(--space-0-5) var(--space-1-5);
-  border-radius: var(--radius-xs);
-  background: rgb(var(--accent-fill) / 0.12);
-  color: rgb(var(--accent-strong));
+  border-radius: var(--r-xs);
+  background: rgb(var(--accent) / 0.12);
+  color: rgb(var(--text-link));
   font: var(--font-xxs);
 }
 .notice {
   margin: var(--space-3) 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xs);
 }
 .notice p {
@@ -369,7 +369,7 @@ onBeforeUnmount(() => {
   max-height: 320px;
   overflow: auto;
   padding: var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   background: rgb(var(--code-block-bg));
   font: var(--font-code);
@@ -381,16 +381,16 @@ dl {
 }
 dl > div {
   padding: var(--space-3) 0;
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 dt {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xxs);
   margin-bottom: var(--space-1);
 }
 dd {
   margin: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xs);
   overflow-wrap: anywhere;
 }
@@ -412,8 +412,8 @@ dd {
   gap: var(--space-1);
   border: 0;
   border-radius: var(--radius-row);
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-secondary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-2));
   padding: var(--space-1) var(--space-2);
   font: var(--font-xxs);
   cursor: pointer;

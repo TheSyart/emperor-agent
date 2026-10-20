@@ -235,7 +235,7 @@ const showActions = computed(
   padding: 0;
   border: 0;
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
 }
 .image-open {
@@ -270,7 +270,7 @@ const showActions = computed(
   max-width: min(360px, 100%);
   max-height: 280px;
   border-radius: var(--radius-row);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   object-fit: cover;
 }
 
@@ -284,9 +284,9 @@ const showActions = computed(
 .stopped {
   align-self: flex-start;
   padding: 0 var(--space-1-5);
-  border-radius: var(--radius-sm);
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-tertiary));
+  border-radius: var(--r-sm);
+  background: var(--surface-hover);
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxs);
 }

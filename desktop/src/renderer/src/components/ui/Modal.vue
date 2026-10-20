@@ -112,7 +112,7 @@ provideSurface(() => 'panel')
 .mask {
   position: absolute;
   inset: 0;
-  background: var(--mask-1);
+  background: var(--scrim);
   backdrop-filter: blur(var(--mask-blur));
 }
 
@@ -124,9 +124,9 @@ provideSurface(() => 'panel')
   max-height: 100%;
   padding-bottom: var(--space-6);
   overflow: hidden;
-  border: 1px solid var(--border-inverted);
+  border: 1px solid var(--stroke-inverted);
   border-radius: var(--radius-modal);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
   box-shadow: var(--shadow-lv3);
 }
 
@@ -143,15 +143,15 @@ provideSurface(() => 'panel')
   margin: 0;
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
 }
 
 .description {
   margin: 0;
   padding: 0 var(--space-6);
   font: var(--font-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .body {

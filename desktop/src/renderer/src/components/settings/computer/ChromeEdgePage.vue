@@ -500,7 +500,7 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono);
   font-size: var(--fs-md);
   line-height: var(--lh-s);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.08em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

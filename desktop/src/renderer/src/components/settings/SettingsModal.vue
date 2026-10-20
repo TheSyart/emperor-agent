@@ -51,6 +51,7 @@ import {
 } from 'vue'
 import { useRouter, type LocationQuery } from 'vue-router'
 import { DsChevronRight, DsClose } from '../icons/ds'
+import IconButton from '../ui/IconButton.vue'
 import { useModalLayer } from '../ui/modalStack'
 import { provideDirtyGuard } from '../ui/useDirtyGuard'
 import { useFocusTrap } from '../ui/useFocusTrap'
@@ -193,15 +194,14 @@ watch(
               </h2>
               <div class="header-actions">
                 <SettingsHeaderBar :actions="header.actions.value" />
-                <button
-                  type="button"
+                <IconButton
                   class="settings-close"
-                  aria-label="关闭设置"
-                  title="关闭"
+                  label="关闭设置"
+                  tooltip="关闭"
                   @click="close"
                 >
                   <DsClose :size="14" />
-                </button>
+                </IconButton>
               </div>
             </div>
             <div
@@ -234,7 +234,7 @@ watch(
 .settings-mask {
   position: absolute;
   inset: 0;
-  background: var(--mask-1);
+  background: var(--scrim);
   backdrop-filter: blur(var(--mask-blur));
 }
 
@@ -248,7 +248,7 @@ watch(
   border-radius: var(--r-xl);
   background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv3);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   outline: none;
 }
 
@@ -286,8 +286,8 @@ watch(
   overflow: hidden;
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -306,13 +306,13 @@ watch(
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: inherit;
   cursor: pointer;
 }
 
 .section-crumb:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .section-crumb:focus-visible {
@@ -322,7 +322,7 @@ watch(
 
 .section-crumb-separator {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .section-page {
@@ -339,31 +339,6 @@ watch(
   margin-left: auto;
 }
 
-/* dsh .close: 28×28 round, 14px glyph. */
-.settings-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: var(--space-7);
-  height: var(--space-7);
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: rgb(var(--label-primary));
-  cursor: pointer;
-}
-
-.settings-close:hover {
-  background: var(--interactive-bg-hover);
-}
-
-.settings-close:focus-visible {
-  outline: 2px solid rgb(var(--focus-ring));
-  outline-offset: 2px;
-}
-
 /* dsh .options: pad (0,24,24), scrolls. The right padding widens past 24px
    once the column exceeds 720 + 48px, capping the content at 720px while
    the scrollbar stays at the panel edge. */
@@ -377,7 +352,7 @@ watch(
   overflow-y: auto;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 @container settings-panel (max-width: 639px) {

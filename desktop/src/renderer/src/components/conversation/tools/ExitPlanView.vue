@@ -47,9 +47,9 @@ const dot = computed<DotState>(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid rgb(var(--approval) / 0.35);
+  border: 1px solid rgb(var(--attention) / 0.35);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
 }
 
 .plan-body {
@@ -73,21 +73,21 @@ const dot = computed<DotState>(() => {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
-  border-top: 1px solid var(--border-l2);
-  background: rgb(var(--approval-soft));
+  border-top: 1px solid var(--stroke-2);
+  background: rgb(var(--attention-soft));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
 
 .label {
   flex: none;
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
 }
 
 .feedback {
   min-width: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
 }
 </style>

@@ -11,6 +11,14 @@ import {
   type PersistenceReceipt,
   type SnapshotCodec,
 } from './types'
+import {
+  DataFileNewerError,
+  asSupported,
+  declaredVersion,
+  knownWritable,
+  newerVersionOf,
+  rememberWritable,
+} from './version'
 
 export interface AtomicSnapshotSyncOptions<T> extends SyncDurableWriteOptions {
   readonly path: string
@@ -60,9 +68,10 @@ export class AtomicSnapshotSync<T> {
       }
 
     try {
-      const decoded = this.codec.decode(
-        JSON.parse(this.adapter.readText(this.path)) as unknown,
-      )
+      const input = JSON.parse(this.adapter.readText(this.path)) as unknown
+      const newer = this.newer(input, options.fallback)
+      if (newer) return newer
+      const decoded = this.codec.decode(input)
       return {
         found: true,
         value: decoded.value,
@@ -113,8 +122,53 @@ export class AtomicSnapshotSync<T> {
     } catch (cause) {
       throw new PersistenceIoError('serialize', this.path, { cause })
     }
+    this.assertWritable()
     durableReplaceSync(this.path, body, this.writeOptions())
+    if (this.codec.versionKey) {
+      let stat = null
+      try {
+        stat = this.adapter.stat(this.path)
+      } catch {
+        // The next write reads the file again.
+      }
+      rememberWritable(this.path, stat)
+    }
     return this.receipt(this.codec.schemaVersion, 'none', null)
+  }
+
+  /** REL-03: never replace a file a newer Emperor wrote. */
+  private assertWritable(): void {
+    const key = this.codec.versionKey
+    if (!key || !this.adapter.exists(this.path)) return
+    if (knownWritable(this.path, this.adapter.stat(this.path))) return
+    const supported = this.codec.schemaVersion
+    const version = newerVersionOf(
+      this.adapter.readText(this.path),
+      key,
+      supported,
+    )
+    if (version !== null)
+      throw new DataFileNewerError(this.path, version, supported)
+  }
+
+  /** A file a newer Emperor wrote: read as well as this build can, as is. */
+  private newer(input: unknown, fallback: T): SnapshotSyncReadResult<T> | null {
+    const key = this.codec.versionKey
+    const version = key ? declaredVersion(input, key) : null
+    if (key === undefined || version === null) return null
+    const supported = this.codec.schemaVersion
+    if (version <= supported) return null
+    let value = fallback
+    try {
+      value = this.codec.decode(asSupported(input, key, supported)).value
+    } catch {
+      // Nothing this build understands: the fallback, the file untouched.
+    }
+    return {
+      found: true,
+      value,
+      receipt: this.receipt(version, 'newer_version_read_only', null),
+    }
   }
 
   private writeOptions(): SyncDurableWriteOptions {

@@ -165,7 +165,7 @@ function details(record: HookAuditRecordPayload): DefinitionItem[] {
 .duration,
 .cursor {
   font: var(--font-code-small);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   white-space: nowrap;
 }
 

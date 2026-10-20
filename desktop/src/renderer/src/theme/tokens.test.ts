@@ -3,13 +3,15 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { THEMES, DEFAULT_THEME, isTheme, applyTheme } from './tokens'
 import LEGACY_KEYS from './legacy-keys.json'
+import RETIRED from './retired-tokens.json'
 
 /**
  * DS-01: three token layers.
  *   L1 primitives.css      theme-agnostic raw values
  *   L2 semantic.*.css      what colours mean (dark default, light)
  *   L3 components.css      tokens owned by one component family
- *   legacy-aliases.css     pre-0.2 names → L2 (deleted by DS-02)
+ * DS-02 retired the pre-0.2 names (retired-tokens.json lists each with its
+ * replacement) and deleted the alias layer.
  */
 
 function fakeDoc() {
@@ -40,7 +42,6 @@ const LAYER_FILES = [
   'semantic.dark.css',
   'semantic.light.css',
   'components.css',
-  'legacy-aliases.css',
 ]
 
 describe('theme registry', () => {
@@ -76,7 +77,14 @@ describe('token layers (DS-01)', () => {
   const dark = declarations(readThemeFile('semantic.dark.css'))
   const light = declarations(readThemeFile('semantic.light.css'))
   const components = declarations(readThemeFile('components.css'))
-  const legacy = declarations(readThemeFile('legacy-aliases.css'))
+  const renames: Record<string, string> = Object.assign(
+    {},
+    ...Object.values(RETIRED.renames),
+  )
+  const retired = new Set([
+    ...Object.keys(renames),
+    ...Object.keys(RETIRED.removed),
+  ])
 
   it('dark and light semantic tokens have the same key set', () => {
     expect(dark.size).toBeGreaterThan(40)
@@ -100,15 +108,18 @@ describe('token layers (DS-01)', () => {
     expect(readThemeFile('../styles.css')).not.toContain(':root')
   })
 
-  it('accounts for every pre-0.2 token name', () => {
+  it('accounts for every pre-0.2 token name: still defined, or retired', () => {
     const defined = new Set([
       ...primitives.keys(),
       ...dark.keys(),
       ...components.keys(),
-      ...legacy.keys(),
     ])
-    const missing = (LEGACY_KEYS as string[]).filter((key) => !defined.has(key))
+    const missing = (LEGACY_KEYS as string[]).filter(
+      (key) => !defined.has(key) && !retired.has(key),
+    )
     expect(missing).toEqual([])
+    const resurrected = [...retired].filter((key) => defined.has(key))
+    expect(resurrected).toEqual([])
   })
 
   it('defines every token name in exactly one layer', () => {
@@ -117,7 +128,6 @@ describe('token layers (DS-01)', () => {
       ['primitives', primitives],
       ['semantic', dark],
       ['components', components],
-      ['legacy', legacy],
     ] as const)
       for (const key of table.keys())
         owners.set(key, [...(owners.get(key) ?? []), file])
@@ -154,12 +164,15 @@ describe('token layers (DS-01)', () => {
       }
   })
 
-  it('maps legacy names only onto semantic tokens or scales', () => {
-    for (const [key, value] of legacy)
-      for (const ref of references(value))
-        expect(dark.has(ref) || primitives.has(ref), `${key} → ${ref}`).toBe(
-          true,
-        )
+  it('renames retired names only onto semantic tokens, component tokens or scales', () => {
+    const colourPrimitive = /^--(?:ink|paper|gold)-/
+    for (const [key, next] of Object.entries(renames)) {
+      expect(colourPrimitive.test(next), `${key} → ${next}`).toBe(false)
+      expect(
+        dark.has(next) || components.has(next) || primitives.has(next),
+        `${key} → ${next}`,
+      ).toBe(true)
+    }
   })
 
   it('stores solid semantic colours as RGB triplets or var() references', () => {

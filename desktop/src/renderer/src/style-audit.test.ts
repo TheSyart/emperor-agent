@@ -1,6 +1,23 @@
 import { describe, it, expect } from 'vitest'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import {
+  auditFile,
+  auditTree,
+  compareRatchet,
+  retiredMatcher,
+  totals,
+  type RatchetTable,
+} from './styleAuditRules'
+import RATCHET from './style-audit-ratchet.json'
+import RETIRED from './theme/retired-tokens.json'
 
 // 样式收敛审计(PLAN-20260721-THEME-THINK):固化颜色/裸值收敛成果,防回归。
 // 白名单:theme/*.css 是 token 定义文件,自身不受这些规则约束。
@@ -317,6 +334,7 @@ describe('style audit: ratchets (only-ever-decrease baselines)', () => {
       )?.[1]
     expect(motion).toBeTruthy()
     expect(motion).toContain('--duration-fast: 1ms')
+    expect(motion).toContain('--motion-base: 1ms')
     expect(motion).toContain('animation-duration: 1ms !important')
     expect(motion).toContain('transition-duration: 1ms !important')
     // 覆盖选择器必须与主题表同特异性(:root[data-theme]),否则主题声明按
@@ -327,14 +345,14 @@ describe('style audit: ratchets (only-ever-decrease baselines)', () => {
         a11y,
       )?.[1]
     expect(transparency).toBeTruthy()
-    expect(transparency).toContain('--material-1-alpha: 0.97')
-    expect(transparency).toContain('--material-1-blur: 0px')
-    expect(transparency).toContain('--glass-blur: 0px')
+    expect(transparency).toContain('--backdrop-blur: 0px')
+    expect(transparency).toContain('--backdrop-blur-strong: 0px')
+    expect(transparency).toContain('--image-viewer-veil: 0.98')
     expect(transparency).toMatch(/:root\[data-theme='dark'\]/)
     const contrast =
       /@media \(prefers-contrast: more\) \{\n([\s\S]*?)\n\}/.exec(a11y)?.[1]
     expect(contrast).toBeTruthy()
-    expect(contrast).toContain('--border: 88 88 98')
+    expect(contrast).toContain('--stroke-solid: 88 88 98')
   })
 
   it('no scattered prefers-reduced-motion blocks outside a11y.css', () => {
@@ -377,5 +395,276 @@ describe('style audit: ratchets (only-ever-decrease baselines)', () => {
         offenders.push(`${rel}: ${count} bare px (baseline ${baseline})`)
     }
     expect(offenders, offenders.join('\n')).toEqual([])
+  })
+})
+
+// ── DS-02: ratchets for controls, weights, borders, icons, layers, tokens ──
+// styleAuditRules.ts counts each rule per file; style-audit-ratchet.json
+// holds what each file may still have. A count above its allowance fails
+// (a regression); a count below it fails too until the allowance is lowered
+// (STYLE_AUDIT_TIGHTEN=1 rewrites the lowered numbers), so the ratchet only
+// ever moves down. New files start at 0.
+
+const DESKTOP = join(SRC, '../../..')
+const REPO = join(DESKTOP, '..')
+const RETIRED_NAMES = [
+  ...Object.values(RETIRED.renames).flatMap((renames) => Object.keys(renames)),
+  ...Object.keys(RETIRED.removed),
+]
+
+function rendererSources(): [string, string][] {
+  const walk = (dir: string): string[] =>
+    readdirSync(join(SRC, dir)).flatMap((name) => {
+      const rel = dir ? join(dir, name) : name
+      if (statSync(join(SRC, rel)).isDirectory()) return walk(rel)
+      return /\.(?:vue|css|ts)$/.test(name) && !/\.(?:test|d)\.ts$/.test(name)
+        ? [rel]
+        : []
+    })
+  return walk('').map((rel) => [rel, read(rel)])
+}
+
+describe('style audit: DS-02 ratchets', () => {
+  const sources = rendererSources()
+  const actual = auditTree(sources, RETIRED_NAMES)
+  const allowed = RATCHET.allowed as RatchetTable
+  const matcher = retiredMatcher(RETIRED_NAMES)
+
+  /** What adding one file would break (a new file is allowed nothing). */
+  function violations(rel: string, text: string): string[] {
+    const table: RatchetTable = {}
+    for (const [rule, n] of Object.entries(auditFile(rel, text, matcher)))
+      table[rule as keyof RatchetTable] = { [rel]: n }
+    return compareRatchet(table, allowed).above
+  }
+
+  it('keeps every rule at its per-file allowance, which only goes down (test 1)', () => {
+    const { above, below } = compareRatchet(actual, allowed)
+    if (process.env.STYLE_AUDIT_TIGHTEN && below.length) {
+      const tightened: RatchetTable = {}
+      for (const [rule, files] of Object.entries(allowed))
+        tightened[rule as keyof RatchetTable] = Object.fromEntries(
+          Object.entries(files)
+            .map(([file, max]): [string, number] => [
+              file,
+              Math.min(max, actual[rule as keyof RatchetTable]?.[file] ?? 0),
+            ])
+            .filter(([, n]) => n > 0),
+        )
+      writeFileSync(
+        join(SRC, 'style-audit-ratchet.json'),
+        `${JSON.stringify({ ...RATCHET, allowed: tightened }, null, 2)}\n`,
+      )
+      return
+    }
+    expect(above, `regressions:\n${above.join('\n')}`).toEqual([])
+    expect(
+      below,
+      `lower these allowances in style-audit-ratchet.json (STYLE_AUDIT_TIGHTEN=1 does it):\n${below.join('\n')}`,
+    ).toEqual([])
+  })
+
+  it('never allows more than the DS-02 baseline in total', () => {
+    const baseline = RATCHET.baseline as Record<string, number>
+    for (const [rule, n] of Object.entries(totals(allowed)))
+      expect(n, rule).toBeLessThanOrEqual(baseline[rule] ?? 0)
+  })
+
+  it('fails on a bare <button> outside components/ui (test 2)', () => {
+    const vue = '<template><button type="button">Go</button></template>\n'
+    expect(violations('components/fixture/BareButton.vue', vue)).toEqual([
+      'bare-button components/fixture/BareButton.vue: 1 (allowed 0)',
+    ])
+    expect(
+      violations(
+        'components/fixture/Controls.vue',
+        '<template><input /><select></select><textarea /></template>\n',
+      ),
+    ).toHaveLength(3)
+    // components/ui is where the controls are implemented.
+    expect(violations('components/ui/FixtureButton.vue', vue)).toEqual([])
+  })
+
+  it('fails on font-weight: 510 (test 3)', () => {
+    const vue = (weight: string) =>
+      `<template><p class="x">a</p></template>\n<style scoped>\n.x {\n  font-weight: ${weight};\n}\n</style>\n`
+    expect(violations('components/fixture/Weight.vue', vue('510'))).toEqual([
+      'font-weight-bare components/fixture/Weight.vue: 1 (allowed 0)',
+      'font-weight-off-scale components/fixture/Weight.vue: 1 (allowed 0)',
+    ])
+    expect(violations('components/fixture/Weight.vue', vue('600'))).toEqual([
+      'font-weight-bare components/fixture/Weight.vue: 1 (allowed 0)',
+    ])
+    expect(
+      violations('components/fixture/Weight.vue', vue('var(--weight-medium)')),
+    ).toEqual([])
+  })
+
+  it('fails on @apply (test 4)', () => {
+    expect(
+      violations(
+        'styles/fixture.css',
+        '.x {\n  @apply flex items-center;\n}\n',
+      ),
+    ).toEqual(['apply styles/fixture.css: 1 (allowed 0)'])
+  })
+
+  it('fails on z-[70] and on bare z-index (test 5)', () => {
+    expect(
+      violations(
+        'components/fixture/Layer.vue',
+        '<template><div class="fixed z-[70]">a</div></template>\n',
+      ),
+    ).toEqual(['z-index components/fixture/Layer.vue: 1 (allowed 0)'])
+    expect(
+      violations('styles/fixture.css', '.x {\n  @apply z-[70];\n}\n'),
+    ).toEqual([
+      'apply styles/fixture.css: 1 (allowed 0)',
+      'z-index styles/fixture.css: 1 (allowed 0)',
+    ])
+    expect(
+      violations('styles/fixture.css', '.x {\n  z-index: 70;\n}\n'),
+    ).toEqual(['z-index styles/fixture.css: 1 (allowed 0)'])
+    expect(
+      violations('styles/fixture.css', '.x {\n  z-index: var(--z-modal);\n}\n'),
+    ).toEqual([])
+  })
+
+  it('flags the remaining rules on fixtures', () => {
+    const style = (css: string) =>
+      `<template><p class="x">a</p></template>\n<style scoped>\n.x {\n  ${css}\n}\n</style>\n`
+    const rel = 'components/fixture/Rules.vue'
+    expect(
+      violations(rel, style('border: 1px solid rgb(var(--stroke-solid));')),
+    ).toEqual([`border-1px-solid ${rel}: 1 (allowed 0)`])
+    expect(
+      violations(rel, style('box-shadow: 0 0 0 0.5px var(--hairline);')),
+    ).toEqual([])
+    expect(
+      violations(
+        rel,
+        style('transition: grid-template-columns var(--motion-base);'),
+      ),
+    ).toEqual([`layout-transition ${rel}: 1 (allowed 0)`])
+    expect(
+      violations(
+        rel,
+        style(
+          'transition: opacity var(--motion-base), transform var(--motion-base);',
+        ),
+      ),
+    ).toEqual([])
+    expect(violations(rel, style('color: rgb(var(--gold-500));'))).toEqual([
+      `l1-token ${rel}: 1 (allowed 0)`,
+    ])
+    expect(violations(rel, style('color: rgb(var(--danger));'))).toEqual([
+      `legacy-token ${rel}: 1 (allowed 0)`,
+    ])
+    expect(
+      violations(
+        'components/fixture/token.ts',
+        "export const ink = style.getPropertyValue('--fg')\n",
+      ),
+    ).toEqual(['legacy-token components/fixture/token.ts: 1 (allowed 0)'])
+    const icon = (size: number) =>
+      `<template><RefreshCw :size="${size}" /></template>\n<script setup lang="ts">\nimport { RefreshCw } from 'lucide-vue-next'\n</script>\n`
+    expect(violations(rel, icon(13))).toEqual([
+      `icon-size ${rel}: 1 (allowed 0)`,
+    ])
+    expect(violations(rel, icon(14))).toEqual([])
+  })
+
+  it('has no Tailwind left: config, PostCSS plugin, dependency, directives (test 6)', () => {
+    expect(existsSync(join(DESKTOP, 'tailwind.config.ts'))).toBe(false)
+    const pkg = JSON.parse(readFileSync(join(DESKTOP, 'package.json'), 'utf8'))
+    expect({ ...pkg.dependencies, ...pkg.devDependencies }).not.toHaveProperty(
+      'tailwindcss',
+    )
+    expect(
+      readFileSync(join(DESKTOP, 'postcss.config.js'), 'utf8'),
+    ).not.toMatch(/tailwind/)
+    const offenders = sources
+      .filter(([rel]) => !rel.endsWith('.ts'))
+      .filter(([, text]) =>
+        /@tailwind\b|@apply\b|(?<![\w-])theme\(|\banimate-spin\b/.test(text),
+      )
+      .map(([rel]) => rel)
+    expect(offenders).toEqual([])
+    expect(totals(actual).apply).toBe(0)
+  })
+
+  it('references no retired token name and has no alias layer (test 7)', () => {
+    expect(existsSync(join(SRC, 'theme/legacy-aliases.css'))).toBe(false)
+    expect(totals(actual)['legacy-token']).toBe(0)
+  })
+
+  it('renames every retired name onto a token the theme defines', () => {
+    const defined = new Set<string>()
+    for (const file of THEME_FILES)
+      for (const m of read(file).matchAll(/(--[\w-]+)\s*:/g)) defined.add(m[1]!)
+    for (const renames of Object.values(RETIRED.renames))
+      for (const [old, next] of Object.entries(renames)) {
+        expect(defined.has(next), `${old} → ${next}`).toBe(true)
+        expect(defined.has(old), `${old} is still defined`).toBe(false)
+      }
+    for (const old of Object.keys(RETIRED.removed))
+      expect(defined.has(old), `${old} is still defined`).toBe(false)
+  })
+
+  it('animates no grid track, width or height, and has no z-[..] left', () => {
+    // AppFrame's column widths change without animation (DS-02).
+    expect(actual['layout-transition'] ?? {}).toEqual({})
+    expect(actual['z-index'] ?? {}).toEqual({})
+  })
+
+  async function loadCodemod() {
+    const url = pathToFileURL(join(REPO, 'scripts/codemods/tokens-v2.mjs')).href
+    return (await import(/* @vite-ignore */ url)) as {
+      transform: (source: string, file: string) => string
+    }
+  }
+
+  it('codemods retired names, weights and icon sizes idempotently', async () => {
+    const codemod = await loadCodemod()
+    const sample = [
+      '<template><RefreshCw :size="13" /><Plus :size="18" /></template>',
+      '<script setup lang="ts">',
+      "import { Plus, RefreshCw } from 'lucide-vue-next'",
+      '</script>',
+      '<style scoped>',
+      '.a {',
+      '  color: rgb(var(--fg) / var(--text-secondary));',
+      '  background: var(--interactive-bg-hover);',
+      '  border-radius: var(--radius-sm);',
+      '  font-weight: 700;',
+      '  transition: opacity var(--duration-ds-fast) var(--ease-in-out);',
+      '}',
+      '.b {',
+      '  color: rgb(var(--fg));',
+      '  font: 600 var(--fs-xs) / var(--lh-xs) var(--font-sans);',
+      '}',
+      '</style>',
+      '',
+    ].join('\n')
+    const once = codemod.transform(sample, 'Sample.vue')
+    expect(once).toContain('<RefreshCw :size="14" /><Plus :size="18" />')
+    expect(once).toContain('color: rgb(var(--text-2));')
+    expect(once).toContain('background: var(--surface-hover);')
+    expect(once).toContain('border-radius: var(--r-sm);')
+    expect(once).toContain('font-weight: var(--weight-semibold);')
+    expect(once).toContain(
+      'transition: opacity var(--motion-fast) var(--ease-standard);',
+    )
+    expect(once).toContain('color: rgb(var(--text-1));')
+    expect(once).toContain('font: var(--weight-semibold) var(--fs-xs)')
+    expect(codemod.transform(once, 'Sample.vue')).toBe(once)
+  })
+
+  it('leaves the codemod nothing to change in the renderer', async () => {
+    const codemod = await loadCodemod()
+    const pending = sources
+      .filter(([rel, text]) => codemod.transform(text, rel) !== text)
+      .map(([rel]) => rel)
+    expect(pending, 'run: node scripts/codemods/tokens-v2.mjs').toEqual([])
   })
 })

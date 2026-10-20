@@ -125,6 +125,8 @@ export class UserDownloads {
   private readonly reserved = new Set<string>()
   private readonly quarantine: (path: string) => Promise<void>
 
+  private newerFile = false
+
   constructor(private readonly options: UserDownloadsOptions) {
     this.quarantine = options.quarantine ?? createQuarantine()
   }
@@ -358,7 +360,8 @@ export class UserDownloads {
 
   private persist(): void {
     const recordPath = this.options.recordPath
-    if (recordPath === undefined) return
+    // A newer Emperor's history file stays as it is (REL-03).
+    if (recordPath === undefined || this.newerFile) return
     const directory = dirname(recordPath)
     const temp = join(
       directory,
@@ -393,6 +396,8 @@ export class UserDownloads {
     } catch {
       return // missing or damaged: start empty
     }
+    if (isRecord(parsed) && Number(parsed.version) > RECORD_VERSION)
+      this.newerFile = true
     if (
       !isRecord(parsed) ||
       parsed.version !== RECORD_VERSION ||

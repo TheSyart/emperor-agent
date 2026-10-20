@@ -150,7 +150,7 @@ function isLong(text: string): boolean {
 .section::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   background-clip: padding-box;
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
 }
 
 .label {

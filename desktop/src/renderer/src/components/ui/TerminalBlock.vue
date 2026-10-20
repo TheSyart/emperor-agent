@@ -145,7 +145,7 @@ const { copied, copy } = useCopyFeedback(() => props.output ?? '')
   position: relative;
   overflow: hidden;
   padding-left: var(--terminal-gutter);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   background: rgb(var(--code-block-bg));
   border-radius: var(--radius-card);
 }
@@ -162,7 +162,7 @@ const { copied, copy } = useCopyFeedback(() => props.output ?? '')
 }
 
 .ds-terminal:not([data-running]) .header {
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .prompt {
@@ -200,7 +200,7 @@ const { copied, copy } = useCopyFeedback(() => props.output ?? '')
 
 .cwd {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .command {
@@ -208,7 +208,7 @@ const { copied, copy } = useCopyFeedback(() => props.output ?? '')
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: pre;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .status {
@@ -216,7 +216,7 @@ const { copied, copy } = useCopyFeedback(() => props.output ?? '')
   top: 0;
   flex: none;
   height: var(--lh-code);
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .copy {
@@ -226,7 +226,7 @@ const { copied, copy } = useCopyFeedback(() => props.output ?? '')
   padding: 0;
   border: none;
   background: rgb(var(--code-block-bg));
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xs);
   line-height: var(--lh-code);
   cursor: pointer;
@@ -249,33 +249,33 @@ const { copied, copy } = useCopyFeedback(() => props.output ?? '')
   padding: 0;
   border: none;
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .expand:hover {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .empty {
   padding: var(--space-3) var(--space-3-5) var(--space-3) 0;
   font: var(--font-code);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .ansi-black,
 .ansi-white {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .ansi-gray {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .ansi-red {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .ansi-green {
@@ -299,7 +299,7 @@ const { copied, copy } = useCopyFeedback(() => props.output ?? '')
 }
 
 .ansi-bold {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .ansi-dim {

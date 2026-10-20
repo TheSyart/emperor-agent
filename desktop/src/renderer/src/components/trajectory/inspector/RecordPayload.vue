@@ -142,12 +142,12 @@ button.image-link {
 .no-payload {
   margin: 0;
   padding: var(--space-4) var(--space-3-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xs);
 }
 
 .json[data-error='true'] :deep(*) {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .blocks {
@@ -166,7 +166,7 @@ button.image-link {
 .payload {
   margin: 0;
   overflow-wrap: anywhere;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: 12px / 19px var(--font-mono);
   tab-size: 2;
   white-space: pre-wrap;
@@ -184,11 +184,11 @@ button.image-link {
 
 [data-error='true'],
 [data-error='true'] .block-text {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .payload[data-empty='true'] {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .image-link {

@@ -389,8 +389,8 @@ function messageOf(cause: unknown): string {
 .conclusion {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
 }
 
 .issues {
@@ -448,12 +448,12 @@ function messageOf(cause: unknown): string {
 }
 
 .issue-where {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
 .issue-what {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
 }
 
@@ -461,8 +461,8 @@ function messageOf(cause: unknown): string {
   flex: none;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
-  color: rgb(var(--accent-strong));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-link));
 }
 
 .issue:hover .issue-go {

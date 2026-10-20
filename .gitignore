@@ -93,6 +93,9 @@ pnpm-debug.log*
 
 /packages/core/native/build/
 
+# Per-worktree Playwright config (a private port); never committed
+desktop/playwright.local.config.ts
+
 # REL-04: the Emperor Home 0.1.0-preview.4 wrote, an upgrade test fixture (no real data).
 !/packages/core/fixtures/emperor-home-0.1.0-preview.4/home/model_config.json
 !/packages/core/fixtures/emperor-home-0.1.0-preview.4/home/memory/MEMORY.local.md

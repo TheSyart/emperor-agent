@@ -390,7 +390,7 @@ function clearSearch() {
               :aria-expanded="noteOpen"
               @click="noteOpen = !noteOpen"
             >
-              <Info :size="13" />
+              <Info :size="14" />
             </IconButton>
           </span>
         </div>
@@ -495,7 +495,7 @@ function clearSearch() {
 }
 
 .filters {
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .error {
@@ -526,7 +526,7 @@ function clearSearch() {
   min-width: 0;
   margin-top: var(--space-4);
   padding-top: var(--space-3);
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
   overflow: hidden;
 }
 
@@ -538,7 +538,7 @@ function clearSearch() {
   align-items: center;
   row-gap: var(--space-1);
   margin-left: calc(var(--space-5) * -1);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-variant-numeric: tabular-nums;
@@ -556,7 +556,7 @@ function clearSearch() {
   content: '·';
   display: inline-block;
   width: var(--space-5);
-  color: rgb(var(--label-dimmed));
+  color: rgb(var(--text-disabled));
   text-align: center;
 }
 
@@ -567,7 +567,7 @@ function clearSearch() {
 
 .policy {
   margin: 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   text-wrap: pretty;

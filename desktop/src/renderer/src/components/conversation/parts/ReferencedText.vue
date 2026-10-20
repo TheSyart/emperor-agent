@@ -123,9 +123,9 @@ function chipName(kind: string, label: string): string {
   padding: 0 var(--space-1);
   margin: 0 var(--space-0-5);
   border-radius: var(--radius-cell);
-  background: rgb(var(--accent-fill) / 0.12);
-  color: rgb(var(--accent-strong));
-  font-weight: 500;
+  background: rgb(var(--accent) / 0.12);
+  color: rgb(var(--text-link));
+  font-weight: var(--weight-medium);
   white-space: nowrap;
   vertical-align: baseline;
 }
@@ -135,8 +135,8 @@ function chipName(kind: string, label: string): string {
 }
 
 .reference-chip[data-unavailable] {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-tertiary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-3));
   text-decoration: line-through;
 }
 </style>

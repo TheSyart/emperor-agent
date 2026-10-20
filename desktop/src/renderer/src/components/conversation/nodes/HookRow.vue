@@ -87,11 +87,11 @@ const summary = computed(() =>
   margin: var(--space-1) 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 dt {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 dd {

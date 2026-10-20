@@ -62,7 +62,7 @@ const sources = computed(() =>
 .answer {
   margin-bottom: var(--space-2);
   font: var(--font-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   white-space: pre-wrap;
 }
 .sources {
@@ -81,16 +81,16 @@ const sources = computed(() =>
 .published-at {
   margin: calc(0px - var(--space-1)) var(--space-3) var(--space-2);
   font: var(--font-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .truncated {
   margin: var(--space-2) 0;
   font: var(--font-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .raw-result > summary {
   padding: var(--space-1) 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xs);
   cursor: pointer;
 }
