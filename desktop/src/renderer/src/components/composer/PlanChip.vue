@@ -61,7 +61,7 @@ function dismiss(): void {
   box-shadow: inset 0 0 0 1px rgb(var(--attention) / 0.3);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   cursor: pointer;
 }
 

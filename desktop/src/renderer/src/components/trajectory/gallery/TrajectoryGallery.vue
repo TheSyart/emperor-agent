@@ -149,7 +149,7 @@ onBeforeUnmount(() => {
 }
 
 .brand {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .link {

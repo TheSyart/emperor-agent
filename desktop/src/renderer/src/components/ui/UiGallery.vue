@@ -401,13 +401,13 @@ h1 {
   margin: 0;
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 h2 {
   margin: 0 0 var(--space-3);
   font: var(--font-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-3));
   text-transform: uppercase;
 }

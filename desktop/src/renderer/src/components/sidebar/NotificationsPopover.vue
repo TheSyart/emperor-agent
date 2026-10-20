@@ -155,7 +155,7 @@ onBeforeUnmount(() => {
   flex: 1;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .head-action {
@@ -244,7 +244,7 @@ onBeforeUnmount(() => {
 
 .row[data-unread] .title {
   color: rgb(var(--text-1));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .detail {

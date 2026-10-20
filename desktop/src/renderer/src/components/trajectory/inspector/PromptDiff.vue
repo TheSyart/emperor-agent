@@ -67,7 +67,7 @@ const sections = computed(() => {
 .title {
   margin: 0 0 var(--space-1-5);
   color: rgb(var(--text-2));
-  font: 600 var(--fs-xs) / var(--lh-xs) var(--font-sans);
+  font: var(--weight-semibold) var(--fs-xs) / var(--lh-xs) var(--font-sans);
 }
 
 .diff {

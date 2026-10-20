@@ -164,7 +164,7 @@ onMounted(() => void load())
 }
 
 .size.total {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--text-1));
 }
 

@@ -133,7 +133,7 @@ withDefaults(
   min-width: 0;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
@@ -144,7 +144,7 @@ withDefaults(
   gap: var(--space-1);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--state-warn-label));
 }
 

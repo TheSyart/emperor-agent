@@ -133,7 +133,7 @@ const titleId = `page-title-${useId()}`
   color: rgb(var(--text-1));
   font-size: var(--fs-hero);
   line-height: var(--space-7);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

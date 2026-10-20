@@ -160,7 +160,7 @@ const checksLabel = computed(() => {
   overflow: hidden;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

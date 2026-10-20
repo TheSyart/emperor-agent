@@ -638,7 +638,7 @@ async function discardRejected(item: RejectedModelEntryPayload): Promise<void> {
 
 .rejected-name {
   flex: none;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .rejected-reason {

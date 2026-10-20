@@ -58,7 +58,7 @@ const emit = defineEmits<{ search: [] }>()
 .brand-name {
   overflow: hidden;
   font-size: var(--fs-md);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   line-height: var(--space-6);
   letter-spacing: 0.02em;
   white-space: nowrap;

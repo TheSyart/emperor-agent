@@ -205,7 +205,7 @@ function open() {
   display: block;
   max-width: calc(100% - 52px);
   color: rgb(var(--text-1));
-  font: 600 var(--fs-s)/var(--lh-s) var(--font-sans);
+  font: var(--weight-semibold) var(--fs-s)/var(--lh-s) var(--font-sans);
   overflow-wrap: anywhere;
   cursor: pointer;
 }

@@ -194,7 +194,7 @@ const emptyLabel = computed(() =>
   color: rgb(var(--text-3));
   background: transparent;
   cursor: pointer;
-  font: 600 12px / 18px var(--font-sans);
+  font: var(--weight-semibold) 12px / 18px var(--font-sans);
 }
 
 .thinking-toggle:hover {
@@ -260,7 +260,7 @@ const emptyLabel = computed(() =>
 .tool-name {
   flex: none;
   margin-right: var(--space-1);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .tool-args {

@@ -389,7 +389,7 @@ function messageOf(cause: unknown): string {
 .conclusion {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--text-1));
 }
 
@@ -461,7 +461,7 @@ function messageOf(cause: unknown): string {
   flex: none;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-link));
 }
 

@@ -67,7 +67,7 @@ withDefaults(
   overflow: hidden;
   font-size: 18px;
   line-height: 26px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
   color: rgb(var(--text-1));
   text-overflow: ellipsis;
@@ -77,7 +77,7 @@ withDefaults(
 .unit {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 400;
+  font-weight: var(--weight-regular);
   color: rgb(var(--text-3));
 }
 

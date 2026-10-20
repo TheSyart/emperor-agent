@@ -153,7 +153,7 @@ const collapsible = computed(
 .name strong {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-1));
 }
 
@@ -180,7 +180,7 @@ const collapsible = computed(
 .value {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--text-1));
   font-variant-numeric: tabular-nums;
   text-align: right;

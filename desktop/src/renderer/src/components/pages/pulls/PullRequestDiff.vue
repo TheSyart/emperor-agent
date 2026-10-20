@@ -247,7 +247,7 @@ function emptyNote(file: PullDiffFile): string {
   background: transparent;
   color: rgb(var(--text-2));
   font: inherit;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   cursor: pointer;
 }
 
@@ -313,7 +313,7 @@ function emptyNote(file: PullDiffFile): string {
   min-width: 0;
   overflow: hidden;
   font: var(--font-code-small);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

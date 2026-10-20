@@ -417,7 +417,7 @@ defineExpose({ reload: () => load(false), dirty })
   min-width: 0;
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
@@ -461,7 +461,7 @@ defineExpose({ reload: () => load(false), dirty })
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--text-1));
 }
 

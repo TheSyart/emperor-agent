@@ -157,7 +157,7 @@ function fmt(value: number): string {
 
 .figures {
   margin-left: auto;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   font-variant-numeric: tabular-nums;
   color: rgb(var(--text-1));
 }

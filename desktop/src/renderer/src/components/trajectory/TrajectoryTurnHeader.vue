@@ -60,7 +60,7 @@ const columns = computed(() => {
 .title {
   flex: none;
   color: rgb(var(--text-1));
-  font: 600 var(--fs-xxs) / var(--lh-xxs) var(--font-sans);
+  font: var(--weight-semibold) var(--fs-xxs) / var(--lh-xxs) var(--font-sans);
 }
 
 .columns {

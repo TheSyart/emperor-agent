@@ -123,7 +123,7 @@ watch(
   cursor: pointer;
 }
 .stream-toggle strong {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 .stream-expand {
   margin-left: auto;

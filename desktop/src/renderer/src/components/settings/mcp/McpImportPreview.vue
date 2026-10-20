@@ -103,13 +103,13 @@ function onOverwrite(name: string, value: boolean) {
   gap: var(--space-2);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-2));
 }
 
 .pending,
 .idle {
-  font-weight: 400;
+  font-weight: var(--weight-regular);
   color: rgb(var(--text-3));
 }
 
@@ -156,7 +156,7 @@ function onOverwrite(name: string, value: boolean) {
   margin-right: var(--space-0-5);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }

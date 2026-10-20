@@ -72,7 +72,7 @@ function skip(): void {
 
 .copy strong {
   color: rgb(var(--text-1));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .actions {

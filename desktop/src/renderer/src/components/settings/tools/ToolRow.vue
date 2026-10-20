@@ -149,7 +149,7 @@ const source = computed(() =>
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -214,7 +214,7 @@ const source = computed(() =>
   margin: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--text-2));
 }
 
@@ -254,7 +254,7 @@ const source = computed(() =>
 
 .param-name {
   font: var(--font-code-small);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }

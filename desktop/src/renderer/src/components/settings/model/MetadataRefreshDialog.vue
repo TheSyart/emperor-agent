@@ -215,7 +215,7 @@ watch(
 .model {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .change {
@@ -229,7 +229,7 @@ watch(
 }
 
 .values strong {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-1));
 }
 

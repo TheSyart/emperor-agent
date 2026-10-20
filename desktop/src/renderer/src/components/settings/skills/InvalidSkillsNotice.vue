@@ -160,7 +160,7 @@ const listId = 'invalid-skills-list'
 .title {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--state-warn-label));
 }
 

@@ -44,7 +44,7 @@ defineEmits<{ open: [] }>()
   margin: 0;
   padding: 0 0 3px var(--space-3-5);
   color: rgb(var(--text-2));
-  font: 600 var(--fs-xs) / 1 var(--font-sans);
+  font: var(--weight-semibold) var(--fs-xs) / 1 var(--font-sans);
 }
 
 .title {

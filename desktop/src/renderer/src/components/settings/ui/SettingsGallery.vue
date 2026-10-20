@@ -524,7 +524,7 @@ const facts = [
   padding-left: var(--space-3-5);
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .header-actions {

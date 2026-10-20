@@ -282,7 +282,7 @@ function openFile(path: string): void {
 }
 
 .headline {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   overflow-wrap: anywhere;
 }
 

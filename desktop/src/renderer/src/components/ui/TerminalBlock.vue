@@ -299,7 +299,7 @@ const { copied, copy } = useCopyFeedback(() => props.output ?? '')
 }
 
 .ansi-bold {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .ansi-dim {

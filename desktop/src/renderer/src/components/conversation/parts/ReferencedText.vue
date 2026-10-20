@@ -125,7 +125,7 @@ function chipName(kind: string, label: string): string {
   border-radius: var(--radius-cell);
   background: rgb(var(--accent) / 0.12);
   color: rgb(var(--text-link));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   white-space: nowrap;
   vertical-align: baseline;
 }

@@ -367,7 +367,7 @@ function submit() {
   color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .history-count {

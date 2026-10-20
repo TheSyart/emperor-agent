@@ -33,7 +33,7 @@ withDefaults(
   display: inline-flex;
   align-items: center;
   font: var(--font-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   white-space: nowrap;
 }
 

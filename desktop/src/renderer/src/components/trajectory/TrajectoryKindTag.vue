@@ -90,7 +90,7 @@ withDefaults(defineProps<{ kind: TrajectoryCellKind; iconOnly?: boolean }>(), {
   padding: 0 calc(var(--space-1) + 1px);
   border: 1px solid transparent;
   border-radius: var(--space-1);
-  font: 650 10px / 16px var(--font-sans);
+  font: var(--weight-semibold) 10px / 16px var(--font-sans);
   letter-spacing: 0.035em;
   white-space: nowrap;
   user-select: none;

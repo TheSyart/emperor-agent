@@ -612,11 +612,11 @@ onMounted(() => {
 .pricing-title {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .pricing-title small {
-  font-weight: 400;
+  font-weight: var(--weight-regular);
   font-size: var(--fs-xxs);
   color: rgb(var(--text-3));
 }

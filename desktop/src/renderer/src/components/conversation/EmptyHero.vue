@@ -42,7 +42,7 @@ defineProps<{ projectName?: string }>()
   color: rgb(var(--text-1));
   font-size: 26px;
   line-height: var(--space-8);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   letter-spacing: 0.01em;
 }
 
@@ -60,7 +60,7 @@ defineProps<{ projectName?: string }>()
 
 .project strong {
   color: rgb(var(--text-2));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .glow {

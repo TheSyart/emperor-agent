@@ -144,7 +144,7 @@ provide(LINK_STATUS_KEY, {
 }
 
 .brand {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .link {

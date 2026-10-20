@@ -113,7 +113,7 @@ const summary = computed(() => {
   flex: none;
   font-size: var(--fs-xs);
   line-height: var(--space-6);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-1));
 }
 

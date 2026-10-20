@@ -90,7 +90,7 @@ const firstContent = computed(() =>
   padding: var(--space-2) var(--space-2) var(--space-1);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-3));
 }
 

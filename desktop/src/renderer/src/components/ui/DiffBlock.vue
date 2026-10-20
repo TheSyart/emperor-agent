@@ -100,7 +100,7 @@ const { copied, copy } = useCopyFeedback(() => diffCopyText(result.value.rows))
 
 .line--path {
   padding-right: calc(var(--space-8) * 2);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--text-1));
 }
 

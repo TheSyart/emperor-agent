@@ -105,7 +105,7 @@ const title = computed(() =>
   color: rgb(var(--text-1));
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .icon-well {

@@ -481,7 +481,7 @@ async function revealProject(): Promise<void> {
 .changes b,
 .changes i {
   font-style: normal;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .changes b {

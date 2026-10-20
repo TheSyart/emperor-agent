@@ -81,7 +81,7 @@ const dot = computed<DotState>(() => {
 
 .label {
   flex: none;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--text-1));
 }
 

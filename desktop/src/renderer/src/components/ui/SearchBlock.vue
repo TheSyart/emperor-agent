@@ -218,7 +218,7 @@ const { copied, copy } = useCopyFeedback(() =>
 
 .file-path {
   min-width: 0;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   white-space: pre;
   color: rgb(var(--text-1));
 }

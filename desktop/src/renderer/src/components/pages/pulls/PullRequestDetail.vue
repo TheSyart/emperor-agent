@@ -388,14 +388,14 @@ function openOnGithub(): void {
   color: rgb(var(--text-1));
   font-size: var(--fs-md);
   line-height: var(--lh-base);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   overflow-wrap: anywhere;
 }
 
 .number {
   margin-left: var(--space-1-5);
   color: rgb(var(--text-3));
-  font-weight: 400;
+  font-weight: var(--weight-regular);
 }
 
 .title-skeleton {
@@ -431,7 +431,7 @@ function openOnGithub(): void {
 
 .repo {
   color: rgb(var(--text-1));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .branches {
@@ -533,7 +533,7 @@ function openOnGithub(): void {
 
 .card-title {
   color: rgb(var(--text-1));
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .card-meta {
@@ -563,7 +563,7 @@ function openOnGithub(): void {
   color: rgb(var(--text-1));
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .section-meta,
@@ -680,7 +680,7 @@ function openOnGithub(): void {
   background: transparent;
   color: inherit;
   font: inherit;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-decoration: underline;
   cursor: pointer;
 }

@@ -194,7 +194,7 @@ const stateLabel = computed(() => {
 
 .summary-suffix[data-tone='warn'] {
   color: rgb(var(--warn));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .summary-suffix[data-tone='accent'] {

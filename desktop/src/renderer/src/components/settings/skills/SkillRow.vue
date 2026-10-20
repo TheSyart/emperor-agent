@@ -120,7 +120,7 @@ const status = computed(() =>
   min-width: 0;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
@@ -131,7 +131,7 @@ const status = computed(() =>
   gap: var(--space-0-5);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--state-warn-label));
   font-variant-numeric: tabular-nums;
 }

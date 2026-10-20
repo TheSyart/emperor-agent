@@ -489,7 +489,7 @@ defineExpose({
   mask: none;
   background: rgb(var(--accent) / 0.14);
   border-radius: var(--r-xs);
-  font: 600 0.7em/1.4 var(--font-sans);
+  font: var(--weight-semibold) 0.7em/1.4 var(--font-sans);
   text-align: center;
 }
 .composer-editor
@@ -584,7 +584,7 @@ defineExpose({
   border-radius: var(--radius-cell);
   background: rgb(var(--accent) / 0.12);
   color: rgb(var(--text-link));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   white-space: nowrap;
   vertical-align: baseline;
   cursor: default;

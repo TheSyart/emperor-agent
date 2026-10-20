@@ -203,7 +203,7 @@ const headline = computed(() => {
   min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--space-6);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .chevron {
@@ -255,7 +255,7 @@ const headline = computed(() => {
 
 .state.held {
   color: rgb(var(--text-2));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .actions {

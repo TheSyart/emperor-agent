@@ -176,7 +176,7 @@ function openTab(tab: 'mcp' | 'plugins'): void {
 .count {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 400;
+  font-weight: var(--weight-regular);
   color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

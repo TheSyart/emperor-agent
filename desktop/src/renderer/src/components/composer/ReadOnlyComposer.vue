@@ -73,7 +73,7 @@ const emit = defineEmits<{ back: []; stop: []; root: [] }>()
 strong {
   margin: 0 var(--space-1);
   color: rgb(var(--text-1));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .back {

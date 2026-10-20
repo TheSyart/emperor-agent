@@ -50,7 +50,7 @@ defineProps<{
 
 .title {
   margin-right: var(--space-1-5);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 [data-state='error'] .title {

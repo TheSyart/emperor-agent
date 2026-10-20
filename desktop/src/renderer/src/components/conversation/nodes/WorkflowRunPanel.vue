@@ -258,7 +258,7 @@ const latestLog = computed(() => props.run.logs.at(-1))
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--fs-s);
-  font-weight: 510;
+  font-weight: var(--weight-medium);
   line-height: var(--lh-base);
   color: rgb(var(--text-2));
 }
@@ -289,7 +289,7 @@ const latestLog = computed(() => props.run.logs.at(-1))
   gap: var(--space-1);
   height: var(--space-5);
   font-size: var(--fs-xxxs);
-  font-weight: 510;
+  font-weight: var(--weight-medium);
   line-height: var(--lh-xxxs);
   color: rgb(var(--text-2));
   white-space: nowrap;

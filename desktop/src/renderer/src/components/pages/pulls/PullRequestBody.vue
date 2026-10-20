@@ -78,7 +78,7 @@ function onClick(event: MouseEvent): void {
   border-radius: var(--r-sm);
   color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
-  font-weight: 400;
+  font-weight: var(--weight-regular);
   text-decoration: none;
 }
 </style>

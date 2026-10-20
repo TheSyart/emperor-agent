@@ -74,7 +74,7 @@ const LABELS = Object.fromEntries(
   padding: 0 var(--space-2-5);
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--text-1));
 }
 
@@ -94,7 +94,7 @@ const LABELS = Object.fromEntries(
   padding: var(--space-3) var(--space-2-5) var(--space-1);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-3));
 }
 
@@ -111,7 +111,7 @@ const LABELS = Object.fromEntries(
   font-family: inherit;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 400;
+  font-weight: var(--weight-regular);
   color: rgb(var(--text-1));
   text-align: left;
 }
@@ -122,7 +122,7 @@ const LABELS = Object.fromEntries(
 
 .nav-cell.active {
   background: rgb(var(--surface-selected));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .nav-cell:focus-visible {

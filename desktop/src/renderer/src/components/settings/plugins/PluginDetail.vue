@@ -482,7 +482,7 @@ defineExpose({ reload: load })
   min-width: 0;
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
@@ -544,7 +544,7 @@ defineExpose({ reload: load })
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--text-1));
 }
 
@@ -603,7 +603,7 @@ defineExpose({ reload: load })
   min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
@@ -661,7 +661,7 @@ defineExpose({ reload: load })
   min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-2));
 }
 

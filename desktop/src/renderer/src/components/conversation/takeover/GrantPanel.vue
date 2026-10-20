@@ -185,7 +185,7 @@ function send(optionId: string) {
 
 .headline {
   font-size: calc(var(--fs-s) + 1px);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   line-height: 24px;
 }
 

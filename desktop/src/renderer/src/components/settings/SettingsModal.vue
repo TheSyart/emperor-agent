@@ -286,7 +286,7 @@ watch(
   overflow: hidden;
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;

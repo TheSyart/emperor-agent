@@ -414,7 +414,7 @@ function onKeydown(event: KeyboardEvent) {
   margin: 0;
   font-size: var(--fs-base);
   line-height: 22px;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -507,7 +507,7 @@ function onKeydown(event: KeyboardEvent) {
   background: rgb(var(--surface-strong));
   color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   line-height: 18px;
 }
 
@@ -557,14 +557,14 @@ function onKeydown(event: KeyboardEvent) {
 .option-label {
   font-size: var(--fs-s);
   line-height: 24px;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .description {
   color: rgb(var(--text-3));
   font-size: var(--fs-s);
   line-height: 24px;
-  font-weight: 400;
+  font-weight: var(--weight-regular);
 }
 
 /* Auto-growing text field: the hidden mirror sizes the grid cell, the
@@ -647,7 +647,7 @@ function onKeydown(event: KeyboardEvent) {
   color: rgb(var(--text-2));
   font-size: var(--fs-s);
   line-height: 24px;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   white-space: nowrap;
   word-spacing: -2px;
 }

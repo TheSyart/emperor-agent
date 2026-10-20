@@ -63,17 +63,17 @@ const linkOptions = { notify: (message: string) => app?.showToast(message) }
 
 .traj-md :deep(h1) {
   margin: var(--space-3) 0 var(--space-1-5);
-  font: 600 16px / 22px var(--font-sans);
+  font: var(--weight-semibold) 16px / 22px var(--font-sans);
 }
 
 .traj-md :deep(h2) {
   margin: var(--space-3) 0 var(--space-1-5);
-  font: 600 15px / 22px var(--font-sans);
+  font: var(--weight-semibold) 15px / 22px var(--font-sans);
 }
 
 .traj-md :deep(:is(h3, h4, h5, h6)) {
   margin: var(--space-2-5) 0 var(--space-1);
-  font: 600 14px / 20px var(--font-sans);
+  font: var(--weight-semibold) 14px / 20px var(--font-sans);
 }
 
 .traj-md :deep(:not(pre) > code) {

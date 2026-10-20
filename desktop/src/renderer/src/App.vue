@@ -902,7 +902,7 @@ provideAppContext({
 .boot-error strong {
   color: rgb(var(--text-1));
   font-size: var(--fs-base);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .boot-error p {

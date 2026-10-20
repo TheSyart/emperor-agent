@@ -1180,7 +1180,7 @@ onBeforeUnmount(() => {
 .agent-card h3 {
   font-size: var(--fs-s);
   line-height: 22px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.05px;
 }
 .agent-card :deep(.title-line) {
@@ -1263,7 +1263,7 @@ onBeforeUnmount(() => {
 .specialty-tag.ds-badge {
   flex: 0 1 auto;
   font-size: var(--fs-xxs);
-  font-weight: 400;
+  font-weight: var(--weight-regular);
   border-radius: var(--r-sm);
   padding: var(--space-0-5) var(--space-2);
   min-height: 24px;
@@ -1378,7 +1378,7 @@ onBeforeUnmount(() => {
 .ability-item .ds-badge {
   font-size: var(--fs-xxxs);
   min-height: 21px;
-  font-weight: 450;
+  font-weight: var(--weight-medium);
   line-height: 17px;
   border-radius: var(--r-sm);
   padding: var(--space-0-5) var(--space-2);

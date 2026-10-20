@@ -86,7 +86,7 @@ defineProps<{ title: string; description?: string; value?: string }>()
 .title {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }

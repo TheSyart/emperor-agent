@@ -325,7 +325,7 @@ onBeforeUnmount(() => {
 }
 .resource-details h2 {
   margin: var(--space-3) 0;
-  font: 600 20px/1.5 var(--font-sans);
+  font: var(--weight-semibold) 20px/1.5 var(--font-sans);
   overflow-wrap: anywhere;
 }
 .description {

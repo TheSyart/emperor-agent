@@ -50,7 +50,7 @@
   border-radius: var(--r-sm);
   background: rgb(var(--surface-base));
   color: rgb(var(--text-1));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-decoration: none;
   vertical-align: baseline;
   cursor: pointer;

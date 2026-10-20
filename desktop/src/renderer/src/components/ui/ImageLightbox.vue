@@ -413,7 +413,7 @@ onBeforeUnmount(() => {
 }
 .viewer-title strong {
   font-size: var(--fs-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   line-height: 22px;
   overflow-wrap: anywhere;
 }
@@ -492,7 +492,7 @@ onBeforeUnmount(() => {
 }
 .viewer-status strong {
   color: rgb(var(--image-viewer-control-ink));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 .viewer-spinner {
   animation: viewer-spin 1s linear infinite;

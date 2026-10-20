@@ -43,7 +43,7 @@
 }
 
 .composer-palette-head span {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .composer-palette-head em {
@@ -113,7 +113,7 @@
   overflow: hidden;
   color: rgb(var(--text-1));
   font-size: var(--fs-xs);
-  font-weight: 560;
+  font-weight: var(--weight-semibold);
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -139,7 +139,7 @@
   color: rgb(var(--text-3));
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: var(--fs-xxxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -152,7 +152,7 @@
   color: rgb(var(--text-3));
   font-family: inherit;
   font-size: var(--fs-xxxs);
-  font-weight: 400;
+  font-weight: var(--weight-regular);
   text-align: right;
 }
 

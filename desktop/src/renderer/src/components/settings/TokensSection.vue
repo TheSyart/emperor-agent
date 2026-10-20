@@ -378,7 +378,7 @@ function partWidth(value: number, total: number) {
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--text-1));
 }
 
@@ -423,7 +423,7 @@ function partWidth(value: number, total: number) {
   overflow: hidden;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-1));
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
@@ -433,7 +433,7 @@ function partWidth(value: number, total: number) {
 .rate {
   font-size: var(--fs-md);
   line-height: var(--lh-md);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--state-ok-label));
   font-variant-numeric: tabular-nums;
 }
@@ -475,7 +475,7 @@ function partWidth(value: number, total: number) {
 }
 
 .legend-item strong {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--text-1));
   font-variant-numeric: tabular-nums;
 }
@@ -518,7 +518,7 @@ function partWidth(value: number, total: number) {
   overflow: hidden;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -532,7 +532,7 @@ function partWidth(value: number, total: number) {
 
 .recent-total {
   font-size: var(--fs-xxs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
 }
 

@@ -223,7 +223,7 @@ button.crumb:hover {
   flex: 0 1 auto;
   max-width: none;
   color: rgb(var(--text-1));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .actions {

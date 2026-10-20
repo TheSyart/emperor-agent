@@ -153,7 +153,7 @@ async function copyDetail(item: ToastItem): Promise<void> {
   padding: 0 var(--space-2);
   border-radius: var(--r-xs);
   font: var(--font-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-decoration: underline;
   text-underline-offset: 3px;
 }

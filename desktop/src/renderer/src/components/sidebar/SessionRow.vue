@@ -252,7 +252,7 @@ defineExpose({ beginRename })
 }
 
 .session-row[data-active] .title {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .rename {

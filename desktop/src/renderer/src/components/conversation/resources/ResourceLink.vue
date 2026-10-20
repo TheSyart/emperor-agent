@@ -33,7 +33,7 @@ const { sessionId } = useChatContext()
   background: transparent;
   vertical-align: baseline;
   color: rgb(var(--text-link));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   line-height: 1.85;
 }
 .resource-inline a {

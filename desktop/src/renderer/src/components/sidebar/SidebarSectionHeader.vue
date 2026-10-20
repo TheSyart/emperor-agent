@@ -43,7 +43,7 @@ const collapsed = defineModel<boolean>('collapsed', { default: false })
   color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   cursor: pointer;
 }
 

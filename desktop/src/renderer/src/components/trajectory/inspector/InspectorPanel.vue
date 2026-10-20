@@ -152,7 +152,7 @@ const tabItems = computed(() =>
   color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .request-dot {
@@ -165,7 +165,7 @@ const tabItems = computed(() =>
 
 .request-name {
   flex: none;
-  font: 500 12px / 16px var(--font-mono);
+  font: var(--weight-medium) 12px / 16px var(--font-mono);
 }
 
 .location {

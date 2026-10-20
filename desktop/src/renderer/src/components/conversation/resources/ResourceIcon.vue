@@ -145,7 +145,7 @@ const site = computed(() => {
   border-radius: var(--r-xs);
   background: rgb(var(--accent) / 0.1);
   color: rgb(var(--text-link));
-  font: 600 0.65rem/1 var(--font-sans);
+  font: var(--weight-semibold) 0.65rem/1 var(--font-sans);
 }
 .site-icon {
   display: block;

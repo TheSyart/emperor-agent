@@ -52,7 +52,7 @@ const problem = computed(
   display: block;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 400;
+  font-weight: var(--weight-regular);
 }
 
 /* One or two lines of why; the full text is the tooltip. */
@@ -81,12 +81,12 @@ const problem = computed(
 }
 
 .value[data-tone='warn'] {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--state-warn-label));
 }
 
 .value[data-tone='error'] {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--state-error-label));
 }
 

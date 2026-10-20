@@ -116,7 +116,7 @@ const {
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-3));
 }
 
@@ -161,7 +161,7 @@ const {
   overflow: hidden;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;

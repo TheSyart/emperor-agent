@@ -185,7 +185,7 @@ const note = computed(() => lifecycleNote(props.entry))
   overflow: hidden;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;

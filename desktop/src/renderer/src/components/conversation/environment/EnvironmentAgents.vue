@@ -268,7 +268,7 @@ async function end(agent: AgentView) {
   white-space: nowrap;
 }
 .agent-copy strong {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   font-size: var(--fs-xs);
 }
 .agent-copy small,

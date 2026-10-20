@@ -263,7 +263,7 @@ function messageOf(cause: unknown): string {
 
 .excluded-label {
   margin-right: var(--space-1);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-1));
 }
 
@@ -279,7 +279,7 @@ function messageOf(cause: unknown): string {
 }
 
 .result strong {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .where {

@@ -403,7 +403,7 @@ const showFooter = computed(
   color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-align: left;
   cursor: pointer;
 }
@@ -464,7 +464,7 @@ const showFooter = computed(
   background: transparent;
   color: inherit;
   font: inherit;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-decoration: underline;
   cursor: pointer;
 }

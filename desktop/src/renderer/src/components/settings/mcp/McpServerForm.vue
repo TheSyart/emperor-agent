@@ -160,7 +160,7 @@ const remote = computed(() => form.value.transport !== 'stdio')
 .label {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-1));
 }
 
@@ -168,7 +168,7 @@ const remote = computed(() => form.value.transport !== 'stdio')
   margin-left: var(--space-1-5);
   font-size: var(--fs-xxs);
   font-style: normal;
-  font-weight: 400;
+  font-weight: var(--weight-regular);
   color: rgb(var(--text-3));
 }
 

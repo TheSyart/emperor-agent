@@ -116,7 +116,7 @@ function newProject(): void {
   color: rgb(var(--text-1));
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-align: left;
   cursor: pointer;
   transition: box-shadow var(--motion-base) var(--ease-standard);
@@ -148,7 +148,7 @@ function newProject(): void {
 .new-chat-key {
   flex: none;
   font-size: var(--fs-xxs);
-  font-weight: 400;
+  font-weight: var(--weight-regular);
   color: rgb(var(--text-3));
   opacity: 0;
   transition: opacity var(--motion-base) var(--ease-standard);
@@ -196,7 +196,7 @@ function newProject(): void {
 .nav-item[aria-current='page'] {
   background: rgb(var(--surface-selected));
   color: rgb(var(--text-1));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .nav-icon {

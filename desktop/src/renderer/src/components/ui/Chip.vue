@@ -54,7 +54,7 @@ withDefaults(
   color: rgb(var(--text-2));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   cursor: pointer;
   transition: background-color var(--motion-fast) ease;
 }

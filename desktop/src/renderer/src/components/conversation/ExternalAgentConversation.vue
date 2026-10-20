@@ -748,7 +748,7 @@ h1 {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--fs-md);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 .child-title > span {
   color: rgb(var(--text-2));

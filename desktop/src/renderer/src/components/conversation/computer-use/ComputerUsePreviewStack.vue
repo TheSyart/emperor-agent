@@ -751,7 +751,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--space-1-5);
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .cu-card-source {

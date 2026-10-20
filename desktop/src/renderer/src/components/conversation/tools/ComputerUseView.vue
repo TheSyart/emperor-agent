@@ -306,7 +306,7 @@ button.shot {
   background: rgb(var(--error-soft));
   color: rgb(var(--error));
   font-size: var(--fs-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   line-height: 20px;
 }
 

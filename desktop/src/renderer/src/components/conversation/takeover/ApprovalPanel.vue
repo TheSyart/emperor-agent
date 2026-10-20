@@ -163,7 +163,7 @@ function decide(action: ApprovalAction) {
 .headline {
   color: rgb(var(--text-1));
   font-size: calc(var(--fs-s) + 1px);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   line-height: 24px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;

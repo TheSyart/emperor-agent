@@ -523,7 +523,7 @@ function stepDot(tone: string): DotState {
   min-width: 0;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
@@ -532,7 +532,7 @@ function stepDot(tone: string): DotState {
   margin: 0;
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }

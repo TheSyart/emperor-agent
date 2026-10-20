@@ -59,7 +59,7 @@ const schema = computed(() =>
 .name {
   margin: 0;
   color: rgb(var(--text-1));
-  font: 600 12px / 18px var(--font-mono);
+  font: var(--weight-semibold) 12px / 18px var(--font-mono);
 }
 
 .description {
@@ -80,7 +80,7 @@ const schema = computed(() =>
   margin: 0;
   padding: var(--space-1) var(--space-3-5) 2px;
   color: rgb(var(--text-3));
-  font: 600 11px / 16px var(--font-sans);
+  font: var(--weight-semibold) 11px / 16px var(--font-sans);
 }
 
 .payload {

@@ -180,7 +180,7 @@ const cumulativeUsage = computed(() =>
   margin: 0;
   padding: var(--space-1) var(--space-3-5) 1px;
   color: rgb(var(--text-2));
-  font: 600 var(--fs-xs) / var(--lh-xs) var(--font-sans);
+  font: var(--weight-semibold) var(--fs-xs) / var(--lh-xs) var(--font-sans);
   user-select: none;
 }
 

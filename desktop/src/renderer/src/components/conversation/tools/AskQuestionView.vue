@@ -128,7 +128,7 @@ const outcome = computed(() => {
 
 [data-selected] .label {
   color: rgb(var(--text-1));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .description {

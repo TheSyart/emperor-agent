@@ -379,7 +379,7 @@ function onClick(): void {
 
 .tool-name {
   color: rgb(var(--text-1));
-  font: 400 12px / 18px var(--font-mono);
+  font: var(--weight-regular) 12px / 18px var(--font-mono);
 }
 
 .tool-args {
@@ -425,7 +425,7 @@ function onClick(): void {
   flex: none;
   margin-right: var(--space-1-5);
   color: rgb(var(--text-3));
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 @container trajectory-table (max-width: 620px) {

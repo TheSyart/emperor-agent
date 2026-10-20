@@ -103,7 +103,7 @@ defineProps<{ tools: readonly ToolSchema[] }>()
 
 .name {
   color: rgb(var(--text-1));
-  font: 500 12px / 18px var(--font-mono);
+  font: var(--weight-medium) 12px / 18px var(--font-mono);
 }
 
 .description {

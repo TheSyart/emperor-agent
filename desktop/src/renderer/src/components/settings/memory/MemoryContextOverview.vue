@@ -83,7 +83,7 @@ const attention = computed(() => groups.value.some((group) => group.warn))
   margin: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--text-2));
 }
 </style>

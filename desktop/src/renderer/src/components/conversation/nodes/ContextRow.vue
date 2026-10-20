@@ -106,7 +106,7 @@ const body = computed(() => {
   border-radius: var(--r-md);
   background: rgb(var(--surface-raised));
   color: rgb(var(--text-3));
-  font: 400 var(--fs-xxxs) / 16px var(--font-mono);
+  font: var(--weight-regular) var(--fs-xxxs) / 16px var(--font-mono);
   white-space: pre-wrap;
   word-break: break-word;
 }

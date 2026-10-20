@@ -110,7 +110,7 @@ const segments = computed<Segment[]>(() =>
 }
 
 .ds-md :deep(strong) {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .ds-md :deep(h1) {
@@ -151,7 +151,7 @@ const segments = computed<Segment[]>(() =>
 .ds-md :deep(a.md-link-chip) {
   display: inline-block;
   max-width: 100%;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   cursor: pointer;
 }
 
@@ -177,7 +177,7 @@ const segments = computed<Segment[]>(() =>
   border-radius: var(--r-xs);
   background: rgb(var(--md-badge-tone, var(--text-2)) / 0.14);
   color: rgb(var(--md-badge-tone, var(--text-2)));
-  font: 700 0.625em / 1.6 var(--font-mono);
+  font: var(--weight-semibold) 0.625em / 1.6 var(--font-mono);
   text-align: center;
   vertical-align: 0.16em;
   -webkit-mask: none;
@@ -292,7 +292,7 @@ const segments = computed<Segment[]>(() =>
   background: rgb(var(--accent) / 0.14);
   color: rgb(var(--text-link));
   border-radius: var(--r-xs);
-  font: 600 0.7em/1.4 var(--font-sans);
+  font: var(--weight-semibold) 0.7em/1.4 var(--font-sans);
   text-align: center;
   vertical-align: 0;
 }

@@ -324,7 +324,7 @@ function onKeydown(event: KeyboardEvent): void {
 .pane-title {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-3));
 }
 
@@ -370,7 +370,7 @@ function onKeydown(event: KeyboardEvent): void {
   background: rgb(var(--menu-fill));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-3));
 }
 

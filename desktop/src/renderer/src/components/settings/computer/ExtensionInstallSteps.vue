@@ -196,7 +196,7 @@ function copyLabel(address: ExtensionAddress): string {
   height: var(--space-6);
   border-radius: var(--radius-pill);
   font-size: var(--fs-xxs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   line-height: 1;
 }
 
