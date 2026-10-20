@@ -259,6 +259,26 @@ onBeforeUnmount(() => {
   clearTimeout(timer)
   unsubscribe()
 })
+
+/** The task limits a run can stop at (AGT-07); other codes show as they are. */
+const LIMIT_LABEL: Record<string, string> = {
+  BUDGET_LIMIT: '已达到单任务费用上限',
+  TOKEN_LIMIT: '已达到单任务 token 上限（模型单价未知）',
+  RUN_LIMIT: '已达到单任务运行次数上限',
+}
+function failureLabel(code: string): string {
+  return LIMIT_LABEL[code] ?? code
+}
+/** The cost the budget counted: a subscription has none to count. */
+function costText(usage: {
+  estimatedUsd?: number
+  billing?: 'subscription' | 'api'
+}): string {
+  if (usage.billing === 'subscription') return '订阅额度，不计费用'
+  return usage.estimatedUsd === undefined
+    ? '费用未提供'
+    : `费用估算 $${Number(usage.estimatedUsd.toFixed(4))}`
+}
 </script>
 <template>
   <Modal
@@ -304,8 +324,8 @@ onBeforeUnmount(() => {
         >
       </div>
       <p v-if="error" role="alert" class="external-error">{{ error }}</p>
-      <p v-if="run?.failureCode" class="external-note">
-        {{ run.failureCode
+      <p v-if="run?.failureCode" class="external-note" :title="run.failureCode">
+        {{ failureLabel(run.failureCode)
         }}<Button
           v-if="
             run.failureCode.includes('AUTH') ||
@@ -320,13 +340,10 @@ onBeforeUnmount(() => {
         执行器报告：{{ run.summary }}
       </p>
       <p class="external-path">成果目录 · {{ record?.cwd }}</p>
-      <p v-if="run?.usage" class="external-note">
+      <p v-if="run?.usage" class="external-note" data-run-usage>
         输入 {{ run.usage.inputTokens ?? '未提供' }} / 输出
-        {{ run.usage.outputTokens ?? '未提供' }} tokens · 费用{{
-          run.usage.estimatedUsd === undefined
-            ? '未提供'
-            : `估算 $${run.usage.estimatedUsd}`
-        }}
+        {{ run.usage.outputTokens ?? '未提供' }} tokens ·
+        {{ costText(run.usage) }}
       </p>
       <p v-if="run?.phase === 'waiting_input'" class="external-note">
         请返回主会话的提问卡片回答。<Button size="sm" @click="returnRoot"

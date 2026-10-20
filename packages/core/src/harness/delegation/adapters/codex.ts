@@ -102,9 +102,75 @@ export function codexThreadParams(
         : 'Deliver changes as files. Do not commit or change Git metadata.'),
   }
 }
+/** One `TokenUsageBreakdown` of `thread/tokenUsage/updated`. */
+interface CodexTokenBreakdown {
+  input: number
+  cached: number
+  output: number
+  reasoning: number
+  total: number
+}
+function breakdown(value: unknown): CodexTokenBreakdown | undefined {
+  const r = record(value)
+  const n = (key: string) =>
+    typeof r[key] === 'number' && Number.isFinite(r[key]) ? r[key] : undefined
+  const input = n('inputTokens'),
+    output = n('outputTokens')
+  if (input === undefined || output === undefined) return undefined
+  const cached = n('cachedInputTokens') ?? 0,
+    reasoning = n('reasoningOutputTokens') ?? 0
+  return {
+    input,
+    cached,
+    output,
+    reasoning,
+    total: n('totalTokens') ?? input + output,
+  }
+}
+/**
+ * A run's tokens from the thread totals (AGT-07). `last` is the latest
+ * model request and `total` the thread's sum, so the run is the latest
+ * total minus the total before its first request (first total − first
+ * last); a repeated update adds nothing. Counts follow the ledger: input
+ * without cache reads, output with reasoning.
+ */
+export function createCodexUsageMeter(): {
+  update(tokenUsage: unknown): ExecutorEventPayload | undefined
+} {
+  let base: CodexTokenBreakdown | undefined
+  return {
+    update(tokenUsage) {
+      const usage = record(tokenUsage)
+      const total = breakdown(usage.total)
+      if (!total) return undefined
+      if (!base) {
+        const last = breakdown(usage.last) ?? total
+        base = {
+          input: total.input - last.input,
+          cached: total.cached - last.cached,
+          output: total.output - last.output,
+          reasoning: total.reasoning - last.reasoning,
+          total: total.total - last.total,
+        }
+      }
+      const d = (key: keyof CodexTokenBreakdown) =>
+        Math.max(0, total[key] - base![key])
+      const cached = d('cached')
+      return {
+        type: 'usage',
+        inputTokens: Math.max(0, d('input') - cached),
+        cacheReadTokens: cached,
+        outputTokens: d('output'),
+        reasoningTokens: d('reasoning'),
+        totalTokens: d('total'),
+      }
+    },
+  }
+}
 export function normalizeCodexNotification(
   method: string,
   params: Record<string, unknown>,
+  meter?: ReturnType<typeof createCodexUsageMeter>,
 ): ExecutorEventPayload[] {
   if (method === 'model/rerouted' && typeof params.toModel === 'string')
     return [
@@ -116,6 +182,10 @@ export function normalizeCodexNotification(
     ]
   if (method === 'item/agentMessage/delta' && typeof params.delta === 'string')
     return [{ type: 'text_delta', text: params.delta }]
+  if (method === 'thread/tokenUsage/updated' && meter) {
+    const event = meter.update(params.tokenUsage)
+    return event ? [event] : []
+  }
   if (method === 'thread/tokenUsage/updated') {
     const last = record(record(params.tokenUsage).last)
     return [
@@ -346,6 +416,8 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
       summary = '',
       startFailure: DelegationError | undefined
     let closePromise: Promise<{ quiescent: boolean }> | undefined
+    // One session is one run: its tokens count from the thread totals.
+    const meter = createCodexUsageMeter()
     let runtimeMetadata: ExecutorEventPayload = {
       type: 'runtime_metadata',
       source: 'thread-configuration',
@@ -450,7 +522,7 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
             active.outputSchema ? 4 * 1024 * 1024 : 8192,
           )
       }
-      for (let event of normalizeCodexNotification(method, params)) {
+      for (let event of normalizeCodexNotification(method, params, meter)) {
         if (event.type === 'text_delta')
           summary = (summary + event.text).slice(
             0,

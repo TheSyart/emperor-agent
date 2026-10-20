@@ -14,6 +14,9 @@ import {
   type ExecutorSession,
   type NormalizedExecutorEvent,
   type ExecutorProbe,
+  type ExecutorBilling,
+  type ExecutorRunUsage,
+  type ExternalBackend,
 } from './types'
 import { defaultExecutorConfig } from './config'
 import { ExecutorFactsStore } from './facts'
@@ -78,7 +81,34 @@ export interface DelegationServiceOptions {
     tempRoot: string
     secretValues?: string[]
     codexAuth?: CodexAuthLink
+    /** Absent: API billing (AGT-07). */
+    billing?: ExecutorBilling
   }>
+  /**
+   * Prices an API-billed run's tokens from the model catalog (MOD-01) when
+   * the executor reports no cost; null when the model's price is unknown
+   * (AGT-07).
+   */
+  estimateUsd?: (input: {
+    backend: ExternalBackend
+    model?: string
+    provider?: string
+    baseUrl?: string
+    usage: {
+      inputTokens: number
+      outputTokens: number
+      cacheReadTokens?: number
+      reasoningTokens?: number
+    }
+  }) => number | null
+  /**
+   * The root task's cost budget (KRN-03): a spent one refuses new runs, and
+   * every settled run's API cost is charged to it (AGT-07).
+   */
+  taskBudget?: {
+    exhausted(owner: DelegationOwner): boolean
+    charge(owner: DelegationOwner, usd: number): void
+  }
   notices?: {
     parent: (
       owner: DelegationOwner,
@@ -1430,6 +1460,11 @@ export class DelegationService {
       if (e.stop) controller.abort()
       const config = this.options.config()
       this.budget.reconfigure(config)
+      if (this.options.taskBudget?.exhausted(record.owner))
+        throw new DelegationError(
+          'BUDGET_LIMIT',
+          'the root task has spent its cost cap',
+        )
       budget = await this.budget.reserve(
         record.owner.taskScopeId,
         record.profileId,
@@ -1496,6 +1531,9 @@ export class DelegationService {
         ...profile,
         defaultModel: spec.model ?? profile.defaultModel,
       }
+      const billing: ExecutorBilling = runtime.billing ?? 'api'
+      let model = effectiveProfile.defaultModel,
+        modelProvider: string | undefined
       this.facts.bind(effectiveProfile, runtime.environment, activeRunId)
       if (e.stop || controller.signal.aborted)
         throw new DelegationError('ABORTED', 'cancelled before process open')
@@ -1515,11 +1553,13 @@ export class DelegationService {
       const prior = Object.values(state.runs).filter(
         (r) => r.id !== activeRunId && r.providerTurnId,
       )
-      const usageBaseline = prior.every(
-        (r) => r.usage?.estimatedUsd !== undefined,
-      )
+      // Claude reports the session's running cost; a subscription keeps it
+      // as nominal, which still counts toward the baseline.
+      const reported = (r: DelegationRunRecord) =>
+        r.usage?.estimatedUsd ?? r.usage?.nominalUsd
+      const usageBaseline = prior.every((r) => reported(r) !== undefined)
         ? {
-            estimatedUsd: prior.reduce((n, r) => n + r.usage!.estimatedUsd!, 0),
+            estimatedUsd: prior.reduce((n, r) => n + reported(r)!, 0),
           }
         : undefined
       // The first message carries the task's name; a follow-up is a new
@@ -1587,6 +1627,9 @@ export class DelegationService {
         },
         outputSchema: spec.outputSchema,
         usageBaseline,
+        ...(billing === 'api'
+          ? { budgetUsd: this.budget.remainingUsd(record.owner.taskScopeId) }
+          : {}),
         cwd: record.cwd,
         environment: runtime.environment,
         boundaryReceiptId,
@@ -1709,19 +1752,38 @@ export class DelegationService {
         )
         if (event.type === 'text_delta')
           summary = boundText(summary + event.text, 8192)
-        if (event.type === 'usage')
-          usage = {
-            ...usage,
-            ...('inputTokens' in event
-              ? { inputTokens: event.inputTokens }
-              : {}),
-            ...('outputTokens' in event
-              ? { outputTokens: event.outputTokens }
-              : {}),
-            ...('estimatedUsd' in event
-              ? { estimatedUsd: event.estimatedUsd }
-              : {}),
+        if (event.type === 'runtime_metadata') {
+          if (event.model) model = event.model
+          if (event.provider) modelProvider = event.provider
+        }
+        if (event.type === 'usage') {
+          const { type: _type, ...reported } = event as typeof event & {
+            type: 'usage'
           }
+          usage = billUsage(
+            { ...usage, ...withoutRunFields(reported) },
+            billing,
+            (counts) =>
+              this.options.estimateUsd?.({
+                backend: record.backend,
+                ...(model ? { model } : {}),
+                ...(modelProvider ? { provider: modelProvider } : {}),
+                ...((runtime.environment.OPENAI_BASE_URL ??
+                runtime.environment.ANTHROPIC_BASE_URL)
+                  ? {
+                      baseUrl:
+                        runtime.environment.OPENAI_BASE_URL ??
+                        runtime.environment.ANTHROPIC_BASE_URL,
+                    }
+                  : {}),
+                usage: counts,
+              }) ?? null,
+            'estimatedUsd' in event,
+          )
+          // A run that takes its task past a cap stops now (AGT-07).
+          const over = this.budget.exceeds(record.owner.taskScopeId, usage)
+          if (over) throw over
+        }
         if (event.type === 'transport_error')
           throw new DelegationError(event.code, event.message)
         if (
@@ -1877,6 +1939,14 @@ export class DelegationService {
         // The budget slot is free once the process is; a run whose stop
         // could not be confirmed keeps only its workspace quarantined.
         budget?.release(sent ? usage : { estimatedUsd: 0 })
+        // The root task's cap counts what its external runs really spent.
+        if (
+          sent &&
+          usage?.billing !== 'subscription' &&
+          usage?.estimatedUsd !== undefined &&
+          usage.estimatedUsd > 0
+        )
+          this.options.taskBudget?.charge(record.owner, usage.estimatedUsd)
         if (quiescent && settledPhase !== 'outcome_unknown')
           workspace?.release()
         else e.held = { workspace, quiescent }
@@ -2247,6 +2317,57 @@ export class DelegationService {
       this.append(e, { type: 'availability', availability: 'closed' }),
     )
   }
+}
+/** The usage fields of a normalized usage event. */
+function withoutRunFields(event: Record<string, unknown>): ExecutorRunUsage {
+  const { delegationId: _d, runId: _r, generation: _g, ...rest } = event
+  return rest as ExecutorRunUsage
+}
+/**
+ * A run's usage as the budget counts it (AGT-07): a subscription's cost is
+ * nominal; an API run without a reported cost is priced from its tokens,
+ * and its token total is known either way.
+ */
+function billUsage(
+  usage: ExecutorRunUsage,
+  billing: ExecutorBilling,
+  estimate: (counts: {
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens?: number
+    reasoningTokens?: number
+  }) => number | null,
+  reportedCost: boolean,
+): ExecutorRunUsage {
+  const { estimatedUsd, nominalUsd, ...counts } = usage
+  const base: ExecutorRunUsage = {
+    ...counts,
+    totalTokens:
+      counts.totalTokens ??
+      (counts.inputTokens ?? 0) +
+        (counts.cacheReadTokens ?? 0) +
+        (counts.outputTokens ?? 0),
+    billing,
+  }
+  if (billing === 'subscription') {
+    const nominal = estimatedUsd ?? nominalUsd
+    return nominal === undefined ? base : { ...base, nominalUsd: nominal }
+  }
+  const usd = reportedCost
+    ? estimatedUsd
+    : (estimate({
+        inputTokens: counts.inputTokens ?? 0,
+        outputTokens: counts.outputTokens ?? 0,
+        ...(counts.cacheReadTokens === undefined
+          ? {}
+          : { cacheReadTokens: counts.cacheReadTokens }),
+        ...(counts.reasoningTokens === undefined
+          ? {}
+          : { reasoningTokens: counts.reasoningTokens }),
+      }) ?? estimatedUsd)
+  return usd === undefined || usd === null
+    ? base
+    : { ...base, estimatedUsd: usd }
 }
 function permissionRank(mode: string): number {
   return mode === 'read-only' ? 0 : mode === 'workspace-write' ? 1 : 2

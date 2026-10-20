@@ -252,6 +252,21 @@ export class TaskTree implements SubagentBudget {
     }
   }
 
+  /** Whether the task's cost cap is spent (no new work may start). */
+  spent(): boolean {
+    return this.verdict().kind === 'exceeded'
+  }
+
+  /**
+   * Charge what an external executor (Claude Code, Codex) spent for this
+   * task, in USD, once its run settles (AGT-07).
+   */
+  chargeUsd(usd: number): BudgetVerdict {
+    if (Number.isFinite(usd) && usd > 0)
+      this.window.spentUsdNanos += usdToNanos(usd)
+    return this.afterCharge()
+  }
+
   /** Charge one request's usage (after every request, failed attempts too). */
   charge(
     request: { routeId: string; usage: TokenUsage | undefined },
@@ -275,6 +290,11 @@ export class TaskTree implements SubagentBudget {
           this.window.failedUsdNanos += cost.costUsdNanos
       }
     }
+    return this.afterCharge()
+  }
+
+  /** The verdict after a charge; the first excess runs the exhaustion hook. */
+  private afterCharge(): BudgetVerdict {
     const verdict = this.verdict()
     if (verdict.kind === 'exceeded' && !this.window.exceeded) {
       this.window.exceeded = true

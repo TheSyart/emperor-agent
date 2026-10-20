@@ -208,6 +208,7 @@ import { ExecutorModelCatalogService } from '../harness/delegation/models'
 import { nativeGeneratedImageRoot } from '../harness/delegation/image-proof'
 import { ClaudeExecutorAdapter } from '../harness/delegation/adapters/claude'
 import { CodexExecutorAdapter } from '../harness/delegation/adapters/codex'
+import { estimateExecutorUsd } from '../harness/delegation/pricing'
 import {
   DelegationError,
   type ExecutorAdapter,
@@ -828,6 +829,13 @@ export class CoreApi {
       workspaces: externalWorkspaces,
       mutations: this.workspaceMutations,
       runtime: (profile, id) => executorRuntime.prepare(profile, id),
+      // AGT-07: API-billed runs priced from the bundled catalog, and their
+      // settled cost counted in the root task's budget.
+      estimateUsd: estimateExecutorUsd,
+      taskBudget: {
+        exhausted: (owner) => host.delegationTaskSpent(owner),
+        charge: (owner, usd) => host.chargeDelegation(owner, usd),
+      },
       notices: {
         parent: (owner) => host.delegationNoticeParent(owner),
         canWake: (owner) => host.delegationNoticeParent(owner) !== undefined,
