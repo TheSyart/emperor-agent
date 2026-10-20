@@ -84,7 +84,7 @@
 
 /* 淡入(浮层、toast、tooltip 进场)。 */
 .ds-fade-in {
-  animation: ds-fade-in var(--duration-ds) var(--ease-in-out) both;
+  animation: ds-fade-in var(--motion-base) var(--ease-standard) both;
 }
 
 @keyframes ds-fade-in {

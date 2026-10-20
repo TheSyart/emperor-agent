@@ -1407,7 +1407,7 @@ onBeforeUnmount(() => {
   color: rgb(var(--text-1));
 }
 .agent-details summary svg {
-  transition: transform var(--duration-ds) var(--ease-in-out);
+  transition: transform var(--motion-base) var(--ease-standard);
 }
 .agent-details[open] summary svg {
   transform: rotate(180deg);

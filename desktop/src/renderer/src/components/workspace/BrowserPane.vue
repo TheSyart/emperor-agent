@@ -565,7 +565,7 @@ function hostOf(url: string): string {
   inset: 0;
   width: 40%;
   background: rgb(var(--accent));
-  animation: browser-progress 1.1s var(--ease-in-out) infinite;
+  animation: browser-progress 1.1s var(--ease-standard) infinite;
 }
 
 @keyframes browser-progress {
@@ -660,7 +660,7 @@ function hostOf(url: string): string {
   color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  transition: background-color var(--duration-ds-fast) ease;
+  transition: background-color var(--motion-fast) ease;
 }
 
 .state-action:hover {
@@ -726,7 +726,7 @@ function hostOf(url: string): string {
   color: rgb(var(--text-1));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xs);
-  transition: background-color var(--duration-ds-fast) ease;
+  transition: background-color var(--motion-fast) ease;
 }
 
 .download-action:hover {

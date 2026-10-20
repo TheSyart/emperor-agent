@@ -131,7 +131,7 @@ function go(entry: SidebarPageEntry): void {
   overflow-y: auto;
   scrollbar-width: none;
   background: rgb(var(--sidebar-fill));
-  animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
+  animation: ds-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .group {

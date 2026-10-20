@@ -78,7 +78,7 @@ onBeforeUnmount(() => clearTimeout(timer))
   box-shadow: var(--shadow-lv3);
   pointer-events: none;
   transform: translateX(-50%);
-  animation: ds-rise-in var(--duration-ds) var(--ease-in-out) both;
+  animation: ds-rise-in var(--motion-base) var(--ease-standard) both;
 }
 
 .ds-toast[data-inline] {

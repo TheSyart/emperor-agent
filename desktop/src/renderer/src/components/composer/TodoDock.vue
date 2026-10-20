@@ -102,7 +102,7 @@ const summary = computed(() => {
 }
 
 .chevron {
-  transition: transform var(--duration-ds-fast) ease;
+  transition: transform var(--motion-fast) ease;
 }
 
 .chevron[data-open] {

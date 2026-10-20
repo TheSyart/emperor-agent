@@ -88,7 +88,7 @@ const emit = defineEmits<{ toggle: []; 'new-session': [] }>()
 .slot .chevron {
   display: none;
   color: rgb(var(--text-3));
-  transition: transform var(--duration-ds) var(--ease-in-out);
+  transition: transform var(--motion-base) var(--ease-standard);
 }
 
 .slot .chevron[data-open] {

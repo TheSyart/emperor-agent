@@ -159,7 +159,7 @@ button.leading {
 .icon-idle {
   display: inline-flex;
   opacity: 1;
-  transition: opacity var(--duration-ds-fast) ease;
+  transition: opacity var(--motion-fast) ease;
 }
 
 .chevron {
@@ -173,7 +173,7 @@ button.leading {
   margin: auto;
   opacity: 0;
   transform: rotate(-90deg);
-  transition: opacity var(--duration-ds-fast) ease;
+  transition: opacity var(--motion-fast) ease;
 }
 
 .row:hover .icon-idle[data-preview] {

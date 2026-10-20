@@ -131,7 +131,7 @@ const brackets = computed(() =>
   border-color: transparent transparent transparent currentColor;
   transform: scale(0.75);
   transform-origin: 33.333% center;
-  transition: transform var(--duration-ds-fast) ease;
+  transition: transform var(--motion-fast) ease;
 }
 
 .expander[data-open]::before {

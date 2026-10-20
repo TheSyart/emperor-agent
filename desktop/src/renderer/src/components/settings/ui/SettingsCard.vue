@@ -147,8 +147,8 @@ function onHeaderClick(event: MouseEvent) {
   border-radius: var(--radius-card);
   background: rgb(var(--settings-card-fill));
   transition:
-    border-color var(--duration-ds-fast) ease,
-    background-color var(--duration-ds-fast) ease;
+    border-color var(--motion-fast) ease,
+    background-color var(--motion-fast) ease;
 }
 
 .ds-settings-card[data-variant='outline'] {
@@ -282,7 +282,7 @@ button.head-text:focus-visible {
 .chevron {
   flex: none;
   color: rgb(var(--text-3));
-  transition: transform var(--duration-ds-fast) var(--ease-in-out);
+  transition: transform var(--motion-fast) var(--ease-standard);
 }
 
 .ds-settings-card[data-open] .chevron {

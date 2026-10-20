@@ -703,7 +703,7 @@ defineExpose({ focusSearch })
   background: rgb(var(--sidebar-fill));
   color: rgb(var(--text-1));
   font-size: var(--fs-s);
-  animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
+  animation: ds-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .head-button {
@@ -730,7 +730,7 @@ defineExpose({ focusSearch })
   flex: none;
   width: auto;
   margin: 0 var(--space-0-5) var(--space-2);
-  animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
+  animation: ds-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .region {

@@ -465,8 +465,8 @@ function onKeydown(event: KeyboardEvent) {
   color: inherit;
   text-align: left;
   transition:
-    background-color var(--duration-ds-fast) ease,
-    border-color var(--duration-ds-fast) ease;
+    background-color var(--motion-fast) ease,
+    border-color var(--motion-fast) ease;
 }
 
 .option {
@@ -528,8 +528,8 @@ function onKeydown(event: KeyboardEvent) {
   border: 1px solid var(--stroke-4);
   border-radius: var(--r-xs);
   transition:
-    background-color var(--duration-ds-fast) ease,
-    border-color var(--duration-ds-fast) ease;
+    background-color var(--motion-fast) ease,
+    border-color var(--motion-fast) ease;
 }
 
 .checkbox > svg {

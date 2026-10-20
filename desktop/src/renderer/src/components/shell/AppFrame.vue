@@ -286,7 +286,7 @@ defineExpose({ toggleSidebar, columns })
   background: rgb(var(--surface-raised));
   opacity: 0;
   transform: translate(-50%, -50%);
-  transition: opacity var(--duration-ds-slow) var(--ease-in-out);
+  transition: opacity var(--motion-slow) var(--ease-standard);
 }
 
 .workspace-col:hover ~ .handle[data-side='workspace']::after,

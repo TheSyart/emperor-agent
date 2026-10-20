@@ -56,7 +56,7 @@ withDefaults(
   line-height: var(--lh-xs);
   font-weight: 500;
   cursor: pointer;
-  transition: background-color var(--duration-ds-fast) ease;
+  transition: background-color var(--motion-fast) ease;
 }
 
 .ds-chip:has(.chevron) {

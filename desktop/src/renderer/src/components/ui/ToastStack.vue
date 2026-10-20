@@ -107,7 +107,7 @@ async function copyDetail(item: ToastItem): Promise<void> {
   color: rgb(var(--toast-fg));
   font: var(--font-s);
   box-shadow: var(--shadow-lv3);
-  animation: ds-rise-in var(--duration-ds) var(--ease-in-out) both;
+  animation: ds-rise-in var(--motion-base) var(--ease-standard) both;
 }
 
 .ds-toast[data-sticky],

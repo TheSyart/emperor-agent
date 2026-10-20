@@ -62,7 +62,7 @@ const collapsed = defineModel<boolean>('collapsed', { default: false })
   align-items: center;
   gap: var(--space-1);
   opacity: 0;
-  transition: opacity var(--duration-ds) var(--ease-in-out);
+  transition: opacity var(--motion-base) var(--ease-standard);
 }
 
 .section-header:hover .section-actions,

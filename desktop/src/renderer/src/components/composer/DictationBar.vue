@@ -96,7 +96,7 @@ const live = computed(() =>
   border: none;
   border-radius: var(--radius-pill);
   cursor: pointer;
-  transition: background-color var(--duration-ds-fast) ease;
+  transition: background-color var(--motion-fast) ease;
 }
 
 .dictation-cancel {

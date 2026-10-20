@@ -192,7 +192,7 @@ defineExpose({ beginRename })
   cursor: pointer;
   user-select: none;
   outline: none;
-  animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
+  animation: ds-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .session-row[data-nested] {

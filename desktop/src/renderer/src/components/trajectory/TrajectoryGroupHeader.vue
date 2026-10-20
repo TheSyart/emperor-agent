@@ -70,8 +70,8 @@ const title = computed(() =>
   box-shadow: 0 0 0 2px rgb(var(--surface-base));
   content: '';
   transition:
-    background-color var(--duration-fast) var(--ease-in-out),
-    box-shadow var(--duration-fast) var(--ease-in-out);
+    background-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .traj-request-marker::after {
@@ -91,8 +91,8 @@ const title = computed(() =>
   pointer-events: none;
   transform: translateX(-2px);
   transition:
-    opacity var(--duration-fast) var(--ease-in-out),
-    transform var(--duration-fast) var(--ease-in-out);
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
   user-select: none;
   white-space: nowrap;
 }

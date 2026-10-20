@@ -206,8 +206,8 @@
   color: rgb(var(--text-3));
   cursor: pointer;
   transition:
-    background var(--motion-fast) var(--ease-in-out),
-    color var(--motion-fast) var(--ease-in-out);
+    background var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 
 .model-setup-close:hover {
@@ -323,8 +323,8 @@
   white-space: nowrap;
   cursor: pointer;
   transition:
-    background var(--motion-fast) var(--ease-in-out),
-    box-shadow var(--motion-fast) var(--ease-in-out);
+    background var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
 }
 
 .model-setup-button:hover {

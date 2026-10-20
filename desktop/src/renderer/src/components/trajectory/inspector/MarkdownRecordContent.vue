@@ -202,7 +202,7 @@ const emptyLabel = computed(() =>
 }
 
 .chevron {
-  transition: transform var(--duration-fast) var(--ease-in-out);
+  transition: transform var(--duration-fast) var(--ease-standard);
 }
 
 .thinking-toggle[aria-expanded='true'] .chevron {

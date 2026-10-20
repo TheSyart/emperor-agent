@@ -244,7 +244,7 @@ const latestLog = computed(() => props.run.logs.at(-1))
   width: var(--space-4);
   height: var(--space-4);
   color: rgb(var(--text-3));
-  transition: transform var(--duration-ds-fast) ease;
+  transition: transform var(--motion-fast) ease;
 }
 
 .leading[data-open] {

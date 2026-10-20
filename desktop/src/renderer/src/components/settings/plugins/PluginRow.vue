@@ -83,7 +83,7 @@ const showScope = computed(
   color: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--duration-ds-fast) ease;
+  transition: background-color var(--motion-fast) ease;
 }
 
 .plugin-row:hover {

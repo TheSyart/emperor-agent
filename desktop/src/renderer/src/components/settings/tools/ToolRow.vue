@@ -168,7 +168,7 @@ const source = computed(() =>
 .chevron {
   flex: none;
   color: rgb(var(--text-3));
-  transition: transform var(--duration-ds-fast) var(--ease-in-out);
+  transition: transform var(--motion-fast) var(--ease-standard);
 }
 
 .tool-row[data-open] .chevron {

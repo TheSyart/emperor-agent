@@ -112,7 +112,7 @@ const summary = computed(() => {
 .icon-chevron {
   display: inline-flex;
   grid-area: 1 / 1;
-  transition: opacity var(--duration-ds-fast) ease;
+  transition: opacity var(--motion-fast) ease;
 }
 
 .icon-chevron {

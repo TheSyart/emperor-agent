@@ -136,7 +136,7 @@ defineExpose({ focus: () => textarea.value?.focus() })
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  transition: border-color var(--duration-ds-fast) ease;
+  transition: border-color var(--motion-fast) ease;
 }
 
 .ds-code-editor:focus-within {

@@ -99,7 +99,7 @@ const checksLabel = computed(() => {
   color: rgb(var(--text-1));
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--duration-ds-fast) ease;
+  transition: background-color var(--motion-fast) ease;
 }
 
 .pr-row:hover {

@@ -223,7 +223,7 @@ const note = computed(() => lifecycleNote(props.entry))
   align-items: center;
   gap: var(--space-1);
   opacity: 0;
-  transition: opacity var(--duration-ds-fast) ease;
+  transition: opacity var(--motion-fast) ease;
 }
 
 .model-row:hover .model-actions,

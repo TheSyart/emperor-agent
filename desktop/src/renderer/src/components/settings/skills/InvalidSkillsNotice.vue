@@ -175,7 +175,7 @@ const listId = 'invalid-skills-list'
   flex: none;
   margin-top: var(--space-1);
   color: rgb(var(--state-warn-label));
-  transition: transform var(--duration-ds-fast) var(--ease-in-out);
+  transition: transform var(--motion-fast) var(--ease-standard);
 }
 
 .invalid-notice[data-open] .chevron {

@@ -234,7 +234,7 @@ const stateLabel = computed(() => {
   line-height: 16px;
   cursor: pointer;
   opacity: 0;
-  transition: opacity var(--duration-ds-fast) ease;
+  transition: opacity var(--motion-fast) ease;
 }
 
 .tool-row:hover .inspect,

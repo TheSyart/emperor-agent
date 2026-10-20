@@ -144,8 +144,8 @@ function onFocusOut(event: FocusEvent): void {
   border-radius: 2px;
   background: rgb(var(--text-3) / 0.7);
   transition:
-    background-color var(--duration-ds-fast) ease,
-    transform var(--duration-ds-fast) ease;
+    background-color var(--motion-fast) ease,
+    transform var(--motion-fast) ease;
   transform-origin: left center;
 }
 

@@ -119,7 +119,7 @@ function newProject(): void {
   font-weight: 500;
   text-align: left;
   cursor: pointer;
-  transition: box-shadow var(--duration-ds) var(--ease-in-out);
+  transition: box-shadow var(--motion-base) var(--ease-standard);
 }
 
 .new-chat:hover {
@@ -151,7 +151,7 @@ function newProject(): void {
   font-weight: 400;
   color: rgb(var(--text-3));
   opacity: 0;
-  transition: opacity var(--duration-ds) var(--ease-in-out);
+  transition: opacity var(--motion-base) var(--ease-standard);
 }
 
 .new-chat:hover .new-chat-key,

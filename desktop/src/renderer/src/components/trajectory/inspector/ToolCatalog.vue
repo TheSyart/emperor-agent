@@ -94,7 +94,7 @@ defineProps<{ tools: readonly ToolSchema[] }>()
 }
 
 .chevron {
-  transition: transform var(--duration-fast) var(--ease-in-out);
+  transition: transform var(--duration-fast) var(--ease-standard);
 }
 
 .item[open] .chevron {

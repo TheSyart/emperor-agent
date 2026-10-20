@@ -210,7 +210,7 @@ const headline = computed(() => {
   flex: none;
   color: rgb(var(--text-3));
   transform: rotate(180deg);
-  transition: transform var(--duration-ds-fast) ease;
+  transition: transform var(--motion-fast) ease;
 }
 
 .chevron[data-open] {

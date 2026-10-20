@@ -697,7 +697,7 @@ onBeforeUnmount(() => {
 
 .lanes[data-animate='true'],
 .boundaries[data-animate='true'] {
-  transition: transform var(--duration-ds) var(--ease-out);
+  transition: transform var(--motion-base) var(--ease-out);
 }
 
 .boundary {
@@ -861,7 +861,7 @@ onBeforeUnmount(() => {
   background: rgb(var(--accent));
   box-shadow: 0 0 0 2px color-mix(in srgb, rgb(var(--accent)) 24%, transparent);
   pointer-events: none;
-  animation: traj-playhead 1.2s var(--ease-in-out) infinite;
+  animation: traj-playhead 1.2s var(--ease-standard) infinite;
 }
 
 @keyframes traj-playhead {

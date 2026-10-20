@@ -42,7 +42,7 @@ const emit = defineEmits<{ start: [] }>()
   background: transparent;
   color: rgb(var(--text-2));
   cursor: pointer;
-  transition: background-color var(--duration-ds-fast) ease;
+  transition: background-color var(--motion-fast) ease;
 }
 
 .dictation-mic:hover:not(:disabled) {

@@ -204,8 +204,8 @@ function onClick(): void {
   outline: none;
   cursor: default;
   transition:
-    background-color var(--duration-fast) var(--ease-in-out),
-    opacity var(--duration-fast) var(--ease-in-out);
+    background-color var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
 }
 
 .traj-row:not([data-selected='true']):hover {
