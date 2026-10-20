@@ -1,9 +1,11 @@
 import { ref, type CSSProperties, type Ref } from 'vue'
 
 export type FloatingMenuPlacement = 'top' | 'bottom'
+/** Which edges line up: `end` (right, default) or `start` (left). */
+export type FloatingMenuAlign = 'start' | 'end'
 
 export interface FloatingMenuLayoutInput {
-  buttonRect: Pick<DOMRect, 'top' | 'bottom' | 'right'>
+  buttonRect: Pick<DOMRect, 'top' | 'bottom' | 'right'> & { left?: number }
   menuWidth: number
   menuHeight: number
   viewportWidth: number
@@ -12,6 +14,7 @@ export interface FloatingMenuLayoutInput {
   gap?: number
   /** Preferred side; the menu flips only when that side lacks room. */
   prefer?: FloatingMenuPlacement
+  align?: FloatingMenuAlign
 }
 
 export interface FloatingMenuLayout {
@@ -40,8 +43,9 @@ export function floatingMenuLayout(
       ? !(spaceBelow < menuHeight && spaceAbove > spaceBelow)
       : spaceAbove < menuHeight && spaceBelow > spaceAbove
   const maxHeight = Math.max(180, placeBelow ? spaceBelow : spaceAbove)
+  const start = input.align === 'start' ? input.buttonRect.left : undefined
   const left = clamp(
-    input.buttonRect.right - menuWidth,
+    start ?? input.buttonRect.right - menuWidth,
     margin,
     input.viewportWidth - menuWidth - margin,
   )
@@ -75,6 +79,7 @@ export function useFloatingMenu(opts: {
   onClose: () => void
   /** Preferred side (default 'top', the upward composer menus). */
   prefer?: () => FloatingMenuPlacement | undefined
+  align?: () => FloatingMenuAlign | undefined
 }) {
   const style = ref<CSSProperties>({})
   const placement = ref<FloatingMenuPlacement>('top')
@@ -91,6 +96,7 @@ export function useFloatingMenu(opts: {
       viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
       prefer: opts.prefer?.(),
+      align: opts.align?.(),
     })
     placement.value = layout.placement
     style.value = {

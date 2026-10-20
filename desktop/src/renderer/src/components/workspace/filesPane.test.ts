@@ -85,8 +85,14 @@ function mount(projectPath = '/tmp/demo'): HTMLDivElement {
 }
 
 function tabLabels(root: HTMLElement): string[] {
-  return [...root.querySelectorAll('.file-tab [role="tab"]')].map(
-    (tab) => tab.textContent?.trim() ?? '',
+  return [
+    ...root.querySelectorAll('.files-main .workspace-tab-bar [role="tab"]'),
+  ].map((tab) => tab.textContent?.trim() ?? '')
+}
+
+function activeTab(root: HTMLElement): HTMLElement | null {
+  return root.querySelector<HTMLElement>(
+    '.files-main .workspace-tab-bar .tab-item[data-active]',
   )
 }
 
@@ -213,9 +219,7 @@ describe('FilesPane', () => {
     expect(labels).toHaveLength(12)
     expect(labels[0]).toBe('f2.ts')
     expect(labels.at(-1)).toBe('f13.ts')
-    expect(root.querySelector('.file-tab.active')?.textContent).toContain(
-      'f13.ts',
-    )
+    expect(activeTab(root)?.textContent).toContain('f13.ts')
   })
 
   it('drops a file response after the viewed session changes', async () => {
@@ -247,10 +251,10 @@ describe('FilesPane', () => {
     await opening
     await flush()
     expect(root.textContent).not.toContain('old session secret')
-    expect(root.querySelectorAll('.file-tab')).toHaveLength(0)
+    expect(tabLabels(root)).toHaveLength(0)
   })
 
-  it('puts the tree in a right column and shows the 打开文件 draft', async () => {
+  it('puts the tree in a right column; with nothing open there is no tab, only the empty state', async () => {
     const root = mount()
     await flush()
     const pane = root.querySelector('.files-pane')!
@@ -263,9 +267,9 @@ describe('FilesPane', () => {
     expect(
       root.querySelector<HTMLInputElement>('.files-search input')!.placeholder,
     ).toBe('筛选文件…')
-    expect(tabLabels(root)).toEqual(['打开文件'])
-    // Nothing to close while the draft is the only tab.
-    expect(root.querySelector('.file-tab.draft .file-tab-close')).toBeNull()
+    // No 「打开文件」 draft tab (UI-S06): the strip is empty until a file opens.
+    expect(tabLabels(root)).toEqual([])
+    expect(root.querySelector('.files-main .workspace-tab-bar')).not.toBeNull()
     expect(root.querySelector('.file-crumbs')?.textContent?.trim()).toBe('/')
     const empty = root.querySelector('.files-empty')!
     expect(empty.textContent).toContain('打开文件')
@@ -273,7 +277,7 @@ describe('FilesPane', () => {
     expect(root.querySelectorAll('.file-tree-row')).toHaveLength(3)
   })
 
-  it('opens files as tabs with a breadcrumb; 「+」 adds a draft and focuses the filter', async () => {
+  it('opens files as tabs with a breadcrumb; 「+」 only focuses the filter', async () => {
     const root = mount()
     await flush()
     treeRow(root, 'README.md').click()
@@ -286,18 +290,16 @@ describe('FilesPane', () => {
       .querySelector<HTMLButtonElement>('button[aria-label="打开文件"]')!
       .click()
     await flush()
-    expect(tabLabels(root)).toEqual(['README.md', '打开文件'])
+    // No draft tab: the open file stays on screen, the caret is in the filter.
+    expect(tabLabels(root)).toEqual(['README.md'])
     expect(document.activeElement).toBe(
       root.querySelector('.files-search input'),
     )
-    expect(root.querySelector('.files-empty')).not.toBeNull()
-    // Picking a file while the draft is active replaces the draft.
+    expect(activeTab(root)?.textContent).toContain('README.md')
     treeRow(root, 'a.ts').click()
     await flush()
     expect(tabLabels(root)).toEqual(['README.md', 'a.ts'])
-    expect(root.querySelector('.file-tab.active')?.textContent).toContain(
-      'a.ts',
-    )
+    expect(activeTab(root)?.textContent).toContain('a.ts')
   })
 
   it('openPath opens nested files at a line and expands the tree', async () => {
@@ -353,8 +355,8 @@ describe('FilesPane', () => {
       relativePath: 'src',
       limit: 500,
     })
-    // No file tab opens; the draft stays.
-    expect(tabLabels(root)).toEqual(['打开文件'])
+    // No file tab opens.
+    expect(tabLabels(root)).toEqual([])
   })
 
   it('closes the active tab on Ctrl/⌘W only while focus is inside the pane', async () => {
@@ -380,7 +382,74 @@ describe('FilesPane', () => {
     expect(root.contains(document.activeElement)).toBe(true)
     pressCloseTab(document.activeElement!)
     await flush()
-    expect(tabLabels(root)).toEqual(['打开文件'])
+    expect(tabLabels(root)).toEqual([])
+  })
+
+  it('6 · draws its tabs with the shared editor tab bar (the terminal uses the same one)', async () => {
+    const root = mount()
+    await flush()
+    treeRow(root, 'README.md').click()
+    await flush()
+    const strip = root.querySelector<HTMLElement>(
+      '.files-main .workspace-tab-bar .ds-tabs',
+    )!
+    expect(strip.dataset.variant).toBe('editor')
+    // The full path shows on hover; the tab closes with its own ×.
+    expect(activeTab(root)?.getAttribute('title')).toBe('README.md')
+    expect(
+      root.querySelector(
+        '.workspace-tab-bar button[aria-label="关闭 README.md"]',
+      ),
+    ).not.toBeNull()
+    expect(root.querySelector('.file-tab')).toBeNull()
+  })
+
+  it('copies the relative or the absolute path from one menu', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    const root = mount()
+    await flush()
+    treeRow(root, 'README.md').click()
+    await flush()
+    // One button, not two.
+    expect(root.querySelector('button[aria-label="复制相对路径"]')).toBeNull()
+    expect(root.querySelector('button[aria-label="复制绝对路径"]')).toBeNull()
+    const copy = () =>
+      root.querySelector<HTMLButtonElement>('button[aria-label="复制路径"]')!
+    copy().click()
+    await flush()
+    const items = () => [
+      ...document.body.querySelectorAll<HTMLButtonElement>(
+        '[role="menu"][aria-label="复制路径"] [role="menuitem"]',
+      ),
+    ]
+    expect(items().map((item) => item.textContent?.trim())).toEqual([
+      '复制相对路径',
+      '复制绝对路径',
+    ])
+    items()[0]!.click()
+    await flush()
+    expect(writeText).toHaveBeenLastCalledWith('README.md')
+    copy().click()
+    await flush()
+    items()[1]!.click()
+    await flush()
+    expect(writeText).toHaveBeenLastCalledWith('/tmp/demo/README.md')
+  })
+
+  it('names the Finder action and the size in Chinese', async () => {
+    const root = mount()
+    await flush()
+    treeRow(root, 'README.md').click()
+    await flush()
+    expect(root.querySelector('.file-preview-meta')?.textContent).toContain(
+      '24 字节',
+    )
+    expect(root.textContent).not.toContain('bytes')
+    expect(root.textContent).not.toContain('Finder')
   })
 
   it('filters through files.search as you type', async () => {

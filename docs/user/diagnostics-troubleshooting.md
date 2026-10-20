@@ -39,7 +39,7 @@
 | Goal 不再自动续跑                                 | 应用重启后 Goal 处于 disarmed，使用 `/goal resume`；或 Goal 已 `blocked` / `complete`                                                                                                                                                                                                                                                                                |
 | MCP 没有工具                                      | 能力页“MCP”标签中该 server 卡片的状态和最近错误（含错误码），再查 `mcp_config.json`、命令/URL 和环境变量。`mcp_sandbox_refused` / `mcp_sandbox_consent_required` 表示进程沙箱不可用（插件的 server 不启动，你的 server 等你在下一次对话中确认）；`npx` / `uvx` server 第一次启动可能因下载超时，稍后重新连接；server 要读写 workspace 以外的目录时把目录写进它的参数 |
 | 定时任务没执行                                    | 定时任务页中任务是否已开启、下次运行时间，任务对话框中的运行历史和最近错误，目标会话是否有待回答的交互                                                                                                                                                                                                                                                               |
-| Pull Request 页或「审查」的 PR 操作不可用         | 诊断 → 环境工具中 `gh` 的状态与版本，以及是否已 `gh auth login`，见下文 [GitHub CLI（gh）](#github-cligh)                                                                                                                                                                                                                                                            |
+| Pull Request 页或「审查」的 PR 一行不可用         | 诊断 → 环境工具中 `gh` 的状态与版本，以及是否已 `gh auth login`，见下文 [GitHub CLI（gh）](#github-cligh)                                                                                                                                                                                                                                                            |
 | 工作台的浏览器打不开网址                          | 只支持不含用户名密码的 `http(s)` 网址；地址栏、历史和界面链接都可打开，链接打开位置由「设置 › 浏览器」决定，见 [浏览器的限制](chat-build.md#浏览器的限制)                                                                                                                                                                                                            |
 | Emperor Computer Helper 不在权限列表              | 设置 → 电脑操作中确认 Helper 已连接，点击对应“请求权限”；录屏列表仍没有时，用“＋ 添加”选择 `~/.emperor/native-helpers/` 中当前版本的 Helper，见[电脑操作](computer-use.md)                                                                                                                                                                                           |
 | Helper 开关已打开，但状态仍为拒绝或失效           | 确认授权的是当前安装版本；必要时在“设置 → 电脑操作”按对应“重置授权”，重新登记并开启。重置会撤销现有系统授权                                                                                                                                                                                                                                                          |
@@ -135,7 +135,7 @@ CoreApi 的 `tasks.*` 把后台 job（`bash` 的后台命令）、子代理会�
 
 ## GitHub CLI（gh）
 
-「Pull Request」页（包括 GitHub 插件的 Issue、CI 标签）和「审查」中的 PR 操作都依赖本机的 GitHub CLI。`gh` 是签名工具目录中的可选工具，要求 2.40.0 或更高版本；Emperor 只探测它，不会替你安装或登录。
+「Pull Request」页（包括 GitHub 插件的 Issue、CI 标签）和「审查」里当前分支的 PR 一行都依赖本机的 GitHub CLI。`gh` 是签名工具目录中的可选工具，要求 2.40.0 或更高版本；Emperor 只探测它，不会替你安装或登录。
 
 1. 在“设置 → 高级 → 诊断 → 环境工具”的“当前项目”分组中查看 `gh` 的状态和版本。
 2. 未安装时按平台安装：macOS 用 Homebrew（`brew install gh`），Windows 用 winget（`winget install GitHub.cli`），Linux 按 [GitHub CLI 官方安装说明](https://github.com/cli/cli/blob/trunk/docs/install_linux.md) 安装。

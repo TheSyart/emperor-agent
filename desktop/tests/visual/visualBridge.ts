@@ -1517,6 +1517,8 @@ export async function installVisualCoreBridge(
             worktree: '.',
             conflict: false,
             untracked: false,
+            additions: 12,
+            deletions: 4,
           },
           {
             path: 'README.md',
@@ -1524,6 +1526,8 @@ export async function installVisualCoreBridge(
             worktree: 'M',
             conflict: false,
             untracked: false,
+            additions: 2,
+            deletions: 0,
           },
           {
             path: 'notes/验收记录.md',
@@ -1531,6 +1535,8 @@ export async function installVisualCoreBridge(
             worktree: '?',
             conflict: false,
             untracked: true,
+            additions: 4,
+            deletions: 0,
           },
         ],
         summary: {
@@ -4379,6 +4385,18 @@ export async function installVisualCoreBridge(
           ).__visualOpenedPaths ??= []).push(opened)
           return { ok: true }
         },
+        // UI-S06: `?visualLinks=record` gives the bridge link routing that
+        // records each web link (window.__visualLinks) instead of opening it.
+        ...(visualParams.get('visualLinks') === 'record'
+          ? {
+              openLink: async (url: string) => {
+                ;((
+                  window as unknown as { __visualLinks?: string[] }
+                ).__visualLinks ??= []).push(url)
+                return { opened: 'system' }
+              },
+            }
+          : {}),
         openBrowserUrl: async (input: string) => {
           const text = String(input ?? '').trim()
           ;(visualBrowser.__visualBrowserOpened ??= []).push(text)
@@ -5177,7 +5195,25 @@ export async function installVisualCoreBridge(
                 owned: [],
               }
             case 'git.pullRequest':
-              return null
+              // UI-S06: `?visualGitPr=open` — the branch has a draft PR;
+              // `?visualGitPr=gh-missing` — the GitHub CLI is unavailable.
+              if (visualParams.get('visualGitPr') === 'gh-missing')
+                throw new Error('git_gh_unavailable: GitHub CLI unavailable')
+              return visualParams.get('visualGitPr') === 'open'
+                ? {
+                    number: 128,
+                    url: 'https://github.com/emperor-agent/visual-build-project/pull/128',
+                    state: 'OPEN',
+                    draft: true,
+                    mergeable: 'MERGEABLE',
+                    headRefName: 'main',
+                    baseRefName: 'release',
+                    checks: [],
+                  }
+                : null
+            case 'git.enterWorktree':
+            case 'git.exitWorktree':
+              return { status: visualGitStatus }
             case 'git.diff':
               return {
                 content:
