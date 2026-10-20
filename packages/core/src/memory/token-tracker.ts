@@ -446,8 +446,7 @@ class LedgerAggregate {
     providerModel.model = model
     addRow(providerModel, r)
     addRow(
-      (this.byUsageType[String(r.usage_type ?? 'main_agent')] ??=
-        emptyStats()),
+      (this.byUsageType[String(r.usage_type ?? 'main_agent')] ??= emptyStats()),
       r,
     )
     if (date) {

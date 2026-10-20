@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { recordedDescendants } from '../harness/host/task-tree'
 import { createAssistantMessage, userText } from '../llm/message'
 import { historyFloor, historyPage } from './history'
 import type { Session } from './session'
@@ -150,6 +151,39 @@ describe('fork children refer to their parent (KRN-12)', () => {
     mkdirSync(join(root, '.trash'), { recursive: true })
     renameSync(join(root, 'parent'), join(root, '.trash', 'parent'))
     expect(plain(store(root).logs.open('sub-1').events)).toEqual(before)
+  })
+
+  it('lets a purge find a forked child and its own child while the root is in the trash', () => {
+    const { logs, root } = store()
+    const parent = logs.create({ id: 'root-session' })
+    runTurn(parent, 1, 'one')
+    const child = logs.fork('root-session', 'sub-child', { origin: 'subagent' })
+    parent.append('subagent/started', {
+      subagentId: 'sub-child',
+      description: 'child',
+      mode: 'fork',
+      background: true,
+    })
+    runTurn(child, 2, 'child turn')
+    logs.fork('sub-child', 'sub-grandchild', { origin: 'subagent' })
+    child.append('subagent/started', {
+      subagentId: 'sub-grandchild',
+      description: 'grandchild',
+      mode: 'fork',
+      background: true,
+    })
+    logs.closeAll()
+    mkdirSync(join(root, '.trash'), { recursive: true })
+    renameSync(join(root, 'root-session'), join(root, '.trash', 'root-session'))
+    const again = store(root).logs
+    const trashed = join(root, '.trash', 'root-session', LOG_FILE)
+    // What host.forgetSessionTree reads before the purge (KRN-03).
+    expect(
+      recordedDescendants(
+        again.readEventsAt('root-session', trashed),
+        (id) => again.readSnapshot(id).events,
+      ),
+    ).toEqual(['sub-child', 'sub-grandchild'])
   })
 
   it('cannot open a child whose parent is gone or changed, and says so', () => {
