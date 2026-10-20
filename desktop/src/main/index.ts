@@ -11,9 +11,11 @@ import {
   screen,
   session,
   shell,
+  systemPreferences,
   type OpenDialogOptions,
   type Rectangle,
   type SaveDialogOptions,
+  type WebContents,
 } from 'electron'
 import { execFile } from 'node:child_process'
 import * as fs from 'node:fs'
@@ -66,6 +68,10 @@ import { defaultSessionPermission } from './renderer-permissions'
 import { hardenSession } from './computer-use/session-hardening'
 import { registerOpenPathIpc } from './open-path-ipc'
 import { registerRemoteImageIpc } from './remote-image-ipc'
+import {
+  createScreenshotCapture,
+  registerScreenshotIpc,
+} from './screenshot-ipc'
 import { pluginAssetResponse } from './plugin-assets'
 import { createCoreHost } from './core-host'
 import { CoreEventBridge, SessionEventBridge } from './event-bridge'
@@ -450,6 +456,42 @@ registerRemoteImageIpc({
   ipcMain,
   authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
   client: webFetchClient,
+})
+
+// UI-S04: the composer's + › 截图 — the system's region capture, read back.
+registerScreenshotIpc({
+  ipcMain,
+  authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
+  capture: createScreenshotCapture({
+    platform: process.platform,
+    screenAccess: () =>
+      process.platform === 'darwin'
+        ? systemPreferences.getMediaAccessStatus('screen')
+        : 'unknown',
+    makeTempDir: () =>
+      fs.promises.mkdtemp(path.join(app.getPath('temp'), 'emperor-shot-')),
+    run: (args) =>
+      new Promise<void>((resolve, reject) => {
+        // Esc ends it with no file; it never needs more than a few minutes.
+        execFile(
+          '/usr/sbin/screencapture',
+          args,
+          { timeout: 300_000 },
+          (error) => {
+            if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT')
+              reject(error)
+            else resolve()
+          },
+        )
+      }),
+    readFile: (target) => fs.promises.readFile(target),
+    removeDir: (target) =>
+      fs.promises.rm(target, { recursive: true, force: true }),
+  }),
+  windowOf: (event) => {
+    const sender = (event as { sender?: WebContents }).sender
+    return sender ? BrowserWindow.fromWebContents(sender) : null
+  },
 })
 
 ipcMain.handle(PET_OPEN_CHANNEL, async (event) => {

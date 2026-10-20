@@ -28,6 +28,17 @@ describe('ConversationView composer seat integration', () => {
     expect(source).toContain("ctx.manageQueuedPrompt(item.id, 'send')")
   })
 
+  it('UI-S04: edits a goal with /goal edit from the goal bar', () => {
+    expect(source).toContain('@edit="editGoal"')
+    expect(source).toContain('setDraft(`/goal edit ${goal.objective}`)')
+  })
+
+  it('UI-S04: offers the profile interview only on the hero', () => {
+    expect(source).not.toContain('notice-dock')
+    expect(source).not.toContain('showProfileOnboardingPrompt')
+    expect(source).toMatch(/<HeroProfilePrompt\s+v-if="phase === 'hero'/)
+  })
+
   it('returns the send outcome to the composer, which restores a refused draft', () => {
     expect(source).toContain('@send="sendFromComposer"')
     expect(source).toContain('return ctx.submitFromComposer(payload)')
