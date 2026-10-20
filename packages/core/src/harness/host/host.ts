@@ -799,6 +799,7 @@ export class HarnessHost {
     installWorkflow(tools, prompt, {
       engine: this.workflows,
       runs: this.workflowRuns,
+      jobs: this.jobs,
     })
     // A goal starts no new round while work it waits for still runs:
     // external delegations, subagents, background jobs (DSH-6).
