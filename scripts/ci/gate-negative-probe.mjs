@@ -117,8 +117,13 @@ async function probe(variant, sealedApp) {
     const output = `${smoke.stdout}\n${smoke.stderr}`
     // The runner keeps its workspace on failure; it is ours to remove.
     const kept = /smoke workspace retained for inspection: (.+)$/m.exec(output)
-    if (kept && resolve(kept[1]).startsWith(realpathSync(tmpdir()) + sep))
-      rmSync(kept[1].trim(), { recursive: true, force: true })
+    const keptPath = kept ? kept[1].trim() : ''
+    if (
+      keptPath &&
+      existsSync(keptPath) &&
+      realpathSync(keptPath).startsWith(realpathSync(tmpdir()) + sep)
+    )
+      rmSync(keptPath, { recursive: true, force: true })
     const refused =
       smoke.status !== 0 &&
       output.includes(variant.expect) &&
