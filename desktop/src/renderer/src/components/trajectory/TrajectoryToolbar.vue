@@ -233,6 +233,8 @@ onBeforeUnmount(() => clearTimeout(timer))
 }
 
 .action-icon {
+  display: block;
+  flex: none;
   color: rgb(var(--label-tertiary));
   font: 14px / 14px var(--font-mono);
 }

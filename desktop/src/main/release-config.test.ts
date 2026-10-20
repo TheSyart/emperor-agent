@@ -244,6 +244,43 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     ).toContain('assemble-dictation-app.sh')
   })
 
+  it('lays out the DMG window on the brand background (UI-S12)', () => {
+    const config = fs.readFileSync(
+      path.join(desktopRoot, 'electron-builder.yml'),
+      'utf8',
+    )
+    const dmg = config.slice(config.indexOf('\ndmg:'), config.indexOf('\nwin:'))
+    expect(dmg).toContain('  background: build/background.tiff')
+    expect(dmg).toMatch(/window:\r?\n\s+width: 660\r?\n\s+height: 400/)
+    expect(dmg).toMatch(/- x: 165\r?\n\s+y: 185\r?\n\s+type: file/)
+    expect(dmg).toMatch(
+      /- x: 495\r?\n\s+y: 185\r?\n\s+type: link\r?\n\s+path: \/Applications/,
+    )
+    // One TIFF carries both scales, so Retina Finder windows stay sharp.
+    const tiff = fs.readFileSync(
+      path.join(desktopRoot, 'build', 'background.tiff'),
+    )
+    expect(tiff.subarray(0, 4).toString('latin1')).toMatch(/^(MM\0\*|II\*\0)$/)
+    const info = spawnSync(
+      'tiffutil',
+      ['-info', path.join(desktopRoot, 'build', 'background.tiff')],
+      {
+        encoding: 'utf8',
+      },
+    )
+    if (info.status === 0) {
+      expect(info.stdout).toContain('Image Width: 660 Image Length: 400')
+      expect(info.stdout).toContain('Image Width: 1320 Image Length: 800')
+    }
+  })
+
+  it('uses the 1024px brand icon for the app bundle', () => {
+    const icon = fs.readFileSync(path.join(desktopRoot, 'build', 'icon.png'))
+    expect(icon.subarray(1, 4).toString('latin1')).toBe('PNG')
+    expect(icon.readUInt32BE(16)).toBe(1024)
+    expect(icon.readUInt32BE(20)).toBe(1024)
+  })
+
   it('ships the Chrome/Edge extension on macOS, without its tests', () => {
     const config = fs.readFileSync(
       path.join(desktopRoot, 'electron-builder.yml'),

@@ -96,6 +96,8 @@ export type { WorkspaceSnapshot } from '../workspace/snapshot'
 export type {
   FilePreviewInput,
   FilePreviewResult,
+  FileStatInput,
+  FileStatResult,
 } from '../workspace/file-preview'
 export type { TerminalEvent, TerminalSummary } from '../workspace/terminal'
 export type {

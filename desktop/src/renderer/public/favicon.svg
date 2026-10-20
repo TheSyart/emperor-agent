@@ -1,3 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#6ea8fe" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="141 141.5 970 970" fill="#D4AA5E">
+  <path fill-rule="evenodd" d="M343 167H909A190 190 0 0 1 1099 357V896A190 190 0 0 1 909 1086H343A190 190 0 0 1 153 896V357A190 190 0 0 1 343 167ZM343 231A126 126 0 0 0 217 357V896A126 126 0 0 0 343 1022H909A126 126 0 0 0 1035 896V357A126 126 0 0 0 909 231Z"/>
+  <path d="M626.5 297L703.6 341.5V430.5L626.5 475L549.4 430.5V341.5Z"/>
+  <path d="M282 383H366L440 488H813L887 383H971L885 562H368Z"/>
+  <g id="half">
+    <path d="M275 603H569L617 651V961H549V736A60 60 0 0 0 489 676H275Z"/>
+    <path d="M275 728H460A45 45 0 0 1 505 773V961H416V799H275Z"/>
+  </g>
+  <use href="#half" transform="matrix(-1 0 0 1 1253 0)"/>
 </svg>

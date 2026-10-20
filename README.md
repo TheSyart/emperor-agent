@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/generated/emperoragent-wordmark.png" alt="Emperor Agent 产品字标" width="560" />
+  <img src="assets/generated/emperor-mark.svg" alt="Emperor Agent 标志" width="88" />
 </p>
 
 <h1 align="center">Emperor Agent · 皇帝智能体</h1>
@@ -353,5 +353,5 @@ npm --prefix desktop run package:verify
 Emperor Agent 使用 [MIT License](LICENSE)。
 
 <p align="center">
-  <img src="assets/generated/emperor-agent-logo-mark.png" alt="Emperor Agent 标志" width="56" />
+  <img src="assets/generated/emperor-mark.svg" alt="Emperor Agent 标志" width="40" />
 </p>

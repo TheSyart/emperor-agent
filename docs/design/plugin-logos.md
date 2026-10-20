@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：插件设计者、前端开发者、维护者<br>
-> 最后核验：2026-09-30<br>
-> 事实源：`assets/generated/plugin-logos/`、`packages/core/bundled-plugins/*/assets/logo.png`、`assets/generated/emperor-agent-logo-mark.png`、`desktop/src/renderer/src/theme/{dark,light}.css`
+> 最后核验：2026-10-20<br>
+> 事实源：`assets/generated/plugin-logos/`、`packages/core/bundled-plugins/*/assets/logo.png`、`assets/generated/emperor-mark.svg`、`desktop/src/renderer/src/theme/{dark,light}.css`
 
 本规范约束 Emperor Agent **插件包的展示 Logo**。当前两张设计源图是 [Computer Use](../../assets/generated/plugin-logos/computer-use.png) 和 [GitHub](../../assets/generated/plugin-logos/github.png)。两个受管插件的包内资源是 `packages/core/bundled-plugins/<name>/assets/logo.png`，由源图等比缩小到 384 × 384（`sips -Z 384`，没有其他改动，约 200 KB）；插件列表与详情通过宿主地址显示它们。
 
