@@ -30,6 +30,8 @@ import {
   clearExecutorCredential,
 } from '../../api/delegations'
 import {
+  SettingsGroup,
+  SettingsRow,
   SettingsSection,
   TextField,
   Select,
@@ -408,6 +410,67 @@ function setDiagnostics(on: boolean) {
   if (!config.value) return
   if (on) config.value.diagnosticsMode = true
   else delete config.value.diagnosticsMode
+}
+/** 高级 › 开发环境 (AGT-08): what a task's environment passes through. */
+type DevEnvKey = keyof NonNullable<ExecutorConfig['developmentEnvironment']>
+const DEV_ENV_DEFAULTS: Record<DevEnvKey, boolean> = {
+  gitIdentity: true,
+  proxy: true,
+  sshAgent: false,
+  toolchains: false,
+  github: false,
+}
+const DEV_ENV_ROWS: ReadonlyArray<{
+  key: DevEnvKey
+  title: string
+  description: string
+}> = [
+  {
+    key: 'gitIdentity',
+    title: 'Git 身份',
+    description: '子智能体提交时使用你 git 配置里的姓名和邮箱。',
+  },
+  {
+    key: 'proxy',
+    title: '网络代理',
+    description: '沿用 Emperor 的 HTTP(S)_PROXY 与 NO_PROXY。',
+  },
+  {
+    key: 'sshAgent',
+    title: 'SSH 代理',
+    description:
+      '子智能体可以用你的 SSH 密钥访问远端仓库（经 SSH agent，不复制密钥）。',
+  },
+  {
+    key: 'toolchains',
+    title: '开发工具链',
+    description:
+      'nvm、volta、rustup / cargo、pyenv 安装的 node、rust、python 可用。',
+  },
+  {
+    key: 'github',
+    title: '允许子智能体使用 GitHub 登录',
+    description:
+      '把 gh 当前登录的令牌交给子任务（GH_TOKEN），子智能体可以用 gh 读写你的仓库。',
+  },
+]
+function devEnv(key: DevEnvKey): boolean {
+  return (config.value?.developmentEnvironment ?? DEV_ENV_DEFAULTS)[key]
+}
+function setDevEnv(key: DevEnvKey, on: boolean) {
+  if (!config.value) return
+  const next = {
+    ...(config.value.developmentEnvironment ?? DEV_ENV_DEFAULTS),
+    [key]: on,
+  }
+  // Stored only when it differs from the defaults.
+  if (
+    (Object.keys(next) as DevEnvKey[]).every(
+      (k) => next[k] === DEV_ENV_DEFAULTS[k],
+    )
+  )
+    delete config.value.developmentEnvironment
+  else config.value.developmentEnvironment = next
 }
 /** 高级 › 验证后再应用 (AGT-06): stored only when on. */
 function setVerifyFirst(on: boolean) {
@@ -1373,6 +1436,27 @@ onBeforeUnmount(() => {
             @update:model-value="setVerifyFirst($event)"
         /></template>
       </SettingsCard>
+      <SettingsGroup
+        v-if="config"
+        title="开发环境"
+        description="子智能体在隔离的主目录里运行，默认只带上 git 身份和网络代理；其余按需打开。"
+        data-executor-dev-env
+      >
+        <SettingsRow
+          v-for="row in DEV_ENV_ROWS"
+          :key="row.key"
+          :title="row.title"
+          :description="row.description"
+        >
+          <Switch
+            :model-value="devEnv(row.key)"
+            :data-dev-env="row.key"
+            :disabled="busy || loading"
+            :aria-label="row.title"
+            @update:model-value="setDevEnv(row.key, $event)"
+          />
+        </SettingsRow>
+      </SettingsGroup>
       <SettingsCard
         v-if="config"
         class="agent-card advanced-card"
