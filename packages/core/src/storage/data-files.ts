@@ -81,6 +81,13 @@ export const DATA_FILES: readonly DataFileSpec[] = [
     '子智能体授权',
   ),
   file(
+    'executorCredentials',
+    'delegations/credentials.json',
+    'schemaVersion',
+    1,
+    'Claude Code 令牌',
+  ),
+  file(
     'browserProfiles',
     'browser/profiles.json',
     'schemaVersion',

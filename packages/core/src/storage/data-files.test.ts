@@ -106,6 +106,18 @@ describe('the data file inventory', () => {
       { expectedRevision: listed.config!.revision, config: listed.config! },
       VIEW,
     )
+    // AGT-02: the Claude Code token pasted in 设置 › 子智能体.
+    const claude = listed.config!.profiles.find(
+      (profile) => profile.backend === 'claude-code',
+    )!
+    await api.executors.setCredential(
+      {
+        profileId: claude.id,
+        kind: 'oauth-token',
+        token: 'sk-ant-oat01-rel03-inventory-scan',
+      },
+      VIEW,
+    )
     // The Agent's browser files (Core's computer-use service owns them).
     const browser = join(stateRoot, 'browser')
     const profile = new BrowserProfileStore(browser).create('Scan')

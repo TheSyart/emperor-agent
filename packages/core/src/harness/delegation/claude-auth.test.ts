@@ -382,3 +382,22 @@ describe('AGT-02 · Claude Code sign-in sources', () => {
     await service.shutdown()
   })
 })
+
+describe('a newer Emperor’s token file (REL-03 × AGT-02)', () => {
+  it('is never replaced: setting a token refuses and leaves the bytes as they were', () => {
+    const f = fixture()
+    const root = join(f.root, 'delegations')
+    mkdirSync(root, { recursive: true })
+    const file = join(root, 'credentials.json')
+    const newer = JSON.stringify({ schemaVersion: 9, tokens: { future: true } })
+    writeFileSync(file, newer)
+    const tokens = new ClaudeTokenStore({
+      root,
+      sealer: createLocalKeySealer(join(f.root, 'state')),
+    })
+    expect(() =>
+      tokens.set('claude', 'oauth-token', 'sk-ant-oat01-abcdefghijklmnop'),
+    ).toThrow(/更新版本的 Emperor|data_file_newer/)
+    expect(readFileSync(file, 'utf8')).toBe(newer)
+  })
+})
