@@ -2,9 +2,11 @@
 /**
  * BackupExportDialog — 导出备份 (REL-03). Opening it asks main what a
  * backup would hold (by category, with sizes) and whether the 密码管理器
- * can go in. 包含会话 is on by default; 包含密码管理器 needs saved entries
- * and an unlocked vault, and a passphrase typed twice (≥ 12 characters):
- * the vault and the local key go in only sealed under it (SEC-09). Main
+ * can go in. 包含会话 is on by default; 包含密码管理器 needs an unlocked
+ * vault (with or without entries: the local key it carries also opens the
+ * model keys) and a passphrase typed twice (≥ 12 characters): the vault,
+ * the local key and AGT-02's sealed Claude token go in only sealed under
+ * it (SEC-09). Main
  * then asks where to save the `.emperor-backup.zip`. After the export: the
  * file name and folder, 在访达中显示 and 完成.
  *
@@ -55,12 +57,16 @@ const total = computed(() =>
       .reduce((sum, category) => sum + category.bytes, 0),
   ),
 )
+/** 包含密码管理器 is possible: a vault that is open (entries or not). */
+const vaultUsable = computed(
+  () => vault.value.state === 'ready' || vault.value.state === 'empty',
+)
 const vaultHint = computed(() => {
   switch (vault.value.state) {
     case 'ready':
-      return `${vault.value.entries} 条凭据和本地密钥用备份口令加密后才放进备份；忘记口令就无法恢复它们。`
+      return `${vault.value.entries} 条凭据、本地密钥和子智能体的登录凭据用备份口令加密后才放进备份；忘记口令就无法恢复它们。`
     case 'empty':
-      return '密码管理器里还没有保存的凭据。'
+      return '密码管理器里还没有保存的凭据；勾选后，本地密钥（模型 Key 和子智能体的登录凭据用它加密）用备份口令加密后放进备份。'
     case 'locked':
       return '先在 设置 › 浏览器 › 密码管理器 解锁，才能把凭据放进备份。'
     default:
@@ -89,7 +95,7 @@ async function load(): Promise<void> {
 async function exportBackup(): Promise<void> {
   if (!plan.value || exporting.value) return
   error.value = ''
-  const withVault = includeCredentials.value && vault.value.state === 'ready'
+  const withVault = includeCredentials.value && vaultUsable.value
   if (withVault) {
     const problem = passphraseProblem(passphrase.value, confirmation.value)
     if (problem) {
@@ -195,14 +201,11 @@ watch(
               <Checkbox
                 v-model="includeCredentials"
                 label="包含密码管理器"
-                :disabled="vault.state !== 'ready'"
+                :disabled="!vaultUsable"
               />
               <p class="hint">{{ vaultHint }}</p>
             </div>
-            <div
-              v-if="includeCredentials && vault.state === 'ready'"
-              class="passphrase"
-            >
+            <div v-if="includeCredentials && vaultUsable" class="passphrase">
               <Field label="备份口令" hint="至少 12 个字符">
                 <TextField
                   v-model="passphrase"

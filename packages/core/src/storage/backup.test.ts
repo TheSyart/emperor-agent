@@ -9,6 +9,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -344,6 +345,86 @@ describe('restore', () => {
     expect(logOf(current)).toContainEqual(
       expect.objectContaining({ kind: 'restore', status: 'rolled_back' }),
     )
+  })
+})
+
+describe('credential files sealed with the local key', () => {
+  // AGT-02's delegations/credentials.json (the pasted Claude Code token,
+  // sealed el1:): like the vault, only in a backup under the passphrase.
+  function withToken(home: string, token: string): void {
+    mkdirSync(join(home, 'delegations'), { recursive: true })
+    writeFileSync(join(home, 'delegations', 'credentials.json'), token, {
+      mode: 0o600,
+    })
+  }
+
+  it('go in only with the sealed vault, and come back only with it', async () => {
+    const { home } = await populated()
+    withToken(home, '{"claude":"el1:source"}')
+    const plain = await stage(home)
+    expect(relativeFiles(plain)).not.toContain(
+      'home/delegations/credentials.json',
+    )
+    expect(readHomeBackup(plain).manifest.categories).not.toContain(
+      'credentials',
+    )
+
+    const folder = join(
+      mkdtempSync(join(tmpdir(), 'emperor-rel03-sealed-')),
+      'b',
+    )
+    await stageHomeBackup({
+      home,
+      folder,
+      includeSessions: false,
+      appVersion: '0.2.0',
+      now: NOW,
+      credentials: Buffer.from('sealed vault'),
+    })
+    expect(relativeFiles(folder)).toEqual(
+      expect.arrayContaining([
+        'credentials.emperor-vault',
+        'home/delegations/credentials.json',
+      ]),
+    )
+    expect(readHomeBackup(folder).manifest).toMatchObject({
+      credentials: true,
+      categories: expect.arrayContaining(['credentials']),
+    })
+
+    // Restored without the passphrase: the target's own file stays.
+    const target = join(tmp('emperor-rel03-sealed-target-'), 'home')
+    mkdirSync(target, { recursive: true })
+    withToken(target, '{"claude":"el1:target"}')
+    scheduleHomeRestore({ home: target, folder })
+    applyPendingRestore({ home: target, now: NOW })
+    expect(
+      readFileSync(join(target, 'delegations', 'credentials.json'), 'utf8'),
+    ).toBe('{"claude":"el1:target"}')
+  })
+
+  it('come back 0600 when the vault was imported', async () => {
+    const { home } = await populated()
+    withToken(home, '{"claude":"el1:source"}')
+    const folder = join(
+      mkdtempSync(join(tmpdir(), 'emperor-rel03-sealed-')),
+      'b',
+    )
+    await stageHomeBackup({
+      home,
+      folder,
+      includeSessions: false,
+      appVersion: '0.2.0',
+      now: NOW,
+      credentials: Buffer.from('sealed vault'),
+    })
+    const target = join(tmp('emperor-rel03-sealed-target-'), 'home')
+    mkdirSync(target, { recursive: true })
+    scheduleHomeRestore({ home: target, folder, withCredentials: true })
+    applyPendingRestore({ home: target, now: NOW })
+    const file = join(target, 'delegations', 'credentials.json')
+    expect(readFileSync(file, 'utf8')).toBe('{"claude":"el1:source"}')
+    expect(statSync(file).mode & 0o777).toBe(0o600)
   })
 })
 

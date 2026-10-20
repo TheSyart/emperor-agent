@@ -138,8 +138,9 @@ describe('导出备份', () => {
       expect(text).toContain(title)
     expect(text).toContain('浏览器登录资料与缓存')
     expect(check(dialog, 'sessions').checked).toBe(true)
-    // An empty vault has nothing to protect: the option stays off.
-    expect(check(dialog, 'credentials').disabled).toBe(true)
+    // An open vault without entries can still carry the local key.
+    expect(check(dialog, 'credentials').disabled).toBe(false)
+    expect(check(dialog, 'credentials').checked).toBe(false)
 
     button(dialog, 'export').click()
     await settle()
@@ -193,6 +194,13 @@ describe('导出备份', () => {
     const dialog = await mount()
     expect(check(dialog, 'credentials').disabled).toBe(true)
     expect(dialog.textContent).toContain('先在 设置 › 浏览器 › 密码管理器 解锁')
+    api.planHomeBackup.mockResolvedValue(
+      plan({ state: 'unavailable', entries: 0 }),
+    )
+    app?.unmount()
+    document.body.innerHTML = ''
+    const unavailable = await mount()
+    expect(check(unavailable, 'credentials').disabled).toBe(true)
   })
 
   it('keeps the dialog open when the save dialog is cancelled', async () => {

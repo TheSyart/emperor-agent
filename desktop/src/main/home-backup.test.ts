@@ -64,6 +64,13 @@ function home(): { home: string; vault: CredentialVault } {
   writeFileSync(join(root, 'settings.json'), '{"version":1,"webui":{}}')
   writeFileSync(join(root, 'memory', 'MEMORY.md'), '# REL03 memory\n')
   writeFileSync(join(root, 'sessions', 's1', 'log.jsonl'), '{"t":"x"}\n')
+  // AGT-02's pasted Claude Code token, sealed with the local key.
+  mkdirSync(join(root, 'delegations'), { recursive: true })
+  writeFileSync(
+    join(root, 'delegations', 'credentials.json'),
+    '{"claude-default":{"token":"el1:rel03"}}',
+    { mode: 0o600 },
+  )
   const vault = vaultOf(root)
   vault.save({
     label: 'REL03 site',
@@ -128,6 +135,7 @@ describe('HomeBackups.export', () => {
       'credentials.emperor-vault',
       'home/computer-use/vault.json',
       'home/computer-use/secrets/local.key',
+      'home/delegations/credentials.json',
     ])
       expect(entries).not.toContain(never)
     const text = zipText(target)
@@ -152,6 +160,8 @@ describe('HomeBackups.export', () => {
     expect(done.credentials).toBe(true)
     const entries = zipEntries(done.path)
     expect(entries).toContain('credentials.emperor-vault')
+    // Sealed with the local key, which only this passphrase opens.
+    expect(entries).toContain('home/delegations/credentials.json')
     expect(entries.some((entry) => entry.startsWith('home/sessions/'))).toBe(
       false,
     )

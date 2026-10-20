@@ -140,8 +140,8 @@ export class HomeBackups {
     const vault = this.options.vault()
     if (!vault || vault.problem) return { state: 'unavailable', entries: 0 }
     const entries = vault.list().length
-    if (entries === 0) return { state: 'empty', entries }
-    return { state: vault.locked ? 'locked' : 'ready', entries }
+    if (vault.locked) return { state: 'locked', entries }
+    return { state: entries === 0 ? 'empty' : 'ready', entries }
   }
 
   async export(
@@ -245,14 +245,18 @@ export class HomeBackups {
     const opened = RESTORE_ID.test(id) ? this.opened.get(id) : undefined
     if (!opened) throw new HomeBackupError('这个备份已经关闭，请重新选择。')
     const credentials = path.join(opened.folder, BACKUP_CREDENTIALS)
-    if (passphrase !== undefined && fs.existsSync(credentials)) {
+    const withCredentials =
+      passphrase !== undefined && fs.existsSync(credentials)
+    if (withCredentials) {
       const vault = this.options.vault()
       if (!vault) throw new HomeBackupError('密码管理器不可用，无法恢复凭据。')
       await vault.importBackup(fs.readFileSync(credentials), passphrase)
     }
+    // Credential files sealed with the local key come back with the vault.
     ;(await loadHomeBackupModule()).scheduleHomeRestore({
       home: this.options.home,
       folder: opened.folder,
+      withCredentials,
     })
     this.discard(id)
   }

@@ -15,6 +15,9 @@
  * logs, the managed environment, the runtime and temp folders, delegation
  * homes, earlier migration backups. Plain API keys and MCP secrets are
  * sealed with the local key in the copy (dropped when it cannot seal).
+ * Files sealed with the local key that hold credentials of their own
+ * (`delegations/credentials.json`, AGT-02's Claude token) go in only with
+ * the vault, and come back only when the vault was imported.
  *
  * A restore replaces only the categories the backup has: what is there now
  * moves to `<home>/migrations/backup-<ts>/` first (same paths), then the
@@ -61,7 +64,7 @@ const PENDING = join('migrations', 'restore-pending')
 const PENDING_MARKER = 'restore.json'
 
 export type BackupCategoryId =
-  'config' | 'memory' | 'extensions' | 'projects' | 'sessions'
+  'config' | 'memory' | 'extensions' | 'projects' | 'sessions' | 'credentials'
 
 interface Root {
   /** Relative to the Emperor Home (`/`-separated). */
@@ -133,6 +136,15 @@ const CATEGORIES: readonly Category[] = [
       { path: 'sessions', exclude: ['.scratch'] },
       ...files('memory/attachments', 'memory/media', 'tokens'),
     ],
+  },
+  {
+    // Only with the vault, under SEC-09's passphrase: sealed with the
+    // local key, which a plain backup never holds. Not listed on its own.
+    id: 'credentials',
+    title: '子智能体的登录凭据',
+    description: '与密码管理器一起，用备份口令加密',
+    optional: true,
+    roots: files('delegations/credentials.json'),
   },
 ]
 
@@ -227,16 +239,18 @@ function walk(
   }
 }
 
-function chosen(includeSessions: boolean): Category[] {
+function chosen(includeSessions: boolean, credentials: boolean): Category[] {
   return CATEGORIES.filter(
-    (category) => includeSessions || category.id !== 'sessions',
+    (category) =>
+      (includeSessions || category.id !== 'sessions') &&
+      (credentials || category.id !== 'credentials'),
   )
 }
 
 /** What a backup of `home` would hold now, by category. */
 export function planHomeBackup(home: string): BackupPlan {
   return {
-    categories: CATEGORIES.map((category) => {
+    categories: chosen(true, false).map((category) => {
       const tally = { files: 0, bytes: 0 }
       for (const root of category.roots)
         walk(join(home, root.path), tally, null, root.exclude)
@@ -330,7 +344,7 @@ export async function stageHomeBackup(opts: {
   mkdirSync(target, { recursive: true, mode: 0o700 })
   chmodSync(opts.folder, 0o700)
   const tally = { files: 0, bytes: 0 }
-  const categories = chosen(opts.includeSessions)
+  const categories = chosen(opts.includeSessions, Boolean(opts.credentials))
   for (const category of categories)
     for (const root of category.roots)
       walk(
@@ -438,6 +452,8 @@ function moveFolder(from: string, to: string): void {
 export function scheduleHomeRestore(opts: {
   home: string
   folder: string
+  /** The vault was imported: its companion credential files come back too. */
+  withCredentials?: boolean
 }): void {
   const { manifest } = readHomeBackup(opts.folder)
   const pending = join(opts.home, PENDING)
@@ -445,8 +461,19 @@ export function scheduleHomeRestore(opts: {
   mkdirSync(dirname(pending), { recursive: true, mode: 0o700 })
   moveFolder(opts.folder, pending)
   rmSync(join(pending, BACKUP_CREDENTIALS), { force: true })
-  writeJson(join(pending, PENDING_MARKER), {
+  const scheduled = {
     ...manifest,
+    categories: manifest.categories.filter(
+      (id) => opts.withCredentials || id !== 'credentials',
+    ),
+  }
+  if (!opts.withCredentials)
+    for (const root of CATEGORIES.find((item) => item.id === 'credentials')!
+      .roots)
+      rmSync(join(pending, 'home', root.path), { recursive: true, force: true })
+  writeJson(join(pending, BACKUP_MANIFEST), scheduled)
+  writeJson(join(pending, PENDING_MARKER), {
+    ...scheduled,
     scheduledAt: new Date().toISOString(),
   })
 }
