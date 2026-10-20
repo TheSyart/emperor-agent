@@ -128,7 +128,7 @@ async function end(agent: AgentView) {
               v-if="agent.backend === 'internal'"
               kind="sprite"
               :id="agent.id"
-              :size="22"
+              :size="20"
               data-agent-face
             />
             <Avatar
