@@ -37,7 +37,7 @@ export async function showDataNotices(deps: {
   }
   if (report.downgradedFrom)
     deps.toast(
-      `Emperor ${report.appVersion} 比上次打开的 ${report.downgradedFrom} 旧：新版本写入的文件在这里只读，不会被改写。`,
+      `Emperor ${report.appVersion} 比上次打开的 ${report.downgradedFrom} 旧：新版本写入的文件只读，不会被改写。`,
       {
         tone: 'warn',
         sticky: true,
