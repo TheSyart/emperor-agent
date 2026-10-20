@@ -99,7 +99,9 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
     tokens.jsonl
   scheduler/
     jobs.json
+    jobs.rejected.json     # 读不出来的任务条目（原样保留，带原因），其余任务照常加载
     action.jsonl
+    scheduler.lock         # 运行定时任务的进程（pid）；另一个活着的进程持有时本进程不启动
   control/
     command-invocations.json   # Slash command 幂等调用记录
     session-transitions.json   # /new 会话转换事务
