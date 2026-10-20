@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 2,
+  "activeModelId": "model-f8efe380-d35a-44a0-8409-a74265f14a8b",
+  "models": [
+    {
+      "entryId": "model-f8efe380-d35a-44a0-8409-a74265f14a8b",
+      "provider": "deepseek",
+      "protocol": "openai",
+      "modelId": "deepseek-chat",
+      "apiBase": "https://api.deepseek.com/v1",
+      "apiKey": "fixture-placeholder-not-a-real-key",
+      "contextWindowTokens": 128000,
+      "maxTokens": 8192,
+      "reasoningEffort": null,
+      "displayName": "DeepSeek（夹具）"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "migration": "skill-plugin-semantics",
+  "completedAt": "2026-10-14T09:00:05.000Z",
+  "discoveredSkillDirectories": 0,
+  "legacyRegistryEntries": 0,
+  "staleLegacyRegistryEntries": 0,
+  "legacyRegistryIsAuthoritative": false,
+  "externalAgentHomesScanned": false
+}
