@@ -883,84 +883,6 @@ async function referencesAndCard(
     },
   )
 
-  await check(
-    page,
-    'in a managed worktree the agent runs and writes there, and comes back (KRN-11)',
-    async () => {
-      const sessionId = await sessionIdOf(page)
-      const status = await core<{ revision: string }>(page, 'git.status', {
-        sessionId,
-      })
-      const entered = await core<{ worktree: { path: string } }>(
-        page,
-        'git.enterWorktree',
-        {
-          sessionId,
-          name: 'krn11-e2e',
-          expectedRevision: status.revision,
-          confirmed: true,
-        },
-      )
-      const worktree = realpathSync(entered.worktree.path)
-      model.enqueue(
-        () => ({
-          tools: [
-            {
-              name: 'bash',
-              args: {
-                command: 'mkdir -p notes && pwd > notes/where.txt',
-                description: 'Record the working directory',
-              },
-            },
-            {
-              name: 'write',
-              args: { file_path: 'notes/worktree.md', content: '# Here\n' },
-            },
-          ],
-        }),
-        () => ({ text: '在 worktree 里写好了。' }),
-      )
-      const before = (await turnRecords(page, sessionId)).length
-      await send(page, '在当前目录记一下位置，再写一份笔记。')
-      await until(
-        async () => (await turnRecords(page, sessionId)).length > before,
-        30_000,
-        'turn/files in the worktree',
-      )
-      const where = readFileSync(join(worktree, 'notes/where.txt'), 'utf8')
-      if (where.trim() !== worktree)
-        throw new Error(`bash ran in ${where.trim()}, not ${worktree}`)
-      if (!existsSync(join(worktree, 'notes/worktree.md')))
-        throw new Error('the write tool did not write into the worktree')
-      if (
-        existsSync(join(project, 'notes/where.txt')) ||
-        existsSync(join(project, 'notes/worktree.md'))
-      )
-        throw new Error('the original checkout was written')
-      const record = (await turnRecords(page, sessionId)).at(-1)!
-      const paths = record.files.map((file) => file.path).sort()
-      if (JSON.stringify(paths) !== '["notes/where.txt","notes/worktree.md"]')
-        throw new Error(`turn record: ${paths}`)
-      const left = await core<{ revision: string }>(page, 'git.status', {
-        sessionId,
-      })
-      await core(page, 'git.exitWorktree', {
-        sessionId,
-        action: 'keep',
-        discardChanges: false,
-        expectedRevision: left.revision,
-        confirmed: true,
-      })
-      const history = await core<{
-        events: Array<{ type: string; data: { reason?: string } }>
-      }>(page, 'sessions.history', { sessionId, maxMessages: 50 })
-      const reasons = history.events
-        .filter((event) => event.type === 'working-directory/change')
-        .map((event) => event.data.reason)
-      return { worktree: '<worktree>', paths, reasons }
-    },
-  )
-
   await check(page, 'the environment card of a Build session', async () => {
     // With a workspace pane open the card is not shown by default: open it
     // with its toggle in the conversation header (same label as the card).
@@ -2091,6 +2013,100 @@ async function realModel(page: Page): Promise<void> {
   )
 }
 
+/**
+ * KRN-11, last (it changes the Build session's working directory and its
+ * runtime context): in a managed worktree the agent's shell and file tools
+ * work there, and leaving brings it back.
+ */
+async function worktreeSession(
+  page: Page,
+  model: FakeModel,
+  project: string,
+  sessionId: string,
+): Promise<void> {
+  await check(
+    page,
+    'in a managed worktree the agent runs and writes there, and comes back (KRN-11)',
+    async () => {
+      const status = await core<{ revision: string }>(page, 'git.status', {
+        sessionId,
+      })
+      const entered = await core<{ worktree: { path: string } }>(
+        page,
+        'git.enterWorktree',
+        {
+          sessionId,
+          name: 'krn11-e2e',
+          expectedRevision: status.revision,
+          confirmed: true,
+        },
+      )
+      if (!entered?.worktree?.path)
+        throw new Error(`enterWorktree: ${JSON.stringify(entered)}`)
+      const worktree = realpathSync(entered.worktree.path)
+      model.enqueue(
+        () => ({
+          tools: [
+            {
+              name: 'bash',
+              args: {
+                command: 'mkdir -p notes && pwd > notes/where.txt',
+                description: 'Record the working directory',
+              },
+            },
+            {
+              name: 'write',
+              args: { file_path: 'notes/worktree.md', content: '# Here\n' },
+            },
+          ],
+        }),
+        () => ({ text: '在 worktree 里写好了。' }),
+      )
+      const before = (await turnRecords(page, sessionId)).length
+      await core(page, 'chat.submit', {
+        sessionId,
+        content: '在当前目录记一下位置，再写一份笔记。',
+      })
+      await until(
+        async () => (await turnRecords(page, sessionId)).length > before,
+        30_000,
+        'turn/files in the worktree',
+      )
+      const where = readFileSync(join(worktree, 'notes/where.txt'), 'utf8')
+      if (where.trim() !== worktree)
+        throw new Error(`bash ran in ${where.trim()}, not ${worktree}`)
+      if (!existsSync(join(worktree, 'notes/worktree.md')))
+        throw new Error('the write tool did not write into the worktree')
+      if (
+        existsSync(join(project, 'notes/where.txt')) ||
+        existsSync(join(project, 'notes/worktree.md'))
+      )
+        throw new Error('the original checkout was written')
+      const record = (await turnRecords(page, sessionId)).at(-1)!
+      const paths = record.files.map((file) => file.path).sort()
+      if (JSON.stringify(paths) !== '["notes/where.txt","notes/worktree.md"]')
+        throw new Error(`turn record: ${paths}`)
+      const left = await core<{ revision: string }>(page, 'git.status', {
+        sessionId,
+      })
+      await core(page, 'git.exitWorktree', {
+        sessionId,
+        action: 'keep',
+        discardChanges: false,
+        expectedRevision: left.revision,
+        confirmed: true,
+      })
+      const history = await core<{
+        events: Array<{ type: string; data: { reason?: string } }>
+      }>(page, 'sessions.history', { sessionId, maxMessages: 50 })
+      const reasons = history.events
+        .filter((event) => event.type === 'working-directory/change')
+        .map((event) => event.data.reason)
+      return { worktree: '<worktree>', paths, reasons }
+    },
+  )
+}
+
 async function main(): Promise<void> {
   mkdirSync(shots, { recursive: true })
   const model = real ? null : await startFakeModel({ agentTool: 'read' })
@@ -2110,7 +2126,10 @@ async function main(): Promise<void> {
       await documentLinks(launched.page, model, project)
       await turnFileRecord(launched.page, model, project)
       await referencesAndCard(launched.page, model, project)
+      // The Build session exists once its first message went out.
+      const buildSession = await sessionIdOf(launched.page)
       await conversationResources(app, launched.page, model, project)
+      await worktreeSession(launched.page, model, project, buildSession)
     }
   } catch (error) {
     if (!(error instanceof Abort))
