@@ -66,8 +66,11 @@ for (const theme of ['dark', 'light'] as const) {
     const editor = await openChat(page, theme)
     await editor.click()
     await page.keyboard.type('请注意：')
+    // UI-S04: with a draft the send key holds the mic's place; the
+    // shortcut starts dictation.
     const mic = page.getByRole('button', { name: '听写', exact: true })
-    await mic.click()
+    await expect(mic).toHaveCount(0)
+    await page.keyboard.press('Meta+Shift+D')
     await expect(page.locator('.composer-dictation-draft')).toHaveText(HEARD)
     await expect(page.getByRole('button', { name: '停止听写' })).toBeVisible()
     await expect(page.getByRole('button', { name: '取消听写' })).toBeVisible()
@@ -76,7 +79,9 @@ for (const theme of ['dark', 'light'] as const) {
     await page.getByRole('button', { name: '停止听写' }).click()
     await expect(page.locator('.composer-dictation-draft')).toHaveCount(0)
     await expect(editor).toHaveText(`请注意：${HEARD}。`)
-    await expect(mic).toBeVisible()
+    await expect(
+      page.getByRole('button', { name: '发送', exact: true }),
+    ).toBeVisible()
     await shot(page, `inserted-${theme}`)
   })
 
@@ -176,7 +181,8 @@ test('cancel leaves the draft as it was', async ({ page }) => {
   const editor = await openChat(page)
   await editor.click()
   await page.keyboard.type('原来的草稿')
-  await page.getByRole('button', { name: '听写', exact: true }).click()
+  // A draft: the shortcut starts dictation (the send key holds the mic's place).
+  await page.keyboard.press('Meta+Shift+D')
   await expect(page.locator('.composer-dictation-draft')).toHaveText(HEARD)
   await page.getByRole('button', { name: '取消听写' }).click()
   await expect(page.locator('.composer-dictation-draft')).toHaveCount(0)

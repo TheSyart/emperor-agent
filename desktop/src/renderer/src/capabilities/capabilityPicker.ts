@@ -6,8 +6,7 @@ export type CapabilityTone =
 export type CapabilityPickerAction =
   | 'files'
   | 'insert_command'
-  | 'insert_capability_token'
-  /** A skill or plugin chip (the rich composer). */
+  /** A skill or plugin chip. */
   | 'insert_reference'
   /** A plugin that cannot be referenced now: open its detail instead. */
   | 'open_plugin'

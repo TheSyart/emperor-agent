@@ -2,7 +2,8 @@
 /**
  * GoalBar — dsh goal dock (36px, radius 12, tip fill, l1 hairline) above the
  * composer card: goal glyph, phase label, objective, round/elapsed meta and
- * pause / resume / clear (two-step) actions.
+ * pause / resume, edit and clear (two-step) actions. 编辑 asks the owner to
+ * put `/goal edit <objective>` into the composer (UI-S04).
  */
 import IconButton from '../ui/IconButton.vue'
 import Spinner from '../ui/Spinner.vue'
@@ -12,14 +13,14 @@ import {
   toGoalStatusBarViewModel,
   type GoalCardAction,
 } from '../../runtime/goalRender'
-import { DsGoal, DsTrash } from '../icons/ds'
+import { DsEdit, DsGoal, DsTrash } from '../icons/ds'
 
 const props = defineProps<{
   goal: RuntimeGoalView
   actionPending?: GoalCardAction | null
 }>()
 
-const emit = defineEmits<{ action: [action: GoalCardAction] }>()
+const emit = defineEmits<{ action: [action: GoalCardAction]; edit: [] }>()
 
 const now = ref(Date.now())
 const confirmCancel = ref(false)
@@ -78,52 +79,62 @@ function actionLabel(action: GoalCardAction): string {
         >{{ model.roundLabel }} · {{ model.elapsedLabel }}</span
       >
       <div class="actions">
-        <IconButton
-          v-for="action in model.actions"
-          :key="action"
-          class="icon"
-          :data-danger="(action === 'cancel' && confirmCancel) || undefined"
-          :label="actionLabel(action)"
-          size="xs"
-          :disabled="Boolean(actionPending)"
-          @click="runAction(action)"
-        >
-          <Spinner v-if="actionPending === action" size="sm" />
-          <svg
-            v-else-if="action === 'resume'"
-            width="14"
-            height="14"
-            viewBox="0 0 14 14"
-            aria-hidden="true"
+        <template v-for="action in model.actions" :key="action">
+          <IconButton
+            v-if="action === 'cancel'"
+            class="icon"
+            label="编辑 Goal"
+            size="xs"
+            :disabled="Boolean(actionPending)"
+            @click="emit('edit')"
           >
-            <path d="M4 2.5v9l7.5-4.5z" fill="currentColor" />
-          </svg>
-          <svg
-            v-else-if="action === 'pause'"
-            width="14"
-            height="14"
-            viewBox="0 0 14 14"
-            aria-hidden="true"
+            <DsEdit :size="14" aria-hidden="true" />
+          </IconButton>
+          <IconButton
+            class="icon"
+            :data-danger="(action === 'cancel' && confirmCancel) || undefined"
+            :label="actionLabel(action)"
+            size="xs"
+            :disabled="Boolean(actionPending)"
+            @click="runAction(action)"
           >
-            <rect
-              x="3.5"
-              y="2.5"
-              width="2.2"
-              height="9"
-              rx="0.6"
-              fill="currentColor"
-            />
-            <rect
-              x="8.3"
-              y="2.5"
-              width="2.2"
-              height="9"
-              rx="0.6"
-              fill="currentColor"
-            />
-          </svg>
-          <DsTrash v-else :size="14" aria-hidden="true" />
-        </IconButton>
+            <Spinner v-if="actionPending === action" size="sm" />
+            <svg
+              v-else-if="action === 'resume'"
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              aria-hidden="true"
+            >
+              <path d="M4 2.5v9l7.5-4.5z" fill="currentColor" />
+            </svg>
+            <svg
+              v-else-if="action === 'pause'"
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              aria-hidden="true"
+            >
+              <rect
+                x="3.5"
+                y="2.5"
+                width="2.2"
+                height="9"
+                rx="0.6"
+                fill="currentColor"
+              />
+              <rect
+                x="8.3"
+                y="2.5"
+                width="2.2"
+                height="9"
+                rx="0.6"
+                fill="currentColor"
+              />
+            </svg>
+            <DsTrash v-else :size="14" aria-hidden="true" />
+          </IconButton>
+        </template>
       </div>
     </div>
     <p v-if="model.notice" class="notice">{{ model.notice }}</p>

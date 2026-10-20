@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-19<br>
+> 最后核验：2026-10-20<br>
 > 事实源：`desktop/src/renderer/src/theme/`（`primitives.css`、`semantic.dark.css`、`semantic.light.css`、`components.css`、`legacy-aliases.css`、`legacy-keys.json`、`tokens.test.ts`）、`desktop/src/main/window-background.ts`
 
 界面的颜色、尺寸、字号、圆角、间距和动效都来自三层令牌。组件只用 L2 与 L3，不直接写颜色值，也不直接用 L1 的颜色原子；新增样式先加令牌再使用。
@@ -110,6 +110,8 @@
 `--accent-glare` `--accent-soft-strong` `--active-bg-a` `--approval-line` `--approval-strong` `--avatar-1` `--avatar-2` `--avatar-3` `--avatar-4` `--avatar-5` `--avatar-6` `--button-primary-fg` `--button-primary-fill` `--button-primary-hover` `--caret` `--code-banner-bg` `--code-block-bg` `--code-comment` `--code-constant` `--code-fg` `--code-function` `--code-keyword` `--code-link` `--code-parameter` `--code-punctuation` `--code-string` `--code-string-expression` `--ghost-active-border` `--ghost-active-fill` `--glass-alpha` `--glass-bg` `--glass-blur` `--glass-border` `--glass-border-a` `--glass-saturate` `--glass-shadow` `--glass-solid-alpha` `--hover-bg-a` `--inline-code-bg` `--input-major` `--mask-blur` `--material-1-alpha` `--material-1-bg` `--material-1-blur` `--material-2-alpha` `--material-2-bg` `--material-2-blur` `--material-3-alpha` `--material-3-bg` `--material-3-blur` `--menu-fill` `--nb-60` `--panel-edge` `--scrim-a` `--scrollbar-thumb` `--scrollbar-thumb-hover` `--selector-fill` `--settings-card-control-fill` `--settings-card-fill` `--shadow-color` `--shadow-lv1-blur` `--sidebar-fill` `--sidebar-item-active` `--sidebar-item-hover` `--skeleton-bg` `--state-error-label` `--state-error-soft` `--state-ok-label` `--state-ok-soft` `--state-warn-label` `--state-warn-soft` `--text-primary` `--text-secondary` `--text-tertiary` `--tip-fill` `--toast-bg` `--toast-fg` `--tone-blue` `--tone-cyan` `--tone-violet` `--tooltip-bg` `--tooltip-fg`
 
 外壳（UI-S01，[外壳布局](layout.md)）：`--rail-w` 56（图标栏）、`--shell-gutter` 8（面板外的画布槽）、`--shell-bar-h` 46（各列顶栏）、`--shell-lights-clear` 84（红绿灯右侧内容的起点）、`--panel-radius`（= `--r-md` 12）、`--panel-edge`（面板边缘：深色 0.5px `--stroke-1`，浅色 `--elev-1`）、`--icon-button-lg` 36（图标栏按钮）。
+
+输入框（UI-S04，[输入框](composer.md)）：`--composer-fill`（卡片底色，两套主题都是 `--surface-raised`）、`--composer-edge`（卡片边缘：深色 `--elev-1`，浅色 0.5px `--hairline` 加 `--elev-1`）。
 
 DS-04 组件尺寸（[组件规范](components.md)）：`--badge-h` 18、`--dot-sm` 6、`--dot-md` 8、`--field-h` 32、`--field-h-sm` 28、`--field-fill`（输入框底色）、`--list-row-sm` 32、`--list-row-md` 40、`--list-row-lg` 52、`--list-inset` 16（组内细线左缩进）、`--pane-header-h` 48、`--switch-thumb`（开关圆钮，两套主题都是白色）。
 

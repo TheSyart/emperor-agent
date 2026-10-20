@@ -1,27 +1,25 @@
 <script setup lang="ts">
 /**
- * ComposerCard — dsh InputBar card (max 780 = content 748 + 32, radius 22,
- * input-major fill, lv2 shadow; input 16/24 growing to 336px). Left
- * toolbar: `+` (attach / plan / goal / capabilities), PermissionChip,
- * PlanChip; right: ModelPicker, ContextMeter, 34px send / stop. All
- * behaviour (drafts, slash palette, reference chips, attachments, queue
- * rules, goal capture) lives in composerController.ts — this is its view.
+ * ComposerCard — the chat composer: a raised card (UI-S04 look: r-xl 24,
+ * `--composer-fill`, `--composer-edge` — dark `--elev-1`, light hairline +
+ * `--elev-1`) with the rich editor above the bottom bar. Left: `+` (上传图片
+ * 或文件, 插入 Skill 或插件, 截图 on macOS, Plan 模式, Goal 模式),
+ * PermissionChip, PlanChip; right: ModelPicker, ContextMeter and the send
+ * slot — the microphone while the composer is empty (where dictation
+ * exists), send once there is a draft, stop while a turn runs (with 加入
+ * 队列 beside it once there is a draft). The input area of a one-line draft
+ * is at least 56px tall. All behaviour lives in composerController.ts —
+ * this is its view.
  *
- * The input is the rich ComposerEditor (skill chips, RF-02); the old
- * textarea with its marker overlay stays behind COMPOSER_INPUT_FLAG until
- * the editor is accepted.
- *
- * Dictation (VO-03, composerDictation.ts): the mic before send and the
- * shortcut from 设置 › 语音, on macOS and in the rich editor only. While
- * it records, the recording bar takes the bottom row (RV-06): × cancel,
- * the waveform and ■ stop (DictationBar), then send, which ends the
- * dictation and sends once the final text is in. `dictationChat` names the
- * chat on screen; a change stops the recording, and a result that arrives
- * afterwards waits above the input of its own chat (插入 / 丢弃).
+ * Dictation (VO-03, composerDictation.ts): the mic and the shortcut from
+ * 设置 › 语音, on macOS. While it records, the recording bar takes the
+ * bottom row (RV-06): × cancel, the waveform and ■ stop (DictationBar),
+ * then send, which ends the dictation and sends once the final text is in.
+ * `dictationChat` names the chat on screen; a change stops the recording,
+ * and a result that arrives afterwards waits above the input of its own
+ * chat (插入 / 丢弃).
  */
-import { requestAddModel } from '../settings/model/addModelRequest'
-import { useSettingsRoute } from '../settings/useSettingsRoute'
-import Spinner from '../ui/Spinner.vue'
+import { Camera } from 'lucide-vue-next'
 import {
   computed,
   nextTick,
@@ -29,6 +27,7 @@ import {
   watch,
   type ComponentPublicInstance,
 } from 'vue'
+import { screenshotSupported } from '../../api/screenshot'
 import AttachmentChip from '../chat/AttachmentChip.vue'
 import CapabilityPicker from '../chat/CapabilityPicker.vue'
 import {
@@ -48,18 +47,21 @@ import {
   DsSkill,
   DsStopSquare,
 } from '../icons/ds'
-import Menu from '../ui/Menu.vue'
-import MenuItem from '../ui/MenuItem.vue'
+import { requestAddModel } from '../settings/model/addModelRequest'
+import { useSettingsRoute } from '../settings/useSettingsRoute'
 import Button from '../ui/Button.vue'
 import IconButton from '../ui/IconButton.vue'
+import Menu from '../ui/Menu.vue'
+import MenuItem from '../ui/MenuItem.vue'
+import Spinner from '../ui/Spinner.vue'
 import ContextMeter from './ContextMeter.vue'
-import ComposerEditor from './editor/ComposerEditor.vue'
 import DictationBar from './DictationBar.vue'
 import DictationButton from './DictationButton.vue'
-import { useComposerDictation } from './composerDictation'
 import ModelPicker from './ModelPicker.vue'
 import PermissionChip from './PermissionChip.vue'
 import PlanChip from './PlanChip.vue'
+import { useComposerDictation } from './composerDictation'
+import ComposerEditor from './editor/ComposerEditor.vue'
 
 const props = defineProps<
   ComposerControllerProps & { hero?: boolean; dictationChat?: string | null }
@@ -67,16 +69,12 @@ const props = defineProps<
 const emit = defineEmits<ComposerEmit>()
 const controller = useComposerController(props, emit)
 const {
-  value,
-  richInput,
   editor,
   catalog,
   onEditorChange,
   onEditorTrigger,
   focusInput,
   shell,
-  input,
-  highlightLayer,
   fileInput,
   drafts,
   uploading,
@@ -88,7 +86,7 @@ const {
   onDrop,
   removeDraft,
   handleFiles,
-  onPaste,
+  hasDraft,
   unknownSlashHint,
   secretPrompt,
   resolveSecretPrompt,
@@ -97,13 +95,10 @@ const {
   activePaletteItem,
   paletteHeading,
   paletteHint,
-  inlineSegments,
-  hasInlineTokens,
-  composerSlashParts,
   modeOptions,
   currentMode,
   modeTitle,
-  permissionAppliesAfterPlan,
+  planEnabled,
   goalCaptureActive,
   goalCaptureStarting,
   activeModelId,
@@ -115,13 +110,13 @@ const {
   reasoningOptions,
   sendDisabled,
   stopPresentation,
-  resize,
-  syncHighlightScroll,
   submit,
   handleKeydown,
   applyPaletteItem,
   toggleAddMenu,
   closeComposerMenus,
+  pickFiles,
+  takeScreenshot,
   selectMode,
   selectModel,
   selectReasoning,
@@ -142,15 +137,21 @@ const {
   keptText: dictationKept,
 } = dictation
 /** Recording: the recording bar holds the bottom row. */
-const dictationActive = computed(
-  () => richInput && dictationPhase.value !== 'idle',
-)
+const dictationActive = computed(() => dictationPhase.value !== 'idle')
 const dictationSendDisabled = computed(
   () =>
     dictationPhase.value === 'starting' ||
     dictationSending.value ||
     goalCaptureStarting.value ||
     Boolean(props.interactionBlocked),
+)
+/** The send slot holds the microphone until there is something to send. */
+const micInSendSlot = computed(
+  () =>
+    dictationSupported &&
+    !props.busy &&
+    !hasDraft.value &&
+    !goalCaptureStarting.value,
 )
 
 /**
@@ -179,6 +180,7 @@ function editorKeydown(event: KeyboardEvent): void {
 
 const addOpen = ref(false)
 const addAnchor = ref<HTMLElement | null>(null)
+const canScreenshot = screenshotSupported()
 /** The <button> behind a component ref (Menu anchors to an element). */
 function anchorElement(instance: unknown): HTMLElement | null {
   const el = (instance as ComponentPublicInstance | null)?.$el
@@ -194,20 +196,9 @@ const placeholder = computed(() =>
         ? '描述要持续完成的目标'
         : props.sendBlockedReason ||
           (props.hero
-            ? '有什么需要推进的？可用 / 调用命令，拖入图片或文档'
-            : '继续对话，/ 调用命令'),
+            ? '有什么需要推进的？/ 调用技能，@ 引用插件，可拖入图片或文档'
+            : '继续对话，/ 调用技能，@ 引用插件'),
 )
-const hasDraft = computed(
-  () => value.value.trim().length > 0 || drafts.value.length > 0,
-)
-
-function pickFiles(): void {
-  fileInput.value?.click()
-}
-
-function openCapabilities(): void {
-  toggleAddMenu()
-}
 
 function focusCard(event: MouseEvent): void {
   const target = event.target as HTMLElement
@@ -293,11 +284,7 @@ function addModel(): void {
         </div>
       </div>
 
-      <div
-        v-if="richInput && dictationKept"
-        class="accessory dictation-kept"
-        role="status"
-      >
+      <div v-if="dictationKept" class="accessory dictation-kept" role="status">
         <span class="dictation-kept-text"
           >听写结果还没放进输入框：{{ dictationKept }}</span
         >
@@ -346,7 +333,6 @@ function addModel(): void {
       </div>
 
       <ComposerEditor
-        v-if="richInput"
         ref="editor"
         class="rich-input"
         :placeholder="placeholder"
@@ -359,50 +345,8 @@ function addModel(): void {
         @focus="closeComposerMenus"
         @files="handleFiles"
       />
-      <div v-else class="scroll">
-        <div
-          v-if="composerSlashParts || hasInlineTokens"
-          ref="highlightLayer"
-          class="backdrop"
-          aria-hidden="true"
-        >
-          <template v-if="hasInlineTokens">
-            <template v-for="(segment, index) in inlineSegments" :key="index">
-              <span
-                v-if="segment.kind === 'token'"
-                class="token composer-inline-token"
-                :data-kind="segment.tokenKind"
-                >{{ segment.tokenKind === 'skill' ? 'Skill' : 'MCP' }} ·
-                {{ segment.name }}</span
-              >
-              <span v-else>{{ segment.text }}</span>
-            </template>
-          </template>
-          <template v-else-if="composerSlashParts">
-            <span class="token composer-skill-slash">{{
-              composerSlashParts.token
-            }}</span
-            ><span>{{ composerSlashParts.rest }}</span>
-          </template>
-        </div>
-        <textarea
-          ref="input"
-          v-model="value"
-          class="input"
-          :data-overlay="composerSlashParts || hasInlineTokens || undefined"
-          rows="1"
-          aria-label="消息输入框"
-          :disabled="goalCaptureStarting || props.interactionBlocked"
-          :placeholder="placeholder"
-          @focus="closeComposerMenus"
-          @input="resize"
-          @scroll="syncHighlightScroll"
-          @keydown="handleKeydown"
-          @paste="onPaste"
-        />
-      </div>
 
-      <div v-if="dictationActive" class="row dictation-row">
+      <div v-if="dictationActive" class="composer-bar dictation-row">
         <DictationBar
           :phase="dictationPhase"
           :levels="dictationLevels"
@@ -422,106 +366,101 @@ function addModel(): void {
           <DsArrowUp v-else :size="16" />
         </IconButton>
       </div>
-      <div v-else class="row">
-        <div class="tools">
+      <div v-else class="composer-bar">
+        <IconButton
+          :ref="(c) => (addAnchor = anchorElement(c))"
+          label="添加附件与能力"
+          size="sm"
+          shape="circle"
+          :active="addOpen"
+          :aria-expanded="addOpen"
+          :disabled="goalCaptureStarting"
+          @click="addOpen = !addOpen"
+        >
+          <DsPlus :size="16" />
+        </IconButton>
+        <PermissionChip
+          :options="modeOptions"
+          :current="currentMode"
+          :disabled="props.busy"
+          :after-plan="planEnabled"
+          :title="modeTitle"
+          @select="selectMode"
+        />
+        <PlanChip
+          :mode="props.lifecycleMode ?? null"
+          :busy="props.busy || goalCaptureStarting"
+          @dismiss="emit('dismiss-lifecycle')"
+        />
+        <span class="spacer" />
+        <ModelPicker
+          v-if="showModelSwitcher"
+          :entries="props.modelEntries"
+          :active-id="activeModelId"
+          :label="currentModelLabel"
+          :reasoning-label="currentReasoningLabel"
+          :reasoning-value="currentReasoningValue"
+          :reasoning-options="reasoningOptions"
+          :provider-options="props.providerOptions"
+          :disabled="props.busy"
+          :title="modelTitle"
+          @select-model="selectModel"
+          @select-reasoning="selectReasoning"
+          @add-model="addModel"
+        />
+        <ContextMeter
+          v-if="props.contextMax > 0"
+          :used="props.contextUsed"
+          :max="props.contextMax"
+        />
+        <DictationButton
+          v-if="micInSendSlot"
+          :shortcut="dictationShortcut"
+          :disabled="props.interactionBlocked"
+          @start="dictation.toggle()"
+        />
+        <template v-else-if="props.busy">
           <IconButton
-            :ref="(c) => (addAnchor = anchorElement(c))"
-            label="添加附件与能力"
-            size="md"
-            shape="circle"
-            :active="addOpen"
-            :aria-expanded="addOpen"
-            :disabled="goalCaptureStarting"
-            @click="addOpen = !addOpen"
-          >
-            <DsPlus :size="16" />
-          </IconButton>
-          <div class="modes">
-            <PermissionChip
-              :options="modeOptions"
-              :current="currentMode"
-              :disabled="props.busy"
-              :after-plan="permissionAppliesAfterPlan"
-              :title="modeTitle"
-              @select="selectMode"
-            />
-            <PlanChip
-              :mode="props.lifecycleMode ?? null"
-              :busy="props.busy || goalCaptureStarting"
-              @dismiss="emit('dismiss-lifecycle')"
-            />
-          </div>
-        </div>
-        <div class="trailing">
-          <ModelPicker
-            v-if="showModelSwitcher"
-            :entries="props.modelEntries"
-            :active-id="activeModelId"
-            :label="currentModelLabel"
-            :reasoning-label="currentReasoningLabel"
-            :reasoning-value="currentReasoningValue"
-            :reasoning-options="reasoningOptions"
-            :provider-options="props.providerOptions"
-            :disabled="props.busy"
-            :title="modelTitle"
-            @select-model="selectModel"
-            @select-reasoning="selectReasoning"
-            @add-model="addModel"
-          />
-          <ContextMeter
-            v-if="props.contextMax > 0"
-            :used="props.contextUsed"
-            :max="props.contextMax"
-          />
-          <DictationButton
-            v-if="richInput && dictationSupported"
-            :shortcut="dictationShortcut"
-            :disabled="goalCaptureStarting || props.interactionBlocked"
-            @start="dictation.toggle()"
-          />
-          <template v-if="props.busy">
-            <IconButton
-              v-if="hasDraft"
-              :label="
-                props.queueOccupied ? COMPOSER_QUEUE_FULL_MESSAGE : '加入队列'
-              "
-              size="md"
-              variant="tonal"
-              shape="circle"
-              :disabled="sendDisabled"
-              @click="submit('queue')"
-            >
-              <DsQueue :size="16" />
-            </IconButton>
-            <IconButton
-              :label="stopPresentation.label"
-              :tooltip="stopPresentation.title"
-              size="md"
-              variant="tonal"
-              shape="circle"
-              @click="emit('stop')"
-            >
-              <DsStopSquare :size="16" />
-            </IconButton>
-          </template>
-          <IconButton
-            v-else
-            type="submit"
-            :label="goalCaptureStarting ? '正在启动 Goal' : '发送'"
-            :tooltip="
-              goalCaptureStarting
-                ? '正在启动 Goal'
-                : props.sendBlockedReason || '发送'
+            v-if="hasDraft"
+            :label="
+              props.queueOccupied ? COMPOSER_QUEUE_FULL_MESSAGE : '加入队列'
             "
             size="md"
-            variant="primary"
+            variant="tonal"
             shape="circle"
             :disabled="sendDisabled"
+            @click="submit('queue')"
           >
-            <Spinner v-if="goalCaptureStarting" size="md" />
-            <DsArrowUp v-else :size="16" />
+            <DsQueue :size="16" />
           </IconButton>
-        </div>
+          <IconButton
+            :label="stopPresentation.label"
+            :tooltip="stopPresentation.title"
+            size="md"
+            variant="tonal"
+            shape="circle"
+            @click="emit('stop')"
+          >
+            <DsStopSquare :size="16" />
+          </IconButton>
+        </template>
+        <IconButton
+          v-else
+          type="submit"
+          :label="goalCaptureStarting ? '正在启动 Goal' : '发送'"
+          :tooltip="
+            goalCaptureStarting
+              ? '正在启动 Goal'
+              : props.sendBlockedReason || '发送'
+          "
+          size="md"
+          variant="primary"
+          shape="circle"
+          :disabled="sendDisabled"
+        >
+          <Spinner v-if="goalCaptureStarting" size="md" />
+          <DsArrowUp v-else :size="16" />
+        </IconButton>
       </div>
     </form>
 
@@ -530,9 +469,13 @@ function addModel(): void {
         <template #icon><DsPaperclip :size="16" /></template>
         上传图片或文件
       </MenuItem>
-      <MenuItem @select="openCapabilities">
+      <MenuItem @select="toggleAddMenu">
         <template #icon><DsSkill :size="16" /></template>
-        {{ richInput ? '插入 Skill 或插件' : '插入 Skill / MCP' }}
+        插入 Skill 或插件
+      </MenuItem>
+      <MenuItem v-if="canScreenshot" @select="takeScreenshot">
+        <template #icon><Camera :size="16" :stroke-width="1.5" /></template>
+        截图
       </MenuItem>
       <MenuItem variant="separator" />
       <MenuItem
@@ -567,6 +510,9 @@ function addModel(): void {
   padding-bottom: 0;
 }
 
+/* Raised, r-xl 24, no border; the edge is a shadow (dark) or a hairline
+   ring plus the shadow (light): --composer-edge. A one-line draft's input
+   area (top padding + one 28px line + the gap to the bar) is 56px. */
 .card {
   position: relative;
   display: flex;
@@ -575,25 +521,20 @@ function addModel(): void {
   box-sizing: border-box;
   width: 100%;
   max-width: var(--composer-card-max);
-  padding-top: var(--space-2-5);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-composer);
-  background: rgb(var(--input-major));
-  box-shadow: var(--shadow-lv2);
+  padding-top: var(--space-4);
+  border: none;
+  border-radius: var(--r-xl);
+  background: rgb(var(--composer-fill));
+  box-shadow: var(--composer-edge);
   font-size: var(--fs-base);
   line-height: var(--lh-base);
   cursor: text;
 }
 
-.card:focus-within {
-  border-color: var(--border-l3);
-}
-
 .card[data-drag] {
-  border-color: rgb(var(--accent-fill) / 0.7);
   box-shadow:
-    var(--shadow-lv2),
-    0 0 0 3px rgb(var(--accent-fill) / 0.15);
+    var(--composer-edge),
+    0 0 0 2px rgb(var(--focus-ring) / 0.5);
 }
 
 .palette {
@@ -619,7 +560,7 @@ function addModel(): void {
 .dictation-kept {
   flex-wrap: nowrap;
   padding: 0 var(--space-4);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -632,12 +573,13 @@ function addModel(): void {
   white-space: nowrap;
 }
 
-/* One line above the input: a /word that will go out as text, or the key prompt. */
+/* One line above the input: a /word that will go out as text, or the key
+   prompt. */
 .composer-notice {
   flex-wrap: wrap;
   gap: var(--space-1-5);
   padding: 0 var(--space-4);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -655,8 +597,8 @@ function addModel(): void {
   height: var(--space-7);
   padding: 0 var(--space-2-5);
   border-radius: var(--radius-cell);
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-secondary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   white-space: nowrap;
@@ -667,110 +609,24 @@ function addModel(): void {
   text-overflow: ellipsis;
 }
 
-.scroll {
-  position: relative;
-  display: grid;
-}
-
-.backdrop,
-.input {
-  grid-area: 1 / 1;
-  box-sizing: border-box;
-  min-width: 0;
-  margin: 0;
-  padding: var(--space-1) var(--space-3) 0 var(--space-4);
-  font-family: var(--font-sans);
-  font-size: inherit;
-  line-height: inherit;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-}
-
-.backdrop {
-  overflow: hidden;
-  color: rgb(var(--label-primary));
-  pointer-events: none;
-}
-
-.token {
-  color: rgb(var(--accent-strong));
-}
-
-.input {
-  width: 100%;
-  min-height: var(--space-7);
-  max-height: 336px;
-  resize: none;
-  overflow-y: auto;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: rgb(var(--label-primary));
-  caret-color: rgb(var(--caret));
-}
-
-.input:focus,
-.input:focus-visible {
-  outline: none;
-  box-shadow: none;
-}
-
-[data-hero] .input {
-  min-height: 52px;
-}
-
-.input[data-overlay] {
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-}
-
-.input::placeholder {
-  color: rgb(var(--label-caption));
-  -webkit-text-fill-color: rgb(var(--label-caption));
-}
-
-.input:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.row {
+/* + with the permission and Plan chips on the left; model, context and the
+   send slot on the right. */
+.composer-bar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--space-1-5);
   min-width: 0;
-  padding: var(--space-0-5) var(--space-2) var(--space-1-5);
+  padding: 0 var(--space-2-5) var(--space-2-5) var(--space-3);
   container-type: inline-size;
+}
+
+.spacer {
+  flex: 1;
+  min-width: 0;
 }
 
 /* RV-06: the recording bar, then the send button, on one line. */
 .dictation-row {
-  flex-wrap: nowrap;
   gap: var(--space-2-5);
-}
-
-.tools,
-.modes,
-.trailing {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-}
-
-.tools {
-  gap: var(--space-4);
-}
-
-.modes {
-  gap: var(--space-3);
-}
-
-.trailing {
-  flex: none;
-  gap: var(--space-3);
-  margin-left: auto;
 }
 </style>

@@ -111,7 +111,7 @@ const live = computed(() =>
 
 .dictation-stop {
   background: rgb(var(--label-primary));
-  color: rgb(var(--input-major));
+  color: rgb(var(--composer-fill));
 }
 
 .dictation-stop:disabled {

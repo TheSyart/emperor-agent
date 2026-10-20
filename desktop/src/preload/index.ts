@@ -10,6 +10,7 @@ import {
   PET_OPEN_CHANNEL,
   PET_STATUS_CHANNEL,
   PET_STATUS_REQUEST_CHANNEL,
+  SCREENSHOT_CAPTURE_CHANNEL,
   SELECT_DIRECTORY_CHANNEL,
   type OpenPathTarget,
 } from '../shared/ipc-contract'
@@ -24,6 +25,8 @@ contextBridge.exposeInMainWorld('emperor', {
   /** A folder Core vouches for (never a path of the renderer's choosing). */
   openPath: (target: OpenPathTarget) =>
     ipcRenderer.invoke(OPEN_PATH_CHANNEL, target),
+  /** The composer's + › 截图: the system's region capture (macOS). */
+  captureScreenshot: () => ipcRenderer.invoke(SCREENSHOT_CAPTURE_CHANNEL),
   openPet: () => ipcRenderer.invoke(PET_OPEN_CHANNEL),
   closePet: () => ipcRenderer.invoke(PET_CLOSE_CHANNEL),
   petStatus: () => ipcRenderer.invoke(PET_STATUS_REQUEST_CHANNEL),
