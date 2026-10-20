@@ -95,6 +95,10 @@ export function useComposerModelControl(
     ...(props.currentModel?.reasoningEfforts || []).map((option) => ({
       value: option,
       label: reasoningLabel(option),
+      // KRN-07: DeepSeek has low / high / max; Emperor's medium is sent as high.
+      ...(props.currentModel?.provider === 'deepseek' && option === 'high'
+        ? { description: DEEPSEEK_HIGH_NOTE }
+        : {}),
     })),
   ])
 
@@ -134,6 +138,9 @@ export function useComposerModelControl(
     selectReasoning,
   }
 }
+
+/** Under High in a DeepSeek model's effort list. */
+export const DEEPSEEK_HIGH_NOTE = 'Medium 也按 High 发送'
 
 export function normalizeReasoningValue(value?: string | null): string {
   return String(value || '')

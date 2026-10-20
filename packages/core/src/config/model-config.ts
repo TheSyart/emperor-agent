@@ -27,6 +27,16 @@ export function modelApiKeyContext(entryId: string): string {
 
 export type ModelProtocol = 'openai' | 'anthropic'
 
+/**
+ * How an entry's requests travel when its provider offers a choice (KRN-07).
+ * DeepSeek's official host defaults to the Anthropic Messages API;
+ * `chat-completions` keeps that entry on the OpenAI-compatible
+ * `/chat/completions` endpoint. In a hand-edited file,
+ * `"protocol": "chat-completions"` means the same and is read as protocol
+ * `openai` with this transport.
+ */
+export type ModelTransport = 'chat-completions'
+
 export interface ModelCapabilityOverrides {
   toolCall?: boolean
   vision?: boolean
@@ -131,6 +141,8 @@ export interface ModelEntryV2 {
   entryId: string
   provider: string
   protocol: ModelProtocol
+  /** Keeps a DeepSeek entry on chat-completions (KRN-07); absent: the provider's default. */
+  transport?: ModelTransport
   modelId: string
   displayName?: string
   apiBase: string
@@ -189,6 +201,7 @@ export interface ModelEntry {
   entryId?: string
   provider: string
   protocol?: ModelProtocol
+  transport?: ModelTransport
   modelId?: string
   displayName?: string
   apiBase: string | null
@@ -253,9 +266,14 @@ export interface WizardModelSettings {
   reasoningEffort?: string | null
 }
 
-export type ModelEntryUpdate = Omit<Partial<ModelEntryV2>, 'pricing'> & {
+export type ModelEntryUpdate = Omit<
+  Partial<ModelEntryV2>,
+  'pricing' | 'transport'
+> & {
   apiKey?: string | null
   pricing?: ModelPricing | null
+  /** null returns the entry to its provider's default transport. */
+  transport?: ModelTransport | null
 }
 
 type RawRecord = Record<string, any>
@@ -645,9 +663,18 @@ function normalizeEntry(
   const provider = canonicalProviderName(submittedProvider)
   if (!provider || REMOVED_PROVIDERS.has(provider))
     throw new ValidationError(`provider 无效: ${submittedProvider ?? ''}`)
-  const protocol = optionalString(input.protocol)
+  let protocol = optionalString(input.protocol)
+  let transport = optionalString(input.transport)
+  // KRN-07: the documented shorthand for an OpenAI-protocol entry that
+  // stays on chat-completions.
+  if (protocol === 'chat-completions') {
+    protocol = 'openai'
+    transport = 'chat-completions'
+  }
   if (protocol !== 'openai' && protocol !== 'anthropic')
     throw new ValidationError(`protocol 无效: ${protocol ?? ''}`)
+  if (transport !== null && transport !== 'chat-completions')
+    throw new ValidationError(`transport 无效: ${transport}`)
   const protocols = findByName(provider)?.protocols ?? []
   if (!protocols.includes(protocol))
     throw new ValidationError(
@@ -685,6 +712,7 @@ function normalizeEntry(
     maxTokens: positiveInteger(input.maxTokens, 'maxTokens'),
     reasoningEffort: optionalString(input.reasoningEffort),
   }
+  if (transport) result.transport = transport
   if (displayName) result.displayName = displayName
   if (capabilityOverrides) result.capabilityOverrides = capabilityOverrides
   if (pricing) result.pricing = pricing

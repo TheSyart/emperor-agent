@@ -1,4 +1,5 @@
-import { parse, type DefaultTreeAdapterMap } from 'parse5'
+import type { DefaultTreeAdapterMap } from 'parse5'
+import { htmlParser } from '../network/html-parser'
 import { rasterMatches } from './reference-images'
 import {
   PublicHttpError,
@@ -189,7 +190,9 @@ export class ReferencePreviewService {
     const mime = contentType(response.headers['content-type'])
     if (mime !== 'text/html' && mime !== 'application/xhtml+xml')
       return failure('unavailable', 'unsupported_content')
-    const metadata = htmlMetadata(Buffer.from(response.body).toString('utf8'))
+    const metadata = await htmlMetadata(
+      Buffer.from(response.body).toString('utf8'),
+    )
     const value: ReferencePreview = {
       state: 'ready',
       updatedAt: Date.now(),
@@ -301,12 +304,13 @@ function githubTarget(value: string): GitHubPreviewTarget | undefined {
 }
 
 type Node = DefaultTreeAdapterMap['node']
-function htmlMetadata(html: string): {
+async function htmlMetadata(html: string): Promise<{
   title?: string
   description?: string
   icon?: string
   image?: string
-} {
+}> {
+  const { parse } = await htmlParser()
   const document = parse(html, { scriptingEnabled: false })
   let title: string | undefined
   let ogTitle: string | undefined

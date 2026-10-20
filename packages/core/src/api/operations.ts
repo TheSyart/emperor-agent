@@ -276,6 +276,8 @@ const modelEntrySaveSchema = z
     contextWindowTokens: z.number().int().positive().optional(),
     maxTokens: z.number().int().positive().optional(),
     reasoningEffort: z.string().trim().nullable().optional(),
+    // KRN-07: keep a DeepSeek entry on chat-completions; null clears it.
+    transport: z.enum(['chat-completions']).nullable().optional(),
     credentialsFrom: idSchema.optional(),
     // MOD-05: the editor's temperature (null removes it) and the fields the
     // user changed, which metadata refreshes then leave alone.

@@ -237,7 +237,7 @@ interface Page {
   plainText: boolean
 }
 
-function render(
+async function render(
   response: PublicHttpResponse,
   requestedUrl: string,
   offset: number,
@@ -252,7 +252,12 @@ function render(
       `${finalUrl} is ${mime || 'binary content'}, not a web page; web_fetch reads HTML and text.`,
       'WEB_FETCH_UNSUPPORTED_CONTENT',
     )
-  const page = readPage(body, kind, response.headers['content-type'], finalUrl)
+  const page = await readPage(
+    body,
+    kind,
+    response.headers['content-type'],
+    finalUrl,
+  )
   const downloadTruncated = response.truncated === true
   const ok = response.status >= 200 && response.status < 300
   const total = page.text.length
@@ -339,12 +344,12 @@ function externalMeta(envelope: ExternalContentEnvelope<string>): JsonValue {
   ) as JsonValue
 }
 
-function readPage(
+async function readPage(
   body: Buffer,
   kind: 'html' | 'text',
   header: string | string[] | undefined,
   finalUrl: string,
-): Page {
+): Promise<Page> {
   const declared = charsetOf(Array.isArray(header) ? header[0] : header)
   const charset =
     declared ?? (kind === 'html' ? metaCharset(body) : undefined) ?? 'utf-8'
@@ -356,7 +361,7 @@ function readPage(
       sourceTruncated: false,
       plainText: false,
     }
-  const converted = htmlToMarkdown(decoded, { baseUrl: finalUrl })
+  const converted = await htmlToMarkdown(decoded, { baseUrl: finalUrl })
   return {
     title: converted.title,
     text: converted.markdown,

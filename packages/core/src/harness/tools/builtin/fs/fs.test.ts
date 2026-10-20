@@ -71,7 +71,7 @@ function fakeAgent(id: string, cwd: string, mode?: SandboxMode): Agent {
     mode === undefined
       ? []
       : [{ type: 'sandbox/mode', data: { mode }, seq: 0, time: 0 }]
-  const session = { id, header: { cwd }, events } as unknown as Session
+  const session = { id, header: { cwd }, cwd, events } as unknown as Session
   return { session } as unknown as Agent
 }
 

@@ -914,7 +914,8 @@ export class SessionLogStore {
     return this.createSession(
       {
         id: childId,
-        ...(source.header.cwd === undefined ? {} : { cwd: source.header.cwd }),
+        // Where the source works now, worktree included (KRN-11).
+        ...(source.cwd === undefined ? {} : { cwd: source.cwd }),
         parentSession: source.id,
         seedLength: seed.length,
         ...(last === undefined

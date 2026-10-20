@@ -1,0 +1,7 @@
+{"kind":"note","text":"The stream starts, then the server sends an Anthropic error event (overloaded_error) instead of finishing; the turn fails with a retryable SERVER error. Hand-written from the Anthropic Messages streaming error event, not recorded."}
+{"kind":"request","method":"POST","url":"https://api.deepseek.com/anthropic/v1/messages"}
+{"kind":"response","status":200,"headers":{"content-type":"text/event-stream"}}
+{"kind":"sse","event":"message_start","data":{"type":"message_start","message":{"id":"msg_err_1","type":"message","role":"assistant","model":"deepseek-flash","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":21,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}}
+{"kind":"sse","event":"content_block_start","data":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}
+{"kind":"sse","event":"content_block_delta","data":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Partial"}}}
+{"kind":"sse","event":"error","data":{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}}

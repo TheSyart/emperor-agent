@@ -1,4 +1,5 @@
-import { parse, type DefaultTreeAdapterMap } from 'parse5'
+import type { DefaultTreeAdapterMap } from 'parse5'
+import { htmlParser } from '../network/html-parser'
 import {
   PublicHttpError,
   isPublicHttpRedirectResponse,
@@ -140,7 +141,9 @@ export class ReferenceSiteIconService {
         ) &&
         home.body.byteLength <= ICON_LIMIT
       ) {
-        for (const href of iconLinks(Buffer.from(home.body).toString('utf8'))) {
+        for (const href of await iconLinks(
+          Buffer.from(home.body).toString('utf8'),
+        )) {
           const url = new URL(href, home.url)
           if (url.protocol !== 'https:' || url.username || url.password)
             continue
@@ -207,7 +210,8 @@ export class ReferenceSiteIconService {
     return
   }
 }
-function iconLinks(html: string): string[] {
+async function iconLinks(html: string): Promise<string[]> {
+  const { parse } = await htmlParser()
   const stack: DefaultTreeAdapterMap['node'][] = [
     parse(html, { scriptingEnabled: false }),
   ]
