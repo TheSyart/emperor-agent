@@ -49,7 +49,6 @@ import {
 } from './components/ui/toasts'
 import { activeConfirm } from './components/ui/confirm'
 import { isConversationRoute, sessionLocation } from './router'
-import { defaultConversationStore } from './conversation/store'
 import { shouldShowModelSetupPrompt } from './components/onboarding/modelSetupDialogModel'
 import { runInitialStartup } from './appStartup'
 import { buildSlashPaletteItems } from './commands'
@@ -352,6 +351,8 @@ async function reconnect() {
   if (!(await bootstrap.retry())) return
   restoreRuntimeState()
   connectSocket()
+  // The conversation store stays in the chat chunk (first-load budget).
+  const { defaultConversationStore } = await import('./conversation/store')
   await defaultConversationStore().resyncAll()
   await loadCommands()
 }
