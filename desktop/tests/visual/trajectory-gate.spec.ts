@@ -177,7 +177,7 @@ test('5 · switching 显示轨迹 off on the trajectory returns to the chat', as
     'trajectory',
   )
   await page
-    .locator('.app-rail')
+    .locator('.sidebar-root')
     .getByRole('button', { name: '设置', exact: true })
     .click()
   await expect(page).toHaveURL(

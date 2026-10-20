@@ -27,6 +27,8 @@ export interface SidebarSearchResult {
   subtitle: string
   mode: 'chat' | 'build'
   projectName?: string | null
+  /** A title match, or a session found by what was said in it (UI-S11). */
+  group?: 'title' | 'content'
 }
 
 export interface SessionControlPendingTag {
@@ -447,10 +449,10 @@ export function moveId(ids: string[], id: string, delta: -1 | 1): string[] {
   return next
 }
 
-// ── 按天分组（UI-S02 侧栏：今天 / 昨天 / 更早） ──
+// ── 按天分组（M4a 侧栏：今天 / 昨天 / 7 天内 / 30 天内 / 更早） ──
 
 export interface SidebarDayGroup {
-  key: 'today' | 'yesterday' | 'older'
+  key: 'today' | 'yesterday' | 'week' | 'month' | 'older'
   label: string
   sessions: SessionInfo[]
 }
@@ -458,6 +460,8 @@ export interface SidebarDayGroup {
 const DAY_GROUP_LABELS: Record<SidebarDayGroup['key'], string> = {
   today: '今天',
   yesterday: '昨天',
+  week: '7 天内',
+  month: '30 天内',
   older: '更早',
 }
 
@@ -478,6 +482,8 @@ export function sidebarDayKey(
   const day = 24 * 60 * 60 * 1000
   if (time >= today) return 'today'
   if (time >= today - day) return 'yesterday'
+  if (time >= today - 7 * day) return 'week'
+  if (time >= today - 30 * day) return 'month'
   return 'older'
 }
 
@@ -502,8 +508,9 @@ export function groupSessionsByDay(
 }
 
 /**
- * Compact relative time for a sidebar row, never a date (UI-S02):
- * 刚刚 / 5 分钟 / 3 小时 / 2 天 / 2 个月 / 1 年.
+ * Compact relative time for a sidebar row, never an ISO date (UI-S11):
+ * 刚刚 / 5 分钟 / 3 小时 (today) / 昨天 / 2 天 (within a week) / 9月10日
+ * (this year) / 2025/12/31 (earlier years).
  */
 export function sidebarRelativeTime(
   iso: string | undefined,
@@ -515,9 +522,14 @@ export function sidebarRelativeTime(
   const minute = 60 * 1000
   if (diff < minute) return '刚刚'
   if (diff < 60 * minute) return `${Math.floor(diff / minute)} 分钟`
-  if (diff < 24 * 60 * minute) return `${Math.floor(diff / (60 * minute))} 小时`
-  const days = Math.floor(diff / (24 * 60 * minute))
-  if (days < 30) return `${days} 天`
-  if (days < 365) return `${Math.min(11, Math.floor(days / 30))} 个月`
-  return `${Math.floor(days / 365)} 年`
+  const today = startOfDay(now)
+  const day = 24 * 60 * minute
+  if (time >= today) return `${Math.floor(diff / (60 * minute))} 小时`
+  if (time >= today - day) return '昨天'
+  const days = Math.round((today - startOfDay(time)) / day)
+  if (days < 7) return `${days} 天`
+  const date = new Date(time)
+  if (date.getFullYear() === new Date(now).getFullYear())
+    return `${date.getMonth() + 1}月${date.getDate()}日`
+  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`
 }

@@ -140,9 +140,9 @@ MCP 工具不需要注册代码：`McpToolBridge` 会把每个已连接 server �
 - 在 `desktop/src/renderer/src/router.ts` 用 `() => import(...)` 懒加载页面组件并给路由命名，`meta` 带 `label` 与 `page: true`。整页的路由名不在 `CONVERSATION_ROUTE_NAMES` 中，`App.vue` 因此不显示右侧工作台，工作台相关快捷键也不响应。
 - 页面根组件渲染 `PageShell`：`title`、可选 `subtitle`、页面自己的标题栏操作 `actions`，以及 `tabs` 插槽。默认布局是最宽 880px、整体滚动的内容列；列表 + 详情这类双栏页面传 `fill`，取消宽度上限和外层滚动，由内部各栏自行滚动（参照 Pull Request 页）。`PageShell` 提供设置标题栏宿主并声明 `settings-panel` 容器，复用的设置分区无需修改。
 - 页面由 `App.vue` 的 `<keep-alive :max="6">` 缓存。首次挂载时自行加载数据；再次显示时用 `pages/pageLifecycle.ts` 的 `onPageReactivated(fn)` 刷新，它不会在首次挂载时触发。路由参数承载选择状态时，只在该页是当前路由时读取参数。
-- 整页入口登记在 `components/sidebar/sidebarNav.ts` 的 `SIDEBAR_PAGES`（`name` 与路由名一致），由常驻图标栏 `SidebarRail.vue` 渲染；只在某个插件启用时出现的入口加 `github: true` 这类条件（Pull Request 只在 GitHub 插件启用时显示）。
+- 整页入口登记在 `components/sidebar/sidebarNav.ts` 的 `SIDEBAR_PAGES`（`name` 与路由名一致），由侧栏的 `SidebarNav.vue` 与收起后的窄轨 `SidebarRail.vue` 渲染（都经 `visibleSidebarPages`）；只在某个插件启用时出现的入口加 `github: true` 这类条件（Pull Request 只在 GitHub 插件启用时显示）。
 - 整页取代原有设置分区时，把分区 key 加入 `settingsSections.ts` 的 `SETTINGS_PAGE_SECTIONS`，并在 `router.ts` 的 `SETTINGS_PAGE_PATHS` 登记目标路径，让旧的 `?settings=<key>` 链接由全局守卫转到新页面。
-- 同步 `router.test.ts`、图标栏用例（`SidebarRail.test.ts`）、视觉测试和用户手册的图标栏入口表。
+- 同步 `router.test.ts`、侧栏用例（`sidebarUsage.test.ts`、`SidebarRoot.integration.test.ts`）、视觉测试（`sidebar.spec.ts`）和用户手册的侧栏入口表。
 
 ### 新工作台面板
 

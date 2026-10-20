@@ -42,7 +42,6 @@ import {
 } from './state-directory-lock'
 import { createLoadFailurePolicy } from './load-failure'
 import { windowBackground } from './window-background'
-import { mainWindowChrome } from './window-chrome'
 import { createQuitCoordinator } from './quit-coordinator'
 import { claimSingleInstance } from './single-instance'
 import { trackedIpcMain } from './tracked-ipc'
@@ -1053,8 +1052,6 @@ function createWindow(): void {
     title: 'Emperor Agent',
     icon: appIconPath,
     backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors),
-    // No native title bar: the traffic lights sit in the rail (UI-S01).
-    ...mainWindowChrome(),
     show: false,
     webPreferences: mainWindowWebPreferences(mainDir, {
       packaged: app.isPackaged,

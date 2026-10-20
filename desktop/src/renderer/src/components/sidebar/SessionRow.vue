@@ -1,11 +1,12 @@
 <script setup lang="ts">
 /**
- * One sidebar session row (dsh Rows: 32px, radius 8, 16px status slot, 14/20
- * title). The relative time (never a date) and 「⋯」 are its hover layer
- * (UI-S02): shown on hover, focus or an open menu, otherwise the title has
- * the row. A running session has the gold dot and an "N 个子智能体运行中"
- * subline, one waiting for an answer or an approval the attention dot. 「⋯」
- * opens rename / pin / archive / delete, plus move up/down under manual sort.
+ * One sidebar session row (UI-S11: 32px, radius 8, 16px status slot, 13/20
+ * title, a compact relative time — never an ISO date). The slot shows the
+ * gold dot while running, the attention dot while it waits for an answer or
+ * an approval, and the ok dot for new activity; a running row adds an
+ * "N 个子智能体运行中" subline. Hover swaps the time for 「⋯」 (rename / pin /
+ * archive / delete, plus move up/down under manual sort). Nested rows (a
+ * project's sessions) hang off a hairline guide.
  */
 import { computed, nextTick, ref } from 'vue'
 import { DsMore } from '../icons/ds'
@@ -132,19 +133,18 @@ defineExpose({ beginRename })
         @blur="commitRename"
       />
       <span v-else class="title">{{ title }}</span>
-      <span v-if="!editing" class="hover-layer" data-hover-layer>
-        <span class="time">{{ time }}</span>
-        <button
-          ref="moreButton"
-          type="button"
-          class="more"
-          aria-label="会话操作"
-          :aria-expanded="menuOpen"
-          @click.stop="menuOpen = !menuOpen"
-        >
-          <DsMore :size="16" />
-        </button>
-      </span>
+      <span v-if="!editing" class="time">{{ time }}</span>
+      <button
+        v-if="!editing"
+        ref="moreButton"
+        type="button"
+        class="more"
+        aria-label="会话操作"
+        :aria-expanded="menuOpen"
+        @click.stop="menuOpen = !menuOpen"
+      >
+        <DsMore :size="16" />
+      </button>
     </div>
     <div v-if="subagents > 0" class="subline">
       {{ subagents }} 个子智能体运行中
@@ -196,12 +196,23 @@ defineExpose({ beginRename })
 }
 
 .session-row[data-nested] {
+  position: relative;
   padding-left: calc(var(--space-2) + var(--space-5) + 2px);
 }
 
+/* The project's guide: under the folder icon's centre (row padding 8 + 8). */
+.session-row[data-nested]::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--space-4) - 0.5px);
+  width: 1px;
+  background: var(--border-l2);
+  content: '';
+}
+
 .session-row:hover,
-.session-row[data-menu-open],
-.session-row[data-active] {
+.session-row[data-menu-open] {
   background: var(--interactive-bg-hover);
 }
 
@@ -263,28 +274,18 @@ defineExpose({ beginRename })
   box-shadow: none;
 }
 
-.hover-layer {
-  display: none;
-  flex: none;
-  align-items: center;
-  gap: var(--space-1);
-}
-
-.session-row:hover .hover-layer,
-.session-row[data-menu-open] .hover-layer,
-.session-row:focus-within .hover-layer {
-  display: inline-flex;
-}
-
 .time {
+  flex: none;
   font-size: var(--fs-xxs);
   line-height: var(--space-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--label-caption));
   font-variant-numeric: tabular-nums;
+  /* 「6月26日」, not 「6 月 26 日」. */
+  text-autospace: no-autospace;
 }
 
 .more {
-  display: inline-flex;
+  display: none;
   flex: none;
   align-items: center;
   justify-content: center;
@@ -300,6 +301,18 @@ defineExpose({ beginRename })
 
 .more:hover {
   color: rgb(var(--label-primary));
+}
+
+.session-row:hover .more,
+.session-row[data-menu-open] .more,
+.session-row:focus-within .more {
+  display: inline-flex;
+}
+
+.session-row:hover .time,
+.session-row[data-menu-open] .time,
+.session-row:focus-within .time {
+  display: none;
 }
 
 .subline {

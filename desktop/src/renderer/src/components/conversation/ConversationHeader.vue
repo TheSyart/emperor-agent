@@ -1,8 +1,7 @@
 <script setup lang="ts">
 /**
  * ConversationHeader — dsh conversation header (l2 hairline). Its first row
- * is the center panel's 46px top bar (UI-S01: bottoms line up with the rail,
- * sidebar and workspace bars, and its empty space moves the window): the
+ * is a 46px bar (its bottom meets the workspace header's): the
  * breadcrumb (project / ancestors / current title; ancestor crumbs
  * navigate) with the right-hand toggles — 环境信息 (the chat
  * environment card, Chat tab only; a floating-card glyph so it does not read
@@ -58,7 +57,7 @@ function onTab(id: string) {
 
 <template>
   <header class="conversation-header" :data-slim="slim || undefined">
-    <div class="title-row" data-app-drag>
+    <div class="title-row">
       <nav v-if="!slim" class="crumbs" aria-label="会话路径">
         <template v-for="(crumb, index) in crumbs" :key="crumb.id">
           <span v-if="index > 0" class="sep" aria-hidden="true">/</span>

@@ -8,6 +8,7 @@ const source = (name: string) => readFileSync(join(__dirname, name), 'utf8')
 const root = source('SidebarRoot.vue')
 const row = source('SessionRow.vue')
 const rail = source('SidebarRail.vue')
+const topRow = source('SidebarTopRow.vue')
 const bell = source('SidebarBell.vue')
 const layoutState = source('useSidebarState.ts')
 
@@ -51,15 +52,13 @@ describe('sidebar nav', () => {
   it('points every page entry at a named route', () => {
     const names = new Set(routeRecords.map((record) => record.name))
     for (const entry of SIDEBAR_PAGES) expect(names.has(entry.name)).toBe(true)
-    // The rail's order (UI-S01); 探索 stays until UI-S08.
+    // 探索 is part of 能力 since UI-S08; Pull Request needs the GitHub plugin.
     expect(SIDEBAR_PAGES.map((entry) => entry.label)).toEqual([
+      'Pull Request',
       '定时任务',
       '能力',
-      'Pull Request',
     ])
-    expect(
-      SIDEBAR_PAGES.filter((entry) => entry.github).map((entry) => entry.name),
-    ).toEqual(['pulls'])
+    expect(SIDEBAR_PAGES.filter((entry) => entry.github)).toHaveLength(1)
   })
 
   it('highlights a page entry only on its own route', () => {
@@ -73,11 +72,12 @@ describe('sidebar nav', () => {
     expect(activeSidebarPage(undefined)).toBeNull()
   })
 
-  it('keeps back / forward on the shared nav history shortcuts (no buttons since UI-S01)', () => {
-    const app = readFileSync(join(__dirname, '../../App.vue'), 'utf8')
-    expect(app).toContain("'nav.back': () => goBack(router)")
-    expect(app).toContain("'nav.forward': () => goForward(router)")
-    expect(rail).not.toContain('goBack')
+  it('reuses the shared nav history for back / forward', () => {
+    for (const text of [topRow, rail]) {
+      expect(text).toContain('useNavHistory()')
+      expect(text).toContain('goBack(router)')
+      expect(text).toContain('goForward(router)')
+    }
   })
 
   it('loads the notification popover as its own chunk', () => {
@@ -85,13 +85,14 @@ describe('sidebar nav', () => {
     expect(bell).not.toMatch(/^import NotificationsPopover/m)
   })
 
-  it('keeps the brand bar display-only with the collapse button', () => {
+  it('keeps the brand row display-only and the footer theme toggle', () => {
     const brand = source('SidebarBrandRow.vue')
+    const footer = source('SidebarFooter.vue')
     expect(brand).not.toContain('<Menu')
     expect(brand).not.toContain('aria-haspopup')
-    expect(brand).toContain('label="收起侧栏"')
-    // The theme is chosen in 设置 › 常规 (the sidebar toggle is gone).
-    expect(root).not.toContain('useTheme')
+    expect(footer).toContain('useTheme()')
+    expect(footer).toContain('@click="toggle()"')
+    expect(footer).not.toContain('openExternal')
   })
 })
 

@@ -1,42 +1,31 @@
 /**
- * Pure concession-chain column solver for the AppFrame (UI-S01): the
- * permanent 56px icon rail, then sidebar | center | workspace (port of dsh
- * ui-layout columns.ts). The rail never changes. Chain order: keep center >=
- * centerMin by shrinking the workspace, then auto-closing it (derived zero
- * width — preferences are never rewritten, so widening the window restores
- * them). The sidebar never concedes: its rendered width is the drag
- * preference (or 0 when folded); center absorbs any remaining deficit as
- * the last resort. The SIDEBAR_AUTO_COLLAPSE breakpoint is consumed by
- * AppFrame, so the solver stays breakpoint-free.
- *
- * Widths are column widths. The center and workspace columns hold their
- * panels inside the 8px canvas gutter (center: 8 on every side, workspace:
- * 8 on top, right and bottom; the gutter between the two panels belongs to
- * the center column), so a panel is its column minus the gutters.
+ * Pure concession-chain column solver for the three-column AppFrame
+ * (sidebar | center | workspace; port of dsh ui-layout columns.ts). Chain
+ * order: keep center >= centerMin by shrinking the workspace, then
+ * auto-closing it (derived zero width — preferences are never rewritten, so
+ * widening the window restores them). The sidebar never concedes: its
+ * rendered width is the drag preference (or the 56px rail); center absorbs
+ * any remaining deficit as the last resort. The SIDEBAR_AUTO_COLLAPSE
+ * breakpoint is consumed by AppFrame, so the solver stays breakpoint-free.
  */
 
 /** Resolved widths for one frame. */
 export interface Columns {
-  rail: number
   sidebar: number
   center: number
   workspace: number
 }
 
-/** The icon rail: 36px buttons between 10px sides (`--rail-w`). */
-export const RAIL_WIDTH = 56
-/** Canvas gutter around the panels (`--shell-gutter`). */
-export const SHELL_GUTTER = 8
 /** Center column floor of the Chat tab (and full-page routes). */
 export const CENTER_MIN_CHAT = 480
 /** Center column floor of the Trajectory tab (ledger + inspector column). */
 export const CENTER_MIN_TRAJECTORY = 640
-export const SIDEBAR_MIN = 200
-export const SIDEBAR_MAX = 360
-export const SIDEBAR_DEFAULT = 236
-/** The sidebar default before 0.2, which every earlier build persisted. */
-export const LEGACY_SIDEBAR_DEFAULT = 280
-/** Viewport width below which the sidebar auto-collapses (the rail stays). */
+export const SIDEBAR_MIN = 264
+export const SIDEBAR_MAX = 420
+export const SIDEBAR_DEFAULT = 280
+/** Closed-sidebar rail: a 24px icon column between 16px paddings. */
+export const SIDEBAR_COLLAPSED = 56
+/** Viewport width below which the sidebar auto-collapses to the rail. */
 export const SIDEBAR_AUTO_COLLAPSE = 1024
 export const WORKSPACE_MIN = 360
 export const WORKSPACE_MAX = 960
@@ -52,10 +41,10 @@ export function clampWidth(px: number, min: number, max: number): number {
 }
 
 /**
- * Solve the column widths for one viewport frame. Pure: the output is a
+ * Solve the three column widths for one viewport frame. Pure: the output is a
  * function of (viewport, preferences, centerMin) only.
  * @param viewport available frame width in px.
- * @param sidebar sidebar width preference in px (0 = folded; the rail stays).
+ * @param sidebar sidebar width preference in px (0 = closed → rail).
  * @param workspace workspace width preference in px (0 = closed).
  * @param centerMin center floor the workspace concedes to (chat 480,
  *   trajectory 640).
@@ -66,24 +55,19 @@ export function computeColumns(
   workspace: number,
   centerMin: number = CENTER_MIN_CHAT,
 ): Columns {
-  const rail = RAIL_WIDTH
-  const s = sidebar === 0 ? 0 : clampWidth(sidebar, SIDEBAR_MIN, SIDEBAR_MAX)
+  const s =
+    sidebar === 0
+      ? SIDEBAR_COLLAPSED
+      : clampWidth(sidebar, SIDEBAR_MIN, SIDEBAR_MAX)
   const w0 =
     workspace === 0 ? 0 : clampWidth(workspace, WORKSPACE_MIN, WORKSPACE_MAX)
-  const fixed = rail + s
 
-  if (fixed + w0 + centerMin <= viewport)
-    return { rail, sidebar: s, center: viewport - fixed - w0, workspace: w0 }
+  if (s + w0 + centerMin <= viewport)
+    return { sidebar: s, center: viewport - s - w0, workspace: w0 }
 
-  const w1 =
-    w0 === 0 ? 0 : Math.max(WORKSPACE_MIN, viewport - fixed - centerMin)
-  if (fixed + w1 + centerMin <= viewport)
-    return { rail, sidebar: s, center: centerMin, workspace: w1 }
+  const w1 = w0 === 0 ? 0 : Math.max(WORKSPACE_MIN, viewport - s - centerMin)
+  if (s + w1 + centerMin <= viewport)
+    return { sidebar: s, center: centerMin, workspace: w1 }
 
-  return {
-    rail,
-    sidebar: s,
-    center: Math.max(0, viewport - fixed),
-    workspace: 0,
-  }
+  return { sidebar: s, center: Math.max(0, viewport - s), workspace: 0 }
 }

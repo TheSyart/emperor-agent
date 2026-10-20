@@ -69,7 +69,7 @@ Scheduler 的 `agent_turn` 任务、Watchlist 检查和 Goal 续跑都通过同�
 
 ## 桌面外壳与路由
 
-Renderer 外壳是 `components/shell/AppFrame.vue` 的网格：常驻的 56px 图标栏、会话侧栏、中间列、右侧工作台；中间列与工作台各是一块面板，布局规则见[外壳布局](../design/layout.md)。主窗口在 macOS 上隐藏系统标题栏（`desktop/src/main/window-chrome.ts`），红绿灯放在图标栏顶部，拖拽区由 renderer 的 `data-app-drag` 标记。列宽由 `components/shell/columns.ts` 的纯函数 `computeColumns()` 求解：中间列有下限（对话 480px、轨迹 640px），空间不足时右侧工作台先在 360–960px 内缩窄，再自动关闭；这一让位只作用于渲染宽度，不改写用户的宽度偏好，窗口变宽后恢复。窗口宽度小于 1024px 时侧栏自动收起，图标栏保留。
+Renderer 外壳是 `components/shell/AppFrame.vue` 的网格：会话侧栏（收起时是 56px 的窄轨）、中间列、右侧工作台，几栏平铺，之间一条发丝线；主窗口使用系统标题栏。布局规则见[外壳布局](../design/layout.md)。列宽由 `components/shell/columns.ts` 的纯函数 `computeColumns()` 求解：中间列有下限（对话 480px、轨迹 640px），空间不足时右侧工作台先在 360–960px 内缩窄，再自动关闭；这一让位只作用于渲染宽度，不改写用户的宽度偏好，窗口变宽后恢复。窗口宽度小于 1024px 时侧栏自动收起为窄轨。
 
 布局偏好由 `components/shell/frameState.ts` 管理，按窗口保存在 renderer 的 `localStorage`（键 `emperor.frame.v2`）：侧栏宽度、工作台开关与宽度、当前工作台面板（`launcher` / `review` / `terminal` / `files` / `browser`）、环境信息卡偏好（`envCard`：`auto` 在会话列不窄于 1120 px 时默认展开，`open` 按需打开，`closed` 手动关闭后保持；旧的 `envCardOpen` 读取时迁移），以及轨迹「详情」列的开关与宽度。会话列是否够宽由 ConversationView 实时测量，不保存。旧的 `emperor.frame.v1`（右侧详情栏）在首次读取时迁移一次后删除。
 

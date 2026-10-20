@@ -3,8 +3,7 @@
  * WorkspacePanel — the AppFrame's right workspace panel: a PaneHeader (pane
  * title, segmented pane switch 审查 / 终端 / 文件 / 浏览器, launcher home,
  * close) over one pane body. The 48px PaneHeader is pulled up 2px so its
- * bottom meets the 46px top bars of the other columns (UI-S01); its empty
- * space moves the window. The launcher lists the panes with their
+ * bottom meets the conversation header's 46px row. The launcher lists the panes with their
  * shortcuts; every pane is its own async chunk (xterm, the file
  * highlighter and the diff views stay out of the shell bundle). The
  * AppFrame owns the column width and drag handle; this fills whatever the
@@ -231,7 +230,7 @@ async function persistFilesTreeWidth(): Promise<void> {
 
 <template>
   <div class="workspace-panel" role="region" aria-label="工作台">
-    <PaneHeader class="workspace-header" data-app-drag>
+    <PaneHeader class="workspace-header">
       <template #title>
         <h2 class="workspace-title">{{ title }}</h2>
       </template>
@@ -329,7 +328,7 @@ async function persistFilesTreeWidth(): Promise<void> {
 }
 
 /* The 48px PaneHeader, pulled up 2px: its bottom (and hairline) meets the
-   46px top bars of the rail, the sidebar and the conversation. */
+   conversation header's 46px row. */
 .workspace-header {
   margin-top: calc(var(--shell-bar-h) - var(--pane-header-h));
 }
