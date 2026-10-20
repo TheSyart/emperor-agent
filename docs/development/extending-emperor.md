@@ -169,7 +169,7 @@ Scheduler、Watchlist 或 Goal 触发的 turn 必须：
 - 重启后不自动重放可能已有副作用的工作；
 - 提供暂停、取消或诊断中的至少一种可控失败路径。
 
-Scheduler 的调度、misfire 与准入逻辑在 `packages/core/src/scheduler/service.ts`，执行器在 `harness/host/scheduler.ts`。
+Scheduler 的调度、misfire 与准入逻辑在 `packages/core/src/scheduler/service.ts`，执行器在 `harness/host/scheduler.ts`。`CoreApi.create` 在插件同步之后才启动 Scheduler（`HarnessHost.startScheduler()`；单独创建的 `HarnessHost` 默认在 `create` 末尾启动），启动失败只记录在 `status().startError` 与诊断里，不会让 Core 启动失败。定时器晚于触发点超过 `SCHEDULER_WAKE_GRACE_MS`（60 秒）时按 misfire 策略处理，与冷启动一致；每次 tick 无论成败都会重新设好下一个定时器。
 
 ## 验收矩阵
 

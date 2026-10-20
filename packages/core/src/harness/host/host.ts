@@ -205,6 +205,12 @@ export interface HarnessHostOptions extends KeptServicesOptions {
   /** Permission preset new sessions start with (default `workspace-write`). */
   defaultPreset?: string
   initializeMcp?: boolean
+  /**
+   * Start the scheduler at the end of `create` (default true). CoreApi
+   * starts it itself once plugins are synced, so a run caught up on at
+   * launch already has the plugins' Hooks (KRN-10).
+   */
+  startScheduler?: boolean
   /** Watch Skill folders and emit `skill_catalog_changed` (default true). */
   watchSkills?: boolean
   /** Test hook: replace the sandbox backend. */
@@ -1094,12 +1100,20 @@ export class HarnessHost {
         logger.warn('MCP initialization failed', { error: String(error) })
       }
     }
+    if (options.startScheduler !== false) await this.startScheduler()
+    if (options.watchSkills !== false) await this.startSkillWatcher()
+  }
+
+  /**
+   * Start the scheduler; a failure is logged and kept in its status
+   * (`startError`, shown in 诊断 and on the 定时任务 page), never thrown.
+   */
+  async startScheduler(): Promise<void> {
     try {
-      this.kept.schedulerService.start()
+      await this.kept.schedulerService.start()
     } catch (error: unknown) {
       logger.warn('scheduler failed to start', { error: String(error) })
     }
-    if (options.watchSkills !== false) await this.startSkillWatcher()
   }
 
   /** Watch user, known project, and Plugin Skill folders for catalog changes. */
