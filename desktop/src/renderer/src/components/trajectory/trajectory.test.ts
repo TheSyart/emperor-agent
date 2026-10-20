@@ -19,7 +19,10 @@ import {
   richScenario,
   type GalleryScenario,
 } from './gallery/galleryScenarios'
-import { FOCUS_CALL_LOAD_LIMIT, focusCallStep } from './focusCallRetry'
+import {
+  FOCUS_CALL_LOAD_LIMIT,
+  focusCallStep,
+} from '../../conversation/focusCallRetry'
 import { ledgerKeyAction } from './tableKeyboard'
 import { acquireTrajectory, type TrajectoryController } from './useTrajectory'
 import {
