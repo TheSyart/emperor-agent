@@ -909,15 +909,38 @@ function schedulerRow(
   const errorCount = count(summary?.lastActionErrors)
   const corruptCount = count(summary?.corruptActionFiles)
   const hasError = errorCount > 0 || corruptCount > 0
+  const startError = summary?.startError || ''
+  const rejected = summary?.rejectedJobs ?? []
+  const problems = [
+    errorCount ? `${errorCount} 个坏 action 行` : '',
+    corruptCount ? `${corruptCount} 个隔离文件` : '',
+  ]
+  if (startError)
+    return {
+      id: 'scheduler-store',
+      label: '定时任务存储',
+      value: '未启动',
+      detail: joinParts([startError, ...problems]),
+      tone: 'error',
+      path: summary?.jobsFile,
+    }
+  if (!hasError && rejected.length)
+    return {
+      id: 'scheduler-store',
+      label: '定时任务存储',
+      value: `${rejected.length} 个任务无法读取`,
+      detail: joinParts([
+        rejected.map((job) => job.name || job.id || '未命名').join('、'),
+        '已移到 jobs.rejected.json，其余任务照常运行',
+      ]),
+      tone: 'warn',
+      path: summary?.rejectedFile ?? summary?.jobsFile,
+    }
   return {
     id: 'scheduler-store',
     label: '定时任务存储',
     value: hasError ? '异常' : summary ? '正常' : '未返回',
-    detail: joinParts([
-      errorCount ? `${errorCount} 个坏 action 行` : '',
-      corruptCount ? `${corruptCount} 个隔离文件` : '',
-      !hasError ? summary?.jobsFile : '',
-    ]),
+    detail: joinParts([...problems, !hasError ? summary?.jobsFile : '']),
     tone: hasError ? 'error' : summary ? 'ok' : 'muted',
     path: summary?.jobsFile,
   }

@@ -782,6 +782,35 @@ describe('diagnostics settings model', () => {
     ).not.toContain('runtime-root')
   })
 
+  it('shows a scheduler that did not start, and jobs it set aside (KRN-10 1, 2)', () => {
+    const row = (scheduler: Record<string, unknown>) =>
+      diagnosticRows({ scheduler } as never)
+        .flatMap((group) => group.rows)
+        .find((item) => item.id === 'scheduler-store')
+    expect(
+      row({
+        jobsFile: '/data/scheduler/jobs.json',
+        startError: '另一个 Emperor 进程（pid 4242）正在运行定时任务',
+      }),
+    ).toMatchObject({
+      value: '未启动',
+      tone: 'error',
+      detail: expect.stringContaining('pid 4242'),
+    })
+    expect(
+      row({
+        jobsFile: '/data/scheduler/jobs.json',
+        rejectedFile: '/data/scheduler/jobs.rejected.json',
+        rejectedJobs: [{ id: 'job-bad', name: '坏任务', error: 'x' }],
+      }),
+    ).toMatchObject({
+      value: '1 个任务无法读取',
+      tone: 'warn',
+      detail: expect.stringContaining('坏任务'),
+      path: '/data/scheduler/jobs.rejected.json',
+    })
+  })
+
   it('summarises section health and lists issues, errors first', () => {
     const sections = diagnosticSections({
       root: '/Users/me/code/app',
