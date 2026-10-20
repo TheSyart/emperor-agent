@@ -29,6 +29,7 @@ import {
   type ModelConfig,
 } from '../../config/model-config'
 import { createLlmClient } from '../../llm'
+import { assertRequestInvariant } from '../agent/invariant'
 import type { LlmClient } from '../../llm/client'
 import {
   createUserMessage,
@@ -74,12 +75,7 @@ import { PermissionPresetService } from '../approval/presets'
 import { ApprovalService, type ApprovalPolicy } from '../approval/service'
 import { CompactionEngine } from '../compaction/engine'
 import { ToolResultPruner } from '../compaction/pruner'
-import {
-  createGoalTools,
-  GoalService,
-  installGoal,
-  type InstalledGoal,
-} from '../goal'
+import { GoalService, installGoal, type InstalledGoal } from '../goal'
 import { ClaudeCodeHooks, defaultHookConfigPaths } from '../hooks'
 import { containedPluginHookRunner } from '../hooks/contained'
 import { PluginHookHealth } from '../hooks/plugin-health'
@@ -225,6 +221,12 @@ export interface HarnessHostOptions extends KeptServicesOptions {
   sandboxBackend?: SandboxBackend
   /** Test hook: replace the LLM client. */
   llm?: LlmClient
+  /**
+   * Check every model request against its session log (KRN-13): on in
+   * development builds and the packaged smoke, off in production. Default:
+   * `EMPEROR_ASSERT_INVARIANT=1`.
+   */
+  assertRequestInvariant?: boolean
   /** Desktop host port for GUI control; absent → no computer-use tools. */
   computerUsePort?: ComputerUseHostPort | null
   /** Computer-use master switch and per-driver switches. */
@@ -396,6 +398,13 @@ export class HarnessHost {
           this.attachments.get(ref.attachmentId) !== null,
       })
     if (options.llm === undefined) this.applyModelConfig(kept.modelConfig)
+    if (
+      options.assertRequestInvariant ??
+      process.env.EMPEROR_ASSERT_INVARIANT === '1'
+    )
+      this.llm.observeRequests((request) =>
+        assertRequestInvariant(request, (id) => this.sessionLog(id)),
+      )
     this.watchlist = new WatchlistService(kept.paths.stateRoot, {
       llm: this.llm,
       tokenTracker: kept.tokenTracker,
@@ -549,7 +558,6 @@ export class HarnessHost {
     const ref: { host?: HarnessHost } = {}
     const kept = await createKeptServices(options, {
       emit: (event) => ref.host?.emitHost(event),
-      refreshRuntimeContext: () => {},
     })
     const host = new HarnessHost(kept, options)
     ref.host = host
@@ -835,7 +843,6 @@ export class HarnessHost {
       if (owner !== undefined)
         goal.driver.delegationSettled(this.rootOf(owner).id)
     })
-    void createGoalTools
     // A step of a project session holds the project's MCP instance (started
     // on first use) until its agent goes idle, before its tools are listed
     // (KRN-01). Then middleware (order matters): instructions, memory,
@@ -1077,6 +1084,19 @@ export class HarnessHost {
   }
 
   private async start(options: HarnessHostOptions): Promise<void> {
+    // Process groups a crashed run left behind go first (KRN-13): only one
+    // whose live start identity matches its receipt is killed.
+    try {
+      const reconciled = await this.kept.processRuntime.reconcileOrphans()
+      if (reconciled.length)
+        logger.info('reconciled leftover processes', {
+          count: reconciled.length,
+        })
+    } catch (error: unknown) {
+      logger.warn('leftover process reconcile failed', {
+        error: String(error),
+      })
+    }
     this.kept.schedulerService.onJob = createSchedulerExecutor({
       // A scheduled turn runs in its own session, never moves the session in
       // view, rejects approvals nobody can answer and stops after 30 minutes.

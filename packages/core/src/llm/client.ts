@@ -82,8 +82,20 @@ export interface LlmClientOptions {
 export class LlmClient {
   private routes = new Map<string, RouteSpec>()
   private activeId: string | null = null
+  private readonly observers = new Set<(options: GenerateOptions) => void>()
 
   constructor(private readonly options: LlmClientOptions) {}
+
+  /**
+   * Observe every dispatched request, after `onRequest`; a throw fails the
+   * call. Returns the unsubscribe (the host's request invariant, KRN-13).
+   */
+  observeRequests(observer: (options: GenerateOptions) => void): () => void {
+    this.observers.add(observer)
+    return () => {
+      this.observers.delete(observer)
+    }
+  }
 
   /** Replace the route table (called whenever model_config.json changes). */
   setRoutes(routes: readonly RouteSpec[], activeId: string | null): void {
@@ -248,6 +260,7 @@ export class LlmClient {
     options: GenerateOptions,
   ): AsyncGenerator<StreamChunk> {
     this.options.onRequest?.(options)
+    for (const observe of this.observers) observe(options)
     let iterator: AsyncIterator<StreamChunk>
     try {
       const hasImages = options.messages.some((message) =>

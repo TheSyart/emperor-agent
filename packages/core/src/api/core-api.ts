@@ -444,7 +444,6 @@ export class CoreApi {
     this.configService = new CoreConfigService(
       this.paths.stateRoot,
       {
-        refreshRuntimeContext: () => {},
         reconcileProfileOnboarding: () => {
           this.onboardingService.reconcile()
         },
@@ -522,7 +521,6 @@ export class CoreApi {
       sessionLog: (sessionId) => host.sessionLog(sessionId),
       compactNow: (sessionId) => host.compactNow(sessionId),
       measureContext: (sessionId) => host.measureContext(sessionId),
-      refreshRuntimeContext: () => {},
       schedulerService: kept.schedulerService,
     })
     this.pluginService = new PluginApplicationService({
@@ -661,7 +659,6 @@ export class CoreApi {
       library: kept.skillLibrary,
       // `null` = chat (no project Skills); callers always name the session.
       projectRootFor: (sessionId) => host.projectRootForSession(sessionId),
-      refreshRuntimeContext: () => {},
     })
     this.environmentService = new CoreEnvironmentService({
       stateRoot: this.paths.stateRoot,
