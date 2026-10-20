@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：希望扩展 Agent 能力的用户<br>
-> 最后核验：2026-10-19<br>
+> 最后核验：2026-10-20<br>
 > 事实源：`packages/core/src/harness/host/host.ts`（`compose()`）、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/tools/builtin/`（含 `skill-manage.ts`、`mcp-config.ts`、`web-fetch.ts`、`web-search.ts`、`deepseek-search.ts`）、`packages/core/src/harness/workflow/`、`packages/core/src/skills/`、`packages/core/src/plugins/`、`packages/core/src/mcp/`、`desktop/src/renderer/src/components/pages/capabilities/`、`desktop/src/renderer/src/components/pages/explore/`（目录与安装流程）、`desktop/src/renderer/src/components/settings/`（插件 / Skills / MCP / 工具分区组件）
 
 Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资源包；Plugin 是带来源、版本和启用状态的 Skill 分发单元；MCP 把外部 server 暴露的工具接入 Agent。
@@ -131,7 +131,7 @@ Emperor 识别三种包格式，按以下顺序判断：
 
 文件夹或压缩包里只能有一个插件包；子目录里的清单算作包内容。清单无法解析、名称不合规、路径越出包目录、含符号链接、超过大小上限、同名 Skill 或 MCP server 重复时，检查会失败并说明原因，不会留下任何内容。
 
-每次安装都先检查来源，再在确认窗口中展示来源、版本、digest、签名状态、大小和包含的能力，并选择安装范围：用户（所有项目可用）、项目（写入当前项目的 `.emperor/settings.json`）或本地项目（写入当前项目的 `.emperor/settings.local.json`，不随仓库提交）。确认后才会安装。
+每次安装都先检查来源，再在确认窗口中展示来源、版本、digest、签名状态、大小和包含的能力，并选择安装范围：用户（所有项目可用）、项目（只在当前项目启用）或本地项目（只在当前项目启用，优先于「项目」范围的同一插件）。确认后才会安装。
 
 本地文件夹和 zip 记为本地来源，启用后即可激活。从 URL 安装的 Plugin 必须通过签名验证才会激活；当前还无法验证 URL 来源的签名，这类 Plugin 安装后停在“签名未验证”，不会激活。信任该来源时，请下载后改用本地安装。
 
@@ -143,12 +143,14 @@ Emperor 自带两个 Plugin：GitHub 和 Computer Use，在插件列表里标为
 
 - **Skill**：进入 Skill 目录。项目范围的 Plugin 只在该项目的会话里可见。
 - **MCP server**：以「插件名-server 名」为名字连接，工具名为 `mcp_<这个名字>_<工具名>`，最长 64 个字符，超长时截短并加一段哈希。与你自己的 server 重名时只改插件这一侧；与已有工具重名的插件工具不注册，原因写在插件详情里。stdio server 在插件目录里运行，与 Shell 用同一套进程沙箱：能读系统与工具链（node、python、uv 等）、当前 workspace 和自己的插件目录，能写 workspace、自己的数据目录（`stateRoot/plugins/data/<插件名>`）和自己的缓存目录，读不到 Emperor Home 里的其他内容和你的凭据文件。沙箱不可用时插件的 server 不启动，详情里写明原因。配置里除 `${PLUGIN_ROOT}`、`${PLUGIN_DATA}` 和少数系统变量（如 `HOME`、`PATH`）外的 `${变量}` 不会展开，这样的 server 显示为「需要连接」，不会启动。
-- **Hook**：旧格式 Plugin 的 Hook 与你自己的 `hooks.json` 写法相同。可移植格式和 Codex 格式的 Hook 只有事件、匹配条件都能对应到 Emperor 时才运行：事件限 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`SubagentStart`、`SubagentStop`；匹配条件只能是工具名的简单并列（例如 `Bash|Write`，会对应到 Emperor 的 `bash`、`edit`、`write`），一般正则、`WebFetch` 这类 Emperor 没有的工具、后台运行的 Hook 都不运行，并在详情里说明原因。Hook 命令可以用 `PLUGIN_ROOT`、`PLUGIN_DATA` 环境变量。插件的 Hook 在进程沙箱里运行：workspace 只读，能写自己的数据目录和 `stateRoot/plugins/tmp/<插件名>`（它的 `TMPDIR`），读不到 Emperor 的设置文件和你的凭据；沙箱不可用时不运行（按 Hook 失败处理，工具调用照常继续）。你自己 `hooks.json` 里的 Hook 不受影响。
+- **Hook**：旧格式 Plugin 的 Hook 与你自己的 `hooks.json` 写法相同。可移植格式和 Codex 格式的 Hook 只有事件、匹配条件都能对应到 Emperor 时才运行：事件限 `SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`SubagentStart`、`SubagentStop`；匹配条件只能是工具名的简单并列（例如 `Bash|Write`，会对应到 Emperor 的 `bash`、`edit`、`write`），一般正则、`WebFetch` 这类 Emperor 没有的工具、后台运行的 Hook 都不运行，并在详情里说明原因。插件的 Hook 在进程沙箱里运行：workspace 只读，能写自己的数据目录和 `stateRoot/plugins/tmp/<插件名>`（它的 `TMPDIR`），读不到 Emperor 的设置文件和你的凭据；沙箱不可用时不运行（按 Hook 失败处理，工具调用照常继续）。它只拿到少数系统环境变量（`PATH`、`HOME`、`USER`、`SHELL`、`LANG`、`LC_ALL`、`TERM`、`PWD`、`TMPDIR` 等）、`PLUGIN_ROOT`、`PLUGIN_DATA`、`CLAUDE_PROJECT_DIR`，以及插件清单 `env` 里声明的变量（取自 Emperor 的环境）；`OPENAI_API_KEY` 这类没有声明的变量看不到。单个插件 Hook 默认 30 秒超时，Hook 自己写的超时最多算 120 秒；超时被终止，按 Hook 失败处理。插件 Hook 失败时（退出码不是 0 或 2、超时、没能启动），插件详情里这个 Hook 显示「失败」、原因和「需要的环境变量」：清单 `env` 没声明、但命令或包里脚本用到的变量，以及声明了但 Emperor 的环境里没有的变量；下一次运行成功后恢复「可用」。详情的「信息」里「可读环境变量」列出清单声明的变量。你自己 `hooks.json` 里的 Hook 不受这些限制，照旧拿到完整的环境变量、默认 10 分钟超时。写插件 Hook 的要求见[扩展 Emperor › 插件 Hook 的运行环境](../development/extending-emperor.md#插件-hook-的运行环境)。
 - **应用连接**：自带 GitHub 插件的「GitHub（本机 gh）」和 Computer Use 插件的三个驱动按上文显示真实状态；其他插件的应用连接暂不支持，详情里列出。
 
 停用或卸载后，这个 Plugin 的 MCP server 立即断开，Hook 不再运行。Plugin 的 MCP server 和 Hook 不写入你的 `mcp_config.json` 或 `hooks.json`，也不在「能力 › MCP」里显示；项目范围的 Plugin 跟随当前会话所在的项目。
 
-用户范围的启用意图保存在 `stateRoot/settings.json`，物化内容保存在 `stateRoot/plugins/`；禁用或卸载不会同步删除不可变缓存。Plugin 安装只能由你在能力页发起，没有对应的模型工具。
+用户范围的启用意图保存在 `stateRoot/settings.json`，项目与本地项目范围的保存在 `stateRoot/projects/<项目 ID>/plugins.json`，物化内容保存在 `stateRoot/plugins/`；禁用或卸载不会同步删除不可变缓存。Plugin 安装只能由你在能力页发起，没有对应的模型工具。
+
+项目的启用意图不写进项目目录，也不从项目目录读取：Agent 能改项目里的文件，克隆来的仓库也可能带着这些文件。仓库 `.emperor/settings.json` 里的 `enabledPlugins` 只是「建议」：其中列出、已按项目范围安装、而你还没有为这个项目选过的插件，会在能力页「插件」标签顶部显示「该项目建议启用 X」，写明它带来的 Skill、MCP server、Hook。选「启用」才会在这个项目里启用，选「忽略」保持停用，两种选择都记在 Emperor 里，之后仓库文件怎么改都不会再改变它；以后也可以在插件详情里随时开关。`.emperor/settings.local.json` 不再读取。从 0.1 升级后第一次启动时，你在已打开过的项目里启用或停用的项目插件会原样搬到 Emperor 里，继续生效；之后才打开的仓库只会显示建议。
 
 旧的 Skill 安装接口和环境配方安装接口已下线；需要外部 CLI 依赖时，在权限允许的情况下用普通命令安装，并单独验证结果。
 
