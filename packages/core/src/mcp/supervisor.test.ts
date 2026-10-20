@@ -7,7 +7,11 @@ import {
   type MCPConnectionLifecycleEvent,
   type MCPToolDefinition,
 } from './connection'
-import { MCPConnectionSupervisor, type MCPClientIdentity } from './supervisor'
+import {
+  MCPConnectionSupervisor,
+  classifyMcpConnectionError,
+  type MCPClientIdentity,
+} from './supervisor'
 
 function config(command = '/bin/mcp'): ServerConfig {
   return {
@@ -179,6 +183,7 @@ describe('MCPConnectionSupervisor', () => {
         delays.push(ms)
       },
       maxRestartAttempts: 3,
+      random: () => 0.5, // no jitter
     })
 
     await expect(supervisor.connect()).resolves.toBe(false)
@@ -386,3 +391,103 @@ async function replacementConnected(
   expect(connection.connectCount).toBe(1)
   expect(supervisor.snapshot().generation).toBe(2)
 }
+
+describe('MCPConnectionSupervisor health and backoff (KRN-04)', () => {
+  it('5 · a late response with an unknown id leaves the connection healthy', async () => {
+    const connection = new ControlledConnection('live')
+    const supervisor = new MCPConnectionSupervisor({
+      serverName: 'alpha',
+      config: config(),
+      connectionFactory: () => connection,
+      sleep: async () => {},
+    })
+    await expect(supervisor.connect()).resolves.toBe(true)
+    connection.report({
+      type: 'error',
+      error: new Error(
+        'Received a response for an unknown message ID: {"jsonrpc":"2.0","id":41,"result":{}}',
+      ),
+    })
+    await Promise.resolve()
+    expect(supervisor.snapshot()).toMatchObject({
+      state: 'ready',
+      health: 'healthy',
+      auth: 'ok',
+    })
+  })
+
+  it('6 · only an HTTP 401 or 403 status means the server rejected the credentials', () => {
+    const body = new Error('tool failed: upstream said "403 Forbidden" in its body')
+    expect(classifyMcpConnectionError(body, 'mcp_connection_failed').code).not.toBe(
+      'mcp_auth_failed',
+    )
+    const forbidden = Object.assign(new Error('Error POSTing to endpoint'), {
+      code: 403,
+    })
+    expect(
+      classifyMcpConnectionError(forbidden, 'mcp_connection_failed').code,
+    ).toBe('mcp_auth_failed')
+    const unauthorized = Object.assign(new Error('Unauthorized'), {
+      name: 'UnauthorizedError',
+    })
+    expect(
+      classifyMcpConnectionError(unauthorized, 'mcp_connection_failed').code,
+    ).toBe('mcp_auth_failed')
+  })
+
+  it('7 · a server that exits at once fails after six attempts with jittered 1/4/16/60 s backoff', async () => {
+    const delays: number[] = []
+    let created = 0
+    const supervisor = new MCPConnectionSupervisor({
+      serverName: 'alpha',
+      config: config(),
+      connectionFactory: () => {
+        created += 1
+        const connection = new ControlledConnection(`exits_${created}`)
+        connection.connectResult = false
+        return connection
+      },
+      sleep: async (ms) => {
+        delays.push(ms)
+      },
+      random: () => 0, // the low end of ±20%
+    })
+    await expect(supervisor.connect()).resolves.toBe(false)
+    for (let index = 0; index < 8; index++)
+      await supervisor.restart('liveness')
+    expect(created).toBe(6)
+    expect(delays).toEqual([800, 3_200, 12_800, 48_000, 48_000])
+    expect(supervisor.snapshot()).toMatchObject({
+      state: 'failed',
+      lastError: { code: 'mcp_restart_exhausted' },
+    })
+  })
+
+  it('resets the restart budget only after 60 s of stable running', async () => {
+    const delays: number[] = []
+    let clock = 0
+    const connections: ControlledConnection[] = []
+    const supervisor = new MCPConnectionSupervisor({
+      serverName: 'alpha',
+      config: config(),
+      connectionFactory: () => {
+        const connection = new ControlledConnection(`c${connections.length}`)
+        connections.push(connection)
+        return connection
+      },
+      sleep: async (ms) => {
+        delays.push(ms)
+      },
+      now: () => clock,
+      random: () => 0.5, // no jitter
+    })
+    await supervisor.connect()
+    clock = 1_000
+    await supervisor.restart('liveness')
+    clock = 2_000
+    await supervisor.restart('liveness')
+    clock = 80_000
+    await supervisor.restart('liveness')
+    expect(delays).toEqual([1_000, 4_000, 1_000])
+  })
+})

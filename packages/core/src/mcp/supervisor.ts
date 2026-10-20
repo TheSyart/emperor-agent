@@ -60,6 +60,8 @@ export interface MCPConnectionSupervisorOptions {
   readonly requestIdFactory?: () => string
   readonly sleep?: (milliseconds: number) => Promise<void>
   readonly now?: () => number
+  /** Jitter source in [0, 1) (tests pin it). */
+  readonly random?: () => number
   readonly maxRestartAttempts?: number
   readonly callTimeoutMs?: number
   readonly connectTimeoutMs?: number
@@ -74,7 +76,15 @@ interface ManagedClient extends MCPClientIdentity {
   readonly tools: MCPToolDefinition[]
 }
 
-const DEFAULT_BACKOFF_MS = [1_000, 4_000, 16_000] as const
+/**
+ * Restart backoff (KRN-04): 1, 4, 16, then 60 s between attempts, each
+ * ±20%; five restarts after the first failure, so the sixth consecutive
+ * failure leaves the server `failed` with no more automatic restarts. The
+ * count resets only after 60 s of stable running.
+ */
+const DEFAULT_BACKOFF_MS = [1_000, 4_000, 16_000, 60_000] as const
+const DEFAULT_MAX_RESTARTS = 5
+const STABLE_RESET_MS = 60_000
 const DEFAULT_CALL_TIMEOUT_MS = 60_000
 
 /**
@@ -100,6 +110,9 @@ export class MCPConnectionSupervisor extends MCPConnection {
   private health: MCPConnectionHealth = 'unknown'
   private auth: MCPConnectionAuth = 'unknown'
   private restartAttempts = 0
+  /** When the current client became ready (the stable-running clock). */
+  private readyAt: number | null = null
+  private readonly random: () => number
   private nextRetryAt: number | null = null
   private lastError: MCPConnectionDiagnosticError | null = null
   private operation: Promise<boolean> | null = null
@@ -119,9 +132,10 @@ export class MCPConnectionSupervisor extends MCPConnection {
       (() => `mcp_req_${randomUUID().replace(/-/g, '')}`)
     this.sleep = opts.sleep ?? abortableDelay
     this.now = opts.now ?? Date.now
+    this.random = opts.random ?? Math.random
     this.maxRestartAttempts = boundedPositiveInt(
       opts.maxRestartAttempts,
-      DEFAULT_BACKOFF_MS.length,
+      DEFAULT_MAX_RESTARTS,
     )
     this.callTimeoutMs = boundedPositiveInt(
       opts.callTimeoutMs,
@@ -267,13 +281,19 @@ export class MCPConnectionSupervisor extends MCPConnection {
   async restart(_reason: string): Promise<boolean> {
     if (this.operation) return await this.operation
     if (this.stopped || this.state === 'auth_failed') return false
+    // A client that ran long enough starts a fresh budget.
+    if (this.readyAt !== null && this.now() - this.readyAt >= STABLE_RESET_MS)
+      this.restartAttempts = 0
+    this.readyAt = null
     if (this.restartAttempts >= this.maxRestartAttempts) {
       this.markRestartExhausted()
       return false
     }
     const attemptIndex = this.restartAttempts
     this.restartAttempts += 1
-    const delay = DEFAULT_BACKOFF_MS[Math.min(attemptIndex, 2)]!
+    const base =
+      DEFAULT_BACKOFF_MS[Math.min(attemptIndex, DEFAULT_BACKOFF_MS.length - 1)]!
+    const delay = Math.round(base * (0.8 + 0.4 * this.random()))
     this.state = 'backoff'
     this.nextRetryAt = this.now() + delay
     this.emitState()
@@ -360,7 +380,7 @@ export class MCPConnectionSupervisor extends MCPConnection {
       this.state = 'ready'
       this.health = 'healthy'
       this.auth = 'ok'
-      this.restartAttempts = 0
+      this.readyAt = this.now()
       this.nextRetryAt = null
       this.lastError = null
       this.emitState()
@@ -410,6 +430,17 @@ export class MCPConnectionSupervisor extends MCPConnection {
             'mcp_connection_failed',
             `MCP server '${this.serverName}' transport closed`,
           )
+    // A JSON-RPC level error (a late reply with an unknown id, one dropped
+    // oversized message) concerns one call, not the connection's health.
+    if (
+      event.type === 'error' &&
+      !event.fatal &&
+      error.code !== 'mcp_auth_failed'
+    ) {
+      this.lastError = diagnosticError(error)
+      this.emitState()
+      return
+    }
     if (error.code === 'mcp_auth_failed') this.markAuthFailed(current, error)
     else this.markCurrentDegraded(current, error)
     if (event.type === 'closed' || event.fatal) void this.restart('liveness')
@@ -524,10 +555,17 @@ export function classifyMcpConnectionError(
   if (error instanceof MCPConnectionError) return error
   const message = error instanceof Error ? error.message : String(error ?? '')
   const normalized = message.toLowerCase()
+  // Only the HTTP status (or the SDK's own auth error) says the server
+  // rejected the credentials; a "403" inside a body is not one (KRN-04).
+  const status =
+    error && typeof error === 'object'
+      ? ((error as { code?: unknown }).code ??
+        (error as { status?: unknown }).status)
+      : undefined
   if (
-    /\b(?:401|403)\b|unauthori[sz]ed|forbidden|authentication|invalid[_ -]?token/.test(
-      normalized,
-    )
+    status === 401 ||
+    status === 403 ||
+    (error instanceof Error && error.name === 'UnauthorizedError')
   )
     return new MCPConnectionError(
       'mcp_auth_failed',
