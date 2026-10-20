@@ -4842,6 +4842,60 @@ export async function installVisualCoreBridge(
             }
             case 'sessions.lineage':
               return lineageOf((args[0] as { sessionId: string }).sessionId)
+            case 'agents.list': {
+              // The agent tree (AGT-10): every recorded subagent under the
+              // given roots, nested children under their parent.
+              const input = (args[0] ?? {}) as { rootSessionIds?: string[] }
+              const agents: Array<Record<string, unknown>> = []
+              for (const root of input.rootSessionIds ?? []) {
+                // Sessions without recorded subagents fall back to the
+                // tasks.list fixture's subagents (the environment card).
+                if (!childrenOf(root).length) {
+                  for (const task of visualTasksFor(root)) {
+                    if (task.kind !== 'subagent') continue
+                    agents.push({
+                      id: task.id,
+                      kind: 'internal',
+                      backend: 'internal',
+                      rootSessionId: root,
+                      parentAgentId: root,
+                      title: task.description,
+                      phase:
+                        task.status === 'running'
+                          ? 'running'
+                          : task.last_stop_reason === 'error'
+                            ? 'failed'
+                            : 'completed',
+                      createdAt: task.started_at,
+                      updatedAt: task.started_at,
+                    })
+                  }
+                  continue
+                }
+                const queue = [{ session: root, parent: root }]
+                while (queue.length) {
+                  const { session, parent } = queue.shift()!
+                  for (const child of childrenOf(session)) {
+                    const id = String(child.subagentId)
+                    agents.push({
+                      id,
+                      kind: 'internal',
+                      backend: 'internal',
+                      rootSessionId: root,
+                      parentAgentId: parent,
+                      title: String(child.description || id),
+                      phase:
+                        child.status === 'running' ? 'running' : 'completed',
+                      createdAt: 1782475200000,
+                      updatedAt: 1782475200000,
+                      ...(child.callId ? { parentCallId: child.callId } : {}),
+                    })
+                    queue.push({ session: id, parent: id })
+                  }
+                }
+              }
+              return { agents }
+            }
             case 'sessions.children':
               return childrenOf((args[0] as { sessionId: string }).sessionId)
             case 'chat.submit': {
