@@ -390,13 +390,56 @@ describe('MCP client reload (KRN-04)', () => {
       await waitFor(() => runtime.list({ activeOnly: true }).length === 1)
       const pid = runtime.list({ activeOnly: true })[0]!.pid
       expect(pid).toBeGreaterThan(0)
+      const closedAt = Date.now()
       await client.close()
       await reload
-      // The server answers initialize after 600 ms; give it time to land.
-      await new Promise((resolve) => setTimeout(resolve, 1500))
+      // The server would answer initialize only after 3 s: the process is
+      // gone well before that, not when its handshake lands.
+      await waitFor(() => !alive(pid!), 2000)
+      expect(Date.now() - closedAt).toBeLessThan(2500)
       expect(runtime.list({ activeOnly: true })).toEqual([])
-      expect(alive(pid!)).toBe(false)
+      await new Promise((resolve) => setTimeout(resolve, 3200))
+      expect(runtime.list({ activeOnly: true })).toEqual([])
       expect(client.getTools()).toEqual([])
+      expect(client.snapshot().servers).toEqual([])
+    },
+    20_000,
+  )
+
+  it.runIf(process.platform === 'darwin')(
+    'a server that fails at startup leaves its last stderr lines for diagnostics',
+    async () => {
+      const stateRoot = tmp('emperor-krn04-stderr-')
+      const workspace = join(stateRoot, 'workspace')
+      mkdirSync(workspace, { recursive: true })
+      const serverDir = tmp('emperor-krn04-crash-')
+      writeFileSync(
+        join(serverDir, 'server.js'),
+        "for (let i = 0; i < 300; i++) process.stderr.write('line ' + i + '\\n')\nprocess.stderr.write('Error: Cannot find module dep\\n')\nprocess.exit(1)\n",
+      )
+      writeServers(stateRoot, {
+        broken: {
+          enabled: true,
+          transport: 'stdio',
+          command: process.execPath,
+          args: [join(serverDir, 'server.js')],
+        },
+      })
+      const client = new MCPClient(stateRoot, {
+        processRuntime: new OwnedProcessRuntime(stateRoot, {
+          sandbox: new OsSandboxController({}),
+        }),
+        workspaceRoot: workspace,
+      })
+      cleanups.push(() => client.close())
+      await client.reload()
+      expect(client.snapshot().servers[0]?.state).toBe('failed')
+      const tail = client.serverStderr('broken')!
+      expect(tail).toContain('Error: Cannot find module dep')
+      // The last 200 lines, not everything.
+      expect(tail.split('\n')).toHaveLength(200)
+      expect(tail).not.toContain('line 100\n')
+      expect(client.serverStderr('missing')).toBeNull()
     },
     20_000,
   )
@@ -483,7 +526,7 @@ function alive(pid: number): boolean {
   }
 }
 
-/** Answers initialize only after 600 ms, so a test can disconnect mid-connect. */
+/** Answers initialize only after 3 s, so a test can disconnect mid-connect. */
 const SLOW_SERVER = `
 const readline = require('node:readline')
 const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n')
@@ -493,7 +536,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   if (m.id === undefined) return
   const reply = (result) => send({ jsonrpc: '2.0', id: m.id, result })
   if (m.method === 'initialize')
-    return setTimeout(() => reply({ protocolVersion: m.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'slow', version: '1' } }), 600)
+    return setTimeout(() => reply({ protocolVersion: m.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'slow', version: '1' } }), 3000)
   if (m.method === 'tools/list')
     return reply({ tools: [{ name: 'slow', description: 'slow', inputSchema: { type: 'object', properties: {} } }] })
   if (m.method === 'ping') return reply({})

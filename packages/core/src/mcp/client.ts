@@ -482,6 +482,11 @@ export class MCPClient {
     return [...this.tools]
   }
 
+  /** A server's last 200 stderr lines (stdio servers), or null for an unknown server. */
+  serverStderr(serverName: string): string | null {
+    return this.connections.get(serverName)?.stderrTail(200) ?? null
+  }
+
   getConnection(serverName: string): MCPConnection | undefined {
     return this.connections.get(serverName)
   }

@@ -126,6 +126,8 @@ export class MCPConnectionSupervisor extends MCPConnection {
   private epoch = 0
   /** The connection an attempt in flight is opening. */
   private candidate: MCPConnection | null = null
+  /** stderr of the last start that failed (why a server will not come up). */
+  private failedStderr = ''
   private stopped = false
   private readonly activeRequests = new Set<string>()
 
@@ -196,6 +198,16 @@ export class MCPConnectionSupervisor extends MCPConnection {
 
   override async listTools(): Promise<MCPToolDefinition[]> {
     return this.current?.tools.map((tool) => structuredClone(tool)) ?? []
+  }
+
+  /**
+   * The server's last stderr lines: the running or starting process's,
+   * else those of the last start that failed.
+   */
+  override stderrTail(lines = 200): string {
+    const live = (this.current?.connection ?? this.candidate)?.stderrTail(lines)
+    if (live) return live
+    return this.failedStderr.split('\n').slice(-lines).join('\n')
   }
 
   override async callTool(
@@ -393,6 +405,7 @@ export class MCPConnectionSupervisor extends MCPConnection {
           connection.lastConnectionFailure,
           'mcp_connection_failed',
         )
+        this.failedStderr = connection.stderrTail()
         this.recordCandidateFailure(failure)
         connection.setLifecycleListener(null)
         await connection.disconnect().catch(() => {})
@@ -445,6 +458,7 @@ export class MCPConnectionSupervisor extends MCPConnection {
         error,
         connected ? 'mcp_protocol_error' : 'mcp_connection_failed',
       )
+      this.failedStderr = connection.stderrTail()
       this.recordCandidateFailure(failure)
       connection.setLifecycleListener(null)
       await connection.disconnect().catch(() => {})
