@@ -148,6 +148,71 @@ it('foreground external cancellation reaches the exact child run and returns an 
   expect((await run).isError).toBe(true)
   expect(f.service.interrupt).toHaveBeenCalledWith('dlg-test', 'dgr-1')
 })
+/** A wait that only ends when its signal aborts (the run never settles). */
+function waitUntilAborted(
+  _id: string,
+  _runId: string,
+  signal?: AbortSignal,
+): Promise<DelegationRunRecord> {
+  return new Promise((_resolve, reject) => {
+    const abort = () => reject(new DelegationError('ABORTED', 'wait cancelled'))
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) abort()
+  })
+}
+it('collect_agent stops waiting within a second when the turn is stopped (AGT-09 5)', async () => {
+  const f = fixture(),
+    controller = new AbortController()
+  f.state.runs['dgr-1'] = { ...f.state.runs['dgr-1']!, phase: 'running' }
+  vi.mocked(f.service.wait).mockImplementation(waitUntilAborted)
+  const collected = f.h.tools.execute({
+    name: 'collect_agent',
+    arguments: { agent_id: 'dlg-test' },
+    agent: f.root,
+    callId: 'collect-call',
+    signal: controller.signal,
+  })
+  await vi.waitFor(() => expect(f.service.wait).toHaveBeenCalled())
+  const stoppedAt = Date.now()
+  controller.abort()
+  const result = await collected
+  expect(Date.now() - stoppedAt).toBeLessThan(1000)
+  expect(result.isError).toBe(true)
+  expect(f.service.wait).toHaveBeenCalledWith(
+    'dlg-test',
+    'dgr-1',
+    controller.signal,
+  )
+})
+it('a foreground external wait ends when the turn is stopped, before the run settles (AGT-09 5)', async () => {
+  const f = fixture(),
+    controller = new AbortController()
+  vi.mocked(f.service.wait).mockImplementation(waitUntilAborted)
+  const run = f.h.tools.execute({
+    name: 'subagent',
+    arguments: {
+      backend: 'codex',
+      description: 'wait',
+      prompt: 'work',
+      run_in_background: false,
+    },
+    agent: f.root,
+    callId: 'foreground-stop',
+    signal: controller.signal,
+  })
+  await vi.waitFor(() => expect(f.service.wait).toHaveBeenCalled())
+  const stoppedAt = Date.now()
+  controller.abort()
+  expect((await run).isError).toBe(true)
+  expect(Date.now() - stoppedAt).toBeLessThan(1000)
+  expect(f.service.wait).toHaveBeenCalledWith(
+    'dlg-test',
+    'dgr-1',
+    controller.signal,
+  )
+  // The run itself is still asked to stop.
+  expect(f.service.interrupt).toHaveBeenCalledWith('dlg-test', 'dgr-1')
+})
 it('external backend resolves trusted owner and profile; queue returns original delegation', async () => {
   const f = fixture()
   const start = await f.call('subagent', {

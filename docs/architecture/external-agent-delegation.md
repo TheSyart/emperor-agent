@@ -70,7 +70,7 @@ Codex 只导入所选模型、所选提供方的连接/认证字段和显式模�
 
 图片引用通过 `references.image` 读取，输入只有会话 ID 和已解析的引用 capability；Core 限定当前普通聊天工作区、Build 项目或该根会话拥有的外部工作区，再由有尺寸上限的 Files 读取器返回栅格图片。renderer 不直接读取任意本地路径。
 
-每个控制动作都重新核验根会话所有权、当前 run 与权限。根 Agent 和所有活动祖先权限取交集；Plan 模式下只允许 `shared-readonly` 的只读委派（审查），其余工作区返回 `PLAN_MODE_UNSUPPORTED`，Plan 模式下未指定工作区时默认只读；进入 Plan 模式不会停止已有的只读委派。祖先收窄权限会停止根任务已有的写入型外部执行并解除 Goal 自动续跑。关闭外部会话保留原生历史、文件、工作区和凭据。
+每个控制动作都重新核验根会话所有权、当前 run 与权限。根 Agent 和所有活动祖先权限取交集；Plan 模式下只允许 `shared-readonly` 的只读委派（审查），其余工作区返回 `PLAN_MODE_UNSUPPORTED`，Plan 模式下未指定工作区时默认只读；进入 Plan 模式不会停止已有的只读委派。祖先收窄权限会停止根任务已有的写入型外部执行并解除 Goal 自动续跑。判断只看未关闭的委派：已关闭的会话不算；父级是已经结束（或重启后尚未载入）的本地子智能体时，按根会话的权限判断，不再一律当作「权限收回」，所以重启后切换权限预设不会无故停止根任务。用户按停止时，根会话有正在运行的外部委派才调用 `stopRoot`；进行中的 Goal 先持久化为「已暂停」。前台等待和 `collect_agent` 把工具调用的取消信号交给 `wait`，停止后工具调用立即结束（前台等待同时 interrupt 该轮）。关闭外部会话保留原生历史、文件、工作区和凭据。
 
 ## 统一子智能体入口与公开对话
 
@@ -127,7 +127,7 @@ Codex 自定义提供方继承 `query_params`（如 Azure 的 `api-version`，�
 
 - 运行中的轮次：Emperor 已不在，协议必然断开。开机标记不同 → 直接 `interrupted`（`failureCode: SYSTEM_RESTARTED`），不碰旧 PID；同一次开机 → 若进程组还在，按上面的时间线停止，再标 `interrupted`（`APP_RESTARTED`）；停不下来或身份对不上 → `outcome_unknown`。已有的失败原因保留，不再被改写为 `CONNECTION_LOST`。
 - 未派发的 queued 轮次：只给这一个委派写 `dispatch-paused`，等用户继续、恢复或标记为已结束。
-- 已结束的历史委派：不追加任何事件，不再给每个委派写 `dispatch-paused`；也不打开它们的根会话（投影写入根会话日志，不实例化 Agent，SessionStart hook 不触发）。待送达的通知在内存中保持暂停，直到用户在该根会话发消息。停止根会话同样不改写已结束的委派。
+- 已结束的历史委派：不追加任何事件，不再给每个委派写 `dispatch-paused`；也不打开它们的根会话（投影写入根会话日志，不实例化 Agent，SessionStart hook 不触发）。待送达的通知在内存中保持暂停，直到用户在该根会话发消息。停止根会话同样不改写已结束的委派。派工的本地子智能体已经结束（或重启后不在内存里）时，外部任务的完成通知送到根会话，不再因为找不到父级而丢失（`delegationNoticeParent`）。
 - 启动时删除 `/private/tmp/emperor-boundary-*` 中超过一天、属于当前用户的旧标记。
 
 `outcome_unknown`（结果待确认）、`needs_recovery` 或因重启暂停的 queued 轮次都有出口「标记为已结束」：主会话环境信息卡、子对话页和任务详情里的按钮，以及父模型的 `collect_agent({ abandon: true })`（必须经用户审批）。它写入 `run-abandoned { by: 'user' | 'model' }`：轮次标记已解决（未结束的轮次变为 interrupted，queued 变为 cancelled），取消排队和送达未知的消息，释放工作区隔离，委派恢复空闲（工作区已不存在时关闭会话）；Goal 把它当作已处置的必需任务。被隔离的进程组在释放前再按时间线停止一次。原有的原生历史 inspection 与 `recover` 仍可用，但不再是唯一出口。
