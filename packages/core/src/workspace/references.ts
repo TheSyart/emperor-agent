@@ -10,7 +10,12 @@ import {
 } from './reference-preview'
 import { existsSync, realpathSync, statSync } from 'node:fs'
 import { basename, isAbsolute, relative, resolve, sep } from 'node:path'
-import { previewCanonicalFile, type FilePreviewResult } from './file-preview'
+import {
+  previewCanonicalFile,
+  statCanonicalFile,
+  type FilePreviewResult,
+  type FileStatResult,
+} from './file-preview'
 import {
   resolveOwnedProject,
   WorkspaceOperationError,
@@ -177,17 +182,7 @@ export class WorkspaceReferenceService {
     sessionId: string
     referenceId: string
   }): Promise<FilePreviewResult> {
-    const descriptor = this.authorize(input.referenceId, input.sessionId)
-    const path = this.references.get(input.referenceId)?.canonicalPath
-    if (
-      !descriptor.available ||
-      !path ||
-      !descriptor.actions.includes('preview')
-    )
-      throw new WorkspaceOperationError(
-        'reference_action_denied',
-        '该引用无法预览文件内容。',
-      )
+    const { descriptor, path } = this.previewable(input)
     if (descriptor.directory) {
       if (realpathSync(path) !== path)
         throw new WorkspaceOperationError(
@@ -209,6 +204,29 @@ export class WorkspaceReferenceService {
       ...value,
       revealable: descriptor.actions.includes('reveal'),
     }))
+  }
+
+  /** Size and mtime of what previewFile would read, under the same checks. */
+  statFile(input: { sessionId: string; referenceId: string }): FileStatResult {
+    return statCanonicalFile(this.previewable(input).path)
+  }
+
+  private previewable(input: { sessionId: string; referenceId: string }): {
+    descriptor: ReferenceDescriptor
+    path: string
+  } {
+    const descriptor = this.authorize(input.referenceId, input.sessionId)
+    const path = this.references.get(input.referenceId)?.canonicalPath
+    if (
+      !descriptor.available ||
+      !path ||
+      !descriptor.actions.includes('preview')
+    )
+      throw new WorkspaceOperationError(
+        'reference_action_denied',
+        '该引用无法预览文件内容。',
+      )
+    return { descriptor, path }
   }
 
   private resolveAttachment(

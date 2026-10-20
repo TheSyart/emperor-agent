@@ -1,4 +1,21 @@
 <script setup lang="ts">
+/**
+ * TerminalPane — the right workspace's 终端 pane: tabs of the session's PTYs
+ * over one xterm surface (the active tab, replayed from Core on activation).
+ *
+ * Sizing (FIX-05): fits wait until the surface size has settled for 100 ms,
+ * are skipped while the column is closed (`visible` false) or the surface is
+ * below 20 × 5 cells, and the PTY hears only about a size it has not been
+ * sent yet (terminalFit.ts). Focus: only an explicit activation — the pane
+ * picked (`focusRequest`), a tab clicked, 新建终端 — moves keyboard focus
+ * into the terminal; restoring after a session switch never does.
+ *
+ * Props:
+ * - sessionId.
+ * - visible?: the workspace column is open (default true).
+ * - focusRequest?: nonce; a new non-zero value focuses the terminal once it
+ *   is ready (WorkspacePanel sends one when the user shows this pane).
+ */
 import { confirmTerminalClose } from './terminalClose'
 import IconButton from '../ui/IconButton.vue'
 import { FitAddon } from '@xterm/addon-fit'
@@ -9,8 +26,20 @@ import { Plus, TerminalSquare, X } from 'lucide-vue-next'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onTerminalEvent } from '../../api/backend'
 import { core } from '../../api/http'
+import {
+  TERMINAL_RESIZE_DEBOUNCE_MS,
+  fitAllowed,
+  terminalFontFamily,
+} from './terminalFit'
 
-const props = defineProps<{ sessionId: string }>()
+const props = withDefaults(
+  defineProps<{
+    sessionId: string
+    visible?: boolean
+    focusRequest?: number
+  }>(),
+  { visible: true, focusRequest: 0 },
+)
 const container = ref<HTMLElement | null>(null)
 const terminals = ref<TerminalSummary[]>([])
 const activeId = ref('')
@@ -26,13 +55,38 @@ let initializing = false
 let pendingEvents: TerminalEvent[] = []
 let pendingEventBytes = 0
 let pendingOverflow = false
+let resizeTimer: ReturnType<typeof setTimeout> | undefined
+/** `cols×rows` last sent to the active PTY ('' = nothing yet). */
+let sentSize = ''
+/** The user asked for the terminal; focus it once it is ready. */
+let focusPending = false
 
 onMounted(async () => {
   await restore()
 })
 watch(
   () => props.sessionId,
-  () => void restore(),
+  () => {
+    // Restoring another session's terminals is not an activation.
+    focusPending = false
+    void restore()
+  },
+)
+watch(
+  () => props.focusRequest,
+  (nonce) => {
+    focusPending = Boolean(nonce)
+    if (focusPending && terminal && !initializing) {
+      focusPending = false
+      terminal.focus()
+    }
+  },
+  { immediate: true },
+)
+// The column opened again: fit once its animation has settled.
+watch(
+  () => props.visible,
+  (visible) => visible && scheduleFit(),
 )
 onBeforeUnmount(() => {
   ownerGeneration += 1
@@ -63,9 +117,20 @@ async function restore(): Promise<void> {
   }
 }
 
+/** 新建终端: an explicit activation, so the new terminal takes focus. */
+function newTerminal(): void {
+  void createTerminal(props.sessionId, ownerGeneration, true)
+}
+
+/** A tab clicked: an explicit activation. */
+function selectTerminal(terminalId: string): void {
+  void activate(terminalId, props.sessionId, ownerGeneration, true)
+}
+
 async function createTerminal(
   owner = props.sessionId,
   generation = ownerGeneration,
+  focus = false,
 ): Promise<void> {
   if (terminals.value.length >= 8) return
   try {
@@ -82,7 +147,7 @@ async function createTerminal(
       return
     }
     terminals.value = [...terminals.value, created]
-    await activate(created.id, owner, generation)
+    await activate(created.id, owner, generation, focus)
   } catch (cause) {
     if (isCurrentOwner(owner, generation)) error.value = message(cause)
   }
@@ -92,6 +157,7 @@ async function activate(
   terminalId: string,
   owner = props.sessionId,
   generation = ownerGeneration,
+  focus = false,
 ): Promise<void> {
   if (!terminalId || !isCurrentOwner(owner, generation)) return
   disposeTerminal()
@@ -120,7 +186,8 @@ async function activate(
   terminal = new Terminal({
     cursorBlink: true,
     convertEol: false,
-    fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, monospace)',
+    // Canvas measuring cannot resolve var(): pass the computed family.
+    fontFamily: terminalFontFamily(container.value),
     fontSize: 12,
     scrollback: 10_000,
     theme: {
@@ -144,7 +211,7 @@ async function activate(
         error.value = message(cause)
     })
   })
-  resizeObserver = new ResizeObserver(() => fitAndResize())
+  resizeObserver = new ResizeObserver(() => scheduleFit())
   resizeObserver.observe(container.value)
   fitAndResize()
   try {
@@ -187,7 +254,10 @@ async function activate(
       terminal.writeln(
         `\r\n[process exited: ${replay.terminal.exitCode ?? 'signal'}]`,
       )
-    terminal.focus()
+    if (focus || focusPending) {
+      focusPending = false
+      terminal.focus()
+    }
   } catch (cause) {
     if (isCurrentActivation(owner, generation, activation, terminalId))
       error.value = message(cause)
@@ -261,33 +331,52 @@ function applyTerminalEvent(event: TerminalEvent): void {
   }
 }
 
+/** The surface changed size: fit once it has settled. */
+function scheduleFit(): void {
+  clearTimeout(resizeTimer)
+  resizeTimer = setTimeout(fitAndResize, TERMINAL_RESIZE_DEBOUNCE_MS)
+}
+
 function fitAndResize(): void {
-  if (!terminal || !fitAddon || !activeId.value) return
+  clearTimeout(resizeTimer)
+  resizeTimer = undefined
+  if (!terminal || !fitAddon || !activeId.value || !props.visible) return
   const owner = props.sessionId
   const terminalId = activeId.value
   const activation = activationGeneration
   try {
+    // A closing column or a squeezed window: keep the size the PTY has.
+    if (!fitAllowed(fitAddon.proposeDimensions())) return
     fitAddon.fit()
-    void core('terminals.resize', {
-      sessionId: owner,
-      terminalId,
-      cols: terminal.cols,
-      rows: terminal.rows,
-    }).catch((cause) => {
-      if (
-        props.sessionId === owner &&
-        activeId.value === terminalId &&
-        activationGeneration === activation
-      )
-        error.value = message(cause)
-    })
   } catch {
-    // Hidden panels can briefly report zero bounds; the next observer tick retries.
+    // Hidden panels can briefly report zero bounds; the next change retries.
+    return
   }
+  const size = `${terminal.cols}x${terminal.rows}`
+  if (size === sentSize) return
+  sentSize = size
+  void core('terminals.resize', {
+    sessionId: owner,
+    terminalId,
+    cols: terminal.cols,
+    rows: terminal.rows,
+  }).catch((cause) => {
+    if (
+      props.sessionId === owner &&
+      activeId.value === terminalId &&
+      activationGeneration === activation
+    ) {
+      sentSize = ''
+      error.value = message(cause)
+    }
+  })
 }
 
 function disposeTerminal(): void {
   activationGeneration += 1
+  clearTimeout(resizeTimer)
+  resizeTimer = undefined
+  sentSize = ''
   resizeObserver?.disconnect()
   resizeObserver = null
   terminal?.dispose()
@@ -364,7 +453,7 @@ function message(value: unknown): string {
           :aria-controls="`terminal-panel-${item.id}`"
           :tabindex="activeId === item.id ? 0 : -1"
           :class="{ active: activeId === item.id }"
-          @click="activate(item.id)"
+          @click="selectTerminal(item.id)"
           @keydown="selectAdjacentTerminal(index, $event.key)"
         >
           <TerminalSquare :size="13" />
@@ -386,7 +475,7 @@ function message(value: unknown): string {
         label="新建终端"
         size="xs"
         :disabled="terminals.length >= 8"
-        @click="createTerminal()"
+        @click="newTerminal"
       >
         <Plus :size="14" />
       </IconButton>
@@ -396,7 +485,7 @@ function message(value: unknown): string {
       v-if="!terminals.length"
       type="button"
       class="terminal-empty-action"
-      @click="createTerminal()"
+      @click="newTerminal"
     >
       <TerminalSquare :size="16" />
       新建终端
@@ -544,6 +633,7 @@ function message(value: unknown): string {
 .terminal-surface {
   min-height: 0;
   flex: 1;
+  font-family: var(--font-mono), monospace;
   padding: var(--space-2) var(--space-1) var(--space-1) var(--space-2);
   overflow: hidden;
   background: rgb(var(--surface-base));

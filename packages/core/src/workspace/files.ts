@@ -41,9 +41,17 @@ export interface WorkspaceFileReadResult {
   kind: 'text' | 'image' | 'binary'
   mimeType: string
   bytes: number
+  /** mtime (ms) of the file read; absent for recorded turn snapshots. */
+  modifiedAt?: number
   truncated: boolean
   content?: string
   dataBase64?: string
+}
+
+/** Size and mtime of a file, to tell whether a preview is still current. */
+export interface WorkspaceFileStat {
+  bytes: number
+  modifiedAt: number
 }
 
 export interface WorkspaceFilesServiceOptions {
@@ -337,6 +345,7 @@ export class WorkspaceFilesService {
       name: basename(target),
       mimeType,
       bytes: metadata.size,
+      modifiedAt: metadata.mtimeMs,
     }
     if (isPreviewableImageMime(mimeType)) {
       if (metadata.size > this.maxImageBytes)
@@ -361,6 +370,19 @@ export class WorkspaceFilesService {
       truncated: metadata.size > bounded.byteLength,
       content: bounded.toString('utf8'),
     }
+  }
+
+  /** Size and mtime only (no read): the same checks as read(). */
+  stat(input: { sessionId: string; relativePath: string }): WorkspaceFileStat {
+    const scope = this.scope(input.sessionId)
+    const target = resolveSafePath(scope.projectRoot, input.relativePath, true)
+    const metadata = statSync(target)
+    if (!metadata.isFile())
+      throw new WorkspaceOperationError(
+        'workspace_path_not_file',
+        '目标路径不是文件。',
+      )
+    return { bytes: metadata.size, modifiedAt: metadata.mtimeMs }
   }
 
   private scope(sessionId: string): WorkspaceProjectScope {

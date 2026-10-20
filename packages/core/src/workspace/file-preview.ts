@@ -1,13 +1,27 @@
-import { realpathSync } from 'node:fs'
+import { realpathSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { WorkspaceOperationError } from './common'
-import { WorkspaceFilesService, type WorkspaceFileReadResult } from './files'
+import {
+  WorkspaceFilesService,
+  type WorkspaceFileReadResult,
+  type WorkspaceFileStat,
+} from './files'
 
 export type FilePreviewInput =
   | { source: 'project'; sessionId: string; path: string }
   | { source: 'turn'; sessionId: string; path: string; turn: number }
   | { source: 'reference'; sessionId: string; referenceId: string }
   | { source: 'attachment'; attachmentId: string }
+
+/**
+ * The previews that can change on disk (files.stat). Turn snapshots and
+ * managed attachments never do.
+ */
+export type FileStatInput = Extract<
+  FilePreviewInput,
+  { source: 'project' } | { source: 'reference' }
+>
+export type FileStatResult = WorkspaceFileStat
 
 export interface FilePreviewResult extends Omit<
   WorkspaceFileReadResult,
@@ -34,6 +48,29 @@ export function filePreviewResult(
     ...(unsupported
       ? { kind: 'binary' as const, content: undefined, truncated: false }
       : {}),
+  }
+}
+
+/** Exact-path twin of previewCanonicalFile: size and mtime, no read. */
+export function statCanonicalFile(path: string): FileStatResult {
+  let canonical: string
+  try {
+    canonical = realpathSync(path)
+  } catch {
+    throw new WorkspaceOperationError(
+      'workspace_path_missing',
+      '文件不存在或已被移除。',
+    )
+  }
+  if (canonical !== path)
+    throw new WorkspaceOperationError(
+      'reference_target_changed',
+      '文件位置已改变，请重新打开引用。',
+    )
+  const metadata = statSync(canonical)
+  return {
+    bytes: metadata.isFile() ? metadata.size : 0,
+    modifiedAt: metadata.mtimeMs,
   }
 }
 

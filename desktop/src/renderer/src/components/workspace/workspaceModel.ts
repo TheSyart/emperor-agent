@@ -5,6 +5,13 @@ export const FILES_TREE_MIN = 240
 export const FILES_TREE_MAX = 320
 export const FILES_TREE_DEFAULT = 280
 
+/**
+ * 审查 refreshes the slow parts (current-branch PR through `gh`, the branch
+ * list) at most this often; status and worktrees come with every workspace
+ * snapshot poll.
+ */
+export const GIT_REVIEW_SLOW_TTL_MS = 60_000
+
 /** Files tree column width (px) persisted as right_workspace.filesTreeWidth. */
 export function clampFilesTreeWidth(value: number): number {
   if (!Number.isFinite(value)) return FILES_TREE_DEFAULT

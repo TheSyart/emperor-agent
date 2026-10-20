@@ -157,6 +157,13 @@ async function launch(
     .setViewportSize({ width: 1440, height: 900 })
     .catch(() => undefined)
   await page.locator('.app-frame').waitFor({ timeout: 60_000 })
+  // The dev app's Chromium profile is shared between runs: start from the
+  // default frame (workspace closed), not the pane the last run left open.
+  await page.evaluate(() => localStorage.removeItem('emperor.frame.v2'))
+  await page.reload()
+  await page.locator('.app-frame').waitFor({ timeout: 60_000 })
+  // The draft the first load opened is gone after the reload.
+  await page.getByRole('button', { name: '新对话' }).first().click()
   return { app, page }
 }
 
@@ -174,6 +181,31 @@ async function userCookies(app: ElectronApplication): Promise<string[]> {
       (cookie) => cookie.name,
     ),
   )
+}
+
+/** The built-in browser's native view as main holds it (null: none). */
+async function userView(
+  app: ElectronApplication,
+): Promise<{ id: number; url: string; visible: boolean } | null> {
+  return await app.evaluate(({ BrowserWindow, session }) => {
+    const partition = session.fromPartition('emperor-browser')
+    for (const win of BrowserWindow.getAllWindows())
+      for (const child of win.contentView.children) {
+        const contents = (child as { webContents?: Electron.WebContents })
+          .webContents
+        if (
+          contents &&
+          !contents.isDestroyed() &&
+          contents.session === partition
+        )
+          return {
+            id: contents.id,
+            url: contents.getURL(),
+            visible: child.getVisible(),
+          }
+      }
+    return null
+  })
 }
 
 /** Your downloads as the settings page reads them (preload bridge). */
@@ -267,14 +299,14 @@ async function userBrowser(
     page,
     'set to the built-in browser, the link opens in the 浏览器 pane',
     async () => {
+      // UI-S07 moved the choice to 设置 › 常规 › 会话 › 网页链接.
       const dialog = await openBrowserSettings(page)
-      await dialog.locator('#browser-link-target').click()
-      await page.getByRole('menuitem', { name: /^Emperor/ }).click()
+      await dialog.locator('.nav-cell[data-section="general"]').click()
+      const target = dialog.locator('#general-link-target')
+      await target.click()
+      await page.getByRole('menuitem', { name: /在 Emperor 中打开/ }).click()
       await until(
-        async () =>
-          (await dialog.locator('#browser-link-target').innerText()).includes(
-            'Emperor',
-          ),
+        async () => (await target.innerText()).includes('Emperor'),
         5_000,
         'the setting to show the built-in browser',
       )
@@ -333,6 +365,73 @@ async function userBrowser(
       if (!entries.some((text) => text.includes('Storage')))
         throw new Error(`history ${JSON.stringify(entries)}`)
       return { cookies: await userCookies(app), entries }
+    },
+  )
+
+  await check(
+    page,
+    'leaving the 浏览器 pane hides the page; coming back finds the same one',
+    async () => {
+      // FIX-05: the pane stays alive behind the others (v-show), and main
+      // only hides the native view; same webContents, cookie and address.
+      // The history menu may still be open (Escape went to the page): an
+      // outside press closes it, and the view shows again a frame later.
+      await page.locator('.workspace-title').click()
+      await page
+        .getByRole('menu', { name: '浏览历史' })
+        .waitFor({ state: 'hidden', timeout: 5_000 })
+      await until(
+        async () => (await userView(app))?.visible === true,
+        5_000,
+        'the native view to show',
+      ).catch(async (error: Error) => {
+        const overlays = await page.evaluate(() =>
+          [
+            ...document.querySelectorAll(
+              '.ds-menu, [role="menu"], [role="dialog"], [role="listbox"], [aria-modal="true"]',
+            ),
+          ].map((node) => node.outerHTML.slice(0, 160)),
+        )
+        throw new Error(
+          `${error.message}: ${JSON.stringify({ view: await userView(app), overlays })}`,
+        )
+      })
+      const before = (await userView(app))!
+      await page.getByRole('button', { name: '工作台首页' }).click()
+      try {
+        await page.locator('.workspace-launcher').waitFor({ timeout: 5_000 })
+        await until(
+          async () => (await userView(app))?.visible !== true,
+          5_000,
+          'the native view to hide',
+        )
+        const hidden = await userView(app)
+        if (hidden?.id !== before.id)
+          throw new Error(
+            `the page closed with the pane: ${JSON.stringify({ before, hidden })}`,
+          )
+      } finally {
+        await page.locator('.segments button[data-pane="browser"]').click()
+      }
+      await until(
+        async () => (await userView(app))?.visible === true,
+        5_000,
+        'the native view to show again',
+      )
+      const after = await userView(app)
+      if (after?.id !== before.id || after.url !== before.url)
+        throw new Error(
+          `not the same page: ${JSON.stringify({ before, after })}`,
+        )
+      if (!(await userCookies(app)).includes('cu_probe'))
+        throw new Error('the cookie went with the pane')
+      const address = await page
+        .locator('.browser-pane .browser-address input')
+        .inputValue()
+      if (!address.includes('/storage'))
+        throw new Error(`address bar: ${address}`)
+      await page.screenshot({ path: join(shots, 'pane-switch-kept.png') })
+      return { webContentsId: after.id, url: after.url }
     },
   )
 
