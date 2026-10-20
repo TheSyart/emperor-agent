@@ -1577,6 +1577,17 @@ async function startup(): Promise<void> {
         webFetchClient,
         logDirectory: logLocation.dir,
         ...(coreSecretSealer ? { secretSealer: coreSecretSealer } : {}),
+        // Dev-build e2e only: external executors look for sign-ins in this
+        // folder instead of ~/.claude and never run the login shell (AGT-02).
+        ...(!app.isPackaged && process.env.EMPEROR_E2E_EXECUTOR_HOME
+          ? {
+              executorHome: {
+                home: process.env.EMPEROR_E2E_EXECUTOR_HOME,
+                environment: { PATH: process.env.PATH ?? '' },
+                loginShell: { read: async () => ({}) },
+              },
+            }
+          : {}),
       },
     })
     const core = coreApi

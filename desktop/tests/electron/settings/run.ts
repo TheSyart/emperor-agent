@@ -6,7 +6,9 @@
  * window keeps the pages without horizontal scrolling. A relaunch with a
  * damaged vault.json still starts and 密码管理器 offers 重新开始（先备份）
  * (SEC-09). 高级 › 存储 (KRN-12) shows a total within 5% of `du` and 清理
- * removes a 40-day-old orphan spill file. Screenshots of every page land
+ * removes a 40-day-old orphan spill file. 子智能体 › Claude Code 设置令牌
+ * seals the pasted token and shows only 末 4 位, reading sign-ins from an
+ * empty folder instead of ~/.claude (AGT-02). Screenshots of every page land
  * in out-e2e/settings/.
  * Prints `E2E-RESULT {json}` lines like the other Electron suites.
  *
@@ -160,6 +162,10 @@ async function launch(
     if (value !== undefined) env[key] = value
   delete env.ELECTRON_RUN_AS_NODE
   env.EMPEROR_CONFIG_DIR = home
+  // Claude/Codex sign-ins come from an empty folder, never ~/.claude, and
+  // the login shell does not run (AGT-02).
+  env.EMPEROR_E2E_EXECUTOR_HOME = join(home, 'executor-home')
+  mkdirSync(env.EMPEROR_E2E_EXECUTOR_HOME, { recursive: true })
   const app = await _electron.launch({
     args: ['.'],
     cwd: desktop,
@@ -249,6 +255,56 @@ async function settings(page: Page, home: string): Promise<void> {
       return { sections: keys.length }
     },
     { critical: true },
+  )
+
+  await check(
+    page,
+    'Claude Code 设置令牌 seals the token and shows only 末 4 位',
+    async () => {
+      const token = 'sk-ant-oat01-e2e-fixture-not-a-real-token-9f3c'
+      const dialog = await openSection(page, 'executors')
+      const card = dialog.locator('[data-settings-agent="claude-code"]')
+      const signIn = card.locator('[data-claude-sign-in]')
+      await signIn.waitFor({ timeout: 15_000 })
+      await until(
+        async () => (await signIn.innerText()).includes('尚未登录'),
+        30_000,
+        'Claude Code 尚未登录',
+      )
+      if ((await dialog.innerText()).includes('auth login'))
+        throw new Error('the page still says auth login')
+      await signIn.locator('[data-claude-token-set]').click()
+      const tokenDialog = page.getByRole('dialog', {
+        name: '设置 Claude Code 令牌',
+      })
+      await tokenDialog.waitFor()
+      await tokenDialog.locator('[data-claude-token-input]').fill(token)
+      await tokenDialog.locator('[data-claude-token-save]').click()
+      await tokenDialog.waitFor({ state: 'hidden', timeout: 30_000 })
+      const status = signIn.locator('[data-claude-auth-source]')
+      await until(
+        async () => (await status.innerText()).includes('末 4 位 9f3c'),
+        30_000,
+        '已设置 · 末 4 位',
+      )
+      await page.screenshot({ path: join(shots, 'claude-token-set.png') })
+      const file = join(home, 'delegations', 'credentials.json')
+      const raw = readFileSync(file, 'utf8')
+      if (!raw.includes('el1:') || raw.includes(token))
+        throw new Error('credentials.json is not sealed')
+      if ((await page.content()).includes(token))
+        throw new Error('the page shows the token')
+      await signIn.locator('[data-claude-token-clear]').click()
+      await until(
+        async () => (await signIn.innerText()).includes('尚未登录'),
+        30_000,
+        'Claude Code back to 尚未登录',
+      )
+      return {
+        sealed: true,
+        cleared: !readFileSync(file, 'utf8').includes('el1:'),
+      }
+    },
   )
 
   await check(page, 'every section opens with its own title', async () => {
