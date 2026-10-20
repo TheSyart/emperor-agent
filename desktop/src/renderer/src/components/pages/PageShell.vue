@@ -131,7 +131,7 @@ const titleId = `page-title-${useId()}`
   margin: 0;
   overflow: hidden;
   color: rgb(var(--text-1));
-  font-size: var(--font-size-2xl);
+  font-size: var(--fs-hero);
   line-height: var(--space-7);
   font-weight: 600;
   text-overflow: ellipsis;

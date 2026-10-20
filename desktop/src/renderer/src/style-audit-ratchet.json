@@ -438,7 +438,6 @@
       "components/conversation/takeover/QuestionComposer.vue": 4,
       "components/conversation/tools/ExitPlanView.vue": 1,
       "components/conversation/TurnScrubber.vue": 2,
-      "components/pages/PageShell.vue": 1,
       "components/pages/pulls/PullRequestRow.vue": 1,
       "components/pages/scheduler/SchedulerJobRow.vue": 1,
       "components/settings/ExecutorsSection.vue": 2,
@@ -479,8 +478,8 @@
       "styles/activity.css": 2,
       "styles/dsh/animations.css": 2,
       "styles/materials.css": 9,
-      "styles/panels.css": 9,
-      "styles/surfaces/menus.css": 16,
+      "styles/panels.css": 8,
+      "styles/surfaces/menus.css": 8,
       "theme/components.css": 34,
       "theme/primitives.css": 25
     }

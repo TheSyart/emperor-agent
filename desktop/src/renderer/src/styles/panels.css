@@ -134,7 +134,7 @@
   flex-shrink: 0;
   color: rgb(var(--text-1) / var(--text-secondary));
   font-family: var(--font-mono);
-  font-size: var(--font-size-xs);
+  font-size: var(--fs-xxxs);
 }
 
 /* ─── 首次运行：模型未配置对话框（UI-S12） ───
