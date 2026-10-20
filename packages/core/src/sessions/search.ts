@@ -8,8 +8,9 @@ import { LOG_FILE } from '../session-log/store'
  * sessions first, one hit per session — the first message that contains the
  * query, from the user's own messages and the model's replies (tool output,
  * injected context and other runtime text are not searched). Logs are read
- * line by line; a line that does not contain the query as raw text is not
- * parsed, and a line that cannot be parsed is skipped. Logs over
+ * line by line; a line that does not contain the query as it is written
+ * inside a JSON string is not parsed, and a line that cannot be parsed is
+ * skipped. Logs over
  * MAX_LOG_BYTES are skipped (title search still finds them).
  */
 export interface SessionSearchHit {
@@ -61,6 +62,8 @@ async function firstMatch(
   needle: string,
 ): Promise<Pick<SessionSearchHit, 'role' | 'snippet'> | null> {
   if (!existsSync(path)) return null
+  // `"` and `\` are escaped in the log line: look for the escaped form.
+  const raw = JSON.stringify(needle).slice(1, -1)
   try {
     if (statSync(path).size > MAX_LOG_BYTES) return null
   } catch {
@@ -72,7 +75,7 @@ async function firstMatch(
   })
   try {
     for await (const line of lines) {
-      if (!line.toLowerCase().includes(needle)) continue
+      if (!line.toLowerCase().includes(raw)) continue
       const found = messageText(line)
       if (!found) continue
       if (!found.text.toLowerCase().includes(needle)) continue

@@ -173,6 +173,19 @@ describe('searchSessionLogs', () => {
     ).toEqual([expect.objectContaining({ sessionId: 'a' })])
   })
 
+  it('finds text with quotes and backslashes, which the log escapes', async () => {
+    const dir = root()
+    write(dir, { a: [['user', '把 "C:\\temp" 换成相对路径']] })
+    const hits = await searchSessionLogs({
+      root: dir,
+      sessions: index(['a']),
+      query: '"c:\\temp"',
+    })
+    expect(hits.map((hit) => hit.snippet)).toEqual([
+      '把 "C:\\temp" 换成相对路径',
+    ])
+  })
+
   it('skips a log line it cannot parse and keeps searching', async () => {
     const dir = root()
     write(dir, { a: [['user', '第一条']] })
