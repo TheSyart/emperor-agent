@@ -43,8 +43,9 @@ describe('agentSummary (UI-S05 子智能体 row)', () => {
   })
 
   it('reads 2 完成 for a finished pair and nothing for none', () => {
-    expect(agentSummary([agent('a', 'completed'), agent('b', 'completed')]))
-      .toBe('2 完成')
+    expect(
+      agentSummary([agent('a', 'completed'), agent('b', 'completed')]),
+    ).toBe('2 完成')
     expect(agentSummary([])).toBe('')
   })
 })

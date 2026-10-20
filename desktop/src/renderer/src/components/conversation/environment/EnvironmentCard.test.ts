@@ -99,9 +99,8 @@ describe('EnvironmentCard (UI-S05: a read-only summary)', () => {
     )
     expect(items).toEqual(['复制项目路径', '在访达中显示', '隐藏此卡片'])
     // Without a project the path entries are there but unavailable.
-    const [copy, reveal, hide] = document.querySelectorAll<HTMLButtonElement>(
-      '[role="menuitem"]',
-    )
+    const [copy, reveal, hide] =
+      document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
     expect(copy.disabled).toBe(true)
     expect(reveal.disabled).toBe(true)
     hide.click()
