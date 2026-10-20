@@ -2027,6 +2027,17 @@ export const CORE_OPERATION_REGISTRY = {
     z.tuple([idSchema, sessionPatchSchema]),
     (api, [id, patch]) => api.sessions.rename(id, patch),
   ),
+  'sessions.search': operation(
+    z.tuple([
+      z
+        .object({
+          query: z.string().max(200),
+          limit: z.number().int().min(1).max(50).optional(),
+        })
+        .strict(),
+    ]),
+    (api, [input]) => api.sessions.search(input),
+  ),
   'sessions.watch': operation(z.tuple([sessionWatchSchema]), (api, [input]) =>
     api.sessions.watch(input),
   ),

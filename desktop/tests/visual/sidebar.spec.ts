@@ -4,9 +4,10 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { installVisualCoreBridge, visualProjectDir } from './visualBridge'
 
-// Sidebar and rail (UI-S01): the brand bar (Emperor + collapse), 置顶 /
-// 项目 / 对话 sections, the permanent 56px rail (new chat, search, 会话, the
-// pages, bell, settings) and the notifications popover.
+// Sidebar and rail (UI-S01/S02): the brand bar (Emperor + collapse), 置顶 /
+// 项目 / 对话 sections (今天 / 昨天 / 更早, no dates), the permanent 56px rail
+// (new chat, search, 会话, the pages, bell, settings), the command palette
+// the rail's search opens, and the notifications popover.
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'sidebar')
 
 test.beforeAll(() => {
@@ -160,8 +161,24 @@ for (const theme of ['dark', 'light'] as const) {
       nav.getByRole('button', { name: '会话', exact: true }),
     ).toHaveAttribute('aria-current', 'page')
     await expect(page.getByRole('button', { name: '帮助' })).toHaveCount(0)
-    // The search capsule stays folded until the rail's search opens it.
-    await expect(page.getByLabel('搜索对话')).toHaveCount(0)
+    // UI-S02: search is the rail's command palette, never a capsule here;
+    // rows show no date (the relative time is part of the hover layer).
+    await expect(page.getByTestId('command-palette')).toHaveCount(0)
+    await expect(root.locator('.search')).toHaveCount(0)
+    expect(await root.innerText()).not.toMatch(/\d{4}-\d{2}-\d{2}/)
+    for (const label of ['7 天内', '30 天内'])
+      await expect(root.getByText(label, { exact: true })).toHaveCount(0)
+    const row = root.locator('.session-row', { hasText: '普通对话' })
+    await expect(row.locator('[data-hover-layer]')).toBeHidden()
+    await row.hover()
+    await expect(row.locator('[data-hover-layer] .time')).toBeVisible()
+    await expect(row.getByRole('button', { name: '会话操作' })).toBeVisible()
+    // Not shot(): it moves the pointer away, which would end the hover.
+    await page.screenshot({
+      path: resolve(screenshotDir, `row-hover-${theme}.png`),
+      animations: 'disabled',
+    })
+    await page.mouse.move(600, 400)
     await shot(page, `expanded-${theme}`)
   })
 
@@ -203,10 +220,10 @@ for (const theme of ['dark', 'light'] as const) {
       'aria-current',
       'page',
     )
-    // Search from the rail expands the sidebar with the capsule focused.
+    // Search from the rail opens the palette and leaves the sidebar folded.
     await nav.getByRole('button', { name: '搜索', exact: true }).click()
-    await expect(sidebar(page)).toBeVisible()
-    await expect(page.getByLabel('搜索对话')).toBeFocused()
+    await expect(page.getByLabel('搜索会话')).toBeFocused()
+    await expect(sidebar(page)).toBeHidden()
   })
 
   test(`pinned section (${theme})`, async ({ page }) => {
@@ -303,28 +320,57 @@ for (const theme of ['dark', 'light'] as const) {
   })
 }
 
-test('the rail search opens the capsule and Esc closes it', async ({
-  page,
-}) => {
+test('the rail search opens the command palette (UI-S02)', async ({ page }) => {
   await open(page, '/chat/build-ui')
   const search = rail(page).getByRole('button', { name: '搜索', exact: true })
   await search.click()
-  const input = page.getByLabel('搜索对话')
+  const palette = page.getByTestId('command-palette')
+  const input = palette.getByLabel('搜索会话')
   await expect(input).toBeFocused()
+  // An empty query lists the latest sessions.
+  await expect(palette.locator('[data-palette-result]').first()).toBeVisible()
   await page.keyboard.press('Escape')
-  await expect(input).toHaveCount(0)
+  await expect(palette).toHaveCount(0)
 
+  // Centered over the app, never inside the sidebar.
   await search.click()
+  const box = (await palette.boundingBox())!
+  const viewport = page.viewportSize()!
+  expect(Math.abs(box.x + box.width / 2 - viewport.width / 2)).toBeLessThan(2)
+  await expect(sidebar(page).getByTestId('command-palette')).toHaveCount(0)
   await input.fill('API')
-  await expect(page.locator('.search-result')).toHaveCount(1)
-  await page.keyboard.press('Escape')
-  await expect(input).toHaveValue('')
-  await page.keyboard.press('Escape')
-  await expect(input).toHaveCount(0)
+  await expect(palette.locator('[data-palette-result]')).toHaveCount(1)
+  await expect(
+    palette.locator('[data-palette-result][aria-selected="true"]'),
+  ).toContainText('API')
+  await shot(page, 'palette')
+  // What was said in a session is found after a short pause.
+  await input.fill('设计稿')
+  const hit = palette.locator('[data-palette-result="chat-main"]')
+  await expect(hit).toContainText('侧栏的间距')
+  await shot(page, 'palette-contents')
+  await input.fill('API')
+  await expect(palette.locator('[data-palette-result]')).toHaveCount(1)
+  await page.keyboard.press('Enter')
+  await expect(palette).toHaveCount(0)
+  await expect(page).toHaveURL(/\/chat\/build-api/)
 
   // ⌘K / Ctrl+K opens it from anywhere.
   await page.keyboard.press('ControlOrMeta+k')
-  await expect(page.getByLabel('搜索对话')).toBeFocused()
+  await expect(page.getByLabel('搜索会话')).toBeFocused()
+})
+
+test('↑ and ↓ move between sidebar sessions (UI-S02)', async ({ page }) => {
+  await open(page, '/chat/build-ui')
+  const rows = sidebar(page).locator('.session-row')
+  await rows.first().focus()
+  await page.keyboard.press('ArrowDown')
+  const second = rows.nth(1)
+  await expect(second).toBeFocused()
+  const id = await second.getAttribute('data-session-id')
+  await expect(page).toHaveURL(new RegExp(`/chat/${id}$`))
+  await page.keyboard.press('ArrowUp')
+  await expect(rows.first()).toBeFocused()
 })
 
 test('live runtime events reach the bell and navigate on click', async ({
