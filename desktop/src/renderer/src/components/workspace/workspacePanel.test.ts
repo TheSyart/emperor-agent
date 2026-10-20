@@ -24,6 +24,7 @@ import {
 } from './useWorkspaceSnapshot'
 import {
   consumeWorkspaceRequest,
+  openWorkspacePane,
   requestWorkspace,
   workspaceRequest,
 } from './workspaceState'
@@ -147,15 +148,17 @@ function mount(): HTMLDivElement {
   return container
 }
 
-function row(root: HTMLElement, pane: string): HTMLButtonElement {
+/** An entry of the no-history empty state. */
+function entry(root: HTMLElement, pane: string): HTMLButtonElement {
   return root.querySelector<HTMLButtonElement>(
-    `.launcher-row[data-pane="${pane}"]`,
+    `.workspace-start .start-entry[data-pane="${pane}"]`,
   )!
 }
 
+/** A tab of the PaneHeader's segmented pane switch. */
 function segment(root: HTMLElement, pane: string): HTMLButtonElement {
   return root.querySelector<HTMLButtonElement>(
-    `.segments button[data-pane="${pane}"]`,
+    `.workspace-panes [data-tab-id="${pane}"]`,
   )!
 }
 
@@ -196,25 +199,32 @@ afterEach(() => {
 })
 
 describe('WorkspacePanel', () => {
-  it('opens on the launcher with shortcut chips and the git reason', async () => {
+  it('1 · with no history, shows the four pane entries with their shortcuts and reasons', async () => {
     const root = mount()
     await flush()
     expect(root.querySelector('.workspace-title')?.textContent).toBe('工作台')
-    const panes = [...root.querySelectorAll<HTMLElement>('.launcher-row')].map(
-      (el) => el.dataset.pane,
-    )
+    const panes = [
+      ...root.querySelectorAll<HTMLElement>('.workspace-start .start-entry'),
+    ].map((el) => el.dataset.pane)
     expect(panes).toEqual(['review', 'terminal', 'files', 'browser'])
-    for (const pane of panes)
-      expect(row(root, pane!).querySelectorAll('.kbd').length).toBeGreaterThan(
-        1,
-      )
+    // An available pane shows its shortcut; an unavailable one says why.
+    for (const pane of ['terminal', 'files', 'browser'])
+      expect(
+        entry(root, pane).querySelectorAll('.ds-kbd').length,
+      ).toBeGreaterThan(1)
+    expect(entry(root, 'review').querySelectorAll('.ds-kbd')).toHaveLength(0)
     expect(core).toHaveBeenCalledWith('workspace.snapshot', { sessionId: 's1' })
     // Snapshot without git: 审查 is disabled and says why.
-    expect(row(root, 'review').disabled).toBe(true)
-    expect(row(root, 'review').textContent).toContain('当前项目未初始化 Git')
-    expect(row(root, 'terminal').disabled).toBe(false)
-    expect(row(root, 'files').disabled).toBe(false)
-    expect(row(root, 'browser').disabled).toBe(false)
+    expect(entry(root, 'review').disabled).toBe(true)
+    expect(entry(root, 'review').textContent).toContain('当前项目未初始化 Git')
+    expect(entry(root, 'terminal').disabled).toBe(false)
+    expect(entry(root, 'files').disabled).toBe(false)
+    expect(entry(root, 'browser').disabled).toBe(false)
+    // No tab is selected yet, and there is no home to go back to.
+    expect(
+      root.querySelector('.workspace-panes [aria-selected="true"]'),
+    ).toBeNull()
+    expect(root.querySelector('button[aria-label="工作台首页"]')).toBeNull()
   })
 
   it('disables project panes without a project, keeping the browser', async () => {
@@ -222,15 +232,57 @@ describe('WorkspacePanel', () => {
     const root = mount()
     await flush()
     for (const pane of ['review', 'terminal']) {
-      expect(row(root, pane).disabled).toBe(true)
-      expect(row(root, pane).textContent).toContain('当前会话未绑定项目')
+      expect(entry(root, pane).disabled).toBe(true)
+      expect(entry(root, pane).textContent).toContain('当前会话未绑定项目')
       expect(segment(root, pane).disabled).toBe(true)
+      // The disabled tab says why on hover.
+      expect(
+        segment(root, pane).closest('.tab-item')?.getAttribute('title'),
+      ).toBe('当前会话未绑定项目')
     }
-    expect(row(root, 'browser').disabled).toBe(false)
-    expect(row(root, 'files').disabled).toBe(false)
+    expect(entry(root, 'browser').disabled).toBe(false)
+    expect(entry(root, 'files').disabled).toBe(false)
     expect(core).not.toHaveBeenCalledWith(
       'workspace.snapshot',
       expect.anything(),
+    )
+  })
+
+  it('1 · opens straight on the pane used last, without a launcher', async () => {
+    window.localStorage.setItem(
+      FRAME_STORAGE_KEY,
+      JSON.stringify({ workspace: 560, workspacePane: 'files' }),
+    )
+    resetFrameStateForTest()
+    const root = mount()
+    await flush()
+    await vi.waitFor(() =>
+      expect(root.querySelector('.files-pane')).not.toBeNull(),
+    )
+    expect(root.querySelector('.workspace-start')).toBeNull()
+    expect(root.querySelector('.workspace-launcher')).toBeNull()
+    expect(segment(root, 'files').getAttribute('aria-selected')).toBe('true')
+    expect(root.querySelector('.workspace-title')?.textContent).toBe('文件')
+  })
+
+  it('1 · closing and reopening — or 打开工作台 from the card — keeps the last pane', async () => {
+    const root = mount()
+    await flush()
+    entry(root, 'terminal').click()
+    await flush()
+    expect(useFrameState().workspacePane).toBe('terminal')
+    root
+      .querySelector<HTMLButtonElement>('button[aria-label="关闭工作台"]')!
+      .click()
+    await flush()
+    // The environment card's 打开工作台 asks for no particular pane.
+    openWorkspacePane('launcher')
+    await flush()
+    expect(useFrameState().workspace).toBeGreaterThan(0)
+    expect(useFrameState().workspacePane).toBe('terminal')
+    expect(root.querySelector('.workspace-start')).toBeNull()
+    await vi.waitFor(() =>
+      expect(root.querySelector('.terminal-pane')).not.toBeNull(),
     )
   })
 
@@ -252,7 +304,7 @@ describe('WorkspacePanel', () => {
     }
     const root = mount()
     await flush()
-    expect(row(root, 'browser').disabled).toBe(false)
+    expect(entry(root, 'browser').disabled).toBe(false)
     expect(segment(root, 'browser').disabled).toBe(false)
     frameActions.openWorkspace(useFrameState(), 'browser')
     await flush()
@@ -260,14 +312,14 @@ describe('WorkspacePanel', () => {
     expect(root.querySelector('.workspace-empty')).toBeNull()
   })
 
-  it('switches panes from the launcher and the header, home returns', async () => {
+  it('switches panes from the empty state and the header tabs', async () => {
     const root = mount()
     await flush()
-    row(root, 'terminal').click()
+    entry(root, 'terminal').click()
     await flush()
     expect(useFrameState().workspacePane).toBe('terminal')
     expect(root.querySelector('.workspace-title')?.textContent).toBe('终端')
-    expect(segment(root, 'terminal').getAttribute('aria-pressed')).toBe('true')
+    expect(segment(root, 'terminal').getAttribute('aria-selected')).toBe('true')
     segment(root, 'files').click()
     await flush()
     expect(useFrameState().workspacePane).toBe('files')
@@ -276,23 +328,27 @@ describe('WorkspacePanel', () => {
     expect(useFrameState().workspacePane).toBe('browser')
     expect(root.querySelector('.workspace-title')?.textContent).toBe('浏览器')
     expect(segment(root, 'desktop')).toBeNull()
-    root
-      .querySelector<HTMLButtonElement>('button[aria-label="工作台首页"]')!
-      .click()
-    await flush()
-    expect(useFrameState().workspacePane).toBe('launcher')
-    expect(root.querySelector('.workspace-launcher')).not.toBeNull()
+    expect(root.querySelector('.workspace-start')).toBeNull()
   })
 
-  it('heads the panel with a PaneHeader that lines up with the 46px bar (UI-S01, UI-S11)', async () => {
+  it('heads the panel with a PaneHeader: the pane switch on the left, close on the right (UI-S06)', async () => {
     const root = mount()
     await flush()
     const header = root.querySelector<HTMLElement>(
       '.workspace-panel > .ds-pane-header',
     )!
     expect(header).not.toBeNull()
-    expect(header.querySelector('.workspace-title')?.textContent).toBe('工作台')
-    expect(header.querySelector('.segments')).not.toBeNull()
+    const tabs = header.querySelector<HTMLElement>('.workspace-panes')!
+    expect(tabs.dataset.variant).toBe('segmented')
+    expect(tabs.getAttribute('aria-label')).toBe('工作台面板')
+    expect(
+      [...tabs.querySelectorAll('[role="tab"]')].map((tab) =>
+        tab.textContent?.trim(),
+      ),
+    ).toEqual(['审查', '终端', '文件', '浏览器'])
+    const buttons = [...header.querySelectorAll<HTMLButtonElement>('button')]
+    expect(buttons.at(-1)?.getAttribute('aria-label')).toBe('关闭工作台')
+    expect(header.querySelector('button[aria-label="工作台首页"]')).toBeNull()
     // The system title bar moves the window again (UI-S11): no drag region.
     expect(header.hasAttribute('data-app-drag')).toBe(false)
     // 48px PaneHeader pulled up 2px: its bottom meets the 46px bar.
@@ -329,6 +385,34 @@ describe('WorkspacePanel', () => {
       ),
     )
     expect(workspaceRequest().value).toBeNull()
+  })
+
+  it('opens a file the child log on screen asks for (its owner is the child)', async () => {
+    bindWorkspaceSnapshotSource({
+      sessionId: () => sessionId.value,
+      projectPath: () => projectPath.value,
+      viewedSessionId: () => 'child-1',
+    })
+    const root = mount()
+    await flush()
+    requestWorkspace({
+      pane: 'files',
+      file: {
+        owner: 'child-1',
+        target: { source: 'attachment', attachmentId: 'att_2026-10_12345678' },
+      },
+    })
+    await vi.waitFor(() =>
+      expect(core).toHaveBeenCalledWith('files.preview', {
+        source: 'attachment',
+        attachmentId: 'att_2026-10_12345678',
+      }),
+    )
+    await vi.waitFor(() =>
+      expect(
+        root.querySelector('.files-pane .tab-item[data-active]'),
+      ).not.toBeNull(),
+    )
   })
 
   it('requestWorkspace({ pane: files, directory }) opens the folder in the tree', async () => {
@@ -551,9 +635,9 @@ describe('WorkspacePanel', () => {
     await flush()
     requestWorkspace({ pane: 'files', file: { path: 'src/a.ts' } })
     await vi.waitFor(() =>
-      expect(root.querySelector('.file-tab.active')?.textContent).toContain(
-        'a.ts',
-      ),
+      expect(
+        root.querySelector('.files-pane .tab-item[data-active]')?.textContent,
+      ).toContain('a.ts'),
     )
     const listings = core.mock.calls.filter(
       ([op]) => op === 'files.list',
@@ -562,9 +646,9 @@ describe('WorkspacePanel', () => {
     await flush()
     segment(root, 'files').click()
     await flush()
-    expect(root.querySelector('.file-tab.active')?.textContent).toContain(
-      'a.ts',
-    )
+    expect(
+      root.querySelector('.files-pane .tab-item[data-active]')?.textContent,
+    ).toContain('a.ts')
     expect(core.mock.calls.filter(([op]) => op === 'files.list')).toHaveLength(
       listings,
     )

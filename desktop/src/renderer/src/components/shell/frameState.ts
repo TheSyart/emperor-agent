@@ -24,9 +24,12 @@ import {
 } from './columns'
 
 /**
- * Right workspace panes; `launcher` is the pane picker (home). The retired
- * 电脑 pane (`desktop`, now the conversation's computer-use preview) is not a
- * pane any more: a persisted `desktop` restores as the launcher.
+ * Right workspace panes. `launcher` means no pane chosen yet: the workspace
+ * shows its empty state with the four panes (UI-S06: there is no launcher
+ * home to return to). Once a pane is chosen the workspace always reopens on
+ * it; asking for `launcher` then keeps it. The retired 电脑 pane (`desktop`,
+ * now the conversation's computer-use preview) is not a pane any more: a
+ * persisted `desktop` restores as no pane.
  */
 export type WorkspacePane =
   'launcher' | 'review' | 'terminal' | 'files' | 'browser'
@@ -301,9 +304,12 @@ export const frameActions = {
   workspaceOpen(state: FrameState): boolean {
     return state.workspace > 0
   },
-  /** Open the workspace (on `pane` when given) at its remembered width. */
+  /**
+   * Open the workspace (on `pane` when given) at its remembered width;
+   * `launcher` asks for no particular pane (the last one stays).
+   */
   openWorkspace(state: FrameState, pane?: WorkspacePane): void {
-    if (pane) state.workspacePane = pane
+    frameActions.setWorkspacePane(state, pane)
     if (state.workspace === 0)
       state.workspace = clampWidth(
         state.workspaceWidth || WORKSPACE_DEFAULT,
@@ -320,11 +326,15 @@ export const frameActions = {
    * showing (otherwise switch to it and open).
    */
   toggleWorkspace(state: FrameState, pane?: WorkspacePane): void {
-    if (state.workspace > 0 && (!pane || pane === state.workspacePane))
+    const target = pane === 'launcher' ? undefined : pane
+    if (state.workspace > 0 && (!target || target === state.workspacePane))
       frameActions.closeWorkspace(state)
-    else frameActions.openWorkspace(state, pane)
+    else frameActions.openWorkspace(state, target)
   },
-  setWorkspacePane(state: FrameState, pane: WorkspacePane): void {
+  /** Show `pane`; `launcher` never replaces a pane already chosen. */
+  setWorkspacePane(state: FrameState, pane?: WorkspacePane): void {
+    if (!pane || (pane === 'launcher' && state.workspacePane !== 'launcher'))
+      return
     state.workspacePane = pane
   },
 

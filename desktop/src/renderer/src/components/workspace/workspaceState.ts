@@ -69,6 +69,7 @@ export function consumeWorkspaceRequest(request: WorkspaceRequest): void {
   if (pending.value?.nonce === request.nonce) pending.value = null
 }
 
+/** Open the column on `pane`; `launcher` keeps the pane used last. */
 export function openWorkspacePane(pane: WorkspacePane): void {
   frameActions.openWorkspace(useFrameState(), pane)
 }

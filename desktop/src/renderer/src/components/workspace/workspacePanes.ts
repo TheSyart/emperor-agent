@@ -1,6 +1,7 @@
 /**
- * Right workspace pane catalogue (launcher rows, header segmented control):
- * label, shortcut action and the availability rule of each pane. Pure.
+ * Right workspace pane catalogue (the header's segmented pane switch, the
+ * no-history empty state): label, shortcut action and the availability rule
+ * of each pane. Pure.
  */
 import type { WorkspacePane } from '../shell/frameState'
 import type { ShortcutAction } from '../../shortcuts'
