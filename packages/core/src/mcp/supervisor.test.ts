@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ServerConfig } from './config'
 import {
   MCPConnection,
@@ -417,10 +417,12 @@ describe('MCPConnectionSupervisor health and backoff (KRN-04)', () => {
   })
 
   it('6 · only an HTTP 401 or 403 status means the server rejected the credentials', () => {
-    const body = new Error('tool failed: upstream said "403 Forbidden" in its body')
-    expect(classifyMcpConnectionError(body, 'mcp_connection_failed').code).not.toBe(
-      'mcp_auth_failed',
+    const body = new Error(
+      'tool failed: upstream said "403 Forbidden" in its body',
     )
+    expect(
+      classifyMcpConnectionError(body, 'mcp_connection_failed').code,
+    ).not.toBe('mcp_auth_failed')
     const forbidden = Object.assign(new Error('Error POSTing to endpoint'), {
       code: 403,
     })
@@ -453,8 +455,7 @@ describe('MCPConnectionSupervisor health and backoff (KRN-04)', () => {
       random: () => 0, // the low end of ±20%
     })
     await expect(supervisor.connect()).resolves.toBe(false)
-    for (let index = 0; index < 8; index++)
-      await supervisor.restart('liveness')
+    for (let index = 0; index < 8; index++) await supervisor.restart('liveness')
     expect(created).toBe(6)
     expect(delays).toEqual([800, 3_200, 12_800, 48_000, 48_000])
     expect(supervisor.snapshot()).toMatchObject({
@@ -489,5 +490,106 @@ describe('MCPConnectionSupervisor health and backoff (KRN-04)', () => {
     clock = 80_000
     await supervisor.restart('liveness')
     expect(delays).toEqual([1_000, 4_000, 1_000])
+  })
+
+  describe('timeouts', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('4 · a connect that never answers times out after 15 s by default', async () => {
+      vi.useFakeTimers()
+      const connection = new ControlledConnection('stuck')
+      connection.holdConnect()
+      const supervisor = new MCPConnectionSupervisor({
+        serverName: 'alpha',
+        config: config(),
+        connectionFactory: () => connection,
+      })
+      let result: boolean | null = null
+      void supervisor.connect().then((value) => {
+        result = value
+      })
+      await vi.advanceTimersByTimeAsync(14_999)
+      expect(result).toBeNull()
+      expect(supervisor.snapshot().state).toBe('connecting')
+      await vi.advanceTimersByTimeAsync(1)
+      expect(result).toBe(false)
+      expect(supervisor.snapshot()).toMatchObject({
+        state: 'failed',
+        lastError: { code: 'mcp_transport_timeout' },
+      })
+    })
+
+    it('4 · a tool list that never arrives times out after 15 s by default', async () => {
+      vi.useFakeTimers()
+      const connection = new ControlledConnection('quiet')
+      connection.listTools = () => new Promise<never>(() => {})
+      const supervisor = new MCPConnectionSupervisor({
+        serverName: 'alpha',
+        config: config(),
+        connectionFactory: () => connection,
+      })
+      let result: boolean | null = null
+      void supervisor.connect().then((value) => {
+        result = value
+      })
+      await vi.advanceTimersByTimeAsync(14_999)
+      expect(result).toBeNull()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(result).toBe(false)
+      expect(supervisor.snapshot()).toMatchObject({
+        state: 'failed',
+        lastError: { code: 'mcp_transport_timeout' },
+      })
+      expect(connection.disconnectCount).toBeGreaterThan(0)
+    })
+  })
+
+  it('9 · a disconnect during a connect closes the new connection when it lands', async () => {
+    const connection = new ControlledConnection('late')
+    connection.holdConnect()
+    const supervisor = new MCPConnectionSupervisor({
+      serverName: 'alpha',
+      config: config(),
+      connectionFactory: () => connection,
+    })
+    const connecting = supervisor.connect()
+    await Promise.resolve()
+    await supervisor.disconnect()
+    connection.releaseHeldConnect()
+    await expect(connecting).resolves.toBe(false)
+    expect(connection.connected).toBe(false)
+    expect(supervisor.snapshot()).toMatchObject({ state: 'stopped' })
+    expect(await supervisor.listTools()).toEqual([])
+  })
+
+  it('a reconfigure during a connect for the old config installs the new config', async () => {
+    const created: ControlledConnection[] = []
+    const supervisor = new MCPConnectionSupervisor({
+      serverName: 'alpha',
+      config: config('/bin/old'),
+      connectionFactory: (candidate) => {
+        const connection = new ControlledConnection(String(candidate.command))
+        if (!created.length) connection.holdConnect()
+        created.push(connection)
+        return connection
+      },
+    })
+    const first = supervisor.connect()
+    await Promise.resolve()
+    const second = supervisor.reconfigure(config('/bin/new'))
+    created[0]!.releaseHeldConnect()
+    await first
+    await expect(second).resolves.toBe(true)
+    expect(created.map((connection) => connection.label)).toEqual([
+      '/bin/old',
+      '/bin/new',
+    ])
+    expect(created[0]!.connected).toBe(false)
+    expect(supervisor.snapshot()).toMatchObject({
+      state: 'ready',
+      generation: 2,
+    })
   })
 })

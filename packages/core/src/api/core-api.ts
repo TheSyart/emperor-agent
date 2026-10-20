@@ -1406,7 +1406,9 @@ export class CoreApi {
       await api.environmentService.initialize()
       await api.delegationRuntime.probeProfiles()
       await api.sessionTransitionService.recover()
-      await api.syncPlugins()
+      // Plugin servers connect in the background: the window never waits
+      // for one (KRN-04).
+      await api.syncPlugins({ waitForMcp: false })
       // After the plugins: a run caught up on at launch needs their Hooks.
       await host.startScheduler()
       // 最近删除 keeps a deleted session for 30 days (FIX-01).
@@ -3611,9 +3613,11 @@ export class CoreApi {
     return this.pluginService.detail(input, projectRoot)
   }
 
-  private async syncPlugins(): Promise<void> {
+  private async syncPlugins(
+    options: { waitForMcp?: boolean } = {},
+  ): Promise<void> {
     try {
-      await this.pluginActivation.sync()
+      await this.pluginActivation.sync(options)
     } catch (error) {
       logger.warn('plugin activation failed', { error: String(error) })
     }

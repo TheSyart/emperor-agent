@@ -19,6 +19,7 @@ import type { MatcherGroup } from '../harness/hooks/types'
 import { SAFE_ENV_KEYS } from '../mcp/connection'
 import type { PluginMcpServer } from '../mcp/client'
 import type { ServerConfig } from '../mcp/config'
+import { logger } from '../util/log'
 import {
   pluginMcpToolName,
   sanitizeMcpName,
@@ -334,8 +335,13 @@ export class PluginActivationController {
     })
   }
 
-  sync(): Promise<void> {
-    const run = this.chain.then(() => this.apply())
+  /**
+   * Apply the current plugins. `waitForMcp: false` (launch) returns once
+   * Hooks and server lists are set; the global servers connect in the
+   * background (KRN-04).
+   */
+  sync(options: { waitForMcp?: boolean } = {}): Promise<void> {
+    const run = this.chain.then(() => this.apply(options.waitForMcp !== false))
     this.chain = run.catch(() => {})
     return run
   }
@@ -476,7 +482,7 @@ export class PluginActivationController {
         })
   }
 
-  private async apply(): Promise<void> {
+  private async apply(waitForMcp: boolean): Promise<void> {
     const packages = this.deps
       .packages(null)
       .filter((item) => !PROJECT_SCOPES.has(item.scope))
@@ -491,8 +497,14 @@ export class PluginActivationController {
     this.contributions = contributions
     this.projects.clear()
     this.deps.hooks.setPluginHooks(hookSets(contributions.hooks))
-    if (this.deps.mcp.setPluginServers(this.servers(contributions.mcp)))
-      await this.deps.mcp.reload()
+    if (this.deps.mcp.setPluginServers(this.servers(contributions.mcp))) {
+      const reload = this.deps.mcp.reload()
+      if (waitForMcp) await reload
+      else
+        void reload.catch((error: unknown) =>
+          logger.warn('plugin MCP reload failed', { error: String(error) }),
+        )
+    }
     await this.deps.projectMcp?.refresh()
   }
 }

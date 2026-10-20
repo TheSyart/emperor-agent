@@ -13,6 +13,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
 import type { MCPClientSnapshot } from '../../../mcp/client'
+import { userMcpToolName } from '../../../mcp/plugin-names'
 import {
   loadMcpConfigUnresolved,
   maskSecretUrl,
@@ -144,14 +145,21 @@ export function createMcpConfigTool(
       return `MCP reload failed: ${error instanceof Error ? error.message : String(error)}. The config was saved; retry with action=reload.`
     }
     if (!names.length) return 'MCP reloaded.'
+    const status = deps.status()
     const byName = new Map(
-      deps.status().servers.map((server) => [server.serverName, server]),
+      status.servers.map((server) => [server.serverName, server]),
     )
     const lines = names.map((name) => {
       const server = byName.get(name)
       if (server === undefined) return `- ${name}: not running (disabled)`
+      // The names the model calls: cleaned, so `my.server` gives mcp_my_server_… (KRN-04).
+      const registered = new Map(
+        (status.toolCapabilities ?? [])
+          .filter((tool) => tool.serverName === name)
+          .map((tool) => [tool.toolName, tool.name]),
+      )
       const tools = server.tools.length
-        ? ` · tools: ${server.tools.map((tool) => `mcp_${name}_${tool}`).join(', ')}`
+        ? ` · tools: ${server.tools.map((tool) => registered.get(tool) ?? userMcpToolName(name, tool)).join(', ')}`
         : ''
       const error = server.lastError ? ` · ${server.lastError.message}` : ''
       return `- ${name}: ${server.state}${tools}${error}`

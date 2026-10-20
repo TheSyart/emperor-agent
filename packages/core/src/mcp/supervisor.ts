@@ -65,6 +65,8 @@ export interface MCPConnectionSupervisorOptions {
   readonly maxRestartAttempts?: number
   readonly callTimeoutMs?: number
   readonly connectTimeoutMs?: number
+  /** How long a new client may take to list its tools (default 15 s). */
+  readonly listToolsTimeoutMs?: number
   readonly onStateChange?: (
     snapshot: MCPConnectionSnapshot,
   ) => void | Promise<void>
@@ -102,6 +104,7 @@ export class MCPConnectionSupervisor extends MCPConnection {
   private readonly maxRestartAttempts: number
   private readonly callTimeoutMs: number
   private readonly connectTimeoutMs: number
+  private readonly listToolsTimeoutMs: number
   private readonly onStateChange:
     MCPConnectionSupervisorOptions['onStateChange'] | null
   private current: ManagedClient | null = null
@@ -116,6 +119,13 @@ export class MCPConnectionSupervisor extends MCPConnection {
   private nextRetryAt: number | null = null
   private lastError: MCPConnectionDiagnosticError | null = null
   private operation: Promise<boolean> | null = null
+  /**
+   * Bumped by disconnect(): an attempt begun before it closes whatever it
+   * opened when it lands and changes nothing (KRN-04, no orphan processes).
+   */
+  private epoch = 0
+  /** The connection an attempt in flight is opening. */
+  private candidate: MCPConnection | null = null
   private stopped = false
   private readonly activeRequests = new Set<string>()
 
@@ -142,6 +152,10 @@ export class MCPConnectionSupervisor extends MCPConnection {
       DEFAULT_CALL_TIMEOUT_MS,
     )
     this.connectTimeoutMs = boundedPositiveInt(opts.connectTimeoutMs, 15_000)
+    this.listToolsTimeoutMs = boundedPositiveInt(
+      opts.listToolsTimeoutMs,
+      15_000,
+    )
     this.onStateChange = opts.onStateChange ?? null
   }
 
@@ -156,6 +170,11 @@ export class MCPConnectionSupervisor extends MCPConnection {
 
   override async disconnect(): Promise<void> {
     this.stopped = true
+    this.epoch += 1
+    // The next connect starts afresh instead of joining a stale attempt.
+    this.operation = null
+    const candidate = this.candidate
+    this.candidate = null
     const previous = this.current
     this.current = null
     this.connected = false
@@ -168,6 +187,10 @@ export class MCPConnectionSupervisor extends MCPConnection {
     if (previous) {
       previous.connection.setLifecycleListener(null)
       await previous.connection.disconnect().catch(() => {})
+    }
+    if (candidate) {
+      candidate.setLifecycleListener(null)
+      await candidate.disconnect().catch(() => {})
     }
   }
 
@@ -266,6 +289,11 @@ export class MCPConnectionSupervisor extends MCPConnection {
     this.desiredConfig = structuredClone(config)
     this.stopped = false
     const fingerprint = configFingerprint(config)
+    // An attempt for an older config may be in flight: let it land, then
+    // install this one (unless a newer reconfigure or a disconnect came).
+    if (this.operation) await this.operation.catch(() => false)
+    if (this.stopped || configFingerprint(this.desiredConfig) !== fingerprint)
+      return false
     if (
       this.current?.configFingerprint === fingerprint &&
       this.state === 'ready'
@@ -329,6 +357,8 @@ export class MCPConnectionSupervisor extends MCPConnection {
   }
 
   private async installCandidate(config: ServerConfig): Promise<boolean> {
+    const epoch = this.epoch
+    const stale = () => epoch !== this.epoch
     this.state = 'connecting'
     this.health = this.current ? this.health : 'unknown'
     this.nextRetryAt = null
@@ -342,6 +372,7 @@ export class MCPConnectionSupervisor extends MCPConnection {
     connection.setLifecycleListener((event) =>
       this.onClientLifecycle(identity, event),
     )
+    this.candidate = connection
 
     let connected = false
     let connectOperation: Promise<boolean> | null = null
@@ -356,6 +387,7 @@ export class MCPConnectionSupervisor extends MCPConnection {
             `MCP server '${this.serverName}' connection timed out`,
           ),
       )
+      if (stale()) return await dropStale(connection)
       if (!connected) {
         const failure = classifyMcpConnectionError(
           connection.lastConnectionFailure,
@@ -366,7 +398,16 @@ export class MCPConnectionSupervisor extends MCPConnection {
         await connection.disconnect().catch(() => {})
         return false
       }
-      const tools = await connection.listTools()
+      const tools = await withTimeout(
+        connection.listTools(),
+        this.listToolsTimeoutMs,
+        () =>
+          new MCPConnectionError(
+            'mcp_transport_timeout',
+            `MCP server '${this.serverName}' did not list its tools in time`,
+          ),
+      )
+      if (stale()) return await dropStale(connection)
       const candidate: ManagedClient = {
         ...identity,
         connection,
@@ -375,7 +416,6 @@ export class MCPConnectionSupervisor extends MCPConnection {
       }
       const previous = this.current
       this.current = candidate
-      this.desiredConfig = structuredClone(config)
       this.connected = true
       this.state = 'ready'
       this.health = 'healthy'
@@ -400,6 +440,7 @@ export class MCPConnectionSupervisor extends MCPConnection {
           .then(async () => await connection.disconnect().catch(() => {}))
           .catch(() => {})
       }
+      if (stale()) return await dropStale(connection)
       const failure = classifyMcpConnectionError(
         error,
         connected ? 'mcp_protocol_error' : 'mcp_connection_failed',
@@ -408,6 +449,8 @@ export class MCPConnectionSupervisor extends MCPConnection {
       connection.setLifecycleListener(null)
       await connection.disconnect().catch(() => {})
       return false
+    } finally {
+      if (this.candidate === connection) this.candidate = null
     }
   }
 
@@ -689,6 +732,13 @@ async function abortableDelay(milliseconds: number): Promise<void> {
     const timer = setTimeout(resolve, milliseconds)
     timer.unref?.()
   })
+}
+
+/** An attempt that landed after a disconnect: close what it opened. */
+async function dropStale(connection: MCPConnection): Promise<false> {
+  connection.setLifecycleListener(null)
+  await connection.disconnect().catch(() => {})
+  return false
 }
 
 async function withTimeout<T>(
