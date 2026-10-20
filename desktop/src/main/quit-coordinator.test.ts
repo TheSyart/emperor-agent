@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest'
-import { createQuitCoordinator } from './quit-coordinator'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  createQuitCoordinator,
+  DEFAULT_QUIT_TIMEOUT_MS,
+} from './quit-coordinator'
 
 describe('graceful App quit', () => {
   it('holds quitting until the writer flushes and joins repeated requests', async () => {
@@ -138,5 +141,26 @@ describe('graceful App quit', () => {
     handler({ preventDefault() {} })
     await done
     expect(events).toEqual(['Error: disk gone', 'closing', 'quit'])
+  })
+
+  it('Cmd+Q ends within 10 seconds even when a subagent never lets go (AGT-06 11)', async () => {
+    vi.useFakeTimers()
+    try {
+      expect(DEFAULT_QUIT_TIMEOUT_MS).toBe(10_000)
+      const events: string[] = []
+      const handler = createQuitCoordinator({
+        close: () => new Promise<void>(() => {}),
+        onTimeout: () => events.push('force-stopped'),
+        onError: () => events.push('reported'),
+        quit: () => events.push('quit'),
+      })
+      handler({ preventDefault() {} })
+      await vi.advanceTimersByTimeAsync(9_999)
+      expect(events).toEqual([])
+      await vi.advanceTimersByTimeAsync(1)
+      expect(events).toEqual(['force-stopped', 'reported', 'quit'])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

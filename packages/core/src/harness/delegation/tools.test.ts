@@ -410,3 +410,166 @@ it('collect_agent does not ask to end a run that settled normally', async () => 
   expect(JSON.stringify(result.content)).toContain('NOTHING_TO_END')
   expect(approve).not.toHaveBeenCalled()
 })
+it('7 · collect_agent applies a result only after the user approves on the approval card', async () => {
+  const approve = vi.fn<NonNullable<DelegationToolOptions['approve']>>(
+    async () => 'rejected',
+  )
+  const f = fixture(undefined, approve)
+  f.state.runs['dgr-1']!.result = {
+    base: 'b'.repeat(40),
+    commit: 'c'.repeat(40),
+    files: [
+      { path: 'src/a.ts', status: 'modified', additions: 4, deletions: 1 },
+      { path: 'src/b.ts', status: 'added', additions: 2, deletions: 0 },
+    ],
+    totals: { files: 2, additions: 6, deletions: 1 },
+    state: 'ready',
+    at: 1,
+  }
+  f.service.applyResult = vi.fn(async () => ({
+    ...f.state.runs['dgr-1']!.result!,
+    state: 'applied' as const,
+    by: 'model' as const,
+  }))
+  const refused = await f.call('collect_agent', {
+    agent_id: 'dlg-test',
+    apply: true,
+  })
+  expect(refused.isError).toBe(true)
+  expect(JSON.stringify(refused.content)).toContain('APPROVAL_REJECTED')
+  expect(approve).toHaveBeenCalledWith(
+    expect.objectContaining({
+      agent: f.root,
+      callId: 'call-collect_agent',
+      reason: expect.stringMatching(/2 files[\s\S]*\+6[\s\S]*−1/),
+    }),
+  )
+  expect(f.service.applyResult).not.toHaveBeenCalled()
+  approve.mockResolvedValueOnce('allowed-once')
+  const applied = await f.call('collect_agent', {
+    agent_id: 'dlg-test',
+    apply: true,
+  })
+  expect(applied.isError).toBe(false)
+  expect(f.service.applyResult).toHaveBeenCalledWith(
+    'dlg-test',
+    'dgr-1',
+    'model',
+  )
+  expect(applied.meta).toMatchObject({ result: { state: 'applied' } })
+})
+it('collect_agent reports conflicts after an approved apply and leaves the result in place', async () => {
+  const approve = vi.fn<NonNullable<DelegationToolOptions['approve']>>(
+    async () => 'allowed-once',
+  )
+  const f = fixture(undefined, approve)
+  const result = {
+    base: 'b'.repeat(40),
+    commit: 'c'.repeat(40),
+    files: [
+      {
+        path: 'src/a.ts',
+        status: 'modified' as const,
+        additions: 1,
+        deletions: 1,
+      },
+    ],
+    totals: { files: 1, additions: 1, deletions: 1 },
+    state: 'ready' as const,
+    at: 1,
+  }
+  f.state.runs['dgr-1']!.result = result
+  f.service.applyResult = vi.fn(async () => ({
+    ...result,
+    state: 'conflicted' as const,
+    conflicts: ['src/a.ts'],
+  }))
+  const outcome = await f.call('collect_agent', {
+    agent_id: 'dlg-test',
+    apply: true,
+  })
+  expect(outcome.isError).toBe(true)
+  expect(JSON.stringify(outcome.content)).toContain('src/a.ts')
+})
+it('collect_agent has nothing to apply for a run without changed files', async () => {
+  const approve = vi.fn<NonNullable<DelegationToolOptions['approve']>>(
+    async () => 'allowed-once',
+  )
+  const f = fixture(undefined, approve)
+  f.service.applyResult = vi.fn()
+  const outcome = await f.call('collect_agent', {
+    agent_id: 'dlg-test',
+    apply: true,
+  })
+  expect(outcome.isError).toBe(true)
+  expect(JSON.stringify(outcome.content)).toContain('NOTHING_TO_APPLY')
+  expect(approve).not.toHaveBeenCalled()
+})
+it('1 · a write task defaults to a snapshot of the current workspace; a review to the shared folder', async () => {
+  const f = fixture()
+  // fixture's parent is read-only: a review in place.
+  await f.call('subagent', {
+    backend: 'codex',
+    description: 'review',
+    prompt: 'look',
+  })
+  expect(f.service.start).toHaveBeenLastCalledWith(
+    expect.anything(),
+    expect.objectContaining({
+      workspace: 'shared-readonly',
+      base: 'committed',
+    }),
+  )
+  await f.call('subagent', {
+    backend: 'codex',
+    description: 'write',
+    prompt: 'change',
+    workspace: 'isolated-worktree',
+  })
+  expect(f.service.start).toHaveBeenLastCalledWith(
+    expect.anything(),
+    expect.objectContaining({
+      workspace: 'isolated-worktree',
+      base: 'snapshot',
+    }),
+  )
+})
+it('8 · outside Git a task defaults to a read-only review even when the parent may write', async () => {
+  const h = createTestHarness()
+  const record = { ...fixtureDelegationRecord(), currentRunId: 'dgr-1' }
+  const start = vi.fn(async () => record)
+  const service = {
+    start,
+    inspect: vi.fn(),
+    list: vi.fn(() => []),
+    send: vi.fn(),
+    interrupt: vi.fn(),
+    wait: vi.fn(),
+  } as unknown as DelegationToolService
+  for (const inGit of [false, true]) {
+    const tools = createDelegationTools({
+      internalManager: {} as SubagentManager,
+      delegations: () => service,
+      ownerResolver: () => record.owner,
+      canControl: () => true,
+      parentReadOnly: () => false,
+      parentInGit: () => inGit,
+    })
+    const subagent = tools.find((t) => t.name === 'subagent')!
+    await subagent.execute(
+      subagent.parse({ backend: 'codex', description: 'd', prompt: 'p' }),
+      {
+        agent: h.agent('root-' + inGit),
+        callId: 'call-' + inGit,
+        signal: new AbortController().signal,
+      } as never,
+    )
+    expect(start).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        workspace: inGit ? 'isolated-worktree' : 'shared-readonly',
+        base: inGit ? 'snapshot' : 'committed',
+      }),
+    )
+  }
+})

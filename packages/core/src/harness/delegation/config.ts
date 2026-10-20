@@ -1,7 +1,11 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { z } from 'zod'
-import { DelegationError, type ExecutorConfig } from './types'
+import {
+  DEFAULT_CLAUDE_MAX_TURNS,
+  DelegationError,
+  type ExecutorConfig,
+} from './types'
 import { durableReplaceSync } from '../../store/persistence'
 export { executorSpecialties } from './specialties'
 const segment = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
@@ -80,11 +84,14 @@ export const executorConfigSchema = z
           .min(1000)
           .max(15 * 60_000),
         estimatedBudgetUsd: z.number().positive().max(10),
+        // 设置 › 子智能体 › 高级 (AGT-02).
+        claudeMaxTurns: z.number().int().min(50).max(1000).optional(),
       })
       .strict(),
     touchedAt: z.number().int().nonnegative().optional(),
     upgradeNotice: z.literal('external-default-off').optional(),
     diagnosticsMode: z.boolean().optional(),
+    verifyBeforeApply: z.boolean().optional(),
   })
   .strict()
   .superRefine((c, ctx) => {
@@ -236,6 +243,9 @@ export class ExecutorConfigStore {
     delete next.upgradeNotice
     // Written only when on, so an older build can still read the file.
     if (!next.diagnosticsMode) delete next.diagnosticsMode
+    if (!next.verifyBeforeApply) delete next.verifyBeforeApply
+    if (next.limits.claudeMaxTurns === DEFAULT_CLAUDE_MAX_TURNS)
+      delete next.limits.claudeMaxTurns
     durableReplaceSync(this.file, JSON.stringify(next, null, 2) + '\n')
     return next
   }

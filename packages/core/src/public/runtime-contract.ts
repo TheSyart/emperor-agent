@@ -91,12 +91,14 @@ export type {
   ExecutorModelCandidate,
   ExecutorProfile,
   ExecutorProbe,
+  ExecutorAuthState,
   ExecutorCapabilities,
   ExecutorRuntimeFacts,
   NativeCapabilityStatus,
   NativeCapabilityEvidence,
   DelegationRecord,
   DelegationRunRecord,
+  DelegationResult,
 } from '../harness/delegation/types'
 export {
   executorIntroduction,
@@ -104,6 +106,7 @@ export {
 } from '../harness/delegation/specialties'
 export type {
   DelegationProjection,
+  DelegationResultRecord,
   DelegationRuntimeName,
 } from '../harness/delegation/events'
 export type { DelegationReceipt } from '../harness/delegation/receipts'
@@ -123,5 +126,7 @@ export {
   agentSourceLabel,
   agentPhaseLabel,
   delegationNeedsExit,
+  RESULT_CLEANUP_AFTER_MS,
+  resultNeedsCleanup,
 } from '../runtime/agent-view'
 export type { AgentView, AgentBackend, AgentPhase } from '../runtime/agent-view'

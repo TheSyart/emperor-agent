@@ -1,5 +1,6 @@
 import type { ConversationDefinition } from '../assembler'
 import { assistantDefinition } from './assistant'
+import { delegationResultDefinition } from './delegationResult'
 import { nextStepInboxDefinition, userMetaDefinition } from './ledgers'
 import { contextDefinition, userDefinition } from './messages'
 import {
@@ -42,6 +43,7 @@ export const CHAT_DEFINITIONS: readonly ConversationDefinition[] = [
   workflowRunDefinition,
   turnTailDefinition,
   turnFilesDefinition,
+  delegationResultDefinition,
   todosFactDefinition,
   requestContextFactDefinition,
 ] as readonly ConversationDefinition[]

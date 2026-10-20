@@ -597,8 +597,10 @@ describe('retry arithmetic', () => {
 })
 
 describe('routeFromEntry', () => {
-  it('routes deepseek entries to the direct adapter with mapped efforts', () => {
-    const r = routeFromEntry(
+  it('routes deepseek entries to the direct adapters with mapped efforts', () => {
+    // KRN-07: the official host (also the default when no base is set)
+    // goes over Messages; a gateway stays on chat-completions.
+    const official = routeFromEntry(
       entry({
         provider: 'deepseek',
         modelId: 'deepseek-chat',
@@ -606,9 +608,20 @@ describe('routeFromEntry', () => {
         reasoningEffort: 'medium',
       }),
     )
-    expect(r.adapter).toBe('deepseek')
-    expect(r.baseURL).toBe('https://api.deepseek.com')
-    expect(r.defaultReasoningEffort).toBe('high')
+    expect(official.adapter).toBe('deepseek-messages')
+    expect(official.baseURL).toBe('https://api.deepseek.com/anthropic')
+    expect(official.defaultReasoningEffort).toBe('high')
+    const gateway = routeFromEntry(
+      entry({
+        provider: 'deepseek',
+        modelId: 'deepseek-chat',
+        apiBase: 'https://gw.example.com/v1',
+        reasoningEffort: 'medium',
+      }),
+    )
+    expect(gateway.adapter).toBe('deepseek')
+    expect(gateway.baseURL).toBe('https://gw.example.com/v1')
+    expect(gateway.defaultReasoningEffort).toBe('high')
   })
   it('routes other entries to pi-ai and trims the base URL', () => {
     const r = routeFromEntry(

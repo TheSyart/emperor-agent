@@ -156,3 +156,57 @@ describe('WorkspaceMutationCoordinator', () => {
     expect(order).toEqual(['web:start', 'web:end', 'api:start'])
   })
 })
+
+describe('waiting for a workspace a child holds (AGT-06)', () => {
+  it('reports after the notice delay who holds the workspace, and ends the notice when the lease comes', async () => {
+    vi.useFakeTimers()
+    try {
+      const coordinator = new WorkspaceMutationCoordinator()
+      const root = mkdtempSync(join(tmpdir(), 'emperor-wait-notice-'))
+      const child = await coordinator.resources.acquire({
+        keys: [workspaceMutationDomain(root)],
+        mode: 'exclusive',
+        owner: 'dlg-child',
+      })
+      const ended = vi.fn()
+      const onWait = vi.fn((_blockers: string[]) => ended)
+      const waiting = coordinator.acquireWriterWithNotice(root, 'call-1', {
+        onWait,
+      })
+      await vi.advanceTimersByTimeAsync(9_999)
+      expect(onWait).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(onWait).toHaveBeenCalledWith(['dlg-child'])
+      child.release()
+      const lease = await waiting
+      expect(ended).toHaveBeenCalledTimes(1)
+      lease.release()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('says nothing for a short wait', async () => {
+    vi.useFakeTimers()
+    try {
+      const coordinator = new WorkspaceMutationCoordinator()
+      const root = mkdtempSync(join(tmpdir(), 'emperor-wait-short-'))
+      const child = await coordinator.resources.acquire({
+        keys: [workspaceMutationDomain(root)],
+        mode: 'exclusive',
+        owner: 'dlg-child',
+      })
+      const onWait = vi.fn()
+      const waiting = coordinator.acquireWriterWithNotice(root, 'call-1', {
+        onWait,
+      })
+      await vi.advanceTimersByTimeAsync(2_000)
+      child.release()
+      ;(await waiting).release()
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(onWait).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

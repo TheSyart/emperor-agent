@@ -9,6 +9,13 @@ export const configureExecutors = (
 ) => invokeCore('executors.configure', input)
 export const probeExecutor = (input: CoreOperationArgs<'executors.probe'>[0]) =>
   invokeCore('executors.probe', input)
+/** 设置令牌 (AGT-02): the token goes to Core once and never comes back. */
+export const setExecutorCredential = (
+  input: CoreOperationArgs<'executors.setCredential'>[0],
+) => invokeCore('executors.setCredential', input)
+export const clearExecutorCredential = (
+  input: CoreOperationArgs<'executors.clearCredential'>[0],
+) => invokeCore('executors.clearCredential', input)
 export const getDelegation = (input: CoreOperationArgs<'delegations.get'>[0]) =>
   invokeCore('delegations.get', input)
 export const getDelegationReceipt = (
@@ -36,6 +43,19 @@ export const integrateDelegation = (
 export const abandonDelegation = (
   input: CoreOperationArgs<'delegations.abandon'>[0],
 ) => invokeCore('delegations.abandon', input)
+/** The result card (AGT-06): 应用到项目 · 丢弃 · 撤销 · 查看差异. */
+export const applyDelegationResult = (
+  input: CoreOperationArgs<'delegations.apply'>[0],
+) => invokeCore('delegations.apply', input)
+export const discardDelegationResult = (
+  input: CoreOperationArgs<'delegations.discard'>[0],
+) => invokeCore('delegations.discard', input)
+export const undoDelegationResult = (
+  input: CoreOperationArgs<'delegations.undo'>[0],
+) => invokeCore('delegations.undo', input)
+export const delegationResultDiff = (
+  input: CoreOperationArgs<'delegations.diff'>[0],
+) => invokeCore('delegations.diff', input)
 export const closeDelegation = (
   input: CoreOperationArgs<'delegations.close'>[0],
 ) => invokeCore('delegations.close', input)

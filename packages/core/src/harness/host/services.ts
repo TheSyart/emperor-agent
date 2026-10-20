@@ -152,7 +152,6 @@ export interface KeptServices {
 export interface KeptServiceHooks {
   /** Host event sink (non-session events: scheduler, MCP, environment, skills). */
   emit(event: Record<string, unknown>): Promise<void> | void
-  refreshRuntimeContext(): void
 }
 
 export async function createKeptServices(
@@ -257,12 +256,6 @@ export async function createKeptServices(
   const managedEnvironmentService = new ManagedEnvironmentService({
     stateRoot: paths.stateRoot,
     skillManager,
-    processRunner: processRuntime,
-    onEnvironmentChanged: async () => {
-      environmentProbe.invalidate()
-      hooks.refreshRuntimeContext()
-      await skillInstallService.reconcileBlocked()
-    },
     onInstallEvent: async (event) => {
       const name =
         event.phase === 'started'
@@ -292,7 +285,6 @@ export async function createKeptServices(
   const skillChangeDetector = new SkillChangeDetector(
     [paths.userSkillsRoot],
     async ({ catalogVersion }) => {
-      hooks.refreshRuntimeContext()
       await hooks.emit({
         event: 'skill_catalog_changed',
         catalog_version: catalogVersion,

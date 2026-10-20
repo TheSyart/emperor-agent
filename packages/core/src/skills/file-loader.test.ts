@@ -1,8 +1,18 @@
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { FileSkillsLoader, SkillLoaders } from './file-loader'
+import {
+  FileSkillsLoader,
+  SkillLoaders,
+  skillFolderChecks,
+} from './file-loader'
 import { checkSkillContent, referencedPaths } from './validate'
 
 function roots() {
@@ -271,5 +281,46 @@ describe('FileSkillsLoader', () => {
     const before = rootsChanged
     loaders.refreshPluginSkillsRoots()
     expect(rootsChanged).toBe(before + 1)
+  })
+})
+
+describe('Skill folder checks are cached (KRN-13)', () => {
+  it('an unchanged Skill is not checked again; an edited one is', async () => {
+    const { stateRoot, runtimeRoot, userSkills } = roots()
+    const folder = skill(
+      join(userSkills, 'cached'),
+      'name: cached\ndescription: First',
+    )
+    skill(join(userSkills, 'other'), 'name: other\ndescription: Other')
+    const loader = new FileSkillsLoader({ stateRoot, runtimeRoot })
+    const before = skillFolderChecks()
+    expect(loader.scan().skills.map((item) => item.name)).toContain('cached')
+    const first = skillFolderChecks() - before
+    expect(first).toBeGreaterThanOrEqual(2)
+    loader.scan()
+    loader.resolve('cached')
+    // Every step and every skill tool call scans: nothing re-read now.
+    expect(skillFolderChecks() - before).toBe(first)
+
+    // An edit (new size and time) is seen at once, without a watcher.
+    await new Promise((resolve) => setTimeout(resolve, 15))
+    writeFileSync(
+      join(folder, 'SKILL.md'),
+      '---\nname: cached\ndescription: Second and longer\n---\n# Body\n',
+    )
+    expect(loader.resolve('cached')?.description).toBe('Second and longer')
+    expect(skillFolderChecks() - before).toBe(first + 1)
+  })
+
+  it('a removed Skill disappears and a new one appears at once', () => {
+    const { stateRoot, runtimeRoot, userSkills } = roots()
+    const loader = new FileSkillsLoader({ stateRoot, runtimeRoot })
+    skill(join(userSkills, 'one'), 'name: one\ndescription: One')
+    expect(loader.scan().skills.map((item) => item.name)).toContain('one')
+    rmSync(join(userSkills, 'one'), { recursive: true })
+    skill(join(userSkills, 'two'), 'name: two\ndescription: Two')
+    const names = loader.scan().skills.map((item) => item.name)
+    expect(names).toContain('two')
+    expect(names).not.toContain('one')
   })
 })

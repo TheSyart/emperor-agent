@@ -18,7 +18,7 @@ import Notice from '../../ui/Notice.vue'
 import Segmented from '../../ui/Segmented.vue'
 import Select from '../../ui/Select.vue'
 import TextField from '../../ui/TextField.vue'
-import { formatTokenCount } from './modelFormModel'
+import { formatTokenCount, reasoningHint } from './modelFormModel'
 import {
   markEdited,
   reasoningOptions,
@@ -182,7 +182,11 @@ function applyBatch(): void {
               @update:model-value="(v) => setNumber(draft, 'maxTokens', v)"
             />
           </Field>
-          <Field v-if="reasoningOptions(draft.model).length" label="思考强度">
+          <Field
+            v-if="reasoningOptions(draft.model).length"
+            label="思考强度"
+            :hint="reasoningHint({ provider: add.connection.provider ?? '' })"
+          >
             <Select
               size="sm"
               :model-value="draft.reasoningEffort ?? ''"

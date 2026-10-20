@@ -111,7 +111,9 @@ export async function importSkills(
 ): Promise<SkillImportResult> {
   const staging = mkdtempSync(join(tmpdir(), 'emperor-skill-import-'))
   try {
-    const root = await materialize(opts, staging)
+    // Symbolic links an archive carried, left out of the import (KRN-13).
+    const skippedLinks: string[] = []
+    const root = await materialize(opts, staging, skippedLinks)
     const candidates = locateSkillFolders(root)
     if (candidates.length === 0)
       throw new SkillError(
@@ -154,7 +156,11 @@ export async function importSkills(
           name: check.name,
           scope: opts.scope,
           path: installed.path,
-          warnings: [...check.warnings, ...installed.warnings],
+          warnings: [
+            ...check.warnings,
+            ...installed.warnings,
+            ...linkWarnings(folder, skippedLinks),
+          ],
           replaced: installed.replaced,
         })
       } catch (error) {
@@ -175,6 +181,7 @@ export async function importSkills(
 async function materialize(
   opts: SkillImportOptions,
   staging: string,
+  skippedLinks: string[],
 ): Promise<string> {
   const source = opts.source
   switch (source.kind) {
@@ -205,10 +212,14 @@ async function materialize(
       }
       if (!stat.isFile())
         throw new SkillError(`Not a zip file: ${path}`, 'skill_import_failed')
-      return extractZip(realpathSync(path), join(staging, 'extracted'))
+      return extractZip(
+        realpathSync(path),
+        join(staging, 'extracted'),
+        skippedLinks,
+      )
     }
     case 'url':
-      return await materializeUrl(source.url, opts, staging)
+      return await materializeUrl(source.url, opts, staging, skippedLinks)
   }
 }
 
@@ -384,6 +395,7 @@ async function materializeUrl(
   raw: string,
   opts: SkillImportOptions,
   staging: string,
+  skippedLinks: string[],
 ): Promise<string> {
   const parsed = parseSkillImportUrl(raw)
   if (!opts.fetchClient)
@@ -394,7 +406,11 @@ async function materializeUrl(
   const body = await download(opts.fetchClient, parsed, opts.signal)
   const archive = join(staging, 'download.zip')
   writeFileSync(archive, body, { mode: 0o600 })
-  const extracted = extractZip(archive, join(staging, 'extracted'))
+  const extracted = extractZip(
+    archive,
+    join(staging, 'extracted'),
+    skippedLinks,
+  )
   if (parsed.kind !== 'github') return extracted
   const top = readdirSync(extracted).filter((entry) => entry !== '__MACOSX')
   const repoRoot =
@@ -471,9 +487,18 @@ async function download(
   )
 }
 
-function extractZip(archive: string, destination: string): string {
+/**
+ * Extract an archive; its symbolic links are left out and their paths
+ * (under `destination`) added to `skippedLinks` (KRN-13: a GitHub repository
+ * with one link no longer fails the whole import).
+ */
+function extractZip(
+  archive: string,
+  destination: string,
+  skippedLinks: string[],
+): string {
   try {
-    extractBoundedZip({
+    const extracted = extractBoundedZip({
       archive,
       destination,
       maxArchiveBytes: MAX_ARCHIVE_BYTES,
@@ -481,7 +506,10 @@ function extractZip(archive: string, destination: string): string {
       maxFileBytes: MAX_FILE_BYTES,
       maxTotalBytes: MAX_EXTRACTED_BYTES,
       maxPathDepth: 32,
+      skipLinks: true,
     })
+    for (const link of extracted.skippedLinks)
+      skippedLinks.push(join(destination, link))
   } catch (error) {
     throw new SkillError(
       `The zip archive could not be extracted: ${errorMessage(error)}`,
@@ -490,6 +518,19 @@ function extractZip(archive: string, destination: string): string {
     )
   }
   return destination
+}
+
+/** One warning per left-out link inside an imported Skill's folder. */
+function linkWarnings(
+  folder: string,
+  skippedLinks: readonly string[],
+): string[] {
+  return skippedLinks
+    .filter((link) => link.startsWith(`${folder}${sep}`))
+    .map(
+      (link) =>
+        `跳过了符号链接 ${toPosix(relative(folder, link))}（导入不复制链接）`,
+    )
 }
 
 // ── locate + install ─────────────────────────────────────────────────────

@@ -27,6 +27,7 @@ import {
 } from '../workspace/file-preview'
 import type { RuntimePaths } from '../runtime/paths'
 import { HarnessHost, type HarnessHostOptions } from '../harness/host/host'
+import type { WorkspaceAccessLeaseProvider } from '../harness/tools/registry'
 import {
   SessionRequiredError,
   type BackgroundTurnOptions,
@@ -177,11 +178,13 @@ import { GitOperationReceiptStore } from '../workspace/git-receipts'
 import {
   WorkspaceMutationCoordinator,
   workspaceMutationDomain,
+  WORKSPACE_WAIT_NOTICE_MS,
 } from '../workspace/mutation-coordinator'
 import { HardenedGitRunner } from '../workspace/git-runner'
 import { TurnSnapshots } from '../workspace/turn-snapshots'
 import { DelegationWorkspaceService } from '../workspace/delegation-workspaces'
 import { SnapshotService } from '../workspace/delegation-snapshot'
+import { DelegationResults } from '../workspace/delegation-results'
 import { ExecutorConfigStore } from '../harness/delegation/config'
 import { ExecutorFactsStore } from '../harness/delegation/facts'
 import { CoreExecutorService } from './services/executor-service'
@@ -199,13 +202,20 @@ import type {
   DelegationState,
   DelegationEvent,
 } from '../harness/delegation/fold'
-import type { DelegationProjection } from '../harness/delegation/events'
+import type {
+  DelegationProjection,
+  DelegationResultRecord,
+} from '../harness/delegation/events'
+import { agentTitle } from '../runtime/agent-view'
 
 import { ExecutorRegistry } from '../harness/delegation/registry'
 import { DelegationService } from '../harness/delegation/service'
 import { ExecutorRuntimeService } from '../harness/delegation/runtime'
 import { ExecutorConsentStore } from '../harness/delegation/consent'
-import { createLoginShellEnvironment } from '../harness/delegation/login-shell'
+import {
+  createLoginShellEnvironment,
+  type LoginShellEnvironment,
+} from '../harness/delegation/login-shell'
 import { ExecutorModelCatalogService } from '../harness/delegation/models'
 import { nativeGeneratedImageRoot } from '../harness/delegation/image-proof'
 import { ClaudeExecutorAdapter } from '../harness/delegation/adapters/claude'
@@ -260,6 +270,15 @@ export interface CoreApiCreateOptions extends HarnessHostOptions {
   enableFirstRunOnboarding?: boolean
   /** Where the host writes its logs (REL-01); diagnostics show it. */
   logDirectory?: string | null
+  /**
+   * Test hook: the home, environment and login shell external executors
+   * read sign-ins from (defaults: the user's own).
+   */
+  executorHome?: {
+    home?: string
+    environment?: NodeJS.ProcessEnv
+    loginShell?: LoginShellEnvironment
+  } | null
   /** Test hook: the GitHub CLI seen by Pull Request, Issue and CI reads. */
   github?: Partial<
     Pick<
@@ -358,6 +377,8 @@ export class CoreApi {
   readonly workspaceReferenceService: WorkspaceReferenceService
   readonly workspaceBindings: WorkspaceBindingStore
   readonly workspaceMutations = new WorkspaceMutationCoordinator()
+  /** How long a write waits for a subagent's workspace before saying so (AGT-06). */
+  workspaceWaitNoticeMs = WORKSPACE_WAIT_NOTICE_MS
   readonly executorConfig: ExecutorConfigStore
   readonly executorFacts: ExecutorFactsStore
   readonly executorRegistry = new ExecutorRegistry()
@@ -439,7 +460,6 @@ export class CoreApi {
     this.configService = new CoreConfigService(
       this.paths.stateRoot,
       {
-        refreshRuntimeContext: () => {},
         reconcileProfileOnboarding: () => {
           this.onboardingService.reconcile()
         },
@@ -496,7 +516,7 @@ export class CoreApi {
     })
     this.hooksService = new CoreHooksService({
       stateRoot: this.paths.stateRoot,
-      hooks: host.hooks,
+      hooks: host.hookConfig,
       projectRoot: (view) => this.viewProjectRoot(view),
       assertMutation: (area, action, view) =>
         this.assertMutation(area, action, view),
@@ -517,7 +537,6 @@ export class CoreApi {
       sessionLog: (sessionId) => host.sessionLog(sessionId),
       compactNow: (sessionId) => host.compactNow(sessionId),
       measureContext: (sessionId) => host.measureContext(sessionId),
-      refreshRuntimeContext: () => {},
       schedulerService: kept.schedulerService,
     })
     this.pluginService = new PluginApplicationService({
@@ -610,19 +629,9 @@ export class CoreApi {
         pluginSkippedTools: (key) => kept.mcpClient.pluginSkippedTools(key),
       },
       projectMcp: host.projectMcp,
-      hooks: host.hooks,
+      hooks: host.pluginHooks,
       projectOf: (agent) => host.projectRootOfAgent(agent),
     })
-    host.setProjectPluginOverrides((projectRoot) =>
-      this.pluginActivation.replacedIn(projectRoot),
-    )
-    kept.skillLoaders.setPluginSkillsResolver((projectRoot) =>
-      this.pluginService.enabledSkillRoots(projectRoot),
-    )
-    // `@plugin` gestures read the plugin service (E-track contract §3).
-    host.setPluginReferenceResolver((id, agent) =>
-      this.pluginReference(id, host.projectRootOfAgent(agent)),
-    )
     this.skillService = new CoreSkillService(this.paths.stateRoot, {
       runtimeRoot: this.paths.runtimeRoot,
       manager: kept.skillManager,
@@ -643,7 +652,7 @@ export class CoreApi {
             // lists them); every other builtin names its category.
             if (Object.hasOwn(GUI_TOOL_CATALOG, schema.name))
               return { ...schema, pluginId: COMPUTER_USE_PLUGIN_ID }
-            const category = host.tools.get(schema.name)?.category
+            const category = host.toolCategory(schema.name)
             return category === undefined ? schema : { ...schema, category }
           }
           return {
@@ -656,7 +665,6 @@ export class CoreApi {
       library: kept.skillLibrary,
       // `null` = chat (no project Skills); callers always name the session.
       projectRootFor: (sessionId) => host.projectRootForSession(sessionId),
-      refreshRuntimeContext: () => {},
     })
     this.appVersion = opts.appVersion ?? '0.0.0-dev'
     this.environmentService = new CoreEnvironmentService({
@@ -765,9 +773,20 @@ export class CoreApi {
       this.paths.delegationsRoot,
       opts.verifyGeneratedImage,
     )
+    // Claude tokens pasted in 设置 › 子智能体, under the local key (AGT-02).
+    const claudeTokens = {
+      root: this.paths.delegationsRoot,
+      sealer: kept.secretSealer,
+    }
+    const executorHome = opts.executorHome ?? {}
     const executorRuntime = new ExecutorRuntimeService({
       root: this.paths.delegationsRoot,
-      loginShell: createLoginShellEnvironment(),
+      ...(executorHome.home ? { home: executorHome.home } : {}),
+      ...(executorHome.environment
+        ? { environment: executorHome.environment }
+        : {}),
+      loginShell: executorHome.loginShell ?? createLoginShellEnvironment(),
+      claudeTokens,
       resolveRoute: async (id, backend) => {
         const config = await loadModelConfig(this.paths.modelConfigFile, {
           sealer: kept.secretSealer,
@@ -809,6 +828,7 @@ export class CoreApi {
     ) => {
       const runtime = await executorRuntime.probe(profile)
       this.executorFacts.bind(profile, runtime.environment)
+      return runtime.auth
     }
     const externalWorkspaces = new DelegationWorkspaceService({
       root: this.paths.delegationsRoot,
@@ -820,11 +840,17 @@ export class CoreApi {
         resources: this.workspaceMutations.resources,
       }),
     })
+    const delegationResults = new DelegationResults({
+      root: this.paths.delegationsRoot,
+      runner: turnGit,
+      mutations: this.workspaceMutations,
+    })
     this.delegationRuntime = new DelegationService({
       facts: this.executorFacts,
       root: this.paths.delegationsRoot,
       config: () => this.executorConfig.read(),
       registry: this.executorRegistry,
+      checkAuth: checkExecutorAuth,
       adapters: new Map<string, ExecutorAdapter>([
         [
           'claude-code',
@@ -834,6 +860,7 @@ export class CoreApi {
       ]),
       parent: (owner) => host.delegationParent(owner),
       workspaces: externalWorkspaces,
+      results: delegationResults,
       mutations: this.workspaceMutations,
       runtime: (profile, id) => executorRuntime.prepare(profile, id),
       // AGT-07: API-billed runs priced from the bundled catalog, and their
@@ -885,6 +912,9 @@ export class CoreApi {
       },
       onSettled: async (id, runId) => {
         this.flushDelegationOutput(runId)
+        // The receipt chain reads the whole result; only 高级 › 验证后再应用
+        // collects it when a run ends (AGT-06). Otherwise 收集成果 does.
+        if (this.executorConfig.read().verifyBeforeApply !== true) return
         const receipt = await this.delegationReceipts.collect(runId)
         await this.delegationRuntime.bindReceipt(
           id,
@@ -1003,6 +1033,7 @@ export class CoreApi {
       refresh: () => this.delegationRuntime.probeProfiles(),
       checkAuth: checkExecutorAuth,
       consent: executorConsent,
+      claudeTokens,
     })
     host.delegationQuestionTimeoutMs = () => {
       try {
@@ -1018,7 +1049,7 @@ export class CoreApi {
         return null
       }
     }
-    host.tools.setWorkspaceAccessLeaseProvider({
+    const workspaceAccess: WorkspaceAccessLeaseProvider = {
       acquire: async (call) => {
         if (!mayWriteFiles(call.name)) return undefined
         const root = host.sandbox.resolve({
@@ -1032,12 +1063,21 @@ export class CoreApi {
         const keys = [workspaceMutationDomain(root)]
         if (typeof extra === 'string')
           keys.push(workspaceMutationDomain(resolve(root, extra)))
-        return this.workspaceMutations.resources.acquire(
-          { keys, mode: 'shared', owner: call.callId },
-          call.signal,
+        // Waiting on a subagent working in the folder itself: after a while
+        // the conversation says so, with 「停止它」 (AGT-06).
+        return this.workspaceMutations.acquireWriterWithNotice(
+          root,
+          call.callId,
+          {
+            keys,
+            signal: call.signal,
+            noticeMs: this.workspaceWaitNoticeMs,
+            onWait: (blockers) =>
+              this.announceWorkspaceWait(call.agent, call.callId, blockers),
+          },
         )
       },
-    })
+    }
     this.turnFiles = new TurnFileRecorder({
       snapshots: new TurnSnapshots({
         exec: (cwd, args, options) => turnGit.execute(cwd, args, options),
@@ -1074,7 +1114,21 @@ export class CoreApi {
       runExclusive: (workspaceRoot, owner, action) =>
         this.workspaceMutations.runExclusive(workspaceRoot, owner, action),
     })
-    this.turnFiles.install(host)
+    // Everything CoreApi plugs into the kernel, in one registration (KRN-13).
+    host.extend({
+      turnFiles: this.turnFiles,
+      workspaceAccess,
+      pluginOverrides: (projectRoot) =>
+        this.pluginActivation.replacedIn(projectRoot),
+      pluginSkills: (projectRoot) =>
+        this.pluginService.enabledSkillRoots(projectRoot),
+      // `@plugin` gestures read the plugin service (E-track contract §3).
+      pluginReferences: (id, agent) =>
+        this.pluginReference(id, host.projectRootOfAgent(agent)),
+      // A session in a managed worktree works there (KRN-11).
+      worktrees: (sessionId, projectRoot) =>
+        this.workspaceBindings.resolve(sessionId, projectRoot),
+    })
     this.appConnections = new AppConnectionRegistry({
       [appConnectionKey(GITHUB_APP)]: {
         check: async () =>
@@ -1179,6 +1233,8 @@ export class CoreApi {
         host.forgetSessionTree(sessionId, join(dir, LOG_FILE)),
       forgetTurnFiles: (sessionId, projectRoot) =>
         this.turnFiles.forgetSession(sessionId, projectRoot),
+      forgetDelegations: (sessionId) =>
+        this.delegationRuntime.forgetRoot(sessionId),
       stopSession: (sessionId) => {
         host.stop(sessionId)
       },
@@ -1572,6 +1628,82 @@ export class CoreApi {
       journal_seq: state.lastSeq,
       ...(run ? { task: externalTask(state, run) } : {}),
     })
+    if (event.type === 'run-result')
+      this.appendDelegationResult(state, event.runId)
+  }
+
+  /** The result card's record in the parent's conversation (AGT-06). */
+  private appendDelegationResult(state: DelegationState, runId: string): void {
+    const record = state.record,
+      result = state.runs[runId]?.result
+    if (
+      !record ||
+      !result ||
+      !this.host.kept.sessionStore.get(record.owner.rootSessionId)
+    )
+      return
+    const payload: DelegationResultRecord = {
+      delegation_id: record.id,
+      run_id: runId,
+      ...(record.owner.parentCallId
+        ? { parent_call_id: record.owner.parentCallId }
+        : {}),
+      backend: record.backend,
+      title: agentTitle(record.startSpec?.description, record.backend),
+      state: result.state,
+      files: result.files,
+      totals: result.totals,
+      ...(result.truncated ? { truncated: true as const } : {}),
+      ...(result.conflicts?.length ? { conflicts: result.conflicts } : {}),
+      at: result.at,
+      ...(result.by ? { by: result.by } : {}),
+      ...(result.state === 'applied' && result.undo
+        ? { undoable: true as const }
+        : {}),
+      ...(result.reverted ? { reverted: result.reverted } : {}),
+      ...(this.executorConfig.read().verifyBeforeApply === true
+        ? { verify_first: true as const }
+        : {}),
+    }
+    const parent = this.host.sessionLog(record.owner.parentAgentId)
+    if (parent) {
+      parent.append('delegation/result', payload)
+      this.host.sessions.flush(parent.id)
+    }
+  }
+
+  /**
+   * A main-session write has waited for a subagent's workspace: the
+   * conversation shows 「正在等待子智能体释放工作区 · 停止它」 under the
+   * call until the wait ends (AGT-06).
+   */
+  private announceWorkspaceWait(
+    agent: Agent | undefined,
+    callId: string,
+    blockers: string[],
+  ): (() => void) | undefined {
+    const state = blockers
+      .map((owner) => this.delegationStates.get(owner))
+      .find((candidate) => candidate?.record)
+    if (!state?.record) return undefined
+    const record = state.record
+    // The conversation the waiting call is in.
+    const sessionId = agent?.id ?? record.owner.rootSessionId
+    const base = {
+      event: 'workspace_wait',
+      session_id: sessionId,
+      call_id: callId,
+    }
+    this.host.emitHost({
+      ...base,
+      waiting: true,
+      delegation_id: record.id,
+      ...(record.currentRunId ? { run_id: record.currentRunId } : {}),
+      backend: record.backend,
+      title: agentTitle(record.startSpec?.description, record.backend),
+      owner_session_id: record.owner.rootSessionId,
+    })
+    return () => this.host.emitHost({ ...base, waiting: false })
   }
 
   async bootstrap(opts: { sessionId?: string | null } = {}) {
@@ -2535,13 +2667,18 @@ export class CoreApi {
     enterWorktree: (
       input: Parameters<WorkspaceGitService['enterWorktree']>[0],
     ) =>
-      this.withWorkspaceGitMutation(input.sessionId, () =>
-        this.workspaceGitService.enterWorktree(input),
-      ),
+      this.withWorkspaceGitMutation(input.sessionId, async () => {
+        const entered = await this.workspaceGitService.enterWorktree(input)
+        // The session's tools, sandbox and records move with it (KRN-11).
+        this.host.moveWorkingDirectory(input.sessionId, 'worktree-enter')
+        return entered
+      }),
     exitWorktree: (input: Parameters<WorkspaceGitService['exitWorktree']>[0]) =>
-      this.withWorkspaceGitMutation(input.sessionId, () =>
-        this.workspaceGitService.exitWorktree(input),
-      ),
+      this.withWorkspaceGitMutation(input.sessionId, async () => {
+        const left = await this.workspaceGitService.exitWorktree(input)
+        this.host.moveWorkingDirectory(input.sessionId, 'worktree-exit')
+        return left
+      }),
     pullRequest: (input: Parameters<WorkspaceGitService['pullRequest']>[0]) =>
       this.workspaceGitService.pullRequest(input),
     publishPreview: (
@@ -3952,7 +4089,7 @@ export class CoreApi {
       check('process-runtime', () =>
         Boolean(kept.processRuntime.capabilityReport()),
       ),
-      check('harness-kernel', () => this.host.tools.schemas().length > 0),
+      check('harness-kernel', () => this.host.toolCount() > 0),
       check(
         'mcp',
         () => kept.mcpClient.snapshot().initialized === true,

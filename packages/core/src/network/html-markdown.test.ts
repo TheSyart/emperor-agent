@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { HTML_CONVERT_MAX_CHARS, htmlToMarkdown } from './html-markdown'
 
 describe('htmlToMarkdown', () => {
-  it('converts content and drops what a reader never sees', () => {
-    const result = htmlToMarkdown(
+  it('converts content and drops what a reader never sees', async () => {
+    const result = await htmlToMarkdown(
       `<html><head><title> A &lt;b&gt; title </title>
         <script>var close = "</div>"; document.write('<p>fake</p>')</script>
         <style>p { color: red }</style></head>
@@ -39,46 +39,47 @@ describe('htmlToMarkdown', () => {
       expect(result.markdown).not.toContain(unseen)
   })
 
-  it('converts a bounded prefix of a huge page and reports the cut', () => {
+  it('converts a bounded prefix of a huge page and reports the cut', async () => {
     const paragraph = '<p>Some words in a paragraph.</p>'
     const html = `<body>${paragraph.repeat(40_000)}</body>`
     expect(html.length).toBeGreaterThan(HTML_CONVERT_MAX_CHARS)
     const started = Date.now()
-    const result = htmlToMarkdown(html)
+    const result = await htmlToMarkdown(html)
     expect(Date.now() - started).toBeLessThan(5_000)
     expect(result.sourceTruncated).toBe(true)
     expect(result.markdown.length).toBeLessThan(HTML_CONVERT_MAX_CHARS)
     expect(result.markdown).not.toContain('<p')
   })
 
-  it('returns plain text for pathological nesting instead of parsing it', () => {
+  it('returns plain text for pathological nesting instead of parsing it', async () => {
     for (const html of [
       `<p>start</p>${'<div>'.repeat(5_000)}deep text${'</div>'.repeat(5_000)}`,
       `${'<table><tr><td>'.repeat(3_000)}cell`,
     ]) {
       const started = Date.now()
-      const result = htmlToMarkdown(html)
+      const result = await htmlToMarkdown(html)
       expect(Date.now() - started).toBeLessThan(2_000)
       expect(result.plainText).toBe(true)
       expect(result.markdown).toMatch(/deep text|cell/)
     }
     // Flat tables without end tags are not deep.
-    const flat = htmlToMarkdown(
+    const flat = await htmlToMarkdown(
       `<table>${'<tr><td>a<td>b'.repeat(2_000)}</table>`,
     )
     expect(flat.plainText).toBe(false)
   })
 
-  it('survives unterminated markup', () => {
+  it('survives unterminated markup', async () => {
     expect(
-      htmlToMarkdown(`<p>kept</p>${'<script>'.repeat(10_000)}`).markdown,
+      (await htmlToMarkdown(`<p>kept</p>${'<script>'.repeat(10_000)}`))
+        .markdown,
     ).toBe('kept')
-    expect(htmlToMarkdown('<p class=a"b>after an odd quote</p>').markdown).toBe(
-      'after an odd quote',
-    )
-    expect(htmlToMarkdown('<p>text</p><div title="never closed').markdown).toBe(
-      'text',
-    )
-    expect(htmlToMarkdown('<title>untitled').title).toBe('untitled')
+    expect(
+      (await htmlToMarkdown('<p class=a"b>after an odd quote</p>')).markdown,
+    ).toBe('after an odd quote')
+    expect(
+      (await htmlToMarkdown('<p>text</p><div title="never closed')).markdown,
+    ).toBe('text')
+    expect((await htmlToMarkdown('<title>untitled')).title).toBe('untitled')
   })
 })

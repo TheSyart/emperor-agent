@@ -656,6 +656,31 @@ describe('Emperor-specific trajectory mapping', () => {
     ])
   })
 
+  it('records a working-directory change as a context record (KRN-11)', () => {
+    const current = snapshot(
+      assembler([
+        at(1, 'working-directory/change', {
+          from: '/repo',
+          to: '/home/git/worktrees/s1/feature',
+          reason: 'worktree-enter',
+        }),
+      ]),
+    )
+    expect(
+      contexts(current).map((node) => [
+        node.eventType,
+        node.label,
+        node.content[0]?.type === 'text' ? node.content[0].text : '',
+      ]),
+    ).toEqual([
+      [
+        'working-directory/change',
+        'Working directory',
+        '/home/git/worktrees/s1/feature\nworktree-enter · from /repo',
+      ],
+    ])
+  })
+
   it('records harness facts as located context records', () => {
     const current = snapshot(
       assembler([

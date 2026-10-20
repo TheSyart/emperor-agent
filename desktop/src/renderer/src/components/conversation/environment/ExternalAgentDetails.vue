@@ -11,6 +11,7 @@ import {
   integrateDelegation,
   closeDelegation,
   abandonDelegation,
+  listExecutors,
   type DelegationView,
   type DelegationDelivery,
 } from '../../../api/delegations'
@@ -53,6 +54,11 @@ let generation = 0,
   timer: ReturnType<typeof setTimeout> | undefined,
   unsubscribe = () => {}
 const failureDisposition = ref('')
+/**
+ * 高级 › 验证后再应用 (AGT-06): the receipt, independent check and preview
+ * chain shows only when it is on, or when this run already went through it.
+ */
+const verifyFirst = ref(false)
 const record = computed(() => view.value?.record),
   run = computed(() => view.value?.runs[props.runId]),
   receipt = computed(() => delivery.value?.receipt),
@@ -113,6 +119,11 @@ const verifyingNow = computed(
 )
 const canApply = computed(
   () => preview.value?.status === 'ready' && acceptance.value === 'passed',
+)
+const showChain = computed(
+  () =>
+    verifyFirst.value ||
+    Boolean(receipt.value || preview.value || delivery.value?.acceptance),
 )
 async function load() {
   const current = ++generation
@@ -242,6 +253,11 @@ function apply() {
 }
 onMounted(() => {
   void load()
+  void listExecutors()
+    .then((list) => {
+      if (alive) verifyFirst.value = list.config?.verifyBeforeApply === true
+    })
+    .catch(() => undefined)
   unsubscribe = onCoreEvent((input) => {
     if (!input || typeof input !== 'object') return
     const event = input as Record<string, unknown>
@@ -266,8 +282,42 @@ const LIMIT_LABEL: Record<string, string> = {
   TOKEN_LIMIT: '已达到单任务 token 上限（模型单价未知）',
   RUN_LIMIT: '已达到单任务运行次数上限',
 }
+/** Why a run failed and what to do next (AGT-02). */
+const FAILURE: Record<string, [reason: string, next: string]> = {
+  AUTH_EXPIRED: [
+    '登录令牌已失效或过期。',
+    '订阅账号：在终端运行 claude setup-token，把新令牌粘贴到 设置 › 子智能体 的「设置令牌」；API Key：在那里粘贴新的 ANTHROPIC_API_KEY。',
+  ],
+  AUTH_REQUIRED: [
+    '执行器没有可用的登录。',
+    '在 设置 › 子智能体 设置令牌，然后让主会话重试。',
+  ],
+  RATE_LIMITED: [
+    '被限流了：订阅额度或接口的速率已用尽。',
+    '稍后再让主会话重试，或换用另一个子智能体。',
+  ],
+  BILLING: [
+    '账户余额或计费状态不允许继续调用。',
+    '在 Anthropic Console 检查余额与付款方式（订阅账号检查订阅状态），然后重试。',
+  ],
+  MAX_TURNS: [
+    '达到了这次运行的最多轮数。',
+    '让主会话发消息继续，或在 设置 › 子智能体 › 高级 调高「每次运行最多轮数」。',
+  ],
+  CONTEXT_OVERFLOW: [
+    '对话超出了模型的上下文长度。',
+    '让主会话把任务拆小，或新开一个子智能体继续。',
+  ],
+  EXECUTOR_TURN_FAILED: [
+    '子智能体这一轮执行失败。',
+    '查看下面的执行器报告和输出，修正后让主会话重试。',
+  ],
+}
 function failureLabel(code: string): string {
-  return LIMIT_LABEL[code] ?? code
+  return LIMIT_LABEL[code] ?? FAILURE[code]?.[0] ?? code
+}
+function failureNext(code: string): string {
+  return FAILURE[code]?.[1] ?? ''
 }
 /** The cost the budget counted: a subscription has none to count. */
 function costText(usage: {
@@ -324,12 +374,21 @@ function costText(usage: {
         >
       </div>
       <p v-if="error" role="alert" class="external-error">{{ error }}</p>
-      <p v-if="run?.failureCode" class="external-note" :title="run.failureCode">
+      <p
+        v-if="run?.failureCode"
+        class="external-note"
+        :title="run.failureCode"
+        :data-failure-code="run.failureCode"
+      >
         {{ failureLabel(run.failureCode)
-        }}<Button
+        }}<span v-if="failureNext(run.failureCode)" data-failure-next>{{
+          failureNext(run.failureCode)
+        }}</span
+        ><Button
           v-if="
             run.failureCode.includes('AUTH') ||
-            run.failureCode.includes('EXECUTOR')
+            run.failureCode.includes('EXECUTOR') ||
+            run.failureCode === 'MAX_TURNS'
           "
           size="sm"
           @click="emit('configure')"
@@ -418,7 +477,9 @@ function costText(usage: {
         </p>
       </details>
       <section
-        v-if="!receipt || hasFileDelivery || delivery?.acceptance"
+        v-if="
+          showChain && (!receipt || hasFileDelivery || delivery?.acceptance)
+        "
         class="external-section"
       >
         <h3>文件交付与检查</h3>
@@ -677,6 +738,11 @@ p {
 .external-note {
   color: rgb(var(--label-secondary));
   overflow-wrap: anywhere;
+}
+.external-note [data-failure-next] {
+  display: block;
+  margin-top: var(--space-0-5);
+  color: rgb(var(--text-3));
 }
 .external-error {
   color: rgb(var(--state-error-label));

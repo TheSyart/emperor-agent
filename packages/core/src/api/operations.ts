@@ -276,6 +276,8 @@ const modelEntrySaveSchema = z
     contextWindowTokens: z.number().int().positive().optional(),
     maxTokens: z.number().int().positive().optional(),
     reasoningEffort: z.string().trim().nullable().optional(),
+    // KRN-07: keep a DeepSeek entry on chat-completions; null clears it.
+    transport: z.enum(['chat-completions']).nullable().optional(),
     credentialsFrom: idSchema.optional(),
     // MOD-05: the editor's temperature (null removes it) and the fields the
     // user changed, which metadata refreshes then leave alone.
@@ -1090,6 +1092,36 @@ export const CORE_OPERATION_REGISTRY = {
     (api, [input], ctx) =>
       api.executors.configure(input, viewOf(ctx, 'executors.configure')),
   ),
+  // AGT-02: a Claude token pasted in 设置 › 子智能体; one line, no spaces.
+  'executors.setCredential': operation(
+    z.tuple([
+      z
+        .object({
+          profileId: z.string().min(1).max(64),
+          kind: z.enum(['oauth-token', 'api-key']),
+          token: z
+            .string()
+            .trim()
+            .min(8)
+            .max(4096)
+            .regex(/^[\x21-\x7e]+$/),
+        })
+        .strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.executors.setCredential(
+        input,
+        viewOf(ctx, 'executors.setCredential'),
+      ),
+  ),
+  'executors.clearCredential': operation(
+    z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),
+    (api, [input], ctx) =>
+      api.executors.clearCredential(
+        input,
+        viewOf(ctx, 'executors.clearCredential'),
+      ),
+  ),
   'delegations.get': operation(z.tuple([externalRef]), (api, [input], ctx) =>
     api.delegations.get(withSession(input, ctx, 'delegations.get')),
   ),
@@ -1204,6 +1236,29 @@ export const CORE_OPERATION_REGISTRY = {
       api.delegations.integrate(
         withSession(input, ctx, 'delegations.integrate'),
       ),
+  ),
+  // The result card (AGT-06): 查看差异 · 应用到项目 · 撤销 · 丢弃.
+  'delegations.diff': operation(
+    z.tuple([
+      externalRunRef.extend({ path: z.string().min(1).max(4096) }).strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.delegations.diff(withSession(input, ctx, 'delegations.diff')),
+  ),
+  'delegations.apply': operation(
+    z.tuple([externalRunRef]),
+    (api, [input], ctx) =>
+      api.delegations.apply(withSession(input, ctx, 'delegations.apply')),
+  ),
+  'delegations.undo': operation(
+    z.tuple([externalRunRef]),
+    (api, [input], ctx) =>
+      api.delegations.undo(withSession(input, ctx, 'delegations.undo')),
+  ),
+  'delegations.discard': operation(
+    z.tuple([externalRunRef]),
+    (api, [input], ctx) =>
+      api.delegations.discard(withSession(input, ctx, 'delegations.discard')),
   ),
   'delegations.close': operation(
     z.tuple([

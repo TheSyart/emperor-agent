@@ -66,7 +66,6 @@ export interface CoreMemoryServiceDeps {
   ): Promise<{ compacted: boolean; shadowedTokenCount?: number }>
   /** Current request pressure of one session (`CompactionEngine.measure` + context window). */
   measureContext(sessionId: string): CoreContextMeasurement | null
-  refreshRuntimeContext(): void
   /** Optional: protected-job summary in the memory payload. */
   schedulerService?: Pick<SchedulerService, 'listJobs'> | null
 }
@@ -224,7 +223,6 @@ export class CoreMemoryService {
     )
     if (!result.ok)
       throw new Error(`save_memory rejected: ${result.errors.join(', ')}`)
-    this.deps.refreshRuntimeContext()
     return {
       path: this.rel(this.memory.memoryFile),
       content: this.memory.readMemory(),
@@ -269,7 +267,6 @@ export class CoreMemoryService {
 
   restoreVersion(versionId: string, sessionId: string | null) {
     const restored = this.memory.versions.restore(versionId)
-    this.deps.refreshRuntimeContext()
     return { restored, memory: this.getMemory(sessionId) }
   }
 
@@ -345,7 +342,6 @@ export class CoreMemoryService {
         error: String(exc instanceof Error ? exc.message : exc).slice(0, 500),
       }
     }
-    this.deps.refreshRuntimeContext()
     const session = this.deps.sessionLog(sessionId)
     const runtime = this.sessionLogStats(sessionId, session)
     if (!result.compacted) {

@@ -36,7 +36,6 @@ export interface CoreSkillServiceDeps {
   manager?: SkillManager
   /** The tools a session sees (null: a Chat session or none) (KRN-01). */
   toolNames?: (sessionId: string | null) => SkillServiceToolEntry[]
-  refreshRuntimeContext?: () => void
   installService?: SkillInstallService
   resolveMissing?: (
     requirements: SkillRequirements,
@@ -427,9 +426,7 @@ export class CoreSkillService {
     return this.deps.projectRootFor?.(sessionId) ?? null
   }
 
-  private changed(): void {
-    this.deps.refreshRuntimeContext?.()
-  }
+  private changed(): void {}
 }
 
 function invalidPayload(skill: InvalidSkill): InvalidSkillPayload {

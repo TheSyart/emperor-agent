@@ -68,7 +68,7 @@ export function sessionCwd(
   context: ToolRunContext,
   requestedPath: string,
 ): string {
-  const cwd = context.agent?.session.header.cwd
+  const cwd = context.agent?.session.cwd
   if (cwd === undefined) return state.services.sandbox.workspaceRoot
   if (
     !PARENT_PATH_SEGMENT.test(cwd) &&

@@ -23,6 +23,8 @@ import {
 } from './executable'
 import {
   DelegationError,
+  ExecutorAuthError,
+  type ExecutorAuthState,
   type ExecutorProfile,
   type ExternalBackend,
   type ExecutorCapabilities,
@@ -244,5 +246,37 @@ export class ExecutorRegistry {
         result.diagnostic ?? result.status,
       )
     return result
+  }
+}
+/**
+ * The sign-in check that goes with an available probe (AGT-02): without a
+ * usable credential the executor is `needs_auth`, with what the check
+ * found; the error is returned for a caller that has to fail with it.
+ */
+export async function checkSignIn(
+  probe: ExecutorProbe,
+  check: () => Promise<ExecutorAuthState | undefined>,
+): Promise<{ probe: ExecutorProbe; error?: unknown }> {
+  if (probe.status !== 'available') return { probe }
+  try {
+    const auth = await check()
+    return {
+      probe: { ...probe, localAuthChecked: true, ...(auth && { auth }) },
+    }
+  } catch (error) {
+    const code = error instanceof DelegationError ? error.code : undefined
+    return {
+      error,
+      probe: {
+        ...probe,
+        localAuthChecked: false,
+        status:
+          code === 'AUTH_REQUIRED' || code === 'AUTH_EXPIRED'
+            ? 'needs_auth'
+            : 'incompatible',
+        diagnostic: code ?? 'AUTH_ROUTE_UNAVAILABLE',
+        ...(error instanceof ExecutorAuthError && { auth: error.auth }),
+      },
+    }
   }
 }

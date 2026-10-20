@@ -29,11 +29,18 @@ export interface ExtractBoundedZipOptions {
   maxPathDepth?: number
   /** Write Unix entries with an execute bit as 0700 (plugin scripts); everything else stays 0600. */
   preserveExecutable?: boolean
+  /**
+   * Leave symbolic links out (listed in `skippedLinks`) instead of refusing
+   * the archive; device and other special entries are still refused.
+   */
+  skipLinks?: boolean
 }
 
 export interface ExtractBoundedZipResult {
   files: string[]
   totalBytes: number
+  /** Symbolic links left out (with `skipLinks`). */
+  skippedLinks: string[]
 }
 
 interface ZipEntry {
@@ -80,7 +87,12 @@ export function extractBoundedZip(
   const archive = readFileSync(opts.archive)
   if (archive.byteLength !== stat.size)
     throw new Error('ZIP archive changed while reading')
-  const entries = readEntries(archive, limits)
+  const skippedLinks: string[] = []
+  const entries = readEntries(
+    archive,
+    limits,
+    opts.skipLinks ? skippedLinks : null,
+  )
   if (!entries.length) throw new Error('ZIP archive contains no regular files')
   const stage = `${opts.destination}.stage-${process.pid}-${randomBytes(5).toString('hex')}`
   mkdirSync(stage, { recursive: false })
@@ -105,7 +117,7 @@ export function extractBoundedZip(
     rmSync(stage, { recursive: true, force: true })
     throw error
   }
-  return { files: files.sort(), totalBytes }
+  return { files: files.sort(), totalBytes, skippedLinks: skippedLinks.sort() }
 }
 
 function readEntries(
@@ -117,6 +129,7 @@ function readEntries(
     path: number
     depth: number
   },
+  skippedLinks: string[] | null,
 ): ZipEntry[] {
   const end = findEndOfCentralDirectory(archive)
   const disk = archive.readUInt16LE(end + 4)
@@ -173,6 +186,11 @@ function readEntries(
     const name = normalizeMember(rawText)
     if (name.split('/').length > limits.depth)
       throw new Error('ZIP path depth limit exceeded')
+    if (skippedLinks !== null && isLinkEntry(madeBy, externalAttributes)) {
+      skippedLinks.push(name)
+      offset += recordLength
+      continue
+    }
     assertRegularEntryType(madeBy, externalAttributes, directory)
     if (!directory) {
       const canonicalName = name.toLowerCase()
@@ -279,6 +297,12 @@ function hasUnsafePathCharacters(value: string): boolean {
     const code = character.charCodeAt(0)
     return code < 32 || code === 127 || character === ':'
   })
+}
+
+function isLinkEntry(madeBy: number, externalAttributes: number): boolean {
+  return (
+    madeBy >>> 8 === 3 && ((externalAttributes >>> 16) & 0o170000) === 0o120000
+  )
 }
 
 function assertRegularEntryType(

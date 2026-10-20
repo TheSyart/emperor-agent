@@ -226,6 +226,127 @@ export async function installVisualCoreBridge(
         visualAgentTab !== null
       if (visualTheme === 'light' || visualTheme === 'dark')
         localStorage.setItem('emperor.theme', visualTheme)
+      // AGT-02: `?visualExecutors=signed-out|expired|soon|token` gives
+      // 设置 › 子智能体 an enabled Claude Code in that sign-in state.
+      const visualExecutorsMode = visualParams.get('visualExecutors')
+      const visualExecutorProfiles = [
+        {
+          id: 'claude-default',
+          backend: 'claude-code',
+          enabled: true,
+          executableSource: 'bundled',
+          executablePath: 'claude',
+          authRef: { kind: 'managed-cli-login' },
+          stateDirectoryId: 'claude-default',
+          concurrencyLimit: 1,
+        },
+        {
+          id: 'codex-default',
+          backend: 'codex',
+          enabled: false,
+          executablePath: 'codex',
+          authRef: { kind: 'managed-cli-login' },
+          stateDirectoryId: 'codex-default',
+          concurrencyLimit: 1,
+        },
+      ]
+      let visualExecutorConfig: Record<string, unknown> = {
+        schemaVersion: 1,
+        revision: 3,
+        touchedAt: 1,
+        profiles: visualExecutorProfiles,
+        limits: {
+          globalConcurrency: 2,
+          maxQueuedMessages: 16,
+          maxRunsPerTask: 32,
+          maxDepth: 3,
+          runTimeoutMs: 1800000,
+          questionTimeoutMs: 900000,
+          estimatedBudgetUsd: 10,
+        },
+      }
+      const visualClaudeAuth = (mode: string | null) =>
+        mode === 'token'
+          ? { source: 'emperor', kind: 'oauth-token', last4: 'a1b2' }
+          : mode === 'soon'
+            ? {
+                source: 'credentials-file',
+                kind: 'oauth-token',
+                expiresAt: Date.now() + 6 * 60_000,
+                expiresSoon: true,
+              }
+            : mode === 'expired'
+              ? {
+                  source: null,
+                  problem: 'expired',
+                  expiresAt: Date.now() - 3_600_000,
+                }
+              : { source: null, problem: 'missing' }
+      const visualExecutorProbe = (id: string, mode: string | null) => {
+        const base = {
+          checkedAt: Date.now(),
+          authVerified: false,
+          executableVersion: id === 'codex-default' ? '0.153.4' : '2.1.281',
+          capabilities: {
+            persistentSession: true,
+            queuedFollowup: true,
+            steer: id === 'codex-default',
+            interrupt: true,
+            questions: true,
+            structuredOutput: true,
+            processBoundary: 'os',
+            usage: 'tokens',
+          },
+        }
+        if (id === 'codex-default')
+          return { ...base, status: 'available', localAuthChecked: true }
+        const auth = visualClaudeAuth(mode)
+        return auth.source
+          ? {
+              ...base,
+              status: 'available',
+              localAuthChecked: true,
+              executableSource: 'bundled',
+              auth,
+            }
+          : {
+              ...base,
+              status: 'needs_auth',
+              localAuthChecked: false,
+              executableSource: 'bundled',
+              diagnostic:
+                auth.problem === 'expired' ? 'AUTH_EXPIRED' : 'AUTH_REQUIRED',
+              auth,
+            }
+      }
+      let visualClaudeMode = visualExecutorsMode
+      const visualExecutorList = () => ({
+        config: visualExecutorConfig,
+        diagnostic: null,
+        profiles: visualExecutorProfiles.map((profile) => ({
+          profile,
+          probe: visualExecutorProbe(profile.id, visualClaudeMode),
+          specialties: [],
+          runtime: {
+            profileId: profile.id,
+            reportedModel: null,
+            configuredModel: null,
+            modelSource: null,
+            provider: null,
+            advertisedTools: null,
+            observedTools: [],
+            hostAllowedTools: [],
+            nativeCapabilities: {
+              search: { status: 'unverified' },
+              imageGeneration: {
+                status:
+                  profile.backend === 'codex' ? 'unverified' : 'unsupported',
+              },
+            },
+          },
+          consent: null,
+        })),
+      })
       const project = {
         project_id: 'visual_project',
         project_path: projectDir,
@@ -7824,6 +7945,48 @@ export async function installVisualCoreBridge(
                 sites,
               }
               return visualExternalBrowser
+            }
+            case 'executors.list':
+              return visualExecutorsMode ? visualExecutorList() : {}
+            case 'executors.probe': {
+              if (!visualExecutorsMode) return {}
+              const input = (args[0] || {}) as { profileId?: string }
+              return visualExecutorProbe(
+                String(input.profileId),
+                visualClaudeMode,
+              )
+            }
+            case 'executors.models': {
+              if (!visualExecutorsMode) return {}
+              const input = (args[0] || {}) as { profileId?: string }
+              return {
+                profileId: input.profileId,
+                models: [],
+                configuredModel: null,
+                provider: 'anthropic',
+                checkedAt: Date.now(),
+                diagnostic: null,
+              }
+            }
+            case 'executors.configure': {
+              if (!visualExecutorsMode) return {}
+              const input = (args[0] || {}) as { config?: object }
+              visualExecutorConfig = {
+                ...(input.config as Record<string, unknown>),
+                revision: Number(visualExecutorConfig.revision) + 1,
+              }
+              return visualExecutorConfig
+            }
+            case 'executors.setCredential':
+            case 'executors.clearCredential': {
+              if (!visualExecutorsMode) return {}
+              visualClaudeMode =
+                operationKey === 'executors.setCredential'
+                  ? 'token'
+                  : 'signed-out'
+              return {
+                probe: visualExecutorProbe('claude-default', visualClaudeMode),
+              }
             }
             default:
               return {}

@@ -361,9 +361,14 @@ export class TurnSnapshots {
     return before && after ? { before, after } : null
   }
 
-  /** Delete every recorded turn of a session. */
+  /** Delete every recorded turn of a session (and its applied results). */
   async dropSession(place: TurnRepository, sessionId: string): Promise<void> {
-    const refs = [...(await this.sessionRefs(place, sessionId)).values()].flat()
+    const listed = await this.exec(place.worktreeRoot, [
+      'for-each-ref',
+      '--format=%(refname)',
+      `${refBase(sessionId)}/`,
+    ])
+    const refs = listed.stdout.split(/\r?\n/).filter(Boolean)
     if (refs.length === 0) return
     await this.exec(place.worktreeRoot, ['update-ref', '--stdin'], {
       stdin: `${refs.map((ref) => `delete ${ref}`).join('\n')}\n`,
@@ -556,10 +561,15 @@ export class TurnSnapshots {
   }
 }
 
-function refBase(sessionId: string): string {
+/**
+ * Where a session's change records live: its turns, and the undo record of
+ * each subagent result applied in it (`applied/<run>`, AGT-06).
+ */
+export function turnRefBase(sessionId: string): string {
   const segment = sessionId.replace(/[^A-Za-z0-9_-]/g, '_') || '_'
   return `refs/emperor/turns/${segment}`
 }
+const refBase = turnRefBase
 
 function parseNameStatus(output: string): Array<{
   path: string

@@ -447,6 +447,11 @@ export interface ModelEntry {
   entryId: string
   provider: string
   protocol: 'openai' | 'anthropic'
+  /**
+   * KRN-07: a DeepSeek entry on the official host travels over Anthropic
+   * Messages unless this keeps it on chat-completions.
+   */
+  transport?: 'chat-completions'
   modelId: string
   displayName?: string
   effectiveDisplayName: string
@@ -528,6 +533,8 @@ export interface ModelEntrySaveInput {
   maxTokens?: number
   reasoningEffort?: string | null
   pricing?: ModelPricing | null
+  /** KRN-07: keep a DeepSeek entry on chat-completions; null clears it. */
+  transport?: 'chat-completions' | null
   /** New entries only: reuse this saved entry's key (same endpoint). */
   credentialsFrom?: string
   /** The editor's temperature (高级); null removes it (MOD-05). */

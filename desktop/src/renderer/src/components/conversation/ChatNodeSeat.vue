@@ -9,7 +9,7 @@
  * directly followed by its turn tail), part ('reasoning' | 'answer': which
  * blocks of an assistant step this seat shows), dense.
  */
-import { computed, type Component } from 'vue'
+import { computed, defineAsyncComponent, type Component } from 'vue'
 import type { ConversationHandle } from '../../conversation/store'
 import type { ChatNodeKind } from '../../conversation/types'
 import JsonTree from '../ui/JsonTree.vue'
@@ -56,6 +56,10 @@ const RENDERERS: Record<ChatNodeKind, Component> = {
   hook: HookRow,
   turnTail: TurnTail,
   turnFiles: TurnFilesCard,
+  // A subagent's result card loads with the first one (AGT-06).
+  delegationResult: defineAsyncComponent(
+    () => import('./nodes/DelegationResultCard.vue'),
+  ),
   goal: GoalRow,
   workflowRun: WorkflowRunNode,
 }

@@ -1617,6 +1617,10 @@ async function startup(): Promise<void> {
       sessionEventBridge,
       authorizeIpc: (event) => trustedRendererPolicy.authorizeIpc(event),
       coreOptions: {
+        // Development builds check every model request against its session
+        // log (KRN-13); production leaves it to EMPEROR_ASSERT_INVARIANT=1.
+        assertRequestInvariant:
+          !app.isPackaged || process.env.EMPEROR_ASSERT_INVARIANT === '1',
         verifyGeneratedImage: (bytes) => {
           const image = nativeImage.createFromBuffer(Buffer.from(bytes))
           const size = image.getSize()
@@ -1652,6 +1656,17 @@ async function startup(): Promise<void> {
         webFetchClient,
         logDirectory: logLocation.dir,
         ...(coreSecretSealer ? { secretSealer: coreSecretSealer } : {}),
+        // Dev-build e2e only: external executors look for sign-ins in this
+        // folder instead of ~/.claude and never run the login shell (AGT-02).
+        ...(!app.isPackaged && process.env.EMPEROR_E2E_EXECUTOR_HOME
+          ? {
+              executorHome: {
+                home: process.env.EMPEROR_E2E_EXECUTOR_HOME,
+                environment: { PATH: process.env.PATH ?? '' },
+                loginShell: { read: async () => ({}) },
+              },
+            }
+          : {}),
       },
     })
     const core = coreApi
@@ -2021,7 +2036,7 @@ const coordinateQuit = createQuitCoordinator({
     quittingCore = coreApi
     coreApi?.flushAll()
   },
-  // Shutdown overran 5s: kill child process trees and terminals now (FIX-07).
+  // Shutdown overran 10s: kill child process trees and terminals now (FIX-07, AGT-06).
   onTimeout: () => quittingCore?.forceStop(),
   close: async () => {
     await startupTask

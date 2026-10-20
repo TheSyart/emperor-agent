@@ -22,7 +22,11 @@ import { TurnSnapshots } from '../../workspace/turn-snapshots'
 import type { SandboxBackend } from '../sandbox/backend'
 import { ScriptedAdapter, testRoute, type ScriptedReply } from '../testing'
 import { HarnessHost } from './host'
-import { TurnFileRecorder, type TurnFilesRecord } from './turn-files'
+import {
+  TurnFileRecorder,
+  callMayWriteFiles,
+  type TurnFilesRecord,
+} from './turn-files'
 
 const hosts: HarnessHost[] = []
 
@@ -353,5 +357,18 @@ describe('TurnFileRecorder', () => {
     expect(
       git(project, 'for-each-ref', '--format=%(refname)', 'refs/emperor/'),
     ).toBe('')
+  })
+})
+
+describe('calls that write the project (AGT-06)', () => {
+  it('counts collect_agent with apply as a write, so the turn card can undo an apply', () => {
+    expect(
+      callMayWriteFiles({ name: 'collect_agent', arguments: { apply: true } }),
+    ).toBe(true)
+    expect(callMayWriteFiles({ name: 'collect_agent', arguments: {} })).toBe(
+      false,
+    )
+    expect(callMayWriteFiles({ name: 'edit', arguments: {} })).toBe(true)
+    expect(callMayWriteFiles({ name: 'read', arguments: {} })).toBe(false)
   })
 })
