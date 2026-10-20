@@ -11,10 +11,14 @@
  * file and web links read as a type icon plus an accent name (contract §4):
  * data-md-icon picks the icon, languages and PDF draw data-md-badge on a
  * data-md-tone tint, and a missing file (MarkdownHtml asks Core) is struck.
+ * While streaming, the reply renders at most once per 80 ms
+ * (useStreamingText) and MarkdownHtml rewrites only its last block; the
+ * final text renders at once when the stream ends (FIX-04).
  *
- * Props: text; streaming? (reserved for incremental rendering).
+ * Props: text; streaming?.
  */
 import { computed } from 'vue'
+import { useStreamingText } from '../../../composables/useStreamingText'
 import CodeBlock from '../../ui/CodeBlock.vue'
 import { splitMarkdownFences } from '../timelineModel'
 import MarkdownHtml from './MarkdownHtml.vue'
@@ -35,8 +39,12 @@ const props = withDefaults(
 
 type Segment =
   ReturnType<typeof splitMarkdownFences>[number] | ResourceMarkdownSegment
+const shown = useStreamingText(
+  () => props.text,
+  () => props.streaming,
+)
 const segments = computed<Segment[]>(() =>
-  splitMarkdownFences(props.text).flatMap<Segment>((segment) =>
+  splitMarkdownFences(shown.value).flatMap<Segment>((segment) =>
     segment.kind === 'markdown' && !props.streaming
       ? resourceMarkdownSegments(segment.text, props.sourceMessageId)
       : [segment],
