@@ -50,7 +50,11 @@ describe('trusted renderer policy wiring', () => {
         ),
       )
     }
-    for (const register of ['registerOpenPathIpc', 'registerRemoteImageIpc'])
+    for (const register of [
+      'registerOpenPathIpc',
+      'registerRemoteImageIpc',
+      'registerScreenshotIpc',
+    ])
       expect(source).toMatch(
         new RegExp(
           `${register}\\(\\{\\s*ipcMain,\\s*authorize: \\(event\\) => trustedRendererPolicy\\.authorizeIpc\\(event\\)`,

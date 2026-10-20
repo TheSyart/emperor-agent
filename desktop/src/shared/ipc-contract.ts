@@ -649,6 +649,25 @@ export const SELECT_DIRECTORY_CHANNEL = 'emperor:select-directory'
  * `{ ok: true } | { ok: false, error }`.
  */
 export const OPEN_PATH_CHANNEL = 'emperor:open-path'
+/**
+ * Main window → main: the composer's + › 截图 (UI-S04, macOS). Main hides
+ * the window, runs the system's interactive region capture into a private
+ * temporary folder, reads the PNG back, deletes it and answers
+ * {@link ScreenshotCaptureResult}. One capture at a time.
+ */
+export const SCREENSHOT_CAPTURE_CHANNEL = 'emperor:screenshot:capture'
+
+export type ScreenshotCaptureResult =
+  | { ok: true; name: string; mime: 'image/png'; data: Uint8Array }
+  | {
+      ok: false
+      /**
+       * `cancelled`: Esc (no picture). `busy`: a capture is already open.
+       * `permission`: screen recording is not allowed for Emperor.
+       */
+      reason: 'cancelled' | 'busy' | 'unsupported' | 'permission' | 'failed'
+      message: string
+    }
 /** Main window → main: open, close or ask about the desktop pet. */
 export const PET_OPEN_CHANNEL = 'emperor:pet:open'
 export const PET_CLOSE_CHANNEL = 'emperor:pet:close'
