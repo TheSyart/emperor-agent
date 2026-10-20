@@ -5,7 +5,7 @@
 import { appendFileSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { LlmClient } from '../../llm/client'
 import { messageText } from '../../llm/message'
 import type { RouteSpec } from '../../llm/route'
