@@ -15,18 +15,29 @@
  * snapshot comes from the shared useWorkspaceSnapshot poller (active while
  * the column is open).
  *
+ * Pane lifetimes (FIX-05):
+ * - 审查 and 文件 live in a KeepAlive: switching panes keeps the commit
+ *   message, the PR draft, the open file tabs and their scroll positions.
+ *   审查 polls (through the shared snapshot) only while it shows.
+ * - 浏览器 mounts the first time it is shown and then stays, hidden with
+ *   v-show (`visible` false hides the native view), so the page and its
+ *   sign-ins survive other panes and a collapsed column. A session switch
+ *   ends it (keyed by session; unmounting closes the view).
+ * - 终端 remounts per visit (Core keeps the PTYs and replays them).
+ *
  * Pane contract (what a request turns into):
  * - review: `focus-paths` (request.paths) and `commit-focus` (the request
  *   nonce of focus 'commit'; the pane scrolls to and focuses the commit box,
- *   then emits commitFocused and the nonce resets).
+ *   then emits commitFocused and the nonce resets); `visible`.
  * - files: `openPath(path, line)` or `openDirectory(path)` on the pane
  *   instance (queued until the async chunk has mounted); `tree-width` in, `treeWidth` out (persisted as
  *   right_workspace.filesTreeWidth).
  * - browser: `prefill` ({ url, nonce }) only fills the address bar — a page
- *   loads on the user's submit alone; `visible` (the column is open) gates
- *   the native view. The pane is keyed by session, so a session switch
- *   remounts it and closes the view.
- * - terminal: session only.
+ *   loads on the user's submit alone; `visible` (the column is open and the
+ *   pane shows) gates the native view.
+ * - terminal: session, `visible` (the column is open) and `focus-request`
+ *   (a nonce sent when the user shows the pane: picking it, or opening the
+ *   column on it — never on a session switch).
  *
  * Props:
  * - open: the column is visible (width > 0).
@@ -98,6 +109,10 @@ const filesPane = ref<{
 const pendingFile = ref<
   WorkspaceFileRequest | { path: string; directory: true } | null
 >(null)
+/** Session the 浏览器 pane was opened in ('' = not mounted). */
+const browserSession = ref('')
+/** Nonce of the user showing 终端 (0 = no focus wanted). */
+const terminalFocus = ref(0)
 /** Address a request asked to prefill (BrowserPane never auto-loads it). */
 const browserPrefill = ref<{ url: string; nonce: number } | null>(null)
 /** Nonce of a pending review commit-box focus request (0 = none). */
@@ -142,11 +157,27 @@ watch(sessionId, () => {
   browserPrefill.value = null
   commitFocus.value = 0
   turnReview.value = null
+  terminalFocus.value = 0
 })
 // Focus / prefill requests are one-shot: they target the pane showing now.
 watch(pane, (next) => {
   if (next !== 'review') commitFocus.value = 0
   if (next !== 'browser') browserPrefill.value = null
+})
+// The browser pane belongs to the session it was opened in: shown, it
+// mounts (or stays); another session ends it.
+watch(
+  [pane, sessionId],
+  ([next, session], previous) => {
+    if (next === 'browser') browserSession.value = session
+    else if (previous && session !== previous[1]) browserSession.value = ''
+  },
+  { immediate: true },
+)
+// The user showed 终端 (picked it, or opened the column on it): focus it.
+watch([pane, () => props.open], ([next, isOpen], [previous, wasOpen]) => {
+  if (next === 'terminal' && isOpen && (previous !== 'terminal' || !wasOpen))
+    terminalFocus.value += 1
 })
 
 // Chat asks for content via requestWorkspace(); the request may predate
@@ -267,7 +298,7 @@ async function persistFilesTreeWidth(): Promise<void> {
         :availability="availability"
         @open="selectPane"
       />
-      <template v-else-if="pane === 'review'">
+      <template v-else-if="pane === 'review' && (reviewReason || turnReview)">
         <EmptyState
           v-if="reviewReason"
           class="workspace-empty"
@@ -279,27 +310,14 @@ async function persistFilesTreeWidth(): Promise<void> {
           :request="turnReview"
           @close="turnReview = null"
         />
-        <GitReviewPane
-          v-else
-          :session-id="sessionId"
-          :has-project="hasProject"
-          :agent-busy="agentBusy"
-          :focus-paths="reviewFilterPaths"
-          :commit-focus="commitFocus"
-          @commit-focused="commitFocus = 0"
-        />
-      </template>
-      <template v-else-if="pane === 'files'">
-        <FilesPane
-          ref="filesPane"
-          :session-id="sessionId"
-          :project-path="projectPath"
-          :tree-width="filesTreeWidth"
-          @tree-width="setFilesTreeWidth"
-        />
       </template>
       <template v-else-if="pane === 'terminal'">
-        <TerminalPane v-if="hasProject" :session-id="sessionId" />
+        <TerminalPane
+          v-if="hasProject"
+          :session-id="sessionId"
+          :visible="open"
+          :focus-request="terminalFocus"
+        />
         <EmptyState
           v-else
           class="workspace-empty"
@@ -307,10 +325,33 @@ async function persistFilesTreeWidth(): Promise<void> {
           :title="NO_PROJECT_REASON"
         />
       </template>
+      <!-- Drafts, open tabs and scroll positions survive pane switches. -->
+      <KeepAlive>
+        <GitReviewPane
+          v-if="pane === 'review' && !reviewReason && !turnReview"
+          :session-id="sessionId"
+          :has-project="hasProject"
+          :agent-busy="agentBusy"
+          :visible="open"
+          :focus-paths="reviewFilterPaths"
+          :commit-focus="commitFocus"
+          @commit-focused="commitFocus = 0"
+        />
+        <FilesPane
+          v-else-if="pane === 'files'"
+          ref="filesPane"
+          :session-id="sessionId"
+          :project-path="projectPath"
+          :tree-width="filesTreeWidth"
+          @tree-width="setFilesTreeWidth"
+        />
+      </KeepAlive>
+      <!-- Hidden, not closed, behind the other panes (its page stays). -->
       <BrowserPane
-        v-else-if="pane === 'browser'"
+        v-if="browserSession && browserSession === sessionId"
+        v-show="pane === 'browser'"
         :key="sessionId"
-        :visible="open"
+        :visible="open && pane === 'browser'"
         :prefill="browserPrefill"
       />
     </div>

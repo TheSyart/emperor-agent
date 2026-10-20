@@ -3,8 +3,23 @@
  * GitReviewPane — the right workspace's 审查 pane: branch / worktree / PR
  * controls, grouped changes with diffs and the commit box.
  *
+ * Polling (FIX-05): the pane has no timer of its own. While it is on screen
+ * (`visible`, and active inside WorkspacePanel's KeepAlive) it counts as a
+ * consumer of the shared workspace snapshot and takes Git status and
+ * worktrees from each snapshot; the branch list and the current-branch PR
+ * (`gh`) refresh at most once a minute (GIT_REVIEW_SLOW_TTL_MS). Hidden, it
+ * makes no Git calls. Polls are silent: they never set `loading`, so no box
+ * flickers or loses focus.
+ *
+ * Errors: a failed read (status, diff, compare) is `readError` and clears on
+ * the next good read; a failed write (commit, stage, push, PR actions…) is
+ * `writeError` and stays until dismissed or the next write starts. Text
+ * boxes are never disabled — only the buttons that act. Switching sessions
+ * clears the commit message, the PR draft and both errors.
+ *
  * Props:
  * - sessionId, hasProject, agentBusy (disables conflicting Git writes).
+ * - visible?: the workspace column is open (default true).
  * - focusPaths?: limit the change list to these files (本次任务 filter).
  * - commitFocus?: nonce; a new non-zero value scrolls to the commit box and
  *   focuses it once the status has loaded (requestWorkspace focus 'commit').
@@ -21,6 +36,7 @@ import type {
   GitStatusResult,
   GitWorktreeSummary,
   PullRequestSummary,
+  WorkspaceSnapshot,
 } from '@emperor/core/api'
 import {
   ArrowDown,
@@ -37,28 +53,52 @@ import {
   ShieldAlert,
   Trash2,
   Workflow,
+  X,
 } from 'lucide-vue-next'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { core } from '../../api/http'
 import {
+  computed,
+  nextTick,
+  onActivated,
+  onBeforeUnmount,
+  onDeactivated,
+  onMounted,
+  ref,
+  watch,
+} from 'vue'
+import { core } from '../../api/http'
+import { useWorkspaceSnapshot } from './useWorkspaceSnapshot'
+import {
+  GIT_REVIEW_SLOW_TTL_MS,
   gitFileChangeLabel,
   gitTransientLabel,
   filterGitFilesByPaths,
   groupGitFiles,
 } from './workspaceModel'
+import { isGitStatus } from './workspaceTypes'
 
-const props = defineProps<{
-  sessionId: string
-  hasProject: boolean
-  agentBusy: boolean
-  focusPaths?: string[]
-  commitFocus?: number
-}>()
+const props = withDefaults(
+  defineProps<{
+    sessionId: string
+    hasProject: boolean
+    agentBusy: boolean
+    visible?: boolean
+    focusPaths?: string[]
+    commitFocus?: number
+  }>(),
+  { visible: true, focusPaths: undefined, commitFocus: undefined },
+)
 const emit = defineEmits<{ commitFocused: [] }>()
 
 const status = ref<GitStatusResult | null>(null)
-const loading = ref(false)
-const error = ref('')
+/** Generation of the user-visible refresh in flight (0: none). */
+const loadingToken = ref(0)
+const loading = computed(() => loadingToken.value !== 0)
+/** A Git or PR write is in flight. */
+const writing = ref(false)
+const comparing = ref(false)
+const previewing = ref(false)
+const readError = ref('')
+const writeError = ref('')
 const diff = ref('')
 const diffTruncated = ref(false)
 const selectedPath = ref('')
@@ -94,10 +134,24 @@ const commitInput = ref<HTMLTextAreaElement | null>(null)
 const commitFocusPending = ref(false)
 /** Brief accent ring on the commit box after a focus request. */
 const commitAttention = ref(false)
+/** Inside WorkspacePanel's KeepAlive: false while another pane shows. */
+const activated = ref(true)
 let attentionTimer: ReturnType<typeof setTimeout> | undefined
 let refreshGeneration = 0
 let diffGeneration = 0
-let pollTimer: number | undefined
+/** When the PR / the branch list were last read (ms; 0: never). */
+let pullRequestCheckedAt = 0
+let branchesCheckedAt = 0
+
+/** On screen: the column is open and this pane is the one showing. */
+const polling = computed(
+  () =>
+    props.visible &&
+    activated.value &&
+    props.hasProject &&
+    Boolean(props.sessionId),
+)
+const workspace = useWorkspaceSnapshot({ active: () => polling.value })
 
 const visibleFiles = computed(() =>
   focusFilterActive.value
@@ -111,6 +165,7 @@ const transientLabel = computed(() =>
 const gitWritesDisabled = computed(
   () =>
     props.agentBusy ||
+    writing.value ||
     loading.value ||
     Boolean(transientLabel.value) ||
     Boolean(status.value?.truncated),
@@ -120,36 +175,52 @@ const activeWorktree = computed(
 )
 
 onMounted(() => {
-  window.addEventListener('focus', refreshOnFocus)
-  void refresh()
-  pollTimer = window.setInterval(() => {
-    if (document.hasFocus() && !loading.value) void refresh()
-  }, 5_000)
+  if (polling.value) void refresh()
 })
+onActivated(() => (activated.value = true))
+onDeactivated(() => (activated.value = false))
 onBeforeUnmount(() => {
   refreshGeneration += 1
   diffGeneration += 1
-  window.removeEventListener('focus', refreshOnFocus)
-  window.clearInterval(pollTimer)
   clearTimeout(attentionTimer)
 })
+// Back on screen: catch up quietly (a first load shows the spinner).
+watch(polling, (on, was) => {
+  if (on && !was) void refresh({ silent: Boolean(status.value) })
+})
+watch(workspace.snapshot, (next) => applySnapshot(next))
 watch(
   () => props.sessionId,
   () => {
     refreshGeneration += 1
     diffGeneration += 1
     status.value = null
+    loadingToken.value = 0
+    writing.value = false
+    comparing.value = false
+    previewing.value = false
+    readError.value = ''
+    writeError.value = ''
     branches.value = []
     worktrees.value = []
     ownedWorktrees.value = []
     pullRequest.value = null
     pullRequestError.value = ''
     publishPreview.value = null
+    pullRequestCheckedAt = 0
+    branchesCheckedAt = 0
     selectedPath.value = ''
     diff.value = ''
     diffTruncated.value = false
     compareBase.value = ''
-    void refresh()
+    // Drafts belong to the session they were written in.
+    commitMessage.value = ''
+    branchName.value = ''
+    worktreeName.value = ''
+    pullRequestTitle.value = ''
+    pullRequestBody.value = ''
+    pullRequestDraft.value = true
+    if (polling.value) void refresh()
   },
 )
 watch(
@@ -194,19 +265,18 @@ async function revealCommitBox(): Promise<void> {
   emit('commitFocused')
 }
 
-function refreshOnFocus(): void {
-  if (!loading.value) void refresh()
-}
-
-async function refresh(): Promise<void> {
+/**
+ * Read status, branches and worktrees. `silent` (catching up when the pane
+ * shows again, after a failed write) leaves `loading` alone.
+ */
+async function refresh(options: { silent?: boolean } = {}): Promise<void> {
   if (!props.hasProject || !props.sessionId) {
     status.value = null
     return
   }
   const owner = props.sessionId
   const generation = ++refreshGeneration
-  loading.value = true
-  error.value = ''
+  if (!options.silent) loadingToken.value = generation
   try {
     const [next, branchPayload, worktreePayload] = await Promise.all([
       core('git.status', { sessionId: owner }),
@@ -215,36 +285,91 @@ async function refresh(): Promise<void> {
     ])
     if (!isCurrentRefresh(owner, generation)) return
     status.value = next
-    branches.value = branchPayload.branches
+    readError.value = ''
+    applyBranches(branchPayload.branches, next)
     worktrees.value = worktreePayload.worktrees
     ownedWorktrees.value = worktreePayload.owned
-    if (!compareBase.value)
-      compareBase.value =
-        branchPayload.branches.find((branch) => branch.name !== next.branch)
-          ?.name ?? ''
-    void refreshPullRequest(owner, generation)
+    void refreshPullRequest(owner, { force: !options.silent })
   } catch (cause) {
-    if (isCurrentRefresh(owner, generation)) error.value = message(cause)
+    if (isCurrentRefresh(owner, generation)) readError.value = message(cause)
   } finally {
-    if (isCurrentRefresh(owner, generation)) loading.value = false
+    if (loadingToken.value === generation) loadingToken.value = 0
   }
 }
 
+/** A shared snapshot poll landed: take its status, quietly. */
+function applySnapshot(next: WorkspaceSnapshot | null): void {
+  // A write in flight brings its own status; a user refresh its own too.
+  if (!next || !polling.value || writing.value || loading.value) return
+  if (workspace.sessionId.value !== props.sessionId) return
+  if (!isGitStatus(next.git)) {
+    if (next.git && 'error' in next.git) readError.value = next.git.error
+    return
+  }
+  const previous = status.value
+  status.value = next.git
+  readError.value = ''
+  worktrees.value = next.worktrees?.worktrees ?? []
+  ownedWorktrees.value = next.worktrees?.owned ?? []
+  const owner = props.sessionId
+  if (
+    !previous ||
+    previous.head !== next.git.head ||
+    previous.branch !== next.git.branch ||
+    Date.now() - branchesCheckedAt >= GIT_REVIEW_SLOW_TTL_MS
+  )
+    void refreshBranches(owner)
+  void refreshPullRequest(owner)
+}
+
+function applyBranches(
+  list: Array<{ name: string; head: string; upstream: string | null }>,
+  current: GitStatusResult,
+): void {
+  branches.value = list
+  branchesCheckedAt = Date.now()
+  if (!compareBase.value)
+    compareBase.value =
+      list.find((branch) => branch.name !== current.branch)?.name ?? ''
+}
+
+async function refreshBranches(owner: string): Promise<void> {
+  branchesCheckedAt = Date.now()
+  try {
+    const payload = await core('git.branches', { sessionId: owner })
+    if (owner === props.sessionId && status.value)
+      applyBranches(payload.branches, status.value)
+  } catch {
+    // The list stays as it was; the next refresh tries again.
+  }
+}
+
+/** The current-branch PR (`gh`): at most once a minute unless forced. */
 async function refreshPullRequest(
   owner: string,
-  generation: number,
+  options: { force?: boolean } = {},
 ): Promise<void> {
-  pullRequestError.value = ''
+  if (
+    !options.force &&
+    Date.now() - pullRequestCheckedAt < GIT_REVIEW_SLOW_TTL_MS
+  )
+    return
+  pullRequestCheckedAt = Date.now()
   try {
     const next = await core('git.pullRequest', { sessionId: owner })
-    if (!isCurrentRefresh(owner, generation)) return
+    if (owner !== props.sessionId) return
     pullRequest.value = next
-    if (next && !pullRequestTitle.value) pullRequestTitle.value = ''
+    pullRequestError.value = ''
   } catch (cause) {
-    if (!isCurrentRefresh(owner, generation)) return
+    if (owner !== props.sessionId) return
     pullRequest.value = null
     pullRequestError.value = friendlyPullRequestError(cause)
   }
+}
+
+/** The 刷新 button: everything now, PR included. */
+function refreshNow(): void {
+  void refresh()
 }
 
 async function showDiff(
@@ -279,7 +404,7 @@ async function showDiff(
       diffTruncated.value = result.truncated
     }
   } catch (cause) {
-    if (isCurrentDiff(owner, generation)) error.value = message(cause)
+    if (isCurrentDiff(owner, generation)) readError.value = message(cause)
   }
 }
 
@@ -375,13 +500,15 @@ async function push(): Promise<void> {
     !(await confirm({ title: '推送当前分支到远端？', confirmLabel: '推送' }))
   )
     return
-  await mutate(() =>
-    core('git.push', {
-      sessionId: props.sessionId,
-      expectedRevision: status.value!.revision,
-      setUpstream: !status.value?.upstream,
-      confirmed: true,
-    }),
+  await mutate(
+    () =>
+      core('git.push', {
+        sessionId: props.sessionId,
+        expectedRevision: status.value!.revision,
+        setUpstream: !status.value?.upstream,
+        confirmed: true,
+      }),
+    { pullRequest: true },
   )
 }
 
@@ -404,13 +531,15 @@ async function switchBranch(name: string): Promise<void> {
     return
   if (!(await confirm({ title: `切换到分支 ${name}？`, confirmLabel: '切换' })))
     return
-  await mutate(() =>
-    core('git.switchBranch', {
-      sessionId: props.sessionId,
-      name,
-      expectedRevision: status.value!.revision,
-      confirmed: true,
-    }),
+  await mutate(
+    () =>
+      core('git.switchBranch', {
+        sessionId: props.sessionId,
+        name,
+        expectedRevision: status.value!.revision,
+        confirmed: true,
+      }),
+    { pullRequest: true },
   )
 }
 
@@ -470,17 +599,20 @@ async function exitWorktree(action: 'keep' | 'remove'): Promise<void> {
 
 async function previewPullRequest(): Promise<void> {
   if (!status.value || status.value.truncated || transientLabel.value) return
-  loading.value = true
+  const owner = props.sessionId
+  previewing.value = true
   pullRequestError.value = ''
   try {
-    publishPreview.value = await core('git.publishPreview', {
-      sessionId: props.sessionId,
+    const preview = await core('git.publishPreview', {
+      sessionId: owner,
       ...(compareBase.value ? { baseRef: compareBase.value } : {}),
     })
+    if (owner === props.sessionId) publishPreview.value = preview
   } catch (cause) {
-    pullRequestError.value = friendlyPullRequestError(cause)
+    if (owner === props.sessionId)
+      pullRequestError.value = friendlyPullRequestError(cause)
   } finally {
-    loading.value = false
+    if (owner === props.sessionId) previewing.value = false
   }
 }
 
@@ -503,23 +635,18 @@ async function publishPullRequestNow(): Promise<void> {
     ))
   )
     return
-  loading.value = true
-  pullRequestError.value = ''
-  try {
-    pullRequest.value = await core('git.publishPullRequest', {
+  const revision = status.value.revision
+  const published = await runPullRequestMutation(() =>
+    core('git.publishPullRequest', {
       sessionId: props.sessionId,
       title: pullRequestTitle.value.trim(),
       body: pullRequestBody.value,
       draft: pullRequestDraft.value,
-      expectedRevision: status.value.revision,
+      expectedRevision: revision,
       confirmed: true,
-    })
-    await refresh()
-  } catch (cause) {
-    pullRequestError.value = friendlyPullRequestError(cause)
-  } finally {
-    loading.value = false
-  }
+    }),
+  )
+  if (published) await refresh({ silent: true })
 }
 
 async function readyPullRequestNow(): Promise<void> {
@@ -589,17 +716,26 @@ async function closePullRequestNow(): Promise<void> {
   )
 }
 
+/** A PR write; its failure is a write error. Resolves true on success. */
 async function runPullRequestMutation(
   action: () => Promise<PullRequestSummary>,
-): Promise<void> {
-  loading.value = true
-  pullRequestError.value = ''
+): Promise<boolean> {
+  const owner = props.sessionId
+  writing.value = true
+  writeError.value = ''
   try {
-    pullRequest.value = await action()
+    const next = await action()
+    if (owner !== props.sessionId) return false
+    pullRequest.value = next
+    pullRequestError.value = ''
+    pullRequestCheckedAt = Date.now()
+    return true
   } catch (cause) {
-    pullRequestError.value = friendlyPullRequestError(cause)
+    if (owner === props.sessionId)
+      writeError.value = friendlyPullRequestError(cause)
+    return false
   } finally {
-    loading.value = false
+    if (owner === props.sessionId) writing.value = false
   }
 }
 
@@ -608,8 +744,7 @@ async function compareBranch(): Promise<void> {
   const owner = props.sessionId
   const generation = ++diffGeneration
   const baseRef = compareBase.value
-  loading.value = true
-  error.value = ''
+  comparing.value = true
   try {
     const result = await core('git.compare', {
       sessionId: owner,
@@ -620,17 +755,25 @@ async function compareBranch(): Promise<void> {
     diff.value = result.diff
     diffTruncated.value = result.truncated
   } catch (cause) {
-    if (isCurrentDiff(owner, generation)) error.value = message(cause)
+    if (isCurrentDiff(owner, generation)) readError.value = message(cause)
   } finally {
-    if (isCurrentDiff(owner, generation)) loading.value = false
+    if (owner === props.sessionId) comparing.value = false
   }
 }
 
-async function mutate(action: () => Promise<GitStatusResult>): Promise<void> {
+/**
+ * Run a Git write. Its error stays on screen (the refresh after it never
+ * clears it); a success also refreshes the shared snapshot, so a poll that
+ * read the repository before the write cannot land after it.
+ */
+async function mutate(
+  action: () => Promise<GitStatusResult>,
+  options: { pullRequest?: boolean } = {},
+): Promise<void> {
   const owner = props.sessionId
   const generation = ++refreshGeneration
-  loading.value = true
-  error.value = ''
+  writing.value = true
+  writeError.value = ''
   try {
     const next = await action()
     const [branchPayload, worktreePayload] = await Promise.all([
@@ -639,17 +782,21 @@ async function mutate(action: () => Promise<GitStatusResult>): Promise<void> {
     ])
     if (isCurrentRefresh(owner, generation)) {
       status.value = next
-      branches.value = branchPayload.branches
+      applyBranches(branchPayload.branches, next)
       worktrees.value = worktreePayload.worktrees
       ownedWorktrees.value = worktreePayload.owned
     }
-  } catch (cause) {
-    if (isCurrentRefresh(owner, generation)) {
-      error.value = message(cause)
-      await refresh()
+    if (owner === props.sessionId) {
+      void workspace.refresh({ force: true })
+      if (options.pullRequest) void refreshPullRequest(owner, { force: true })
     }
+  } catch (cause) {
+    if (owner !== props.sessionId) return
+    writeError.value = message(cause)
+    // The repository may have moved (a stale revision): read it again.
+    await refresh({ silent: true })
   } finally {
-    if (isCurrentRefresh(owner, generation)) loading.value = false
+    if (owner === props.sessionId) writing.value = false
   }
 }
 
@@ -682,9 +829,27 @@ function friendlyPullRequestError(value: unknown): string {
         <GitBranch :size="14" class="workspace-eyebrow" aria-hidden="true" />
         <strong>{{ status?.branch || 'Git' }}</strong>
       </div>
-      <IconButton label="刷新 Git 状态" :disabled="loading" @click="refresh">
+      <IconButton label="刷新 Git 状态" :disabled="loading" @click="refreshNow">
         <Spinner v-if="loading" size="sm" />
         <RefreshCw v-else :size="15" />
+      </IconButton>
+    </div>
+
+    <!-- A failed write stays until dismissed (refreshes never clear it). -->
+    <div
+      v-if="writeError"
+      class="workspace-inline-error git-write-error"
+      role="alert"
+      data-git-write-error
+    >
+      <span class="git-write-error-text">{{ writeError }}</span>
+      <IconButton
+        label="关闭错误提示"
+        :tooltip="false"
+        size="xs"
+        @click="writeError = ''"
+      >
+        <X :size="12" />
       </IconButton>
     </div>
 
@@ -694,7 +859,13 @@ function friendlyPullRequestError(value: unknown): string {
       variant="inline"
       title="当前会话没有 Git 项目。"
     />
-    <div v-else-if="error" class="workspace-inline-error">{{ error }}</div>
+    <div
+      v-else-if="readError"
+      class="workspace-inline-error"
+      data-git-read-error
+    >
+      {{ readError }}
+    </div>
     <template v-if="status">
       <div
         v-if="focusFilterActive && props.focusPaths?.length"
@@ -723,7 +894,11 @@ function friendlyPullRequestError(value: unknown): string {
       <div class="git-sync-bar">
         <span><ArrowUp :size="13" />{{ status.ahead }}</span>
         <span><ArrowDown :size="13" />{{ status.behind }}</span>
-        <button type="button" :disabled="loading" @click="fetchRemote">
+        <button
+          type="button"
+          :disabled="loading || writing"
+          @click="fetchRemote"
+        >
           Fetch
         </button>
         <button type="button" :disabled="gitWritesDisabled" @click="pull">
@@ -767,7 +942,6 @@ function friendlyPullRequestError(value: unknown): string {
             v-model="branchName"
             size="sm"
             placeholder="新分支名称"
-            :disabled="gitWritesDisabled"
             @keydown.enter.prevent="createBranch"
           />
           <button
@@ -791,7 +965,11 @@ function friendlyPullRequestError(value: unknown): string {
               {{ branch.name }}
             </option>
           </select>
-          <button type="button" :disabled="!compareBase" @click="compareBranch">
+          <button
+            type="button"
+            :disabled="!compareBase || comparing"
+            @click="compareBranch"
+          >
             Compare
           </button>
         </div>
@@ -829,7 +1007,6 @@ function friendlyPullRequestError(value: unknown): string {
             v-model="worktreeName"
             size="sm"
             placeholder="临时 worktree 分支名"
-            :disabled="gitWritesDisabled"
             @keydown.enter.prevent="enterWorktree"
           />
           <button
@@ -960,13 +1137,12 @@ function friendlyPullRequestError(value: unknown): string {
           aria-label="提交信息"
           rows="3"
           placeholder="提交信息"
-          :disabled="gitWritesDisabled"
         />
         <button
           type="submit"
           :disabled="!commitMessage.trim() || gitWritesDisabled"
         >
-          <LoaderCircle v-if="loading" :size="14" class="animate-spin" />
+          <LoaderCircle v-if="writing" :size="14" class="animate-spin" />
           <Check v-else :size="14" />
           Commit
         </button>
@@ -1029,7 +1205,10 @@ function friendlyPullRequestError(value: unknown): string {
           type="button"
           class="git-preview-button"
           :disabled="
-            loading || Boolean(transientLabel) || Boolean(status.truncated)
+            previewing ||
+            writing ||
+            Boolean(transientLabel) ||
+            Boolean(status.truncated)
           "
           @click="previewPullRequest"
         >
@@ -1060,13 +1239,11 @@ function friendlyPullRequestError(value: unknown): string {
             v-model="pullRequestTitle"
             size="sm"
             placeholder="Pull Request 标题"
-            :disabled="gitWritesDisabled"
           />
           <textarea
             v-model="pullRequestBody"
             rows="4"
             placeholder="Pull Request 正文"
-            :disabled="gitWritesDisabled"
           />
           <Checkbox v-model="pullRequestDraft">Draft</Checkbox>
           <button
@@ -1604,6 +1781,26 @@ function friendlyPullRequestError(value: unknown): string {
 .workspace-inline-error {
   color: rgb(var(--danger));
   background: rgb(var(--danger-soft));
+}
+
+/* Stays in view while the pane scrolls (the commit box sits further down). */
+.git-write-error {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  align-items: center;
+  background:
+    linear-gradient(rgb(var(--danger-soft)), rgb(var(--danger-soft))),
+    rgb(var(--surface-base));
+}
+
+.git-write-error-text {
+  min-width: 0;
+  flex: 1;
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .workspace-inline-warning {

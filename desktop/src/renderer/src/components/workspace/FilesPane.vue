@@ -9,6 +9,13 @@
  * file while the draft is active replaces the draft. ⌘W (Ctrl+W off macOS)
  * closes the active tab only while focus is inside this pane.
  *
+ * Reopening (FIX-05): a request for a file that already has a tab first
+ * asks Core for its size and mtime (files.stat); when either changed — or
+ * the stat fails — the tab is read again, so a link to line N shows the
+ * current text. Turn snapshots and attachments never change and are reused.
+ * WorkspacePanel keeps this pane alive across pane switches (KeepAlive); the
+ * scroll positions are put back on reactivation.
+ *
  * Props:
  * - sessionId, projectPath.
  * - treeWidth: tree column width in px (240–320; the parent persists it as
@@ -38,6 +45,7 @@ import {
   inject,
   markRaw,
   nextTick,
+  onActivated,
   onBeforeUnmount,
   onMounted,
   ref,
@@ -180,6 +188,28 @@ onBeforeUnmount(() => {
   requestGeneration += 1
   fileGeneration += 1
   treeGeneration += 1
+})
+
+// KeepAlive detaches the DOM while another pane shows, and a detached
+// scroller forgets its offset (already gone when onDeactivated runs): keep
+// the last offsets as they change and put them back on reactivation.
+const scrollOffsets = new Map<HTMLElement, [top: number, left: number]>()
+function rememberScroll(event: Event): void {
+  const target = event.target
+  if (target instanceof HTMLElement)
+    scrollOffsets.set(target, [target.scrollTop, target.scrollLeft])
+}
+onActivated(() => {
+  void nextTick(() => {
+    for (const [element, [top, left]] of scrollOffsets) {
+      if (!element.isConnected) {
+        scrollOffsets.delete(element)
+        continue
+      }
+      element.scrollTop = top
+      element.scrollLeft = left
+    }
+  })
 })
 watch(
   () => props.sessionId,
@@ -387,13 +417,18 @@ async function openPreview(
   )
   activeLine.value = normalizeLine(request.line)
   openError.value = ''
-  if (existing && !refresh) {
-    activePath.value = existing.key
-    draftOpen.value = false
-    await revealActiveLine()
-    return
-  }
   const owner = props.sessionId
+  if (existing && !refresh) {
+    const generation = ++fileGeneration
+    const changed = await changedOnDisk(existing)
+    if (owner !== props.sessionId || generation !== fileGeneration) return
+    if (!changed) {
+      activePath.value = existing.key
+      draftOpen.value = false
+      await revealActiveLine()
+      return
+    }
+  }
   const generation = ++fileGeneration
   loading.value = true
   try {
@@ -426,6 +461,25 @@ async function openPreview(
   } finally {
     if (owner === props.sessionId && generation === fileGeneration)
       loading.value = false
+  }
+}
+
+/**
+ * Whether a tab's file changed since it was read: size or mtime differ, or
+ * the stat failed (gone, moved: reading again shows why).
+ */
+async function changedOnDisk(tab: FileTab): Promise<boolean> {
+  const target = tab.request.target
+  if (target.source !== 'project' && target.source !== 'reference') return false
+  if (tab.preview.kind === 'directory') return false
+  try {
+    const stat = await core('files.stat', { ...target })
+    return (
+      stat.bytes !== tab.preview.bytes ||
+      stat.modifiedAt !== tab.preview.modifiedAt
+    )
+  } catch {
+    return true
   }
 }
 
@@ -634,6 +688,7 @@ function message(value: unknown): string {
     tabindex="-1"
     :data-tree="treeVisible ? 'shown' : 'hidden'"
     @keydown="onPaneKeydown"
+    @scroll.capture.passive="rememberScroll"
   >
     <section class="files-main" aria-label="文件预览">
       <header class="file-tabs-bar">

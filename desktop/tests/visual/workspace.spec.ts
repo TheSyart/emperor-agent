@@ -41,6 +41,8 @@ async function open(
 ) {
   await page.addInitScript(
     ({ pane, width }) => {
+      // Init scripts also run in same-origin child frames.
+      if (window !== window.top) return
       localStorage.setItem(
         'emperor.frame.v2',
         JSON.stringify({
@@ -86,6 +88,39 @@ async function expectBoundsShown(page: Page) {
 
 async function expectBoundsHidden(page: Page) {
   await expect.poll(() => lastBounds(page)).toBeNull()
+}
+
+/** How many times the pane closed the native view (its partition wiped). */
+async function browserClosed(page: Page): Promise<number> {
+  return page.evaluate(
+    () =>
+      (window as unknown as { __visualBrowserClosed?: number })
+        .__visualBrowserClosed ?? 0,
+  )
+}
+
+interface WorkspaceOp {
+  op: string
+  at: number
+  input: Record<string, unknown> | undefined
+}
+
+/** The workspace panes' Core calls so far (visual bridge log). */
+async function workspaceOps(page: Page, pattern?: RegExp) {
+  const ops = await page.evaluate(
+    () =>
+      (window as unknown as { __visualWorkspaceOps?: WorkspaceOp[] })
+        .__visualWorkspaceOps ?? [],
+  )
+  return pattern ? ops.filter((entry) => pattern.test(entry.op)) : ops
+}
+
+/** What chat components ask for (a string: the page imports the module). */
+async function requestWorkspace(page: Page, request: unknown) {
+  await page.evaluate(
+    `import('/src/components/workspace/workspaceState.ts').then((m) =>
+      m.requestWorkspace(${JSON.stringify(request)}))`,
+  )
 }
 
 for (const theme of ['dark', 'light'] as const) {
@@ -269,18 +304,10 @@ test('browser: loading page and the native-view hide rules', async ({
   await expectBoundsHidden(page)
   await page.getByRole('button', { name: '工作台', exact: true }).click()
   await expectBoundsShown(page)
-  // Leaving the pane closes the view (its partition is wiped).
+  // Leaving the pane only hides the view (FIX-05): the page stays.
   await page.getByRole('button', { name: '工作台首页' }).click()
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          (window as unknown as { __visualBrowserClosed?: number })
-            .__visualBrowserClosed ?? 0,
-      ),
-    )
-    .toBe(1)
   await expectBoundsHidden(page)
+  expect(await browserClosed(page)).toBe(0)
   expect(
     await page.evaluate(
       () => (window as unknown as VisualBrowserWindow).__visualBrowserOpened,
@@ -306,3 +333,278 @@ for (const theme of ['dark', 'light'] as const) {
     await shot(page, `review-commit-focus-${theme}`)
   })
 }
+
+// ── FIX-05 · 工作台缺陷 ─────────────────────────────────────────────────────
+
+test('FIX-05 1 · a commit the pre-commit hook rejects keeps its error', async ({
+  page,
+}) => {
+  await open(
+    page,
+    '/chat/build-ui?visualProgress=final&visualGitCommit=reject',
+    'dark',
+    'review',
+  )
+  const pane = page.locator('.git-review-pane')
+  const box = pane.getByRole('textbox', { name: '提交信息' })
+  await box.fill('feat: add the thing')
+  await pane.locator('.git-commit-form button[type="submit"]').click()
+  const alert = pane.locator('[data-git-write-error]')
+  await expect(alert).toContainText('pre-commit hook failed')
+  await expect(alert).toHaveAttribute('role', 'alert')
+  // A poll (and the refresh after the failure) come and go; it stays.
+  const polls = (
+    await workspaceOps(page, /^(workspace\.snapshot|git\.status)$/)
+  ).length
+  await expect
+    .poll(
+      async () =>
+        (await workspaceOps(page, /^(workspace\.snapshot|git\.status)$/))
+          .length,
+      { timeout: 12_000 },
+    )
+    .toBeGreaterThan(polls)
+  await expect(alert).toContainText('pre-commit hook failed')
+  await expect(box).toHaveValue('feat: add the thing')
+  await shot(page, 'review-write-error-dark')
+  await alert.getByRole('button', { name: '关闭错误提示' }).click()
+  await expect(alert).toHaveCount(0)
+})
+
+test('FIX-05 2 · typing in the commit box through a poll loses no focus or keys', async ({
+  page,
+}) => {
+  await open(page, '/chat/build-ui?visualProgress=final', 'dark', 'review')
+  const box = page
+    .locator('.git-review-pane')
+    .getByRole('textbox', { name: '提交信息' })
+  await box.click()
+  // Record whether the box is ever disabled while we type.
+  await box.evaluate((element) => {
+    const record = window as unknown as { __commitBoxDisabled?: number }
+    record.__commitBoxDisabled = 0
+    new MutationObserver(() => {
+      if ((element as HTMLTextAreaElement).disabled)
+        record.__commitBoxDisabled = (record.__commitBoxDisabled ?? 0) + 1
+    }).observe(element, { attributes: true, attributeFilter: ['disabled'] })
+  })
+  const before = (
+    await workspaceOps(page, /^(workspace\.snapshot|git\.status)$/)
+  ).length
+  await page.keyboard.type('fix: ')
+  // Slow typing across at least one 5 s poll.
+  await box.pressSequentially('abcdefghij', { delay: 650 })
+  expect(
+    (await workspaceOps(page, /^(workspace\.snapshot|git\.status)$/)).length,
+  ).toBeGreaterThan(before)
+  await expect(box).toHaveValue('fix: abcdefghij')
+  await expect(box).toBeFocused()
+  expect(
+    await page.evaluate(
+      () =>
+        (window as unknown as { __commitBoxDisabled?: number })
+          .__commitBoxDisabled,
+    ),
+  ).toBe(0)
+})
+
+test('FIX-05 5 · the browser page survives 终端 and back; a session switch ends it', async ({
+  page,
+}) => {
+  await open(page, '/chat/build-ui?visualProgress=final', 'dark', 'browser')
+  const pane = page.locator('.browser-pane')
+  const address = pane.getByRole('textbox', { name: '网址' })
+  await address.fill('example.com')
+  await address.press('Enter')
+  await page.evaluate(() =>
+    (window as unknown as VisualBrowserWindow).__visualEmitBrowserState?.({
+      url: 'https://example.com/account',
+      title: 'Account',
+      loading: false,
+      canGoBack: true,
+      canGoForward: false,
+    }),
+  )
+  await expectBoundsShown(page)
+  const segments = page.locator('.segments')
+  await segments.locator('button[data-pane="terminal"]').click()
+  await expect(page.locator('.terminal-pane')).toBeVisible()
+  await expectBoundsHidden(page)
+  await expect(pane).toBeHidden()
+  expect(await browserClosed(page)).toBe(0)
+  await segments.locator('button[data-pane="browser"]').click()
+  await expect(pane).toBeVisible()
+  await expect(pane).toHaveAttribute('data-state', 'page')
+  await expect(address).toHaveValue(/example\.com/)
+  await expect(pane.getByRole('button', { name: '后退' })).toBeEnabled()
+  await expectBoundsShown(page)
+  expect(await browserClosed(page)).toBe(0)
+  await shot(page, 'browser-kept-dark')
+  // Another session: its own browser, this page closed.
+  await page.getByText('构建 Visual API').click()
+  await expect(page).toHaveURL(/\/chat\/build-api/)
+  await expect.poll(() => browserClosed(page)).toBe(1)
+  await expect(page.locator('.browser-pane')).toHaveAttribute(
+    'data-state',
+    'empty',
+  )
+})
+
+async function openTerminal(page: Page) {
+  await open(page, '/chat/build-ui?visualProgress=final', 'dark', 'terminal')
+  await expect(page.locator('.terminal-pane .xterm')).toBeVisible()
+  // The first fit reaches the PTY.
+  await expect
+    .poll(async () => (await workspaceOps(page, /^terminals\.resize$/)).length)
+    .toBeGreaterThan(0)
+  await page.waitForTimeout(300)
+}
+
+function sizeOf(entry: WorkspaceOp): { cols: number; rows: number } {
+  return { cols: Number(entry.input?.cols), rows: Number(entry.input?.rows) }
+}
+
+test('FIX-05 6 · collapsing the column sends the PTY no tiny size', async ({
+  page,
+}) => {
+  await openTerminal(page)
+  const sent = (await workspaceOps(page, /^terminals\.resize$/)).length
+  await page.getByRole('button', { name: '关闭工作台' }).click()
+  await page.waitForTimeout(900)
+  const afterClose = (await workspaceOps(page, /^terminals\.resize$/)).slice(
+    sent,
+  )
+  expect(afterClose.map(sizeOf)).toEqual([])
+  await page.getByRole('button', { name: '工作台', exact: true }).click()
+  await expect(page.locator('.terminal-pane .xterm')).toBeVisible()
+  await page.waitForTimeout(900)
+  for (const entry of await workspaceOps(page, /^terminals\.resize$/)) {
+    expect(sizeOf(entry).cols).toBeGreaterThanOrEqual(20)
+    expect(sizeOf(entry).rows).toBeGreaterThanOrEqual(5)
+  }
+})
+
+test('FIX-05 7 · dragging the column width sends at most one resize per 100 ms', async ({
+  page,
+}) => {
+  await openTerminal(page)
+  const sent = (await workspaceOps(page, /^terminals\.resize$/)).length
+  const handle = page.locator('.handle[data-side="workspace"]')
+  const grip = (await handle.boundingBox())!
+  const y = grip.y + grip.height / 2
+  await page.mouse.move(grip.x + grip.width / 2, y)
+  await page.mouse.down()
+  // Narrower (the window leaves no room to widen it).
+  for (let step = 1; step <= 30; step += 1) {
+    await page.mouse.move(grip.x + grip.width / 2 + step * 6, y)
+    await page.waitForTimeout(20)
+  }
+  await page.mouse.up()
+  await page.waitForTimeout(500)
+  const during = (await workspaceOps(page, /^terminals\.resize$/)).slice(sent)
+  expect(during.length).toBeGreaterThan(0)
+  for (let index = 1; index < during.length; index += 1)
+    expect(during[index]!.at - during[index - 1]!.at).toBeGreaterThanOrEqual(95)
+  const sizes = during.map(sizeOf).map((size) => `${size.cols}x${size.rows}`)
+  // Only real changes: never the same size twice in a row.
+  for (let index = 1; index < sizes.length; index += 1)
+    expect(sizes[index]).not.toBe(sizes[index - 1])
+})
+
+test('FIX-05 8 · a file edited on disk shows its new text at the linked line', async ({
+  page,
+}) => {
+  await open(page, '/chat/build-ui?visualProgress=final', 'dark', 'files')
+  await requestWorkspace(page, {
+    pane: 'files',
+    file: { path: 'src/app.ts', line: 1 },
+  })
+  const pane = page.locator('.files-pane')
+  await expect(pane.locator('.file-tab.active')).toContainText('app.ts')
+  await expect(pane.locator('.file-code-view')).not.toContainText(
+    'Edited on disk',
+  )
+  await page.evaluate(() => {
+    ;(
+      window as unknown as { __visualFileVersion?: number }
+    ).__visualFileVersion = 2
+  })
+  await requestWorkspace(page, {
+    pane: 'files',
+    file: { path: 'src/app.ts', line: 5 },
+  })
+  const line = pane.locator('.file-code-line[data-line="5"]')
+  await expect(line).toContainText('Edited on disk (v2)')
+  await expect(line).toHaveClass(/reference-line-active/)
+  await expect(pane.locator('.file-tab')).toHaveCount(1)
+  await shot(page, 'files-reread-dark')
+})
+
+test('FIX-05 · 文件 keeps its tabs and scroll position across pane switches', async ({
+  page,
+}) => {
+  await open(page, '/chat/build-ui?visualProgress=final', 'dark', 'files')
+  await requestWorkspace(page, { pane: 'files', file: { path: 'src/long.ts' } })
+  const pane = page.locator('.files-pane')
+  await expect(pane.locator('.file-tab.active')).toContainText('long.ts')
+  const body = pane.locator('.file-preview-content')
+  await body.evaluate((element) => {
+    element.scrollTop = 1200
+  })
+  await expect
+    .poll(() => body.evaluate((element) => element.scrollTop))
+    .toBe(1200)
+  const segments = page.locator('.segments')
+  await segments.locator('button[data-pane="browser"]').click()
+  await expect(page.locator('.browser-pane')).toBeVisible()
+  await segments.locator('button[data-pane="files"]').click()
+  await expect(pane.locator('.file-tab.active')).toContainText('long.ts')
+  await expect
+    .poll(() => body.evaluate((element) => element.scrollTop))
+    .toBe(1200)
+})
+
+test('FIX-05 9 · switching sessions keeps keyboard focus out of the terminal', async ({
+  page,
+}) => {
+  await openTerminal(page)
+  const inTerminal = () =>
+    page.evaluate(() =>
+      Boolean(document.activeElement?.closest('.terminal-pane')),
+    )
+  // Opening the app on the 终端 pane does not grab focus either.
+  expect(await inTerminal()).toBe(false)
+  await page.getByLabel('消息输入框').first().click()
+  const reads = (await workspaceOps(page, /^terminals\.read$/)).length
+  await page.getByText('构建 Visual API').click()
+  await expect(page).toHaveURL(/\/chat\/build-api/)
+  await expect
+    .poll(async () => (await workspaceOps(page, /^terminals\.read$/)).length)
+    .toBeGreaterThan(reads)
+  await page.waitForTimeout(400)
+  expect(await inTerminal()).toBe(false)
+  // Picking the pane is an explicit activation: then it takes focus.
+  const segments = page.locator('.segments')
+  await segments.locator('button[data-pane="files"]').click()
+  await segments.locator('button[data-pane="terminal"]').click()
+  await expect.poll(inTerminal).toBe(true)
+})
+
+test('FIX-05 10 · a closed column (or another pane) runs no git IPC', async ({
+  page,
+}) => {
+  await open(page, '/chat/build-ui?visualProgress=final', 'dark', 'review')
+  await expect(page.locator('.git-review-pane')).toBeVisible()
+  await page.getByRole('button', { name: '关闭工作台' }).click()
+  await page.waitForTimeout(300)
+  const closed = (await workspaceOps(page, /^git\./)).length
+  await page.waitForTimeout(6_000)
+  expect((await workspaceOps(page, /^git\./)).length).toBe(closed)
+  await page.getByRole('button', { name: '工作台', exact: true }).click()
+  await page.locator('.segments button[data-pane="files"]').click()
+  await expect(page.locator('.files-pane')).toBeVisible()
+  await page.waitForTimeout(300)
+  const elsewhere = (await workspaceOps(page, /^git\./)).length
+  await page.waitForTimeout(6_000)
+  expect((await workspaceOps(page, /^git\./)).length).toBe(elsewhere)
+})
