@@ -36,6 +36,7 @@ const DAY = 24 * 60 * 60 * 1000
 export const ORPHAN_MAX_AGE_MS = 30 * DAY
 const TEMP_MAX_AGE_MS = DAY
 const DELEGATION_TEMP_ROOTS = ['indexes', 'snapshot-temp', 'artifact-temp']
+const USAGE_WORKERS = 16
 const TRASH_DIR = SESSION_TRASH_DIR
 
 export const STORAGE_CATEGORIES = [
@@ -252,26 +253,45 @@ export class RetentionService {
       STORAGE_CATEGORIES.map((id) => [id, 0]),
     ) as Record<StorageCategoryId, number>
     const seen = new Set<string>()
-    const walk = async (path: string, inherited: StorageCategoryId) => {
-      let st
-      try {
-        st = await lstat(path)
-      } catch {
-        return
-      }
-      if (!st.isDirectory() && st.nlink > 1) {
-        const key = `${st.dev}:${st.ino}`
-        if (seen.has(key)) return
-        seen.add(key)
-      }
-      const category = owners.get(path) ?? inherited
-      bytes[category] += st.blocks * 512
-      if (!st.isDirectory()) return
-      const names = await entries(path).catch(() => [])
-      await Promise.all(names.map((name) => walk(join(path, name), category)))
-    }
     const root = resolve(paths.stateRoot)
-    await walk(root, 'other')
+    // A few workers over one stack: a large home never has more than
+    // USAGE_WORKERS file system calls in flight.
+    const stack: Array<[string, StorageCategoryId]> = [[root, 'other']]
+    let busy = 0
+    const idle: Array<() => void> = []
+    const wake = () => {
+      for (const resume of idle.splice(0)) resume()
+    }
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const next = stack.pop()
+        if (next === undefined) {
+          if (busy === 0) return wake()
+          await new Promise<void>((resume) => idle.push(resume))
+          continue
+        }
+        busy += 1
+        try {
+          const [path, inherited] = next
+          const st = await lstat(path).catch(() => null)
+          if (st === null) continue
+          if (!st.isDirectory() && st.nlink > 1) {
+            const key = `${st.dev}:${st.ino}`
+            if (seen.has(key)) continue
+            seen.add(key)
+          }
+          const category = owners.get(path) ?? inherited
+          bytes[category] += st.blocks * 512
+          if (st.isDirectory())
+            for (const name of await entries(path).catch(() => []))
+              stack.push([join(path, name), category])
+        } finally {
+          busy -= 1
+          wake()
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: USAGE_WORKERS }, worker))
     const categories = STORAGE_CATEGORIES.map((id) => ({
       id,
       bytes: bytes[id],
