@@ -7,7 +7,7 @@
 
 Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资源包；Plugin 是带来源、版本和启用状态的 Skill 分发单元；MCP 把外部 server 暴露的工具接入 Agent。
 
-- 图标栏的「能力」打开能力页（`/capabilities`），用“插件 / Skills / MCP / 工具”四个标签分别管理 Plugin、Skill、MCP server，并查看注册给 Agent 的工具；
+- 侧栏的「能力」打开能力页（`/capabilities`），用“插件 / Skills / MCP / 工具”四个标签分别管理 Plugin、Skill、MCP server，并查看注册给 Agent 的工具；
 - 「能力」页顶部的「推荐」列出应用内置的一小组精选 Skills 和 MCP server，见[推荐](#推荐)；
 - 能力页的“工具”标签（`/capabilities/tools`）按用途分类查看 Emperor 内建的工具。
 

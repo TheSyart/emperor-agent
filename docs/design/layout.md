@@ -2,77 +2,57 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-19<br>
-> 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/`（`SidebarRail.vue`、`SidebarRoot.vue`、`SessionRow.vue`、`CommandPalette.vue`）、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/theme/base.css`、`desktop/src/main/window-chrome.ts`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）；测试 `AppFrame.test.ts`、`SidebarRail.test.ts`、`window-chrome.test.ts`、`desktop/tests/visual/shell.spec.ts`、`desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/electron/shell/run.ts`、`desktop/tests/visual/settings-groups.spec.ts`
+> 最后核验：2026-10-20<br>
+> 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/`（`SidebarRoot.vue`、`SidebarTopRow.vue`、`SidebarBrandRow.vue`、`SidebarNav.vue`、`SessionRow.vue`、`SidebarProjectRow.vue`、`SidebarSectionHeader.vue`、`SidebarSearchResults.vue`、`useContentSearch.ts`、`SidebarFooter.vue`、`SidebarRail.vue`、`sidebarNav.ts`）、`desktop/src/renderer/src/runtime/sidebarModel.ts`、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）；测试 `SidebarRoot.integration.test.ts`、`SessionRow.test.ts`、`sidebarDayGroups.test.ts`、`desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/settings-groups.spec.ts`
 
-主窗口是「画布 + 面板」：窗口底色是 `--surface-canvas`，图标栏和侧栏直接画在画布上；中间的对话（或整页）和右侧工作台各是一块面板。层级靠明度区分，画布上不画任何列边框。
+主窗口用系统标题栏，下面是平铺的几栏：侧栏、中栏（对话、轨迹或整页）、右侧工作台。侧栏画在 `--surface-canvas` 上，中栏与工作台在 `--surface-base` 上，栏与栏之间只有一条 0.5px 发丝线（`--border-l1`）。布局与入口位置是 Emperor 自己的；质感参考了 Codex（颜色、字体、间距、圆角、阴影），布局不照搬（2026-10-20 决定）。
 
 ## 结构
 
 从左到右：
 
-| 区域   | 宽度                             | 底色                  | 说明                                                            |
-| ------ | -------------------------------- | --------------------- | --------------------------------------------------------------- |
-| 图标栏 | 固定 56（`--rail-w`）            | 画布                  | 常驻，不随侧栏收起；顶部是红绿灯区域                            |
-| 侧栏   | 默认 236，可拖 200–360；收起为 0 | 画布                  | 只放项目与对话：顶栏（Emperor 标 + 收起按钮）、置顶、项目、对话 |
-| 中栏   | 余下宽度；下限对话 480、轨迹 640 | 面板 `--surface-base` | 对话、轨迹或整页                                                |
-| 工作台 | 默认 560，可拖 360–960；关闭为 0 | 面板 `--surface-base` | 审查 / 终端 / 文件 / 浏览器                                     |
+| 区域   | 宽度                                     | 底色               | 说明                                                     |
+| ------ | ---------------------------------------- | ------------------ | -------------------------------------------------------- |
+| 侧栏   | 默认 280，可拖 264–420；收起为 56 的窄轨 | `--surface-canvas` | 顶行、品牌行、新对话与页面入口、置顶 / 项目 / 对话、底部 |
+| 中栏   | 余下宽度；下限对话 480、轨迹 640         | `--surface-base`   | 对话、轨迹或整页                                         |
+| 工作台 | 默认 560，可拖 360–960；关闭为 0         | `--surface-base`   | 审查 / 终端 / 文件 / 浏览器                              |
 
-- 面板：圆角 12（`--panel-radius`），四周留 8px 画布槽（`--shell-gutter`）；两块面板之间也是 8px。深色主题面板边缘是 0.5px 的最弱描边，浅色主题用 `--elev-1`（`--panel-edge`）。
-- 面板里的内容以 `--surface-base` 为背景；卡片、代码块等在面板上再抬一级。
-- 宽度都是列宽：中栏与工作台列包含它们的槽（中栏列四周各 8，工作台列上、右、下各 8），面板等于列宽减去槽。
-
-## 窗口标题栏
-
-macOS 上主窗口隐藏系统标题栏（`titleBarStyle: 'hiddenInset'`），内容铺满窗口：
-
-- 红绿灯位置 `{ x: 16, y: 24 }`（`window-chrome.ts`）。macOS 26 的三个按钮各 14×14、间距 23，整组宽 60，竖直中心 y = 31，正好是顶栏的中线（8 + 46 / 2）。
-- 红绿灯从图标栏伸进侧栏顶部约 20px。旁边的内容从 x = 84 开始（`--shell-lights-clear` = 16 + 60 + 8）：侧栏顶栏的左内边距是 84 − 56 = 28；侧栏收起时，中栏面板从 x = 84 开始，而不是图标栏右侧 8px，避免红绿灯压在面板角上。
-- `window-chrome.test.ts` 保证这些数值与 `components.css` 的令牌一致。
-
-## 顶栏对齐
-
-各列顶栏高 46（`--shell-bar-h`），从画布槽下沿（y = 8）开始，底边都在 y = 54：
-
-| 列     | 顶栏                                                | 高度                                                      |
-| ------ | --------------------------------------------------- | --------------------------------------------------------- |
-| 图标栏 | `.rail-top`：空白，放红绿灯                         | 54（槽 + 顶栏）                                           |
-| 侧栏   | `SidebarBrandRow`（`.sidebar-bar`）                 | 46                                                        |
-| 中栏   | 会话头第一行（`.conversation-header > .title-row`） | 46；空白新对话的浮动头同样 46                             |
-| 工作台 | `PaneHeader`                                        | 48，上移 2px（`margin-top: 46 − 48`），底边与其他顶栏对齐 |
-
-整页（定时任务、能力、GitHub）没有顶栏，标题在页面内容里（PageShell）：内容宽 880、居中，标题 20/600，页签在标题下。Pull Request 是唯一占满宽度的页面，但它的标题行和页签仍在同一个 880 列、同一高度，所以 GitHub 的 PR / Issue / CI 三个标签切换时标题不动。
-
-## 拖拽区
-
-窗口没有系统标题栏，拖动下面这些空白处移动窗口：
-
-- 图标栏顶部（红绿灯区域）、侧栏顶栏、会话头第一行、工作台 PaneHeader。它们带 `data-app-drag` 属性，`theme/base.css` 把它变成 `-webkit-app-region: drag`。
-- 拖拽区里的控件（`button`、`a`、输入框、`role="button"` / `role="tab"`、带 `tabindex` 的元素）一律 `no-drag`，照常点击。
-- 移出 `#app` 的浮层（菜单、弹窗、提示、灯箱）一律 `no-drag`：即使盖在顶栏上也能点。列宽拖动条也是 `no-drag`。
-- 新加顶栏时加 `data-app-drag`；不要把拖拽区放在没有 `no-drag` 的可点元素上（Electron 的拖拽区会吞掉点击，CDP 合成的点击测不出来，只能用真实指针验证：`node scripts/e2e-cu.mjs --mode=shell`）。
-
-## 图标栏
-
-- 从上到下：新对话（⌘N）、搜索（⌘K，打开居中的命令面板 `CommandPalette`，侧栏里没有搜索框）、会话、定时任务、能力（原「探索」是能力页的「推荐」）、Pull Request（只在 GitHub 插件启用时出现）；底部是通知铃铛和设置。
-- 按钮是 IconButton `size="lg"`（36，`--icon-button-lg`），图标 20，提示在右侧。当前路由的入口画 `--surface-selected`（IconButton `selected`），并带 `aria-current="page"`。
-- 「会话」在对话路由上一直是选中状态：点击收起或展开侧栏（⌘B）；在整页上点击回到当前会话。
-- 后退 / 前进不再有按钮，用 ⌘[ / ⌘]。
+- 没有圆角面板和外围留边；层级靠底色明度与发丝线区分。卡片、代码块等在 `--surface-base` 上再抬一级。
+- 会话头第一行高 46（`--shell-bar-h`），工作台 `PaneHeader` 高 48、上移 2px，两者底边对齐。
+- 整页（定时任务、能力、GitHub）没有会话头，标题在页面内容里（PageShell）：内容宽 880、居中，标题 20/600，页签在标题下。Pull Request 是唯一占满宽度的页面，但它的标题行和页签仍在同一个 880 列、同一高度，所以 GitHub 的 PR / Issue / CI 三个标签切换时标题不动。
 
 ## 侧栏
 
-- 从上到下：顶栏、置顶（总在最上方）、项目、对话。对话按 `updated_at` 分「今天 / 昨天 / 更早」三组；手动排序时不分组。
-- 会话行是 `SessionRow`：32 高、圆角 8、16px 状态槽。选中画 `--surface-selected`，标题 500 字重。状态槽：运行中是金色呼吸点（Dot `running`），等待回答或审批是 `--attention` 点，有新进展是 `ok` 点。
-- 行内不显示日期。相对时间（12px 三级文字，「3 小时」「2 个月」「1 年」）和「⋯」组成悬停层（`data-hover-layer`），只在悬停、焦点在行内或菜单打开时出现。
-- 焦点在会话行上时，↑ / ↓ 把焦点移到相邻的行，并打开那个会话。
-- 搜索是图标栏打开的 `CommandPalette`：居中、宽 560、距顶 14vh；标题即时匹配（`searchSidebarSessions`），停顿 250ms 后用 Core `sessions.search` 补上内容命中（只搜用户消息和模型回答），每个会话一条，带片段。
+从上到下（`data-sidebar-block`：`top` → `brand` → `new` → `pages` → `sections` → `footer`）：
+
+1. **顶行**（`SidebarTopRow`）：收起、后退、前进（`shell/navHistory`，各自在历史尽头禁用）。
+2. **品牌行**（`SidebarBrandRow`）：Emperor 标与名称；右侧搜索、通知铃铛。
+3. **新对话**（`SidebarNav`）：侧栏里唯一抬起的对象——高 36、`--surface-raised` 底、`--elev-1`（悬停 `--elev-2`）、圆角 `--r-md`、13/500；悬停时右侧显示 ⌘N。旁边的 `+` 在项目中新建会话。
+4. **页面入口**：Pull Request（只在 GitHub 插件启用时出现，`visibleSidebarPages`）、定时任务、能力。比会话低一级：文字二级色、图标三级色；当前页 `--surface-selected` + 主文字 + 500。原「探索」是能力页顶部的「推荐」。
+5. **会话**：置顶（总在最上方）、项目、对话（`data-sidebar-section`）。
+6. **底部**（`SidebarFooter`）：「设置」在左，明暗切换在右。
+
+节奏：
+
+- 所有行 32 高、圆角 8（`--radius-row`）；分组标题 28 高，12/500 三级文字，吸顶；标题右侧的 `+`、`⋯` 只在悬停、焦点在标题内或菜单打开时出现。
+- 区块之间靠 12px 留白分开，不画分隔线。
+- 项目行：文件夹图标、名称、会话数（说明文字色、等宽数字，悬停时换成「新建该项目会话」）。项目内的会话缩进一级，左侧一条引导线落在文件夹图标中线上。
+- 会话行（`SessionRow`）：16px 状态槽——运行中金色呼吸点（Dot `running`），等待回答或审批 `--attention` 点，有新进展 `ok` 点；标题 13；右侧紧凑相对时间（`sidebarRelativeTime`：刚刚 / N 分钟 / N 小时（今天）/ 昨天 / N 天（一周内）/ 9月10日（今年）/ 2025/12/31（更早），说明文字色、等宽数字、不加中英文间距），悬停时换成「⋯」。选中 `--surface-selected`、标题 500。行带 `data-session-id`。
+- 对话按 `updated_at` 分「今天 / 昨天 / 7 天内 / 30 天内 / 更早」；手动排序时不分组。
+- 焦点在会话行上时，↑ / ↓ 把焦点移到相邻的行并打开那个会话。
+
+搜索：
+
+- 品牌行的放大镜（或 ⌘K）在页面入口下方展开搜索框，结果替换会话列表（`SidebarSearchResults`）。
+- 先列「会话」：标题、项目名、路径即时匹配（`searchSidebarSessions`，不含已归档）；停顿 250ms 后列「内容」：Core `sessions.search` 找到的、聊天内容里提到这段文字的会话（只搜用户消息和模型回答），每条带命中的句子（`useContentSearch`，旧查询的结果丢弃）。
+- ↑ / ↓ 选择、回车打开；Esc 先清空，再关闭。
 
 ## 收起与断点
 
-- 视口宽度小于 1024px 时侧栏自动收起，图标栏仍在；收起的侧栏保持挂载（宽度 0、`inert`），展开时保留分组的折叠状态。
+- 收起后侧栏列宽 56，渲染窄轨（`SidebarRail`）：品牌标（悬停换成展开图标）、后退 / 前进、新对话、搜索、通知、页面入口，底部设置与明暗切换；按钮 36、图标 20、提示在右侧。点品牌标或 ⌘B 展开。
+- 视口宽度小于 1024px 时侧栏自动收起为窄轨。
 - 空间不够时，工作台先缩到 360，再自动关闭；只改渲染宽度，不改用户保存的宽度（`columns.ts` 的让位链）。
 - 列宽变化不做过渡动画：拖动时宽度逐帧跟随，收起和展开立即生效。
-- 0.2 之前保存的默认侧栏宽度 280 读取时换成新的默认 236；其他宽度夹到 200–360。
 
 ## 设置面板
 

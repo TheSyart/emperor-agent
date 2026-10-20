@@ -9,16 +9,16 @@
 
 ## 基础与操作
 
-| 组件       | 用途与变体                                                                                                                                                                             |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Icon       | 统一图标注册表，尺寸 xs 12 / sm 14 / md 16 / lg 20，线条 1.5；不接受刻度以外的尺寸                                                                                                     |
-| Button     | primary（金色，每屏最多一个）/ secondary / ghost / danger（只在确认场景）；sm 28 / md 32 / lg 40                                                                                       |
-| IconButton | 只有图标的按钮，xs 20 / sm 28 / md 32 / lg 36（图标栏）；必须有 `label`，提示走 Tooltip，不用原生 title；`selected` 画 `--surface-selected`（导航条的当前项，aria-current 由调用方给） |
-| LinkButton | 行内文字按钮，`--text-link`                                                                                                                                                            |
-| Spinner    | sm / md，neutral / accent；减少动态效果时不旋转                                                                                                                                        |
-| Skeleton   | 行、块、圆                                                                                                                                                                             |
-| Kbd        | 快捷键提示                                                                                                                                                                             |
-| Tooltip    | 悬停与聚焦气泡（Tooltip 与 IconButton 共用 `useTooltip`），可带快捷键；`top` 气泡离窗口顶边不足 40px 时改在下方（无标题栏窗口的顶栏），贴左右边时收回窗口内                            |
+| 组件       | 用途与变体                                                                                                                                                  |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Icon       | 统一图标注册表，尺寸 xs 12 / sm 14 / md 16 / lg 20，线条 1.5；不接受刻度以外的尺寸                                                                          |
+| Button     | primary（金色，每屏最多一个）/ secondary / ghost / danger（只在确认场景）；sm 28 / md 32 / lg 40                                                            |
+| IconButton | 只有图标的按钮，xs 20 / sm 28 / md 32 / lg 36（收起后的窄轨）；必须有 `label`，提示走 Tooltip，不用原生 title；`selected` 画 `--surface-selected`           |
+| LinkButton | 行内文字按钮，`--text-link`                                                                                                                                 |
+| Spinner    | sm / md，neutral / accent；减少动态效果时不旋转                                                                                                             |
+| Skeleton   | 行、块、圆                                                                                                                                                  |
+| Kbd        | 快捷键提示                                                                                                                                                  |
+| Tooltip    | 悬停与聚焦气泡（Tooltip 与 IconButton 共用 `useTooltip`），可带快捷键；`top` 气泡离窗口顶边不足 40px 时改在下方（无标题栏窗口的顶栏），贴左右边时收回窗口内 |
 
 ## 显示
 
@@ -42,7 +42,7 @@
 | Notice             | 提示条：左侧图标 + 标题 + 说明 + 可选操作；tone 与 Badge 相同，warn / error 以 role=alert 播报。只在问题存在时出现                                                                                                                  |
 | DisclosureRow      | 会话流里的 28px 可折叠行：14px 图标（悬停换成箭头）、13px 标题与摘要、「·」分隔、可选尾部操作；正文左缩进 22px，展开收起用 CollapseTransition（见[会话流](conversation.md)）                                                        |
 | IoBlock            | 工具展开后的 IN / OUT 块：`--surface-raised`、`--r-md`、无边框，每段最高 150px，过长时「展开全部」；`tree` 把对象显示为 JsonTree（未知工具的通用正文）                                                                              |
-| PaneHeader         | 面板顶栏，固定 48px：标题 + 可选 Tabs + 右侧操作；长标题截断，高度不随内容变化。工作台用它做顶栏，上移 2px 与 46px 的列顶栏对齐（见[外壳布局](layout.md)）                                                                          |
+| PaneHeader         | 面板顶栏，固定 48px：标题 + 可选 Tabs + 右侧操作；长标题截断，高度不随内容变化。工作台用它做顶栏，上移 2px 与会话头 46px 的第一行底边对齐（见[外壳布局](layout.md)）                                                                |
 
 ## 输入
 
