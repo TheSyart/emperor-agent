@@ -109,7 +109,22 @@ macOS 使用 Seatbelt；Linux 实现使用 bubblewrap PID namespace。每次运�
 
 Windows 没有完整的受限执行和进程组停止：能力声明为 none，停止不会标记为 quiescent。Linux 有实现及协议测试；真实 Linux/Windows 验收需要在对应目标机执行，macOS 证据不能替代。
 
-每个会话有私有 HOME/config/temp。默认从本机 CLI 设置和凭据文件读取窄认证配置，支持显式 CLAUDE_CONFIG_DIR / CODEX_HOME；也可选择模型凭据引用。Claude 仅 Keychain OAuth 不读取，返回 AUTH_REQUIRED。认证不传到 renderer、日志摘要或公共 receipt。运行环境不继承宿主全部密钥，也不导入本机插件或 hooks。设置页的检测只确认本地可用条件，真实调用失败时单独报告认证错误。
+每个会话有私有 HOME/config/temp。默认从本机 CLI 设置和凭据文件读取窄认证配置，支持显式 CLAUDE_CONFIG_DIR / CODEX_HOME；也可选择模型凭据引用。认证不传到 renderer、日志摘要或公共 receipt。运行环境不继承宿主全部密钥，也不导入本机插件或 hooks。
+
+Claude Code 的认证（AGT-02，`claude-auth.ts`，随第一次 Claude 运行或「设置令牌」按需加载，不在启动路径上）按顺序取第一个有凭据的来源，该来源的凭据变量（`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、`CLAUDE_CODE_OAUTH_TOKEN`）一起使用，其他来源的不混入：
+
+1. Emperor 凭据：设置 › 子智能体 › Claude Code「设置令牌」，`executors.setCredential { profileId, kind: oauth-token | api-key, token }` / `executors.clearCredential`（按 view 校验的写操作）。存在 `<delegations>/credentials.json`（0600），值是 SEC-06/SEC-09 本地密钥（`LocalSecretStore`，与模型 Key、凭据库同一把）的 `el1:` 信封，关联数据绑定 profile 与 kind；明文只留末 4 位。本地密钥变化后解不开时状态为 `unreadable`，继续看后面的来源。订阅令牌作为 `CLAUDE_CODE_OAUTH_TOKEN`、API Key 作为 `ANTHROPIC_API_KEY` 传入。
+2. `~/.claude/settings.json`（或 `CLAUDE_CONFIG_DIR`）的 `env`。
+3. `.credentials.json` 的 `claudeAiOauth.accessToken`；`expiresAt` 已过则跳过并记为 `expired`，10 分钟内到期时照常使用并标 `expiresSoon`。refresh token 不进入隔离目录（与 Codex 相同的理由：隔离进程刷新会让用户自己的 CLI 失效），所以长任务应改用 `claude setup-token` 的长期令牌。
+4. 宿主进程环境，然后登录 shell（`login-shell.ts`，只取 `CLAUDE_SHELL_KEYS` 白名单：三个凭据变量与 `ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL`；进程内每组变量名只运行一次）。
+
+不读取 macOS 钥匙串（不调用 `security`，不用 safeStorage）。结果写在 `PreparedRuntime.auth`（`ExecutorAuthState`：`source`、`kind`、`last4`、`problem: missing | expired | unreadable`、`expiresAt`、`expiresSoon`）；没有凭据时抛 `ExecutorAuthError`（`AUTH_EXPIRED` 或 `AUTH_REQUIRED`，消息告诉父模型请用户运行 `claude setup-token` 并设置令牌）。`registry.checkSignIn` 把它并入探测：启动时 `probeProfiles` 对已启用的 Claude profile 检查一次，`start` 在征求同意前再检查一次，设置页检测同样如此；没有登录时探测为 `needs_auth` 并带 `auth`，父模型的执行器上下文写 `status=unavailable (not signed in…)`，派工直接以 `AUTH_REQUIRED` / `AUTH_EXPIRED` 失败，不弹同意卡。
+
+Claude 子进程设置 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`。对 SDK 0.3.281 / CLI 2.1.281 的影响（从随包二进制核对）：Bash 工具、hooks 与 MCP 子进程的环境去掉 `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_CUSTOM_HEADERS`、`CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CODE_OAUTH_REFRESH_TOKEN` 等凭据变量，以及名字像密钥（`*_TOKEN`、`*_KEY`、`*_SECRET`、`*PASSWORD*` 等）的变量；权限模式固定为 `default`（Emperor 本来就请求 `default`，AGT-01 的 init 检查不受影响）；`--await-claim` 不可用（Emperor 不用）；配置里的 `${VAR}` 展开不再取到凭据。CLI 自身仍用这些变量认证。
+
+Claude 一轮失败时，适配器从 SDK result 的 subtype、`terminal_reason`、`api_error_status` 与 `result`/`errors` 文本得出 `failureCode`（`turn_finished.failureCode`，服务写进运行记录）：`error_max_turns` 或 `max_turns` → `MAX_TURNS`；`prompt_too_long`、`blocking_limit`、`rapid_refill_breaker` 或「prompt is too long」→ `CONTEXT_OVERFLOW`；402 或余额/计费文字 → `BILLING`；401 或认证、API key、OAuth token、`/login` 文字 → `AUTH_EXPIRED`；429、rate limit、usage limit → `RATE_LIMITED`；其余 `EXECUTOR_TURN_FAILED`。失败摘要保留执行器的错误文本（经秘密脱敏），不再是「Claude execution failed」。任务详情按代码显示中文原因与下一步。
+
+SDK `maxTurns` 默认 200（`DEFAULT_CLAUDE_MAX_TURNS`），`limits.claudeMaxTurns` 可设 50–1000（设置 › 子智能体 › 高级 › 每次运行最多轮数；等于默认值时不写入文件；改过之后，降级到更早的版本会因严格校验把配置判为无效）。
 
 Codex 的 ChatGPT 登录不复制 refresh token（`codex-auth.ts`）。私有 CODEX_HOME 里的 `auth.json` 是指向用户 `auth.json`（`$CODEX_HOME` 或 `~/.codex`）的符号链接，隔离进程刷新令牌时写回用户的同一份文件，用户自己的 Codex 不会拿着已作废的旧令牌被登出：
 
@@ -187,7 +202,7 @@ Scheduler 与普通调用使用同一服务、权限与配额。无人工 answer
 
 Codex 协议的 120 秒空闲计时只约束两轮之间与启动阶段：轮次进行中（`CodexRpc.hold()`）或有待回答的 server request（提问）时暂停，长时间没有输出的命令或几分钟后才回答的问题不会被判空闲。运行时限（`runTimeoutMs`）是长轮次的唯一兜底，到时中断并以 `cancelled` + `RUN_TIMEOUT` 结束。续聊的 `thread/resume` 带 `excludeTurns: true`，不再把整段历史放进一个响应帧；恢复检查改用 `thread/read`（不含轮次）取状态，再按新到旧分页调用 `thread/turns/list`（`itemsView: summary`），单页结果超过 1 MiB 时减半重取，最多取最近 20 轮。
 
-设置 renderer 通过 `executors.list/configure/probe` 读写真实配置。保存携带 `expectedRevision`，完整保留未编辑字段；版本冲突保留草稿且不自动重放。刷新遇到草稿先要求明确丢弃，异步读取和 probe 受页面 generation 与 profile 内容约束。`available` 只说明本机 CLI 与认证配置可读，`authVerified=false`；认证诊断即使映射为 incompatible 也按诊断给出恢复帮助。
+设置 renderer 通过 `executors.list/configure/probe` 读写真实配置。保存携带 `expectedRevision`，完整保留未编辑字段；版本冲突保留草稿且不自动重放。刷新遇到草稿先要求明确丢弃，异步读取和 probe 受页面 generation 与 profile 内容约束。`available` 只说明本机 CLI 与认证配置可读（Claude 另有 `auth` 说明来源），`authVerified=false`；认证诊断即使映射为 incompatible 也按诊断给出恢复帮助。
 
 本地子智能体头像由稳定会话身份在 36 个透明角色中固定选择，状态或排序不改变角色。设置页独立预览以 2.4 秒停留和 320 毫秒渐变轮换角色；图片解码且页面可见并聚焦时播放，隐藏页面或窗口失焦时保留进度暂停，重新聚焦后续播；减少动态效果时静止，卸载时释放 RAF 和监听器。
 
