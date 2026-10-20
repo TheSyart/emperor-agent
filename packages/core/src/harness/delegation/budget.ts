@@ -1,12 +1,54 @@
-import { DelegationError, type ExecutorConfig } from './types'
+import {
+  DEFAULT_UNPRICED_TOKENS_PER_TASK,
+  DelegationError,
+  type ExecutorConfig,
+  type ExecutorRunUsage,
+} from './types'
+/**
+ * Per-task limits of external executors (AGT-07). A scope is the task the
+ * delegation belongs to (KRN-03: a user message or a goal). Each run counts
+ * against `maxRunsPerTask`; its usage then counts by billing:
+ * - subscription: nominal cost only, nothing counted (turns and time bound it);
+ * - API with a known cost: USD toward `estimatedBudgetUsd`;
+ * - API with no price: its tokens toward `maxUnpricedTokensPerTask`.
+ * A run is also checked while it runs (`exceeds`), and an API run hands
+ * Claude what remains (`remainingUsd`) as the SDK's maxBudgetUsd.
+ */
+type RunUsage = Pick<
+  ExecutorRunUsage,
+  'estimatedUsd' | 'billing' | 'totalTokens'
+>
+interface ScopeUsage {
+  runs: number
+  knownEstimatedUsd: number
+  unknownRuns: number
+  unpricedTokens: number
+}
+function freshScope(): ScopeUsage {
+  return { runs: 0, knownEstimatedUsd: 0, unknownRuns: 0, unpricedTokens: 0 }
+}
+function knownUsd(usage: RunUsage | undefined): number | undefined {
+  const usd = usage?.estimatedUsd
+  return usd === undefined || !Number.isFinite(usd) || usd < 0 ? undefined : usd
+}
+/** Book one run's usage into its scope. */
+function account(s: ScopeUsage, usage: RunUsage | undefined): void {
+  if (usage?.billing === 'subscription') return
+  const usd = knownUsd(usage)
+  if (usd !== undefined) {
+    s.knownEstimatedUsd += usd
+    return
+  }
+  s.unknownRuns++
+  const tokens = usage?.totalTokens
+  if (tokens !== undefined && Number.isFinite(tokens) && tokens > 0)
+    s.unpricedTokens += tokens
+}
 export interface BudgetLease {
-  release(usage?: { estimatedUsd?: number }): void
+  release(usage?: RunUsage): void
 }
 export class DelegationBudget {
-  private readonly scopes = new Map<
-    string,
-    { runs: number; knownEstimatedUsd: number; unknownRuns: number }
-  >()
+  private readonly scopes = new Map<string, ScopeUsage>()
   private readonly active = new Map<string, number>()
   private readonly waiting: {
     scope: string
@@ -23,52 +65,59 @@ export class DelegationBudget {
    * Count a run from history against its task's limits. It never occupies a
    * concurrency slot: a run that needs recovery is not running (AGT-04).
    */
-  restore(scope: string, usage: { estimatedUsd?: number } | undefined): void {
-    const s = this.scopes.get(scope) ?? {
-      runs: 0,
-      knownEstimatedUsd: 0,
-      unknownRuns: 0,
-    }
+  restore(scope: string, usage: RunUsage | undefined): void {
+    const s = this.scopes.get(scope) ?? freshScope()
     s.runs++
-    if (
-      usage?.estimatedUsd === undefined ||
-      !Number.isFinite(usage.estimatedUsd) ||
-      usage.estimatedUsd < 0
-    )
-      s.unknownRuns++
-    else s.knownEstimatedUsd += usage.estimatedUsd
+    account(s, usage)
     this.scopes.set(scope, s)
   }
   reconfigure(config: ExecutorConfig): void {
     this.config = config
     this.drain()
   }
-  usage(scope: string): {
-    runs: number
-    knownEstimatedUsd: number
-    unknownRuns: number
-    estimatedUsd?: number
-  } {
-    const s = this.scopes.get(scope) ?? {
-      runs: 0,
-      knownEstimatedUsd: 0,
-      unknownRuns: 0,
-    }
+  usage(scope: string): ScopeUsage & { estimatedUsd?: number } {
+    const s = this.scopes.get(scope) ?? freshScope()
     return {
       ...s,
       ...(s.unknownRuns === 0 ? { estimatedUsd: s.knownEstimatedUsd } : {}),
     }
   }
-  private limit(scope: string): DelegationError | undefined {
-    const s = this.usage(scope)
-    if (s.runs >= this.config.limits.maxRunsPerTask)
-      return new DelegationError('RUN_LIMIT', 'task scope run limit reached')
-    if (s.knownEstimatedUsd >= this.config.limits.estimatedBudgetUsd)
+  /** What the scope may still spend in USD (an API run's SDK budget). */
+  remainingUsd(scope: string): number {
+    return Math.max(
+      0,
+      this.config.limits.estimatedBudgetUsd -
+        this.usage(scope).knownEstimatedUsd,
+    )
+  }
+  /** Whether a run's usage so far takes its scope past a cap. */
+  exceeds(scope: string, live: RunUsage): DelegationError | undefined {
+    const s = { ...(this.scopes.get(scope) ?? freshScope()) }
+    account(s, live)
+    return this.spent(s)
+  }
+  private spent(s: ScopeUsage): DelegationError | undefined {
+    const limits = this.config.limits
+    if (s.knownEstimatedUsd >= limits.estimatedBudgetUsd)
       return new DelegationError(
         'BUDGET_LIMIT',
         'known estimated cost reached scope limit',
       )
+    if (
+      s.unpricedTokens >=
+      (limits.maxUnpricedTokensPerTask ?? DEFAULT_UNPRICED_TOKENS_PER_TASK)
+    )
+      return new DelegationError(
+        'TOKEN_LIMIT',
+        'unpriced API tokens reached scope limit',
+      )
     return undefined
+  }
+  private limit(scope: string): DelegationError | undefined {
+    const s = this.usage(scope)
+    if (s.runs >= this.config.limits.maxRunsPerTask)
+      return new DelegationError('RUN_LIMIT', 'task scope run limit reached')
+    return this.spent(s)
   }
   reserve(
     scope: string,
@@ -147,11 +196,7 @@ export class DelegationBudget {
       w.signal?.removeEventListener('abort', w.abort)
       this.lastScope = w.scope
       this.active.set(w.profile, (this.active.get(w.profile) ?? 0) + 1)
-      const s = this.scopes.get(w.scope) ?? {
-        runs: 0,
-        knownEstimatedUsd: 0,
-        unknownRuns: 0,
-      }
+      const s = this.scopes.get(w.scope) ?? freshScope()
       s.runs++
       this.scopes.set(w.scope, s)
       let released = false
@@ -160,13 +205,7 @@ export class DelegationBudget {
           if (released) return
           released = true
           this.active.set(w.profile, (this.active.get(w.profile) ?? 1) - 1)
-          if (
-            usage?.estimatedUsd === undefined ||
-            !Number.isFinite(usage.estimatedUsd) ||
-            usage.estimatedUsd < 0
-          )
-            s.unknownRuns++
-          else s.knownEstimatedUsd += usage.estimatedUsd
+          account(s, usage)
           this.drain()
         },
       })

@@ -116,16 +116,16 @@ Chat 与 Trajectory 只从 session log 的原始 `SessionEvent` 渲染，不再�
 
 `desktop/src/renderer/src/conversation/` 负责把原始事件投影成 Chat 节点：
 
-- `sessionWindow.ts`：每个 session 一个连续事件窗口，状态 `cold → opening → open`。打开时先拉尾页；拉取期间到达的 live 事件先缓冲，再按 `seq` 拼接。`seq` 是去重键；发现缺口时重新拉尾页修复；`loadOlder` 用 `beforeSeq` 向前翻页并检查连续性。
+- `sessionWindow.ts`：每个 session 一个连续事件窗口，状态 `cold → opening → open`。打开时先拉尾页；拉取期间到达的 live 事件先缓冲，再按 `seq` 拼接。`seq` 是去重键；发现缺口时重新拉尾页修复，已加载的更早页只要与新尾页相接就保留（读者位置不跳）；最多修补 3 次，仍接不上就整窗从尾页重开（`resync`），不丢弃已到的事件；`loadOlder` 用 `beforeSeq` 向前翻页并检查连续性。读取失败时窗口进入 `error`，时间线显示原因与「重试」（`handle.retry()`），再次打开该会话也会重新读取；启动失败画面的「重新连接」调用 `ConversationStore.resyncAll()` 重读所有打开的窗口（FIX-03）。
 - `assembler.ts` 与 `nodes/*` 把事件折叠成节点，`chatSnapshot.ts` 产出 Chat 快照；`composerPhase.ts` 推导 Composer 处于 `blank`、`engaging` 还是 `active`。
-- `store.ts` 的 `useConversation`：每个节点一个 `shallowRef`，流式增量只触发对应行；流式发布按 `requestAnimationFrame` 合批。最多保留 4 个打开的窗口（LRU），当前会话和面包屑中的父会话被 retain，不会被淘汰。所有窗口共享一个全局 `onSessionEvents` 订阅，watch 集合跟随打开的窗口变化。
+- `store.ts` 的 `useConversation`：每个节点一个 `shallowRef`，流式增量只触发对应行；流式发布按 `requestAnimationFrame` 合批。一次刷新若只让流式回答的文字变长（块、空与非空、状态都不变），`chatSnapshot.ts` 返回上一个快照对象，快照 ref 不触发；`running`、`turnCount`、`planSummary` 各有自己的 ref，只在值变化时触发。快照里的事实增量维护：待办只在待办事实变化时重算，上下文用量只在带用量的模型行或请求事实变化时重算，计划摘要（`snapshot.planSummary`）只在计划行、待办或顺序变化时重算。最多保留 4 个打开的窗口（LRU），当前会话和面包屑中的父会话被 retain，不会被淘汰。所有窗口共享一个全局 `onSessionEvents` 订阅，watch 集合跟随打开的窗口变化。
 
 Trajectory（`desktop/src/renderer/src/trajectory/model/`）复用同一个 assembler，作为按需激活的额外 target；未打开 Trajectory 标签时 Chat 路径不承担其开销。轨迹视图用 `retainTarget` 持有这个 target，最后一个视图离开 30 秒后（`LAZY_TARGET_IDLE_MS`）store 用 `assembler.retract` 把它注销并重新装配窗口，之后的事件只装配 Chat。
 
 ### 两条管线的分工
 
 - **原始 session 事件**：Chat 时间线与 Trajectory 的唯一数据源。
-- **UiEvent（runtime events）**：`onCoreEvent`、`packages/core/src/runtime/events.ts` 与 `useRuntime.ts` 这一条管线继续负责控制状态与待处理交互、Goal、后台任务、排队消息、会话创建与标题、onboarding、Scheduler、MCP、桌宠、侧栏运行标记以及 busy / stop 状态。它同时是侧栏通知的来源：`runtime/notifications.ts` 从 `scheduler_run_done` / `scheduler_run_error`、`ask_request` / `plan_draft`、`assistant_done` 和 host-only 的 `git_operation_completed` 推导通知，renderer 对 `git_operation_completed` 只做这一件事（`runtime/handlers/git.ts`），不投影到其他视图状态。host-only 的 `session_log_state`（会话记录被修复、无法读取、暂停或恢复写入，字段 `state`、`kind`、`line`、`backup_path`、`error` 等）同样只变成一条提示（`runtime/handlers/sessionLog.ts`），不论属于哪个会话，也不进入投影。
+- **UiEvent（runtime events）**：`onCoreEvent`、`packages/core/src/runtime/events.ts` 与 `useRuntime.ts` 这一条管线继续负责控制状态与待处理交互、Goal、后台任务、排队消息、会话创建与标题、onboarding、Scheduler、MCP、桌宠、侧栏运行标记以及 busy / stop 状态。事件按 IPC 交来的对象直接处理（不再 JSON 往返）；每个会话的运行标记（`sessionRuntimeStates`：running、attention、pending）只在值真的变化时才换新对象，所以流式的 `message_delta` 不会让侧栏重新渲染。它同时是侧栏通知的来源：`runtime/notifications.ts` 从 `scheduler_run_done` / `scheduler_run_error`、`ask_request` / `plan_draft`、`assistant_done` 和 host-only 的 `git_operation_completed` 推导通知，renderer 对 `git_operation_completed` 只做这一件事（`runtime/handlers/git.ts`），不投影到其他视图状态。host-only 的 `session_log_state`（会话记录被修复、无法读取、暂停或恢复写入，字段 `state`、`kind`、`line`、`backup_path`、`error` 等）同样只变成一条提示（`runtime/handlers/sessionLog.ts`），不论属于哪个会话，也不进入投影。
 
 排队消息有三个 host-only 事件：`prompt_queued` / `prompt_dequeued` 在用户消息进入或离开 inbox 时发出，`queue_item_state { prompt_id, state, reason? }` 在一条用户消息的队列状态变化时发出。`state` 为 `sending`（某个 step 预留了它，pre-step 通过后它的 `user_message` 随之到达）、`queued`（回到队列，或待发送的项被重新发送）、`failed-previous`（待发送：前一轮失败或被停止，或应用重启前未发出；`reason` 为 `previous-turn-failed`、`previous-turn-stopped` 或 `interrupted`）、`discarded`（`reason` 为 `user`、`cancelled`、`stopped` 或 `dropped`）。`useRuntime` 在 `sending` 与 `discarded` 时直接把该项移出队列栏，其余状态重新读取 `chat.listQueuedPrompts`；列表项的 `state` 为 `queued` 或 `failed-previous`（带 `reason`），QueueDock 把后者显示为「待发送 · 上一轮失败」等，提供「发送」（`chat.manageQueuedPrompt` 的 `action: 'send'`）、编辑与「丢弃」（`cancel`）。已被预留的项不能再修改，返回 `prompt_already_started`。
 

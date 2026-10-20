@@ -240,7 +240,6 @@ for (const theme of ['dark', 'light'] as const) {
     await open(page, '/chat/build-ui', { theme })
     const envCard = card(page)
     await expect(envCard).toBeVisible()
-    await expect(envCard).not.toHaveAttribute('data-overlay', /.*/)
     // A Build session's card is titled with the project.
     await expect(envCard.locator('.card-title')).toHaveText(
       'Visual Build Project',
@@ -250,14 +249,21 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(branchRow).toContainText('main')
     await expect(branchRow).toContainText('+18')
     await expect(branchRow).toContainText('−4')
-    await expect(envCard.locator('[data-section="git"] .row')).toHaveCount(1)
+    await expect(envCard.locator('[data-section="git"] .env-row')).toHaveCount(
+      1,
+    )
     await expect(envCard.locator('[data-row="plan"]')).toContainText(
       '重做环境信息卡',
     )
     await expect(envCard.locator('[data-row="plan"]')).toContainText('2/4')
-    const agents = envCard.locator('[data-section="subagents"] .row.agent')
-    await expect(agents).toHaveCount(3)
-    const portrait = agents.first().locator('.ds-avatar[data-kind="sprite"]')
+    // UI-S05: each section is one summary row.
+    const agents = envCard.locator('[data-row="agents"]')
+    await expect(agents).toContainText('子智能体')
+    await expect(agents).toContainText('1 运行 · 3 完成 · 1 失败')
+    await expect(agents).toHaveAttribute('aria-expanded', 'false')
+    await expect(agents.locator('[data-agent-face]')).toHaveCount(3)
+    await expect(envCard.locator('.agent-row')).toHaveCount(0)
+    const portrait = agents.locator('.ds-avatar[data-kind="sprite"]').first()
     await expect(portrait).toHaveAttribute('data-avatar', /^[ABCD]0[1-9]$/)
     // The portrait is cropped into a canvas at the drawn size (DS-04).
     const { size, width, dpr } = await portrait.evaluate((node) => ({
@@ -266,16 +272,17 @@ for (const theme of ['dark', 'light'] as const) {
       dpr: window.devicePixelRatio,
     }))
     expect(width).toBe(Math.round(size * dpr))
-    await expect(
-      envCard.getByRole('button', { name: '再显示 2 个' }),
-    ).toBeVisible()
-    await expect(envCard.locator('[data-section="background"]')).toContainText(
+    await expect(envCard.locator('[data-row="background"]')).toContainText(
       '2 个运行中',
     )
-    const sources = envCard.locator('[data-section="sources"] .row')
-    await expect(sources).toHaveCount(3)
-    await expect(sources.first()).toContainText('visual-audit')
-    await expect(envCard.getByText('查看全部 · 5')).toBeVisible()
+    const sources = envCard.locator('[data-row="sources"]')
+    await expect(sources).toContainText('来源')
+    await expect(sources).toContainText('5')
+    await expect(sources.locator('[data-resource-face]')).toHaveCount(3)
+    // At most eight controls on the card itself.
+    expect(await envCard.locator('button:visible').count()).toBeLessThanOrEqual(
+      8,
+    )
 
     // The chat body and the composer make room for the card.
     const cardBox = (await envCard.boundingBox())!
@@ -291,21 +298,22 @@ for (const theme of ['dark', 'light'] as const) {
     await shot(page, `card-wide-build-${theme}`)
   })
 
-  test(`Build card overlays a narrow chat (${theme})`, async ({ page }) => {
+  test(`Build card in a narrow chat (${theme})`, async ({ page }) => {
     await open(page, '/chat/build-ui', { theme, width: 1180 })
     const envCard = card(page)
-    await expect(envCard).toHaveAttribute('data-overlay', 'true')
-    const padding = await page
-      .locator('.chat-body-slot')
-      .evaluate((el) => parseFloat(getComputedStyle(el).paddingInlineEnd))
-    expect(padding).toBe(0)
+    await expect(envCard).toBeVisible()
+    // An opened card always reserves its space, narrow or wide.
+    const cardBox = (await envCard.boundingBox())!
+    const composerBox = (await page
+      .locator('.composer-root .card')
+      .boundingBox())!
+    expect(composerBox.x + composerBox.width).toBeLessThanOrEqual(cardBox.x)
     await expectNoHorizontalOverflow(page)
     await shot(page, `card-narrow-build-${theme}`)
-    await page.keyboard.press('Escape')
+    const toggle = page.getByRole('button', { name: '环境信息', exact: true })
+    await toggle.click()
     await expect(envCard).toHaveCount(0)
-    await expect(
-      page.getByRole('button', { name: '环境信息', exact: true }),
-    ).toHaveAttribute('aria-pressed', 'false')
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false')
   })
 
   test(`plain chat card, wide and narrow (${theme})`, async ({ page }) => {
@@ -317,13 +325,11 @@ for (const theme of ['dark', 'light'] as const) {
     )
     await expect(envCard.locator('[data-row="branch"]')).toHaveCount(0)
     await expect(envCard.locator('.card-title')).toHaveText('环境信息')
-    await expect(
-      envCard.locator('[data-section="subagents"] .row.agent'),
-    ).toHaveCount(2)
+    await expect(envCard.locator('[data-row="agents"]')).toContainText('2 完成')
     await expect(page.locator('.changes-pill')).toHaveCount(0)
     await shot(page, `card-wide-chat-${theme}`)
     await page.setViewportSize({ width: 1180, height: 900 })
-    await expect(envCard).toHaveAttribute('data-overlay', 'true')
+    await expect(envCard).toBeVisible()
     await shot(page, `card-narrow-chat-${theme}`)
   })
 
@@ -392,52 +398,44 @@ test('the card shows beside a wide chat by default and remembers a close', async
   await page.setViewportSize({ width: 1180, height: 900 })
   await expect(envCard).toHaveCount(0)
   await toggle.click()
-  await expect(envCard).toHaveAttribute('data-overlay', 'true')
-  await page.keyboard.press('Escape')
+  await expect(envCard).toBeVisible()
+  await toggle.click()
   await expect(envCard).toHaveCount(0)
   await expect.poll(saved).toBe('auto')
 })
 
-test('card rows open the plan row, subagents, branches and all sources', async ({
+test('card rows open the review, the subagent list, all sources and the plan', async ({
   page,
 }) => {
   await open(page, '/chat/build-ui')
   const envCard = card(page)
   await expect(envCard).toBeVisible()
 
-  await envCard.getByRole('button', { name: '再显示 2 个' }).click()
-  await expect(
-    envCard.locator('[data-section="subagents"] .row.agent'),
-  ).toHaveCount(5)
-  await expect(envCard.getByRole('button', { name: '收起' })).toBeVisible()
+  // 子智能体 opens its list in place.
+  const agents = envCard.locator('[data-row="agents"]')
+  await agents.click()
+  await expect(agents).toHaveAttribute('aria-expanded', 'true')
+  await expect(envCard.locator('.agent-row')).toHaveCount(5)
+  await shot(page, 'card-agents-open')
+  await agents.click()
+  await expect(envCard.locator('.agent-row')).toHaveCount(0)
 
-  // 「…」 holds 打开工作台 and the Git actions.
+  // 「…」 keeps three entries; the Git writes live in 审查.
   const more = envCard.getByRole('button', { name: '更多操作' })
   await more.click()
   const moreMenu = page.getByRole('menu', { name: '更多操作' })
-  await expect(moreMenu).toContainText('打开工作台')
-  await expect(moreMenu).toContainText('提交或推送')
-  await expect(
-    moreMenu.getByRole('menuitem', { name: /比较分支/ }),
-  ).toContainText('当前就是 main')
+  await expect(moreMenu.getByRole('menuitem')).toHaveText([
+    '复制项目路径',
+    '在访达中显示',
+    '隐藏此卡片',
+  ])
   await shot(page, 'card-more-menu')
-  await moreMenu.getByRole('menuitem', { name: /切换分支/ }).click()
-  const branchMenu = page.getByRole('menu', { name: '切换分支' })
-  await expect(branchMenu).toBeVisible()
-  await expect(branchMenu).toContainText('codex/workspace-panel')
-  await shot(page, 'card-branch-menu')
   await page.keyboard.press('Escape')
-  await expect(branchMenu).toHaveCount(0)
+  await expect(moreMenu).toHaveCount(0)
   // A menu's Escape never closes the card.
   await expect(envCard).toBeVisible()
 
-  await more.click()
-  await moreMenu.getByRole('menuitem', { name: /工作位置/ }).click()
-  const worktreeMenu = page.getByRole('menu', { name: '工作位置' })
-  await expect(worktreeMenu).toContainText('新建 worktree')
-  await page.keyboard.press('Escape')
-
-  await envCard.getByText('查看全部 · 5').click()
+  await envCard.locator('[data-row="sources"]').click()
   const sourcesMenu = page.getByRole('menu', { name: '全部来源' })
   await expect(sourcesMenu).toBeVisible()
   await expect(sourcesMenu).toContainText('example.com/agent-desktop')
@@ -452,7 +450,10 @@ test('card rows open the plan row, subagents, branches and all sources', async (
     sourcesMenu.locator('.document-icon[data-kind="document"]'),
   ).toHaveCount(1)
   await shot(page, 'card-sources-menu')
+  // A click leaves focus on the row; Escape still closes the menu first.
   await page.keyboard.press('Escape')
+  await expect(sourcesMenu).toHaveCount(0)
+  await expect(envCard).toBeVisible()
 
   await page.locator('[data-conversation-scroll]').evaluate((el) => {
     el.scrollTop = el.scrollHeight
@@ -461,6 +462,29 @@ test('card rows open the plan row, subagents, branches and all sources', async (
   await expect(
     page.locator('.tool-row[data-call-id="call_plan"]'),
   ).toBeInViewport()
+
+  // The changes row opens 审查.
+  await envCard.locator('[data-row="branch"]').click()
+  await expect(page.locator('.workspace-col .workspace-body')).toHaveAttribute(
+    'data-pane',
+    'review',
+  )
+})
+
+test('「隐藏此卡片」 closes the card and remembers it', async ({ page }) => {
+  await open(page, '/chat/build-ui', { envCard: 'auto' })
+  const envCard = card(page)
+  await envCard.getByRole('button', { name: '更多操作' }).click()
+  await page.getByRole('menuitem', { name: '隐藏此卡片' }).click()
+  await expect(envCard).toHaveCount(0)
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          JSON.parse(localStorage.getItem('emperor.frame.v2') ?? '{}').envCard,
+      ),
+    )
+    .toBe('closed')
 })
 
 for (const theme of ['dark', 'light'] as const) {
@@ -496,7 +520,8 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(dev).toContainText('npm run dev')
     await expect(dev).toContainText(/bash · 3m \d\ds/)
     await expect(failed).toContainText('退出码 1')
-    await expect(failed.getByRole('button', { name: /^停止/ })).toHaveCount(0)
+    // 「停止」 only in the output dialog (UI-S05).
+    await expect(envCard.getByRole('button', { name: /^停止/ })).toHaveCount(0)
     await expect(failed.locator('.task-dot')).toHaveAttribute(
       'data-status',
       'failed',
@@ -505,13 +530,14 @@ for (const theme of ['dark', 'light'] as const) {
     await shot(page, `background-list-${theme}`)
 
     // 输出: the job's output in a read-only viewer.
-    await dev.getByRole('button', { name: '查看输出：npm run dev' }).click()
+    await envCard.getByRole('button', { name: '查看输出：npm run dev' }).click()
     const dialog = page.getByRole('dialog', { name: '命令输出' })
     await expect(dialog).toBeVisible()
     await expect(dialog.locator('[data-task-output]')).toContainText(
       'electron-vite dev',
     )
     await expect(dialog.getByRole('button', { name: '刷新' })).toBeVisible()
+    await expect(dialog.getByRole('button', { name: '停止' })).toBeVisible()
     await expect(dialog.getByRole('button', { name: '加载更多' })).toHaveCount(
       0,
     )
@@ -522,7 +548,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(envCard).toBeVisible()
 
     // A workflow record pages: 「加载更多」 while more entries remain.
-    await workflow
+    await envCard
       .getByRole('button', { name: '查看输出：修复视觉回归' })
       .click()
     const record = page.getByRole('dialog', { name: '工作流记录' })
@@ -530,32 +556,35 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(output).toContainText('[阶段] 第 1 轮')
     await expect(output).not.toContainText('sub-ralph-12')
     await record.getByRole('button', { name: '加载更多' }).click()
-    await expect(output).toContainText('[代理] #12 修复视觉回归 started')
+    await expect(output).toContainText('[子智能体] #12 修复视觉回归 started')
     await expect(record.getByRole('button', { name: '加载更多' })).toHaveCount(
       0,
     )
-    await record.getByRole('button', { name: '关闭' }).click()
-    await expect(record).toHaveCount(0)
-
     // Stopping a workflow run asks first; 取消 keeps it running.
-    await workflow.getByRole('button', { name: '停止：修复视觉回归' }).click()
-    const confirm = page.locator('.ds-modal [role="dialog"]')
+    await record.getByRole('button', { name: '停止' }).click()
+    const confirm = page
+      .locator('.ds-modal [role="dialog"]')
+      .filter({ hasText: '停止工作流「修复视觉回归」' })
     await expect(confirm).toContainText('停止工作流「修复视觉回归」')
     await confirm.getByRole('button', { name: '取消', exact: true }).click()
     await expect(confirm).toHaveCount(0)
+    await record.getByRole('button', { name: '关闭' }).click()
+    await expect(record).toHaveCount(0)
     await expect(workflow.locator('.task-dot')).toHaveAttribute(
       'data-status',
       'running',
     )
 
     // A job stops without asking and settles as 已停止.
-    await dev.getByRole('button', { name: '停止：npm run dev' }).click()
+    await envCard.getByRole('button', { name: '查看输出：npm run dev' }).click()
+    await dialog.getByRole('button', { name: '停止' }).click()
+    await expect(dialog.getByRole('button', { name: '停止' })).toHaveCount(0)
+    await page.keyboard.press('Escape')
     await expect(dev).toContainText('退出码 143')
     await expect(dev.locator('.task-dot')).toHaveAttribute(
       'data-status',
       'cancelled',
     )
-    await expect(dev.getByRole('button', { name: /^停止/ })).toHaveCount(0)
     await expect(row).toContainText('1 个运行中')
     // The stopped job moves below the live run, above the older failure.
     await expect(lines.nth(0)).toHaveAttribute(

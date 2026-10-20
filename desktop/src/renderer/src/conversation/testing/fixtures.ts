@@ -82,6 +82,7 @@ export function structural(snapshot: ChatSnapshot): unknown {
     turnStatus: snapshot.turnStatus,
     todos: snapshot.todos,
     contextUsage: snapshot.contextUsage,
+    planSummary: snapshot.planSummary,
   }
 }
 

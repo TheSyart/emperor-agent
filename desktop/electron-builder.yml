@@ -105,6 +105,23 @@ mac:
   icon: build/icon.png
   artifactName: Emperor-Agent-${version}-mac-${arch}.${ext}
 
+# The install window (UI-S12): background.tiff holds the 660×400 art and its
+# @2x; the app and the Applications link sit level with the gold arrow.
+dmg:
+  background: build/background.tiff
+  iconSize: 96
+  window:
+    width: 660
+    height: 400
+  contents:
+    - x: 165
+      y: 185
+      type: file
+    - x: 495
+      y: 185
+      type: link
+      path: /Applications
+
 win:
   target:
     - nsis

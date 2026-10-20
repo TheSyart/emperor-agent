@@ -247,13 +247,16 @@ describe('style audit: unified tokens (hard rules, must stay zero)', () => {
   it('every design token a style uses is defined somewhere', () => {
     // An undefined var() drops the declaration without an error, so a typo
     // like --fs-sm silently renders the inherited size (and a missing
-    // --accent-* color the inherited color).
+    // --accent-* color the inherited color). The DS families count too:
+    // a --font-sm shorthand once dropped a whole `font` declaration.
     const used =
-      /var\((--(?:fs|lh|accent|label|bg|fg|border|radius|space|shadow|material|glass|scrim|mask|state|danger|warn|z|duration|ease)-?[a-z0-9-]*)/g
+      /var\((--(?:fs|lh|accent|label|bg|fg|border|radius|space|shadow|material|glass|scrim|mask|state|danger|warn|z|duration|ease|font|type|weight|r|surface|text|stroke|elev|control|icon|motion|row|brand|focus|attention|info|error|success)-?[a-z0-9-]*)/g
     const defined = new Set<string>()
     for (const rel of SCANNED)
-      for (const m of read(rel).matchAll(/(--[a-z0-9-]+)\s*:/g))
-        defined.add(m[1])
+      for (const m of read(rel).matchAll(
+        /(--[a-z0-9-]+)\s*:|['"](--[a-z0-9-]+)['"]\s*:/g,
+      ))
+        defined.add(m[1] ?? m[2]) // CSS declarations and :style bindings
     const offenders: string[] = []
     const targets = [
       ...STYLE_FILES.map((rel) => [rel, read(rel)] as const),

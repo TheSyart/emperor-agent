@@ -126,7 +126,9 @@ function closeModelSetupPrompt() {
   modelSetupPromptOpen.value = false
 }
 
-const bootstrap = useBootstrap(showToast)
+const bootstrap = useBootstrap(showToast, {
+  onSessionUnavailable: (sessionId) => void leaveUnavailableSession(sessionId),
+})
 const sessionStore = useSession()
 const notifications = useNotifications()
 const {
@@ -262,6 +264,21 @@ async function onSessionActivate(id: string) {
   restoreRuntimeState()
 }
 
+/**
+ * The session was archived or deleted elsewhere (its bootstrap failed and a
+ * plain one worked): go to the most recent session and say so (FIX-03).
+ */
+async function leaveUnavailableSession(sessionId: string): Promise<void> {
+  showToast('这个会话已归档或不存在，已回到最近的会话')
+  await sessionStore.load().catch(() => undefined)
+  const next = sessionStore.sessions.value.find(
+    (item) => !item.draft && item.id !== sessionId,
+  )
+  await router
+    .push(next ? sessionLocation(next.id) : { name: 'chat' })
+    .catch(() => undefined)
+}
+
 async function openProfileInterviewSession(sessionId: string | null) {
   if (!sessionId) return
   await sessionStore.load()
@@ -318,12 +335,26 @@ const stopPluginList = followPluginList(boot)
 onBeforeUnmount(stopPluginList)
 
 async function refreshAll() {
-  await loadBootstrap(false, sessionStore.backendSessionId())
-  if (!error.value) {
-    connectSocket()
-    await loadCommands()
-    showToast('工作台已刷新')
-  }
+  // A failed refresh toasts and keeps the shell (useBootstrap, FIX-03).
+  if (!(await loadBootstrap(false, sessionStore.backendSessionId()))) return
+  connectSocket()
+  await loadCommands()
+  showToast('工作台已刷新')
+}
+
+/**
+ * 「重新连接」 on the start-failure screen: a plain bootstrap (never the
+ * session that failed), then every open conversation reread from its tail,
+ * since live events may have been missed meanwhile (FIX-03).
+ */
+async function reconnect() {
+  if (!(await bootstrap.retry())) return
+  restoreRuntimeState()
+  connectSocket()
+  // The conversation store stays in the chat chunk (first-load budget).
+  const { defaultConversationStore } = await import('./conversation/store')
+  await defaultConversationStore().resyncAll()
+  await loadCommands()
 }
 
 watch(sessionId, () => void loadCommands())
@@ -791,7 +822,7 @@ provideAppContext({
     <div class="boot-card boot-error" role="alert">
       <strong>桌面端启动失败</strong>
       <p>{{ error }}</p>
-      <button type="button" class="boot-retry" @click="refreshAll">
+      <button type="button" class="boot-retry" @click="reconnect">
         重新连接
       </button>
     </div>

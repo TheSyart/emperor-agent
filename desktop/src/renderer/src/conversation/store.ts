@@ -2,9 +2,11 @@
 // session, published to Vue through shallow refs.
 //
 // - `order` and `snapshot` refs change only when the chat order/snapshot
-//   changes; `node(key)` returns a per-key shallowRef triggered only when
-//   that node's materialized value changes, so a streaming delta re-renders
-//   exactly one row.
+//   changes (a flush that only grows streaming text publishes no snapshot);
+//   `running`, `turnCount` and `planSummary` are their own refs, triggered
+//   only when their value changes; `node(key)` returns a per-key shallowRef
+//   triggered only when that node's materialized value changes, so a
+//   streaming delta re-renders exactly one row.
 // - Flushes are batched: 'immediate' publications flush in a microtask,
 //   streaming ('animation-frame') publications once per frame. The
 //   scheduler is injectable for tests.
@@ -41,6 +43,7 @@ import {
   createConversationAssembler,
   type ConversationExtensions,
 } from './chatSnapshot'
+import type { PlanSummary } from './planSummary'
 import {
   inspectRequests,
   type RequestInspectionSnapshot,
@@ -128,8 +131,18 @@ export interface ConversationHandle {
   readonly sessionId: string
   /** Visible node keys in render order. */
   readonly order: Readonly<ShallowRef<readonly string[]>>
-  /** Latest chat snapshot (running, turnStatus, todos, contextUsage...). */
+  /**
+   * Latest chat snapshot (running, turnStatus, todos, contextUsage...).
+   * Republished only when something derived from it can change: a flush
+   * that only grows the text of streaming rows leaves it as it is.
+   */
   readonly snapshot: Readonly<ShallowRef<ChatSnapshot>>
+  /** A turn is open in the window (snapshot `running`). */
+  readonly running: Readonly<ShallowRef<boolean>>
+  /** Turns in the loaded window. */
+  readonly turnCount: Readonly<ShallowRef<number>>
+  /** Latest plan of the window (environment card 计划 row). */
+  readonly planSummary: Readonly<ShallowRef<PlanSummary | null>>
   /** Window facts: open state, header, hasMore, loadingOlder, error. */
   readonly window: Readonly<ShallowRef<SessionWindowState>>
   /** Bumps on every published flush (trajectory and other targets). */
@@ -157,6 +170,8 @@ export interface ConversationHandle {
   /** Loaded raw events (seq ascending, wire-sanitized; read-only). */
   rawEvents(): readonly WireSessionEvent[]
   loadOlder(): Promise<void>
+  /** Read the history again after a failed read (FIX-03). */
+  retry(): Promise<void>
   /** Flush pending publications synchronously (tests, imperative reads). */
   flushNow(): void
 }
@@ -167,6 +182,9 @@ interface Entry {
   readonly assembler: ConversationAssembler
   readonly order: ShallowRef<readonly string[]>
   readonly snapshot: ShallowRef<ChatSnapshot>
+  readonly running: ShallowRef<boolean>
+  readonly turnCount: ShallowRef<number>
+  readonly planSummary: ShallowRef<PlanSummary | null>
   readonly windowState: ShallowRef<SessionWindowState>
   readonly revision: ShallowRef<number>
   readonly nodeRefs: Map<string, ShallowRef<ChatNode | undefined>>
@@ -256,8 +274,20 @@ export class ConversationStore {
     })
   }
 
+  /**
+   * Reopen every open window from its tail (FIX-03: after 「重新连接」, when
+   * live events may have been missed).
+   */
+  async resyncAll(): Promise<void> {
+    await Promise.all(
+      [...this.entries.values()].map((entry) => entry.window.resync()),
+    )
+  }
+
   private startOpen(entry: Entry): void {
-    if (entry.opened !== null) return
+    // A failed read is read again when the session is opened again.
+    if (entry.opened !== null && entry.window.snapshot.openState !== 'error')
+      return
     // Watch first so no live event falls between the history cut and the
     // subscription; events that race the fetch are buffered by the window.
     entry.opened = this.watchChain
@@ -305,6 +335,9 @@ export class ConversationStore {
     const assembler = createConversationAssembler(this.deps.extensions)
     const order = shallowRef<readonly string[]>(EMPTY_CHAT_SNAPSHOT.order)
     const snapshot = shallowRef<ChatSnapshot>(EMPTY_CHAT_SNAPSHOT)
+    const running = shallowRef(false)
+    const turnCount = shallowRef(0)
+    const planSummary = shallowRef<PlanSummary | null>(null)
     const revision = shallowRef(0)
     const nodeRefs = new Map<string, ShallowRef<ChatNode | undefined>>()
     // The window's onChange and the handle close over the entry built below.
@@ -322,6 +355,9 @@ export class ConversationStore {
       sessionId,
       order,
       snapshot,
+      running,
+      turnCount,
+      planSummary,
       window: windowState,
       revision,
       node: (key) => {
@@ -385,6 +421,13 @@ export class ConversationStore {
       },
       rawEvents: () => window.window,
       loadOlder: () => window.loadOlder(),
+      retry: () => {
+        const entry = box.entry
+        if (entry === null) return Promise.resolve()
+        entry.opened = null
+        this.startOpen(entry)
+        return entry.opened ?? Promise.resolve()
+      },
       flushNow: () => {
         if (box.entry !== null) this.flush(box.entry)
       },
@@ -395,6 +438,9 @@ export class ConversationStore {
       assembler,
       order,
       snapshot,
+      running,
+      turnCount,
+      planSummary,
       windowState,
       revision,
       nodeRefs,
@@ -478,7 +524,15 @@ export class ConversationStore {
       }
     }
     if (entry.order.value !== next.order) entry.order.value = next.order
-    if (entry.snapshot.value !== next) entry.snapshot.value = next
+    if (entry.snapshot.value !== next) {
+      entry.snapshot.value = next
+      if (entry.running.value !== next.running)
+        entry.running.value = next.running
+      const turns = next.timeline.turnOrder.length
+      if (entry.turnCount.value !== turns) entry.turnCount.value = turns
+      const plan = next.planSummary ?? null
+      if (entry.planSummary.value !== plan) entry.planSummary.value = plan
+    }
     entry.revision.value++
   }
 }

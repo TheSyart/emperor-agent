@@ -46,6 +46,39 @@ afterEach(() => {
   state.errors = {}
   vi.clearAllMocks()
 })
+/** UI-S05: the list sits behind the 子智能体 summary row. */
+async function expand() {
+  const row = el.querySelector<HTMLButtonElement>('[data-row="agents"]')!
+  if (row.getAttribute('aria-expanded') !== 'true') row.click()
+  await nextTick()
+}
+it('summarises the agents on one row and lists them only when asked', async () => {
+  state.trees.root = buildAgentTree('root', [
+    { ...agent('sub-a', 'root', 'internal'), phase: 'running' },
+    agent('sub-b', 'root', 'internal'),
+    agent('dlg-c'),
+    { ...agent('dlg-d'), phase: 'failed' },
+  ])
+  el = document.createElement('div')
+  app = createApp({
+    render: () => h(EnvironmentAgents, { rootSessionId: 'root' }),
+  })
+  app.mount(el)
+  await nextTick()
+  const row = el.querySelector<HTMLButtonElement>('[data-row="agents"]')!
+  expect(row.textContent).toContain('子智能体')
+  expect(row.textContent).toContain('1 运行 · 2 完成 · 1 失败')
+  expect(row.getAttribute('aria-expanded')).toBe('false')
+  expect(row.querySelectorAll('[data-agent-face]')).toHaveLength(3)
+  expect(el.querySelectorAll('[data-agent-id]')).toHaveLength(0)
+  row.click()
+  await nextTick()
+  expect(row.getAttribute('aria-expanded')).toBe('true')
+  expect(el.querySelectorAll('[data-agent-id]')).toHaveLength(4)
+  row.click()
+  await nextTick()
+  expect(el.querySelectorAll('[data-agent-id]')).toHaveLength(0)
+})
 it('shows stable internal and external identities, canonical names, sources and actual parent paths', async () => {
   state.trees.root = buildAgentTree('root', [
     agent('sub-parent', 'root', 'internal'),
@@ -59,6 +92,10 @@ it('shows stable internal and external identities, canonical names, sources and 
   })
   app.mount(el)
   await nextTick()
+  // The viewed agent is in the list: it opens by itself.
+  expect(
+    el.querySelector('[data-row="agents"]')!.getAttribute('aria-expanded'),
+  ).toBe('true')
   const child = el.querySelector<HTMLButtonElement>(
     '[data-agent-id="dlg-child"]',
   )!
@@ -100,6 +137,7 @@ it('shows active plus recent entries, with all entries available after expanding
   })
   app.mount(el)
   await nextTick()
+  await expand()
   expect(el.querySelectorAll('[data-agent-id]')).toHaveLength(5)
   el.querySelector<HTMLButtonElement>('[data-show-all-agents]')!.click()
   await nextTick()
@@ -125,6 +163,7 @@ it.each(['missing', 'foreign', 'cycle'] as const)(
     })
     app.mount(el)
     await nextTick()
+    await expand()
     const row = el.querySelector<HTMLButtonElement>(
       '[data-agent-id="dlg-lost"]',
     )!
@@ -206,6 +245,7 @@ it('offers 标记为已结束 for an external task that has no outcome, then ref
   })
   app.mount(el)
   await nextTick()
+  await expand()
   expect(el.querySelector('[data-abandon-agent="dlg-done"]')).toBeNull()
   const end = el.querySelector<HTMLButtonElement>(
     '[data-abandon-agent="dlg-stuck"]',

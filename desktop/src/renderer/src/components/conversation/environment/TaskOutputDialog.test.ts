@@ -69,3 +69,72 @@ it('follows durable external output automatically and never reads foreign sessio
     'Hello world',
   )
 })
+
+// UI-S05: 「停止」 lives in the dialog, not on the card's task lines.
+function mountDialog(props: Record<string, unknown>) {
+  const root = document.createElement('div')
+  document.body.append(root)
+  app = createApp({
+    render: () =>
+      h(TaskOutputDialog, {
+        taskId: 'job-dev',
+        label: 'npm run dev',
+        kind: 'job',
+        live: true,
+        ...props,
+      }),
+  })
+  app.mount(root)
+}
+function stopButton(): HTMLButtonElement | undefined {
+  return [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent?.trim() === '停止',
+  )
+}
+it('stops a running job from the dialog and reports it', async () => {
+  mock.core.mockResolvedValue({ entries: [], eof: true })
+  const onStopped = vi.fn()
+  mountDialog({ stoppable: true, onStopped })
+  for (let i = 0; i < 4; i++) await nextTick()
+  stopButton()!.click()
+  for (let i = 0; i < 8; i++) await Promise.resolve()
+  expect(mock.core).toHaveBeenCalledWith('tasks.cancel', 'job-dev', {
+    reason: 'user_stopped_from_environment_card',
+  })
+  expect(onStopped).toHaveBeenCalledOnce()
+})
+it('asks before stopping a workflow run, and 取消 keeps it running', async () => {
+  mock.core.mockResolvedValue({ entries: [], eof: true })
+  const { answerConfirmsForTest } = await import('../../ui/confirm')
+  const asked: string[] = []
+  answerConfirmsForTest((options) => {
+    asked.push(options.title)
+    return false
+  })
+  try {
+    mountDialog({
+      taskId: 'wf-run',
+      label: '修复视觉回归',
+      kind: 'workflow',
+      stoppable: true,
+      confirmStop: true,
+    })
+    for (let i = 0; i < 4; i++) await nextTick()
+    stopButton()!.click()
+    for (let i = 0; i < 8; i++) await Promise.resolve()
+    expect(asked).toEqual(['停止工作流「修复视觉回归」？'])
+    expect(mock.core).not.toHaveBeenCalledWith(
+      'tasks.cancel',
+      expect.anything(),
+      expect.anything(),
+    )
+  } finally {
+    answerConfirmsForTest(null)
+  }
+})
+it('has no 停止 for a finished task', async () => {
+  mock.core.mockResolvedValue({ entries: [], eof: true })
+  mountDialog({ live: false, stoppable: false })
+  for (let i = 0; i < 4; i++) await nextTick()
+  expect(stopButton()).toBeUndefined()
+})

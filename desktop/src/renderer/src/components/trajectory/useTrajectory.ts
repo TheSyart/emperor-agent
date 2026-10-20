@@ -264,7 +264,7 @@ export function createTrajectoryController(
   const windowState = computed(() => handle.window.value ?? EMPTY_WINDOW)
   const running = computed(
     () =>
-      handle.snapshot.value.running ||
+      handle.running.value ||
       snapshot.value.partial !== null ||
       snapshot.value.runningCalls.length > 0,
   )

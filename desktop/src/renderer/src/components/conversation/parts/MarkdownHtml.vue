@@ -6,9 +6,14 @@
  * and the hover title shows the full path. Image files the session owns
  * (Markdown images and links to image files) show inline previews that open
  * in the shared image viewer.
+ *
+ * The HTML is written block by block (MarkdownBlockView, FIX-04): a growing
+ * reply re-renders and re-sanitizes only its last block, and the nodes of
+ * the blocks before it stay (a selection in them survives). The element
+ * holds exactly the whole-document HTML, as `v-html` would.
  */
-import { inject, onMounted, onBeforeUnmount, ref, toRef, watch } from 'vue'
-import { useMarkdown } from '../../../composables/useMarkdown'
+import { inject, onMounted, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { MarkdownBlockView } from '../../../composables/markdownBlocks'
 import {
   handleMarkdownClick,
   handleMarkdownKeydown,
@@ -29,8 +34,19 @@ const props = withDefaults(
   }>(),
   { streaming: false, sourceMessageId: 'markdown' },
 )
-const { rendered } = useMarkdown(toRef(() => props.text))
 const root = ref<HTMLElement | null>(null)
+/** Bumps whenever the element's content was rewritten. */
+const rendered = shallowRef(0)
+let view: MarkdownBlockView | null = null
+function render(): void {
+  if (root.value === null) return
+  view ??= new MarkdownBlockView(root.value)
+  if (view.update(props.text)) rendered.value++
+}
+// Before the link and icon passes below (mount hooks and post watchers run
+// in registration order).
+onMounted(render)
+watch(() => props.text, render, { flush: 'post' })
 const links = inject(LINK_STATUS_KEY, null)
 const app = inject(APP_CONTEXT_KEY, null)
 const linkOptions = { notify: (message: string) => app?.showToast(message) }
@@ -200,12 +216,6 @@ function mark(anchor: HTMLAnchorElement, status: LinkStatus): void {
 </script>
 
 <template>
-  <!-- sanitized by useMarkdown (DOMPurify) -->
-  <div
-    ref="root"
-    class="ds-md-html"
-    @click="onClick"
-    @keydown="onKeydown"
-    v-html="rendered"
-  />
+  <!-- filled by MarkdownBlockView (sanitized per block with DOMPurify) -->
+  <div ref="root" class="ds-md-html" @click="onClick" @keydown="onKeydown" />
 </template>

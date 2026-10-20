@@ -258,7 +258,58 @@ function showFileName(
   label.content = name
 }
 
+/** Sanitized HTML of a whole document (what `useMarkdown` renders). */
+export function renderMarkdown(text: string): string {
+  return sanitizeHtml(md.render(text || ''))
+}
+
+/**
+ * A document cut at its top-level blocks: `closed` blocks are followed by
+ * another top-level block, so text arriving later cannot change them; the
+ * `tail` is the last block and anything after it (an unclosed fence, a list
+ * still growing). Each piece renders to the same HTML in isolation as inside
+ * the whole document.
+ */
+export interface MarkdownBlockSplit {
+  readonly closed: readonly string[]
+  readonly tail: string
+}
+
+/**
+ * Cut a document at its top-level markdown-it blocks, or null when it has
+ * reference definitions (a definition can change any earlier block).
+ */
+export function splitMarkdownBlocks(text: string): MarkdownBlockSplit | null {
+  // markdown-it's own normalization, so lines match its line map.
+  const source = (text || '').replace(/\r\n?/g, '\n').replace(/\0/g, '\uFFFD')
+  const env: { references?: Record<string, unknown> } = {}
+  const tokens = md.parse(source, env)
+  if (env.references !== undefined && Object.keys(env.references).length > 0)
+    return null
+  const starts: number[] = []
+  const ends: number[] = []
+  for (const token of tokens) {
+    if (token.level !== 0 || token.nesting === -1 || token.map === null)
+      continue
+    starts.push(token.map[0])
+    ends.push(token.map[1])
+  }
+  if (starts.length === 0) return { closed: [], tail: source }
+  const lines = source.split('\n')
+  const closed: string[] = []
+  // A closed block never ends inside an open fence: its trailing blank
+  // lines carry nothing.
+  for (let index = 0; index < starts.length - 1; index++)
+    closed.push(
+      lines.slice(starts[index], ends[index]).join('\n').replace(/\n+$/u, ''),
+    )
+  return {
+    closed,
+    tail: lines.slice(starts[starts.length - 1]).join('\n'),
+  }
+}
+
 export function useMarkdown(content: Ref<string>) {
-  const rendered = computed(() => sanitizeHtml(md.render(content.value || '')))
+  const rendered = computed(() => renderMarkdown(content.value))
   return { rendered }
 }

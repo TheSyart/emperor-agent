@@ -2,7 +2,12 @@
 // `exit_plan_mode` call, its review outcome, the plan title and the todo
 // progress of the current `todo_write` list. Pure over a ChatSnapshot; it
 // only sees the loaded window (an older plan paged out is not reported).
-import type { ChatSnapshot, ToolChatData } from './types'
+import type {
+  ChatSnapshot,
+  TodoItem,
+  ToolChatData,
+  ToolChatNode,
+} from './types'
 
 export const EXIT_PLAN_MODE_TOOL = 'exit_plan_mode'
 
@@ -90,40 +95,50 @@ function reviewStatus(
   return 'approved'
 }
 
-/** Summary of the latest plan presented in the window, or null. */
+/** Summary of one `exit_plan_mode` row against the current todo list. */
+export function planSummaryOf(
+  node: ToolChatNode,
+  todos: readonly TodoItem[],
+): PlanSummary {
+  const data = node.data
+  const metaTitle = resultMeta(data)?.title
+  const title =
+    (typeof metaTitle === 'string' && metaTitle.trim()) ||
+    planHeading(planArgument(data.argsRaw)) ||
+    UNTITLED_PLAN
+  const total = todos.length
+  const done = todos.filter((item) => item.status === 'completed').length
+  const review = reviewStatus(data)
+  const status: PlanSummaryStatus =
+    review !== 'approved' || total === 0
+      ? review
+      : done === total
+        ? 'done'
+        : 'executing'
+  return {
+    key: node.key,
+    callId: data.callId,
+    title,
+    status,
+    steps: { done, total },
+  }
+}
+
+/**
+ * Summary of the latest plan presented in the window, or null. A chat
+ * snapshot carries it precomputed (`planSummary`, kept up to date by the
+ * snapshot builder); otherwise the window is scanned.
+ */
 export function planSummary(
   snapshot: ChatSnapshot | null | undefined,
 ): PlanSummary | null {
   if (!snapshot) return null
+  if (snapshot.planSummary !== undefined) return snapshot.planSummary
   for (let index = snapshot.order.length - 1; index >= 0; index--) {
     const key = snapshot.order[index]
     const node = key === undefined ? undefined : snapshot.nodes.get(key)
-    if (node?.kind !== 'tool' || node.data.name !== EXIT_PLAN_MODE_TOOL)
-      continue
-    const data = node.data
-    const metaTitle = resultMeta(data)?.title
-    const title =
-      (typeof metaTitle === 'string' && metaTitle.trim()) ||
-      planHeading(planArgument(data.argsRaw)) ||
-      UNTITLED_PLAN
-    const total = snapshot.todos.length
-    const done = snapshot.todos.filter(
-      (item) => item.status === 'completed',
-    ).length
-    const review = reviewStatus(data)
-    const status: PlanSummaryStatus =
-      review !== 'approved' || total === 0
-        ? review
-        : done === total
-          ? 'done'
-          : 'executing'
-    return {
-      key: node.key,
-      callId: data.callId,
-      title,
-      status,
-      steps: { done, total },
-    }
+    if (node?.kind === 'tool' && node.data.name === EXIT_PLAN_MODE_TOOL)
+      return planSummaryOf(node, snapshot.todos)
   }
   return null
 }

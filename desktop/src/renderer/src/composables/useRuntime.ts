@@ -80,6 +80,13 @@ import {
 } from '../runtime/rendererProjection'
 import { RuntimeControllerManager } from '../runtime/runtimeController'
 
+/** Transient per-session run state (sidebar marks, background pending). */
+interface SessionRuntimeState {
+  running: boolean
+  attention: boolean
+  pending: PendingState
+}
+
 function nextId(prefix: string) {
   const random =
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -147,19 +154,12 @@ export function useRuntime(options: {
   const goalProjection = reactive<GoalProjectionState>(
     createGoalProjectionState(),
   )
-  // P1-7：per-session 瞬态运行/提醒状态，不落盘
-  const sessionRuntimeStates = reactive<
-    Record<
-      string,
-      {
-        running: boolean
-        attention: boolean
-        lastSeq: number
-        pending: PendingState
-      }
-    >
-  >({})
-  const lastSeq = ref(0)
+  // P1-7：per-session 瞬态运行/提醒状态，不落盘。An entry is replaced only
+  // when one of its values changes (FIX-04): a streaming delta leaves every
+  // entry, and so the sidebar that reads them, untouched.
+  const sessionRuntimeStates = reactive<Record<string, SessionRuntimeState>>({})
+  /** Last session told to main as the one on screen. */
+  let viewingSession: string | null | undefined
   let rehydrating = false
   /** Message of the latest turn `error` event (submit-rejection dedupe). */
   let lastTurnErrorMessage = ''
@@ -208,9 +208,9 @@ export function useRuntime(options: {
   const sessionEffectExecutor = new SessionEffectExecutor({
     isAvailable: hasCoreBridge,
     subscribe: onCoreEvent,
+    // IPC already hands each listener its own structured clone.
     onEvent: (event) => {
-      if (event && typeof event === 'object')
-        handleSocketEvent(JSON.stringify(event))
+      if (event && typeof event === 'object') handleCoreEvent(event)
     },
   })
   const sessionStore = new ActionEffectStore<
@@ -794,38 +794,59 @@ export function useRuntime(options: {
 
   function syncSessionProjection(state: SessionProjectionState): void {
     sessionId.value = state.activeSessionId
-    setViewingSession(
+    const viewing =
       state.activeSessionId && !isDraftSessionId(state.activeSessionId)
         ? state.activeSessionId
-        : null,
-    )
-    lastSeq.value = state.activeLastSeq
-    status.value = state.transport
-    for (const [id, value] of Object.entries(state.sessions)) {
-      sessionRuntimeStates[id] = {
-        running: value.running,
-        attention: value.attention,
-        lastSeq: value.lastSeq,
-        pending:
-          sessionRuntimeStates[id]?.pending ??
-          createPendingProjectionState().pending,
-      }
+        : null
+    if (viewing !== viewingSession) {
+      viewingSession = viewing
+      setViewingSession(viewing)
     }
+    status.value = state.transport
+    // A session with a runtime controller takes the controller's state
+    // (written right below), so its projection values are not written first.
+    const controlled = runtimeControllers.states()
+    for (const [id, value] of Object.entries(state.sessions))
+      if (!(id in controlled))
+        writeSessionRuntimeState(
+          id,
+          value.running,
+          value.attention,
+          sessionRuntimeStates[id]?.pending ??
+            createPendingProjectionState().pending,
+        )
     syncRuntimeControllerStates()
   }
 
   function syncRuntimeControllerStates(): void {
     const states = runtimeControllers.states()
-    for (const [id, value] of Object.entries(states)) {
-      sessionRuntimeStates[id] = {
-        running: value.running,
-        attention: value.attention,
-        lastSeq: value.lastSeq,
-        pending: { ...value.pending },
-      }
-    }
-    const selected = runtimeControllers.selected()
-    if (selected) lastSeq.value = selected.state.lastSeq
+    for (const [id, value] of Object.entries(states))
+      writeSessionRuntimeState(
+        id,
+        value.running,
+        value.attention,
+        value.pending,
+      )
+  }
+
+  /** Replace one session's entry, only when a value really changed. */
+  function writeSessionRuntimeState(
+    id: string,
+    running: boolean,
+    attention: boolean,
+    pending: PendingState,
+  ): void {
+    const current = sessionRuntimeStates[id]
+    if (
+      current !== undefined &&
+      current.running === running &&
+      current.attention === attention &&
+      current.pending.label === pending.label &&
+      current.pending.detail === pending.detail &&
+      current.pending.tone === pending.tone
+    )
+      return
+    sessionRuntimeStates[id] = { running, attention, pending: { ...pending } }
   }
 
   function settleSessionRuntime(
@@ -966,11 +987,16 @@ export function useRuntime(options: {
   }
 
   function restoreFromRuntimeEvents(events: RuntimeEventEnvelope[]) {
-    busy.value = false
-    updatePending()
     const scope = String(
       sessionId.value || options.boot.value?.runtime?.sessionId || '',
     )
+    // A bootstrap taken before live events already handled for this session
+    // (the turn ended during the round trip) must not bring busy back: the
+    // live state is newer (FIX-03, UI-20).
+    const liveSeq = runtimeControllers.controller(scope).state.lastSeq
+    const stale = Number(options.boot.value?.runtime?.latestSeq ?? 0) < liveSeq
+    busy.value = false
+    updatePending()
     rehydrating = true
     try {
       const adaptedEvents = events as WsEvent[]
@@ -1002,12 +1028,13 @@ export function useRuntime(options: {
       rehydrating = false
     }
     const runtime = options.boot.value?.runtime
+    const liveRunning = runtimeControllers.controller(scope).state.running
+    if (stale) {
+      busy.value = liveRunning
+      return
+    }
     busy.value =
-      runtime?.busy === false
-        ? false
-        : Boolean(
-            runtime?.busy || runtimeControllers.controller(scope).state.running,
-          )
+      runtime?.busy === false ? false : Boolean(runtime?.busy || liveRunning)
     if (runtime?.busy === false) clearAllSessionRunning()
   }
 
@@ -1023,19 +1050,12 @@ export function useRuntime(options: {
     boot.invalidSkills = catalog.invalid
   }
 
-  function handleSocketEvent(raw: string) {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(raw)
-    } catch {
-      handleChatError('事件通道返回了无法解析的数据', { transport: true })
-      return
-    }
-    if (!isRuntimeEventWire(parsed)) {
+  function handleCoreEvent(input: object) {
+    if (!isRuntimeEventWire(input)) {
       handleChatError('事件通道返回了未注册的事件', { transport: true })
       return
     }
-    const data = parsed as WsEvent
+    const data = input as WsEvent
     const admittedId =
       data.event === 'user_message'
         ? data.client_message_id

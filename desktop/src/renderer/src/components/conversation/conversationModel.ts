@@ -45,6 +45,22 @@ export function conversationPhase(input: {
   return input.composer === 'active' ? 'active' : 'hero'
 }
 
+/**
+ * Whether the viewed session runs: one source for the composer's stop
+ * button and the turn status (FIX-03). Once the conversation window is
+ * open it is the raw log projection (`snapshot.running`); before that, the
+ * runtime's busy of the active session.
+ */
+export function sessionRunning(input: {
+  windowOpen: boolean
+  logRunning: boolean
+  active: boolean
+  runtimeBusy: boolean
+}): boolean {
+  if (input.windowOpen) return input.logRunning
+  return input.active && input.runtimeBusy
+}
+
 /** A session is a child (subagent) view when its lineage has ancestors. */
 export function isChildLineage(lineage: SessionLineage | null): boolean {
   return (lineage?.chain?.length ?? 0) > 1

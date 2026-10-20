@@ -23,6 +23,7 @@
  * — the same for a tool call's row, opened (a trajectory link while the
  * trajectory is off, UI-S09).
  */
+import Button from '../ui/Button.vue'
 import Spinner from '../ui/Spinner.vue'
 import {
   computed,
@@ -141,7 +142,7 @@ const items = computed(() =>
     return item
   }),
 )
-const running = computed(() => snapshot.value?.running === true)
+const running = computed(() => handle.value?.running.value === true)
 const liveProcess = computed(() =>
   rows.value.some((row) => row.kind === 'process' && row.live),
 )
@@ -152,6 +153,10 @@ const hasMore = computed(() => windowState.value?.hasMore === true)
 const loadingOlder = computed(() => windowState.value?.loadingOlder === true)
 const openState = computed(() => windowState.value?.openState ?? 'cold')
 const openError = computed(() => windowState.value?.error ?? null)
+/** Read the history again after a failed read (FIX-03). */
+function retryOpen(): void {
+  void handle.value?.retry()
+}
 
 // ── scrolling ───────────────────────────────────────────────────────────
 const scroller = ref<HTMLElement | null>(null)
@@ -457,7 +462,8 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall })
           "
         />
         <div v-if="openError" class="open-error" role="alert">
-          会话记录读取失败：{{ openError }}
+          <span>会话记录读取失败：{{ openError }}</span>
+          <Button size="sm" variant="secondary" @click="retryOpen">重试</Button>
         </div>
         <DynamicScroller
           ref="list"
@@ -569,10 +575,21 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall })
 }
 
 .open-error {
-  padding-bottom: var(--space-4);
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-  color: rgb(var(--danger));
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-block: var(--space-6) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--r-md);
+  background: rgb(var(--error-soft));
+  color: rgb(var(--text-1));
+  font: var(--font-xs);
+}
+
+.open-error span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* Zero-height sticky slot: the button never extends scrollHeight. */
