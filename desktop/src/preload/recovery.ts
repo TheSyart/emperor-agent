@@ -5,6 +5,7 @@ import {
 } from '../shared/recovery-contract'
 
 contextBridge.exposeInMainWorld('emperorRecovery', {
-  action: (action: RecoveryAction) =>
-    ipcRenderer.invoke(RECOVERY_ACTION_CHANNEL, action),
+  /** `payload` is `{ id }` for the diagnostics bundle actions only. */
+  action: (action: RecoveryAction, payload?: { id: string }) =>
+    ipcRenderer.invoke(RECOVERY_ACTION_CHANNEL, action, payload),
 })
