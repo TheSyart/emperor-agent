@@ -15,7 +15,6 @@ import {
   INSPECTOR_DEFAULT,
   INSPECTOR_MAX,
   INSPECTOR_MIN,
-  LEGACY_SIDEBAR_DEFAULT,
   SIDEBAR_DEFAULT,
   SIDEBAR_MAX,
   SIDEBAR_MIN,
@@ -41,7 +40,7 @@ export const WORKSPACE_PANES: readonly WorkspacePane[] = [
 ]
 
 export interface FrameState {
-  /** Sidebar width preference (0 = folded; the rail stays). */
+  /** Sidebar width preference (0 = collapsed to the rail). */
   sidebar: number
   /** Workspace width preference (0 = closed). */
   workspace: number
@@ -122,14 +121,8 @@ function parseObject(raw: string | null | undefined): object | null {
   }
 }
 
-/**
- * The persisted sidebar width. The pre-0.2 default (280) every earlier build
- * wrote moves to the new default (236, UI-S01); other widths are clamped to
- * the new 200–360 range.
- */
 function restoreSidebar(state: FrameState, value: unknown): void {
   if (value === 0) state.sidebar = 0
-  else if (value === LEGACY_SIDEBAR_DEFAULT) state.sidebar = SIDEBAR_DEFAULT
   else if (typeof value === 'number')
     state.sidebar = clampWidth(value, SIDEBAR_MIN, SIDEBAR_MAX)
 }
@@ -296,7 +289,7 @@ export const frameActions = {
     state.narrow = narrow
     state.narrowExpanded = false
   },
-  /** Whether the sidebar is folded now (only the rail shows). */
+  /** Whether the sidebar currently renders as the collapsed rail. */
   sidebarCollapsed(state: FrameState): boolean {
     return state.narrow ? !state.narrowExpanded : state.sidebar === 0
   },

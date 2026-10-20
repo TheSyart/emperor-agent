@@ -1,26 +1,31 @@
-// The rail's page entries (UI-S01) and their glyphs. 探索 is part of 能力
-// since UI-S08; Pull Request shows only while the GitHub plugin is on.
+// Sidebar page entries (expanded nav rows + rail icons) and their glyphs.
 import {
+  ArrowLeft,
+  ArrowRight,
   Bell,
   Blocks,
   Clock,
+  Compass,
   GitPullRequest,
-  MessageSquare,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
 
 export interface SidebarPageEntry {
-  /** Route name the entry highlights for (router.ts). */
-  name: 'pulls' | 'scheduler' | 'capabilities'
+  /** Route name the row highlights for (router.ts). */
+  name: 'pulls' | 'scheduler' | 'capabilities' | 'explore'
   label: string
   to: RouteLocationRaw
   icon: Component
-  /** Shown only while the GitHub plugin is in effect and active. */
-  github?: true
 }
 
 export const SIDEBAR_PAGES: readonly SidebarPageEntry[] = [
+  {
+    name: 'pulls',
+    label: 'Pull Request',
+    to: { name: 'pulls' },
+    icon: GitPullRequest,
+  },
   {
     name: 'scheduler',
     label: '定时任务',
@@ -33,13 +38,7 @@ export const SIDEBAR_PAGES: readonly SidebarPageEntry[] = [
     to: { name: 'capabilities' },
     icon: Blocks,
   },
-  {
-    name: 'pulls',
-    label: 'Pull Request',
-    to: { name: 'pulls' },
-    icon: GitPullRequest,
-    github: true,
-  },
+  { name: 'explore', label: '探索', to: { name: 'explore' }, icon: Compass },
 ]
 
 /** Pages reached from another entry: the GitHub plugin's tabs live under Pull Request. */
@@ -58,6 +57,7 @@ export function activeSidebarPage(
 }
 
 export const SIDEBAR_ICONS = {
+  back: ArrowLeft,
+  forward: ArrowRight,
   bell: Bell,
-  sessions: MessageSquare,
 } satisfies Record<string, Component>

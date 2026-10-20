@@ -42,15 +42,9 @@
   --pane-header-h: 48px;
   --switch-thumb: 255 255 255;
   --icon-button-lg: 36px;
-
-  /* Window shell (UI-S01): rail, canvas gutter, column top bars, panels.
-     --shell-lights-clear: where content may start beside the traffic
-     lights (main/window-chrome.ts: 16 + 60 + 8). */
-  --rail-w: 56px;
-  --shell-gutter: 8px;
+  /* Column top bars: the conversation header row and the workspace header
+     end on the same line. */
   --shell-bar-h: 46px;
-  --shell-lights-clear: 84px;
-  --panel-radius: var(--r-md);
 
   /* Materials and glass */
   --mask-blur: 2px;
@@ -126,7 +120,6 @@
   --active-bg-a: 0.08;
   --shadow-color: 0 0 0;
   --nb-60: 249 250 251;
-  --panel-edge: 0 0 0 0.5px var(--stroke-1);
 }
 
 :root[data-theme='light'] {
@@ -182,5 +175,4 @@
   --active-bg-a: 0.08;
   --shadow-color: 28 27 25;
   --nb-60: 245 246 247;
-  --panel-edge: var(--elev-1);
 }

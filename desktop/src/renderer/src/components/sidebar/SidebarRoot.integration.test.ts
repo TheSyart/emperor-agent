@@ -207,76 +207,19 @@ it('preserves main session actions and search without child rows', async () => {
   ).toBe('pinned')
   expect(root.querySelectorAll('[aria-label="会话操作"]')).toHaveLength(2)
   expect(root.querySelector('[data-agent-id]')).toBeNull()
-  // Search is the rail's command palette now (UI-S02), not a capsule here.
-  expect(root.querySelector('[aria-label="搜索对话"]')).toBeNull()
-})
-
-it('keeps 置顶 on top, then 项目 and 对话 (UI-S02 8)', async () => {
-  await mount('/chat/pinned')
-  const headers = [
-    ...root.querySelectorAll<HTMLElement>('[data-sidebar-section]'),
-  ].map((el) => el.dataset.sidebarSection)
-  expect(headers[0]).toBe('pinned')
-  expect(headers).toEqual(['pinned', 'projects', 'chats'])
-})
-
-it('moves between sessions with ↑ and ↓ (UI-S02 7)', async () => {
-  const router = await mount('/chat/pinned')
-  const rows = () => [...root.querySelectorAll<HTMLElement>('.session-row')]
-  const first = rows()[0]!
-  first.focus()
-  first.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
-  )
+  ;(root.querySelector('[aria-label="搜索对话"]') as HTMLButtonElement)?.click()
   await settle()
-  const next = rows()[1]!
-  expect(document.activeElement).toBe(next)
-  expect(router.currentRoute.value.params.sessionId).toBe(
-    next.getAttribute('data-session-id'),
-  )
-  next.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }),
-  )
-  await settle()
-  expect(document.activeElement).toBe(rows()[0])
-  expect(router.currentRoute.value.params.sessionId).toBe('pinned')
 })
 
 async function chooseNewProjectFolder() {
-  root.querySelector<HTMLButtonElement>('[aria-label="项目操作"]')!.click()
+  root.querySelector<HTMLButtonElement>('[aria-label="新建项目会话"]')!.click()
   await settle()
   const item = [
     ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
-  ].find((el) => el.textContent?.includes('使用现有文件夹'))!
+  ].find((el) => el.textContent?.includes('选择项目文件夹'))!
   item.click()
   await settle()
 }
-
-it('holds only the brand bar, projects and chats (UI-S01)', async () => {
-  await mount('/chat/pinned')
-  const labels = [...root.querySelectorAll('button')].map((b) =>
-    b.getAttribute('aria-label'),
-  )
-  // New chat, search, the pages, the bell and settings live in the rail.
-  for (const moved of [
-    '新对话',
-    '新建项目会话',
-    '后退',
-    '前进',
-    '搜索',
-    '设置',
-    '定时任务',
-    '能力',
-  ])
-    expect(labels).not.toContain(moved)
-  expect(root.querySelector('nav[aria-label="侧栏导航"]')).toBeNull()
-  expect(root.querySelector('[data-testid="sidebar-theme-toggle"]')).toBeNull()
-  // The 46px top bar: brand and the collapse button, a drag region.
-  const bar = root.querySelector<HTMLElement>('.sidebar-bar')!
-  expect(bar.hasAttribute('data-app-drag')).toBe(true)
-  expect(bar.textContent).toContain('Emperor')
-  expect(bar.querySelector('[aria-label="收起侧栏"]')).not.toBeNull()
-})
 
 it('does nothing when the folder picker is cancelled (FIX-06 1)', async () => {
   mock.selectDirectory.mockResolvedValue(null)

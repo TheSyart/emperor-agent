@@ -29,8 +29,6 @@ import {
   goForward,
   installNavHistory,
 } from './components/shell/navHistory'
-import CommandPalette from './components/sidebar/CommandPalette.vue'
-import SidebarRail from './components/sidebar/SidebarRail.vue'
 import SidebarRoot from './components/sidebar/SidebarRoot.vue'
 import { useAgentTree } from './components/sidebar/agentTree'
 import { bindWorkspaceSnapshotSource } from './components/workspace/useWorkspaceSnapshot'
@@ -668,8 +666,7 @@ const workspaceAvailable = computed(() => isConversationRoute(route.name))
 const centerMin = computed(() =>
   route.name === 'trajectory' ? CENTER_MIN_TRAJECTORY : CENTER_MIN_CHAT,
 )
-/** The rail's 搜索 and ⌘K open the command palette (UI-S02). */
-const paletteOpen = ref(false)
+const sidebar = ref<{ focusSearch: () => void } | null>(null)
 
 const stopNavHistory = installNavHistory(router)
 onBeforeUnmount(stopNavHistory)
@@ -694,7 +691,7 @@ useShortcuts({
   'envCard.toggle': () => frameActions.toggleEnvCard(frame),
   'sidebar.toggle': () => frameActions.toggleSidebar(frame),
   'session.new': () => runSafely(newChatFromShortcut),
-  search: () => (paletteOpen.value = true),
+  search: () => sidebar.value?.focusSearch(),
   'nav.back': () => goBack(router),
   'nav.forward': () => goForward(router),
 })
@@ -802,17 +799,9 @@ provideAppContext({
 
   <template v-else>
     <AppFrame :workspace-available="workspaceAvailable" :center-min="centerMin">
-      <template #rail="{ collapsed, toggle }">
-        <SidebarRail
-          :sidebar-collapsed="collapsed"
-          @new-chat="runSafely(newChatFromShortcut)"
-          @search="paletteOpen = true"
-          @toggle-sidebar="toggle"
-        />
-      </template>
       <template #sidebar="{ collapsed, width, toggle }">
         <SidebarRoot
-          v-show="!collapsed"
+          ref="sidebar"
           :collapsed="collapsed"
           :width="width"
           @toggle="toggle"
@@ -829,7 +818,6 @@ provideAppContext({
     </AppFrame>
     <ImageViewerHost :owner="viewedSessionId" />
     <SettingsModal />
-    <CommandPalette v-model:open="paletteOpen" />
     <ModelSetupRequiredDialog
       v-if="modelSetupPromptOpen"
       :open="modelSetupPromptOpen"
