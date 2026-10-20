@@ -1,13 +1,18 @@
 /**
  * 记忆版本快照/diff/restore。
  * 磁盘兼容: memory/versions/{index.json, snapshots/<id>.json}；字段 relPath/createdAt/contentHash（camel）。
+ * 保留（KRN-12）：索引修剪到 maxVersions 时同时删除被移出的快照文件；
+ * pruneOrphans() 清掉索引不再列出的快照与原子写留下的临时文件（超过一小时）。
  */
 import { createHash } from 'node:crypto'
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -17,6 +22,10 @@ import { relativePortable, relativePortableOrAbsolute } from '../util/paths'
 
 export type MemoryVersionTarget = 'memory' | 'user' | 'episode' | 'project'
 const DATE_EPISODE_RE = /^\d{4}-\d{2}-\d{2}\.md$/
+/** A snapshot file this store writes, and the temp file of an atomic write. */
+const SNAPSHOT_FILE_RE = /^memv_[A-Za-z0-9_.-]+\.json$/
+const TEMP_FILE_RE = /^\.(?:memv_[A-Za-z0-9_.-]+|index)\.json\.[0-9a-f]+\.tmp$/
+const ORPHAN_GRACE_MS = 60 * 60 * 1000
 
 export interface MemoryVersion {
   id: string
@@ -139,8 +148,54 @@ export class MemoryVersionStore {
       bytes: Buffer.byteLength(content, 'utf8'),
     }
     this.writeSnapshot(version, content)
-    this.writeIndex([version, ...existing].slice(0, this.maxVersions))
+    const versions = [version, ...existing]
+    this.writeIndex(versions.slice(0, this.maxVersions))
+    // A version trimmed from the index takes its snapshot file along.
+    for (const dropped of versions.slice(this.maxVersions))
+      if (SNAPSHOT_FILE_RE.test(`${dropped.id}.json`))
+        rmSync(join(this.snapshotsDir, `${dropped.id}.json`), { force: true })
     return version
+  }
+
+  /**
+   * Remove snapshot files the index does not list and temp files a failed
+   * atomic write left, once older than `olderThanMs` (an hour: a snapshot is
+   * written just before its index line). Bytes are allocated bytes.
+   */
+  pruneOrphans(opts: { olderThanMs?: number; now?: number } = {}): {
+    removed: number
+    bytes: number
+  } {
+    const cutoff =
+      (opts.now ?? Date.now()) - (opts.olderThanMs ?? ORPHAN_GRACE_MS)
+    const listed = new Set(this.loadIndex().map((item) => `${item.id}.json`))
+    const out = { removed: 0, bytes: 0 }
+    for (const dir of [this.snapshotsDir, this.versionsDir]) {
+      let names: string[]
+      try {
+        names = readdirSync(dir)
+      } catch {
+        continue
+      }
+      for (const name of names) {
+        const orphan =
+          dir === this.snapshotsDir &&
+          SNAPSHOT_FILE_RE.test(name) &&
+          !listed.has(name)
+        if (!orphan && !TEMP_FILE_RE.test(name)) continue
+        const path = join(dir, name)
+        try {
+          const st = lstatSync(path)
+          if (!st.isFile() || st.mtimeMs >= cutoff) continue
+          unlinkSync(path)
+          out.removed += 1
+          out.bytes += st.blocks * 512
+        } catch {
+          // Gone already, or not ours to remove: leave it.
+        }
+      }
+    }
+    return out
   }
 
   list(opts?: {
