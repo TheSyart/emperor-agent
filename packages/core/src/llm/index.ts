@@ -2,6 +2,7 @@
 
 import type { LlmAdapter } from './adapter'
 import { DeepSeekAdapter } from './adapters/deepseek/adapter'
+import { DeepSeekMessagesAdapter } from './adapters/deepseek-messages/adapter'
 import { PiAiAdapter } from './adapters/pi-ai/adapter'
 import { LlmClient } from './client'
 import type { ImageResolver } from './content'
@@ -22,8 +23,15 @@ export type { LlmAdapter, AdapterCallContext } from './adapter'
 /** Default adapter selection: one shared instance per transport. */
 export function defaultAdapterFor(): (route: RouteSpec) => LlmAdapter {
   const deepseek = new DeepSeekAdapter()
+  // One instance per client, so its Files API cache spans the session.
+  const messages = new DeepSeekMessagesAdapter()
   const piAi = new PiAiAdapter()
-  return (route) => (route.adapter === 'deepseek' ? deepseek : piAi)
+  return (route) =>
+    route.adapter === 'deepseek-messages'
+      ? messages
+      : route.adapter === 'deepseek'
+        ? deepseek
+        : piAi
 }
 
 /** Create the process-wide client with production adapters. */
