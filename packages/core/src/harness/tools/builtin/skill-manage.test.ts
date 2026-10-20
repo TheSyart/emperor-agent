@@ -44,7 +44,7 @@ function setup(mode: SandboxMode, outcome = 'allowed-once') {
   })
   const agent = {
     id: 'agent-1',
-    session: { id: 'agent-1', events: [], header: { cwd: root } },
+    session: { id: 'agent-1', events: [], header: { cwd: root }, cwd: root },
   } as unknown as Agent
   const run = async (raw: unknown) => {
     const args = tool.parse(raw)
