@@ -6,6 +6,7 @@ import {
   activationState,
   capabilityChips,
   formatBytes,
+  PLUGIN_SCOPE_OPTIONS,
   scopeLabel,
   signatureLabel,
   sourceLabel,
@@ -85,6 +86,15 @@ describe('plugin display vocabulary', () => {
     expect(
       activationState({ activation: 'active' } as PluginSummary).tone,
     ).toBe('ok')
+  })
+
+  it('keeps a project’s choice in Emperor, not in the repository’s files (SEC-07)', () => {
+    const descriptions = PLUGIN_SCOPE_OPTIONS.map((item) => item.description)
+    expect(descriptions.join(' ')).not.toMatch(/settings(\.local)?\.json/)
+    expect(
+      PLUGIN_SCOPE_OPTIONS.find((item) => item.value === 'project')
+        ?.description,
+    ).toBe('只在当前项目启用，选择记在 Emperor 里')
   })
 
   it('counts capabilities from lists or numbers and formats sizes', () => {

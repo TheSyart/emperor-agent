@@ -83,7 +83,10 @@ export interface ClaudeCodeHooksOptions {
   pluginRoot?: string
   /** Replaces `${CLAUDE_PROJECT_DIR}` and is exported as `CLAUDE_PROJECT_DIR` (else the session cwd). */
   projectDir?: string
-  /** Per-hook timeout when a hook sets none (default 600000 ms). */
+  /**
+   * Per-hook timeout of the user's own hooks when a hook sets none (default
+   * 600000 ms). Plugin hooks have their own: 30 s, at most 120 s (SEC-07).
+   */
   defaultTimeoutMs?: number
   /** Cap for the persisted `hook/result.stderrSummary` (default 500 chars). */
   stderrSummaryMaxChars?: number
@@ -116,6 +119,8 @@ export interface PluginHookSet {
   /** The contributing plugin (a project's own copy hides its global one). */
   readonly pluginId?: string
   readonly env: Readonly<Record<string, string>>
+  /** Names its manifest's `env` lets its hooks read from Emperor's environment (SEC-07). */
+  readonly allowedEnv?: readonly string[]
   readonly config: ClaudeCodeHookConfig
 }
 
@@ -269,6 +274,7 @@ export class ClaudeCodeHooks {
       id: set.id,
       ...(set.pluginId === undefined ? {} : { pluginId: set.pluginId }),
       env: { ...set.env },
+      allowedEnv: [...(set.allowedEnv ?? [])],
       config: set.config,
     }))
     this.reload()
@@ -702,6 +708,7 @@ function pluginSourceOf(set: PluginHookSet): PluginHookSource {
     pluginId: set.pluginId ?? set.id,
     root: set.env.PLUGIN_ROOT ?? set.env.CLAUDE_PLUGIN_ROOT ?? null,
     data: set.env.PLUGIN_DATA ?? set.env.CLAUDE_PLUGIN_DATA ?? null,
+    allowedEnv: set.allowedEnv ?? [],
   }
 }
 

@@ -30,8 +30,13 @@ import {
 } from './schedulerModel'
 
 const props = withDefaults(
-  defineProps<{ disabled?: boolean; mode?: 'create' | 'edit' }>(),
-  { disabled: false, mode: 'edit' },
+  defineProps<{
+    disabled?: boolean
+    mode?: 'create' | 'edit'
+    /** Why the 「指定时间」 cannot be saved (scheduleProblem), shown on it. */
+    scheduleError?: string | null
+  }>(),
+  { disabled: false, mode: 'edit', scheduleError: null },
 )
 
 const draft = defineModel<SchedulerJobDraft>({ required: true })
@@ -126,7 +131,12 @@ defineExpose({
           :disabled="disabled"
         />
       </Field>
-      <Field v-else-if="scheduleKind === 'at'" :id="atId" label="指定时间">
+      <Field
+        v-else-if="scheduleKind === 'at'"
+        :id="atId"
+        label="指定时间"
+        :error="scheduleError ?? undefined"
+      >
         <TextField
           v-model="atLocal"
           type="datetime-local"

@@ -161,9 +161,12 @@ async function save(): Promise<void> {
         <Switch :id="`${uid}-transient`" v-model="draft.onTransient" />
       </SettingsRow>
     </template>
-    <SettingsRow title="每 Agent 轮成本上限" :label-for="`${uid}-cap`">
+    <SettingsRow title="每个任务的费用上限" :label-for="`${uid}-cap`">
       <template #description>
-        <span>按模型单价累计；未知成本不会按 0 计算，账本会标记为不完整。</span>
+        <span
+          >从你发出一条消息起，主对话、子智能体与失败的请求都计入；按模型单价累计，未知成本不会按
+          0 计算，账本会标记为不完整。</span
+        >
         <span
           v-for="name in unpriced"
           :key="name"

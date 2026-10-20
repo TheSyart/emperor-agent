@@ -172,6 +172,39 @@ for (const theme of ['dark', 'light'] as const) {
   })
 }
 
+test('scheduler notices and the 指定时间 check (KRN-10)', async ({ page }) => {
+  await page.addInitScript(() => {
+    ;(
+      window as unknown as { __visualSchedulerStatus?: unknown }
+    ).__visualSchedulerStatus = {
+      running: false,
+      startError:
+        '另一个 Emperor 进程（pid 4242）正在运行定时任务，本进程不启动定时任务',
+      rejectedJobs: 1,
+    }
+  })
+  const shell = await open(page, '/scheduler', { theme: 'light' })
+  await expect(shell.locator('[data-scheduler-notice="start"]')).toContainText(
+    'pid 4242',
+  )
+  await expect(
+    shell.locator('[data-scheduler-notice="rejected"]'),
+  ).toContainText('1 个定时任务无法读取')
+  await expect(jobRow(shell, 'job_daily_digest')).toBeVisible()
+  await shot(page, 'scheduler-notices-light')
+
+  await shell.locator('[data-action="create"]').click()
+  await page
+    .getByRole('menu', { name: '创建' })
+    .locator('[data-menu-item="blank"]')
+    .click()
+  const dialog = page.getByTestId('scheduler-job-dialog')
+  await dialog.getByRole('radio', { name: '指定时间' }).click()
+  await expect(dialog.getByText('请选择日期和时间')).toBeVisible()
+  await expect(page.locator('[data-action="create-job"]')).toBeDisabled()
+  await shot(page, 'scheduler-at-required-light')
+})
+
 test('scheduler row menu runs, pauses, resumes, creates and deletes', async ({
   page,
 }) => {
@@ -282,6 +315,63 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(header.locator('[data-action="refresh"]')).toBeVisible()
     await expectPageFits(page)
     await shot(page, `capabilities-tools-${theme}`)
+  })
+}
+
+// ── 能力 › 插件: trust boundary (SEC-07) ───────────────────────────────
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`能力 › 插件 asks before enabling a project's suggestion (${theme})`, async ({
+    page,
+  }) => {
+    const shell = await open(page, '/capabilities?visualPluginSuggestion=on', {
+      theme,
+    })
+    const notice = shell.locator('[data-plugin-suggestion="acme/repo-lint"]')
+    await expect(notice).toBeVisible()
+    await expect(notice).toContainText('该项目建议启用 Repo Lint')
+    await expect(notice).toContainText('.emperor/settings.json')
+    await expect(notice).toContainText('1 个 Skill、1 个 Hook')
+    // Not turned on by being shown.
+    await expect(
+      shell.locator('[data-plugin-id="acme/repo-lint"]'),
+    ).toContainText('已停用')
+    await expectPageFits(page)
+    await shot(page, `plugins-suggestion-${theme}`)
+
+    await notice.getByRole('button', { name: '启用' }).click()
+    await expect(notice).toHaveCount(0)
+    await expect(
+      shell
+        .getByRole('status')
+        .filter({ hasText: '已在这个项目启用「Repo Lint」' }),
+    ).toBeVisible()
+  })
+
+  test(`a failed plugin hook shows why and the variables it needs (${theme})`, async ({
+    page,
+  }) => {
+    const shell = await open(
+      page,
+      '/capabilities?plugin=emperor%2Fweb-research&scope=user&visualHookFailure=on',
+      { theme },
+    )
+    const member = shell.locator('[data-member="PreToolUse#1"]')
+    await expect(member).toHaveAttribute('data-member-state', 'failed')
+    await expect(member).toContainText('KeyError: SEARCH_API_KEY')
+    const variables = member.locator('[data-member-variables]')
+    await expect(variables).toContainText(
+      'SEARCH_API_KEY（插件清单的 env 没有声明）',
+    )
+    await expect(variables).toContainText(
+      'SEARCH_REGION（Emperor 的环境里没有）',
+    )
+    await expect(shell.locator('[data-plugin-info]')).toContainText(
+      '可读环境变量',
+    )
+    await member.scrollIntoViewIfNeeded()
+    await expectPageFits(page)
+    await shot(page, `plugins-hook-failure-${theme}`)
   })
 }
 

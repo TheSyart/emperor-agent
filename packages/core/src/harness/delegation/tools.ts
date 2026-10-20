@@ -105,7 +105,11 @@ export interface DelegationToolService {
     runId?: string
   }>
   interrupt(id: string, runId: string): Promise<{ requested: boolean }>
-  wait(id: string, runId: string): Promise<DelegationRunRecord>
+  wait(
+    id: string,
+    runId: string,
+    signal?: AbortSignal,
+  ): Promise<DelegationRunRecord>
   /** End a run that has no outcome (AGT-04). */
   abandon?(id: string, by: 'user' | 'model'): Promise<DelegationRecord>
 }
@@ -335,7 +339,12 @@ export function createDelegationTools(
         ctx.signal.addEventListener('abort', abort, { once: true })
         if (ctx.signal.aborted) abort()
         try {
-          const run = await service().wait(record.id, record.currentRunId!)
+          // Stopping the turn ends the wait at once; the run is interrupted.
+          const run = await service().wait(
+            record.id,
+            record.currentRunId!,
+            ctx.signal,
+          )
           if (run.phase !== 'completed')
             throw new ToolError(
               'external run ' +
@@ -606,7 +615,7 @@ export function createDelegationTools(
             },
           }
         }
-        const run = await service().wait(args.agent_id, runId)
+        const run = await service().wait(args.agent_id, runId, ctx.signal)
         return {
           content: closingText(service().inspect(args.agent_id).record!, run),
           meta: {

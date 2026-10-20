@@ -162,10 +162,10 @@ test('sidebar expanded vs collapsed rail', async ({ page }) => {
 
 test('sidebar search filters sessions', async ({ page }) => {
   await open(page, '/chat/build-ui')
-  // The capsule opens from the rail's search button (or ⌘K).
+  // The command palette opens from the rail's search button (or ⌘K).
   await page.getByRole('button', { name: '搜索', exact: true }).click()
-  await page.getByLabel('搜索对话').fill('Visual')
-  await expect(page.locator('.search-result').first()).toBeVisible()
+  await page.getByLabel('搜索会话').fill('Visual')
+  await expect(page.locator('[data-palette-result]').first()).toBeVisible()
   await shot(page, 'sidebar-search')
 })
 

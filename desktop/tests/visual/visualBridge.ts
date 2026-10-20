@@ -801,6 +801,13 @@ export async function installVisualCoreBridge(
           ...scheduler.status,
           jobs: jobs.length,
           enabled: jobs.filter((job) => job.enabled).length,
+          // A spec can mark the service as not started or with jobs set
+          // aside (KRN-10).
+          ...((
+            window as unknown as {
+              __visualSchedulerStatus?: Record<string, unknown>
+            }
+          ).__visualSchedulerStatus ?? {}),
         }
         // IPC results are structured clones: hand back a fresh copy.
         return JSON.parse(JSON.stringify(scheduler))
@@ -1545,6 +1552,13 @@ export async function installVisualCoreBridge(
        * or run for good (`visualCancelledTasks`).
        */
       const visualCancelledTasks = new Map<string, number>()
+      const visualTaskBudget = {
+        maxSteps: 400,
+        maxBackgroundSteps: 120,
+        maxActiveAgents: 8,
+        maxTotalAgents: 64,
+        maxNoticeWakes: 32,
+      }
       function visualBackgroundTask(
         task: Record<string, unknown> & { id: string; kind: string },
       ) {
@@ -2460,6 +2474,40 @@ export async function installVisualCoreBridge(
         unarchivedHistory: [],
         context_used: 12000,
       }
+      // `?visualPluginSuggestion=on` (SEC-07): the project's
+      // .emperor/settings.json suggests a project plugin the user has not
+      // decided on, so 能力 › 插件 asks 「该项目建议启用 …」.
+      if (visualParams.get('visualPluginSuggestion') === 'on')
+        boot.plugins.push({
+          pluginId: 'acme/repo-lint',
+          name: 'Repo Lint',
+          displayName: 'Repo Lint',
+          description: '提交前检查改动',
+          developerName: 'Acme',
+          format: 'portable',
+          logo: null,
+          effective: false,
+          toggleable: true,
+          uninstallable: true,
+          scope: 'project',
+          version: '0.4.0',
+          digest: '9'.repeat(64),
+          source: { kind: 'local', label: 'repo-lint' },
+          signature: { status: 'local_user_source', publisher: null },
+          enabled: false,
+          materialization: 'installed',
+          activation: 'disabled',
+          suggested: true,
+          capabilities: {
+            skills: 1,
+            agents: 0,
+            hooks: 1,
+            mcpServers: 0,
+            lspServers: 0,
+            commands: 0,
+            apps: 0,
+          },
+        } as (typeof boot.plugins)[number])
       // `?visualGithub=off`: the GitHub plugin is turned off, so its Issue /
       // CI tabs go away and github.* reads are refused.
       if (visualParams.get('visualGithub') === 'off') {
@@ -4776,6 +4824,22 @@ export async function installVisualCoreBridge(
                 lastSeq: raw?.events.at(-1)?.seq ?? -1,
               }
             }
+            case 'sessions.search': {
+              // Content search (UI-S02 palette): one canned hit.
+              const query = (args[0] as { query: string }).query
+              return {
+                hits: query.includes('设计稿')
+                  ? [
+                      {
+                        sessionId: 'chat-main',
+                        title: '普通对话',
+                        role: 'assistant',
+                        snippet: '…对照设计稿，侧栏的间距应该收紧到 8px…',
+                      },
+                    ]
+                  : [],
+              }
+            }
             case 'sessions.lineage':
               return lineageOf((args[0] as { sessionId: string }).sessionId)
             case 'sessions.children':
@@ -4812,6 +4876,12 @@ export async function installVisualCoreBridge(
               })
               return streamVisualReply(promoted.id, input)
             }
+            // 设置 › 高级 › 任务预算 (KRN-03): the defaults, saved in memory.
+            case 'tasks.budget':
+              return { ...visualTaskBudget }
+            case 'tasks.setBudget':
+              Object.assign(visualTaskBudget, args[0] ?? {})
+              return { ...visualTaskBudget }
             case 'tasks.cancel': {
               const id = String(args[0] ?? '')
               if (!visualCancelledTasks.has(id))
@@ -6415,14 +6485,30 @@ export async function installVisualCoreBridge(
                     state: 'unsupported',
                     reason: 'Emperor 还不支持这个应用连接',
                   },
-                  {
-                    kind: 'hook',
-                    id: 'PreToolUse#1',
-                    title: 'PreToolUse · bash',
-                    description: 'python3 "$PLUGIN_ROOT/hooks/guard.py"',
-                    state: 'available',
-                    reason: null,
-                  },
+                  // `?visualHookFailure=on` (SEC-07): the guard failed for
+                  // want of a variable its manifest does not declare.
+                  visualParams.get('visualHookFailure') === 'on'
+                    ? {
+                        kind: 'hook',
+                        id: 'PreToolUse#1',
+                        title: 'PreToolUse · bash',
+                        description: 'python3 "$PLUGIN_ROOT/hooks/guard.py"',
+                        state: 'failed',
+                        reason:
+                          '最近一次运行失败（退出码 1）：KeyError: SEARCH_API_KEY',
+                        variables: [
+                          { name: 'SEARCH_API_KEY', state: 'undeclared' },
+                          { name: 'SEARCH_REGION', state: 'unset' },
+                        ],
+                      }
+                    : {
+                        kind: 'hook',
+                        id: 'PreToolUse#1',
+                        title: 'PreToolUse · bash',
+                        description: 'python3 "$PLUGIN_ROOT/hooks/guard.py"',
+                        state: 'available',
+                        reason: null,
+                      },
                   {
                     kind: 'hook',
                     id: 'PostToolUse#1',
@@ -6818,6 +6904,11 @@ export async function installVisualCoreBridge(
                   network:
                     plugin.scope === 'managed' ||
                     plugin.pluginId === 'emperor/web-research',
+                  // What its manifest's env lets its hooks read (SEC-07).
+                  env:
+                    plugin.pluginId === 'emperor/web-research'
+                      ? ['SEARCH_REGION']
+                      : [],
                 },
                 components: (members[String(plugin.pluginId)] ?? []).map(
                   (member) =>
@@ -6849,6 +6940,10 @@ export async function installVisualCoreBridge(
                   : plugin.signature.status === 'unverified'
                     ? 'blocked_unverified'
                     : 'active'
+                // The user's choice ends a project's suggestion (SEC-07).
+                if ('suggested' in plugin) plugin.suggested = false
+                if (plugin.scope === 'project' && plugin.enabled)
+                  plugin.effective = true
               }
               return { changed: Boolean(plugin), plugin }
             }

@@ -33,6 +33,7 @@ import {
   runHistory,
   runKey,
   scheduleLabelZh,
+  scheduleProblem,
   schedulerJobStatus,
   schedulerMisfirePolicyLabel,
   schedulerRunStatusLabel,
@@ -95,8 +96,21 @@ const status = computed(() =>
 )
 const history = computed(() => runHistory(props.job))
 const title = computed(() => props.job?.name ?? '新建定时任务')
+/**
+ * 「指定时间」 needs a date later than now (KRN-10). An edit that leaves an
+ * existing time alone is not checked: a past one-time job can still be
+ * renamed.
+ */
+const scheduleError = computed(() => {
+  const seeded = props.job ? draftFromJob(props.job) : null
+  if (seeded && seeded.atLocal === current.value.atLocal) return null
+  return scheduleProblem(current.value)
+})
 const canSubmit = computed(
-  () => !props.busy && Boolean(current.value.message.trim()),
+  () =>
+    !props.busy &&
+    Boolean(current.value.message.trim()) &&
+    !scheduleError.value,
 )
 
 /** Two columns of facts: what the job is / when it runs. */
@@ -175,6 +189,7 @@ function submit() {
         v-model="current"
         :mode="creating ? 'create' : 'edit'"
         :disabled="busy"
+        :schedule-error="scheduleError"
       />
       <p v-else class="note">
         受保护的系统任务：可以暂停、恢复或立即运行，不能编辑或删除。

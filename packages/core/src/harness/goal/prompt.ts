@@ -1,7 +1,8 @@
 /**
  * Model-visible goal text, verbatim from dsh: the `tool:goal` policy section
  * (dsh-tool-goal, order 114), the `<goal_round>` continuation prompt
- * (dsh-goal-round-driver), and the terminal wrap-up notices (dsh-tool-goal).
+ * (dsh-goal-round-driver, with the later "end your turn instead of sleeping
+ * or polling" line, DSH-6), and the terminal wrap-up notices (dsh-tool-goal).
  */
 
 import type { GoalView } from './types'
@@ -37,7 +38,9 @@ export function renderGoalRoundPrompt(
     'tool results, and durable session state as authoritative; inspect them instead of assuming ' +
     'earlier narration is still current. Make concrete progress and verify the result. Before ' +
     'claiming completion, gather evidence that the whole objective is achieved, read the current ' +
-    'goal, and mark it complete. If work remains, leave the goal active for the next round. Follow ' +
+    'goal, and mark it complete. If work remains, leave the goal active for the next round. When ' +
+    'all that remains is waiting for subagents or background jobs, end your turn instead of ' +
+    'sleeping or polling: the next round starts once they finish. Follow ' +
     'the configured goal-tool policy before reporting a blocker.\n' +
     '</goal_round>'
   )

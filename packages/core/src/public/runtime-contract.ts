@@ -62,6 +62,7 @@ export type {
   TokenUsage,
   ToolResultMessage,
   ToolSchema,
+  TurnBudgetReason,
   TurnEndReason,
   TurnFileEntry,
   TurnFilesRecord,

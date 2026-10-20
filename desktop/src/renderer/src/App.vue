@@ -29,6 +29,7 @@ import {
   goForward,
   installNavHistory,
 } from './components/shell/navHistory'
+import CommandPalette from './components/sidebar/CommandPalette.vue'
 import SidebarRail from './components/sidebar/SidebarRail.vue'
 import SidebarRoot from './components/sidebar/SidebarRoot.vue'
 import { useAgentTree } from './components/sidebar/agentTree'
@@ -667,7 +668,8 @@ const workspaceAvailable = computed(() => isConversationRoute(route.name))
 const centerMin = computed(() =>
   route.name === 'trajectory' ? CENTER_MIN_TRAJECTORY : CENTER_MIN_CHAT,
 )
-const sidebar = ref<{ focusSearch: () => void } | null>(null)
+/** The rail's 搜索 and ⌘K open the command palette (UI-S02). */
+const paletteOpen = ref(false)
 
 const stopNavHistory = installNavHistory(router)
 onBeforeUnmount(stopNavHistory)
@@ -692,7 +694,7 @@ useShortcuts({
   'envCard.toggle': () => frameActions.toggleEnvCard(frame),
   'sidebar.toggle': () => frameActions.toggleSidebar(frame),
   'session.new': () => runSafely(newChatFromShortcut),
-  search: () => sidebar.value?.focusSearch(),
+  search: () => (paletteOpen.value = true),
   'nav.back': () => goBack(router),
   'nav.forward': () => goForward(router),
 })
@@ -804,14 +806,13 @@ provideAppContext({
         <SidebarRail
           :sidebar-collapsed="collapsed"
           @new-chat="runSafely(newChatFromShortcut)"
-          @search="sidebar?.focusSearch()"
+          @search="paletteOpen = true"
           @toggle-sidebar="toggle"
         />
       </template>
       <template #sidebar="{ collapsed, width, toggle }">
         <SidebarRoot
           v-show="!collapsed"
-          ref="sidebar"
           :collapsed="collapsed"
           :width="width"
           @toggle="toggle"
@@ -828,6 +829,7 @@ provideAppContext({
     </AppFrame>
     <ImageViewerHost :owner="viewedSessionId" />
     <SettingsModal />
+    <CommandPalette v-model:open="paletteOpen" />
     <ModelSetupRequiredDialog
       v-if="modelSetupPromptOpen"
       :open="modelSetupPromptOpen"

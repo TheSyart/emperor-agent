@@ -5,7 +5,12 @@ import { contextMessage, messageText, userText } from '../../llm/message'
 import type { GenerateOptions } from '../../llm/types'
 import type { SessionEvent } from '../../session-log/types'
 import type { Agent } from '../agent/agent'
-import { createTestHarness, replyChunks, type ScriptedReply } from '../testing'
+import {
+  createTestHarness,
+  replyChunks,
+  withTaskBudget,
+  type ScriptedReply,
+} from '../testing'
 import {
   createGoalTools,
   GoalService,
@@ -575,6 +580,29 @@ describe('same-session goal driving', () => {
     await settle(t.agent)
     expect(goal).toMatchObject({ roundsStarted: 1, activation: 'disarmed' })
     expect(t.h.adapter.requests).toHaveLength(1)
+  })
+
+  it('disarms automatic continuation after a round reaches its step budget (KRN-03)', async () => {
+    const t = setup([{ tools: [{ name: 'missing_tool' }] }, { text: 'never' }])
+    withTaskBudget(t.h, t.agent.id, { maxSteps: 1 })
+    t.goals.create(t.agent, {
+      objective: 'stop at the budget',
+      maxGoalRounds: 8,
+    })
+    const goal = await waitForGoal(
+      t.goals,
+      t.agent,
+      (current) =>
+        current?.phase === 'active' && current.activation === 'disarmed',
+    )
+    await settle(t.agent)
+    expect(goal).toMatchObject({ roundsStarted: 1, activation: 'disarmed' })
+    expect(t.h.adapter.requests).toHaveLength(1)
+    expect(t.agent.session.lastOf('turn/end')?.data.reason).toEqual({
+      kind: 'budget',
+      limit: 'steps',
+      maxSteps: 1,
+    })
   })
 
   it('maps a downstream step rejection to blocked without entering the round', async () => {

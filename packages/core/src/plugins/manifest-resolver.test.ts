@@ -582,6 +582,53 @@ describe('package errors', () => {
   })
 })
 
+describe('the env a package’s hooks may read (SEC-07)', () => {
+  it('reads `env` from the manifest of each format', () => {
+    const portable = packageAt(
+      portablePackage('env-kit', {}, { env: ['ACME_TOKEN', 'ACME_URL'] }),
+    )
+    const codex = packageAt({
+      '.codex-plugin/plugin.json': { name: 'codex-kit', env: ['CODEX_X'] },
+    })
+    const legacy = packageAt({
+      '.emperor-plugin/plugin.json': {
+        schemaVersion: 1,
+        id: 'acme/legacy',
+        name: 'Legacy',
+        version: '1.0.0',
+        env: ['LEGACY_KEY', 'LEGACY_KEY'],
+      },
+    })
+    expect(resolveStrict(portable).envAllowlist).toEqual([
+      'ACME_TOKEN',
+      'ACME_URL',
+    ])
+    expect(resolveStrict(codex).envAllowlist).toEqual(['CODEX_X'])
+    expect(resolveStrict(legacy).envAllowlist).toEqual(['LEGACY_KEY'])
+    expect(
+      resolveStrict(packageAt(portablePackage('plain-kit'))).envAllowlist,
+    ).toEqual([])
+  })
+
+  it('rejects names that are not variable names at install, and drops them once installed', () => {
+    const root = packageAt(
+      portablePackage('bad-env', {}, { env: ['GOOD_ONE', 'not ok', 3] }),
+    )
+    expect(errorCode(() => resolveStrict(root))).toBe(
+      'plugin_preview_manifest_invalid',
+    )
+    expect(resolvePluginPackage(root, { strict: false }).envAllowlist).toEqual([
+      'GOOD_ONE',
+    ])
+    const notList = packageAt(
+      portablePackage('bad-env-2', {}, { env: 'ACME_TOKEN' }),
+    )
+    expect(errorCode(() => resolveStrict(notList))).toBe(
+      'plugin_preview_manifest_invalid',
+    )
+  })
+})
+
 describe('determinism', () => {
   it('resolves copies of a package to the same result', () => {
     const first = packageAt(

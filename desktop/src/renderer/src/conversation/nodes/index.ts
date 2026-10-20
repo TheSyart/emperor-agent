@@ -8,6 +8,7 @@ import {
   goalDefinition,
   hookDefinition,
   retryDefinition,
+  turnBudgetDefinition,
   turnErrorDefinition,
   turnMaxTokensDefinition,
 } from './notices'
@@ -33,6 +34,7 @@ export const CHAT_DEFINITIONS: readonly ConversationDefinition[] = [
   fallbackDefinition,
   turnErrorDefinition,
   turnMaxTokensDefinition,
+  turnBudgetDefinition,
   costCapDefinition,
   compactionDefinition,
   hookDefinition,

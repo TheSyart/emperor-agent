@@ -577,6 +577,38 @@ describe('HarnessHost', () => {
   })
 })
 
+it('stop during a Goal pauses it (已暂停) and /goal resume brings it back (AGT-09 1, 2)', async () => {
+  const { host, adapter } = await makeHost()
+  const entry = host.kept.sessionStore.create('goal stop', { mode: 'chat' }),
+    agent = host.agentFor(entry.id)
+  const goal = host.goals.create(agent, { objective: 'fixture only' })
+  host.stop(entry.id)
+  expect(host.goals.get(agent)).toMatchObject({
+    phase: 'paused',
+    activation: 'disarmed',
+  })
+  const resumed = host.goals.resume(agent, {
+    id: goal.id,
+    revision: host.goals.get(agent)!.revision,
+  })
+  expect(resumed).toMatchObject({ phase: 'active', activation: 'armed' })
+  host.stop(entry.id)
+  expect(host.goals.get(agent)?.phase).toBe('paused')
+  expect(adapter.requests.length).toBeLessThanOrEqual(1)
+})
+
+it('an external result whose parent subagent has ended goes to the root (AGT-09 4)', async () => {
+  const { host } = await makeHost()
+  const entry = host.kept.sessionStore.create('notice root', { mode: 'chat' })
+  const root = host.agentFor(entry.id)
+  expect(
+    host.delegationNoticeParent({
+      rootSessionId: entry.id,
+      parentAgentId: 'sub-ended',
+    } as never),
+  ).toBe(root)
+})
+
 it('root stop disarms an idle Goal before an external settlement can revive automatic work', async () => {
   const { host, adapter } = await makeHost()
   const entry = host.kept.sessionStore.create('stop fixture', { mode: 'chat' }),

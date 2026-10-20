@@ -30,6 +30,7 @@ import IconButton from '../../ui/IconButton.vue'
 import Menu from '../../ui/Menu.vue'
 import MenuItem from '../../ui/MenuItem.vue'
 import Modal from '../../ui/Modal.vue'
+import Notice from '../../ui/Notice.vue'
 import Popover from '../../ui/Popover.vue'
 import Tabs from '../../ui/Tabs.vue'
 import { DsClock, DsPlus, DsSparkle } from '../../icons/ds'
@@ -310,6 +311,21 @@ function clearSearch() {
         @update:model-value="selectFilter"
       />
 
+      <Notice
+        v-if="scheduler.status?.startError"
+        tone="error"
+        title="定时任务没有启动"
+        :description="scheduler.status.startError"
+        role="alert"
+        data-scheduler-notice="start"
+      />
+      <Notice
+        v-if="scheduler.status?.rejectedJobs"
+        tone="warn"
+        :title="`${scheduler.status.rejectedJobs} 个定时任务无法读取`"
+        description="它们已移到数据目录的 scheduler/jobs.rejected.json，其余任务照常运行；诊断里列出了名称和原因。"
+        data-scheduler-notice="rejected"
+      />
       <p v-if="scheduler.status?.lastError" class="error" role="alert">
         {{ scheduler.status.lastError }}
       </p>

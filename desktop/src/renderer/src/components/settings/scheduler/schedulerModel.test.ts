@@ -19,6 +19,7 @@ import {
   relativeNextRunZh,
   runKey,
   scheduleLabelZh,
+  scheduleProblem,
   schedulerJobBucket,
   schedulerJobLine,
   schedulerJobStatus,
@@ -174,9 +175,10 @@ describe('scheduler model', () => {
       kind: 'every',
       everyMs: 15 * 60_000,
     })
-    expect(
-      buildSchedule({ ...base, scheduleKind: 'at', atLocal: '' }, 1_000),
-    ).toEqual({ kind: 'at', atMs: 1_000 + 60 * 60 * 1000 })
+    // UI-27: no silent 「1 小时后」 for 指定时间 without a date.
+    expect(() =>
+      buildSchedule({ ...base, scheduleKind: 'at', atLocal: '' }),
+    ).toThrow('请选择日期和时间')
     expect(
       buildSchedule({
         ...base,
@@ -185,6 +187,28 @@ describe('scheduler model', () => {
         cronTz: ' ',
       }),
     ).toEqual({ kind: 'cron', expr: '0 9 * * *', tz: 'UTC' })
+  })
+
+  it('requires a date for 指定时间, later than now (KRN-10 7, 8)', () => {
+    const now = new Date('2026-10-20T10:00').getTime()
+    const at = { ...emptyJobDraft(), scheduleKind: 'at' as const }
+    expect(scheduleProblem({ ...at, atLocal: '' }, now)).toBe(
+      '请选择日期和时间',
+    )
+    expect(scheduleProblem({ ...at, atLocal: '2026-10-20T09:59' }, now)).toBe(
+      '指定时间必须晚于现在',
+    )
+    expect(scheduleProblem({ ...at, atLocal: '2026-10-20T10:00' }, now)).toBe(
+      '指定时间必须晚于现在',
+    )
+    expect(
+      scheduleProblem({ ...at, atLocal: '2026-10-20T10:01' }, now),
+    ).toBeNull()
+    expect(scheduleProblem({ ...at, atLocal: 'not a date' }, now)).toBe(
+      '请选择日期和时间',
+    )
+    // Other kinds have nothing to check here.
+    expect(scheduleProblem(emptyJobDraft(), now)).toBeNull()
   })
 
   it('creates main-agent jobs and keeps payload identity on update', () => {

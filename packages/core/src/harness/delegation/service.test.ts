@@ -14,6 +14,7 @@ import { WorkspaceMutationCoordinator } from '../../workspace/mutation-coordinat
 import type { DelegationParentContext } from './policy'
 import { DelegationError } from './types'
 import type {
+  DelegationOwner,
   DelegationStart,
   ExecutorOpenInput,
   ExecutorTurnInput,
@@ -83,6 +84,8 @@ function fixture(
     cwd: f.root,
     policy: { mode: 'read-only', workspaceRoot: f.root },
   }
+  let parentFor: ((owner: DelegationOwner) => DelegationParentContext) | null =
+    null
   const mutations = new WorkspaceMutationCoordinator()
   const service = new DelegationService({
     ...callbacks,
@@ -90,7 +93,7 @@ function fixture(
     config: () => config,
     registry,
     adapters: new Map([['codex', adapter]]),
-    parent: () => parent,
+    parent: (owner) => (parentFor ? parentFor(owner) : parent),
     workspaces: { prepare, retain: vi.fn(), get: vi.fn(), release: vi.fn() },
     mutations,
     runtime: async (_profile, id) => {
@@ -118,6 +121,11 @@ function fixture(
     },
     setParent: (mode: DelegationParentContext['policy']['mode']) => {
       parent = { cwd: f.root, policy: { mode, workspaceRoot: f.root } }
+    },
+    setParentFor: (
+      resolve: ((owner: DelegationOwner) => DelegationParentContext) | null,
+    ) => {
+      parentFor = resolve
     },
   }
 }
@@ -503,6 +511,45 @@ it('revocation includes idle terminal conversations whose auxiliary verification
   await f.service.wait(record.id, record.currentRunId!)
   f.setPlan(true)
   expect(f.service.inspect(record.id).record!.availability).toBe('idle')
+  expect(f.service.parentPermissionsRevoked('root')).toBe(true)
+  await f.service.shutdown()
+  f.cleanup()
+})
+it('a closed conversation never counts as a revoked permission (AGT-09 3)', async () => {
+  const f = fixture()
+  f.setParent('workspace-write')
+  const record = await f.service.start(f.owner, {
+    ...spec,
+    workspace: 'shared-exclusive',
+  })
+  await f.service.wait(record.id, record.currentRunId!)
+  await f.service.close(record.id)
+  expect(f.service.inspect(record.id).record!.availability).toBe('closed')
+  f.setParent('read-only')
+  expect(f.service.parentPermissionsRevoked('root')).toBe(false)
+  await f.service.shutdown()
+  f.cleanup()
+})
+it('a conversation whose parent subagent has ended is checked against the root (AGT-09 3, 6, 7)', async () => {
+  const f = fixture()
+  f.setParent('workspace-write')
+  const record = await f.service.start(
+    { ...f.owner, parentAgentId: 'sub-ended' },
+    { ...spec, workspace: 'shared-exclusive' },
+  )
+  await f.service.wait(record.id, record.currentRunId!)
+  // The subagent is gone (e.g. after a restart): the root still allows it.
+  let rootMode: DelegationParentContext['policy']['mode'] = 'workspace-write'
+  f.setParentFor((owner) => {
+    if (owner.parentAgentId !== owner.rootSessionId)
+      throw new DelegationError('PARENT_NOT_FOUND', 'parent is not active')
+    return { cwd: f.root, policy: { mode: rootMode, workspaceRoot: f.root } }
+  })
+  expect(f.service.parentPermissionsRevoked('root')).toBe(false)
+  // Loosening stays allowed; tightening the root revokes.
+  rootMode = 'danger-full-access'
+  expect(f.service.parentPermissionsRevoked('root')).toBe(false)
+  rootMode = 'read-only'
   expect(f.service.parentPermissionsRevoked('root')).toBe(true)
   await f.service.shutdown()
   f.cleanup()

@@ -60,6 +60,7 @@ import {
   type WorkflowRunRecord,
 } from '../harness/workflow/records'
 import type { Session } from '../session-log/session'
+import { LOG_FILE } from '../session-log/store'
 import type { SessionEvent } from '../session-log/types'
 import {
   sanitizeForWire,
@@ -90,13 +91,17 @@ import { CoreEffectiveConfigService } from './services/effective-config-service'
 import type { BrowserPreferences } from '../config/local-config'
 import { CoreBrowserPreferencesService } from './services/browser-preferences-service'
 import { CoreWebToolsService } from './services/web-tools-service'
+import { CoreTaskBudgetService } from './services/task-budget-service'
 import {
   CoreSessionDefaultsService,
   type SessionDefaults,
 } from './services/session-defaults-service'
 import type { SessionPermission } from '../config/local-config'
 import type { WebToolsStatus } from '../harness/host/web-tools'
-import type { WebToolPreferences } from '../config/local-config'
+import type {
+  TaskBudgetSettings,
+  WebToolPreferences,
+} from '../config/local-config'
 import { CoreDesktopPetService } from './services/desktop-pet-service'
 import { CoreEnvironmentService } from './services/environment-service'
 import { CoreHooksService } from './services/hooks-service'
@@ -126,6 +131,7 @@ import { loadMcpConfig } from '../mcp/config'
 import { logger } from '../util/log'
 import { EmperorError, OperationRetiredError } from '../errors'
 import { CoreSessionApplicationService } from './services/session-application-service'
+import { searchSessionLogs, type SessionSearchHit } from '../sessions/search'
 import { CoreWorkspaceApplicationService } from './services/workspace-application-service'
 import {
   CoreCommandApplicationService,
@@ -314,6 +320,7 @@ export class CoreApi {
   readonly desktopPetService: CoreDesktopPetService
   readonly browserPreferencesService: CoreBrowserPreferencesService
   readonly webToolsService: CoreWebToolsService
+  readonly taskBudgetService: CoreTaskBudgetService
   readonly sessionDefaultsService: CoreSessionDefaultsService
   readonly diagnosticsService: CoreDiagnosticsService
   readonly environmentService: CoreEnvironmentService
@@ -446,6 +453,12 @@ export class CoreApi {
       assertMutation: (area, action, view) =>
         this.assertMutation(area, action, view),
     })
+    this.taskBudgetService = new CoreTaskBudgetService(this.root, {
+      stateRoot: this.paths.stateRoot,
+      host,
+      assertMutation: (area, action, view) =>
+        this.assertMutation(area, action, view),
+    })
     this.webToolsService = new CoreWebToolsService(this.root, {
       stateRoot: this.paths.stateRoot,
       tools: host.webTools,
@@ -535,6 +548,8 @@ export class CoreApi {
                 }))
         },
         computerUseTools: () => listGuiTools(),
+        hookFailure: (pluginId, hookId) =>
+          host.pluginHookHealth.failure(pluginId, hookId),
         appConnection: (pluginId, scope, appId) =>
           this.appConnections.state(
             appConnectionKey({ scope, pluginId, appId }),
@@ -551,7 +566,12 @@ export class CoreApi {
           ),
       },
       onChanged: () => this.pluginsChanged(),
+      // Pre-0.2 project choices move to stateRoot once (SEC-07).
+      knownProjects: () =>
+        kept.projectStore.list().map((project) => project.project_path),
     })
+    // A plugin hook starting or stopping to fail re-reads its detail.
+    host.pluginHookHealth.onChange(() => this.emitPluginsChanged('hooks'))
     // Plugins apply per session scope (KRN-01): user-wide and shipped ones
     // everywhere, a project's own only in that project's sessions.
     this.pluginActivation = new PluginActivationController({
@@ -1125,6 +1145,8 @@ export class CoreApi {
       resolveProject: (projectPath) =>
         kept.projectStore.resolve(projectPath) as unknown as Dict,
       unloadSession: (sessionId) => host.unloadSession(sessionId),
+      forgetSessionTree: (sessionId, dir) =>
+        host.forgetSessionTree(sessionId, join(dir, LOG_FILE)),
       forgetTurnFiles: (sessionId, projectRoot) =>
         this.turnFiles.forgetSession(sessionId, projectRoot),
       stopSession: (sessionId) => {
@@ -1253,7 +1275,10 @@ export class CoreApi {
           ...kept.projectStore.detectLegacyPrivateData(projectPath),
         }
       },
-      schedulerDiagnostics: () => kept.schedulerStore.diagnostics(),
+      schedulerDiagnostics: () => ({
+        ...kept.schedulerStore.diagnostics(),
+        startError: kept.schedulerService.startFailure(),
+      }),
       runtimeStats: (view) =>
         this.runtimeStats(this.viewedSession(view)?.id ?? null),
       workspacePolicy: (view) => {
@@ -1321,7 +1346,9 @@ export class CoreApi {
 
   static async create(opts: CoreApiCreateOptions): Promise<CoreApi> {
     const root = resolve(opts.root)
-    const host = opts.host ?? (await HarnessHost.create(opts))
+    const host =
+      opts.host ??
+      (await HarnessHost.create({ ...opts, startScheduler: false }))
     let api: CoreApi | null = null
     try {
       api = new CoreApi(root, host, opts)
@@ -1333,6 +1360,8 @@ export class CoreApi {
       await api.delegationRuntime.probeProfiles()
       await api.sessionTransitionService.recover()
       await api.syncPlugins()
+      // After the plugins: a run caught up on at launch needs their Hooks.
+      await host.startScheduler()
       // 最近删除 keeps a deleted session for 30 days (FIX-01).
       await api.sessionApplicationService
         .purgeExpiredDeleted()
@@ -2147,6 +2176,25 @@ export class CoreApi {
           sessionId,
         )
       return event
+    },
+    /**
+     * 命令面板 (UI-S02): sessions whose own messages or replies contain the
+     * query, newest first, one snippet each. Archived sessions are included.
+     */
+    search: async (input: {
+      query: string
+      limit?: number
+    }): Promise<{ hits: SessionSearchHit[] }> => {
+      this.host.sessions.flush(undefined, { sync: true })
+      const hits = await searchSessionLogs({
+        root: this.host.sessions.root,
+        sessions: this.sessionApplicationService.list({
+          includeArchived: true,
+        }),
+        query: input.query,
+        ...(input.limit === undefined ? {} : { limit: input.limit }),
+      })
+      return { hits }
     },
     /** Ancestor chain of a (child) session, root first. */
     lineage: (input: { sessionId: string }): SessionLineage => {
@@ -3185,6 +3233,13 @@ export class CoreApi {
       else this.cancelTask(taskId, opts.sessionId ?? null)
       return { ...this.findTask(taskId, opts.sessionId) }
     },
+    /** 设置 › 高级 › 任务预算 (KRN-03). */
+    budget: (): TaskBudgetSettings => this.taskBudgetService.get(),
+    setBudget: (
+      change: Partial<TaskBudgetSettings>,
+      view: ViewScope,
+    ): Promise<TaskBudgetSettings> =>
+      this.taskBudgetService.update(change, view),
     resume: async (_taskId: string, _opts: Dict = {}): Promise<never> => {
       throw new OperationRetiredError(
         '子代理任务不再支持从面板恢复；请在对话中让主代理用 send_message 继续该子代理。',
@@ -3463,7 +3518,7 @@ export class CoreApi {
     }
   }
 
-  private emitPluginsChanged(reason: 'plugins' | 'project'): void {
+  private emitPluginsChanged(reason: 'plugins' | 'project' | 'hooks'): void {
     this.host.emitHost({ event: 'plugins_changed', reason })
   }
 
@@ -3615,7 +3670,8 @@ export class CoreApi {
       )
     if (task.kind === 'job')
       return (
-        this.host.jobs.kill(task.id, this.jobOwner(task), 'user') ===
+        // The model is told the user stopped it (DSH-5).
+        this.host.jobs.kill(task.id, this.jobOwner(task), 'user', 'user') ===
         'requested'
       )
     try {

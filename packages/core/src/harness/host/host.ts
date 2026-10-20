@@ -17,6 +17,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   statSync,
 } from 'node:fs'
 import { join, resolve, relative, isAbsolute, sep } from 'node:path'
@@ -44,7 +45,11 @@ import {
   type SessionHistoryPage,
 } from '../../session-log/history'
 import type { Session } from '../../session-log/session'
-import { SessionLogStore, type SessionLogState } from '../../session-log/store'
+import {
+  LOG_FILE,
+  SessionLogStore,
+  type SessionLogState,
+} from '../../session-log/store'
 import type { SessionEvent } from '../../session-log/types'
 import type { SessionEntry } from '../../sessions/store'
 import { MCPClient } from '../../mcp/client'
@@ -57,7 +62,6 @@ import { isUserTyped, type HoldReason, type QueueChange } from '../agent/inbox'
 import { createMiddleware, type AgentMiddleware } from '../agent/middleware'
 import { retryMiddleware } from '../agent/retry'
 import {
-  costCapMiddleware,
   currentModel,
   fallbackConfigMiddleware,
   fallbackErrorMiddleware,
@@ -75,6 +79,7 @@ import {
 } from '../goal'
 import { ClaudeCodeHooks, defaultHookConfigPaths } from '../hooks'
 import { containedPluginHookRunner } from '../hooks/contained'
+import { PluginHookHealth } from '../hooks/plugin-health'
 import type { UnsandboxedRequest } from '../../sandbox/consent'
 import { createJobTools, installJobsPromptSection, JobRegistry } from '../jobs'
 import { ComputerUseConfigStore } from '../computer-use/config'
@@ -142,12 +147,17 @@ import type { WebSearchBackend } from '../tools/builtin/web-search'
 import { ToolRegistry } from '../tools/registry'
 import { createRepeatReminder } from '../tools/repeat-reminder'
 import type { ToolServices } from '../tools/services'
-import { createSpillMiddleware } from '../tools/spill'
+import { createSpillMiddleware, spillSessionDir } from '../tools/spill'
 import { PendingInteractions, type UiAnswers } from './interactions'
 import { installLinkGuidancePromptSection } from './link-guidance'
 import { McpToolBridge } from './mcp-tools'
 import { createSchedulerExecutor } from './scheduler'
-import { currentTurnSource } from './turn-source'
+import { currentTurnInfo, currentTurnSource } from './turn-source'
+import { recordedDescendants, TaskTree, type TaskBudget } from './task-tree'
+import {
+  normalizeTaskBudgetSettings,
+  type TaskBudgetSettings,
+} from '../../config/local-config'
 import {
   createKeptServices,
   type KeptServices,
@@ -196,6 +206,12 @@ export interface HarnessHostOptions extends KeptServicesOptions {
   /** Permission preset new sessions start with (default `workspace-write`). */
   defaultPreset?: string
   initializeMcp?: boolean
+  /**
+   * Start the scheduler at the end of `create` (default true). CoreApi
+   * starts it itself once plugins are synced, so a run caught up on at
+   * launch already has the plugins' Hooks (KRN-10).
+   */
+  startScheduler?: boolean
   /** Watch Skill folders and emit `skill_catalog_changed` (default true). */
   watchSkills?: boolean
   /** Test hook: replace the sandbox backend. */
@@ -301,6 +317,8 @@ export class HarnessHost {
   readonly workflows: WorkflowEngine
   readonly workflowRuns = new WorkflowRunRegistry()
   readonly hooks: ClaudeCodeHooks
+  /** Each plugin hook's last failure, for the plugin's detail page (SEC-07). */
+  readonly pluginHookHealth = new PluginHookHealth()
   readonly pending = new PendingInteractions()
   readonly attachments: AttachmentStore
   readonly watchlist: WatchlistService
@@ -324,6 +342,10 @@ export class HarnessHost {
   private projectPluginOverrides: (projectRoot: string) => ReadonlySet<string> =
     () => new Set()
   private readonly agents = new Map<string, Agent>()
+  /** Each root session's task tree: its subagents, their jobs, its budget (KRN-03). */
+  private readonly taskTrees = new Map<string, TaskTree>()
+  /** 设置 › 高级 › 任务预算 (the cost cap is the model policy's). */
+  private taskBudgetSettings: TaskBudgetSettings
   private readonly projectors = new Map<string, SessionProjector>()
   private readonly unsubscribes = new Map<string, () => void>()
   /** Queued user prompt ids last announced per root session (prompt_queued/dequeued). */
@@ -344,6 +366,9 @@ export class HarnessHost {
       kept.localConfig?.sessions?.defaultPermission ??
       DEFAULT_PRESET
     this.timers = options.timers ?? realTimers
+    this.taskBudgetSettings = normalizeTaskBudgetSettings(
+      kept.localConfig?.taskBudget,
+    )
     this.attachments = new AttachmentStore(kept.paths.stateRoot)
     this.llm =
       options.llm ??
@@ -385,11 +410,28 @@ export class HarnessHost {
     this.compaction = new CompactionEngine(this.llm, new ToolResultPruner())
     this.subagents = new SubagentManager({
       sessions: this.sessions,
-      createAgent: (session, agentOptions) =>
-        this.attachAgent(new Agent(session, this.agentDeps(), agentOptions)),
+      createAgent: (session, agentOptions) => {
+        const child = this.attachAgent(
+          new Agent(session, this.agentDeps(), agentOptions),
+        )
+        this.taskTreeOf(child).adopt({
+          sessionId: child.id,
+          agent: child,
+          detach: () => this.detachAgent(child.id),
+        })
+        return child
+      },
       lookupAgent: (id) => this.agents.get(id),
       sandbox: this.sandbox,
       approval: this.approval,
+      // One budget per root task: total, pool, result wakes (KRN-03).
+      budget: {
+        reserve: (parent) => this.taskTreeOf(parent).reserve(parent),
+        admission: (parent) => this.taskTreeOf(parent).gate,
+        waiting: (parent, delta) =>
+          this.taskTreeOf(parent).waiting(parent, delta),
+        takeWake: (parent) => this.taskTreeOf(parent).takeWake(parent),
+      },
     })
     this.workflows = new WorkflowEngine([
       createRoutingChildProvider({
@@ -409,10 +451,12 @@ export class HarnessHost {
     ])
     this.hooks = new ClaudeCodeHooks({
       configPaths: defaultHookConfigPaths({ stateRoot: kept.paths.stateRoot }),
-      // A plugin's hooks run in the process containment (SEC-08).
+      // A plugin's hooks run in the process containment (SEC-08) with the
+      // safe and declared variables and a 30 s timeout (SEC-07).
       pluginHookRunner: containedPluginHookRunner({
         runtime: kept.processRuntime,
         stateRoot: kept.paths.stateRoot,
+        health: this.pluginHookHealth,
       }),
     })
     this.projectMcp = new ProjectMcpInstances({
@@ -756,11 +800,18 @@ export class HarnessHost {
       engine: this.workflows,
       runs: this.workflowRuns,
     })
+    // A goal starts no new round while work it waits for still runs:
+    // external delegations, subagents, background jobs (DSH-6).
     const goal = installGoal({ prompt, middleware, tools }, this.goals, {
       driverOptions: {
         hasOutstandingDelegations: (id) =>
-          this.delegations?.hasOutstanding(id) ?? false,
+          (this.delegations?.hasOutstanding(id) ?? false) ||
+          this.taskTreeBusy(id),
       },
+    })
+    this.jobs.onJobDone((_snapshot, owner) => {
+      if (owner !== undefined)
+        goal.driver.delegationSettled(this.rootOf(owner).id)
     })
     void createGoalTools
     // A step of a project session holds the project's MCP instance (started
@@ -801,14 +852,21 @@ export class HarnessHost {
     )
     this.compaction.install(middleware)
     middleware.requestError.push(retryMiddleware())
-    // Saved model execution policy: fallback after retries give up, per-turn cost cap.
+    // Saved model execution policy: fallback after retries give up.
     const modelPolicy: ModelPolicySource = {
       policy: () => this.kept.modelConfig.policy,
-      pricing: (routeId) => findEntry(this.kept.modelConfig, routeId)?.pricing,
     }
     middleware.requestError.push(fallbackErrorMiddleware(modelPolicy, this.llm))
     middleware.requestConfig.push(fallbackConfigMiddleware(this.llm))
-    middleware.preStep.unshift(costCapMiddleware(modelPolicy))
+    // Task budget (KRN-03): every request's usage, failed attempts too, is
+    // charged to its root task; a spent budget ends the turn before its
+    // next step (the policy's cost cap, now over the whole task).
+    middleware.requestEnd.push(({ agent, provider, usage, attempt }) => {
+      this.taskTreeOf(agent).charge({ routeId: provider, usage }, attempt)
+    })
+    middleware.budget.push(({ agent, step }) =>
+      this.taskTreeOf(agent).check(agent, step),
+    )
     const reminder = createRepeatReminder()
     middleware.preStep.push(reminder.preStep)
     tools.postExecute.push(reminder)
@@ -833,7 +891,10 @@ export class HarnessHost {
       settled: (child) => {
         this.hooks.subagentStopped(child)
         this.projectMcp.release(child.id)
+        goal.driver.delegationSettled(this.rootOf(child).id)
       },
+      // Its jobs stop now; once idle it leaves the host's tables (CORE-17/19).
+      disposed: (child) => this.taskTreeOf(child).disposeChild(child.id),
     })
     return goal
   }
@@ -952,8 +1013,11 @@ export class HarnessHost {
         queueMicrotask(() => this.releaseComputerUseIfTaskEnded(sessionId))
     })
     this.subagents.observe({
-      settled: (child) =>
-        queueMicrotask(() => this.releaseComputerUseIfTaskEnded(child.id)),
+      settled: (child) => {
+        // By root: a disposed child may already have left the tables.
+        const rootId = this.rootOf(child).id
+        queueMicrotask(() => this.releaseComputerUseIfTaskEnded(rootId))
+      },
     })
   }
 
@@ -1041,12 +1105,20 @@ export class HarnessHost {
         logger.warn('MCP initialization failed', { error: String(error) })
       }
     }
+    if (options.startScheduler !== false) await this.startScheduler()
+    if (options.watchSkills !== false) await this.startSkillWatcher()
+  }
+
+  /**
+   * Start the scheduler; a failure is logged and kept in its status
+   * (`startError`, shown in 诊断 and on the 定时任务 page), never thrown.
+   */
+  async startScheduler(): Promise<void> {
     try {
-      this.kept.schedulerService.start()
+      await this.kept.schedulerService.start()
     } catch (error: unknown) {
       logger.warn('scheduler failed to start', { error: String(error) })
     }
-    if (options.watchSkills !== false) await this.startSkillWatcher()
   }
 
   /** Watch user, known project, and Plugin Skill folders for catalog changes. */
@@ -1402,7 +1474,11 @@ export class HarnessHost {
     const fresh = session === undefined
     if (session === undefined)
       session = this.sessions.create({ id: sessionId, cwd })
-    const agent = this.attachAgent(new Agent(session, this.agentDeps()))
+    const tree = this.taskTree(sessionId)
+    const agent = this.attachAgent(
+      new Agent(session, this.agentDeps(), { admission: tree.gate }),
+    )
+    tree.setRoot(agent)
     if (fresh) this.presets.pin(session, this.defaultPreset)
     this.goalInstall.driver.attach(agent)
     this.hooks.sessionStarted(agent, fresh ? 'startup' : 'resume')
@@ -1480,6 +1556,75 @@ export class HarnessHost {
       unobserve()
     })
     return agent
+  }
+
+  /** Forget a disposed child: its subscription, projector and table entry. */
+  private detachAgent(sessionId: string): void {
+    this.unsubscribes.get(sessionId)?.()
+    this.unsubscribes.delete(sessionId)
+    this.projectors.delete(sessionId)
+    this.agents.delete(sessionId)
+    this.projectMcp.release(sessionId)
+  }
+
+  /** A root session's task tree (made on first use). */
+  private taskTree(rootId: string): TaskTree {
+    let tree = this.taskTrees.get(rootId)
+    if (tree === undefined) {
+      tree = new TaskTree(rootId, {
+        budget: () => this.taskBudget(),
+        pricing: (routeId) =>
+          findEntry(this.kept.modelConfig, routeId)?.pricing,
+        background: (root) => {
+          const turn = currentTurnInfo(root.session.events)
+          return turn.source === 'scheduler' || turn.goalRound
+        },
+        disposeJobs: (agentId) => this.jobs.disposeOwner(agentId),
+        disposeChildren: (id) => this.subagents.disposeChildrenOf(id),
+        // Nothing runs on its own past the cost cap: the goal waits for the user.
+        exhausted: () => {
+          const root = this.agents.get(rootId)
+          if (root !== undefined) this.goals.disarm(root)
+        },
+      })
+      this.taskTrees.set(rootId, tree)
+    }
+    return tree
+  }
+
+  /** The task tree an agent (root or child) belongs to. */
+  private taskTreeOf(agent: Agent): TaskTree {
+    return this.taskTree(this.rootOf(agent).id)
+  }
+
+  /** Whether a root's subagents, or any background job of its tree, still run. */
+  private taskTreeBusy(rootId: string): boolean {
+    const tree = this.taskTrees.get(rootId)
+    return (
+      tree !== undefined &&
+      (tree.childrenActive() || this.jobs.hasActive(tree.agentIds()))
+    )
+  }
+
+  /** One task's budget now: the settings and the model policy's cost cap. */
+  private taskBudget(): TaskBudget {
+    const cap = this.kept.modelConfig.policy?.cost.maxUsdPerAgentTurn
+    return {
+      ...this.taskBudgetSettings,
+      ...(cap === null || cap === undefined ? {} : { maxCostUsd: cap }),
+    }
+  }
+
+  /** 设置 › 高级 › 任务预算 as the host applies it. */
+  get taskBudgetSettingsNow(): TaskBudgetSettings {
+    return { ...this.taskBudgetSettings }
+  }
+
+  /** Apply new budget settings to every task from its next decision on. */
+  setTaskBudget(settings: TaskBudgetSettings): void {
+    this.taskBudgetSettings = normalizeTaskBudgetSettings(settings)
+    // A larger pool may start agents that wait for a slot.
+    for (const tree of this.taskTrees.values()) tree.wake()
   }
 
   /** Tell the queue UI a user message changed state (host-only `queue_item_state`). */
@@ -1681,9 +1826,12 @@ export class HarnessHost {
   ): Agent | undefined {
     const root = this.kept.sessionStore.get(owner.rootSessionId)
     if (!root || root.archived_at || this.closed) return undefined
+    // A parent subagent that has ended (or a restart) hands the result to
+    // the root instead of dropping it (AGT-09).
     return owner.parentAgentId === owner.rootSessionId
       ? this.agentFor(owner.rootSessionId)
-      : this.agents.get(owner.parentAgentId)
+      : (this.agents.get(owner.parentAgentId) ??
+          this.agentFor(owner.rootSessionId))
   }
   private resumeDelegationNotices(input: SubmitInput): void {
     if (input.scheduler || (input.source && input.source !== 'user')) return
@@ -1854,6 +2002,8 @@ export class HarnessHost {
       ...(input.scheduler ? { scheduler: input.scheduler } : {}),
       ...(input.uiHidden ? { uiHidden: true } : {}),
     })
+    // The user (or a scheduler) asks: a new task, a fresh budget (KRN-03).
+    this.taskTree(agent.id).beginTask()
     if (input.delivery === 'interject' && agent.status === 'running') {
       agent.steer(message)
       this.resumeDelegationNotices(input)
@@ -1905,6 +2055,13 @@ export class HarnessHost {
     return this.kept.sessionStore.setGeneratedTitle(sessionId, title)
   }
 
+  /**
+   * The user pressed stop: an active goal is paused (durably, so it shows
+   * 「已暂停」 and `/goal resume` brings it back) and the turn and its
+   * subagents are cancelled (AGT-09). `stopRoot` also fences an external
+   * start still in flight and holds late results; with no external
+   * delegation it does nothing.
+   */
   stop(sessionId: string): boolean {
     this.delegationInteractions.cancelRoot(sessionId)
     this.delegationConsent.cancelRoot(sessionId)
@@ -1925,10 +2082,24 @@ export class HarnessHost {
     if (agent === undefined) return externalActive
     const running = agent.status === 'running'
     this.pending.cancelSession(sessionId)
-    this.goals.disarm(agent)
+    this.pauseGoalForStop(agent)
     agent.cancel({ kind: 'user' })
     this.subagents.disposeChildrenOf(sessionId)
     return running || externalActive
+  }
+
+  /** Pause an active goal; anything else (or a failed pause) is disarmed. */
+  private pauseGoalForStop(agent: Agent): void {
+    const goal = this.goals.get(agent)
+    if (goal?.phase === 'active') {
+      try {
+        this.goals.pause(agent, { id: goal.id, revision: goal.revision })
+        return
+      } catch (error: unknown) {
+        logger.warn('stop could not pause the goal', { error: String(error) })
+      }
+    }
+    this.goals.disarm(agent)
   }
 
   isBusy(sessionId: string | null): boolean {
@@ -1993,6 +2164,8 @@ export class HarnessHost {
       return { ok: false, reason: 'prompt_not_queued' }
     if (state === 'sending')
       return { ok: false, reason: 'prompt_already_started' }
+    // Sending a held prompt again is the user asking anew (KRN-03).
+    if (action !== 'cancel') this.taskTree(sessionId).beginTask()
     const applied =
       action === 'cancel'
         ? agent.inbox.discard(promptId, 'user')
@@ -2255,15 +2428,66 @@ export class HarnessHost {
     this.unsubscribes.delete(sessionId)
     this.projectors.delete(sessionId)
     this.announcedQueue.delete(sessionId)
-    void this.jobs.disposeOwner(sessionId)
+    const tree = this.taskTrees.get(sessionId)
+    this.taskTrees.delete(sessionId)
+    // Its subagents (stop disposed them), their jobs and its own.
+    void (
+      tree?.disposeAll('session unloaded') ?? this.jobs.disposeOwner(sessionId)
+    )
     void this.computerUse?.service.onSessionDeleted(sessionId)
     this.sessions.close(sessionId)
   }
 
-  /** unloadSession, then remove the session's log directory. */
+  /** The host's per-session tables, for tests (KRN-03). */
+  attachedForTest(): {
+    agents: string[]
+    projectors: string[]
+    unsubscribes: string[]
+  } {
+    return {
+      agents: [...this.agents.keys()],
+      projectors: [...this.projectors.keys()],
+      unsubscribes: [...this.unsubscribes.keys()],
+    }
+  }
+
+  /** A root session's task tree, for tests (KRN-03). */
+  taskTreeForTest(rootId: string): TaskTree | undefined {
+    return this.taskTrees.get(rootId)
+  }
+
+  /** unloadSession, then remove the session's log directory and its tree's. */
   deleteSession(sessionId: string): void {
     this.unloadSession(sessionId)
+    this.forgetSessionTree(
+      sessionId,
+      join(this.sessions.root, sessionId, LOG_FILE),
+    )
     this.sessions.delete(sessionId)
+  }
+
+  /**
+   * Remove what a deleted root session leaves outside its own directory
+   * (KRN-03): the session of every subagent it (or they) recorded, and the
+   * spill of all of them. `rootLog` is the root's log file — in the trash
+   * when a deleted session is purged.
+   */
+  forgetSessionTree(rootId: string, rootLog: string): string[] {
+    const descendants = recordedDescendants(
+      this.sessions.readEventsAt(rootId, rootLog),
+      (id) => {
+        try {
+          return this.sessions.readSnapshot(id).events
+        } catch {
+          return []
+        }
+      },
+    )
+    const spillRoot = join(this.kept.paths.stateRoot, 'spill')
+    for (const id of [rootId, ...descendants])
+      rmSync(spillSessionDir(spillRoot, id), { recursive: true, force: true })
+    for (const id of descendants) this.sessions.delete(id)
+    return descendants
   }
 
   async close(): Promise<void> {
@@ -2327,7 +2551,7 @@ export function sessionLogStateEvent(
 
 export type QueueActionRefusal = 'prompt_not_queued' | 'prompt_already_started'
 
-/** One turn's final assistant text, and whether a cost cap stopped it. */
+/** One turn's final assistant text, and whether a cost cap stopped it (logs before KRN-03). */
 function turnFacts(
   events: readonly SessionEvent[],
   turn: number,
@@ -2410,6 +2634,13 @@ function submitResultFor(
       result = {
         kind: 'blocked',
         reason: costCapped ? 'cost-cap' : 'prompt-rejected',
+        turnId,
+      }
+      break
+    case 'budget':
+      result = {
+        kind: 'blocked',
+        reason: reason.limit === 'cost' ? 'cost-cap' : 'step-limit',
         turnId,
       }
       break

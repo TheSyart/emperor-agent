@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用自动化能力的用户<br>
-> 最后核验：2026-10-19<br>
+> 最后核验：2026-10-20<br>
 > 事实源：`packages/core/src/scheduler/`、`packages/core/src/harness/host/scheduler.ts`、`packages/core/src/harness/hooks/`、`packages/core/src/api/services/hooks-service.ts`、`packages/core/src/watchlist/`、DesktopPet service、`desktop/src/renderer/src/components/pages/scheduler/`、`desktop/src/renderer/src/components/settings/`（高级 › Hooks、记忆、常规 › 外观 › 桌宠）
 
 本页介绍预览阶段的自动化能力。它们都通过与普通对话相同的内核运行，不获得额外权限。
@@ -17,6 +17,9 @@
 - **行菜单**：每行右侧的 `⋯` 提供「立即运行」、「暂停」（已停用的任务显示「恢复」）和「删除」（删除前确认，任务和运行历史一并删除）。
 - 受保护的系统任务可以暂停、恢复或立即运行，但不能编辑或删除。
 - 列表下方显示服务状态（运行、并发和排队情况）以及关闭应用和错过触发点的处理规则。
+- 「指定时间」必须选好日期和时间，并且晚于现在，否则不能保存；编辑一个已经过期的一次性任务时，不改时间就可以照常保存其他内容。
+- 定时任务服务没有启动时（例如另一个 Emperor 进程正在使用同一个数据目录运行定时任务），列表上方会写明原因；「设置 › 高级 › 诊断」的「定时任务存储」一行也会显示。
+- `jobs.json` 里某个任务读不出来时，只有它被移到数据目录的 `scheduler/jobs.rejected.json`，其他任务照常加载和运行；列表上方会提示一次，诊断里列出被移走任务的名称和原因。
 
 定时任务运行完成或失败时，图标栏底部的通知铃铛会收到一条通知；此时正在查看定时任务页的话，这条通知直接记为已读。
 
@@ -38,7 +41,9 @@
 
 旧版本创建的 `team_wake` 任务已不再支持，运行时会报错，请删除或改为 `agent_turn`。
 
-`misfirePolicy` 有三种：`skip`（默认）只记录错过并移到下一个未来触发点；`latest` 只补跑最后一个错过的触发点；`catch-up-one` 只补跑最早一个错过的触发点。无论错过多少次，每个任务每次启动最多补跑一次。
+`misfirePolicy` 有三种：`skip`（默认）只记录错过并移到下一个未来触发点；`latest` 只补跑最后一个错过的触发点；`catch-up-one` 只补跑最早一个错过的触发点。无论错过多少次，每个任务每次启动最多补跑一次。电脑睡眠期间错过的触发点按同样的规则处理：醒来时比触发点晚 1 分钟以上，就当作错过，`skip` 的任务记一条「已跳过」，其余两种补跑一次。启动时补跑的任务在插件同步之后才开始，插件提供的 Hook 对它照常生效。
+
+同一个数据目录同时只有一个进程运行定时任务（`scheduler/scheduler.lock`）：例如编辑器里的 ACP 会话先占用了它，桌面端就不运行定时任务并说明原因；占用的进程退出后，桌面端会在 5 分钟内自动接手。
 
 定时任务最多同时运行 2 个、同一目标最多 1 个，最多排队 100 个，这些上限不能从界面或任务放宽。应用退出时 Scheduler 停止接收新任务并取消进行中的工作，它不会作为系统后台服务继续运行。重启后已经开始运行的任务不会自动重放，无法确认结果时记为 `interrupted`。
 
@@ -48,7 +53,7 @@
 
 - 配置文件：`stateRoot/hooks.json`，按“事件 → matcher 分组 → hooks”组织，可以在“配置”标签编辑；保存时会校验并立即重新加载。
 - 支持的事件：`SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`SubagentStart`、`SubagentStop`。其他事件和非 `command` 类型的 handler 会被忽略，页面会列出被跳过的项。
-- Hook 在会话工作目录中按配置顺序串行运行，多个结果取最严格的决定。环境变量 `CLAUDE_PROJECT_DIR` 指向当前项目目录，单个 Hook 默认超时 10 分钟。
+- Hook 在会话工作目录中按配置顺序串行运行，多个结果取最严格的决定。环境变量 `CLAUDE_PROJECT_DIR` 指向当前项目目录，单个 Hook 默认超时 10 分钟。这里说的是你自己写在 `hooks.json` 里的 Hook；插件带来的 Hook 在进程沙箱里运行，只拿到系统变量与插件清单声明的变量，默认 30 秒、最多 120 秒超时，见[工具、Skill 与 MCP › Plugins](tools-skills-mcp.md#plugins)。
 
 | 事件               | 可以做什么                                   |
 | ------------------ | -------------------------------------------- |

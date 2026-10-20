@@ -1,19 +1,19 @@
 <script setup lang="ts">
 /**
- * Sidebar column (UI-S01): projects and chats only. Top to bottom: the 46px
- * SidebarBrandRow (Emperor + collapse; a window drag region), the search
- * capsule while searching, then the session list — 置顶 (pinned, pin order),
- * 项目 (projects → sessions), 对话 (chats grouped by day). New chat, search,
- * the full pages, the bell and settings live in the permanent rail
- * (SidebarRail, rendered by App beside this column). Geometry is owned by
- * AppFrame; this fills the column it is given and stays mounted (hidden by
- * App) while folded. The persisted layout (sorts, orders, pins) lives in
+ * Sidebar column (UI-S01/S02): projects and chats only. Top to bottom: the
+ * 46px SidebarBrandRow (Emperor + collapse; a window drag region), then the
+ * session list — 置顶 (pinned, pin order), 项目 (projects → sessions), 对话
+ * (chats under 今天 / 昨天 / 更早). ↑ / ↓ on a focused row move to the
+ * next one and open it. New chat, search (the command palette), the full
+ * pages, the bell and settings live in the permanent rail (SidebarRail,
+ * rendered by App beside this column). Geometry is owned by AppFrame; this
+ * fills the column it is given and stays mounted (hidden by App) while
+ * folded. The persisted layout (sorts, orders, pins) lives in
  * useSidebarState.
  */
 import { elementOf } from '../ui/elementOf'
 import IconButton from '../ui/IconButton.vue'
-import SearchField from '../ui/SearchField.vue'
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { selectDirectory } from '../../api/backend'
 import { useAppContext } from '../../composables/useAppContext'
@@ -21,7 +21,6 @@ import { useSession } from '../../composables/useSession'
 import { sessionLocation } from '../../router'
 import {
   groupSessionsByDay,
-  searchSidebarSessions,
   sessionControlPendingTag,
   sessionRuntimeIndicator,
   type SidebarProjectGroup,
@@ -33,13 +32,12 @@ import MenuItem from '../ui/MenuItem.vue'
 import SessionRow from './SessionRow.vue'
 import SidebarBrandRow from './SidebarBrandRow.vue'
 import SidebarProjectRow from './SidebarProjectRow.vue'
-import SidebarSearchResults from './SidebarSearchResults.vue'
 import SidebarSectionHeader from './SidebarSectionHeader.vue'
 import { useSidebarState } from './useSidebarState'
 import { useAgentTree } from './agentTree'
 import { fetchSessionLineage } from '../../api/sessions'
 
-const props = defineProps<{ collapsed: boolean; width: number }>()
+defineProps<{ collapsed: boolean; width: number }>()
 const emit = defineEmits<{ toggle: [] }>()
 
 const router = useRouter()
@@ -69,10 +67,6 @@ const layout = useSidebarState({
 })
 const { state: sidebarState, grouped } = layout
 
-const searchQuery = ref('')
-const searchOpen = ref(false)
-const searchInput = ref<InstanceType<typeof SearchField> | null>(null)
-const searchIndex = ref(0)
 const creatingBuild = ref(false)
 const projectMenuOpen = ref(false)
 const projectMenuAnchor = ref<HTMLElement | null>(null)
@@ -86,11 +80,6 @@ const chatDayGroups = computed(() =>
   sidebarState.value.chat_sort === 'manual'
     ? [{ key: 'manual', label: '', sessions: grouped.value.chats }]
     : groupSessionsByDay(grouped.value.chats),
-)
-const searching = computed(() => searchQuery.value.trim().length > 0)
-const searchVisible = computed(() => searchOpen.value || searching.value)
-const searchResults = computed(() =>
-  searchSidebarSessions(sessions.value, searchQuery.value),
 )
 const layoutLoaded = ref(false)
 const visibleRootIds = computed(() =>
@@ -291,51 +280,22 @@ async function doRename(id: string, title: string) {
     ctx.showError(sessionActionError.value || '未知错误', '重命名失败')
 }
 
-function focusSearch() {
-  if (props.collapsed) emit('toggle')
-  searchOpen.value = true
-  void nextTick(() => searchInput.value?.focus())
+/** ↑ / ↓ on a focused row: focus the next row in the list and open it. */
+function moveRow(event: KeyboardEvent, delta: -1 | 1) {
+  const row = event.target as HTMLElement | null
+  if (!row?.classList.contains('session-row')) return
+  const rows = [
+    ...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>(
+      '.session-row',
+    ),
+  ]
+  const next = rows[rows.indexOf(row) + delta]
+  event.preventDefault()
+  if (!next) return
+  next.focus()
+  const id = next.dataset.sessionId
+  if (id) openSession(id)
 }
-
-function clearSearch() {
-  searchQuery.value = ''
-  searchIndex.value = 0
-}
-
-/** Esc: clear the query, then close the capsule. */
-function escapeSearch() {
-  if (searching.value) {
-    clearSearch()
-    return
-  }
-  searchOpen.value = false
-  searchInput.value?.blur()
-}
-
-function onSearchBlur() {
-  if (!searching.value) searchOpen.value = false
-}
-
-function moveSearch(delta: number) {
-  const count = searchResults.value.length
-  if (!count) return
-  searchIndex.value = (searchIndex.value + delta + count) % count
-}
-
-function openSearchResult(id: string) {
-  clearSearch()
-  searchOpen.value = false
-  openSession(id)
-}
-
-function commitSearch() {
-  const result = searchResults.value[searchIndex.value]
-  if (result) openSearchResult(result.id)
-}
-
-watch(searchQuery, () => {
-  searchIndex.value = 0
-})
 
 onMounted(async () => {
   await Promise.all([
@@ -344,8 +304,6 @@ onMounted(async () => {
   ])
   layoutLoaded.value = true
 })
-
-defineExpose({ focusSearch })
 </script>
 
 <template>
@@ -356,33 +314,21 @@ defineExpose({ focusSearch })
   >
     <SidebarBrandRow class="bar" @toggle="emit('toggle')" />
 
-    <SearchField
-      v-if="searchVisible"
-      ref="searchInput"
-      v-model="searchQuery"
-      class="search"
-      placeholder="搜索对话"
-      @clear="clearSearch"
-      @keydown.down.prevent="moveSearch(1)"
-      @keydown.up.prevent="moveSearch(-1)"
-      @keydown.enter.prevent="commitSearch"
-      @keydown.esc.prevent="escapeSearch"
-      @blur="onSearchBlur"
-    />
-
     <div class="region">
       <div v-if="loading && !sessions.length" class="empty">加载中…</div>
 
-      <SidebarSearchResults
-        v-else-if="searching"
-        :results="searchResults"
-        :selected-index="searchIndex"
-        @hover="searchIndex = $event"
-        @open="openSearchResult"
-      />
-
-      <div v-else class="list">
-        <section v-if="grouped.pinned.length" class="section" aria-label="置顶">
+      <div
+        v-else
+        class="list"
+        @keydown.down="moveRow($event, 1)"
+        @keydown.up="moveRow($event, -1)"
+      >
+        <section
+          v-if="grouped.pinned.length"
+          class="section"
+          aria-label="置顶"
+          data-sidebar-section="pinned"
+        >
           <SidebarSectionHeader
             v-model:collapsed="pinnedCollapsed"
             label="置顶"
@@ -412,6 +358,7 @@ defineExpose({ focusSearch })
         <section
           v-if="sidebarState.section_order.includes('projects')"
           class="section"
+          data-sidebar-section="projects"
         >
           <SidebarSectionHeader
             v-model:collapsed="projectsCollapsed"
@@ -472,6 +419,7 @@ defineExpose({ focusSearch })
         <section
           v-if="sidebarState.section_order.includes('chats')"
           class="section"
+          data-sidebar-section="chats"
         >
           <SidebarSectionHeader v-model:collapsed="chatsCollapsed" label="对话">
             <IconButton
@@ -613,13 +561,6 @@ defineExpose({ focusSearch })
 .head-button:hover,
 .head-button[aria-expanded='true'] {
   background: var(--interactive-bg-hover);
-}
-
-.search {
-  flex: none;
-  width: auto;
-  margin: 0 var(--space-0-5) var(--space-2);
-  animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
 }
 
 .region {

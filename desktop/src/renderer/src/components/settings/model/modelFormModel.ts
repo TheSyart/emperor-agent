@@ -192,7 +192,7 @@ export function buildModelPolicy(
     maxUsdPerAgentTurn !== null &&
     (!Number.isFinite(maxUsdPerAgentTurn) || maxUsdPerAgentTurn <= 0)
   )
-    throw new Error('每 Agent 轮成本上限必须是正数')
+    throw new Error('每个任务的费用上限必须是正数')
   return {
     fallback: {
       enabled: draft.fallbackEnabled,

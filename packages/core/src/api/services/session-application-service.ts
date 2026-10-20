@@ -19,6 +19,12 @@ export interface SessionApplicationServiceDeps {
    * restored until the trash is emptied.
    */
   unloadSession(sessionId: string): void
+  /**
+   * Remove what a purged session leaves outside its own directory: its
+   * subagents' sessions and the spill of all of them (KRN-03). `dir` is the
+   * session's directory in the trash, its log still inside.
+   */
+  forgetSessionTree?(sessionId: string, dir: string): void
   /** Drop a purged session's kept turn snapshots (turnFiles.forgetSession). */
   forgetTurnFiles(sessionId: string, projectRoot: string | null): Promise<void>
   closeTerminals(sessionId: string): void
@@ -131,6 +137,7 @@ export class CoreSessionApplicationService {
 
   /** Delete a trashed session for good (its turn snapshots too). */
   async purgeDeleted(sessionId: string): Promise<{ purged: true }> {
+    this.forgetSessionTree(sessionId)
     const record = this.deps.sessions.purgeTrashed(sessionId)
     if (!record) throw new Error('该会话已不在最近删除中')
     await this.forgetTurnFiles(record)
@@ -143,12 +150,24 @@ export class CoreSessionApplicationService {
     for (const id of this.deps.sessions.trashedBefore(
       now - SESSION_TRASH_RETENTION_MS,
     )) {
+      this.forgetSessionTree(id)
       const record = this.deps.sessions.purgeTrashed(id)
       if (!record) continue
       await this.forgetTurnFiles(record)
       purged.push(id)
     }
     return purged
+  }
+
+  /** Before the trashed directory goes: its log names the subagent sessions. */
+  private forgetSessionTree(sessionId: string): void {
+    const dir = this.deps.sessions.trashedDir(sessionId)
+    if (dir === null || this.deps.forgetSessionTree === undefined) return
+    try {
+      this.deps.forgetSessionTree(sessionId, dir)
+    } catch {
+      // The session itself is still purged; leftovers are only disk space.
+    }
   }
 
   private async forgetTurnFiles(record: TrashedSession): Promise<void> {

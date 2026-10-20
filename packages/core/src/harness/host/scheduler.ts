@@ -180,7 +180,9 @@ function blockedNote(
     case 'interaction-timeout':
       return `等待审批或回答超时${suffix}`
     case 'cost-cap':
-      return '达到单轮费用上限，已停止'
+      return '达到任务费用上限，已停止'
+    case 'step-limit':
+      return '达到单轮步数上限，已停止'
     case 'prompt-rejected':
       return 'UserPromptSubmit Hook 拒绝了这条消息'
   }

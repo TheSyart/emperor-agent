@@ -658,22 +658,40 @@ export class DelegationService {
     )
   }
   /** Revoke existing processes when any live ancestor narrows their authority. */
+  /**
+   * A conversation of this root may now do more than its parent allows.
+   * Closed conversations never count; one whose parent subagent has ended
+   * (or is not loaded after a restart) is checked against the root (AGT-09).
+   */
   parentPermissionsRevoked(rootSessionId: string): boolean {
     return this.list().some((state) => {
       const record = state.record!
       if (record.owner.rootSessionId !== rootSessionId) return false
-      try {
-        const parent = this.options.parent(record.owner)
-        return (
-          // Plan mode still allows a read-only review (AGT-05).
-          (!!parent.planMode && record.effectivePermission !== 'read-only') ||
-          permissionRank(parent.policy.mode) <
-            permissionRank(record.effectivePermission)
-        )
-      } catch {
-        return true
-      }
+      if (record.availability === 'closed') return false
+      const parent = this.parentOrRoot(record.owner)
+      if (parent === null) return false
+      return (
+        // Plan mode still allows a read-only review (AGT-05).
+        (!!parent.planMode && record.effectivePermission !== 'read-only') ||
+        permissionRank(parent.policy.mode) <
+          permissionRank(record.effectivePermission)
+      )
     })
+  }
+  private parentOrRoot(owner: DelegationOwner): DelegationParentContext | null {
+    try {
+      return this.options.parent(owner)
+    } catch {
+      if (owner.parentAgentId === owner.rootSessionId) return null
+      try {
+        return this.options.parent({
+          ...owner,
+          parentAgentId: owner.rootSessionId,
+        })
+      } catch {
+        return null
+      }
+    }
   }
   hasOutstanding(
     owner: string | Pick<DelegationOwner, 'rootSessionId'>,

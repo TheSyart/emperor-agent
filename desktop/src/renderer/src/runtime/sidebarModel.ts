@@ -303,12 +303,12 @@ export function searchSidebarSessions(
     .map((session) => ({
       id: session.id,
       title: session.title || '新会话',
-      subtitle:
-        session.mode === 'build'
-          ? [session.project_name, session.project_path]
-              .filter(Boolean)
-              .join(' · ')
-          : (session.updated_at || '').slice(0, 10),
+      subtitle: [
+        session.mode === 'build' ? session.project_name : '',
+        sidebarRelativeTime(session.updated_at),
+      ]
+        .filter(Boolean)
+        .join(' · '),
       mode: session.mode === 'build' ? 'build' : 'chat',
       projectName: session.project_name,
     }))
@@ -447,10 +447,10 @@ export function moveId(ids: string[], id: string, delta: -1 | 1): string[] {
   return next
 }
 
-// ── 按天分组（M4a 侧栏：今天 / 昨天 / 7 天内 / 30 天内 / 更早） ──
+// ── 按天分组（UI-S02 侧栏：今天 / 昨天 / 更早） ──
 
 export interface SidebarDayGroup {
-  key: 'today' | 'yesterday' | 'week' | 'month' | 'older'
+  key: 'today' | 'yesterday' | 'older'
   label: string
   sessions: SessionInfo[]
 }
@@ -458,8 +458,6 @@ export interface SidebarDayGroup {
 const DAY_GROUP_LABELS: Record<SidebarDayGroup['key'], string> = {
   today: '今天',
   yesterday: '昨天',
-  week: '7 天内',
-  month: '30 天内',
   older: '更早',
 }
 
@@ -480,8 +478,6 @@ export function sidebarDayKey(
   const day = 24 * 60 * 60 * 1000
   if (time >= today) return 'today'
   if (time >= today - day) return 'yesterday'
-  if (time >= today - 7 * day) return 'week'
-  if (time >= today - 30 * day) return 'month'
   return 'older'
 }
 
@@ -505,7 +501,10 @@ export function groupSessionsByDay(
   return groups
 }
 
-/** Compact relative time for a sidebar row (刚刚 / 5 分钟 / 3 小时 / 2 天 / 2026-01-02). */
+/**
+ * Compact relative time for a sidebar row, never a date (UI-S02):
+ * 刚刚 / 5 分钟 / 3 小时 / 2 天 / 2 个月 / 1 年.
+ */
 export function sidebarRelativeTime(
   iso: string | undefined,
   now: number = Date.now(),
@@ -517,7 +516,8 @@ export function sidebarRelativeTime(
   if (diff < minute) return '刚刚'
   if (diff < 60 * minute) return `${Math.floor(diff / minute)} 分钟`
   if (diff < 24 * 60 * minute) return `${Math.floor(diff / (60 * minute))} 小时`
-  if (diff < 30 * 24 * 60 * minute)
-    return `${Math.floor(diff / (24 * 60 * minute))} 天`
-  return (iso || '').slice(0, 10)
+  const days = Math.floor(diff / (24 * 60 * minute))
+  if (days < 30) return `${days} 天`
+  if (days < 365) return `${Math.min(11, Math.floor(days / 30))} 个月`
+  return `${Math.floor(days / 365)} 年`
 }

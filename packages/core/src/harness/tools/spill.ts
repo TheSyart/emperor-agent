@@ -68,7 +68,8 @@ export function encodeSegment(raw: string): string {
   return out
 }
 
-function sessionDir(root: string, sessionId: string): string {
+/** Where one session's spilled results live under `root`. */
+export function spillSessionDir(root: string, sessionId: string): string {
   const hash = createHash('sha256').update(sessionId).digest('hex').slice(0, 12)
   return join(root, `session-${hash}`)
 }
@@ -87,7 +88,9 @@ export async function spillText(
 ): Promise<SpillRef> {
   const base = resolve(root)
   const dir =
-    options.sessionId === undefined ? base : sessionDir(base, options.sessionId)
+    options.sessionId === undefined
+      ? base
+      : spillSessionDir(base, options.sessionId)
   await mkdir(dir, { recursive: true, mode: 0o700 })
   const path = join(
     dir,

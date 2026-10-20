@@ -690,6 +690,16 @@ export interface SchedulerDiagnosticsPayload {
   actionFile?: string
   lastActionErrors?: unknown[]
   corruptActionFiles?: DiagnosticsFileInfo[]
+  /** Why the scheduler did not start (KRN-10), e.g. another process holds it. */
+  startError?: string | null
+  /** Job entries that could not be read, set aside here (KRN-10). */
+  rejectedFile?: string
+  rejectedJobs?: Array<{
+    id: string | null
+    name: string | null
+    error: string
+    rejectedAtMs?: number | null
+  }>
 }
 
 export interface DiagnosticsDependencyPayload {
@@ -1356,6 +1366,10 @@ export interface SchedulerStatusPayload {
   enabled: number
   nextRunAtMs?: number | null
   lastError?: string | null
+  /** Why the last start failed (KRN-10); null once it runs. */
+  startError?: string | null
+  /** Job entries this run set aside in `jobs.rejected.json`. */
+  rejectedJobs?: number
   active?: number
   queued?: number
   maxConcurrentRuns?: number

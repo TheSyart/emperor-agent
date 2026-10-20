@@ -83,7 +83,7 @@ function sessions(): void {
       <IconButton
         size="lg"
         label="搜索"
-        tooltip="搜索对话"
+        tooltip="搜索会话"
         side="right"
         :shortcut="shortcutLabel('search', platform)"
         @click="emit('search')"

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   defaultModelExecutionPolicy,
   type ModelExecutionPolicy,
-  type ModelPricing,
 } from '../../config/model-config'
 import { messageText, userText, type Message } from '../../llm/message'
 import { MODEL_SWITCH_PRODUCER } from './agent'
@@ -13,7 +12,6 @@ import {
   type ScriptedReply,
 } from '../testing'
 import {
-  costCapMiddleware,
   currentModel,
   fallbackConfigMiddleware,
   fallbackErrorMiddleware,
@@ -21,30 +19,15 @@ import {
   type ModelPolicySource,
 } from './model-policy'
 
-const PRICING: ModelPricing = {
-  inputUsdPerMillionTokens: 1_000,
-  outputUsdPerMillionTokens: 1_000,
-  cacheReadUsdPerMillionTokens: 0,
-  cacheWriteUsdPerMillionTokens: 0,
-}
-
-function harness(
-  replies: ScriptedReply[],
-  policy: ModelExecutionPolicy,
-  pricing: Record<string, ModelPricing> = {},
-) {
+function harness(replies: ScriptedReply[], policy: ModelExecutionPolicy) {
   const h = createTestHarness({ replies })
   h.llm.setRoutes(
     [testRoute(), testRoute({ id: 'backup', modelId: 'backup-model' })],
     'test-route',
   )
-  const source: ModelPolicySource = {
-    policy: () => policy,
-    pricing: (routeId) => pricing[routeId],
-  }
+  const source: ModelPolicySource = { policy: () => policy }
   h.middleware.requestError.push(fallbackErrorMiddleware(source, h.llm))
   h.middleware.requestConfig.push(fallbackConfigMiddleware(h.llm))
-  h.middleware.preStep.unshift(costCapMiddleware(source))
   return h
 }
 
@@ -240,60 +223,5 @@ describe('model execution policy', () => {
       false,
     )
     expect(h.adapter.requests).toHaveLength(3)
-  })
-
-  it('stops the turn once priced usage reaches the per-turn cost cap', async () => {
-    const policy: ModelExecutionPolicy = {
-      ...defaultModelExecutionPolicy(),
-      // 10 input + 5 output tokens at $1000/M = $0.015 per step.
-      cost: { maxUsdPerAgentTurn: 0.02 },
-    }
-    const h = harness(
-      [
-        { tools: [{ name: 'missing_tool' }] },
-        { tools: [{ name: 'missing_tool' }] },
-        { text: 'never reached' },
-      ],
-      policy,
-      { 'test-route': PRICING },
-    )
-    const agent = h.agent()
-    agent.followup(userText('go'))
-    await agent.whenIdle()
-    expect(h.adapter.requests).toHaveLength(2)
-    const cap = agent.session.lastOf('llm/cost-cap')
-    expect(cap?.data).toMatchObject({
-      turn: 1,
-      step: 3,
-      capUsdNanos: 20_000_000,
-      spentUsdNanos: 30_000_000,
-    })
-    expect(agent.session.lastOf('turn/end')?.data.reason).toEqual({
-      kind: 'blocked',
-    })
-    // The next turn starts with a fresh budget.
-    h.adapter.push({ text: 'fresh' })
-    agent.followup(userText('again'))
-    await agent.whenIdle()
-    expect(agent.session.lastOf('turn/end')?.data.reason).toEqual({
-      kind: 'completed',
-    })
-  })
-
-  // MOD-05 8: a route without prices cannot be capped; the turn goes on
-  // (设置 › 模型 says the cap does not apply to that model).
-  it('keeps going on a route without pricing: the cap cannot apply', async () => {
-    const h = harness(
-      [{ tools: [{ name: 'missing_tool' }] }, { text: 'done' }],
-      { ...defaultModelExecutionPolicy(), cost: { maxUsdPerAgentTurn: 5 } },
-    )
-    const agent = h.agent()
-    agent.followup(userText('go'))
-    await agent.whenIdle()
-    expect(agent.session.lastOf('llm/cost-cap')).toBeUndefined()
-    expect(h.adapter.requests).toHaveLength(2)
-    expect(agent.session.lastOf('turn/end')?.data.reason).toEqual({
-      kind: 'completed',
-    })
   })
 })
