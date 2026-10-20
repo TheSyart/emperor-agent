@@ -522,6 +522,9 @@ function tokenSaved(profile: ExecutorProfile, probe: ExecutorProbe) {
   probes.value[profile.id] = probe
   delete probeErrors.value[profile.id]
   tokenDialog.value = null
+  // 「读取不到认证」 no longer holds; 刷新模型 lists the account's models.
+  const catalog = catalogs.value[profile.id]
+  if (catalog) catalogs.value[profile.id] = { ...catalog, diagnostic: null }
 }
 async function clearToken(profile: ExecutorProfile) {
   if (tokenBusy.value) return
