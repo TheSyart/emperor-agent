@@ -11,10 +11,8 @@ import type { ExecutorFactsStore } from '../../harness/delegation/facts'
 import { executorSpecialties } from '../../harness/delegation/specialties'
 import type { ExecutorModelCatalogService } from '../../harness/delegation/models'
 import type { ExecutorConsentStore } from '../../harness/delegation/consent'
-import type {
-  ClaudeTokenKind,
-  ClaudeTokenStore,
-} from '../../harness/delegation/claude-tokens'
+import type { ClaudeTokenKind } from '../../harness/delegation/claude-auth'
+import type { SecretSealer } from '../../security/secret-sealer'
 import {
   DelegationError,
   type ExecutorAuthState,
@@ -35,8 +33,8 @@ export class CoreExecutorService {
       ) => Promise<ExecutorAuthState | undefined>
       /** "以后都允许" per profile (AGT-05). */
       consent?: ExecutorConsentStore
-      /** Tokens pasted into 设置 › 子智能体 (AGT-02). */
-      claudeTokens?: Pick<ClaudeTokenStore, 'status' | 'set' | 'clear'>
+      /** Where tokens pasted into 设置 › 子智能体 live (AGT-02). */
+      claudeTokens?: { root: string; sealer: SecretSealer }
     },
   ) {}
   close() {
@@ -61,8 +59,6 @@ export class CoreExecutorService {
           consent: this.options.consent?.granted(profile.id)
             ? ('always' as const)
             : null,
-          /** A token pasted into Emperor: its kind and last 4 only. */
-          credential: this.options.claudeTokens?.status(profile.id) ?? null,
         })),
       }
     } catch {
@@ -92,44 +88,40 @@ export class CoreExecutorService {
     this.options.facts.setProbe(profile, value)
     return value
   }
-  /**
-   * 设置令牌 (AGT-02): seal a Claude token for this profile; the reply
-   * carries its kind and last 4 and the new probe, never the token.
-   */
-  async setCredential(
-    input: { profileId: string; kind: ClaudeTokenKind; token: string },
+  // 设置令牌 / 移除令牌 (AGT-02): the reply is the new probe; its `auth`
+  // shows 末 4 位, never the token.
+  setCredential(
+    input: { profileId: string; kind?: ClaudeTokenKind; token?: string },
+    view: ViewScope,
+  ) {
+    return this.saveToken(input, view)
+  }
+  clearCredential(input: { profileId: string }, view: ViewScope) {
+    return this.saveToken(input, view)
+  }
+  private async saveToken(
+    input: { profileId: string; kind?: ClaudeTokenKind; token?: string },
     view: ViewScope,
   ) {
     this.options.assertConfigure(view)
-    const profile = this.claudeProfile(input.profileId)
-    let credential
-    try {
-      credential = this.options.claudeTokens!.set(
-        profile.id,
-        input.kind,
-        input.token,
+    const profile = this.profile(input.profileId),
+      tokens = this.options.claudeTokens
+    if (profile.backend !== 'claude-code' || !tokens)
+      throw new DelegationError(
+        'UNSUPPORTED_OPTION',
+        'only Claude Code takes a token pasted into Emperor',
       )
+    const { ClaudeTokenStore } =
+      await import('../../harness/delegation/claude-auth')
+    try {
+      new ClaudeTokenStore(tokens).set(profile.id, input.kind, input.token)
     } catch {
       throw new DelegationError(
         'CREDENTIAL_UNAVAILABLE',
         "Emperor's local key cannot seal the token",
       )
     }
-    return { credential, probe: await this.probe(input) }
-  }
-  async clearCredential(input: { profileId: string }, view: ViewScope) {
-    this.options.assertConfigure(view)
-    this.options.claudeTokens!.clear(this.claudeProfile(input.profileId).id)
-    return { credential: null, probe: await this.probe(input) }
-  }
-  private claudeProfile(profileId: string): ExecutorProfile {
-    const profile = this.profile(profileId)
-    if (profile.backend !== 'claude-code' || !this.options.claudeTokens)
-      throw new DelegationError(
-        'UNSUPPORTED_OPTION',
-        'only Claude Code takes a token pasted into Emperor',
-      )
-    return profile
+    return { probe: await this.probe(input) }
   }
   async configure(
     input: { expectedRevision: number; config: unknown },

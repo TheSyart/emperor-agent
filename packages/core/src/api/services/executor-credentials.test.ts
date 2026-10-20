@@ -51,18 +51,18 @@ it('1 · 设置令牌 seals the pasted token and the list shows only 末 4 位',
       [{ profileId: 'claude-default', kind: 'oauth-token', token: TOKEN }],
       VIEW,
     )
-    expect(saved).toMatchObject({
-      credential: { kind: 'oauth-token', last4: '7f3e' },
-      probe: {
+    expect(saved).toEqual({
+      probe: expect.objectContaining({
         status: 'available',
-        auth: { source: 'emperor', kind: 'oauth-token' },
-      },
+        localAuthChecked: true,
+        auth: { source: 'emperor', kind: 'oauth-token', last4: '7f3e' },
+      }),
     })
     expect(JSON.stringify(saved)).not.toContain(TOKEN)
     const listed = core.executors.list()
     expect(
-      listed.profiles.find((p) => p.profile.id === 'claude-default'),
-    ).toMatchObject({ credential: { kind: 'oauth-token', last4: '7f3e' } })
+      listed.profiles.find((p) => p.profile.id === 'claude-default')?.probe,
+    ).toMatchObject({ auth: { source: 'emperor', last4: '7f3e' } })
     expect(JSON.stringify(listed)).not.toContain(TOKEN)
     const file = join(core.paths.delegationsRoot, 'credentials.json')
     expect(readFileSync(file, 'utf8')).toContain('el1:')
@@ -111,7 +111,6 @@ it('5 · without any sign-in the settings probe says 需要登录; removing the 
       VIEW,
     )
     expect(cleared).toMatchObject({
-      credential: null,
       probe: {
         status: 'needs_auth',
         diagnostic: 'AUTH_REQUIRED',
@@ -119,10 +118,11 @@ it('5 · without any sign-in the settings probe says 需要登录; removing the 
       },
     })
     expect(
-      core.executors
-        .list()
-        .profiles.find((p) => p.profile.id === 'claude-default')?.credential,
-    ).toBeNull()
+      readFileSync(
+        join(core.paths.delegationsRoot, 'credentials.json'),
+        'utf8',
+      ),
+    ).not.toContain('claude-default')
     expect(
       await core.executors.probe({ profileId: 'claude-default' }),
     ).toMatchObject({ status: 'needs_auth', localAuthChecked: false })

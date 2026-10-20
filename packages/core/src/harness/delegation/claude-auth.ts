@@ -1,6 +1,7 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ClaudeTokenKind } from './claude-tokens'
+import { durableReplaceSync } from '../../store/persistence'
+import type { SecretSealer } from '../../security/secret-sealer'
 import type { LoginShellEnvironment } from './login-shell'
 import type { ExecutorAuthState } from './types'
 
@@ -9,15 +10,15 @@ import type { ExecutorAuthState } from './types'
  * holds a credential supplies all of it, so a key never rides along from
  * another source:
  *  ① a token pasted into Emperor (设置 › 子智能体 › 设置令牌), sealed with
- *     Emperor's local key (claude-tokens.ts);
+ *     Emperor's local key ({@link ClaudeTokenStore});
  *  ② `env` in ~/.claude/settings.json;
  *  ③ `.credentials.json`: its access token only (the refresh token stays
  *     with the user's own CLI); an expired one is skipped and reported,
  *     one that expires within ten minutes is used with a warning;
  *  ④ the environment Emperor started with, then the login shell (read
  *     once, whitelisted names only: a Dock launch never sees ~/.zshrc).
- * The macOS Keychain is never read. Loaded on a Claude run's first
- * prepare, not at startup.
+ * The macOS Keychain is never read. The module loads with a Claude
+ * run's first prepare or a 设置令牌, not at startup.
  */
 const CREDENTIAL_KEYS = [
   'ANTHROPIC_AUTH_TOKEN',
@@ -38,6 +39,12 @@ export const CLAUDE_SHELL_KEYS: readonly string[] = [
 export const isClaudeCredentialKey = (key: string) =>
   (CREDENTIAL_KEYS as readonly string[]).includes(key)
 const EXPIRY_WARNING_MS = 10 * 60_000
+export type ClaudeTokenKind = 'oauth-token' | 'api-key'
+interface StoredToken {
+  kind: ClaudeTokenKind
+  token: string
+  last4: string
+}
 
 interface ClaudeResolved {
   variables: Record<string, string>
@@ -56,7 +63,7 @@ function found(
 }
 
 export async function resolveClaudeCredential(input: {
-  stored: () => { kind: ClaudeTokenKind; token: string } | null
+  stored: () => StoredToken | null
   settingsEnv: Record<string, unknown>
   /** Where `.credentials.json` lives: CLAUDE_CONFIG_DIR or ~/.claude. */
   configDirectory: string
@@ -76,7 +83,7 @@ export async function resolveClaudeCredential(input: {
             ? 'ANTHROPIC_API_KEY'
             : 'CLAUDE_CODE_OAUTH_TOKEN']: stored.token,
         },
-        auth: { source: 'emperor', kind: stored.kind },
+        auth: { source: 'emperor', kind: stored.kind, last4: stored.last4 },
       }
   } catch {
     // Sealed under a key that is gone or changed: the user sets it again.
@@ -134,4 +141,66 @@ export function signInMissing(auth: ExecutorAuthState): string {
         : 'Claude Code has no usable sign-in') +
     '; ask the user to run `claude setup-token` in a terminal and paste the token (or an ANTHROPIC_API_KEY) under Settings › 子智能体 › Claude Code › 设置令牌'
   )
+}
+
+/**
+ * Tokens pasted into 设置 › 子智能体, one per Claude profile, in
+ * `<delegations>/credentials.json` (0600). Each value is an `el1:`
+ * envelope of the local key Emperor uses for model keys and the
+ * credential vault (LocalSecretStore, SEC-06/SEC-09), bound to the
+ * profile and kind; only the last four characters stay in the clear.
+ */
+export class ClaudeTokenStore {
+  readonly file: string
+  constructor(
+    private readonly options: { root: string; sealer: SecretSealer },
+  ) {
+    this.file = join(options.root, 'credentials.json')
+  }
+  private rows(): Record<
+    string,
+    { kind: ClaudeTokenKind; value: string; last4: string }
+  > {
+    if (!existsSync(this.file)) return {}
+    return (
+      (JSON.parse(readFileSync(this.file, 'utf8')) as { tokens?: never })
+        .tokens ?? {}
+    )
+  }
+  private context(profileId: string, kind: ClaudeTokenKind) {
+    return `delegations/credentials.json#${profileId}.${kind}`
+  }
+  /** Throws when the value cannot be opened (the local key changed). */
+  read(profileId: string): StoredToken | null {
+    const rows = this.rows()
+    const row = Object.hasOwn(rows, profileId) ? rows[profileId] : undefined
+    if (!row) return null
+    const token = this.options.sealer.open(
+      row.value,
+      this.context(profileId, row.kind),
+    )
+    return { kind: row.kind, token, last4: row.last4 }
+  }
+  clear(profileId: string): void {
+    this.set(profileId)
+  }
+  set(profileId: string, kind?: ClaudeTokenKind, token = ''): void {
+    let rows
+    try {
+      rows = this.rows()
+    } catch {
+      rows = {} // A damaged file holds nothing usable.
+    }
+    delete rows[profileId]
+    if (kind)
+      rows[profileId] = {
+        kind,
+        value: this.options.sealer.seal(token, this.context(profileId, kind)),
+        last4: token.slice(-4),
+      }
+    durableReplaceSync(
+      this.file,
+      JSON.stringify({ schemaVersion: 1, tokens: rows }, null, 2) + '\n',
+    )
+  }
 }

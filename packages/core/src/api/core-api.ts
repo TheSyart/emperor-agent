@@ -214,7 +214,6 @@ import {
   createLoginShellEnvironment,
   type LoginShellEnvironment,
 } from '../harness/delegation/login-shell'
-import { ClaudeTokenStore } from '../harness/delegation/claude-tokens'
 import { ExecutorModelCatalogService } from '../harness/delegation/models'
 import { nativeGeneratedImageRoot } from '../harness/delegation/image-proof'
 import { ClaudeExecutorAdapter } from '../harness/delegation/adapters/claude'
@@ -783,10 +782,10 @@ export class CoreApi {
       opts.verifyGeneratedImage,
     )
     // Claude tokens pasted in 设置 › 子智能体, under the local key (AGT-02).
-    const claudeTokens = new ClaudeTokenStore({
+    const claudeTokens = {
       root: this.paths.delegationsRoot,
       sealer: kept.secretSealer,
-    })
+    }
     const executorHome = opts.executorHome ?? {}
     const executorRuntime = new ExecutorRuntimeService({
       root: this.paths.delegationsRoot,

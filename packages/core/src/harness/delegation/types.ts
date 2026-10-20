@@ -163,6 +163,8 @@ export interface ExecutorAuthState {
     | 'model-route'
     | null
   kind?: 'oauth-token' | 'api-key' | 'auth-token'
+  /** Emperor's own token: its last four characters, for 已设置 · 末 4 位. */
+  last4?: string
   /** Set when there is no usable credential. */
   problem?: 'missing' | 'expired' | 'unreadable'
   /** `.credentials.json`'s expiry (epoch ms). */

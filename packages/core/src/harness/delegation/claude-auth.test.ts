@@ -2,8 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createLocalKeySealer } from '../../security/secret-sealer'
-import { CLAUDE_SHELL_KEYS } from './claude-auth'
-import { ClaudeTokenStore } from './claude-tokens'
+import { CLAUDE_SHELL_KEYS, ClaudeTokenStore } from './claude-auth'
 import { createLoginShellEnvironment } from './login-shell'
 import { defaultExecutorConfig } from './config'
 import { ExecutorRuntimeService } from './runtime'
@@ -39,10 +38,8 @@ function setup(
   const home = join(f.root, 'home'),
     root = join(f.root, 'delegations')
   mkdirSync(home, { recursive: true })
-  const tokens = new ClaudeTokenStore({
-    root,
-    sealer: createLocalKeySealer(join(f.root, 'state')),
-  })
+  const vault = { root, sealer: createLocalKeySealer(join(f.root, 'state')) }
+  const tokens = new ClaudeTokenStore(vault)
   const shellReads: string[][] = []
   const loginShell = {
     read: vi.fn(async (names: readonly string[]) => {
@@ -57,8 +54,8 @@ function setup(
     home,
     environment: options.environment ?? { PATH: '/usr/bin:/bin' },
     loginShell,
-    claudeTokens: tokens,
-  } as ConstructorParameters<typeof ExecutorRuntimeService>[0])
+    claudeTokens: vault,
+  })
   const writeClaude = (file: string, value: unknown) => {
     mkdirSync(join(home, '.claude'), { recursive: true })
     writeFileSync(join(home, '.claude', file), JSON.stringify(value))
@@ -78,22 +75,18 @@ function setup(
 describe('AGT-02 · Claude Code sign-in sources', () => {
   it('1 · runs with only a token pasted into Emperor, sealed on disk', async () => {
     const s = setup()
-    expect(s.tokens.status('claude-default')).toBeNull()
-    const status = s.tokens.set('claude-default', 'oauth-token', OAUTH)
-    expect(status).toEqual({
-      kind: 'oauth-token',
-      last4: 'a1b2',
-      savedAt: expect.any(Number),
-    })
+    expect(s.tokens.read('claude-default')).toBeNull()
+    s.tokens.set('claude-default', 'oauth-token', OAUTH)
     const file = join(s.root, 'credentials.json'),
       raw = readFileSync(file, 'utf8')
     expect(raw).not.toContain(OAUTH)
     expect(raw).toContain('el1:')
+    expect(raw).toContain('"last4": "a1b2"')
     expect(statSync(file).mode & 0o777).toBe(0o600)
-    expect(s.tokens.status('claude-default')).toEqual(status)
     expect(s.tokens.read('claude-default')).toEqual({
       kind: 'oauth-token',
       token: OAUTH,
+      last4: 'a1b2',
     })
 
     const runtime = await s.runtime.prepare(claude(), 'dlg-vault')
@@ -102,7 +95,7 @@ describe('AGT-02 · Claude Code sign-in sources', () => {
     expect(runtime.billing).toBe('subscription')
     expect(runtime.secretValues).toContain(OAUTH)
     expect(runtime).toMatchObject({
-      auth: { source: 'emperor', kind: 'oauth-token' },
+      auth: { source: 'emperor', kind: 'oauth-token', last4: 'a1b2' },
     })
     // Nothing else was consulted.
     expect(s.loginShell.read).not.toHaveBeenCalled()
@@ -147,8 +140,25 @@ describe('AGT-02 · Claude Code sign-in sources', () => {
     expect(api.environment.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
     expect(api.billing).toBe('api')
     s.tokens.clear('claude-default')
-    expect(s.tokens.status('claude-default')).toBeNull()
+    expect(s.tokens.read('claude-default')).toBeNull()
     expect(readFileSync(file, 'utf8')).not.toContain('el1:')
+    // A value sealed under another key reads as unreadable, not as a token.
+    s.tokens.set('claude-default', 'oauth-token', OAUTH)
+    const moved = new ExecutorRuntimeService({
+      root: s.root,
+      home: s.home,
+      environment: { PATH: '/usr/bin:/bin' },
+      claudeTokens: {
+        root: s.root,
+        sealer: createLocalKeySealer(join(s.root, 'another-state')),
+      },
+    })
+    await expect(
+      moved.prepare(claude(), 'dlg-other-key'),
+    ).rejects.toMatchObject({
+      code: 'AUTH_REQUIRED',
+      auth: { source: null, problem: 'unreadable' },
+    })
   })
 
   it('2 · runs with only a token in ~/.claude/settings.json env', async () => {
@@ -341,13 +351,8 @@ describe('AGT-02 · Claude Code sign-in sources', () => {
     const service = new DelegationService({
       ...f.options,
       consent,
-      checkAuth: async (profile) =>
-        (
-          (await s.runtime.probe(profile)) as unknown as {
-            auth?: unknown
-          }
-        ).auth,
-    } as ConstructorParameters<typeof DelegationService>[0])
+      checkAuth: async (profile) => (await s.runtime.probe(profile)).auth,
+    })
     await service.probeProfiles()
     const context = service.executorContext()
     const line = context

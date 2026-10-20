@@ -30,7 +30,7 @@ import {
   type CodexAuthLink,
 } from './codex-auth'
 import type { LoginShellEnvironment } from './login-shell'
-import type { ClaudeTokenStore } from './claude-tokens'
+import type { SecretSealer } from '../../security/secret-sealer'
 /** The one long-lived private directory every login probe of a profile reuses. */
 export const PROBE_RUNTIME_ID = 'probe'
 export interface PreparedRuntime {
@@ -81,8 +81,8 @@ export class ExecutorRuntimeService {
       ) => Promise<ExecutorCredential>
       /** Provider keys exported in ~/.zshrc (absent from a Dock launch). */
       loginShell?: LoginShellEnvironment
-      /** Tokens pasted into 设置 › 子智能体 (AGT-02), read first. */
-      claudeTokens?: Pick<ClaudeTokenStore, 'read'>
+      /** Where tokens pasted into 设置 › 子智能体 live (AGT-02), read first. */
+      claudeTokens?: { root: string; sealer: SecretSealer }
     },
   ) {}
   /**
@@ -217,10 +217,16 @@ export class ExecutorRuntimeService {
         }
       }
       // The credential comes from one source, in AGT-02's order.
-      const { resolveClaudeCredential, isClaudeCredentialKey, signInMissing } =
-        await import('./claude-auth')
+      const {
+        resolveClaudeCredential,
+        isClaudeCredentialKey,
+        signInMissing,
+        ClaudeTokenStore,
+      } = await import('./claude-auth')
+      const tokens = this.options.claudeTokens
       const resolved = await resolveClaudeCredential({
-        stored: () => this.options.claudeTokens?.read(profile.id) ?? null,
+        stored: () =>
+          tokens ? new ClaudeTokenStore(tokens).read(profile.id) : null,
         settingsEnv: configured,
         configDirectory: sourceDirectory,
         ambient,
