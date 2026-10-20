@@ -2,9 +2,9 @@
 /**
  * StatusGoalSection — the 目标 section of the composer status bar's popover
  * (UI-S04): phase, objective, round and elapsed time, the blocked / paused
- * notice, and three actions — 暂停 or 恢复, 编辑 (once paused or blocked:
- * the goal is cleared and its objective goes back into the composer to be
- * described again) and 清除, which asks first.
+ * notice, and three actions — 暂停 or 恢复, 编辑 (`/goal edit <objective>`
+ * goes into the composer to be changed and sent; the goal keeps its id and
+ * rounds) and 清除, which asks first.
  *
  * Props: goal, actionPending (the action Core is still running).
  * Emits: action(pause | resume | cancel), edit.
@@ -41,8 +41,6 @@ const model = computed(() => toGoalStatusBarViewModel(props.goal, now.value))
 const toggleAction = computed<GoalCardAction>(() =>
   model.value.actions.includes('resume') ? 'resume' : 'pause',
 )
-/** A running goal is paused before it is edited. */
-const editable = computed(() => model.value.actions.includes('resume'))
 
 function run(action: GoalCardAction): void {
   if (props.actionPending) return
@@ -86,8 +84,7 @@ async function clear(): Promise<void> {
       <Button
         size="sm"
         aria-label="编辑 Goal"
-        :title="editable ? undefined : '暂停后才能编辑'"
-        :disabled="!editable || Boolean(actionPending)"
+        :disabled="Boolean(actionPending)"
         @click="emit('edit')"
       >
         编辑

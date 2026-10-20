@@ -25,10 +25,9 @@ describe('ConversationView composer seat integration', () => {
     expect(source).toContain(
       ':queue-occupied="Boolean(ctx.queuedPrompts.value.length)"',
     )
-    // 编辑 a goal: clear it and describe it again in the composer.
+    // 编辑 a goal: `/goal edit <objective>` in the composer (Core edits it).
     expect(source).toContain('@goal-edit="editGoal"')
-    expect(source).toContain("'user_edit_goal'")
-    expect(source).toContain('ctx.activateGoalCapture()')
+    expect(source).toContain('setDraft(`/goal edit ${goal.objective}`)')
   })
 
   it('sends a held prompt (待发送) from the status bar', () => {

@@ -256,11 +256,11 @@ describe('the composer status bar', () => {
       ['截图验收', 'pending'],
     ])
 
-    // 目标: pause; edit waits for a pause; clear asks first.
+    // 目标: pause; clear asks first (edit: below).
     const goalSection = section(panel, '目标')
     expect(goalSection.textContent).toContain('让输入框更简单')
     expect(goalSection.textContent).toContain('进行中')
-    expect(button(goalSection, '编辑 Goal').disabled).toBe(true)
+    expect(button(goalSection, '编辑 Goal').disabled).toBe(false)
     button(goalSection, '暂停 Goal').click()
     expect(props.onGoalAction).toHaveBeenLastCalledWith('pause')
     answerConfirmsForTest(() => false)

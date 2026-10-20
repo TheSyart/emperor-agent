@@ -853,26 +853,14 @@ async function runGoalStatusAction(action: GoalCardAction): Promise<void> {
 }
 
 /**
- * 编辑 a paused goal (the status bar): Core cannot rewrite an objective, so
- * the goal is cleared and its objective goes back into the composer, armed
- * as a new goal to be described again.
+ * 编辑 a goal (the status bar): `/goal edit <objective>` goes into the
+ * composer to be changed and sent; Core edits the goal in place (same id,
+ * rounds kept).
  */
-async function editGoal(): Promise<void> {
+function editGoal(): void {
   const goal = activeGoal.value
-  if (!goal || goalActionPending.value) return
-  const objective = goal.objective
-  goalActionPending.value = 'cancel'
-  try {
-    await ctx.runGoalAction(goal.id, 'cancel', 'user_edit_goal')
-  } catch (error) {
-    ctx.showError(error)
-    return
-  } finally {
-    goalActionPending.value = null
-  }
-  const result = await ctx.activateGoalCapture()
-  if (!result.ok && result.error) ctx.showToast(result.error)
-  if (result.ok) composer.value?.setDraft(objective)
+  if (!goal) return
+  composer.value?.setDraft(`/goal edit ${goal.objective}`)
 }
 
 async function activatePlan(): Promise<void> {
