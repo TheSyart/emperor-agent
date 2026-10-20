@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、开发者、希望理解产品边界的用户<br>
-> 最后核验：2026-10-19<br>
+> 最后核验：2026-10-20<br>
 > 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/api/core-api.ts`、`packages/core/src/api/operations.ts`、`desktop/src/main/`、`desktop/src/preload/`、`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/workspace/`
 
 Emperor Agent 的桌面主产品是本地单用户 Electron 应用。Electron main 进程内创建一个 TypeScript `CoreApi`；`CoreApi` 背后是唯一的内核组合根 `HarnessHost`。Vue renderer 只能通过 preload 暴露的 IPC contract 请求 Core，并通过 runtime events 接收过程状态。源码还提供默认不随桌面安装包开放的 ACP V1 stdio operator preview，它为受信本机 client 创建独立的 `CoreApi`。产品主线没有 Python runtime、HTTP backend 或 WebSocket backend。
@@ -101,7 +101,7 @@ Renderer 外壳是 `components/shell/AppFrame.vue` 的网格：常驻的 56px �
 - Agent 的内置浏览器独立由 `BrowserSessionManager` 管理 profile 与目标，经 `ComputerUseService` 执行；它不使用用户工作台的内存会话。Chrome/Edge 走扩展与 Native Messaging，macOS 桌面走独立 Helper，三者共享目标租约、generation/revision、确认、取消与释放契约。受控目标的只读预览在对话中显示，任务结束释放，不由工作台面板决定目标寿命。
 - 「Pull Request」整页通过 `pullRequests.*` 调用签名工具目录中的 `gh`，不绑定会话或项目，只读。GitHub 插件启用时页面加上 Issue、CI 两个标签（`github.*`，同样只读）；插件停用时标签消失，Core 拒绝 `github.*`。
 
-这些入口都不是 renderer 的本机权限旁路：Git 根、路径、revision、确认和浏览器地址由 Core 或 Electron main 校验。Trajectory 的「详情」列（Inspector）是轨迹视图内部的一列，不属于右侧工作台；对话中的 Inspect 跳转到 `/chat/:id/trajectory?call=<callId>` 并打开这一列。
+这些入口都不是 renderer 的本机权限旁路：Git 根、路径、revision、确认和浏览器地址由 Core 或 Electron main 校验。Trajectory 的「详情」列（Inspector）是轨迹视图内部的一列，不属于右侧工作台；对话中的 Inspect 跳转到 `/chat/:id/trajectory?call=<callId>` 并打开这一列。轨迹默认隐藏，打开「设置 › 常规 › 开发者 › 显示轨迹」（renderer 偏好 `emperor.ui.prefs.v1` 的 `showTrajectory`）后才有页签和 Inspect；关闭时 trajectory 路由的 `beforeEnter` 把链接转回对话（`components/conversation/trajectoryGate.ts`），轨迹分包不加载。
 
 ## Headless ACP
 

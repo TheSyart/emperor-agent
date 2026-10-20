@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用普通会话或项目会话的用户<br>
-> 最后核验：2026-10-19<br>
+> 最后核验：2026-10-20<br>
 > 事实源：`packages/core/src/sessions/store.ts`、`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/prompt/agent-instructions.ts`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/sidebar/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/composer/`、`desktop/src/renderer/src/components/trajectory/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/pages/pulls/`、`desktop/src/renderer/src/components/pages/github/`、`desktop/src/main/browser-view.ts`
 
 Chat（普通对话）和 Build（项目工作）是会话类型。它们决定 Agent 的工作目录和能看到哪些长期上下文，不决定权限。
@@ -42,7 +42,7 @@ Build 绑定一个本地文件夹。Agent 在该目录内读取文件、按当�
 
 ## 对话视图
 
-会话头部左侧是路径导航，下方是「对话」「轨迹」两个标签；右上角是「环境信息」（只在「对话」标签显示）和「工作台」两个开关。空白的新对话只显示「工作台」开关。
+会话头部只有一行：左侧是路径导航，右上角是「环境信息」（只在「对话」标签显示）和「工作台」两个开关。空白的新对话只显示「工作台」开关。打开「设置 › 常规 › 开发者 › 显示轨迹」后，头部下方多出「对话」「轨迹」两个标签（见[轨迹](#轨迹trajectory)）。
 
 - **空会话**：输入框居中显示；发送后你的消息以气泡出现，Agent 的回复随即流式输出。
 - **处理过程**：一轮里的思考、工具调用、子智能体、重试等步骤收在一行里。运行中这一行写着当前在做什么，例如「正在读取 SettingsView.vue · 第 4 步」；完成后变成「已处理 9 步 · 用时 1 分 12 秒 ›」，回答和「已编辑 N 个文件」卡在它下面。点这一行展开全部步骤，再点收起。「设置 › 常规 › 会话 › 处理过程」可以改为始终展开或始终收起；上下文注入和 Hook 这类系统步骤默认不列出，在「设置 › 常规 › 开发者 › 显示系统步骤」打开。
@@ -54,7 +54,7 @@ Build 绑定一个本地文件夹。Agent 在该目录内读取文件、按当�
 - **其他链接**：回复里的链接一律不会让窗口跳转或重新加载。没有扩展名的相对路径（如 `packages/core`）同样交给引用解析，在 Build 会话里打开对应目录；邮件（`mailto:`）和电话（`tel:`）链接交给系统；其他协议不会打开，并提示原因。
 - **远程图片**：回复和 Markdown 预览里的网络图片默认不加载，显示为「点击加载图片 · 域名」。点击后由 Emperor 在后台代为下载并显示：不带 Cookie，拒绝本机和内网地址，单张不超过 10 MB；同一张图片在本次运行中再出现时直接显示。
 
-悬停工具行时出现 **Inspect**：点击后切到本会话的「轨迹」标签（`/chat/:id/trajectory?call=<callId>`），选中这次调用，并在轨迹右侧的「详情」列中显示它的参数、结果、工具 Schema 与耗时。调用较早、尚未加载时会先加载更早的记录再定位。
+打开「显示轨迹」后，悬停展开的工具行时出现 **Inspect**：点击后切到本会话的「轨迹」标签（`/chat/:id/trajectory?call=<callId>`），选中这次调用，并在轨迹右侧的「详情」列中显示它的参数、结果、工具 Schema 与耗时。调用较早、尚未加载时会先加载更早的记录再定位。
 
 - **变更汇总条**：Build 会话的项目有未提交改动时，输入框上方显示「N 个文件已更改 +A −D」，点击打开右侧工作台的「审查」。它统计的是整个工作区当前的 Git 改动，不是某一轮对话的改动。
 - **本轮改动卡**：一轮对话改过文件时，这一轮末尾显示「已编辑 N 个文件 +A −D」，列出每个文件（目录暗色、文件名亮色、增删行数；二进制文件写「二进制」），默认显示前 3 个，点「再显示 N 个文件」展开；标题下方单独显示增删行数，长路径完整换行。统计口径可通过标题旁的信息图标查看。
@@ -115,6 +115,12 @@ Build 会话的第一行是「± 分支名 +A −D」：当前分支、与上游
 计划、输出和来源只根据已加载的对话记录计算；还有较早历史时会提示清单范围，继续加载历史后补齐。当前 Goal 显示在输入框上方的 Goal 条中，卡片不重复显示。
 
 ## 轨迹（Trajectory）
+
+轨迹是排查问题用的开发者视图，默认隐藏。在「设置 › 常规 › 开发者」里打开 **显示轨迹**，会话头部出现「对话」「轨迹」两个标签，工具行出现 Inspect；关闭后两者都不再显示，对话也不会加载轨迹。
+
+- 在「轨迹」标签上关闭这个开关，视图自动回到「对话」；「详情」列收起，宽度保留到下次打开。
+- 关闭时打开的轨迹链接（例如 `/chat/:id/trajectory?call=<callId>`，或用 ⌘[ 回到以前的轨迹页）会改为打开这个会话的对话：带调用 ID 时滚动到对应的工具行并展开，同时提示「轨迹视图已关闭」，点「在设置中开启」直接进入「设置 › 常规」。
+- 工具参数在传输时被截断时，工具行只写「参数过长，已截断显示」；打开显示轨迹后才接着提示「在轨迹中查看完整内容」。
 
 「轨迹」标签把同一份会话记录按 Turn → Step 展开成账本，便于逐条核对 Agent 实际做了什么：
 
