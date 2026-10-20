@@ -121,7 +121,7 @@ defineExpose({ panel })
   box-sizing: border-box;
   padding: var(--space-1);
   overflow-y: auto;
-  border: 1px solid var(--border-inverted);
+  border: 1px solid var(--stroke-inverted);
   border-radius: var(--radius-card);
   background: rgb(var(--menu-fill));
   box-shadow: var(--shadow-lv3);

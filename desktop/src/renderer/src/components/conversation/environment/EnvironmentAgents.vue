@@ -284,7 +284,7 @@ async function end(agent: AgentView) {
   display: block;
   margin: 0 0 var(--space-1) calc(28px + var(--space-3));
   padding: var(--space-0-5) var(--space-2);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   background: transparent;
   color: rgb(var(--label-secondary));

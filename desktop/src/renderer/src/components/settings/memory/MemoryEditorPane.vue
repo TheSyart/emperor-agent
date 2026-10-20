@@ -127,7 +127,7 @@ const modes: SegmentedOption<Mode>[] = [
   flex: 1 1 auto;
   min-height: calc(var(--lh-xxs) * 12);
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   background: rgb(var(--surface-overlay));
   overflow-wrap: anywhere;

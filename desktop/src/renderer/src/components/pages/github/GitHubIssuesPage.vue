@@ -345,13 +345,13 @@ const actions = computed(() =>
   padding: 0;
   overflow: hidden;
   list-style: none;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   background: rgb(var(--surface-overlay));
 }
 
 .rows > li + li {
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .row {
@@ -453,7 +453,7 @@ const actions = computed(() =>
 
 .comments {
   padding-top: var(--space-3);
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .section-title {
@@ -482,7 +482,7 @@ const actions = computed(() =>
   gap: var(--space-1);
   min-width: 0;
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
 }
 </style>

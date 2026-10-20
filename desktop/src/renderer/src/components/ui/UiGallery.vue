@@ -394,7 +394,7 @@ const jsonSample = {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 h1 {
@@ -433,7 +433,7 @@ h2 {
   align-items: flex-end;
   height: calc(var(--space-8) + var(--space-6));
   padding: var(--space-1);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
 }
 
@@ -571,6 +571,6 @@ h2 {
 .json-card {
   border-radius: var(--radius-card);
   background: rgb(var(--surface-base));
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
 }
 </style>

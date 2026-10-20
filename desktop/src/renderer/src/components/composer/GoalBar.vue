@@ -158,7 +158,7 @@ function actionLabel(action: GoalCardAction): string {
   height: 36px;
   padding: var(--space-1) calc(var(--space-1) + 1px) var(--space-1)
     var(--space-3);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
   background: rgb(var(--tip-fill));
 }

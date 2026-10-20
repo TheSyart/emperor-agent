@@ -358,7 +358,7 @@ onBeforeUnmount(() => {
   width: var(--inspector-width);
   max-width: calc(100% - 280px);
   min-height: 0;
-  border-left: 1px solid var(--border-l2);
+  border-left: 1px solid var(--stroke-2);
   background: rgb(var(--surface-base));
 }
 

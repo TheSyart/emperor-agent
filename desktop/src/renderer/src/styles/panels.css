@@ -11,7 +11,7 @@
   @apply inline-flex items-center gap-2 border px-2 py-1.5;
   max-width: 16rem;
   border-radius: var(--radius-md);
-  border-color: rgb(var(--border));
+  border-color: rgb(var(--stroke-solid));
   background: rgb(var(--surface-base));
   box-shadow: none;
 }
@@ -74,7 +74,7 @@
   max-width: min(94vw, 1440px);
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid rgb(var(--border-strong));
+  border: 1px solid rgb(var(--stroke-solid-strong));
   border-radius: var(--radius-xl);
   background: rgb(var(--surface-base));
   box-shadow: 0 28px 90px rgb(var(--shadow-color) / 0.5);
@@ -97,7 +97,7 @@
   width: 34px;
   height: 34px;
   place-items: center;
-  border: 1px solid rgb(var(--border-strong));
+  border: 1px solid rgb(var(--stroke-solid-strong));
   border-radius: 999px;
   background: rgb(var(--surface-base) / 0.9);
   color: rgb(var(--fg));

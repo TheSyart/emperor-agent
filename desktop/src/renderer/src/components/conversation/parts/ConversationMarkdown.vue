@@ -345,7 +345,7 @@ const segments = computed<Segment[]>(() =>
   height: 1px;
   margin: var(--space-8) 0;
   border: none;
-  background: var(--border-l2);
+  background: var(--stroke-2);
 }
 
 .ds-md :deep(blockquote) {
@@ -389,7 +389,7 @@ const segments = computed<Segment[]>(() =>
 .ds-md :deep(th) {
   min-width: 100px;
   padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--border-l3);
+  border-bottom: 1px solid var(--stroke-3);
   font: var(--weight-medium) var(--type-body-sm) var(--font-sans);
   text-align: start;
 }
@@ -397,7 +397,7 @@ const segments = computed<Segment[]>(() =>
 .ds-md :deep(td) {
   min-width: 100px;
   padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
   font: var(--weight-regular) var(--type-body-sm) var(--font-sans);
 }
 

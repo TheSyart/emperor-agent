@@ -113,7 +113,7 @@ const collapsible = computed(
   gap: var(--space-0-5) var(--space-2);
   min-height: 42px;
   padding: var(--space-1-5) var(--space-2);
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
   border-radius: var(--radius-xs);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
@@ -200,7 +200,7 @@ const collapsible = computed(
   min-height: var(--space-7);
   margin-top: var(--space-2);
   padding: 0 var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
   background: transparent;
   font: inherit;

@@ -212,7 +212,7 @@ function onCommentKeydown(event: KeyboardEvent) {
   min-height: 36px;
   max-height: 120px;
   padding: var(--space-1-5) var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   background: transparent;
   color: rgb(var(--label-primary));

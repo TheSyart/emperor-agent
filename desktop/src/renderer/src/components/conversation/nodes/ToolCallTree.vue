@@ -290,7 +290,7 @@ const hasChildren = computed(
   gap: 0;
   margin: 0 0 var(--space-0-5) calc(var(--space-4) + var(--space-1-5));
   padding-left: var(--space-2);
-  border-left: 1px solid var(--border-l2);
+  border-left: 1px solid var(--stroke-2);
 }
 
 .sub-line {

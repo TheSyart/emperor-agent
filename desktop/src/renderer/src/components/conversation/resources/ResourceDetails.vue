@@ -369,7 +369,7 @@ onBeforeUnmount(() => {
   max-height: 320px;
   overflow: auto;
   padding: var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   background: rgb(var(--code-block-bg));
   font: var(--font-code);
@@ -381,7 +381,7 @@ dl {
 }
 dl > div {
   padding: var(--space-3) 0;
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 dt {
   color: rgb(var(--label-tertiary));

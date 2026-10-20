@@ -106,7 +106,7 @@ const linkOptions = { notify: (message: string) => app?.showToast(message) }
 
 .traj-md :deep(:is(th, td)) {
   padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
 }
 
 .traj-md :deep(a) {

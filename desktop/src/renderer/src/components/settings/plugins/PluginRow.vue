@@ -67,7 +67,7 @@ const showScope = computed(
 }
 
 .plugin-row-item + .plugin-row-item {
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .plugin-row {

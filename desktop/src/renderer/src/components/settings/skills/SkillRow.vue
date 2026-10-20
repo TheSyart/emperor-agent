@@ -72,7 +72,7 @@ const status = computed(() =>
 }
 
 .skill-row-item + .skill-row-item {
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .skill-row {

@@ -184,7 +184,7 @@ onBeforeUnmount(() => clearTimeout(timer))
   box-sizing: border-box;
   height: 32px;
   padding: 0 var(--space-1-5);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
   background: rgb(var(--surface-base));
 }
 

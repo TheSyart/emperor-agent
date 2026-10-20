@@ -40,7 +40,7 @@ const output = computed(() => {
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
   background: rgb(var(--code-block-bg));
 }

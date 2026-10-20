@@ -408,7 +408,7 @@ function partWidth(value: number, total: number) {
   gap: var(--space-0-5);
   min-width: 0;
   padding: var(--space-2) var(--space-2-5);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-row);
 }
 
@@ -494,7 +494,7 @@ function partWidth(value: number, total: number) {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-2);
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 .recent-row:last-child {

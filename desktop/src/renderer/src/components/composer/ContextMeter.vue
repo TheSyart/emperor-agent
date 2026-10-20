@@ -127,7 +127,7 @@ function fmt(value: number): string {
 
 .track {
   fill: none;
-  stroke: var(--border-l4);
+  stroke: var(--stroke-4);
   stroke-width: 2;
 }
 

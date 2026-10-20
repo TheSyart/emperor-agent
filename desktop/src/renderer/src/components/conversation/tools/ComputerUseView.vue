@@ -347,7 +347,7 @@ button.shot {
   align-items: baseline;
   gap: var(--space-1) var(--space-2);
   padding: var(--space-2) var(--space-2-5);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
   font-size: var(--fs-xs);
   line-height: 20px;
@@ -393,7 +393,7 @@ button.shot {
   display: block;
   align-self: flex-start;
   max-width: 100%;
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-row);
   overflow: hidden;
   background: rgb(var(--code-block-bg));

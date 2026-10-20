@@ -212,7 +212,7 @@ function copyLabel(address: ExtensionAddress): string {
 }
 
 .marker[data-state='todo'] {
-  border: 1px solid var(--border-l3);
+  border: 1px solid var(--stroke-3);
   color: rgb(var(--label-tertiary));
 }
 
@@ -228,7 +228,7 @@ function copyLabel(address: ExtensionAddress): string {
   max-width: 100%;
   margin-top: var(--space-1-5);
   padding: var(--space-0-5) var(--space-2);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-sm);
   background: rgb(var(--settings-card-control-fill));
   color: rgb(var(--label-secondary));

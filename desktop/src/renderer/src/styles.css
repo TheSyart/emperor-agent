@@ -61,7 +61,7 @@
   textarea {
     @apply w-full border px-3 py-2 text-sm outline-none transition;
     border-radius: var(--radius);
-    border-color: rgb(var(--border));
+    border-color: rgb(var(--stroke-solid));
     background: rgb(var(--surface-sunken));
     color: rgb(var(--fg));
   }

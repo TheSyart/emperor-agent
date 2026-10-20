@@ -495,7 +495,7 @@ function clearSearch() {
 }
 
 .filters {
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .error {
@@ -526,7 +526,7 @@ function clearSearch() {
   min-width: 0;
   margin-top: var(--space-4);
   padding-top: var(--space-3);
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
   overflow: hidden;
 }
 

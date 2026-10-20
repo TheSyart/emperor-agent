@@ -368,7 +368,7 @@ function onKeydown(event: KeyboardEvent) {
   max-width: var(--chat-content-width, 748px);
   max-height: min(60vh, 520px);
   padding: 0 0 var(--space-2-5);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-takeover);
   background: rgb(var(--input-major));
   box-shadow: var(--shadow-lv2);
@@ -488,7 +488,7 @@ function onKeydown(event: KeyboardEvent) {
 .option[data-selected],
 .custom-row:focus-within,
 .custom-row[data-active] {
-  border-color: var(--border-l2);
+  border-color: var(--stroke-2);
 }
 
 .option:focus-visible {
@@ -525,7 +525,7 @@ function onKeydown(event: KeyboardEvent) {
   grid-area: 1 / 1;
   width: 14px;
   height: 14px;
-  border: 1px solid var(--border-l4);
+  border: 1px solid var(--stroke-4);
   border-radius: var(--radius-xs);
   transition:
     background-color var(--duration-ds-fast) ease,
@@ -612,7 +612,7 @@ function onKeydown(event: KeyboardEvent) {
   flex: none;
   min-height: 64px;
   margin: var(--space-2) var(--space-6) 0;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-cell);
   background: rgb(var(--surface-strong));
 }

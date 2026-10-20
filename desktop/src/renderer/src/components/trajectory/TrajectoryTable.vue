@@ -606,7 +606,7 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
   justify-content: center;
   gap: var(--space-1-5);
   height: 30px;
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
   background: rgb(var(--surface-base));
   color: rgb(var(--label-secondary));
   font: var(--font-xxs);
@@ -618,7 +618,7 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
 
 .history-row {
   height: 30px;
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 .history-button {

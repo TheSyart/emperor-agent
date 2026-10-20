@@ -226,7 +226,7 @@ const stateLabel = computed(() => {
   gap: var(--space-1);
   margin: var(--space-1) 0 var(--space-0-5);
   padding: var(--space-0-5) var(--space-2);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
   background: rgb(var(--surface-base));
   color: rgb(var(--label-secondary));

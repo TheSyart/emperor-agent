@@ -299,7 +299,7 @@ const resultJson = computed(() =>
   margin: 0;
   overflow: auto;
   padding: var(--space-2-5) var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   background: rgb(var(--code-block-bg));
   font-family: var(--font-mono);

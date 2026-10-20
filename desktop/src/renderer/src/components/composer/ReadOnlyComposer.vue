@@ -57,7 +57,7 @@ const emit = defineEmits<{ back: []; stop: []; root: [] }>()
   min-height: 54px;
   margin: 0 auto var(--space-5);
   padding: var(--space-2-5) var(--space-4);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   background: rgb(var(--surface-base));
   color: rgb(var(--label-tertiary));
@@ -80,7 +80,7 @@ strong {
   flex: none;
   height: var(--space-7);
   padding: 0 var(--space-2-5);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
   background: transparent;
   color: rgb(var(--label-secondary));

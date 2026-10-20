@@ -675,7 +675,7 @@ function costText(usage: {
 .external-status {
   padding: var(--space-2) var(--space-3);
   background: rgb(var(--surface-base));
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
 }
 .external-status [data-acceptance='passed'] {
@@ -683,7 +683,7 @@ function costText(usage: {
 }
 .external-section {
   padding-top: var(--space-3);
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 h3 {
   margin: 0 0 var(--space-2);

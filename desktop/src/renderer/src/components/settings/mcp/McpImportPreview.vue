@@ -125,7 +125,7 @@ function onOverwrite(name: string, value: boolean) {
   margin: 0;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   list-style: none;
 }
@@ -140,7 +140,7 @@ function onOverwrite(name: string, value: boolean) {
 }
 
 .row + .row {
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .row-main {

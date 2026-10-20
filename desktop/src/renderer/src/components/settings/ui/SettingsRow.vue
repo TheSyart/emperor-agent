@@ -104,7 +104,7 @@ withDefaults(
 }
 
 .ds-settings-row[data-divider] {
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .ds-settings-row:last-child {
@@ -205,7 +205,7 @@ withDefaults(
   right: var(--space-4);
   bottom: 0;
   left: var(--space-4);
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 .ds-settings-row[data-in-card] .text {

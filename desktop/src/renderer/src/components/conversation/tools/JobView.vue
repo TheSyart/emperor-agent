@@ -94,7 +94,7 @@ function dot(status: string | undefined) {
   margin: 0;
   padding: var(--space-3) var(--space-4);
   overflow: auto;
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
   background: rgb(var(--code-block-bg));
   font: var(--font-code-small);

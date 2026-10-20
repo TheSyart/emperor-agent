@@ -164,7 +164,7 @@ function open() {
   min-width: 0;
   margin: var(--space-3) 0;
   padding: var(--space-5);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   background: rgb(var(--surface-base));
   line-height: 1.5;

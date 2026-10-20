@@ -149,7 +149,7 @@ const note = computed(() => lifecycleNote(props.entry))
 }
 
 .model-row + .model-row {
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .model-row[data-highlight] {

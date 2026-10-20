@@ -1159,7 +1159,7 @@ onBeforeUnmount(() => {
 }
 .agent-card.ds-settings-card {
   background: rgb(var(--surface-raised));
-  border-color: var(--border-l2);
+  border-color: var(--stroke-2);
   box-shadow: none;
 }
 .agent-card :deep(.head) {
@@ -1204,7 +1204,7 @@ onBeforeUnmount(() => {
   margin: 0 var(--space-4);
   padding: var(--space-3) 0 var(--space-3);
   gap: var(--space-3);
-  border-color: var(--border-l1);
+  border-color: var(--stroke-1);
 }
 .local-card :deep(.body[data-after-head]) {
   border-top: none;
@@ -1322,7 +1322,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-2-5);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-row);
 }
 .custom-model-actions {
@@ -1386,7 +1386,7 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 .agent-details {
-  border-top: calc(var(--space-0-5) / 2) solid var(--border-l1);
+  border-top: calc(var(--space-0-5) / 2) solid var(--stroke-1);
   padding-top: var(--space-2-5);
   min-width: 0;
 }
@@ -1441,7 +1441,7 @@ onBeforeUnmount(() => {
   color: rgb(var(--label-secondary));
 }
 .connection-settings {
-  border-top: calc(var(--space-0-5) / 2) solid var(--border-l1);
+  border-top: calc(var(--space-0-5) / 2) solid var(--stroke-1);
   padding-top: var(--space-2);
 }
 .connection-settings .ds-text-field {

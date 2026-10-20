@@ -198,7 +198,7 @@ function onClick(): void {
   grid-template-columns: var(--traj-event-width, 122px) minmax(0, 1fr);
   box-sizing: border-box;
   height: 30px;
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
   color: rgb(var(--label-primary));
   font: var(--font-xxs);
   outline: none;
@@ -241,7 +241,7 @@ function onClick(): void {
   right: 0;
   left: 0;
   height: 2px;
-  background: var(--border-l1);
+  background: var(--stroke-1);
   content: '';
   pointer-events: none;
   transform: translateY(-50%);

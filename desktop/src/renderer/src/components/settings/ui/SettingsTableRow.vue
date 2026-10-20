@@ -48,7 +48,7 @@ export default defineComponent({
   display: grid;
   grid-column: 1 / -1;
   grid-template-columns: subgrid;
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .cell {

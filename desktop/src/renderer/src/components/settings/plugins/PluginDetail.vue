@@ -556,7 +556,7 @@ defineExpose({ reload: load })
   padding: 0;
   list-style: none;
   overflow: hidden;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   background: rgb(var(--surface-overlay));
   min-width: 0;
@@ -579,7 +579,7 @@ defineExpose({ reload: load })
 
 .prompt + .prompt,
 .member + .member {
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .prompt-text {
@@ -671,7 +671,7 @@ defineExpose({ reload: load })
   margin: 0;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   list-style: none;
 }

@@ -11,14 +11,14 @@
   flex-direction: column;
   overflow-x: hidden;
   overflow-y: auto;
-  border: 1px solid rgb(var(--border-strong));
+  border: 1px solid rgb(var(--stroke-solid-strong));
   border-radius: var(--radius-lg);
   padding: var(--space-2);
   background: rgb(var(--surface-base) / 0.98);
   box-shadow: 0 16px 46px rgb(var(--shadow-color) / 0.28);
   backdrop-filter: blur(var(--material-2-blur));
   scrollbar-width: thin;
-  scrollbar-color: rgb(var(--border-strong) / 0.72) transparent;
+  scrollbar-color: rgb(var(--stroke-solid-strong) / 0.72) transparent;
 }
 
 .composer-palette::-webkit-scrollbar {
@@ -28,7 +28,7 @@
 .composer-palette::-webkit-scrollbar-thumb {
   border: 0;
   border-radius: 999px;
-  background: rgb(var(--border-strong) / 0.78);
+  background: rgb(var(--stroke-solid-strong) / 0.78);
 }
 
 .composer-palette-head {
@@ -87,7 +87,7 @@
 
 .composer-palette-item:hover,
 .composer-palette-item.active {
-  background: rgb(var(--border-strong) / 0.34);
+  background: rgb(var(--stroke-solid-strong) / 0.34);
 }
 
 .composer-palette-item-icon {
@@ -133,7 +133,7 @@
 .composer-palette-item b {
   max-width: 120px;
   overflow: hidden;
-  border: 1px solid rgb(var(--border));
+  border: 1px solid rgb(var(--stroke-solid));
   border-radius: var(--radius-sm);
   padding: 1px var(--space-2);
   color: rgb(var(--fg) / var(--text-tertiary));

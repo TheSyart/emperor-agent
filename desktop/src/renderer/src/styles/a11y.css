@@ -65,11 +65,11 @@
 @media (prefers-contrast: more) {
   :root,
   :root[data-theme='dark'] {
-    --border: 88 88 98;
-    --border-strong: 140 140 150;
+    --stroke-solid: 88 88 98;
+    --stroke-solid-strong: 140 140 150;
   }
   :root[data-theme='light'] {
-    --border: 150 150 158;
-    --border-strong: 120 120 128;
+    --stroke-solid: 150 150 158;
+    --stroke-solid-strong: 120 120 128;
   }
 }

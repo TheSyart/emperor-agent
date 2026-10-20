@@ -666,7 +666,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--space-1-5);
   padding: var(--space-1-5) var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
   background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv2);
@@ -690,7 +690,7 @@ onBeforeUnmount(() => {
   width: calc(100% - var(--depth) * 2 * var(--space-3));
   margin-bottom: calc(0px - var(--space-1));
   padding: var(--space-1) var(--space-3) var(--space-2);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-bottom: 0;
   border-radius: var(--radius-card) var(--radius-card) 0 0;
   background: rgb(var(--surface-raised));
@@ -739,7 +739,7 @@ onBeforeUnmount(() => {
   position: relative;
   min-width: 0;
   padding: var(--space-2-5) var(--space-3) var(--space-3);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
   background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv2);
@@ -769,7 +769,7 @@ onBeforeUnmount(() => {
   width: 100%;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-row);
   background: rgb(var(--surface-canvas));
   cursor: zoom-in;
@@ -827,7 +827,7 @@ onBeforeUnmount(() => {
   margin: 0;
   aspect-ratio: 16 / 10;
   place-items: center;
-  border: 1px dashed var(--border-l2);
+  border: 1px dashed var(--stroke-2);
   border-radius: var(--radius-row);
   color: rgb(var(--label-tertiary));
   font-size: var(--fs-xs);

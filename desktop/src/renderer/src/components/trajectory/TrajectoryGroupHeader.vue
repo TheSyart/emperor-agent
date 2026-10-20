@@ -80,7 +80,7 @@ const title = computed(() =>
   left: calc(var(--space-4) + 1px);
   width: max-content;
   padding: 0 var(--space-1);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: 2px;
   color: rgb(var(--label-secondary));
   background: rgb(var(--surface-base));

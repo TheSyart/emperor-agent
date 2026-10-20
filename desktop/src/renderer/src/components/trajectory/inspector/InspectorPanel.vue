@@ -137,7 +137,7 @@ const tabItems = computed(() =>
   box-sizing: border-box;
   height: 42px;
   padding: 0 var(--space-2) 0 var(--space-3);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .title {
@@ -180,7 +180,7 @@ const tabItems = computed(() =>
 .tabs {
   flex: none;
   padding: 0 var(--space-2);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
   overflow-x: auto;
   scrollbar-width: none;
 }

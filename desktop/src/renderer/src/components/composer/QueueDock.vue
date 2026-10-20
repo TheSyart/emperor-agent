@@ -166,7 +166,7 @@ const headline = computed(() => {
   content: '';
   position: absolute;
   inset: 0;
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-bottom: none;
   border-radius: inherit;
   pointer-events: none;
@@ -234,7 +234,7 @@ const headline = computed(() => {
   height: 36px;
   padding: var(--space-1) calc(var(--space-1) + 1px) var(--space-1)
     var(--space-3);
-  box-shadow: inset 0 1px 0 var(--border-l1);
+  box-shadow: inset 0 1px 0 var(--stroke-1);
 }
 
 .preview {

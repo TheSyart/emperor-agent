@@ -132,7 +132,7 @@ provideSurface(() => (card.value ? 'card' : 'panel'))
 }
 
 .ds-settings-group[data-card] > .content {
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   background: rgb(var(--settings-card-fill));
 }

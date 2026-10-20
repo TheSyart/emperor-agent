@@ -712,7 +712,7 @@ async function stop() {
   flex: none;
   min-width: 0;
   padding: var(--space-4) var(--space-6);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 .child-header nav {
   display: flex;
@@ -789,7 +789,7 @@ h1 {
   gap: var(--space-2);
   align-items: center;
   padding: var(--space-3) var(--space-5);
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 .child-footer > span {
   flex: 1 0 auto;

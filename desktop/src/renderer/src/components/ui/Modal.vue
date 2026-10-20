@@ -124,7 +124,7 @@ provideSurface(() => 'panel')
   max-height: 100%;
   padding-bottom: var(--space-6);
   overflow: hidden;
-  border: 1px solid var(--border-inverted);
+  border: 1px solid var(--stroke-inverted);
   border-radius: var(--radius-modal);
   background: rgb(var(--surface-raised));
   box-shadow: var(--shadow-lv3);

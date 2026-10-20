@@ -234,7 +234,7 @@ const validationState = computed(() => {
   gap: var(--space-3);
   min-width: 0;
   padding: var(--space-2-5) 0;
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .event-name {
@@ -261,7 +261,7 @@ const validationState = computed(() => {
   margin: 0;
   padding: 0;
   list-style: none;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
 }
 
@@ -278,7 +278,7 @@ const validationState = computed(() => {
 }
 
 .issue + .issue {
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .issue-kind {

@@ -584,7 +584,7 @@ onBeforeUnmount(() => {
   position: relative;
   isolation: isolate;
   flex: none;
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
   user-select: none;
 }
 
@@ -598,7 +598,7 @@ onBeforeUnmount(() => {
 
 .labels {
   position: relative;
-  border-right: 1px solid var(--border-l1);
+  border-right: 1px solid var(--stroke-1);
   color: rgb(var(--label-caption));
   font: 10px / 1 var(--font-sans);
 }
@@ -706,7 +706,7 @@ onBeforeUnmount(() => {
   bottom: 0;
   left: var(--traj-turn-left);
   width: 1px;
-  background: var(--border-l2);
+  background: var(--stroke-2);
 }
 
 .span {
@@ -881,7 +881,7 @@ onBeforeUnmount(() => {
   bottom: 0;
   left: 0;
   height: 12px;
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
   pointer-events: none;
 }
 

@@ -612,7 +612,7 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall })
   height: 34px;
   margin-top: calc(0px - var(--space-8) - var(--space-0-5));
   padding: 0;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
   background: rgb(var(--surface-raised));
   box-shadow: var(--shadow-lv2);

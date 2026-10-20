@@ -151,7 +151,7 @@ const titleId = `page-title-${useId()}`
 }
 
 .page-tabs {
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 @container page-shell (max-width: 639px) {

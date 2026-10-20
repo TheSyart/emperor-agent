@@ -499,7 +499,7 @@ function hostOf(url: string): string {
   align-items: center;
   gap: var(--space-0-5);
   padding: var(--space-2) var(--space-2);
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 .browser-address {
@@ -511,14 +511,14 @@ function hostOf(url: string): string {
   height: var(--space-7);
   margin: 0 var(--space-1);
   padding: 0 var(--space-2-5);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
   background: rgb(var(--input-major));
   color: rgb(var(--label-tertiary));
 }
 
 .browser-address:focus-within {
-  border-color: var(--border-l4);
+  border-color: var(--stroke-4);
 }
 
 .browser-address[data-invalid] {
@@ -655,7 +655,7 @@ function hostOf(url: string): string {
 .state-action {
   margin-top: var(--space-2);
   padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
   color: rgb(var(--label-primary));
   font-size: var(--fs-xs);
@@ -680,7 +680,7 @@ function hostOf(url: string): string {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
   color: rgb(var(--label-secondary));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
@@ -721,7 +721,7 @@ function hostOf(url: string): string {
   flex: none;
   margin-left: auto;
   padding: 0 var(--space-2);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
   color: rgb(var(--label-primary));
   font-size: var(--fs-xxs);

@@ -228,7 +228,7 @@ function openFile(path: string): void {
 .turn-files {
   container-type: inline-size;
   overflow: hidden;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   background: rgb(var(--surface-base));
   font-size: var(--fs-s);
@@ -265,7 +265,7 @@ function openFile(path: string): void {
   flex: none;
   width: calc(var(--space-8) + var(--space-2));
   height: calc(var(--space-8) + var(--space-2));
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   background: rgb(var(--surface-canvas));
   color: rgb(var(--label-secondary));
@@ -336,7 +336,7 @@ function openFile(path: string): void {
 .files {
   margin: 0;
   padding: var(--space-1) 0;
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
   background: rgb(var(--surface-canvas) / 0.3);
   list-style: none;
 }
@@ -409,7 +409,7 @@ function openFile(path: string): void {
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2);
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }

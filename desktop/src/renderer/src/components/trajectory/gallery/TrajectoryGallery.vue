@@ -144,7 +144,7 @@ onBeforeUnmount(() => {
   gap: var(--space-3);
   height: 36px;
   padding: 0 var(--space-4);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
   font: var(--font-xs);
 }
 

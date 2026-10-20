@@ -139,7 +139,7 @@ provide(LINK_STATUS_KEY, {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
   font-size: var(--fs-xs);
 }
 

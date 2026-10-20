@@ -165,7 +165,7 @@ function noteOf(entry: TurnFileEntry): string {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .title {
@@ -199,7 +199,7 @@ function noteOf(entry: TurnFileEntry): string {
   padding: var(--space-1) 0;
   overflow-y: auto;
   list-style: none;
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .file {

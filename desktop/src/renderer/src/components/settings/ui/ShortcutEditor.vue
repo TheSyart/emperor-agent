@@ -151,7 +151,7 @@ function save(): void {
 
 .shortcut-current {
   padding: var(--space-0-5) var(--space-1-5);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   color: rgb(var(--label-primary));
   font-family: var(--font-mono);

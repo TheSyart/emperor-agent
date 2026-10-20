@@ -279,7 +279,7 @@ function onPointerMove(event: PointerEvent) {
 .token-trend-chart {
   min-width: 0;
   padding: var(--space-2-5);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-row);
   background: rgb(var(--surface-raised));
 }
@@ -358,13 +358,13 @@ function onPointerMove(event: PointerEvent) {
 }
 
 .grid-line {
-  stroke: var(--border-l1);
+  stroke: var(--stroke-1);
   stroke-width: 1;
   stroke-dasharray: 2 4;
 }
 
 .focus-line {
-  stroke: var(--border-l3);
+  stroke: var(--stroke-3);
   stroke-width: 1;
   pointer-events: none;
 }
@@ -392,7 +392,7 @@ function onPointerMove(event: PointerEvent) {
   max-width: 240px;
   margin-left: var(--space-2);
   padding: var(--space-1-5) var(--space-2);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-sm);
   background: rgb(var(--surface-strong));
   box-shadow: var(--shadow-lv1);

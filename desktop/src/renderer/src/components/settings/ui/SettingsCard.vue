@@ -143,7 +143,7 @@ function onHeaderClick(event: MouseEvent) {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   background: rgb(var(--settings-card-fill));
   transition:
@@ -300,7 +300,7 @@ button.head-text:focus-visible {
 .body[data-after-head] {
   margin: 0 var(--space-4);
   padding: var(--space-3) 0 var(--space-4);
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .footer {
@@ -311,6 +311,6 @@ button.head-text:focus-visible {
   gap: var(--space-2);
   margin: 0 var(--space-4);
   padding: var(--space-3) 0;
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 </style>

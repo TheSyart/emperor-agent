@@ -65,7 +65,7 @@ defineProps<{ tools: readonly ToolSchema[] }>()
 }
 
 .item {
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 .summary {

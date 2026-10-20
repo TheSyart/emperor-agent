@@ -469,14 +469,14 @@ function stepDot(tone: string): DotState {
   padding: 0;
   overflow: hidden;
   list-style: none;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   background: rgb(var(--surface-overlay));
 }
 
 .rows > li + li,
 .jobs > li + li {
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .row {

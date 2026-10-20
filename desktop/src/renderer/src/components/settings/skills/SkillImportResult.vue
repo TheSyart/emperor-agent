@@ -91,7 +91,7 @@ const emit = defineEmits<{ select: [name: string] }>()
   min-width: 0;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   list-style: none;
 }
@@ -105,7 +105,7 @@ const emit = defineEmits<{ select: [name: string] }>()
 }
 
 .row + .row {
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .row-head {

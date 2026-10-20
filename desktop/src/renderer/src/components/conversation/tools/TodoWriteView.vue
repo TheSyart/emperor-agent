@@ -37,7 +37,7 @@ const items = computed(() => todoItems(props.data))
   gap: var(--space-0-5);
   margin: 0;
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
   background: rgb(var(--code-block-bg));
   list-style: none;
@@ -60,7 +60,7 @@ const items = computed(() => todoItems(props.data))
   justify-content: center;
   width: 14px;
   height: 14px;
-  border: 1px solid var(--border-l4);
+  border: 1px solid var(--stroke-4);
   border-radius: var(--radius-xs);
   color: rgb(var(--label-inverted));
 }

@@ -192,7 +192,7 @@ function openTab(tab: 'mcp' | 'plugins'): void {
   margin: var(--space-2) 0 0;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   list-style: none;
 }

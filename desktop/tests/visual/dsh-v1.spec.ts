@@ -384,12 +384,16 @@ test.describe('a11y media-feature degradation', () => {
     await page.emulateMedia({ contrast: 'more' })
     await open(page, '/chat/chat-main', { theme: 'dark' })
     const darkBorder = await page.evaluate(() =>
-      getComputedStyle(document.documentElement).getPropertyValue('--border'),
+      getComputedStyle(document.documentElement).getPropertyValue(
+        '--stroke-solid',
+      ),
     )
     expect(darkBorder.trim()).toBe('88 88 98')
     await open(page, '/chat/chat-main', { theme: 'light' })
     const lightBorder = await page.evaluate(() =>
-      getComputedStyle(document.documentElement).getPropertyValue('--border'),
+      getComputedStyle(document.documentElement).getPropertyValue(
+        '--stroke-solid',
+      ),
     )
     expect(lightBorder.trim()).toBe('150 150 158')
   })

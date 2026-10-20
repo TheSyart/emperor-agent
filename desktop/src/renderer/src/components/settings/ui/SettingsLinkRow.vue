@@ -63,7 +63,7 @@ defineProps<{ title: string; description?: string; value?: string }>()
   right: var(--space-4);
   bottom: 0;
   left: var(--space-4);
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 .ds-settings-link-row:hover {

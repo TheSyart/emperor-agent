@@ -487,7 +487,7 @@ function openOnGithub(): void {
 }
 
 .detail-tabs {
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .overview {
@@ -517,7 +517,7 @@ function openOnGithub(): void {
 
 .card {
   min-width: 0;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
 }
 
@@ -526,7 +526,7 @@ function openOnGithub(): void {
   align-items: baseline;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -573,14 +573,14 @@ function openOnGithub(): void {
   flex-direction: column;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   list-style: none;
   overflow: hidden;
 }
 
 .rows > li + li {
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .row {

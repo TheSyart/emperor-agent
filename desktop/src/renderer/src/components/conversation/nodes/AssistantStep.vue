@@ -270,7 +270,7 @@ const showActions = computed(
   max-width: min(360px, 100%);
   max-height: 280px;
   border-radius: var(--radius-row);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   object-fit: cover;
 }
 

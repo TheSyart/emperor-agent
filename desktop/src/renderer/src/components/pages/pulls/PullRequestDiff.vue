@@ -262,7 +262,7 @@ function emptyNote(file: PullDiffFile): string {
 
 .diff-file {
   min-width: 0;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   background: rgb(var(--code-block-bg));
 }
@@ -286,7 +286,7 @@ function emptyNote(file: PullDiffFile): string {
 }
 
 .diff-file[data-open] .file-head {
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
   border-radius: var(--radius-card) var(--radius-card) 0 0;
 }
 

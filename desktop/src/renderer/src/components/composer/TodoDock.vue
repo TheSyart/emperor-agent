@@ -70,7 +70,7 @@ const summary = computed(() => {
   max-width: calc(var(--composer-card-max) - 4 * var(--dock-inset));
   margin: 0 auto;
   overflow: hidden;
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
   background: rgb(var(--tip-fill));
 }

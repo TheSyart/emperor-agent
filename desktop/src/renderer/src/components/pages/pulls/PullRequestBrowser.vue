@@ -350,7 +350,7 @@ watch(selectedKey, () => {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .list-col {
@@ -361,7 +361,7 @@ watch(selectedKey, () => {
   width: var(--pr-list-width);
   max-width: 50%;
   min-height: 0;
-  border-right: 1px solid var(--border-l2);
+  border-right: 1px solid var(--stroke-2);
 }
 
 .pr-layout[data-narrow] .list-col {

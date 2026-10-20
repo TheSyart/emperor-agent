@@ -157,6 +157,6 @@ function activate() {
 .separator {
   height: 1px;
   margin: var(--space-1) 2px;
-  background: var(--border-l1);
+  background: var(--stroke-1);
 }
 </style>

@@ -331,7 +331,7 @@ const showFooter = computed(
   gap: var(--space-3);
   min-width: 0;
   padding: 0 var(--space-4);
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 .list-tabs {

@@ -66,7 +66,7 @@ useSettingsHeader({
 /* Underline tabs sit on a full-width l2 hairline, like the dsh detail tabs. */
 .hooks-tabs {
   margin-bottom: var(--space-1);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .hooks-alert {

@@ -103,7 +103,7 @@ const source = computed(() =>
 .tool-row {
   min-width: 0;
   list-style: none;
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .tool-row:last-child {
@@ -181,7 +181,7 @@ const source = computed(() =>
   gap: var(--space-3);
   min-width: 0;
   padding: var(--space-3) var(--space-3-5) var(--space-3-5);
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
   background: rgb(var(--selector-fill));
 }
 
@@ -232,7 +232,7 @@ const source = computed(() =>
   gap: var(--space-0-5);
   min-width: 0;
   padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .param:first-child {

@@ -351,7 +351,7 @@ describe('style audit: ratchets (only-ever-decrease baselines)', () => {
     const contrast =
       /@media \(prefers-contrast: more\) \{\n([\s\S]*?)\n\}/.exec(a11y)?.[1]
     expect(contrast).toBeTruthy()
-    expect(contrast).toContain('--border: 88 88 98')
+    expect(contrast).toContain('--stroke-solid: 88 88 98')
   })
 
   it('no scattered prefers-reduced-motion blocks outside a11y.css', () => {

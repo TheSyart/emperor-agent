@@ -207,7 +207,7 @@ defineExpose({ beginRename })
   bottom: 0;
   left: calc(var(--space-4) - 0.5px);
   width: 1px;
-  background: var(--border-l2);
+  background: var(--stroke-2);
   content: '';
 }
 
@@ -260,7 +260,7 @@ defineExpose({ beginRename })
   min-width: 0;
   margin: 0 var(--space-1-5) 0 var(--space-1);
   padding: 0 var(--space-0-5);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-xs);
   outline: none;
   background: rgb(var(--surface-raised));
@@ -270,7 +270,7 @@ defineExpose({ beginRename })
 }
 
 .rename:focus {
-  border-color: var(--border-l3);
+  border-color: var(--stroke-3);
   box-shadow: none;
 }
 

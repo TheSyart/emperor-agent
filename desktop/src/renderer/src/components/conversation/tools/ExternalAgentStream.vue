@@ -107,7 +107,7 @@ watch(
 <style scoped>
 .external-stream {
   min-width: 0;
-  border-left: 1px solid var(--border-l1);
+  border-left: 1px solid var(--stroke-1);
   padding-left: var(--space-3);
 }
 .stream-toggle {

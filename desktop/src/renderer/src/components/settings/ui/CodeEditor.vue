@@ -130,7 +130,7 @@ defineExpose({ focus: () => textarea.value?.focus() })
   width: 100%;
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   background: rgb(var(--code-block-bg));
   font-family: var(--font-mono);
@@ -158,7 +158,7 @@ defineExpose({ focus: () => textarea.value?.focus() })
   flex: none;
   min-width: calc(var(--code-digits) * 1ch + var(--space-5));
   overflow: hidden;
-  border-right: 1px solid var(--border-l1);
+  border-right: 1px solid var(--stroke-1);
   user-select: none;
 }
 

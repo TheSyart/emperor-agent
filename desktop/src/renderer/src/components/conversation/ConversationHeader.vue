@@ -142,7 +142,7 @@ function onTab(id: string) {
   bottom: 0;
   left: 0;
   height: 1px;
-  background: var(--border-l2);
+  background: var(--stroke-2);
   pointer-events: none;
 }
 

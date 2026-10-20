@@ -74,7 +74,7 @@ function onClick(event: MouseEvent): void {
 .pr-md :deep(.pr-md-image) {
   display: inline-flex;
   padding: 0 var(--space-1-5);
-  border: 1px dashed var(--border-l3);
+  border: 1px dashed var(--stroke-3);
   border-radius: var(--radius-sm);
   color: rgb(var(--label-secondary));
   font-size: var(--fs-xxs);

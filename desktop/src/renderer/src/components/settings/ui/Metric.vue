@@ -45,7 +45,7 @@ withDefaults(
   gap: var(--space-1);
   min-width: 0;
   padding: var(--space-2-5) var(--space-3);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-row);
   background: rgb(var(--surface-raised));
 }

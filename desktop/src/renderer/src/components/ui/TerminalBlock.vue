@@ -162,7 +162,7 @@ const { copied, copy } = useCopyFeedback(() => props.output ?? '')
 }
 
 .ds-terminal:not([data-running]) .header {
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .prompt {

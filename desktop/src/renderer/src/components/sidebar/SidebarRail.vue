@@ -141,7 +141,7 @@ function go(entry: SidebarPageEntry): void {
   align-items: center;
   gap: var(--space-1);
   padding-top: var(--space-2);
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .rail-button {

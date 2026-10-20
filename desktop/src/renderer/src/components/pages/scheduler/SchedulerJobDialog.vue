@@ -324,7 +324,7 @@ function submit() {
   gap: var(--space-1-5) var(--space-4);
   min-width: 0;
   padding: var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
 }
 
@@ -353,7 +353,7 @@ function submit() {
   gap: var(--space-1-5);
   min-width: 0;
   padding-top: var(--space-3);
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .history-head {
@@ -391,7 +391,7 @@ function submit() {
   gap: var(--space-1);
   min-width: 0;
   padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 .run:last-child {

@@ -239,7 +239,7 @@ defineExpose({ toggleSidebar, columns })
 .sidebar-col {
   min-width: 0;
   overflow: hidden;
-  border-right: 0.5px solid var(--border-l1);
+  border-right: 0.5px solid var(--stroke-1);
   background: rgb(var(--surface-canvas));
 }
 
@@ -254,7 +254,7 @@ defineExpose({ toggleSidebar, columns })
 .workspace-col {
   min-width: 0;
   overflow: hidden;
-  border-left: 0.5px solid var(--border-l1);
+  border-left: 0.5px solid var(--stroke-1);
 }
 
 .app-frame[data-workspace-collapsed] .workspace-col {
@@ -281,7 +281,7 @@ defineExpose({ toggleSidebar, columns })
   box-sizing: border-box;
   width: var(--space-3);
   height: var(--space-8);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-cell);
   background: rgb(var(--surface-raised));
   opacity: 0;
