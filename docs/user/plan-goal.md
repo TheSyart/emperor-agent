@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：需要控制权限、审阅方案或持续推进任务的用户<br>
-> 最后核验：2026-10-19<br>
+> 最后核验：2026-10-20<br>
 > 事实源：`packages/core/src/harness/approval/presets.ts`、`packages/core/src/harness/sandbox/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/goal/`、`packages/core/src/commands/builtins.ts`
 
 权限预设决定 Agent 能写哪里；Plan（规划模式）决定 Agent 先提方案还是直接动手；Goal（目标）让 Agent 在你不再输入时继续推进同一个目标。三者可以组合使用。
@@ -32,7 +32,7 @@
 /plan off
 ```
 
-- `/plan` 进入 Plan 模式；`/plan <消息>` 进入的同时把消息发给 Agent；`/plan off` 退出。
+- `/plan` 进入 Plan 模式；`/plan <消息>` 进入的同时把消息发给 Agent；`/plan off` 退出。也可以用输入框底栏权限菜单里的「Plan 模式」开关；开着时权限按钮写「工作区 · Plan」。
 - Plan 模式下 Agent 会先只读探索、在必要时向你提问，然后提交一份以标题开头的完整计划。
 - 计划出现在底部审阅面板，有两个选择：
   - **Approve**：退出 Plan 模式，Agent 从下一步开始执行计划；
@@ -76,7 +76,7 @@ Goal 的状态：
 - 应用重启后 Goal 保留原状态，但不会自动继续续跑，需要 `/goal resume`。
 - Goal 不提高权限；续跑轮与普通对话使用同一权限预设。
 - Agent 只能在你直接发出消息的那一轮，或正在进行的续跑轮中把 Goal 标记为完成或受阻。
-- 状态条显示当前 Goal 的阶段、目标和已用轮数。
+- 输入框上方的状态条写着「目标进行中」等；点开后的「目标」分区显示阶段、目标和已用轮数，可以暂停或恢复、编辑（把 `/goal edit <目标>` 放进输入框）和清除。
 
 ## 选择建议
 

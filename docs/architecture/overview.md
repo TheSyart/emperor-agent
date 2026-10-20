@@ -91,7 +91,7 @@ Renderer 外壳是 `components/shell/AppFrame.vue` 的网格：常驻的 56px �
 
 ## 右侧工作台与环境信息卡
 
-右侧工作台（`components/workspace/WorkspacePanel.vue`）提供启动器和四个面板：审查、终端、文件、浏览器，每个面板单独分包。对话组件通过 `workspaceState.ts` 的 `requestWorkspace({ pane, paths?, file?, directory?, turn?, url?, focus? })` 请求打开某个面板或内容，不持有组件引用：`directory` 在文件树中展开一个目录，`turn` 让「审查」显示一轮对话的改动（本轮改动视图）。环境信息卡（`components/conversation/environment/EnvironmentCard.vue`）浮在对话区右上角，输入框上方的变更汇总条显示工作区 Git 改动总计；工作台、环境信息卡和变更汇总条共用 `useWorkspaceSnapshot.ts` 中按引用计数轮询的同一份 `workspace.snapshot`。
+右侧工作台（`components/workspace/WorkspacePanel.vue`）提供启动器和四个面板：审查、终端、文件、浏览器，每个面板单独分包。对话组件通过 `workspaceState.ts` 的 `requestWorkspace({ pane, paths?, file?, directory?, turn?, url?, focus? })` 请求打开某个面板或内容，不持有组件引用：`directory` 在文件树中展开一个目录，`turn` 让「审查」显示一轮对话的改动（本轮改动视图）。环境信息卡（`components/conversation/environment/EnvironmentCard.vue`）浮在对话区右上角，输入框上方的状态条（`components/composer/ComposerStatusBar.vue`）以工作区 Git 改动总计开头；工作台、环境信息卡和状态条共用 `useWorkspaceSnapshot.ts` 中按引用计数轮询的同一份 `workspace.snapshot`。
 
 - `workspace.snapshot` 聚合 Git/worktree/安全操作凭据、当前 Goal、后台任务、子代理和终端的投影。
 - 审查使用 Core 内的 Git 分层服务；环境信息卡的「比较分支」通过 `git.remote` 取得 `origin` 的网页地址。
