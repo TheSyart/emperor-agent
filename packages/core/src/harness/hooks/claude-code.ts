@@ -609,7 +609,7 @@ export class ClaudeCodeHooks {
   }
 
   private workdir(agent: Agent | undefined): string {
-    return agent?.session.header.cwd ?? this.options.projectDir ?? process.cwd()
+    return agent?.session.cwd ?? this.options.projectDir ?? process.cwd()
   }
 
   /**

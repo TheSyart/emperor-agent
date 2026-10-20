@@ -57,7 +57,7 @@ export function searchWorkdir(
   context: Pick<ToolRunContext, 'agent'>,
   defaultWorkdir?: string,
 ): string {
-  return context.agent?.session.header.cwd ?? defaultWorkdir ?? process.cwd()
+  return context.agent?.session.cwd ?? defaultWorkdir ?? process.cwd()
 }
 
 function stderrExcerpt(text: string, truncated: boolean): string {

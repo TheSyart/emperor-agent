@@ -50,7 +50,10 @@ import {
   SessionLogStore,
   type SessionLogState,
 } from '../../session-log/store'
-import type { SessionEvent } from '../../session-log/types'
+import type {
+  SessionEvent,
+  WorkingDirectoryChangeReason,
+} from '../../session-log/types'
 import type { SessionEntry } from '../../sessions/store'
 import { MCPClient } from '../../mcp/client'
 import { ProjectMcpInstances } from '../../mcp/project-instances'
@@ -103,7 +106,11 @@ import { SessionProjector, type UiEvent } from '../projection/projector'
 import { createAskUserQuestionTool, UserQuestionService } from '../questions'
 import { UserQuestionDismissed } from '../questions/service'
 import { LocalSandbox, type SandboxBackend } from '../sandbox/backend'
-import { SandboxPolicyService, type SandboxMode } from '../sandbox/policy'
+import {
+  canonicalPath,
+  SandboxPolicyService,
+  type SandboxMode,
+} from '../sandbox/policy'
 import { SubagentManager } from '../subagent/manager'
 import { installSubagents } from '../subagent/tools'
 import { createDelegationTools } from '../delegation/tools'
@@ -342,6 +349,8 @@ export class HarnessHost {
   private projectPluginOverrides: (projectRoot: string) => ReadonlySet<string> =
     () => new Set()
   private readonly agents = new Map<string, Agent>()
+  private worktreeResolver: (sessionId: string, projectRoot: string) => string =
+    (_sessionId, projectRoot) => projectRoot
   /** Each root session's task tree: its subagents, their jobs, its budget (KRN-03). */
   private readonly taskTrees = new Map<string, TaskTree>()
   /** 设置 › 高级 › 任务预算 (the cost cap is the model policy's). */
@@ -626,7 +635,7 @@ export class HarnessHost {
     )
     prompt.variable(
       'cwd',
-      ({ agent }) => agent?.session.header.cwd ?? this.chatWorkspace(),
+      ({ agent }) => agent?.session.cwd ?? this.chatWorkspace(),
     )
     prompt.section({ name: 'persona', order: 0, text: this.personaText() })
     // The model and working directory change per session and on a model
@@ -638,7 +647,7 @@ export class HarnessHost {
       text: ({ agent }) =>
         agent === undefined
           ? ''
-          : `Current model: ${this.modelLabel(agent)}. Working directory: ${JSON.stringify(agent.session.header.cwd ?? this.chatWorkspace())}.`,
+          : `Current model: ${this.modelLabel(agent)}. Working directory: ${JSON.stringify(agent.session.cwd ?? this.chatWorkspace())}.${this.worktreeNote(agent)}`,
     })
     installLinkGuidancePromptSection(prompt)
     this.sandbox.install(prompt)
@@ -1307,10 +1316,83 @@ export class HarnessHost {
     return dir
   }
 
+  /**
+   * Where a Build session works: its managed worktree once it entered one
+   * (KRN-11, the resolver CoreApi passes from its worktree bindings), else
+   * its project root; a Chat session works in the chat workspace.
+   */
   workspaceRootFor(entry: SessionEntry | null | undefined): string {
     if (entry?.mode === 'build' && entry.project_path)
-      return resolve(entry.project_path)
+      return this.worktreeResolver(entry.id, resolve(entry.project_path))
     return this.chatWorkspace()
+  }
+
+  /** CoreApi's worktree bindings: a session's worktree, or the root it is given. */
+  setWorktreeResolver(
+    resolver: (sessionId: string, projectRoot: string) => string,
+  ): void {
+    this.worktreeResolver = resolver
+  }
+
+  /**
+   * Move a session's tools to where it works now (KRN-11): after it entered
+   * or left a managed worktree. A live agent gets a
+   * `working-directory/change`; one not open yet starts there.
+   */
+  moveWorkingDirectory(
+    sessionId: string,
+    reason: WorkingDirectoryChangeReason,
+  ): void {
+    const agent = this.agents.get(sessionId)
+    if (agent === undefined) return
+    this.syncWorkingDirectory(agent, reason)
+  }
+
+  private syncWorkingDirectory(
+    agent: Agent,
+    reason: WorkingDirectoryChangeReason,
+  ): void {
+    const entry = this.kept.sessionStore.get(agent.session.id)
+    if (entry?.mode !== 'build' || !entry.project_path) return
+    const current = agent.session.cwd
+    const target = canonicalPath(this.workspaceRootFor(entry))
+    if (current !== undefined && canonicalPath(current) === target) return
+    agent.session.append('working-directory/change', {
+      from: current === undefined ? target : canonicalPath(current),
+      to: target,
+      reason,
+    })
+  }
+
+  /**
+   * A reopened session follows its worktree binding: only sessions that are
+   * in a worktree or have been in one (a plain Build session keeps the
+   * directory it was created with).
+   */
+  private resyncWorkingDirectory(agent: Agent): void {
+    const entry = this.kept.sessionStore.get(agent.session.id)
+    if (entry?.mode !== 'build' || !entry.project_path) return
+    const bound =
+      canonicalPath(this.workspaceRootFor(entry)) !==
+      canonicalPath(resolve(entry.project_path))
+    if (
+      bound ||
+      agent.session.events.some(
+        (event) => event.type === 'working-directory/change',
+      )
+    )
+      this.syncWorkingDirectory(agent, 'worktree-resync')
+  }
+
+  /** Runtime-context line for a session in a managed worktree (KRN-11). */
+  private worktreeNote(agent: Agent): string {
+    const entry = this.entryFor(agent)
+    const cwd = agent.session.cwd
+    if (entry?.mode !== 'build' || !entry.project_path || cwd === undefined)
+      return ''
+    const projectRoot = canonicalPath(resolve(entry.project_path))
+    if (canonicalPath(cwd) === projectRoot) return ''
+    return ` This is a managed git worktree of the project at ${JSON.stringify(projectRoot)}: work and run commands here; the original checkout is outside the writable workspace.`
   }
 
   /** A conversation's workspace (project root, or the chat workspace). */
@@ -1327,7 +1409,10 @@ export class HarnessHost {
     if (!id) throw new SessionRequiredError(operation)
     const entry = this.kept.sessionStore.get(id)
     if (entry === null) throw new Error(`unknown session ${id}`)
-    return scopeOfEntry(entry, this.chatWorkspace())
+    return {
+      ...scopeOfEntry(entry, this.chatWorkspace()),
+      workspaceRoot: this.workspaceRootFor(entry),
+    }
   }
 
   /** The project an agent works in: its root session's (null for Chat). */
@@ -1509,6 +1594,8 @@ export class HarnessHost {
       new Agent(session, this.agentDeps(), { admission: tree.gate }),
     )
     tree.setRoot(agent)
+    // Its worktree binding may have changed while the session was closed.
+    if (!fresh) this.resyncWorkingDirectory(agent)
     if (fresh) this.presets.pin(session, this.defaultPreset)
     this.goalInstall.driver.attach(agent)
     this.hooks.sessionStarted(agent, fresh ? 'startup' : 'resume')
