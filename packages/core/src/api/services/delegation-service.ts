@@ -373,6 +373,36 @@ export class CoreDelegationService {
       },
     )
   }
+  /** 应用到项目 on the result card (AGT-06). */
+  async apply(input: { runId: string; sessionId?: string | null }) {
+    const { record, run } = this.run(input.runId, input.sessionId)
+    this.access(record.id, input.sessionId, true)
+    this.options.assertMutation(record.owner.rootSessionId, 'integrate')
+    return this.options.service.applyResult(record.id, run.id, 'user')
+  }
+  /** 丢弃 / 清理 on the result card (AGT-06). */
+  async discard(input: { runId: string; sessionId?: string | null }) {
+    const { record, run } = this.run(input.runId, input.sessionId)
+    this.access(record.id, input.sessionId, true)
+    this.options.assertMutation(record.owner.rootSessionId, 'integrate')
+    return this.options.service.discardResult(record.id, run.id, 'user')
+  }
+  /** 撤销 after 应用到项目 (AGT-06). */
+  async undo(input: { runId: string; sessionId?: string | null }) {
+    const { record, run } = this.run(input.runId, input.sessionId)
+    this.access(record.id, input.sessionId, true)
+    this.options.assertMutation(record.owner.rootSessionId, 'integrate')
+    return this.options.service.undoResult(record.id, run.id)
+  }
+  /** 查看差异: one file of a run's result (AGT-06). */
+  async diff(input: {
+    runId: string
+    path: string
+    sessionId?: string | null
+  }) {
+    const { record, run } = this.run(input.runId, input.sessionId)
+    return this.options.service.resultDiff(record.id, run.id, input.path)
+  }
   async close(input: {
     id: string
     sessionId?: string | null

@@ -68,3 +68,19 @@ export function delegationNeedsExit(
   // Never dispatched before a restart: the queue waits for the user.
   return run.phase === 'queued' && record.dispatchPaused === true
 }
+
+/** A subagent result left unhandled this long asks to be cleaned up (AGT-06). */
+export const RESULT_CLEANUP_AFTER_MS = 14 * 24 * 60 * 60 * 1000
+
+/**
+ * The result still holds its isolated workspace and nobody applied or
+ * discarded it for 14 days: the result card offers 清理.
+ */
+export function resultNeedsCleanup(
+  result: { state: string; at: number } | undefined,
+  now: number = Date.now(),
+): boolean {
+  if (!result) return false
+  if (result.state !== 'ready' && result.state !== 'conflicted') return false
+  return now - result.at >= RESULT_CLEANUP_AFTER_MS
+}

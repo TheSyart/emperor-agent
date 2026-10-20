@@ -124,6 +124,13 @@ it('scheduler and ordinary children share global quota; stable Goal identity ret
     )
     await service.stopRoot('root')
     expect(service.hasOutstanding('root')).toBe(false)
+    // A settled read-only review is a text result (AGT-06: no receipt is
+    // collected unless 高级 › 验证后再应用 is on).
+    await expect(
+      service.verifyGoalCompletion({ id: 'g', revision: 9 }, 'root'),
+    ).resolves.toBeUndefined()
+    // With 验证后再应用 on, the receipt decides, as before.
+    config.verifyBeforeApply = true
     await expect(
       service.verifyGoalCompletion({ id: 'g', revision: 9 }, 'root'),
     ).rejects.toThrow('no current host acceptance')

@@ -85,6 +85,7 @@ export const executorConfigSchema = z
     touchedAt: z.number().int().nonnegative().optional(),
     upgradeNotice: z.literal('external-default-off').optional(),
     diagnosticsMode: z.boolean().optional(),
+    verifyBeforeApply: z.boolean().optional(),
   })
   .strict()
   .superRefine((c, ctx) => {
@@ -236,6 +237,7 @@ export class ExecutorConfigStore {
     delete next.upgradeNotice
     // Written only when on, so an older build can still read the file.
     if (!next.diagnosticsMode) delete next.diagnosticsMode
+    if (!next.verifyBeforeApply) delete next.verifyBeforeApply
     durableReplaceSync(this.file, JSON.stringify(next, null, 2) + '\n')
     return next
   }

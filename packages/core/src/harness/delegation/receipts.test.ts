@@ -1,5 +1,11 @@
 import { expect, it } from 'vitest'
-import { writeFileSync, readFileSync, existsSync, renameSync } from 'node:fs'
+import {
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  renameSync,
+  realpathSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { fixtureGit } from '../../workspace/delegation-test-fixture'
 import { receiptFixture } from './receipt-test-fixture'
@@ -103,9 +109,10 @@ it('captures a non-Git baseline before shared writes and excludes nested private
         workspace: 'shared-exclusive',
         base: 'committed',
       }),
+      // AGT-06: a write outside Git works in a copy of the folder.
       record = {
         ...fixtureDelegationRecord(),
-        cwd: temp.root,
+        cwd: lease.cwd,
         workspaceLeaseId: lease.id,
       },
       run = {
@@ -119,8 +126,11 @@ it('captures a non-Git baseline before shared writes and excludes nested private
         mutations,
         resolve: () => ({ record, run, lease }),
       })
-    writeFileSync(join(temp.root, 'plain.txt'), 'external changed input')
+    expect(lease.cwd).not.toBe(temp.root)
+    expect(existsSync(join(lease.cwd, 'private-state'))).toBe(false)
+    writeFileSync(join(lease.cwd, 'plain.txt'), 'external changed input')
     const receipt = await receipts.collect(run.id)
+    expect(receipt.originCwd).toBe(realpathSync(temp.root))
     expect(
       readFileSync(
         receipt.baseFiles.find((f) => f.path === 'plain.txt')!.blob,

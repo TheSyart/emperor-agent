@@ -745,6 +745,16 @@ export class HarnessHost {
             reason,
             signal,
           }),
+        // Outside Git a task defaults to a review in place (AGT-06).
+        parentInGit: (agent) =>
+          existsSync(
+            join(
+              workspaceMutationDomain(
+                this.sandbox.resolve({ session: agent.session }).workspaceRoot,
+              ),
+              '.git',
+            ),
+          ),
         // Plan mode explores read-only: external children default to review.
         parentReadOnly: (agent) =>
           this.sandbox.resolve({ session: agent.session }).mode ===
