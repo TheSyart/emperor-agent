@@ -354,7 +354,7 @@ export class SubagentManager {
     }
     this.deps.budget?.reserve(parent)
     const childId = `sub-${randomUUID()}`
-    const cwd = parent.session.header.cwd
+    const cwd = parent.session.cwd
     let session: Session
     if (request.mode === 'fork') {
       const boundary = lastCompletedTurnEnd(parent.session.events)

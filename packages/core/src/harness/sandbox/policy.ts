@@ -226,7 +226,7 @@ export class SandboxPolicyService {
         (session === undefined ? undefined : this.overrideOf(session)) ??
         this.defaultMode,
       workspaceRoot: resolvePath(
-        canonicalPath(session?.header.cwd ?? this.workspaceRoot),
+        canonicalPath(session?.cwd ?? this.workspaceRoot),
       ),
       ...(session === undefined ? {} : { sessionId: session.id }),
     }

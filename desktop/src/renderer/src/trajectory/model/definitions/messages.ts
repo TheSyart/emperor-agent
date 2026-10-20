@@ -107,6 +107,7 @@ const CONTEXT_EVENT_TYPES: ReadonlySet<string> = new Set([
   'permission/preset',
   'plan/mode',
   'sandbox/mode',
+  'working-directory/change',
   'agent/inbox/spliced',
   'instructions/baseline',
   'memory/baseline',
@@ -223,6 +224,11 @@ function eventFacts(
     return {
       label: 'Sandbox mode',
       text: `${event.data.mode}${event.data.source === undefined ? '' : ` · ${event.data.source}`}`,
+    }
+  if (isEvent(event, 'working-directory/change'))
+    return {
+      label: 'Working directory',
+      text: `${event.data.to}\n${event.data.reason} · from ${event.data.from}`,
     }
   if (isEvent(event, 'agent/inbox/spliced')) return inboxFacts(event.data)
   if (isEvent(event, 'instructions/baseline'))

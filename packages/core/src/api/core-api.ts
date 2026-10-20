@@ -681,6 +681,10 @@ export class CoreApi {
       managedEnvironment: kept.managedEnvironmentService,
     })
     this.workspaceBindings = new WorkspaceBindingStore(this.paths.stateRoot)
+    // A session in a managed worktree works there (KRN-11).
+    host.setWorktreeResolver((sessionId, projectRoot) =>
+      this.workspaceBindings.resolve(sessionId, projectRoot),
+    )
     this.gitReceipts = new GitOperationReceiptStore(this.paths.stateRoot)
     const resolveWorkspaceProject = (sessionId: string) => {
       const session = this.requireReadableSession(sessionId, 'workspace') as {
@@ -2635,13 +2639,18 @@ export class CoreApi {
     enterWorktree: (
       input: Parameters<WorkspaceGitService['enterWorktree']>[0],
     ) =>
-      this.withWorkspaceGitMutation(input.sessionId, () =>
-        this.workspaceGitService.enterWorktree(input),
-      ),
+      this.withWorkspaceGitMutation(input.sessionId, async () => {
+        const entered = await this.workspaceGitService.enterWorktree(input)
+        // The session's tools, sandbox and records move with it (KRN-11).
+        this.host.moveWorkingDirectory(input.sessionId, 'worktree-enter')
+        return entered
+      }),
     exitWorktree: (input: Parameters<WorkspaceGitService['exitWorktree']>[0]) =>
-      this.withWorkspaceGitMutation(input.sessionId, () =>
-        this.workspaceGitService.exitWorktree(input),
-      ),
+      this.withWorkspaceGitMutation(input.sessionId, async () => {
+        const left = await this.workspaceGitService.exitWorktree(input)
+        this.host.moveWorkingDirectory(input.sessionId, 'worktree-exit')
+        return left
+      }),
     pullRequest: (input: Parameters<WorkspaceGitService['pullRequest']>[0]) =>
       this.workspaceGitService.pullRequest(input),
     publishPreview: (
