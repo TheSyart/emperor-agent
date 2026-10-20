@@ -797,6 +797,13 @@ export async function installVisualCoreBridge(
           ...scheduler.status,
           jobs: jobs.length,
           enabled: jobs.filter((job) => job.enabled).length,
+          // A spec can mark the service as not started or with jobs set
+          // aside (KRN-10).
+          ...((
+            window as unknown as {
+              __visualSchedulerStatus?: Record<string, unknown>
+            }
+          ).__visualSchedulerStatus ?? {}),
         }
         // IPC results are structured clones: hand back a fresh copy.
         return JSON.parse(JSON.stringify(scheduler))

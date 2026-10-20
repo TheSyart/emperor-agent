@@ -172,6 +172,39 @@ for (const theme of ['dark', 'light'] as const) {
   })
 }
 
+test('scheduler notices and the 指定时间 check (KRN-10)', async ({ page }) => {
+  await page.addInitScript(() => {
+    ;(
+      window as unknown as { __visualSchedulerStatus?: unknown }
+    ).__visualSchedulerStatus = {
+      running: false,
+      startError:
+        '另一个 Emperor 进程（pid 4242）正在运行定时任务，本进程不启动定时任务',
+      rejectedJobs: 1,
+    }
+  })
+  const shell = await open(page, '/scheduler', { theme: 'light' })
+  await expect(shell.locator('[data-scheduler-notice="start"]')).toContainText(
+    'pid 4242',
+  )
+  await expect(
+    shell.locator('[data-scheduler-notice="rejected"]'),
+  ).toContainText('1 个定时任务无法读取')
+  await expect(jobRow(shell, 'job_daily_digest')).toBeVisible()
+  await shot(page, 'scheduler-notices-light')
+
+  await shell.locator('[data-action="create"]').click()
+  await page
+    .getByRole('menu', { name: '创建' })
+    .locator('[data-menu-item="blank"]')
+    .click()
+  const dialog = page.getByTestId('scheduler-job-dialog')
+  await dialog.getByRole('radio', { name: '指定时间' }).click()
+  await expect(dialog.getByText('请选择日期和时间')).toBeVisible()
+  await expect(page.locator('[data-action="create-job"]')).toBeDisabled()
+  await shot(page, 'scheduler-at-required-light')
+})
+
 test('scheduler row menu runs, pauses, resumes, creates and deletes', async ({
   page,
 }) => {
