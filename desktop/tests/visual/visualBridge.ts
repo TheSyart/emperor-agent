@@ -199,7 +199,11 @@ export async function installVisualCoreBridge(
       const visualPlanEnabled = visualParams.get('visualPlan') === 'on'
       const visualGoalPhase = visualParams.get('visualGoal')
       const visualTheme = visualParams.get('visualTheme')
-      const visualQueueEnabled = visualParams.get('visualQueue') === 'on'
+      // `?visualQueue=on`: one message queued behind a running turn;
+      // `held`: one waiting as 待发送 after the turn before it failed (KRN-02).
+      const visualQueueMode = visualParams.get('visualQueue')
+      const visualQueueEnabled =
+        visualQueueMode === 'on' || visualQueueMode === 'held'
       const visualControlMode = visualParams.get('visualControl')
       const visualProgressMode = visualParams.get('visualProgress')
       // Targets the Agent of chat-main controls: `agent` (one built-in
@@ -1908,6 +1912,8 @@ export async function installVisualCoreBridge(
         },
       ]
       const supportedGoalPhases = new Set([
+        'active',
+        'blocked',
         'contract',
         'planning',
         'executing',
@@ -1926,6 +1932,10 @@ export async function installVisualCoreBridge(
             status: 'active',
             phase: normalizedGoalPhase,
             outcome: '让 Composer 的 Goal 生命周期清晰、可控并且可恢复',
+            objective: '让 Composer 的 Goal 生命周期清晰、可控并且可恢复',
+            revision: 1,
+            roundsStarted: 2,
+            maxGoalRounds: 8,
             sessionId: 'build-ui',
             currentPlanId: visualPlanEnabled ? 'plan_visual' : null,
             cyclesUsed: 2,
@@ -2529,26 +2539,31 @@ export async function installVisualCoreBridge(
           github.activation = 'disabled'
         }
       }
-      const visualQueuedPrompts = visualQueueEnabled
-        ? [
-            {
-              id: 'prompt_visual_queue',
-              turnId: 'turn_visual_queue',
-              clientMessageId: 'prompt_visual_queue',
-              delivery: 'queue',
-              state: 'queued',
-              content: '继续补充视觉验收细节',
-              displayContent: '继续补充视觉验收细节',
-              supportsInterjection: true,
-              createdOrder: 1,
-              createdAt: now,
-              updatedAt: now,
-              attachmentIds: [],
-              requestedSkills: [],
-            },
-          ]
-        : []
-      if (visualQueueEnabled) {
+      let visualQueuedPrompts: Array<Record<string, unknown>> =
+        visualQueueEnabled
+          ? [
+              {
+                id: 'prompt_visual_queue',
+                turnId: 'turn_visual_queue',
+                clientMessageId: 'prompt_visual_queue',
+                delivery: 'queue',
+                state:
+                  visualQueueMode === 'held' ? 'failed-previous' : 'queued',
+                ...(visualQueueMode === 'held'
+                  ? { reason: 'previous-turn-failed' }
+                  : {}),
+                content: '继续补充视觉验收细节',
+                displayContent: '继续补充视觉验收细节',
+                supportsInterjection: true,
+                createdOrder: 1,
+                createdAt: now,
+                updatedAt: now,
+                attachmentIds: [],
+                requestedSkills: [],
+              },
+            ]
+          : []
+      if (visualQueueMode === 'on') {
         boot.runtime.busy = true
         boot.runtime.latestSeq = 2
         boot.runtime.events = [
@@ -4964,6 +4979,33 @@ export async function installVisualCoreBridge(
               )
               return ownerSessionId === 'build-ui' ? visualQueuedPrompts : []
             }
+            // The status bar's queue actions (UI-S04): recorded on
+            // `window.__visualQueueActions`, and the message leaves the list.
+            case 'chat.manageQueuedPrompt': {
+              const body = (args[0] || {}) as {
+                promptId?: string
+                action?: string
+              }
+              const record = window as unknown as {
+                __visualQueueActions?: Array<{
+                  promptId?: string
+                  action?: string
+                }>
+              }
+              record.__visualQueueActions = [
+                ...(record.__visualQueueActions ?? []),
+                { promptId: body.promptId, action: body.action },
+              ]
+              const known = visualQueuedPrompts.some(
+                (item) => item.id === body.promptId,
+              )
+              visualQueuedPrompts = visualQueuedPrompts.filter(
+                (item) => item.id !== body.promptId,
+              )
+              return known
+                ? { ok: true }
+                : { ok: false, reason: 'prompt_not_queued' }
+            }
             case 'projects.resolve':
               return project
             case 'projects.list':
@@ -6982,10 +7024,30 @@ export async function installVisualCoreBridge(
                     : boot.control.mode
                 boot.control.mode = 'plan'
               } else {
-                boot.control.mode = nextMode
+                boot.control.mode =
+                  nextMode === 'default'
+                    ? String(boot.control.previous_mode || 'ask_before_edit')
+                    : nextMode
                 boot.control.previous_mode = null
               }
-              return { ...boot.control }
+              // Like Core: `{ control }`, with the Plan flag.
+              boot.control.plan = nextMode === 'plan'
+              return { control: { ...boot.control } }
+            }
+            case 'goals.pause':
+            case 'goals.resume': {
+              const activeGoal = boot.goals.active as Record<
+                string,
+                unknown
+              > | null
+              if (!activeGoal) throw new Error('Goal is not active')
+              const nextGoal = {
+                ...activeGoal,
+                phase: operationKey === 'goals.pause' ? 'paused' : 'active',
+                revision: Number(activeGoal.revision ?? 0) + 1,
+              }
+              boot.goals.active = nextGoal as typeof boot.goals.active
+              return { accepted: true, goal: nextGoal }
             }
             case 'goals.cancel': {
               const activeGoal = boot.goals.active

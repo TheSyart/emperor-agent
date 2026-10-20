@@ -1136,20 +1136,24 @@ test('first-run model prompt opens the settings model section', async ({
   ).toBeVisible()
 })
 
-test('profile onboarding starts, defers and skips from the notice dock', async ({
+test('profile onboarding starts from the hero and stays in 记忆', async ({
   page,
 }) => {
   await open(page, '/chat/chat-main?visualProfile=pending', {
     width: 1280,
     height: 820,
   })
-  const notice = page.locator('.notice-dock')
-  await expect(notice).toBeVisible()
-  await notice.getByRole('button', { name: '开始访谈' }).click()
+  // UI-S04: the offer is on the hero of the empty chat (once), not a dock
+  // above every composer.
+  await expect(page.locator('.notice-dock')).toHaveCount(0)
+  const prompt = page.locator('.hero-profile-prompt')
+  await expect(prompt).toBeVisible()
+  await prompt.getByRole('button', { name: '开始访谈' }).click()
   const card = page.locator('[data-takeover="question"]')
   await expect(card).toBeVisible()
   await expect(card.getByText('我平时怎么称呼你？')).toBeVisible()
   await expect(card.getByRole('button', { name: '不再提醒' })).toBeVisible()
+  await expect(prompt).toHaveCount(0)
   await shot(page, 'profile-onboarding-question')
 
   await card
@@ -1157,9 +1161,9 @@ test('profile onboarding starts, defers and skips from the notice dock', async (
     .last()
     .click()
   await expect(card).toBeHidden()
-  await expect(notice).toBeVisible()
-  await notice.getByRole('button', { name: '不再提醒' }).click()
-  await expect(notice).toBeHidden()
+  // Deferred: the offer stays on this chat's hero (and nowhere else).
+  await expect(page.locator('.notice-dock')).toHaveCount(0)
+  await expect(prompt).toBeVisible()
 
   // The profile (and its interview) lives in 记忆 › 用户档案.
   await page.getByRole('button', { name: '设置', exact: true }).click()
@@ -1168,8 +1172,9 @@ test('profile onboarding starts, defers and skips from the notice dock', async (
     .getByRole('button', { name: '记忆', exact: true })
     .click()
   await page.getByRole('radio', { name: '用户档案' }).click()
-  await expect(page.getByText('已跳过')).toBeVisible()
-  await expect(page.getByRole('button', { name: '重新开始' })).toBeVisible()
+  const settings = page.getByTestId('settings-modal')
+  await expect(settings.getByText('待补充')).toBeVisible()
+  await expect(settings.getByRole('button', { name: '开始访谈' })).toBeVisible()
 })
 
 test('hooks editor: edit, validate, save, match and test-run', async ({

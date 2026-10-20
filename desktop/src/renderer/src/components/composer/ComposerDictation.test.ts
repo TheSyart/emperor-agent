@@ -146,6 +146,27 @@ async function startByButton(composer: ReturnType<typeof mount>) {
   await settle()
 }
 
+/** ⇧⌘D in the editor: with a draft the send key takes the mic's place (UI-S04). */
+function pressShortcut(composer: ReturnType<typeof mount>): void {
+  composer.view().dom.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'D',
+      code: 'KeyD',
+      metaKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    }),
+  )
+}
+
+async function startByShortcut(composer: ReturnType<typeof mount>) {
+  pressShortcut(composer)
+  await settle()
+  hear({ type: 'started', locale: 'zh-CN' })
+  await settle()
+}
+
 /**
  * Put the caret (or a selection) somewhere, as a click would: the editor
  * has focus, and jsdom's late selection events are over before it moves.
@@ -218,7 +239,8 @@ describe('dictation in the composer', () => {
     await settle()
     expect(composer.view().state.doc.textContent).toBe('你好。')
     expect(composer.draft()).toBeNull()
-    expect(composer.button('听写')).not.toBeNull()
+    // The text is in: send takes the mic's place (UI-S04), nothing is sent.
+    expect(composer.button('发送')).not.toBeNull()
     expect(composer.onSend).not.toHaveBeenCalled()
   })
 
@@ -246,7 +268,9 @@ describe('dictation in the composer', () => {
     const view = composer.view()
     typeInto(view, 'hello world')
     await placeCaret(view, 6)
-    await startByButton(composer)
+    // A draft: the send key holds the mic's place, the shortcut starts.
+    expect(composer.button('听写')).toBeNull()
+    await startByShortcut(composer)
     hear({ type: 'final', text: 'big' })
     hear({ type: 'ended', reason: 'stopped' })
     await settle()
@@ -254,7 +278,7 @@ describe('dictation in the composer', () => {
 
     await placeCaret(view, 11, 16)
     api.startDictation.mockResolvedValue({ ok: true, session: 'session-0002' })
-    composer.button('听写')!.click()
+    pressShortcut(composer)
     await settle()
     for (const listener of [...api.listeners])
       listener({
@@ -271,7 +295,7 @@ describe('dictation in the composer', () => {
     const composer = mount()
     const view = composer.view()
     typeInto(view, '/image-gen 画')
-    await startByButton(composer)
+    await startByShortcut(composer)
     typeInto(view, '一只')
     hear({ type: 'final', text: '猫' })
     await settle()
@@ -413,8 +437,9 @@ describe('the recording bar (RV-06)', () => {
     await settle()
     expect(composer.button('取消听写')).toBeNull()
     expect(composer.button('添加附件与能力')).not.toBeNull()
+    // Still empty: the mic holds the send slot (UI-S04).
     expect(composer.button('听写')).not.toBeNull()
-    expect(composer.button('发送')).not.toBeNull()
+    expect(composer.button('发送')).toBeNull()
   })
 
   it('draws the loudness: newest on the right, silence as dots, about 3 seconds', async () => {
@@ -477,7 +502,7 @@ describe('the recording bar (RV-06)', () => {
     const composer = mount()
     const view = composer.view()
     typeInto(view, '请注意：')
-    await startByButton(composer)
+    await startByShortcut(composer)
     hear({ type: 'partial', text: '今天的构建' })
     await settle()
     composer.button('结束听写并发送')!.click()
@@ -505,7 +530,8 @@ describe('the recording bar (RV-06)', () => {
     await settle()
     expect(composer.onError).toHaveBeenCalled()
     expect(composer.onSend).not.toHaveBeenCalled()
-    expect(composer.button('发送')).not.toBeNull()
+    // Nothing went in: the bottom row is back, with the mic in the send slot.
+    expect(composer.button('听写')).not.toBeNull()
   })
 
   it('names the shortcut on the stop button', async () => {

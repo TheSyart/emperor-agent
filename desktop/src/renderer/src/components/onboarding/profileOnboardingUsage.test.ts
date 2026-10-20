@@ -7,12 +7,14 @@ function source(path: string): string {
 }
 
 describe('profile onboarding renderer flow', () => {
-  it('shows a compact pending onboarding prompt in the chat view', () => {
+  it('offers the pending interview once, on the hero of an empty chat (UI-S04)', () => {
     const chat = source('../conversation/ConversationView.vue')
+    const prompt = source('../conversation/HeroProfilePrompt.vue')
 
-    expect(chat).toContain('showProfileOnboardingPrompt')
-    expect(chat).toContain('开始访谈')
-    expect(chat).toContain('不再提醒')
+    expect(chat).toContain('<HeroProfilePrompt')
+    expect(prompt).toContain('claimProfilePrompt')
+    expect(prompt).toContain('开始访谈')
+    expect(prompt).toContain('不再提醒')
   })
 
   it('gives the onboarding Ask takeover dedicated actions', () => {

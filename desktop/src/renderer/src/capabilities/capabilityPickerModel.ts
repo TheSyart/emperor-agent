@@ -1,6 +1,5 @@
 import { skillIdOf, type SlashPaletteItem } from '../commands'
-import { actionIcons, navIcon, toolIcon } from '../icons'
-import type { ToolInfo } from '../types'
+import { toolIcon } from '../icons'
 import type {
   CapabilityPickerGroup,
   CapabilityPickerItem,
@@ -13,107 +12,29 @@ import {
 
 export interface CapabilityPickerModelInput {
   commands: SlashPaletteItem[]
-  tools: ToolInfo[]
-  mcpContent?: string
-  /**
-   * The rich composer: Skills insert chips and MCP servers are not offered
-   * (they cannot be referenced; plugins take that place in RF-03). Off: the
-   * old `@skill()` / `@mcp()` markers.
-   */
-  chips?: boolean
-  /** Plugins for the 插件 group (rich composer only). */
+  /** Plugins for the 插件 group. */
   plugins?: readonly PluginChoice[]
 }
 
+/**
+ * The + menu's 插入 Skill 或插件 list (UI-S04): Skills as chips, then
+ * plugins. Attachments have their own + menu item; commands, Plan and Goal
+ * start with `/` (Plan is also in the permission menu).
+ */
 export function buildCapabilityPickerGroups(
   input: CapabilityPickerModelInput,
 ): CapabilityPickerGroup[] {
-  const commandItems = prioritizedCommands(input.commands)
   const skillItems = input.commands
     .filter((item) => item.kind === 'skill')
     .slice(0, 8)
-    .map(input.chips ? skillChipItem : skillPickerItem)
-  const mcpItems = input.chips
-    ? []
-    : mcpServerNames(input.tools, input.mcpContent).map(mcpPickerItem)
-  const pluginItems = input.chips
-    ? rankPluginChoices(input.plugins ?? [], '')
-        .slice(0, 8)
-        .map(pluginChipItem)
-    : []
-
+    .map(skillChipItem)
+  const pluginItems = rankPluginChoices(input.plugins ?? [], '')
+    .slice(0, 8)
+    .map(pluginChipItem)
   return [
-    {
-      label: '附件',
-      items: [
-        {
-          id: 'files',
-          action: 'files' as const,
-          label: '文件与图片',
-          description: '上传 PDF、图片、文档或数据文件',
-          meta: '本轮上下文',
-          icon: actionIcons.attach,
-          tone: 'red' as const,
-        },
-      ],
-    },
-    {
-      label: 'Skills',
-      items: skillItems,
-    },
-    {
-      label: '插件',
-      items: pluginItems,
-    },
-    {
-      label: 'MCP',
-      items: mcpItems,
-    },
-    {
-      label: '命令',
-      items: commandItems,
-    },
+    { label: 'Skills', items: skillItems },
+    { label: '插件', items: pluginItems },
   ].filter((group) => group.items.length)
-}
-
-function prioritizedCommands(
-  commands: SlashPaletteItem[],
-): CapabilityPickerItem[] {
-  const priority = ['/plan', '/goal', '/model', '/permissions']
-  return priority
-    .map((name) =>
-      commands.find((item) => item.kind === 'command' && item.name === name),
-    )
-    .filter((item): item is SlashPaletteItem => Boolean(item))
-    .map((item) => ({
-      id: item.id,
-      action:
-        item.name === '/plan'
-          ? ('activate_plan' as const)
-          : item.name === '/goal'
-            ? ('activate_goal' as const)
-            : ('insert_command' as const),
-      label: item.title,
-      description: item.description,
-      meta: item.name,
-      completion: item.completion,
-      icon: commandIcon(item.name),
-      tone: 'slate' as const,
-    }))
-}
-
-function skillPickerItem(item: SlashPaletteItem): CapabilityPickerItem {
-  const name = item.skillName || item.name.replace(/^\//, '')
-  return {
-    id: item.id,
-    action: 'insert_capability_token',
-    label: item.title,
-    description: item.description,
-    meta: item.tags || 'Skill',
-    completion: `@skill(${name})`,
-    icon: toolIcon('skill'),
-    tone: 'cyan',
-  }
 }
 
 /** A skill chip; also used by the composer's `/` lists. */
@@ -128,46 +49,4 @@ export function skillChipItem(item: SlashPaletteItem): CapabilityPickerItem {
     icon: toolIcon('skill'),
     tone: 'cyan',
   }
-}
-
-function mcpPickerItem(name: string): CapabilityPickerItem {
-  return {
-    id: `mcp:${name}`,
-    action: 'insert_capability_token',
-    label: name,
-    description: '引用这个 MCP 连接作为本轮外部能力上下文',
-    meta: 'MCP',
-    completion: `@mcp(${name})`,
-    icon: navIcon('mcp'),
-    tone: 'slate',
-  }
-}
-
-function mcpServerNames(tools: ToolInfo[], mcpContent?: string): string[] {
-  const names = new Set<string>()
-  for (const tool of tools) {
-    if (tool.source === 'mcp' && tool.server) names.add(tool.server)
-  }
-  for (const name of mcpServerNamesFromConfig(mcpContent)) {
-    names.add(name)
-  }
-  return [...names].sort((a, b) => a.localeCompare(b))
-}
-
-function mcpServerNamesFromConfig(mcpContent?: string): string[] {
-  if (!mcpContent?.trim()) return []
-  try {
-    const parsed = JSON.parse(mcpContent) as { servers?: unknown }
-    if (!parsed.servers || typeof parsed.servers !== 'object') return []
-    return Object.keys(parsed.servers as Record<string, unknown>)
-  } catch {
-    return []
-  }
-}
-
-function commandIcon(name: string) {
-  if (name === '/plan') return actionIcons.modePlan
-  if (name === '/permissions') return actionIcons.modeAskBeforeEdit
-  if (name === '/model') return actionIcons.commandModel
-  return toolIcon('shell')
 }
