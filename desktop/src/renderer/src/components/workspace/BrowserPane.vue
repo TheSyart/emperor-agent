@@ -692,7 +692,7 @@ function hostOf(url: string): string {
 }
 
 .browser-download[data-tone='done'] .download-glyph {
-  color: rgb(var(--state-ok));
+  color: rgb(var(--ok));
 }
 
 .browser-download[data-tone='blocked'] .download-glyph,

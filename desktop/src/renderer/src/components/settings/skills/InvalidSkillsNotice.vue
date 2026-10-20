@@ -117,7 +117,7 @@ const listId = 'invalid-skills-list'
   display: flex;
   flex-direction: column;
   min-width: 0;
-  border: 1px solid rgb(var(--state-warn) / 0.35);
+  border: 1px solid rgb(var(--warn) / 0.35);
   border-radius: var(--radius-card);
   background: rgb(var(--state-warn-soft));
 }
@@ -146,7 +146,7 @@ const listId = 'invalid-skills-list'
 .glyph {
   flex: none;
   margin-top: var(--space-0-5);
-  color: rgb(var(--state-warn));
+  color: rgb(var(--warn));
 }
 
 .text {

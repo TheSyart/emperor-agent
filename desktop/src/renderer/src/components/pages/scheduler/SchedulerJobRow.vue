@@ -189,7 +189,7 @@ function onMenu(event: MouseEvent) {
 }
 
 .job-row[data-state='completed'] .glyph {
-  color: rgb(var(--state-ok));
+  color: rgb(var(--ok));
 }
 
 .text {

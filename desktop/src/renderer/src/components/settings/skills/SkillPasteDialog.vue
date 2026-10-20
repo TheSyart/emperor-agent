@@ -296,7 +296,7 @@ async function submit(overwrite = false) {
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-3);
   padding: var(--space-2-5) var(--space-3);
-  border: 1px solid rgb(var(--state-warn) / 0.35);
+  border: 1px solid rgb(var(--warn) / 0.35);
   border-radius: var(--radius-row);
   background: rgb(var(--state-warn-soft));
 }

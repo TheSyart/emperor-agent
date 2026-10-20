@@ -47,7 +47,7 @@ const dot = computed<DotState>(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid rgb(var(--approval) / 0.35);
+  border: 1px solid rgb(var(--attention) / 0.35);
   border-radius: var(--radius-card);
   background: rgb(var(--surface-base));
 }

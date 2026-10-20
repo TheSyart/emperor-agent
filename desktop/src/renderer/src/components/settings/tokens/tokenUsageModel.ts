@@ -66,8 +66,8 @@ export const SERIES_COLORS = [
   'rgb(var(--tone-cyan))',
   'rgb(var(--accent))',
   'rgb(var(--tone-violet))',
-  'rgb(var(--state-warn))',
-  'rgb(var(--state-ok))',
+  'rgb(var(--warn))',
+  'rgb(var(--ok))',
   'rgb(var(--tone-blue))',
 ] as const
 export const OTHER_COLOR = 'rgb(var(--text-3))'
@@ -195,7 +195,7 @@ export function usageComposition(totals: UsageTotals) {
     cache_create: totals.cacheCreate,
   })
   const colors: Record<string, string> = {
-    cache_hit: 'rgb(var(--state-ok))',
+    cache_hit: 'rgb(var(--ok))',
     cache_miss: 'rgb(var(--tone-blue))',
     output: 'rgb(var(--accent))',
   }
@@ -551,7 +551,7 @@ export function cacheTrend(
         id: 'cacheRead',
         label: '缓存读取',
         values: buckets.map((bucket) => bucket.cacheRead),
-        color: 'rgb(var(--state-ok))',
+        color: 'rgb(var(--ok))',
         dash: '',
       },
       {

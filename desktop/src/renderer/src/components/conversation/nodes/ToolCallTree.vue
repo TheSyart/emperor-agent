@@ -317,7 +317,7 @@ const hasChildren = computed(
 }
 
 [data-outcome='pending'] .sub-leading {
-  color: rgb(var(--approval));
+  color: rgb(var(--attention));
 }
 
 .sub-title {

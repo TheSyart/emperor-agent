@@ -128,7 +128,7 @@ function decide(action: ApprovalAction) {
 .card {
   width: 100%;
   max-width: var(--chat-content-width, 748px);
-  border: 1px solid rgb(var(--approval) / 0.45);
+  border: 1px solid rgb(var(--attention) / 0.45);
   border-radius: var(--radius-takeover);
   background: rgb(var(--input-major));
   box-shadow: var(--shadow-lv2);

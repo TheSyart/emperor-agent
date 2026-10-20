@@ -246,7 +246,7 @@ const resultJson = computed(() =>
   gap: var(--space-2-5);
   margin-top: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  border: 1px solid rgb(var(--state-warn) / 0.4);
+  border: 1px solid rgb(var(--warn) / 0.4);
   border-radius: var(--radius-card);
   background: rgb(var(--state-warn-soft));
 }

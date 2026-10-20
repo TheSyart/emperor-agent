@@ -58,7 +58,7 @@ function dismiss(): void {
   border-radius: var(--radius-pill);
   background: rgb(var(--attention-soft));
   color: rgb(var(--approval-line));
-  box-shadow: inset 0 0 0 1px rgb(var(--approval) / 0.3);
+  box-shadow: inset 0 0 0 1px rgb(var(--attention) / 0.3);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 500;

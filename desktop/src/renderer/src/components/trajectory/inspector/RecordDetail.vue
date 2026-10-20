@@ -558,7 +558,7 @@ function openCall(callId: string): void {
 .notice {
   margin: var(--space-2) var(--space-3-5) 0;
   padding: var(--space-1-5) var(--space-2-5);
-  border: 1px solid color-mix(in srgb, rgb(var(--approval)) 40%, transparent);
+  border: 1px solid color-mix(in srgb, rgb(var(--attention)) 40%, transparent);
   border-radius: var(--radius-row);
   color: rgb(var(--approval-strong));
   background: rgb(var(--attention-soft));

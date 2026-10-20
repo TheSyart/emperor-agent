@@ -150,7 +150,7 @@ function onCommentKeydown(event: KeyboardEvent) {
   width: 100%;
   max-width: var(--chat-content-width, 748px);
   max-height: min(60vh, 520px);
-  border: 1px solid rgb(var(--approval) / 0.45);
+  border: 1px solid rgb(var(--attention) / 0.45);
   border-radius: var(--radius-takeover);
   background: rgb(var(--input-major));
   box-shadow: var(--shadow-lv2);

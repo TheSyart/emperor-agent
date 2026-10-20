@@ -84,6 +84,6 @@ withDefaults(
 }
 
 .issue[data-tone='warn']::before {
-  background: rgb(var(--state-warn));
+  background: rgb(var(--warn));
 }
 </style>

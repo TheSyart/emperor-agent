@@ -80,11 +80,11 @@ withDefaults(
 .ds-chip[data-tone='approval'] {
   color: rgb(var(--approval-line));
   background: rgb(var(--attention-soft));
-  box-shadow: inset 0 0 0 1px rgb(var(--approval) / 0.35);
+  box-shadow: inset 0 0 0 1px rgb(var(--attention) / 0.35);
 }
 
 .ds-chip[data-tone='approval']:hover:not(:disabled) {
-  background: rgb(var(--approval) / 0.16);
+  background: rgb(var(--attention) / 0.16);
 }
 
 .ds-chip[data-tone='accent'] {
