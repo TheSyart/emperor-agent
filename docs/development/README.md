@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：贡献者、维护者<br>
-> 最后核验：2026-10-15<br>
+> 最后核验：2026-10-21<br>
 > 事实源：根目录与 `desktop/package.json`、`packages/core/package.json`、`Makefile`
 
 这里提供源码开发的最短入口，并维护公共的工程约束、关键目录和禁止提交项；系统边界先读[架构总览](../architecture/overview.md)。
@@ -50,6 +50,7 @@ npm --prefix desktop run package:verify
 - 打包出的应用不签名（[项目决定](../release/preview-release-runbook.md#发布包不签名)），本地打包和 GitHub 发布都用 Preview 配置 `desktop/electron-builder.preview.cjs`：它不带签名身份，打包后做 ad-hoc 封签：先翻转 Electron fuses，再由内到外给每段代码签上 hardened runtime。要 dmg / zip 时，在 `desktop/` 下先 `npm run build`，再运行 `npx electron-builder --config electron-builder.preview.cjs --mac dmg zip --arm64 --publish never`，产物在 `desktop/dist/`，文件名带 `UNSIGNED-PREVIEW`。不要给打包配置签名身份（`CSC_*`、`EMPEROR_DEV_SIGN_IDENTITY`）。`npm run dist` 走冻结的签名发布链，没有证书会直接失败，不要用。
 - 修改 Terminal 时还要运行 `npm --prefix desktop run terminal:smoke`，并在目标 Electron ABI 下创建真实 PTY；afterPack 必须验证目标 platform/arch 对应的 `pty.node`（Unix 还包括可执行 `spawn-helper`），三平台 Preview candidate 必须完成 native rebuild/package smoke。
 - 文档改动至少运行 `npm run format:check`、`git diff --check` 和相关 contract test。
+- CI 只跑 macOS，每个 job 调用 `scripts/ci/` 里的一个脚本：PR gate、nightly、每周模型元数据和发布前的 nightly 检查分别做什么、怎样在本机重跑，见 [CI 门禁](ci.md)。`package:verify` 的打包冒烟还检查 Native Messaging host 握手、`app://` 路径穿越、主窗口关闭后重开、正常退出，以及在 0.1.0-preview.4 的数据目录上启动。
 
 对话里的资源身份、工具展示元数据、SVG 图标与按需详情接口见[对话资源展示契约](conversation-resources.md)。
 
