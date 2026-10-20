@@ -88,8 +88,8 @@ const acceptanceLabel = computed(
   () =>
     ({
       unverified: '交付前待检查',
-      passed: '验收通过',
-      failed: '验收失败',
+      passed: '验证通过',
+      failed: '验证失败',
       needs_user: '需要处理',
     })[acceptance.value],
 )
@@ -289,7 +289,7 @@ const FAILURE: Record<string, [reason: string, next: string]> = {
     '订阅账号：在终端运行 claude setup-token，把新令牌粘贴到 设置 › 子智能体 的「设置令牌」；API Key：在那里粘贴新的 ANTHROPIC_API_KEY。',
   ],
   AUTH_REQUIRED: [
-    '执行器没有可用的登录。',
+    '子智能体没有可用的登录。',
     '在 设置 › 子智能体 设置令牌，然后让主会话重试。',
   ],
   RATE_LIMITED: [
@@ -310,7 +310,7 @@ const FAILURE: Record<string, [reason: string, next: string]> = {
   ],
   EXECUTOR_TURN_FAILED: [
     '子智能体这一轮执行失败。',
-    '查看下面的执行器报告和输出，修正后让主会话重试。',
+    '查看下面的子智能体报告和输出，修正后让主会话重试。',
   ],
 }
 function failureLabel(code: string): string {
@@ -392,11 +392,11 @@ function costText(usage: {
           "
           size="sm"
           @click="emit('configure')"
-          >打开执行器设置</Button
+          >打开子智能体设置</Button
         >
       </p>
       <p v-if="run?.summary" class="external-note">
-        执行器报告：{{ run.summary }}
+        子智能体报告：{{ run.summary }}
       </p>
       <p class="external-path">成果目录 · {{ record?.cwd }}</p>
       <p v-if="run?.usage" class="external-note" data-run-usage>
@@ -430,7 +430,7 @@ function costText(usage: {
       </div>
       <p v-if="needsExit" class="external-note" data-needs-exit>
         这次运行没有正常结束（例如 Emperor
-        或电脑重启过，或无法确认它已停止）。确认不再需要后，可以标记为已结束：释放它占用的工作区，Goal
+        或电脑重启过，或无法确认它已停止）。确认不再需要后，可以标记为已结束：释放它占用的工作区，目标
         可以继续；保留的文件不受影响。<Button
           data-abandon-run
           size="sm"
@@ -451,7 +451,7 @@ function costText(usage: {
         }}
       </p>
       <p class="external-note">
-        请返回主会话回答问题或继续派工。<Button size="sm" @click="returnRoot"
+        请返回主会话回答问题或继续安排任务。<Button size="sm" @click="returnRoot"
           >返回主会话</Button
         >
       </p>
@@ -465,7 +465,7 @@ function costText(usage: {
         class="external-note"
         data-text-result
       >
-        结果已返回，可在主会话继续派工。
+        结果已返回，可在主会话继续安排任务。
       </p>
       <details
         v-if="receipt && !hasFileDelivery && receipt.excluded.length"
@@ -490,7 +490,7 @@ function costText(usage: {
           @click="action(() => collectDelegation({ runId, sessionId }))"
           >收集成果</Button
         ><template v-if="receipt"
-          ><p class="external-id">结果树 · {{ receipt.resultTreeDigest }}</p>
+          ><p class="external-id">成果 · {{ receipt.resultTreeDigest }}</p>
           <ul class="external-files">
             <li v-for="file in receipt.changedFiles" :key="file.path">
               {{ file.status }} · {{ file.path
@@ -529,9 +529,9 @@ function costText(usage: {
               :key="index"
             >
               {{
-                evidence.source === 'host-verified' ? '宿主验证' : '执行器自报'
+                evidence.source === 'host-verified' ? '宿主验证' : '子智能体自报'
               }}
-              · exit {{ evidence.exitCode ?? '未知' }} ·
+              · 退出码 {{ evidence.exitCode ?? '未知' }} ·
               {{ evidence.argv.join(' ') }}
               <p class="external-id">
                 {{ evidence.cwd }} · {{ evidence.treeDigest }}
@@ -542,7 +542,7 @@ function costText(usage: {
             <summary>独立验证当前成果</summary>
             <div class="external-form">
               <label
-                >验收要求<TextField
+                >验证要求<TextField
                   v-model="criterion"
                   :disabled="busy" /></label
               ><label
@@ -566,7 +566,7 @@ function costText(usage: {
                 v-model="reviewed"
                 class="external-check"
                 :disabled="busy"
-                >我已审查上面的结果树</Checkbox
+                >我已检查上面的成果</Checkbox
               ><Button
                 size="sm"
                 variant="secondary"
@@ -605,7 +605,7 @@ function costText(usage: {
           {{ preview.target?.indexDigest ?? '无' }}
         </p>
         <p class="external-id">
-          预览版本 {{ preview.revision }} · 整合结果树 {{ preview.treeDigest }}
+          预览版本 {{ preview.revision }} · 整合成果 {{ preview.treeDigest }}
         </p>
         <p v-if="preview.verificationId" class="external-id">
           预览验证 · {{ preview.verificationId }}
@@ -632,7 +632,7 @@ function costText(usage: {
           "
           class="external-form"
         >
-          明确接受本项失败的处置理由（填写后关闭会话，Goal 才能将其视为已处置）
+          明确接受本项失败的处置理由（填写后关闭会话，目标才能将其视为已处置）
           <TextField
             v-model="failureDisposition"
             aria-label="必需任务失败处置理由"
@@ -652,7 +652,7 @@ function costText(usage: {
           >应用此预览到原工作区</Button
         >
         <p class="external-note">
-          预览和双方成果目录会保留。应用前会重新检查原工作区、预览版本和验收证据。
+          预览和双方成果目录会保留。应用前会重新检查原工作区、预览版本和验证证据。
         </p>
       </section>
       <p v-if="record?.availability === 'closed'" class="external-note">

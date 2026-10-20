@@ -215,7 +215,7 @@ export function useComposerController(
       if (drafts.value.length > 0 || normalized.references.length > 0) {
         emit(
           'error',
-          'Goal Outcome 暂仅支持纯文字；请先移除附件或 Skill 引用。',
+          '目标描述暂仅支持纯文字；请先移除附件或 Skill 引用。',
         )
         return
       }

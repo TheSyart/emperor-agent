@@ -441,7 +441,7 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
       class="pane"
       role="grid"
       tabindex="0"
-      aria-label="Trajectory ledger"
+      aria-label="轨迹记录"
       :aria-rowcount="layout.rows.length"
       :aria-activedescendant="
         focusPosition >= 0 ? `traj-row-${focusPosition}` : undefined
@@ -465,7 +465,7 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
         <span v-if="openState === 'error'" class="error-text">{{
           controller.windowState.value.error ?? 'Failed to load trajectory'
         }}</span>
-        <template v-else> <Spinner size="sm" />Loading trajectory… </template>
+        <template v-else> <Spinner size="sm" />正在加载轨迹… </template>
       </div>
       <div v-if="hasMore" class="history-row" data-history-load>
         <button
@@ -482,7 +482,7 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
       </div>
       <EmptyState
         v-if="openState === 'open' && layout.rows.length === 0"
-        title="No trajectory records yet"
+        title="还没有轨迹记录"
       />
       <RecycleScroller
         v-if="virtual"

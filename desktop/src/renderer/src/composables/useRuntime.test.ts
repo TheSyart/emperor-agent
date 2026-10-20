@@ -322,12 +322,12 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(wsCtor).not.toHaveBeenCalled()
     expect(runtime.status.value).toBe('error')
     expect(runtime.pending).toMatchObject({
-      label: '桌面 IPC 不可用',
-      detail: '请在 Electron 桌面窗口中使用；普通浏览器没有 CoreApi bridge。',
+      label: '无法连接 Emperor 核心',
+      detail: '请在 Emperor 桌面窗口中使用；普通浏览器连不上 Emperor 核心。',
       tone: 'error',
     })
     expect(showToast).toHaveBeenCalledWith(
-      '桌面 IPC 不可用，请在 Electron 桌面窗口中使用',
+      '无法连接 Emperor 核心：请在 Emperor 桌面窗口中打开。',
     )
   })
 

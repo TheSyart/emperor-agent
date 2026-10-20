@@ -443,18 +443,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section ref="root" class="traj-timeline" aria-label="Trajectory timeline">
+  <section ref="root" class="traj-timeline" aria-label="轨迹时间线">
     <div class="plot">
       <div class="labels" aria-hidden="true">
-        <span>Input</span>
-        <span>Model</span>
-        <span>Tools</span>
+        <span>输入</span>
+        <span>模型</span>
+        <span>工具</span>
       </div>
       <div
         ref="track"
         class="track"
         tabindex="0"
-        aria-label="Timeline overview; drag horizontally to focus events"
+        aria-label="时间线概览，左右拖动聚焦事件"
         :data-panning="panning || undefined"
         :data-zoomed="viewport !== null || undefined"
         @keydown="onKeydown"
@@ -466,13 +466,13 @@ onBeforeUnmount(() => {
         @dblclick.prevent="emit('range-change', null)"
         @contextmenu.prevent
       >
-        <span v-if="model === null" class="empty">No timing data</span>
+        <span v-if="model === null" class="empty">没有计时数据</span>
         <button
           v-if="showEarlier"
           type="button"
           class="earlier"
-          aria-label="Load earlier history"
-          title="Click to load earlier history"
+          aria-label="加载更早的记录"
+          title="点击加载更早的记录"
           @pointerdown.stop
           @click="emit('load-earlier')"
         >

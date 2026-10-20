@@ -18,9 +18,9 @@ const columns = computed(() => {
   const count = (value: number | undefined) =>
     value === undefined ? '—' : formatCount(value)
   return [
-    { label: 'Input', value: count(props.totals.input) },
-    { label: 'Output', value: count(props.totals.output) },
-    { label: 'Think', value: count(props.totals.think) },
+    { label: '输入', value: count(props.totals.input) },
+    { label: '输出', value: count(props.totals.output) },
+    { label: '思考', value: count(props.totals.think) },
     {
       label: 'Time',
       value:

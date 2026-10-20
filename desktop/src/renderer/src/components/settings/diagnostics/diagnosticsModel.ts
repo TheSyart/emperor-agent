@@ -687,7 +687,7 @@ function contextExplanationGroup(
       rows: [
         {
           id: 'context-mode',
-          label: 'Context Plan',
+          label: '上下文计划',
           value: String(explanation.mode || status),
           detail: contextModeDetail(explanation),
           tone: status === 'ok' ? 'ok' : diagnosticStatusTone(status),
@@ -717,7 +717,7 @@ function contextExplanationGroup(
                   `${String(item.kind || 'unknown')}: ${String(item.reason || '')}`.trim(),
                 )
                 .join(' · ')
-            : '当前 ContextPlan 没有记录被策略排除的上下文',
+            : '当前上下文计划没有记录被策略排除的上下文',
           tone: omitted.length ? 'warn' : 'ok',
         },
         {
@@ -751,7 +751,7 @@ function contextExplanationGroup(
         },
         {
           id: 'context-checkpoint',
-          label: 'Turn Checkpoint',
+          label: '回合检查点',
           value: diagnosticStatusText(
             recordValue(explanation.checkpoint).status,
           ),
@@ -1273,9 +1273,9 @@ function subagentSupervisorRow(
     ).length
     return {
       id: 'subagent-supervisor',
-      label: '子代理',
+      label: '子智能体',
       value: `${running} 个运行中 · 共 ${value.length} 个`,
-      detail: '当前会话树中的子代理',
+      detail: '当前会话树中的子智能体',
       tone: 'ok',
     }
   }
@@ -1291,7 +1291,7 @@ function subagentSupervisorRow(
     sessions.some(([, count]) => maxPerSession > 0 && count >= maxPerSession)
   return {
     id: 'subagent-supervisor',
-    label: '子代理',
+    label: '子智能体',
     value: supervisor
       ? `${active} active · ${active}/${maxGlobal} capacity`
       : '未返回',

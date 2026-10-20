@@ -25,7 +25,7 @@ export function createGoalCaptureController<TResult>(
 
   function arm(): { ok: boolean; error?: string } {
     if (options.hasActiveGoal())
-      return { ok: false, error: '当前会话已有 active Goal。' }
+      return { ok: false, error: '当前会话已有进行中的目标。' }
     state.value = {
       sessionId: options.currentSessionId(),
       status: 'armed',
@@ -39,12 +39,12 @@ export function createGoalCaptureController<TResult>(
 
   async function start(outcome: string): Promise<TResult> {
     const normalized = outcome.trim()
-    if (!normalized) throw new Error('Outcome 不能为空。')
+    if (!normalized) throw new Error('目标描述不能为空。')
     if (
       state.value.status !== 'armed' ||
       state.value.sessionId !== options.currentSessionId()
     )
-      throw new Error('当前会话未进入 Goal 待输入状态。')
+      throw new Error('当前会话未进入目标待输入状态。')
 
     const sessionId = state.value.sessionId
     state.value = { sessionId, status: 'starting' }

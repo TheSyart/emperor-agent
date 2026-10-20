@@ -1,5 +1,5 @@
 // Trajectory list fold (ported from the dsh ui-trajectory layout): turn →
-// Message / Step N / Compaction N groups → records. Expands assistant
+// 消息 / 第 N 步 / 压缩 #N groups → records. Expands assistant
 // blocks, hangs usage on the Message record, derives own durations, adds the
 // in-flight partial and running calls, and describes each group by its wall
 // span and tool histogram.
@@ -31,9 +31,9 @@ import type {
   TrajectoryToolResultNode,
 } from './contract'
 import type { TrajectoryCellProps, TrajectorySourceBlock } from './record'
-import { formatElapsedSeconds } from './record'
+import { formatElapsedSeconds, trajectoryStepTitle } from './record'
 
-/** One Message, Step or Compaction group inside a turn. */
+/** One 消息, 第 N 步 or 压缩 #N group inside a turn. */
 export interface TrajectoryGroupModel {
   title: string
   description?: string
@@ -242,16 +242,16 @@ export function deriveTrajectoryLayout(
   const pushMessage = (turn: number, laid: LaidCell) => {
     const groups = bucket(turn).groups
     const last = groups.at(-1)
-    if (last?.title === 'Message') {
+    if (last?.title === '消息') {
       last.laid.push(laid)
       return
     }
-    groups.push({ title: 'Message', laid: [laid] })
+    groups.push({ title: '消息', laid: [laid] })
   }
   const pushStep = (turn: number, step: number, laid: readonly LaidCell[]) => {
     if (laid.length === 0) return
     const groups = bucket(turn).groups
-    const title = `Step ${step}`
+    const title = trajectoryStepTitle(step)
     const existing = groups.find((group) => group.title === title)
     if (existing !== undefined) {
       existing.laid.push(...laid)
@@ -266,7 +266,7 @@ export function deriveTrajectoryLayout(
   ) => {
     if (laid.length === 0) return
     const groups = bucket(turn).groups
-    const title = `Step ${step}`
+    const title = trajectoryStepTitle(step)
     const existing = groups.find((group) => group.title === title)
     if (existing === undefined) {
       groups.push({ title, laid: [...laid] })
@@ -405,7 +405,7 @@ export function deriveTrajectoryLayout(
           request.status === 'running'
             ? 'Compacting context…'
             : request.status === 'error'
-              ? (request.error ?? 'Compaction failed')
+              ? (request.error ?? '压缩失败')
               : request.summary === undefined
                 ? 'Context compacted'
                 : '',
@@ -434,7 +434,7 @@ export function deriveTrajectoryLayout(
       const compaction: TurnBucket = {
         groups: [
           {
-            title: `Compaction ${request.startSeq}`,
+            title: `压缩 #${request.startSeq}`,
             laid: [{ absTime: finiteTime(request.startedAt), cell }],
           },
         ],
@@ -917,10 +917,10 @@ function summarizeAssistantActivity(
 }
 
 function promptChangeLabel(change: RequestPromptChange): string {
-  if (change.kind === 'initial') return 'Initial System Prompt'
-  if (change.kind === 'system') return 'System Prompt Updated'
-  if (change.kind === 'tools') return 'Tools Updated'
-  return 'System Prompt and Tools Updated'
+  if (change.kind === 'initial') return '初始系统提示词'
+  if (change.kind === 'system') return '系统提示词已更新'
+  if (change.kind === 'tools') return '工具已更新'
+  return '系统提示词与工具已更新'
 }
 
 function assistantSourceBlock(

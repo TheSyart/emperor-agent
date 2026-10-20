@@ -36,7 +36,7 @@ export const STORAGE_CATEGORY_TEXT: Record<
   },
   delegations: {
     title: '委派',
-    description: 'Claude Code、Codex 等外部执行器的隔离目录、回执与成果',
+    description: 'Claude Code、Codex 等外部子智能体的隔离目录、回执与成果',
   },
   other: {
     title: '其他',

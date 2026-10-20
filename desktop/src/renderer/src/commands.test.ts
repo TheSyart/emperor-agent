@@ -54,7 +54,7 @@ describe('Core-owned slash palette projection', () => {
         commandId: 'skill.user.audit',
         name: '/audit',
         title: 'Audit',
-        sourceLabel: 'Personal',
+        sourceLabel: '个人',
         kind: 'skill',
       },
     ])

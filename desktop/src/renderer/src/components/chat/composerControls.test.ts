@@ -130,8 +130,8 @@ describe('composer control model', () => {
 
   it('uses pause semantics while the owner session Goal is running', () => {
     expect(composerStopPresentation(true)).toEqual({
-      title: '暂停当前 Goal',
-      label: '暂停 Goal',
+      title: '暂停当前目标',
+      label: '暂停目标',
     })
     expect(composerStopPresentation(false).title).toBe('停止当前任务')
   })

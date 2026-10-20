@@ -2,7 +2,7 @@
 /**
  * GitBranchMenu — the 审查 pane's 「分支名 ▾」 button and every Git action
  * behind it (UI-S06): 切换分支 ▸ (the branch list), 新建分支… (a name box),
- * Fetch, Pull, Push, 比较分支 ↗ (the provider's compare page) and the
+ * 获取 (fetch), 拉取 (pull), 推送 (push), 比较分支 ↗ (the provider's compare page) and the
  * worktree: 新建并进入, or 离开 / 安全删除 while in one. These are also the
  * writes the environment card's 「…」 menu used to hold.
  *
@@ -157,7 +157,7 @@ async function create(): Promise<void> {
       description="获取远端的最新引用"
       @select="review.fetchRemote"
     >
-      Fetch
+      获取
       <template #icon><RefreshCw :size="15" /></template>
     </MenuItem>
     <MenuItem
@@ -166,7 +166,7 @@ async function create(): Promise<void> {
       :description="pullHint"
       @select="review.pull"
     >
-      Pull
+      拉取
       <template #icon><ArrowDownToLine :size="15" /></template>
     </MenuItem>
     <MenuItem
@@ -175,7 +175,7 @@ async function create(): Promise<void> {
       :description="pushHint"
       @select="review.push"
     >
-      Push
+      推送
       <template #icon><ArrowUpFromLine :size="15" /></template>
     </MenuItem>
     <MenuItem variant="separator" />

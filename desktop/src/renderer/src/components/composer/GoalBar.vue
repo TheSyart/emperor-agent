@@ -56,9 +56,9 @@ function runAction(action: GoalCardAction): void {
 }
 
 function actionLabel(action: GoalCardAction): string {
-  if (action === 'resume') return '恢复 Goal'
-  if (action === 'pause') return '暂停 Goal'
-  return confirmCancel.value ? '确认清除 Goal' : '清除 Goal'
+  if (action === 'resume') return '恢复目标'
+  if (action === 'pause') return '暂停目标'
+  return confirmCancel.value ? '确认清除目标' : '清除目标'
 }
 </script>
 
@@ -67,7 +67,7 @@ function actionLabel(action: GoalCardAction): string {
     v-if="!model.terminal"
     class="goal-dock"
     :data-phase="goal.phase"
-    aria-label="当前 Goal"
+    aria-label="当前目标"
   >
     <div class="bar" role="status">
       <DsGoal :size="14" class="glyph" aria-hidden="true" />
@@ -83,7 +83,7 @@ function actionLabel(action: GoalCardAction): string {
           <IconButton
             v-if="action === 'cancel'"
             class="icon"
-            label="编辑 Goal"
+            label="编辑目标"
             size="xs"
             :disabled="Boolean(actionPending)"
             @click="emit('edit')"

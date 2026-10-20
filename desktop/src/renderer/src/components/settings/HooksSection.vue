@@ -43,7 +43,7 @@ useSettingsHeader({
       v-model="activeTab"
       :tabs="tabs"
       class="hooks-tabs"
-      aria-label="Hooks views"
+      aria-label="Hooks 视图"
     />
 
     <div v-if="error" class="hooks-alert" role="alert">

@@ -14,7 +14,7 @@ const unix = ref(false)
 
 <template>
   <div>
-    <dt>Started</dt>
+    <dt>开始</dt>
     <dd>
       <button
         v-if="
@@ -29,7 +29,7 @@ const unix = ref(false)
       >
         {{ unix ? (timestamp / 1000).toFixed(3) : formatStartedAt(timestamp) }}
       </button>
-      <template v-else>Not available</template>
+      <template v-else>不可用</template>
     </dd>
   </div>
 </template>

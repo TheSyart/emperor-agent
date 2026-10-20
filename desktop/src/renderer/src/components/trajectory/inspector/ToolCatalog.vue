@@ -14,7 +14,7 @@ defineProps<{ tools: readonly ToolSchema[] }>()
 </script>
 
 <template>
-  <p v-if="tools.length === 0" class="no-payload">No tools in this request</p>
+  <p v-if="tools.length === 0" class="no-payload">本次请求没有工具</p>
   <div v-else class="traj-tool-catalog">
     <details
       v-for="(tool, index) in tools"

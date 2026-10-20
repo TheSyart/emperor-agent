@@ -13,7 +13,7 @@ const emit = defineEmits<{ dismiss: [] }>()
 
 const label = computed(() => (props.mode === 'goal' ? 'Goal' : 'Plan'))
 const dismissLabel = computed(() =>
-  props.mode === 'goal' ? '取消 Goal' : '退出 Plan',
+  props.mode === 'goal' ? '取消目标' : '退出计划',
 )
 const title = computed(() =>
   props.busy ? '任务运行中，请先停止或暂停' : dismissLabel.value,

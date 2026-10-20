@@ -30,7 +30,7 @@ describe('Goal capture controller', () => {
 
     expect(capture.arm()).toEqual({
       ok: false,
-      error: '当前会话已有 active Goal。',
+      error: '当前会话已有进行中的目标。',
     })
     expect(capture.state.value.status).toBe('idle')
   })
@@ -78,7 +78,7 @@ describe('Goal capture controller', () => {
     })
     capture.arm()
 
-    await expect(capture.start('   ')).rejects.toThrow('Outcome 不能为空')
+    await expect(capture.start('   ')).rejects.toThrow('目标描述不能为空')
     expect(startGoal).not.toHaveBeenCalled()
     expect(capture.state.value.status).toBe('armed')
   })

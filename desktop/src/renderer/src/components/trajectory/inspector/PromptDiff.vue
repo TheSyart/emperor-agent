@@ -19,11 +19,11 @@ const sections = computed(() => {
   const toolsAfter = JSON.stringify(props.after.tools, null, 2)
   return [
     {
-      title: 'System Prompt',
+      title: '系统提示词',
       lines: promptDiffLines(props.before.system, props.after.system),
     },
     {
-      title: 'Tools',
+      title: '工具',
       lines:
         toolsBefore === toolsAfter
           ? []
@@ -34,7 +34,7 @@ const sections = computed(() => {
 </script>
 
 <template>
-  <p v-if="sections.length === 0" class="no-payload">No prompt changes</p>
+  <p v-if="sections.length === 0" class="no-payload">提示词没有变化</p>
   <div v-else class="traj-prompt-diff">
     <section v-for="section in sections" :key="section.title" class="section">
       <h3 class="title">{{ section.title }}</h3>

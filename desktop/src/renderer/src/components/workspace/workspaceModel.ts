@@ -71,7 +71,7 @@ export function filterGitFilesByPaths(
 }
 
 export function gitFileChangeLabel(file: GitFileStatus): string {
-  if (file.binary) return 'binary'
+  if (file.binary) return '二进制'
   const additions = Math.max(0, Math.floor(file.additions ?? 0))
   const deletions = Math.max(0, Math.floor(file.deletions ?? 0))
   if (!additions && !deletions) return ''

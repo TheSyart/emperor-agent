@@ -87,7 +87,7 @@ describe('workspace model', () => {
         untracked: false,
         binary: true,
       }),
-    ).toBe('binary')
+    ).toBe('二进制')
     expect(gitTransientLabel('rebase')).toBe('Rebase 尚未完成')
     expect(gitTransientLabel('none')).toBe('')
   })

@@ -184,7 +184,7 @@ async function end(agent: AgentView) {
           type="button"
           class="agent-end"
           :data-abandon-agent="agent.id"
-          title="这次运行没有正常结束。确认不再需要后，标记为已结束会释放它占用的工作区，Goal 可以继续。"
+          title="这次运行没有正常结束。确认不再需要后，标记为已结束会释放它占用的工作区，目标可以继续。"
           :disabled="ending !== null"
           @click="end(agent)"
         >

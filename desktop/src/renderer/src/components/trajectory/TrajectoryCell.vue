@@ -69,7 +69,7 @@ const toolParts = computed(() =>
   trajectoryToolCallTextParts(cell.value.kind, displayText.value),
 )
 const listText = computed(() => {
-  if (toolCallOnly.value) return '(tool call only)'
+  if (toolCallOnly.value) return '（只有工具调用）'
   const parts = toolParts.value
   if (parts === undefined) return displayText.value
   return [parts.name, parts.args].filter(Boolean).join(' ')
@@ -164,7 +164,7 @@ function onClick(): void {
       >
         <span :class="{ 'result-request': resultText !== undefined }">
           <span v-if="toolCallOnly" class="tool-call-only"
-            >(tool call only)</span
+            >（只有工具调用）</span
           >
           <template v-else-if="toolParts !== undefined">
             <span class="tool-name">{{ toolParts.name || '—' }}</span>

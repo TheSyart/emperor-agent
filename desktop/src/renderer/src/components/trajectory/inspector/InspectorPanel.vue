@@ -74,7 +74,7 @@ const tabItems = computed(() =>
         <span class="heading">详情</span>
         <template v-if="request !== undefined">
           <span class="request-dot" aria-hidden="true" />
-          <span class="request-name">Request #{{ request.number ?? '—' }}</span>
+          <span class="request-name">请求 #{{ request.number ?? '—' }}</span>
           <span class="location">{{ request.location }}</span>
         </template>
         <template v-else-if="record !== undefined">

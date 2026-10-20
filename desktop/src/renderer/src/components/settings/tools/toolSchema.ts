@@ -30,7 +30,7 @@ export const TOOL_CATEGORY_GROUPS: ReadonlyArray<{
   { id: 'basic', title: '基础工具' },
   { id: 'network', title: '网络' },
   { id: 'planning', title: '任务与规划' },
-  { id: 'agents', title: '子代理与工作流' },
+  { id: 'agents', title: '子智能体与工作流' },
   { id: 'config', title: '技能、记忆与配置' },
 ]
 
@@ -40,12 +40,13 @@ function isSchema(value: unknown): value is Schema {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-function typeLabel(schema: Schema): string {
+/** The JSON Schema type expression (`string[]`, `enum`, `a | b`), shown as code. */
+function schemaType(schema: Schema): string {
   if (Array.isArray(schema.enum)) return 'enum'
   const type = schema.type
   if (Array.isArray(type)) return type.map(String).join(' | ')
   if (type === 'array') {
-    const items = isSchema(schema.items) ? typeLabel(schema.items) : 'any'
+    const items = isSchema(schema.items) ? schemaType(schema.items) : 'any'
     return `${items.includes(' ') ? `(${items})` : items}[]`
   }
   if (typeof type === 'string') return type
@@ -53,7 +54,7 @@ function typeLabel(schema: Schema): string {
   if (Array.isArray(variants))
     return variants
       .filter(isSchema)
-      .map((variant) => typeLabel(variant))
+      .map((variant) => schemaType(variant))
       .join(' | ')
   return 'any'
 }
@@ -68,7 +69,7 @@ export function toolParams(parameters?: Record<string, unknown>): ToolParam[] {
     const schema = isSchema(raw) ? raw : {}
     return {
       name,
-      type: typeLabel(schema),
+      type: schemaType(schema),
       required: required.has(name),
       description:
         typeof schema.description === 'string' ? schema.description : '',

@@ -14,7 +14,7 @@ describe('runInitialStartup', () => {
         activeId: ref(''),
         load: vi.fn(async () => {
           throw new Error(
-            'Core IPC bridge is unavailable; use the Electron desktop window.',
+            '无法连接 Emperor 核心：请在 Emperor 桌面窗口中打开。',
           )
         }),
         backendSessionId: () => '',
@@ -23,7 +23,7 @@ describe('runInitialStartup', () => {
       bootstrap: {
         boot: ref(null),
         error: ref(
-          'Core IPC bridge is unavailable; use the Electron desktop window.',
+          '无法连接 Emperor 核心：请在 Emperor 桌面窗口中打开。',
         ),
         loadBootstrap,
       },

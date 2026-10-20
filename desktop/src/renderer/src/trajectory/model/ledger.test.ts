@@ -39,14 +39,14 @@ const turns: readonly TrajectoryTurnModel[] = [
     turn: 1,
     groups: [
       {
-        title: 'Message',
+        title: '消息',
         cells: [
-          cell(1, 'system', { text: 'Initial System Prompt' }),
+          cell(1, 'system', { text: '初始系统提示词' }),
           cell(2, 'user', { previewMarkdown: 'hi', sourceSeq: 2 }),
         ],
       },
       {
-        title: 'Step 1',
+        title: '第 1 步',
         cells: [
           cell(3, 'message', {
             recordId: 'assistant\u00001\u00001',
@@ -58,7 +58,7 @@ const turns: readonly TrajectoryTurnModel[] = [
         ],
       },
       {
-        title: 'Step 2',
+        title: '第 2 步',
         cells: [
           cell(6, 'user', { previewMarkdown: 'steer', sourceSeq: 6 }),
           cell(7, 'message', {
@@ -73,7 +73,7 @@ const turns: readonly TrajectoryTurnModel[] = [
     turn: null,
     groups: [
       {
-        title: 'Compaction 9',
+        title: '压缩 #9',
         cells: [cell(8, 'compacted', { timeSeconds: null })],
       },
     ],
@@ -93,17 +93,17 @@ describe('trajectory ledger', () => {
         row.turnEnd,
       ]),
     ).toEqual([
-      [1, 0, 'Message', true, false, false],
-      [2, 0, 'Message', false, true, false],
-      [3, 0, 'Step 1', true, false, false],
-      [4, 0, 'Step 1', false, false, false],
-      [5, 0, 'Step 1', false, false, false],
-      [6, 0, 'Step 2', true, false, false],
-      [7, 0, 'Step 2', false, false, true],
-      [8, 1, 'Compaction 9', true, true, true],
+      [1, 0, '消息', true, false, false],
+      [2, 0, '消息', false, true, false],
+      [3, 0, '第 1 步', true, false, false],
+      [4, 0, '第 1 步', false, false, false],
+      [5, 0, '第 1 步', false, false, false],
+      [6, 0, '第 2 步', true, false, false],
+      [7, 0, '第 2 步', false, false, true],
+      [8, 1, '压缩 #9', true, true, true],
     ])
-    expect(trajectorySectionLabel(null)).toBe('Between turns')
-    expect(trajectorySectionLabel(3)).toBe('Turn 3')
+    expect(trajectorySectionLabel(null)).toBe('轮次之间')
+    expect(trajectorySectionLabel(3)).toBe('第 3 轮')
   })
 
   it('keeps the first row and a compact summary when a turn is collapsed', () => {
@@ -113,7 +113,7 @@ describe('trajectory ledger', () => {
     ).toEqual([
       [1, null],
       [2, null],
-      [2, '2 steps · 2 tool calls'],
+      [2, '2 步 · 2 次工具调用'],
       [8, null],
     ])
     expect(rows[2]).toMatchObject({
@@ -136,7 +136,7 @@ describe('trajectory ledger', () => {
       [1, null],
       [2, null],
       [3, null],
-      [3, '2 tool calls · bash, job:bash'],
+      [3, '2 次工具调用 · bash, job:bash'],
       [6, null],
       [7, null],
       [8, null],
@@ -168,16 +168,16 @@ describe('trajectory ledger', () => {
   it('places request boundaries after leading steering input and numbers them', () => {
     const rows = flattenTrajectoryRecords(turns)
     const boundaries = indexTrajectoryRequestBoundaries(rows)
-    expect(boundaries.get('1\u0000Step 1')).toBe(3)
-    expect(boundaries.get('1\u0000Step 2')).toBe(7)
-    expect(boundaries.get('null\u0000Compaction 9')).toBe(8)
+    expect(boundaries.get('1\u0000第 1 步')).toBe(3)
+    expect(boundaries.get('1\u0000第 2 步')).toBe(7)
+    expect(boundaries.get('null\u0000压缩 #9')).toBe(8)
     const numbers = indexTrajectoryRequestDisplayNumbers(
       rows,
-      [{ turn: 1, step: 2, group: 'Step 2', number: 4 }],
+      [{ turn: 1, step: 2, group: '第 2 步', number: 4 }],
       boundaries,
     )
-    expect(numbers.get('1\u0000Step 2')).toBe(4)
-    expect(numbers.get('1\u0000Step 1')).toBe(5)
+    expect(numbers.get('1\u0000第 2 步')).toBe(4)
+    expect(numbers.get('1\u0000第 1 步')).toBe(5)
   })
 
   it('lays coincident request markers left to right', () => {
@@ -186,15 +186,15 @@ describe('trajectory ledger', () => {
         turn: 1,
         groups: [
           {
-            title: 'Step 1',
+            title: '第 1 步',
             cells: [cell(1, 'message', { requestOnly: true, isError: true })],
           },
           {
-            title: 'Step 2',
+            title: '第 2 步',
             cells: [cell(2, 'message', { requestOnly: true })],
           },
           {
-            title: 'Step 3',
+            title: '第 3 步',
             cells: [cell(3, 'message', { previewMarkdown: 'ok' })],
           },
         ],
@@ -249,8 +249,8 @@ describe('trajectory ledger', () => {
     expect(
       trajectoryMessageSourceLabel({ kind: 'event', type: 'goal/change' }),
     ).toBe('Event · goal/change')
-    expect(trajectoryMessageSourceLabel({ kind: 'user' })).toBe('User')
-    expect(trajectoryMessageSourceLabel(null)).toBe('Unknown')
+    expect(trajectoryMessageSourceLabel({ kind: 'user' })).toBe('用户')
+    expect(trajectoryMessageSourceLabel(null)).toBe('未知')
     expect(
       trajectoryDetailTabs(cell(1, 'system')).map((tab) => tab.id),
     ).toEqual(['system-prompt', 'tools'])

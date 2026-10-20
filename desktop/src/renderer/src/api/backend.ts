@@ -106,7 +106,7 @@ export interface VaultStatus {
 }
 
 export const CORE_BRIDGE_UNAVAILABLE_MESSAGE =
-  'Core IPC bridge is unavailable; use the Electron desktop window.'
+  '无法连接 Emperor 核心：请在 Emperor 桌面窗口中打开。'
 
 interface EmperorBridge {
   vaultStatus?: () => Promise<VaultStatus>

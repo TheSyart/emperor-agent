@@ -90,7 +90,7 @@ const emptyLabel = computed(() =>
         :aria-expanded="thinkingExpanded"
         @click="thinkingExpanded = !thinkingExpanded"
       >
-        Thinking
+        思考
         <DsChevronRight :size="12" class="chevron" />
       </button>
       <InspectorMarkdown
@@ -110,7 +110,7 @@ const emptyLabel = computed(() =>
         <button
           type="button"
           class="tool-call"
-          title="Open tool call summary"
+          title="打开工具调用摘要"
           @click="call.callId !== undefined && $emit('open-call', call.callId)"
         >
           <svg

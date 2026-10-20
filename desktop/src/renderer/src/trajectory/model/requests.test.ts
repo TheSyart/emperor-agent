@@ -62,7 +62,7 @@ describe('trajectory request numbering', () => {
         number: 1,
         turn: 1,
         step: 1,
-        group: 'Step 1',
+        group: '第 1 步',
         status: 'complete',
         provider: 'p',
         model: 'm',
@@ -80,7 +80,7 @@ describe('trajectory request numbering', () => {
         purpose: 'compaction',
         turn: null,
         step: 0,
-        group: 'Compaction 5',
+        group: '压缩 #5',
         model: 'm2',
         usage: { input: 7, output: 1 },
         cumulativeUsage: { input: 17, output: 3, cacheRead: 4 },
@@ -89,14 +89,14 @@ describe('trajectory request numbering', () => {
         number: 3,
         turn: 2,
         step: 1,
-        group: 'Step 1',
+        group: '第 1 步',
         seq: 8,
         cumulativeUsage: { input: 20, output: 6, cacheRead: 4 },
       },
     ])
     expect(numbers[2]?.status).toBeUndefined()
     expect(
-      indexTrajectoryRequestNumbers(numbers).get('null\u0000Compaction 5')
+      indexTrajectoryRequestNumbers(numbers).get('null\u0000压缩 #5')
         ?.number,
     ).toBe(2)
   })

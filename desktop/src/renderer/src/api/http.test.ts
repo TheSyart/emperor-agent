@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { CORE_BRIDGE_UNAVAILABLE_MESSAGE } from './backend'
 import { core } from './http'
 
 const g = globalThis as unknown as { window?: any }
@@ -37,7 +38,7 @@ describe('core IPC wrapper (W4: fake REST route table removed)', () => {
     g.window = {}
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
 
-    await expect(core('memory.tokens')).rejects.toThrow(/IPC/)
+    await expect(core('memory.tokens')).rejects.toThrow(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 })

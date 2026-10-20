@@ -36,34 +36,34 @@ const summaryRows = computed((): InspectorRow[] => {
   const inspection = props.inspection
   const rows: InspectorRow[] = [
     {
-      label: 'Status',
+      label: '状态',
       value: trajectoryStatusLabel(inspection.state),
       ...(inspection.state === 'error' ? { tone: 'error' as const } : {}),
     },
   ]
   if (inspection.compaction)
-    rows.push({ label: 'Purpose', value: 'Compaction' })
+    rows.push({ label: '用途', value: 'Compaction' })
   const provider = info.value?.provider ?? info.value?.requestConfig?.provider
   const model = info.value?.model ?? info.value?.requestConfig?.model
-  if (provider !== undefined) rows.push({ label: 'Provider', value: provider })
-  if (model !== undefined) rows.push({ label: 'Model', value: model })
+  if (provider !== undefined) rows.push({ label: '提供方', value: provider })
+  if (model !== undefined) rows.push({ label: '模型', value: model })
   if (info.value?.contextWindow !== undefined)
     rows.push({
-      label: 'Context',
+      label: '上下文',
       value: `${info.value.contextWindow.toLocaleString('en-US')} tok`,
     })
-  rows.push({ label: 'Tool calls', value: String(inspection.toolCalls) })
+  rows.push({ label: '工具调用', value: String(inspection.toolCalls) })
   if (inspection.subtoolCalls > 0)
     rows.push({
-      label: 'Subtool calls',
+      label: '子工具调用',
       value: String(inspection.subtoolCalls),
     })
   if (info.value?.error !== undefined)
-    rows.push({ label: 'Error', value: info.value.error, tone: 'error' })
+    rows.push({ label: '错误', value: info.value.error, tone: 'error' })
   for (const notice of info.value?.notices ?? [])
     if (notice.kind === 'fallback')
       rows.push({
-        label: 'Fallback',
+        label: '回退',
         value: `${notice.from} → ${notice.to}`,
         tone: 'error',
       })
@@ -81,7 +81,7 @@ const cumulativeUsage = computed(() =>
     <template v-if="tab === 'overview'">
       <InspectorRows :rows="summaryRows">
         <div v-if="inspection.result !== undefined">
-          <dt>Result</dt>
+          <dt>结果</dt>
           <dd>
             <button
               type="button"
@@ -99,18 +99,18 @@ const cumulativeUsage = computed(() =>
       </InspectorRows>
       <OverviewSection
         v-if="inspection.options !== undefined"
-        label="Options"
+        label="选项"
         @open="c.activateTab('options')"
       >
         <JsonTree :value="inspection.options" />
       </OverviewSection>
-      <OverviewSection label="Usage" @open="c.activateTab('usage')">
+      <OverviewSection label="用量" @open="c.activateTab('usage')">
         <p v-if="requestUsage.length === 0" class="no-payload">
-          Usage not reported
+          未报告用量
         </p>
         <InspectorRows v-else :rows="requestUsage" dense />
       </OverviewSection>
-      <OverviewSection label="Timing" @open="c.activateTab('timing')">
+      <OverviewSection label="计时" @open="c.activateTab('timing')">
         <InspectorRows :rows="timingRows" dense>
           <template #before>
             <StartedAt
@@ -122,22 +122,22 @@ const cumulativeUsage = computed(() =>
     </template>
     <template v-else-if="tab === 'options'">
       <p v-if="inspection.options === undefined" class="no-payload">
-        Options not recorded
+        未记录选项
       </p>
       <JsonTree v-else :value="inspection.options" :expand-depth="3" />
     </template>
     <div v-else-if="tab === 'usage'" class="usage" data-inspector-usage>
       <section class="usage-group">
-        <h4 class="usage-heading">This request</h4>
+        <h4 class="usage-heading">本次请求</h4>
         <p v-if="requestUsage.length === 0" class="no-payload">
-          Usage not reported
+          未报告用量
         </p>
         <InspectorRows v-else :rows="requestUsage" dense />
       </section>
       <section class="usage-group">
-        <h4 class="usage-heading">Session cumulative</h4>
+        <h4 class="usage-heading">会话累计</h4>
         <p v-if="cumulativeUsage.length === 0" class="no-payload">
-          Usage not reported
+          未报告用量
         </p>
         <InspectorRows v-else :rows="cumulativeUsage" dense />
       </section>
@@ -153,7 +153,7 @@ const cumulativeUsage = computed(() =>
       <template
         v-if="inspection.assistant?.cell.assistantMetrics !== undefined"
       >
-        <h4 class="usage-heading">Assistant step</h4>
+        <h4 class="usage-heading">助手步骤</h4>
         <RecordTiming :record="inspection.assistant" dense />
       </template>
     </template>

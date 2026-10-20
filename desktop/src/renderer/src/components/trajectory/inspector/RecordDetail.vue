@@ -88,7 +88,7 @@ const hasHierarchy = computed(
 const statusRows = computed((): InspectorRow[] => {
   const rows: InspectorRow[] = [
     {
-      label: 'Status',
+      label: '状态',
       value: trajectoryStatusLabel(state.value),
       ...(state.value === 'error' ? { tone: 'error' as const } : {}),
     },
@@ -101,24 +101,24 @@ const statusRows = computed((): InspectorRow[] => {
     })
     if (value.think !== undefined)
       rows.push({
-        label: 'Reasoning',
+        label: '推理',
         value: formatTokens(value.think),
         detail: true,
       })
     if (value.output !== undefined && value.think !== undefined)
       rows.push({
-        label: 'Content',
+        label: '内容',
         value: formatTokens(Math.max(0, value.output - value.think)),
         detail: true,
       })
   }
   if (value.kind === 'user' || value.kind === 'context')
     rows.push({
-      label: 'Duration',
+      label: '时长',
       value: formatElapsedSeconds(value.timeSeconds),
     })
   if (value.eventType !== undefined)
-    rows.push({ label: 'Event', value: value.eventType })
+    rows.push({ label: '事件', value: value.eventType })
   return rows
 })
 
@@ -129,16 +129,16 @@ const factRows = computed((): InspectorRow[] => {
   if (value.subagent !== undefined) {
     const fact = value.subagent
     rows.push({
-      label: 'Subagent',
+      label: '子智能体',
       value: fact.description || fact.childSessionId,
     })
     rows.push({
-      label: 'Mode',
+      label: '模式',
       value: `${fact.mode}${fact.background ? ' · background' : ''}`,
       detail: true,
     })
     rows.push({
-      label: 'State',
+      label: '状态',
       value:
         fact.status === 'running'
           ? 'Running'
@@ -149,11 +149,11 @@ const factRows = computed((): InspectorRow[] => {
   if (value.job !== undefined) {
     const job = value.job
     rows.push({
-      label: 'Job',
+      label: '后台任务',
       value: `${job.jobId}${job.kind ? ` · ${job.kind}` : ''}`,
     })
     rows.push({
-      label: 'State',
+      label: '状态',
       value: `${job.status}${job.exitCode === undefined ? '' : ` · exit ${job.exitCode}`}`,
       detail: true,
       ...(job.status === 'failed' ? { tone: 'error' as const } : {}),
@@ -166,14 +166,14 @@ const factRows = computed((): InspectorRow[] => {
       value: run.name,
     })
     rows.push({
-      label: 'State',
+      label: '状态',
       value: run.status,
       detail: true,
       ...(run.status === 'error' ? { tone: 'error' as const } : {}),
     })
     if (run.phases.length > 0)
       rows.push({
-        label: 'Phases',
+        label: '阶段',
         value: run.phases.join(' → '),
         detail: true,
       })
@@ -181,13 +181,13 @@ const factRows = computed((): InspectorRow[] => {
   for (const notice of value.notices ?? []) {
     if (notice.kind === 'fallback')
       rows.push({
-        label: 'Fallback',
+        label: '回退',
         value: `${notice.from} → ${notice.to} · ${notice.code}`,
         tone: 'error',
       })
     else
       rows.push({
-        label: 'Cost cap',
+        label: '费用上限',
         value: `$${(notice.spentUsdNanos / 1e9).toFixed(4)} spent of $${(notice.capUsdNanos / 1e9).toFixed(4)}`,
         tone: 'error',
       })
@@ -314,7 +314,7 @@ function openCall(callId: string): void {
     <template v-if="cell.kind === 'system' && cell.promptDetail !== undefined">
       <template v-if="tab === 'system-prompt'">
         <p v-if="cell.promptDetail.system === ''" class="no-payload">
-          No system prompt in this request
+          本次请求没有系统提示词
         </p>
         <InspectorMarkdown v-else :text="cell.promptDetail.system" />
       </template>
@@ -335,12 +335,12 @@ function openCall(callId: string): void {
         <InspectorRows
           :rows="[
             {
-              label: 'Status',
+              label: '状态',
               value: trajectoryStatusLabel(state),
               ...(state === 'error' ? { tone: 'error' as const } : {}),
             },
             {
-              label: 'Duration',
+              label: '时长',
               value: formatElapsedSeconds(cell.timeSeconds),
             },
             { label: 'Tokens', value: '—' },
@@ -368,7 +368,7 @@ function openCall(callId: string): void {
         <InspectorRows :rows="[...statusRows, ...factRows]">
           <template #before>
             <div v-if="cell.messageSource !== undefined">
-              <dt>Source</dt>
+              <dt>来源</dt>
               <dd class="links">
                 <button
                   type="button"
@@ -384,7 +384,7 @@ function openCall(callId: string): void {
             </div>
             <div v-if="hasHierarchy">
               <dt>
-                {{ requestTarget !== undefined ? 'Source' : 'Hierarchy' }}
+                {{ requestTarget !== undefined ? '来源' : 'Hierarchy' }}
               </dt>
               <dd class="links">
                 <button
@@ -394,7 +394,7 @@ function openCall(callId: string): void {
                   data-link="request"
                   @click="c.selectRequest(requestTarget)"
                 >
-                  <span>Request #{{ requestNumber }}</span>
+                  <span>请求 #{{ requestNumber }}</span>
                   <DsChevronRight :size="11" class="nav-icon" />
                 </button>
                 <button
@@ -404,7 +404,7 @@ function openCall(callId: string): void {
                   data-link="message"
                   @click="c.openRecordSummary(parents.message)"
                 >
-                  <span>Assistant Message</span>
+                  <span>助手消息</span>
                   <DsChevronRight :size="11" class="nav-icon" />
                 </button>
                 <button
@@ -414,14 +414,14 @@ function openCall(callId: string): void {
                   data-link="tool"
                   @click="c.openRecordSummary(parents.tool)"
                 >
-                  <span>Tool Call</span>
+                  <span>工具调用</span>
                   <DsChevronRight :size="11" class="nav-icon" />
                 </button>
               </dd>
             </div>
           </template>
           <div v-if="cell.childSessionId !== undefined">
-            <dt>Session</dt>
+            <dt>会话</dt>
             <dd class="links">
               <button
                 type="button"
@@ -429,7 +429,7 @@ function openCall(callId: string): void {
                 data-link="child-session"
                 @click="emit('open-subagent', cell.childSessionId)"
               >
-                <span>Open child session</span>
+                <span>打开子会话</span>
                 <DsChevronRight :size="11" class="nav-icon" />
               </button>
             </dd>
@@ -438,7 +438,7 @@ function openCall(callId: string): void {
         <div class="sections">
           <OverviewSection
             v-if="markdown"
-            label="Preview"
+            label="预览"
             @open="c.activateTab('rendered')"
           >
             <MarkdownRecordContent
@@ -452,32 +452,32 @@ function openCall(callId: string): void {
           <template v-else>
             <OverviewSection
               v-if="cell.inputDetail"
-              label="Payload"
+              label="载荷"
               @open="c.activateTab('input')"
             >
               <RecordPayload :record="record" direction="input" preview />
             </OverviewSection>
             <OverviewSection
               v-if="cell.outputDetail"
-              label="Result"
+              label="结果"
               @open="c.activateTab('output')"
             >
               <RecordPayload :record="record" direction="output" preview />
             </OverviewSection>
-            <OverviewSection label="Schema" @open="c.activateTab('schema')">
+            <OverviewSection label="参数结构" @open="c.activateTab('schema')">
               <RecordSchema :record="record" preview />
             </OverviewSection>
           </template>
           <OverviewSection
             v-if="requestTarget !== undefined"
-            label="Request Timing"
+            label="请求计时"
             @open="c.selectRequest(requestTarget, 'timing')"
           >
             <RecordTiming :record="record" dense />
           </OverviewSection>
           <OverviewSection
             v-if="cell.kind === 'tool' || cell.kind === 'subtool'"
-            label="Timing"
+            label="计时"
             @open="c.activateTab('timing')"
           >
             <RecordTiming :record="record" dense />
@@ -499,7 +499,7 @@ function openCall(callId: string): void {
       />
       <template v-else-if="tab === 'source'">
         <p v-if="cell.messageSource === undefined" class="no-payload">
-          Source not recorded
+          未记录来源
         </p>
         <JsonTree v-else :value="sourceData" :expand-depth="3" />
       </template>
