@@ -12,6 +12,9 @@
   --tip-fill: var(--surface-overlay);
   --ghost-active-fill: var(--surface-selected);
 
+  /* The chat composer card (UI-S04): raised in both themes */
+  --composer-fill: var(--surface-raised);
+
   /* Settings cards sit on the panel; their controls one step down */
   --settings-card-fill: var(--surface-raised);
   --settings-card-control-fill: var(--surface-base);
@@ -127,6 +130,8 @@
   --shadow-color: 0 0 0;
   --nb-60: 249 250 251;
   --panel-edge: 0 0 0 0.5px var(--stroke-1);
+  /* The composer's edge: the shadow carries it on dark */
+  --composer-edge: var(--elev-1);
 }
 
 :root[data-theme='light'] {
@@ -183,4 +188,6 @@
   --shadow-color: 28 27 25;
   --nb-60: 245 246 247;
   --panel-edge: var(--elev-1);
+  /* A hairline ring as well on light */
+  --composer-edge: 0 0 0 0.5px var(--hairline), var(--elev-1);
 }

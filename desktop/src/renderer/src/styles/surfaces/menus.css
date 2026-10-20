@@ -160,16 +160,3 @@
 .composer-palette-item[data-action='insert_skill'] strong {
   color: rgb(var(--ok));
 }
-
-.composer-palette-item[data-action='insert_capability_token']
-  .composer-palette-item-icon,
-.composer-palette-item[data-action='insert_capability_token'] strong {
-  color: rgb(101 210 255);
-}
-
-.composer-palette-item[data-action='insert_capability_token'][data-tone='slate']
-  .composer-palette-item-icon,
-.composer-palette-item[data-action='insert_capability_token'][data-tone='slate']
-  strong {
-  color: rgb(var(--fg));
-}

@@ -1113,8 +1113,6 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           :lifecycle-mode="composerLifecycleMode"
           :commands="ctx.commands.value"
           :plugins="ctx.boot.value?.plugins ?? []"
-          :tools="ctx.boot.value?.tools || []"
-          :mcp-content="ctx.mcpContent.value"
           :context-used="ctx.boot.value?.context_used ?? 0"
           :context-max="
             ctx.boot.value?.modelConfig?.current?.contextWindowTokens ?? 0
