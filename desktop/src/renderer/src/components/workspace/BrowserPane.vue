@@ -312,21 +312,21 @@ function hostOf(url: string): string {
         :disabled="!state?.canGoBack"
         @click="navigate('back')"
       >
-        <ArrowLeft :size="15" />
+        <ArrowLeft :size="16" />
       </IconButton>
       <IconButton
         label="前进"
         :disabled="!state?.canGoForward"
         @click="navigate('forward')"
       >
-        <ArrowRight :size="15" />
+        <ArrowRight :size="16" />
       </IconButton>
       <IconButton
         :label="state?.loading ? '停止加载' : '刷新'"
         :disabled="!hasPage"
         @click="reloadOrStop"
       >
-        <X v-if="state?.loading" :size="15" />
+        <X v-if="state?.loading" :size="16" />
         <RotateCw v-else :size="14" />
       </IconButton>
       <span v-if="historyShown" ref="historyAnchor" class="history-anchor">
@@ -347,11 +347,11 @@ function hostOf(url: string): string {
       >
         <LockKeyhole
           v-if="secure && !editing"
-          :size="13"
+          :size="14"
           class="address-glyph"
           aria-hidden="true"
         />
-        <Globe v-else :size="13" class="address-glyph" aria-hidden="true" />
+        <Globe v-else :size="14" class="address-glyph" aria-hidden="true" />
         <input
           ref="addressInput"
           v-model="address"
@@ -412,7 +412,7 @@ function hostOf(url: string): string {
       :aria-busy="loading || undefined"
     >
       <div v-if="page.error" class="browser-state" role="alert">
-        <TriangleAlert :size="22" class="state-glyph danger" />
+        <TriangleAlert :size="20" class="state-glyph danger" />
         <strong>无法打开此网页</strong>
         <p class="state-detail">{{ page.error }}</p>
         <p v-if="pageUrl" class="state-url">{{ pageUrl }}</p>
@@ -422,13 +422,13 @@ function hostOf(url: string): string {
       </div>
       <!-- Under the native view: shows while it is hidden (drags, menus). -->
       <div v-else-if="hasPage" class="browser-state">
-        <Globe :size="22" class="state-glyph" />
+        <Globe :size="20" class="state-glyph" />
         <strong>{{ pageLabel }}</strong>
         <p class="state-url">{{ pageUrl }}</p>
         <p v-if="state?.loading" class="state-detail">正在加载…</p>
       </div>
       <div v-else class="browser-state">
-        <Globe :size="22" class="state-glyph" />
+        <Globe :size="20" class="state-glyph" />
         <strong>输入网址（支持 localhost）</strong>
         <p class="state-detail">例如 localhost:5173 或 example.com</p>
         <p class="state-note">页面在独立沙箱中打开，关闭后不保留浏览数据</p>
@@ -473,7 +473,7 @@ function hostOf(url: string): string {
         在访达中显示
       </button>
       <IconButton label="关闭下载提示" @click="dismissDownload">
-        <X :size="13" />
+        <X :size="14" />
       </IconButton>
     </div>
   </div>

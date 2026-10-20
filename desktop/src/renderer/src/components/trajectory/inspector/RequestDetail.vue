@@ -92,7 +92,7 @@ const cumulativeUsage = computed(() =>
               <span>{{
                 inspection.compaction ? 'Compacted' : 'Assistant Message'
               }}</span>
-              <DsChevronRight :size="11" class="nav-icon" />
+              <DsChevronRight :size="12" class="nav-icon" />
             </button>
           </dd>
         </div>

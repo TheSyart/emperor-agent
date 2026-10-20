@@ -263,7 +263,7 @@ const facts = [
                 description="eyebrow 插槽：标题上方的风险标签"
               >
                 <template #eyebrow>
-                  <DsWarning :size="13" aria-hidden="true" />风险升高
+                  <DsWarning :size="14" aria-hidden="true" />风险升高
                 </template>
                 <Switch v-model="fullAccess" aria-label="启用完整访问" />
               </SettingsRow>

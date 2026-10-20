@@ -68,7 +68,7 @@ function copyLabel(address: ExtensionAddress): string {
           :data-state="state.folder"
           role="img"
           :aria-label="marker('folder')"
-          ><DsCheck v-if="state.folder === 'done'" :size="13" /><template v-else
+          ><DsCheck v-if="state.folder === 'done'" :size="14" /><template v-else
             >1</template
           ></span
         >
@@ -113,7 +113,7 @@ function copyLabel(address: ExtensionAddress): string {
           :data-state="state.developer"
           role="img"
           :aria-label="marker('developer')"
-          ><DsCheck v-if="state.developer === 'done'" :size="13" /><template
+          ><DsCheck v-if="state.developer === 'done'" :size="14" /><template
             v-else
             >2</template
           ></span
@@ -148,7 +148,7 @@ function copyLabel(address: ExtensionAddress): string {
           :data-state="state.load"
           role="img"
           :aria-label="marker('load')"
-          ><DsCheck v-if="state.load === 'done'" :size="13" /><template v-else
+          ><DsCheck v-if="state.load === 'done'" :size="14" /><template v-else
             >3</template
           ></span
         >
@@ -170,7 +170,7 @@ function copyLabel(address: ExtensionAddress): string {
           :data-state="state.connect"
           role="img"
           :aria-label="marker('connect')"
-          ><DsCheck v-if="state.connect === 'done'" :size="13" /><template
+          ><DsCheck v-if="state.connect === 'done'" :size="14" /><template
             v-else
             >4</template
           ></span

@@ -242,7 +242,7 @@ onBeforeUnmount(() => {
           aria-label="关闭图片预览"
           @click="closeImageViewer"
         >
-          <X :size="22" />
+          <X :size="20" />
         </button>
       </header>
       <div
@@ -312,7 +312,7 @@ onBeforeUnmount(() => {
             :disabled="loading || failed"
             @click="zoom(scale / 1.25)"
           >
-            <Minus :size="19" />
+            <Minus :size="20" />
           </button>
           <span class="viewer-scale">{{ Math.round(scale * 100) }}%</span>
           <button
@@ -323,7 +323,7 @@ onBeforeUnmount(() => {
             :disabled="loading || failed"
             @click="zoom(scale * 1.25)"
           >
-            <Plus :size="19" />
+            <Plus :size="20" />
           </button>
           <i class="viewer-divider" aria-hidden="true" />
           <button
@@ -334,7 +334,7 @@ onBeforeUnmount(() => {
             :disabled="loading || failed"
             @click="fit"
           >
-            <Scan :size="19" />
+            <Scan :size="20" />
           </button>
           <button
             class="viewer-button"
@@ -344,7 +344,7 @@ onBeforeUnmount(() => {
             :disabled="loading || failed"
             @click="original"
           >
-            <Expand :size="19" />
+            <Expand :size="20" />
           </button>
           <i class="viewer-divider" aria-hidden="true" />
           <button
@@ -355,7 +355,7 @@ onBeforeUnmount(() => {
             :disabled="loading || failed"
             @click="rotate(-90)"
           >
-            <RotateCcw :size="19" />
+            <RotateCcw :size="20" />
           </button>
           <button
             class="viewer-button"
@@ -365,7 +365,7 @@ onBeforeUnmount(() => {
             :disabled="loading || failed"
             @click="rotate(90)"
           >
-            <RotateCw :size="19" />
+            <RotateCw :size="20" />
           </button>
           <template v-if="item?.file"
             ><i class="viewer-divider" aria-hidden="true" /><button
@@ -375,7 +375,7 @@ onBeforeUnmount(() => {
               title="在文件中查看"
               @click="openFile"
             >
-              <FolderOpen :size="19" /></button
+              <FolderOpen :size="20" /></button
           ></template>
         </div>
         <span class="viewer-hint">滚动缩放 · 拖动查看 · Esc 关闭</span>

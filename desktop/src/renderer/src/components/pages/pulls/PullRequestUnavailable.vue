@@ -47,7 +47,7 @@ const title = computed(() =>
   <div class="pr-unavailable" :data-reason="reason" role="status">
     <EmptyState :title="title">
       <template #icon>
-        <span class="icon-well"><component :is="icon" :size="22" /></span>
+        <span class="icon-well"><component :is="icon" :size="20" /></span>
       </template>
       <template #description>
         <span v-if="reason === 'gh_missing'" class="lines">

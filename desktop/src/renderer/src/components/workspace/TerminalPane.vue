@@ -465,7 +465,7 @@ function message(value: unknown): string {
             :disabled="terminals.length >= 8"
             @click="newTerminal"
           >
-            <Plus :size="15" />
+            <Plus :size="16" />
           </IconButton>
         </template>
       </WorkspaceTabBar>

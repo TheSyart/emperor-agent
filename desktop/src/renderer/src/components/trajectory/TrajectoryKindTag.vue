@@ -26,9 +26,9 @@ withDefaults(defineProps<{ kind: TrajectoryCellKind; iconOnly?: boolean }>(), {
     :title="TRAJECTORY_KIND_LABEL[kind]"
   >
     <span class="icon" aria-hidden="true">
-      <DsSettings v-if="kind === 'system'" :size="13" />
-      <DsUser v-else-if="kind === 'user'" :size="13" />
-      <DsSparkle v-else-if="kind === 'message'" :size="13" />
+      <DsSettings v-if="kind === 'system'" :size="14" />
+      <DsUser v-else-if="kind === 'user'" :size="14" />
+      <DsSparkle v-else-if="kind === 'message'" :size="14" />
       <svg
         v-else-if="kind === 'context'"
         width="14"

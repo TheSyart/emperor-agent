@@ -390,7 +390,7 @@ function clearSearch() {
               :aria-expanded="noteOpen"
               @click="noteOpen = !noteOpen"
             >
-              <Info :size="13" />
+              <Info :size="14" />
             </IconButton>
           </span>
         </div>

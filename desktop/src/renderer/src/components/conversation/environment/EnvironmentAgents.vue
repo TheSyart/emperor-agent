@@ -140,7 +140,7 @@ async function end(agent: AgentView) {
               data-agent-face
             />
           </template>
-          <Users v-if="!faces.length" :size="15" />
+          <Users v-if="!faces.length" :size="16" />
         </span>
       </template>
     </EnvironmentRow>

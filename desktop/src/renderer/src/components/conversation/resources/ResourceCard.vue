@@ -130,7 +130,7 @@ function open() {
         title="查看详情"
         @click="requestResourceDetail(resource, sessionId())"
       >
-        <Info :size="15" /></button
+        <Info :size="16" /></button
       ><button
         type="button"
         :aria-label="`打开：${resource.label}`"
@@ -138,7 +138,7 @@ function open() {
         :disabled="resource.available === false"
         @click="open"
       >
-        <ArrowUpRight :size="15" />
+        <ArrowUpRight :size="16" />
       </button>
     </div>
   </div>

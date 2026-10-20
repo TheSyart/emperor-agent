@@ -378,7 +378,7 @@ function openCall(callId: string): void {
                   <span>{{
                     trajectoryMessageSourceLabel(cell.messageSource)
                   }}</span>
-                  <DsChevronRight :size="11" class="nav-icon" />
+                  <DsChevronRight :size="12" class="nav-icon" />
                 </button>
               </dd>
             </div>
@@ -395,7 +395,7 @@ function openCall(callId: string): void {
                   @click="c.selectRequest(requestTarget)"
                 >
                   <span>Request #{{ requestNumber }}</span>
-                  <DsChevronRight :size="11" class="nav-icon" />
+                  <DsChevronRight :size="12" class="nav-icon" />
                 </button>
                 <button
                   v-if="parents.message !== undefined"
@@ -405,7 +405,7 @@ function openCall(callId: string): void {
                   @click="c.openRecordSummary(parents.message)"
                 >
                   <span>Assistant Message</span>
-                  <DsChevronRight :size="11" class="nav-icon" />
+                  <DsChevronRight :size="12" class="nav-icon" />
                 </button>
                 <button
                   v-if="parents.tool !== undefined"
@@ -415,7 +415,7 @@ function openCall(callId: string): void {
                   @click="c.openRecordSummary(parents.tool)"
                 >
                   <span>Tool Call</span>
-                  <DsChevronRight :size="11" class="nav-icon" />
+                  <DsChevronRight :size="12" class="nav-icon" />
                 </button>
               </dd>
             </div>
@@ -430,7 +430,7 @@ function openCall(callId: string): void {
                 @click="emit('open-subagent', cell.childSessionId)"
               >
                 <span>Open child session</span>
-                <DsChevronRight :size="11" class="nav-icon" />
+                <DsChevronRight :size="12" class="nav-icon" />
               </button>
             </dd>
           </div>

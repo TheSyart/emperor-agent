@@ -229,7 +229,7 @@ onBeforeUnmount(() => {
       >
         <p>{{ previewReason }}</p>
         <Button size="sm" @click="load"
-          ><RefreshCw :size="13" />重新加载</Button
+          ><RefreshCw :size="14" />重新加载</Button
         >
       </div>
       <button
@@ -271,7 +271,7 @@ onBeforeUnmount(() => {
           type="button"
           @click="emit('reveal', use.nodeKey)"
         >
-          <LocateFixed :size="13" />{{ PROVENANCE_LABEL[use.provenance] }} ·
+          <LocateFixed :size="14" />{{ PROVENANCE_LABEL[use.provenance] }} ·
           定位出处
         </button>
       </div>
@@ -294,7 +294,7 @@ onBeforeUnmount(() => {
           variant="secondary"
           @click="emit('open-internal')"
           >在 Emperor 查看</Button
-        ><Button size="sm" @click="copy"><Copy :size="13" />复制地址</Button>
+        ><Button size="sm" @click="copy"><Copy :size="14" />复制地址</Button>
       </div>
       <p v-if="copyStatus" class="notice" role="status">{{ copyStatus }}</p>
     </div>

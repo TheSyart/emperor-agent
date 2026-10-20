@@ -547,7 +547,7 @@ onBeforeUnmount(() => {
       aria-controls="cu-preview-stack"
       @click="expanded = !expanded"
     >
-      <ScreenShare :size="15" aria-hidden="true" />
+      <ScreenShare :size="16" aria-hidden="true" />
       <span>电脑操作</span>
       <Badge variant="count" :label="ordered.length" />
     </button>

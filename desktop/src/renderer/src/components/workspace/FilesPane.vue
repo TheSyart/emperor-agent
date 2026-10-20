@@ -715,7 +715,7 @@ function message(value: unknown): string {
         >
           <template v-if="hasProject" #after>
             <IconButton label="打开文件" @click="startOpenFile">
-              <Plus :size="15" />
+              <Plus :size="16" />
             </IconButton>
           </template>
           <template v-if="hasProject" #actions>
@@ -724,8 +724,8 @@ function message(value: unknown): string {
               :aria-pressed="treeVisible"
               @click="treeVisible = !treeVisible"
             >
-              <PanelRightClose v-if="treeVisible" :size="15" />
-              <PanelRightOpen v-else :size="15" />
+              <PanelRightClose v-if="treeVisible" :size="16" />
+              <PanelRightOpen v-else :size="16" />
             </IconButton>
           </template>
         </WorkspaceTabBar>
@@ -749,14 +749,14 @@ function message(value: unknown): string {
         </nav>
         <div v-if="activeTab" class="file-preview-actions">
           <IconButton label="刷新文件" :disabled="loading" @click="refreshFile"
-            ><RefreshCw :size="13"
+            ><RefreshCw :size="14"
           /></IconButton>
           <IconButton
             v-if="activeTab.preview.revealable && !isDraftSession"
             label="在访达中显示"
             @click="revealFile"
           >
-            <FolderOpen :size="13" />
+            <FolderOpen :size="14" />
           </IconButton>
           <Button
             v-if="isMarkdown"
@@ -773,7 +773,7 @@ function message(value: unknown): string {
               :aria-expanded="copyMenu"
               @click="copyMenu = !copyMenu"
             >
-              <Copy :size="13" />
+              <Copy :size="14" />
             </IconButton>
           </span>
           <Menu
@@ -897,7 +897,7 @@ function message(value: unknown): string {
           />
         </form>
         <IconButton label="刷新目录树" @click="reloadTree">
-          <RefreshCw :size="13" :class="{ 'animate-spin': loading }" />
+          <RefreshCw :size="14" :class="{ 'animate-spin': loading }" />
         </IconButton>
       </div>
       <div v-if="treeError" class="files-inline-error" role="alert">
@@ -931,9 +931,9 @@ function message(value: unknown): string {
         >
           <ChevronDown
             v-if="isDirectory(row.entry) && expanded.has(row.entry.path)"
-            :size="13"
+            :size="14"
           />
-          <ChevronRight v-else-if="isDirectory(row.entry)" :size="13" />
+          <ChevronRight v-else-if="isDirectory(row.entry)" :size="14" />
           <span v-else class="file-tree-spacer"></span>
           <DocumentIcon
             :path="row.entry.name"

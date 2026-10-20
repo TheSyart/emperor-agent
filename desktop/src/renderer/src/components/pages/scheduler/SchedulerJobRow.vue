@@ -103,14 +103,14 @@ function onMenu(event: MouseEvent) {
           <Lock
             v-if="job.protected"
             class="kind"
-            :size="13"
+            :size="14"
             aria-hidden="true"
           />
           <component
             :is="oneShot ? CalendarClock : Repeat"
             v-else
             class="kind"
-            :size="13"
+            :size="14"
             aria-hidden="true"
           />
         </span>
