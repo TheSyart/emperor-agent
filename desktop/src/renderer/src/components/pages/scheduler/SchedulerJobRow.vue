@@ -19,11 +19,11 @@ import {
   CircleCheck,
   CircleDot,
   CirclePause,
-  LoaderCircle,
   Lock,
   Repeat,
 } from 'lucide-vue-next'
 import IconButton from '../../ui/IconButton.vue'
+import Spinner from '../../ui/Spinner.vue'
 import { DsMore } from '../../icons/ds'
 import { Badge } from '../../settings/ui'
 import {
@@ -40,7 +40,7 @@ const props = withDefaults(
 const emit = defineEmits<{ open: []; menu: [anchor: HTMLElement] }>()
 
 const GLYPHS = {
-  running: LoaderCircle,
+  running: Circle,
   queued: CircleDot,
   error: CircleAlert,
   enabled: Circle,
@@ -89,10 +89,13 @@ function onMenu(event: MouseEvent) {
       :aria-label="`${job.name}，${STATE_LABELS[state]}，${line}`"
       @click="emit('open')"
     >
+      <span v-if="state === 'running'" class="glyph spin" aria-hidden="true">
+        <Spinner tone="accent" />
+      </span>
       <component
         :is="glyph"
+        v-else
         class="glyph"
-        :class="{ 'animate-spin': state === 'running' }"
         :size="18"
         :stroke-width="1.75"
         aria-hidden="true"
@@ -173,6 +176,14 @@ function onMenu(event: MouseEvent) {
 .glyph {
   flex: none;
   color: rgb(var(--text-2));
+}
+
+/* The running Spinner sits in the same 18px slot as the state glyphs. */
+.glyph.spin {
+  display: inline-grid;
+  place-items: center;
+  width: calc(var(--icon-md) + var(--space-0-5));
+  height: calc(var(--icon-md) + var(--space-0-5));
 }
 
 .job-row[data-state='running'] .glyph,

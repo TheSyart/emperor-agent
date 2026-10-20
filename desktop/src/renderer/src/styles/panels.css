@@ -8,19 +8,33 @@
 /* ─── 附件 chip：草稿条 + 用户气泡通用 ─── */
 
 .attach-chip {
-  @apply inline-flex items-center gap-2 border px-2 py-1.5;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   max-width: 16rem;
+  padding: var(--space-1-5) var(--space-2);
+  border-width: 1px;
   border-radius: var(--r-sm);
   border-color: rgb(var(--stroke-solid));
   background: rgb(var(--surface-base));
   box-shadow: none;
 }
 .attach-chip.is-image .attach-thumb {
-  @apply h-12 w-12 rounded-lg object-cover;
   flex-shrink: 0;
+  width: 3rem;
+  height: 3rem;
+  border-radius: var(--r-sm);
+  object-fit: cover;
 }
 .attach-preview-trigger {
-  @apply block shrink-0 rounded-lg outline-none transition;
+  display: block;
+  flex-shrink: 0;
+  border-radius: var(--r-sm);
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition:
+    transform var(--duration) var(--ease-standard),
+    box-shadow var(--duration) var(--ease-standard);
 }
 .attach-preview-trigger:hover {
   transform: scale(1.03);
@@ -29,30 +43,67 @@
   box-shadow: 0 0 0 2px rgb(var(--accent) / 0.62);
 }
 .attach-chip .attach-doc-icon {
-  @apply grid h-12 w-12 place-items-center rounded-lg border border-border/45 bg-bg-inset;
+  display: grid;
   flex-shrink: 0;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-width: 1px;
+  border-radius: var(--r-sm);
+  border-color: rgb(var(--stroke-solid) / 0.45);
+  background-color: rgb(var(--surface-sunken));
 }
 .attach-chip .attach-doc-icon img {
-  @apply h-9 w-9;
+  width: 2.25rem;
+  height: 2.25rem;
   transform: scale(1.08);
 }
 .attach-chip.uploading {
-  @apply border-warn/40 bg-warn/10;
+  border-color: rgb(var(--warn) / 0.4);
+  background-color: rgb(var(--warn) / 0.1);
 }
 .attach-chip .attach-meta {
-  @apply min-w-0 flex-1 leading-tight;
+  flex: 1 1 0%;
+  min-width: 0;
+  line-height: 1.25;
 }
 .attach-chip .attach-name {
-  @apply truncate font-mono text-xs font-bold text-fg;
+  overflow: hidden;
+  color: rgb(var(--text-1));
+  font-family: var(--font-mono);
+  font-size: var(--fs-xxs);
+  font-weight: var(--weight-semibold);
+  line-height: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .attach-chip .attach-sub {
-  @apply truncate font-mono text-[10px] text-secondary;
+  overflow: hidden;
+  color: rgb(var(--text-2));
+  font-family: var(--font-mono);
+  font-size: var(--fs-xxxs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .attach-chip .attach-remove {
-  @apply ml-1 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-bg-inset text-base text-secondary transition;
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: var(--space-6);
+  height: var(--space-6);
+  margin-left: var(--space-1);
+  border-radius: var(--r-full);
+  background-color: rgb(var(--surface-sunken));
+  color: rgb(var(--text-2));
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  transition:
+    background-color var(--duration) var(--ease-standard),
+    color var(--duration) var(--ease-standard);
 }
 .attach-chip .attach-remove:hover {
-  @apply bg-accent/15 text-accent;
+  background-color: rgb(var(--accent) / 0.15);
+  color: rgb(var(--accent));
 }
 
 /* 用户消息气泡上方的 attach 行 */
@@ -141,8 +192,15 @@
    The illustration fills the dialog; its left 40% is empty studio surface
    in --surface-canvas, so the copy sits on it behind a soft fade. */
 
+/* Above the page, its sticky bars and overlays; below popovers, toasts,
+   modals and menus (the order the former z-index 70 gave it). */
 .onboarding-backdrop {
-  @apply fixed inset-0 z-[70] grid place-items-center p-4;
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-drawer);
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
 }
 
 .model-setup-backdrop {

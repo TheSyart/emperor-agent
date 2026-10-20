@@ -361,6 +361,20 @@ async function persistFilesTreeWidth(): Promise<void> {
 </template>
 
 <style scoped>
+/* Visually hidden, still announced (the Tailwind utility of the same name
+   is gone with DS-02). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
 .workspace-panel {
   display: flex;
   flex-direction: column;

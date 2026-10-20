@@ -574,7 +574,7 @@ describe('style audit: DS-02 ratchets', () => {
     expect(violations(rel, icon(14))).toEqual([])
   })
 
-  it.skip('has no Tailwind left: config, PostCSS plugin, dependency, directives (test 6)', () => {
+  it('has no Tailwind left: config, PostCSS plugin, dependency, directives (test 6)', () => {
     expect(existsSync(join(DESKTOP, 'tailwind.config.ts'))).toBe(false)
     const pkg = JSON.parse(readFileSync(join(DESKTOP, 'package.json'), 'utf8'))
     expect({ ...pkg.dependencies, ...pkg.devDependencies }).not.toHaveProperty(
@@ -611,7 +611,7 @@ describe('style audit: DS-02 ratchets', () => {
       expect(defined.has(old), `${old} is still defined`).toBe(false)
   })
 
-  it.skip('animates no grid track, width or height, and has no z-[..] left', () => {
+  it('animates no grid track, width or height, and has no z-[..] left', () => {
     // AppFrame's column widths change without animation (DS-02).
     expect(actual['layout-transition'] ?? {}).toEqual({})
     expect(actual['z-index'] ?? {}).toEqual({})

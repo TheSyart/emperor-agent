@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "about": "DS-02 style ratchet. `baseline`: totals measured when DS-02 started (release/0.2@e785cb18). `allowed`: the count each file may have per rule; counts only go down, the end goal is 0 (see style-audit.test.ts and styleAuditRules.ts).",
+  "about": "DS-02 style ratchet. `baseline`: totals measured when DS-02 started (release/0.2@e785cb18). `allowed`: the count each file may have per rule; counts only go down, the end goal is 0 (see style-audit.test.ts and styleAuditRules.ts). border-1px-solid baseline 171 → 177 in the Tailwind removal: six pre-existing 1px borders were written as Tailwind `border` utilities inside @apply, which the rule could not see; written out as CSS they are counted.",
   "baseline": {
     "bare-button": 134,
     "bare-input": 3,
@@ -8,7 +8,7 @@
     "bare-textarea": 4,
     "font-weight-bare": 191,
     "font-weight-off-scale": 7,
-    "border-1px-solid": 171,
+    "border-1px-solid": 177,
     "icon-size": 87,
     "apply": 31,
     "layout-transition": 0,
@@ -217,8 +217,9 @@
       "components/ui/UiGallery.vue": 3,
       "components/workspace/BrowserPane.vue": 5,
       "components/workspace/TurnReviewView.vue": 2,
-      "styles/activity.css": 1,
-      "styles/panels.css": 2,
+      "styles.css": 1,
+      "styles/activity.css": 4,
+      "styles/panels.css": 4,
       "styles/surfaces/menus.css": 2
     },
     "icon-size": {
@@ -229,15 +230,9 @@
       "components/sidebar/SidebarRail.vue": 6,
       "components/ui/ImageLightbox.vue": 4
     },
-    "apply": {
-      "styles.css": 2,
-      "styles/activity.css": 17,
-      "styles/panels.css": 12
-    },
+    "apply": {},
     "layout-transition": {},
-    "z-index": {
-      "styles/panels.css": 1
-    },
+    "z-index": {},
     "l1-token": {
       "App.vue": 1,
       "components/conversation/ChatTimeline.vue": 1,

@@ -71,6 +71,7 @@ import { APP_CONTEXT_KEY } from '../../composables/useAppContext'
 import { useResizable } from '../../composables/useResizable'
 import { detectShortcutPlatform } from '../../shortcuts'
 import IconButton from '../ui/IconButton.vue'
+import Spinner from '../ui/Spinner.vue'
 import { highlightFile } from './fileHighlight'
 import DocumentIcon from '../ui/DocumentIcon.vue'
 import WorkspaceTabBar from './WorkspaceTabBar.vue'
@@ -897,7 +898,8 @@ function message(value: unknown): string {
           />
         </form>
         <IconButton label="刷新目录树" @click="reloadTree">
-          <RefreshCw :size="14" :class="{ 'animate-spin': loading }" />
+          <Spinner v-if="loading" size="sm" />
+          <RefreshCw v-else :size="14" />
         </IconButton>
       </div>
       <div v-if="treeError" class="files-inline-error" role="alert">
