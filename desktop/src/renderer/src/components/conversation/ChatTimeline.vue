@@ -141,7 +141,7 @@ const items = computed(() =>
     return item
   }),
 )
-const running = computed(() => snapshot.value?.running === true)
+const running = computed(() => handle.value?.running.value === true)
 const liveProcess = computed(() =>
   rows.value.some((row) => row.kind === 'process' && row.live),
 )

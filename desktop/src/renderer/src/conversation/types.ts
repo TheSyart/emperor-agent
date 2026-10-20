@@ -18,6 +18,7 @@ import type {
 } from '@emperor/core/runtime-contract'
 import type { ConversationTimeline } from './locationIndex'
 import type { MessageReference } from '../types'
+import type { PlanSummary } from './planSummary'
 
 export type { TodoItem, TokenUsage }
 
@@ -506,7 +507,9 @@ export interface ContextUsage {
 /**
  * One published chat state. `order` and scalar fields are immutable per
  * snapshot; `nodes` is a stable live reader (an old snapshot observes later
- * flushes through it), matching the dsh ChatSnapshot contract.
+ * flushes through it), matching the dsh ChatSnapshot contract. A flush that
+ * only grows the text of streaming assistant rows publishes no new snapshot
+ * (FIX-04): those rows reach the UI through their per-key node refs.
  */
 export interface ChatSnapshot {
   /** Visible node keys in render order. */
@@ -525,4 +528,9 @@ export interface ChatSnapshot {
   readonly contextUsage: ContextUsage | null
   /** Reference-stable Turn/Step timeline of the window. */
   readonly timeline: ConversationTimeline
+  /**
+   * Latest plan of the window (environment card 计划 row), kept by the
+   * snapshot builder; absent on hand-built snapshots (`planSummary()` scans).
+   */
+  readonly planSummary?: PlanSummary | null
 }
