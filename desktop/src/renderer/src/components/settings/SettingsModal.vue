@@ -51,6 +51,7 @@ import {
 } from 'vue'
 import { useRouter, type LocationQuery } from 'vue-router'
 import { DsChevronRight, DsClose } from '../icons/ds'
+import IconButton from '../ui/IconButton.vue'
 import { useModalLayer } from '../ui/modalStack'
 import { provideDirtyGuard } from '../ui/useDirtyGuard'
 import { useFocusTrap } from '../ui/useFocusTrap'
@@ -193,15 +194,14 @@ watch(
               </h2>
               <div class="header-actions">
                 <SettingsHeaderBar :actions="header.actions.value" />
-                <button
-                  type="button"
+                <IconButton
                   class="settings-close"
-                  aria-label="关闭设置"
-                  title="关闭"
+                  label="关闭设置"
+                  tooltip="关闭"
                   @click="close"
                 >
                   <DsClose :size="14" />
-                </button>
+                </IconButton>
               </div>
             </div>
             <div
@@ -337,31 +337,6 @@ watch(
   gap: var(--space-2);
   min-width: 0;
   margin-left: auto;
-}
-
-/* dsh .close: 28×28 round, 14px glyph. */
-.settings-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: var(--space-7);
-  height: var(--space-7);
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: rgb(var(--text-1));
-  cursor: pointer;
-}
-
-.settings-close:hover {
-  background: var(--surface-hover);
-}
-
-.settings-close:focus-visible {
-  outline: 2px solid rgb(var(--focus-ring));
-  outline-offset: 2px;
 }
 
 /* dsh .options: pad (0,24,24), scrolls. The right padding widens past 24px

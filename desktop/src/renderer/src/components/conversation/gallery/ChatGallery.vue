@@ -12,6 +12,7 @@
  */
 import { computed, onBeforeUnmount, provide, ref } from 'vue'
 import ChatTimeline from '../ChatTimeline.vue'
+import LinkButton from '../../ui/LinkButton.vue'
 import { LINK_STATUS_KEY } from '../parts/linkStatus'
 import { createFixtureStore } from './fixtureStore'
 import { kernelScenario } from './kernelScenario'
@@ -101,9 +102,9 @@ provide(LINK_STATUS_KEY, {
       >
     </header>
     <div v-if="stack.length > 1" class="crumbs">
-      <button type="button" class="back" @click="stack = stack.slice(0, -1)">
+      <LinkButton class="back" @click="stack = stack.slice(0, -1)">
         ← 返回父会话
-      </button>
+      </LinkButton>
       <span class="crumb">{{ current }}</span>
     </div>
     <main class="conversation">
@@ -164,15 +165,6 @@ provide(LINK_STATUS_KEY, {
   padding: var(--space-2) var(--space-4);
   font-size: var(--fs-xs);
   color: rgb(var(--text-3));
-}
-
-.back {
-  padding: 0;
-  border: none;
-  background: none;
-  color: rgb(var(--text-link));
-  font: inherit;
-  cursor: pointer;
 }
 
 .conversation {

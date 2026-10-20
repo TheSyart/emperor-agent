@@ -18,6 +18,7 @@ import {
 import { core } from '../../../api/http'
 import type { BrowserProfileView } from '@emperor/core/runtime-contract'
 import Button from '../../ui/Button.vue'
+import LinkButton from '../../ui/LinkButton.vue'
 import Modal from '../../ui/Modal.vue'
 import { Select, Switch, type SelectOption } from '../ui'
 
@@ -254,14 +255,9 @@ watch(
           role="alert"
         >
           导入前，请完全关闭 {{ current.browserName }}
-          <button
-            type="button"
-            class="import-recheck"
-            data-testid="import-recheck"
-            @click="recheck"
-          >
+          <LinkButton data-testid="import-recheck" @click="recheck">
             重新检查
-          </button>
+          </LinkButton>
         </p>
 
         <div class="import-toggles">
@@ -383,19 +379,6 @@ watch(
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-.import-recheck {
-  border: none;
-  background: none;
-  padding: 0;
-  color: rgb(var(--text-link));
-  cursor: pointer;
-  font: inherit;
-}
-
-.import-recheck:hover {
-  text-decoration: underline;
 }
 
 .import-toggles {

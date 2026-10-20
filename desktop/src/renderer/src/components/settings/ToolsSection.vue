@@ -10,6 +10,7 @@
  * Core (`skills.tools`) into the bootstrap state.
  */
 import Badge from '../ui/Badge.vue'
+import LinkButton from '../ui/LinkButton.vue'
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { core } from '../../api/http'
@@ -68,21 +69,10 @@ function openTab(tab: 'mcp' | 'plugins'): void {
   <SettingsSection>
     <template #intro>
       这里是 Emperor 内建的工具；MCP 服务器的工具见
-      <button
-        type="button"
-        class="inline-link"
-        data-link="mcp"
-        @click="openTab('mcp')"
-      >
-        MCP</button
+      <LinkButton data-link="mcp" @click="openTab('mcp')">MCP</LinkButton
       >，插件的工具见
-      <button
-        type="button"
-        class="inline-link"
-        data-link="plugins"
-        @click="openTab('plugins')"
-      >
-        插件</button
+      <LinkButton data-link="plugins" @click="openTab('plugins')"
+        >插件</LinkButton
       >。
     </template>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -142,25 +132,6 @@ function openTab(tab: 'mcp' | 'plugins'): void {
 </template>
 
 <style scoped>
-.inline-link {
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  color: rgb(var(--text-link));
-  cursor: pointer;
-}
-
-.inline-link:hover {
-  text-decoration: underline;
-}
-
-.inline-link:focus-visible {
-  outline: 2px solid rgb(var(--focus-ring));
-  outline-offset: 1px;
-  border-radius: var(--r-xs);
-}
-
 .error {
   margin: 0 0 var(--space-3);
   font-size: var(--fs-xxs);

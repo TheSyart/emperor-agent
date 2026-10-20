@@ -9,6 +9,7 @@
 import { ref } from 'vue'
 import Button from '../../ui/Button.vue'
 import Dot from '../../ui/Dot.vue'
+import IconButton from '../../ui/IconButton.vue'
 import {
   DsClose,
   DsCode,
@@ -176,9 +177,9 @@ const facts = [
           <h2 class="title">组件库</h2>
           <div class="header-actions">
             <SettingsHeaderBar :actions="header.actions.value" />
-            <button type="button" class="close" aria-label="关闭设置">
+            <IconButton class="close" label="关闭设置" :tooltip="false">
               <DsClose :size="14" />
-            </button>
+            </IconButton>
           </div>
         </div>
         <div class="options">
@@ -531,18 +532,6 @@ const facts = [
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-.close {
-  display: inline-grid;
-  place-items: center;
-  width: var(--space-7);
-  height: var(--space-7);
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: rgb(var(--text-1));
 }
 
 .options {
