@@ -412,6 +412,38 @@ export interface TurnFilesChatData {
   }
 }
 
+/**
+ * `delegationResult`: what a subagent changed in its isolated workspace and
+ * what became of it (AGT-06) — one card per delegation, updated in place.
+ */
+export interface DelegationResultChatData {
+  readonly delegationId: string
+  readonly runId: string
+  readonly backend: 'claude-code' | 'codex'
+  readonly title?: string
+  readonly state: 'ready' | 'conflicted' | 'applied' | 'reverted' | 'discarded'
+  readonly files: readonly TurnFileEntry[]
+  readonly totals: {
+    readonly files: number
+    readonly additions: number
+    readonly deletions: number
+  }
+  readonly truncated: boolean
+  /** Files that also changed in the project (nothing was applied). */
+  readonly conflicts: readonly string[]
+  /** When the result was recorded (the 14-day cleanup prompt counts from it). */
+  readonly at: number
+  readonly by?: 'user' | 'model'
+  /** Applied with an undo record. */
+  readonly undoable: boolean
+  /** 高级 › 验证后再应用 was on: the card opens the checks instead. */
+  readonly verifyFirst: boolean
+  readonly reverted?: {
+    readonly reverted: readonly string[]
+    readonly skipped: TurnFilesReverted['skipped']
+  }
+}
+
 /** `goal`: one goal mutation, rendered inline. */
 export interface GoalChatData {
   readonly seq: number
@@ -462,6 +494,10 @@ export type ContextChatNode = ChatNodeBase<'context', ContextChatData>
 export type HookChatNode = ChatNodeBase<'hook', HookChatData>
 export type TurnTailChatNode = ChatNodeBase<'turnTail', TurnTailChatData>
 export type TurnFilesChatNode = ChatNodeBase<'turnFiles', TurnFilesChatData>
+export type DelegationResultChatNode = ChatNodeBase<
+  'delegationResult',
+  DelegationResultChatData
+>
 export type GoalChatNode = ChatNodeBase<'goal', GoalChatData>
 export type WorkflowRunChatNode = ChatNodeBase<'workflowRun', WorkflowRunView>
 
@@ -481,6 +517,7 @@ export type ChatNode =
   | HookChatNode
   | TurnTailChatNode
   | TurnFilesChatNode
+  | DelegationResultChatNode
   | GoalChatNode
   | WorkflowRunChatNode
 

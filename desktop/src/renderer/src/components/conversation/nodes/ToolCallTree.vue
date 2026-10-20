@@ -21,6 +21,8 @@ import Avatar from '../../ui/Avatar.vue'
 import ToolCallRow from './ToolCallRow.vue'
 import WorkflowRunPanel from './WorkflowRunPanel.vue'
 import ExternalAgentStream from '../tools/ExternalAgentStream.vue'
+import WorkspaceWaitLine from './WorkspaceWaitLine.vue'
+import { workspaceWaitFor } from './workspaceWaits'
 
 const props = defineProps<{ node: ToolChatNode }>()
 const chat = useChatContext()
@@ -117,8 +119,12 @@ function grantStatus(grant: ToolGrantView): string {
   return GRANT_LABEL[grant.decision] ?? grant.decision
 }
 
+/** This call's write waits for a subagent's workspace (AGT-06). */
+const wait = workspaceWaitFor(props.node.data.callId)
+
 const hasChildren = computed(
   () =>
+    wait.value !== undefined ||
     data.value.workflow !== undefined ||
     data.value.subagent !== undefined ||
     data.value.externalAgent !== undefined ||
@@ -162,6 +168,7 @@ const hasChildren = computed(
     </div>
     <ToolCallRow :data="data" :agent="nativeAgent" />
     <div v-if="hasChildren" class="subcalls" data-subcalls>
+      <WorkspaceWaitLine v-if="wait" :wait="wait" />
       <ExternalAgentStream
         v-if="data.externalAgent"
         :run="data.externalAgent"
