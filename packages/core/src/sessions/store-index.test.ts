@@ -1,7 +1,13 @@
 // KRN-12 (CORE-36): the session index lives in memory. It is built once
 // from the session directories and kept current by this store's own writes;
 // a write by another process (it rewrites index.json) makes it reload.
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -86,14 +92,31 @@ describe('SessionStore index in memory (KRN-12)', () => {
 
   it('compacts meta.jsonl to one snapshot past 1000 lines', () => {
     const root = tmp()
+    const [, id] = seed(root, 2) as [string, string]
+    const meta = join(root, 'sessions', id, 'meta.jsonl')
+    // 999 more snapshots of the same session: 1000 lines, at the limit.
+    const first = readFileSync(meta, 'utf8')
+    writeFileSync(meta, first.repeat(1000), 'utf8')
+    expect(lines(meta)).toBe(1000)
+    const store = new SessionStore(root)
+    expect(store.rename(id, '名字 0')).toBe(true)
+    expect(lines(meta)).toBe(1)
+    for (let index = 1; index <= 3; index += 1)
+      store.rename(id, `名字 ${index}`)
+    expect(lines(meta)).toBe(4)
+    expect(store.get(id)?.title).toBe('名字 3')
+    expect(new SessionStore(root).get(id)?.title).toBe('名字 3')
+  })
+
+  it('does not change the index in memory when the write fails', () => {
+    const root = tmp()
     const store = new SessionStore(root)
     store.create('keeper')
-    const entry = store.create('often renamed')
-    const meta = store.metaPath(entry.id)
-    for (let index = 0; index < 1001; index += 1)
-      store.rename(entry.id, `名字 ${index}`)
-    expect(lines(meta)).toBeLessThanOrEqual(1000)
-    expect(store.get(entry.id)?.title).toBe('名字 1000')
-    expect(new SessionStore(root).get(entry.id)?.title).toBe('名字 1000')
+    const entry = store.create('原名')
+    // A directory where meta.jsonl should be: the append throws.
+    rmSync(store.sessionDir(entry.id), { recursive: true, force: true })
+    mkdirSync(store.metaPath(entry.id), { recursive: true })
+    expect(() => store.rename(entry.id, '新名')).toThrow()
+    expect(store.get(entry.id)?.title).toBe('原名')
   })
 })

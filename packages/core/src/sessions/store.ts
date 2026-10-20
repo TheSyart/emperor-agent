@@ -287,17 +287,13 @@ export class SessionStore {
   }
 
   rename(sessionId: string, title: string): boolean {
-    const items = this.load()
-    for (const item of items) {
-      if (item.id !== sessionId) continue
-      item.title = title.trim()
-      item.updated_at = stamp()
-      item.title_status = 'manual'
-      this.appendSnapshot(item)
-      this.load()
-      return true
-    }
-    return false
+    return (
+      this.update(sessionId, (item) => {
+        item.title = title.trim()
+        item.updated_at = stamp()
+        item.title_status = 'manual'
+      }) !== null
+    )
   }
 
   archive(sessionId: string): SessionEntry | null {
@@ -309,17 +305,11 @@ export class SessionStore {
   }
 
   setGeneratedTitle(sessionId: string, title: string): SessionEntry | null {
-    const items = this.load()
-    for (const item of items) {
-      if (item.id !== sessionId) continue
+    return this.update(sessionId, (item) => {
       item.title = title.trim()
       item.title_status = 'generated'
       item.updated_at = stamp()
-      this.appendSnapshot(item)
-      this.load()
-      return cloneSession(item)
-    }
-    return null
+    })
   }
 
   touch(
@@ -327,18 +317,12 @@ export class SessionStore {
     preview: string,
     opts: { incrementMessages?: boolean } = {},
   ): SessionEntry | null {
-    const items = this.load()
-    for (const item of items) {
-      if (item.id !== sessionId) continue
+    return this.update(sessionId, (item) => {
       item.preview = preview.slice(0, 280)
       if (opts.incrementMessages)
         item.message_count = Number(item.message_count || 0) + 1
       item.updated_at = stamp()
-      this.appendSnapshot(item)
-      this.load()
-      return cloneSession(item)
-    }
-    return null
+    })
   }
 
   setControlPending(
@@ -347,29 +331,17 @@ export class SessionStore {
   ): SessionEntry | null {
     const normalized = normalizeControlPending(pending)
     if (!normalized) return null
-    const items = this.load()
-    for (const item of items) {
-      if (item.id !== sessionId) continue
+    return this.update(sessionId, (item) => {
       item.control_pending = normalized
       item.updated_at = stamp()
-      this.appendSnapshot(item)
-      this.load()
-      return cloneSession(item)
-    }
-    return null
+    })
   }
 
   clearControlPending(sessionId: string): SessionEntry | null {
-    const items = this.load()
-    for (const item of items) {
-      if (item.id !== sessionId) continue
+    return this.update(sessionId, (item) => {
       item.control_pending = null
       item.updated_at = stamp()
-      this.appendSnapshot(item)
-      this.load()
-      return cloneSession(item)
-    }
-    return null
+    })
   }
 
   reconcileSessionControlPending(
@@ -389,17 +361,11 @@ export class SessionStore {
     sessionId: string,
     targetSessionId: string,
   ): SessionEntry | null {
-    const items = this.load()
-    for (const item of items) {
-      if (item.id !== sessionId) continue
+    return this.update(sessionId, (item) => {
       item.transitioned_to_session_id = targetSessionId
       item.transitioned_at = stamp()
       item.updated_at = stamp()
-      this.appendSnapshot(item)
-      this.load()
-      return cloneSession(item)
-    }
-    return null
+    })
   }
 
   reconcileControlPending(
@@ -408,7 +374,7 @@ export class SessionStore {
   ): void {
     const normalized = normalizeControlPending(pending)
     const items = this.load()
-    let changed = false
+    const changed = new Set<SessionEntry>()
     let matched = false
 
     for (const item of items) {
@@ -416,7 +382,7 @@ export class SessionStore {
         if (item.control_pending !== null) {
           item.control_pending = null
           item.updated_at = stamp()
-          changed = true
+          changed.add(item)
         }
         continue
       }
@@ -428,7 +394,7 @@ export class SessionStore {
         ) {
           item.control_pending = normalized
           item.updated_at = stamp()
-          changed = true
+          changed.add(item)
         }
         continue
       }
@@ -436,7 +402,7 @@ export class SessionStore {
       if (item.control_pending !== null) {
         item.control_pending = null
         item.updated_at = stamp()
-        changed = true
+        changed.add(item)
       }
     }
 
@@ -445,22 +411,41 @@ export class SessionStore {
         if (item.id !== fallbackSessionId) continue
         item.control_pending = normalized
         item.updated_at = stamp()
-        changed = true
+        changed.add(item)
         break
       }
     }
 
-    if (changed) {
-      for (const item of items) this.appendSnapshot(item)
+    if (changed.size > 0) {
+      // Only the sessions that changed get a snapshot (KRN-12).
+      for (const item of changed) this.appendSnapshot(item)
       this.load()
     }
   }
 
-  /** The sessions, newest first (a copy the caller may change). */
+  /** The sessions, newest first (copies the caller may change). */
   private load(): SessionEntry[] {
     const cache = this.fresh()
     cache.sorted ??= sortByUpdated([...cache.byId.values()])
-    return [...cache.sorted]
+    return cache.sorted.map(cloneSession)
+  }
+
+  /**
+   * Change one session: `mutate` edits a copy, the copy is appended to its
+   * meta.jsonl, and only then does the index in memory take it. Returns the
+   * new entry, or null when the session is not in the index.
+   */
+  private update(
+    sessionId: string,
+    mutate: (item: SessionEntry) => void,
+  ): SessionEntry | null {
+    const current = this.fresh().byId.get(sessionId)
+    if (current === undefined) return null
+    const item = cloneSession(current)
+    mutate(item)
+    this.appendSnapshot(item)
+    this.fresh()
+    return cloneSession(item)
   }
 
   /** The index in memory: rebuilt when missing or stale, saved when dirty. */
@@ -475,10 +460,11 @@ export class SessionStore {
     return this.cache!
   }
 
+  /** index.json's identity; nanosecond mtime, since a rewrite is a rename. */
   private indexStamp(): string | null {
     try {
-      const st = statSync(this.indexPath)
-      return `${st.ino}:${st.size}:${st.mtimeMs}`
+      const st = statSync(this.indexPath, { bigint: true })
+      return `${st.ino}:${st.size}:${st.mtimeNs}`
     } catch {
       return null
     }
@@ -622,16 +608,10 @@ export class SessionStore {
     sessionId: string,
     archived: boolean,
   ): SessionEntry | null {
-    const items = this.load()
-    for (const item of items) {
-      if (item.id !== sessionId) continue
+    return this.update(sessionId, (item) => {
       item.archived_at = archived ? stamp() : null
       item.updated_at = stamp()
-      this.appendSnapshot(item)
-      this.load()
-      return cloneSession(item)
-    }
-    return null
+    })
   }
 
   private appendSnapshot(session: SessionEntry): void {
