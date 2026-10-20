@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** CostCapRow — the per-turn cost cap stopped the turn (warn). */
+/** CostCapRow — the per-turn cost cap stopped the turn (warn; logs before KRN-03). */
 import { computed } from 'vue'
 import type { CostCapChatNode } from '../../../conversation/types'
 import { formatUsdNanos } from '../chatFormat'

@@ -12,6 +12,7 @@ import type {
   SubagentStopReason,
   TodoItem,
   TokenUsage,
+  TurnBudgetReason,
   TurnFileEntry,
   TurnFilesReverted,
 } from '@emperor/core/runtime-contract'
@@ -276,7 +277,15 @@ export interface TurnMaxTokensChatData {
   readonly time: number
 }
 
-/** `costCap`: the per-turn cost cap stopped the turn. */
+/** `turnBudget`: the task budget ended a turn (KRN-03): its steps or the task's cost. */
+export interface TurnBudgetChatData {
+  readonly turn: number
+  readonly seq: number
+  readonly time: number
+  readonly reason: TurnBudgetReason
+}
+
+/** `costCap`: the per-turn cost cap stopped the turn (logs before KRN-03). */
 export interface CostCapChatData {
   readonly turn: number
   readonly step: number
@@ -439,6 +448,7 @@ export type TurnMaxTokensChatNode = ChatNodeBase<
   'turnMaxTokens',
   TurnMaxTokensChatData
 >
+export type TurnBudgetChatNode = ChatNodeBase<'turnBudget', TurnBudgetChatData>
 export type CostCapChatNode = ChatNodeBase<'costCap', CostCapChatData>
 export type CompactionChatNode = ChatNodeBase<'compaction', CompactionChatData>
 export type ContextChatNode = ChatNodeBase<'context', ContextChatData>
@@ -457,6 +467,7 @@ export type ChatNode =
   | FallbackChatNode
   | TurnErrorChatNode
   | TurnMaxTokensChatNode
+  | TurnBudgetChatNode
   | CostCapChatNode
   | CompactionChatNode
   | ContextChatNode

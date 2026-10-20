@@ -21,6 +21,7 @@ import GoalRow from './nodes/GoalRow.vue'
 import HookRow from './nodes/HookRow.vue'
 import RetryRow from './nodes/RetryRow.vue'
 import ToolCallTree from './nodes/ToolCallTree.vue'
+import TurnBudgetRow from './nodes/TurnBudgetRow.vue'
 import TurnErrorRow from './nodes/TurnErrorRow.vue'
 import TurnFilesCard from './nodes/TurnFilesCard.vue'
 import TurnMaxTokensRow from './nodes/TurnMaxTokensRow.vue'
@@ -45,6 +46,7 @@ const RENDERERS: Record<ChatNodeKind, Component> = {
   fallback: FallbackRow,
   turnError: TurnErrorRow,
   turnMaxTokens: TurnMaxTokensRow,
+  turnBudget: TurnBudgetRow,
   costCap: CostCapRow,
   compaction: CompactionRow,
   context: ContextRow,

@@ -747,6 +747,54 @@ describe('turn footer', () => {
   })
 })
 
+describe('task budget (KRN-03)', () => {
+  it('shows a turn the budget stopped, and the notice the model reads', () => {
+    const log = new LogBuilder()
+    log.user('u1', 'loop')
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.message(1, 1, [{ type: 'text', text: 'working' }])
+    log.add('step/end', { turn: 1, step: 1 })
+    log.add(
+      'user/message',
+      {
+        id: 'budget-1',
+        role: 'user',
+        content: [{ type: 'text', text: 'This turn stopped before step 2.' }],
+        source: {
+          kind: 'context',
+          producer: 'task-budget',
+          form: 'notice',
+          summary: '本轮已达 1 步上限，已停止',
+        },
+      },
+      { surfaceOp: 'append' },
+    )
+    log.add('turn/end', {
+      turn: 1,
+      reason: { kind: 'budget', limit: 'steps', maxSteps: 1 },
+    })
+    log.add('turn/start', { turn: 2 })
+    log.add('turn/end', {
+      turn: 2,
+      reason: {
+        kind: 'budget',
+        limit: 'cost',
+        capUsdNanos: 1_000_000_000,
+        spentUsdNanos: 1_200_000_000,
+      },
+    })
+    const { snapshot } = replay(log.events)
+    const described = describeNodes(snapshot)
+    expect(described).toContain('context: task-budget')
+    expect(described).toContain('turnBudget: turn 1 steps')
+    expect(described.at(-1)).toBe('turnBudget: turn 2 cost')
+    // A budget stop is not a finished turn: no turn footer.
+    expect(described.some((line) => line.startsWith('turnTail'))).toBe(false)
+    expectConverges(log)
+  })
+})
+
 describe('turn files', () => {
   const record = {
     turn: 1,

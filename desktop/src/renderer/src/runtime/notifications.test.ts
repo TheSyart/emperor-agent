@@ -227,6 +227,14 @@ describe('runtime events → notices', () => {
         1,
       ),
     ).toMatchObject({ outcome: 'error' })
+    // KRN-03: the task budget stopped it — news, but not an error.
+    expect(
+      runtimeNoticeFromEvent(
+        { event: 'assistant_done', seq: 65, stop_reason: 'budget' } as WsEvent,
+        's2',
+        1,
+      ),
+    ).toMatchObject({ outcome: 'budget' })
     // The user stopped it, or dismissed the plan review to speak: not news.
     for (const reason of ['aborted', 'interrupted', 'plan-dismissed'])
       expect(
