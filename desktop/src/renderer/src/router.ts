@@ -14,6 +14,7 @@ import {
   settingsAlias,
   type SettingsSectionKey,
 } from './components/settings/settingsSections'
+import { trajectoryRouteGuard } from './components/conversation/trajectoryGate'
 
 // Every route view is its own chunk.
 const ConversationView = () =>
@@ -73,6 +74,8 @@ export const routeRecords: RouteRecordRaw[] = [
     name: 'trajectory',
     component: ConversationView,
     meta: { label: 'Trajectory', tab: 'trajectory' },
+    // UI-S09: opens only while 设置 › 常规 › 开发者 › 显示轨迹 is on.
+    beforeEnter: trajectoryRouteGuard,
   },
   {
     path: '/chat/:sessionId?',

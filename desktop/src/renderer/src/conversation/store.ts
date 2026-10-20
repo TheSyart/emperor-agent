@@ -15,7 +15,9 @@
 //   the open windows.
 // - Extra targets (the trajectory) are lazy: a window assembles only chat
 //   until `activate(target)` / `target(target)` first asks for one, so the
-//   chat path pays nothing for an unopened trajectory tab.
+//   chat path pays nothing for an unopened trajectory tab. A view holds its
+//   target with `retainTarget`; LAZY_TARGET_IDLE_MS after the last holder
+//   lets go, the target is dropped again (UI-39).
 import {
   getCurrentScope,
   onScopeDispose,
@@ -53,12 +55,22 @@ import type { ChatNode, ChatSnapshot } from './types'
 /** Default number of simultaneously open session windows. */
 export const CONVERSATION_WINDOW_CAPACITY = 4
 
+/** How long a lazy target stays assembled after its last holder leaves. */
+export const LAZY_TARGET_IDLE_MS = 30_000
+
 /** Flush scheduling primitives (injectable for tests). */
 export interface ConversationScheduler {
   /** Run once before the next paint (streaming cadence). */
   frame(callback: () => void): void
   /** Run after the current task (state changes). */
   microtask(callback: () => void): void
+  /** Run once after `ms` (idle lazy targets); returns a cancel. */
+  delay?(callback: () => void, ms: number): () => void
+}
+
+function timeoutDelay(callback: () => void, ms: number): () => void {
+  const timer = setTimeout(callback, ms)
+  return () => clearTimeout(timer)
 }
 
 export const browserScheduler: ConversationScheduler = {
@@ -68,6 +80,7 @@ export const browserScheduler: ConversationScheduler = {
     else setTimeout(callback, 16)
   },
   microtask: (callback) => queueMicrotask(callback),
+  delay: timeoutDelay,
 }
 
 export interface ConversationStoreDeps {
@@ -105,6 +118,11 @@ export function registerLazyConversationTarget(
   LAZY_TARGET_REGISTRY.set(target, extensions)
 }
 
+/** Test seam: the lazy targets registered so far (UI-S09 visual checks). */
+export function lazyConversationTargetsForTest(): string[] {
+  return [...LAZY_TARGET_REGISTRY.keys()]
+}
+
 /** Reactive view of one open session conversation. */
 export interface ConversationHandle {
   readonly sessionId: string
@@ -126,6 +144,14 @@ export interface ConversationHandle {
   target<Snapshot>(target: string): Snapshot | undefined
   /** Register a lazy target now and publish its first snapshot. */
   activate(target: string): void
+  /** Whether a target is assembled right now (never activates it). */
+  hasTarget(target: string): boolean
+  /**
+   * Activate a lazy target for one holder (a mounted view). The returned
+   * release is idempotent; LAZY_TARGET_IDLE_MS after the last release the
+   * target is dropped, unless someone holds it again meanwhile.
+   */
+  retainTarget(target: string): () => void
   /** Provider requests of the loaded window (cached per revision). */
   requests(): RequestInspectionSnapshot
   /** Loaded raw events (seq ascending, wire-sanitized; read-only). */
@@ -150,6 +176,9 @@ interface Entry {
   scheduleGeneration: number
   requestsCache: { revision: number; value: RequestInspectionSnapshot } | null
   opened: Promise<void> | null
+  /** Holders per lazy target, and the pending drop of an idle one. */
+  readonly targetHolders: Map<string, number>
+  readonly targetDrops: Map<string, () => void>
 }
 
 export class ConversationStore {
@@ -214,6 +243,8 @@ export class ConversationStore {
   dispose(): void {
     this.unsubscribe?.()
     this.unsubscribe = null
+    for (const entry of this.entries.values())
+      for (const cancel of entry.targetDrops.values()) cancel()
     this.entries.clear()
     this.syncWatch()
   }
@@ -261,7 +292,11 @@ export class ConversationStore {
       }
       if (victim === undefined) return
       const entry = this.entries.get(victim)
-      if (entry !== undefined) entry.scheduleGeneration++
+      if (entry !== undefined) {
+        entry.scheduleGeneration++
+        for (const cancel of entry.targetDrops.values()) cancel()
+        entry.targetDrops.clear()
+      }
       this.entries.delete(victim)
     }
   }
@@ -303,11 +338,41 @@ export class ConversationStore {
       },
       activate: (target) => {
         if (assembler.hasTarget(target)) return
-        const extension =
-          this.lazyTargets?.[target] ?? LAZY_TARGET_REGISTRY.get(target)
+        const extension = this.lazyExtension(target)
         if (extension === undefined) return
         assembler.extend(extension.definitions ?? [], extension.views ?? [])
         if (box.entry !== null) this.flush(box.entry)
+      },
+      hasTarget: (target) => assembler.hasTarget(target),
+      retainTarget: (target) => {
+        const entry = box.entry
+        if (entry === null || this.lazyExtension(target) === undefined)
+          return () => {}
+        entry.targetDrops.get(target)?.()
+        entry.targetDrops.delete(target)
+        entry.targetHolders.set(
+          target,
+          (entry.targetHolders.get(target) ?? 0) + 1,
+        )
+        handle.activate(target)
+        let released = false
+        return () => {
+          if (released) return
+          released = true
+          const holders = (entry.targetHolders.get(target) ?? 1) - 1
+          if (holders > 0) {
+            entry.targetHolders.set(target, holders)
+            return
+          }
+          entry.targetHolders.delete(target)
+          entry.targetDrops.set(
+            target,
+            this.delay(() => {
+              entry.targetDrops.delete(target)
+              this.dropTarget(entry, target)
+            }, LAZY_TARGET_IDLE_MS),
+          )
+        }
       },
       requests: () => {
         const cache = box.entry?.requestsCache ?? null
@@ -339,9 +404,34 @@ export class ConversationStore {
       scheduleGeneration: 0,
       requestsCache: null,
       opened: null,
+      targetHolders: new Map(),
+      targetDrops: new Map(),
     }
     box.entry = entry
     return entry
+  }
+
+  private delay(callback: () => void, ms: number): () => void {
+    return this.scheduler.delay
+      ? this.scheduler.delay(callback, ms)
+      : timeoutDelay(callback, ms)
+  }
+
+  private lazyExtension(target: string): ConversationExtensions | undefined {
+    return this.lazyTargets?.[target] ?? LAZY_TARGET_REGISTRY.get(target)
+  }
+
+  /** Stop assembling an idle lazy target (UI-39). */
+  private dropTarget(entry: Entry, target: string): void {
+    if (entry.targetHolders.has(target)) return
+    const extension = this.lazyExtension(target)
+    if (extension === undefined) return
+    const publication = entry.assembler.retract(
+      extension.definitions ?? [],
+      extension.views ?? [],
+    )
+    if (publication !== 'none' && this.entries.get(entry.sessionId) === entry)
+      this.flush(entry)
   }
 
   private schedule(entry: Entry, publication: ConversationPublication): void {

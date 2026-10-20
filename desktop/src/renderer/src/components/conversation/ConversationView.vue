@@ -23,7 +23,10 @@
  * A tool row's Inspect opens the trajectory inspector column and routes to
  * `/chat/:id/trajectory?call=<id>`; the trajectory selects that call (paging
  * older history in when needed) and reports `inspect-applied`, which drops
- * the query again.
+ * the query again. All of it exists only while 设置 › 常规 › 开发者 ›
+ * 显示轨迹 is on (UI-S09, trajectoryGate): off, the header has no tabs, the
+ * trajectory never loads, and a trajectory link that lands here instead says
+ * so in a toast and opens the call's tool row in the chat.
  *
  * Child (subagent) sessions — ids outside the sidebar list whose lineage has
  * ancestors — render the same timeline (live through the watch set), the
@@ -53,6 +56,8 @@ import { fetchSessionLineage } from '../../api/sessions'
 import { deriveComposerPhase } from '../../conversation/composerPhase'
 import { EMPTY_CHAT_SNAPSHOT } from '../../conversation/chatSnapshot'
 import { useSessionConversation } from '../../composables/useSessionConversation'
+import { useUiPreferences } from '../../composables/useUiPreferences'
+import { focusCallStep } from '../../conversation/focusCallRetry'
 import { useAppContext } from '../../composables/useAppContext'
 import { composerLifecycleMode as resolveComposerLifecycleMode } from '../../composables/composerLifecycle'
 import { useSession } from '../../composables/useSession'
@@ -77,6 +82,7 @@ import { frameActions, useFrameState } from '../shell/frameState'
 import Button from '../ui/Button.vue'
 import { useAgentTree } from '../sidebar/agentTree'
 import { requestWorkspace } from '../workspace/workspaceState'
+import { useSettingsRoute } from '../settings/useSettingsRoute'
 import ChatTimeline from './ChatTimeline.vue'
 import ConversationHeader from './ConversationHeader.vue'
 import EmptyHero from './EmptyHero.vue'
@@ -86,6 +92,7 @@ import {
   isChildLineage,
 } from './conversationModel'
 import { TrajectoryViewAsync } from '../trajectory/lazy'
+import { takeTrajectoryNotice, trajectoryNotice } from './trajectoryGate'
 import { previewShownTargets } from './computer-use/computerUsePreviewState'
 import { createLinkStatusSource, LINK_STATUS_KEY } from './parts/linkStatus'
 import TakeoverSeat from './takeover/TakeoverSeat.vue'
@@ -129,6 +136,10 @@ const sessionStore = useSession()
 const route = useRoute()
 const router = useRouter()
 const frame = useFrameState()
+const settingsRoute = useSettingsRoute()
+const { preferences: uiPrefs } = useUiPreferences()
+/** 设置 › 常规 › 开发者 › 显示轨迹 (UI-S09). */
+const trajectoryShown = computed(() => uiPrefs.value.showTrajectory)
 
 const composer = ref<{
   setDraft: (text: string) => void
@@ -137,7 +148,10 @@ const composer = ref<{
   takeSnapshot: () => ComposerDraft
   applySnapshot: (draft: ComposerDraft | null) => void
 } | null>(null)
-const timeline = ref<{ scrollToKey: (key: string) => boolean } | null>(null)
+const timeline = ref<{
+  scrollToKey: (key: string) => boolean
+  revealCall: (callId: string) => boolean
+} | null>(null)
 
 // ── session identity / lineage ────────────────────────────────────────────
 const routeSessionId = computed(() => {
@@ -187,8 +201,9 @@ const unknownSession = computed(
     !child.value &&
     viewingId.value !== ctx.sessionId.value,
 )
+// The switch turning off shows the chat at once; App.vue moves the route.
 const tab = computed<'chat' | 'trajectory'>(() =>
-  route.name === 'trajectory' ? 'trajectory' : 'chat',
+  route.name === 'trajectory' && trajectoryShown.value ? 'trajectory' : 'chat',
 )
 /** Raw-log conversation of the viewed session (null for drafts). */
 const conversation = useSessionConversation(() => viewingId.value)
@@ -698,7 +713,7 @@ watch(
 // ── timeline actions ──────────────────────────────────────────────────────
 /** Tool-row Inspect: the trajectory's inspector column shows the call. */
 function inspectCall(callId: string): void {
-  if (!viewingId.value || !callId) return
+  if (!trajectoryShown.value || !viewingId.value || !callId) return
   frameActions.openInspector(frame)
   void router
     .push({
@@ -761,6 +776,52 @@ function clearFocusCall(): void {
   const { call: _call, ...query } = route.query
   void router.replace({ ...route, query }).catch(() => undefined)
 }
+
+// ── trajectory gate (UI-S09) ─────────────────────────────────────────────
+// A trajectory link opened while 显示轨迹 is off landed here: say so, and
+// open the tool row of the call it pointed at (paging older history in, as
+// the trajectory would).
+const revealCallId = ref<string | null>(null)
+let revealPagesLoaded = 0
+watch(
+  [() => trajectoryNotice.value, viewingId],
+  ([, id], previous) => {
+    if (previous?.[1] !== id) revealCallId.value = null
+    const notice = takeTrajectoryNotice(id)
+    if (notice === null) return
+    ctx.showToast('轨迹视图已关闭', {
+      action: {
+        label: '在设置中开启',
+        run: () => void settingsRoute.openSettings('general'),
+      },
+    })
+    revealCallId.value = notice.callId
+    revealPagesLoaded = 0
+  },
+  { immediate: true },
+)
+watch(
+  () =>
+    [
+      revealCallId.value,
+      timeline.value,
+      snapshot.value,
+      conversation.value?.window.value,
+    ] as const,
+  ([callId, list, , sessionWindow]) => {
+    if (callId === null || list === null || sessionWindow === undefined) return
+    if (list.revealCall(callId)) {
+      revealCallId.value = null
+      return
+    }
+    const step = focusCallStep(sessionWindow, revealPagesLoaded)
+    if (step === 'give-up') revealCallId.value = null
+    if (step !== 'load-older') return
+    revealPagesLoaded++
+    void conversation.value?.loadOlder()
+  },
+  { flush: 'post' },
+)
 
 // ── child session stop ───────────────────────────────────────────────────
 const childRunning = computed(() => child.value && snapshot.value.running)
@@ -915,6 +976,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
       :workspace-open="workspaceOpen"
       :env-card-open="envCardShown"
       :tabs-disabled="!viewingId"
+      :trajectory="trajectoryShown"
       @navigate="navigate"
       @tab="switchTab"
       @toggle-workspace="toggleWorkspace"

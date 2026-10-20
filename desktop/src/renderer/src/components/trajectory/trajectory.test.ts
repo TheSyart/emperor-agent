@@ -19,7 +19,10 @@ import {
   richScenario,
   type GalleryScenario,
 } from './gallery/galleryScenarios'
-import { FOCUS_CALL_LOAD_LIMIT, focusCallStep } from './focusCallRetry'
+import {
+  FOCUS_CALL_LOAD_LIMIT,
+  focusCallStep,
+} from '../../conversation/focusCallRetry'
 import { ledgerKeyAction } from './tableKeyboard'
 import { acquireTrajectory, type TrajectoryController } from './useTrajectory'
 import {
@@ -441,6 +444,39 @@ describe('Inspect deep link', () => {
     expect(loads).toBe(FOCUS_CALL_LOAD_LIMIT)
     expect(controller.windowState.value.hasMore).toBe(true)
     expect(emitted).toEqual([])
+  })
+})
+
+describe('trajectory target lifetime (UI-39)', () => {
+  it('9 · unregisters the target 30 s after the last trajectory view leaves', async () => {
+    const timers: Array<{ ms: number; callback: () => void }> = []
+    const scenario = kernelScenario()
+    gallery = createGalleryStore(scenario.sessions, {
+      pageEvents: Number.MAX_SAFE_INTEGER,
+      scheduler: {
+        ...immediate,
+        delay: (callback, ms) => {
+          const timer = { ms, callback }
+          timers.push(timer)
+          return () => timers.splice(timers.indexOf(timer), 1)
+        },
+      },
+    })
+    const sessionId = scenario.sessions[0]!.id
+    const ledger = acquireTrajectory(sessionId, gallery.store)
+    const inspector = acquireTrajectory(sessionId, gallery.store)
+    await settle(30)
+    const handle = ledger.controller.handle
+    expect(handle.hasTarget('trajectory')).toBe(true)
+    // The chat view keeps the window open meanwhile.
+    held = { release: gallery.store.retain(sessionId) }
+    ledger.release()
+    expect(timers).toHaveLength(0)
+    inspector.release()
+    expect(timers.map((timer) => timer.ms)).toEqual([30_000])
+    expect(handle.hasTarget('trajectory')).toBe(true)
+    timers[0]!.callback()
+    expect(handle.hasTarget('trajectory')).toBe(false)
   })
 })
 

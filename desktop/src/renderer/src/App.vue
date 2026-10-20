@@ -39,6 +39,8 @@ import {
   toggleWorkspacePane,
 } from './components/workspace/workspaceState'
 import { useLazySessionConversation } from './composables/useLazySessionConversation'
+import { useUiPreferences } from './composables/useUiPreferences'
+import { trajectoryOffLocation } from './components/conversation/trajectoryGate'
 import { useShortcuts } from './composables/useShortcuts'
 import { useSettingsRoute } from './components/settings/useSettingsRoute'
 import {
@@ -515,6 +517,8 @@ const routeSessionId = computed(() => {
   return typeof value === 'string' ? value : ''
 })
 const startupDone = ref(false)
+/** 显示轨迹 (UI-S09): the route follows into the trajectory only when on. */
+const { preferences: uiPrefs } = useUiPreferences()
 const routeOwner = createRouteOwnerController({
   resolve: async (target) => {
     if (sessionStore.getSession(target)) return target
@@ -578,7 +582,9 @@ watch(
       .replace({
         ...(sessionLocation(
           active,
-          route.name === 'trajectory' ? 'trajectory' : 'chat',
+          route.name === 'trajectory' && uiPrefs.value.showTrajectory
+            ? 'trajectory'
+            : 'chat',
         ) as object),
         query: route.query,
       })
@@ -643,6 +649,20 @@ bindWorkspaceSnapshotSource({
 })
 
 const frame = useFrameState()
+
+// 轨迹门控 (UI-S09): turning 显示轨迹 off leaves the trajectory at once
+// (an open settings modal stays) and folds its inspector column, whose
+// width waits for the next time.
+watch(
+  () => uiPrefs.value.showTrajectory,
+  (shown) => {
+    if (shown) return
+    frameActions.closeInspector(frame)
+    const target = trajectoryOffLocation(route)
+    if (target) void router.replace(target).catch(() => undefined)
+  },
+)
+
 /** Full-page routes (scheduler, plugins, …) have no workspace column. */
 const workspaceAvailable = computed(() => isConversationRoute(route.name))
 const centerMin = computed(() =>
