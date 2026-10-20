@@ -9,8 +9,22 @@ import type { ChatSnapshot } from './types'
 
 export type ComposerPhase = 'blank' | 'engaging' | 'active'
 
+/**
+ * What the phase reads of the chat: three scalars, which the conversation
+ * handle publishes as their own refs (`order`, `turnCount`, `running`), so
+ * the phase does not follow every snapshot.
+ */
+export interface ConversationContent {
+  /** Visible rows in the loaded window. */
+  readonly rows: number
+  /** Turns in the loaded window. */
+  readonly turns: number
+  /** A turn is open. */
+  readonly running: boolean
+}
+
 export interface ComposerPhaseInput {
-  readonly snapshot: ChatSnapshot
+  readonly content: ConversationContent
   /** A prompt was submitted from this view (sticky, never resets). */
   readonly promptAttempted: boolean
   /** A control interaction (approval/question/plan) is pending. */
@@ -19,15 +33,22 @@ export interface ComposerPhaseInput {
   readonly busy?: boolean
 }
 
-/** Whether the chat has any visible row or turn at all. */
-export function hasVisibleConversationContent(snapshot: ChatSnapshot): boolean {
-  return snapshot.order.length > 0 || snapshot.timeline.turnOrder.length > 0
+/** The content scalars of a chat snapshot. */
+export function conversationContent(
+  snapshot: ChatSnapshot,
+): ConversationContent {
+  return {
+    rows: snapshot.order.length,
+    turns: snapshot.timeline.turnOrder.length,
+    running: snapshot.running,
+  }
 }
 
 export function deriveComposerPhase(input: ComposerPhaseInput): ComposerPhase {
   if (
-    hasVisibleConversationContent(input.snapshot) ||
-    input.snapshot.running ||
+    input.content.rows > 0 ||
+    input.content.turns > 0 ||
+    input.content.running ||
     input.busy === true ||
     input.pendingInteraction === true
   )

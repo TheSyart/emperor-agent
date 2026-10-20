@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApp, h, nextTick, reactive, ref } from 'vue'
 import MarkdownHtml from './MarkdownHtml.vue'
+import { renderMarkdown } from '../../../composables/useMarkdown'
 import { createExpansionStore, provideChatContext } from '../chatContext'
 import { closeImageViewer, imageViewer } from '../../ui/imageViewer'
 import {
@@ -225,5 +226,48 @@ describe('MarkdownHtml document links', () => {
     const { root } = mount({ text: TEXT })
     await flushPromises()
     expect(anchor(root, 'docs/gone.md').dataset.mdState).toBeUndefined()
+  })
+})
+
+describe('MarkdownHtml while streaming (FIX-04)', () => {
+  it('7 · keeps completed blocks, and a selection in them, while the reply grows', async () => {
+    const { root, state } = mount({
+      text: 'First finished paragraph.\n\nSecond one is stre',
+      streaming: true,
+    })
+    await nextTick()
+    const html = root.querySelector<HTMLElement>('.ds-md-html')!
+    const first = html.querySelector('p')!
+    expect(first.textContent).toBe('First finished paragraph.')
+    const range = document.createRange()
+    range.selectNodeContents(first)
+    const selection = window.getSelection()!
+    selection.removeAllRanges()
+    selection.addRange(range)
+
+    state.text =
+      'First finished paragraph.\n\nSecond one is streaming.\n\n- a list'
+    await nextTick()
+    state.text += '\n- grows'
+    await nextTick()
+
+    expect(html.querySelector('p')).toBe(first)
+    expect(first.isConnected).toBe(true)
+    expect(selection.toString()).toBe('First finished paragraph.')
+    expect(html.querySelectorAll('li')).toHaveLength(2)
+  })
+
+  it('renders the same HTML as the whole document once the stream ends', async () => {
+    const text =
+      '# Title\n\nSome **bold** text.\n\n| a | b |\n| - | - |\n| 1 | 2 |'
+    const { root, state } = mount({ text: text.slice(0, 20), streaming: true })
+    await nextTick()
+    state.text = text
+    await nextTick()
+    state.streaming = false
+    await nextTick()
+    const whole = document.createElement('div')
+    whole.innerHTML = renderMarkdown(text)
+    expect(root.querySelector('.ds-md-html')!.innerHTML).toBe(whole.innerHTML)
   })
 })

@@ -320,6 +320,15 @@ export function timelineRows(
 /** Durations and the closing flag, which need the rows around each row. */
 function finish(rows: TimelineRow[], input: TimelineRowsInput): TimelineRow[] {
   const { nodes } = input
+  // Whether a later process row of the same turn follows (one backward pass).
+  const later = new Array<boolean>(rows.length).fill(false)
+  const seen = new Set<number>()
+  for (let index = rows.length - 1; index >= 0; index--) {
+    const row = rows[index]
+    if (row?.kind !== 'process') continue
+    later[index] = seen.has(row.turn)
+    seen.add(row.turn)
+  }
   return rows.map((row, index) => {
     if (row.kind === 'node') {
       const next = rows[index + 1]
@@ -330,12 +339,13 @@ function finish(rows: TimelineRow[], input: TimelineRowsInput): TimelineRow[] {
       return closing ? { ...row, closing: true } : row
     }
     if (row.live) return row
-    const later = rows
-      .slice(index + 1)
-      .some((other) => other.kind === 'process' && other.turn === row.turn)
     const location = input.timeline.turns.get(row.turn)
     let endedAt: number | null = null
-    if (!later && location?.status === 'closed' && location.end !== undefined)
+    if (
+      !later[index] &&
+      location?.status === 'closed' &&
+      location.end !== undefined
+    )
       endedAt = location.end.time
     else {
       const next = rows[index + 1]
