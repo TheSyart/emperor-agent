@@ -502,18 +502,18 @@ async function main(): Promise<void> {
           .click()
         const dialog = page.getByRole('dialog', { name: '设置' })
         await dialog.waitFor()
-        for (const section of [
-          'general',
-          'model',
-          'browser',
-          'voice',
-          'diagnostics',
-        ]) {
+        for (const section of ['general', 'model', 'browser', 'voice']) {
           await dialog.locator(`.nav-cell[data-section="${section}"]`).click()
           await dialog
             .locator(`.settings-options[data-section="${section}"]`)
             .waitFor({ timeout: 10_000 })
         }
+        // 诊断 is a sub page of 高级 since UI-S07.
+        await dialog.locator('.nav-cell[data-section="advanced"]').click()
+        await dialog.locator('[data-advanced-page="diagnostics"]').click()
+        await dialog
+          .locator('.settings-options[data-page="diagnostics"]')
+          .waitFor({ timeout: 10_000 })
         await page.keyboard.press('Escape')
       },
     )
