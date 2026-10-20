@@ -129,3 +129,97 @@ describe('bootstrap recovery surface', () => {
     await expect(handler(41, 'unknown')).rejects.toThrow(/invalid/i)
   })
 })
+
+describe('recovery page: logs and the diagnostics bundle (REL-01)', () => {
+  const BUNDLE = {
+    id: 'b_0123456789ab',
+    name: 'emperor-diagnostics-20261020-163000',
+    entries: [{ path: 'logs/main.log', title: '主进程日志', bytes: 2048 }],
+    excluded: ['会话与消息内容'],
+  }
+
+  function handlerWith(
+    extra: Partial<Parameters<typeof createRecoveryActionHandler>[0]>,
+  ) {
+    return createRecoveryActionHandler({
+      senderId: 7,
+      emperorHome: '/Users/tester/.emperor',
+      legacyHome: null,
+      retry: vi.fn(),
+      openPath: vi.fn(async () => ''),
+      exit: vi.fn(),
+      ...extra,
+    })
+  }
+
+  it('names the log file and offers 打开日志 and 导出诊断包', () => {
+    const payload = recoveryPayload(new Error('boom'), {
+      emperorHome: '/Users/tester/.emperor',
+      legacyHome: null,
+      logFile: '/Users/tester/Library/Logs/Emperor Agent/main.log',
+    })
+    expect(payload.logFile).toBe(
+      '/Users/tester/Library/Logs/Emperor Agent/main.log',
+    )
+    const html = createRecoveryHtml(payload)
+    expect(html).toContain('id="open-logs"')
+    expect(html).toContain('打开日志')
+    expect(html).toContain('id="export-bundle"')
+    expect(html).toContain('导出诊断包')
+    expect(html).toContain('Library/Logs/Emperor Agent/main.log')
+    // The list the user confirms before anything is written.
+    expect(html).toContain('id="bundle-entries"')
+    expect(html).toContain('不包含')
+  })
+
+  it('打开日志 opens main.log through main, never a renderer path', async () => {
+    const openLogs = vi.fn(async () => '')
+    const handler = handlerWith({ openLogs })
+    await expect(handler(7, 'open_logs')).resolves.toEqual({ ok: true })
+    expect(openLogs).toHaveBeenCalledOnce()
+    openLogs.mockResolvedValueOnce('No application knows how to open it')
+    await expect(handler(7, 'open_logs')).resolves.toEqual({
+      ok: false,
+      error: 'No application knows how to open it',
+    })
+    await expect(handlerWith({})(7, 'open_logs')).resolves.toEqual({
+      ok: false,
+      error: '日志不可用',
+    })
+  })
+
+  it('lists the bundle first, then exports or discards it', async () => {
+    const diagnostics = {
+      prepare: vi.fn(async () => BUNDLE),
+      export: vi.fn(async () => ({
+        ok: true as const,
+        name: `${BUNDLE.name}.zip`,
+        location: '~/Desktop',
+      })),
+      discard: vi.fn(),
+    }
+    const handler = handlerWith({ diagnostics })
+    await expect(handler(7, 'prepare_diagnostics')).resolves.toEqual({
+      ok: true,
+      bundle: BUNDLE,
+    })
+    await expect(
+      handler(7, 'export_diagnostics', { id: BUNDLE.id }),
+    ).resolves.toEqual({
+      ok: true,
+      name: `${BUNDLE.name}.zip`,
+      location: '~/Desktop',
+    })
+    expect(diagnostics.export).toHaveBeenCalledWith(BUNDLE.id)
+    await expect(
+      handler(7, 'discard_diagnostics', { id: BUNDLE.id }),
+    ).resolves.toEqual({ ok: true })
+    expect(diagnostics.discard).toHaveBeenCalledWith(BUNDLE.id)
+    await expect(
+      handler(7, 'export_diagnostics', { id: '../etc' }),
+    ).resolves.toEqual({ ok: false, error: '无效的诊断包' })
+    await expect(handler(8, 'prepare_diagnostics')).rejects.toThrow(
+      /unauthorized/i,
+    )
+  })
+})

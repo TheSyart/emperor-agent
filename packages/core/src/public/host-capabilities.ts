@@ -117,3 +117,6 @@ export type {
   ExternalSiteDecider,
   ExternalSiteVerdict,
 } from '../harness/computer-use/port'
+export { redactLogText } from '../util/redaction'
+export { setCoreLogSink } from '../util/log'
+export type { LogLevel, LogLine, LogSink } from '../util/log'

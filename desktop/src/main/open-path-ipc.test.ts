@@ -115,6 +115,23 @@ describe('emperor:open-path (MAIN-27)', () => {
     expect(showItemInFolder).toHaveBeenCalledWith('/Users/me/Evil.app')
   })
 
+  it('opens the log folder main writes to (REL-01)', async () => {
+    const { invoke, openPath } = setup({
+      logsFolder: () => '/Users/me/Library/Logs/Emperor Agent',
+    })
+    expect(await invoke({ kind: 'diagnostic', rowId: 'logs-path' })).toEqual({
+      ok: true,
+    })
+    expect(openPath).toHaveBeenCalledWith(
+      '/Users/me/Library/Logs/Emperor Agent',
+    )
+    // A host that keeps no log folder offers none.
+    const bare = setup()
+    expect(
+      await bare.invoke({ kind: 'diagnostic', rowId: 'logs-path' }),
+    ).toMatchObject({ ok: false })
+  })
+
   it('serves the trusted main window only', async () => {
     const { invoke } = setup()
     await expect(
