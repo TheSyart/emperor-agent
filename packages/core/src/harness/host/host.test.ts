@@ -581,57 +581,20 @@ it('stop during a Goal pauses it (已暂停) and /goal resume brings it back (AG
   const { host, adapter } = await makeHost()
   const entry = host.kept.sessionStore.create('goal stop', { mode: 'chat' }),
     agent = host.agentFor(entry.id)
-  const stopRoot = vi.fn(async () => undefined)
-  host.delegations = {
-    list: () => [],
-    stopRoot,
-    parentPermissionsRevoked: () => false,
-    shutdown: async () => undefined,
-  } as never
   const goal = host.goals.create(agent, { objective: 'fixture only' })
   host.stop(entry.id)
   expect(host.goals.get(agent)).toMatchObject({
     phase: 'paused',
     activation: 'disarmed',
   })
-  // Only local work: nothing external to stop.
-  expect(stopRoot).not.toHaveBeenCalled()
   const resumed = host.goals.resume(agent, {
     id: goal.id,
     revision: host.goals.get(agent)!.revision,
   })
   expect(resumed).toMatchObject({ phase: 'active', activation: 'armed' })
   host.stop(entry.id)
+  expect(host.goals.get(agent)?.phase).toBe('paused')
   expect(adapter.requests.length).toBeLessThanOrEqual(1)
-})
-
-it('stop stops external work only when the root has an active delegation (AGT-09 2)', async () => {
-  const { host } = await makeHost()
-  const entry = host.kept.sessionStore.create('external stop', { mode: 'chat' })
-  host.agentFor(entry.id)
-  const stopRoot = vi.fn(async () => undefined)
-  let active = false
-  host.delegations = {
-    list: () =>
-      active
-        ? [
-            {
-              record: {
-                owner: { rootSessionId: entry.id },
-                availability: 'active',
-              },
-            },
-          ]
-        : [],
-    stopRoot,
-    parentPermissionsRevoked: () => false,
-    shutdown: async () => undefined,
-  } as never
-  host.stop(entry.id)
-  expect(stopRoot).not.toHaveBeenCalled()
-  active = true
-  expect(host.stop(entry.id)).toBe(true)
-  expect(stopRoot).toHaveBeenCalledWith(entry.id)
 })
 
 it('an external result whose parent subagent has ended goes to the root (AGT-09 4)', async () => {

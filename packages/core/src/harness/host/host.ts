@@ -2052,9 +2052,10 @@ export class HarnessHost {
 
   /**
    * The user pressed stop: an active goal is paused (durably, so it shows
-   * 「已暂停」 and `/goal resume` brings it back), the turn and its subagents
-   * are cancelled, and external work is stopped only when the root has an
-   * active delegation (AGT-09).
+   * 「已暂停」 and `/goal resume` brings it back) and the turn and its
+   * subagents are cancelled (AGT-09). `stopRoot` also fences an external
+   * start still in flight and holds late results; with no external
+   * delegation it does nothing.
    */
   stop(sessionId: string): boolean {
     this.delegationInteractions.cancelRoot(sessionId)
@@ -2067,12 +2068,11 @@ export class HarnessHost {
             state.record?.owner.rootSessionId === sessionId &&
             state.record.availability === 'active',
         ) ?? false
-    if (externalActive)
-      void this.delegations?.stopRoot(sessionId).catch((error) =>
-        logger.warn('external delegation stop requires recovery', {
-          error: String(error),
-        }),
-      )
+    void this.delegations?.stopRoot(sessionId).catch((error) =>
+      logger.warn('external delegation stop requires recovery', {
+        error: String(error),
+      }),
+    )
     const agent = this.agents.get(sessionId)
     if (agent === undefined) return externalActive
     const running = agent.status === 'running'
