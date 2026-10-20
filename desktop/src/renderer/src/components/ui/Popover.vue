@@ -14,6 +14,7 @@
  * - label: accessible name of the panel.
  * - width (default 320): panel width in px.
  * - placement: 'bottom' (default) or 'top'.
+ * - align: 'end' (default: right edges line up) or 'start' (left edges).
  * - padded (default true): 12px inner padding; false for list content
  *   that pads its own rows.
  * Slot: default (panel content). Attributes (class, data-*) land on the
@@ -31,9 +32,10 @@ const props = withDefaults(
     label: string
     width?: number
     placement?: 'top' | 'bottom'
+    align?: 'start' | 'end'
     padded?: boolean
   }>(),
-  { width: 320, placement: 'bottom', padded: true },
+  { width: 320, placement: 'bottom', align: 'end', padded: true },
 )
 
 const open = defineModel<boolean>('open', { default: false })
@@ -51,6 +53,7 @@ const floating = useFloatingMenu({
   fallbackHeight: 240,
   onClose: close,
   prefer: () => props.placement,
+  align: () => props.align,
 })
 
 // Escape closes the popover wherever focus is (a control that disabled

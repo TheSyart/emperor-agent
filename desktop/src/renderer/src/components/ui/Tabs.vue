@@ -13,7 +13,8 @@
  * a closable editor tab.
  *
  * Props:
- * - tabs: { id, label, disabled?, icon?, count?, closable? }[].
+ * - tabs: { id, label, disabled?, icon?, count?, closable?, title? }[]
+ *   (`title` is the hover text, kept on a disabled tab).
  * - modelValue (v-model): active tab id.
  * - block?: stretch to the container, equal widths (segmented).
  * - semantics: 'tabs' (tablist, default) | 'radio' (radiogroup; Segmented).
@@ -92,6 +93,7 @@ function onKeydown(event: KeyboardEvent, tab: TabItem) {
       :key="tab.id"
       class="tab-item"
       :data-active="tab.id === active || undefined"
+      :title="tab.title"
     >
       <button
         type="button"
