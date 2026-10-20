@@ -1127,6 +1127,57 @@ test('first-run model prompt opens the settings model section', async ({
   ).toBeVisible()
 })
 
+// UI-S12: the illustration fills the dialog behind the copy and follows
+// the theme; the brand line is the vector mark plus the name.
+for (const theme of ['dark', 'light'] as const) {
+  test(`first-run model prompt artwork (${theme})`, async ({ page }) => {
+    await open(page, '/chat?visualModel=unavailable', { theme })
+    const prompt = page.getByRole('dialog', { name: '把任务交给本地 Agent。' })
+    await expect(prompt).toBeVisible()
+    const art = prompt.locator('img.model-setup-art')
+    await expect(art).toHaveAttribute(
+      'src',
+      new RegExp(`model-setup-hero-${theme}\\.webp`),
+    )
+    await expect
+      .poll(() => art.evaluate((img: HTMLImageElement) => img.naturalWidth))
+      .toBe(1600)
+    await expect(prompt.locator('svg.brand-mark')).toBeVisible()
+    await expect(prompt.locator('.model-setup-wordmark')).toHaveText(
+      'Emperor Agent',
+    )
+    const box = (await prompt.boundingBox())!
+    const copy = (await prompt.locator('.model-setup-copy').boundingBox())!
+    // The art fills the dialog at 16:10; the copy keeps to the empty left.
+    expect(box.width / box.height).toBeCloseTo(1.6, 1)
+    expect(copy.x + copy.width - box.x).toBeLessThanOrEqual(box.width * 0.45)
+    await expect(
+      prompt.getByRole('button', { name: '去配置模型' }),
+    ).toBeFocused()
+    await expectNoHorizontalOverflow(page)
+    await shot(page, `first-run-model-${theme}`)
+  })
+}
+
+test('first-run model prompt stacks the artwork on a narrow window', async ({
+  page,
+}) => {
+  await open(page, '/chat?visualModel=unavailable', {
+    width: 700,
+    height: 860,
+    theme: 'light',
+  })
+  const prompt = page.getByRole('dialog', { name: '把任务交给本地 Agent。' })
+  await expect(prompt).toBeVisible()
+  const art = (await prompt.locator('img.model-setup-art').boundingBox())!
+  const copy = (await prompt.locator('.model-setup-copy').boundingBox())!
+  expect(art.height).toBe(200)
+  expect(copy.y).toBeGreaterThanOrEqual(art.y + art.height - 1)
+  await expect(prompt.getByRole('button', { name: '稍后配置' })).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+  await shot(page, 'first-run-model-narrow')
+})
+
 test('profile onboarding starts from the hero and stays in 记忆', async ({
   page,
 }) => {
