@@ -1821,9 +1821,12 @@ export class HarnessHost {
   ): Agent | undefined {
     const root = this.kept.sessionStore.get(owner.rootSessionId)
     if (!root || root.archived_at || this.closed) return undefined
+    // A parent subagent that has ended (or a restart) hands the result to
+    // the root instead of dropping it (AGT-09).
     return owner.parentAgentId === owner.rootSessionId
       ? this.agentFor(owner.rootSessionId)
-      : this.agents.get(owner.parentAgentId)
+      : (this.agents.get(owner.parentAgentId) ??
+          this.agentFor(owner.rootSessionId))
   }
   private resumeDelegationNotices(input: SubmitInput): void {
     if (input.scheduler || (input.source && input.source !== 'user')) return
@@ -2047,6 +2050,13 @@ export class HarnessHost {
     return this.kept.sessionStore.setGeneratedTitle(sessionId, title)
   }
 
+  /**
+   * The user pressed stop: an active goal is paused (durably, so it shows
+   * 「已暂停」 and `/goal resume` brings it back) and the turn and its
+   * subagents are cancelled (AGT-09). `stopRoot` also fences an external
+   * start still in flight and holds late results; with no external
+   * delegation it does nothing.
+   */
   stop(sessionId: string): boolean {
     this.delegationInteractions.cancelRoot(sessionId)
     this.delegationConsent.cancelRoot(sessionId)
@@ -2067,10 +2077,24 @@ export class HarnessHost {
     if (agent === undefined) return externalActive
     const running = agent.status === 'running'
     this.pending.cancelSession(sessionId)
-    this.goals.disarm(agent)
+    this.pauseGoalForStop(agent)
     agent.cancel({ kind: 'user' })
     this.subagents.disposeChildrenOf(sessionId)
     return running || externalActive
+  }
+
+  /** Pause an active goal; anything else (or a failed pause) is disarmed. */
+  private pauseGoalForStop(agent: Agent): void {
+    const goal = this.goals.get(agent)
+    if (goal?.phase === 'active') {
+      try {
+        this.goals.pause(agent, { id: goal.id, revision: goal.revision })
+        return
+      } catch (error: unknown) {
+        logger.warn('stop could not pause the goal', { error: String(error) })
+      }
+    }
+    this.goals.disarm(agent)
   }
 
   isBusy(sessionId: string | null): boolean {
