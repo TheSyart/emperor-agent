@@ -13,7 +13,8 @@
  * The environment card floats at the top right of the view area. From a
  * 1120px conversation column (container query) the chat body and the
  * composer stack pad their inline end by the card width so nothing sits
- * under it; narrower, the card overlays the chat (Escape closes it).
+ * under it; narrower, it shows only once opened from the header and still
+ * reserves its space.
  *
  * The computer-use preview (read-only pictures of the windows and tabs the
  * Agent controls) sits at the bottom right of the view area, below the
