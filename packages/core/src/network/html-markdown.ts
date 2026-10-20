@@ -3,7 +3,8 @@
  * linear lexical pre-pass.
  *
  * Core runs in the Electron main process, so conversion is synchronous work
- * on the app's event loop, and turndown's walk grows faster than linearly
+ * on the app's event loop (only the parser's first load is asynchronous:
+ * it loads on demand, see `html-parser.ts`), and turndown's walk grows faster than linearly
  * with page size and nesting depth (measured on an M-series Mac: 2 MiB of
  * plain markup ≈ 2.3 s, 8 MiB ≈ 36 s; a 512 KiB table ≈ 1.2 s, 256 KiB ≈
  * 0.3 s, 256 KiB of prose ≈ 30 ms). The pre-pass therefore:
@@ -22,7 +23,7 @@
  * point at absolute http(s) URLs so the model can fetch them next.
  */
 
-import { parseFragment } from 'parse5'
+import { htmlParser } from './html-parser'
 import TurndownService from 'turndown'
 
 /** Kept HTML characters converted per page (the rest is reported as cut). */
@@ -49,18 +50,20 @@ export interface HtmlToMarkdownResult {
   plainText: boolean
 }
 
-export function htmlToMarkdown(
+export async function htmlToMarkdown(
   html: string,
   options: HtmlToMarkdownOptions = {},
-): HtmlToMarkdownResult {
+): Promise<HtmlToMarkdownResult> {
+  const { parseFragment } = await htmlParser()
+  const decode = (raw: string) => decodeText(raw, parseFragment)
   const scan = scanHtml(html, options.maxChars ?? HTML_CONVERT_MAX_CHARS)
-  const title = scan.title === null ? null : oneLine(decodeText(scan.title))
+  const title = scan.title === null ? null : oneLine(decode(scan.title))
   const base = {
     title: title ? title.slice(0, TITLE_MAX_CHARS) : null,
     sourceTruncated: scan.truncated,
   }
   if (scan.depth > (options.maxDepth ?? HTML_CONVERT_MAX_DEPTH))
-    return { ...base, markdown: plainText(scan.html), plainText: true }
+    return { ...base, markdown: plainText(scan.html, decode), plainText: true }
   try {
     const markdown = converter(options.baseUrl)
       .turndown(scan.html)
@@ -70,7 +73,7 @@ export function htmlToMarkdown(
   } catch {
     // Markup the pre-pass cannot model can still make the DOM walk throw
     // (deep recursion): the text is still worth returning.
-    return { ...base, markdown: plainText(scan.html), plainText: true }
+    return { ...base, markdown: plainText(scan.html, decode), plainText: true }
   }
 }
 
@@ -300,7 +303,10 @@ function isSpace(code: number): boolean {
 // ── text helpers ───────────────────────────────────────────────────────
 
 /** Decode character references the way an RCDATA element does. */
-function decodeText(raw: string): string {
+function decodeText(
+  raw: string,
+  parseFragment: Awaited<ReturnType<typeof htmlParser>>['parseFragment'],
+): string {
   const fragment = parseFragment(
     `<textarea>${raw.replace(/<\/textarea/gi, '')}</textarea>`,
   )
@@ -319,10 +325,8 @@ const BLOCK_TAG =
   /<\/?(?:address|article|aside|blockquote|br|dd|div|dl|dt|fieldset|figcaption|figure|footer|form|h[1-6]|header|hr|li|main|nav|ol|p|pre|section|table|tbody|td|tfoot|th|thead|tr|ul)\b[^>]*>/gi
 
 /** Text with paragraph breaks, for pages that cannot be converted. */
-function plainText(html: string): string {
-  const text = decodeText(
-    html.replace(BLOCK_TAG, '\n').replace(/<[^>]*>/g, ' '),
-  )
+function plainText(html: string, decode: (raw: string) => string): string {
+  const text = decode(html.replace(BLOCK_TAG, '\n').replace(/<[^>]*>/g, ' '))
   return text
     .replace(/[^\S\n]+/g, ' ')
     .replace(/ *\n */g, '\n')
