@@ -36,6 +36,12 @@ import {
   DIAGNOSTICS_BUNDLE_EXPORT_CHANNEL,
   DIAGNOSTICS_BUNDLE_PREPARE_CHANNEL,
   DIAGNOSTICS_BUNDLE_REVEAL_CHANNEL,
+  HOME_BACKUP_DISCARD_CHANNEL,
+  HOME_BACKUP_EXPORT_CHANNEL,
+  HOME_BACKUP_OPEN_CHANNEL,
+  HOME_BACKUP_PLAN_CHANNEL,
+  HOME_BACKUP_RESTORE_CHANNEL,
+  HOME_BACKUP_REVEAL_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
   LINK_OPEN_CHANNEL,
   APP_MENU_COMMAND_CHANNEL,
@@ -230,6 +236,31 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
       ipcRenderer.invoke(DIAGNOSTICS_BUNDLE_REVEAL_CHANNEL, { id }),
     discardDiagnosticsBundle: (id: string) =>
       ipcRenderer.invoke(DIAGNOSTICS_BUNDLE_DISCARD_CHANNEL, { id }),
+    // REL-03 备份与恢复: main picks every path; an opened backup is an id.
+    planHomeBackup: () => ipcRenderer.invoke(HOME_BACKUP_PLAN_CHANNEL),
+    exportHomeBackup: (input: {
+      includeSessions: boolean
+      passphrase?: string
+      confirmation?: string
+    }) =>
+      ipcRenderer.invoke(HOME_BACKUP_EXPORT_CHANNEL, {
+        includeSessions: input.includeSessions,
+        ...(input.passphrase === undefined
+          ? {}
+          : { passphrase: input.passphrase }),
+        ...(input.confirmation === undefined
+          ? {}
+          : { confirmation: input.confirmation }),
+      }),
+    revealHomeBackup: () => ipcRenderer.invoke(HOME_BACKUP_REVEAL_CHANNEL),
+    openHomeBackup: () => ipcRenderer.invoke(HOME_BACKUP_OPEN_CHANNEL),
+    restoreHomeBackup: (id: string, passphrase?: string) =>
+      ipcRenderer.invoke(HOME_BACKUP_RESTORE_CHANNEL, {
+        id,
+        ...(passphrase === undefined ? {} : { passphrase }),
+      }),
+    discardHomeBackup: (id: string) =>
+      ipcRenderer.invoke(HOME_BACKUP_DISCARD_CHANNEL, { id }),
     macHelperStatus: () => ipcRenderer.invoke(MAC_HELPER_STATUS_CHANNEL),
     macHelperRequestPermission: (permission: MacHelperPermission) =>
       ipcRenderer.invoke(MAC_HELPER_PERMISSION_CHANNEL, { permission }),

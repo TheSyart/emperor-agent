@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import type { Agent } from '../agent/agent'
 import type { PendingInteractions } from '../host/interactions'
 import { currentTurnInfo } from '../host/turn-source'
-import { durableReplaceSync } from '../../store/persistence'
+import { assertNotNewerSync, durableReplaceSync } from '../../store/persistence'
 import type { UserAnswers, UserQuestionItem } from '../questions/service'
 import type { DelegationOwner, ExecutorProfile } from './types'
 
@@ -49,6 +49,12 @@ export class ExecutorConsentStore {
     }
   }
   private write(profiles: Record<string, { grantedAt: number }>): void {
+    // A newer Emperor's consent.json stays as it is (REL-03): ask again.
+    try {
+      assertNotNewerSync(this.file, 'schemaVersion', 1)
+    } catch {
+      return
+    }
     durableReplaceSync(
       this.file,
       JSON.stringify({ schemaVersion: 1, profiles }, null, 2) + '\n',

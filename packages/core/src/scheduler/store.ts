@@ -315,10 +315,13 @@ export class SchedulerStore {
 
   private readStore(): SchedulerStoreData {
     try {
-      const data = this.jobsSnapshot.read({
+      const read = this.jobsSnapshot.read({
         fallback: new SchedulerStoreData(),
-      }).value
-      if (data.rejected.length) this.setAside(data.rejected)
+      })
+      const data = read.value
+      // A newer Emperor's jobs.json (REL-03) is only read: nothing set aside.
+      const newer = read.receipt.recoveryAction === 'newer_version_read_only'
+      if (data.rejected.length && !newer) this.setAside(data.rejected)
       this.lastGood = data
       return data
     } catch (error) {
@@ -448,6 +451,7 @@ export class SchedulerStore {
 
 const SCHEDULER_STORE_CODEC: SnapshotCodec<SchedulerStoreData> = {
   schemaVersion: SCHEMA_VERSION,
+  versionKey: 'version',
   encode(value) {
     return value.toDict()
   },

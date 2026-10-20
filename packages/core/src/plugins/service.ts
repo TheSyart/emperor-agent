@@ -54,6 +54,7 @@ import {
 } from './models'
 import { PluginStore } from './store'
 import { pluginToolsView } from './tools'
+import { assertNotNewerSync } from '../store/persistence'
 
 const MAX_PLUGIN_FILES = 4_000
 const MAX_PLUGIN_FILE_BYTES = 20 * 1024 * 1024
@@ -792,7 +793,7 @@ export class PluginApplicationService {
         : {}
     current[pluginId] = enabled
     settings.enabledPlugins = current
-    writePrivateJsonAtomic(path, settings)
+    writeSettings(path, settings)
   }
 
   /** Drop the intent key so an uninstalled package leaves no row behind. */
@@ -823,7 +824,7 @@ export class PluginApplicationService {
     const next = { ...(current as Record<string, unknown>) }
     delete next[pluginId]
     settings.enabledPlugins = next
-    writePrivateJsonAtomic(path, settings)
+    writeSettings(path, settings)
   }
 
   /**
@@ -1115,6 +1116,12 @@ function readJsonObject(path: string): Record<string, unknown> {
 
 function mkdirPrivate(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 })
+}
+
+/** settings.json keeps its version; a newer Emperor's file is read-only (REL-03). */
+function writeSettings(path: string, settings: Record<string, unknown>): void {
+  assertNotNewerSync(path, 'version', 1)
+  writePrivateJsonAtomic(path, { version: 1, ...settings })
 }
 
 function writePrivateJsonAtomic(path: string, value: unknown): void {

@@ -145,6 +145,7 @@ import {
   type RetentionReport,
   type StorageUsage,
 } from '../storage/retention'
+import type { DataVersionsReport } from '../storage/data-files'
 import { searchSessionLogs, type SessionSearchHit } from '../sessions/search'
 import { CoreWorkspaceApplicationService } from './services/workspace-application-service'
 import {
@@ -407,6 +408,8 @@ export class CoreApi {
   /** Retention sweep and 设置 › 高级 › 存储 (KRN-12). */
   readonly retention: RetentionService
   private retentionAtStartup: Promise<void> | null = null
+  /** The release running (REL-03 `storage.versions`). */
+  private readonly appVersion: string
   readonly workspaceApplicationService: CoreWorkspaceApplicationService
   readonly commandApplicationService: CoreCommandApplicationService
   readonly sessionTransitionService: SessionTransitionService
@@ -663,6 +666,7 @@ export class CoreApi {
       // `null` = chat (no project Skills); callers always name the session.
       projectRootFor: (sessionId) => host.projectRootForSession(sessionId),
     })
+    this.appVersion = opts.appVersion ?? '0.0.0-dev'
     this.environmentService = new CoreEnvironmentService({
       stateRoot: this.paths.stateRoot,
       catalog: kept.environmentCatalog,
@@ -3489,6 +3493,11 @@ export class CoreApi {
       this.assertMutation('storage', 'clean', view)
       const report = await this.retention.sweep()
       return { report, usage: await this.retention.usage() }
+    },
+    /** REL-03: the runs, the data version, files a newer Emperor wrote. */
+    versions: async (): Promise<DataVersionsReport> => {
+      const { dataVersionsReport } = await import('../storage/data-files')
+      return dataVersionsReport(this.paths.stateRoot, this.appVersion)
     },
   }
 
