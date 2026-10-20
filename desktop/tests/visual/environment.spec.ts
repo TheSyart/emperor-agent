@@ -320,27 +320,33 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(
       envCard.locator('[data-section="subagents"] .row.agent'),
     ).toHaveCount(2)
-    await expect(page.locator('.changes-pill')).toHaveCount(0)
+    await expect(page.locator('.composer-status-bar')).toHaveCount(0)
     await shot(page, `card-wide-chat-${theme}`)
     await page.setViewportSize({ width: 1180, height: 900 })
     await expect(envCard).toHaveAttribute('data-overlay', 'true')
     await shot(page, `card-narrow-chat-${theme}`)
   })
 
-  test(`changes pill above the composer (${theme})`, async ({ page }) => {
+  test(`workspace changes in the status bar above the composer (${theme})`, async ({
+    page,
+  }) => {
     await open(page, '/chat/build-ui', { theme, envCard: 'closed' })
-    const pill = page.locator('.changes-pill')
-    await expect(pill).toBeVisible()
-    await expect(pill).toContainText('3 个文件已更改')
-    await expect(pill).toContainText('+18')
-    await expect(pill).toContainText('−4')
-    const pillBox = (await pill.boundingBox())!
-    const todoBox = (await page.locator('.todo-dock').boundingBox())!
-    expect(pillBox.y + pillBox.height).toBeLessThanOrEqual(todoBox.y)
-    await pill.hover()
-    await expect(page.getByRole('tooltip')).toHaveText('工作区总改动')
+    // UI-S04: the changes pill is the first part of the status bar.
+    const status = page.locator('.composer-status-bar')
+    await expect(status).toBeVisible()
+    await expect(status.locator('[data-part="changes"]')).toHaveText(
+      /3 个文件已更改\s*\+18\s*−4/,
+    )
+    const statusBox = (await status.boundingBox())!
+    const cardBox = (await page.locator('.composer-root .card').boundingBox())!
+    expect(statusBox.y + statusBox.height).toBeLessThanOrEqual(cardBox.y + 1)
     await shot(page, `changes-pill-${theme}`)
-    await pill.click()
+    await status.click()
+    await page
+      .getByRole('dialog', { name: '输入框状态' })
+      .getByRole('region', { name: '改动' })
+      .getByRole('button', { name: '审查' })
+      .click()
     await expect(
       page.locator('.workspace-col .workspace-body'),
     ).toHaveAttribute('data-pane', 'review')

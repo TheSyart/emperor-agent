@@ -105,10 +105,12 @@ for (const theme of ['dark', 'light'] as const) {
     await shot(page, `hero-empty-${theme}`)
   })
 
-  test(`active conversation with docks (${theme})`, async ({ page }) => {
+  test(`active conversation with the status bar (${theme})`, async ({
+    page,
+  }) => {
     await open(
       page,
-      '/chat/build-ui?visualQueue=on&visualGoal=executing&visualTodos=on',
+      '/chat/build-ui?visualQueue=on&visualGoal=active&visualTodos=on',
       { theme },
     )
     await expect(page.locator('.conversation-root')).toHaveAttribute(
@@ -116,11 +118,20 @@ for (const theme of ['dark', 'light'] as const) {
       'active',
     )
     await expect(page.locator('.conversation-header')).toBeVisible()
-    await expect(page.locator('.queue-dock')).toBeVisible()
-    await expect(page.locator('.goal-dock')).toBeVisible()
-    await expect(page.locator('.todo-dock')).toBeVisible()
+    // UI-S04: the four docks are one line above the composer.
+    const status = page.locator('.composer-status-bar')
+    await expect(status).toContainText('待办 2/4')
+    await expect(status).toContainText('1 条排队中')
+    await expect(status).toContainText('目标进行中')
     await shot(page, `docks-${theme}`)
-    await page.locator('.todo-dock .header').click()
+    await status.click()
+    const panel = page.getByRole('dialog', { name: '输入框状态' })
+    await expect(panel.getByRole('region', { name: '待办' })).toContainText(
+      '重做输入框与 Dock',
+    )
+    await expect(
+      panel.getByRole('region', { name: '待处理消息队列' }),
+    ).toContainText('继续补充视觉验收细节')
     await shot(page, `docks-todo-expanded-${theme}`)
   })
 }
@@ -211,16 +222,24 @@ for (const theme of ['dark', 'light'] as const) {
     await shot(page, `composer-add-menu-${theme}`)
     await page.keyboard.press('Escape')
 
-    await card.locator('.context-meter .trigger').click()
-    await expect(page.getByRole('dialog', { name: '上下文用量' })).toBeVisible()
+    // UI-S04: the context usage is at the bottom of the model menu.
+    await card.getByRole('button', { name: '模型与思考' }).click()
+    await expect(
+      page
+        .getByRole('menu', { name: '模型与思考' })
+        .getByRole('group', { name: '上下文用量' }),
+    ).toBeVisible()
     await shot(page, `composer-context-${theme}`)
   })
 }
 
-test('composer slash palette and plan chip', async ({ page }) => {
+test('composer slash palette in Plan mode', async ({ page }) => {
   await open(page, '/chat/build-ui?visualPlan=on&visualProgress=final')
   const card = page.locator('.composer-root .card')
-  await expect(card.locator('.plan-chip')).toBeVisible()
+  // UI-S04: Plan shows on the permission chip, not a capsule of its own.
+  await expect(
+    card.getByRole('button', { name: /^执行权限 .* · Plan 模式$/ }),
+  ).toHaveText(/·\s*Plan/)
   await card.getByLabel('消息输入框').fill('/')
   await expect(page.locator('.composer-palette')).toBeVisible()
   await shot(page, 'composer-slash-plan')
@@ -1136,20 +1155,22 @@ test('first-run model prompt opens the settings model section', async ({
   ).toBeVisible()
 })
 
-test('profile onboarding starts, defers and skips from the notice dock', async ({
+test('profile onboarding starts from the hero and stays in 记忆', async ({
   page,
 }) => {
   await open(page, '/chat/chat-main?visualProfile=pending', {
     width: 1280,
     height: 820,
   })
-  const notice = page.locator('.notice-dock')
-  await expect(notice).toBeVisible()
-  await notice.getByRole('button', { name: '开始访谈' }).click()
+  // UI-S04: the prompt is on the hero of the empty chat, once.
+  const prompt = page.locator('.hero-profile-prompt')
+  await expect(prompt).toBeVisible()
+  await prompt.getByRole('button', { name: '开始访谈' }).click()
   const card = page.locator('[data-takeover="question"]')
   await expect(card).toBeVisible()
   await expect(card.getByText('我平时怎么称呼你？')).toBeVisible()
   await expect(card.getByRole('button', { name: '不再提醒' })).toBeVisible()
+  await expect(prompt).toHaveCount(0)
   await shot(page, 'profile-onboarding-question')
 
   await card
@@ -1157,9 +1178,9 @@ test('profile onboarding starts, defers and skips from the notice dock', async (
     .last()
     .click()
   await expect(card).toBeHidden()
-  await expect(notice).toBeVisible()
-  await notice.getByRole('button', { name: '不再提醒' }).click()
-  await expect(notice).toBeHidden()
+  // Deferred: the offer stays on this chat's hero (and nowhere else).
+  await expect(page.locator('.notice-dock')).toHaveCount(0)
+  await expect(prompt).toBeVisible()
 
   // The profile (and its interview) lives in 记忆 › 用户档案.
   await page.getByRole('button', { name: '设置', exact: true }).click()
@@ -1168,8 +1189,9 @@ test('profile onboarding starts, defers and skips from the notice dock', async (
     .getByRole('button', { name: '记忆', exact: true })
     .click()
   await page.getByRole('radio', { name: '用户档案' }).click()
-  await expect(page.getByText('已跳过')).toBeVisible()
-  await expect(page.getByRole('button', { name: '重新开始' })).toBeVisible()
+  const settings = page.getByTestId('settings-modal')
+  await expect(settings.getByText('待补充')).toBeVisible()
+  await expect(settings.getByRole('button', { name: '开始访谈' })).toBeVisible()
 })
 
 test('hooks editor: edit, validate, save, match and test-run', async ({

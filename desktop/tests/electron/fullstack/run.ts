@@ -1018,21 +1018,23 @@ async function fullstack(
       await send(page, 'KRN-02 long turn')
       await until(() => running.reached, 15_000, 'the turn to reach the model')
       await send(page, 'KRN-02 queued message')
+      // UI-S04: the queue is a section of the status bar's popover; open
+      // it when it is closed (a press elsewhere closes it).
+      const status = page.locator('.composer-status-bar')
       const dock = page.getByRole('region', { name: '待处理消息队列' })
+      const queueText = async (): Promise<string> => {
+        if ((await dock.count()) === 0 && (await status.count()) > 0)
+          await status.click().catch(() => undefined)
+        return dock.innerText().catch(() => '')
+      }
       await until(
-        async () =>
-          (await dock.innerText().catch(() => '')).includes(
-            'KRN-02 queued message',
-          ),
+        async () => (await queueText()).includes('KRN-02 queued message'),
         10_000,
-        'the queued message in the dock',
+        'the queued message in the status bar',
       )
       await page.getByRole('button', { name: '停止', exact: true }).click()
       await until(
-        async () =>
-          (await dock.innerText().catch(() => '')).includes(
-            '待发送 · 上一轮已停止',
-          ),
+        async () => (await queueText()).includes('待发送 · 上一轮已停止'),
         10_000,
         'the message to wait as 待发送',
       )
@@ -1046,9 +1048,11 @@ async function fullstack(
         'the sent message to run',
       )
       await until(
-        async () => (await dock.count()) === 0,
+        async () =>
+          (await dock.count()) === 0 &&
+          !(await status.innerText().catch(() => '')).includes('待发送'),
         10_000,
-        'the dock to empty',
+        'the queue to empty',
       )
     },
   )
