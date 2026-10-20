@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、安全审查者、维护者<br>
-> 最后核验：2026-10-19<br>
+> 最后核验：2026-10-20<br>
 > 事实源：`packages/core/src/sandbox/`、`packages/core/src/harness/sandbox/`、`packages/core/src/mcp/containment.ts`、`packages/core/src/harness/hooks/contained.ts`、`packages/core/src/harness/approval/`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/questions/`、`packages/core/src/harness/host/interactions.ts`、`packages/core/src/harness/computer-use/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/api/mutation-guard.ts`、`packages/core/src/workspace/git-runner.ts`、`packages/core/src/security/`、`packages/core/src/config/model-config.ts`、`packages/core/src/mcp/config.ts`
 
 Agent 能做什么由两个独立旋钮决定：**沙箱模式**限制文件写入范围，**审批策略**决定需要批准的操作是否询问用户。用户看到的是把两者打包在一起的**权限预设**。Plan 模式是独立的会话状态，不是第四种权限。
@@ -73,7 +73,7 @@ Seatbelt 取最后一条匹配的规则，所以 profile 分层写：宽泛放�
 | `bash`（`danger-full-access`，macOS）               | 全部（`state` / `config` 除外）                                            | 全部（受保护路径表除外）                | 允许 | 允许 | `SANDBOX_UNAVAILABLE`                       |
 | 插件的 MCP stdio server                             | 系统、工具链、workspace、插件包（`stateGrants.read`）、工作目录、缓存      | workspace、插件数据目录、缓存           | 允许 | 允许 | 拒绝启动（`mcp_sandbox_refused`，写明原因） |
 | 用户的 MCP stdio server（`mcp_config.json`）        | 同上，另加参数里的绝对路径（目录可写；文件开放其项目目录供读取）与工作目录 | workspace、缓存、参数里的目录、工作目录 | 允许 | 允许 | 询问一次（下文），记住答案                  |
-| 插件 Hook                                           | 系统、工具链、workspace（只读）、插件包                                    | `plugins/data/<id>`、`plugins/tmp/<id>` | 允许 | 拒绝 | 不运行（非阻塞的 Hook 错误）                |
+| 插件 Hook（环境与超时见下）                         | 系统、工具链、workspace（只读）、插件包                                    | `plugins/data/<id>`、`plugins/tmp/<id>` | 允许 | 拒绝 | 不运行（非阻塞的 Hook 错误）                |
 | 托管环境安装器的配方命令（venv / pip / npm / 校验） | 系统、工具链、计划目录、安装目标                                           | 计划目录、安装目标、工具的数据目录      | 允许 | 拒绝 | 不运行，安装失败                            |
 
 - **Shell 不变**：Shell 的 profile 仍是 allow-all 读、受保护路径表与原来的写策略。`sandbox/__golden__/*.pre-sec08.sb` 保存 SEC-08 之前的 Shell / 委派 profile，golden 测试要求新 profile 保留每一条旧规则且顺序不变，新增的只能是 `deny`（目前为零）。其他消费者的 profile 文本也有 golden（`mcp-user.sb` 等）。
@@ -81,7 +81,9 @@ Seatbelt 取最后一条匹配的规则，所以 profile 分层写：宽泛放�
 - **来源**：只有 `mcp_config.json` 里点名的 server 算用户的；插件的、按项目实例里的 server 一律按插件处理（`fallback: 'refuse'`）。stdio server 没有任何不经隔离的启动路径：没有受管进程运行时的连接直接失败。
 - **询问**：沙箱不可用时，用户的 server 不启动，进入 `UnsandboxedConsentRegistry` 的待答列表（状态 `mcp_sandbox_consent_required`）。宿主在下一次用户会话的步骤开始前（`middleware.preAssemble`；后台 turn、子代理和审批策略为 `never` 的会话不问）用普通审批卡询问一次，卡上写明 server、原因和命令。「允许本次」与「拒绝」都按 server 与命令（指纹）记在 `processes/unsandboxed-consent.v1.json`，允许后当步重新加载 MCP，工具在这一步就可用；关闭卡片不记住，下次再问；命令改了就重新询问。
 - **回执**：每次启动——包括被拒绝的——都在 `processes/receipts.v1.json` 留下 `ContainmentReceipt`（被拒绝的状态为 `refused`，不启动进程）。旧版本的回执（`sandboxed` / `unsandboxed` / `denied`）读取时换成新词。诊断页「运行时 › 进程隔离回执」列出最新几条：来源、`已隔离 / 已拒绝 / 经同意未隔离`、runner 与策略哈希，有未隔离的就标为警告。
-- **不在范围内**：环境页「安装」调用的系统包管理器与安装程序（`brew install`、`pkgutil`、`open` 一个 `.pkg`、`xcode-select --install`），环境探测（`node --version` 之类）和 Emperor 自己的 git / gh 仍直接运行：它们是目录里写死的系统命令，`brew` 要写 `/opt/homebrew` 等系统位置。用户在 `hooks.json` 里自己写的 Hook 也照旧直接运行（用户可信，SEC-07 不改）。
+- **插件 Hook 的环境与超时（SEC-07）**：插件 Hook 的进程只拿到安全键（`PATH`、`HOME`、`USER`、`SHELL`、`LANG`、`LC_ALL`、`TERM`、`PWD` 等，与 MCP stdio server 同一张 `SAFE_ENV_KEYS`）、插件清单 `env` 声明的变量（取自 Emperor 的环境）、`PLUGIN_ROOT` / `PLUGIN_DATA` 及其 `CLAUDE_` 别名、`CLAUDE_PROJECT_DIR`，`TMPDIR` / `TMP` / `TEMP` 由隔离设为插件的临时目录；默认 30 秒，Hook 自己的 `timeout` 最多算 120 秒，超时按 Hook 失败处理，工具调用照常继续。每个插件 Hook 最近一次失败（原因与可能缺的变量）记在内存的 `PluginHookHealth`，插件详情显示它。细节与清单写法见[扩展 Emperor › 插件 Hook 的运行环境](../development/extending-emperor.md#插件-hook-的运行环境)。
+- **项目插件意图（SEC-07）**：项目与本地项目范围的插件启用意图记在 `<stateRoot>/projects/<project-id>/plugins.json`，不读写 workspace 里 Agent 可写的 `.emperor/settings*.json`；仓库 `.emperor/settings.json` 的 `enabledPlugins` 只在能力页生成「该项目建议启用 X」，由用户确认（`plugins.setEnabled`，经 mutation guard）后才写入 stateRoot。Agent 没有改插件启用状态的工具。该文件与 `installed_plugins.json`、`plugins/managed.json` 一样在 Agent 的默认可写根之外，但不在受保护路径表里：常设 `danger-full-access` 的 Shell 能写到它们（与能改插件缓存一样）。
+- **不在范围内**：环境页「安装」调用的系统包管理器与安装程序（`brew install`、`pkgutil`、`open` 一个 `.pkg`、`xcode-select --install`），环境探测（`node --version` 之类）和 Emperor 自己的 git / gh 仍直接运行：它们是目录里写死的系统命令，`brew` 要写 `/opt/homebrew` 等系统位置。用户在 `hooks.json` 里自己写的 Hook 也照旧直接运行，环境变量完整、默认 10 分钟超时（用户可信）。
 
 ## 一次性提权
 

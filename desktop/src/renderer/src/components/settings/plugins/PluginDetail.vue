@@ -6,7 +6,8 @@
  * short description, developer and version, and the enable switch; the
  * example prompts with 「立即试用」 (opens a new chat with the prompt in its
  * composer, never sends it); then the real members grouped by kind with
- * each member's state and reason; the 工具 it brings, one group per member
+ * each member's state and reason (a failed hook also names the variables
+ * it may need, SEC-07); the 工具 it brings, one group per member
  * with the rows of 能力 › 工具 (Computer Use by driver, each driver with a
  * way to its settings page; an MCP server's while it runs); and the 信息
  * group.
@@ -40,6 +41,7 @@ import {
 import Avatar from '../../ui/Avatar.vue'
 import {
   componentStateBadge,
+  hookVariableNotes,
   isComputerUsePlugin,
   memberGroups,
   pluginFacts,
@@ -331,6 +333,19 @@ defineExpose({ reload: load })
                 {{ item.description }}
               </p>
               <p v-if="item.reason" class="member-reason">{{ item.reason }}</p>
+              <p
+                v-if="item.variables?.length"
+                class="member-reason"
+                data-member-variables
+              >
+                需要的环境变量：<template
+                  v-for="(variable, index) in hookVariableNotes(item.variables)"
+                  :key="variable.name"
+                  ><template v-if="index > 0">；</template
+                  ><code>{{ variable.name }}</code
+                  >（{{ variable.note }}）</template
+                >
+              </p>
             </li>
           </ul>
         </section>
@@ -613,6 +628,10 @@ defineExpose({ reload: load })
 
 .member-reason {
   color: rgb(var(--label-secondary));
+}
+
+.member-reason code {
+  font-family: var(--font-mono);
 }
 
 .tool-group {

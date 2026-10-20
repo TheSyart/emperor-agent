@@ -23,6 +23,14 @@ export { PROJECT_MEMORY_END, PROJECT_MEMORY_START } from './state-store'
 
 const VERSION = 1
 
+/** A project's id: its state lives in `<stateRoot>/projects/<id>/`. */
+export function projectIdForPath(projectPath: string): string {
+  return createHash('sha256')
+    .update(resolve(projectPath), 'utf8')
+    .digest('hex')
+    .slice(0, 16)
+}
+
 export interface LegacyProjectPrivateData {
   sessions: boolean
   memory: boolean
@@ -206,10 +214,7 @@ export class ProjectStore {
   }
 
   private entryForPath(projectPath: string): ProjectEntry {
-    const projectId = createHash('sha256')
-      .update(projectPath, 'utf8')
-      .digest('hex')
-      .slice(0, 16)
+    const projectId = projectIdForPath(projectPath)
     const now = stamp()
     const paths = this.stateStore.paths(projectId)
     return {

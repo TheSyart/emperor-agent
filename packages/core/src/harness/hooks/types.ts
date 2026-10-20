@@ -44,6 +44,8 @@ export interface CommandHook {
   command: string
   /** Per-hook timeout in SECONDS (the wire unit); the runner converts to ms. */
   timeoutSec?: number
+  /** A plugin hook's member id (`<event>#<n>`), under which its last failure is kept. */
+  id?: string
 }
 
 /** A `matcher` pattern (absent / `''` / `'*'` = match-all) plus its command hooks. */
@@ -57,6 +59,8 @@ export interface MatcherGroup {
     readonly pluginId: string
     readonly root: string | null
     readonly data: string | null
+    /** Variables its manifest's `env` lets it read from Emperor's environment (SEC-07). */
+    readonly allowedEnv?: readonly string[]
   }
 }
 

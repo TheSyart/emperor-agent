@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-10-19<br>
+> 最后核验：2026-10-20<br>
 > 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store
 
 ## 两个根的区分
@@ -52,10 +52,13 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
   skills/<skill-name>/SKILL.md   # 个人 Skills（也接受直接放置的 <name>.md）
   plugins/
     known_marketplaces.json
-    installed_plugins.json # 已物化版本；启用意图在 settings.json
+    installed_plugins.json # 已物化版本；用户范围的启用意图在 settings.json，项目的在 projects/<project-id>/plugins.json
+    managed.json           # 随 Emperor 提供的插件的开关
+    project-intents-migration.json  # 0.2 首次启动把旧项目启用意图搬到 stateRoot 后写下，只搬一次（SEC-07）
     marketplaces/
     cache/                 # 不可变版本内容
     data/                  # 跨版本持久数据
+    tmp/<插件名>/          # 插件 Hook 的 TMPDIR
     staging/               # 有界安装预览
   environment/
     bin/                   # 受管执行环境的 PATH 首位
@@ -90,6 +93,7 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
       project.json
       AGENTS.local.md      # 全局私有项目记忆
       prompt-overlay.md
+      plugins.json         # 这个项目的插件启用意图（项目与本地项目两个范围，SEC-07）
   git/
     worktree-leases.json   # Emperor 创建的 worktree owner/lease
     receipts/              # commit/push/pull/worktree/PR 的脱敏凭据
@@ -179,17 +183,18 @@ Build 项目目录只可能包含用户自己维护的内容：
   AGENTS.local.md / CLAUDE.local.md
   .emperor/
     skills/                # 项目 Skills；仅在绑定该项目的 Build 会话中可见、可写
-    settings.json          # 项目 scope 的 Plugin 启用意图（选择该 scope 时写入）
-    settings.local.json    # 本地项目 scope 的 Plugin 启用意图，不随仓库提交
+    settings.json          # 只读：其中的 enabledPlugins 只是「建议」，见下
 ```
 
-Core 不会在项目目录下创建 session、memory、附件或 Goal 数据。只有在你把 Skill 保存或导入到项目 scope，或以项目 / 本地项目 scope 管理 Plugin 时，Core 才会写入上面 `.emperor/` 下的对应位置。在设置里打开项目 Skills 文件夹只是查看：目录还不存在时会提示，不会为此在项目里建目录。如果旧版本留下了 `.emperor/sessions`、`.emperor/memory` 等目录，Diagnostics 只提示“检测到旧私有数据”，不会自动删除或搬移。
+Core 不会在项目目录下创建 session、memory、附件或 Goal 数据。只有在你把 Skill 保存或导入到项目 scope 时，Core 才会写入上面 `.emperor/skills/`。在设置里打开项目 Skills 文件夹只是查看：目录还不存在时会提示，不会为此在项目里建目录。如果旧版本留下了 `.emperor/sessions`、`.emperor/memory` 等目录，Diagnostics 只提示“检测到旧私有数据”，不会自动删除或搬移。
+
+项目与本地项目范围的 Plugin 启用意图不在项目目录里（SEC-07）：项目目录 Agent 能写，克隆来的仓库也自带内容，所以意图记在 `<stateRoot>/projects/<project-id>/plugins.json`（`{ schemaVersion: 1, workspace, enabledPlugins: { project, local } }`，`<project-id>` 按项目的真实路径计算，经符号链接或 `/var` 与 `/private/var` 打开同一个文件夹时共用一份）。仓库 `.emperor/settings.json` 的 `enabledPlugins` 只作为建议：其中列出、已按项目范围安装、而你还没有为这个项目做过选择的插件，在能力页显示「该项目建议启用 X」，你选「启用」或「忽略」后写入 stateRoot，之后仓库文件再怎么改都不影响。`settings.local.json` 不再读取。升级到 0.2 后第一次启动时，Emperor 已经知道的项目（`projects/index.json`）里旧 `.emperor/settings.json`、`settings.local.json` 记下的启用意图（只限已在对应范围安装的插件）搬到 stateRoot、保持原样，并写下 `plugins/project-intents-migration.json`，以后不再搬；这两个旧文件不会被修改或删除。
 
 Agent 按你的要求修改项目文件时，write / edit 工具先在 Emperor Home 的 `write-staging/` 写好内容，再整体改名到目标位置，项目里不会出现半写入的临时文件。如果项目和 Emperor Home 不在同一个文件系统上（例如外接盘），跨盘无法原子改名，这时退回在目标文件旁边暂存 `.<文件名>.<pid>.<uuid>.tmp` 再改名；写入依然原子，原有文件权限保留。
 
 ## Emperor Home 之外的位置
 
-除 Emperor Home 和上面列出的项目 `.emperor/` 外，应用只会用到以下位置：
+除 Emperor Home 和上面列出的项目 `.emperor/skills/` 外，应用只会用到以下位置：
 
 | 位置                                                                       | 内容                                                                                                                                                                                                                                     |
 | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
