@@ -446,7 +446,7 @@ function openOnGithub(): void {
   min-width: 0;
   overflow: hidden;
   padding: 0 var(--space-1-5);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
   background: var(--surface-hover);
   color: rgb(var(--text-2));
   font: var(--font-code-small);

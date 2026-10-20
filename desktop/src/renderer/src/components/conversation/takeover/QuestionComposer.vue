@@ -503,7 +503,7 @@ function onKeydown(event: KeyboardEvent) {
   width: 20px;
   height: 20px;
   margin-top: var(--space-0-5);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
   background: rgb(var(--surface-strong));
   color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
@@ -526,7 +526,7 @@ function onKeydown(event: KeyboardEvent) {
   width: 14px;
   height: 14px;
   border: 1px solid var(--stroke-4);
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   transition:
     background-color var(--duration-ds-fast) ease,
     border-color var(--duration-ds-fast) ease;

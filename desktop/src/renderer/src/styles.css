@@ -19,7 +19,7 @@
       - 材质 → materials.css 的 .glass
       - 模糊 → var(--material-*-blur|--glass-blur),禁止 blur(<px>)
       - 层级 → var(--z-base..--z-lightbox),禁止数字 z-index
-      - 间距 → var(--space-1..6);圆角 → var(--radius*);时长/缓动 → var(--duration-*|--ease-*)
+      - 间距 → var(--space-1..6);圆角 → var(--r-sm*);时长/缓动 → var(--duration-*|--ease-*)
       - 文字层级 → var(--text-primary|secondary|tertiary) 等
    3. 写法三分层:
       - 全局 surface 类 → styles/{activity,chat,panels,workspace}.css 与
@@ -60,7 +60,7 @@
   select,
   textarea {
     @apply w-full border px-3 py-2 text-sm outline-none transition;
-    border-radius: var(--radius);
+    border-radius: var(--r-sm);
     border-color: rgb(var(--stroke-solid));
     background: rgb(var(--surface-sunken));
     color: rgb(var(--text-1));

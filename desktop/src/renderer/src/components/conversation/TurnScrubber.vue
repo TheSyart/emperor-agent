@@ -133,7 +133,7 @@ function onFocusOut(event: FocusEvent): void {
   min-height: 3px;
   padding: 0 var(--space-1-5);
   border: none;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
   cursor: pointer;
 }

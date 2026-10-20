@@ -145,7 +145,7 @@ const title = computed(() =>
 
 code {
   padding: 0 var(--space-1-5);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
   background: var(--surface-hover);
   color: rgb(var(--text-1));
   font: var(--font-code-small);

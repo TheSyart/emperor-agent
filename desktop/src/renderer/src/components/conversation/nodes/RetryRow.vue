@@ -115,7 +115,7 @@ const label = computed(() => {
 .summary:focus-visible {
   outline: 1.5px solid rgb(var(--focus-ring));
   outline-offset: 2px;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
 }
 
 .chevron {

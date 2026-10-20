@@ -12,7 +12,7 @@
   overflow-x: hidden;
   overflow-y: auto;
   border: 1px solid rgb(var(--stroke-solid-strong));
-  border-radius: var(--radius-lg);
+  border-radius: var(--r-md);
   padding: var(--space-2);
   background: rgb(var(--surface-base) / 0.98);
   box-shadow: 0 16px 46px rgb(var(--shadow-color) / 0.28);
@@ -75,7 +75,7 @@
   grid-template-columns: 20px minmax(112px, 0.34fr) minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-2);
-  border-radius: var(--radius-md);
+  border-radius: var(--r-sm);
   padding: var(--space-1) var(--space-2);
   color: rgb(var(--text-1));
   font-size: var(--font-size-sm);
@@ -134,7 +134,7 @@
   max-width: 120px;
   overflow: hidden;
   border: 1px solid rgb(var(--stroke-solid));
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
   padding: 1px var(--space-2);
   color: rgb(var(--text-1) / var(--text-tertiary));
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;

@@ -47,7 +47,7 @@
   padding: 0 0.375em;
   margin: 0 0.125em;
   border: 1px solid rgb(var(--stroke-solid));
-  border-radius: var(--radius-md);
+  border-radius: var(--r-sm);
   background: rgb(var(--surface-base));
   color: rgb(var(--text-1));
   font-weight: 500;

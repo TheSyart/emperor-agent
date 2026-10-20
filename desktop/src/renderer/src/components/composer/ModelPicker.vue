@@ -336,7 +336,7 @@ function onKeydown(event: KeyboardEvent): void {
   height: var(--space-6);
   padding: 0;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
   background: transparent;
   color: rgb(var(--text-2));
   cursor: pointer;

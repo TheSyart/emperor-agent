@@ -29,7 +29,7 @@ const { sessionId } = useChatContext()
   align-items: center;
   max-width: calc(100% - var(--space-2));
   margin-inline: var(--space-1);
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
   vertical-align: baseline;
   color: rgb(var(--text-link));

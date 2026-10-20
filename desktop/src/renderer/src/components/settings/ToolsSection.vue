@@ -158,7 +158,7 @@ function openTab(tab: 'mcp' | 'plugins'): void {
 .inline-link:focus-visible {
   outline: 2px solid rgb(var(--focus-ring));
   outline-offset: 1px;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
 }
 
 .error {

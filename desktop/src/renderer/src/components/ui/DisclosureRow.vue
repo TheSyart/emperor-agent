@@ -124,7 +124,7 @@ function onKeydown(event: KeyboardEvent) {
   align-items: center;
   height: var(--control-sm);
   min-width: 0;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   font: var(--type-footnote) var(--font-sans);
 }
 

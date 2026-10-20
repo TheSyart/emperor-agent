@@ -38,7 +38,7 @@ const collapsed = defineModel<boolean>('collapsed', { default: false })
 .section-label {
   padding: 0 var(--space-1);
   border: none;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
   color: rgb(var(--text-3));
   font-size: var(--fs-xs);

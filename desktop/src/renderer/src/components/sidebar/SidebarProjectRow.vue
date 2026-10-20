@@ -122,7 +122,7 @@ const emit = defineEmits<{ toggle: []; 'new-session': [] }>()
   height: var(--space-5);
   padding: 0;
   border: none;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
   color: rgb(var(--text-3));
   cursor: pointer;

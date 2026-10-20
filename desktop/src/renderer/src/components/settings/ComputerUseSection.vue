@@ -580,7 +580,7 @@ onBeforeUnmount(() => {
   display: inline-block;
   margin: var(--space-1) var(--space-1) 0 0;
   padding: 0 var(--space-1-5);
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: rgb(var(--settings-card-control-fill));
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);

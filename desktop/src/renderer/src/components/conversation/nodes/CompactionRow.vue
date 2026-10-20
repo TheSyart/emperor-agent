@@ -83,7 +83,7 @@ const summary = computed(() => {
   height: var(--lh-base);
   padding: 0;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
   background: none;
   color: inherit;
   font: inherit;

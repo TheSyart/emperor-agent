@@ -288,7 +288,7 @@ function openFile(path: string): void {
 
 .scope-info {
   display: inline-flex;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   color: rgb(var(--text-3));
   cursor: help;
 }
@@ -420,7 +420,7 @@ function openFile(path: string): void {
   gap: var(--space-1-5);
   padding: var(--space-2-5) var(--space-4);
   border: 0;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
   color: rgb(var(--text-2));
   font: inherit;

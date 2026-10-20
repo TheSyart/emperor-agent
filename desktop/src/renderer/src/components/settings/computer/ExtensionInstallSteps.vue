@@ -229,7 +229,7 @@ function copyLabel(address: ExtensionAddress): string {
   margin-top: var(--space-1-5);
   padding: var(--space-0-5) var(--space-2);
   border: 1px solid var(--stroke-1);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
   background: rgb(var(--settings-card-control-fill));
   color: rgb(var(--text-2));
   font-family: var(--font-mono);

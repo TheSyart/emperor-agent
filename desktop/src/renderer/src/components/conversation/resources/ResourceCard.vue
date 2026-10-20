@@ -154,7 +154,7 @@ function open() {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
 }
 .resource-card {
   display: flex;
@@ -258,7 +258,7 @@ function open() {
   outline-offset: 2px;
 }
 .status {
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   padding: 0 var(--space-1);
   color: rgb(var(--text-link));
   background: rgb(var(--accent) / 0.1);

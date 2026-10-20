@@ -3,7 +3,7 @@
 @media (max-width: 820px) {
   .composer-palette {
     max-height: min(310px, 48vh);
-    border-radius: var(--radius);
+    border-radius: var(--r-sm);
     padding: var(--space-2);
   }
 

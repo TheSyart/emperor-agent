@@ -355,7 +355,7 @@ const latestLog = computed(() => props.run.logs.at(-1))
   min-height: var(--lh-base);
   padding: 0;
   border: 0;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
   color: rgb(var(--text-2));
   font: inherit;

@@ -95,7 +95,7 @@ defineProps<{
 }
 .resource-thumb {
   object-fit: cover;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
 }
 .resource-row-content {
   flex: 1;

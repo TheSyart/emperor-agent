@@ -443,7 +443,7 @@ h2 {
   line-height: var(--lh-xxxs);
   color: rgb(var(--text-1));
   background: rgb(var(--surface-canvas) / 0.8);
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   padding: 0 2px;
 }
 

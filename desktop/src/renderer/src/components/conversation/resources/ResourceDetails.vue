@@ -344,7 +344,7 @@ onBeforeUnmount(() => {
 .status {
   display: inline-block;
   padding: var(--space-0-5) var(--space-1-5);
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: rgb(var(--accent) / 0.12);
   color: rgb(var(--text-link));
   font: var(--font-xxs);

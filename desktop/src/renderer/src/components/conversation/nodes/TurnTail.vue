@@ -78,7 +78,7 @@ const usageLabel = computed(() => {
   align-items: center;
   height: var(--space-7);
   padding: 0 var(--space-1-5);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-variant-numeric: tabular-nums;

@@ -298,7 +298,7 @@ function onPointerMove(event: PointerEvent) {
   min-width: 0;
   padding: var(--space-1);
   border: none;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
   font: inherit;
   font-size: var(--fs-xxxs);
@@ -372,7 +372,7 @@ function onPointerMove(event: PointerEvent) {
 .focus-layer {
   position: absolute;
   inset: 0;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   outline: none;
 }
 
@@ -393,7 +393,7 @@ function onPointerMove(event: PointerEvent) {
   margin-left: var(--space-2);
   padding: var(--space-1-5) var(--space-2);
   border: 1px solid var(--stroke-2);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
   background: rgb(var(--surface-strong));
   box-shadow: var(--shadow-lv1);
   font-size: var(--fs-xxxs);

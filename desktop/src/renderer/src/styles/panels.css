@@ -10,7 +10,7 @@
 .attach-chip {
   @apply inline-flex items-center gap-2 border px-2 py-1.5;
   max-width: 16rem;
-  border-radius: var(--radius-md);
+  border-radius: var(--r-sm);
   border-color: rgb(var(--stroke-solid));
   background: rgb(var(--surface-base));
   box-shadow: none;
@@ -75,7 +75,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid rgb(var(--stroke-solid-strong));
-  border-radius: var(--radius-xl);
+  border-radius: var(--r-xl);
   background: rgb(var(--surface-base));
   box-shadow: 0 28px 90px rgb(var(--shadow-color) / 0.5);
 }

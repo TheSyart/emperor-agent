@@ -61,7 +61,7 @@ const items = computed(() => todoItems(props.data))
   width: 14px;
   height: 14px;
   border: 1px solid var(--stroke-4);
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   color: rgb(var(--text-inverted));
 }
 

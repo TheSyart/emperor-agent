@@ -470,7 +470,7 @@ defineExpose({
   text-decoration: underline;
   text-decoration-color: rgb(var(--accent) / 0.3);
   text-underline-offset: 4px;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
 }
 .composer-editor :deep(.composer-url-decoration::before) {
@@ -488,7 +488,7 @@ defineExpose({
   content: attr(data-site-letter) / '';
   mask: none;
   background: rgb(var(--accent) / 0.14);
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   font: 600 0.7em/1.4 var(--font-sans);
   text-align: center;
 }
@@ -505,7 +505,7 @@ defineExpose({
   mask: none;
   background: rgb(var(--nb-00)) var(--composer-site-icon) center / contain
     no-repeat;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
 }
 
 .composer-editor :deep(.composer-editor-input) {

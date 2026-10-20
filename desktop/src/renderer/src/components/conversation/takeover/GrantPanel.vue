@@ -212,7 +212,7 @@ function send(optionId: string) {
 .input-value {
   margin: 0;
   padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: rgb(var(--code-block-bg));
   font-family: var(--font-mono);
   font-size: var(--fs-xs);

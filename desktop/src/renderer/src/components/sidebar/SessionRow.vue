@@ -261,7 +261,7 @@ defineExpose({ beginRename })
   margin: 0 var(--space-1-5) 0 var(--space-1);
   padding: 0 var(--space-0-5);
   border: 1px solid var(--stroke-2);
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   outline: none;
   background: rgb(var(--surface-raised));
   color: inherit;
@@ -293,7 +293,7 @@ defineExpose({ beginRename })
   height: var(--space-4);
   padding: 0;
   border: none;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
   color: rgb(var(--text-3));
   cursor: pointer;

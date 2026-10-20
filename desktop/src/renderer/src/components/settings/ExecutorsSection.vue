@@ -1264,7 +1264,7 @@ onBeforeUnmount(() => {
   flex: 0 1 auto;
   font-size: var(--fs-xxs);
   font-weight: 400;
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
   padding: var(--space-0-5) var(--space-2);
   min-height: 24px;
   line-height: 18px;
@@ -1380,7 +1380,7 @@ onBeforeUnmount(() => {
   min-height: 21px;
   font-weight: 450;
   line-height: 17px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
   padding: var(--space-0-5) var(--space-2);
   white-space: normal;
   overflow-wrap: anywhere;

@@ -281,7 +281,7 @@ const hasChildren = computed(
   display: flex;
   flex-direction: column;
   min-width: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
 }
 
 .subcalls {

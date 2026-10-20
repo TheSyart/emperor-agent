@@ -174,7 +174,7 @@ const segments = computed<Segment[]>(() =>
   min-width: 1.6em;
   height: auto;
   padding: 0 0.35em;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: rgb(var(--md-badge-tone, var(--text-2)) / 0.14);
   color: rgb(var(--md-badge-tone, var(--text-2)));
   font: 700 0.625em / 1.6 var(--font-mono);
@@ -264,7 +264,7 @@ const segments = computed<Segment[]>(() =>
   max-width: calc(100% - var(--space-2));
   padding: 0 var(--space-0-5);
   margin-inline: var(--space-1);
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
   line-height: 1.85;
   text-decoration-thickness: 1px;
@@ -291,7 +291,7 @@ const segments = computed<Segment[]>(() =>
   mask: none;
   background: rgb(var(--accent) / 0.14);
   color: rgb(var(--text-link));
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   font: 600 0.7em/1.4 var(--font-sans);
   text-align: center;
   vertical-align: 0;
@@ -307,7 +307,7 @@ const segments = computed<Segment[]>(() =>
   margin: 0 var(--space-1-5) 0 0;
   vertical-align: -0.125em;
   object-fit: contain;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: rgb(var(--nb-00));
 }
 
@@ -357,7 +357,7 @@ const segments = computed<Segment[]>(() =>
 
 .ds-md :deep(:not(pre) > code) {
   padding: 0 var(--space-1);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
   background: rgb(var(--inline-code-bg));
   font-family: var(--font-mono);
   font-size: 0.875em;
