@@ -910,3 +910,108 @@ describe('recordedDescendants', () => {
     ).toEqual(['sub-a', 'sub-c', 'sub-b'])
   })
 })
+
+describe('KRN-09 workflow agents in the task budget', () => {
+  it('6 · a background workflow returns a job at once and its result arrives as a notice', async () => {
+    const root = script([
+      {
+        tools: [
+          {
+            id: 'wf-bg',
+            name: 'workflow',
+            args: {
+              meta: { name: 'bg-leaf', description: 'one agent' },
+              script: "return await agent('leaf task', { label: 'leaf' })",
+              run_in_background: true,
+            },
+          },
+        ],
+        usage: FREE,
+      },
+      { text: 'started in the background', usage: FREE },
+      { text: 'read the result', usage: FREE },
+    ])
+    const requests: GenerateOptions[] = []
+    const t = await makeTree((request, { rootId }) => {
+      if (request.sessionId === rootId) {
+        requests.push(request)
+        return root()
+      }
+      return { text: 'leaf done', usage: FREE }
+    })
+    await t.submit('run it in the background')
+    const started = t
+      .events()
+      .find(
+        (event): event is SessionEvent<'tool/result'> =>
+          event.type === 'tool/result' &&
+          event.data.message.source.callId === 'wf-bg',
+      )!
+    const text = started.data.message.content
+      .flatMap((part) => part.content)
+      .map((block) => ('text' in block ? block.text : ''))
+      .join('\n')
+    expect(text).toMatch(/in the background as job workflow-\d+/)
+    await waitFor(() =>
+      t
+        .events()
+        .some(
+          (event) =>
+            event.type === 'job/finished' &&
+            (
+              event.data as { jobId?: string; status?: string }
+            ).jobId?.startsWith('workflow-') === true &&
+            (event.data as { status?: string }).status === 'completed',
+        ),
+    )
+    await waitFor(() => requests.length >= 3)
+    await t.quiet()
+    // The idle root is woken with the jobs notice; job_output reads the result.
+    expect(JSON.stringify(requests.at(-1)!.messages)).toContain(
+      'background job workflow-1 (workflow: bg-leaf) finished [status: completed]',
+    )
+  }, 60_000)
+
+  it('8 · agent() calls of a workflow count toward the task total', async () => {
+    const root = script([
+      {
+        tools: [
+          {
+            id: 'wf',
+            name: 'workflow',
+            args: {
+              meta: { name: 'three-leaves', description: 'three agents' },
+              script: `const out = []
+                for (const n of [1, 2, 3]) {
+                  try { out.push(await agent('leaf ' + n, { label: 'leaf ' + n })) }
+                  catch (error) { out.push('refused: ' + String(error && error.message || error)) }
+                }
+                return out`,
+            },
+          },
+        ],
+        usage: FREE,
+      },
+      { text: 'workflow done', usage: FREE },
+    ])
+    const t = await makeTree((request, { rootId }) =>
+      request.sessionId === rootId ? root() : { text: 'ok', usage: FREE },
+    )
+    await t.api.tasks.setBudget({ maxTotalAgents: 2 }, VIEW)
+    await t.submit('run three leaves')
+    await t.quiet()
+    expect(t.children()).toHaveLength(2)
+    const result = t
+      .events()
+      .find(
+        (event): event is SessionEvent<'tool/result'> =>
+          event.type === 'tool/result' &&
+          event.data.message.source.callId === 'wf',
+      )!
+    const text = result.data.message.content
+      .flatMap((part) => part.content)
+      .map((block) => ('text' in block ? block.text : ''))
+      .join('\n')
+    expect(text).toContain('AGENT_BUDGET_EXCEEDED')
+  }, 60_000)
+})
