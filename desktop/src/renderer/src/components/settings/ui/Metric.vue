@@ -45,16 +45,16 @@ withDefaults(
   gap: var(--space-1);
   min-width: 0;
   padding: var(--space-2-5) var(--space-3);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-row);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
 }
 
 .label {
   overflow: hidden;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -67,9 +67,9 @@ withDefaults(
   overflow: hidden;
   font-size: 18px;
   line-height: 26px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -77,15 +77,15 @@ withDefaults(
 .unit {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 400;
-  color: rgb(var(--label-tertiary));
+  font-weight: var(--weight-regular);
+  color: rgb(var(--text-3));
 }
 
 .hint {
   overflow: hidden;
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -103,6 +103,6 @@ withDefaults(
 }
 
 .ds-metric[data-tone='accent'] .value {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 </style>

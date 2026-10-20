@@ -77,7 +77,7 @@ const folded = computed(() =>
   max-width: 780px;
   margin: 0 auto var(--space-1-5);
   padding: var(--space-1) var(--space-4);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -93,13 +93,13 @@ const folded = computed(() =>
   border: none;
   border-radius: var(--radius-pill);
   background: rgb(var(--selector-fill));
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   cursor: pointer;
 }
 
 .takeover-folded-action:hover {
-  background: rgb(var(--interactive-bg-hover-solid));
+  background: rgb(var(--surface-hover-solid));
 }
 </style>

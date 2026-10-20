@@ -107,7 +107,7 @@ watch(
 <style scoped>
 .external-stream {
   min-width: 0;
-  border-left: 1px solid var(--border-l1);
+  border-left: 1px solid var(--stroke-1);
   padding-left: var(--space-3);
 }
 .stream-toggle {
@@ -118,16 +118,16 @@ watch(
   border: 0;
   background: transparent;
   text-align: left;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-code-small);
   cursor: pointer;
 }
 .stream-toggle strong {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 .stream-expand {
   margin-left: auto;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 .stream-content {
   max-height: 360px;
@@ -149,11 +149,11 @@ watch(
   display: flex;
   gap: var(--space-2);
   padding: var(--space-1) 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 .stream-tools li > span:first-child,
 .stream-note {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 .stream-tools li > span:first-child,
 .stream-tools code {

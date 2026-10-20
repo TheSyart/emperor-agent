@@ -265,7 +265,7 @@ const hasChildren = computed(
   align-items: center;
   gap: var(--space-1);
   min-width: 0;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-s);
   text-decoration: none;
 }
@@ -273,7 +273,7 @@ const hasChildren = computed(
   text-decoration: underline;
 }
 .agent-entry > span:not(.ds-avatar) {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   margin-left: var(--space-2);
 }
@@ -281,7 +281,7 @@ const hasChildren = computed(
   display: flex;
   flex-direction: column;
   min-width: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
 }
 
 .subcalls {
@@ -290,7 +290,7 @@ const hasChildren = computed(
   gap: 0;
   margin: 0 0 var(--space-0-5) calc(var(--space-4) + var(--space-1-5));
   padding-left: var(--space-2);
-  border-left: 1px solid var(--border-l2);
+  border-left: 1px solid var(--stroke-2);
 }
 
 .sub-line {
@@ -309,7 +309,7 @@ const hasChildren = computed(
   width: var(--space-4);
   height: var(--space-4);
   margin-right: var(--space-1-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .agent-leading {
   width: 24px;
@@ -317,12 +317,12 @@ const hasChildren = computed(
 }
 
 [data-outcome='pending'] .sub-leading {
-  color: rgb(var(--approval));
+  color: rgb(var(--attention));
 }
 
 .sub-title {
   flex: none;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .sep {
@@ -337,14 +337,14 @@ const hasChildren = computed(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .sub-status {
   flex: none;
   margin-left: var(--space-2);
   font-size: var(--fs-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .open-link {
@@ -358,7 +358,7 @@ const hasChildren = computed(
   background: none;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   cursor: pointer;
 }
 

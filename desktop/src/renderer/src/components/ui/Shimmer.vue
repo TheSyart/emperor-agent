@@ -33,11 +33,11 @@ withDefaults(
   display: inline-flex;
   align-items: center;
   font: var(--font-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   white-space: nowrap;
 }
 
 .ds-shimmer-text:not(.ds-shimmer) {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 </style>

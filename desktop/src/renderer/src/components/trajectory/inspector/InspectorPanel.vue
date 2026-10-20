@@ -124,8 +124,8 @@ const tabItems = computed(() =>
   min-width: 0;
   min-height: 0;
   height: 100%;
-  background: rgb(var(--bg-layer-1));
-  color: rgb(var(--label-primary));
+  background: rgb(var(--surface-base));
+  color: rgb(var(--text-1));
 }
 
 .header {
@@ -137,7 +137,7 @@ const tabItems = computed(() =>
   box-sizing: border-box;
   height: 42px;
   padding: 0 var(--space-2) 0 var(--space-3);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .title {
@@ -149,10 +149,10 @@ const tabItems = computed(() =>
 
 .heading {
   flex: none;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .request-dot {
@@ -160,18 +160,18 @@ const tabItems = computed(() =>
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: rgb(var(--label-secondary));
+  background: rgb(var(--text-2));
 }
 
 .request-name {
   flex: none;
-  font: 500 12px / 16px var(--font-mono);
+  font: var(--weight-medium) 12px / 16px var(--font-mono);
 }
 
 .location {
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: 11px / 16px var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -180,7 +180,7 @@ const tabItems = computed(() =>
 .tabs {
   flex: none;
   padding: 0 var(--space-2);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
   overflow-x: auto;
   scrollbar-width: none;
 }

@@ -170,13 +170,13 @@ async function submit() {
 
 .mcp-add-dialog > :first-child {
   margin-top: calc(var(--space-3) * -1);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .preview {
   min-width: 0;
   padding-top: var(--space-3);
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .submit-error {

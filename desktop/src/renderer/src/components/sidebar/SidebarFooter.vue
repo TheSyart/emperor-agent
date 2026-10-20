@@ -82,7 +82,7 @@ const themeIcon = computed(() => (theme.value === 'dark' ? DsLight : DsDark))
   border: none;
   border-radius: var(--radius-card);
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   cursor: pointer;
@@ -91,7 +91,7 @@ const themeIcon = computed(() => (theme.value === 'dark' ? DsLight : DsDark))
 
 .settings:hover,
 .theme:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 [data-rail] .settings {
@@ -117,7 +117,7 @@ const themeIcon = computed(() => (theme.value === 'dark' ? DsLight : DsDark))
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
 }
 

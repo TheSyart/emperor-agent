@@ -482,8 +482,8 @@ defineExpose({ reload: load })
   min-width: 0;
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -502,13 +502,13 @@ defineExpose({ reload: load })
 
 .description,
 .long {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .byline,
 .note,
 .enable-note {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .error {
@@ -522,7 +522,7 @@ defineExpose({ reload: load })
   gap: var(--space-1-5);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
 }
 
@@ -544,8 +544,8 @@ defineExpose({ reload: load })
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
 }
 
 .prompts,
@@ -556,9 +556,9 @@ defineExpose({ reload: load })
   padding: 0;
   list-style: none;
   overflow: hidden;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-3));
+  background: rgb(var(--surface-overlay));
   min-width: 0;
 }
 
@@ -579,7 +579,7 @@ defineExpose({ reload: load })
 
 .prompt + .prompt,
 .member + .member {
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .prompt-text {
@@ -587,7 +587,7 @@ defineExpose({ reload: load })
   min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -603,8 +603,8 @@ defineExpose({ reload: load })
   min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -618,7 +618,7 @@ defineExpose({ reload: load })
 }
 
 .member-description {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 /* MCP transports and Hook commands read as code; other descriptions are prose. */
@@ -627,7 +627,7 @@ defineExpose({ reload: load })
 }
 
 .member-reason {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .member-reason code {
@@ -661,8 +661,8 @@ defineExpose({ reload: load })
   min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
-  color: rgb(var(--label-secondary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-2));
 }
 
 .tool-list {
@@ -671,7 +671,7 @@ defineExpose({ reload: load })
   margin: 0;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   list-style: none;
 }
@@ -684,7 +684,7 @@ defineExpose({ reload: load })
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-card);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .cross-link p {
@@ -693,7 +693,7 @@ defineExpose({ reload: load })
   min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 @container (max-width: 439px) {

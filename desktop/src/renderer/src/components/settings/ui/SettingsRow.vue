@@ -104,7 +104,7 @@ withDefaults(
 }
 
 .ds-settings-row[data-divider] {
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .ds-settings-row:last-child {
@@ -133,8 +133,8 @@ withDefaults(
   min-width: 0;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -144,14 +144,14 @@ withDefaults(
   gap: var(--space-1);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--state-warn-label));
 }
 
 .description {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
   text-wrap: pretty;
 }
@@ -205,7 +205,7 @@ withDefaults(
   right: var(--space-4);
   bottom: 0;
   left: var(--space-4);
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 .ds-settings-row[data-in-card] .text {

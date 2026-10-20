@@ -29,11 +29,11 @@ const { sessionId } = useChatContext()
   align-items: center;
   max-width: calc(100% - var(--space-2));
   margin-inline: var(--space-1);
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
   vertical-align: baseline;
   color: rgb(var(--text-link));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   line-height: 1.85;
 }
 .resource-inline a {
@@ -53,7 +53,7 @@ const { sessionId } = useChatContext()
 .resource-inline a:hover {
   text-decoration: underline;
   text-underline-offset: 4px;
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 .resource-inline a:focus-visible {
   outline: 2px solid rgb(var(--focus-ring));

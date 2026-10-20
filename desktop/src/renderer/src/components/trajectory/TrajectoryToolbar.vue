@@ -184,8 +184,8 @@ onBeforeUnmount(() => clearTimeout(timer))
   box-sizing: border-box;
   height: 32px;
   padding: 0 var(--space-1-5);
-  border-bottom: 1px solid var(--border-l2);
-  background: rgb(var(--bg-layer-1));
+  border-bottom: 1px solid var(--stroke-2);
+  background: rgb(var(--surface-base));
 }
 
 .actions {
@@ -204,7 +204,7 @@ onBeforeUnmount(() => clearTimeout(timer))
   padding: 0 calc(var(--space-1) + 1px);
   border: 0;
   border-radius: 2px;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   background: transparent;
   cursor: pointer;
   font: var(--font-xxs);
@@ -212,8 +212,8 @@ onBeforeUnmount(() => clearTimeout(timer))
 
 .action:hover,
 .action[aria-pressed='true'] {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
+  color: rgb(var(--text-1));
+  background: var(--surface-hover);
 }
 
 .action:focus-visible,
@@ -235,7 +235,7 @@ onBeforeUnmount(() => clearTimeout(timer))
 .action-icon {
   display: block;
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: 14px / 14px var(--font-mono);
 }
 
@@ -248,7 +248,7 @@ onBeforeUnmount(() => clearTimeout(timer))
 
 .count {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xxxs);
   font-variant-numeric: tabular-nums;
 }

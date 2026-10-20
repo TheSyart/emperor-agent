@@ -168,7 +168,7 @@ function title(line: BackgroundTaskLine): string {
       aria-controls="env-card-background"
       @click="open = !open"
     >
-      <template #lead><Workflow :size="15" /></template>
+      <template #lead><Workflow :size="16" /></template>
     </EnvironmentRow>
     <ul
       v-if="open"

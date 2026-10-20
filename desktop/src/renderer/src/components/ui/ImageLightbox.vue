@@ -242,7 +242,7 @@ onBeforeUnmount(() => {
           aria-label="关闭图片预览"
           @click="closeImageViewer"
         >
-          <X :size="22" />
+          <X :size="20" />
         </button>
       </header>
       <div
@@ -312,7 +312,7 @@ onBeforeUnmount(() => {
             :disabled="loading || failed"
             @click="zoom(scale / 1.25)"
           >
-            <Minus :size="19" />
+            <Minus :size="20" />
           </button>
           <span class="viewer-scale">{{ Math.round(scale * 100) }}%</span>
           <button
@@ -323,7 +323,7 @@ onBeforeUnmount(() => {
             :disabled="loading || failed"
             @click="zoom(scale * 1.25)"
           >
-            <Plus :size="19" />
+            <Plus :size="20" />
           </button>
           <i class="viewer-divider" aria-hidden="true" />
           <button
@@ -334,7 +334,7 @@ onBeforeUnmount(() => {
             :disabled="loading || failed"
             @click="fit"
           >
-            <Scan :size="19" />
+            <Scan :size="20" />
           </button>
           <button
             class="viewer-button"
@@ -344,7 +344,7 @@ onBeforeUnmount(() => {
             :disabled="loading || failed"
             @click="original"
           >
-            <Expand :size="19" />
+            <Expand :size="20" />
           </button>
           <i class="viewer-divider" aria-hidden="true" />
           <button
@@ -355,7 +355,7 @@ onBeforeUnmount(() => {
             :disabled="loading || failed"
             @click="rotate(-90)"
           >
-            <RotateCcw :size="19" />
+            <RotateCcw :size="20" />
           </button>
           <button
             class="viewer-button"
@@ -365,7 +365,7 @@ onBeforeUnmount(() => {
             :disabled="loading || failed"
             @click="rotate(90)"
           >
-            <RotateCw :size="19" />
+            <RotateCw :size="20" />
           </button>
           <template v-if="item?.file"
             ><i class="viewer-divider" aria-hidden="true" /><button
@@ -375,7 +375,7 @@ onBeforeUnmount(() => {
               title="在文件中查看"
               @click="openFile"
             >
-              <FolderOpen :size="19" /></button
+              <FolderOpen :size="20" /></button
           ></template>
         </div>
         <span class="viewer-hint">滚动缩放 · 拖动查看 · Esc 关闭</span>
@@ -391,8 +391,8 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: rgb(var(--image-viewer-bg) / var(--material-2-alpha));
-  backdrop-filter: blur(var(--material-1-blur));
+  background: rgb(var(--image-viewer-bg) / var(--image-viewer-veil));
+  backdrop-filter: blur(var(--backdrop-blur));
   color: rgb(var(--image-viewer-ink));
   animation: viewer-enter 160ms ease-out;
   -webkit-app-region: no-drag;
@@ -413,7 +413,7 @@ onBeforeUnmount(() => {
 }
 .viewer-title strong {
   font-size: var(--fs-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   line-height: 22px;
   overflow-wrap: anywhere;
 }
@@ -492,7 +492,7 @@ onBeforeUnmount(() => {
 }
 .viewer-status strong {
   color: rgb(var(--image-viewer-control-ink));
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 .viewer-spinner {
   animation: viewer-spin 1s linear infinite;
@@ -505,7 +505,7 @@ onBeforeUnmount(() => {
   height: 48px;
   border-radius: 50%;
   background: rgb(var(--image-viewer-control) / 80%);
-  backdrop-filter: blur(var(--material-1-blur));
+  backdrop-filter: blur(var(--backdrop-blur));
 }
 .viewer-previous {
   left: var(--space-5);
@@ -532,7 +532,7 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-takeover);
   background: rgb(var(--image-viewer-toolbar) / 85%);
   box-shadow: 0 8px 32px rgb(var(--image-viewer-shadow) / 33%);
-  backdrop-filter: blur(var(--material-2-blur));
+  backdrop-filter: blur(var(--backdrop-blur-strong));
 }
 .viewer-scale {
   min-width: 48px;

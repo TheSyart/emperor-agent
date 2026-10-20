@@ -109,7 +109,7 @@ withDefaults(
 .caret {
   flex: none;
   color: rgb(var(--text-3));
-  transition: transform var(--motion-fast) var(--ease-in-out);
+  transition: transform var(--motion-fast) var(--ease-standard);
 }
 
 .caret[data-open] {

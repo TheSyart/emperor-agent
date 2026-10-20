@@ -696,7 +696,7 @@ async function stop() {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 .child-view-area {
   position: relative;
@@ -712,14 +712,14 @@ async function stop() {
   flex: none;
   min-width: 0;
   padding: var(--space-4) var(--space-6);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 .child-header nav {
   display: flex;
   overflow: hidden;
   white-space: nowrap;
   gap: var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-code-small);
 }
 .child-header nav button {
@@ -748,10 +748,10 @@ h1 {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--fs-md);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 .child-title > span {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-code-small);
 }
 .child-timeline {
@@ -768,18 +768,18 @@ h1 {
 .child-entry h2 {
   margin: var(--space-5) 0 var(--space-2);
   font: var(--font-code-small);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 .child-entry-label {
   margin: var(--space-2) 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-code-small);
 }
 .child-entry-label code {
   margin-left: var(--space-2);
 }
 .child-entry[data-entry-type='prompt'] {
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   border-radius: var(--radius-card);
 }
 .child-footer {
@@ -789,19 +789,19 @@ h1 {
   gap: var(--space-2);
   align-items: center;
   padding: var(--space-3) var(--space-5);
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 .child-footer > span {
   flex: 1 0 auto;
   white-space: nowrap;
   font: var(--font-code-small);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 .child-note,
 .child-more {
   padding: var(--space-4);
   text-align: center;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 .child-diagnostics {
   flex: none;

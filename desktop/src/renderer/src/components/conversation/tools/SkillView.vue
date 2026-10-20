@@ -39,7 +39,7 @@ const meta = computed(() => metaOf(props.data))
   min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .root {

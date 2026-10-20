@@ -54,7 +54,7 @@ const label = computed(() =>
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
 }
 
@@ -62,13 +62,13 @@ const label = computed(() =>
   width: calc(var(--space-8) + var(--space-1));
   height: calc(var(--space-8) + var(--space-1));
   border-radius: var(--radius-pill);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .bell:hover,
 .bell[aria-expanded='true'] {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-primary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-1));
 }
 
 .bell:focus-visible {

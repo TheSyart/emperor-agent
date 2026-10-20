@@ -19,11 +19,11 @@ import {
   CircleCheck,
   CircleDot,
   CirclePause,
-  LoaderCircle,
   Lock,
   Repeat,
 } from 'lucide-vue-next'
 import IconButton from '../../ui/IconButton.vue'
+import Spinner from '../../ui/Spinner.vue'
 import { DsMore } from '../../icons/ds'
 import { Badge } from '../../settings/ui'
 import {
@@ -40,7 +40,7 @@ const props = withDefaults(
 const emit = defineEmits<{ open: []; menu: [anchor: HTMLElement] }>()
 
 const GLYPHS = {
-  running: LoaderCircle,
+  running: Circle,
   queued: CircleDot,
   error: CircleAlert,
   enabled: Circle,
@@ -89,10 +89,13 @@ function onMenu(event: MouseEvent) {
       :aria-label="`${job.name}，${STATE_LABELS[state]}，${line}`"
       @click="emit('open')"
     >
+      <span v-if="state === 'running'" class="glyph spin" aria-hidden="true">
+        <Spinner tone="accent" />
+      </span>
       <component
         :is="glyph"
+        v-else
         class="glyph"
-        :class="{ 'animate-spin': state === 'running' }"
         :size="18"
         :stroke-width="1.75"
         aria-hidden="true"
@@ -103,14 +106,14 @@ function onMenu(event: MouseEvent) {
           <Lock
             v-if="job.protected"
             class="kind"
-            :size="13"
+            :size="14"
             aria-hidden="true"
           />
           <component
             :is="oneShot ? CalendarClock : Repeat"
             v-else
             class="kind"
-            :size="13"
+            :size="14"
             aria-hidden="true"
           />
         </span>
@@ -146,7 +149,7 @@ function onMenu(event: MouseEvent) {
 
 .job-row:hover,
 .job-row[data-menu-open] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .main {
@@ -172,24 +175,32 @@ function onMenu(event: MouseEvent) {
 
 .glyph {
   flex: none;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
+}
+
+/* The running Spinner sits in the same 18px slot as the state glyphs. */
+.glyph.spin {
+  display: inline-grid;
+  place-items: center;
+  width: calc(var(--icon-md) + var(--space-0-5));
+  height: calc(var(--icon-md) + var(--space-0-5));
 }
 
 .job-row[data-state='running'] .glyph,
 .job-row[data-state='queued'] .glyph {
-  color: rgb(var(--accent-fill));
+  color: rgb(var(--accent));
 }
 
 .job-row[data-state='error'] .glyph {
-  color: rgb(var(--state-error));
+  color: rgb(var(--error));
 }
 
 .job-row[data-state='paused'] .glyph {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .job-row[data-state='completed'] .glyph {
-  color: rgb(var(--state-ok));
+  color: rgb(var(--ok));
 }
 
 .text {
@@ -209,22 +220,22 @@ function onMenu(event: MouseEvent) {
 
 .name {
   overflow: hidden;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .kind {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .line {
   overflow: hidden;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-variant-numeric: tabular-nums;

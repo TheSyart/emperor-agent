@@ -111,6 +111,8 @@ Windows 没有完整的受限执行和进程组停止：能力声明为 none，�
 
 每个会话有私有 HOME/config/temp。默认从本机 CLI 设置和凭据文件读取窄认证配置，支持显式 CLAUDE_CONFIG_DIR / CODEX_HOME；也可选择模型凭据引用。认证不传到 renderer、日志摘要或公共 receipt。运行环境不继承宿主全部密钥，也不导入本机插件或 hooks。
 
+开发环境（AGT-08，`harness/delegation/dev-environment.ts`）：`ExecutorRuntimeService.prepare()`（登录探测除外）按执行者配置的 `developmentEnvironment`（与默认值相同时不写入）补上：`gitIdentity`（默认开，`git config --global user.name/email` 读用户真实 HOME，注入 `GIT_AUTHOR_*` / `GIT_COMMITTER_*`）、`proxy`（默认开，即原有的代理变量透传；关闭时移除）、`sshAgent`（`SSH_AUTH_SOCK`）、`toolchains`（`NVM_DIR` 与 nvm default 别名的 node bin、`VOLTA_HOME`、`RUSTUP_HOME`、`CARGO_HOME`、`PYENV_ROOT` 及其 bin 前置到 PATH）、`github`（`gh auth token` → `GH_TOKEN`，并写私有 `$XDG_CONFIG_HOME/gh/hosts.yml`（0600），因为 Claude Code 的 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` 会从它的 Bash 里去掉令牌变量；关闭时删除该文件，令牌进 `secretValues` 供脱敏）。进程环境里没有的变量从登录 shell 读取（只在对应开关打开时）。Codex 的 `shell_environment_policy` 不继承，`set` 里加上 `DEVELOPMENT_ENVIRONMENT_KEYS`。项目说明：Claude 不加载项目设置（`settingSources: []`，项目 `.claude/settings.json` 的 permissions 可能在 `canUseTool` 之前放行工具），改为把 `CLAUDE.md`、`.claude/CLAUDE.md`、`AGENTS.md` 的文本（每个最多 16 KiB）追加到 system prompt；Codex 的 `developerInstructions` 附 `AGENTS.md` 摘要（最多 8 KiB）。
+
 Claude Code 的认证（AGT-02，`claude-auth.ts`，随第一次 Claude 运行或「设置令牌」按需加载，不在启动路径上）按顺序取第一个有凭据的来源，该来源的凭据变量（`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、`CLAUDE_CODE_OAUTH_TOKEN`）一起使用，其他来源的不混入：
 
 1. Emperor 凭据：设置 › 子智能体 › Claude Code「设置令牌」，`executors.setCredential { profileId, kind: oauth-token | api-key, token }` / `executors.clearCredential`（按 view 校验的写操作）。存在 `<delegations>/credentials.json`（0600），值是 SEC-06/SEC-09 本地密钥（`LocalSecretStore`，与模型 Key、凭据库同一把）的 `el1:` 信封，关联数据绑定 profile 与 kind；明文只留末 4 位。本地密钥变化后解不开时状态为 `unreadable`，继续看后面的来源。订阅令牌作为 `CLAUDE_CODE_OAUTH_TOKEN`、API Key 作为 `ANTHROPIC_API_KEY` 传入。

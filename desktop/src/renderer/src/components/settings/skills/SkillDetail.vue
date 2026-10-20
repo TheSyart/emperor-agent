@@ -417,8 +417,8 @@ defineExpose({ reload: () => load(false), dirty })
   min-width: 0;
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -426,7 +426,7 @@ defineExpose({ reload: () => load(false), dirty })
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
   text-wrap: pretty;
 }
@@ -438,7 +438,7 @@ defineExpose({ reload: () => load(false), dirty })
   background: rgb(var(--selector-fill));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-wrap: pretty;
 }
 
@@ -461,8 +461,8 @@ defineExpose({ reload: () => load(false), dirty })
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
 }
 
 .revert {

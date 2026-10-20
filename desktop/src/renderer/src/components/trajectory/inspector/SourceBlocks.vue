@@ -70,22 +70,22 @@ defineEmits<{ 'open-call': [callId: string] }>()
 }
 
 .label {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: 11px / 16px var(--font-mono);
 }
 
 .jump-icon {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .jump:hover .jump-icon {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .content {
   margin: 0;
   overflow-wrap: anywhere;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: 12px / 19px var(--font-mono);
   tab-size: 2;
   white-space: pre-wrap;

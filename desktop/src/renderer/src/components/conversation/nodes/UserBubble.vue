@@ -212,7 +212,7 @@ function attachmentResource(
 .thumb {
   width: 120px;
   height: 120px;
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
   object-fit: cover;
   background: rgb(var(--code-block-bg));
@@ -244,7 +244,7 @@ function attachmentResource(
 .source {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .actions {

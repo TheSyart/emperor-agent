@@ -157,7 +157,7 @@ const emptyLabel = computed(() =>
 .no-payload {
   margin: 0;
   padding: var(--space-4) var(--space-3-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xs);
 }
 
@@ -166,7 +166,7 @@ const emptyLabel = computed(() =>
   margin: 0;
   padding: var(--space-3-5);
   overflow-wrap: anywhere;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   background: rgb(var(--code-block-bg));
   font: 12px / 19px var(--font-mono);
   tab-size: 2;
@@ -180,8 +180,8 @@ const emptyLabel = computed(() =>
 .thinking {
   margin: var(--space-1-5) var(--space-3-5) 0 var(--space-3);
   padding-left: var(--space-1-5);
-  border-left: 2px solid rgb(var(--label-caption));
-  color: rgb(var(--label-secondary));
+  border-left: 2px solid rgb(var(--text-3));
+  color: rgb(var(--text-2));
 }
 
 .thinking-toggle {
@@ -191,18 +191,18 @@ const emptyLabel = computed(() =>
   height: 18px;
   padding: 0;
   border: 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   background: transparent;
   cursor: pointer;
-  font: 600 12px / 18px var(--font-sans);
+  font: var(--weight-semibold) 12px / 18px var(--font-sans);
 }
 
 .thinking-toggle:hover {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .chevron {
-  transition: transform var(--duration-fast) var(--ease-in-out);
+  transition: transform var(--duration-fast) var(--ease-standard);
 }
 
 .thinking-toggle[aria-expanded='true'] .chevron {
@@ -211,13 +211,13 @@ const emptyLabel = computed(() =>
 
 .thinking-body {
   padding: 2px 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .tool-calls {
   margin: 2px var(--space-3-5) var(--space-3);
   padding: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: 11px / 17px var(--font-mono);
   list-style: none;
 }
@@ -240,13 +240,13 @@ const emptyLabel = computed(() =>
 }
 
 .tool-call:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .tool-icon {
   flex: none;
   margin-right: var(--space-1);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .tool-text {
@@ -260,13 +260,13 @@ const emptyLabel = computed(() =>
 .tool-name {
   flex: none;
   margin-right: var(--space-1);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .tool-args {
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-overflow: ellipsis;
 }
 

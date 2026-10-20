@@ -77,12 +77,12 @@ defineProps<{
   border: 0;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-align: left;
   cursor: pointer;
 }
 .resource-sidebar-row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 .resource-row-icon,
 .resource-thumb {
@@ -91,11 +91,11 @@ defineProps<{
   flex: none;
   width: 28px;
   height: 32px;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 .resource-thumb {
   object-fit: cover;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
 }
 .resource-row-content {
   flex: 1;
@@ -116,12 +116,12 @@ defineProps<{
   display: block;
   margin-top: var(--space-0-5);
   font: var(--font-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 .resource-row-arrow {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   opacity: 0;
 }
 .resource-sidebar-row:hover .resource-row-arrow,

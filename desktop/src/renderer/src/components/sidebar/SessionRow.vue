@@ -188,11 +188,11 @@ defineExpose({ beginRename })
   min-height: var(--space-8);
   padding: 0 var(--space-2);
   border-radius: var(--radius-row);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   cursor: pointer;
   user-select: none;
   outline: none;
-  animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
+  animation: ds-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .session-row[data-nested] {
@@ -207,13 +207,13 @@ defineExpose({ beginRename })
   bottom: 0;
   left: calc(var(--space-4) - 0.5px);
   width: 1px;
-  background: var(--border-l2);
+  background: var(--stroke-2);
   content: '';
 }
 
 .session-row:hover,
 .session-row[data-menu-open] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .session-row[data-active] {
@@ -252,7 +252,7 @@ defineExpose({ beginRename })
 }
 
 .session-row[data-active] .title {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .rename {
@@ -260,17 +260,17 @@ defineExpose({ beginRename })
   min-width: 0;
   margin: 0 var(--space-1-5) 0 var(--space-1);
   padding: 0 var(--space-0-5);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-xs);
+  border: 1px solid var(--stroke-2);
+  border-radius: var(--r-xs);
   outline: none;
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
   color: inherit;
   font-size: var(--fs-s);
   line-height: var(--space-5);
 }
 
 .rename:focus {
-  border-color: var(--border-l3);
+  border-color: var(--stroke-3);
   box-shadow: none;
 }
 
@@ -278,7 +278,7 @@ defineExpose({ beginRename })
   flex: none;
   font-size: var(--fs-xxs);
   line-height: var(--space-5);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
   /* 「6月26日」, not 「6 月 26 日」. */
   text-autospace: no-autospace;
@@ -293,14 +293,14 @@ defineExpose({ beginRename })
   height: var(--space-4);
   padding: 0;
   border: none;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: pointer;
 }
 
 .more:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .session-row:hover .more,
@@ -321,7 +321,7 @@ defineExpose({ beginRename })
   overflow: hidden;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-overflow: ellipsis;
   white-space: nowrap;
 }

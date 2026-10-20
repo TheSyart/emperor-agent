@@ -185,7 +185,10 @@ import { TurnSnapshots } from '../workspace/turn-snapshots'
 import { DelegationWorkspaceService } from '../workspace/delegation-workspaces'
 import { SnapshotService } from '../workspace/delegation-snapshot'
 import { DelegationResults } from '../workspace/delegation-results'
-import { ExecutorConfigStore } from '../harness/delegation/config'
+import {
+  developmentEnvironmentOf,
+  ExecutorConfigStore,
+} from '../harness/delegation/config'
 import { ExecutorFactsStore } from '../harness/delegation/facts'
 import { CoreExecutorService } from './services/executor-service'
 import {
@@ -787,6 +790,9 @@ export class CoreApi {
         : {}),
       loginShell: executorHome.loginShell ?? createLoginShellEnvironment(),
       claudeTokens,
+      // 设置 › 子智能体 › 高级 › 开发环境 (AGT-08).
+      developmentEnvironment: () =>
+        developmentEnvironmentOf(this.executorConfig.read()),
       resolveRoute: async (id, backend) => {
         const config = await loadModelConfig(this.paths.modelConfigFile, {
           sealer: kept.secretSealer,

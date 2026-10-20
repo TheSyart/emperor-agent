@@ -62,7 +62,7 @@ import Spinner from '../ui/Spinner.vue'
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }

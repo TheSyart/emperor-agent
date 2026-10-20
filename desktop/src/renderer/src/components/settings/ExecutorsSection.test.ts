@@ -930,3 +930,40 @@ it('8 · 高级 sets Claude Code’s turns per run, 200 by default, stored only 
     'claudeMaxTurns',
   )
 })
+
+it('offers 开发环境 under 高级: git identity and proxies on, the rest off; saves only a change (AGT-08)', async () => {
+  await mount()
+  const group = root.querySelector<HTMLElement>('[data-executor-dev-env]')!
+  expect(group).not.toBeNull()
+  expect(group.textContent).toContain('开发环境')
+  const toggle = (key: string) =>
+    group.querySelector<HTMLButtonElement>(`[data-dev-env="${key}"]`)!
+  expect(toggle('gitIdentity').getAttribute('aria-checked')).toBe('true')
+  expect(toggle('proxy').getAttribute('aria-checked')).toBe('true')
+  for (const key of ['sshAgent', 'toolchains', 'github'])
+    expect(toggle(key).getAttribute('aria-checked')).toBe('false')
+  expect(group.textContent).toContain('允许子智能体使用 GitHub 登录')
+
+  toggle('sshAgent').click()
+  await settle()
+  await action('save-executors').onClick!()
+  await settle()
+  expect(
+    configureExecutors.mock.calls.at(-1)![0].config.developmentEnvironment,
+  ).toEqual({
+    gitIdentity: true,
+    proxy: true,
+    sshAgent: true,
+    toolchains: false,
+    github: false,
+  })
+
+  // Back to the defaults: the field is not stored at all.
+  toggle('sshAgent').click()
+  await settle()
+  await action('save-executors').onClick!()
+  await settle()
+  expect(
+    configureExecutors.mock.calls.at(-1)![0].config.developmentEnvironment,
+  ).toBeUndefined()
+})

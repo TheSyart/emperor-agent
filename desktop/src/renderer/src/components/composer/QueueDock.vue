@@ -166,7 +166,7 @@ const headline = computed(() => {
   content: '';
   position: absolute;
   inset: 0;
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-bottom: none;
   border-radius: inherit;
   pointer-events: none;
@@ -183,19 +183,19 @@ const headline = computed(() => {
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-align: left;
   cursor: pointer;
 }
 
 .header:focus-visible {
-  outline: 2px solid rgb(var(--label-tertiary));
+  outline: 2px solid rgb(var(--text-3));
   outline-offset: -2px;
 }
 
 .lead {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .count {
@@ -203,14 +203,14 @@ const headline = computed(() => {
   min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--space-6);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   transform: rotate(180deg);
-  transition: transform var(--duration-ds-fast) ease;
+  transition: transform var(--motion-fast) ease;
 }
 
 .chevron[data-open] {
@@ -234,7 +234,7 @@ const headline = computed(() => {
   height: 36px;
   padding: var(--space-1) calc(var(--space-1) + 1px) var(--space-1)
     var(--space-3);
-  box-shadow: inset 0 1px 0 var(--border-l1);
+  box-shadow: inset 0 1px 0 var(--stroke-1);
 }
 
 .preview {
@@ -243,19 +243,19 @@ const headline = computed(() => {
   overflow: hidden;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .state {
   margin-right: var(--space-1);
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 
 .state.held {
-  color: rgb(var(--label-secondary));
-  font-weight: 500;
+  color: rgb(var(--text-2));
+  font-weight: var(--weight-medium);
 }
 
 .actions {

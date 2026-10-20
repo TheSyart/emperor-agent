@@ -8,19 +8,33 @@
 /* ─── 附件 chip：草稿条 + 用户气泡通用 ─── */
 
 .attach-chip {
-  @apply inline-flex items-center gap-2 border px-2 py-1.5;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   max-width: 16rem;
-  border-radius: var(--radius-md);
-  border-color: rgb(var(--border));
-  background: rgb(var(--bg-elevated));
+  padding: var(--space-1-5) var(--space-2);
+  border-width: 1px;
+  border-radius: var(--r-sm);
+  border-color: rgb(var(--stroke-solid));
+  background: rgb(var(--surface-base));
   box-shadow: none;
 }
 .attach-chip.is-image .attach-thumb {
-  @apply h-12 w-12 rounded-lg object-cover;
   flex-shrink: 0;
+  width: 3rem;
+  height: 3rem;
+  border-radius: var(--r-sm);
+  object-fit: cover;
 }
 .attach-preview-trigger {
-  @apply block shrink-0 rounded-lg outline-none transition;
+  display: block;
+  flex-shrink: 0;
+  border-radius: var(--r-sm);
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition:
+    transform var(--duration) var(--ease-standard),
+    box-shadow var(--duration) var(--ease-standard);
 }
 .attach-preview-trigger:hover {
   transform: scale(1.03);
@@ -29,30 +43,67 @@
   box-shadow: 0 0 0 2px rgb(var(--accent) / 0.62);
 }
 .attach-chip .attach-doc-icon {
-  @apply grid h-12 w-12 place-items-center rounded-lg border border-border/45 bg-bg-inset;
+  display: grid;
   flex-shrink: 0;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-width: 1px;
+  border-radius: var(--r-sm);
+  border-color: rgb(var(--stroke-solid) / 0.45);
+  background-color: rgb(var(--surface-sunken));
 }
 .attach-chip .attach-doc-icon img {
-  @apply h-9 w-9;
+  width: 2.25rem;
+  height: 2.25rem;
   transform: scale(1.08);
 }
 .attach-chip.uploading {
-  @apply border-warn/40 bg-warn/10;
+  border-color: rgb(var(--warn) / 0.4);
+  background-color: rgb(var(--warn) / 0.1);
 }
 .attach-chip .attach-meta {
-  @apply min-w-0 flex-1 leading-tight;
+  flex: 1 1 0%;
+  min-width: 0;
+  line-height: 1.25;
 }
 .attach-chip .attach-name {
-  @apply truncate font-mono text-xs font-bold text-fg;
+  overflow: hidden;
+  color: rgb(var(--text-1));
+  font-family: var(--font-mono);
+  font-size: var(--fs-xxs);
+  font-weight: var(--weight-semibold);
+  line-height: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .attach-chip .attach-sub {
-  @apply truncate font-mono text-[10px] text-secondary;
+  overflow: hidden;
+  color: rgb(var(--text-2));
+  font-family: var(--font-mono);
+  font-size: var(--fs-xxxs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .attach-chip .attach-remove {
-  @apply ml-1 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-bg-inset text-base text-secondary transition;
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: var(--space-6);
+  height: var(--space-6);
+  margin-left: var(--space-1);
+  border-radius: var(--r-full);
+  background-color: rgb(var(--surface-sunken));
+  color: rgb(var(--text-2));
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  transition:
+    background-color var(--duration) var(--ease-standard),
+    color var(--duration) var(--ease-standard);
 }
 .attach-chip .attach-remove:hover {
-  @apply bg-accent/15 text-accent;
+  background-color: rgb(var(--accent) / 0.15);
+  color: rgb(var(--accent));
 }
 
 /* 用户消息气泡上方的 attach 行 */
@@ -64,7 +115,7 @@
   place-items: center;
   padding: var(--space-6);
   background: rgb(var(--shadow-color) / 0.78);
-  backdrop-filter: blur(var(--material-1-blur));
+  backdrop-filter: blur(var(--backdrop-blur));
 }
 
 .attachment-preview-stage {
@@ -74,9 +125,9 @@
   max-width: min(94vw, 1440px);
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid rgb(var(--border-strong));
-  border-radius: var(--radius-xl);
-  background: rgb(var(--bg-elevated));
+  border: 1px solid rgb(var(--stroke-solid-strong));
+  border-radius: var(--r-xl);
+  background: rgb(var(--surface-base));
   box-shadow: 0 28px 90px rgb(var(--shadow-color) / 0.5);
 }
 
@@ -85,7 +136,7 @@
   max-height: calc(100vh - 118px);
   max-width: min(94vw, 1440px);
   object-fit: contain;
-  background: rgb(var(--bg-inset));
+  background: rgb(var(--surface-sunken));
 }
 
 .attachment-preview-close {
@@ -97,10 +148,10 @@
   width: 34px;
   height: 34px;
   place-items: center;
-  border: 1px solid rgb(var(--border-strong));
+  border: 1px solid rgb(var(--stroke-solid-strong));
   border-radius: 999px;
-  background: rgb(var(--bg-elevated) / 0.9);
-  color: rgb(var(--fg));
+  background: rgb(var(--surface-base) / 0.9);
+  color: rgb(var(--text-1));
   font-size: 22px;
   line-height: 1;
   box-shadow: 0 6px 20px rgb(var(--shadow-color) / 0.24);
@@ -120,7 +171,7 @@
   justify-content: space-between;
   gap: 20px;
   padding: 11px var(--space-3);
-  color: rgb(var(--fg));
+  color: rgb(var(--text-1));
 }
 
 .attachment-preview-caption strong {
@@ -132,22 +183,29 @@
 
 .attachment-preview-caption span {
   flex-shrink: 0;
-  color: rgb(var(--fg) / var(--text-secondary));
+  color: rgb(var(--text-2));
   font-family: var(--font-mono);
-  font-size: var(--font-size-xs);
+  font-size: var(--fs-xxxs);
 }
 
 /* ─── 首次运行：模型未配置对话框（UI-S12） ───
    The illustration fills the dialog; its left 40% is empty studio surface
    in --surface-canvas, so the copy sits on it behind a soft fade. */
 
+/* Above the page, its sticky bars and overlays; below popovers, toasts,
+   modals and menus (the order the former z-index 70 gave it). */
 .onboarding-backdrop {
-  @apply fixed inset-0 z-[70] grid place-items-center p-4;
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-drawer);
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
 }
 
 .model-setup-backdrop {
   background: var(--scrim);
-  backdrop-filter: blur(var(--material-1-blur));
+  backdrop-filter: blur(var(--backdrop-blur));
 }
 
 .model-setup-modal {
@@ -206,8 +264,8 @@
   color: rgb(var(--text-3));
   cursor: pointer;
   transition:
-    background var(--motion-fast) var(--ease-in-out),
-    color var(--motion-fast) var(--ease-in-out);
+    background var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 
 .model-setup-close:hover {
@@ -272,7 +330,7 @@
   border-radius: var(--r-md);
   background: rgb(var(--surface-base) / 0.72);
   padding: var(--space-2-5) var(--space-3);
-  backdrop-filter: blur(var(--material-1-blur));
+  backdrop-filter: blur(var(--backdrop-blur));
 }
 
 .model-setup-status::before {
@@ -323,8 +381,8 @@
   white-space: nowrap;
   cursor: pointer;
   transition:
-    background var(--motion-fast) var(--ease-in-out),
-    box-shadow var(--motion-fast) var(--ease-in-out);
+    background var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
 }
 
 .model-setup-button:hover {

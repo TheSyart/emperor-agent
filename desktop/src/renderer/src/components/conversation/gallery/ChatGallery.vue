@@ -12,6 +12,7 @@
  */
 import { computed, onBeforeUnmount, provide, ref } from 'vue'
 import ChatTimeline from '../ChatTimeline.vue'
+import LinkButton from '../../ui/LinkButton.vue'
 import { LINK_STATUS_KEY } from '../parts/linkStatus'
 import { createFixtureStore } from './fixtureStore'
 import { kernelScenario } from './kernelScenario'
@@ -101,9 +102,9 @@ provide(LINK_STATUS_KEY, {
       >
     </header>
     <div v-if="stack.length > 1" class="crumbs">
-      <button type="button" class="back" @click="stack = stack.slice(0, -1)">
+      <LinkButton class="back" @click="stack = stack.slice(0, -1)">
         ← 返回父会话
-      </button>
+      </LinkButton>
       <span class="crumb">{{ current }}</span>
     </div>
     <main class="conversation">
@@ -127,8 +128,8 @@ provide(LINK_STATUS_KEY, {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: rgb(var(--bg-base));
-  color: rgb(var(--label-primary));
+  background: rgb(var(--surface-canvas));
+  color: rgb(var(--text-1));
   font-family: var(--font-sans);
 }
 
@@ -139,21 +140,21 @@ provide(LINK_STATUS_KEY, {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
   font-size: var(--fs-xs);
 }
 
 .brand {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .link {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-decoration: none;
 }
 
 .link[data-active] {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 
 .crumbs {
@@ -163,16 +164,7 @@ provide(LINK_STATUS_KEY, {
   gap: var(--space-3);
   padding: var(--space-2) var(--space-4);
   font-size: var(--fs-xs);
-  color: rgb(var(--label-tertiary));
-}
-
-.back {
-  padding: 0;
-  border: none;
-  background: none;
-  color: rgb(var(--accent-strong));
-  font: inherit;
-  cursor: pointer;
+  color: rgb(var(--text-3));
 }
 
 .conversation {

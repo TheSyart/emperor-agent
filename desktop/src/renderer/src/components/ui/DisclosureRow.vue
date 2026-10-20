@@ -124,7 +124,7 @@ function onKeydown(event: KeyboardEvent) {
   align-items: center;
   height: var(--control-sm);
   min-width: 0;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   font: var(--type-footnote) var(--font-sans);
 }
 
@@ -159,11 +159,11 @@ button.leading {
 .icon-idle {
   display: inline-flex;
   opacity: 1;
-  transition: opacity var(--duration-ds-fast) ease;
+  transition: opacity var(--motion-fast) ease;
 }
 
 .chevron {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 /* Collapsed chevron points right; the open row shows it pointing down. */
@@ -173,7 +173,7 @@ button.leading {
   margin: auto;
   opacity: 0;
   transform: rotate(-90deg);
-  transition: opacity var(--duration-ds-fast) ease;
+  transition: opacity var(--motion-fast) ease;
 }
 
 .row:hover .icon-idle[data-preview] {
@@ -205,7 +205,7 @@ button.leading {
 }
 
 [data-tone='error'] .summary {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .trailing {

@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "about": "Token names retired by DS-02. `renames` maps each old name onto the token that replaces it (scripts/codemods/tokens-v2.mjs applies them, one category at a time); `removed` lists retired names with no one-to-one replacement (migrated by hand); `snaps` records the renames whose value changes. style-audit.test.ts counts any reference to these names as a legacy reference.",
+  "renames": {
+    "surfaces": {
+      "--bg-base": "--surface-canvas",
+      "--bg-layer-1": "--surface-base",
+      "--bg-layer-2": "--surface-raised",
+      "--bg-layer-3": "--surface-overlay",
+      "--bg-overlay": "--surface-strong",
+      "--bg": "--surface-canvas",
+      "--bg-elevated": "--surface-base",
+      "--bg-inset": "--surface-sunken",
+      "--interactive-bg-hover": "--surface-hover",
+      "--interactive-bg-active": "--surface-active",
+      "--interactive-bg-hover-strong": "--surface-hover-strong",
+      "--interactive-bg-hover-danger": "--surface-hover-danger",
+      "--interactive-bg-hover-solid": "--surface-hover-solid",
+      "--mask-1": "--scrim",
+      "--mask-2": "--scrim-soft"
+    },
+    "text": {
+      "--label-primary": "--text-1",
+      "--label-secondary": "--text-2",
+      "--label-tertiary": "--text-3",
+      "--label-caption": "--text-3",
+      "--label-dimmed": "--text-disabled",
+      "--label-inverted": "--text-inverted",
+      "--fg": "--text-1"
+    },
+    "strokes": {
+      "--border-l1": "--stroke-1",
+      "--border-l2": "--stroke-2",
+      "--border-l3": "--stroke-3",
+      "--border-l4": "--stroke-4",
+      "--border-inverted": "--stroke-inverted",
+      "--border": "--stroke-solid",
+      "--border-strong": "--stroke-solid-strong"
+    },
+    "accent-status": {
+      "--accent-fill": "--accent",
+      "--accent-strong": "--text-link",
+      "--accent-fg": "--text-on-accent",
+      "--approval-soft": "--attention-soft",
+      "--danger-soft": "--error-soft",
+      "--state-error": "--error",
+      "--danger": "--error"
+    },
+    "elevation": {
+      "--shadow-sm": "--elev-1",
+      "--shadow-md": "--elev-2",
+      "--shadow-lg": "--elev-3"
+    },
+    "radius": {
+      "--radius-xs": "--r-xs",
+      "--radius-sm": "--r-sm",
+      "--radius-md": "--r-sm",
+      "--radius": "--r-sm",
+      "--radius-lg": "--r-md",
+      "--radius-xl": "--r-xl"
+    },
+    "font-size": {
+      "--font-size-2xs": "--fs-xxxs",
+      "--font-size-xs": "--fs-xxxs",
+      "--font-size-sm": "--fs-xxs",
+      "--font-size-md": "--fs-xs",
+      "--font-size-lg": "--fs-s",
+      "--font-size-xl": "--fs-base",
+      "--font-size-2xl": "--fs-hero"
+    },
+    "motion": {
+      "--duration-ds-fast": "--motion-fast",
+      "--duration-ds": "--motion-base",
+      "--duration-ds-slow": "--motion-slow",
+      "--ease-in-out": "--ease-standard"
+    },
+    "status-primitives": {
+      "--approval": "--attention",
+      "--state-ok": "--ok",
+      "--state-warn": "--warn"
+    }
+  },
+  "removed": {
+    "--text-primary": "alpha text level: rgb(var(--fg) / var(--text-primary)) becomes rgb(var(--text-1))",
+    "--text-secondary": "alpha text level: rgb(var(--fg) / var(--text-secondary)) becomes rgb(var(--text-2))",
+    "--text-tertiary": "alpha text level: rgb(var(--fg) / var(--text-tertiary)) becomes rgb(var(--text-3))",
+    "--hover-bg-a": "alpha hover level: use var(--surface-hover)",
+    "--active-bg-a": "alpha pressed level: use var(--surface-active)",
+    "--scrim-a": "alpha scrim level: use var(--scrim)",
+    "--glass-alpha": "glass material (no users)",
+    "--glass-bg": "glass material (no users)",
+    "--glass-border": "glass material (no users)",
+    "--glass-border-a": "glass material (no users)",
+    "--glass-blur": "glass material (no users)",
+    "--glass-saturate": "glass material (no users)",
+    "--glass-shadow": "glass material (no users)",
+    "--glass-solid-alpha": "glass material (no users)",
+    "--material-1-bg": "material tier: use the surface tokens",
+    "--material-1-alpha": "material tier: use the surface tokens",
+    "--material-1-blur": "material tier: use var(--backdrop-blur)",
+    "--material-2-bg": "material tier: use the surface tokens",
+    "--material-2-alpha": "material tier: use the surface tokens",
+    "--material-2-blur": "material tier: use var(--backdrop-blur-strong)",
+    "--material-3-bg": "material tier: use the surface tokens",
+    "--material-3-alpha": "material tier: use the surface tokens",
+    "--material-3-blur": "material tier: use var(--backdrop-blur-strong)",
+    "--shadow-lv1-blur": "unused alias of var(--elev-1)",
+    "--nb-00": "pre-0.2 neutral scale: use the surface and text tokens",
+    "--nb-50": "pre-0.2 neutral scale",
+    "--nb-60": "pre-0.2 neutral scale",
+    "--nb-75": "pre-0.2 neutral scale",
+    "--nb-100": "pre-0.2 neutral scale",
+    "--nb-150": "pre-0.2 neutral scale",
+    "--nb-200": "pre-0.2 neutral scale",
+    "--nb-300": "pre-0.2 neutral scale",
+    "--nb-400": "pre-0.2 neutral scale",
+    "--nb-500": "pre-0.2 neutral scale",
+    "--nb-600": "pre-0.2 neutral scale",
+    "--nb-700": "pre-0.2 neutral scale",
+    "--nb-750": "pre-0.2 neutral scale",
+    "--nb-800": "pre-0.2 neutral scale",
+    "--nb-850": "pre-0.2 neutral scale",
+    "--nb-875": "pre-0.2 neutral scale",
+    "--nb-900": "pre-0.2 neutral scale",
+    "--nb-950": "pre-0.2 neutral scale",
+    "--nb-1000": "pre-0.2 neutral scale"
+  },
+  "snaps": {
+    "--radius-sm": "6px → 8px (--r-sm)",
+    "--radius-xl": "20px → 24px (--r-xl)",
+    "--font-size-2xs": "10px → 11px (--fs-xxxs)",
+    "--font-size-xl": "17px → 16px (--fs-base)",
+    "--duration-ds-fast": "100ms → 120ms (--motion-fast)",
+    "--duration-ds-slow": "300ms → 320ms (--motion-slow)",
+    "--ease-in-out": "cubic-bezier(0.4, 0, 0.2, 1) → cubic-bezier(0.2, 0, 0, 1) (--ease-standard)",
+    "--approval": "245 158 11 in both themes → --attention (dark 240 136 62, light 194 87 12)",
+    "--state-ok": "34 197 94 in both themes → --ok (dark 76 195 138, light 31 157 85)",
+    "--state-warn": "245 158 11 in both themes → --warn (dark 232 162 59, light 181 96 11)"
+  }
+}

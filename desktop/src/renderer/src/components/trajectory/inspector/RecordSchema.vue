@@ -44,7 +44,7 @@ const schema = computed(() =>
 .no-payload {
   margin: 0;
   padding: var(--space-4) var(--space-3-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xs);
 }
 
@@ -58,13 +58,13 @@ const schema = computed(() =>
 
 .name {
   margin: 0;
-  color: rgb(var(--label-primary));
-  font: 600 12px / 18px var(--font-mono);
+  color: rgb(var(--text-1));
+  font: var(--weight-semibold) 12px / 18px var(--font-mono);
 }
 
 .description {
   margin: 2px 0 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xs);
   white-space: pre-wrap;
 }
@@ -79,14 +79,14 @@ const schema = computed(() =>
 .parameters-title {
   margin: 0;
   padding: var(--space-1) var(--space-3-5) 2px;
-  color: rgb(var(--label-tertiary));
-  font: 600 11px / 16px var(--font-sans);
+  color: rgb(var(--text-3));
+  font: var(--weight-semibold) 11px / 16px var(--font-sans);
 }
 
 .payload {
   margin: 0;
   padding: var(--space-3-5);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: 12px / 19px var(--font-mono);
   white-space: pre-wrap;
 }

@@ -64,13 +64,13 @@ export const SORT_OPTIONS: Array<{ value: RankSort; label: string }> = [
 /** Series colors: theme tones only (both themes define them). */
 export const SERIES_COLORS = [
   'rgb(var(--tone-cyan))',
-  'rgb(var(--accent-fill))',
+  'rgb(var(--accent))',
   'rgb(var(--tone-violet))',
-  'rgb(var(--state-warn))',
-  'rgb(var(--state-ok))',
+  'rgb(var(--warn))',
+  'rgb(var(--ok))',
   'rgb(var(--tone-blue))',
 ] as const
-export const OTHER_COLOR = 'rgb(var(--label-tertiary))'
+export const OTHER_COLOR = 'rgb(var(--text-3))'
 const SERIES_DASHES = ['', '8 4', '2 4', '11 4 2 4', '4 3', '12 3'] as const
 
 export interface UsageTotals {
@@ -195,9 +195,9 @@ export function usageComposition(totals: UsageTotals) {
     cache_create: totals.cacheCreate,
   })
   const colors: Record<string, string> = {
-    cache_hit: 'rgb(var(--state-ok))',
+    cache_hit: 'rgb(var(--ok))',
     cache_miss: 'rgb(var(--tone-blue))',
-    output: 'rgb(var(--accent-fill))',
+    output: 'rgb(var(--accent))',
   }
   return {
     ...composition,
@@ -551,7 +551,7 @@ export function cacheTrend(
         id: 'cacheRead',
         label: '缓存读取',
         values: buckets.map((bucket) => bucket.cacheRead),
-        color: 'rgb(var(--state-ok))',
+        color: 'rgb(var(--ok))',
         dash: '',
       },
       {

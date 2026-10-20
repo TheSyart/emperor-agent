@@ -52,15 +52,15 @@ const columns = computed(() => {
   box-sizing: border-box;
   height: 28px;
   padding: 0 var(--space-4) 0 var(--space-3);
-  border-bottom: 1px solid var(--border-l1);
-  background: rgb(var(--bg-layer-1));
+  border-bottom: 1px solid var(--stroke-1);
+  background: rgb(var(--surface-base));
   user-select: none;
 }
 
 .title {
   flex: none;
-  color: rgb(var(--label-primary));
-  font: 600 var(--fs-xxs) / var(--lh-xxs) var(--font-sans);
+  color: rgb(var(--text-1));
+  font: var(--weight-semibold) var(--fs-xxs) / var(--lh-xxs) var(--font-sans);
 }
 
 .columns {
@@ -81,7 +81,7 @@ const columns = computed(() => {
 }
 
 dt {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font: var(--font-xxxs);
 }
 
@@ -89,7 +89,7 @@ dd {
   min-width: 0;
   margin: 0;
   overflow: hidden;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xxxs);
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;

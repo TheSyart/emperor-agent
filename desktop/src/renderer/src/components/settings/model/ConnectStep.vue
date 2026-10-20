@@ -247,7 +247,7 @@ function protocolLabel(value: string): string {
 .group-label {
   margin: 0;
   font-size: var(--fs-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-3));
 }
 
@@ -313,7 +313,7 @@ function protocolLabel(value: string): string {
 }
 
 .chosen-name {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .key-hint,

@@ -699,7 +699,7 @@ function costText(usage: {
   max-height: 65vh;
   overflow: auto;
   min-width: 0;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   text-wrap: pretty;
 }
@@ -717,8 +717,8 @@ function costText(usage: {
 }
 .external-status {
   padding: var(--space-2) var(--space-3);
-  background: rgb(var(--bg-layer-1));
-  border: 1px solid var(--border-l2);
+  background: rgb(var(--surface-base));
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
 }
 .external-status [data-acceptance='passed'] {
@@ -726,7 +726,7 @@ function costText(usage: {
 }
 .external-section {
   padding-top: var(--space-3);
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 h3 {
   margin: 0 0 var(--space-2);
@@ -736,7 +736,7 @@ p {
   margin: var(--space-1) 0;
 }
 .external-note {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
 }
 .external-note [data-failure-next] {
@@ -753,7 +753,7 @@ p {
 .external-code {
   font: var(--font-code-small);
   overflow-wrap: anywhere;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .external-code {
   white-space: pre-wrap;

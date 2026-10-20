@@ -103,14 +103,14 @@ function onOverwrite(name: string, value: boolean) {
   gap: var(--space-2);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
-  color: rgb(var(--label-secondary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-2));
 }
 
 .pending,
 .idle {
-  font-weight: 400;
-  color: rgb(var(--label-tertiary));
+  font-weight: var(--weight-regular);
+  color: rgb(var(--text-3));
 }
 
 .idle {
@@ -125,7 +125,7 @@ function onOverwrite(name: string, value: boolean) {
   margin: 0;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   list-style: none;
 }
@@ -136,11 +136,11 @@ function onOverwrite(name: string, value: boolean) {
   gap: var(--space-1);
   min-width: 0;
   padding: var(--space-2-5) var(--space-3);
-  background: rgb(var(--bg-layer-3));
+  background: rgb(var(--surface-overlay));
 }
 
 .row + .row {
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .row-main {
@@ -156,8 +156,8 @@ function onOverwrite(name: string, value: boolean) {
   margin-right: var(--space-0-5);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -170,7 +170,7 @@ function onOverwrite(name: string, value: boolean) {
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 

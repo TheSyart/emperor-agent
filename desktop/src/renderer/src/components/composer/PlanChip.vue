@@ -56,12 +56,12 @@ function dismiss(): void {
   padding: var(--space-0-5) var(--space-2);
   border: none;
   border-radius: var(--radius-pill);
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
   color: rgb(var(--approval-line));
-  box-shadow: inset 0 0 0 1px rgb(var(--approval) / 0.3);
+  box-shadow: inset 0 0 0 1px rgb(var(--attention) / 0.3);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   cursor: pointer;
 }
 
@@ -71,8 +71,8 @@ function dismiss(): void {
 
 .plan-chip[data-kind='goal'] {
   background: rgb(var(--accent-soft));
-  color: rgb(var(--accent-strong));
-  box-shadow: inset 0 0 0 1px rgb(var(--accent-fill) / 0.3);
+  color: rgb(var(--text-link));
+  box-shadow: inset 0 0 0 1px rgb(var(--accent) / 0.3);
 }
 
 .plan-chip[aria-disabled] {

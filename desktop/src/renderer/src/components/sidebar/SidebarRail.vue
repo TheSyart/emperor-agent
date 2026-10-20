@@ -131,7 +131,7 @@ function go(entry: SidebarPageEntry): void {
   overflow-y: auto;
   scrollbar-width: none;
   background: rgb(var(--sidebar-fill));
-  animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
+  animation: ds-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .group {
@@ -141,7 +141,7 @@ function go(entry: SidebarPageEntry): void {
   align-items: center;
   gap: var(--space-1);
   padding-top: var(--space-2);
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .rail-button {
@@ -153,16 +153,16 @@ function go(entry: SidebarPageEntry): void {
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   cursor: pointer;
 }
 
 .rail-button:hover:not(:disabled) {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .rail-button[aria-current='page'] {
-  background: var(--interactive-bg-active);
+  background: var(--surface-active);
 }
 
 .rail-button:disabled {

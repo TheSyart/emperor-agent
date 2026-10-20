@@ -299,7 +299,7 @@ async function revealProject(): Promise<void> {
           :aria-expanded="moreMenu"
           @click="moreMenu = !moreMenu"
         >
-          <Ellipsis :size="15" />
+          <Ellipsis :size="16" />
         </IconButton>
       </span>
     </header>
@@ -318,7 +318,7 @@ async function revealProject(): Promise<void> {
               :title="`${branchLabel} · 在审查中查看改动`"
               @click="openReview"
             >
-              <template #lead><FileDiff :size="15" /></template>
+              <template #lead><FileDiff :size="16" /></template>
               <template #meta>
                 <Badge v-if="inWorktree">worktree</Badge>
                 <span v-if="aheadBehind" class="ahead">{{ aheadBehind }}</span>
@@ -332,7 +332,7 @@ async function revealProject(): Promise<void> {
               </template>
             </EnvironmentRow>
             <p v-if="transient" class="warn-line" role="status">
-              <TriangleAlert :size="15" />
+              <TriangleAlert :size="16" />
               <span>{{ transient }}</span>
             </p>
           </div>
@@ -350,7 +350,7 @@ async function revealProject(): Promise<void> {
           :status="plan.status === 'executing' ? 'running' : undefined"
           @click="emit('reveal', plan.key)"
         >
-          <template #lead><ListChecks :size="15" /></template>
+          <template #lead><ListChecks :size="16" /></template>
         </EnvironmentRow>
       </div>
 
@@ -379,15 +379,15 @@ async function revealProject(): Promise<void> {
     >
       <MenuItem :disabled="!projectPath" @select="copyProjectPath">
         复制项目路径
-        <template #icon><Copy :size="15" /></template>
+        <template #icon><Copy :size="16" /></template>
       </MenuItem>
       <MenuItem :disabled="!projectPath" @select="revealProject">
         在访达中显示
-        <template #icon><FolderOpen :size="15" /></template>
+        <template #icon><FolderOpen :size="16" /></template>
       </MenuItem>
       <MenuItem @select="emit('close')">
         隐藏此卡片
-        <template #icon><EyeOff :size="15" /></template>
+        <template #icon><EyeOff :size="16" /></template>
       </MenuItem>
     </Menu>
   </aside>
@@ -481,7 +481,7 @@ async function revealProject(): Promise<void> {
 .changes b,
 .changes i {
   font-style: normal;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .changes b {

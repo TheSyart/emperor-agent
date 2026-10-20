@@ -71,6 +71,7 @@ import { APP_CONTEXT_KEY } from '../../composables/useAppContext'
 import { useResizable } from '../../composables/useResizable'
 import { detectShortcutPlatform } from '../../shortcuts'
 import IconButton from '../ui/IconButton.vue'
+import Spinner from '../ui/Spinner.vue'
 import { highlightFile } from './fileHighlight'
 import DocumentIcon from '../ui/DocumentIcon.vue'
 import WorkspaceTabBar from './WorkspaceTabBar.vue'
@@ -715,7 +716,7 @@ function message(value: unknown): string {
         >
           <template v-if="hasProject" #after>
             <IconButton label="打开文件" @click="startOpenFile">
-              <Plus :size="15" />
+              <Plus :size="16" />
             </IconButton>
           </template>
           <template v-if="hasProject" #actions>
@@ -724,8 +725,8 @@ function message(value: unknown): string {
               :aria-pressed="treeVisible"
               @click="treeVisible = !treeVisible"
             >
-              <PanelRightClose v-if="treeVisible" :size="15" />
-              <PanelRightOpen v-else :size="15" />
+              <PanelRightClose v-if="treeVisible" :size="16" />
+              <PanelRightOpen v-else :size="16" />
             </IconButton>
           </template>
         </WorkspaceTabBar>
@@ -749,14 +750,14 @@ function message(value: unknown): string {
         </nav>
         <div v-if="activeTab" class="file-preview-actions">
           <IconButton label="刷新文件" :disabled="loading" @click="refreshFile"
-            ><RefreshCw :size="13"
+            ><RefreshCw :size="14"
           /></IconButton>
           <IconButton
             v-if="activeTab.preview.revealable && !isDraftSession"
             label="在访达中显示"
             @click="revealFile"
           >
-            <FolderOpen :size="13" />
+            <FolderOpen :size="14" />
           </IconButton>
           <Button
             v-if="isMarkdown"
@@ -773,7 +774,7 @@ function message(value: unknown): string {
               :aria-expanded="copyMenu"
               @click="copyMenu = !copyMenu"
             >
-              <Copy :size="13" />
+              <Copy :size="14" />
             </IconButton>
           </span>
           <Menu
@@ -897,7 +898,8 @@ function message(value: unknown): string {
           />
         </form>
         <IconButton label="刷新目录树" @click="reloadTree">
-          <RefreshCw :size="13" :class="{ 'animate-spin': loading }" />
+          <Spinner v-if="loading" size="sm" />
+          <RefreshCw v-else :size="14" />
         </IconButton>
       </div>
       <div v-if="treeError" class="files-inline-error" role="alert">
@@ -931,9 +933,9 @@ function message(value: unknown): string {
         >
           <ChevronDown
             v-if="isDirectory(row.entry) && expanded.has(row.entry.path)"
-            :size="13"
+            :size="14"
           />
-          <ChevronRight v-else-if="isDirectory(row.entry)" :size="13" />
+          <ChevronRight v-else-if="isDirectory(row.entry)" :size="14" />
           <span v-else class="file-tree-spacer"></span>
           <DocumentIcon
             :path="row.entry.name"
@@ -964,14 +966,14 @@ function message(value: unknown): string {
   border: 0;
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-row);
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-secondary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-2));
   font: var(--font-xs);
   cursor: pointer;
 }
 .file-preview-meta {
   margin: var(--space-4) 0 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xs);
   overflow-wrap: anywhere;
 }
@@ -983,7 +985,7 @@ function message(value: unknown): string {
   padding: var(--space-4);
   border: 0;
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: zoom-in;
 }
 .file-image-preview img {
@@ -1070,14 +1072,14 @@ function message(value: unknown): string {
 .source-toggle {
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-row);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
 
 .source-toggle:hover {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
+  color: rgb(var(--text-1));
+  background: var(--surface-hover);
 }
 
 /* ── preview ───────────────────────────────────────────────────────── */
@@ -1103,7 +1105,7 @@ function message(value: unknown): string {
 }
 
 .file-markdown-preview {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -1124,20 +1126,20 @@ function message(value: unknown): string {
   position: sticky;
   left: 0;
   padding-right: var(--space-2);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   text-align: right;
   user-select: none;
   background: rgb(var(--surface-base));
 }
 
 .file-code-line code {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   white-space: pre;
 }
 
 .file-code-line.reference-line-active {
-  background: rgb(var(--accent-fill) / 0.12);
-  box-shadow: inset 2px 0 0 rgb(var(--accent-fill));
+  background: rgb(var(--accent) / 0.12);
+  box-shadow: inset 2px 0 0 rgb(var(--accent));
 }
 
 .file-code-line.reference-line-active > span {
@@ -1147,7 +1149,7 @@ function message(value: unknown): string {
 .file-truncated {
   display: block;
   margin-top: var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -1182,7 +1184,7 @@ function message(value: unknown): string {
 .file-tree-resizer:hover,
 .file-tree-resizer:focus-visible {
   outline: none;
-  background: rgb(var(--accent-fill) / 0.35);
+  background: rgb(var(--accent) / 0.35);
 }
 
 .file-tree-toolbar {
@@ -1216,20 +1218,20 @@ function message(value: unknown): string {
   padding-block: var(--space-1);
   padding-right: var(--space-2);
   border-radius: var(--radius-row);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-align: left;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
 
 .file-tree-row:hover {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
+  color: rgb(var(--text-1));
+  background: var(--surface-hover);
 }
 
 .file-tree-row.active {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-active);
+  color: rgb(var(--text-1));
+  background: var(--surface-active);
 }
 
 .file-tree-row:focus-visible {
@@ -1248,7 +1250,7 @@ function message(value: unknown): string {
 
 .file-tree-hint {
   overflow: hidden;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
   text-overflow: ellipsis;
@@ -1260,7 +1262,7 @@ function message(value: unknown): string {
 
 .files-muted {
   padding: var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -1279,12 +1281,12 @@ function message(value: unknown): string {
 }
 
 .files-inline-error {
-  color: rgb(var(--danger));
-  background: rgb(var(--danger-soft));
+  color: rgb(var(--error));
+  background: rgb(var(--error-soft));
 }
 
 .files-inline-warning {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   background: rgb(var(--warn-soft));
 }
 </style>

@@ -874,8 +874,8 @@ provideAppContext({
   display: grid;
   place-items: center;
   height: 100dvh;
-  background: rgb(var(--bg-base));
-  color: rgb(var(--label-secondary));
+  background: rgb(var(--surface-canvas));
+  color: rgb(var(--text-2));
 }
 
 .boot-card {
@@ -885,9 +885,9 @@ provideAppContext({
   gap: var(--space-3);
   max-width: 420px;
   padding: var(--space-5) var(--space-6);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-takeover);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv2);
   font-size: var(--fs-s);
   line-height: var(--lh-s);
@@ -902,19 +902,19 @@ provideAppContext({
   width: var(--space-2);
   height: var(--space-2);
   border-radius: var(--radius-pill);
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
   animation: ds-fade-in 1s ease-in-out infinite alternate;
 }
 
 .boot-error strong {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-base);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .boot-error p {
   margin: 0;
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
   word-break: break-word;
 }
 

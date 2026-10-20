@@ -133,7 +133,7 @@ function onFocusOut(event: FocusEvent): void {
   min-height: 3px;
   padding: 0 var(--space-1-5);
   border: none;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
   cursor: pointer;
 }
@@ -142,20 +142,20 @@ function onFocusOut(event: FocusEvent): void {
   width: var(--space-2-5);
   height: 2px;
   border-radius: 2px;
-  background: rgb(var(--label-caption) / 0.7);
+  background: rgb(var(--text-3) / 0.7);
   transition:
-    background-color var(--duration-ds-fast) ease,
-    transform var(--duration-ds-fast) ease;
+    background-color var(--motion-fast) ease,
+    transform var(--motion-fast) ease;
   transform-origin: left center;
 }
 
 .tick:hover .mark,
 .tick:focus-visible .mark {
-  background: rgb(var(--label-secondary));
+  background: rgb(var(--text-2));
 }
 
 .tick[data-active] .mark {
-  background: rgb(var(--label-primary));
+  background: rgb(var(--text-1));
   transform: scaleX(1.6);
 }
 

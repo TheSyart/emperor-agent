@@ -49,11 +49,11 @@
 .ds-shimmer {
   background: linear-gradient(
     90deg,
-    rgb(var(--accent-fill)) 0%,
-    rgb(var(--accent-fill)) 40%,
+    rgb(var(--accent)) 0%,
+    rgb(var(--accent)) 40%,
     rgb(var(--accent-glare)) 50%,
-    rgb(var(--accent-fill)) 60%,
-    rgb(var(--accent-fill)) 100%
+    rgb(var(--accent)) 60%,
+    rgb(var(--accent)) 100%
   );
   background-position: 100% 0;
   background-size: 250% 100%;
@@ -68,11 +68,11 @@
 .ds-shimmer[data-tone='neutral'] {
   background-image: linear-gradient(
     90deg,
-    rgb(var(--label-tertiary)) 0%,
-    rgb(var(--label-tertiary)) 40%,
-    rgb(var(--label-primary)) 50%,
-    rgb(var(--label-tertiary)) 60%,
-    rgb(var(--label-tertiary)) 100%
+    rgb(var(--text-3)) 0%,
+    rgb(var(--text-3)) 40%,
+    rgb(var(--text-1)) 50%,
+    rgb(var(--text-3)) 60%,
+    rgb(var(--text-3)) 100%
   );
 }
 
@@ -84,7 +84,7 @@
 
 /* 淡入(浮层、toast、tooltip 进场)。 */
 .ds-fade-in {
-  animation: ds-fade-in var(--duration-ds) var(--ease-in-out) both;
+  animation: ds-fade-in var(--motion-base) var(--ease-standard) both;
 }
 
 @keyframes ds-fade-in {

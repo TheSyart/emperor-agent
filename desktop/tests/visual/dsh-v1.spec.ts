@@ -384,12 +384,16 @@ test.describe('a11y media-feature degradation', () => {
     await page.emulateMedia({ contrast: 'more' })
     await open(page, '/chat/chat-main', { theme: 'dark' })
     const darkBorder = await page.evaluate(() =>
-      getComputedStyle(document.documentElement).getPropertyValue('--border'),
+      getComputedStyle(document.documentElement).getPropertyValue(
+        '--stroke-solid',
+      ),
     )
     expect(darkBorder.trim()).toBe('88 88 98')
     await open(page, '/chat/chat-main', { theme: 'light' })
     const lightBorder = await page.evaluate(() =>
-      getComputedStyle(document.documentElement).getPropertyValue('--border'),
+      getComputedStyle(document.documentElement).getPropertyValue(
+        '--stroke-solid',
+      ),
     )
     expect(lightBorder.trim()).toBe('150 150 158')
   })
@@ -1008,7 +1012,7 @@ test.describe('plugin logos on a high-density screen', () => {
         const board = document.createElement('div')
         board.id = 'logo-board'
         board.style.cssText =
-          'position:fixed;inset:auto 24px 24px auto;display:grid;gap:16px;padding:16px;border-radius:12px;background:rgb(var(--bg-layer-2));z-index:99999'
+          'position:fixed;inset:auto 24px 24px auto;display:grid;gap:16px;padding:16px;border-radius:12px;background:rgb(var(--surface-raised));z-index:99999'
         for (const src of srcs) {
           const row = document.createElement('div')
           row.style.cssText = 'display:flex;align-items:end;gap:16px'

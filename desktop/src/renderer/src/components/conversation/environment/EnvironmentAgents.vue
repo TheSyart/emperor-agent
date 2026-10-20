@@ -140,7 +140,7 @@ async function end(agent: AgentView) {
               data-agent-face
             />
           </template>
-          <Users v-if="!faces.length" :size="15" />
+          <Users v-if="!faces.length" :size="16" />
         </span>
       </template>
     </EnvironmentRow>
@@ -247,13 +247,13 @@ async function end(agent: AgentView) {
   border-radius: var(--radius-row);
   border: 0;
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-align: left;
   cursor: pointer;
 }
 .agent-row:hover,
 .agent-row[aria-current='page'] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 .agent-copy {
   display: flex;
@@ -268,14 +268,14 @@ async function end(agent: AgentView) {
   white-space: nowrap;
 }
 .agent-copy strong {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   font-size: var(--fs-xs);
 }
 .agent-copy small,
 .agent-phase,
 .agent-more {
   font-size: var(--fs-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .agent-phase {
   flex: none;
@@ -284,15 +284,15 @@ async function end(agent: AgentView) {
   display: block;
   margin: 0 0 var(--space-1) calc(28px + var(--space-3));
   padding: var(--space-0-5) var(--space-2);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   cursor: pointer;
 }
 .agent-end:hover:not(:disabled) {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 .agent-end:disabled {
   cursor: default;

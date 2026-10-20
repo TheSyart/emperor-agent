@@ -9,6 +9,7 @@
 import { ref } from 'vue'
 import Button from '../../ui/Button.vue'
 import Dot from '../../ui/Dot.vue'
+import IconButton from '../../ui/IconButton.vue'
 import {
   DsClose,
   DsCode,
@@ -176,9 +177,9 @@ const facts = [
           <h2 class="title">组件库</h2>
           <div class="header-actions">
             <SettingsHeaderBar :actions="header.actions.value" />
-            <button type="button" class="close" aria-label="关闭设置">
+            <IconButton class="close" label="关闭设置" :tooltip="false">
               <DsClose :size="14" />
-            </button>
+            </IconButton>
           </div>
         </div>
         <div class="options">
@@ -263,7 +264,7 @@ const facts = [
                 description="eyebrow 插槽：标题上方的风险标签"
               >
                 <template #eyebrow>
-                  <DsWarning :size="13" aria-hidden="true" />风险升高
+                  <DsWarning :size="14" aria-hidden="true" />风险升高
                 </template>
                 <Switch v-model="fullAccess" aria-label="启用完整访问" />
               </SettingsRow>
@@ -487,8 +488,8 @@ const facts = [
   gap: var(--space-6);
   min-height: 100vh;
   padding: var(--space-6);
-  background: rgb(var(--bg-base));
-  color: rgb(var(--label-primary));
+  background: rgb(var(--surface-canvas));
+  color: rgb(var(--text-1));
   font-family: var(--font-sans);
 }
 
@@ -499,7 +500,7 @@ const facts = [
   max-width: 100%;
   overflow: hidden;
   border-radius: var(--radius-modal);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
   box-shadow: var(--shadow-lv3);
 }
 
@@ -524,25 +525,13 @@ const facts = [
   padding-left: var(--space-3-5);
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .header-actions {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-.close {
-  display: inline-grid;
-  place-items: center;
-  width: var(--space-7);
-  height: var(--space-7);
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: rgb(var(--label-primary));
 }
 
 .options {
@@ -571,7 +560,7 @@ const facts = [
   width: 360px;
   padding: 0 var(--space-6) var(--space-3);
   border-radius: var(--radius-takeover);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
   box-shadow: var(--shadow-lv3);
 }
 
@@ -579,6 +568,6 @@ const facts = [
   padding-top: var(--space-4);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

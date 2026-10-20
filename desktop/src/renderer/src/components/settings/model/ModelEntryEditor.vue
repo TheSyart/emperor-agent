@@ -533,7 +533,7 @@ onMounted(() => {
   margin-top: var(--space-3);
   padding: var(--space-3) var(--space-3-5);
   border-radius: var(--radius-cell);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
 }
 
 .connection {
@@ -544,7 +544,7 @@ onMounted(() => {
   min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .connection-text {
@@ -585,7 +585,7 @@ onMounted(() => {
   font: inherit;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
 }
 
@@ -600,7 +600,7 @@ onMounted(() => {
 .advanced-toggle:focus-visible {
   outline: 2px solid rgb(var(--focus-ring));
   outline-offset: 2px;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
 }
 
 .advanced {
@@ -612,20 +612,20 @@ onMounted(() => {
 .pricing-title {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .pricing-title small {
-  font-weight: 400;
+  font-weight: var(--weight-regular);
   font-size: var(--fs-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .note {
   margin: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .error {

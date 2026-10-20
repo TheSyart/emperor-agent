@@ -57,10 +57,10 @@ const emit = defineEmits<{ back: []; stop: []; root: [] }>()
   min-height: 54px;
   margin: 0 auto var(--space-5);
   padding: var(--space-2-5) var(--space-4);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-1));
-  color: rgb(var(--label-tertiary));
+  background: rgb(var(--surface-base));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -72,30 +72,30 @@ const emit = defineEmits<{ back: []; stop: []; root: [] }>()
 
 strong {
   margin: 0 var(--space-1);
-  color: rgb(var(--label-primary));
-  font-weight: 500;
+  color: rgb(var(--text-1));
+  font-weight: var(--weight-medium);
 }
 
 .back {
   flex: none;
   height: var(--space-7);
   padding: 0 var(--space-2-5);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   cursor: pointer;
 }
 
 .back:hover {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-primary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-1));
 }
 
 .stop:hover:not(:disabled) {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .stop:disabled {

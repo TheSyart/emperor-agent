@@ -279,9 +279,9 @@ function onPointerMove(event: PointerEvent) {
 .token-trend-chart {
   min-width: 0;
   padding: var(--space-2-5);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-row);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
 }
 
 .legend {
@@ -298,18 +298,18 @@ function onPointerMove(event: PointerEvent) {
   min-width: 0;
   padding: var(--space-1);
   border: none;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
   font: inherit;
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-align: left;
   cursor: pointer;
 }
 
 .legend-button:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .legend-button:focus-visible {
@@ -343,7 +343,7 @@ function onPointerMove(event: PointerEvent) {
 
 .legend-sub {
   font-size: var(--fs-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .canvas {
@@ -358,13 +358,13 @@ function onPointerMove(event: PointerEvent) {
 }
 
 .grid-line {
-  stroke: var(--border-l1);
+  stroke: var(--stroke-1);
   stroke-width: 1;
   stroke-dasharray: 2 4;
 }
 
 .focus-line {
-  stroke: var(--border-l3);
+  stroke: var(--stroke-3);
   stroke-width: 1;
   pointer-events: none;
 }
@@ -372,7 +372,7 @@ function onPointerMove(event: PointerEvent) {
 .focus-layer {
   position: absolute;
   inset: 0;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   outline: none;
 }
 
@@ -392,13 +392,13 @@ function onPointerMove(event: PointerEvent) {
   max-width: 240px;
   margin-left: var(--space-2);
   padding: var(--space-1-5) var(--space-2);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-sm);
-  background: rgb(var(--bg-overlay));
+  border: 1px solid var(--stroke-2);
+  border-radius: var(--r-sm);
+  background: rgb(var(--surface-strong));
   box-shadow: var(--shadow-lv1);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   pointer-events: none;
 }
 
@@ -430,7 +430,7 @@ function onPointerMove(event: PointerEvent) {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -445,7 +445,7 @@ function onPointerMove(event: PointerEvent) {
   margin-top: var(--space-1);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
 }
 

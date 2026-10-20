@@ -155,7 +155,7 @@ onBeforeUnmount(() => {
   flex: 1;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .head-action {
@@ -163,15 +163,15 @@ onBeforeUnmount(() => {
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   cursor: pointer;
 }
 
 .head-action:hover:not(:disabled) {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-primary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-1));
 }
 
 .head-action:disabled {
@@ -205,21 +205,21 @@ onBeforeUnmount(() => {
 .row:hover,
 .row:focus-visible {
   outline: none;
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .glyph {
   flex: none;
   margin-top: var(--space-0-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .row[data-tone='error'] .glyph {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .row[data-tone='warning'] .glyph {
-  color: rgb(var(--accent-fill));
+  color: rgb(var(--accent));
 }
 
 .body {
@@ -239,18 +239,18 @@ onBeforeUnmount(() => {
 .title {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .row[data-unread] .title {
-  color: rgb(var(--label-primary));
-  font-weight: 500;
+  color: rgb(var(--text-1));
+  font-weight: var(--weight-medium);
 }
 
 .detail {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .meta {
@@ -264,7 +264,7 @@ onBeforeUnmount(() => {
 .time {
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   white-space: nowrap;
 }
 
@@ -272,14 +272,14 @@ onBeforeUnmount(() => {
   width: var(--space-1-5);
   height: var(--space-1-5);
   border-radius: var(--radius-pill);
-  background: rgb(var(--danger));
+  background: rgb(var(--error));
 }
 
 .empty {
   padding: var(--space-6) var(--space-3);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   text-align: center;
 }
 </style>

@@ -165,7 +165,7 @@ function noteOf(entry: TurnFileEntry): string {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .title {
@@ -180,7 +180,7 @@ function noteOf(entry: TurnFileEntry): string {
 .summary {
   display: inline-flex;
   gap: var(--space-1);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-variant-numeric: tabular-nums;
 }
 
@@ -189,7 +189,7 @@ function noteOf(entry: TurnFileEntry): string {
 }
 
 .del {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .files {
@@ -199,7 +199,7 @@ function noteOf(entry: TurnFileEntry): string {
   padding: var(--space-1) 0;
   overflow-y: auto;
   list-style: none;
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .file {
@@ -210,7 +210,7 @@ function noteOf(entry: TurnFileEntry): string {
   padding: var(--space-1) var(--space-3);
   border: 0;
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   text-align: start;
@@ -219,7 +219,7 @@ function noteOf(entry: TurnFileEntry): string {
 
 .file:hover,
 .file.active {
-  background: rgb(var(--fg) / var(--hover-bg-a));
+  background: var(--surface-hover);
 }
 
 .path {
@@ -235,7 +235,7 @@ function noteOf(entry: TurnFileEntry): string {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .name {
@@ -244,7 +244,7 @@ function noteOf(entry: TurnFileEntry): string {
 
 .note {
   flex: none;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
 }
 
@@ -264,13 +264,13 @@ function noteOf(entry: TurnFileEntry): string {
 
 .muted {
   margin: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xs);
 }
 
 .error {
   margin: 0;
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
   font-size: var(--fs-xs);
 }
 </style>

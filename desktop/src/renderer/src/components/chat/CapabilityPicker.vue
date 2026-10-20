@@ -51,7 +51,7 @@ const emit = defineEmits<{
             :src="item.logo.url"
             :size="16"
           />
-          <component :is="item.icon" v-else :size="15" />
+          <component :is="item.icon" v-else :size="16" />
         </span>
         <strong>{{ item.label }}</strong>
         <span>{{ item.description }}</span>
