@@ -14,7 +14,8 @@
  * - reserved/claimed round never admitted, or admitted round cancelled
  *   (turn aborted) → durable `pause` (fallback: disarm);
  * - downstream pre-step rejection of a valid round → `block` `prompt-rejected`;
- * - cancellation unrelated to a goal round, max-tokens, or agent error → disarm.
+ * - cancellation unrelated to a goal round, max-tokens, a spent task budget
+ *   (KRN-03), or agent error → disarm.
  *
  * Human work always wins: a competing `next-turn` message queued while a
  * reservation is still pending makes it stale; the round is re-reserved at
@@ -243,7 +244,7 @@ export class GoalRoundDriver {
         return
       case 'turn/end': {
         const reason = event.data.reason
-        if (reason.kind === 'max-tokens') {
+        if (reason.kind === 'max-tokens' || reason.kind === 'budget') {
           this.disarm(state)
         } else if (reason.kind === 'aborted') {
           // Claimed/admitted (or discarded from the inbox by the cancel) → the round was cancelled.

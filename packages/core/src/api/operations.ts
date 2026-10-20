@@ -2095,6 +2095,22 @@ export const CORE_OPERATION_REGISTRY = {
     (api, [id, options], ctx) =>
       api.tasks.get(id, withSession(options ?? {}, ctx, 'tasks.get')),
   ),
+  'tasks.budget': operation(z.tuple([]), (api) => api.tasks.budget()),
+  'tasks.setBudget': operation(
+    z.tuple([
+      z
+        .object({
+          maxSteps: z.number().int().optional(),
+          maxBackgroundSteps: z.number().int().optional(),
+          maxActiveAgents: z.number().int().optional(),
+          maxTotalAgents: z.number().int().optional(),
+          maxNoticeWakes: z.number().int().optional(),
+        })
+        .strict(),
+    ]),
+    (api, [change], ctx) =>
+      api.tasks.setBudget(change, viewOf(ctx, 'tasks.setBudget')),
+  ),
   'tasks.cancel': operation(
     z.tuple([
       taskIdSchema,

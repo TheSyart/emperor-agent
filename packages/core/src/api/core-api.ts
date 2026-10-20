@@ -60,6 +60,7 @@ import {
   type WorkflowRunRecord,
 } from '../harness/workflow/records'
 import type { Session } from '../session-log/session'
+import { LOG_FILE } from '../session-log/store'
 import type { SessionEvent } from '../session-log/types'
 import {
   sanitizeForWire,
@@ -90,13 +91,17 @@ import { CoreEffectiveConfigService } from './services/effective-config-service'
 import type { BrowserPreferences } from '../config/local-config'
 import { CoreBrowserPreferencesService } from './services/browser-preferences-service'
 import { CoreWebToolsService } from './services/web-tools-service'
+import { CoreTaskBudgetService } from './services/task-budget-service'
 import {
   CoreSessionDefaultsService,
   type SessionDefaults,
 } from './services/session-defaults-service'
 import type { SessionPermission } from '../config/local-config'
 import type { WebToolsStatus } from '../harness/host/web-tools'
-import type { WebToolPreferences } from '../config/local-config'
+import type {
+  TaskBudgetSettings,
+  WebToolPreferences,
+} from '../config/local-config'
 import { CoreDesktopPetService } from './services/desktop-pet-service'
 import { CoreEnvironmentService } from './services/environment-service'
 import { CoreHooksService } from './services/hooks-service'
@@ -314,6 +319,7 @@ export class CoreApi {
   readonly desktopPetService: CoreDesktopPetService
   readonly browserPreferencesService: CoreBrowserPreferencesService
   readonly webToolsService: CoreWebToolsService
+  readonly taskBudgetService: CoreTaskBudgetService
   readonly sessionDefaultsService: CoreSessionDefaultsService
   readonly diagnosticsService: CoreDiagnosticsService
   readonly environmentService: CoreEnvironmentService
@@ -441,6 +447,12 @@ export class CoreApi {
       },
     )
     this.sessionDefaultsService = new CoreSessionDefaultsService(this.root, {
+      stateRoot: this.paths.stateRoot,
+      host,
+      assertMutation: (area, action, view) =>
+        this.assertMutation(area, action, view),
+    })
+    this.taskBudgetService = new CoreTaskBudgetService(this.root, {
       stateRoot: this.paths.stateRoot,
       host,
       assertMutation: (area, action, view) =>
@@ -1125,6 +1137,8 @@ export class CoreApi {
       resolveProject: (projectPath) =>
         kept.projectStore.resolve(projectPath) as unknown as Dict,
       unloadSession: (sessionId) => host.unloadSession(sessionId),
+      forgetSessionTree: (sessionId, dir) =>
+        host.forgetSessionTree(sessionId, join(dir, LOG_FILE)),
       forgetTurnFiles: (sessionId, projectRoot) =>
         this.turnFiles.forgetSession(sessionId, projectRoot),
       stopSession: (sessionId) => {
@@ -3177,6 +3191,13 @@ export class CoreApi {
       else this.cancelTask(taskId, opts.sessionId ?? null)
       return { ...this.findTask(taskId, opts.sessionId) }
     },
+    /** 设置 › 高级 › 任务预算 (KRN-03). */
+    budget: (): TaskBudgetSettings => this.taskBudgetService.get(),
+    setBudget: (
+      change: Partial<TaskBudgetSettings>,
+      view: ViewScope,
+    ): Promise<TaskBudgetSettings> =>
+      this.taskBudgetService.update(change, view),
     resume: async (_taskId: string, _opts: Dict = {}): Promise<never> => {
       throw new OperationRetiredError(
         '子代理任务不再支持从面板恢复；请在对话中让主代理用 send_message 继续该子代理。',
@@ -3607,7 +3628,8 @@ export class CoreApi {
       )
     if (task.kind === 'job')
       return (
-        this.host.jobs.kill(task.id, this.jobOwner(task), 'user') ===
+        // The model is told the user stopped it (DSH-5).
+        this.host.jobs.kill(task.id, this.jobOwner(task), 'user', 'user') ===
         'requested'
       )
     try {

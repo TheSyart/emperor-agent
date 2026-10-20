@@ -10,19 +10,14 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import {
-  defaultModelExecutionPolicy,
-  type ModelExecutionPolicy,
-} from '../../config/model-config'
-import {
   contextMessage,
   messageText,
   userText,
   type UserMessage,
 } from '../../llm/message'
-import { createTestHarness, replyChunks } from '../testing'
+import { createTestHarness, replyChunks, withTaskBudget } from '../testing'
 import { defineTool } from '../tools/definition'
 import type { Agent } from './agent'
-import { costCapMiddleware } from './model-policy'
 
 /** A tool that runs `onRun` (e.g. a steer arriving mid-step) and returns. */
 function hookTool(onRun: () => void) {
@@ -52,27 +47,24 @@ function lastTexts(messages: readonly { content: unknown }[], count: number) {
 }
 
 describe('KRN-02 inbox claims (agent)', () => {
-  it('#2 a cost cap rejecting step 2 hands the interjection back to the queue', async () => {
-    const policy: ModelExecutionPolicy = {
-      ...defaultModelExecutionPolicy(),
-      // One step costs $0.015 (10 input + 5 output tokens at $1000/M).
-      cost: { maxUsdPerAgentTurn: 0.01 },
-    }
+  it('#2 a spent cost budget ending the turn before step 2 leaves the interjection queued', async () => {
     const h = createTestHarness({
       replies: [{ tools: [{ name: 'hook' }] }, { text: 'never reached' }],
     })
-    h.middleware.preStep.unshift(
-      costCapMiddleware({
-        policy: () => policy,
-        pricing: () => ({
-          inputUsdPerMillionTokens: 1_000,
-          outputUsdPerMillionTokens: 1_000,
-          cacheReadUsdPerMillionTokens: 0,
-          cacheWriteUsdPerMillionTokens: 0,
-        }),
-      }),
-    )
     const agent = h.agent()
+    // One step costs $0.015 (10 input + 5 output tokens at $1000/M); KRN-03
+    // checks the budget before the step claims anything.
+    withTaskBudget(
+      h,
+      agent.id,
+      { maxCostUsd: 0.01 },
+      {
+        inputUsdPerMillionTokens: 1_000,
+        outputUsdPerMillionTokens: 1_000,
+        cacheReadUsdPerMillionTokens: 0,
+        cacheWriteUsdPerMillionTokens: 0,
+      },
+    )
     const steer = userText('also check the tests')
     h.tools.register(hookTool(() => agent.steer(steer)))
     const first = userText('go')
@@ -81,10 +73,13 @@ describe('KRN-02 inbox claims (agent)', () => {
     agent.followup(first)
     await agent.whenIdle()
 
-    expect(agent.session.lastOf('llm/cost-cap')?.data.step).toBe(2)
-    expect(agent.session.lastOf('turn/end')?.data.reason).toEqual({
-      kind: 'blocked',
-    })
+    const budget = {
+      kind: 'budget',
+      limit: 'cost',
+      capUsdNanos: 10_000_000,
+      spentUsdNanos: 15_000_000,
+    }
+    expect(agent.session.lastOf('turn/end')?.data.reason).toEqual(budget)
     expect(h.adapter.requests).toHaveLength(1)
     expect(userMessageIds(agent)).toEqual([first.id])
     expect(agent.inbox.nextStep.map((m) => m.id)).toEqual([steer.id])
@@ -92,11 +87,11 @@ describe('KRN-02 inbox claims (agent)', () => {
     await expect(firstOutcome).resolves.toEqual({
       kind: 'consumed',
       turn: 1,
-      reason: { kind: 'blocked' },
+      reason: budget,
     })
     await expect(steerOutcome).resolves.toEqual({
       kind: 'not-consumed',
-      reason: 'previous-turn-failed',
+      reason: 'previous-turn-stopped',
     })
   })
 

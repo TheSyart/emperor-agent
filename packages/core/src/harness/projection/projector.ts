@@ -615,6 +615,20 @@ export class SessionProjector {
           })
         } else if (reason.kind === 'interrupted') {
           emit('runtime_task_cancelled', { reason: 'interrupted' })
+        } else if (reason.kind === 'budget') {
+          emit('agent_thought', {
+            thought_id: `budget:${event.data.turn}`,
+            stage: 'retry',
+            label: '达到任务预算',
+            status: 'error',
+            source: 'core',
+            summary:
+              reason.limit === 'steps'
+                ? `本轮已执行 ${reason.maxSteps} 步，达到上限，已停止`
+                : reason.unpricedRoutes !== undefined
+                  ? `模型 ${reason.unpricedRoutes.join(', ')} 缺少单价，无法执行费用上限，已停止`
+                  : `本任务已用 $${(reason.spentUsdNanos / 1e9).toFixed(4)}，上限 $${(reason.capUsdNanos / 1e9).toFixed(4)}，已停止`,
+          })
         }
         emit('assistant_done', {
           content: this.turnText,
