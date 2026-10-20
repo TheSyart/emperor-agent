@@ -1454,7 +1454,12 @@ export class CoreApi {
 
   close(): Promise<void> {
     this.closePromise ??= (async () => {
-      await this.retentionAtStartup
+      // A sweep still running gets a moment; quit never waits on it longer.
+      if (this.retentionAtStartup)
+        await Promise.race([
+          this.retentionAtStartup,
+          new Promise<void>((done) => setTimeout(done, 2000).unref()),
+        ])
       this.flushAll()
       await this.executors.close()
       this.terminalService.closeAll()
