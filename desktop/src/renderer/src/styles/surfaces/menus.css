@@ -16,7 +16,7 @@
   padding: var(--space-2);
   background: rgb(var(--surface-base) / 0.98);
   box-shadow: 0 16px 46px rgb(var(--shadow-color) / 0.28);
-  backdrop-filter: blur(var(--material-2-blur));
+  backdrop-filter: blur(var(--backdrop-blur-strong));
   scrollbar-width: thin;
   scrollbar-color: rgb(var(--stroke-solid-strong) / 0.72) transparent;
 }

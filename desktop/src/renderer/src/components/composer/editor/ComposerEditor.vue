@@ -503,8 +503,8 @@ defineExpose({
   :deep(.composer-url-decoration[data-site-icon='ready']::before) {
   content: '';
   mask: none;
-  background: rgb(var(--nb-00)) var(--composer-site-icon) center / contain
-    no-repeat;
+  background: rgb(var(--site-icon-plate)) var(--composer-site-icon) center /
+    contain no-repeat;
   border-radius: var(--r-xs);
 }
 

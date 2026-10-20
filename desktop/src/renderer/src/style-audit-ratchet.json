@@ -218,7 +218,6 @@
       "components/workspace/BrowserPane.vue": 5,
       "components/workspace/TurnReviewView.vue": 2,
       "styles/activity.css": 1,
-      "styles/materials.css": 1,
       "styles/panels.css": 2,
       "styles/surfaces/menus.css": 2
     },
@@ -259,19 +258,6 @@
       "components/ui/ToastStack.vue": 1,
       "components/ui/UiGallery.vue": 3
     },
-    "legacy-token": {
-      "components/composer/editor/ComposerEditor.vue": 1,
-      "components/conversation/computer-use/ComputerUsePreviewStack.vue": 2,
-      "components/conversation/parts/ConversationMarkdown.vue": 1,
-      "components/conversation/resources/ResourceIcon.vue": 1,
-      "components/ui/ImageLightbox.vue": 4,
-      "styles.css": 1,
-      "styles/a11y.css": 12,
-      "styles/materials.css": 9,
-      "styles/panels.css": 3,
-      "styles/surfaces/menus.css": 1,
-      "theme/components.css": 34,
-      "theme/primitives.css": 25
-    }
+    "legacy-token": {}
   }
 }

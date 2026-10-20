@@ -153,6 +153,6 @@ const site = computed(() => {
   height: 100%;
   object-fit: contain;
   border-radius: var(--r-xs);
-  background: rgb(var(--nb-00));
+  background: rgb(var(--site-icon-plate));
 }
 </style>

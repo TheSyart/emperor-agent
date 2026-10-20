@@ -64,7 +64,7 @@
   place-items: center;
   padding: var(--space-6);
   background: rgb(var(--shadow-color) / 0.78);
-  backdrop-filter: blur(var(--material-1-blur));
+  backdrop-filter: blur(var(--backdrop-blur));
 }
 
 .attachment-preview-stage {
@@ -147,7 +147,7 @@
 
 .model-setup-backdrop {
   background: var(--scrim);
-  backdrop-filter: blur(var(--material-1-blur));
+  backdrop-filter: blur(var(--backdrop-blur));
 }
 
 .model-setup-modal {
@@ -272,7 +272,7 @@
   border-radius: var(--r-md);
   background: rgb(var(--surface-base) / 0.72);
   padding: var(--space-2-5) var(--space-3);
-  backdrop-filter: blur(var(--material-1-blur));
+  backdrop-filter: blur(var(--backdrop-blur));
 }
 
 .model-setup-status::before {

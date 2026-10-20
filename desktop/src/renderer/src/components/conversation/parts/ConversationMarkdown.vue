@@ -308,7 +308,7 @@ const segments = computed<Segment[]>(() =>
   vertical-align: -0.125em;
   object-fit: contain;
   border-radius: var(--r-xs);
-  background: rgb(var(--nb-00));
+  background: rgb(var(--site-icon-plate));
 }
 
 .ds-md :deep(:is(ul, ol)) {

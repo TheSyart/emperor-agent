@@ -218,7 +218,7 @@ async function activate(
     theme: {
       // The workspace panel's surface (UI-S01).
       background: cssColor(style, '--surface-base', 'rgb(26 26 25)'),
-      foreground: cssColor(style, '--fg', 'rgb(238 238 241)'),
+      foreground: cssColor(style, '--text-1', 'rgb(238 238 241)'),
       cursor: cssColor(style, '--accent', 'rgb(99 153 255)'),
       selectionBackground: 'rgba(103, 167, 255, 0.28)',
     },

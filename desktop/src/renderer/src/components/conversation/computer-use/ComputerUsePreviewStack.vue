@@ -806,11 +806,11 @@ onBeforeUnmount(() => {
 .cu-pointer-arrow {
   display: block;
   overflow: visible;
-  filter: drop-shadow(0 1px 2px rgb(var(--nb-1000) / 0.45));
+  filter: drop-shadow(0 1px 2px rgb(var(--pointer-ink) / 0.45));
 }
 
 .cu-pointer-arrow path {
-  fill: rgb(var(--nb-1000) / 0.55);
+  fill: rgb(var(--pointer-ink) / 0.55);
   stroke: rgb(var(--accent));
   stroke-width: 1.6;
   stroke-linejoin: round;

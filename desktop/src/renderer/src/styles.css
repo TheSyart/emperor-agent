@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 样式入口:主题 token 见 theme/（L1 primitives、L2 semantic.*、L3 components、legacy-aliases）;全局 base 见
+/* 样式入口:主题 token 见 theme/（L1 primitives、L2 semantic.*、L3 components）;全局 base 见
    theme/base.css;按表面拆分的组件样式见 styles/ 目录,均由 main.ts 引入。
    @layer base 必须留在本文件——Tailwind 按文件处理,它依赖同文件的
    @tailwind base 指令。 */
@@ -16,15 +16,13 @@
       值统一用 RGB 三元组 + rgb(var(--x) / <alpha>) 表达透明度。
    2. 颜色/材质/动效/层级一律消费 token 或工具类,禁止裸值:
       - 颜色 → rgb(var(--surface-canvas|fg|border|accent|brand|...)/<a>)
-      - 材质 → materials.css 的 .glass
-      - 模糊 → var(--material-*-blur|--glass-blur),禁止 blur(<px>)
+      - 模糊 → var(--backdrop-blur*|--mask-blur),禁止 blur(<px>)
       - 层级 → var(--z-base..--z-lightbox),禁止数字 z-index
       - 间距 → var(--space-1..6);圆角 → var(--r-sm*);时长/缓动 → var(--duration-*|--ease-*)
-      - 文字层级 → var(--text-primary|secondary|tertiary) 等
+      - 文字层级 → rgb(var(--text-1|2|3|4))
    3. 写法三分层:
       - 全局 surface 类 → styles/{activity,chat,panels,workspace}.css 与
         styles/surfaces/*.css(按界面拆分)。可复用、跨组件共享的样式写这里。
-      - 复合工具类(材质/聚焦环) → materials.css。
       - 组件私有、一次性、强耦合 DOM 结构的样式 → <style scoped>,
         同样只消费 token,禁止裸值与 !important。
    4. !important 默认禁止。仅两类合法且必须紧邻 audit-allow 注释:

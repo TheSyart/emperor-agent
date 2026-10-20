@@ -391,8 +391,8 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: rgb(var(--image-viewer-bg) / var(--material-2-alpha));
-  backdrop-filter: blur(var(--material-1-blur));
+  background: rgb(var(--image-viewer-bg) / var(--image-viewer-veil));
+  backdrop-filter: blur(var(--backdrop-blur));
   color: rgb(var(--image-viewer-ink));
   animation: viewer-enter 160ms ease-out;
   -webkit-app-region: no-drag;
@@ -505,7 +505,7 @@ onBeforeUnmount(() => {
   height: 48px;
   border-radius: 50%;
   background: rgb(var(--image-viewer-control) / 80%);
-  backdrop-filter: blur(var(--material-1-blur));
+  backdrop-filter: blur(var(--backdrop-blur));
 }
 .viewer-previous {
   left: var(--space-5);
@@ -532,7 +532,7 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-takeover);
   background: rgb(var(--image-viewer-toolbar) / 85%);
   box-shadow: 0 8px 32px rgb(var(--image-viewer-shadow) / 33%);
-  backdrop-filter: blur(var(--material-2-blur));
+  backdrop-filter: blur(var(--backdrop-blur-strong));
 }
 .viewer-scale {
   min-width: 48px;

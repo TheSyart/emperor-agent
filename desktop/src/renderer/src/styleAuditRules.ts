@@ -66,10 +66,14 @@ function escape(name: string): string {
   return name.replace(/[-]/g, '\\-')
 }
 
-/** Matches var(--name) / var(--name, …) and `--name:` declarations. */
+/**
+ * Matches var(--name) / var(--name, …), `--name:` declarations, and the
+ * name as a quoted string (getPropertyValue('--name') and the like).
+ */
 export function retiredMatcher(retired: Iterable<string>): {
   references: RegExp
   definitions: RegExp
+  quoted: RegExp
 } {
   const names = [...retired]
     .map((name) => escape(name.replace(/^--/, '')))
@@ -78,6 +82,7 @@ export function retiredMatcher(retired: Iterable<string>): {
   return {
     references: new RegExp(`var\\(\\s*--(?:${names})(?![\\w-])`, 'g'),
     definitions: new RegExp(`(?<![\\w-])--(?:${names})\\s*:`, 'g'),
+    quoted: new RegExp(`['"\`]--(?:${names})['"\`]`, 'g'),
   }
 }
 
@@ -315,11 +320,12 @@ function merge(into: RuleCounts, from: RuleCounts): RuleCounts {
 export function auditFile(
   rel: string,
   text: string,
-  retired: { references: RegExp; definitions: RegExp },
+  retired: { references: RegExp; definitions: RegExp; quoted: RegExp },
 ): RuleCounts {
   const counts: RuleCounts = {}
   const legacy =
     count(text, retired.references) +
+    (rel.endsWith('.css') ? 0 : count(text, retired.quoted)) +
     (rel === 'theme/legacy-aliases.css' ? 0 : count(text, retired.definitions))
   if (rel.endsWith('.vue')) {
     const sfc = splitSfc(text)

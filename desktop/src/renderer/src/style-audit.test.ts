@@ -334,6 +334,7 @@ describe('style audit: ratchets (only-ever-decrease baselines)', () => {
       )?.[1]
     expect(motion).toBeTruthy()
     expect(motion).toContain('--duration-fast: 1ms')
+    expect(motion).toContain('--motion-base: 1ms')
     expect(motion).toContain('animation-duration: 1ms !important')
     expect(motion).toContain('transition-duration: 1ms !important')
     // 覆盖选择器必须与主题表同特异性(:root[data-theme]),否则主题声明按
@@ -344,9 +345,9 @@ describe('style audit: ratchets (only-ever-decrease baselines)', () => {
         a11y,
       )?.[1]
     expect(transparency).toBeTruthy()
-    expect(transparency).toContain('--material-1-alpha: 0.97')
-    expect(transparency).toContain('--material-1-blur: 0px')
-    expect(transparency).toContain('--glass-blur: 0px')
+    expect(transparency).toContain('--backdrop-blur: 0px')
+    expect(transparency).toContain('--backdrop-blur-strong: 0px')
+    expect(transparency).toContain('--image-viewer-veil: 0.98')
     expect(transparency).toMatch(/:root\[data-theme='dark'\]/)
     const contrast =
       /@media \(prefers-contrast: more\) \{\n([\s\S]*?)\n\}/.exec(a11y)?.[1]
@@ -559,6 +560,12 @@ describe('style audit: DS-02 ratchets', () => {
     expect(violations(rel, style('color: rgb(var(--danger));'))).toEqual([
       `legacy-token ${rel}: 1 (allowed 0)`,
     ])
+    expect(
+      violations(
+        'components/fixture/token.ts',
+        "export const ink = style.getPropertyValue('--fg')\n",
+      ),
+    ).toEqual(['legacy-token components/fixture/token.ts: 1 (allowed 0)'])
     const icon = (size: number) =>
       `<template><RefreshCw :size="${size}" /></template>\n<script setup lang="ts">\nimport { RefreshCw } from 'lucide-vue-next'\n</script>\n`
     expect(violations(rel, icon(13))).toEqual([
@@ -586,12 +593,12 @@ describe('style audit: DS-02 ratchets', () => {
     expect(totals(actual).apply).toBe(0)
   })
 
-  it.skip('references no retired token name and has no alias layer (test 7)', () => {
+  it('references no retired token name and has no alias layer (test 7)', () => {
     expect(existsSync(join(SRC, 'theme/legacy-aliases.css'))).toBe(false)
     expect(totals(actual)['legacy-token']).toBe(0)
   })
 
-  it.skip('renames every retired name onto a token the theme defines', () => {
+  it('renames every retired name onto a token the theme defines', () => {
     const defined = new Set<string>()
     for (const file of THEME_FILES)
       for (const m of read(file).matchAll(/(--[\w-]+)\s*:/g)) defined.add(m[1]!)
@@ -653,7 +660,7 @@ describe('style audit: DS-02 ratchets', () => {
     expect(codemod.transform(once, 'Sample.vue')).toBe(once)
   })
 
-  it.skip('leaves the codemod nothing to change in the renderer', async () => {
+  it('leaves the codemod nothing to change in the renderer', async () => {
     const codemod = await loadCodemod()
     const pending = sources
       .filter(([rel, text]) => codemod.transform(text, rel) !== text)

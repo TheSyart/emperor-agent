@@ -104,22 +104,22 @@ const jsonSample = {
       <div class="swatches">
         <span
           v-for="token in [
-            'bg-base',
-            'bg-layer-1',
-            'bg-layer-2',
-            'bg-layer-3',
+            'surface-canvas',
+            'surface-base',
+            'surface-raised',
+            'surface-overlay',
             'sidebar-fill',
             'code-block-bg',
-            'accent-fill',
+            'accent',
             'accent-hover',
-            'accent-strong',
+            'text-link',
             'accent-soft',
             'bubble-user',
-            'approval',
-            'approval-soft',
+            'attention',
+            'attention-soft',
             'ok',
             'warn',
-            'danger',
+            'error',
           ]"
           :key="token"
           class="swatch"
