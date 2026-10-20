@@ -13,7 +13,8 @@
  * The environment card floats at the top right of the view area. From a
  * 1120px conversation column (container query) the chat body and the
  * composer stack pad their inline end by the card width so nothing sits
- * under it; narrower, the card overlays the chat (Escape closes it).
+ * under it; narrower, it shows only once opened from the header and still
+ * reserves its space.
  *
  * The computer-use preview (read-only pictures of the windows and tabs the
  * Agent controls) sits at the bottom right of the view area, below the
@@ -102,7 +103,12 @@ import {
   takeComposerDraft,
 } from '../../composables/useComposerDrafts'
 import { activeTakeover, isTakeoverMinimized } from './takeover/takeoverModel'
-import { activeTurnTick, turnTicks } from './timelineModel'
+import {
+  activeTurnTick,
+  sameTicks,
+  turnTicks,
+  type TurnTick,
+} from './timelineModel'
 import {
   PROVENANCE_LABEL,
   type DisplayResource,
@@ -222,9 +228,17 @@ watch(viewingId, (next, previous) => {
   promptedSessions.value = new Set([...promptedSessions.value, next])
 })
 const isActiveSession = computed(() => viewingId.value === ctx.sessionId.value)
+/** A turn is open in the viewed window (its own ref: not every snapshot). */
+const conversationRunning = computed(
+  () => conversation.value?.running.value ?? false,
+)
 const composerPhase = computed(() =>
   deriveComposerPhase({
-    snapshot: snapshot.value,
+    content: {
+      rows: conversation.value?.order.value.length ?? 0,
+      turns: conversation.value?.turnCount.value ?? 0,
+      running: conversationRunning.value,
+    },
     promptAttempted: promptedSessions.value.has(viewingId.value),
     pendingInteraction:
       isActiveSession.value && Boolean(pendingInteraction.value),
@@ -366,7 +380,12 @@ const firstVisibleKey = ref<string | null>(null)
 watch(viewingId, () => {
   firstVisibleKey.value = null
 })
-const ticks = computed(() => turnTicks(snapshot.value))
+// A structural flush that leaves the prompts as they are keeps the same
+// array, so the scrubber does not re-render.
+const ticks = computed<TurnTick[]>((previous) => {
+  const next = turnTicks(snapshot.value)
+  return previous !== undefined && sameTicks(previous, next) ? previous : next
+})
 const activeTick = computed(() =>
   activeTurnTick(ticks.value, snapshot.value.order, firstVisibleKey.value),
 )
@@ -819,7 +838,7 @@ watch(
 )
 
 // ── child session stop ───────────────────────────────────────────────────
-const childRunning = computed(() => child.value && snapshot.value.running)
+const childRunning = computed(() => child.value && conversationRunning.value)
 const stoppingChild = ref(false)
 watch(childRunning, (running) => {
   if (!running) stoppingChild.value = false

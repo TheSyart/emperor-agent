@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
 > 最后核验：2026-10-20<br>
-> 事实源：`desktop/src/renderer/src/components/conversation/`（`processModel.ts`、`ChatTimeline.vue`、`nodes/ProcessGroup.vue`、`nodes/ToolCallRow.vue`、`nodes/UserBubble.vue`、`parts/ConversationMarkdown.vue`、`nodes/TurnTail.vue`）、`components/ui/DisclosureRow.vue`、`components/ui/IoBlock.vue`、`components/motion/CollapseTransition.vue`、`conversation/events.ts`；`components/conversation/trajectoryGate.ts`；测试 `processModel.test.ts`、`processGroup.test.ts`、`CollapseTransition.test.ts`、`trajectoryGate.test.ts`、`desktop/tests/visual/process.spec.ts`、`desktop/tests/visual/trajectory-gate.spec.ts`
+> 事实源：`desktop/src/renderer/src/components/conversation/`（`processModel.ts`、`ChatTimeline.vue`、`nodes/ProcessGroup.vue`、`nodes/ToolCallRow.vue`、`nodes/UserBubble.vue`、`parts/ConversationMarkdown.vue`、`parts/MarkdownHtml.vue`、`nodes/TurnTail.vue`）、`composables/markdownBlocks.ts`、`composables/useStreamingText.ts`、`components/ui/DisclosureRow.vue`、`components/ui/IoBlock.vue`、`components/motion/CollapseTransition.vue`、`conversation/events.ts`；`components/conversation/trajectoryGate.ts`；测试 `processModel.test.ts`、`processGroup.test.ts`、`CollapseTransition.test.ts`、`trajectoryGate.test.ts`、`markdownBlocks.test.ts`、`desktop/tests/visual/process.spec.ts`、`desktop/tests/visual/streaming.spec.ts`、`desktop/tests/visual/trajectory-gate.spec.ts`
 
 对话面板里从上到下是一条会话流：你的消息、Agent 处理这一轮的过程、回答、本轮改动卡和轮末操作。默认只显示结论，过程收成一行，细节按需展开。
 
@@ -71,5 +71,6 @@
 ## 实现要点
 
 - `processModel.ts` 是纯函数：输入快照的节点顺序、节点和 Turn/Step 时间线，输出虚拟列表的行；行不变时保持同一个对象，整张表不变时返回上一次的数组，流式输出时只有被改动的那一行重新渲染。
+- 流式回答的节奏：输出中正文每 80ms 最多渲染一次（`useStreamingText`），输出结束立即渲染全文。正文按顶层块写入（`MarkdownHtml` + `composables/markdownBlocks.ts`）：后面已经开始了新块的块算「已闭合」，只渲染、净化一次并保留 DOM 节点，输出中可以选中其中的文字；最后一块和它之后的内容（未闭合的代码围栏、还在增长的列表）整体重渲染。拼起来的 HTML 与整篇渲染完全一致；带引用式链接定义的文档整篇渲染。
 - 过程组的 id 是 `process:<turn>:<序号>`；时间轴的「当前可见行」把它换算成组里的第一步。
 - 准备中的调用从当前步骤的模型节点里读取（即使那个节点只有工具调用、本身不显示），排在已开始的调用之后。

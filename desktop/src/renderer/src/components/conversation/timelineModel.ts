@@ -135,6 +135,26 @@ export function turnTicks(
   return ticks
 }
 
+/** Whether two tick lists are equal tick by tick. */
+export function sameTicks(
+  left: readonly TurnTick[],
+  right: readonly TurnTick[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((tick, index) => {
+      const other = right[index]
+      return (
+        other !== undefined &&
+        tick.key === other.key &&
+        tick.index === other.index &&
+        tick.turn === other.turn &&
+        tick.label === other.label
+      )
+    })
+  )
+}
+
 /**
  * Tick of the turn the reader is in: the last tick at or above the first
  * visible row (the first tick while the reader is above every prompt).

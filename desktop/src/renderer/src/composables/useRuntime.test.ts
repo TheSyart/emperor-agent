@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { reactive, ref } from 'vue'
+import { effectScope, reactive, ref, watch } from 'vue'
 import type { BootstrapPayload } from '../types'
 import { useRuntime } from './useRuntime'
 
@@ -2011,5 +2011,134 @@ describe('useRuntime bell notices (onNotify)', () => {
       summary: '已提交 · abcdef1',
     })
     expect(runtime.sessionRuntimeStates.s2?.attention).toBe(true)
+  })
+})
+
+describe('useRuntime runtime-state writes (FIX-04)', () => {
+  function streamingRuntime() {
+    let listener: ((event: unknown) => void) | null = null
+    const viewing: Array<string | null> = []
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => {
+          listener = null
+        }
+      },
+      setViewingSession: (id: string | null) => viewing.push(id),
+    })
+    const runtime = useRuntime(testOptions())
+    runtime.connectSocket()
+    runtime.switchSession('s1')
+    // Another session the sidebar shows, settled.
+    emitCoreEvent(listener, {
+      event: 'assistant_done',
+      seq: 1,
+      session_id: 's2',
+      turn_id: 's2:1',
+      content: 'done',
+    })
+    emitCoreEvent(listener, {
+      event: 'turn_phase',
+      seq: 16,
+      session_id: 's1',
+      turn_id: 's1:1',
+      phase: 'started',
+    })
+    const delta = (index: number) =>
+      emitCoreEvent(listener, {
+        event: 'message_delta',
+        seq: 32 + index * 16,
+        session_id: 's1',
+        turn_id: 's1:1',
+        delta: `piece ${index} `,
+      })
+    const emit = (event: Record<string, unknown>) =>
+      emitCoreEvent(listener, event)
+    return { runtime, delta, emit, viewing }
+  }
+
+  it('2 · fires no watcher while 1000 deltas leave the runtime values unchanged', () => {
+    const { runtime, delta } = streamingRuntime()
+    expect(runtime.sessionRuntimeStates.s1).toMatchObject({ running: true })
+    const fired: string[] = []
+    const scope = effectScope()
+    scope.run(() => {
+      watch(
+        () => runtime.sessionRuntimeStates.s1,
+        () => fired.push('s1'),
+        { flush: 'sync' },
+      )
+      watch(
+        () => runtime.sessionRuntimeStates.s2,
+        () => fired.push('s2'),
+        { flush: 'sync' },
+      )
+      watch(
+        () => runtime.sessionRuntimeStates,
+        () => fired.push('deep'),
+        { flush: 'sync', deep: true },
+      )
+      watch(
+        () => [
+          runtime.busy.value,
+          runtime.status.value,
+          runtime.sessionId.value,
+        ],
+        () => fired.push('scalars'),
+        { flush: 'sync' },
+      )
+    })
+    for (let index = 0; index < 1000; index++) delta(index)
+    scope.stop()
+    expect(fired).toEqual([])
+    expect(runtime.sessionRuntimeStates.s1).toMatchObject({
+      running: true,
+      attention: false,
+    })
+  })
+
+  it('2 · still writes a value that really changes, once', () => {
+    const { runtime, delta, emit } = streamingRuntime()
+    const seen: unknown[] = []
+    const scope = effectScope()
+    scope.run(() =>
+      watch(
+        () => runtime.sessionRuntimeStates.s1,
+        (value) => seen.push({ ...value }),
+        { flush: 'sync' },
+      ),
+    )
+    delta(0)
+    emit({
+      event: 'assistant_done',
+      seq: 999,
+      session_id: 's1',
+      turn_id: 's1:1',
+      content: 'done',
+    })
+    delta(1)
+    scope.stop()
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({ running: false, attention: false })
+  })
+
+  it('takes core events as they arrive, without a JSON round trip', () => {
+    const { delta } = streamingRuntime()
+    const parse = vi.spyOn(JSON, 'parse')
+    const stringify = vi.spyOn(JSON, 'stringify')
+    for (let index = 0; index < 50; index++) delta(index)
+    expect(parse).not.toHaveBeenCalled()
+    expect(stringify).not.toHaveBeenCalled()
+  })
+
+  it('tells main the viewed session only when it changes', () => {
+    const { runtime, delta, viewing } = streamingRuntime()
+    const before = viewing.length
+    for (let index = 0; index < 100; index++) delta(index)
+    expect(viewing.length).toBe(before)
+    runtime.switchSession('s2')
+    expect(viewing.at(-1)).toBe('s2')
   })
 })

@@ -62,3 +62,36 @@ export function agentAncestry(
     current = parent
   }
 }
+
+const SUMMARY_ORDER = [
+  ['running', '运行'],
+  ['waiting', '等待'],
+  ['completed', '完成'],
+  ['failed', '失败'],
+  ['interrupted', '中断'],
+  ['unknown', '待确认'],
+] as const satisfies ReadonlyArray<readonly [AgentView['phase'], string]>
+
+/** The 子智能体 row's value (UI-S05): 「1 运行 · 3 完成 · 1 失败」. */
+export function agentSummary(agents: readonly AgentView[]): string {
+  const counts = new Map<string, number>()
+  for (const agent of agents)
+    counts.set(agent.phase, (counts.get(agent.phase) ?? 0) + 1)
+  return SUMMARY_ORDER.filter(([phase]) => counts.get(phase))
+    .map(([phase, label]) => `${counts.get(phase)} ${label}`)
+    .join(' · ')
+}
+
+function active(agent: AgentView): boolean {
+  return agent.phase === 'running' || agent.phase === 'waiting'
+}
+
+/** The faces stacked on the row: active first, then the latest; three at most. */
+export function agentStack(agents: readonly AgentView[]): AgentView[] {
+  return [...agents]
+    .sort(
+      (a, b) =>
+        Number(active(b)) - Number(active(a)) || b.updatedAt - a.updatedAt,
+    )
+    .slice(0, 3)
+}

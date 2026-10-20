@@ -7,9 +7,12 @@
  * workflow run's record (phases, logs, agents, outcome). 「加载更多」 while
  * the record has more entries; 「刷新」 reloads from the start while the
  * task is still live. Job output opens scrolled to its latest lines.
+ * 「停止」 (UI-S05: only here, never on the card's lines) cancels a running
+ * job or workflow run; a workflow asks first, since its subagents stop too.
  *
- * Props: taskId, label, kind ('job' | 'workflow'), live.
- * Emits: close.
+ * Props: taskId, label, kind ('job' | 'workflow'), live, stoppable,
+ * confirmStop.
+ * Emits: close, stopped (after `tasks.cancel`, so the card reloads).
  */
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef } from 'vue'
 import { core } from '../../../api/http'
@@ -17,6 +20,7 @@ import { onCoreEvent } from '../../../api/backend'
 import { mergeExternalTranscript } from '@emperor/core/runtime-contract'
 import Button from '../../ui/Button.vue'
 import Modal from '../../ui/Modal.vue'
+import { confirm } from '../../ui/confirm'
 import {
   transcriptText,
   type TaskTranscriptEntry,
@@ -30,9 +34,11 @@ const props = defineProps<{
   kind: 'job' | 'workflow' | 'external-agent'
   sessionId?: string
   live: boolean
+  stoppable?: boolean
+  confirmStop?: boolean
 }>()
 
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; stopped: [] }>()
 
 const entries = shallowRef<TaskTranscriptEntry[]>([])
 const eof = ref(true)
@@ -134,6 +140,34 @@ const emptyText = computed(() => {
 function onOpen(open: boolean): void {
   if (!open) emit('close')
 }
+
+const stopping = ref(false)
+
+async function stop(): Promise<void> {
+  if (stopping.value) return
+  if (
+    props.confirmStop &&
+    !(await confirm({
+      title: `停止工作流「${props.label}」？`,
+      body: '它正在运行的子智能体也会一起停止。',
+      confirmLabel: '停止',
+      tone: 'danger',
+    }))
+  )
+    return
+  stopping.value = true
+  try {
+    await core('tasks.cancel', props.taskId, {
+      reason: 'user_stopped_from_environment_card',
+    })
+    emit('stopped')
+    await load(true)
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    stopping.value = false
+  }
+}
 </script>
 
 <template>
@@ -150,7 +184,16 @@ function onOpen(open: boolean): void {
     <p v-if="error" class="task-output-note" data-tone="error" role="alert">
       {{ error }}
     </p>
-    <template v-if="!eof || live" #footer>
+    <template v-if="!eof || live || stoppable" #footer>
+      <Button
+        v-if="stoppable"
+        size="sm"
+        variant="secondary"
+        :loading="stopping"
+        @click="stop"
+      >
+        停止
+      </Button>
       <Button
         v-if="live"
         size="sm"
