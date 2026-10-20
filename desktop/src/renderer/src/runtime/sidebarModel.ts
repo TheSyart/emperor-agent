@@ -303,12 +303,12 @@ export function searchSidebarSessions(
     .map((session) => ({
       id: session.id,
       title: session.title || '新会话',
-      subtitle:
-        session.mode === 'build'
-          ? [session.project_name, session.project_path]
-              .filter(Boolean)
-              .join(' · ')
-          : sidebarRelativeTime(session.updated_at),
+      subtitle: [
+        session.mode === 'build' ? session.project_name : '',
+        sidebarRelativeTime(session.updated_at),
+      ]
+        .filter(Boolean)
+        .join(' · '),
       mode: session.mode === 'build' ? 'build' : 'chat',
       projectName: session.project_name,
     }))

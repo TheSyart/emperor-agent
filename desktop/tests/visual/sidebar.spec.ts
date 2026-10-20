@@ -173,7 +173,11 @@ for (const theme of ['dark', 'light'] as const) {
     await row.hover()
     await expect(row.locator('[data-hover-layer] .time')).toBeVisible()
     await expect(row.getByRole('button', { name: '会话操作' })).toBeVisible()
-    await shot(page, `row-hover-${theme}`)
+    // Not shot(): it moves the pointer away, which would end the hover.
+    await page.screenshot({
+      path: resolve(screenshotDir, `row-hover-${theme}.png`),
+      animations: 'disabled',
+    })
     await page.mouse.move(600, 400)
     await shot(page, `expanded-${theme}`)
   })

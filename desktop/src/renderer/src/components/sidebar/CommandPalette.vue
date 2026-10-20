@@ -323,6 +323,10 @@ provideSurface(() => 'panel')
   line-height: var(--lh-base);
 }
 
+.field input:focus {
+  box-shadow: none;
+}
+
 .field input::placeholder {
   color: rgb(var(--label-caption));
 }
