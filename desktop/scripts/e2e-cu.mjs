@@ -2,7 +2,7 @@
 // Computer Use end-to-end runner: bundles tests/electron/harness/main.ts to
 // out-e2e/harness.cjs and runs it in real Electron (ELECTRON_RUN_AS_NODE
 // removed, Emperor Home isolated), then summarises the E2E-RESULT lines.
-//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|userbrowser|browser-security|fullstack|real|references|references-real|plugins|userbrowser-app|settings|renderer-security]
+//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|userbrowser|browser-security|fullstack|real|references|references-real|plugins|userbrowser-app|settings|renderer-security|diagnostics]
 // `real` and `references-real` need EMPEROR_E2E_MODEL_CONFIG (a
 // model_config.json to copy). `references` runs the E-track suite (reply
 // links in a Build session); `references-real` asks a real model once.
@@ -14,7 +14,10 @@
 // `renderer-security` checks the main window's CSP, permissions, link and
 // remote image handling in the real app (SEC-05). `browser-security` checks
 // imported cookies, typing next to cross-origin frames and the inbox
-// quarantine mark in real Electron (SEC-10).
+// quarantine mark in real Electron (SEC-10). `diagnostics` checks main.log
+// and core.log, redaction, uncaught errors in main, a renderer minidump,
+// the 诊断包 export in 设置 and on the recovery page (REL-01); its logs stay
+// in the temporary Emperor Home (`<home>/logs`).
 import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -40,6 +43,7 @@ const plugins = mode === '--mode=plugins'
 const userBrowserApp = mode === '--mode=userbrowser-app'
 const settingsApp = mode === '--mode=settings'
 const rendererSecurity = mode === '--mode=renderer-security'
+const diagnosticsApp = mode === '--mode=diagnostics'
 const realModel = mode === '--mode=real' || mode === '--mode=references-real'
 const appMode =
   mode === '--mode=fullstack' ||
@@ -48,7 +52,8 @@ const appMode =
   plugins ||
   userBrowserApp ||
   settingsApp ||
-  rendererSecurity
+  rendererSecurity ||
+  diagnosticsApp
 const entry = references
   ? 'tests/electron/references/run.ts'
   : plugins
@@ -59,9 +64,11 @@ const entry = references
         ? 'tests/electron/settings/run.ts'
         : rendererSecurity
           ? 'tests/electron/renderer-security/run.ts'
-          : appMode
-            ? 'tests/electron/fullstack/run.ts'
-            : 'tests/electron/harness/main.ts'
+          : diagnosticsApp
+            ? 'tests/electron/diagnostics/run.ts'
+            : appMode
+              ? 'tests/electron/fullstack/run.ts'
+              : 'tests/electron/harness/main.ts'
 const bundle = references
   ? join(desktop, 'out-e2e', 'references.cjs')
   : plugins
@@ -72,9 +79,11 @@ const bundle = references
         ? join(desktop, 'out-e2e', 'settings.cjs')
         : rendererSecurity
           ? join(desktop, 'out-e2e', 'renderer-security.cjs')
-          : appMode
-            ? join(desktop, 'out-e2e', 'fullstack.cjs')
-            : outfile
+          : diagnosticsApp
+            ? join(desktop, 'out-e2e', 'diagnostics.cjs')
+            : appMode
+              ? join(desktop, 'out-e2e', 'fullstack.cjs')
+              : outfile
 
 await build({
   entryPoints: [join(desktop, entry)],

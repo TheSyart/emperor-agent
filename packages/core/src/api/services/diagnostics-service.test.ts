@@ -233,6 +233,25 @@ describe('CoreDiagnosticsService (MIG-IPC-007 / MIG-APP-002)', () => {
     })
   })
 
+  it('names the log folder the host writes to (REL-01)', async () => {
+    const root = tmp('emperor-diagnostics-logs-')
+    const stateRoot = join(root, '.emperor')
+    const logs = join(root, 'Library', 'Logs', 'Emperor Agent')
+    const withLogs = new CoreDiagnosticsService(root, {
+      runtimePaths: resolveRuntimePaths(root, { stateRoot }),
+      logDirectory: logs,
+    })
+    expect((await withLogs.payload(VIEW)).paths).toMatchObject({
+      logsRoot: logs,
+    })
+    const withoutLogs = new CoreDiagnosticsService(root, {
+      runtimePaths: resolveRuntimePaths(root, { stateRoot }),
+    })
+    expect((await withoutLogs.payload(VIEW)).paths).not.toHaveProperty(
+      'logsRoot',
+    )
+  })
+
   it('reports workspace mcporter config without claiming ownership or deleting it', async () => {
     const root = tmp('emperor-diagnostics-external-tool-config-')
     const workspaceConfig = join(root, 'project', 'config', 'mcporter.json')

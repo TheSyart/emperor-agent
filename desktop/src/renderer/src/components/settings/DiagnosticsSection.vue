@@ -14,14 +14,22 @@
  *   Core returned no data for, left out). Rows are DiagnosticItems: the
  *   value as plain text, the why only where something needs attention;
  *   home paths read `~`.
- * Header actions: 刷新 (diagnostics + environment re-detection) and 复制报告
- * (plain-text report of the page).
+ * Header actions: 导出诊断包 (REL-01: DiagnosticsExportDialog lists the
+ * zip's contents before anything is written), 复制报告 (plain-text report
+ * of the page) and 刷新 (diagnostics + environment re-detection). 存储路径
+ * shows the log folder (main.log, core.log, Crashpad) with an open button.
  */
 import EmptyState from '../ui/EmptyState.vue'
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import IconButton from '../ui/IconButton.vue'
 import { useCopyFeedback } from '../ui/useCopyFeedback'
-import { DsCopy, DsFolderOpen, DsShieldAlert, DsWarning } from '../icons/ds'
+import {
+  DsCopy,
+  DsDownload,
+  DsFolderOpen,
+  DsShieldAlert,
+  DsWarning,
+} from '../icons/ds'
 import { SettingsCard, Notice, SettingsSection, Badge } from './ui'
 import { refreshAction, useSettingsHeader } from './settingsHeader'
 import { core } from '../../api/http'
@@ -30,6 +38,7 @@ import { useAppContext } from '../../composables/useAppContext'
 import type { DiagnosticsPayload } from '../../types'
 import DiagnosticItem from './diagnostics/DiagnosticItem.vue'
 import EnvironmentToolsGroup from './diagnostics/EnvironmentToolsGroup.vue'
+import DiagnosticsExportDialog from './diagnostics/DiagnosticsExportDialog.vue'
 import {
   DIAGNOSTIC_SECTION_TITLES,
   OPENABLE_DIAGNOSTIC_PATHS,
@@ -69,6 +78,7 @@ const environment = ref<EnvironmentStatusPayload | null>(null)
 const environmentLoading = ref(false)
 const environmentError = ref('')
 const openCards = reactive<Partial<Record<CardId, boolean>>>({})
+const exportOpen = ref(false)
 
 const current = computed(
   () => diagnostics.value || ctx.boot.value?.diagnostics || null,
@@ -153,6 +163,16 @@ const { copied, copy } = useCopyFeedback(
 useSettingsHeader({
   actions: () => [
     {
+      id: 'export-bundle',
+      label: '导出诊断包',
+      kind: 'secondary',
+      icon: DsDownload,
+      title: '导出诊断包（zip，导出前列出内容）',
+      onClick: () => {
+        exportOpen.value = true
+      },
+    },
+    {
       id: 'copy-report',
       label: copied.value ? '已复制' : '复制报告',
       kind: 'secondary',
@@ -210,8 +230,9 @@ async function reveal(row: DiagnosticRow) {
     // Main asks Core where the row's folder is; no path crosses IPC.
     await openPath({
       kind: 'diagnostic',
-      rowId: row.id as 'global-state-root' | 'active-project-path',
-      sessionId: ctx.sessionId.value || null,
+      rowId: row.id as
+        'global-state-root' | 'active-project-path' | 'logs-path',
+      sessionId: ctx.sessionId?.value || null,
     })
   } catch (cause) {
     revealError.value = messageOf(cause)
@@ -344,6 +365,7 @@ function messageOf(cause: unknown): string {
         </div>
       </SettingsCard>
     </div>
+    <DiagnosticsExportDialog v-if="exportOpen" v-model:open="exportOpen" />
   </SettingsSection>
 </template>
 

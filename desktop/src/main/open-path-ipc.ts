@@ -1,5 +1,6 @@
 /**
- * `emperor:open-path` (MAIN-27): open a folder in Finder for 设置 › 诊断 and
+ * `emperor:open-path` (MAIN-27): open a folder in Finder for 设置 › 诊断
+ * (Emperor Home, the session's project, the log folder) and
  * 能力 › Skills. The renderer names what to open ({@link OpenPathTarget});
  * main asks Core where it is, so a renderer that got hijacked cannot use
  * `shell.openPath` to launch a downloaded program or any path it likes. An
@@ -18,6 +19,8 @@ export interface OpenPathSources {
   skillFolder(name: string, sessionId: string | null): string | null
   /** The rejected Skill folders and files Core lists for that scope. */
   invalidSkillPaths(sessionId: string | null): readonly string[]
+  /** The folder of main.log and core.log (REL-01), when main keeps one. */
+  logsFolder?(): string | null
 }
 
 interface IpcMainLike {
@@ -47,7 +50,8 @@ export function parseOpenPathTarget(payload: unknown): OpenPathTarget | null {
   switch (record.kind) {
     case 'diagnostic':
       return record.rowId === 'global-state-root' ||
-        record.rowId === 'active-project-path'
+        record.rowId === 'active-project-path' ||
+        record.rowId === 'logs-path'
         ? { kind: 'diagnostic', rowId: record.rowId, sessionId }
         : null
     case 'skill':
@@ -74,6 +78,7 @@ export function resolveOpenPathTarget(
 ): string | null {
   switch (target.kind) {
     case 'diagnostic':
+      if (target.rowId === 'logs-path') return sources.logsFolder?.() || null
       return target.rowId === 'global-state-root'
         ? sources.emperorHome() || null
         : sources.sessionProject(target.sessionId ?? null) || null
