@@ -31,6 +31,16 @@ vi.mock('./DiagnosticsSection.vue', async () => {
     }),
   }
 })
+// KRN-12: 存储 is a sub page too.
+vi.mock('./StorageSection.vue', async () => {
+  const { defineComponent, h } = await import('vue')
+  return {
+    __esModule: true,
+    default: defineComponent({
+      render: () => h('p', { 'data-testid': 'storage-body' }, '存储'),
+    }),
+  }
+})
 
 type Status = {
   webFetch: { enabled: boolean; available: boolean }
@@ -204,6 +214,7 @@ describe('设置 › 高级 sub pages (UI-S07)', () => {
   it.each([
     ['hooks', 'Hooks', 'hooks-body'],
     ['diagnostics', '诊断', 'diagnostics-body'],
+    ['storage', '存储', 'storage-body'],
   ])('opens %s from its row', async (page, title, body) => {
     const element = await mount()
     expect(element.querySelector(`[data-testid="${body}"]`)).toBeNull()
