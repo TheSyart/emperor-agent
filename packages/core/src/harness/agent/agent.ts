@@ -22,7 +22,13 @@
  * of the turn that took it, not consumed (held: the turn before it failed
  * or was stopped, so it waits for the user to send it again), or discarded.
  *
- * There is deliberately no max-steps limit.
+ * Budget (KRN-03): before each step (and before claiming its messages)
+ * the `budget` middleware may end the turn (`turn/end` reason `budget`: a
+ * step limit, or a task's spent cost cap), after logging a notice the model
+ * reads with its next request. Every request attempt, a failed one
+ * included, is reported to `requestEnd` so its usage is charged. An
+ * optional admission gate (`AgentOptions.admission`) may keep an idle
+ * agent from starting: its messages stay queued until the gate wakes it.
  */
 
 import { BlockAssembler } from '../../llm/assembler'
@@ -35,7 +41,7 @@ import {
   createAssistantMessage,
   type UserMessage,
 } from '../../llm/message'
-import type { GenerateOptions, ToolSchema } from '../../llm/types'
+import type { GenerateOptions, TokenUsage, ToolSchema } from '../../llm/types'
 import { ToolCallRecovery } from '../../session-log/repair'
 import { canonicalHeader, headerEquals } from '../../session-log/request-header'
 import type { Session } from '../../session-log/session'
@@ -64,7 +70,7 @@ import {
   type QueueChange,
 } from './inbox'
 import { offloadImages } from './image-offload'
-import type { AgentMiddleware, PreStepDecision } from './middleware'
+import type { AgentMiddleware, BudgetStop, PreStepDecision } from './middleware'
 import { RuntimeContextProjection } from './runtime-context'
 import { executeToolCalls } from './tool-calls'
 
@@ -88,6 +94,16 @@ export interface AgentOptions {
   toolFilter?: ToolFilter
   /** Owning (parent) agent for delegated agents. */
   owner?: Agent
+  /** Whether the agent may start running now (KRN-03 task tree pool). */
+  admission?: AgentAdmission
+}
+
+/**
+ * Decides when an idle agent may start running. A refused agent stays idle
+ * with its messages queued; the gate calls `wakeInbox()` once it may run.
+ */
+export interface AgentAdmission {
+  admit(agent: Agent): boolean
 }
 
 export interface CancelOptions {
@@ -477,6 +493,8 @@ export class Agent {
       }
       return
     }
+    // Parked: the gate wakes it (wakeInbox) once it may run.
+    if (this.options.admission?.admit(this) === false) return
     let resolveDriver!: () => void
     this.activityDone = new Promise<void>((resolve) => {
       resolveDriver = resolve
@@ -625,6 +643,35 @@ export class Agent {
       this.holdUnsent('previous-turn-failed')
   }
 
+  /** The first budget that ends the turn before `step`, if one is spent. */
+  private budgetStop(turn: number, step: number): BudgetStop | undefined {
+    for (const middleware of this.deps.middleware.budget) {
+      const stop = middleware({ agent: this, turn, step })
+      if (stop !== undefined) return stop
+    }
+    return undefined
+  }
+
+  /** Report one finished request attempt (its usage is charged, KRN-03). */
+  private requestEnded(
+    turn: number,
+    step: number,
+    provider: string,
+    usage: TokenUsage | undefined,
+    attempt: 'ok' | 'failed',
+  ): void {
+    for (const middleware of this.deps.middleware.requestEnd) {
+      try {
+        middleware({ agent: this, turn, step, provider, usage, attempt })
+      } catch (error: unknown) {
+        logger.warn('request-end middleware failed', {
+          session: this.id,
+          error: errorChain(error),
+        })
+      }
+    }
+  }
+
   private async preStep(
     claimed: readonly UserMessage[],
     position: { turn: number; step: number },
@@ -678,6 +725,16 @@ export class Agent {
       while (true) {
         signal.throwIfAborted()
         const step = phase.step + 1
+        const stop = this.budgetStop(turn, step)
+        if (stop !== undefined) {
+          // Nothing is claimed: whatever waits stays queued for later.
+          if (stop.notice !== undefined)
+            this.session.append('user/message', stop.notice, {
+              surfaceOp: 'append',
+            })
+          turnEnds = stop.reason
+          return false
+        }
         const claim = this.inbox.claim(target)
         let decision: PreparedStep
         try {
@@ -822,6 +879,14 @@ export class Agent {
         }
         signal.throwIfAborted()
       } catch (error: unknown) {
+        if (assembler.usage !== undefined)
+          this.requestEnded(
+            turn,
+            step,
+            request.provider,
+            assembler.usage,
+            'failed',
+          )
         if (signal.aborted) {
           const content = assembler.interruptedBlocks()
           if (content.length > 0) {
@@ -846,7 +911,15 @@ export class Agent {
         throw error
       }
       const finish = assembler.finish
-      if (finish.kind === 'error' || finish.kind === 'aborted') {
+      const failed = finish.kind === 'error' || finish.kind === 'aborted'
+      this.requestEnded(
+        turn,
+        step,
+        request.provider,
+        assembler.usage,
+        failed ? 'failed' : 'ok',
+      )
+      if (failed) {
         let action: 'retry' | undefined
         for (const middleware of this.deps.middleware.requestError) {
           action = await middleware({
