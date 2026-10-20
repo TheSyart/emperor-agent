@@ -1,7 +1,14 @@
 <script setup lang="ts">
 /** Minimal source controls. Hidden settings are round-tripped without edits. */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+} from 'vue'
 import type {
+  ExecutorAuthState,
   ExecutorConfig,
   ExecutorModelCatalog,
   ExecutorProfile,
@@ -20,6 +27,7 @@ import {
   configureExecutors,
   probeExecutor,
   listExecutorModels,
+  clearExecutorCredential,
 } from '../../api/delegations'
 import {
   SettingsSection,
@@ -31,9 +39,14 @@ import {
 import Button from '../ui/Button.vue'
 import SettingsCard from './ui/SettingsCard.vue'
 import Badge from '../ui/Badge.vue'
+import Notice from '../ui/Notice.vue'
 import { DsChevronDown, DsRefresh } from '../icons/ds'
 import Avatar from '../ui/Avatar.vue'
 import SubagentAvatarPreview from '../ui/SubagentAvatarPreview.vue'
+// 设置令牌 (AGT-02) loads when it is opened.
+const ClaudeTokenDialog = defineAsyncComponent(
+  () => import('./ClaudeTokenDialog.vue'),
+)
 const config = ref<ExecutorConfig | null>(null),
   runtimes = ref<Record<string, ExecutorRuntimeFacts | undefined>>({}),
   editingSpecialties = ref<Record<string, boolean>>({}),
@@ -198,7 +211,12 @@ function capabilityTone(value: NativeCapabilityStatus) {
 }
 function readinessTone(profile: ExecutorProfile) {
   if (!profile.enabled) return 'neutral'
-  if (hasIssue(profile) || warning(profile)) return 'warn'
+  if (
+    hasIssue(profile) ||
+    warning(profile) ||
+    probes.value[profile.id]?.auth?.expiresSoon
+  )
+    return 'warn'
   return probes.value[profile.id]?.status === 'available' ? 'ok' : 'neutral'
 }
 async function refreshFacts() {
@@ -329,7 +347,11 @@ function label(profile: ExecutorProfile) {
   const probe = probes.value[profile.id]
   if (!probe) return '未检测'
   if (probe.diagnostic === 'executor version probe failed') return '检测失败'
+  if (probe.diagnostic === 'AUTH_EXPIRED' || probe.auth?.problem === 'expired')
+    return '令牌已过期'
   if (probe.diagnostic === 'AUTH_REQUIRED') return '需要登录配置'
+  if (probe.status === 'available' && probe.auth?.expiresSoon)
+    return '令牌即将过期'
   if (probe.diagnostic === 'AUTH_ROUTE_UNAVAILABLE') return '凭据不可用'
   if (probe.status === 'available' && probe.compatibility === 'unverified')
     return '可能不兼容'
@@ -350,10 +372,11 @@ function detail(profile: ExecutorProfile) {
     return 'CLI 版本检测失败，请检查可执行权限及本机运行环境后重试。'
   if (probe.diagnostic === 'AUTH_ROUTE_UNAVAILABLE')
     return '所选模型凭据不可读，请在模型设置检查原配置。'
+  // Claude Code's own sign-in has its help in the 登录 block (AGT-02).
   if (probe.status === 'needs_auth' || probe.diagnostic === 'AUTH_REQUIRED')
     return profile.authRef.kind === 'model-route'
       ? '所选模型凭据不可读，请在模型设置检查原配置。'
-      : `请在终端运行 ${profile.backend === 'codex' ? 'codex login' : 'claude auth login'}。${profile.backend === 'claude-code' ? 'Emperor 需要可读取的 CLI 文件或环境变量认证；仅钥匙串登录不可用。官方订阅可运行 claude setup-token，并将令牌设为 CLAUDE_CODE_OAUTH_TOKEN；无需改用 API 计费。' : ''}配置完成后重新检测。`
+      : '请在终端运行 codex login，配置完成后重新检测。'
   if (probe.status === 'missing')
     return usesBundledClaude(profile)
       ? 'Emperor 内置的 Claude Code 缺失，请重新安装 Emperor，或在「查看详情」里改用本机安装的 claude。'
@@ -410,6 +433,126 @@ function versionText(profile: ExecutorProfile) {
     probe.executableVersion +
     (probe.executableSource === 'system' ? '（本机）' : '（随 Emperor 内置）')
   )
+}
+// ── Claude Code 登录 (AGT-02) ──────────────────────────────────────────
+// Sources, in Core's order: Emperor's own token, ~/.claude/settings.json,
+// .credentials.json, the environment, the login shell. Never the Keychain.
+const tokenDialog = ref<ExecutorProfile | null>(null),
+  tokenBusy = ref(false)
+const KIND_LABEL = {
+  'oauth-token': '订阅账号',
+  'api-key': 'API Key',
+  'auth-token': '网关令牌',
+} as const
+const SOURCE_LABEL = {
+  settings: '来自 ~/.claude/settings.json',
+  'credentials-file': '来自 ~/.claude/.credentials.json',
+  environment: '来自启动 Emperor 时的环境变量',
+  'login-shell': '来自登录 shell 的环境变量（如 ~/.zshrc）',
+  'model-route': '使用已有模型配置',
+} as const
+/** A Claude profile that signs in on its own (not through a model route). */
+function signsInHere(profile: ExecutorProfile) {
+  return (
+    profile.backend === 'claude-code' &&
+    profile.authRef.kind === 'managed-cli-login'
+  )
+}
+function minutesLeft(auth: ExecutorAuthState) {
+  return Math.max(1, Math.ceil(((auth.expiresAt ?? 0) - Date.now()) / 60_000))
+}
+function authOf(profile: ExecutorProfile) {
+  return probes.value[profile.id]?.auth
+}
+function hasEmperorToken(profile: ExecutorProfile) {
+  const auth = authOf(profile)
+  return auth?.source === 'emperor' || auth?.problem === 'unreadable'
+}
+function signInText(profile: ExecutorProfile) {
+  const auth = authOf(profile)
+  if (!auth)
+    return probes.value[profile.id]?.localAuthChecked
+      ? '本机登录配置可读'
+      : '尚未检测'
+  if (auth.source === 'emperor')
+    return `已设置 · 末 4 位 ${auth.last4 ?? ''}（${KIND_LABEL[auth.kind ?? 'oauth-token']}）`
+  if (auth.source)
+    return [
+      SOURCE_LABEL[auth.source],
+      ...(auth.kind && auth.source !== 'model-route'
+        ? [KIND_LABEL[auth.kind]]
+        : []),
+      ...(auth.expiresSoon ? [`${minutesLeft(auth)} 分钟内过期`] : []),
+    ].join(' · ')
+  return auth.problem === 'expired'
+    ? '.credentials.json 里的令牌已过期'
+    : auth.problem === 'unreadable'
+      ? '保存在 Emperor 的令牌已无法读取'
+      : '未登录'
+}
+/** Claude's sign-in is what is missing: its help replaces the generic notice. */
+function authIssue(profile: ExecutorProfile) {
+  const probe = probes.value[profile.id]
+  return (
+    signsInHere(profile) &&
+    !!probe &&
+    (probe.status === 'needs_auth' ||
+      probe.diagnostic === 'AUTH_REQUIRED' ||
+      probe.diagnostic === 'AUTH_EXPIRED')
+  )
+}
+const ALERT_TITLE = {
+  missing: '尚未登录',
+  expired: '令牌已过期',
+  unreadable: '令牌无法读取',
+  soon: '令牌即将过期',
+} as const
+/** What the 登录 block has to tell: no sign-in, or one about to expire. */
+function signInAlert(profile: ExecutorProfile): keyof typeof ALERT_TITLE | '' {
+  const auth = authOf(profile)
+  if (authIssue(profile))
+    return auth?.problem === 'expired' || auth?.problem === 'unreadable'
+      ? auth.problem
+      : 'missing'
+  return probes.value[profile.id]?.status === 'available' && auth?.expiresSoon
+    ? 'soon'
+    : ''
+}
+function tokenSaved(profile: ExecutorProfile, probe: ExecutorProbe) {
+  probes.value[profile.id] = probe
+  delete probeErrors.value[profile.id]
+  tokenDialog.value = null
+}
+async function clearToken(profile: ExecutorProfile) {
+  if (tokenBusy.value) return
+  tokenBusy.value = true
+  error.value = ''
+  try {
+    probes.value[profile.id] = (
+      await clearExecutorCredential({ profileId: profile.id })
+    ).probe
+  } catch (cause) {
+    error.value = `移除令牌失败：${message(cause)}`
+  } finally {
+    tokenBusy.value = false
+  }
+}
+// 高级 › 每次运行最多轮数: absent means Core's default of 200.
+const DEFAULT_MAX_TURNS = 200
+function turnOptions() {
+  const current = config.value?.limits.claudeMaxTurns ?? DEFAULT_MAX_TURNS
+  return [...new Set([50, 100, 200, 300, 500, 1000, current])]
+    .sort((a, b) => a - b)
+    .map((n) => ({
+      value: String(n),
+      label: n === DEFAULT_MAX_TURNS ? `${n} 轮（默认）` : `${n} 轮`,
+    }))
+}
+function setMaxTurns(value: string) {
+  if (!config.value) return
+  const turns = Number(value)
+  if (turns === DEFAULT_MAX_TURNS) delete config.value.limits.claudeMaxTurns
+  else config.value.limits.claudeMaxTurns = turns
 }
 function hasIssue(profile: ExecutorProfile) {
   return (
@@ -746,7 +889,87 @@ onBeforeUnmount(() => {
           >
             <p role="status">{{ warning(row.profile) }}</p>
           </div>
-          <div v-if="hasIssue(row.profile)" class="message recovery-message">
+          <div
+            v-if="signsInHere(row.profile)"
+            class="sign-in-block"
+            data-claude-sign-in
+          >
+            <div class="block-heading">
+              <span>登录</span>
+              <div v-if="!signInAlert(row.profile)" class="inline-actions">
+                <Button
+                  v-if="hasEmperorToken(row.profile)"
+                  size="sm"
+                  variant="ghost"
+                  data-claude-token-clear
+                  :disabled="busy || loading || tokenBusy"
+                  @click="clearToken(row.profile)"
+                  >移除令牌</Button
+                ><Button
+                  size="sm"
+                  variant="ghost"
+                  data-claude-token-set
+                  :disabled="busy || loading || tokenBusy"
+                  @click="tokenDialog = row.profile"
+                  >{{
+                    hasEmperorToken(row.profile) ? '更换令牌' : '设置令牌'
+                  }}</Button
+                >
+              </div>
+            </div>
+            <p
+              v-if="!authIssue(row.profile)"
+              class="sign-in-status"
+              data-claude-auth-source
+            >
+              {{ signInText(row.profile) }}
+            </p>
+            <Notice
+              v-if="signInAlert(row.profile)"
+              tone="warn"
+              :title="ALERT_TITLE[signInAlert(row.profile) || 'missing']"
+            >
+              <span data-claude-sign-in-help>
+                <template v-if="signInAlert(row.profile) === 'soon'"
+                  >长任务可能中途失败。在终端运行
+                  <code>claude setup-token</code
+                  >，把生成的长期令牌粘贴到这里。</template
+                ><template v-else-if="signInAlert(row.profile) === 'expired'"
+                  >~/.claude/.credentials.json 里的登录已过期。在终端运行
+                  <code>claude setup-token</code
+                  >，把生成的长期令牌粘贴到这里。</template
+                ><template v-else-if="signInAlert(row.profile) === 'unreadable'"
+                  >保存在 Emperor
+                  的令牌已无法读取（本地密钥变了），请重新设置。</template
+                ><template v-else
+                  >订阅账号：在终端运行
+                  <code>claude setup-token</code>，把生成的令牌粘贴到这里；API
+                  Key：粘贴 ANTHROPIC_API_KEY。Emperor 不读取钥匙串，终端里
+                  /login 的登录在这里不可用。</template
+                >
+              </span>
+              <template #actions>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  data-claude-token-set
+                  :disabled="busy || loading || tokenBusy"
+                  @click="tokenDialog = row.profile"
+                  >设置令牌</Button
+                ><Button
+                  size="sm"
+                  variant="ghost"
+                  :disabled="busy || loading"
+                  @click="load(true)"
+                  >重新检测</Button
+                >
+              </template>
+            </Notice>
+          </div>
+          <div
+            v-if="hasIssue(row.profile) && !authIssue(row.profile)"
+            class="message recovery-message"
+          >
             <p role="status">{{ detail(row.profile) }}</p>
             <div class="inline-actions">
               <Button
@@ -955,7 +1178,7 @@ onBeforeUnmount(() => {
             <summary><span>查看详情</span><DsChevronDown :size="14" /></summary>
             <div class="details-content">
               <dl>
-                <div>
+                <div v-if="!signsInHere(row.profile)">
                   <dt>认证来源</dt>
                   <dd>
                     {{
@@ -1147,7 +1370,41 @@ onBeforeUnmount(() => {
             @update:model-value="setVerifyFirst($event)"
         /></template>
       </SettingsCard>
+      <SettingsCard
+        v-if="config"
+        class="agent-card advanced-card"
+        data-executor-max-turns
+      >
+        <template #title><h3>每次运行最多轮数</h3></template>
+        <template #description
+          ><span
+            >Claude Code 一次运行里最多调用模型的轮数，默认 200，可设
+            50–1000。用完时这次运行以「达到最多轮数」结束，主会话可以发消息让它继续。</span
+          ></template
+        >
+        <template #actions
+          ><Select
+            :model-value="
+              String(config.limits.claudeMaxTurns ?? DEFAULT_MAX_TURNS)
+            "
+            :options="turnOptions()"
+            size="sm"
+            data-claude-max-turns
+            aria-label="Claude Code 每次运行最多轮数"
+            :disabled="busy || loading"
+            @update:model-value="setMaxTurns(String($event))"
+        /></template>
+      </SettingsCard>
     </div>
+    <ClaudeTokenDialog
+      v-if="tokenDialog"
+      :profile-id="tokenDialog.id"
+      :kind="
+        authOf(tokenDialog)?.kind === 'api-key' ? 'api-key' : 'oauth-token'
+      "
+      @close="tokenDialog = null"
+      @saved="tokenSaved(tokenDialog, $event)"
+    />
   </SettingsSection>
 </template>
 <style scoped>
@@ -1439,6 +1696,26 @@ onBeforeUnmount(() => {
   min-width: 0;
   overflow-wrap: anywhere;
   color: rgb(var(--label-secondary));
+}
+.sign-in-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+}
+.sign-in-status {
+  margin: 0;
+  font-size: var(--fs-xxs);
+  line-height: 20px;
+  color: rgb(var(--text-2));
+  overflow-wrap: anywhere;
+}
+.sign-in-block code {
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  padding: 0 var(--space-1);
+  border-radius: var(--r-xs);
+  background: rgb(var(--surface-sunken));
+  color: rgb(var(--text-1));
 }
 .connection-settings {
   border-top: calc(var(--space-0-5) / 2) solid var(--border-l1);

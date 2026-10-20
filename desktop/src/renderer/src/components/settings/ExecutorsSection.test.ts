@@ -8,12 +8,16 @@ const {
   configureExecutors,
   probeExecutor,
   listExecutorModels,
+  setExecutorCredential,
+  clearExecutorCredential,
   openExternal,
 } = vi.hoisted(() => ({
   listExecutors: vi.fn(),
   configureExecutors: vi.fn(),
   probeExecutor: vi.fn(),
   listExecutorModels: vi.fn(),
+  setExecutorCredential: vi.fn(),
+  clearExecutorCredential: vi.fn(),
   openExternal: vi.fn(),
 }))
 vi.mock('../../api/backend', () => ({ openExternal }))
@@ -22,6 +26,8 @@ vi.mock('../../api/delegations', () => ({
   configureExecutors,
   probeExecutor,
   listExecutorModels,
+  setExecutorCredential,
+  clearExecutorCredential,
 }))
 function payload() {
   const profiles = ['claude-code', 'codex', 'claude-code'].map(
@@ -331,12 +337,12 @@ it('does not invent absent profiles', async () => {
 })
 it.each([
   ['missing', undefined, '内置的 Claude Code 缺失'],
-  ['needs_auth', 'AUTH_REQUIRED', 'claude auth login'],
+  ['needs_auth', 'AUTH_REQUIRED', 'claude setup-token'],
   ['incompatible', 'AUTH_ROUTE_UNAVAILABLE', '模型凭据'],
   ['incompatible', undefined, '需要 >= 2.1'],
   ['containment_unavailable', undefined, '运行环境'],
   ['incompatible', 'executor version probe failed', '可执行权限'],
-  ['incompatible', 'AUTH_REQUIRED', '仅钥匙串登录不可用'],
+  ['incompatible', 'AUTH_REQUIRED', '粘贴 ANTHROPIC_API_KEY'],
 ])(
   'shows useful inline recovery for %s/%s',
   async (status, diagnostic, message) => {
@@ -678,5 +684,249 @@ it('offers 验证后再应用 under 高级, off by default, and saves it only wh
   await settle()
   expect(configureExecutors.mock.calls[0]![0].config.verifyBeforeApply).toBe(
     true,
+  )
+})
+
+// AGT-02 · Claude Code sign-in: 设置令牌, the sources Emperor reads, and
+// copy that never sends the user to `claude auth login`.
+function claudeProbe(probe: Record<string, unknown>) {
+  const value = payload() as any
+  value.config.profiles[0].enabled = true
+  Object.assign(value.profiles[0].probe, probe)
+  listExecutors.mockResolvedValue(value)
+  probeExecutor.mockResolvedValue(value.profiles[0].probe)
+  return value
+}
+const signIn = () =>
+  row('claude-code').querySelector<HTMLElement>('[data-claude-sign-in]')!
+async function dialogReady() {
+  for (let i = 0; i < 5; i++) {
+    await vi.dynamicImportSettled()
+    await settle()
+  }
+  // The form sits in the dialog; its buttons in the dialog's footer.
+  return document
+    .querySelector<HTMLElement>('[data-claude-token-dialog]')!
+    .closest<HTMLElement>('[role="dialog"]')!
+}
+function typeInto(input: HTMLInputElement, value: string) {
+  input.value = value
+  input.dispatchEvent(new Event('input'))
+}
+it('1 · 设置令牌 sends the pasted token once and shows only 已设置 · 末 4 位', async () => {
+  const token = 'sk-ant-oat01-pasted-subscription-token-a1b2'
+  claudeProbe({
+    status: 'needs_auth',
+    diagnostic: 'AUTH_REQUIRED',
+    localAuthChecked: false,
+    auth: { source: null, problem: 'missing' },
+  })
+  setExecutorCredential.mockImplementation(async (input) => {
+    const next = claudeProbe({
+      status: 'available',
+      diagnostic: undefined,
+      localAuthChecked: true,
+      auth: {
+        source: 'emperor',
+        kind: input.kind,
+        last4: input.token.slice(-4),
+      },
+    })
+    return { probe: next.profiles[0].probe }
+  })
+  await mount()
+  expect(signIn().textContent).toContain('未登录')
+  signIn().querySelector<HTMLButtonElement>('[data-claude-token-set]')!.click()
+  const dialog = await dialogReady()
+  expect(dialog.textContent).toContain('在终端运行')
+  expect(dialog.textContent).toContain('claude setup-token')
+  expect(dialog.textContent).toContain('把生成的令牌粘贴到这里')
+  const input = dialog.querySelector<HTMLInputElement>(
+    '[data-claude-token-input]',
+  )!
+  // Masked: the field never shows what was pasted.
+  expect(input.type).toBe('password')
+  typeInto(input, token)
+  await settle()
+  dialog.querySelector<HTMLButtonElement>('[data-claude-token-save]')!.click()
+  await settle()
+  await settle()
+  expect(setExecutorCredential).toHaveBeenCalledWith({
+    profileId: 'profile-0',
+    kind: 'oauth-token',
+    token,
+  })
+  expect(document.querySelector('[data-claude-token-dialog]')).toBeNull()
+  expect(signIn().textContent).toContain('已设置 · 末 4 位 a1b2')
+  expect(document.body.innerHTML).not.toContain(token)
+  expect(row('claude-code').querySelector('.readiness')!.textContent).toBe(
+    '执行器就绪',
+  )
+})
+it('1 · the API Key choice asks for ANTHROPIC_API_KEY and refuses a subscription token in it', async () => {
+  claudeProbe({
+    status: 'needs_auth',
+    diagnostic: 'AUTH_REQUIRED',
+    auth: { source: null, problem: 'missing' },
+  })
+  await mount()
+  signIn().querySelector<HTMLButtonElement>('[data-claude-token-set]')!.click()
+  const dialog = await dialogReady()
+  ;[...dialog.querySelectorAll<HTMLButtonElement>('[role="radio"]')]
+    .find((b) => b.textContent?.includes('API Key'))!
+    .click()
+  await settle()
+  expect(dialog.textContent).toContain('粘贴 ANTHROPIC_API_KEY')
+  typeInto(
+    dialog.querySelector<HTMLInputElement>('[data-claude-token-input]')!,
+    'sk-ant-oat01-this-is-a-subscription-token',
+  )
+  await settle()
+  expect(
+    dialog.querySelector<HTMLButtonElement>('[data-claude-token-save]')!
+      .disabled,
+  ).toBe(true)
+  expect(
+    dialog.querySelector('[data-claude-token-problem]')!.textContent,
+  ).toContain('请选择「订阅账号」')
+  expect(setExecutorCredential).not.toHaveBeenCalled()
+})
+it('1 · 移除令牌 forgets Emperor’s token', async () => {
+  claudeProbe({ auth: { source: 'emperor', kind: 'api-key', last4: 'c3d4' } })
+  clearExecutorCredential.mockImplementation(async () => {
+    const next = claudeProbe({
+      status: 'needs_auth',
+      diagnostic: 'AUTH_REQUIRED',
+      auth: { source: null, problem: 'missing' },
+    })
+    return { probe: next.profiles[0].probe }
+  })
+  await mount()
+  expect(signIn().textContent).toContain('已设置 · 末 4 位 c3d4')
+  expect(signIn().textContent).toContain('API Key')
+  signIn()
+    .querySelector<HTMLButtonElement>('[data-claude-token-clear]')!
+    .click()
+  await settle()
+  await settle()
+  expect(clearExecutorCredential).toHaveBeenCalledWith({
+    profileId: 'profile-0',
+  })
+  expect(signIn().textContent).toContain('未登录')
+})
+it.each([
+  ['settings', '~/.claude/settings.json'],
+  ['credentials-file', '~/.claude/.credentials.json'],
+  ['environment', '启动 Emperor 时的环境变量'],
+  ['login-shell', '登录 shell'],
+])('names where the sign-in came from (%s)', async (source, text) => {
+  claudeProbe({ auth: { source, kind: 'oauth-token' } })
+  await mount()
+  expect(signIn().textContent).toContain(text)
+})
+it('3 · an expired .credentials.json reads 令牌已过期 and says what to do', async () => {
+  claudeProbe({
+    status: 'needs_auth',
+    diagnostic: 'AUTH_EXPIRED',
+    localAuthChecked: false,
+    auth: { source: null, problem: 'expired', expiresAt: Date.now() - 1000 },
+  })
+  await mount()
+  expect(row('claude-code').querySelector('.readiness')!.textContent).toBe(
+    '令牌已过期',
+  )
+  expect(row('claude-code').textContent).toContain('已过期')
+  expect(row('claude-code').textContent).toContain('claude setup-token')
+})
+it('3 · warns ten minutes before the .credentials.json token expires', async () => {
+  claudeProbe({
+    status: 'available',
+    auth: {
+      source: 'credentials-file',
+      kind: 'oauth-token',
+      expiresAt: Date.now() + 5 * 60_000,
+      expiresSoon: true,
+    },
+  })
+  await mount()
+  expect(row('claude-code').querySelector('.readiness')!.textContent).toBe(
+    '令牌即将过期',
+  )
+  expect(row('claude-code').textContent).toMatch(/[45] 分钟内过期/)
+  expect(row('claude-code').textContent).toContain('claude setup-token')
+})
+it('10 · the sign-in help never says claude auth login (snapshot)', async () => {
+  claudeProbe({
+    status: 'needs_auth',
+    diagnostic: 'AUTH_REQUIRED',
+    auth: { source: null, problem: 'missing' },
+  })
+  await mount()
+  const help = row('claude-code').querySelector('[data-claude-sign-in-help]')!
+  expect(help.textContent!.replace(/\s+/g, ' ').trim()).toMatchInlineSnapshot(
+    `"订阅账号：在终端运行 claude setup-token，把生成的令牌粘贴到这里；API Key：粘贴 ANTHROPIC_API_KEY。Emperor 不读取钥匙串，终端里 /login 的登录在这里不可用。"`,
+  )
+  expect(row('claude-code').textContent).not.toContain('auth login')
+  expect(document.body.textContent).not.toContain('claude auth login')
+})
+it('10 · no copy in the app, Core or the user manual says claude auth login', async () => {
+  const { readdirSync, readFileSync, statSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  // jsdom serves modules from /@fs/<absolute path>.
+  const repo = new URL('../../../../../../', import.meta.url).pathname.replace(
+    /^\/@fs/,
+    '',
+  )
+  const offenders: string[] = []
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name)
+      if (statSync(path).isDirectory()) walk(path)
+      else if (
+        /\.(vue|ts|md)$/.test(name) &&
+        !name.endsWith('.test.ts') &&
+        readFileSync(path, 'utf8').includes('claude auth login')
+      )
+        offenders.push(path.slice(repo.length))
+    }
+  }
+  for (const dir of [
+    'desktop/src',
+    'packages/core/src',
+    'docs/user',
+    'docs/architecture',
+  ])
+    walk(join(repo, dir))
+  expect(offenders).toEqual([])
+})
+it('8 · 高级 sets Claude Code’s turns per run, 200 by default, stored only when changed', async () => {
+  await mount()
+  const select = root.querySelector<HTMLButtonElement>(
+    '[data-claude-max-turns]',
+  )!
+  expect(select.textContent).toContain('200')
+  select.click()
+  await settle()
+  const values = [
+    ...document.querySelectorAll<HTMLElement>('[data-value]'),
+  ].map((o) => o.dataset.value)
+  expect(values).toEqual(
+    expect.arrayContaining(['50', '100', '200', '500', '1000']),
+  )
+  document.querySelector<HTMLElement>('[data-value="500"]')!.click()
+  await settle()
+  await action('save-executors').onClick!()
+  await settle()
+  expect(
+    configureExecutors.mock.calls[0]![0].config.limits.claudeMaxTurns,
+  ).toBe(500)
+  root.querySelector<HTMLButtonElement>('[data-claude-max-turns]')!.click()
+  await settle()
+  document.querySelector<HTMLElement>('[data-value="200"]')!.click()
+  await settle()
+  await action('save-executors').onClick!()
+  await settle()
+  expect(configureExecutors.mock.calls[1]![0].config.limits).not.toHaveProperty(
+    'claudeMaxTurns',
   )
 })
