@@ -203,3 +203,63 @@ describe('ConversationStore', () => {
     expect(context.store.openSessions()).toEqual(['x'])
   })
 })
+
+describe('ConversationStore history failures (FIX-03)', () => {
+  function failingStore(log: LogBuilder) {
+    const scheduler = new ManualScheduler()
+    const api = new FakeHistoryApi([...log.events])
+    api.failNext = new Error('read failed')
+    const store = new ConversationStore({
+      api: { history: (query) => api.history(query) },
+      watch: vi.fn(async () => undefined),
+      subscribe: () => () => undefined,
+      scheduler,
+    })
+    return { store, scheduler, api }
+  }
+
+  it('4 · a failed history read can be retried from the handle', async () => {
+    const { store, scheduler } = failingStore(inProgressLog())
+    const handle = store.open('s1')
+    await settle(20)
+    scheduler.runMicrotasks()
+    expect(handle.window.value).toMatchObject({
+      openState: 'error',
+      error: 'read failed',
+    })
+    await handle.retry()
+    await settle(20)
+    scheduler.runMicrotasks()
+    expect(handle.window.value.openState).toBe('open')
+    expect(handle.order.value.length).toBeGreaterThan(0)
+  })
+
+  it('4 · reopening a session whose read failed reads it again', async () => {
+    const { store, scheduler, api } = failingStore(inProgressLog())
+    store.open('s1')
+    await settle(20)
+    const again = store.open('s1')
+    await settle(20)
+    scheduler.runMicrotasks()
+    expect(api.calls).toHaveLength(2)
+    expect(again.window.value.openState).toBe('open')
+  })
+
+  it('9 · resyncAll reopens every open window from its tail', async () => {
+    const log = inProgressLog()
+    const scheduler = new ManualScheduler()
+    const api = new FakeHistoryApi([...log.events])
+    const store = new ConversationStore({
+      api: { history: (query) => api.history(query) },
+      watch: vi.fn(async () => undefined),
+      subscribe: () => () => undefined,
+      scheduler,
+    })
+    store.open('s1')
+    await settle(20)
+    expect(api.calls).toHaveLength(1)
+    await store.resyncAll()
+    await settle(20)
+    expect(api.calls).toHaveLength(2)
+  })
+})
