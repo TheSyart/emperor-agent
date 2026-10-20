@@ -22,36 +22,53 @@ export interface Logger {
   child(bindings: Record<string, unknown>): Logger
 }
 
+export interface LogLine {
+  level: LogLevel
+  msg: string
+  fields: Record<string, unknown>
+}
+
+export type LogSink = (line: LogLine) => void
+
 export interface LoggerOptions {
   level?: LogLevel
   bindings?: Record<string, unknown>
-  /** 注入 sink，便于测试；默认 console。 */
-  sink?: (line: {
-    level: LogLevel
-    msg: string
-    fields: Record<string, unknown>
-  }) => void
+  /** 注入 sink，便于测试；默认 console（宿主可用 setCoreLogSink 改道）。 */
+  sink?: LogSink
 }
+
+/** Where loggers without a sink of their own write; null: the console. */
+let processSink: LogSink | null = null
+
+/**
+ * Route every logger that has no sink of its own (the shared `logger` and
+ * its children included) to `sink`, e.g. the desktop's core.log (REL-01);
+ * null goes back to the console.
+ */
+export function setCoreLogSink(sink: LogSink | null): void {
+  processSink = sink
+}
+
+const consoleSink: LogSink = (line) => {
+  const payload = Object.keys(line.fields).length ? line.fields : undefined
+  const fn =
+    line.level === 'debug'
+      ? console.debug
+      : line.level === 'warn'
+        ? console.warn
+        : line.level === 'error'
+          ? console.error
+          : console.info
+  fn(`[${line.level}] ${line.msg}`, payload ?? '')
+}
+
+const defaultSink: LogSink = (line) => (processSink ?? consoleSink)(line)
 
 export function createLogger(opts: LoggerOptions = {}): Logger {
   const level =
     opts.level ?? (process.env.EMPEROR_LOG_LEVEL as LogLevel) ?? 'info'
   const bindings = opts.bindings ?? {}
-  const sink =
-    opts.sink ??
-    ((line) => {
-      const payload = Object.keys(line.fields).length ? line.fields : undefined
-
-      const fn =
-        line.level === 'debug'
-          ? console.debug
-          : line.level === 'warn'
-            ? console.warn
-            : line.level === 'error'
-              ? console.error
-              : console.info
-      fn(`[${line.level}] ${line.msg}`, payload ?? '')
-    })
+  const sink = opts.sink ?? defaultSink
 
   const emit = (
     lvl: LogLevel,

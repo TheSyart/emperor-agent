@@ -255,6 +255,8 @@ export interface CoreApiCreateOptions extends HarnessHostOptions {
   webFetchClient?: WebFetchClient | null
   /** Start the first-run profile interview after a model is configured. */
   enableFirstRunOnboarding?: boolean
+  /** Where the host writes its logs (REL-01); diagnostics show it. */
+  logDirectory?: string | null
   /** Test hook: the GitHub CLI seen by Pull Request, Issue and CI reads. */
   github?: Partial<
     Pick<
@@ -1305,6 +1307,7 @@ export class CoreApi {
     })
     this.diagnosticsService = new CoreDiagnosticsService(this.root, {
       runtimePaths: this.paths,
+      logDirectory: opts.logDirectory ?? null,
       legacyStateMigration: kept.legacyStateMigration,
       projectLegacyPrivateData: (view) => {
         const projectPath = this.viewProjectRoot(view)
