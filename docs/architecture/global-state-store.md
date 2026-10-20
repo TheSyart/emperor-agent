@@ -47,7 +47,7 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
   onboarding.json
   AGENTS.md                # 可选的全局工作区说明，用户手写
   workspace/               # Chat 会话的工作目录
-  spill/                   # 超出内联上限的工具结果全文
+  spill/                   # 超出内联上限的工具结果全文：session-<hash>/ 按会话，shell-*.log 等散文件不属于会话
   write-staging/           # write / edit 工具的原子写暂存区，写完即改名到目标位置
   skills/<skill-name>/SKILL.md   # 个人 Skills（也接受直接放置的 <name>.md）
   plugins/
@@ -71,7 +71,7 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
     profile/USER.local.md  # 用户档案
     MEMORY.local.md        # 全局长期记忆
     YYYY-MM-DD.md          # 按日情景记忆
-    versions/              # 记忆版本快照
+    versions/              # 记忆版本快照；修剪到 300 个时被移出的快照文件一起删除
     watchlist.md
     watchlist_state.json
     attachments/<month>/
@@ -81,10 +81,10 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
     sidebar_state.json     # 左侧导航（排序、折叠、置顶会话）和文件树宽度等工作台偏好
   sessions/
     .harness-kernel-v1     # 当前内核的会话目录标记
-    index.json             # 会话索引（标题、模式、项目绑定、归档）
+    index.json             # 会话索引（标题、模式、项目绑定、归档）；启动时建一次，之后常驻内存
     .scratch/
     <session-id>/
-      meta.jsonl           # 会话索引元数据，用于重建 index.json
+      meta.jsonl           # 会话索引元数据，用于重建 index.json；超过 1000 行时压缩为最新一条快照
       log.jsonl            # append-only session log：会话全部事实
   sessions.legacy-<ts>/    # 首次启动新内核时移走的旧会话目录（如存在）
   projects/
@@ -100,7 +100,8 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
   processes/
     receipts.v1.json       # 受管进程的最小账本
   tokens/
-    tokens.jsonl
+    tokens.jsonl           # 每次模型调用一行；超过 5000 行时把最旧的行归档，留下 4000 行
+    tokens_archive/<YYYY-MM>.jsonl.gz
   scheduler/
     jobs.json
     jobs.rejected.json     # 读不出来的任务条目（原样保留，带原因），其余任务照常加载
@@ -136,6 +137,17 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
   migrations/
     state-root-migration.json
 ```
+
+### 保留与存储占用（KRN-12）
+
+`storage/retention.ts` 的 `RetentionService` 在 Core 启动后于后台运行一次，「设置 › 高级 › 存储」的「清理」也调用它（CoreApi `storage.clean`，受 plan 模式与待决交互的变更守卫）。每一步单独进行，失败只记入结果、不中断其他步骤：
+
+- 「最近删除」里超过 30 天的会话经会话服务永久删除（连同子会话、spill 与 turn 快照）。
+- `spill/` 下不属于任何会话的内容：散文件（`shell-*.log`、没有会话的落盘结果）与 `session-<hash>/` 目录（其会话既不在 `sessions/`，也不在 `sessions/.trash/`，子会话也算），其中所有文件 30 天没有变化时删除。会话自己的 spill 目录在会话永久删除时删除（KRN-03）。
+- `memory/versions/snapshots/` 里索引不再列出的快照，以及原子写留下的临时文件（超过一小时）。
+- `delegations/runtime/<profile>/<delegation-id>/`（外部执行器的隔离 HOME、`CODEX_HOME` 等）：委派空闲或已关闭、且所属会话已不存在时删除；没有任何委派记录的目录 30 天后删除；旧版本每次检查新建的 `dlg-probe-*`（各含一份令牌副本）与 `indexes/`、`snapshot-temp/`、`artifact-temp/` 的临时内容一天后删除。删除从不跟随符号链接（`CODEX_HOME/auth.json` 是指向用户文件的链接，只删链接）。成果 worktree 与用户仓库里的 `refs/emperor/delegations/*` 由委派流程自己清理（AGT-06）。
+
+`storage.usage` 遍历一次 Emperor Home，按会话、附件（`memory/attachments`、`memory/media`）、溢出文件、记忆版本、用量账本、委派与其他汇总磁盘占用（按块计算，硬链接只算一次，不跟随链接，与 `du` 的口径一致）。
 
 旧版本可能留下 `team/`、`tasks/`、`goals/`、`code-intelligence/`、`memory/history.jsonl`、`memory/tool-results/` 等目录或文件。当前内核启动时不创建、也不读写它们；旧的 `hooks_config.json` 与 `hooks/` 同样不再使用。这些内容保留原位，不会自动删除，确认不需要后可以手动删除。
 
