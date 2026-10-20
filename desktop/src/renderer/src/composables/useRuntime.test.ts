@@ -951,6 +951,52 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     })
   })
 
+  it('FIX-03 6 · a bootstrap older than the live events never turns busy back on', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    g.window = fakeWindow({
+      invokeCore: async () => ({ ok: true }),
+      onCoreEvent: (cb: (event: unknown) => void) => {
+        listener = cb
+        return () => {
+          listener = null
+        }
+      },
+    })
+    const options = testOptions()
+    const runtime = useRuntime(options)
+    runtime.switchSession('s1')
+    emitCoreEvent(listener, {
+      event: 'turn_phase',
+      seq: 5,
+      session_id: 's1',
+      turn_id: 't1',
+      phase: 'started',
+    })
+    expect(runtime.busy.value).toBe(true)
+    // The turn ends while a bootstrap taken at seq 5 is still on its way.
+    emitCoreEvent(listener, {
+      event: 'assistant_done',
+      seq: 7,
+      session_id: 's1',
+      turn_id: 't1',
+      content: 'done',
+    })
+    expect(runtime.busy.value).toBe(false)
+    options.boot.value = {
+      app: 'Emperor Agent',
+      runtime: { sessionId: 's1', events: [], latestSeq: 5, busy: true },
+    } as unknown as BootstrapPayload
+    runtime.restoreRuntimeState()
+    expect(runtime.busy.value).toBe(false)
+    // A bootstrap as new as the live stream still applies.
+    options.boot.value = {
+      app: 'Emperor Agent',
+      runtime: { sessionId: 's1', events: [], latestSeq: 9, busy: true },
+    } as unknown as BootstrapPayload
+    runtime.restoreRuntimeState()
+    expect(runtime.busy.value).toBe(true)
+  })
+
   it('ignores live runtime events from another session for the active busy state', async () => {
     let listener: ((event: unknown) => void) | null = null
     g.window = fakeWindow({

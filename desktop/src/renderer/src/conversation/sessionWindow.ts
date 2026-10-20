@@ -197,12 +197,22 @@ export class SessionWindow {
   /**
    * Install a tail page and stitch the live buffer by seq (the sole dedupe
    * key). Buffered events that do not connect stay buffered for repair.
+   * A repair (`keepOlder`) keeps the older pages already loaded when they
+   * still connect to the new tail (FIX-03): the reader's place stays put.
    */
-  private install(page: SessionHistoryPage): void {
-    this.events = [...page.events].sort((left, right) => left.seq - right.seq)
+  private install(page: SessionHistoryPage, keepOlder = false): void {
+    const fresh = [...page.events].sort((left, right) => left.seq - right.seq)
+    const first = fresh[0]?.seq
+    const older =
+      keepOlder && first !== undefined
+        ? this.events.filter((event) => event.seq < first)
+        : []
+    const connected = older.length > 0 && older.at(-1)!.seq + 1 === first
+    this.events = connected ? [...older, ...fresh] : fresh
     this.cutSeq = page.lastSeq >= 0 ? page.lastSeq : null
-    this.assembler.replaceWindow(this.events, page.hasMore)
-    this.setState({ header: page.header, hasMore: page.hasMore }, false)
+    const hasMore = connected ? this.state.hasMore : page.hasMore
+    this.assembler.replaceWindow(this.events, hasMore)
+    this.setState({ header: page.header, hasMore }, false)
     const buffered = this.liveBuffer
     this.liveBuffer = []
     buffered.sort((left, right) => left.seq - right.seq)
@@ -225,7 +235,7 @@ export class SessionWindow {
         })
         if (generation !== this.generation || this.state.openState !== 'open')
           return
-        this.install(page)
+        this.install(page, true)
       } catch (error: unknown) {
         this.warn(`gap repair failed: ${errorText(error)}`)
         return
@@ -233,9 +243,10 @@ export class SessionWindow {
         this.stitching = false
       }
     }
-    if (this.liveBuffer.length > 0) {
+    if (this.liveBuffer.length > 0 && generation === this.generation) {
+      // Reopen from the tail rather than drop what arrived (FIX-03).
       this.warn(`gap repair gave up with ${this.liveBuffer.length} buffered`)
-      this.liveBuffer = []
+      await this.resync()
     }
   }
 

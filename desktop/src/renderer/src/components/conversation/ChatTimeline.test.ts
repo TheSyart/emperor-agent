@@ -139,8 +139,9 @@ describe('ChatTimeline over the recorded kernel log', () => {
       else reject(new Error('history offline'))
       await settle()
       expect(root.querySelector('[aria-busy="true"]')).toBeNull()
+      // FIX-03: the message, then 重试.
       expect(
-        root.querySelector('[role="alert"]')?.textContent?.trim() ?? '',
+        root.querySelector('[role="alert"] span')?.textContent?.trim() ?? '',
       ).toBe(outcome === 'reject' ? '会话记录读取失败：history offline' : '')
     },
   )
