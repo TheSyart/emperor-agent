@@ -297,3 +297,18 @@ it('a run that changed nothing leaves an empty result and a Goal can move on', a
     totals: { files: 0 },
   })
 })
+
+it('never writes through a folder that became a link in the project', async () => {
+  const f = fixture({ script: writes(CHILD_EDIT) })
+  const record = await f.start()
+  const run = await f.settle(record.id)
+  const { renameSync, symlinkSync, mkdirSync } = await import('node:fs')
+  const outside = join(f.root, 'outside')
+  mkdirSync(outside)
+  renameSync(join(f.repo, 'src'), join(outside, 'src'))
+  symlinkSync(join(outside, 'src'), join(f.repo, 'src'))
+  const outcome = await f.service.applyResult(record.id, run.id, 'user')
+  expect(outcome.state).toBe('conflicted')
+  expect(outcome.conflicts).toEqual(['src/a.txt', 'src/new.ts'])
+  expect(existsSync(join(outside, 'src', 'new.ts'))).toBe(false)
+})

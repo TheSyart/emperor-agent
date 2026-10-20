@@ -305,6 +305,12 @@ export class DelegationResults {
         const present: string[] = []
         const local = (path: string) => join(side.root, path)
         for (const entry of entries) {
+          // Never write through a link: a folder on the way that became one
+          // (or anything not a regular file) is the user's to sort out.
+          if (linkedParent(side.root, entry.path)) {
+            conflicts.push(entry.path)
+            continue
+          }
           let stat
           try {
             stat = lstatSync(local(entry.path))
@@ -682,6 +688,22 @@ function unprefixed(side: Side, paths: string[]): string[] {
       ? path.slice(side.prefix.length)
       : path,
   )
+}
+
+/** A folder on the way to `path` is a link (or not a folder). */
+function linkedParent(root: string, path: string): boolean {
+  const parts = path.split('/').slice(0, -1)
+  let current = root
+  for (const part of parts) {
+    current = join(current, part)
+    try {
+      const stat = lstatSync(current)
+      if (stat.isSymbolicLink() || !stat.isDirectory()) return true
+    } catch {
+      return false
+    }
+  }
+  return false
 }
 
 function install(path: string, from: string, mode: string): void {
