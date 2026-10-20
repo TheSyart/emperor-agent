@@ -6,7 +6,8 @@
  * says where it came from (手动 / 官方接口 / 内置目录 / 推断). The connection
  * is read-only here — its 「编辑地址」 opens the card's dialog, and the key
  * is changed for the whole connection from the card's 「⋯」. 温度 and 单价
- * wait behind 「高级」.
+ * wait behind 「高级」, with 接口 for a DeepSeek entry on the official host
+ * (Messages by default, chat-completions as the fallback; KRN-07).
  *
  * Saving sends only the model's own fields (`model.saveEntry`), the
  * temperature as `sampling`, and the fields the user changed as
@@ -42,14 +43,17 @@ import {
   CAPABILITY_OPTIONS,
   CAPABILITY_ROWS,
   INPUT_TOKEN_PRESETS,
+  INTERFACE_OPTIONS,
   OUTPUT_TOKEN_PRESETS,
-  PROTOCOL_LABELS,
   capabilityControlValue,
   capabilityStatus,
+  deepseekInterface,
+  entryInterfaceLabel,
   formatTokenCount,
   formatTokenPreset,
   modelEntryLabel,
   reasoningChoices,
+  reasoningHint,
   type CapabilityControl,
 } from './modelFormModel'
 import { hostOf, keyTail, valueSource } from './modelListModel'
@@ -75,6 +79,8 @@ interface Draft {
   temperature: string
   /** USD per million tokens as typed; empty means unknown. */
   pricing: Record<keyof ModelPricing, string>
+  /** '' = the provider's default interface (KRN-07). */
+  transport: '' | 'chat-completions'
 }
 
 function priceText(value: number | undefined): string {
@@ -111,6 +117,7 @@ function draftOf(entry: ModelEntry): Draft {
         entry.pricing?.cacheWriteUsdPerMillionTokens,
       ),
     },
+    transport: entry.transport ?? '',
   }
 }
 
@@ -126,15 +133,23 @@ const error = ref('')
 const root = ref<HTMLElement | null>(null)
 
 const label = computed(() => modelEntryLabel(props.entry))
-useDirtyGuard(label, () => !saving.value && changedFields().length > 0)
+useDirtyGuard(
+  label,
+  () =>
+    !saving.value &&
+    (changedFields().length > 0 || draft.value.transport !== opened.transport),
+)
 
 const provider = computed(() =>
   props.providerOptions.find((item) => item.name === props.entry.provider),
 )
+/** A DeepSeek entry on the official host can pick its interface. */
+const interfaceChoice = computed(() => deepseekInterface(props.entry) !== null)
+const effortHint = computed(() => reasoningHint(props.entry))
 const connection = computed(() =>
   [
     providerDisplayName(props.entry.provider, provider.value),
-    PROTOCOL_LABELS[props.entry.protocol],
+    entryInterfaceLabel(props.entry),
     hostOf(props.entry.apiBase),
     keyTail([props.entry]),
   ]
@@ -294,6 +309,8 @@ function saveInput(): ModelEntrySaveInput {
   }
   if (now.temperature.trim() !== openedTemperature && temperature !== 'invalid')
     input.sampling = { temperature }
+  if (now.transport !== opened.transport)
+    input.transport = now.transport || null
   const locked = changedFields()
   if (locked.length) input.lockFields = locked
   return input
@@ -407,7 +424,7 @@ onMounted(() => {
       </Field>
     </div>
 
-    <Field label="思考强度">
+    <Field label="思考强度" :hint="effortHint">
       <Select
         v-model="draft.reasoningEffort"
         :options="reasoningOptions"
@@ -446,6 +463,13 @@ onMounted(() => {
       高级
     </button>
     <div v-if="advanced" :id="`${uid}-advanced`" class="advanced">
+      <Field
+        v-if="interfaceChoice"
+        label="接口"
+        hint="DeepSeek 官方地址默认走 Anthropic Messages；只有它出问题时才切回 Chat Completions"
+      >
+        <Select v-model="draft.transport" :options="INTERFACE_OPTIONS" block />
+      </Field>
       <Field
         label="温度"
         :hint="

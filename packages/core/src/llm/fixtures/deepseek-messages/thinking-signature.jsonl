@@ -1,0 +1,22 @@
+{"kind":"note","text":"Turn 1 streams a thinking block whose signature arrives as signature_delta; turn 2 must replay that thinking block with the signature byte for byte. Hand-written (Anthropic Messages streaming: thinking_delta / signature_delta; thinking blocks are supported on https://api-docs.deepseek.com/guides/anthropic_api), not recorded."}
+{"kind":"request","method":"POST","url":"https://api.deepseek.com/anthropic/v1/messages"}
+{"kind":"response","status":200,"headers":{"content-type":"text/event-stream"}}
+{"kind":"sse","event":"message_start","data":{"type":"message_start","message":{"id":"msg_sig_1","type":"message","role":"assistant","model":"deepseek-flash","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":40,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}}
+{"kind":"sse","event":"content_block_start","data":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}}
+{"kind":"sse","event":"content_block_delta","data":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"2 加 2，"}}}
+{"kind":"sse","event":"content_block_delta","data":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"等于 4。"}}}
+{"kind":"sse","event":"content_block_delta","data":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EqQBCkgIBhABGAIiQHx9+/ds=="}}}
+{"kind":"sse","event":"content_block_stop","data":{"type":"content_block_stop","index":0}}
+{"kind":"sse","event":"content_block_start","data":{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}}
+{"kind":"sse","event":"content_block_delta","data":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"答案是 4。"}}}
+{"kind":"sse","event":"content_block_stop","data":{"type":"content_block_stop","index":1}}
+{"kind":"sse","event":"message_delta","data":{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":20}}}
+{"kind":"sse","event":"message_stop","data":{"type":"message_stop"}}
+{"kind":"request","method":"POST","url":"https://api.deepseek.com/anthropic/v1/messages"}
+{"kind":"response","status":200,"headers":{"content-type":"text/event-stream"}}
+{"kind":"sse","event":"message_start","data":{"type":"message_start","message":{"id":"msg_sig_2","type":"message","role":"assistant","model":"deepseek-flash","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":12,"cache_creation_input_tokens":0,"cache_read_input_tokens":64,"output_tokens":1}}}}
+{"kind":"sse","event":"content_block_start","data":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}
+{"kind":"sse","event":"content_block_delta","data":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"再加 1 是 5。"}}}
+{"kind":"sse","event":"content_block_stop","data":{"type":"content_block_stop","index":0}}
+{"kind":"sse","event":"message_delta","data":{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":8}}}
+{"kind":"sse","event":"message_stop","data":{"type":"message_stop"}}

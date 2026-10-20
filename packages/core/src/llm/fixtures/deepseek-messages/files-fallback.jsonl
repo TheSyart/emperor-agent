@@ -1,0 +1,19 @@
+{"kind":"note","text":"The Files API upload fails (HTTP 503), so the image travels inline as a base64 image source and the request carries no anthropic-beta header; the next request within the back-off goes inline without trying the upload again. Hand-written from https://api-docs.deepseek.com/guides/vision (Anthropic image sources base64 / file) and https://api-docs.deepseek.com/quick_start/error_codes (503), not recorded."}
+{"kind":"request","method":"POST","url":"https://api.deepseek.com/files"}
+{"kind":"response","status":503,"json":{"error":{"message":"Server overloaded, please retry later","type":"server_error","code":"service_unavailable"}}}
+{"kind":"request","method":"POST","url":"https://api.deepseek.com/anthropic/v1/messages"}
+{"kind":"response","status":200,"headers":{"content-type":"text/event-stream"}}
+{"kind":"sse","event":"message_start","data":{"type":"message_start","message":{"id":"msg_inline_1","type":"message","role":"assistant","model":"deepseek-flash","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":300,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}}
+{"kind":"sse","event":"content_block_start","data":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}
+{"kind":"sse","event":"content_block_delta","data":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"一个红点。"}}}
+{"kind":"sse","event":"content_block_stop","data":{"type":"content_block_stop","index":0}}
+{"kind":"sse","event":"message_delta","data":{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5}}}
+{"kind":"sse","event":"message_stop","data":{"type":"message_stop"}}
+{"kind":"request","method":"POST","url":"https://api.deepseek.com/anthropic/v1/messages"}
+{"kind":"response","status":200,"headers":{"content-type":"text/event-stream"}}
+{"kind":"sse","event":"message_start","data":{"type":"message_start","message":{"id":"msg_inline_2","type":"message","role":"assistant","model":"deepseek-flash","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":20,"cache_creation_input_tokens":0,"cache_read_input_tokens":300,"output_tokens":1}}}}
+{"kind":"sse","event":"content_block_start","data":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}
+{"kind":"sse","event":"content_block_delta","data":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"好的。"}}}
+{"kind":"sse","event":"content_block_stop","data":{"type":"content_block_stop","index":0}}
+{"kind":"sse","event":"message_delta","data":{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":3}}}
+{"kind":"sse","event":"message_stop","data":{"type":"message_stop"}}

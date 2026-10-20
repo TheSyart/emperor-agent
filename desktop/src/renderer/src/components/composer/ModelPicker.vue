@@ -31,7 +31,11 @@ const props = defineProps<{
   label: string
   reasoningLabel: string
   reasoningValue: string
-  reasoningOptions: Array<{ value: string | null; label: string }>
+  reasoningOptions: Array<{
+    value: string | null
+    label: string
+    description?: string
+  }>
   providerOptions: readonly ProviderOption[]
   disabled?: boolean
   title?: string
@@ -253,6 +257,7 @@ function onKeydown(event: KeyboardEvent): void {
           <MenuItem
             v-for="option in reasoningOptions"
             :key="option.label"
+            :description="option.description"
             :selected="effortSelected(option.value)"
             :disabled="disabled"
             @select="emit('select-reasoning', option.value)"
