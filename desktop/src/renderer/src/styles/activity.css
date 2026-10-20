@@ -70,7 +70,7 @@
   flex: none;
   width: 0.875em;
   height: 0.875em;
-  background-color: rgb(var(--text-1) / var(--text-tertiary));
+  background-color: rgb(var(--text-3));
   -webkit-mask: var(--md-link-ico) center / contain no-repeat;
   mask: var(--md-link-ico) center / contain no-repeat;
 }
@@ -112,7 +112,7 @@
 .markdown-body blockquote {
   @apply border-l-2 py-1 pl-4;
   border-color: rgb(var(--stroke-solid-strong));
-  color: rgb(var(--text-1) / var(--text-secondary));
+  color: rgb(var(--text-2));
 }
 
 .markdown-body code {

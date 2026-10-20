@@ -219,7 +219,7 @@ function noteOf(entry: TurnFileEntry): string {
 
 .file:hover,
 .file.active {
-  background: rgb(var(--text-1) / var(--hover-bg-a));
+  background: var(--surface-hover);
 }
 
 .path {

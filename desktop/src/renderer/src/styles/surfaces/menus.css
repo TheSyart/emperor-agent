@@ -38,7 +38,7 @@
   justify-content: space-between;
   gap: var(--space-3);
   padding: 0 var(--space-2) var(--space-1);
-  color: rgb(var(--text-1) / var(--text-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
 }
 
@@ -59,7 +59,7 @@
 
 .composer-palette-label {
   padding: var(--space-1) var(--space-2) var(--space-1);
-  color: rgb(var(--text-1) / var(--text-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxxs);
 }
 
@@ -95,12 +95,12 @@
   width: 18px;
   height: 18px;
   place-items: center;
-  color: rgb(var(--text-1) / var(--text-secondary));
+  color: rgb(var(--text-2));
 }
 
 /* A plugin that cannot be referenced now: greyed; selecting it opens its detail. */
 .composer-palette-item[data-unavailable] strong {
-  color: rgb(var(--text-1) / var(--text-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .composer-palette-item[data-unavailable] .composer-palette-item-icon {
@@ -123,7 +123,7 @@
 .composer-palette-item > span:not(.composer-palette-item-icon) {
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--text-1) / var(--text-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: 1.25;
   text-overflow: ellipsis;
@@ -136,7 +136,7 @@
   border: 1px solid rgb(var(--stroke-solid));
   border-radius: var(--r-sm);
   padding: 1px var(--space-2);
-  color: rgb(var(--text-1) / var(--text-tertiary));
+  color: rgb(var(--text-3));
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: var(--fs-xxxs);
   font-weight: 500;
@@ -149,7 +149,7 @@
   max-width: 92px;
   border: 0;
   padding: 0;
-  color: rgb(var(--text-1) / var(--text-tertiary));
+  color: rgb(var(--text-3));
   font-family: inherit;
   font-size: var(--fs-xxxs);
   font-weight: 400;

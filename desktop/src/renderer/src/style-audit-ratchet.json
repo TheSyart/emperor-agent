@@ -472,14 +472,12 @@
       "components/ui/Toast.vue": 2,
       "components/ui/ToastStack.vue": 2,
       "components/workspace/BrowserPane.vue": 4,
-      "components/workspace/TurnReviewView.vue": 1,
-      "styles.css": 2,
+      "styles.css": 1,
       "styles/a11y.css": 12,
-      "styles/activity.css": 2,
       "styles/dsh/animations.css": 2,
       "styles/materials.css": 9,
-      "styles/panels.css": 8,
-      "styles/surfaces/menus.css": 8,
+      "styles/panels.css": 7,
+      "styles/surfaces/menus.css": 1,
       "theme/components.css": 34,
       "theme/primitives.css": 25
     }
