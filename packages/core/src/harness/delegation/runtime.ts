@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -8,7 +9,7 @@ import {
   unlinkSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import {
   DelegationError,
   ExecutorAuthError,
@@ -30,6 +31,11 @@ import {
   type CodexAuthLink,
 } from './codex-auth'
 import type { LoginShellEnvironment } from './login-shell'
+import {
+  DEFAULT_DEVELOPMENT_ENVIRONMENT,
+  developmentEnvironment,
+  type DevelopmentEnvironmentSettings,
+} from './dev-environment'
 import type { SecretSealer } from '../../security/secret-sealer'
 /** The one long-lived private directory every login probe of a profile reuses. */
 export const PROBE_RUNTIME_ID = 'probe'
@@ -83,6 +89,13 @@ export class ExecutorRuntimeService {
       loginShell?: LoginShellEnvironment
       /** Where tokens pasted into 设置 › 子智能体 live (AGT-02), read first. */
       claudeTokens?: { root: string; sealer: SecretSealer }
+      /** What a task's environment passes through (设置 › 子智能体 › 高级, AGT-08). */
+      developmentEnvironment?: () => DevelopmentEnvironmentSettings
+      /** Test hooks: the git identity and gh token readers. */
+      readGitIdentity?: (
+        home: string,
+      ) => Promise<{ name?: string; email?: string }>
+      readGhToken?: (home: string) => Promise<string | null>
     },
   ) {}
   /**
@@ -371,6 +384,48 @@ export class ExecutorRuntimeService {
         : codexAuth
           ? 'subscription'
           : 'api'
+    // The task's development environment (AGT-08): not for the login probe,
+    // which only lists models.
+    if (id !== PROBE_RUNTIME_ID) {
+      const dev = await developmentEnvironment({
+        settings:
+          this.options.developmentEnvironment?.() ??
+          DEFAULT_DEVELOPMENT_ENVIRONMENT,
+        ambient,
+        home: this.options.home ?? homedir(),
+        ...(this.options.loginShell
+          ? { loginShell: this.options.loginShell }
+          : {}),
+        ...(this.options.readGitIdentity
+          ? { readGitIdentity: this.options.readGitIdentity }
+          : {}),
+        ...(this.options.readGhToken
+          ? { readGhToken: this.options.readGhToken }
+          : {}),
+      })
+      for (const key of dev.remove) delete environment[key]
+      Object.assign(environment, dev.env)
+      if (dev.pathPrefix.length)
+        environment.PATH = [...dev.pathPrefix, environment.PATH]
+          .filter(Boolean)
+          .join(delimiter)
+      credentialSecrets.push(...dev.secrets)
+      // Claude Code scrubs *_TOKEN from its Bash (AGT-02), so gh also gets
+      // a private hosts.yml in the task's own config folder; it goes away
+      // with the switch.
+      const ghHosts = join(environment.XDG_CONFIG_HOME!, 'gh', 'hosts.yml')
+      if (dev.env.GH_TOKEN) {
+        mkdirSync(join(environment.XDG_CONFIG_HOME!, 'gh'), {
+          recursive: true,
+          mode: 0o700,
+        })
+        durableReplaceSync(
+          ghHosts,
+          `github.com:\n    oauth_token: ${dev.env.GH_TOKEN}\n    git_protocol: https\n`,
+        )
+        chmodSync(ghHosts, 0o600)
+      } else if (existsSync(ghHosts)) unlinkSync(ghHosts)
+    }
     const secretValues = [
       ...credentialSecrets,
       ...Object.entries(environment)

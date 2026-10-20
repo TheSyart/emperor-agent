@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type {
   Options,
@@ -377,4 +377,28 @@ it('caps an API-billed run with the SDK maxBudgetUsd and leaves a subscription u
     await session.close()
     f.cleanup()
   }
+})
+
+it('6 · a Claude task reads the repository’s CLAUDE.md, without loading its settings (AGT-08)', async () => {
+  const f = fixture()
+  writeFileSync(
+    join(f.root, 'CLAUDE.md'),
+    '# House rules\nAlways run pnpm test.\n',
+  )
+  const session = await f.adapter.open(f.input)
+  const submit = session.submit({
+    runId: 'dgr-claude-md',
+    messageId: 'dgm-claude-md',
+    text: 'fixture',
+  })
+  for await (const event of session.events)
+    if (event.type === 'turn_finished') break
+  await submit
+  const append = JSON.stringify(f.getOptions().systemPrompt)
+  expect(append).toContain('CLAUDE.md')
+  expect(append).toContain('Always run pnpm test.')
+  // Project settings (hooks, permission rules) stay out: only the text.
+  expect(f.getOptions().settingSources).toEqual([])
+  await session.close()
+  f.cleanup()
 })

@@ -118,6 +118,18 @@ export interface ExecutorConfig {
    * they reach the project; 应用到项目 on the result card is refused.
    */
   verifyBeforeApply?: boolean
+  /**
+   * What a task's environment passes through (AGT-08): git identity and
+   * proxies by default; SSH agent, toolchains and GitHub sign-in on request.
+   * Absent: the defaults.
+   */
+  developmentEnvironment?: {
+    gitIdentity: boolean
+    proxy: boolean
+    sshAgent: boolean
+    toolchains: boolean
+    github: boolean
+  }
 }
 export interface ExecutorProbe {
   status:
