@@ -17,6 +17,7 @@ import {
   type SnapshotCodec,
   type SyncPersistenceAdapter,
 } from '../store/persistence'
+import { SESSION_TRASH_DIR } from '../session-log/store'
 
 const VERSION = 1
 /** A session's meta.jsonl is compacted to its latest snapshot past this. */
@@ -85,7 +86,7 @@ export interface TrashedSession {
   deleted_at: string
 }
 
-const TRASH_DIR = '.trash'
+const TRASH_DIR = SESSION_TRASH_DIR
 const TRASH_RECORD = 'trash.json'
 
 export type SessionIndexSource = 'cache' | 'rebuilt'

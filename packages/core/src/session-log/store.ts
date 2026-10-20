@@ -15,6 +15,12 @@
  * damaged line earlier keeps the readable prefix and moves the original to
  * `log.jsonl.corrupt-<ms>`. Only an unreadable header makes a session
  * unrecoverable, and then the file is left exactly as it was.
+ *
+ * A fork child (KRN-12) does not copy its parent's prefix: its header names
+ * the parent, the seed length and the last seed event (`seedRef`), and
+ * opening it reads those events from the parent — live, on disk, or in
+ * `<root>/.trash`. A parent that is gone or no longer holds them makes the
+ * child unrecoverable. Children written before keep their copied prefix.
  */
 
 import {
@@ -45,6 +51,10 @@ import {
 } from './types'
 
 export const LOG_FILE = 'log.jsonl'
+/** Where deleted sessions wait to be purged (SessionStore, FIX-01). */
+export const SESSION_TRASH_DIR = '.trash'
+/** A fork child's parents are followed this deep at most. */
+const MAX_FORK_DEPTH = 64
 export const DEFAULT_WRITE_BATCH_MAX_DELAY_MS = 200
 export const DEFAULT_WRITE_RETRY_DELAY_MS = 2_000
 
@@ -378,6 +388,17 @@ export class SessionLogStore {
     },
     seed?: readonly SessionEvent[],
   ): Session {
+    return this.createSession(header, seed ?? [], false)
+  }
+
+  /** `sharedSeed`: the header refers to the seed, which is not written. */
+  private createSession(
+    header: Omit<SessionHeader, 'version' | 'createdAt'> & {
+      createdAt?: number
+    },
+    seed: readonly SessionEvent[],
+    sharedSeed: boolean,
+  ): Session {
     if (this.has(header.id))
       throw new Error(`session "${header.id}" already exists`)
     const full: SessionHeader = {
@@ -385,15 +406,16 @@ export class SessionLogStore {
       createdAt: header.createdAt ?? Date.now(),
       ...header,
     }
-    const session = new Session(full, seed ?? [], 'seed')
+    const session = new Session(full, seed, 'seed')
     let bytes = 0
     if (this.persist) {
       mkdirSync(this.dir(full.id), { recursive: true })
+      const written = sharedSeed
+        ? session.events.slice(seed.length)
+        : session.events
       const lines = [
         JSON.stringify(headerLine(session.header)),
-        ...packChunkRuns(session.events).map((record) =>
-          JSON.stringify(record),
-        ),
+        ...packChunkRuns(written).map((record) => JSON.stringify(record)),
       ]
       const text = Buffer.from(`${lines.join('\n')}\n`)
       writeFileSync(this.logPath(full.id), text, { mode: 0o600 })
@@ -445,8 +467,10 @@ export class SessionLogStore {
     if (!existsSync(path)) throw new Error(`session "${id}" not found`)
     const buffer = readFileSync(path)
     let parsed: ParsedLog
+    let seed: readonly SessionEvent[]
     try {
       parsed = parseLog(id, buffer)
+      seed = this.sharedSeed(id, parsed.header, 0)
     } catch (error: unknown) {
       if (fix && error instanceof SessionLogUnrecoverableError)
         this.report({
@@ -456,7 +480,11 @@ export class SessionLogStore {
         })
       throw error
     }
-    const session = new Session(parsed.header, parsed.events, 'restore')
+    const session = new Session(
+      parsed.header,
+      seed.length > 0 ? [...seed, ...parsed.events] : parsed.events,
+      'restore',
+    )
     if (parsed.corruptLine === undefined && parsed.tailBytes === 0)
       return { session, bytes: buffer.byteLength }
     if (!fix) {
@@ -467,6 +495,53 @@ export class SessionLogStore {
       return { session, bytes: buffer.byteLength }
     }
     return { session, bytes: this.repairFile(id, path, buffer, parsed) }
+  }
+
+  /**
+   * The parent events a fork child starts from when its log refers to them
+   * (`seedRef`); none for any other session.
+   */
+  private sharedSeed(
+    id: string,
+    header: SessionHeader,
+    depth: number,
+  ): readonly SessionEvent[] {
+    const ref = header.seedRef
+    if (ref === undefined) return []
+    const parentId = header.parentSession ?? ''
+    const length = header.seedLength ?? 0
+    const events =
+      depth < MAX_FORK_DEPTH ? this.eventsOf(parentId, depth + 1) : undefined
+    const last = events?.[length - 1]
+    if (last?.type !== ref.lastType || last.time !== ref.lastTime)
+      throw new SessionLogUnrecoverableError(
+        id,
+        events === undefined
+          ? `its parent session "${parentId}" cannot be read`
+          : `its parent session "${parentId}" no longer holds the ${length} events it was forked from`,
+      )
+    return events!.slice(0, length)
+  }
+
+  /** All events of a fork child's parent (live, stored or trashed), read only. */
+  private eventsOf(
+    id: string,
+    depth: number,
+  ): readonly SessionEvent[] | undefined {
+    const live = this.get(id)
+    if (live) return live.events
+    if (!this.persist || !id || id.startsWith('.') || /[\\/]/.test(id))
+      return undefined
+    const trashed = join(this.options.root, SESSION_TRASH_DIR, id, LOG_FILE)
+    const path = [this.logPath(id), trashed].find((item) => existsSync(item))
+    if (path === undefined) return undefined
+    try {
+      const parsed = parseLog(id, readFileSync(path))
+      const seed = this.sharedSeed(id, parsed.header, depth)
+      return seed.length > 0 ? [...seed, ...parsed.events] : parsed.events
+    } catch {
+      return undefined
+    }
   }
 
   /** Make the file match what was read; returns its new length. */
@@ -778,8 +853,9 @@ export class SessionLogStore {
   }
 
   /**
-   * Fork a live session: copy `events[0..boundary]` as the child's seed.
-   * The boundary must not fall inside an open turn.
+   * Fork a live session: `events[0..boundary]` become the child's seed. The
+   * child's log refers to them instead of copying them (KRN-12). The
+   * boundary must not fall inside an open turn.
    */
   fork(
     sourceId: string,
@@ -834,18 +910,23 @@ export class SessionLogStore {
       }
       seed = prefix
     }
-    return this.create(
+    const last = seed.at(-1)
+    return this.createSession(
       {
         id: childId,
         ...(source.header.cwd === undefined ? {} : { cwd: source.header.cwd }),
         parentSession: source.id,
         seedLength: seed.length,
+        ...(last === undefined
+          ? {}
+          : { seedRef: { lastType: last.type, lastTime: last.time } }),
         ...(options.origin === undefined ? {} : { origin: options.origin }),
         ...(options.delegationDepth === undefined
           ? {}
           : { delegationDepth: options.delegationDepth }),
       },
       seed,
+      last !== undefined,
     )
   }
 }
