@@ -303,6 +303,24 @@ export class Session {
     return this.contextFold
   }
 
+  private cwdFold: string | undefined
+  private cwdFoldSeq = 0
+
+  /**
+   * Where this session's tools work now: the last logged
+   * `working-directory/change` (KRN-11), else the creation `cwd`.
+   */
+  get cwd(): string | undefined {
+    if (this.cwdFoldSeq < this.log.length) {
+      for (const event of this.log.slice(this.cwdFoldSeq)) {
+        if (event.type === 'working-directory/change')
+          this.cwdFold = event.data.to
+      }
+      this.cwdFoldSeq = this.log.length
+    }
+    return this.cwdFold ?? this.header.cwd
+  }
+
   private readonly offloaded = new Set<number>()
   private readonly offloadedMessages = new Map<number, Message>()
   private offloadFoldSeq = 0

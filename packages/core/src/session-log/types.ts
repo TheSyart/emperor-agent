@@ -116,6 +116,13 @@ export type RequestHeaderReason = 'initial' | 'resume' | 'change'
 /** Why an image left the requests: `request-bytes` = over the route's inline image budget. */
 export type ImageOffloadReason = 'request-bytes'
 
+/**
+ * Why a session's working directory moved: it entered or left a managed
+ * worktree, or its binding changed while it was not open (`worktree-resync`).
+ */
+export type WorkingDirectoryChangeReason =
+  'worktree-enter' | 'worktree-exit' | 'worktree-resync'
+
 /** Core event payloads; domains merge more entries in. */
 export interface SessionEventMap {
   'turn/start': { turn: number }
@@ -153,6 +160,16 @@ export interface SessionEventMap {
    * whatever route serves later requests (KRN-05, DSH-13).
    */
   'image/offload': { seq: number; reason: ImageOffloadReason }
+  /**
+   * Where the session's tools work from now on (KRN-11): a managed worktree
+   * it entered, or back to the checkout it left. Last one wins over the
+   * header's `cwd`.
+   */
+  'working-directory/change': {
+    from: string
+    to: string
+    reason: WorkingDirectoryChangeReason
+  }
   /** Marks where a fork's copied seed ends. */
   'session/end-seed': Record<string, never>
 }
