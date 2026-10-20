@@ -813,6 +813,8 @@ export interface DiagnosticsRuntimePaths {
   mcpConfigPath?: string
   runtimeManifestPath?: string
   legacyRuntimeSkillsReceiptPath?: string
+  /** The desktop's log folder (REL-01). */
+  logsRoot?: string
 }
 
 export interface LegacyStateRootInfo {

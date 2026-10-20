@@ -14,6 +14,9 @@ export interface WorkspaceMutationHost {
   ): Promise<T>
 }
 
+/** A write waits this long for a child's workspace before it says so (AGT-06). */
+export const WORKSPACE_WAIT_NOTICE_MS = 10_000
+
 /** Agent tools and trusted Renderer Git actions share one Core-owned queue. */
 export class WorkspaceMutationCoordinator implements WorkspaceMutationHost {
   private readonly tails = new Map<string, Promise<void>>()
@@ -30,6 +33,41 @@ export class WorkspaceMutationCoordinator implements WorkspaceMutationHost {
       { keys: [workspaceMutationDomain(root)], mode: 'shared', owner },
       signal,
     )
+  }
+
+  /**
+   * A main-session write's lease (AGT-06): it waits for an exclusive holder
+   * (a subagent working in the folder itself), ends when `signal` aborts,
+   * and after `noticeMs` tells `onWait` who it waits for; the function
+   * `onWait` returns runs when the wait ends, however it ends.
+   */
+  async acquireWriterWithNotice(
+    root: string,
+    owner: string,
+    options: {
+      signal?: AbortSignal | null
+      keys?: string[]
+      noticeMs?: number
+      onWait?: (blockers: string[]) => (() => void) | void
+    } = {},
+  ): Promise<ResourceLease> {
+    const keys = options.keys ?? [workspaceMutationDomain(root)]
+    let ended: (() => void) | undefined
+    const timer = options.onWait
+      ? setTimeout(() => {
+          const blockers = this.resources.blockers({ keys, mode: 'shared' })
+          if (blockers.length) ended = options.onWait!(blockers) ?? undefined
+        }, options.noticeMs ?? WORKSPACE_WAIT_NOTICE_MS)
+      : undefined
+    try {
+      return await this.resources.acquire(
+        { keys, mode: 'shared', owner },
+        options.signal,
+      )
+    } finally {
+      clearTimeout(timer)
+      ended?.()
+    }
   }
 
   async runExclusive<T>(

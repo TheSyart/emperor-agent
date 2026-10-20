@@ -19,6 +19,7 @@ const {
   readPackagedFuses,
   verifyMacHardening,
 } = require('./harden-package.cjs')
+const { checkStartupLog } = require('./packaged-log-check.cjs')
 
 const desktopRoot = resolve(__dirname, '..')
 const repoRoot = resolve(desktopRoot, '..')
@@ -81,6 +82,9 @@ async function main() {
   const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'))
   validateReceipt(receipt)
   receipt.package = seal
+  // REL-01: the packaged app wrote its startup record to main.log.
+  const log = checkStartupLog(stateRoot)
+  receipt.mainLog = { bytes: log.bytes, startLine: log.startLine }
   const outputDir = join(desktopRoot, 'dist', 'packaged-smoke')
   const outputPath = join(outputDir, `${receipt.platform}-${receipt.arch}.json`)
   mkdirSync(outputDir, { recursive: true })

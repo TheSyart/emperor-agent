@@ -1186,6 +1186,136 @@ export function turnFilesScenario(now = Date.now()): Scenario {
 }
 
 /**
+ * AGT-06: subagent result cards — waiting to be applied, conflicting with
+ * the project, applied (with 撤销), and one left alone for 15 days.
+ */
+export function subagentResultsScenario(now = Date.now()): Scenario {
+  const log = new ShowcaseLog(now - 120_000)
+  const turn = (number: number, prompt: string, reply: string) => {
+    log.user(prompt)
+    log.turnStart(number)
+    log.stepStart(number, 1)
+    log.stream(number, 1, [{ text: reply }])
+    log.stepEnd(number, 1)
+    log.turnEnd(number)
+  }
+  const result = (data: Record<string, unknown>) =>
+    log.add('delegation/result', {
+      backend: 'codex',
+      state: 'ready',
+      at: now - 60_000,
+      ...data,
+    })
+  turn(
+    1,
+    '让 Codex 把登录页重构成响应式，Claude Code 补上测试。',
+    '已经分别派给 Codex 和 Claude Code，它们在各自独立的工作区里改，完成后成果会出现在这里。',
+  )
+  result({
+    delegation_id: 'dlg-login',
+    run_id: 'dgr-login',
+    title: '重构登录页',
+    files: [
+      {
+        path: 'src/login/LoginForm.vue',
+        status: 'modified',
+        additions: 64,
+        deletions: 5,
+      },
+      {
+        path: 'src/login/useLogin.ts',
+        status: 'added',
+        additions: 38,
+        deletions: 0,
+      },
+      {
+        path: 'src/login/login.css',
+        status: 'modified',
+        additions: 12,
+        deletions: 3,
+      },
+      {
+        path: 'src/login/legacy.css',
+        status: 'deleted',
+        additions: 0,
+        deletions: 0,
+      },
+      {
+        path: 'public/login-hero.png',
+        status: 'added',
+        additions: null,
+        deletions: null,
+        binary: true,
+      },
+      { path: 'package.json', status: 'modified', additions: 6, deletions: 0 },
+    ],
+    totals: { files: 6, additions: 120, deletions: 8 },
+  })
+  result({
+    delegation_id: 'dlg-tests',
+    run_id: 'dgr-tests',
+    backend: 'claude-code',
+    title: '补全登录测试',
+    state: 'conflicted',
+    conflicts: ['src/login/LoginForm.vue'],
+    files: [
+      {
+        path: 'src/login/LoginForm.vue',
+        status: 'modified',
+        additions: 3,
+        deletions: 1,
+      },
+      {
+        path: 'tests/login.spec.ts',
+        status: 'added',
+        additions: 42,
+        deletions: 0,
+      },
+    ],
+    totals: { files: 2, additions: 45, deletions: 1 },
+  })
+  turn(2, '文档也顺手更新一下。', 'Codex 改好了文档，我已经帮你应用到项目里。')
+  result({
+    delegation_id: 'dlg-docs',
+    run_id: 'dgr-docs',
+    title: '更新登录文档',
+    state: 'applied',
+    by: 'model',
+    undoable: true,
+    files: [
+      {
+        path: 'docs/login.md',
+        status: 'modified',
+        additions: 18,
+        deletions: 6,
+      },
+      { path: 'README.md', status: 'modified', additions: 2, deletions: 1 },
+    ],
+    totals: { files: 2, additions: 20, deletions: 7 },
+  })
+  result({
+    delegation_id: 'dlg-old',
+    run_id: 'dgr-old',
+    title: '清理旧脚本',
+    at: now - 15 * 86_400_000,
+    files: [
+      {
+        path: 'scripts/old-build.sh',
+        status: 'deleted',
+        additions: 0,
+        deletions: 24,
+      },
+    ],
+    totals: { files: 1, additions: 0, deletions: 24 },
+  })
+  return {
+    id: 'subagent-results',
+    label: '子智能体成果',
+    sessions: [{ id: 'subagent-results', events: log.events }],
+  }
+}
+
+/**
  * DSH-23: the model is writing an `edit` call — the file name is complete,
  * the replacement is still arriving (the replay stops mid-arguments).
  */
@@ -1326,6 +1456,7 @@ export const SCENARIO_BUILDERS: Record<string, (now: number) => Scenario> = {
   long: longScenario,
   links: linksScenario,
   'turn-files': turnFilesScenario,
+  'subagent-results': subagentResultsScenario,
   preparing: preparingScenario,
   'long-process': longProcessScenario,
   typography: typographyScenario,

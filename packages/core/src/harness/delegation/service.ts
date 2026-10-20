@@ -17,6 +17,7 @@ import {
   type ExecutorBilling,
   type ExecutorRunUsage,
   type ExternalBackend,
+  type DelegationResult,
 } from './types'
 import { defaultExecutorConfig } from './config'
 import { ExecutorFactsStore } from './facts'
@@ -40,6 +41,7 @@ import type {
 } from './interactions'
 import type { ExecutorRegistry } from './registry'
 import type { DelegationWorkspaceService } from '../../workspace/delegation-workspaces'
+import type { DelegationResults } from '../../workspace/delegation-results'
 import {
   workspaceMutationDomain,
   type WorkspaceMutationCoordinator,
@@ -70,6 +72,15 @@ export interface DelegationServiceOptions {
   workspaces: Pick<
     DelegationWorkspaceService,
     'prepare' | 'retain' | 'get' | 'release'
+  > &
+    Partial<Pick<DelegationWorkspaceService, 'retire'>>
+  /**
+   * A write run's result (AGT-06): recorded when it settles, applied to
+   * the project as a three-way merge, undone, discarded, cleaned up.
+   */
+  results?: Pick<
+    DelegationResults,
+    'collect' | 'apply' | 'undo' | 'diff' | 'cleanup' | 'forget'
   >
   mutations: WorkspaceMutationCoordinator
   runtime: (
@@ -184,6 +195,7 @@ export class DelegationService {
   >()
   private readonly rootEpochs = new Map<string, number>()
   private readonly goalProofs = new Map<string, string>()
+  private readonly resultLocks = new Map<string, Promise<unknown>>()
   readonly facts: ExecutorFactsStore
   private shutdownPromise?: Promise<void>
   private disposed = false
@@ -823,6 +835,13 @@ export class DelegationService {
     const key = JSON.stringify([rootSessionId, goal.id]),
       proof = this.goalProof(goal, rootSessionId)
     this.goalProofs.delete(key)
+    // 高级 › 验证后再应用: every result goes through its receipt (AGT-06).
+    let verifyFirst = false
+    try {
+      verifyFirst = this.options.config().verifyBeforeApply === true
+    } catch {
+      /* an unreadable configuration keeps the default */
+    }
     for (const state of this.requiredForGoal(goal, rootSessionId)) {
       const record = state.record!,
         run = record.currentRunId ? state.runs[record.currentRunId] : undefined
@@ -835,11 +854,24 @@ export class DelegationService {
         continue
       // Marked as ended by the user (or the model, with approval): disposed.
       if (run?.abandoned && TERMINAL_RUN_PHASES.has(run.phase)) continue
-      const resultOnly =
-        run?.receiptId &&
-        run.acceptance === 'unverified' &&
-        this.options.deliveryRequiresAcceptance?.(run.receiptId, record) ===
-          false
+      // Its result was applied (or undone, or discarded) by a decision: disposed (AGT-06).
+      if (
+        run?.result &&
+        run.phase === 'completed' &&
+        ['applied', 'reverted', 'discarded'].includes(run.result.state)
+      )
+        continue
+      // A text result: a review, or a run that changed no file (AGT-06);
+      // a run with a receipt (验证后再应用) keeps the receipt's say.
+      const resultOnly = run?.receiptId
+        ? run.acceptance === 'unverified' &&
+          this.options.deliveryRequiresAcceptance?.(run.receiptId, record) ===
+            false
+        : !!run &&
+          !verifyFirst &&
+          (run.result
+            ? run.result.totals.files === 0
+            : record.startSpec?.workspace === 'shared-readonly')
       if (
         !run ||
         record.availability === 'needs_recovery' ||
@@ -856,7 +888,7 @@ export class DelegationService {
       )
         throw new DelegationError(
           'REQUIRED_DELEGATION_UNVERIFIED',
-          `required delegation ${record.id} has no current host acceptance or settled text result; inspect its outcome and check file deliverables before delivery`,
+          `required delegation ${record.id} has no current host acceptance or settled text result; apply or discard its result (collect_agent apply=true asks the user), or check its file deliverables before delivery`,
         )
     }
     if (this.goalProof(goal, rootSessionId) !== proof)
@@ -1499,6 +1531,8 @@ export class DelegationService {
           workspace: spec.workspace,
           base: spec.base,
           readOnly: record.effectivePermission === 'read-only',
+          // Stopping the run ends its wait for the workspace (AGT-06).
+          signal: controller.signal,
         })
         await this.serial(e, () =>
           this.append(e, {
@@ -1986,6 +2020,7 @@ export class DelegationService {
             await this.append(e, { ...interaction, state: 'cancelled' })
       })
       if (quiescent && settledPhase !== 'outcome_unknown') {
+        await this.collectResult(e, activeRunId)
         try {
           await this.options.onSettled?.(id, activeRunId)
         } catch {
@@ -2275,6 +2310,258 @@ export class DelegationService {
         ...(acceptanceId ? { acceptanceId } : {}),
       }),
     )
+  }
+  /** A settled run's result, from its workspace (AGT-06). Best effort. */
+  private async collectResult(e: Entry, runId: string): Promise<void> {
+    const record = e.journal.load().record!
+    if (!this.options.results || !record.workspaceLeaseId) return
+    try {
+      const lease = this.options.workspaces.get(record.workspaceLeaseId)
+      const result = await this.options.results.collect(lease, runId)
+      if (result)
+        await this.serial(e, () =>
+          this.append(e, { type: 'run-result', runId, result }),
+        )
+    } catch {
+      // The files stay in the run's workspace; the card just does not show.
+    }
+  }
+  private resultOf(id: string, runId: string) {
+    const e = this.entry(id),
+      state = e.journal.load(),
+      record = state.record!,
+      run = state.runs[runId]
+    if (!run)
+      throw new DelegationError('RUN_NOT_FOUND', 'run does not belong here')
+    if (!run.result || run.result.totals.files === 0)
+      throw new DelegationError(
+        'NOTHING_TO_APPLY',
+        'this run left no changed files',
+      )
+    if (!this.options.results)
+      throw new DelegationError(
+        'EXECUTOR_UNAVAILABLE',
+        'results are not composed',
+      )
+    return { e, record, run, result: run.result, results: this.options.results }
+  }
+  private async recordResult(
+    e: Entry,
+    runId: string,
+    result: DelegationResult,
+  ): Promise<DelegationResult> {
+    await this.serial(e, () =>
+      this.append(e, { type: 'run-result', runId, result }),
+    )
+    return e.journal.load().runs[runId]!.result!
+  }
+  /**
+   * The result's worktree (or copy) and private refs go, its lease is
+   * released and the conversation closes: nothing is left to continue in.
+   */
+  private async retireWorkspace(e: Entry, keepUndo: boolean): Promise<void> {
+    const state = e.journal.load(),
+      record = state.record!
+    const runs = Object.values(state.runs)
+    try {
+      const lease = this.options.workspaces.get(record.workspaceLeaseId)
+      await this.options.results?.cleanup(lease, {
+        keepUndo,
+        // What the 高级 › 验证后再应用 chain left: patch snapshots and
+        // integration previews of this conversation's runs.
+        refs: runs.flatMap((run) =>
+          run.receiptId
+            ? [`refs/emperor/delegations/${run.receiptId}/base`]
+            : [],
+        ),
+        worktrees: runs.flatMap((run) =>
+          run.integrationPreviewId
+            ? [
+                join(
+                  this.options.root,
+                  'integrations',
+                  run.integrationPreviewId,
+                  'workspace',
+                ),
+              ]
+            : [],
+        ),
+      })
+      this.options.workspaces.retire?.(lease.id)
+    } catch {
+      /* the lease intent keeps the paths known */
+    }
+    if (e.journal.load().record!.availability !== 'closed')
+      await this.serial(e, () =>
+        this.append(e, { type: 'availability', availability: 'closed' }),
+      )
+  }
+  /**
+   * 应用到项目 (AGT-06): a three-way merge of the result into the current
+   * workspace. A conflict writes nothing and keeps the result; otherwise
+   * the result's worktree and refs go and only its undo record stays.
+   */
+  applyResult(
+    id: string,
+    runId: string,
+    by: 'user' | 'model',
+  ): Promise<DelegationResult> {
+    return this.underResultLock(id, () => this.applyNow(id, runId, by))
+  }
+  /**
+   * One decision about a delegation's result at a time (a click and the
+   * model's collect_agent may race): each reads the state it acts on
+   * inside the lock.
+   */
+  private underResultLock<T>(id: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.resultLocks.get(id) ?? Promise.resolve()
+    const next = previous.catch(() => undefined).then(task)
+    const tail = next.catch(() => undefined)
+    this.resultLocks.set(id, tail)
+    void tail.then(() => {
+      if (this.resultLocks.get(id) === tail) this.resultLocks.delete(id)
+    })
+    return next
+  }
+  private async applyNow(
+    id: string,
+    runId: string,
+    by: 'user' | 'model',
+  ): Promise<DelegationResult> {
+    const { e, record, result, results } = this.resultOf(id, runId)
+    if (this.options.config().verifyBeforeApply)
+      throw new DelegationError(
+        'VERIFY_BEFORE_APPLY',
+        '验证后再应用 is on: check the result in its task details before applying it',
+      )
+    if (record.currentRunId !== runId)
+      throw new DelegationError(
+        'STALE_RUN',
+        'a later run of this task replaced this result',
+      )
+    if (result.state !== 'ready' && result.state !== 'conflicted')
+      throw new DelegationError(
+        'RESULT_SETTLED',
+        'this result was already ' + result.state,
+      )
+    if (e.active)
+      throw new DelegationError('ACTIVE_RUN', 'the task is still running')
+    const lease = this.options.workspaces.get(record.workspaceLeaseId)
+    const outcome = await results.apply(lease, result, {
+      sessionId: record.owner.rootSessionId,
+      runId,
+    })
+    const changedAt = Date.now()
+    if (outcome.state === 'conflicted')
+      return this.recordResult(e, runId, {
+        ...result,
+        state: 'conflicted',
+        conflicts: outcome.conflicts,
+        changedAt,
+        by,
+      })
+    const { conflicts: _old, truncated: _truncated, ...rest } = result
+    const applied = await this.recordResult(e, runId, {
+      ...rest,
+      state: 'applied',
+      files: outcome.files,
+      totals: outcome.totals,
+      ...(outcome.truncated ? { truncated: true as const } : {}),
+      undo: outcome.undo,
+      changedAt,
+      by,
+    })
+    await this.retireWorkspace(e, true)
+    return applied
+  }
+  /** 丢弃 (AGT-06): the result goes, the project is left as it is. */
+  discardResult(
+    id: string,
+    runId: string,
+    by: 'user' | 'model',
+  ): Promise<DelegationResult> {
+    return this.underResultLock(id, () => this.discardNow(id, runId, by))
+  }
+  private async discardNow(
+    id: string,
+    runId: string,
+    by: 'user' | 'model',
+  ): Promise<DelegationResult> {
+    const { e, result } = this.resultOf(id, runId)
+    if (result.state !== 'ready' && result.state !== 'conflicted')
+      throw new DelegationError(
+        'RESULT_SETTLED',
+        'this result was already ' + result.state,
+      )
+    if (e.active)
+      throw new DelegationError('ACTIVE_RUN', 'the task is still running')
+    const discarded = await this.recordResult(e, runId, {
+      ...result,
+      state: 'discarded',
+      changedAt: Date.now(),
+      by,
+    })
+    await this.retireWorkspace(e, false)
+    return discarded
+  }
+  /** 撤销 after 应用到项目 (AGT-06): files nobody changed since go back. */
+  undoResult(id: string, runId: string): Promise<DelegationResult> {
+    return this.underResultLock(id, () => this.undoNow(id, runId))
+  }
+  private async undoNow(id: string, runId: string): Promise<DelegationResult> {
+    const { e, record, result, results } = this.resultOf(id, runId)
+    if (result.state !== 'applied' || !result.undo)
+      throw new DelegationError(
+        'NOTHING_TO_UNDO',
+        'only an applied result can be undone',
+      )
+    const lease = this.options.workspaces.get(record.workspaceLeaseId)
+    const reverted = await results.undo(lease, result, {
+      sessionId: record.owner.rootSessionId,
+    })
+    return this.recordResult(e, runId, {
+      ...result,
+      state: 'reverted',
+      reverted,
+      changedAt: Date.now(),
+    })
+  }
+  /** 查看差异: one file of the result (or of what applying it changed). */
+  async resultDiff(
+    id: string,
+    runId: string,
+    path: string,
+  ): Promise<{ path: string; diff: string; truncated: boolean }> {
+    const { record, result, results } = this.resultOf(id, runId)
+    if (result.state === 'discarded')
+      throw new DelegationError('RESULT_GONE', 'this result was discarded')
+    const lease = this.options.workspaces.get(record.workspaceLeaseId)
+    return results.diff(lease, result, path, record.owner.rootSessionId)
+  }
+  /**
+   * The conversation is deleted for good (AGT-06): every result worktree,
+   * folder copy, private ref and undo record of its subagents goes.
+   */
+  async forgetRoot(rootSessionId: string): Promise<void> {
+    const entries = [...this.entries.values()].filter(
+      (e) => e.journal.load().record?.owner.rootSessionId === rootSessionId,
+    )
+    if (entries.some((e) => e.active)) await this.stopRoot(rootSessionId)
+    for (const e of entries) {
+      const record = e.journal.load().record!
+      if (!record.workspaceLeaseId) continue
+      try {
+        const lease = this.options.workspaces.get(record.workspaceLeaseId)
+        await this.options.results?.forget(lease, rootSessionId)
+        if (!lease.cleaned) this.options.workspaces.retire?.(lease.id)
+      } catch {
+        /* nothing more to remove */
+      }
+      if (e.journal.load().record!.availability !== 'closed')
+        await this.serial(e, () =>
+          this.append(e, { type: 'availability', availability: 'closed' }),
+        )
+    }
   }
   async wait(
     id: string,

@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  crashReporter,
   dialog,
   ipcMain,
   Menu,
@@ -19,6 +20,7 @@ import {
 } from 'electron'
 import { execFile } from 'node:child_process'
 import * as fs from 'node:fs'
+import * as os from 'node:os'
 import { userInfo } from 'node:os'
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -29,8 +31,19 @@ import {
   loadBundledToolCatalog,
   localSecretKeyPath,
   sealerFromSecretStore,
+  setCoreLogSink,
   type SecretSealer,
 } from '@emperor/core/host-capabilities'
+import { resolveLogLocation } from './logging/log-location'
+import { createAppLog, logLevelOf, teeConsole } from './logging/app-log'
+import { installProcessErrorHandlers } from './logging/process-errors'
+import { startCrashReporting } from './logging/crash-reporting'
+import { DiagnosticsBundles } from './diagnostics-bundle'
+import {
+  exportDiagnosticsBundle,
+  registerDiagnosticsBundleIpc,
+} from './diagnostics-bundle-ipc'
+import { electronFrameworkBinary, readFuseStates } from './fuse-state'
 
 import { offerMoveToApplications } from './app-location'
 import { resolveConfig } from './config'
@@ -210,6 +223,54 @@ if (debugSwitch) {
 // bundle audit hold the code to it.
 app.commandLine.appendSwitch('use-mock-keychain')
 let config = resolveConfig({ argv: mainArgv, env: process.env })
+// REL-01: main.log, core.log (5 MB × 5, redacted) and Crashpad dumps in
+// ~/Library/Logs/Emperor Agent; with EMPEROR_CONFIG_DIR in `<home>/logs`.
+const logLocation = resolveLogLocation({
+  stateRoot: config.stateRoot,
+  stateRootSource: config.stateRootSource,
+  homeDir: os.homedir(),
+  platform: process.platform,
+  // Only asked off macOS: getPath('logs') creates its default folder.
+  ...(process.platform === 'darwin' ? {} : { systemLogs: app.getPath('logs') }),
+})
+app.setAppLogsPath(logLocation.dir)
+const logLevel = logLevelOf(process.env.EMPEROR_LOG_LEVEL)
+const mainLog = createAppLog({ file: logLocation.mainLog, level: logLevel })
+const coreLog = createAppLog({ file: logLocation.coreLog, level: logLevel })
+teeConsole(console, mainLog)
+setCoreLogSink((line) => coreLog.write(line.level, line.msg, line.fields))
+installProcessErrorHandlers({ process, log: mainLog })
+const crashReporting = startCrashReporting({
+  dir: logLocation.crashDumps,
+  app,
+  crashReporter,
+})
+mainLog.info(`Emperor Agent ${app.getVersion()} starting`, {
+  packaged: app.isPackaged,
+  electron: process.versions.electron,
+  platform: process.platform,
+  arch: process.arch,
+  pid: process.pid,
+  stateRootSource: config.stateRootSource,
+  logs: logLocation.source,
+})
+if (!crashReporting.ok)
+  mainLog.warn('crash reporting unavailable', { error: crashReporting.error })
+app.on('render-process-gone', (_event, contents, details) => {
+  mainLog.warn('renderer process gone', {
+    kind: contents === mainWindow?.webContents ? 'main' : contents.getType(),
+    reason: details.reason,
+    exitCode: details.exitCode,
+  })
+})
+app.on('child-process-gone', (_event, details) => {
+  mainLog.warn('child process gone', {
+    type: details.type,
+    reason: details.reason,
+    exitCode: details.exitCode,
+    name: details.name ?? details.serviceName ?? null,
+  })
+})
 // MAIN-28: the smoke runs only on a disposable state root under the system
 // temp directory; otherwise exit before anything reads or writes state.
 const smokeLaunch = packagedSmokeLaunch(process.argv, {
@@ -438,6 +499,7 @@ registerOpenPathIpc({
     invalidSkillPaths: (sessionId) =>
       coreApi?.skills.list({ sessionId }).invalid.map((item) => item.path) ??
       [],
+    logsFolder: () => logLocation.dir,
   },
   isDirectory: (target) => {
     try {
@@ -448,6 +510,29 @@ registerOpenPathIpc({
   },
   openPath: (target) => shell.openPath(target),
   showItemInFolder: (target) => shell.showItemInFolder(target),
+})
+
+// REL-01 导出诊断包: staged in a private temp folder, listed for the user,
+// then zipped where they choose (设置 › 诊断 and the recovery page).
+const diagnosticsBundles = new DiagnosticsBundles({
+  sources: {
+    logDir: logLocation.dir,
+    crashDumps: logLocation.crashDumps,
+    stateRoot: config.stateRoot,
+    homeDir: os.homedir(),
+    app: () => diagnosticsAppFacts(),
+    core: () => (coreApi ? coreApi.diagnostics.get({ sessionId: null }) : null),
+    system: () => diagnosticsSystemFacts(),
+  },
+  tempDir: app.getPath('temp'),
+})
+registerDiagnosticsBundleIpc({
+  ipcMain,
+  authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
+  bundles: diagnosticsBundles,
+  chooseTarget: (name) => chooseBundleTarget(name, mainWindow),
+  reveal: (target) => shell.showItemInFolder(target),
+  homeDir: os.homedir(),
 })
 
 // UI-38: a remote markdown image the user clicked, fetched here.
@@ -837,8 +922,9 @@ function fail(title: string, message: string): void {
 
 async function showBootstrapRecovery(error: unknown): Promise<void> {
   runtimeReady = false
-  // The recovery page shows only a code; keep the cause for diagnosis.
-  console.error(`Emperor startup failed: ${errMessage(error)}`)
+  // The recovery page shows only a code; main.log keeps the whole cause
+  // (stack and every `cause`), and the page offers 打开日志 (REL-01).
+  mainLog.error('Emperor startup failed', { error })
   if (coreApi) await coreApi.close().catch(() => {})
   coreApi = null
   if (recoveryWindow && !recoveryWindow.isDestroyed()) recoveryWindow.close()
@@ -848,6 +934,7 @@ async function showBootstrapRecovery(error: unknown): Promise<void> {
   const payload = recoveryPayload(error, {
     emperorHome: config.stateRoot,
     legacyHome,
+    logFile: logLocation.mainLog,
   })
   const ownerApp =
     payload.canSwitch && error instanceof StateDirectoryLockError
@@ -882,9 +969,34 @@ async function showBootstrapRecovery(error: unknown): Promise<void> {
     openPath: (target) => shell.openPath(target),
     exit: () => app.quit(),
     ...(ownerApp ? { switchToOwner: () => activateApp(ownerApp) } : {}),
+    openLogs: () =>
+      shell.openPath(
+        fs.existsSync(logLocation.mainLog)
+          ? logLocation.mainLog
+          : logLocation.dir,
+      ),
+    diagnostics: {
+      prepare: async () => {
+        const bundle = await diagnosticsBundles.prepare()
+        bundleNames.set(bundle.id, bundle.name)
+        return bundle
+      },
+      export: (id) =>
+        exportDiagnosticsBundle({
+          bundles: diagnosticsBundles,
+          id,
+          chooseTarget: (name) => chooseBundleTarget(name, win),
+          homeDir: os.homedir(),
+          name: bundleNames.get(id),
+        }),
+      discard: (id) => diagnosticsBundles.discard(id),
+    },
   })
-  ipcMain.handle(RECOVERY_ACTION_CHANNEL, async (event, action: unknown) =>
-    handle(event.sender.id, action),
+  const bundleNames = new Map<string, string>()
+  ipcMain.handle(
+    RECOVERY_ACTION_CHANNEL,
+    async (event, action: unknown, bundle: unknown) =>
+      handle(event.sender.id, action, bundle),
   )
   win.once('ready-to-show', () => win.show())
   win.on('closed', () => {
@@ -895,6 +1007,109 @@ async function showBootstrapRecovery(error: unknown): Promise<void> {
   await win.loadURL(
     `data:text/html;charset=utf-8,${encodeURIComponent(createRecoveryHtml(payload))}`,
   )
+}
+
+/** The save dialog for a diagnostics bundle (Desktop by default). */
+async function chooseBundleTarget(
+  name: string,
+  owner: BrowserWindow | null,
+): Promise<string | null> {
+  const options: SaveDialogOptions = {
+    title: '导出诊断包',
+    buttonLabel: '导出',
+    defaultPath: path.join(app.getPath('desktop'), name),
+    filters: [{ name: 'Zip', extensions: ['zip'] }],
+    properties: ['createDirectory', 'showOverwriteConfirmation'],
+  }
+  const result =
+    owner && !owner.isDestroyed()
+      ? await dialog.showSaveDialog(owner, options)
+      : await dialog.showSaveDialog(options)
+  return result.canceled || !result.filePath ? null : result.filePath
+}
+
+/** At most `ms` for one status probe of the bundle; its error otherwise. */
+async function boundedProbe<T>(
+  task: Promise<T> | undefined,
+  ms = 3_000,
+): Promise<T | { error: string } | null> {
+  if (!task) return null
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      task.catch((error: unknown) => ({ error: errMessage(error) })),
+      new Promise<{ error: string }>((resolve) => {
+        timer = setTimeout(() => resolve({ error: 'timed out' }), ms)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** app.json of the diagnostics bundle: versions, fuses, helpers, extension. */
+async function diagnosticsAppFacts(): Promise<Record<string, unknown>> {
+  const [fuses, helper, dictationStatus, extension] = await Promise.all([
+    readFuseStates(electronFrameworkBinary(process.execPath)),
+    boundedProbe(nativeDesktop?.status()),
+    boundedProbe(dictation?.status()),
+    boundedProbe(browserExtension?.status()),
+  ])
+  const voice =
+    dictationStatus && !('error' in dictationStatus)
+      ? {
+          available: dictationStatus.available,
+          reason: dictationStatus.reason ?? null,
+          engine: dictationStatus.engine,
+          permissions: dictationStatus.permissions,
+        }
+      : dictationStatus
+  return {
+    app: {
+      name: 'Emperor Agent',
+      version: app.getVersion(),
+      packaged: app.isPackaged,
+      runtimeRevision: packagedRuntimeRevision || 'development',
+      runtimeReady,
+      stateRootSource: config.stateRootSource,
+      uptimeSeconds: Math.round(process.uptime()),
+    },
+    versions: {
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      v8: process.versions.v8,
+    },
+    logs: {
+      location: logLocation.source,
+      level: logLevel,
+      crashReporting: crashReporting.ok ? 'local' : crashReporting.error,
+    },
+    fuses: fuses ?? 'unavailable',
+    helper,
+    dictation: voice,
+    extension,
+    chromeBridge: nmBridge
+      ? { reason: nmBridge.unavailableReason ?? null }
+      : null,
+  }
+}
+
+/** system.json of the diagnostics bundle. */
+function diagnosticsSystemFacts(): Record<string, unknown> {
+  const cpus = os.cpus()
+  return {
+    platform: process.platform,
+    arch: process.arch,
+    osVersion: process.getSystemVersion(),
+    kernel: os.release(),
+    translated: app.runningUnderARM64Translation,
+    cpu: { model: cpus[0]?.model ?? '', count: cpus.length },
+    memory: { totalBytes: os.totalmem(), freeBytes: os.freemem() },
+    locale: app.getLocale(),
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    uptimeSeconds: Math.round(os.uptime()),
+  }
 }
 
 function registerAppProtocol(): void {
@@ -1360,6 +1575,7 @@ async function startup(): Promise<void> {
         terminalHost: new NodePtyHost(),
         terminalEventSink: terminalEventBridge.sink(),
         webFetchClient,
+        logDirectory: logLocation.dir,
         ...(coreSecretSealer ? { secretSealer: coreSecretSealer } : {}),
       },
     })
@@ -1677,6 +1893,7 @@ async function startup(): Promise<void> {
     return
   }
   runtimeReady = true
+  mainLog.info('Core ready; opening the main window')
 
   createWindow()
 }
@@ -1729,7 +1946,7 @@ const coordinateQuit = createQuitCoordinator({
     quittingCore = coreApi
     coreApi?.flushAll()
   },
-  // Shutdown overran 5s: kill child process trees and terminals now (FIX-07).
+  // Shutdown overran 10s: kill child process trees and terminals now (FIX-07, AGT-06).
   onTimeout: () => quittingCore?.forceStop(),
   close: async () => {
     await startupTask
@@ -1751,6 +1968,8 @@ process.once('SIGINT', () => app.quit())
 
 app.on('will-quit', () => {
   dictation?.dispose()
+  diagnosticsBundles.disposeAll()
+  mainLog.info('quit')
 })
 
 /**

@@ -15,7 +15,7 @@ export function settlementNotice(
       ? ' (marked as ended by the user)'
       : " (marked as ended with the user's approval)"
     : ''
-  const text = `External ${record.backend} delegation ${record.id}, run ${run.id}: execution=${run.phase}${ended}; artifact acceptance=${run.acceptance}.\n${run.summary ?? 'No closing summary.'}`
+  const text = `External ${record.backend} delegation ${record.id}, run ${run.id}: execution=${run.phase}${ended}; artifact acceptance=${run.acceptance}.${resultLine(run)}\n${run.summary ?? 'No closing summary.'}`
   const bytes = Buffer.from(text),
     bounded =
       bytes.length <= 8192
@@ -79,5 +79,27 @@ export class DelegationNoticeOutbox {
     parent.wakeInbox()
     await this.options.markDelivered(notice.id)
     return { delivered: true, duplicate: false }
+  }
+}
+/**
+ * What the run left in its isolated workspace (AGT-06), for the parent:
+ * nothing reaches the project until it is applied.
+ */
+export function resultLine(run: DelegationRunRecord): string {
+  const result = run.result
+  if (!result || result.totals.files === 0) return ''
+  const { files, additions, deletions } = result.totals
+  const counts = `${files} ${files === 1 ? 'file' : 'files'} (+${additions} −${deletions})`
+  switch (result.state) {
+    case 'applied':
+      return ` Result: ${counts}, applied to the project.`
+    case 'reverted':
+      return ` Result: ${counts}, applied and then undone by the user.`
+    case 'discarded':
+      return ` Result: ${counts}, discarded.`
+    case 'conflicted':
+      return ` Result: ${counts} in its isolated workspace, not applied: ${result.conflicts?.join(', ') ?? 'some files'} also changed in the project.`
+    default:
+      return ` Result: ${counts} changed in its isolated workspace, not in the project yet. collect_agent with apply=true asks the user to apply them (a three-way merge into the current workspace); the user can also apply or discard them on the result card.`
   }
 }

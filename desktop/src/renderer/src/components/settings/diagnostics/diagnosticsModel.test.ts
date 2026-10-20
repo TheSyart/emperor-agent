@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DiagnosticsPayload } from '../../../types'
 import {
+  OPENABLE_DIAGNOSTIC_PATHS,
   diagnosticCardDescription,
   diagnosticReportText,
   diagnosticRows,
@@ -1045,5 +1046,47 @@ describe('process containment receipts row (SEC-08)', () => {
         containment: { backend: 'seatbelt', available: true, recent: [] },
       }),
     ).toMatchObject({ value: '暂无', tone: 'muted' })
+  })
+})
+
+describe('the log folder in 存储路径 (REL-01)', () => {
+  it('shows where main.log and core.log are, and offers to open it', () => {
+    const sections = diagnosticSections(
+      {
+        root: '/Users/me/app',
+        paths: {
+          runtimeRoot: '/Users/me/app',
+          stateRoot: '/Users/me/.emperor',
+          logsRoot: '/Users/me/Library/Logs/Emperor Agent',
+        },
+      } as DiagnosticsPayload,
+      { app: { service: '在线', model: '', projects: 0 } },
+    )
+    const row = sections
+      .find((section) => section.id === 'paths')
+      ?.rows.find((item) => item.id === 'logs-path')
+    expect(row).toMatchObject({
+      label: '日志',
+      value: '~/Library/Logs/Emperor Agent',
+      path: '/Users/me/Library/Logs/Emperor Agent',
+      tone: 'ok',
+    })
+    expect(row?.detail).toContain('main.log')
+    expect(OPENABLE_DIAGNOSTIC_PATHS.has('logs-path')).toBe(true)
+  })
+
+  it('leaves the row out when the host keeps no log folder', () => {
+    const sections = diagnosticSections(
+      {
+        root: '/r',
+        paths: { runtimeRoot: '/r', stateRoot: '/s' },
+      } as DiagnosticsPayload,
+      { app: { service: '在线', model: '', projects: 0 } },
+    )
+    expect(
+      sections
+        .find((section) => section.id === 'paths')
+        ?.rows.some((item) => item.id === 'logs-path'),
+    ).toBe(false)
   })
 })

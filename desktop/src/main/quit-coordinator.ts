@@ -1,4 +1,9 @@
-export const DEFAULT_QUIT_TIMEOUT_MS = 5_000
+/**
+ * Cmd+Q ends within this, whatever is still closing (AGT-06): long enough
+ * for a stopping subagent's process group (interrupt, then SIGTERM, then
+ * SIGKILL; AGT-04), never longer.
+ */
+export const DEFAULT_QUIT_TIMEOUT_MS = 10_000
 
 /**
  * Keep the process (and its data lock) alive while the writer flushes.

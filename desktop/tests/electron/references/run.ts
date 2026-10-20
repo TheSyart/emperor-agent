@@ -961,7 +961,14 @@ async function observeResources(app: ElectronApplication): Promise<void> {
       if (!original) throw new Error(`missing real IPC handler: ${channel}`)
       originals.set(channel, original)
       handlers.set(channel, async (event, ...args) => {
-        const entry: ResourceOperation = { operation, args }
+        // Core channels carry the call context first (KRN-01); record the
+        // operation's own arguments.
+        const first = args[0] as { emperorCoreCall?: unknown } | undefined
+        const own =
+          channel.startsWith('emperor:core:') && first?.emperorCoreCall === 1
+            ? args.slice(1)
+            : args
+        const entry: ResourceOperation = { operation, args: own }
         observation.operations.push(entry)
         const result = await original(event, ...args)
         if (

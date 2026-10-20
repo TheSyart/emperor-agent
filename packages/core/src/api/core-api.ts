@@ -133,6 +133,7 @@ import {
 } from '../plugins/service'
 import { loadMcpConfig } from '../mcp/config'
 import { logger } from '../util/log'
+import { redactLogText } from '../util/redaction'
 import { EmperorError, OperationRetiredError } from '../errors'
 import {
   CoreSessionApplicationService,
@@ -175,11 +176,13 @@ import { GitOperationReceiptStore } from '../workspace/git-receipts'
 import {
   WorkspaceMutationCoordinator,
   workspaceMutationDomain,
+  WORKSPACE_WAIT_NOTICE_MS,
 } from '../workspace/mutation-coordinator'
 import { HardenedGitRunner } from '../workspace/git-runner'
 import { TurnSnapshots } from '../workspace/turn-snapshots'
 import { DelegationWorkspaceService } from '../workspace/delegation-workspaces'
 import { SnapshotService } from '../workspace/delegation-snapshot'
+import { DelegationResults } from '../workspace/delegation-results'
 import { ExecutorConfigStore } from '../harness/delegation/config'
 import { ExecutorFactsStore } from '../harness/delegation/facts'
 import { CoreExecutorService } from './services/executor-service'
@@ -197,7 +200,11 @@ import type {
   DelegationState,
   DelegationEvent,
 } from '../harness/delegation/fold'
-import type { DelegationProjection } from '../harness/delegation/events'
+import type {
+  DelegationProjection,
+  DelegationResultRecord,
+} from '../harness/delegation/events'
+import { agentTitle } from '../runtime/agent-view'
 
 import { ExecutorRegistry } from '../harness/delegation/registry'
 import { DelegationService } from '../harness/delegation/service'
@@ -256,6 +263,8 @@ export interface CoreApiCreateOptions extends HarnessHostOptions {
   webFetchClient?: WebFetchClient | null
   /** Start the first-run profile interview after a model is configured. */
   enableFirstRunOnboarding?: boolean
+  /** Where the host writes its logs (REL-01); diagnostics show it. */
+  logDirectory?: string | null
   /** Test hook: the GitHub CLI seen by Pull Request, Issue and CI reads. */
   github?: Partial<
     Pick<
@@ -354,6 +363,8 @@ export class CoreApi {
   readonly workspaceReferenceService: WorkspaceReferenceService
   readonly workspaceBindings: WorkspaceBindingStore
   readonly workspaceMutations = new WorkspaceMutationCoordinator()
+  /** How long a write waits for a subagent's workspace before saying so (AGT-06). */
+  workspaceWaitNoticeMs = WORKSPACE_WAIT_NOTICE_MS
   readonly executorConfig: ExecutorConfigStore
   readonly executorFacts: ExecutorFactsStore
   readonly executorRegistry = new ExecutorRegistry()
@@ -813,6 +824,11 @@ export class CoreApi {
         resources: this.workspaceMutations.resources,
       }),
     })
+    const delegationResults = new DelegationResults({
+      root: this.paths.delegationsRoot,
+      runner: turnGit,
+      mutations: this.workspaceMutations,
+    })
     this.delegationRuntime = new DelegationService({
       facts: this.executorFacts,
       root: this.paths.delegationsRoot,
@@ -827,6 +843,7 @@ export class CoreApi {
       ]),
       parent: (owner) => host.delegationParent(owner),
       workspaces: externalWorkspaces,
+      results: delegationResults,
       mutations: this.workspaceMutations,
       runtime: (profile, id) => executorRuntime.prepare(profile, id),
       // AGT-07: API-billed runs priced from the bundled catalog, and their
@@ -878,6 +895,9 @@ export class CoreApi {
       },
       onSettled: async (id, runId) => {
         this.flushDelegationOutput(runId)
+        // The receipt chain reads the whole result; only 高级 › 验证后再应用
+        // collects it when a run ends (AGT-06). Otherwise 收集成果 does.
+        if (this.executorConfig.read().verifyBeforeApply !== true) return
         const receipt = await this.delegationReceipts.collect(runId)
         await this.delegationRuntime.bindReceipt(
           id,
@@ -1025,9 +1045,18 @@ export class CoreApi {
         const keys = [workspaceMutationDomain(root)]
         if (typeof extra === 'string')
           keys.push(workspaceMutationDomain(resolve(root, extra)))
-        return this.workspaceMutations.resources.acquire(
-          { keys, mode: 'shared', owner: call.callId },
-          call.signal,
+        // Waiting on a subagent working in the folder itself: after a while
+        // the conversation says so, with 「停止它」 (AGT-06).
+        return this.workspaceMutations.acquireWriterWithNotice(
+          root,
+          call.callId,
+          {
+            keys,
+            signal: call.signal,
+            noticeMs: this.workspaceWaitNoticeMs,
+            onWait: (blockers) =>
+              this.announceWorkspaceWait(call.agent, call.callId, blockers),
+          },
         )
       },
     })
@@ -1172,6 +1201,8 @@ export class CoreApi {
         host.forgetSessionTree(sessionId, join(dir, LOG_FILE)),
       forgetTurnFiles: (sessionId, projectRoot) =>
         this.turnFiles.forgetSession(sessionId, projectRoot),
+      forgetDelegations: (sessionId) =>
+        this.delegationRuntime.forgetRoot(sessionId),
       stopSession: (sessionId) => {
         host.stop(sessionId)
       },
@@ -1313,6 +1344,7 @@ export class CoreApi {
     })
     this.diagnosticsService = new CoreDiagnosticsService(this.root, {
       runtimePaths: this.paths,
+      logDirectory: opts.logDirectory ?? null,
       legacyStateMigration: kept.legacyStateMigration,
       projectLegacyPrivateData: (view) => {
         const projectPath = this.viewProjectRoot(view)
@@ -1406,7 +1438,9 @@ export class CoreApi {
       await api.environmentService.initialize()
       await api.delegationRuntime.probeProfiles()
       await api.sessionTransitionService.recover()
-      await api.syncPlugins()
+      // Plugin servers connect in the background: the window never waits
+      // for one (KRN-04).
+      await api.syncPlugins({ waitForMcp: false })
       // After the plugins: a run caught up on at launch needs their Hooks.
       await host.startScheduler()
       // 最近删除 keeps a deleted session for 30 days (FIX-01).
@@ -1562,6 +1596,82 @@ export class CoreApi {
       journal_seq: state.lastSeq,
       ...(run ? { task: externalTask(state, run) } : {}),
     })
+    if (event.type === 'run-result')
+      this.appendDelegationResult(state, event.runId)
+  }
+
+  /** The result card's record in the parent's conversation (AGT-06). */
+  private appendDelegationResult(state: DelegationState, runId: string): void {
+    const record = state.record,
+      result = state.runs[runId]?.result
+    if (
+      !record ||
+      !result ||
+      !this.host.kept.sessionStore.get(record.owner.rootSessionId)
+    )
+      return
+    const payload: DelegationResultRecord = {
+      delegation_id: record.id,
+      run_id: runId,
+      ...(record.owner.parentCallId
+        ? { parent_call_id: record.owner.parentCallId }
+        : {}),
+      backend: record.backend,
+      title: agentTitle(record.startSpec?.description, record.backend),
+      state: result.state,
+      files: result.files,
+      totals: result.totals,
+      ...(result.truncated ? { truncated: true as const } : {}),
+      ...(result.conflicts?.length ? { conflicts: result.conflicts } : {}),
+      at: result.at,
+      ...(result.by ? { by: result.by } : {}),
+      ...(result.state === 'applied' && result.undo
+        ? { undoable: true as const }
+        : {}),
+      ...(result.reverted ? { reverted: result.reverted } : {}),
+      ...(this.executorConfig.read().verifyBeforeApply === true
+        ? { verify_first: true as const }
+        : {}),
+    }
+    const parent = this.host.sessionLog(record.owner.parentAgentId)
+    if (parent) {
+      parent.append('delegation/result', payload)
+      this.host.sessions.flush(parent.id)
+    }
+  }
+
+  /**
+   * A main-session write has waited for a subagent's workspace: the
+   * conversation shows 「正在等待子智能体释放工作区 · 停止它」 under the
+   * call until the wait ends (AGT-06).
+   */
+  private announceWorkspaceWait(
+    agent: Agent | undefined,
+    callId: string,
+    blockers: string[],
+  ): (() => void) | undefined {
+    const state = blockers
+      .map((owner) => this.delegationStates.get(owner))
+      .find((candidate) => candidate?.record)
+    if (!state?.record) return undefined
+    const record = state.record
+    // The conversation the waiting call is in.
+    const sessionId = agent?.id ?? record.owner.rootSessionId
+    const base = {
+      event: 'workspace_wait',
+      session_id: sessionId,
+      call_id: callId,
+    }
+    this.host.emitHost({
+      ...base,
+      waiting: true,
+      delegation_id: record.id,
+      ...(record.currentRunId ? { run_id: record.currentRunId } : {}),
+      backend: record.backend,
+      title: agentTitle(record.startSpec?.description, record.backend),
+      owner_session_id: record.owner.rootSessionId,
+    })
+    return () => this.host.emitHost({ ...base, waiting: false })
   }
 
   async bootstrap(opts: { sessionId?: string | null } = {}) {
@@ -1801,6 +1911,14 @@ export class CoreApi {
   readonly mcp = {
     getConfig: () => this.configService.getMcpConfig(),
     status: () => this.host.kept.mcpClient.snapshot(),
+    /** A server's last 200 stderr lines, redacted like the logs (KRN-04); null: not running. */
+    serverLog: (input: { name: string }) => {
+      const text = this.host.kept.mcpClient.serverStderr(input.name)
+      return {
+        name: input.name,
+        text: text === null ? null : redactLogText(text),
+      }
+    },
     saveConfig: async (raw: Dict, view: ViewScope) => {
       // Saving MCP config lets MCPClient spawn servers.*.command; guard it like any mutation.
       this.assertMutation('mcp', 'saveConfig', view)
@@ -3611,9 +3729,11 @@ export class CoreApi {
     return this.pluginService.detail(input, projectRoot)
   }
 
-  private async syncPlugins(): Promise<void> {
+  private async syncPlugins(
+    options: { waitForMcp?: boolean } = {},
+  ): Promise<void> {
     try {
-      await this.pluginActivation.sync()
+      await this.pluginActivation.sync(options)
     } catch (error) {
       logger.warn('plugin activation failed', { error: String(error) })
     }

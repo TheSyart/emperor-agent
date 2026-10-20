@@ -101,6 +101,44 @@ describe('buildMcpServerViews', () => {
     },
   ]
 
+  it('finds the descriptions of a server whose name was cleaned for its tool names', () => {
+    const [view] = buildMcpServerViews(
+      {
+        servers: {
+          'my.server': { transport: 'stdio', enabled: true, command: 'x' },
+        },
+      },
+      {
+        servers: [
+          {
+            serverName: 'my.server',
+            state: 'ready',
+            toolCount: 2,
+            tools: ['search', 'read.file'],
+          },
+        ],
+      },
+      [
+        {
+          name: 'mcp_my_server_search',
+          description: '搜索',
+          source: 'mcp',
+          server: 'my.server',
+        },
+        {
+          name: 'mcp_my_server_read_file',
+          description: '读取',
+          source: 'mcp',
+          server: 'my.server',
+        },
+      ],
+    )
+    expect(view!.tools).toEqual([
+      { name: 'search', description: '搜索' },
+      { name: 'read.file', description: '读取' },
+    ])
+  })
+
   it('joins config, status and tool descriptions per server', () => {
     const [aihot, privateApi, files] = buildMcpServerViews(
       config,

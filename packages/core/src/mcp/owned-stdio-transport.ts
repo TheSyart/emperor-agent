@@ -1,7 +1,6 @@
-import { PassThrough, type Stream } from 'node:stream'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import {
-  ReadBuffer,
+  deserializeMessage,
   serializeMessage,
 } from '@modelcontextprotocol/sdk/shared/stdio.js'
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
@@ -14,7 +13,12 @@ import type { UnsandboxedConsentPort } from '../sandbox/consent'
 import { MCPConnectionError } from './errors'
 import { mcpServerContainment, type McpServerSource } from './containment'
 
-const MCP_STDIO_OUTPUT_QUOTA_BYTES = 8 * 1_024 * 1_024
+/** One message's ceiling; a longer line is dropped, the server lives on. */
+export const MCP_MESSAGE_LIMIT_BYTES = 16 * 1_024 * 1_024
+/** stderr kept for the diagnostics page (the newest bytes). */
+export const MCP_STDERR_RING_BYTES = 256 * 1_024
+/** stdout read per second before reading pauses until the next second. */
+const MCP_STDOUT_RATE_BYTES = 64 * 1_024 * 1_024
 
 export interface OwnedStdioClientTransportOptions {
   runtime: OwnedProcessRuntime
@@ -39,19 +43,32 @@ export interface OwnedStdioClientTransportOptions {
  * and its containment (SEC-08). A refused start fails `start()` with
  * `mcp_sandbox_refused` or, while a user's answer is pending,
  * `mcp_sandbox_consent_required`.
+ *
+ * The child is a long-lived stream (KRN-04): no cumulative output quota.
+ * stdout is framed by line with a per-message ceiling and a read-rate
+ * limit (reading pauses, the process is never killed for volume); stderr
+ * goes to a bounded ring that never blocks the server.
  */
 export class OwnedStdioClientTransport implements Transport {
   onclose?: () => void
   onerror?: (error: Error) => void
   onmessage?: (message: JSONRPCMessage) => void
-  private readonly readBuffer = new ReadBuffer()
-  private readonly stderrStream = new PassThrough()
+  private chunks: Buffer[] = []
+  private pendingBytes = 0
+  /** Inside an oversized line: drop bytes until its newline. */
+  private discarding = false
+  private stderrRing: Buffer[] = []
+  private stderrBytes = 0
+  private windowStart = 0
+  private windowBytes = 0
   private handle: OwnedProcessHandle | null = null
 
   constructor(private readonly opts: OwnedStdioClientTransportOptions) {}
 
-  get stderr(): Stream {
-    return this.stderrStream
+  /** The last `lines` lines the server wrote to stderr (diagnostics). */
+  stderrTail(lines = 200): string {
+    const text = Buffer.concat(this.stderrRing).toString('utf8')
+    return text.split(/\r?\n/).filter(Boolean).slice(-lines).join('\n')
   }
 
   get pid(): number | null {
@@ -84,9 +101,7 @@ export class OwnedStdioClientTransport implements Transport {
         args,
         cwd,
         env: { ...(this.opts.env ?? {}), ...containment.env },
-        maxOutputBytes: MCP_STDIO_OUTPUT_QUOTA_BYTES,
-        outputPolicy: 'terminate',
-        outputQuotaScope: 'combined',
+        stream: 'long-lived',
         owner: {
           kind: 'mcp',
           id: this.opts.serverName,
@@ -126,14 +141,15 @@ export class OwnedStdioClientTransport implements Transport {
     }
     this.handle = handle
     handle.stdout.on('data', (chunk: Buffer | string) => {
-      this.readBuffer.append(
-        Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk),
-      )
-      this.processReadBuffer()
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      this.limitRate(handle, buffer.length)
+      this.receive(buffer)
     })
     handle.stdout.on('error', (error) => this.onerror?.(error))
     handle.stdin.on('error', (error) => this.onerror?.(error))
-    handle.stderr.pipe(this.stderrStream, { end: false })
+    handle.stderr.on('data', (chunk: Buffer | string) =>
+      this.keepStderr(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)),
+    )
     handle.stderr.on('error', (error) => this.onerror?.(error))
     void handle.settled.then((result) => {
       if (this.handle === handle) this.handle = null
@@ -146,7 +162,9 @@ export class OwnedStdioClientTransport implements Transport {
   async close(): Promise<void> {
     const handle = this.handle
     this.handle = null
-    this.readBuffer.clear()
+    this.chunks = []
+    this.pendingBytes = 0
+    this.discarding = false
     if (!handle) return
     handle.cancel('mcp transport closed')
     await handle.settled
@@ -175,17 +193,75 @@ export class OwnedStdioClientTransport implements Transport {
     })
   }
 
-  private processReadBuffer(): void {
-    while (true) {
-      try {
-        const message = this.readBuffer.readMessage()
-        if (message === null) return
-        this.onmessage?.(message)
-      } catch (error) {
-        this.onerror?.(
-          error instanceof Error ? error : new Error(String(error)),
-        )
+  /** Frame stdout by newline; an oversized line is dropped, not fatal. */
+  private receive(chunk: Buffer): void {
+    let start = 0
+    while (start < chunk.length) {
+      const newline = chunk.indexOf(0x0a, start)
+      const end = newline < 0 ? chunk.length : newline
+      if (!this.discarding) {
+        const part = chunk.subarray(start, end)
+        if (this.pendingBytes + part.length > MCP_MESSAGE_LIMIT_BYTES) {
+          this.chunks = []
+          this.pendingBytes = 0
+          this.discarding = true
+          this.onerror?.(
+            new MCPConnectionError(
+              'mcp_protocol_error',
+              `MCP server '${this.opts.serverName}' sent a message too large (over 16 MiB); it was dropped`,
+            ),
+          )
+        } else {
+          this.chunks.push(part)
+          this.pendingBytes += part.length
+        }
       }
+      if (newline < 0) return
+      if (this.discarding) this.discarding = false
+      else this.emitLine()
+      start = newline + 1
+    }
+  }
+
+  private emitLine(): void {
+    const line = Buffer.concat(this.chunks).toString('utf8').replace(/\r$/, '')
+    this.chunks = []
+    this.pendingBytes = 0
+    if (!line) return
+    try {
+      this.onmessage?.(deserializeMessage(line))
+    } catch (error) {
+      this.onerror?.(error instanceof Error ? error : new Error(String(error)))
+    }
+  }
+
+  /** Past the read rate, pause stdout until the next second. */
+  private limitRate(handle: OwnedProcessHandle, bytes: number): void {
+    const now = Date.now()
+    if (now - this.windowStart >= 1000) {
+      this.windowStart = now
+      this.windowBytes = 0
+    }
+    this.windowBytes += bytes
+    if (this.windowBytes <= MCP_STDOUT_RATE_BYTES) return
+    handle.stdout.pause()
+    const timer = setTimeout(
+      () => {
+        if (this.handle === handle) handle.stdout.resume()
+      },
+      1000 - (now - this.windowStart),
+    )
+    timer.unref()
+  }
+
+  private keepStderr(chunk: Buffer): void {
+    this.stderrRing.push(chunk)
+    this.stderrBytes += chunk.length
+    while (
+      this.stderrBytes > MCP_STDERR_RING_BYTES &&
+      this.stderrRing.length > 1
+    ) {
+      this.stderrBytes -= this.stderrRing.shift()!.length
     }
   }
 }

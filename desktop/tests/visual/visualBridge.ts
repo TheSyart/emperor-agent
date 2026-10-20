@@ -82,6 +82,10 @@ type VisualBridge = {
   agentDownloadReveal?: (id: string) => Promise<unknown>
   agentDownloadMove?: (id: string) => Promise<unknown>
   agentDownloadSaveAs?: (id: string) => Promise<unknown>
+  prepareDiagnosticsBundle?: () => Promise<unknown>
+  exportDiagnosticsBundle?: (id: string) => Promise<unknown>
+  revealDiagnosticsBundle?: (id: string) => Promise<unknown>
+  discardDiagnosticsBundle?: (id: string) => Promise<unknown>
 }
 
 declare global {
@@ -2403,6 +2407,7 @@ export async function installVisualCoreBridge(
             sessionsRoot: '/Users/visual/.emperor/sessions',
             attachmentsRoot: '/Users/visual/.emperor/attachments',
             mcpConfigPath: '/Users/visual/.emperor/mcp_config.json',
+            logsRoot: '/Users/visual/Library/Logs/Emperor Agent',
           },
           workspacePolicy: { workspaceRoot: projectDir },
           modelConfig: {
@@ -4371,6 +4376,76 @@ export async function installVisualCoreBridge(
           ).__visualOpenedPaths ??= []).push(path)
           return { ok: true, path }
         },
+        // REL-01 诊断包: main stages the bundle, the user confirms its
+        // contents, main asks where to save it (here: always ~/Desktop).
+        prepareDiagnosticsBundle: async () => ({
+          ok: true,
+          bundle: {
+            id: 'b_0123456789ab',
+            name: 'emperor-diagnostics-20261020-163000',
+            entries: [
+              {
+                path: 'README.txt',
+                title: '说明：包含什么、不包含什么',
+                bytes: 1180,
+              },
+              {
+                path: 'diagnostics.json',
+                title: 'Core 诊断（diagnostics.get）',
+                bytes: 48213,
+              },
+              {
+                path: 'app.json',
+                title: '版本、fuse、Helper 与扩展状态',
+                bytes: 2306,
+              },
+              {
+                path: 'model-config.json',
+                title: '模型配置结构（不含 Key）',
+                bytes: 1544,
+              },
+              { path: 'system.json', title: '操作系统信息', bytes: 412 },
+              {
+                path: 'crashes.json',
+                title: '崩溃转储清单（只有文件名）',
+                bytes: 96,
+              },
+              {
+                path: 'logs/main.log',
+                title: '主进程日志（脱敏）',
+                bytes: 1_874_002,
+              },
+              {
+                path: 'logs/core.log',
+                title: 'Core 日志（脱敏）',
+                bytes: 220_481,
+              },
+            ],
+            excluded: [
+              '会话与消息内容',
+              '记忆',
+              'API Key、令牌等密钥',
+              '崩溃转储文件本身（只列出文件名）',
+            ],
+          },
+        }),
+        exportDiagnosticsBundle: async (id: string) => {
+          ;((
+            window as unknown as { __visualDiagnosticsExports?: string[] }
+          ).__visualDiagnosticsExports ??= []).push(id)
+          return {
+            ok: true,
+            name: 'emperor-diagnostics-20261020-163000.zip',
+            location: '~/Desktop',
+          }
+        },
+        revealDiagnosticsBundle: async () => ({ ok: true }),
+        discardDiagnosticsBundle: async (id: string) => {
+          ;((
+            window as unknown as { __visualDiagnosticsDiscarded?: string[] }
+          ).__visualDiagnosticsDiscarded ??= []).push(id)
+          return { ok: true }
+        },
         openPath: async (target: VisualOpenPathTarget) => {
           // Main resolves these through Core; the harness records what the
           // renderer asked for (an invalid Skill's folder, a Skill, a row).
@@ -6024,6 +6099,20 @@ export async function installVisualCoreBridge(
               return visualMcpConfig()
             case 'mcp.status':
               return visualMcpStatus()
+            case 'mcp.serverLog': {
+              const name = String((args[0] as { name?: string })?.name)
+              return {
+                name,
+                text: visualMcpServers[name]
+                  ? [
+                      'GitHub MCP Server running on stdio',
+                      'Using token sk-***',
+                      'tools/list: 3 tools',
+                      'GET https://api.github.com/search/repositories?q=emperor&token=*** 200 (182 ms)',
+                    ].join('\n')
+                  : null,
+              }
+            }
             case 'mcp.importServers':
               return visualMcpImport(args[0])
             case 'mcp.setServerEnabled': {

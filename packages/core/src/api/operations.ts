@@ -1207,6 +1207,29 @@ export const CORE_OPERATION_REGISTRY = {
         withSession(input, ctx, 'delegations.integrate'),
       ),
   ),
+  // The result card (AGT-06): 查看差异 · 应用到项目 · 撤销 · 丢弃.
+  'delegations.diff': operation(
+    z.tuple([
+      externalRunRef.extend({ path: z.string().min(1).max(4096) }).strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.delegations.diff(withSession(input, ctx, 'delegations.diff')),
+  ),
+  'delegations.apply': operation(
+    z.tuple([externalRunRef]),
+    (api, [input], ctx) =>
+      api.delegations.apply(withSession(input, ctx, 'delegations.apply')),
+  ),
+  'delegations.undo': operation(
+    z.tuple([externalRunRef]),
+    (api, [input], ctx) =>
+      api.delegations.undo(withSession(input, ctx, 'delegations.undo')),
+  ),
+  'delegations.discard': operation(
+    z.tuple([externalRunRef]),
+    (api, [input], ctx) =>
+      api.delegations.discard(withSession(input, ctx, 'delegations.discard')),
+  ),
   'delegations.close': operation(
     z.tuple([
       externalRef
@@ -1706,6 +1729,9 @@ export const CORE_OPERATION_REGISTRY = {
   ),
   'mcp.getConfig': operation(z.tuple([]), (api) => api.mcp.getConfig()),
   'mcp.status': operation(z.tuple([]), (api) => api.mcp.status()),
+  'mcp.serverLog': operation(z.tuple([mcpServerRefSchema]), (api, [input]) =>
+    api.mcp.serverLog(input),
+  ),
   'mcp.saveConfig': operation(z.tuple([mcpConfigSchema]), (api, [input], ctx) =>
     api.mcp.saveConfig({ ...input }, viewOf(ctx, 'mcp.saveConfig')),
   ),

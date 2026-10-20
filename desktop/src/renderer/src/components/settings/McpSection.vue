@@ -11,9 +11,10 @@
  * Data: the masked config view (`mcp.getConfig`, source of the list), the
  * `mcp.status` snapshot (mirrored into boot.mcp) and boot.tools for tool
  * descriptions — refreshed after every change so the rest of the app (Tools
- * section, composer) sees the new MCP tools. While a server is still
- * connecting the status is polled briefly. Showing the kept-alive page
- * again re-reads the config and the status.
+ * section, composer) sees the new MCP tools. Each `mcp_connection_state`
+ * event re-reads the status (KRN-04: servers connect in the background);
+ * while a server is still connecting the status is also polled briefly.
+ * Showing the kept-alive page again re-reads the config and the status.
  */
 import {
   computed,
@@ -41,6 +42,7 @@ import { refreshAction, useSettingsHeader } from './settingsHeader'
 import { onPageReactivated } from '../pages/pageLifecycle'
 import { useAppContext } from '../../composables/useAppContext'
 import { core } from '../../api/http'
+import { onCoreEvent } from '../../api/backend'
 import {
   getMcpConfig,
   getMcpStatus,
@@ -191,9 +193,38 @@ function schedulePoll(restart = true) {
   }, POLL_INTERVAL_MS)
 }
 
-onMounted(() => void refresh())
+/** A burst of connection events reads the status once. */
+const EVENT_DEBOUNCE_MS = 150
+let eventTimer: ReturnType<typeof setTimeout> | undefined
+let unsubscribe = () => {}
+
+function onConnectionState() {
+  if (eventTimer !== undefined) return
+  eventTimer = setTimeout(async () => {
+    eventTimer = undefined
+    const before = connectedKey()
+    try {
+      await loadStatus()
+    } catch {
+      // Keep the last snapshot; polling or a manual refresh retries.
+    }
+    if (connectedKey() !== before) await refreshTools()
+  }, EVENT_DEBOUNCE_MS)
+}
+
+onMounted(() => {
+  void refresh()
+  unsubscribe = onCoreEvent((event) => {
+    if ((event as { event?: unknown } | null)?.event === 'mcp_connection_state')
+      onConnectionState()
+  })
+})
 onPageReactivated(() => refresh())
-onBeforeUnmount(() => clearTimeout(pollTimer))
+onBeforeUnmount(() => {
+  clearTimeout(pollTimer)
+  clearTimeout(eventTimer)
+  unsubscribe()
+})
 
 async function toggle(name: string, enabled: boolean) {
   busy[name] = true

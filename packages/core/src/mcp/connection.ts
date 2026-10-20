@@ -86,6 +86,11 @@ export abstract class MCPConnection {
     return this.connectionFailure
   }
 
+  /** The server's last stderr lines; only stdio servers have any. */
+  stderrTail(_lines = 200): string {
+    return ''
+  }
+
   setLifecycleListener(
     listener:
       ((event: MCPConnectionLifecycleEvent) => void | Promise<void>) | null,
@@ -177,6 +182,8 @@ export function buildStdioEnv(
 export class StdioConnection extends MCPConnection {
   config: ServerConfig
   private client: Client | null = null
+  /** The transport of the last start: its stderr ring outlives a failure. */
+  private transport: OwnedStdioClientTransport | null = null
   private executionEnvironment: ExecutionEnvironment | null
   private intentionalDisconnect = false
   private readonly processRuntime: OwnedProcessRuntime | null
@@ -267,6 +274,7 @@ export class StdioConnection extends MCPConnection {
         source: this.source,
         consent: this.consent,
       })
+      this.transport = transport
       const client = new Client({ name: 'emperor-agent', version: '0.0.0' })
       client.onclose = () => {
         if (this.client === client) this.client = null
@@ -283,8 +291,14 @@ export class StdioConnection extends MCPConnection {
         this.connectionFailure = error
         this.reportLifecycle({ type: 'error', error })
       }
-      await client.connect(transport)
+      // Known before the handshake, so a disconnect meanwhile kills the
+      // process at once instead of when the handshake lands (KRN-04).
       this.client = client
+      await client.connect(transport)
+      if (this.client !== client) {
+        await client.close().catch(() => {})
+        return false
+      }
       this.connected = true
       this.connectionFailure = null
       return true
@@ -294,6 +308,10 @@ export class StdioConnection extends MCPConnection {
       this.connected = false
       return false
     }
+  }
+
+  override stderrTail(lines = 200): string {
+    return this.transport?.stderrTail(lines) ?? ''
   }
 
   async disconnect(): Promise<void> {

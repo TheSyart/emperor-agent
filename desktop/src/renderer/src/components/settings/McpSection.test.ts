@@ -530,3 +530,127 @@ describe('McpSection advanced editor', () => {
     expect(context.saveMcpConfig).toHaveBeenCalledWith(next)
   })
 })
+
+describe('McpSection live status (KRN-04)', () => {
+  it('re-reads the status when a server reports a new state', async () => {
+    let listener: ((event: unknown) => void) | null = null
+    servers = { slow: server({ command: 'node' }) }
+    statusServers = [
+      {
+        serverName: 'slow',
+        transport: 'stdio',
+        generation: 1,
+        state: 'connecting',
+        toolCount: 0,
+        tools: [],
+      },
+    ]
+    ;(
+      window as unknown as { emperor: { onCoreEvent: unknown } }
+    ).emperor.onCoreEvent = (next: (event: unknown) => void) => {
+      listener = next
+      return () => {
+        listener = null
+      }
+    }
+    mount()
+    await settle()
+    expect(card('slow').dataset.state).toBe('connecting')
+    expect(listener).not.toBeNull()
+
+    statusServers = [
+      {
+        serverName: 'slow',
+        transport: 'stdio',
+        generation: 1,
+        state: 'ready',
+        toolCount: 1,
+        tools: ['search'],
+      },
+    ]
+    const before = calls.filter(([key]) => key === 'mcp.status').length
+    listener!({
+      event: 'mcp_connection_state',
+      server_name: 'slow',
+      state: 'ready',
+    })
+    listener!({
+      event: 'mcp_connection_state',
+      server_name: 'slow',
+      state: 'ready',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    await settle()
+    // Two events in a burst: one read.
+    expect(calls.filter(([key]) => key === 'mcp.status').length).toBe(
+      before + 1,
+    )
+    expect(card('slow').dataset.state).toBe('connected')
+    // Newly connected: the tool descriptions are re-read too.
+    expect(calls.some(([key]) => key === 'bootstrap')).toBe(true)
+
+    app?.unmount()
+    app = null
+    expect(listener).toBeNull()
+  })
+})
+
+describe('McpSection server output (KRN-04)', () => {
+  it('shows the last stderr lines of a stdio server on request', async () => {
+    servers = { notes: server({ command: 'node' }) }
+    statusServers = [
+      {
+        serverName: 'notes',
+        transport: 'stdio',
+        generation: 1,
+        state: 'failed',
+        toolCount: 0,
+        tools: [],
+        lastError: { code: 'mcp_connection_failed', message: 'exited' },
+      },
+    ]
+    replies['mcp.serverLog'] = (input: { name: string }) => ({
+      name: input.name,
+      text: 'Error: Cannot find module dep\n    at load (server.js:1:1)',
+    })
+    mount()
+    await settle()
+    const item = card('notes')
+    item.querySelector<HTMLButtonElement>('button.head-text')!.click()
+    await nextTick()
+    expect(calls.some(([key]) => key === 'mcp.serverLog')).toBe(false)
+
+    buttonByText(item, '查看最近输出').click()
+    await settle()
+    expect(calls).toContainEqual(['mcp.serverLog', { name: 'notes' }])
+    const output = item.querySelector<HTMLElement>('.server-output pre')
+    expect(output?.textContent).toContain('Error: Cannot find module dep')
+    expect(buttonByText(item, '刷新输出')).toBeTruthy()
+  })
+
+  it('says so when the server wrote nothing, and has no output section for remote servers', async () => {
+    servers = {
+      quiet: server({ command: 'node' }),
+      remote: server({ transport: 'http', url: 'https://mcp.example.test' }),
+    }
+    statusServers = []
+    replies['mcp.serverLog'] = (input: { name: string }) => ({
+      name: input.name,
+      text: '',
+    })
+    mount()
+    await settle()
+    const quiet = card('quiet')
+    quiet.querySelector<HTMLButtonElement>('button.head-text')!.click()
+    await nextTick()
+    buttonByText(quiet, '查看最近输出').click()
+    await settle()
+    expect(quiet.querySelector('.server-output')?.textContent).toContain(
+      '没有输出',
+    )
+    const remote = card('remote')
+    remote.querySelector<HTMLButtonElement>('button.head-text')!.click()
+    await nextTick()
+    expect(remote.querySelector('.server-output')).toBeNull()
+  })
+})

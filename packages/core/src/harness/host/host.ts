@@ -495,6 +495,8 @@ export class HarnessHost {
       (agent) => this.projectRootOfAgent(agent),
     )
     kept.mcpClient.setReservedToolNames(() => this.mcpTools.reservedNames())
+    // Each server's tools join as it becomes ready (KRN-04).
+    kept.mcpClient.onToolsChanged(() => this.mcpTools.sync())
     this.delegationInteractions = new DelegationInteractionBridge({
       pending: this.pending,
       root: (id) => {
@@ -745,6 +747,16 @@ export class HarnessHost {
             reason,
             signal,
           }),
+        // Outside Git a task defaults to a review in place (AGT-06).
+        parentInGit: (agent) =>
+          existsSync(
+            join(
+              workspaceMutationDomain(
+                this.sandbox.resolve({ session: agent.session }).workspaceRoot,
+              ),
+              '.git',
+            ),
+          ),
         // Plan mode explores read-only: external children default to review.
         parentReadOnly: (agent) =>
           this.sandbox.resolve({ session: agent.session }).mode ===
@@ -1096,15 +1108,22 @@ export class HarnessHost {
       })
     }
     if (options.initializeMcp !== false) {
-      try {
-        environment ??= await this.kept.executionEnvironmentService.create({
-          projectRoot: this.chatWorkspace(),
-        })
-        await this.kept.mcpClient.initialize(environment)
-        this.mcpTools.sync()
-      } catch (error: unknown) {
-        logger.warn('MCP initialization failed', { error: String(error) })
-      }
+      // In the background (KRN-04): the window never waits for a server, and
+      // each one's tools are registered as it becomes ready.
+      const probed = environment
+      void (async () => {
+        try {
+          const ready =
+            probed ??
+            (await this.kept.executionEnvironmentService.create({
+              projectRoot: this.chatWorkspace(),
+            }))
+          await this.kept.mcpClient.initialize(ready)
+          this.mcpTools.sync()
+        } catch (error: unknown) {
+          logger.warn('MCP initialization failed', { error: String(error) })
+        }
+      })()
     }
     if (options.startScheduler !== false) await this.startScheduler()
     if (options.watchSkills !== false) await this.startSkillWatcher()

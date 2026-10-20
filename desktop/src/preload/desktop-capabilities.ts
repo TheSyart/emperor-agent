@@ -32,6 +32,10 @@ import {
   BROWSER_OPEN_CHANNEL,
   BROWSER_REVEAL_CHANNEL,
   BROWSER_STATE_CHANNEL,
+  DIAGNOSTICS_BUNDLE_DISCARD_CHANNEL,
+  DIAGNOSTICS_BUNDLE_EXPORT_CHANNEL,
+  DIAGNOSTICS_BUNDLE_PREPARE_CHANNEL,
+  DIAGNOSTICS_BUNDLE_REVEAL_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
   LINK_OPEN_CHANNEL,
   APP_MENU_COMMAND_CHANNEL,
@@ -217,6 +221,15 @@ export function createDesktopCapabilityBridge(ipcRenderer: IpcRendererLike) {
       ipcRenderer.invoke(AGENT_DOWNLOAD_MOVE_CHANNEL, { downloadId }),
     agentDownloadSaveAs: (downloadId: string) =>
       ipcRenderer.invoke(AGENT_DOWNLOAD_SAVE_AS_CHANNEL, { downloadId }),
+    /** 导出诊断包 (REL-01): stage and list; then export / reveal / discard by id. */
+    prepareDiagnosticsBundle: () =>
+      ipcRenderer.invoke(DIAGNOSTICS_BUNDLE_PREPARE_CHANNEL),
+    exportDiagnosticsBundle: (id: string) =>
+      ipcRenderer.invoke(DIAGNOSTICS_BUNDLE_EXPORT_CHANNEL, { id }),
+    revealDiagnosticsBundle: (id: string) =>
+      ipcRenderer.invoke(DIAGNOSTICS_BUNDLE_REVEAL_CHANNEL, { id }),
+    discardDiagnosticsBundle: (id: string) =>
+      ipcRenderer.invoke(DIAGNOSTICS_BUNDLE_DISCARD_CHANNEL, { id }),
     macHelperStatus: () => ipcRenderer.invoke(MAC_HELPER_STATUS_CHANNEL),
     macHelperRequestPermission: (permission: MacHelperPermission) =>
       ipcRenderer.invoke(MAC_HELPER_PERMISSION_CHANNEL, { permission }),

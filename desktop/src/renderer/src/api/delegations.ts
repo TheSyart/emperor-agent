@@ -36,6 +36,19 @@ export const integrateDelegation = (
 export const abandonDelegation = (
   input: CoreOperationArgs<'delegations.abandon'>[0],
 ) => invokeCore('delegations.abandon', input)
+/** The result card (AGT-06): 应用到项目 · 丢弃 · 撤销 · 查看差异. */
+export const applyDelegationResult = (
+  input: CoreOperationArgs<'delegations.apply'>[0],
+) => invokeCore('delegations.apply', input)
+export const discardDelegationResult = (
+  input: CoreOperationArgs<'delegations.discard'>[0],
+) => invokeCore('delegations.discard', input)
+export const undoDelegationResult = (
+  input: CoreOperationArgs<'delegations.undo'>[0],
+) => invokeCore('delegations.undo', input)
+export const delegationResultDiff = (
+  input: CoreOperationArgs<'delegations.diff'>[0],
+) => invokeCore('delegations.diff', input)
 export const closeDelegation = (
   input: CoreOperationArgs<'delegations.close'>[0],
 ) => invokeCore('delegations.close', input)

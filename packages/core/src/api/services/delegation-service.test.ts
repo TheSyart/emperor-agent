@@ -320,6 +320,8 @@ it('collects real artifacts through Core composition and requires independent cr
     )
     const config = api.executorConfig.read()
     config.profiles.find((p) => p.backend === 'codex')!.enabled = true
+    // 高级 › 验证后再应用 (AGT-06): the receipt is collected when the run ends.
+    config.verifyBeforeApply = true
     await api.executors.configure({ expectedRevision: 0, config }, VIEW)
     const owner = {
       ...fixtureDelegationRecord().owner,

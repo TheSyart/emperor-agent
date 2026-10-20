@@ -3,6 +3,7 @@ import {
   DelegationError,
   TERMINAL_RUN_PHASES,
   type DelegationRecord,
+  type DelegationResult,
   type DelegationRunRecord,
   type RunPhase,
 } from './types'
@@ -91,6 +92,8 @@ export type DelegationEvent =
   | { type: 'recovery'; reason: string }
   /** The run is ended as is: resolved, its queue cancelled (AGT-04). */
   | { type: 'run-abandoned'; runId: string; by: 'user' | 'model'; at: number }
+  /** A settled run's result, recorded or changed (applied, ...; AGT-06). */
+  | { type: 'run-result'; runId: string; result: DelegationResult }
 export interface DelegationState {
   record?: DelegationRecord
   runs: Record<string, DelegationRunRecord>
@@ -375,6 +378,17 @@ export class DelegationFold {
         if (next.record!.availability !== 'closed')
           next.record!.availability = 'idle'
         next.record!.dispatchPaused = false
+        break
+      }
+      case 'run-result': {
+        const run = requireRun(e.runId)
+        if (!TERMINAL_RUN_PHASES.has(run.phase))
+          throw new DelegationError(
+            'ACTIVE_RUN',
+            'a result requires a settled run',
+          )
+        run.result = structuredClone(e.result)
+        run.revision++
         break
       }
       default:
