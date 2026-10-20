@@ -10,7 +10,8 @@
  * session index (a list) carries `version` on every entry.
  *
  * Main owns the credential vault and the two download records; Core owns
- * the rest. Loaded on demand (the settings page), never at startup.
+ * the rest (the Agent's browser profiles, site permissions and restorable
+ * tabs included). Loaded on demand (the settings page), never at startup.
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -78,6 +79,27 @@ export const DATA_FILES: readonly DataFileSpec[] = [
     'schemaVersion',
     1,
     '子智能体授权',
+  ),
+  file(
+    'browserProfiles',
+    'browser/profiles.json',
+    'schemaVersion',
+    1,
+    '浏览器登录资料',
+  ),
+  file(
+    'sitePermissions',
+    'browser/site-permissions.json',
+    'schemaVersion',
+    1,
+    '网站权限',
+  ),
+  file(
+    'restorableTabs',
+    'browser/restorable.json',
+    'schemaVersion',
+    1,
+    '可恢复的标签页',
   ),
   file(
     'vault',

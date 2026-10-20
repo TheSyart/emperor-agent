@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { CoreApi } from './core-api'
 import { invokeCoreOperation } from './operations'
 import { makeApi, tmp } from './test-helpers'
+import { BrowserProfileStore } from '../harness/computer-use/profiles'
 import { NEWER_FILE_MESSAGE } from '../store/persistence'
 
 const VIEW = { sessionId: null }
@@ -271,5 +272,24 @@ describe('storage.versions', () => {
       supportedDataVersion: 1,
     })
     expect(report.files.every((file) => file.state === 'ok')).toBe(true)
+  })
+})
+
+describe("the Agent's browser files from a newer Emperor", () => {
+  it('are read, kept in place, and not written over', () => {
+    const browser = join(tmp('emperor-rel03-browser-'), 'browser')
+    const store = new BrowserProfileStore(browser)
+    store.create('Work')
+    const path = join(browser, 'profiles.json')
+    const value = json(path)
+    writeFileSync(path, JSON.stringify({ ...value, schemaVersion: 2 }))
+    const before = readFileSync(path, 'utf8')
+    const again = new BrowserProfileStore(browser)
+    expect(again.list().map((profile) => profile.name)).toEqual(['Work'])
+    expect(() => again.create('Refused')).toThrow(NEWER_FILE_MESSAGE)
+    expect(readFileSync(path, 'utf8')).toBe(before)
+    expect(
+      readdirSync(browser).filter((name) => name.includes('corrupt')),
+    ).toEqual([])
   })
 })

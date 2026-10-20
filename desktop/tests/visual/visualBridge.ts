@@ -4547,7 +4547,7 @@ export async function installVisualCoreBridge(
               {
                 id: 'sessions',
                 title: '会话',
-                description: '会话记录、附件、目标与用量记录',
+                description: '会话记录、附件与用量记录',
                 files: 1_204,
                 bytes: 128_974_848,
                 optional: true,

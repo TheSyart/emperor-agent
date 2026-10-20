@@ -15,6 +15,12 @@ import type { CoreApi } from '../api/core-api'
 import { makeApi } from '../api/test-helpers'
 import { runDataMigrations } from '../migrations/runner'
 import { declaredVersion } from '../store/persistence'
+import { BrowserProfileStore } from '../harness/computer-use/profiles'
+import { RestorableTabStore } from '../harness/computer-use/restorable'
+import {
+  SITE_PERMISSION_KINDS,
+  SitePermissionStore,
+} from '../harness/computer-use/site-permissions'
 import { DATA_FILES, inspectDataFiles } from './data-files'
 
 const VIEW = { sessionId: null }
@@ -39,6 +45,9 @@ describe('the data file inventory', () => {
         'computer-use/vault.json',
         'sessions/index.json',
         'plugins/installed_plugins.json',
+        'browser/profiles.json',
+        'browser/site-permissions.json',
+        'browser/restorable.json',
         'browser/user-downloads.json',
         'browser/downloads/.index.json',
         'delegations/config.json',
@@ -97,6 +106,22 @@ describe('the data file inventory', () => {
       { expectedRevision: listed.config!.revision, config: listed.config! },
       VIEW,
     )
+    // The Agent's browser files (Core's computer-use service owns them).
+    const browser = join(stateRoot, 'browser')
+    const profile = new BrowserProfileStore(browser).create('Scan')
+    new SitePermissionStore(browser).allow({
+      profileId: profile.profileId,
+      origin: 'https://scan.test',
+      kind: SITE_PERMISSION_KINDS[0],
+    })
+    new RestorableTabStore(browser).remember([
+      {
+        ownerSessionId: 'scan-session',
+        profileId: profile.profileId,
+        url: 'https://scan.test/',
+        title: 'Scan',
+      } as never,
+    ])
 
     const states = inspectDataFiles(stateRoot)
     for (const file of CORE_FILES) {

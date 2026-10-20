@@ -127,17 +127,11 @@ const CATEGORIES: readonly Category[] = [
   {
     id: 'sessions',
     title: '会话',
-    description: '会话记录、附件、目标与用量记录',
+    description: '会话记录、附件与用量记录',
     optional: true,
     roots: [
       { path: 'sessions', exclude: ['.scratch'] },
-      ...files(
-        'memory/attachments',
-        'memory/media',
-        'goals',
-        'tasks',
-        'tokens',
-      ),
+      ...files('memory/attachments', 'memory/media', 'tokens'),
     ],
   },
 ]

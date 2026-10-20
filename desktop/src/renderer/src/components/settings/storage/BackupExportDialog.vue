@@ -186,7 +186,7 @@ watch(
             <div class="option" data-option="sessions">
               <Checkbox v-model="includeSessions" label="包含会话" />
               <p class="hint">
-                会话记录、附件、目标与用量记录（{{
+                会话记录、附件与用量记录（{{
                   formatStorageBytes(sessions?.bytes ?? 0)
                 }}）。不包含时，恢复不会改动当时的会话。
               </p>
