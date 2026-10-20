@@ -868,7 +868,7 @@ provideAppContext({
   place-items: center;
   height: 100dvh;
   background: rgb(var(--surface-canvas));
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .boot-card {
@@ -900,7 +900,7 @@ provideAppContext({
 }
 
 .boot-error strong {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-base);
   font-weight: 500;
 }

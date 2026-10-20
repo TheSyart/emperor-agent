@@ -215,7 +215,7 @@ defineExpose({
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .select-wrap {

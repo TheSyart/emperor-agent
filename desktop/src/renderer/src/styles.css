@@ -63,7 +63,7 @@
     border-radius: var(--radius);
     border-color: rgb(var(--stroke-solid));
     background: rgb(var(--surface-sunken));
-    color: rgb(var(--fg));
+    color: rgb(var(--text-1));
   }
 
   input:focus,
@@ -75,7 +75,7 @@
 
   input::placeholder,
   textarea::placeholder {
-    color: rgb(var(--fg) / var(--text-tertiary));
+    color: rgb(var(--text-1) / var(--text-tertiary));
   }
 
   textarea {

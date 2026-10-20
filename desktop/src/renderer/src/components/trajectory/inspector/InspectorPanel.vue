@@ -125,7 +125,7 @@ const tabItems = computed(() =>
   min-height: 0;
   height: 100%;
   background: rgb(var(--surface-base));
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .header {
@@ -149,7 +149,7 @@ const tabItems = computed(() =>
 
 .heading {
   flex: none;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 500;
@@ -160,7 +160,7 @@ const tabItems = computed(() =>
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: rgb(var(--label-secondary));
+  background: rgb(var(--text-2));
 }
 
 .request-name {
@@ -171,7 +171,7 @@ const tabItems = computed(() =>
 .location {
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: 11px / 16px var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;

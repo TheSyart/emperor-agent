@@ -183,19 +183,19 @@ const headline = computed(() => {
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-align: left;
   cursor: pointer;
 }
 
 .header:focus-visible {
-  outline: 2px solid rgb(var(--label-tertiary));
+  outline: 2px solid rgb(var(--text-3));
   outline-offset: -2px;
 }
 
 .lead {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .count {
@@ -208,7 +208,7 @@ const headline = computed(() => {
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   transform: rotate(180deg);
   transition: transform var(--duration-ds-fast) ease;
 }
@@ -243,7 +243,7 @@ const headline = computed(() => {
   overflow: hidden;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -254,7 +254,7 @@ const headline = computed(() => {
 }
 
 .state.held {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-weight: 500;
 }
 

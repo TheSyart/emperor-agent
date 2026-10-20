@@ -37,7 +37,7 @@ const linkOptions = { notify: (message: string) => app?.showToast(message) }
   box-sizing: border-box;
   padding: var(--space-3-5);
   overflow-wrap: anywhere;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: var(--font-xs);
 }
 
@@ -95,8 +95,8 @@ const linkOptions = { notify: (message: string) => app?.showToast(message) }
 .traj-md :deep(blockquote) {
   margin: var(--space-2) 0;
   padding-left: var(--space-2);
-  border-left: 2px solid rgb(var(--label-caption));
-  color: rgb(var(--label-secondary));
+  border-left: 2px solid rgb(var(--text-3));
+  color: rgb(var(--text-2));
 }
 
 .traj-md :deep(table) {

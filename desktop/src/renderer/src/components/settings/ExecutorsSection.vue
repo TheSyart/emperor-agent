@@ -1189,7 +1189,7 @@ onBeforeUnmount(() => {
 .agent-card :deep(.description) {
   font-size: var(--fs-xs);
   line-height: 21px;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-wrap: pretty;
 }
 .agent-card :deep(.actions) {
@@ -1214,7 +1214,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2-5) var(--space-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: 20px;
   padding-left: calc(var(--space-8) + var(--space-5));
@@ -1235,7 +1235,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: 20px;
   min-height: 22px;
@@ -1271,7 +1271,7 @@ onBeforeUnmount(() => {
   white-space: normal;
   overflow-wrap: anywhere;
   background: var(--surface-hover);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow: visible;
 }
 .specialty-editor {
@@ -1284,7 +1284,7 @@ onBeforeUnmount(() => {
 .field-error {
   font-size: var(--fs-xxs);
   line-height: 20px;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .field-error {
   color: rgb(var(--state-error-label));
@@ -1308,7 +1308,7 @@ onBeforeUnmount(() => {
 .default-model-choice > span {
   flex: none;
   font-size: var(--fs-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .default-model-choice .ds-select {
   flex: 1;
@@ -1340,7 +1340,7 @@ onBeforeUnmount(() => {
   flex: none;
 }
 .model-pending {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .model-line {
   display: flex;
@@ -1351,14 +1351,14 @@ onBeforeUnmount(() => {
   line-height: 20px;
 }
 .model-line > span:first-child {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   white-space: nowrap;
   flex: none;
 }
 .model-value {
   min-width: 0;
   overflow-wrap: anywhere;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-family: 'SFMono-Regular', Menlo, 'PingFang SC', monospace;
   font-size: var(--fs-xxs);
 }
@@ -1371,7 +1371,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: 20px;
 }
@@ -1395,7 +1395,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
   list-style: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: 20px;
   cursor: pointer;
@@ -1404,7 +1404,7 @@ onBeforeUnmount(() => {
   display: none;
 }
 .agent-details summary:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 .agent-details summary svg {
   transition: transform var(--duration-ds) var(--ease-in-out);
@@ -1432,13 +1432,13 @@ onBeforeUnmount(() => {
   gap: var(--space-3);
 }
 .details-content dt {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .details-content dd {
   margin: 0;
   min-width: 0;
   overflow-wrap: anywhere;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 .connection-settings {
   border-top: calc(var(--space-0-5) / 2) solid var(--stroke-1);
@@ -1477,10 +1477,10 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--space-2-5);
   background: var(--surface-hover);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 .muted {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: 20px;
 }
@@ -1490,7 +1490,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--space-3);
   font-size: var(--fs-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .profile-choice .ds-select {
   width: 170px;
@@ -1552,7 +1552,7 @@ onBeforeUnmount(() => {
   color: rgb(var(--state-error-label));
 }
 .executor-note {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
 }
 .reload-notice,

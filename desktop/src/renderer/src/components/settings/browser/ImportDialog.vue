@@ -366,7 +366,7 @@ watch(
 
 .import-label {
   font-size: var(--fs-s);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .import-source-row :deep(.ds-select),
@@ -379,7 +379,7 @@ watch(
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -410,7 +410,7 @@ watch(
   justify-content: space-between;
   gap: var(--space-3);
   font-size: var(--fs-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .import-target-row {
@@ -419,21 +419,21 @@ watch(
 
 .import-target-label {
   font-size: var(--fs-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .import-note {
   margin: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-wrap: pretty;
 }
 
 .import-result {
   margin: 0;
   font-size: var(--fs-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .import-error {

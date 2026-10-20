@@ -177,7 +177,7 @@ function openTab(tab: 'mcp' | 'plugins'): void {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-weight: 400;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }

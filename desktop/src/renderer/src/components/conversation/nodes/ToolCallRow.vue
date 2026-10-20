@@ -181,9 +181,9 @@ const stateLabel = computed(() => {
 }
 
 .summary-text[data-path] {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-decoration: underline;
-  text-decoration-color: rgb(var(--label-caption));
+  text-decoration-color: rgb(var(--text-3));
   text-underline-offset: 3px;
 }
 
@@ -229,7 +229,7 @@ const stateLabel = computed(() => {
   border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
   background: rgb(var(--surface-base));
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxxs);
   line-height: 16px;
   cursor: pointer;
@@ -244,7 +244,7 @@ const stateLabel = computed(() => {
 
 .inspect:hover {
   background: var(--surface-hover-solid);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .sr-only {

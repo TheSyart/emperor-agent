@@ -51,7 +51,7 @@ withDefaults(
   border-radius: var(--radius-pill);
   outline: none;
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 500;
@@ -73,7 +73,7 @@ withDefaults(
 }
 
 .ds-chip:disabled {
-  color: rgb(var(--label-dimmed));
+  color: rgb(var(--text-disabled));
   cursor: default;
 }
 
@@ -111,6 +111,6 @@ withDefaults(
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 </style>

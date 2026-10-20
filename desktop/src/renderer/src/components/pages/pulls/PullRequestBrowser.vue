@@ -340,7 +340,7 @@ watch(selectedKey, () => {
   display: grid;
   flex: 1;
   place-items: center;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }

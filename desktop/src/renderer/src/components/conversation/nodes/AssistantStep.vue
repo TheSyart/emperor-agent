@@ -235,7 +235,7 @@ const showActions = computed(
   padding: 0;
   border: 0;
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
 }
 .image-open {
@@ -286,7 +286,7 @@ const showActions = computed(
   padding: 0 var(--space-1-5);
   border-radius: var(--radius-sm);
   background: var(--surface-hover);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxs);
 }

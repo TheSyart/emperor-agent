@@ -54,7 +54,7 @@ withDefaults(
   overflow: hidden;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -69,7 +69,7 @@ withDefaults(
   line-height: 26px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -78,14 +78,14 @@ withDefaults(
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-weight: 400;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .hint {
   overflow: hidden;
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-overflow: ellipsis;
   white-space: nowrap;
 }

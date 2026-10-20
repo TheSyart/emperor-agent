@@ -162,7 +162,7 @@ const segments = computed<Segment[]>(() =>
   height: var(--icon-xs);
   margin-inline-end: var(--space-1);
   vertical-align: -0.06em;
-  background-color: rgb(var(--md-link-ink, var(--label-secondary)));
+  background-color: rgb(var(--md-link-ink, var(--text-2)));
   -webkit-mask: var(--md-link-ico) center / contain no-repeat;
   mask: var(--md-link-ico) center / contain no-repeat;
 }
@@ -175,8 +175,8 @@ const segments = computed<Segment[]>(() =>
   height: auto;
   padding: 0 0.35em;
   border-radius: var(--radius-xs);
-  background: rgb(var(--md-badge-tone, var(--label-secondary)) / 0.14);
-  color: rgb(var(--md-badge-tone, var(--label-secondary)));
+  background: rgb(var(--md-badge-tone, var(--text-2)) / 0.14);
+  color: rgb(var(--md-badge-tone, var(--text-2)));
   font: 700 0.625em / 1.6 var(--font-mono);
   text-align: center;
   vertical-align: 0.16em;
@@ -217,9 +217,9 @@ const segments = computed<Segment[]>(() =>
 
 /* A file Core cannot find: struck through and dimmed, icon included. */
 .ds-md :deep(a.md-link-chip[data-md-state='missing']) {
-  --md-link-ink: var(--label-tertiary);
-  --md-badge-tone: var(--label-tertiary);
-  color: rgb(var(--label-tertiary));
+  --md-link-ink: var(--text-3);
+  --md-badge-tone: var(--text-3);
+  color: rgb(var(--text-3));
   text-decoration: line-through;
   cursor: default;
 }
@@ -338,7 +338,7 @@ const segments = computed<Segment[]>(() =>
 }
 
 .ds-md :deep(li::marker) {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .ds-md :deep(hr) {
@@ -351,8 +351,8 @@ const segments = computed<Segment[]>(() =>
 .ds-md :deep(blockquote) {
   margin: var(--space-3) 0;
   padding-left: var(--space-3-5);
-  border-left: 2px solid rgb(var(--label-caption));
-  color: rgb(var(--label-secondary));
+  border-left: 2px solid rgb(var(--text-3));
+  color: rgb(var(--text-2));
 }
 
 .ds-md :deep(:not(pre) > code) {
@@ -425,7 +425,7 @@ const segments = computed<Segment[]>(() =>
 
 .ds-md :deep(input[type='checkbox']) {
   margin: 0 var(--space-2) 0 0;
-  accent-color: rgb(var(--label-secondary));
+  accent-color: rgb(var(--text-2));
 }
 
 /* Filled color artwork must not become a solid monochrome mask. */

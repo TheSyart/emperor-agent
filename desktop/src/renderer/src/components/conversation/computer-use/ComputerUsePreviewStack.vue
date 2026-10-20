@@ -670,7 +670,7 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-pill);
   background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv2);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: var(--font-xs);
   cursor: pointer;
 }
@@ -694,7 +694,7 @@ onBeforeUnmount(() => {
   border-bottom: 0;
   border-radius: var(--radius-card) var(--radius-card) 0 0;
   background: rgb(var(--surface-raised));
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xxs);
   text-align: start;
   cursor: pointer;
@@ -716,7 +716,7 @@ onBeforeUnmount(() => {
 .cu-strip-status,
 .cu-card-status {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
 }
 
@@ -743,7 +743,7 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-card);
   background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv2);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .cu-card-head {
@@ -757,7 +757,7 @@ onBeforeUnmount(() => {
 .cu-card-source {
   margin: var(--space-0-5) 0 var(--space-2);
   overflow: hidden;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -829,14 +829,14 @@ onBeforeUnmount(() => {
   place-items: center;
   border: 1px dashed var(--stroke-2);
   border-radius: var(--radius-row);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   text-align: center;
 }
 
 .cu-card-note {
   margin: var(--space-1-5) 0 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -867,7 +867,7 @@ onBeforeUnmount(() => {
 
 .cu-enlarged-note {
   margin: var(--space-2) 0 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
 }
 </style>

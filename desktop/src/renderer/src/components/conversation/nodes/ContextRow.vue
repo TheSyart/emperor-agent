@@ -105,7 +105,7 @@ const body = computed(() => {
   overflow: auto;
   border-radius: var(--r-md);
   background: rgb(var(--surface-raised));
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: 400 var(--fs-xxxs) / 16px var(--font-mono);
   white-space: pre-wrap;
   word-break: break-word;

@@ -180,7 +180,7 @@ function open() {
   width: 40px;
   height: 40px;
   border-radius: var(--radius-cell);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   background: var(--surface-hover);
 }
 .resource-glyph img {
@@ -198,13 +198,13 @@ function open() {
   align-items: center;
   gap: var(--space-2);
   margin-bottom: var(--space-1);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xxs);
 }
 .resource-title {
   display: block;
   max-width: calc(100% - 52px);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: 600 var(--fs-s)/var(--lh-s) var(--font-sans);
   overflow-wrap: anywhere;
   cursor: pointer;
@@ -214,7 +214,7 @@ function open() {
 }
 .resource-description {
   margin: var(--space-1) 0 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xs);
   overflow-wrap: anywhere;
 }
@@ -223,7 +223,7 @@ function open() {
   flex-wrap: wrap;
   gap: var(--space-2-5);
   margin-top: var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xxs);
 }
 .resource-actions {
@@ -241,12 +241,12 @@ function open() {
   border: 0;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: pointer;
 }
 .resource-actions button:hover {
   background: var(--surface-hover);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 .resource-actions button:disabled {
   opacity: 0.35;
@@ -264,7 +264,7 @@ function open() {
   background: rgb(var(--accent) / 0.1);
 }
 .resource-card[data-missing] .resource-title {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-decoration: line-through;
   cursor: default;
 }

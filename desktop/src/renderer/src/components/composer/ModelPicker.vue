@@ -289,7 +289,7 @@ function onKeydown(event: KeyboardEvent): void {
 
 .effort {
   margin-left: var(--space-1);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .panes {
@@ -303,14 +303,14 @@ function onKeydown(event: KeyboardEvent): void {
   overflow: hidden;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .cell-chevron {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .pane-head {
@@ -325,7 +325,7 @@ function onKeydown(event: KeyboardEvent): void {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-weight: 500;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .back {
@@ -338,7 +338,7 @@ function onKeydown(event: KeyboardEvent): void {
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
 }
 
@@ -371,7 +371,7 @@ function onKeydown(event: KeyboardEvent): void {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-weight: 500;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .empty {

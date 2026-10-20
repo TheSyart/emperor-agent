@@ -172,7 +172,7 @@ function onMenu(event: MouseEvent) {
 
 .glyph {
   flex: none;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .job-row[data-state='running'] .glyph,
@@ -185,7 +185,7 @@ function onMenu(event: MouseEvent) {
 }
 
 .job-row[data-state='paused'] .glyph {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .job-row[data-state='completed'] .glyph {
@@ -209,7 +209,7 @@ function onMenu(event: MouseEvent) {
 
 .name {
   overflow: hidden;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   font-weight: 500;
@@ -219,12 +219,12 @@ function onMenu(event: MouseEvent) {
 
 .kind {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .line {
   overflow: hidden;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-variant-numeric: tabular-nums;

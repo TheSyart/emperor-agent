@@ -343,7 +343,7 @@ function partWidth(value: number, total: number) {
 .updated {
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
 }
 
@@ -379,14 +379,14 @@ function partWidth(value: number, total: number) {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 600;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .caption,
 .muted {
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .muted {
@@ -415,7 +415,7 @@ function partWidth(value: number, total: number) {
 .fact dt {
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .fact dd {
@@ -424,7 +424,7 @@ function partWidth(value: number, total: number) {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xs);
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -459,7 +459,7 @@ function partWidth(value: number, total: number) {
   gap: var(--space-1-5) var(--space-4);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .legend-item {
@@ -476,7 +476,7 @@ function partWidth(value: number, total: number) {
 
 .legend-item strong {
   font-weight: 600;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-variant-numeric: tabular-nums;
 }
 
@@ -505,7 +505,7 @@ function partWidth(value: number, total: number) {
   font-family: var(--font-mono);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .recent-main {
@@ -526,7 +526,7 @@ function partWidth(value: number, total: number) {
 .recent-main small {
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 

@@ -78,7 +78,7 @@ function openReview(): void {
   border: 1px solid var(--stroke-1);
   border-radius: var(--radius-pill);
   background: rgb(var(--tip-fill));
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   white-space: nowrap;
@@ -87,7 +87,7 @@ function openReview(): void {
 
 .changes-pill:hover {
   background: var(--surface-hover-solid);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .changes-pill:focus-visible {
@@ -97,7 +97,7 @@ function openReview(): void {
 
 .lead {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .added,

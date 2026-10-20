@@ -514,7 +514,7 @@ function hostOf(url: string): string {
   border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
   background: rgb(var(--input-major));
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .browser-address:focus-within {
@@ -538,14 +538,14 @@ function hostOf(url: string): string {
   outline: none;
   background: transparent;
   box-shadow: none;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   text-overflow: ellipsis;
 }
 
 .browser-address input::placeholder {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 /* Indeterminate load bar on the toolbar's bottom hairline. */
@@ -609,7 +609,7 @@ function hostOf(url: string): string {
 .browser-state strong {
   max-width: 100%;
   overflow: hidden;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   font-weight: 500;
@@ -619,7 +619,7 @@ function hostOf(url: string): string {
 
 .state-glyph {
   margin-bottom: var(--space-1);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .state-glyph.danger {
@@ -631,7 +631,7 @@ function hostOf(url: string): string {
 .state-note {
   max-width: 100%;
   margin: 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -647,7 +647,7 @@ function hostOf(url: string): string {
 
 .state-note {
   margin-top: var(--space-2);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -657,7 +657,7 @@ function hostOf(url: string): string {
   padding: var(--space-1) var(--space-3);
   border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   transition: background-color var(--duration-ds-fast) ease;
@@ -681,14 +681,14 @@ function hostOf(url: string): string {
   gap: var(--space-2);
   padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
   border-top: 1px solid var(--stroke-1);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
 
 .download-glyph {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .browser-download[data-tone='done'] .download-glyph {
@@ -703,7 +703,7 @@ function hostOf(url: string): string {
 .download-text {
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -712,7 +712,7 @@ function hostOf(url: string): string {
   min-width: 0;
   flex: 1;
   overflow: hidden;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -723,7 +723,7 @@ function hostOf(url: string): string {
   padding: 0 var(--space-2);
   border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xs);
   transition: background-color var(--duration-ds-fast) ease;

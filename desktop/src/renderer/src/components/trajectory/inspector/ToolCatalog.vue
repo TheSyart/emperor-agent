@@ -56,7 +56,7 @@ defineProps<{ tools: readonly ToolSchema[] }>()
 .no-payload {
   margin: 0;
   padding: var(--space-4) var(--space-3-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xs);
 }
 
@@ -90,7 +90,7 @@ defineProps<{ tools: readonly ToolSchema[] }>()
 
 .chevron,
 .glyph {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .chevron {
@@ -102,14 +102,14 @@ defineProps<{ tools: readonly ToolSchema[] }>()
 }
 
 .name {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: 500 12px / 18px var(--font-mono);
 }
 
 .description {
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -123,7 +123,7 @@ defineProps<{ tools: readonly ToolSchema[] }>()
 .full-description {
   margin: 0;
   padding: var(--space-2) var(--space-3-5) var(--space-1) 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xs);
   white-space: pre-wrap;
 }

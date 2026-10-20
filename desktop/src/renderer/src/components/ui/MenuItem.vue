@@ -83,7 +83,7 @@ function activate() {
   background: transparent;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-align: left;
   cursor: pointer;
 }
@@ -120,7 +120,7 @@ function activate() {
   justify-content: center;
   width: var(--space-4);
   height: var(--space-4);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .text {
@@ -139,19 +139,19 @@ function activate() {
 .description {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .check {
   flex: none;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .label {
   padding: var(--space-2) var(--space-2-5);
   font-size: var(--fs-xxs);
   line-height: var(--space-4);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .separator {

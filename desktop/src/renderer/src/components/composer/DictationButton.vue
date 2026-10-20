@@ -40,14 +40,14 @@ const emit = defineEmits<{ start: [] }>()
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
   transition: background-color var(--duration-ds-fast) ease;
 }
 
 .dictation-mic:hover:not(:disabled) {
   background: rgb(var(--surface-hover-solid));
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .dictation-mic:disabled {

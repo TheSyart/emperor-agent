@@ -31,7 +31,7 @@
     -webkit-text-fill-color: currentColor;
   }
   html:root .ds-shimmer[data-tone='neutral'] {
-    color: rgb(var(--label-secondary));
+    color: rgb(var(--text-2));
   }
   *,
   *::before,

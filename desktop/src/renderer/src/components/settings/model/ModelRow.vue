@@ -186,7 +186,7 @@ const note = computed(() => lifecycleNote(props.entry))
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -199,12 +199,12 @@ const note = computed(() => lifecycleNote(props.entry))
   min-width: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .model-id {
   font: var(--font-code-small);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
 }
 
@@ -213,7 +213,7 @@ const note = computed(() => lifecycleNote(props.entry))
 }
 
 .test-result {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 /* 测试 / 编辑 / ⋯ show on hover or focus (and while busy or editing). */

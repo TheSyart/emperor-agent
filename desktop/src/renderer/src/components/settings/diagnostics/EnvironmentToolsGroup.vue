@@ -91,7 +91,7 @@ const jobs = computed(() => props.status?.recentJobs ?? [])
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-weight: 500;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .subhead:first-child {
@@ -100,6 +100,6 @@ const jobs = computed(() => props.status?.recentJobs ?? [])
 
 .subhead-count {
   font-weight: 400;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

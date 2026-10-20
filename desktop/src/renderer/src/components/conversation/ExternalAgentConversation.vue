@@ -696,7 +696,7 @@ async function stop() {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 .child-view-area {
   position: relative;
@@ -719,7 +719,7 @@ async function stop() {
   overflow: hidden;
   white-space: nowrap;
   gap: var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-code-small);
 }
 .child-header nav button {
@@ -751,7 +751,7 @@ h1 {
   font-weight: 600;
 }
 .child-title > span {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-code-small);
 }
 .child-timeline {
@@ -768,11 +768,11 @@ h1 {
 .child-entry h2 {
   margin: var(--space-5) 0 var(--space-2);
   font: var(--font-code-small);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 .child-entry-label {
   margin: var(--space-2) 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-code-small);
 }
 .child-entry-label code {
@@ -795,13 +795,13 @@ h1 {
   flex: 1 0 auto;
   white-space: nowrap;
   font: var(--font-code-small);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 .child-note,
 .child-more {
   padding: var(--space-4);
   text-align: center;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 .child-diagnostics {
   flex: none;

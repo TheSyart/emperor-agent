@@ -102,7 +102,7 @@ const jobDot = computed(() => {
   padding-left: var(--space-1);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .job-title {
@@ -112,7 +112,7 @@ const jobDot = computed(() => {
 .job-id {
   flex: none;
   font: var(--font-code-small);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .job-status {
@@ -124,6 +124,6 @@ const jobDot = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

@@ -53,7 +53,7 @@ const sections = computed(() => {
 .no-payload {
   margin: 0;
   padding: var(--space-4) var(--space-3-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xs);
 }
 
@@ -66,14 +66,14 @@ const sections = computed(() => {
 
 .title {
   margin: 0 0 var(--space-1-5);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: 600 var(--fs-xs) / var(--lh-xs) var(--font-sans);
 }
 
 .diff {
   margin: 0;
   overflow: auto;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: 11px / 17px var(--font-mono);
   white-space: pre;
 }
@@ -85,17 +85,17 @@ const sections = computed(() => {
 }
 
 .line[data-kind='meta'] {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   background: var(--surface-hover);
   user-select: none;
 }
 
 .line[data-kind='context'] {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .line[data-kind='added'] {
-  color: color-mix(in srgb, rgb(var(--ok)) 72%, rgb(var(--label-primary)));
+  color: color-mix(in srgb, rgb(var(--ok)) 72%, rgb(var(--text-1)));
   background: rgb(var(--ok-soft));
 }
 

@@ -82,7 +82,7 @@ const titleId = `page-title-${useId()}`
   min-height: 0;
   height: 100%;
   background: rgb(var(--surface-base));
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .page-scroll {
@@ -130,7 +130,7 @@ const titleId = `page-title-${useId()}`
 .page-title {
   margin: 0;
   overflow: hidden;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--font-size-2xl);
   line-height: var(--space-7);
   font-weight: 600;
@@ -140,7 +140,7 @@ const titleId = `page-title-${useId()}`
 
 .page-subtitle {
   margin: 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }

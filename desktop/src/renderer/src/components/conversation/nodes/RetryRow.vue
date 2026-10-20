@@ -93,7 +93,7 @@ const label = computed(() => {
 .retry {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .summary {
@@ -109,7 +109,7 @@ const label = computed(() => {
 }
 
 .summary:hover {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .summary:focus-visible {
@@ -144,12 +144,12 @@ const label = computed(() => {
 
 .label {
   margin-right: var(--space-1-5);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .code {
   margin-left: var(--space-1-5);
   font: var(--font-code-small);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

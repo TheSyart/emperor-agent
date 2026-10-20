@@ -133,7 +133,7 @@ const collapsible = computed(
 }
 
 .rank {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
 }
 
@@ -154,13 +154,13 @@ const collapsible = computed(
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .name small {
   margin-top: var(--space-0-5);
   font-size: var(--fs-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .bar {
@@ -181,7 +181,7 @@ const collapsible = computed(
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-weight: 600;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
@@ -190,7 +190,7 @@ const collapsible = computed(
 .detail {
   grid-column: 2 / -1;
   min-width: 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
@@ -205,13 +205,13 @@ const collapsible = computed(
   background: transparent;
   font: inherit;
   font-size: var(--fs-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
 }
 
 .expand:hover {
   background: var(--surface-hover);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .expand:focus-visible {

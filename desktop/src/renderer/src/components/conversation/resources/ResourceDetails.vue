@@ -309,13 +309,13 @@ onBeforeUnmount(() => {
 }
 .resource-details {
   min-width: 0;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 .identity {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xs);
 }
 .identity img {
@@ -331,7 +331,7 @@ onBeforeUnmount(() => {
 .description {
   margin: var(--space-3) 0;
   font: var(--font-s);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -351,7 +351,7 @@ onBeforeUnmount(() => {
 }
 .notice {
   margin: var(--space-3) 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xs);
 }
 .notice p {
@@ -384,13 +384,13 @@ dl > div {
   border-top: 1px solid var(--stroke-1);
 }
 dt {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xxs);
   margin-bottom: var(--space-1);
 }
 dd {
   margin: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xs);
   overflow-wrap: anywhere;
 }
@@ -413,7 +413,7 @@ dd {
   border: 0;
   border-radius: var(--radius-row);
   background: var(--surface-hover);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   padding: var(--space-1) var(--space-2);
   font: var(--font-xxs);
   cursor: pointer;

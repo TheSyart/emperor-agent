@@ -102,7 +102,7 @@ const title = computed(() =>
 }
 
 .pr-unavailable :deep(.ds-empty-state .title) {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-base);
   line-height: var(--lh-base);
   font-weight: 600;
@@ -116,7 +116,7 @@ const title = computed(() =>
   margin-bottom: var(--space-1);
   border-radius: var(--radius-pill);
   background: var(--surface-hover);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .lines {
@@ -133,12 +133,12 @@ const title = computed(() =>
   flex-direction: column;
   align-items: center;
   gap: var(--space-1);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   white-space: nowrap;
 }
 
 .version {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -147,7 +147,7 @@ code {
   padding: 0 var(--space-1-5);
   border-radius: var(--radius-sm);
   background: var(--surface-hover);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: var(--font-code-small);
 }
 </style>

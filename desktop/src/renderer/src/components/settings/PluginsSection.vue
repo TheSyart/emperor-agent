@@ -342,7 +342,7 @@ async function onUninstalled(): Promise<void> {
 .count {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -359,13 +359,13 @@ async function onUninstalled(): Promise<void> {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 600;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .catalog-heading span {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
 }
 

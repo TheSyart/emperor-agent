@@ -385,7 +385,7 @@ const jsonSample = {
   margin: 0 auto;
   padding: var(--space-6);
   background: rgb(var(--surface-canvas));
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: var(--font-s);
 }
 
@@ -408,7 +408,7 @@ h2 {
   margin: 0 0 var(--space-3);
   font: var(--font-xs);
   font-weight: 500;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-transform: uppercase;
 }
 
@@ -441,7 +441,7 @@ h2 {
   font-style: normal;
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   background: rgb(var(--surface-canvas) / 0.8);
   border-radius: var(--radius-xs);
   padding: 0 2px;
@@ -487,19 +487,19 @@ h2 {
 }
 
 .l-primary {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .l-secondary {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .l-tertiary {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .l-caption {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .shadow {
@@ -536,7 +536,7 @@ h2 {
   gap: var(--space-1);
   padding: var(--space-2) var(--space-1);
   border-radius: var(--radius-row);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .icon-cell:hover {
@@ -547,7 +547,7 @@ h2 {
   font-style: normal;
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .flow {
@@ -557,7 +557,7 @@ h2 {
 .think {
   margin: 0;
   font: var(--font-s);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .menu-anchor {

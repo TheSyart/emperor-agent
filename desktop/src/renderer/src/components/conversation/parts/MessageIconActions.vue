@@ -110,7 +110,7 @@ const caption = computed(() => {
   font-size: var(--fs-s);
   line-height: var(--lh-base);
   font-variant-numeric: tabular-nums;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   white-space: nowrap;
 }
 
@@ -136,13 +136,13 @@ const caption = computed(() => {
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: pointer;
 }
 
 .action:hover {
   background: var(--surface-hover);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 </style>
 

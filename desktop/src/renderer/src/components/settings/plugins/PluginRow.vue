@@ -116,7 +116,7 @@ const showScope = computed(
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -125,13 +125,13 @@ const showScope = computed(
   overflow: hidden;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 </style>

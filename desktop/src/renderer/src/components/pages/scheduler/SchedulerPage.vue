@@ -538,7 +538,7 @@ function clearSearch() {
   align-items: center;
   row-gap: var(--space-1);
   margin-left: calc(var(--space-5) * -1);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-variant-numeric: tabular-nums;
@@ -556,7 +556,7 @@ function clearSearch() {
   content: '·';
   display: inline-block;
   width: var(--space-5);
-  color: rgb(var(--label-dimmed));
+  color: rgb(var(--text-disabled));
   text-align: center;
 }
 
@@ -567,7 +567,7 @@ function clearSearch() {
 
 .policy {
   margin: 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   text-wrap: pretty;

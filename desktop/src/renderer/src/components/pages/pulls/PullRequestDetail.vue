@@ -357,7 +357,7 @@ function openOnGithub(): void {
   padding: 0;
   border: none;
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   cursor: pointer;
@@ -385,7 +385,7 @@ function openOnGithub(): void {
   flex: 1;
   min-width: 0;
   margin: 0;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-md);
   line-height: var(--lh-base);
   font-weight: 600;
@@ -394,7 +394,7 @@ function openOnGithub(): void {
 
 .number {
   margin-left: var(--space-1-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-weight: 400;
 }
 
@@ -418,19 +418,19 @@ function openOnGithub(): void {
   align-items: center;
   gap: var(--space-1-5) var(--space-2);
   min-width: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
 
 .stats-row {
   gap: var(--space-1-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
 }
 
 .repo {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-weight: 500;
 }
 
@@ -448,22 +448,22 @@ function openOnGithub(): void {
   padding: 0 var(--space-1-5);
   border-radius: var(--radius-sm);
   background: var(--surface-hover);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-code-small);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .arrow {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .author {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .sep {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .add {
@@ -532,12 +532,12 @@ function openOnGithub(): void {
 }
 
 .card-title {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-weight: 600;
 }
 
 .card-meta {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .card-body {
@@ -560,7 +560,7 @@ function openOnGithub(): void {
 
 .section-title {
   margin: 0;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   font-weight: 600;
@@ -592,7 +592,7 @@ function openOnGithub(): void {
   min-width: 0;
   min-height: var(--space-8);
   padding: var(--space-1-5) var(--space-3);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -627,7 +627,7 @@ function openOnGithub(): void {
 
 .row-meta {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -656,7 +656,7 @@ function openOnGithub(): void {
 }
 
 .row[data-outcome='neutral'] .check-icon {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .inline-error {

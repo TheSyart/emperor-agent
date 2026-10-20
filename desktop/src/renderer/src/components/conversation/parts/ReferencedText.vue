@@ -136,7 +136,7 @@ function chipName(kind: string, label: string): string {
 
 .reference-chip[data-unavailable] {
   background: var(--surface-hover);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-decoration: line-through;
 }
 </style>

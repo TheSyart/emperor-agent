@@ -39,7 +39,7 @@ defineProps<{ projectName?: string }>()
   align-items: center;
   gap: var(--space-2-5);
   margin: 0;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: 26px;
   line-height: var(--space-8);
   font-weight: 500;
@@ -55,11 +55,11 @@ defineProps<{ projectName?: string }>()
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .project strong {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-weight: 500;
 }
 

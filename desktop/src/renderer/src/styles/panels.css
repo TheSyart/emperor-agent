@@ -100,7 +100,7 @@
   border: 1px solid rgb(var(--stroke-solid-strong));
   border-radius: 999px;
   background: rgb(var(--surface-base) / 0.9);
-  color: rgb(var(--fg));
+  color: rgb(var(--text-1));
   font-size: 22px;
   line-height: 1;
   box-shadow: 0 6px 20px rgb(var(--shadow-color) / 0.24);
@@ -120,7 +120,7 @@
   justify-content: space-between;
   gap: 20px;
   padding: 11px var(--space-3);
-  color: rgb(var(--fg));
+  color: rgb(var(--text-1));
 }
 
 .attachment-preview-caption strong {
@@ -132,7 +132,7 @@
 
 .attachment-preview-caption span {
   flex-shrink: 0;
-  color: rgb(var(--fg) / var(--text-secondary));
+  color: rgb(var(--text-1) / var(--text-secondary));
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
 }

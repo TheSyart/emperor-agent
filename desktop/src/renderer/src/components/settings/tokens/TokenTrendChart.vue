@@ -303,7 +303,7 @@ function onPointerMove(event: PointerEvent) {
   font: inherit;
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-align: left;
   cursor: pointer;
 }
@@ -343,7 +343,7 @@ function onPointerMove(event: PointerEvent) {
 
 .legend-sub {
   font-size: var(--fs-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .canvas {
@@ -398,7 +398,7 @@ function onPointerMove(event: PointerEvent) {
   box-shadow: var(--shadow-lv1);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   pointer-events: none;
 }
 
@@ -430,7 +430,7 @@ function onPointerMove(event: PointerEvent) {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -445,7 +445,7 @@ function onPointerMove(event: PointerEvent) {
   margin-top: var(--space-1);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
 }
 

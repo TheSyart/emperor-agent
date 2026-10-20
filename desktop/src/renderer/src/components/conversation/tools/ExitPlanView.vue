@@ -82,12 +82,12 @@ const dot = computed<DotState>(() => {
 .label {
   flex: none;
   font-weight: 600;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .feedback {
   min-width: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
 }
 </style>

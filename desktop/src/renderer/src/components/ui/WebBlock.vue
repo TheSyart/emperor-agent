@@ -79,7 +79,7 @@ const empty = computed(() => !props.answer && props.sources.length === 0)
 <style scoped>
 .ds-web {
   padding: var(--space-3) var(--space-3-5);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   background: rgb(var(--code-block-bg));
   border-radius: var(--radius-card);
 }
@@ -102,7 +102,7 @@ const empty = computed(() => !props.answer && props.sources.length === 0)
 
 .source {
   min-width: 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xs);
 }
 
@@ -123,14 +123,14 @@ a.fetch-url:hover {
   margin-top: 2px;
   font-size: var(--fs-xs);
   line-height: 19px;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   word-break: break-word;
 }
 
 .meta {
   margin-top: 2px;
   font: var(--font-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .truncated {
@@ -139,7 +139,7 @@ a.fetch-url:hover {
 
 .empty {
   font: var(--font-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .fetch {
@@ -169,6 +169,6 @@ a.fetch-url:hover {
 
 .status {
   font: var(--font-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 </style>

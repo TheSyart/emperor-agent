@@ -188,7 +188,7 @@ defineExpose({ beginRename })
   min-height: var(--space-8);
   padding: 0 var(--space-2);
   border-radius: var(--radius-row);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   cursor: pointer;
   user-select: none;
   outline: none;
@@ -278,7 +278,7 @@ defineExpose({ beginRename })
   flex: none;
   font-size: var(--fs-xxs);
   line-height: var(--space-5);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
   /* 「6月26日」, not 「6 月 26 日」. */
   text-autospace: no-autospace;
@@ -295,12 +295,12 @@ defineExpose({ beginRename })
   border: none;
   border-radius: var(--radius-xs);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: pointer;
 }
 
 .more:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .session-row:hover .more,
@@ -321,7 +321,7 @@ defineExpose({ beginRename })
   overflow: hidden;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-overflow: ellipsis;
   white-space: nowrap;
 }

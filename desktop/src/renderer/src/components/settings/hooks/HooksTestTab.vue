@@ -225,7 +225,7 @@ const resultJson = computed(() =>
 
 .command {
   font: var(--font-code-small);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 

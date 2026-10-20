@@ -38,6 +38,6 @@ withDefaults(
 }
 
 .ds-shimmer-text:not(.ds-shimmer) {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 </style>

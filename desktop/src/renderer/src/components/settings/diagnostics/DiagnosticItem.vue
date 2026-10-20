@@ -68,7 +68,7 @@ const problem = computed(
   min-width: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-variant-numeric: tabular-nums;
   text-align: right;
   overflow-wrap: anywhere;
@@ -91,7 +91,7 @@ const problem = computed(
 }
 
 .value[data-tone='muted'] {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .value[data-tone='running'] {

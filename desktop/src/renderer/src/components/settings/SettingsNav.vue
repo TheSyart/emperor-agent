@@ -75,7 +75,7 @@ const LABELS = Object.fromEntries(
   font-size: var(--fs-base);
   line-height: var(--lh-base);
   font-weight: 600;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .nav-list {
@@ -95,7 +95,7 @@ const LABELS = Object.fromEntries(
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-weight: 500;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .nav-cell {
@@ -112,7 +112,7 @@ const LABELS = Object.fromEntries(
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   font-weight: 400;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-align: left;
 }
 

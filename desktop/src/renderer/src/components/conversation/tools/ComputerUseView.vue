@@ -286,14 +286,14 @@ button.shot {
 }
 
 .title {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-s);
   line-height: 22px;
   overflow-wrap: anywhere;
 }
 
 .url {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   line-height: 18px;
@@ -311,7 +311,7 @@ button.shot {
 }
 
 .records-text {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: 20px;
 }
@@ -334,11 +334,11 @@ button.shot {
 }
 
 .message {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .hint {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .download {
@@ -361,13 +361,13 @@ button.shot {
 }
 
 .download-name {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
 
 .download-meta {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .download-reveal {

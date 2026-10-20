@@ -608,7 +608,7 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
   height: 30px;
   border-bottom: 1px solid var(--stroke-2);
   background: rgb(var(--surface-base));
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xxs);
 }
 
@@ -630,14 +630,14 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
   height: 29px;
   border: 0;
   background: rgb(var(--surface-base));
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
   font: var(--font-xxs);
 }
 
 .history-button:hover:not(:disabled) {
   background: var(--surface-hover);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .history-button:disabled {

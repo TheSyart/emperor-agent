@@ -82,7 +82,7 @@ const usageLabel = computed(() => {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-variant-numeric: tabular-nums;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   opacity: 0;
   transition: opacity var(--duration-instant) ease;
 }

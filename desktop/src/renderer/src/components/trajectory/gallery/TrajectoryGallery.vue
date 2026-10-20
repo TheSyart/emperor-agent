@@ -134,7 +134,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   height: 100vh;
   background: rgb(var(--surface-canvas));
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .bar {
@@ -155,7 +155,7 @@ onBeforeUnmount(() => {
 .link {
   padding: 0;
   border: 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   background: transparent;
   cursor: pointer;
   font: inherit;
@@ -168,7 +168,7 @@ onBeforeUnmount(() => {
 
 .note {
   margin-left: auto;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font: var(--font-xxs);
 }
 

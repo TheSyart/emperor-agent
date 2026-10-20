@@ -247,7 +247,7 @@ async function end(agent: AgentView) {
   border-radius: var(--radius-row);
   border: 0;
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-align: left;
   cursor: pointer;
 }
@@ -275,7 +275,7 @@ async function end(agent: AgentView) {
 .agent-phase,
 .agent-more {
   font-size: var(--fs-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .agent-phase {
   flex: none;
@@ -287,7 +287,7 @@ async function end(agent: AgentView) {
   border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   cursor: pointer;
 }

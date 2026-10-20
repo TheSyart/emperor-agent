@@ -199,7 +199,7 @@ function onClick(): void {
   box-sizing: border-box;
   height: 30px;
   border-bottom: 1px solid var(--stroke-1);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: var(--font-xxs);
   outline: none;
   cursor: default;
@@ -324,7 +324,7 @@ function onClick(): void {
   width: max-content;
   padding: 1px calc(var(--space-1) + 1px);
   border-radius: 0 0 2px;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   background: var(--surface-hover);
   font: 8px / 10px var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -333,11 +333,7 @@ function onClick(): void {
 }
 
 .turn-label[data-active='true'] {
-  color: color-mix(
-    in srgb,
-    rgb(var(--text-link)) 70%,
-    rgb(var(--label-tertiary))
-  );
+  color: color-mix(in srgb, rgb(var(--text-link)) 70%, rgb(var(--text-3)));
   background: var(--traj-turn-accent);
 }
 
@@ -382,24 +378,24 @@ function onClick(): void {
 }
 
 .tool-name {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: 400 12px / 18px var(--font-mono);
 }
 
 .tool-args {
   margin-left: calc(var(--space-1-5) + 1px);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .tool-call-only {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .inline-result {
   display: flex;
   align-items: center;
   min-width: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .inline-result[data-error='true'] {
@@ -407,20 +403,20 @@ function onClick(): void {
 }
 
 .inline-result-text[data-empty='true'] {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .arrow {
   flex: none;
   margin-right: var(--space-2);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .collapsed {
   display: flex;
   align-items: center;
   min-width: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xxs);
   line-height: 16px;
 }
@@ -428,7 +424,7 @@ function onClick(): void {
 .collapsed-ellipsis {
   flex: none;
   margin-right: var(--space-1-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-weight: 600;
 }
 

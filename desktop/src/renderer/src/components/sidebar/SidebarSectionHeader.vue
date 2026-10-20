@@ -40,7 +40,7 @@ const collapsed = defineModel<boolean>('collapsed', { default: false })
   border: none;
   border-radius: var(--radius-xs);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 500;
@@ -48,11 +48,11 @@ const collapsed = defineModel<boolean>('collapsed', { default: false })
 }
 
 .section-label:hover {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .section-label[aria-expanded='false'] {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 /* Trailing actions (+, ⋯) only while the header is hovered or focused, or

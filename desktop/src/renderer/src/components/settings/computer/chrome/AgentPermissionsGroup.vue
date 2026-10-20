@@ -277,7 +277,7 @@ onMounted(async () => {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -299,7 +299,7 @@ onMounted(async () => {
   margin: var(--space-2) var(--space-0-5) 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .agent-permissions-error {

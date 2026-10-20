@@ -163,7 +163,7 @@ onBeforeUnmount(() => {
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   cursor: pointer;
@@ -171,7 +171,7 @@ onBeforeUnmount(() => {
 
 .head-action:hover:not(:disabled) {
   background: var(--surface-hover);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .head-action:disabled {
@@ -211,7 +211,7 @@ onBeforeUnmount(() => {
 .glyph {
   flex: none;
   margin-top: var(--space-0-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .row[data-tone='error'] .glyph {
@@ -239,18 +239,18 @@ onBeforeUnmount(() => {
 .title {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .row[data-unread] .title {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-weight: 500;
 }
 
 .detail {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .meta {
@@ -264,7 +264,7 @@ onBeforeUnmount(() => {
 .time {
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   white-space: nowrap;
 }
 
@@ -279,7 +279,7 @@ onBeforeUnmount(() => {
   padding: var(--space-6) var(--space-3);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   text-align: center;
 }
 </style>

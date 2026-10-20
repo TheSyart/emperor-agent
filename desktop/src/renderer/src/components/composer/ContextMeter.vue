@@ -108,7 +108,7 @@ function fmt(value: number): string {
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: pointer;
 }
 
@@ -141,7 +141,7 @@ function fmt(value: number): string {
 .usage {
   font-size: var(--fs-xxs);
   line-height: var(--space-5);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: default;
 }
 
@@ -152,14 +152,14 @@ function fmt(value: number): string {
 }
 
 .headline {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .figures {
   margin-left: auto;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .bar {
@@ -175,7 +175,7 @@ function fmt(value: number): string {
   min-width: 2px;
   height: 100%;
   border-radius: 0;
-  background: rgb(var(--label-tertiary));
+  background: rgb(var(--text-3));
 }
 
 .segment[data-tone='warn'] {
@@ -199,12 +199,12 @@ function fmt(value: number): string {
 }
 
 .row dt {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .row dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 </style>

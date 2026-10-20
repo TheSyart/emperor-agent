@@ -54,7 +54,7 @@ const output = computed(() => {
 
 .label {
   font: var(--font-code-small);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .prompt {
@@ -62,7 +62,7 @@ const output = computed(() => {
   overflow-y: auto;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -76,7 +76,7 @@ const output = computed(() => {
   gap: var(--space-2);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .output[data-error] :deep(.ds-md) {

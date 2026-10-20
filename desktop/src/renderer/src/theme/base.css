@@ -15,7 +15,7 @@ body {
   margin: 0;
   overflow-x: hidden;
   background: rgb(var(--surface-canvas));
-  color: rgb(var(--fg));
+  color: rgb(var(--text-1));
   font-family: theme('fontFamily.body');
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;

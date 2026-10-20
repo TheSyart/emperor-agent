@@ -164,7 +164,7 @@ const cumulativeUsage = computed(() =>
 .no-payload {
   margin: 0;
   padding: var(--space-1-5) var(--space-3-5) var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xs);
 }
 
@@ -179,7 +179,7 @@ const cumulativeUsage = computed(() =>
 .usage-heading {
   margin: 0;
   padding: var(--space-1) var(--space-3-5) 1px;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: 600 var(--fs-xs) / var(--lh-xs) var(--font-sans);
   user-select: none;
 }
@@ -190,17 +190,17 @@ const cumulativeUsage = computed(() =>
   gap: 1px;
   padding: 0;
   border: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   background: transparent;
   cursor: pointer;
   font: inherit;
 }
 
 .nav-link:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .nav-icon {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 </style>

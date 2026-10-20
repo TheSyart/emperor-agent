@@ -106,7 +106,7 @@ async function onKeydown(event: KeyboardEvent, index: number) {
   height: var(--lh-xxxs);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .months span {
@@ -165,7 +165,7 @@ async function onKeydown(event: KeyboardEvent, index: number) {
   margin-top: var(--space-1);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .swatch {

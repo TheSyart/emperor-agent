@@ -50,7 +50,7 @@ const items = computed(() => todoItems(props.data))
   min-height: var(--lh-base);
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .mark {
@@ -62,12 +62,12 @@ const items = computed(() => todoItems(props.data))
   height: 14px;
   border: 1px solid var(--stroke-4);
   border-radius: var(--radius-xs);
-  color: rgb(var(--label-inverted));
+  color: rgb(var(--text-inverted));
 }
 
 [data-status='completed'] .mark {
-  border-color: rgb(var(--label-tertiary));
-  background: rgb(var(--label-tertiary));
+  border-color: rgb(var(--text-3));
+  background: rgb(var(--text-3));
 }
 
 [data-status='in_progress'] .mark {
@@ -77,12 +77,12 @@ const items = computed(() => todoItems(props.data))
 }
 
 [data-status='completed'] .content {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-decoration: line-through;
 }
 
 [data-status='in_progress'] .content {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .content {

@@ -248,7 +248,7 @@ watch(
   border-radius: var(--r-xl);
   background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv3);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   outline: none;
 }
 
@@ -287,7 +287,7 @@ watch(
   font-size: var(--fs-base);
   line-height: var(--lh-base);
   font-weight: 600;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -306,13 +306,13 @@ watch(
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: inherit;
   cursor: pointer;
 }
 
 .section-crumb:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .section-crumb:focus-visible {
@@ -322,7 +322,7 @@ watch(
 
 .section-crumb-separator {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .section-page {
@@ -351,7 +351,7 @@ watch(
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   cursor: pointer;
 }
 
@@ -377,7 +377,7 @@ watch(
   overflow-y: auto;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 @container settings-panel (max-width: 639px) {

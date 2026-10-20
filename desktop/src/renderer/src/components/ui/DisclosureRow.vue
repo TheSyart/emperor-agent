@@ -163,7 +163,7 @@ button.leading {
 }
 
 .chevron {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 /* Collapsed chevron points right; the open row shows it pointing down. */

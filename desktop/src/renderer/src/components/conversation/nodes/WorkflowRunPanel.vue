@@ -243,7 +243,7 @@ const latestLog = computed(() => props.run.logs.at(-1))
   justify-content: center;
   width: var(--space-4);
   height: var(--space-4);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   transition: transform var(--duration-ds-fast) ease;
 }
 
@@ -260,7 +260,7 @@ const latestLog = computed(() => props.run.logs.at(-1))
   font-size: var(--fs-s);
   font-weight: 510;
   line-height: var(--lh-base);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .sep {
@@ -268,7 +268,7 @@ const latestLog = computed(() => props.run.logs.at(-1))
   width: 2px;
   height: 2px;
   border-radius: 50%;
-  background: rgb(var(--label-tertiary));
+  background: rgb(var(--text-3));
 }
 
 .run-summary {
@@ -279,7 +279,7 @@ const latestLog = computed(() => props.run.logs.at(-1))
   white-space: nowrap;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .status-tail {
@@ -291,7 +291,7 @@ const latestLog = computed(() => props.run.logs.at(-1))
   font-size: var(--fs-xxxs);
   font-weight: 510;
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   white-space: nowrap;
 }
 
@@ -312,7 +312,7 @@ const latestLog = computed(() => props.run.logs.at(-1))
   white-space: nowrap;
   font-size: var(--fs-s);
   line-height: var(--lh-base);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .phase-count {
@@ -323,7 +323,7 @@ const latestLog = computed(() => props.run.logs.at(-1))
   white-space: nowrap;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .phase-status {
@@ -335,7 +335,7 @@ const latestLog = computed(() => props.run.logs.at(-1))
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   text-align: right;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .members {
@@ -357,7 +357,7 @@ const latestLog = computed(() => props.run.logs.at(-1))
   border: 0;
   border-radius: var(--radius-xs);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: inherit;
   text-align: left;
 }
@@ -402,13 +402,13 @@ const latestLog = computed(() => props.run.logs.at(-1))
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   text-align: right;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .run-log {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .run-log {

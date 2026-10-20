@@ -194,7 +194,7 @@ function messageOf(cause: unknown): string {
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .loading {
@@ -202,7 +202,7 @@ function messageOf(cause: unknown): string {
   align-items: center;
   gap: var(--space-2);
   font-size: var(--fs-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .entries {
@@ -234,7 +234,7 @@ function messageOf(cause: unknown): string {
 .path {
   min-width: 0;
   font-family: var(--font-mono);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -242,14 +242,14 @@ function messageOf(cause: unknown): string {
   grid-row: 1 / span 2;
   grid-column: 2;
   align-self: center;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .title {
   grid-column: 1;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
 }
 
@@ -258,13 +258,13 @@ function messageOf(cause: unknown): string {
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .excluded-label {
   margin-right: var(--space-1);
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .result {
@@ -274,7 +274,7 @@ function messageOf(cause: unknown): string {
   margin: 0;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -284,7 +284,7 @@ function messageOf(cause: unknown): string {
 
 .where {
   font-size: var(--fs-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .error {

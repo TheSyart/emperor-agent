@@ -76,7 +76,7 @@ const firstContent = computed(() =>
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-align: left;
   cursor: pointer;
 }
@@ -91,7 +91,7 @@ const firstContent = computed(() =>
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-weight: 500;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .search-title,
@@ -109,13 +109,13 @@ const firstContent = computed(() =>
 .search-meta {
   font-size: var(--fs-xxs);
   line-height: 17px;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .empty {
   padding: var(--space-2);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 </style>

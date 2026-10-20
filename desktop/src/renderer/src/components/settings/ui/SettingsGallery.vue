@@ -488,7 +488,7 @@ const facts = [
   min-height: 100vh;
   padding: var(--space-6);
   background: rgb(var(--surface-canvas));
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-family: var(--font-sans);
 }
 
@@ -542,7 +542,7 @@ const facts = [
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .options {
@@ -579,6 +579,6 @@ const facts = [
   padding-top: var(--space-4);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

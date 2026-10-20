@@ -134,7 +134,7 @@ withDefaults(
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -151,7 +151,7 @@ withDefaults(
 .description {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
   text-wrap: pretty;
 }

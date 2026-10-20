@@ -154,7 +154,7 @@ function onCommentKeydown(event: KeyboardEvent) {
   border-radius: var(--radius-takeover);
   background: rgb(var(--input-major));
   box-shadow: var(--shadow-lv2);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow: hidden;
   outline: none;
 }
@@ -194,7 +194,7 @@ function onCommentKeydown(event: KeyboardEvent) {
 
 .empty {
   margin: 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .footer {
@@ -215,7 +215,7 @@ function onCommentKeydown(event: KeyboardEvent) {
   border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   caret-color: rgb(var(--accent));
   font: inherit;
   font-size: var(--fs-s);
@@ -226,7 +226,7 @@ function onCommentKeydown(event: KeyboardEvent) {
 }
 
 .comment::placeholder {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .comment:focus {

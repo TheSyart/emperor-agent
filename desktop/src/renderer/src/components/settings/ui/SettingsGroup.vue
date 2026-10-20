@@ -102,14 +102,14 @@ provideSurface(() => (card.value ? 'card' : 'panel'))
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 600;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .description {
   margin: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-wrap: pretty;
 }
 

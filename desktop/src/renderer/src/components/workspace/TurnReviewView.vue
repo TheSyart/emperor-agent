@@ -180,7 +180,7 @@ function noteOf(entry: TurnFileEntry): string {
 .summary {
   display: inline-flex;
   gap: var(--space-1);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-variant-numeric: tabular-nums;
 }
 
@@ -210,7 +210,7 @@ function noteOf(entry: TurnFileEntry): string {
   padding: var(--space-1) var(--space-3);
   border: 0;
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   text-align: start;
@@ -219,7 +219,7 @@ function noteOf(entry: TurnFileEntry): string {
 
 .file:hover,
 .file.active {
-  background: rgb(var(--fg) / var(--hover-bg-a));
+  background: rgb(var(--text-1) / var(--hover-bg-a));
 }
 
 .path {
@@ -235,7 +235,7 @@ function noteOf(entry: TurnFileEntry): string {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .name {
@@ -244,7 +244,7 @@ function noteOf(entry: TurnFileEntry): string {
 
 .note {
   flex: none;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
 }
 
@@ -264,7 +264,7 @@ function noteOf(entry: TurnFileEntry): string {
 
 .muted {
   margin: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xs);
 }
 

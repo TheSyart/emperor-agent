@@ -89,7 +89,7 @@ const brackets = computed(() =>
 .ds-json {
   min-width: 0;
   font: var(--font-code-small);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .ds-json[data-root] {
@@ -118,7 +118,7 @@ const brackets = computed(() =>
   padding: 0;
   border: 0;
   background: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: pointer;
 }
 
@@ -139,7 +139,7 @@ const brackets = computed(() =>
 }
 
 .expander:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .label {
@@ -169,6 +169,6 @@ const brackets = computed(() =>
 }
 
 .value--other {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 </style>

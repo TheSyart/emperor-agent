@@ -173,7 +173,7 @@ function actionLabel(action: GoalCardAction): string {
   font-size: var(--fs-xs);
   line-height: var(--space-6);
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .objective {
@@ -182,7 +182,7 @@ function actionLabel(action: GoalCardAction): string {
   overflow: hidden;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -191,7 +191,7 @@ function actionLabel(action: GoalCardAction): string {
   flex: none;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
 }
 
@@ -211,13 +211,13 @@ function actionLabel(action: GoalCardAction): string {
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: pointer;
 }
 
 .icon:hover:not(:disabled) {
   background: var(--surface-hover);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .icon[data-danger] {

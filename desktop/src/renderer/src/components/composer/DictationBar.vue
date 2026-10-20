@@ -101,22 +101,22 @@ const live = computed(() =>
 
 .dictation-cancel {
   background: var(--surface-hover);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .dictation-cancel:hover {
   background: var(--surface-active);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .dictation-stop {
-  background: rgb(var(--label-primary));
+  background: rgb(var(--text-1));
   color: rgb(var(--composer-fill));
 }
 
 .dictation-stop:disabled {
   background: var(--surface-hover);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: default;
 }
 
@@ -147,13 +147,13 @@ const live = computed(() =>
 .dictation-wave > .bar {
   height: calc(var(--space-1) + var(--dictation-level) * var(--space-6));
   border-radius: 2px;
-  background: rgb(var(--label-secondary));
+  background: rgb(var(--text-2));
 }
 
 .dictation-wave > .dot {
   height: 3px;
   border-radius: var(--radius-pill);
-  background: rgb(var(--label-caption));
+  background: rgb(var(--text-3));
 }
 
 .dictation-live {

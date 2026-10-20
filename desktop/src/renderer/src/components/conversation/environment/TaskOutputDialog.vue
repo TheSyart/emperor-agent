@@ -220,7 +220,7 @@ async function stop(): Promise<void> {
 .task-output-label {
   margin: 0 0 var(--space-2);
   overflow: hidden;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-code-small);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -234,7 +234,7 @@ async function stop(): Promise<void> {
   border: 1px solid var(--stroke-1);
   border-radius: var(--radius-row);
   background: rgb(var(--surface-base));
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: var(--font-code-small);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -248,7 +248,7 @@ async function stop(): Promise<void> {
 .task-output-note {
   margin: 0;
   padding: var(--space-2) 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }

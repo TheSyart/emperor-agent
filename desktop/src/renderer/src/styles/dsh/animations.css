@@ -68,11 +68,11 @@
 .ds-shimmer[data-tone='neutral'] {
   background-image: linear-gradient(
     90deg,
-    rgb(var(--label-tertiary)) 0%,
-    rgb(var(--label-tertiary)) 40%,
-    rgb(var(--label-primary)) 50%,
-    rgb(var(--label-tertiary)) 60%,
-    rgb(var(--label-tertiary)) 100%
+    rgb(var(--text-3)) 0%,
+    rgb(var(--text-3)) 40%,
+    rgb(var(--text-1)) 50%,
+    rgb(var(--text-3)) 60%,
+    rgb(var(--text-3)) 100%
   );
 }
 

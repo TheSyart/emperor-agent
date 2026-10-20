@@ -63,6 +63,6 @@ function openPlugin(): void {
   padding-top: var(--space-1);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

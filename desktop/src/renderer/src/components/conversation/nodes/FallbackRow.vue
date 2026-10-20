@@ -49,7 +49,7 @@ const trigger = computed(
 .fallback {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .summary {
@@ -65,7 +65,7 @@ const trigger = computed(
 }
 
 .summary:hover {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .chevron {
@@ -94,7 +94,7 @@ const trigger = computed(
 
 .label {
   margin-right: var(--space-1-5);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .code {

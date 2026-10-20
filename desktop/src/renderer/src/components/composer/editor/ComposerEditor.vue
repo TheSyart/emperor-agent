@@ -516,7 +516,7 @@ defineExpose({
   padding: var(--space-1) var(--space-3) 0 var(--space-4);
   overflow-y: auto;
   outline: none;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   caret-color: rgb(var(--caret));
   font-family: var(--font-sans);
   font-size: inherit;
@@ -553,14 +553,14 @@ defineExpose({
   content: attr(data-placeholder);
   float: left;
   height: 0;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   pointer-events: none;
 }
 
 /* Dictation (dictationDraft.ts): what is being heard, not yet text. */
 .composer-editor :deep(.composer-dictation-draft) {
-  color: rgb(var(--label-tertiary));
-  text-decoration: underline dotted rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
+  text-decoration: underline dotted rgb(var(--text-3));
   text-underline-offset: 0.2em;
   pointer-events: none;
   user-select: none;
@@ -571,7 +571,7 @@ defineExpose({
 }
 
 .composer-editor :deep(.composer-dictation-replaced) {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-decoration: line-through;
 }
 

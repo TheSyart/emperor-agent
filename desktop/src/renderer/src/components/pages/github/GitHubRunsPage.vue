@@ -524,7 +524,7 @@ function stepDot(tone: string): DotState {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -533,7 +533,7 @@ function stepDot(tone: string): DotState {
   font-size: var(--fs-base);
   line-height: var(--lh-base);
   font-weight: 600;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -545,7 +545,7 @@ function stepDot(tone: string): DotState {
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 
@@ -562,7 +562,7 @@ function stepDot(tone: string): DotState {
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .bar {
@@ -626,7 +626,7 @@ function stepDot(tone: string): DotState {
   min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .step-name {
@@ -637,6 +637,6 @@ function stepDot(tone: string): DotState {
 
 .step-outcome {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

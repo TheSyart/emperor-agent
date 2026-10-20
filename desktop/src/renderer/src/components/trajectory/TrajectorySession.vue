@@ -334,7 +334,7 @@ onBeforeUnmount(() => {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   background: rgb(var(--surface-base));
 }
 

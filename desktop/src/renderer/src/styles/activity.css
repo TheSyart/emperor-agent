@@ -2,7 +2,7 @@
 
 .markdown-body {
   @apply min-w-0 max-w-full text-[14px] leading-7;
-  color: rgb(var(--fg));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -18,7 +18,7 @@
 .markdown-body h2,
 .markdown-body h3 {
   @apply font-semibold leading-tight;
-  color: rgb(var(--fg));
+  color: rgb(var(--text-1));
 }
 
 .markdown-body h1 {
@@ -49,7 +49,7 @@
   border: 1px solid rgb(var(--stroke-solid));
   border-radius: var(--radius-md);
   background: rgb(var(--surface-base));
-  color: rgb(var(--fg));
+  color: rgb(var(--text-1));
   font-weight: 500;
   text-decoration: none;
   vertical-align: baseline;
@@ -62,7 +62,7 @@
 .markdown-body a.md-link-chip:hover {
   border-color: rgb(var(--stroke-solid-strong));
   background: rgb(var(--surface-sunken));
-  color: rgb(var(--fg));
+  color: rgb(var(--text-1));
 }
 
 .markdown-body a.md-link-chip::before {
@@ -70,7 +70,7 @@
   flex: none;
   width: 0.875em;
   height: 0.875em;
-  background-color: rgb(var(--fg) / var(--text-tertiary));
+  background-color: rgb(var(--text-1) / var(--text-tertiary));
   -webkit-mask: var(--md-link-ico) center / contain no-repeat;
   mask: var(--md-link-ico) center / contain no-repeat;
 }
@@ -112,20 +112,20 @@
 .markdown-body blockquote {
   @apply border-l-2 py-1 pl-4;
   border-color: rgb(var(--stroke-solid-strong));
-  color: rgb(var(--fg) / var(--text-secondary));
+  color: rgb(var(--text-1) / var(--text-secondary));
 }
 
 .markdown-body code {
   @apply rounded px-1.5 py-0.5 font-mono text-[0.9em];
   background: rgb(var(--surface-sunken));
-  color: rgb(var(--fg));
+  color: rgb(var(--text-1));
 }
 
 .markdown-body pre {
   @apply max-w-full overflow-x-auto rounded-md border p-3.5;
   border-color: rgb(var(--stroke-solid));
   background: rgb(var(--surface-sunken));
-  color: rgb(var(--fg));
+  color: rgb(var(--text-1));
 }
 
 .markdown-body pre code {

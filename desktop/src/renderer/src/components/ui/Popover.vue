@@ -125,7 +125,7 @@ defineExpose({ panel })
   border-radius: var(--radius-card);
   background: rgb(var(--menu-fill));
   box-shadow: var(--shadow-lv3);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .ds-popover[data-padded] {

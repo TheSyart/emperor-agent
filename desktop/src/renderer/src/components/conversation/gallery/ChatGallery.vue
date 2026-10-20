@@ -128,7 +128,7 @@ provide(LINK_STATUS_KEY, {
   flex-direction: column;
   height: 100vh;
   background: rgb(var(--surface-canvas));
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-family: var(--font-sans);
 }
 
@@ -148,7 +148,7 @@ provide(LINK_STATUS_KEY, {
 }
 
 .link {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-decoration: none;
 }
 
@@ -163,7 +163,7 @@ provide(LINK_STATUS_KEY, {
   gap: var(--space-3);
   padding: var(--space-2) var(--space-4);
   font-size: var(--fs-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .back {

@@ -161,7 +161,7 @@ const remote = computed(() => form.value.transport !== 'stdio')
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .label em {
@@ -169,7 +169,7 @@ const remote = computed(() => form.value.transport !== 'stdio')
   font-size: var(--fs-xxs);
   font-style: normal;
   font-weight: 400;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .transport > .ds-tabs {
@@ -180,6 +180,6 @@ const remote = computed(() => form.value.transport !== 'stdio')
   margin: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

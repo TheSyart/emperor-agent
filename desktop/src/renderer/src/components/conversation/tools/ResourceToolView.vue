@@ -45,11 +45,11 @@ const statusCode = computed(() =>
   gap: var(--space-3);
   margin: var(--space-1) 0 var(--space-2);
   font: var(--font-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .raw-result > summary {
   padding: var(--space-1) 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xs);
   cursor: pointer;
 }

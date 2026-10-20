@@ -76,7 +76,7 @@ function onClick(event: MouseEvent): void {
   padding: 0 var(--space-1-5);
   border: 1px dashed var(--stroke-3);
   border-radius: var(--radius-sm);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   font-weight: 400;
   text-decoration: none;

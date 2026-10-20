@@ -483,7 +483,7 @@ defineExpose({ reload: load })
   font-size: var(--fs-base);
   line-height: var(--lh-base);
   font-weight: 600;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -502,13 +502,13 @@ defineExpose({ reload: load })
 
 .description,
 .long {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .byline,
 .note,
 .enable-note {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .error {
@@ -522,7 +522,7 @@ defineExpose({ reload: load })
   gap: var(--space-1-5);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
 }
 
@@ -545,7 +545,7 @@ defineExpose({ reload: load })
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 600;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .prompts,
@@ -587,7 +587,7 @@ defineExpose({ reload: load })
   min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -604,7 +604,7 @@ defineExpose({ reload: load })
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -618,7 +618,7 @@ defineExpose({ reload: load })
 }
 
 .member-description {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 /* MCP transports and Hook commands read as code; other descriptions are prose. */
@@ -627,7 +627,7 @@ defineExpose({ reload: load })
 }
 
 .member-reason {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .member-reason code {
@@ -662,7 +662,7 @@ defineExpose({ reload: load })
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 500;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .tool-list {
@@ -693,7 +693,7 @@ defineExpose({ reload: load })
   min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 @container (max-width: 439px) {

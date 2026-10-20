@@ -527,7 +527,7 @@ function openCall(callId: string): void {
 .no-payload {
   margin: 0;
   padding: var(--space-4) var(--space-3-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xs);
 }
 
@@ -576,7 +576,7 @@ function openCall(callId: string): void {
   gap: 1px;
   padding: 0;
   border: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   background: transparent;
   cursor: pointer;
   font: inherit;
@@ -584,7 +584,7 @@ function openCall(callId: string): void {
 
 .nav-link:hover,
 .nav-link:focus-visible {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .nav-link:focus-visible {
@@ -593,11 +593,11 @@ function openCall(callId: string): void {
 }
 
 .nav-icon {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .nav-link:hover .nav-icon {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .sections {

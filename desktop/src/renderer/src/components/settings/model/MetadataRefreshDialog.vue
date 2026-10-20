@@ -173,7 +173,7 @@ watch(
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .loading {
@@ -181,7 +181,7 @@ watch(
   align-items: center;
   gap: var(--space-2);
   font-size: var(--fs-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .error {
@@ -224,13 +224,13 @@ watch(
   gap: var(--space-3);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-variant-numeric: tabular-nums;
 }
 
 .values strong {
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .actions {

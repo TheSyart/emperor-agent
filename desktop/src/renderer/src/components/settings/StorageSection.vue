@@ -159,18 +159,18 @@ onMounted(() => void load())
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   font-variant-numeric: tabular-nums;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   white-space: nowrap;
 }
 
 .size.total {
   font-weight: 600;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .summary {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 </style>

@@ -265,7 +265,7 @@ const hasChildren = computed(
   align-items: center;
   gap: var(--space-1);
   min-width: 0;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-s);
   text-decoration: none;
 }
@@ -273,7 +273,7 @@ const hasChildren = computed(
   text-decoration: underline;
 }
 .agent-entry > span:not(.ds-avatar) {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   margin-left: var(--space-2);
 }
@@ -309,7 +309,7 @@ const hasChildren = computed(
   width: var(--space-4);
   height: var(--space-4);
   margin-right: var(--space-1-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .agent-leading {
   width: 24px;
@@ -322,7 +322,7 @@ const hasChildren = computed(
 
 .sub-title {
   flex: none;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .sep {
@@ -337,14 +337,14 @@ const hasChildren = computed(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .sub-status {
   flex: none;
   margin-left: var(--space-2);
   font-size: var(--fs-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .open-link {

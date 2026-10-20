@@ -656,7 +656,7 @@ function costText(usage: {
   max-height: 65vh;
   overflow: auto;
   min-width: 0;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   text-wrap: pretty;
 }
@@ -693,7 +693,7 @@ p {
   margin: var(--space-1) 0;
 }
 .external-note {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
 }
 .external-error {
@@ -705,7 +705,7 @@ p {
 .external-code {
   font: var(--font-code-small);
   overflow-wrap: anywhere;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .external-code {
   white-space: pre-wrap;

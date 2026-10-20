@@ -48,6 +48,6 @@ const text = computed(() =>
 .ds-elapsed {
   font: var(--font-xs);
   font-variant-numeric: tabular-nums;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 </style>

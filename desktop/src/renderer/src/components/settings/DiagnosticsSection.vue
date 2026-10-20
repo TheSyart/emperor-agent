@@ -390,7 +390,7 @@ function messageOf(cause: unknown): string {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   font-weight: 600;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .issues {
@@ -448,12 +448,12 @@ function messageOf(cause: unknown): string {
 }
 
 .issue-where {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
 .issue-what {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
 }
 

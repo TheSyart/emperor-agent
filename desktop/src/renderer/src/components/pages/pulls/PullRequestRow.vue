@@ -96,7 +96,7 @@ const checksLabel = computed(() => {
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-align: left;
   cursor: pointer;
   transition: background-color var(--duration-ds-fast) ease;
@@ -126,7 +126,7 @@ const checksLabel = computed(() => {
 }
 
 .glyph[data-draft] {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .checks-dot {
@@ -167,7 +167,7 @@ const checksLabel = computed(() => {
 
 .age {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-variant-numeric: tabular-nums;
@@ -175,7 +175,7 @@ const checksLabel = computed(() => {
 
 .meta {
   gap: var(--space-1);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -199,7 +199,7 @@ const checksLabel = computed(() => {
 
 .sep {
   flex: none;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .stats {

@@ -372,7 +372,7 @@ function onKeydown(event: KeyboardEvent) {
   border-radius: var(--radius-takeover);
   background: rgb(var(--input-major));
   box-shadow: var(--shadow-lv2);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow: hidden;
   outline: none;
 }
@@ -405,7 +405,7 @@ function onKeydown(event: KeyboardEvent) {
 
 .eyebrow {
   margin-bottom: calc(var(--space-1) + 1px);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxxs);
   line-height: 16px;
 }
@@ -430,7 +430,7 @@ function onKeydown(event: KeyboardEvent) {
 .pager .small-icon {
   width: 24px;
   height: 24px;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .body {
@@ -505,7 +505,7 @@ function onKeydown(event: KeyboardEvent) {
   margin-top: var(--space-0-5);
   border-radius: var(--radius-sm);
   background: rgb(var(--surface-strong));
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   font-weight: 500;
   line-height: 18px;
@@ -537,12 +537,12 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .checkbox[data-checked] {
-  color: rgb(var(--label-inverted));
+  color: rgb(var(--text-inverted));
 }
 
 .checkbox[data-checked]::before {
-  border-color: rgb(var(--label-primary));
-  background: rgb(var(--label-primary));
+  border-color: rgb(var(--text-1));
+  background: rgb(var(--text-1));
 }
 
 .option-line {
@@ -561,7 +561,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .description {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-s);
   line-height: 24px;
   font-weight: 400;
@@ -600,12 +600,12 @@ function onKeydown(event: KeyboardEvent) {
   border: none;
   outline: none;
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   caret-color: rgb(var(--accent));
 }
 
 .field-input::placeholder {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .field-block {
@@ -644,7 +644,7 @@ function onKeydown(event: KeyboardEvent) {
 
 .progress {
   padding: 0 var(--space-1);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-s);
   line-height: 24px;
   font-weight: 500;
@@ -660,7 +660,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .kbd {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-family: inherit;
   font-size: var(--fs-xxxs);
   line-height: 16px;

@@ -965,13 +965,13 @@ function message(value: unknown): string {
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-row);
   background: var(--surface-hover);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xs);
   cursor: pointer;
 }
 .file-preview-meta {
   margin: var(--space-4) 0 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xs);
   overflow-wrap: anywhere;
 }
@@ -983,7 +983,7 @@ function message(value: unknown): string {
   padding: var(--space-4);
   border: 0;
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: zoom-in;
 }
 .file-image-preview img {
@@ -1070,13 +1070,13 @@ function message(value: unknown): string {
 .source-toggle {
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-row);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
 
 .source-toggle:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   background: var(--surface-hover);
 }
 
@@ -1103,7 +1103,7 @@ function message(value: unknown): string {
 }
 
 .file-markdown-preview {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -1124,14 +1124,14 @@ function message(value: unknown): string {
   position: sticky;
   left: 0;
   padding-right: var(--space-2);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   text-align: right;
   user-select: none;
   background: rgb(var(--surface-base));
 }
 
 .file-code-line code {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   white-space: pre;
 }
 
@@ -1147,7 +1147,7 @@ function message(value: unknown): string {
 .file-truncated {
   display: block;
   margin-top: var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -1216,19 +1216,19 @@ function message(value: unknown): string {
   padding-block: var(--space-1);
   padding-right: var(--space-2);
   border-radius: var(--radius-row);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-align: left;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
 
 .file-tree-row:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   background: var(--surface-hover);
 }
 
 .file-tree-row.active {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   background: var(--surface-active);
 }
 
@@ -1248,7 +1248,7 @@ function message(value: unknown): string {
 
 .file-tree-hint {
   overflow: hidden;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
   text-overflow: ellipsis;
@@ -1260,7 +1260,7 @@ function message(value: unknown): string {
 
 .files-muted {
   padding: var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -1284,7 +1284,7 @@ function message(value: unknown): string {
 }
 
 .files-inline-warning {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   background: rgb(var(--warn-soft));
 }
 </style>

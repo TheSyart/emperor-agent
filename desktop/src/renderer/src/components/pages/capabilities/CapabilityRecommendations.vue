@@ -117,7 +117,7 @@ const {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 500;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .grid {
@@ -147,7 +147,7 @@ const {
   height: var(--space-8);
   border-radius: var(--radius-row);
   background: rgb(var(--surface-base));
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .recommendation-text {
@@ -162,7 +162,7 @@ const {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -171,7 +171,7 @@ const {
   overflow: hidden;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-overflow: ellipsis;
   white-space: nowrap;
 }

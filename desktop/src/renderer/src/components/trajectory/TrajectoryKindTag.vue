@@ -94,7 +94,7 @@ withDefaults(defineProps<{ kind: TrajectoryCellKind; iconOnly?: boolean }>(), {
   letter-spacing: 0.035em;
   white-space: nowrap;
   user-select: none;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   background: var(--surface-hover);
 }
 
@@ -141,7 +141,7 @@ withDefaults(defineProps<{ kind: TrajectoryCellKind; iconOnly?: boolean }>(), {
 }
 
 .traj-kind-tag[data-kind='context'] {
-  color: color-mix(in srgb, rgb(var(--ok)) 68%, rgb(var(--label-secondary)));
+  color: color-mix(in srgb, rgb(var(--ok)) 68%, rgb(var(--text-2)));
   background: rgb(var(--ok-soft));
 }
 
@@ -163,7 +163,7 @@ withDefaults(defineProps<{ kind: TrajectoryCellKind; iconOnly?: boolean }>(), {
   color: color-mix(
     in srgb,
     rgb(var(--approval-strong)) 62%,
-    rgb(var(--label-tertiary))
+    rgb(var(--text-3))
   );
   background: color-mix(
     in srgb,

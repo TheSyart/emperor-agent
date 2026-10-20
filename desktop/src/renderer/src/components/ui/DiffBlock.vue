@@ -68,7 +68,7 @@ const { copied, copy } = useCopyFeedback(() => diffCopyText(result.value.rows))
 <style scoped>
 .ds-diff {
   position: relative;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   background: rgb(var(--code-block-bg));
   border-radius: var(--radius-card);
 }
@@ -81,7 +81,7 @@ const { copied, copy } = useCopyFeedback(() => diffCopyText(result.value.rows))
   padding: 0;
   border: none;
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xs);
   cursor: pointer;
 }
@@ -101,12 +101,12 @@ const { copied, copy } = useCopyFeedback(() => diffCopyText(result.value.rows))
 .line--path {
   padding-right: calc(var(--space-8) * 2);
   font-weight: 600;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .line--gap,
 .line--ctx {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .line--ctx::before {
@@ -145,19 +145,19 @@ const { copied, copy } = useCopyFeedback(() => diffCopyText(result.value.rows))
   padding: 0;
   border: none;
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .expand:hover {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .footer {
   padding: 0 var(--space-3-5) var(--space-3);
   font: var(--font-code);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

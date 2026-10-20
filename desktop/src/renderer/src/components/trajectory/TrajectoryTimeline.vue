@@ -599,7 +599,7 @@ onBeforeUnmount(() => {
 .labels {
   position: relative;
   border-right: 1px solid var(--stroke-1);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font: 10px / 1 var(--font-sans);
 }
 
@@ -643,7 +643,7 @@ onBeforeUnmount(() => {
   position: absolute;
   top: 50%;
   left: 50%;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font: var(--font-xs);
   transform: translate(-50%, -50%);
 }
@@ -665,7 +665,7 @@ onBeforeUnmount(() => {
     rgb(var(--surface-raised)) 38%,
     transparent 100%
   );
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xs);
   opacity: 0.72;
   cursor: pointer;
@@ -720,7 +720,7 @@ onBeforeUnmount(() => {
   height: 8px;
   min-width: 2px;
   border-radius: 2px;
-  background: rgb(var(--label-secondary));
+  background: rgb(var(--text-2));
   opacity: 0.78;
 }
 
@@ -729,11 +729,7 @@ onBeforeUnmount(() => {
 }
 
 .span[data-timeline-span='context'] {
-  background: color-mix(
-    in srgb,
-    rgb(var(--ok)) 68%,
-    rgb(var(--label-secondary))
-  );
+  background: color-mix(in srgb, rgb(var(--ok)) 68%, rgb(var(--text-2)));
 }
 
 .span[data-timeline-span='message'] {
@@ -888,7 +884,7 @@ onBeforeUnmount(() => {
   position: absolute;
   bottom: 0;
   left: var(--traj-tick-left);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font: 9px / 11px var(--font-mono);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

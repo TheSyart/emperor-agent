@@ -32,7 +32,7 @@ const icon = computed(() =>
 
 <style scoped>
 .document-icon {
-  --document-tone: var(--label-secondary);
+  --document-tone: var(--text-2);
   display: inline-flex;
   flex: none;
   align-items: center;

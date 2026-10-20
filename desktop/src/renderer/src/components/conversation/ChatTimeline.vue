@@ -559,7 +559,7 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall })
   border: none;
   border-radius: var(--radius-pill);
   background: var(--surface-hover-solid);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   cursor: pointer;
@@ -571,7 +571,7 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall })
   gap: var(--space-1-5);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .open-error {
@@ -616,7 +616,7 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall })
   border-radius: var(--radius-pill);
   background: rgb(var(--surface-raised));
   box-shadow: var(--shadow-lv2);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   cursor: pointer;
   pointer-events: auto;
 }

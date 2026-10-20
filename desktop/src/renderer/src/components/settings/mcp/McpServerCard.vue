@@ -183,7 +183,7 @@ async function loadOutput() {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-weight: 500;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .tool-list {
@@ -209,13 +209,13 @@ async function loadOutput() {
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
 .output-hint {
   font-weight: 400;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .output-load {
@@ -232,7 +232,7 @@ async function loadOutput() {
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -251,7 +251,7 @@ async function loadOutput() {
   -webkit-line-clamp: 2;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 </style>

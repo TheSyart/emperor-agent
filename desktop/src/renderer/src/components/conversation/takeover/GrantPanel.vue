@@ -151,7 +151,7 @@ function send(optionId: string) {
   border-radius: var(--radius-takeover);
   background: rgb(var(--input-major));
   box-shadow: var(--shadow-lv2);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow: hidden;
   outline: none;
 }
@@ -190,7 +190,7 @@ function send(optionId: string) {
 }
 
 .target {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   line-height: 20px;
@@ -205,7 +205,7 @@ function send(optionId: string) {
 }
 
 .input-label {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
 }
 
@@ -227,7 +227,7 @@ function send(optionId: string) {
 }
 
 .reason {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-s);
   line-height: 22px;
   white-space: pre-wrap;
@@ -235,7 +235,7 @@ function send(optionId: string) {
 }
 
 .reason-label {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .scope {
@@ -246,7 +246,7 @@ function send(optionId: string) {
 }
 
 .scope-label {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xs);
   line-height: 20px;
 }

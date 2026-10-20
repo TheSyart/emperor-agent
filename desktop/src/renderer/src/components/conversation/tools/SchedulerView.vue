@@ -78,13 +78,13 @@ const output = computed(() => resultText(props.data))
 }
 
 dt {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 dd {
   margin: 0;
   min-width: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -95,7 +95,7 @@ dd {
   padding-top: var(--space-2);
   border-top: 1px solid var(--stroke-2);
   font: var(--font-code-small);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

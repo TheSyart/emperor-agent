@@ -60,7 +60,7 @@ export default defineComponent({
   padding: var(--space-2) var(--space-3) var(--space-2) 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 

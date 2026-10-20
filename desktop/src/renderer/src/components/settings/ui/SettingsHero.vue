@@ -57,7 +57,7 @@ withDefaults(defineProps<{ title: string; description?: string }>(), {
   font-size: var(--fs-hero);
   line-height: var(--lh-hero);
   font-weight: 600;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -72,7 +72,7 @@ withDefaults(defineProps<{ title: string; description?: string }>(), {
 .description {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 

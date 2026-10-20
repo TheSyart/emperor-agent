@@ -37,7 +37,7 @@ withDefaults(defineProps<{ intro?: string; fill?: boolean }>(), {
   min-width: 0;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .ds-settings-section[data-fill] {
@@ -59,7 +59,7 @@ withDefaults(defineProps<{ intro?: string; fill?: boolean }>(), {
   padding: var(--space-1) 0 var(--space-2);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-wrap: pretty;
 }
 </style>

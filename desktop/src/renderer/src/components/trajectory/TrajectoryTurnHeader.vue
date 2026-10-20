@@ -59,7 +59,7 @@ const columns = computed(() => {
 
 .title {
   flex: none;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: 600 var(--fs-xxs) / var(--lh-xxs) var(--font-sans);
 }
 
@@ -81,7 +81,7 @@ const columns = computed(() => {
 }
 
 dt {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font: var(--font-xxxs);
 }
 
@@ -89,7 +89,7 @@ dd {
   min-width: 0;
   margin: 0;
   overflow: hidden;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xxxs);
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;

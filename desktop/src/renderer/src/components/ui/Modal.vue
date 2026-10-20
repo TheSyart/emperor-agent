@@ -144,14 +144,14 @@ provideSurface(() => 'panel')
   font-size: var(--fs-base);
   line-height: var(--lh-base);
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .description {
   margin: 0;
   padding: 0 var(--space-6);
   font: var(--font-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .body {

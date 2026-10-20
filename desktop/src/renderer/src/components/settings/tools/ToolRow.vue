@@ -150,7 +150,7 @@ const source = computed(() =>
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -160,14 +160,14 @@ const source = computed(() =>
   overflow: hidden;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   transition: transform var(--duration-ds-fast) var(--ease-in-out);
 }
 
@@ -189,7 +189,7 @@ const source = computed(() =>
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
@@ -215,7 +215,7 @@ const source = computed(() =>
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-weight: 600;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .params {
@@ -255,7 +255,7 @@ const source = computed(() =>
 .param-name {
   font: var(--font-code-small);
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -263,7 +263,7 @@ const source = computed(() =>
 .param-values {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 </style>

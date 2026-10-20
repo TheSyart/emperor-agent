@@ -153,7 +153,7 @@ const { copied, copy } = useCopyFeedback(() =>
 <style scoped>
 .ds-search {
   position: relative;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   background: rgb(var(--code-block-bg));
   border-radius: var(--radius-card);
 }
@@ -175,7 +175,7 @@ const { copied, copy } = useCopyFeedback(() =>
   text-overflow: ellipsis;
   white-space: nowrap;
   font: var(--font-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .copy {
@@ -183,7 +183,7 @@ const { copied, copy } = useCopyFeedback(() =>
   padding: 0;
   border: none;
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xs);
   cursor: pointer;
 }
@@ -220,7 +220,7 @@ const { copied, copy } = useCopyFeedback(() =>
   min-width: 0;
   font-weight: 600;
   white-space: pre;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .expand {
@@ -229,19 +229,19 @@ const { copied, copy } = useCopyFeedback(() =>
   padding: 0 var(--space-3-5);
   border: none;
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .expand:hover {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .empty {
   padding: var(--space-3) var(--space-3-5);
   font: var(--font-code);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

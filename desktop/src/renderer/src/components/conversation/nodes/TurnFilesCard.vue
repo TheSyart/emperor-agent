@@ -241,7 +241,7 @@ function openFile(path: string): void {
   gap: var(--space-2);
   margin: 0;
   padding: var(--space-3) var(--space-4);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .head {
@@ -268,7 +268,7 @@ function openFile(path: string): void {
   border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   background: rgb(var(--surface-canvas));
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .summary-text {
@@ -289,7 +289,7 @@ function openFile(path: string): void {
 .scope-info {
   display: inline-flex;
   border-radius: var(--radius-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: help;
 }
 
@@ -329,7 +329,7 @@ function openFile(path: string): void {
 }
 
 .reverted {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xs);
 }
 
@@ -350,7 +350,7 @@ function openFile(path: string): void {
   padding: var(--space-2-5) var(--space-4);
   border: 0;
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-s);
   text-align: start;
@@ -378,11 +378,11 @@ function openFile(path: string): void {
 }
 
 .dir {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .name {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .file-meta {
@@ -390,7 +390,7 @@ function openFile(path: string): void {
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-top: var(--space-0-5);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   overflow-wrap: anywhere;
@@ -422,19 +422,19 @@ function openFile(path: string): void {
   border: 0;
   border-radius: var(--radius-xs);
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: inherit;
   cursor: pointer;
 }
 
 .more:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   background: var(--surface-hover);
 }
 
 .limit {
   padding: var(--space-2) var(--space-4);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
 }
 

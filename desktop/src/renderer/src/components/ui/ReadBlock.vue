@@ -96,7 +96,7 @@ const { copied, copy } = useCopyFeedback(() => raw.value)
   --read-gutter: calc(var(--space-6) * 2);
 
   position: relative;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   background: rgb(var(--code-block-bg));
   border-radius: var(--radius-card);
 }
@@ -120,7 +120,7 @@ const { copied, copy } = useCopyFeedback(() => raw.value)
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .actions {
@@ -136,21 +136,21 @@ const { copied, copy } = useCopyFeedback(() => raw.value)
 }
 
 .count {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .lang {
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .copy {
   padding: 0;
   border: none;
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: pointer;
 }
 
@@ -173,7 +173,7 @@ const { copied, copy } = useCopyFeedback(() => raw.value)
   width: var(--read-gutter);
   padding-right: var(--space-3-5);
   text-align: right;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   user-select: none;
 }
 
@@ -183,13 +183,13 @@ const { copied, copy } = useCopyFeedback(() => raw.value)
   padding: 0 0 0 var(--read-gutter);
   border: none;
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .expand:hover {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 </style>

@@ -66,7 +66,7 @@ const title = computed(() =>
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: rgb(var(--label-caption));
+  background: rgb(var(--text-3));
   box-shadow: 0 0 0 2px rgb(var(--surface-base));
   content: '';
   transition:
@@ -82,7 +82,7 @@ const title = computed(() =>
   padding: 0 var(--space-1);
   border: 1px solid var(--stroke-1);
   border-radius: 2px;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv2);
   content: attr(data-label);

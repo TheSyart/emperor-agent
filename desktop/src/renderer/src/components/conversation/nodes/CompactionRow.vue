@@ -105,7 +105,7 @@ const summary = computed(() => {
   width: var(--space-4);
   height: var(--space-4);
   margin-right: var(--space-1-5);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .icon-context,
@@ -142,7 +142,7 @@ const summary = computed(() => {
   flex: none;
   font-size: var(--fs-s);
   line-height: var(--lh-base);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 [data-status='error'] .title {
@@ -155,7 +155,7 @@ const summary = computed(() => {
   height: 2px;
   margin: 0 var(--space-2);
   border-radius: 50%;
-  background: rgb(var(--label-caption));
+  background: rgb(var(--text-3));
 }
 
 .summary {
@@ -166,18 +166,18 @@ const summary = computed(() => {
   white-space: nowrap;
   font-size: var(--fs-s);
   line-height: var(--lh-base);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .body {
   padding: var(--space-1) 0 var(--space-1)
     calc(var(--space-4) + var(--space-1-5));
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .body :deep(.ds-md) {
   font-size: var(--fs-s);
   line-height: var(--lh-base);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

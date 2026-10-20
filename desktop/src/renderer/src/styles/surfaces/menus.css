@@ -38,7 +38,7 @@
   justify-content: space-between;
   gap: var(--space-3);
   padding: 0 var(--space-2) var(--space-1);
-  color: rgb(var(--fg) / var(--text-tertiary));
+  color: rgb(var(--text-1) / var(--text-tertiary));
   font-size: var(--font-size-sm);
 }
 
@@ -59,7 +59,7 @@
 
 .composer-palette-label {
   padding: var(--space-1) var(--space-2) var(--space-1);
-  color: rgb(var(--fg) / var(--text-tertiary));
+  color: rgb(var(--text-1) / var(--text-tertiary));
   font-size: var(--font-size-xs);
 }
 
@@ -77,7 +77,7 @@
   gap: var(--space-2);
   border-radius: var(--radius-md);
   padding: var(--space-1) var(--space-2);
-  color: rgb(var(--fg));
+  color: rgb(var(--text-1));
   font-size: var(--font-size-sm);
   text-align: left;
   transition:
@@ -95,12 +95,12 @@
   width: 18px;
   height: 18px;
   place-items: center;
-  color: rgb(var(--fg) / var(--text-secondary));
+  color: rgb(var(--text-1) / var(--text-secondary));
 }
 
 /* A plugin that cannot be referenced now: greyed; selecting it opens its detail. */
 .composer-palette-item[data-unavailable] strong {
-  color: rgb(var(--fg) / var(--text-tertiary));
+  color: rgb(var(--text-1) / var(--text-tertiary));
 }
 
 .composer-palette-item[data-unavailable] .composer-palette-item-icon {
@@ -111,7 +111,7 @@
 .composer-palette-item strong {
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--fg));
+  color: rgb(var(--text-1));
   font-size: var(--font-size-md);
   font-weight: 560;
   line-height: 1.25;
@@ -123,7 +123,7 @@
 .composer-palette-item > span:not(.composer-palette-item-icon) {
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--fg) / var(--text-tertiary));
+  color: rgb(var(--text-1) / var(--text-tertiary));
   font-size: var(--font-size-sm);
   line-height: 1.25;
   text-overflow: ellipsis;
@@ -136,7 +136,7 @@
   border: 1px solid rgb(var(--stroke-solid));
   border-radius: var(--radius-sm);
   padding: 1px var(--space-2);
-  color: rgb(var(--fg) / var(--text-tertiary));
+  color: rgb(var(--text-1) / var(--text-tertiary));
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: var(--font-size-2xs);
   font-weight: 500;
@@ -149,7 +149,7 @@
   max-width: 92px;
   border: 0;
   padding: 0;
-  color: rgb(var(--fg) / var(--text-tertiary));
+  color: rgb(var(--text-1) / var(--text-tertiary));
   font-family: inherit;
   font-size: var(--font-size-xs);
   font-weight: 400;

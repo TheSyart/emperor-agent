@@ -204,7 +204,7 @@ onBeforeUnmount(() => clearTimeout(timer))
   padding: 0 calc(var(--space-1) + 1px);
   border: 0;
   border-radius: 2px;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   background: transparent;
   cursor: pointer;
   font: var(--font-xxs);
@@ -212,7 +212,7 @@ onBeforeUnmount(() => clearTimeout(timer))
 
 .action:hover,
 .action[aria-pressed='true'] {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   background: var(--surface-hover);
 }
 
@@ -235,7 +235,7 @@ onBeforeUnmount(() => clearTimeout(timer))
 .action-icon {
   display: block;
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: 14px / 14px var(--font-mono);
 }
 
@@ -248,7 +248,7 @@ onBeforeUnmount(() => clearTimeout(timer))
 
 .count {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xxxs);
   font-variant-numeric: tabular-nums;
 }

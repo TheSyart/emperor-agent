@@ -166,7 +166,7 @@ defineExpose({ focus: () => textarea.value?.focus() })
   margin: 0;
   padding: var(--code-pad) var(--space-2-5) var(--code-pad) var(--space-2);
   font: inherit;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   text-align: right;
   white-space: pre;
 }
@@ -204,11 +204,11 @@ defineExpose({ focus: () => textarea.value?.focus() })
 }
 
 .code::placeholder {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .ds-code-editor[data-disabled] .code {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: default;
 }
 </style>

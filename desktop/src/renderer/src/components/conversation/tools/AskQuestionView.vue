@@ -81,13 +81,13 @@ const outcome = computed(() => {
 .header {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .text {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .options {
@@ -105,7 +105,7 @@ const outcome = computed(() => {
   gap: var(--space-2);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .check {
@@ -118,7 +118,7 @@ const outcome = computed(() => {
   align-self: center;
   border: 1px solid var(--stroke-3);
   border-radius: var(--radius-pill);
-  color: rgb(var(--label-inverted));
+  color: rgb(var(--text-inverted));
 }
 
 [data-selected] .check {
@@ -127,7 +127,7 @@ const outcome = computed(() => {
 }
 
 [data-selected] .label {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-weight: 500;
 }
 
@@ -141,16 +141,16 @@ const outcome = computed(() => {
 .outcome {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .custom-label {
   margin-right: var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .skipped,
 .outcome {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

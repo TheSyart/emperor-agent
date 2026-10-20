@@ -153,7 +153,7 @@ function go(entry: SidebarPageEntry): void {
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   cursor: pointer;
 }
 

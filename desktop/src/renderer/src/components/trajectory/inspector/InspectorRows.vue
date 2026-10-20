@@ -53,14 +53,14 @@ withDefaults(
 }
 
 .traj-rows :deep(dt) {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .traj-rows :deep(dd) {
   min-width: 0;
   margin: 0;
   overflow: hidden;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }

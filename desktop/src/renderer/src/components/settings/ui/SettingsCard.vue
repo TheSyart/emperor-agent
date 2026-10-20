@@ -161,7 +161,7 @@ function onHeaderClick(event: MouseEvent) {
 }
 
 .ds-settings-card[data-expandable]:not([data-disabled]):hover {
-  border-color: rgb(var(--label-dimmed));
+  border-color: rgb(var(--text-disabled));
 }
 
 .ds-settings-card[data-variant='filled'][data-expandable]:hover {
@@ -170,7 +170,7 @@ function onHeaderClick(event: MouseEvent) {
 
 /* An open card reads as the one being worked on, not merely taller. */
 .ds-settings-card[data-open] {
-  border-color: rgb(var(--label-dimmed));
+  border-color: rgb(var(--text-disabled));
   background: rgb(var(--surface-raised));
 }
 
@@ -201,7 +201,7 @@ function onHeaderClick(event: MouseEvent) {
   flex: none;
   align-items: center;
   justify-content: center;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 /* A page's master switch: the glyph on a gold tile, a semibold title. */
@@ -259,7 +259,7 @@ button.head-text:focus-visible {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   font-weight: 500;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -267,7 +267,7 @@ button.head-text:focus-visible {
 .description {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 
@@ -281,7 +281,7 @@ button.head-text:focus-visible {
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   transition: transform var(--duration-ds-fast) var(--ease-in-out);
 }
 

@@ -205,7 +205,7 @@ function emptyNote(file: PullDiffFile): string {
 
 .diff-loading {
   padding: var(--space-6) 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   text-align: center;
@@ -230,7 +230,7 @@ function emptyNote(file: PullDiffFile): string {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -245,7 +245,7 @@ function emptyNote(file: PullDiffFile): string {
   padding: 0;
   border: none;
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: inherit;
   font-weight: 500;
   cursor: pointer;
@@ -257,7 +257,7 @@ function emptyNote(file: PullDiffFile): string {
 }
 
 .link:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .diff-file {
@@ -280,7 +280,7 @@ function emptyNote(file: PullDiffFile): string {
   border: none;
   border-radius: var(--radius-card);
   background: rgb(var(--code-block-bg));
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-align: left;
   cursor: pointer;
 }
@@ -301,7 +301,7 @@ function emptyNote(file: PullDiffFile): string {
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .file-head:disabled .chevron {
@@ -338,7 +338,7 @@ function emptyNote(file: PullDiffFile): string {
 .file-note {
   padding: 0 var(--space-3) var(--space-2-5)
     calc(var(--space-3) + var(--space-5) + var(--space-0-5));
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }

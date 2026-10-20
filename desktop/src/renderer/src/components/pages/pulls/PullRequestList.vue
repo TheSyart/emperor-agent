@@ -343,7 +343,7 @@ const showFooter = computed(
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   text-overflow: ellipsis;
@@ -400,7 +400,7 @@ const showFooter = computed(
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-weight: 500;
@@ -409,7 +409,7 @@ const showFooter = computed(
 }
 
 .group-head:hover {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .group-label {
@@ -425,7 +425,7 @@ const showFooter = computed(
 
 .group-count {
   margin-left: auto;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
 }
 
@@ -438,7 +438,7 @@ const showFooter = computed(
 .list-foot {
   margin: var(--space-3) 0 0;
   padding: 0 var(--space-2-5);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
