@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-10-20<br>
-> 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store
+> 最后核验：2026-10-21<br>
+> 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store
 
 ## 两个根的区分
 
@@ -39,13 +39,13 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
 
 ```text
 ~/.emperor/
-  installation.json        # layout/app/runtime revision 与首次启动、迁移状态
-  settings.json            # 用户通用配置
+  installation.json        # layout/app/runtime revision、首次启动与迁移状态；lastRunVersion / previousRunVersion（降级提示）与 dataVersion（数据迁移）
+  settings.json            # 用户通用配置（version 1）
   model_config.json        # schemaVersion 2；多个模型、单 active；apiKey 以本地密钥加密（el1:…）；单条坏条目只跳过该条（MOD-03）
   model_config.json.pre-seal-<ts>  # 第一次加密前的原文件（含明文 Key，0600，用户可删）
   model_tests.json         # 每条模型最近一次连接测试（设置 › 模型 的连接状态；运行状态，不是配置）
-  mcp_config.json          # headers / env 中 key、token、secret 等值以本地密钥加密
-  hooks.json               # Claude Code hooks.json 格式的 command hooks（可选）
+  mcp_config.json          # version 1；headers / env 中 key、token、secret 等值以本地密钥加密
+  hooks.json               # Claude Code hooks.json 格式的 command hooks（可选；保存时第一个键写 "version": 1）
   onboarding.json
   AGENTS.md                # 可选的全局工作区说明，用户手写
   workspace/               # Chat 会话的工作目录
@@ -138,6 +138,11 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
   native-helpers/<cdhash>/   # 签名 Helper 的独立安装版本（macOS）
   migrations/
     state-root-migration.json
+    log.jsonl                # 数据迁移与恢复，每次一行（kind、status、backup、files / categories、error）
+    backup-<ts>/             # 迁移前复制、恢复前移走的文件（相对路径不变）；不自动删除
+    restore-pending/         # 已确认、待下次启动应用的恢复（restore.json 为标记）
+    restore-failed-<ts>/     # 应用失败后留下的恢复内容（已回滚）
+    .restore-<id>/           # 「从备份恢复」打开后、确认前的解压目录（关闭即删）
 ```
 
 ### 保留与存储占用（KRN-12）
@@ -245,13 +250,63 @@ Release 在创建 Core 前由 `bootstrapEmperorHome()` 执行默认根迁移：
 2. `~/.emperor` 不存在而 `~/.emperor-agent` 存在时，先写 prepared receipt，再原子 rename，随后规范化配置并写 applied receipt。
 3. 两个默认根并存时只使用 `~/.emperor`，不合并、不删除旧根，Diagnostics 报告遗留目录。
 4. 旧 `emperor.local.json` 在没有 `settings.json` 时原子改名；两者并存时新文件优先。
-5. `installation.json` 的 layout version 高于当前应用时拒绝写入并进入恢复页，防止降级破坏数据。
+5. `installation.json` 的 layout version 高于当前应用时拒绝写入并进入恢复页，防止降级破坏数据。单个文件版本更高时只读降级，见下文「数据版本与只读降级」。
 
 更早的仓库内布局由 `migrate-state-root.ts` 兼容处理：只复制、不删除，不覆盖已有文件；每次迁移写入 `migrations/state-root-migration.json` 与 `migration-log.jsonl`。
 
 `settings.json` 的 `sessions.defaultPermission`（`read-only` / `workspace-write` / `danger-full-access`，默认 `workspace-write`）是新会话起始的权限预设；已经有日志的会话保留自己的预设。不认识的值读作默认值。
 
 `settings.json` 中旧内核的 `permissions.rules`、`workspace.fileCheckpoints`、`workspace.gitRewind`、`memory.hybridMemory` 和 `codeIntelligence` 在读取时被忽略，保存时不再写回。
+
+## 数据版本与只读降级（REL-03）
+
+每个持久文件写明自己的版本。版本键沿用各文件的历史：0.2 之前没有版本的文件写 `version`（由迁移 0-1 或下一次保存补上），已有 `schemaVersion` 的继续用它（旧版本已经在检查这个键），会话索引是数组，每条记录带 `version`。清单在 `storage/data-files.ts`（`DATA_FILES`）：
+
+| 文件                                                                                | 版本键          | 当前版本 | 写入方 |
+| ----------------------------------------------------------------------------------- | --------------- | -------- | ------ |
+| `installation.json`                                                                 | `schemaVersion` | 1        | Core   |
+| `settings.json`、`mcp_config.json`、`hooks.json`、`scheduler/jobs.json`             | `version`       | 1        | Core   |
+| `model_config.json`                                                                 | `schemaVersion` | 2        | Core   |
+| `sessions/index.json`                                                               | 每条 `version`  | 1        | Core   |
+| `plugins/installed_plugins.json`、`plugins/known_marketplaces.json`                 | `schemaVersion` | 1        | Core   |
+| `delegations/config.json`、`delegations/consent.json`                               | `schemaVersion` | 1        | Core   |
+| `browser/profiles.json`、`browser/site-permissions.json`、`browser/restorable.json` | `schemaVersion` | 1        | Core   |
+| `computer-use/vault.json`                                                           | `version`       | 3        | main   |
+| `browser/user-downloads.json`、`browser/downloads/.index.json`                      | `version`       | 1        | main   |
+
+持久化内核（`store/persistence`）的 snapshot codec 声明 `versionKey`。读到的版本高于本构建写入的版本时：
+
+- 按本构建的版本尽量解码（解不出来时用默认值），回执是 `newer_version_read_only`；**不隔离**（不改名为 `*.corrupt-*`），也不重写；
+- 之后对这个文件的任何写入都抛 `DataFileNewerError`（code `data_file_newer`，消息「这个文件来自更新版本的 Emperor，当前版本只读：<文件名>」，经 IPC 原样到达界面）。写前检查按文件的 size + mtime 缓存，同一文件重复写入时只 `stat` 一次；
+- 不走 snapshot 的写入方（插件服务写 `settings.json`、Hooks 服务、子智能体授权、main 的两个下载记录）各自先检查版本；会话索引更新版时只在内存中维护（目录本来就从各会话的 `meta.jsonl` 重建）；定时任务文件更新版时定时任务服务启动失败并写明原因，不会运行任务；委派授权更新版时不记住「以后都允许」；`delegations/config.json` 版本未知时本来就拒绝读写。
+
+`installation.json` 记录 `lastRunVersion`（本次运行的版本）与 `previousRunVersion`（上一次）；只有正式版本号（`x.y.z[-pre]`，不含 `0.0.0-*`、`development`）才记录。本次版本低于上一次时为降级：CoreApi `storage.versions` 返回 `downgradedFrom`，界面启动时显示提示。`installation.json` 的 `schemaVersion` 更高时不重写它。`storage.versions` 同时返回数据版本、清单中每个存在的文件的状态（`ok` / `newer` / `unversioned` / `unreadable`）和最近一次恢复。
+
+## 数据迁移（REL-03）
+
+`installation.json` 的 `dataVersion` 是 Emperor Home 的数据版本（新建目录直接是当前版本；旧目录没有这个字段即为 0）。迁移步骤是 `packages/core/src/migrations/<from>-<to>.ts`，`DATA_MIGRATIONS` 按顺序排成一条链；只有数据版本落后时才加载迁移代码（`runPendingDataMigrations`，main 在 bootstrap 之后、Core 创建之前调用，headless Core 在自己的 bootstrap 之后调用）。每一步：
+
+1. 把这一步列出的文件复制到 `migrations/backup-<ts>/`（相对路径与权限不变）；
+2. 运行，成功后 `dataVersion` 前进，`migrations/log.jsonl` 写一行 `status: "applied"`；
+3. 失败时把复制的文件放回、删除这一步新建的文件，日志写 `rolled_back`，数据版本不变，下次启动再试。
+
+步骤必须可以重复执行：旧版本运行后会去掉 `dataVersion`，再次升级时步骤会再跑一遍。迁移 `0-1` 给旧版本留下的 `settings.json`、`mcp_config.json`、`hooks.json` 补上 `"version": 1`。版本更高的数据版本不做任何迁移。
+
+## 备份与恢复（REL-03）
+
+「设置 › 高级 › 存储 › 备份与恢复」由 main（`desktop/src/main/home-backup.ts`，按需加载）与 Core（`storage/backup.ts`，经 `loadHomeBackupModule()` 按需加载，不进入主 bundle）完成。IPC 见 [IPC 与运行时事件](ipc-and-runtime-events.md#备份与恢复)。
+
+备份按部分组织：设置与配置（`settings.json`、`model_config.json`、`mcp_config.json`、`hooks.json`、`onboarding.json`、`delegations/config.json`、`delegations/consent.json`）、记忆（`memory/`，附件与媒体除外）、Skills / 插件 / 智能体（`skills/` 除 `.staging`、`agents/`、`plugins/` 除 `staging`）、项目与定时任务（`projects/`、`scheduler/` 除锁），可选的会话（`sessions/` 除 `.scratch`、`memory/attachments`、`memory/media`、`tokens/`）。任何深度的锁文件、临时文件、`*.corrupt-*`、符号链接和特殊文件都不复制。备份从不包含 `installation.json`、`computer-use/`（凭据库与本地密钥）、`browser/`、`environment/`、`logs/`、`run/`、`spill/`、`write-staging/`、`git/`、委派的运行目录和 `migrations/`。
+
+导出：有备份口令时先由凭据库导出 SEC-09 的口令封装文件（条目与本地密钥，AES-256-GCM，scrypt 派生），作为 `credentials.emperor-vault`，同时带上 `delegations/credentials.json`（AGT-02 用本地密钥封装的 Claude Code 令牌）；没有口令时这三者都不在备份里。Core 把备份范围复制到 main 的私有临时目录（0700，文件 0600），复制件里的明文模型 Key 与 MCP 密钥用本地密钥封装（无法封装时去掉），写 `emperor-backup.json`（format `emperor-backup`、version 1、createdAt、appVersion、dataVersion、categories、credentials、files、bytes），main 用 `ditto -c -k --keepParent` 打包为 `.emperor-backup.zip`（先写 `.partial`，0600，再改名），然后删除临时目录。
+
+恢复：main 用 `ditto -x -k` 解压到 `<home>/migrations/.restore-<id>/`，Core 校验 manifest（格式更新的备份拒绝）和每一个路径（只允许 manifest 声明的部分里的普通文件与目录，符号链接与范围外路径一律拒绝）。用户确认后，有口令时 main 先导入凭据库（全部字段打开后才改动本地状态；口令错误时什么都不变）；然后 Core 把解压目录改名为 `migrations/restore-pending/`（同一磁盘，原子），去掉 `credentials.emperor-vault`，没有导入凭据库时也去掉 `delegations/credentials.json`，最后写标记 `restore.json`；main 重新启动。下次启动在取得数据目录锁之后、bootstrap 之前（`applyPendingHomeRestore`）：
+
+1. 当前数据中备份所含部分的条目（文件，或带排除项目录的子项）改名到 `migrations/backup-<ts>/`；
+2. 备份里的条目改名到原位，`dataVersion` 设为备份的数据版本（随后的数据迁移会补齐）；
+3. 删除 `restore-pending/`，`log.jsonl` 写 `kind: "restore"` `status: "applied"`；任何一步失败时按相反顺序移回，`restore-pending/` 改名为 `restore-failed-<ts>/`，日志写 `rolled_back`。
+
+`storage.versions` 的 `lastRestore` 让界面在恢复后的第一次启动提示一次。
 
 ## 诊断字段速查
 
