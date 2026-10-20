@@ -207,8 +207,39 @@ it('preserves main session actions and search without child rows', async () => {
   ).toBe('pinned')
   expect(root.querySelectorAll('[aria-label="会话操作"]')).toHaveLength(2)
   expect(root.querySelector('[data-agent-id]')).toBeNull()
-  ;(root.querySelector('[aria-label="搜索对话"]') as HTMLButtonElement)?.click()
+  // Search is the rail's command palette now (UI-S02), not a capsule here.
+  expect(root.querySelector('[aria-label="搜索对话"]')).toBeNull()
+})
+
+it('keeps 置顶 on top, then 项目 and 对话 (UI-S02 8)', async () => {
+  await mount('/chat/pinned')
+  const headers = [
+    ...root.querySelectorAll<HTMLElement>('[data-sidebar-section]'),
+  ].map((el) => el.dataset.sidebarSection)
+  expect(headers[0]).toBe('pinned')
+  expect(headers).toEqual(['pinned', 'projects', 'chats'])
+})
+
+it('moves between sessions with ↑ and ↓ (UI-S02 7)', async () => {
+  const router = await mount('/chat/pinned')
+  const rows = () => [...root.querySelectorAll<HTMLElement>('.session-row')]
+  const first = rows()[0]!
+  first.focus()
+  first.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+  )
   await settle()
+  const next = rows()[1]!
+  expect(document.activeElement).toBe(next)
+  expect(router.currentRoute.value.params.sessionId).toBe(
+    next.getAttribute('data-session-id'),
+  )
+  next.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }),
+  )
+  await settle()
+  expect(document.activeElement).toBe(rows()[0])
+  expect(router.currentRoute.value.params.sessionId).toBe('pinned')
 })
 
 async function chooseNewProjectFolder() {
