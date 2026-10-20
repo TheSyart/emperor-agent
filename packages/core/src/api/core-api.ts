@@ -548,6 +548,8 @@ export class CoreApi {
                 }))
         },
         computerUseTools: () => listGuiTools(),
+        hookFailure: (pluginId, hookId) =>
+          host.pluginHookHealth.failure(pluginId, hookId),
         appConnection: (pluginId, scope, appId) =>
           this.appConnections.state(
             appConnectionKey({ scope, pluginId, appId }),
@@ -564,7 +566,12 @@ export class CoreApi {
           ),
       },
       onChanged: () => this.pluginsChanged(),
+      // Pre-0.2 project choices move to stateRoot once (SEC-07).
+      knownProjects: () =>
+        kept.projectStore.list().map((project) => project.project_path),
     })
+    // A plugin hook starting or stopping to fail re-reads its detail.
+    host.pluginHookHealth.onChange(() => this.emitPluginsChanged('hooks'))
     // Plugins apply per session scope (KRN-01): user-wide and shipped ones
     // everywhere, a project's own only in that project's sessions.
     this.pluginActivation = new PluginActivationController({
@@ -3511,7 +3518,7 @@ export class CoreApi {
     }
   }
 
-  private emitPluginsChanged(reason: 'plugins' | 'project'): void {
+  private emitPluginsChanged(reason: 'plugins' | 'project' | 'hooks'): void {
     this.host.emitHost({ event: 'plugins_changed', reason })
   }
 

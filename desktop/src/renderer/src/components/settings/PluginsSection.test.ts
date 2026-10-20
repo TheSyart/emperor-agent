@@ -74,7 +74,7 @@ function detailOf(plugin: Dict, patch: Dict = {}): Dict {
     signature: plugin.signature,
     digest: plugin.digest,
     installedAt: null,
-    permissions: { runsCommands: false, network: false },
+    permissions: { runsCommands: false, network: false, env: [] },
     components: [],
     tools: { note: null, groups: [] },
     ...patch,
@@ -513,5 +513,167 @@ describe('能力 › 插件', () => {
     await new Promise((resolve) => setTimeout(resolve, 200))
     await settle()
     expect(reads('hello-kit')).toBe(1)
+  })
+})
+
+describe('能力 › 插件 · 信任边界 (SEC-07)', () => {
+  const SUGGESTED = summary({
+    pluginId: 'repo-kit',
+    name: 'Repo Kit',
+    displayName: 'Repo Kit',
+    scope: 'project',
+    enabled: false,
+    activation: 'disabled',
+    effective: false,
+    suggested: true,
+    capabilities: {
+      skills: 1,
+      agents: 0,
+      hooks: 1,
+      mcpServers: 1,
+      lspServers: 0,
+      commands: 0,
+      apps: 0,
+    },
+  })
+
+  /** Answer `plugins.setEnabled` the way Core does: the choice ends the suggestion. */
+  function decideLikeCore(): void {
+    const bridge = (
+      window as unknown as {
+        emperor: { invokeCore: (key: string, input?: Dict) => unknown }
+      }
+    ).emperor
+    const original = bridge.invokeCore
+    bridge.invokeCore = async (key, input) => {
+      if (key === 'plugins.setEnabled')
+        context.boot.value.plugins = context.boot.value.plugins.map(
+          (plugin: Dict) =>
+            plugin.pluginId === input!.pluginId && plugin.scope === input!.scope
+              ? {
+                  ...plugin,
+                  enabled: input!.enabled,
+                  activation: input!.enabled ? 'active' : 'disabled',
+                  suggested: false,
+                }
+              : plugin,
+        )
+      return await original(key, input)
+    }
+  }
+
+  function suggestion(): HTMLElement | null {
+    return document.querySelector<HTMLElement>(
+      '[data-plugin-suggestion="repo-kit"]',
+    )
+  }
+
+  function button(root: Element, label: string): HTMLButtonElement {
+    return [...root.querySelectorAll('button')].find(
+      (item) => item.textContent?.trim() === label,
+    )!
+  }
+
+  let saved: Dict[] = []
+  afterEach(() => {
+    context.boot.value.plugins = saved
+  })
+
+  it('6–7: asks before enabling what the project’s settings suggest, and enables it on 启用', async () => {
+    saved = context.boot.value.plugins
+    context.boot.value.plugins = [HELLO, SUGGESTED, GITHUB]
+    installBridge()
+    decideLikeCore()
+    context.refreshAll.mockClear()
+    await mount()
+
+    const notice = suggestion()!
+    expect(notice.textContent).toContain('该项目建议启用 Repo Kit')
+    expect(notice.textContent).toContain('.emperor/settings.json')
+    expect(notice.textContent).toContain(
+      '1 个 Skill、1 个 MCP server、1 个 Hook',
+    )
+    // Nothing was turned on just by showing it.
+    expect(calls.some(([key]) => key === 'plugins.setEnabled')).toBe(false)
+
+    button(notice, '启用').click()
+    await until(() => !suggestion())
+    expect(calls).toContainEqual([
+      'plugins.setEnabled',
+      { pluginId: 'repo-kit', scope: 'project', enabled: true },
+    ])
+    expect(context.refreshAll).toHaveBeenCalled()
+    expect(document.querySelector('[role="status"].notice')?.textContent).toBe(
+      '已在这个项目启用「Repo Kit」',
+    )
+  })
+
+  it('忽略 keeps it off and stops asking', async () => {
+    saved = context.boot.value.plugins
+    context.boot.value.plugins = [HELLO, SUGGESTED, GITHUB]
+    installBridge()
+    decideLikeCore()
+    await mount()
+
+    button(suggestion()!, '忽略').click()
+    await until(() => !suggestion())
+    expect(calls).toContainEqual([
+      'plugins.setEnabled',
+      { pluginId: 'repo-kit', scope: 'project', enabled: false },
+    ])
+    expect(document.querySelector('[data-plugin-suggestion]')).toBeNull()
+  })
+
+  it('shows no suggestion when the project asks for nothing, nor inside a plugin’s detail', async () => {
+    saved = context.boot.value.plugins
+    context.boot.value.plugins = [HELLO, SUGGESTED, GITHUB]
+    installBridge()
+    details['hello-kit:user'] = detailOf(HELLO)
+    await mount('/capabilities?plugin=hello-kit&scope=user')
+    await until(() => Boolean(document.querySelector('[data-plugin-info]')))
+    expect(document.querySelector('[data-plugin-suggestion]')).toBeNull()
+
+    app?.unmount()
+    container?.remove()
+    context.boot.value.plugins = [HELLO, GITHUB]
+    await mount()
+    expect(document.querySelector('[data-plugin-suggestion]')).toBeNull()
+  })
+
+  it('shows why a plugin hook failed and the variables it may need', async () => {
+    installBridge()
+    details['hello-kit:user'] = detailOf(HELLO, {
+      permissions: { runsCommands: true, network: false, env: ['ACME_URL'] },
+      components: [
+        {
+          kind: 'hook',
+          id: 'PreToolUse#1',
+          title: 'PreToolUse · bash',
+          description: 'sh "$PLUGIN_ROOT/hooks/guard.sh"',
+          state: 'failed',
+          reason: '最近一次运行失败（退出码 1）：ACME_TOKEN is not set',
+          variables: [
+            { name: 'ACME_TOKEN', state: 'undeclared' },
+            { name: 'ACME_URL', state: 'unset' },
+          ],
+        },
+      ],
+    })
+    await mount('/capabilities?plugin=hello-kit&scope=user')
+    await until(() =>
+      Boolean(document.querySelector('[data-member="PreToolUse#1"]')),
+    )
+    const member = document.querySelector('[data-member="PreToolUse#1"]')!
+    expect(member.textContent).toContain('失败')
+    expect(member.textContent).toContain('ACME_TOKEN is not set')
+    const variables = member.querySelector('[data-member-variables]')!
+    expect(variables.textContent).toContain('需要的环境变量')
+    expect(variables.textContent).toContain('ACME_TOKEN')
+    expect(variables.textContent).toContain('插件清单的 env 没有声明')
+    expect(variables.textContent).toContain('ACME_URL')
+    expect(variables.textContent).toContain('Emperor 的环境里没有')
+    expect(document.querySelector('[data-plugin-info]')!.textContent).toContain(
+      '可读环境变量',
+    )
   })
 })

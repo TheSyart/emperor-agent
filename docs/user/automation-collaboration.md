@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用自动化能力的用户<br>
-> 最后核验：2026-10-19<br>
+> 最后核验：2026-10-20<br>
 > 事实源：`packages/core/src/scheduler/`、`packages/core/src/harness/host/scheduler.ts`、`packages/core/src/harness/hooks/`、`packages/core/src/api/services/hooks-service.ts`、`packages/core/src/watchlist/`、DesktopPet service、`desktop/src/renderer/src/components/pages/scheduler/`、`desktop/src/renderer/src/components/settings/`（高级 › Hooks、记忆、常规 › 外观 › 桌宠）
 
 本页介绍预览阶段的自动化能力。它们都通过与普通对话相同的内核运行，不获得额外权限。
@@ -53,7 +53,7 @@
 
 - 配置文件：`stateRoot/hooks.json`，按“事件 → matcher 分组 → hooks”组织，可以在“配置”标签编辑；保存时会校验并立即重新加载。
 - 支持的事件：`SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`SubagentStart`、`SubagentStop`。其他事件和非 `command` 类型的 handler 会被忽略，页面会列出被跳过的项。
-- Hook 在会话工作目录中按配置顺序串行运行，多个结果取最严格的决定。环境变量 `CLAUDE_PROJECT_DIR` 指向当前项目目录，单个 Hook 默认超时 10 分钟。
+- Hook 在会话工作目录中按配置顺序串行运行，多个结果取最严格的决定。环境变量 `CLAUDE_PROJECT_DIR` 指向当前项目目录，单个 Hook 默认超时 10 分钟。这里说的是你自己写在 `hooks.json` 里的 Hook；插件带来的 Hook 在进程沙箱里运行，只拿到系统变量与插件清单声明的变量，默认 30 秒、最多 120 秒超时，见[工具、Skill 与 MCP › Plugins](tools-skills-mcp.md#plugins)。
 
 | 事件               | 可以做什么                                   |
 | ------------------ | -------------------------------------------- |

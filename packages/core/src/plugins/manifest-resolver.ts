@@ -256,6 +256,7 @@ function resolvePortable(
   return finish({
     pluginId: name,
     format: 'portable',
+    strict: options.strict,
     root,
     manifestPath,
     manifest,
@@ -310,6 +311,7 @@ function resolveCodex(
   return finish({
     pluginId: name,
     format: 'codex-compat',
+    strict: options.strict,
     root,
     manifestPath,
     manifest,
@@ -365,6 +367,7 @@ function resolveEmperorV1(
   return finish({
     pluginId,
     format: 'emperor-v1',
+    strict: options.strict,
     root,
     manifestPath,
     manifest,
@@ -685,6 +688,7 @@ function describeServer(server: PluginMcpServerSpec): string {
 function finish(input: {
   pluginId: string
   format: PluginFormat
+  strict: boolean
   root: string
   manifestPath: string
   manifest: Record<string, unknown>
@@ -720,8 +724,35 @@ function finish(input: {
     skillRoots: [...members.skillRoots],
     mcpServers: [...members.mcpServers],
     hooks: [...members.hooks],
+    envAllowlist: envAllowlist(manifest.env, label, input.strict),
     components: sortComponents(members.components),
   }
+}
+
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+const MAX_ENV_NAMES = 64
+
+/**
+ * The manifest's `env` (SEC-07): names of variables its hooks may read from
+ * Emperor's environment. The preview rejects anything but a list of
+ * variable names; an installed package keeps the valid ones.
+ */
+function envAllowlist(raw: unknown, label: string, strict: boolean): string[] {
+  if (raw === undefined) return []
+  const list = Array.isArray(raw) ? raw : []
+  const names = list.filter(
+    (item): item is string => typeof item === 'string' && ENV_NAME.test(item),
+  )
+  if (
+    strict &&
+    (!Array.isArray(raw) ||
+      names.length !== list.length ||
+      list.length > MAX_ENV_NAMES)
+  )
+    throw manifestInvalid(
+      `${label} 的 env 必须是环境变量名的数组（字母、数字、下划线，最多 ${MAX_ENV_NAMES} 个）`,
+    )
+  return [...new Set(names)].slice(0, MAX_ENV_NAMES)
 }
 
 function interfaceOf(

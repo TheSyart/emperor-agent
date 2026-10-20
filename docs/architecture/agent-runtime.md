@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、维护者<br>
-> 最后核验：2026-10-19<br>
+> 最后核验：2026-10-20<br>
 > 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/agent/`、`packages/core/src/session-log/`、`packages/core/src/llm/`、`packages/core/src/harness/compaction/`、`packages/core/src/mcp/`、`packages/core/src/skills/`
 
 Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript 实现，采用 deepseek-harness standard 模式的语义，但不含插件框架：各子系统在 `HarnessHost.compose()` 中把自己的处理函数压入有序的 middleware 数组。`HarnessHost` 是唯一组合根，每个 session 持有一个 `Agent`。
@@ -160,7 +160,7 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 
 - `mcp/client.ts` 按 server 创建连接（`mcp/connection.ts`）：`stdio` 通过受管子进程（`owned-stdio-transport.ts`）通信；`sse` 使用 SDK 的 SSE transport；`http` 先尝试 Streamable HTTP，初始握手失败时回退到 legacy SSE，认证失败不回退，`HttpConnection.activeTransport` 记录实际使用的传输。transport 未知或缺少 `command` / `url` 的 server 得到一个不会启动进程的无效配置连接并报告原因，不会回退为 `stdio`。
 - `mcp/supervisor.ts` 负责重连：传输失败按 1、4、16 秒退避，每次重建递增 generation，迟到的旧连接事件被忽略。`harness/host/mcp-tools.ts` 的 `McpToolBridge` 把全局 server 与各项目实例已连接 server 的工具注册为 `mcp_<server>_<tool>`，按调用方的项目决定是否可见。
-- 插件贡献的 server 不进 `mcp_config.json`：`plugins/activation.ts` 从生效的插件包算出配置，经 `MCPClient.setPluginServers()` 交给 client，按契约的键（`sanitize(插件名-server 名)`，与用户 server 重名时加 6 位哈希）连接。工具名由 `mcp/plugin-names.ts` 生成，最长 64 个字符；与宿主已有工具（`McpToolBridge.reservedNames()`）或先注册的工具重名时跳过并记录。执行环境变化后按名字回查配置时，插件 server 从 client 自己的列表取回。插件 stdio server 的工作目录是插件目录，进程隔离（`mcp/containment.ts` 生成的 `ContainmentPolicy`，见[统一进程隔离](control-and-permissions.md#统一进程隔离sec-08)）通过 `stateGrants` 只放行该插件的包（只读）和数据目录（读写），另有它自己的缓存目录，Emperor Home 其余内容仍不可访问；沙箱不可用时拒绝启动。插件 Hook 接在用户文件之后，每组带自己的 `PLUGIN_ROOT`、`PLUGIN_DATA`，经 `harness/hooks/contained.ts` 在同一套隔离里运行（workspace 只读）。用户范围与随 Emperor 提供的插件进全局 client 与全局 Hook 集合，项目范围的插件进该项目的实例与 Hook 集合（见「会话作用域」）。安装、启停、卸载后 CoreApi 重新计算并应用这些贡献，对应操作在应用完成后才返回。
+- 插件贡献的 server 不进 `mcp_config.json`：`plugins/activation.ts` 从生效的插件包算出配置，经 `MCPClient.setPluginServers()` 交给 client，按契约的键（`sanitize(插件名-server 名)`，与用户 server 重名时加 6 位哈希）连接。工具名由 `mcp/plugin-names.ts` 生成，最长 64 个字符；与宿主已有工具（`McpToolBridge.reservedNames()`）或先注册的工具重名时跳过并记录。执行环境变化后按名字回查配置时，插件 server 从 client 自己的列表取回。插件 stdio server 的工作目录是插件目录，进程隔离（`mcp/containment.ts` 生成的 `ContainmentPolicy`，见[统一进程隔离](control-and-permissions.md#统一进程隔离sec-08)）通过 `stateGrants` 只放行该插件的包（只读）和数据目录（读写），另有它自己的缓存目录，Emperor Home 其余内容仍不可访问；沙箱不可用时拒绝启动。插件 Hook 接在用户文件之后，每组带自己的 `PLUGIN_ROOT`、`PLUGIN_DATA` 与清单 `env` 声明的变量名，经 `harness/hooks/contained.ts` 在同一套隔离里运行（workspace 只读；环境只有安全键、声明的变量与 Emperor 给的变量；默认 30 秒、最多 120 秒），每次结果交给 `PluginHookHealth`，插件详情据此显示失败原因与可能缺的变量（SEC-07）。项目与本地项目范围插件的启用意图读自 `<stateRoot>/projects/<project-id>/plugins.json`，项目目录的 `.emperor/settings.json` 只产生建议。用户范围与随 Emperor 提供的插件进全局 client 与全局 Hook 集合，项目范围的插件进该项目的实例与 Hook 集合（见「会话作用域」）。安装、启停、卸载后 CoreApi 重新计算并应用这些贡献，对应操作在应用完成后才返回。
 - `mcp/import.ts` 的 `normalizeMcpImport()` 把 `mcpServers`、`servers`、`mcp.servers`、单个带 `name` 的 server 或裸“名称 → 配置”映射规范为 `mcp_config.json` 的 server 形状，JSONC 与片段经修复并给出警告。`mcp/manage.ts` 在此之上提供按名称合并（新增 / 覆盖 / 跳过，支持 dry-run）、启停与删除，CoreApi `mcp.*` 与 `mcp_config` 工具共用它；写入后由调用方重载 MCP，client 按 server diff，只重建变化的连接。
 
 ### 跟随权限预设的配置工具
