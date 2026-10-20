@@ -496,6 +496,11 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
         mcpServers: {},
         strictMcpConfig: true,
         maxTurns: 64,
+        // API billing only: what the task may still spend (AGT-07). A
+        // subscription's cost is nominal and is not capped here.
+        ...(input.budgetUsd !== undefined && input.budgetUsd > 0
+          ? { maxBudgetUsd: input.budgetUsd }
+          : {}),
         hooks: {
           PreToolUse: [
             {
