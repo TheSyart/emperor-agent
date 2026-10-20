@@ -4886,9 +4886,11 @@ export async function installVisualCoreBridge(
               const input = (args[0] ?? {}) as { rootSessionIds?: string[] }
               const agents: Array<Record<string, unknown>> = []
               for (const root of input.rootSessionIds ?? []) {
-                // Sessions without recorded subagents fall back to the
-                // tasks.list fixture's subagents (the environment card).
+                // A session with a transcript but no recorded subagents
+                // falls back to the tasks.list fixture's subagents (the
+                // environment card); an empty session stays empty (hero).
                 if (!childrenOf(root).length) {
+                  if (!rawLogs.get(root)?.events.length) continue
                   for (const task of visualTasksFor(root)) {
                     if (task.kind !== 'subagent') continue
                     agents.push({
