@@ -390,7 +390,7 @@ onMounted(() => void load())
 <style scoped>
 .error {
   margin: 0 0 var(--space-3);
-  font: var(--font-sm);
+  font: var(--font-xs);
   color: rgb(var(--state-error-label));
 }
 
