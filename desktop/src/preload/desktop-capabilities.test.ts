@@ -24,6 +24,12 @@ import {
   DIAGNOSTICS_BUNDLE_PREPARE_CHANNEL,
   DIAGNOSTICS_BUNDLE_REVEAL_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
+  HOME_BACKUP_DISCARD_CHANNEL,
+  HOME_BACKUP_EXPORT_CHANNEL,
+  HOME_BACKUP_OPEN_CHANNEL,
+  HOME_BACKUP_PLAN_CHANNEL,
+  HOME_BACKUP_RESTORE_CHANNEL,
+  HOME_BACKUP_REVEAL_CHANNEL,
   LINK_OPEN_CHANNEL,
   MARKDOWN_REMOTE_IMAGE_CHANNEL,
   APP_MENU_COMMAND_CHANNEL,
@@ -126,7 +132,9 @@ describe('desktop capability preload bridge', () => {
       'clearBrowserData',
       'denyBrowserPairing',
       'discardDiagnosticsBundle',
+      'discardHomeBackup',
       'exportDiagnosticsBundle',
+      'exportHomeBackup',
       'installBrowserExtension',
       'loadRemoteImage',
       'macHelperReconnect',
@@ -144,14 +152,18 @@ describe('desktop capability preload bridge', () => {
       'openBrowserHistory',
       'openBrowserUrl',
       'openExternal',
+      'openHomeBackup',
       'openLink',
       'openSkillsFolder',
+      'planHomeBackup',
       'prepareDiagnosticsBundle',
       'removeBrowserDownload',
       'removeBrowserExtension',
+      'restoreHomeBackup',
       'revealBrowserDownload',
       'revealBrowserExtension',
       'revealDiagnosticsBundle',
+      'revealHomeBackup',
       'revealReference',
       'revokeBrowserPairing',
       'runBrowserImport',
@@ -169,6 +181,37 @@ describe('desktop capability preload bridge', () => {
       'vaultStartOver',
       'vaultStatus',
       'vaultUnlock',
+    ])
+  })
+
+  it('asks main for 备份与恢复 by id, forwarding only known fields (REL-03)', async () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createDesktopCapabilityBridge(ipc)
+    await bridge.planHomeBackup()
+    expect(ipc.invoked.at(-1)).toEqual([HOME_BACKUP_PLAN_CHANNEL, undefined])
+    await bridge.exportHomeBackup({
+      includeSessions: true,
+      passphrase: 'p',
+      confirmation: 'p',
+      path: '/etc/x',
+    } as never)
+    expect(ipc.invoked.at(-1)).toEqual([
+      HOME_BACKUP_EXPORT_CHANNEL,
+      { includeSessions: true, passphrase: 'p', confirmation: 'p' },
+    ])
+    await bridge.revealHomeBackup()
+    expect(ipc.invoked.at(-1)).toEqual([HOME_BACKUP_REVEAL_CHANNEL, undefined])
+    await bridge.openHomeBackup()
+    expect(ipc.invoked.at(-1)).toEqual([HOME_BACKUP_OPEN_CHANNEL, undefined])
+    await bridge.restoreHomeBackup('r_0123456789ab', 'secret phrase')
+    expect(ipc.invoked.at(-1)).toEqual([
+      HOME_BACKUP_RESTORE_CHANNEL,
+      { id: 'r_0123456789ab', passphrase: 'secret phrase' },
+    ])
+    await bridge.discardHomeBackup('r_0123456789ab')
+    expect(ipc.invoked.at(-1)).toEqual([
+      HOME_BACKUP_DISCARD_CHANNEL,
+      { id: 'r_0123456789ab' },
     ])
   })
 

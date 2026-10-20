@@ -30,3 +30,10 @@ export async function applyPendingHomeRestore(
   const { applyPendingRestore } = await import('../storage/backup')
   return applyPendingRestore({ home: emperorHome })
 }
+
+/** The backup module, loaded on demand (main's 备份与恢复 uses it). */
+export function loadHomeBackupModule(): Promise<
+  typeof import('../storage/backup')
+> {
+  return import('../storage/backup')
+}

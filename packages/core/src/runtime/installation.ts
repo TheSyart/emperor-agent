@@ -37,6 +37,7 @@ export {
 } from './data-version'
 export {
   applyPendingHomeRestore,
+  loadHomeBackupModule,
   runPendingDataMigrations,
 } from './data-startup'
 

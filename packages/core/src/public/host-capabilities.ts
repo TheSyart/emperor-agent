@@ -19,10 +19,12 @@ export {
   CURRENT_DATA_VERSION,
   CURRENT_STATE_LAYOUT_VERSION,
   InstallationBootstrapError,
+  loadHomeBackupModule,
   runPendingDataMigrations,
 } from '../runtime/installation'
-// REL-03: data versions, read-only newer files, 备份与恢复 (main loads the
-// backup module on demand).
+// REL-03: data versions, read-only newer files, 备份与恢复. The backup code
+// is reached through loadHomeBackupModule() only (its own chunk, never in
+// the main bundle), so only its types are exported here.
 export {
   DataFileNewerError,
   NEWER_FILE_MESSAGE,
@@ -31,18 +33,6 @@ export {
 } from '../store/persistence/version'
 export { DATA_FILES, inspectDataFiles } from '../storage/data-files'
 export type { DataFileSpec, DataFileState } from '../storage/data-files'
-export {
-  BACKUP_CREDENTIALS,
-  BACKUP_EXTENSION,
-  BACKUP_MANIFEST,
-  HomeBackupError,
-  applyPendingRestore,
-  pendingRestoreExists,
-  planHomeBackup,
-  readHomeBackup,
-  scheduleHomeRestore,
-  stageHomeBackup,
-} from '../storage/backup'
 export type {
   BackupCategoryId,
   BackupPlan,

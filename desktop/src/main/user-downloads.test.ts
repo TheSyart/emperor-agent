@@ -518,6 +518,18 @@ describe('your downloads: the history', () => {
         .map((view) => view.id),
     ).toEqual(['ud_0123456789ab'])
   })
+
+  it('never writes over a history file a newer Emperor wrote (REL-03)', () => {
+    const t = setup()
+    mkdirSync(join(t.home, '.emperor', 'browser'), { recursive: true })
+    const newer = JSON.stringify({ version: 2, downloads: [], futureOnly: 1 })
+    writeFileSync(t.recordPath, newer)
+    const downloads = t.make()
+    expect(downloads.list()).toEqual([])
+    downloads.clear()
+    expect(downloads.remove('ud_0123456789ab')).toBe(false)
+    expect(readFileSync(t.recordPath, 'utf8')).toBe(newer)
+  })
 })
 
 describe('quarantine mark', () => {

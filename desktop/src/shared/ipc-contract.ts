@@ -694,6 +694,79 @@ export type DiagnosticsBundleExportResult =
   | { ok: false; canceled: true }
   | { ok: false; error: string }
 /**
+ * 设置 › 高级 › 存储 › 备份与恢复 (REL-03), trusted main window only. `plan`
+ * counts what a backup would hold; `export` `{ includeSessions,
+ * passphrase?, confirmation? }` asks where to save and writes the
+ * `.emperor-backup.zip` (the vault only sealed under the passphrase);
+ * `reveal` shows the last export in Finder; `open` asks for a backup,
+ * unzips and checks it ({@link HomeBackupView}); `restore` `{ id,
+ * passphrase? }` imports the vault (when given), schedules the restore and
+ * restarts; `discard` `{ id }` drops an opened backup. No path crosses IPC.
+ */
+export const HOME_BACKUP_PLAN_CHANNEL = 'emperor:home-backup:plan'
+export const HOME_BACKUP_EXPORT_CHANNEL = 'emperor:home-backup:export'
+export const HOME_BACKUP_REVEAL_CHANNEL = 'emperor:home-backup:reveal'
+export const HOME_BACKUP_OPEN_CHANNEL = 'emperor:home-backup:open'
+export const HOME_BACKUP_RESTORE_CHANNEL = 'emperor:home-backup:restore'
+export const HOME_BACKUP_DISCARD_CHANNEL = 'emperor:home-backup:discard'
+
+export interface HomeBackupCategoryView {
+  id: string
+  title: string
+  description: string
+  optional: boolean
+  files: number
+  bytes: number
+}
+
+export interface HomeBackupPlan {
+  /** The default file name, without `.emperor-backup.zip`. */
+  name: string
+  categories: HomeBackupCategoryView[]
+  excluded: string[]
+  /** 密码管理器: `ready` can go in under a passphrase. */
+  vault: {
+    state: 'empty' | 'ready' | 'locked' | 'unavailable'
+    entries: number
+  }
+}
+
+export interface HomeBackupExportInput {
+  includeSessions: boolean
+  passphrase?: string
+  confirmation?: string
+}
+
+/** A backup main unzipped and checked, ready to restore. */
+export interface HomeBackupView {
+  /** `r_` + 12 hex. */
+  id: string
+  name: string
+  createdAt: string
+  appVersion: string
+  categories: string[]
+  credentials: boolean
+  files: number
+  bytes: number
+  /** Written by a newer Emperor than this one. */
+  newer: boolean
+}
+
+export type HomeBackupPlanResult =
+  { ok: true; plan: HomeBackupPlan } | { ok: false; error: string }
+
+export type HomeBackupExportResult =
+  | { ok: true; name: string; location: string; credentials: boolean }
+  | { ok: false; canceled: true }
+  | { ok: false; error: string }
+
+export type HomeBackupOpenResult =
+  | { ok: true; backup: HomeBackupView }
+  | { ok: false; canceled: true }
+  | { ok: false; error: string }
+
+export type HomeBackupResult = { ok: true } | { ok: false; error: string }
+/**
  * Main window → main: the composer's + › 截图 (UI-S04, macOS). Main hides
  * the window, runs the system's interactive region capture into a private
  * temporary folder, reads the PNG back, deletes it and answers
