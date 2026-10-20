@@ -48,14 +48,16 @@ async function open(
   await expect(page.locator('.app-frame')).toBeVisible()
 }
 
+/** Preset UI preferences (useUiPreferences) before the app reads them. */
+async function uiPreferences(page: Page, prefs: Record<string, unknown>) {
+  await page.addInitScript((value) => {
+    localStorage.setItem('emperor.ui.prefs.v1', JSON.stringify(value))
+  }, prefs)
+}
+
 /** UI-S03: list every turn's steps instead of the folded process line. */
 async function listProcessSteps(page: Page) {
-  await page.addInitScript(() => {
-    localStorage.setItem(
-      'emperor.ui.prefs.v1',
-      JSON.stringify({ processDisplay: 'expanded' }),
-    )
-  })
+  await uiPreferences(page, { processDisplay: 'expanded' })
 }
 
 async function shot(page: Page, name: string) {
@@ -392,6 +394,8 @@ test.describe('a11y media-feature degradation', () => {
 test('sidebar rows and header tabs drive the /chat/:sessionId routes', async ({
   page,
 }) => {
+  // UI-S09: the 对话 | 轨迹 tabs exist only while 显示轨迹 is on.
+  await uiPreferences(page, { showTrajectory: true })
   await open(page, '/chat/build-ui?visualProgress=final')
   await page.getByRole('tab', { name: '轨迹' }).click()
   await expect(page).toHaveURL(/\/chat\/build-ui\/trajectory/)
@@ -516,7 +520,11 @@ for (const theme of ['dark', 'light'] as const) {
   test(`tool row Inspect opens the trajectory inspector (${theme})`, async ({
     page,
   }) => {
-    await listProcessSteps(page)
+    // UI-S09: Inspect is offered only while 显示轨迹 is on.
+    await uiPreferences(page, {
+      processDisplay: 'expanded',
+      showTrajectory: true,
+    })
     await open(page, '/chat/build-ui', { theme })
     const row = page.locator('.tool-row[data-call-id="call_grep"]')
     await row.scrollIntoViewIfNeeded()

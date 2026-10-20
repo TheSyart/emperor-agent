@@ -1,9 +1,11 @@
-// Shared trajectory controller of one session: activates the lazy
-// 'trajectory' target of the conversation store, memoizes the view model on
-// the snapshot fields it reads (streaming deltas never rebuild the finalized
-// layout), and owns the selection / fold / tab state that the ledger and
-// the inspector column (both inside TrajectoryView) share. Callers use
-// `useTrajectory(sessionId)` and receive the same ref-counted controller.
+// Shared trajectory controller of one session: holds the lazy 'trajectory'
+// target of the conversation store while it lives (the store drops the
+// target 30 s after the last controller is gone, UI-39), memoizes the view
+// model on the snapshot fields it reads (streaming deltas never rebuild the
+// finalized layout), and owns the selection / fold / tab state that the
+// ledger and the inspector column (both inside TrajectoryView) share.
+// Callers use `useTrajectory(sessionId)` and receive the same ref-counted
+// controller.
 import {
   computed,
   effectScope,
@@ -166,11 +168,15 @@ function toggled<T>(set: ReadonlySet<T>, value: T): ReadonlySet<T> {
   return next
 }
 
-/** Build a controller over one open conversation handle. */
+/**
+ * Build a controller over one open conversation handle. It holds the
+ * trajectory target until the calling scope is disposed.
+ */
 export function createTrajectoryController(
   handle: ConversationHandle,
 ): TrajectoryController {
-  handle.activate(TRAJECTORY_TARGET)
+  const releaseTarget = handle.retainTarget(TRAJECTORY_TARGET)
+  if (getCurrentScope() !== undefined) onScopeDispose(releaseTarget)
   const snapshot = computed<TrajectorySnapshot>(() => {
     void handle.revision.value
     return (

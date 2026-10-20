@@ -362,6 +362,8 @@ describe('ChatTimeline over the recorded kernel log', () => {
   })
 
   it('routes inspect and open-subagent through its emits', async () => {
+    // Inspect is offered only while 显示轨迹 is on (UI-S09).
+    setUiPreference('showTrajectory', true)
     const log = loadKernelLog()
     const inspected: string[] = []
     const opened: string[] = []

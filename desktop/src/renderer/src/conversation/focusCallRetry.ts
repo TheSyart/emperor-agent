@@ -1,8 +1,10 @@
 /**
- * Inspect deep link (`?call=`) against a paged session window: when the
- * call is not in the loaded records yet, page older history in — a bounded
- * number of times — and retry. Pure decision step (unit-tested); the
- * TrajectorySession watcher performs it.
+ * A call to show (Inspect deep link `?call=`) against a paged session
+ * window: when the call is not in the loaded records yet, page older
+ * history in — a bounded number of times — and retry. Pure decision step
+ * (unit-tested); the TrajectorySession watcher performs it, and so does
+ * ConversationView when a trajectory link lands on the chat because the
+ * trajectory is off (UI-S09).
  */
 
 /** Older pages loaded at most while hunting one call id. */

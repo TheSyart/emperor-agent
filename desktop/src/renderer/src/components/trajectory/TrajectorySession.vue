@@ -31,7 +31,7 @@ import TrajectoryTable from './TrajectoryTable.vue'
 import TrajectoryTimeline from './TrajectoryTimeline.vue'
 import TrajectoryToolbar from './TrajectoryToolbar.vue'
 import InspectorPanel from './inspector/InspectorPanel.vue'
-import { focusCallStep } from './focusCallRetry'
+import { focusCallStep } from '../../conversation/focusCallRetry'
 import { useTrajectory } from './useTrajectory'
 import {
   INSPECTOR_DEFAULT,

@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
 > 最后核验：2026-10-20<br>
-> 事实源：`desktop/src/renderer/src/components/conversation/`（`processModel.ts`、`ChatTimeline.vue`、`nodes/ProcessGroup.vue`、`nodes/ToolCallRow.vue`、`nodes/UserBubble.vue`、`parts/ConversationMarkdown.vue`、`nodes/TurnTail.vue`）、`components/ui/DisclosureRow.vue`、`components/ui/IoBlock.vue`、`components/motion/CollapseTransition.vue`、`conversation/events.ts`；测试 `processModel.test.ts`、`processGroup.test.ts`、`CollapseTransition.test.ts`、`desktop/tests/visual/process.spec.ts`
+> 事实源：`desktop/src/renderer/src/components/conversation/`（`processModel.ts`、`ChatTimeline.vue`、`nodes/ProcessGroup.vue`、`nodes/ToolCallRow.vue`、`nodes/UserBubble.vue`、`parts/ConversationMarkdown.vue`、`nodes/TurnTail.vue`）、`components/ui/DisclosureRow.vue`、`components/ui/IoBlock.vue`、`components/motion/CollapseTransition.vue`、`conversation/events.ts`；`components/conversation/trajectoryGate.ts`；测试 `processModel.test.ts`、`processGroup.test.ts`、`CollapseTransition.test.ts`、`trajectoryGate.test.ts`、`desktop/tests/visual/process.spec.ts`、`desktop/tests/visual/trajectory-gate.spec.ts`
 
 对话面板里从上到下是一条会话流：你的消息、Agent 处理这一轮的过程、回答、本轮改动卡和轮末操作。默认只显示结论，过程收成一行，细节按需展开。
 
@@ -41,6 +41,15 @@
 - 展开后的内容与思考的正文一样左缩进 22px；工具的输入输出块用 `IoBlock`（`--surface-raised`、`--r-md`、无边框，IN / OUT 两段，过长时「展开全部」）。
 - **三个阶段**（准备中 → 运行中 → 结果）：模型还在写工具参数时，这一行已经出现，显示已经解析出的参数（文件名、命令、关键词）和「准备中」，不能展开；参数写完、调用开始后换成运行中的工具行。草稿只保留前 4096 个字符（`TOOL_DRAFT_LIMIT`），模型消息落地后丢弃。
 - 参数在传输中被截断时，展开后提示「参数过长，已截断显示」；只有打开了 设置 › 常规 › 开发者 › 显示轨迹，才接着写「在轨迹中查看完整内容」。
+
+## 轨迹门控
+
+轨迹（会话头部的「对话 | 轨迹」页签、工具行的 Inspect、轨迹的「详情」列）是开发者视图，只有打开 设置 › 常规 › 开发者 › 显示轨迹 才出现（`useUiPreferences().showTrajectory`，默认关；`components/conversation/trajectoryGate.ts`）。
+
+- **关闭时**：会话头部只有 46px 的一行（路径与两个开关），没有页签；工具行展开后没有 Inspect；对话不加载轨迹分包，会话 store 也不注册 trajectory target，对话这条路径没有额外开销。
+- **轨迹链接**：关闭时打开 `/chat/:id/trajectory`（深链、⌘[ 回到旧的轨迹页）会转到 `/chat/:id`，去掉 `call`、保留其他参数；带 `call` 时滚到对应的工具行并展开（先展开它所在的过程组，较早的调用先加载更早的记录，最多 5 页），同时提示「轨迹视图已关闭」，操作「在设置中开启」打开 设置 › 常规。
+- **运行时切换**：在轨迹页关掉开关，立即回到对话页（打开的设置弹窗保留），「详情」列收起，宽度留到下次打开。
+- **释放**：离开轨迹视图 30 秒后，trajectory target 从会话 store 注销（`LAZY_TARGET_IDLE_MS`），之后的事件不再为轨迹装配；30 秒内回来则继续使用。
 
 ## 消息与正文
 

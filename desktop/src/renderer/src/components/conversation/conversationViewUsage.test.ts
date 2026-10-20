@@ -91,6 +91,21 @@ describe('ConversationView composer seat integration', () => {
     expect(source).not.toContain('selectCall')
   })
 
+  it('UI-S09: shows the trajectory only while 显示轨迹 is on', () => {
+    expect(source).toContain(
+      "route.name === 'trajectory' && trajectoryShown.value ? 'trajectory' : 'chat'",
+    )
+    expect(source).toContain(':trajectory="trajectoryShown"')
+    expect(source).toContain(
+      'if (!trajectoryShown.value || !viewingId.value || !callId) return',
+    )
+    // A trajectory link turned back by the gate: toast, then the call.
+    expect(source).toContain('takeTrajectoryNotice(id)')
+    expect(source).toContain("ctx.showToast('轨迹视图已关闭'")
+    expect(source).toContain("settingsRoute.openSettings('general')")
+    expect(source).toContain('list.revealCall(callId)')
+  })
+
   it('keeps the header toggles on the hero phase and seats the environment card', () => {
     expect(source).toContain(':slim="phase === \'hero\'"')
     expect(source).toContain('@toggle-workspace="toggleWorkspace"')
