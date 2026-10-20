@@ -214,7 +214,7 @@ function onHeaderClick(event: MouseEvent) {
   height: calc(var(--space-8) + var(--space-1));
   border-radius: var(--radius-cell);
   background: rgb(var(--accent-soft));
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 
 .ds-settings-card[data-master] .title {

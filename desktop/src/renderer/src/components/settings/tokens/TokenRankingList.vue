@@ -174,7 +174,7 @@ const collapsible = computed(
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
 }
 
 .value {

@@ -522,7 +522,7 @@ function hostOf(url: string): string {
 }
 
 .browser-address[data-invalid] {
-  border-color: rgb(var(--danger) / 0.6);
+  border-color: rgb(var(--error) / 0.6);
 }
 
 .address-glyph {
@@ -564,7 +564,7 @@ function hostOf(url: string): string {
   position: absolute;
   inset: 0;
   width: 40%;
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
   animation: browser-progress 1.1s var(--ease-in-out) infinite;
 }
 
@@ -582,8 +582,8 @@ function hostOf(url: string): string {
   margin: var(--space-2) var(--space-3) 0;
   padding: var(--space-1-5) var(--space-2-5);
   border-radius: var(--radius-row);
-  background: rgb(var(--danger-soft));
-  color: rgb(var(--danger));
+  background: rgb(var(--error-soft));
+  color: rgb(var(--error));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -623,7 +623,7 @@ function hostOf(url: string): string {
 }
 
 .state-glyph.danger {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .state-detail,
@@ -697,7 +697,7 @@ function hostOf(url: string): string {
 
 .browser-download[data-tone='blocked'] .download-glyph,
 .browser-download[data-tone='failed'] .download-glyph {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .download-text {

@@ -303,8 +303,8 @@ button.shot {
 .mismatch {
   padding: var(--space-2) var(--space-2-5);
   border-radius: var(--radius-card);
-  background: rgb(var(--danger-soft));
-  color: rgb(var(--danger));
+  background: rgb(var(--error-soft));
+  color: rgb(var(--error));
   font-size: var(--fs-xs);
   font-weight: 500;
   line-height: 20px;
@@ -323,7 +323,7 @@ button.shot {
   gap: var(--space-0-5);
   padding: var(--space-2) var(--space-2-5);
   border-radius: var(--radius-card);
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
   color: rgb(var(--approval-line));
   font-size: var(--fs-xs);
   line-height: 20px;
@@ -357,7 +357,7 @@ button.shot {
 .download[data-state='too-large'],
 .download[data-state='interrupted'],
 .download[data-state='timed-out'] {
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
 }
 
 .download-name {
@@ -386,7 +386,7 @@ button.shot {
 
 .download-error {
   flex-basis: 100%;
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .shot {

@@ -205,7 +205,7 @@ button.leading {
 }
 
 [data-tone='error'] .summary {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .trailing {

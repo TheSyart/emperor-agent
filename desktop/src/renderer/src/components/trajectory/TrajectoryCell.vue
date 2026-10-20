@@ -298,19 +298,19 @@ function onClick(): void {
   top: 0;
   bottom: 0;
   width: 3px;
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
 }
 
 .traj-row[data-error='true'] .turn-rail {
   background: color-mix(
     in srgb,
-    rgb(var(--danger)) 22%,
+    rgb(var(--error)) 22%,
     rgb(var(--surface-base))
   );
 }
 
 .traj-row[data-error='true'] .selection-rail {
-  background: rgb(var(--danger));
+  background: rgb(var(--error));
 }
 
 .turn-label {
@@ -335,7 +335,7 @@ function onClick(): void {
 .turn-label[data-active='true'] {
   color: color-mix(
     in srgb,
-    rgb(var(--accent-strong)) 70%,
+    rgb(var(--text-link)) 70%,
     rgb(var(--label-tertiary))
   );
   background: var(--traj-turn-accent);
@@ -403,7 +403,7 @@ function onClick(): void {
 }
 
 .inline-result[data-error='true'] {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .inline-result-text[data-empty='true'] {

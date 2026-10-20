@@ -165,7 +165,7 @@ function onCommentKeydown(event: KeyboardEvent) {
   flex-shrink: 0;
   gap: var(--space-2);
   padding: var(--space-1-5) var(--space-3) var(--space-1-5) var(--space-4);
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
   color: rgb(var(--approval-line));
   font-size: var(--fs-xs);
   line-height: 18px;
@@ -216,7 +216,7 @@ function onCommentKeydown(event: KeyboardEvent) {
   border-radius: var(--radius-card);
   background: transparent;
   color: rgb(var(--label-primary));
-  caret-color: rgb(var(--accent-fill));
+  caret-color: rgb(var(--accent));
   font: inherit;
   font-size: var(--fs-s);
   line-height: 22px;
@@ -230,7 +230,7 @@ function onCommentKeydown(event: KeyboardEvent) {
 }
 
 .comment:focus {
-  border-color: rgb(var(--accent-fill));
+  border-color: rgb(var(--accent));
 }
 
 .actions {

@@ -115,11 +115,11 @@ const { copied, copy } = useCopyFeedback(() => diffCopyText(result.value.rows))
 
 .line--del,
 .line--del::before {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .line--del {
-  background: rgb(var(--danger) / 0.06);
+  background: rgb(var(--error) / 0.06);
 }
 
 .line--del::before {

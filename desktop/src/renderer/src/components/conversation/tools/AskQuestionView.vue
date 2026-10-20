@@ -122,8 +122,8 @@ const outcome = computed(() => {
 }
 
 [data-selected] .check {
-  border-color: rgb(var(--accent-fill));
-  background: rgb(var(--accent-fill));
+  border-color: rgb(var(--accent));
+  background: rgb(var(--accent));
 }
 
 [data-selected] .label {

@@ -143,8 +143,8 @@ const site = computed(() => {
   place-items: center;
   flex: none;
   border-radius: var(--radius-xs);
-  background: rgb(var(--accent-fill) / 0.1);
-  color: rgb(var(--accent-strong));
+  background: rgb(var(--accent) / 0.1);
+  color: rgb(var(--text-link));
   font: 600 0.65rem/1 var(--font-sans);
 }
 .site-icon {

@@ -317,7 +317,7 @@ function openFile(path: string): void {
 }
 
 .del {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .actions {

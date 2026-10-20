@@ -389,7 +389,7 @@ watch(
   border: none;
   background: none;
   padding: 0;
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   cursor: pointer;
   font: inherit;
 }

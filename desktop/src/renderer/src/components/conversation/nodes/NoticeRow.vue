@@ -54,7 +54,7 @@ defineProps<{
 }
 
 [data-state='error'] .title {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 [data-state='warn'] .title {

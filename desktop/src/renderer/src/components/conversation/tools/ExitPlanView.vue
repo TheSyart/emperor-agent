@@ -74,7 +74,7 @@ const dot = computed<DotState>(() => {
   gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
   border-top: 1px solid var(--stroke-2);
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }

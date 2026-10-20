@@ -732,7 +732,7 @@ onBeforeUnmount(() => {
 
 .cu-strip-status[data-tone='lost'],
 .cu-card-status[data-tone='lost'] {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .cu-card {
@@ -811,7 +811,7 @@ onBeforeUnmount(() => {
 
 .cu-pointer-arrow path {
   fill: rgb(var(--nb-1000) / 0.55);
-  stroke: rgb(var(--accent-fill));
+  stroke: rgb(var(--accent));
   stroke-width: 1.6;
   stroke-linejoin: round;
 }

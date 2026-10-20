@@ -27,7 +27,7 @@
   }
   html:root .ds-shimmer {
     background: none;
-    color: rgb(var(--accent-fill));
+    color: rgb(var(--accent));
     -webkit-text-fill-color: currentColor;
   }
   html:root .ds-shimmer[data-tone='neutral'] {

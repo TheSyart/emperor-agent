@@ -171,7 +171,7 @@ function open() {
   transition: border-color var(--duration-fast) ease;
 }
 .resource-card:hover {
-  border-color: rgb(var(--accent-fill) / 0.3);
+  border-color: rgb(var(--accent) / 0.3);
 }
 .resource-glyph {
   display: grid;
@@ -210,7 +210,7 @@ function open() {
   cursor: pointer;
 }
 .resource-title:hover {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 .resource-description {
   margin: var(--space-1) 0 0;
@@ -260,8 +260,8 @@ function open() {
 .status {
   border-radius: var(--radius-xs);
   padding: 0 var(--space-1);
-  color: rgb(var(--accent-strong));
-  background: rgb(var(--accent-fill) / 0.1);
+  color: rgb(var(--text-link));
+  background: rgb(var(--accent) / 0.1);
 }
 .resource-card[data-missing] .resource-title {
   color: rgb(var(--label-tertiary));

@@ -147,7 +147,7 @@ button.image-link {
 }
 
 .json[data-error='true'] :deep(*) {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .blocks {
@@ -184,7 +184,7 @@ button.image-link {
 
 [data-error='true'],
 [data-error='true'] .block-text {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .payload[data-empty='true'] {

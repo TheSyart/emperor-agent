@@ -374,7 +374,7 @@ const showFooter = computed(
   width: var(--space-1-5);
   height: var(--space-1-5);
   border-radius: var(--radius-pill);
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
 }
 
 .list-body {

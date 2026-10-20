@@ -122,7 +122,7 @@ function fmt(value: number): string {
 }
 
 .trigger[data-tone='danger'] {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .track {
@@ -183,7 +183,7 @@ function fmt(value: number): string {
 }
 
 .segment[data-tone='danger'] {
-  background: rgb(var(--danger));
+  background: rgb(var(--error));
 }
 
 .rows {

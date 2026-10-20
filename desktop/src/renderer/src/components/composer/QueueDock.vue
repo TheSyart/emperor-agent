@@ -250,7 +250,7 @@ const headline = computed(() => {
 
 .state {
   margin-right: var(--space-1);
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 
 .state.held {

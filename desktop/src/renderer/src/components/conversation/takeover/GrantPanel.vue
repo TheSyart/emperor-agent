@@ -161,7 +161,7 @@ function send(optionId: string) {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2-5) var(--space-4);
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
   color: rgb(var(--approval-line));
   font-size: var(--fs-xs);
   line-height: 18px;

@@ -66,6 +66,6 @@ withDefaults(
 }
 
 .traj-rows :deep(dd[data-tone='error']) {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 </style>

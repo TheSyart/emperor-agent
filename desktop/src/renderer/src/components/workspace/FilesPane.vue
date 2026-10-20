@@ -1136,8 +1136,8 @@ function message(value: unknown): string {
 }
 
 .file-code-line.reference-line-active {
-  background: rgb(var(--accent-fill) / 0.12);
-  box-shadow: inset 2px 0 0 rgb(var(--accent-fill));
+  background: rgb(var(--accent) / 0.12);
+  box-shadow: inset 2px 0 0 rgb(var(--accent));
 }
 
 .file-code-line.reference-line-active > span {
@@ -1182,7 +1182,7 @@ function message(value: unknown): string {
 .file-tree-resizer:hover,
 .file-tree-resizer:focus-visible {
   outline: none;
-  background: rgb(var(--accent-fill) / 0.35);
+  background: rgb(var(--accent) / 0.35);
 }
 
 .file-tree-toolbar {
@@ -1279,8 +1279,8 @@ function message(value: unknown): string {
 }
 
 .files-inline-error {
-  color: rgb(var(--danger));
-  background: rgb(var(--danger-soft));
+  color: rgb(var(--error));
+  background: rgb(var(--error-soft));
 }
 
 .files-inline-warning {

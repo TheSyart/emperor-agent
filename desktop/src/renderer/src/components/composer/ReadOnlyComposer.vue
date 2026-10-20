@@ -95,7 +95,7 @@ strong {
 }
 
 .stop:hover:not(:disabled) {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .stop:disabled {

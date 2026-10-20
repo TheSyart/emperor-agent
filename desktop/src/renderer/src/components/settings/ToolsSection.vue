@@ -147,7 +147,7 @@ function openTab(tab: 'mcp' | 'plugins'): void {
   border: 0;
   background: none;
   font: inherit;
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   cursor: pointer;
 }
 

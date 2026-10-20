@@ -566,7 +566,7 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
 .traj-table {
   --traj-turn-accent: color-mix(
     in srgb,
-    rgb(var(--accent-fill)) 22%,
+    rgb(var(--accent)) 22%,
     rgb(var(--surface-base))
   );
 
@@ -613,7 +613,7 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
 }
 
 .error-text {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .history-row {

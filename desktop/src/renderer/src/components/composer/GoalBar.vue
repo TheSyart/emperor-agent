@@ -165,7 +165,7 @@ function actionLabel(action: GoalCardAction): string {
 
 .glyph {
   flex: none;
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 
 .label {
@@ -221,7 +221,7 @@ function actionLabel(action: GoalCardAction): string {
 }
 
 .icon[data-danger] {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
   background: var(--surface-hover-danger);
 }
 
@@ -234,6 +234,6 @@ function actionLabel(action: GoalCardAction): string {
   margin: var(--space-1) var(--space-3) 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 </style>

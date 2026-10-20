@@ -336,7 +336,7 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 .status[data-tone='danger'] {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 .status[data-tone='ok'] {
   color: rgb(var(--ok));
@@ -345,8 +345,8 @@ onBeforeUnmount(() => {
   display: inline-block;
   padding: var(--space-0-5) var(--space-1-5);
   border-radius: var(--radius-xs);
-  background: rgb(var(--accent-fill) / 0.12);
-  color: rgb(var(--accent-strong));
+  background: rgb(var(--accent) / 0.12);
+  color: rgb(var(--text-link));
   font: var(--font-xxs);
 }
 .notice {

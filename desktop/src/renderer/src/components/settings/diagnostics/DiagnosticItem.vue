@@ -95,6 +95,6 @@ const problem = computed(
 }
 
 .value[data-tone='running'] {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 </style>

@@ -64,7 +64,7 @@ export const SORT_OPTIONS: Array<{ value: RankSort; label: string }> = [
 /** Series colors: theme tones only (both themes define them). */
 export const SERIES_COLORS = [
   'rgb(var(--tone-cyan))',
-  'rgb(var(--accent-fill))',
+  'rgb(var(--accent))',
   'rgb(var(--tone-violet))',
   'rgb(var(--state-warn))',
   'rgb(var(--state-ok))',
@@ -197,7 +197,7 @@ export function usageComposition(totals: UsageTotals) {
   const colors: Record<string, string> = {
     cache_hit: 'rgb(var(--state-ok))',
     cache_miss: 'rgb(var(--tone-blue))',
-    output: 'rgb(var(--accent-fill))',
+    output: 'rgb(var(--accent))',
   }
   return {
     ...composition,

@@ -358,7 +358,7 @@ const hasChildren = computed(
   background: none;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   cursor: pointer;
 }
 

@@ -146,7 +146,7 @@ const summary = computed(() => {
 }
 
 [data-status='error'] .title {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .sep {

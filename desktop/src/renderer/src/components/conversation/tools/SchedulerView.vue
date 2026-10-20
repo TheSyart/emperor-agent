@@ -101,6 +101,6 @@ dd {
 }
 
 .output[data-error] {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 </style>

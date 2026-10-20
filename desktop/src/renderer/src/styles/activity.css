@@ -82,7 +82,7 @@
   margin-inline: var(--space-1);
   border: 0;
   background: transparent;
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   line-height: 1.85;
 }
 

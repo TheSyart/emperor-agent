@@ -99,20 +99,20 @@ const title = computed(() =>
 
 .traj-request-marker:hover::before,
 .traj-request-marker:focus-visible::before {
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
 }
 
 .traj-request-marker[aria-pressed='true']::before {
   background: color-mix(
     in srgb,
-    rgb(var(--accent-fill)) 18%,
+    rgb(var(--accent)) 18%,
     rgb(var(--surface-base))
   );
-  box-shadow: 0 0 0 1.5px rgb(var(--accent-fill));
+  box-shadow: 0 0 0 1.5px rgb(var(--accent));
 }
 
 .traj-request-marker[data-request-status='error']::before {
-  background: rgb(var(--danger));
+  background: rgb(var(--error));
 }
 
 .traj-request-marker:hover::after,

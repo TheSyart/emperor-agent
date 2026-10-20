@@ -173,7 +173,7 @@ function save(): void {
 }
 
 .shortcut-capture[aria-invalid='true'] {
-  border-color: rgb(var(--state-error));
+  border-color: rgb(var(--error));
 }
 
 .shortcut-conflict {

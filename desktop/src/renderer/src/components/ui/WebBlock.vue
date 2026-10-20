@@ -109,7 +109,7 @@ const empty = computed(() => !props.answer && props.sources.length === 0)
 .link {
   font-size: var(--fs-s);
   line-height: var(--lh-xs);
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   text-decoration: none;
   word-break: break-word;
 }
@@ -152,7 +152,7 @@ a.fetch-url:hover {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   line-height: 19px;
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   text-decoration: none;
   word-break: break-all;
 }

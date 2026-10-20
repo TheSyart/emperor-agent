@@ -177,11 +177,11 @@ function onMenu(event: MouseEvent) {
 
 .job-row[data-state='running'] .glyph,
 .job-row[data-state='queued'] .glyph {
-  color: rgb(var(--accent-fill));
+  color: rgb(var(--accent));
 }
 
 .job-row[data-state='error'] .glyph {
-  color: rgb(var(--state-error));
+  color: rgb(var(--error));
 }
 
 .job-row[data-state='paused'] .glyph {

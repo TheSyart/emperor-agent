@@ -49,11 +49,11 @@
 .ds-shimmer {
   background: linear-gradient(
     90deg,
-    rgb(var(--accent-fill)) 0%,
-    rgb(var(--accent-fill)) 40%,
+    rgb(var(--accent)) 0%,
+    rgb(var(--accent)) 40%,
     rgb(var(--accent-glare)) 50%,
-    rgb(var(--accent-fill)) 60%,
-    rgb(var(--accent-fill)) 100%
+    rgb(var(--accent)) 60%,
+    rgb(var(--accent)) 100%
   );
   background-position: 100% 0;
   background-size: 250% 100%;

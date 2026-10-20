@@ -106,7 +106,7 @@ function activate() {
 
 .item[data-danger],
 .item[data-danger] .icon {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .item[data-danger]:hover:not(:disabled) {

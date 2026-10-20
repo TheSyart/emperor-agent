@@ -179,7 +179,7 @@ async function confirm(): Promise<void> {
 
 .error {
   margin: var(--space-2) 0 0;
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
   font-size: var(--fs-xs);
 }
 </style>

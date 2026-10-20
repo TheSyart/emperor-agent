@@ -725,7 +725,7 @@ onBeforeUnmount(() => {
 }
 
 .span[data-timeline-span='user'] {
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
 }
 
 .span[data-timeline-span='context'] {
@@ -765,7 +765,7 @@ onBeforeUnmount(() => {
 }
 
 .span[data-error='true'] {
-  background: rgb(var(--danger));
+  background: rgb(var(--error));
 }
 
 .span[data-selected='false'] {
@@ -777,7 +777,7 @@ onBeforeUnmount(() => {
   opacity: 1;
   box-shadow:
     0 0 0 1px rgb(var(--surface-raised)),
-    0 0 0 2px color-mix(in srgb, rgb(var(--accent-fill)) 80%, transparent);
+    0 0 0 2px color-mix(in srgb, rgb(var(--accent)) 80%, transparent);
 }
 
 .span[data-current='true'] {
@@ -785,7 +785,7 @@ onBeforeUnmount(() => {
   opacity: 1;
   box-shadow:
     0 0 0 1px rgb(var(--surface-raised)),
-    0 0 0 2px rgb(var(--accent-fill));
+    0 0 0 2px rgb(var(--accent));
 }
 
 .span[data-search-match='false'] {
@@ -805,7 +805,7 @@ onBeforeUnmount(() => {
 
 .selection {
   z-index: var(--z-base);
-  background: color-mix(in srgb, rgb(var(--accent-fill)) 12%, transparent);
+  background: color-mix(in srgb, rgb(var(--accent)) 12%, transparent);
   box-shadow:
     -100vw 0 0 100vw
       color-mix(in srgb, rgb(var(--surface-base)) 58%, transparent),
@@ -814,7 +814,7 @@ onBeforeUnmount(() => {
 }
 
 .selection[data-dragging='true'] {
-  background: color-mix(in srgb, rgb(var(--accent-fill)) 18%, transparent);
+  background: color-mix(in srgb, rgb(var(--accent)) 18%, transparent);
 }
 
 .selection-edges {
@@ -827,7 +827,7 @@ onBeforeUnmount(() => {
   top: 0;
   bottom: 0;
   width: 3px;
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
   content: '';
 }
 
@@ -851,7 +851,7 @@ onBeforeUnmount(() => {
   bottom: 0;
   left: clamp(0px, calc(var(--traj-hover-left) - 1px), calc(100% - 2px));
   width: 2px;
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
   pointer-events: none;
 }
 
@@ -862,9 +862,8 @@ onBeforeUnmount(() => {
   bottom: var(--space-3);
   left: clamp(0px, calc(var(--traj-playhead-left) - 1px), calc(100% - 2px));
   width: 2px;
-  background: rgb(var(--accent-fill));
-  box-shadow: 0 0 0 2px
-    color-mix(in srgb, rgb(var(--accent-fill)) 24%, transparent);
+  background: rgb(var(--accent));
+  box-shadow: 0 0 0 2px color-mix(in srgb, rgb(var(--accent)) 24%, transparent);
   pointer-events: none;
   animation: traj-playhead 1.2s var(--ease-in-out) infinite;
 }

@@ -367,7 +367,7 @@ const latestLog = computed(() => props.run.logs.at(-1))
 }
 
 .member[data-link] .member-label {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   text-decoration: underline;
   text-underline-position: from-font;
 }
@@ -420,7 +420,7 @@ const latestLog = computed(() => props.run.logs.at(-1))
 .run-error {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
   overflow-wrap: anywhere;
 }
 </style>

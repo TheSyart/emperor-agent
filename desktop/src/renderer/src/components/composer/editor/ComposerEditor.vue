@@ -466,9 +466,9 @@ defineExpose({
 
 <style scoped>
 .composer-editor :deep(.composer-url-decoration) {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   text-decoration: underline;
-  text-decoration-color: rgb(var(--accent-fill) / 0.3);
+  text-decoration-color: rgb(var(--accent) / 0.3);
   text-underline-offset: 4px;
   border-radius: var(--radius-xs);
   background: transparent;
@@ -487,7 +487,7 @@ defineExpose({
 .composer-editor :deep(.composer-url-decoration[data-site-letter]::before) {
   content: attr(data-site-letter) / '';
   mask: none;
-  background: rgb(var(--accent-fill) / 0.14);
+  background: rgb(var(--accent) / 0.14);
   border-radius: var(--radius-xs);
   font: 600 0.7em/1.4 var(--font-sans);
   text-align: center;
@@ -582,8 +582,8 @@ defineExpose({
   padding: 0 var(--space-1);
   margin: 0 var(--space-0-5);
   border-radius: var(--radius-cell);
-  background: rgb(var(--accent-fill) / 0.12);
-  color: rgb(var(--accent-strong));
+  background: rgb(var(--accent) / 0.12);
+  color: rgb(var(--text-link));
   font-weight: 500;
   white-space: nowrap;
   vertical-align: baseline;

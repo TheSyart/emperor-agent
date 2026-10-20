@@ -80,6 +80,6 @@ const output = computed(() => {
 }
 
 .output[data-error] :deep(.ds-md) {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 </style>

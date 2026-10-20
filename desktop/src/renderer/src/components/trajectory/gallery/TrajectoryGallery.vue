@@ -163,7 +163,7 @@ onBeforeUnmount(() => {
 }
 
 .link[data-active='true'] {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 
 .note {

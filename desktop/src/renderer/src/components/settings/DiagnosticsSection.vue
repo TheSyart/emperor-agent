@@ -462,7 +462,7 @@ function messageOf(cause: unknown): string {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-weight: 500;
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 
 .issue:hover .issue-go {

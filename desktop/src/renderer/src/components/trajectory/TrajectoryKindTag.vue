@@ -136,7 +136,7 @@ withDefaults(defineProps<{ kind: TrajectoryCellKind; iconOnly?: boolean }>(), {
 }
 
 .traj-kind-tag[data-kind='user'] {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   background: rgb(var(--accent-soft));
 }
 
@@ -156,7 +156,7 @@ withDefaults(defineProps<{ kind: TrajectoryCellKind; iconOnly?: boolean }>(), {
 
 .traj-kind-tag[data-kind='tool'] {
   color: rgb(var(--approval-strong));
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
 }
 
 .traj-kind-tag[data-kind='subtool'] {
@@ -167,7 +167,7 @@ withDefaults(defineProps<{ kind: TrajectoryCellKind; iconOnly?: boolean }>(), {
   );
   background: color-mix(
     in srgb,
-    rgb(var(--approval-soft)) 58%,
+    rgb(var(--attention-soft)) 58%,
     rgb(var(--surface-base))
   );
 }

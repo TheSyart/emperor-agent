@@ -533,7 +533,7 @@ function openCall(callId: string): void {
 
 .load-full {
   margin-left: var(--space-2);
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   text-decoration: underline;
   font: inherit;
 }
@@ -542,7 +542,7 @@ function openCall(callId: string): void {
 }
 .load-error {
   margin-left: var(--space-2);
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 .full-payload pre {
   margin: var(--space-2) var(--space-3-5) 0;
@@ -561,7 +561,7 @@ function openCall(callId: string): void {
   border: 1px solid color-mix(in srgb, rgb(var(--approval)) 40%, transparent);
   border-radius: var(--radius-row);
   color: rgb(var(--approval-strong));
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
   font: var(--font-xxs);
 }
 

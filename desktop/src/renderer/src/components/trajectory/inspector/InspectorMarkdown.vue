@@ -110,6 +110,6 @@ const linkOptions = { notify: (message: string) => app?.showToast(message) }
 }
 
 .traj-md :deep(a) {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 </style>

@@ -189,7 +189,7 @@ function noteOf(entry: TurnFileEntry): string {
 }
 
 .del {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .files {
@@ -270,7 +270,7 @@ function noteOf(entry: TurnFileEntry): string {
 
 .error {
   margin: 0;
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
   font-size: var(--fs-xs);
 }
 </style>

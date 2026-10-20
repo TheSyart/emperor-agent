@@ -103,6 +103,6 @@ withDefaults(
 }
 
 .ds-metric[data-tone='accent'] .value {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 </style>

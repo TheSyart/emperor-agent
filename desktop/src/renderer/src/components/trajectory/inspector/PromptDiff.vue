@@ -100,10 +100,10 @@ const sections = computed(() => {
 }
 
 .line[data-kind='removed'] {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
   background: color-mix(
     in srgb,
-    rgb(var(--danger)) 12%,
+    rgb(var(--error)) 12%,
     rgb(var(--surface-base))
   );
 }

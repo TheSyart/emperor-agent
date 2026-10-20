@@ -71,8 +71,8 @@ defineProps<{ projectName?: string }>()
   aspect-ratio: 1051 / 468;
   background: radial-gradient(
     closest-side,
-    rgb(var(--accent-fill) / 0.16),
-    rgb(var(--accent-fill) / 0.06) 55%,
+    rgb(var(--accent) / 0.16),
+    rgb(var(--accent) / 0.06) 55%,
     transparent
   );
   transform: translate(-50%, -30%);

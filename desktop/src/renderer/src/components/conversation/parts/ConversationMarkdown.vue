@@ -209,7 +209,7 @@ const segments = computed<Segment[]>(() =>
 }
 
 .ds-md :deep(a.md-link-chip[data-md-tone='danger']) {
-  --md-badge-tone: var(--danger);
+  --md-badge-tone: var(--error);
 }
 .ds-md :deep(a.md-link-chip[data-md-custom-icon][data-md-tone]) {
   --md-link-ink: var(--md-badge-tone);
@@ -289,7 +289,7 @@ const segments = computed<Segment[]>(() =>
 .ds-md :deep(a.md-link-chip[data-site-letter]::before) {
   content: attr(data-site-letter) / '';
   mask: none;
-  background: rgb(var(--accent-fill) / 0.14);
+  background: rgb(var(--accent) / 0.14);
   color: rgb(var(--text-link));
   border-radius: var(--radius-xs);
   font: 600 0.7em/1.4 var(--font-sans);

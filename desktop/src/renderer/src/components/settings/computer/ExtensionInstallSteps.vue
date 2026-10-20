@@ -206,9 +206,9 @@ function copyLabel(address: ExtensionAddress): string {
 }
 
 .marker[data-state='now'] {
-  border: 1.5px solid rgb(var(--accent-fill));
+  border: 1.5px solid rgb(var(--accent));
   background: rgb(var(--accent-soft));
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 
 .marker[data-state='todo'] {

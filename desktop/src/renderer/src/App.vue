@@ -895,7 +895,7 @@ provideAppContext({
   width: var(--space-2);
   height: var(--space-2);
   border-radius: var(--radius-pill);
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
   animation: ds-fade-in 1s ease-in-out infinite alternate;
 }
 
@@ -907,7 +907,7 @@ provideAppContext({
 
 .boot-error p {
   margin: 0;
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
   word-break: break-word;
 }
 

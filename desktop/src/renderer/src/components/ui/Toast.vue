@@ -100,7 +100,7 @@ onBeforeUnmount(() => clearTimeout(timer))
 }
 
 [data-tone='error'] .icon {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 [data-tone='ok'] .icon {

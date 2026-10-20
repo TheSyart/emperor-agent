@@ -79,7 +79,7 @@ withDefaults(
 
 .ds-chip[data-tone='approval'] {
   color: rgb(var(--approval-line));
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
   box-shadow: inset 0 0 0 1px rgb(var(--approval) / 0.35);
 }
 
@@ -88,7 +88,7 @@ withDefaults(
 }
 
 .ds-chip[data-tone='accent'] {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   background: rgb(var(--accent-soft));
 }
 

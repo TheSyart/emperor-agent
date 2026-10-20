@@ -71,9 +71,9 @@ const items = computed(() => todoItems(props.data))
 }
 
 [data-status='in_progress'] .mark {
-  border-color: rgb(var(--accent-fill));
+  border-color: rgb(var(--accent));
   box-shadow: inset 0 0 0 3px rgb(var(--surface-base));
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
 }
 
 [data-status='completed'] .content {
@@ -95,6 +95,6 @@ const items = computed(() => todoItems(props.data))
   flex: none;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 </style>

@@ -216,7 +216,7 @@ const { copied, copy } = useCopyFeedback(() => props.output ?? '')
   top: 0;
   flex: none;
   height: var(--lh-code);
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .copy {
@@ -275,7 +275,7 @@ const { copied, copy } = useCopyFeedback(() => props.output ?? '')
 }
 
 .ansi-red {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .ansi-green {

@@ -123,8 +123,8 @@ function chipName(kind: string, label: string): string {
   padding: 0 var(--space-1);
   margin: 0 var(--space-0-5);
   border-radius: var(--radius-cell);
-  background: rgb(var(--accent-fill) / 0.12);
-  color: rgb(var(--accent-strong));
+  background: rgb(var(--accent) / 0.12);
+  color: rgb(var(--text-link));
   font-weight: 500;
   white-space: nowrap;
   vertical-align: baseline;

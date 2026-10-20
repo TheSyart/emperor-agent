@@ -136,19 +136,19 @@ async function onKeydown(event: KeyboardEvent, index: number) {
 }
 
 .cell[data-level='1'] {
-  background: rgb(var(--accent-fill) / 0.24);
+  background: rgb(var(--accent) / 0.24);
 }
 
 .cell[data-level='2'] {
-  background: rgb(var(--accent-fill) / 0.44);
+  background: rgb(var(--accent) / 0.44);
 }
 
 .cell[data-level='3'] {
-  background: rgb(var(--accent-fill) / 0.68);
+  background: rgb(var(--accent) / 0.68);
 }
 
 .cell[data-level='4'] {
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
 }
 
 .cell:focus-visible {

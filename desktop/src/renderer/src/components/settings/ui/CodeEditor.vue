@@ -140,11 +140,11 @@ defineExpose({ focus: () => textarea.value?.focus() })
 }
 
 .ds-code-editor:focus-within {
-  border-color: rgb(var(--accent-fill));
+  border-color: rgb(var(--accent));
 }
 
 .ds-code-editor[data-invalid] {
-  border-color: rgb(var(--state-error));
+  border-color: rgb(var(--error));
 }
 
 .ds-code-editor[data-fill] {

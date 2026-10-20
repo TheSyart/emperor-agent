@@ -62,7 +62,7 @@
 }
 
 :is(.file-code-view, .ds-hl) .hljs-deletion {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 :is(.file-code-view, .ds-hl) .hljs-operator,

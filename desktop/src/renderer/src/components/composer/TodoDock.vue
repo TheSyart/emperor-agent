@@ -168,7 +168,7 @@ const summary = computed(() => {
 }
 
 .item[data-status='in_progress'] .glyph {
-  color: rgb(var(--accent-fill));
+  color: rgb(var(--accent));
 }
 
 .pending-marker {

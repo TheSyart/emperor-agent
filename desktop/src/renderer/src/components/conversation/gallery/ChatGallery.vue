@@ -153,7 +153,7 @@ provide(LINK_STATUS_KEY, {
 }
 
 .link[data-active] {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 
 .crumbs {
@@ -170,7 +170,7 @@ provide(LINK_STATUS_KEY, {
   padding: 0;
   border: none;
   background: none;
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   font: inherit;
   cursor: pointer;
 }

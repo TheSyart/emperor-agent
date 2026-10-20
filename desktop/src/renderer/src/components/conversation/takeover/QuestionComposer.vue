@@ -601,7 +601,7 @@ function onKeydown(event: KeyboardEvent) {
   outline: none;
   background: transparent;
   color: rgb(var(--label-primary));
-  caret-color: rgb(var(--accent-fill));
+  caret-color: rgb(var(--accent));
 }
 
 .field-input::placeholder {
@@ -622,7 +622,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .field-block:focus-within {
-  border-color: rgb(var(--accent-fill));
+  border-color: rgb(var(--accent));
 }
 
 .footer {

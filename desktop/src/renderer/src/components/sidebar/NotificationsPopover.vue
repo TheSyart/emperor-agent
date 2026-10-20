@@ -215,11 +215,11 @@ onBeforeUnmount(() => {
 }
 
 .row[data-tone='error'] .glyph {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .row[data-tone='warning'] .glyph {
-  color: rgb(var(--accent-fill));
+  color: rgb(var(--accent));
 }
 
 .body {
@@ -272,7 +272,7 @@ onBeforeUnmount(() => {
   width: var(--space-1-5);
   height: var(--space-1-5);
   border-radius: var(--radius-pill);
-  background: rgb(var(--danger));
+  background: rgb(var(--error));
 }
 
 .empty {

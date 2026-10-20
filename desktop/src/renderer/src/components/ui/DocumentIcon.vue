@@ -72,6 +72,6 @@ const icon = computed(() =>
 }
 
 .document-icon[data-tone='danger'] {
-  --document-tone: var(--danger);
+  --document-tone: var(--error);
 }
 </style>
