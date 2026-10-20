@@ -106,6 +106,18 @@ function fakeJob() {
   }
 }
 
+/** Start one job for `owner`, finish it, and wait for whatever it woke. */
+async function completeOne(
+  jobs: JobRegistry,
+  owner: ReturnType<ReturnType<typeof createTestHarness>['agent']>,
+): Promise<void> {
+  const job = fakeJob()
+  jobs.start({ kind: 'bash', label: 'quick', owner, run: () => job.hooks })
+  job.finish({ status: 'completed', detail: 'exit code: 0', exitCode: 0 })
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  await owner.whenIdle()
+}
+
 describe.skipIf(!posix)('background bash jobs', () => {
   it('starts a background job and collects it with job_output wait', async () => {
     const jobs = new JobRegistry()
@@ -326,7 +338,18 @@ describe('JobRegistry', () => {
     expect(a.inbox.nextTurn).toHaveLength(0)
   })
 
-  it('caps consecutive completion wakes at 3 until user input arrives', async () => {
+  it('#9 KRN-03: the fourth completion notice still wakes the owner (no default cap)', async () => {
+    const h = createTestHarness({
+      replies: [{ text: 'w1' }, { text: 'w2' }, { text: 'w3' }, { text: 'w4' }],
+    })
+    const a = h.agent()
+    const jobs = new JobRegistry()
+    for (let index = 0; index < 4; index++) await completeOne(jobs, a)
+    expect(h.adapter.requests).toHaveLength(4)
+    expect(a.inbox.hasPending).toBe(false)
+  })
+
+  it('caps consecutive completion wakes when a limit is configured, until user input arrives', async () => {
     const h = createTestHarness({
       replies: [
         { text: 'w1' },
@@ -337,32 +360,58 @@ describe('JobRegistry', () => {
       ],
     })
     const a = h.agent()
-    const jobs = new JobRegistry()
-    const complete = async (): Promise<void> => {
-      const job = fakeJob()
-      jobs.start({
-        kind: 'bash',
-        label: 'quick',
-        owner: a,
-        run: () => job.hooks,
-      })
-      job.finish({ status: 'completed', detail: 'exit code: 0', exitCode: 0 })
-      await new Promise((resolve) => setTimeout(resolve, 5))
-      await a.whenIdle()
-    }
-    await complete()
-    await complete()
-    await complete()
+    const jobs = new JobRegistry({ maxConsecutiveWakes: 3 })
+    await completeOne(jobs, a)
+    await completeOne(jobs, a)
+    await completeOne(jobs, a)
     expect(h.adapter.requests).toHaveLength(3)
-    await complete()
+    await completeOne(jobs, a)
     // Budget spent: the fourth notice is injected and waits for the next step.
     expect(h.adapter.requests).toHaveLength(3)
     expect(a.inbox.nextStep).toHaveLength(1)
     a.followup(userText('hello'))
     await a.whenIdle()
     expect(h.adapter.requests).toHaveLength(4)
-    await complete()
+    await completeOne(jobs, a)
     expect(h.adapter.requests).toHaveLength(5)
+  })
+
+  it('#10 KRN-03: a job the user stopped tells its owner at the next step', async () => {
+    const h = createTestHarness({ replies: [{ text: 'noted' }] })
+    const a = h.agent()
+    const jobs = new JobRegistry()
+    const job = fakeJob()
+    const id = jobs.start({
+      kind: 'bash',
+      label: 'sleep 30',
+      owner: a,
+      run: () => job.hooks,
+    })
+    expect(jobs.kill(id, a, 'user', 'user')).toBe('requested')
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    // No wake: the user is there; the model reads it with its next step.
+    expect(h.adapter.requests).toHaveLength(0)
+    expect(a.inbox.nextTurn).toHaveLength(0)
+    expect(a.inbox.nextStep.map(messageText)).toEqual([
+      'The user stopped background job bash-1 (bash: sleep 30) [status: killed, killed before exit]. Do not start it again unless the user asks.',
+    ])
+    expect(a.inbox.nextStep[0]!.source).toMatchObject({
+      kind: 'context',
+      producer: 'jobs',
+      form: 'notice',
+      summary: '用户已手动停止任务 bash-1',
+    })
+    // The agent's own job_kill still reports at once, with no notice.
+    const other = fakeJob()
+    const second = jobs.start({
+      kind: 'bash',
+      label: 'sleep 31',
+      owner: a,
+      run: () => other.hooks,
+    })
+    jobs.kill(second, a, 'not needed')
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(a.inbox.nextStep).toHaveLength(1)
   })
 
   it('does not notify when a kill or live wait already reported the outcome', async () => {

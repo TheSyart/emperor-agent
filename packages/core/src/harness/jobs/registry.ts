@@ -14,10 +14,13 @@
  *   `job/finished` log event, then one completion notice unless something
  *   already reported the terminal state (a kill, a terminal read, a live
  *   wait, or teardown).
- * - Completion notice: an idle owner is woken with `followup` (at most
- *   `maxConsecutiveWakes`, default 3, since the owner last received
- *   user-authored input); a running owner — or one past its budget — gets the
- *   notice injected into its next step.
+ * - Completion notice: an idle owner is woken with `followup`; a running
+ *   owner — or one past an optional `maxConsecutiveWakes` budget (counted
+ *   since the owner last received user-authored input; none by default,
+ *   DSH-3) — gets the notice injected into its next step.
+ * - A job the user stopped (`kill(..., 'user')`, the task panel) is not
+ *   reported by the kill: once it settles the owner gets a notice that the
+ *   user stopped it, injected into its next step without a wake (DSH-5).
  * - {@link disposeOwner} cancels, awaits, and drops every job of one agent.
  */
 
@@ -151,11 +154,19 @@ export interface JobRegistryOptions {
   maxConcurrentPerOwner?: number
   /** `wakeup` opens a turn on an idle owner; `quiet` only injects. */
   completionDelivery?: CompletionDelivery
+  /** Completion wakes allowed since the owner's last user input (default: no limit). */
   maxConsecutiveWakes?: number
 }
 
+/** Who asked a job to stop: the owning agent (`job_kill`) or the user (task panel). */
+export type JobKiller = 'agent' | 'user'
+
 export const DEFAULT_MAX_CONCURRENT_JOBS_PER_OWNER = 10
-export const DEFAULT_MAX_CONSECUTIVE_WAKES = 3
+/**
+ * Completion wakes are not capped by default (DSH-3): a capped owner left
+ * later notices in its inbox and looked stuck.
+ */
+export const DEFAULT_MAX_CONSECUTIVE_WAKES = Number.POSITIVE_INFINITY
 export const JOB_WAIT_TIMEOUT = 'JOB_WAIT_TIMEOUT'
 export const JOB_NOTICE_PRODUCER = 'jobs'
 
@@ -175,6 +186,8 @@ interface TrackedJob {
   startedAt: number
   finishedAt: number | undefined
   reported: boolean
+  /** The user stopped it: its owner is told once it settles. */
+  stoppedByUser: boolean
   settled: Promise<void>
   markSettled: () => void
   waiters: number
@@ -197,6 +210,11 @@ export function statusLine(
 /** Completion notice text (dsh-tool-jobs `fitCompletionNotice`, uncapped). */
 export function completionNotice(snapshot: JobSnapshot): string {
   return `background job ${snapshot.id} (${snapshot.kind}: ${snapshot.label}) finished ${statusLine(snapshot)}. Read its output with job_output.`
+}
+
+/** What the owner learns when the user stopped its job (DSH-5). */
+export function userStoppedNotice(snapshot: JobSnapshot): string {
+  return `The user stopped background job ${snapshot.id} (${snapshot.kind}: ${snapshot.label}) ${statusLine(snapshot)}. Do not start it again unless the user asks.`
 }
 
 export class JobRegistry {
@@ -222,7 +240,10 @@ export class JobRegistry {
       options.maxConsecutiveWakes ?? DEFAULT_MAX_CONSECUTIVE_WAKES
     if (!Number.isSafeInteger(this.maxPerOwner) || this.maxPerOwner < 1)
       throw new Error('maxConcurrentPerOwner must be a positive integer')
-    if (!Number.isSafeInteger(this.wakeBudget) || this.wakeBudget < 0)
+    if (
+      this.wakeBudget !== Number.POSITIVE_INFINITY &&
+      (!Number.isSafeInteger(this.wakeBudget) || this.wakeBudget < 0)
+    )
       throw new Error('maxConsecutiveWakes must be a whole number of turns')
   }
 
@@ -273,6 +294,7 @@ export class JobRegistry {
       startedAt: Date.now(),
       finishedAt: undefined,
       reported: false,
+      stoppedByUser: false,
       settled,
       markSettled,
       waiters: 0,
@@ -338,21 +360,39 @@ export class JobRegistry {
     return { text, snapshot: this.snapshot(job) }
   }
 
+  /**
+   * Stop a job. The owner's own kill reports the outcome at once; a stop
+   * by the user is reported to the owner as a notice once the job settled.
+   */
   kill(
     id: string,
     caller?: Agent,
     reason?: string,
+    by: JobKiller = 'agent',
   ): 'requested' | 'already-finished' {
     const job = this.expect(id, caller)
     if (isTerminal(job.status)) {
-      job.reported = true
+      if (by === 'agent') job.reported = true
       return 'already-finished'
     }
+    if (by === 'user') job.stoppedByUser = true
+    else job.reported = true
     job.cancel(reason)
     job.status = 'stopping'
-    job.reported = true
     this.notifyChanged(job.owner)
     return 'requested'
+  }
+
+  /** Whether any of these agents owns a job still running (or stopping). */
+  hasActive(ownerIds: ReadonlySet<string>): boolean {
+    for (const job of this.store.values())
+      if (
+        job.owner !== undefined &&
+        ownerIds.has(job.owner.id) &&
+        !isTerminal(job.status)
+      )
+        return true
+    return false
   }
 
   /** Wait for settlement or timeout without cancelling the job. */
@@ -541,11 +581,31 @@ export class JobRegistry {
       }
     }
     // Completion is announced last: a wake may open a model turn synchronously.
-    this.deliverNotice(snapshot, job.owner)
+    this.deliverNotice(job, snapshot, job.owner)
   }
 
-  private deliverNotice(snapshot: JobSnapshot, owner: Agent | undefined): void {
+  private deliverNotice(
+    job: TrackedJob,
+    snapshot: JobSnapshot,
+    owner: Agent | undefined,
+  ): void {
     if (snapshot.reported || owner === undefined) return
+    if (job.stoppedByUser) {
+      try {
+        // The user is there: no wake, the model reads it with its next step.
+        owner.inject(
+          contextMessage(JOB_NOTICE_PRODUCER, userStoppedNotice(snapshot), {
+            form: 'notice',
+            summary: boundContextSummary(`用户已手动停止任务 ${snapshot.id}`),
+          }),
+        )
+      } catch (error: unknown) {
+        logger.warn(`jobs: stop notice for ${snapshot.id} was not delivered`, {
+          error: String(error),
+        })
+      }
+      return
+    }
     const message = contextMessage(
       JOB_NOTICE_PRODUCER,
       completionNotice(snapshot),
@@ -602,6 +662,7 @@ export class JobRegistry {
       if (isTerminal(job.status)) continue
       // Nothing will read a notice for a job whose owner is being destroyed.
       job.reported = true
+      job.stoppedByUser = false
       try {
         job.cancel(reason)
         job.status = 'stopping'
