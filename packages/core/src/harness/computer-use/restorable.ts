@@ -43,6 +43,7 @@ const schema = z
 
 const CODEC: SnapshotCodec<RestorableTab[]> = {
   schemaVersion: 1,
+  versionKey: 'schemaVersion',
   encode: (value) => ({ schemaVersion: 1, tabs: value }),
   decode(input) {
     return { value: schema.parse(input).tabs, schemaVersion: 1 }

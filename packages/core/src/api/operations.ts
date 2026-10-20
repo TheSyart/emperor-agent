@@ -2200,6 +2200,7 @@ export const CORE_OPERATION_REGISTRY = {
   'storage.clean': operation(z.tuple([]), (api, _args, ctx) =>
     api.storage.clean(viewOf(ctx, 'storage.clean')),
   ),
+  'storage.versions': operation(z.tuple([]), (api) => api.storage.versions()),
   'tasks.budget': operation(z.tuple([]), (api) => api.tasks.budget()),
   'tasks.setBudget': operation(
     z.tuple([

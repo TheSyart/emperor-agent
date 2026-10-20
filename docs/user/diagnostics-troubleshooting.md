@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：遇到启动、模型、会话、工具或打包问题的用户和开发者<br>
-> 最后核验：2026-10-20<br>
-> 事实源：`packages/core/src/api/services/diagnostics-service.ts`、`desktop/src/main/logging/`、`desktop/src/main/diagnostics-bundle.ts`、`desktop/src/main/recovery.ts`、`packages/core/src/session-log/`、`packages/core/src/environment/tool-catalog.json`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/renderer/src/components/settings/DiagnosticsSection.vue` 与 `diagnostics/`、`desktop/src/renderer/src/components/pages/pulls/`、当前构建与运行脚本
+> 最后核验：2026-10-21<br>
+> 事实源：`packages/core/src/api/services/diagnostics-service.ts`、`desktop/src/main/logging/`、`desktop/src/main/diagnostics-bundle.ts`、`desktop/src/main/home-backup.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/migrations/`、`desktop/src/main/recovery.ts`、`packages/core/src/session-log/`、`packages/core/src/environment/tool-catalog.json`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/renderer/src/components/settings/DiagnosticsSection.vue` 与 `diagnostics/`、`desktop/src/renderer/src/components/pages/pulls/`、当前构建与运行脚本
 
 先进入“设置 → 高级 → 诊断”。页面顶部是一张概览卡：一句结论（一切正常时是「运行正常」，否则是「n 项需要关注」「n 项异常」加「其余都正常」），下面只列需要关注的项目（异常在前），点一项会展开它所在的分组并滚到那里。读取诊断或探测环境失败时，概览上方出现一张提醒卡写明原因。右上角「导出诊断包」生成一个 zip（见下文[日志与诊断包](#日志与诊断包)），「复制报告」把整页复制成纯文本，便于反馈问题；刷新会重新读取诊断并重新探测环境。
 
@@ -155,6 +155,57 @@ CoreApi 的 `tasks.*` 把后台 job（`bash` 的后台命令）、子代理会�
 - 会话已删除的外部执行器（Claude Code、Codex）委派留下的隔离目录，以及临时文件。
 
 对话、附件与设置不会被清理。完成后页面写明释放了多少空间、各删除了几项，并重新统计占用。每次启动后 Emperor 也会在后台自动清理一次，不影响启动。
+
+## 备份与恢复
+
+「设置 › 高级 › 存储 › 备份与恢复」把 Emperor Home 打包成一个 `.emperor-backup.zip`，或从这样的文件恢复。
+
+**导出备份**：点「导出…」，对话框先列出备份会包含的内容和大小，确认后选择保存位置（默认「文稿」）。备份只保存在你选的位置，Emperor 不会上传。
+
+| 部分                 | 内容                                                                                   |
+| -------------------- | -------------------------------------------------------------------------------------- |
+| 设置与配置           | `settings.json`、`model_config.json`、`mcp_config.json`、`hooks.json`、子智能体设置    |
+| 记忆                 | 长期记忆、用户档案、情景记忆与版本历史                                                 |
+| Skills、插件与智能体 | 你安装和编写的 Skills、已安装的插件、自定义智能体                                      |
+| 项目与定时任务       | 项目设置、项目记忆和定时任务                                                           |
+| 会话（可选）         | 会话记录、附件和用量记录；默认包含，可以在对话框里取消「包含会话」                     |
+| 密码管理器（可选）   | 只有勾选「包含密码管理器」并设置备份口令（至少 12 个字符，输入两次）时才放进去，见下文 |
+
+备份不包含：Agent 浏览器的登录资料与缓存（`browser/profiles`）、Agent 下载的文件、日志、受管环境工具、运行时与临时文件（`run/`、`spill/`、锁文件）、子智能体的运行目录，以及 `installation.json`。
+
+**密码管理器与密钥**：不设备份口令时，备份里既没有凭据库（`computer-use/vault.json`），也没有 Emperor 的本地密钥（`computer-use/secrets/local.key`）。设了口令时，凭据库连同本地密钥用口令加密成一个文件放进备份（与密码管理器里「导出凭据备份」相同的方式），子智能体设置里粘贴的 Claude Code 令牌（`delegations/credentials.json`，用本地密钥加密）也一起放进去；忘记口令就无法恢复它们。恢复时填了口令才会恢复这些凭据，文件权限保持 0600。凭据库加了主密码时，先在「设置 › 浏览器 › 密码管理器」解锁。
+
+**模型 Key 与 MCP 令牌**：它们在备份里仍是用本地密钥加密的形式；还没加密过的明文 Key 在备份里也会先加密（加密不可用时不放进备份）。在同一台 Mac 上恢复照常可用；恢复到另一台 Mac 时，只有备份里带了密码管理器（也就带了本地密钥）、而那台 Mac 上还没有 Emperor 本地密钥，Key 才能直接使用，否则需要在「设置 › 模型」重新填写。
+
+**从备份恢复**：点「选择备份…」，选一个 `.emperor-backup.zip`。Emperor 先检查文件（不是 Emperor 备份、含有不该恢复的路径或符号链接、来自格式更新的备份都会拒绝，并说明原因），再显示备份时间、写入它的 Emperor 版本和会替换的部分。备份带有密码管理器时可以填写备份口令一起恢复；口令错误时什么都不会改动，可以重新输入；留空则不恢复凭据。
+
+点「恢复并重新启动」后，Emperor 重新启动，并在打开数据之前完成恢复：
+
+1. 先把当前数据中会被替换的部分移到 Emperor Home 的 `migrations/backup-<日期时间>/`（保持原来的相对路径），这就是恢复前的自动备份；
+2. 再把备份里的文件放到原位。备份没有的部分（例如没有包含会话的备份）保持当前内容不变；浏览器登录资料、日志和本地密钥不会改动；
+3. 结果记在 `migrations/log.jsonl`。中途失败时，已经移动的文件全部移回，Emperor 照常用原来的数据启动，未完成的恢复留在 `migrations/restore-failed-<日期时间>/`。
+
+启动后会提示「已从备份恢复」。确认恢复无误后，可以手动删除 `migrations/backup-*` 释放空间；需要撤销时，退出 Emperor，把其中的文件移回 Emperor Home 原处。
+
+## 用较旧的 Emperor 打开数据
+
+每个持久文件都写明它的版本（`version` 或 `schemaVersion`）。较旧的 Emperor 读到更新版本写入的文件时：
+
+- 照常读取它能理解的内容，但不会改写这个文件，也不会把它当作损坏文件移走；
+- 修改这类文件的操作会失败，并提示「这个文件来自更新版本的 Emperor，当前版本只读」；
+- 「设置 › 高级 › 存储」顶部列出这些文件；
+- 比上次打开的版本旧时，启动后顶部会出现提示，点「查看」打开「存储」。
+
+定时任务文件来自更新版本时，定时任务服务不启动（不会出现「运行了却记不下来」的重复运行）；会话索引来自更新版本时，会话照常使用，索引只在内存中更新。回到更新版本的 Emperor 后一切恢复正常。整个 Emperor Home 的布局版本更高时（`installation.json` 的 `stateLayoutVersion`），仍然直接显示恢复页，不会打开数据。
+
+升级时，数据迁移（`migrations/<from>-<to>`）先把会改动的文件复制到 `migrations/backup-<日期时间>/`，结果写入 `migrations/log.jsonl`；某一步失败时从这份复制恢复原文件，下次启动再试。
+
+## Time Machine 与凭据文件
+
+- Agent 浏览器的 profile 文件夹（`~/.emperor/browser/profiles/<profile-id>/`，网站数据、缓存与登录状态）由 Emperor 自动排除出 Time Machine（`tmutil addexclusion`）。
+- 建议再手动排除可以重新生成、体积大的目录：`~/.emperor/browser/profiles`（整个文件夹）、`~/.emperor/browser/downloads`、`~/.emperor/environment/downloads`、`~/.emperor/spill`、`~/.emperor/logs`（使用 `EMPEROR_CONFIG_DIR` 时）。在「系统设置 › 通用 › 时间机器 › 选项」里添加，或执行 `tmutil addexclusion <路径>`。
+- 不要排除整个 `~/.emperor`：会话、记忆和配置都在里面。需要单独、可携带的副本时用上面的「导出备份」。
+- 凭据文件的保护方式：凭据库 `computer-use/vault.json` 的每个字段、模型 Key 和 MCP 令牌都用 Emperor 本地密钥加密（AES-256-GCM），可以再加主密码；本地密钥 `computer-use/secrets/local.key` 只属于当前用户（0600，目录 0700），不使用钥匙串，Agent 的 Shell 与文件工具也读不到 `computer-use/`。Time Machine 备份里同时有本地密钥和凭据库，因此要像保护这台 Mac 一样保护备份磁盘（建议开启 Time Machine 的备份加密）。
 
 - 子代理结束后不能从界面恢复，需要在对话中让主 Agent 用 `send_message` 继续。
 

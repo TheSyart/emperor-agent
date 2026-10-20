@@ -157,6 +157,8 @@ export class DownloadInbox {
   private indexLoaded = false
   private readonly quarantine: (path: string) => Promise<void>
 
+  private newerIndex = false
+
   constructor(private readonly options: DownloadInboxOptions) {
     this.quarantine = options.quarantine ?? createQuarantine()
   }
@@ -494,7 +496,8 @@ export class DownloadInbox {
 
   private persistIndex(): void {
     const indexPath = this.options.indexPath
-    if (indexPath === undefined) return
+    // A newer Emperor's index stays as it is (REL-03).
+    if (indexPath === undefined || this.newerIndex) return
     try {
       const temp = join(
         dirname(indexPath),
@@ -521,6 +524,7 @@ export class DownloadInbox {
         version?: unknown
         entries?: unknown
       }
+      if (Number(parsed.version) > 1) this.newerIndex = true
       if (parsed.version !== 1 || !Array.isArray(parsed.entries)) return
       for (const item of parsed.entries.slice(-INDEX_LIMIT)) {
         if (!Array.isArray(item) || item.length !== 2) continue

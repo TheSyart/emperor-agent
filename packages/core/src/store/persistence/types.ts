@@ -8,6 +8,7 @@ export type PersistenceRecoveryAction =
   | 'quarantined_corrupt_snapshot'
   | 'truncated_partial_tail'
   | 'filtered_corrupt_journal_rows'
+  | 'newer_version_read_only'
 
 export type PersistenceOperation =
   | 'append_sync'
@@ -39,6 +40,8 @@ export interface SnapshotDecodeResult<T> {
 /** Domain codecs keep business schema and legacy migration outside the kernel. */
 export interface SnapshotCodec<T> {
   readonly schemaVersion: number
+  /** REL-03: where the file declares its version; a newer one is read-only. */
+  readonly versionKey?: 'version' | 'schemaVersion'
   encode(value: T): unknown
   decode(input: unknown): SnapshotDecodeResult<T>
 }

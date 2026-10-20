@@ -16,6 +16,14 @@
  *   nor a session title.
  * Launch 2 (installation.json broken): the recovery page; main.log has the
  * full cause with its stack; 打开日志 opens main.log; 导出诊断包 works there.
+ * REL-03 (data versions, 备份与恢复), on homes of their own:
+ * - Launch 3: 设置 › 高级 › 存储 › 导出备份 writes a zip with the memory and
+ *   without the vault, the local key or a plain model key;
+ * - Launch 4: 从备份恢复 of that zip into another home schedules the
+ *   restore and asks to restart; launch 5 applies it at startup, the data
+ *   it replaced is in migrations/backup-<ts>, and a notice says so;
+ * - Launch 6: a home a newer Emperor (99.0.0) ran last: the startup
+ *   banner; its settings.json stays byte for byte and 存储 names it.
  * Prints `E2E-RESULT {json}` lines like the other Electron suites.
  *
  *   node scripts/e2e-cu.mjs --mode=diagnostics   (after `npm run build`)
@@ -547,6 +555,247 @@ async function recoveryPage(
   )
 }
 
+// --- REL-03 ----------------------------------------------------------------
+
+const MEMORY_A = 'REL03-e2e-memory-a'
+const MEMORY_B = 'REL03-e2e-memory-b'
+const PLAIN_KEY = 'sk-fake-rel03-e2e-plain-key'
+
+/** A home with a model (its key still plain, as 0.1 left it) and memory. */
+function prepareDataHome(home: string, model: FakeModel, memory: string): void {
+  prepareHome(home, model)
+  writeFileSync(
+    join(home, 'model_config.json'),
+    read(join(home, 'model_config.json')).replace(
+      'sk-fake-rel01-e2e-key',
+      PLAIN_KEY,
+    ),
+  )
+  writeFileSync(join(home, 'mcp_config.json'), '{"version": 1, "servers": {}}')
+  mkdirSync(join(home, 'memory'), { recursive: true })
+  // Core reads (and first renames) the legacy MEMORY.md as MEMORY.local.md.
+  writeFileSync(join(home, 'memory', 'MEMORY.md'), `# Memory\n\n${memory}\n`)
+}
+
+async function openStorage(page: Page): Promise<ReturnType<Page['getByRole']>> {
+  const settings = page.getByRole('dialog', { name: '设置' })
+  if (!(await settings.isVisible()))
+    await page
+      .getByRole('button', { name: '设置', exact: true })
+      .first()
+      .click()
+  await settings.waitFor()
+  await settings.locator('.nav-cell[data-section="advanced"]').click()
+  await settings.locator('[data-advanced-page="storage"]').click()
+  await settings.locator('[data-group="storage-backup"]').waitFor()
+  return settings
+}
+
+function pendingRestore(home: string): string {
+  return join(home, 'migrations', 'restore-pending', 'restore.json')
+}
+
+async function exportBackup(
+  app: ElectronApplication,
+  page: Page,
+  out: string,
+): Promise<string> {
+  const zip = join(out, 'rel03.emperor-backup.zip')
+  await check(
+    page,
+    '存储 › 导出备份 writes a zip with the memory, without the vault, the local key or a plain model key',
+    async () => {
+      await page.locator('.app-frame').waitFor({ timeout: 60_000 })
+      const settings = await openStorage(page)
+      await settings.locator('[data-backup-export]').click()
+      const dialog = page.getByTestId('backup-export-dialog')
+      await dialog
+        .locator('[data-category]')
+        .first()
+        .waitFor({ timeout: 15_000 })
+      await page.screenshot({ path: join(shots, 'backup-export.png') })
+      await answerSaveDialog(app, zip)
+      await dialog.locator('[data-action="export"]').click()
+      await dialog.getByText('已导出').waitFor({ timeout: 30_000 })
+      const files = zipFiles(zip)
+      if (!files.includes('home/memory/MEMORY.local.md'))
+        throw new Error(`no memory in ${JSON.stringify(files)}`)
+      const secret = files.filter(
+        (file) =>
+          file.startsWith('home/computer-use/') ||
+          file === 'credentials.emperor-vault',
+      )
+      if (secret.length) throw new Error(`secrets in the zip ${secret}`)
+      const leaks = scanZip(zip, [PLAIN_KEY])
+      if (leaks.length) throw new Error(`plain key in ${JSON.stringify(leaks)}`)
+      if (!scanZip(zip, [MEMORY_A]).length)
+        throw new Error('the memory text is not in the zip')
+      await dialog.locator('[data-action="done"]').click()
+      return { files: files.length }
+    },
+    { critical: true },
+  )
+  return zip
+}
+
+async function scheduleRestore(
+  app: ElectronApplication,
+  page: Page,
+  home: string,
+  zip: string,
+  out: string,
+): Promise<void> {
+  const marker = join(out, 'rel03-relaunch.txt')
+  await check(
+    page,
+    '存储 › 从备份恢复 schedules the restore, then restarts the app',
+    async () => {
+      await page.locator('.app-frame').waitFor({ timeout: 60_000 })
+      // The real relaunch would start an app Playwright does not own: note
+      // it instead, and let the app quit by itself.
+      await app.evaluate(
+        ({ app: electronApp, dialog }, paths) => {
+          dialog.showOpenDialog = (async () => ({
+            canceled: false,
+            filePaths: [paths.zip],
+          })) as unknown as typeof dialog.showOpenDialog
+          const fs = process.getBuiltinModule(
+            'node:fs',
+          ) as typeof import('node:fs')
+          electronApp.relaunch = (() =>
+            fs.writeFileSync(
+              paths.marker,
+              'relaunch',
+            )) as typeof electronApp.relaunch
+        },
+        { zip, marker },
+      )
+      const settings = await openStorage(page)
+      await settings.locator('[data-backup-restore]').click()
+      const dialog = page.getByTestId('backup-restore-dialog')
+      await dialog.waitFor({ timeout: 15_000 })
+      await page.screenshot({ path: join(shots, 'backup-restore.png') })
+      const closed = app.waitForEvent('close', { timeout: 30_000 })
+      await dialog.locator('[data-action="restore"]').click()
+      await closed
+      if (read(marker) !== 'relaunch') throw new Error('no relaunch')
+      if (!existsSync(pendingRestore(home)))
+        throw new Error('no restore-pending/restore.json')
+      return { pending: relative(home, pendingRestore(home)) }
+    },
+    { critical: true },
+  )
+}
+
+async function restoredApp(page: Page, home: string): Promise<void> {
+  await check(
+    page,
+    'the next start applies the restore; what it replaced is in migrations/backup-<ts>',
+    async () => {
+      await page.locator('.app-frame').waitFor({ timeout: 60_000 })
+      if (existsSync(pendingRestore(home)))
+        throw new Error('the restore is still pending')
+      const memory = read(join(home, 'memory', 'MEMORY.local.md'))
+      if (!memory.includes(MEMORY_A))
+        throw new Error(`memory not restored: ${memory}`)
+      const migrations = join(home, 'migrations')
+      const backup = readdirSync(migrations).find((name) =>
+        name.startsWith('backup-'),
+      )
+      if (!backup) throw new Error('no migrations/backup-<ts>')
+      if (
+        !read(join(migrations, backup, 'memory', 'MEMORY.local.md')).includes(
+          MEMORY_B,
+        )
+      )
+        throw new Error('the replaced memory is not in the backup folder')
+      const log = read(join(migrations, 'log.jsonl'))
+      if (!/"kind":"restore"[^\n]*"status":"applied"/.test(log))
+        throw new Error(`no restore in log.jsonl: ${log}`)
+      await page
+        .locator('[role="status"]')
+        .filter({ hasText: '已从备份恢复' })
+        .waitFor({ timeout: 15_000 })
+      await page.screenshot({ path: join(shots, 'backup-restored.png') })
+      return { backup: `migrations/${backup}` }
+    },
+  )
+}
+
+function prepareNewerHome(home: string, model: FakeModel): string {
+  prepareHome(home, model)
+  writeFileSync(join(home, 'mcp_config.json'), '{"version": 1, "servers": {}}')
+  writeFileSync(
+    join(home, 'installation.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      stateLayoutVersion: 1,
+      appVersion: '99.0.0',
+      lastRunVersion: '99.0.0',
+      runtimeRevision: 'future',
+      initializedAt: '2026-10-01T00:00:00.000Z',
+      updatedAt: '2026-10-01T00:00:00.000Z',
+      emperorHomeSource: 'env',
+      migration: 'existing',
+      dataVersion: 1,
+    }),
+  )
+  const settings = `${JSON.stringify({ version: 99, browser: { showFullUrl: false }, futureOnly: true }, null, 2)}\n`
+  writeFileSync(join(home, 'settings.json'), settings)
+  return settings
+}
+
+async function newerHome(
+  page: Page,
+  home: string,
+  settings: string,
+): Promise<void> {
+  await check(
+    page,
+    'running an older Emperor than last time shows the startup banner',
+    async () => {
+      await page.locator('.app-frame').waitFor({ timeout: 60_000 })
+      const banner = page
+        .locator('[role="status"]')
+        .filter({ hasText: '比上次打开的 99.0.0 旧' })
+      await banner.waitFor({ timeout: 15_000 })
+      await page.screenshot({ path: join(shots, 'downgrade-banner.png') })
+      return { text: (await banner.innerText()).trim() }
+    },
+  )
+  await check(
+    page,
+    'settings.json from a newer Emperor stays byte for byte; Core refuses; 存储 names it',
+    async () => {
+      const result = (await page.evaluate(
+        async () =>
+          await (
+            window as unknown as {
+              emperor: {
+                invokeCore(key: string, input: unknown): Promise<unknown>
+              }
+            }
+          ).emperor.invokeCore('browser.setPreferences', { showFullUrl: true }),
+      )) as { ok?: boolean; error?: { code?: string; message?: string } }
+      if (result?.error?.code !== 'data_file_newer')
+        throw new Error(`Core accepted the save: ${JSON.stringify(result)}`)
+      if (read(join(home, 'settings.json')) !== settings)
+        throw new Error('settings.json changed')
+      const quarantined = readdirSync(home).filter((name) =>
+        name.startsWith('settings.json.'),
+      )
+      if (quarantined.length) throw new Error(`moved aside: ${quarantined}`)
+      const storage = await openStorage(page)
+      const notice = storage.locator('[data-storage-readonly]')
+      await notice.waitFor({ timeout: 10_000 })
+      const text = await notice.innerText()
+      if (!text.includes('settings.json')) throw new Error(text)
+      await page.screenshot({ path: join(shots, 'readonly-notice.png') })
+      return { message: result.error.message }
+    },
+  )
+}
+
 /** The user's own log folders (the packaged and the dev app name). */
 function realLogFolders(): string {
   return JSON.stringify(
@@ -566,6 +815,9 @@ async function main(): Promise<void> {
   const home = mkdtempSync(join(tmpdir(), 'emperor-e2e-diagnostics-'))
   const broken = mkdtempSync(join(tmpdir(), 'emperor-e2e-diagnostics-broken-'))
   const out = mkdtempSync(join(tmpdir(), 'emperor-e2e-diagnostics-out-'))
+  const source = mkdtempSync(join(tmpdir(), 'emperor-e2e-rel03-source-'))
+  const target = mkdtempSync(join(tmpdir(), 'emperor-e2e-rel03-target-'))
+  const newer = mkdtempSync(join(tmpdir(), 'emperor-e2e-rel03-newer-'))
   let app: ElectronApplication | null = null
   try {
     prepareHome(home, model)
@@ -590,6 +842,33 @@ async function main(): Promise<void> {
         return { folders: JSON.parse(after) as unknown }
       },
     )
+
+    // REL-03: export from one home, restore into another, a newer home.
+    prepareDataHome(source, model, MEMORY_A)
+    const exporting = await launch(source)
+    app = exporting.app
+    const zip = await exportBackup(app, exporting.page, out)
+    await app.close()
+    app = null
+
+    prepareDataHome(target, model, MEMORY_B)
+    const restoring = await launch(target)
+    app = restoring.app
+    await scheduleRestore(app, restoring.page, target, zip, out)
+    await app.close().catch(() => undefined)
+    app = null
+    const restarted = await launch(target)
+    app = restarted.app
+    await restoredApp(restarted.page, target)
+    await app.close()
+    app = null
+
+    const settings = prepareNewerHome(newer, model)
+    const older = await launch(newer)
+    app = older.app
+    await newerHome(older.page, newer, settings)
+    await app.close()
+    app = null
   } catch (error) {
     if (!(error instanceof Abort))
       report({
@@ -605,7 +884,7 @@ async function main(): Promise<void> {
   } finally {
     await app?.close().catch(() => undefined)
     await model.close()
-    for (const dir of [home, broken, out])
+    for (const dir of [home, broken, out, source, target, newer])
       rmSync(dir, { recursive: true, force: true })
     process.stdout.write('E2E-DONE\n')
   }

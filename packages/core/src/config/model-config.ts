@@ -11,6 +11,7 @@ import {
   AtomicSnapshot,
   type PersistenceAdapter,
   type SnapshotCodec,
+  assertNotNewerSync,
 } from '../store/persistence'
 
 /** 单模型配置文件。磁盘只保存 schemaVersion=2；旧字段仅通过只读 adapter 暂时兼容。 */
@@ -1297,6 +1298,7 @@ function validateDiskConfig(value: unknown): RawRecord {
 
 const MODEL_CONFIG_SNAPSHOT_CODEC: SnapshotCodec<RawRecord> = {
   schemaVersion: 2,
+  versionKey: 'schemaVersion',
   encode(value) {
     return value
   },
@@ -1401,10 +1403,13 @@ async function loadModelConfigLocked(
   const lenient = normalizeV2Lenient(loaded)
   const normalized = lenient.config
   const disk = { ...normalized, models: lenient.diskModels }
+  // A newer Emperor's file (REL-03) is read as v2 and never rewritten.
+  const newer =
+    loadedSnapshot.receipt.recoveryAction === 'newer_version_read_only'
   try {
     // Keys are written back exactly as stored (sealed or not); plaintext
     // is sealed by the next save (SEC-06). Rejected entries stay in place.
-    if (JSON.stringify(JSON.parse(source)) !== JSON.stringify(disk))
+    if (!newer && JSON.stringify(JSON.parse(source)) !== JSON.stringify(disk))
       await writeModelConfigSnapshot(path, disk, opts.persistenceAdapter)
   } catch {
     // AtomicSnapshot 已负责隔离畸形文件；这里不重复恢复。
@@ -1428,6 +1433,7 @@ export async function saveModelConfig(
   } & ModelConfigPersistenceOptions = {},
 ): Promise<ModelConfig> {
   const path = configPath(rootOrFile)
+  assertNotNewerSync(path, 'schemaVersion', 2)
   const stored = await readStoredConfig(path)
   const merged = preserveStoredApiKeys(
     stored?.value,

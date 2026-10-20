@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { durableReplaceSync } from '../../store/persistence'
+import { assertNotNewerSync, durableReplaceSync } from '../../store/persistence'
 import type { SecretSealer } from '../../security/secret-sealer'
 import type { LoginShellEnvironment } from './login-shell'
 import type { ExecutorAuthState } from './types'
@@ -185,6 +185,8 @@ export class ClaudeTokenStore {
     this.set(profileId)
   }
   set(profileId: string, kind?: ClaudeTokenKind, token = ''): void {
+    // A newer Emperor's file is read-only here (REL-03): refuse, never replace.
+    assertNotNewerSync(this.file, 'schemaVersion', 1)
     let rows
     try {
       rows = this.rows()
