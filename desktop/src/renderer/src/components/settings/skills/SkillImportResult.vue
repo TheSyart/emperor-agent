@@ -91,7 +91,7 @@ const emit = defineEmits<{ select: [name: string] }>()
   min-width: 0;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   list-style: none;
 }
@@ -105,7 +105,7 @@ const emit = defineEmits<{ select: [name: string] }>()
 }
 
 .row + .row {
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .row-head {
@@ -121,7 +121,7 @@ const emit = defineEmits<{ select: [name: string] }>()
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -134,7 +134,7 @@ const emit = defineEmits<{ select: [name: string] }>()
   font-family: var(--font-mono);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 </style>

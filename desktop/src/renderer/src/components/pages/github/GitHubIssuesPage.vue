@@ -345,13 +345,13 @@ const actions = computed(() =>
   padding: 0;
   overflow: hidden;
   list-style: none;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-3));
+  background: rgb(var(--surface-overlay));
 }
 
 .rows > li + li {
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .row {
@@ -370,7 +370,7 @@ const actions = computed(() =>
 }
 
 .row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .row:focus-visible {
@@ -390,8 +390,8 @@ const actions = computed(() =>
   min-width: 0;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -399,8 +399,8 @@ const actions = computed(() =>
   margin: 0;
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -412,7 +412,7 @@ const actions = computed(() =>
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 
@@ -429,7 +429,7 @@ const actions = computed(() =>
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .bar {
@@ -453,7 +453,7 @@ const actions = computed(() =>
 
 .comments {
   padding-top: var(--space-3);
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .section-title {
@@ -463,8 +463,8 @@ const actions = computed(() =>
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
 }
 
 .comment-list {
@@ -482,7 +482,7 @@ const actions = computed(() =>
   gap: var(--space-1);
   min-width: 0;
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
 }
 </style>

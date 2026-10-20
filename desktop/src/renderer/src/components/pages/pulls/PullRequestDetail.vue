@@ -357,7 +357,7 @@ function openOnGithub(): void {
   padding: 0;
   border: none;
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   cursor: pointer;
@@ -385,17 +385,17 @@ function openOnGithub(): void {
   flex: 1;
   min-width: 0;
   margin: 0;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-md);
   line-height: var(--lh-base);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   overflow-wrap: anywhere;
 }
 
 .number {
   margin-left: var(--space-1-5);
-  color: rgb(var(--label-tertiary));
-  font-weight: 400;
+  color: rgb(var(--text-3));
+  font-weight: var(--weight-regular);
 }
 
 .title-skeleton {
@@ -418,20 +418,20 @@ function openOnGithub(): void {
   align-items: center;
   gap: var(--space-1-5) var(--space-2);
   min-width: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
 
 .stats-row {
   gap: var(--space-1-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
 }
 
 .repo {
-  color: rgb(var(--label-primary));
-  font-weight: 500;
+  color: rgb(var(--text-1));
+  font-weight: var(--weight-medium);
 }
 
 .branches {
@@ -446,24 +446,24 @@ function openOnGithub(): void {
   min-width: 0;
   overflow: hidden;
   padding: 0 var(--space-1-5);
-  border-radius: var(--radius-sm);
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-secondary));
+  border-radius: var(--r-sm);
+  background: var(--surface-hover);
+  color: rgb(var(--text-2));
   font: var(--font-code-small);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .arrow {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .author {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .sep {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .add {
@@ -487,7 +487,7 @@ function openOnGithub(): void {
 }
 
 .detail-tabs {
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .overview {
@@ -517,7 +517,7 @@ function openOnGithub(): void {
 
 .card {
   min-width: 0;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
 }
 
@@ -526,18 +526,18 @@ function openOnGithub(): void {
   align-items: baseline;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
 
 .card-title {
-  color: rgb(var(--label-primary));
-  font-weight: 600;
+  color: rgb(var(--text-1));
+  font-weight: var(--weight-semibold);
 }
 
 .card-meta {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .card-body {
@@ -560,10 +560,10 @@ function openOnGithub(): void {
 
 .section-title {
   margin: 0;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .section-meta,
@@ -573,14 +573,14 @@ function openOnGithub(): void {
   flex-direction: column;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   list-style: none;
   overflow: hidden;
 }
 
 .rows > li + li {
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .row {
@@ -592,7 +592,7 @@ function openOnGithub(): void {
   min-width: 0;
   min-height: var(--space-8);
   padding: var(--space-1-5) var(--space-3);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -605,7 +605,7 @@ function openOnGithub(): void {
 }
 
 .row--button:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .row--button:focus-visible {
@@ -627,7 +627,7 @@ function openOnGithub(): void {
 
 .row-meta {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -656,7 +656,7 @@ function openOnGithub(): void {
 }
 
 .row[data-outcome='neutral'] .check-icon {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .inline-error {
@@ -680,7 +680,7 @@ function openOnGithub(): void {
   background: transparent;
   color: inherit;
   font: inherit;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-decoration: underline;
   cursor: pointer;
 }

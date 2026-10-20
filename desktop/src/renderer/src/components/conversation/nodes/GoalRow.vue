@@ -74,12 +74,12 @@ const dot = computed(() =>
   margin: var(--space-1) 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .code {
   margin-left: var(--space-1-5);
   font: var(--font-code-small);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

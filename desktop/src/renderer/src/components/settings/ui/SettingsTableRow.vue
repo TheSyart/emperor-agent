@@ -48,7 +48,7 @@ export default defineComponent({
   display: grid;
   grid-column: 1 / -1;
   grid-template-columns: subgrid;
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .cell {
@@ -60,7 +60,7 @@ export default defineComponent({
   padding: var(--space-2) var(--space-3) var(--space-2) 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 

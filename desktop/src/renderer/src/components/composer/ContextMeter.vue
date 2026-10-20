@@ -108,13 +108,13 @@ function fmt(value: number): string {
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: pointer;
 }
 
 .trigger:hover,
 .trigger[aria-expanded='true'] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .trigger[data-tone='warn'] {
@@ -122,12 +122,12 @@ function fmt(value: number): string {
 }
 
 .trigger[data-tone='danger'] {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .track {
   fill: none;
-  stroke: var(--border-l4);
+  stroke: var(--stroke-4);
   stroke-width: 2;
 }
 
@@ -141,7 +141,7 @@ function fmt(value: number): string {
 .usage {
   font-size: var(--fs-xxs);
   line-height: var(--space-5);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   cursor: default;
 }
 
@@ -152,14 +152,14 @@ function fmt(value: number): string {
 }
 
 .headline {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .figures {
   margin-left: auto;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   font-variant-numeric: tabular-nums;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .bar {
@@ -168,14 +168,14 @@ function fmt(value: number): string {
   margin: var(--space-2-5) 0 var(--space-3);
   overflow: hidden;
   border-radius: var(--radius-pill);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .segment {
   min-width: 2px;
   height: 100%;
   border-radius: 0;
-  background: rgb(var(--label-tertiary));
+  background: rgb(var(--text-3));
 }
 
 .segment[data-tone='warn'] {
@@ -183,7 +183,7 @@ function fmt(value: number): string {
 }
 
 .segment[data-tone='danger'] {
-  background: rgb(var(--danger));
+  background: rgb(var(--error));
 }
 
 .rows {
@@ -199,12 +199,12 @@ function fmt(value: number): string {
 }
 
 .row dt {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .row dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 </style>

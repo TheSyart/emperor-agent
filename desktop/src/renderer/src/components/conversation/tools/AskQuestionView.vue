@@ -67,7 +67,7 @@ const outcome = computed(() => {
   flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
   background: rgb(var(--code-block-bg));
 }
@@ -81,13 +81,13 @@ const outcome = computed(() => {
 .header {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .text {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .options {
@@ -105,7 +105,7 @@ const outcome = computed(() => {
   gap: var(--space-2);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .check {
@@ -116,19 +116,19 @@ const outcome = computed(() => {
   width: 14px;
   height: 14px;
   align-self: center;
-  border: 1px solid var(--border-l3);
+  border: 1px solid var(--stroke-3);
   border-radius: var(--radius-pill);
-  color: rgb(var(--label-inverted));
+  color: rgb(var(--text-inverted));
 }
 
 [data-selected] .check {
-  border-color: rgb(var(--accent-fill));
-  background: rgb(var(--accent-fill));
+  border-color: rgb(var(--accent));
+  background: rgb(var(--accent));
 }
 
 [data-selected] .label {
-  color: rgb(var(--label-primary));
-  font-weight: 500;
+  color: rgb(var(--text-1));
+  font-weight: var(--weight-medium);
 }
 
 .description {
@@ -141,16 +141,16 @@ const outcome = computed(() => {
 .outcome {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .custom-label {
   margin-right: var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .skipped,
 .outcome {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

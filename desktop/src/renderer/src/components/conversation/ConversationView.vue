@@ -1195,7 +1195,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   height: 100%;
   overflow: hidden;
   background: rgb(var(--surface-base));
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .view-area {
@@ -1243,7 +1243,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   margin: 0;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-align: center;
 }
 

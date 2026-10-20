@@ -158,22 +158,22 @@ function actionLabel(action: GoalCardAction): string {
   height: 36px;
   padding: var(--space-1) calc(var(--space-1) + 1px) var(--space-1)
     var(--space-3);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
   background: rgb(var(--tip-fill));
 }
 
 .glyph {
   flex: none;
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 
 .label {
   flex: none;
   font-size: var(--fs-xs);
   line-height: var(--space-6);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
 }
 
 .objective {
@@ -182,7 +182,7 @@ function actionLabel(action: GoalCardAction): string {
   overflow: hidden;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -191,7 +191,7 @@ function actionLabel(action: GoalCardAction): string {
   flex: none;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
 }
 
@@ -211,18 +211,18 @@ function actionLabel(action: GoalCardAction): string {
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: pointer;
 }
 
 .icon:hover:not(:disabled) {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-secondary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-2));
 }
 
 .icon[data-danger] {
-  color: rgb(var(--danger));
-  background: var(--interactive-bg-hover-danger);
+  color: rgb(var(--error));
+  background: var(--surface-hover-danger);
 }
 
 .icon:disabled {
@@ -234,6 +234,6 @@ function actionLabel(action: GoalCardAction): string {
   margin: var(--space-1) var(--space-3) 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 </style>

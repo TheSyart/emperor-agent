@@ -106,7 +106,7 @@ async function onKeydown(event: KeyboardEvent, index: number) {
   height: var(--lh-xxxs);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .months span {
@@ -127,7 +127,7 @@ async function onKeydown(event: KeyboardEvent, index: number) {
   width: 100%;
   aspect-ratio: 1;
   border-radius: 2px;
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   outline: none;
 }
 
@@ -136,19 +136,19 @@ async function onKeydown(event: KeyboardEvent, index: number) {
 }
 
 .cell[data-level='1'] {
-  background: rgb(var(--accent-fill) / 0.24);
+  background: rgb(var(--accent) / 0.24);
 }
 
 .cell[data-level='2'] {
-  background: rgb(var(--accent-fill) / 0.44);
+  background: rgb(var(--accent) / 0.44);
 }
 
 .cell[data-level='3'] {
-  background: rgb(var(--accent-fill) / 0.68);
+  background: rgb(var(--accent) / 0.68);
 }
 
 .cell[data-level='4'] {
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
 }
 
 .cell:focus-visible {
@@ -165,7 +165,7 @@ async function onKeydown(event: KeyboardEvent, index: number) {
   margin-top: var(--space-1);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .swatch {

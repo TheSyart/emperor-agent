@@ -147,11 +147,11 @@ function send(optionId: string) {
 .card {
   width: 100%;
   max-width: var(--chat-content-width, 748px);
-  border: 1px solid rgb(var(--approval) / 0.45);
+  border: 1px solid rgb(var(--attention) / 0.45);
   border-radius: var(--radius-takeover);
   background: rgb(var(--input-major));
   box-shadow: var(--shadow-lv2);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow: hidden;
   outline: none;
 }
@@ -161,7 +161,7 @@ function send(optionId: string) {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2-5) var(--space-4);
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
   color: rgb(var(--approval-line));
   font-size: var(--fs-xs);
   line-height: 18px;
@@ -185,12 +185,12 @@ function send(optionId: string) {
 
 .headline {
   font-size: calc(var(--fs-s) + 1px);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   line-height: 24px;
 }
 
 .target {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   line-height: 20px;
@@ -205,14 +205,14 @@ function send(optionId: string) {
 }
 
 .input-label {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
 }
 
 .input-value {
   margin: 0;
   padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: rgb(var(--code-block-bg));
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
@@ -227,7 +227,7 @@ function send(optionId: string) {
 }
 
 .reason {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-s);
   line-height: 22px;
   white-space: pre-wrap;
@@ -235,7 +235,7 @@ function send(optionId: string) {
 }
 
 .reason-label {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .scope {
@@ -246,7 +246,7 @@ function send(optionId: string) {
 }
 
 .scope-label {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xs);
   line-height: 20px;
 }

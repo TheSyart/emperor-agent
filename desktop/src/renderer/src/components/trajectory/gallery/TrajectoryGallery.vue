@@ -133,8 +133,8 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: rgb(var(--bg-base));
-  color: rgb(var(--label-primary));
+  background: rgb(var(--surface-canvas));
+  color: rgb(var(--text-1));
 }
 
 .bar {
@@ -144,18 +144,18 @@ onBeforeUnmount(() => {
   gap: var(--space-3);
   height: 36px;
   padding: 0 var(--space-4);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
   font: var(--font-xs);
 }
 
 .brand {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .link {
   padding: 0;
   border: 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   background: transparent;
   cursor: pointer;
   font: inherit;
@@ -163,12 +163,12 @@ onBeforeUnmount(() => {
 }
 
 .link[data-active='true'] {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 
 .note {
   margin-left: auto;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font: var(--font-xxs);
 }
 

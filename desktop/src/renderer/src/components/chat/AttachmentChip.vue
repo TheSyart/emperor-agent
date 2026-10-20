@@ -83,11 +83,11 @@ function openFile() {
         @error="thumbFailed = true"
       />
       <span v-else class="attach-doc-icon" aria-hidden="true">
-        <component :is="iconComp" :size="22" />
+        <component :is="iconComp" :size="20" />
       </span>
     </button>
     <span v-else class="attach-doc-icon" aria-hidden="true">
-      <component :is="iconComp" :size="22" />
+      <component :is="iconComp" :size="20" />
     </span>
     <div v-if="!isImage" class="attach-meta">
       <button

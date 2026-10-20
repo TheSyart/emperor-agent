@@ -151,7 +151,7 @@ async function revealCommitBox(): Promise<void> {
         @click="review.refresh()"
       >
         <Spinner v-if="loading" size="sm" />
-        <RefreshCw v-else :size="15" />
+        <RefreshCw v-else :size="16" />
       </IconButton>
     </div>
 

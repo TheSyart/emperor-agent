@@ -43,8 +43,8 @@ defineEmits<{ open: [] }>()
   height: 28px;
   margin: 0;
   padding: 0 0 3px var(--space-3-5);
-  color: rgb(var(--label-secondary));
-  font: 600 var(--fs-xs) / 1 var(--font-sans);
+  color: rgb(var(--text-2));
+  font: var(--weight-semibold) var(--fs-xs) / 1 var(--font-sans);
 }
 
 .title {
@@ -60,11 +60,11 @@ defineEmits<{ open: [] }>()
 }
 
 .title-icon {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .title:hover .title-icon {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .title:focus-visible {

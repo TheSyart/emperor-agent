@@ -35,6 +35,6 @@ const identity = computed(() => mcpIdentity(props.data))
 
 .tool {
   font: var(--font-code-small);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

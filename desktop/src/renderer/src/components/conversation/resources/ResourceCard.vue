@@ -130,7 +130,7 @@ function open() {
         title="查看详情"
         @click="requestResourceDetail(resource, sessionId())"
       >
-        <Info :size="15" /></button
+        <Info :size="16" /></button
       ><button
         type="button"
         :aria-label="`打开：${resource.label}`"
@@ -138,7 +138,7 @@ function open() {
         :disabled="resource.available === false"
         @click="open"
       >
-        <ArrowUpRight :size="15" />
+        <ArrowUpRight :size="16" />
       </button>
     </div>
   </div>
@@ -154,7 +154,7 @@ function open() {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
 }
 .resource-card {
   display: flex;
@@ -164,14 +164,14 @@ function open() {
   min-width: 0;
   margin: var(--space-3) 0;
   padding: var(--space-5);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   line-height: 1.5;
   transition: border-color var(--duration-fast) ease;
 }
 .resource-card:hover {
-  border-color: rgb(var(--accent-fill) / 0.3);
+  border-color: rgb(var(--accent) / 0.3);
 }
 .resource-glyph {
   display: grid;
@@ -180,8 +180,8 @@ function open() {
   width: 40px;
   height: 40px;
   border-radius: var(--radius-cell);
-  color: rgb(var(--label-secondary));
-  background: var(--interactive-bg-hover);
+  color: rgb(var(--text-2));
+  background: var(--surface-hover);
 }
 .resource-glyph img {
   width: 100%;
@@ -198,23 +198,23 @@ function open() {
   align-items: center;
   gap: var(--space-2);
   margin-bottom: var(--space-1);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xxs);
 }
 .resource-title {
   display: block;
   max-width: calc(100% - 52px);
-  color: rgb(var(--label-primary));
-  font: 600 var(--fs-s)/var(--lh-s) var(--font-sans);
+  color: rgb(var(--text-1));
+  font: var(--weight-semibold) var(--fs-s)/var(--lh-s) var(--font-sans);
   overflow-wrap: anywhere;
   cursor: pointer;
 }
 .resource-title:hover {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 .resource-description {
   margin: var(--space-1) 0 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xs);
   overflow-wrap: anywhere;
 }
@@ -223,7 +223,7 @@ function open() {
   flex-wrap: wrap;
   gap: var(--space-2-5);
   margin-top: var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font: var(--font-xxs);
 }
 .resource-actions {
@@ -241,12 +241,12 @@ function open() {
   border: 0;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   cursor: pointer;
 }
 .resource-actions button:hover {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-primary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-1));
 }
 .resource-actions button:disabled {
   opacity: 0.35;
@@ -258,13 +258,13 @@ function open() {
   outline-offset: 2px;
 }
 .status {
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   padding: 0 var(--space-1);
-  color: rgb(var(--accent-strong));
-  background: rgb(var(--accent-fill) / 0.1);
+  color: rgb(var(--text-link));
+  background: rgb(var(--accent) / 0.1);
 }
 .resource-card[data-missing] .resource-title {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-decoration: line-through;
   cursor: default;
 }

@@ -225,7 +225,7 @@ const resultJson = computed(() =>
 
 .command {
   font: var(--font-code-small);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -246,7 +246,7 @@ const resultJson = computed(() =>
   gap: var(--space-2-5);
   margin-top: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  border: 1px solid rgb(var(--state-warn) / 0.4);
+  border: 1px solid rgb(var(--warn) / 0.4);
   border-radius: var(--radius-card);
   background: rgb(var(--state-warn-soft));
 }
@@ -299,7 +299,7 @@ const resultJson = computed(() =>
   margin: 0;
   overflow: auto;
   padding: var(--space-2-5) var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
   background: rgb(var(--code-block-bg));
   font-family: var(--font-mono);

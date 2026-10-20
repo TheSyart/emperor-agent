@@ -51,12 +51,12 @@ withDefaults(
   border-radius: var(--radius-pill);
   outline: none;
   background: transparent;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: background-color var(--duration-ds-fast) ease;
+  transition: background-color var(--motion-fast) ease;
 }
 
 .ds-chip:has(.chevron) {
@@ -65,7 +65,7 @@ withDefaults(
 
 .ds-chip:hover:not(:disabled),
 .ds-chip[data-active] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .ds-chip:focus-visible {
@@ -73,22 +73,22 @@ withDefaults(
 }
 
 .ds-chip:disabled {
-  color: rgb(var(--label-dimmed));
+  color: rgb(var(--text-disabled));
   cursor: default;
 }
 
 .ds-chip[data-tone='approval'] {
   color: rgb(var(--approval-line));
-  background: rgb(var(--approval-soft));
-  box-shadow: inset 0 0 0 1px rgb(var(--approval) / 0.35);
+  background: rgb(var(--attention-soft));
+  box-shadow: inset 0 0 0 1px rgb(var(--attention) / 0.35);
 }
 
 .ds-chip[data-tone='approval']:hover:not(:disabled) {
-  background: rgb(var(--approval) / 0.16);
+  background: rgb(var(--attention) / 0.16);
 }
 
 .ds-chip[data-tone='accent'] {
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
   background: rgb(var(--accent-soft));
 }
 
@@ -111,6 +111,6 @@ withDefaults(
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 </style>

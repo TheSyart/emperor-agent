@@ -27,13 +27,13 @@
 
 以下内容已经由代码或资源文件约束，暂时没有单独的规范文档；修改时以这些文件为准：
 
-| 方面           | 事实源                                                                                                                                                                                                                     |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 颜色与主题变量 | `desktop/src/renderer/src/theme/`（见[设计令牌](tokens.md)）                                                                                                                                                               |
-| 样式约束       | `desktop/src/renderer/src/style-audit.test.ts`：颜色与尺寸必须收敛到主题变量，`theme/*.css` 本身除外                                                                                                                       |
-| 样式归属       | `desktop/src/renderer/src/feature-style-owners.json`：每个界面功能的视图、控制器和样式层位置                                                                                                                               |
-| 组件           | `components/ui/`（见[组件规范](components.md)），开发模式下打开 `?ui-gallery` 查看；设置页的布局原语在 `components/settings/ui/`，打开 `?settings-gallery` 查看，搭建方法见[扩展指南](../development/extending-emperor.md) |
-| 品牌与产品图   | 见[品牌资源规范](brand.md)；`assets/generated/` 下的标、首启插图、产品图和插件 Logo，图片生成的提示词记录在 `assets/generated/PROMPTS.md`                                                                                  |
+| 方面           | 事实源                                                                                                                                                                                                                                                                                    |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 颜色与主题变量 | `desktop/src/renderer/src/theme/`（见[设计令牌](tokens.md)）                                                                                                                                                                                                                              |
+| 样式约束       | `desktop/src/renderer/src/style-audit.test.ts`：颜色与尺寸必须收敛到主题变量，`theme/*.css` 本身除外；裸控件、字重、1px 边框、图标尺寸、层级与退役令牌的 ratchet 计数在 `style-audit-ratchet.json`（只降不升，见[设计令牌](tokens.md)）；旧令牌名用 `scripts/codemods/tokens-v2.mjs` 改写 |
+| 样式归属       | `desktop/src/renderer/src/feature-style-owners.json`：每个界面功能的视图、控制器和样式层位置                                                                                                                                                                                              |
+| 组件           | `components/ui/`（见[组件规范](components.md)），开发模式下打开 `?ui-gallery` 查看；设置页的布局原语在 `components/settings/ui/`，打开 `?settings-gallery` 查看，搭建方法见[扩展指南](../development/extending-emperor.md)                                                                |
+| 品牌与产品图   | 见[品牌资源规范](brand.md)；`assets/generated/` 下的标、首启插图、产品图和插件 Logo，图片生成的提示词记录在 `assets/generated/PROMPTS.md`                                                                                                                                                 |
 
 ## 新增规范
 

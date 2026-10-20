@@ -109,7 +109,7 @@ const current = computed(() =>
 }
 
 .steps li[data-state='current'] {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--text-1));
 }
 

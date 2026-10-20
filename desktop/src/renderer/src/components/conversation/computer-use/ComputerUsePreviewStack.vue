@@ -547,7 +547,7 @@ onBeforeUnmount(() => {
       aria-controls="cu-preview-stack"
       @click="expanded = !expanded"
     >
-      <ScreenShare :size="15" aria-hidden="true" />
+      <ScreenShare :size="16" aria-hidden="true" />
       <span>电脑操作</span>
       <Badge variant="count" :label="ordered.length" />
     </button>
@@ -666,11 +666,11 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--space-1-5);
   padding: var(--space-1-5) var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv2);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font: var(--font-xs);
   cursor: pointer;
 }
@@ -690,18 +690,18 @@ onBeforeUnmount(() => {
   width: calc(100% - var(--depth) * 2 * var(--space-3));
   margin-bottom: calc(0px - var(--space-1));
   padding: var(--space-1) var(--space-3) var(--space-2);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-bottom: 0;
   border-radius: var(--radius-card) var(--radius-card) 0 0;
-  background: rgb(var(--bg-layer-2));
-  color: rgb(var(--label-secondary));
+  background: rgb(var(--surface-raised));
+  color: rgb(var(--text-2));
   font: var(--font-xxs);
   text-align: start;
   cursor: pointer;
 }
 
 .cu-strip:hover {
-  background: rgb(var(--bg-layer-3));
+  background: rgb(var(--surface-overlay));
 }
 
 .cu-strip-title,
@@ -716,7 +716,7 @@ onBeforeUnmount(() => {
 .cu-strip-status,
 .cu-card-status {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
 }
 
@@ -732,18 +732,18 @@ onBeforeUnmount(() => {
 
 .cu-strip-status[data-tone='lost'],
 .cu-card-status[data-tone='lost'] {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .cu-card {
   position: relative;
   min-width: 0;
   padding: var(--space-2-5) var(--space-3) var(--space-3);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv2);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .cu-card-head {
@@ -751,13 +751,13 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--space-1-5);
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .cu-card-source {
   margin: var(--space-0-5) 0 var(--space-2);
   overflow: hidden;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -769,9 +769,9 @@ onBeforeUnmount(() => {
   width: 100%;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-row);
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-canvas));
   cursor: zoom-in;
 }
 
@@ -806,12 +806,12 @@ onBeforeUnmount(() => {
 .cu-pointer-arrow {
   display: block;
   overflow: visible;
-  filter: drop-shadow(0 1px 2px rgb(var(--nb-1000) / 0.45));
+  filter: drop-shadow(0 1px 2px rgb(var(--pointer-ink) / 0.45));
 }
 
 .cu-pointer-arrow path {
-  fill: rgb(var(--nb-1000) / 0.55);
-  stroke: rgb(var(--accent-fill));
+  fill: rgb(var(--pointer-ink) / 0.55);
+  stroke: rgb(var(--accent));
   stroke-width: 1.6;
   stroke-linejoin: round;
 }
@@ -827,16 +827,16 @@ onBeforeUnmount(() => {
   margin: 0;
   aspect-ratio: 16 / 10;
   place-items: center;
-  border: 1px dashed var(--border-l2);
+  border: 1px dashed var(--stroke-2);
   border-radius: var(--radius-row);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   text-align: center;
 }
 
 .cu-card-note {
   margin: var(--space-1-5) 0 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -862,12 +862,12 @@ onBeforeUnmount(() => {
   max-height: 70vh;
   object-fit: contain;
   border-radius: var(--radius-row);
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-canvas));
 }
 
 .cu-enlarged-note {
   margin: var(--space-2) 0 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
 }
 </style>

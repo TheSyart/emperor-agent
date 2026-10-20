@@ -103,7 +103,7 @@ const source = computed(() =>
 .tool-row {
   min-width: 0;
   list-style: none;
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .tool-row:last-child {
@@ -127,7 +127,7 @@ const source = computed(() =>
 
 .row-head:hover,
 .tool-row[data-open] > .row-head {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .row-head:focus-visible {
@@ -149,8 +149,8 @@ const source = computed(() =>
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -160,15 +160,15 @@ const source = computed(() =>
   overflow: hidden;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-tertiary));
-  transition: transform var(--duration-ds-fast) var(--ease-in-out);
+  color: rgb(var(--text-3));
+  transition: transform var(--motion-fast) var(--ease-standard);
 }
 
 .tool-row[data-open] .chevron {
@@ -181,7 +181,7 @@ const source = computed(() =>
   gap: var(--space-3);
   min-width: 0;
   padding: var(--space-3) var(--space-3-5) var(--space-3-5);
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
   background: rgb(var(--selector-fill));
 }
 
@@ -189,7 +189,7 @@ const source = computed(() =>
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
@@ -214,8 +214,8 @@ const source = computed(() =>
   margin: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 600;
-  color: rgb(var(--label-secondary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-2));
 }
 
 .params {
@@ -232,7 +232,7 @@ const source = computed(() =>
   gap: var(--space-0-5);
   min-width: 0;
   padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
 }
 
 .param:first-child {
@@ -254,8 +254,8 @@ const source = computed(() =>
 
 .param-name {
   font: var(--font-code-small);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -263,7 +263,7 @@ const source = computed(() =>
 .param-values {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 </style>

@@ -154,6 +154,6 @@ async function activate(action: SettingsHeaderAction) {
 .chevron {
   flex: none;
   margin-right: calc(-1 * var(--space-0-5));
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 </style>

@@ -173,7 +173,7 @@ async function loadOutput() {
   gap: var(--space-1-5);
   min-width: 0;
   padding-top: var(--space-3);
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .tools-head {
@@ -182,8 +182,8 @@ async function loadOutput() {
   gap: var(--space-1-5);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
-  color: rgb(var(--label-secondary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-2));
 }
 
 .tool-list {
@@ -209,13 +209,13 @@ async function loadOutput() {
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
 .output-hint {
-  font-weight: 400;
-  color: rgb(var(--label-tertiary));
+  font-weight: var(--weight-regular);
+  color: rgb(var(--text-3));
 }
 
 .output-load {
@@ -232,7 +232,7 @@ async function loadOutput() {
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -251,7 +251,7 @@ async function loadOutput() {
   -webkit-line-clamp: 2;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 </style>

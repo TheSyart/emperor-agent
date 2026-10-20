@@ -313,7 +313,7 @@ function submit() {
   flex: none;
   align-items: center;
   gap: var(--space-2);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -324,7 +324,7 @@ function submit() {
   gap: var(--space-1-5) var(--space-4);
   min-width: 0;
   padding: var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
 }
 
@@ -342,7 +342,7 @@ function submit() {
 
 .note {
   margin: 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -353,7 +353,7 @@ function submit() {
   gap: var(--space-1-5);
   min-width: 0;
   padding-top: var(--space-3);
-  border-top: 1px solid var(--border-l1);
+  border-top: 1px solid var(--stroke-1);
 }
 
 .history-head {
@@ -364,14 +364,14 @@ function submit() {
 }
 
 .history-title {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .history-count {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-variant-numeric: tabular-nums;
@@ -391,7 +391,7 @@ function submit() {
   gap: var(--space-1);
   min-width: 0;
   padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 .run:last-child {
@@ -408,7 +408,7 @@ function submit() {
 .run-time,
 .run-detail {
   margin: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   font-variant-numeric: tabular-nums;

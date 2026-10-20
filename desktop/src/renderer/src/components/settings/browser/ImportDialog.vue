@@ -18,6 +18,7 @@ import {
 import { core } from '../../../api/http'
 import type { BrowserProfileView } from '@emperor/core/runtime-contract'
 import Button from '../../ui/Button.vue'
+import LinkButton from '../../ui/LinkButton.vue'
 import Modal from '../../ui/Modal.vue'
 import { Select, Switch, type SelectOption } from '../ui'
 
@@ -254,14 +255,9 @@ watch(
           role="alert"
         >
           导入前，请完全关闭 {{ current.browserName }}
-          <button
-            type="button"
-            class="import-recheck"
-            data-testid="import-recheck"
-            @click="recheck"
-          >
+          <LinkButton data-testid="import-recheck" @click="recheck">
             重新检查
-          </button>
+          </LinkButton>
         </p>
 
         <div class="import-toggles">
@@ -366,7 +362,7 @@ watch(
 
 .import-label {
   font-size: var(--fs-s);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .import-source-row :deep(.ds-select),
@@ -379,23 +375,10 @@ watch(
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-.import-recheck {
-  border: none;
-  background: none;
-  padding: 0;
-  color: rgb(var(--accent-strong));
-  cursor: pointer;
-  font: inherit;
-}
-
-.import-recheck:hover {
-  text-decoration: underline;
 }
 
 .import-toggles {
@@ -410,7 +393,7 @@ watch(
   justify-content: space-between;
   gap: var(--space-3);
   font-size: var(--fs-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .import-target-row {
@@ -419,21 +402,21 @@ watch(
 
 .import-target-label {
   font-size: var(--fs-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .import-note {
   margin: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-wrap: pretty;
 }
 
 .import-result {
   margin: 0;
   font-size: var(--fs-s);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .import-error {

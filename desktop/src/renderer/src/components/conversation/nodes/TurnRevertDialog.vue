@@ -127,7 +127,7 @@ async function confirm(): Promise<void> {
   padding: var(--space-2) var(--space-2-5);
   border-radius: var(--radius-row);
   background: rgb(var(--warn) / 0.12);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -154,7 +154,7 @@ async function confirm(): Promise<void> {
 }
 
 .file.disabled {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .path {
@@ -170,7 +170,7 @@ async function confirm(): Promise<void> {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .name {
@@ -179,7 +179,7 @@ async function confirm(): Promise<void> {
 
 .error {
   margin: var(--space-2) 0 0;
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
   font-size: var(--fs-xs);
 }
 </style>

@@ -50,11 +50,11 @@ defineProps<{
 
 .title {
   margin-right: var(--space-1-5);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 [data-state='error'] .title {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 [data-state='warn'] .title {
@@ -62,11 +62,11 @@ defineProps<{
 }
 
 .message {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .code {
   font: var(--font-code-small);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 </style>

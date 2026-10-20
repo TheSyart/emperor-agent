@@ -203,7 +203,7 @@ async function save(): Promise<void> {
 .unit {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .unpriced {

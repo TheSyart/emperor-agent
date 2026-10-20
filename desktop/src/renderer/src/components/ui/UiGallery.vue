@@ -104,22 +104,22 @@ const jsonSample = {
       <div class="swatches">
         <span
           v-for="token in [
-            'bg-base',
-            'bg-layer-1',
-            'bg-layer-2',
-            'bg-layer-3',
+            'surface-canvas',
+            'surface-base',
+            'surface-raised',
+            'surface-overlay',
             'sidebar-fill',
             'code-block-bg',
-            'accent-fill',
+            'accent',
             'accent-hover',
-            'accent-strong',
+            'text-link',
             'accent-soft',
             'bubble-user',
-            'approval',
-            'approval-soft',
+            'attention',
+            'attention-soft',
             'ok',
             'warn',
-            'danger',
+            'error',
           ]"
           :key="token"
           class="swatch"
@@ -384,8 +384,8 @@ const jsonSample = {
   min-height: 100vh;
   margin: 0 auto;
   padding: var(--space-6);
-  background: rgb(var(--bg-base));
-  color: rgb(var(--label-primary));
+  background: rgb(var(--surface-canvas));
+  color: rgb(var(--text-1));
   font: var(--font-s);
 }
 
@@ -394,21 +394,21 @@ const jsonSample = {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 h1 {
   margin: 0;
   font-size: var(--fs-base);
   line-height: var(--lh-base);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 h2 {
   margin: 0 0 var(--space-3);
   font: var(--font-xs);
-  font-weight: 500;
-  color: rgb(var(--label-tertiary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-3));
   text-transform: uppercase;
 }
 
@@ -433,7 +433,7 @@ h2 {
   align-items: flex-end;
   height: calc(var(--space-8) + var(--space-6));
   padding: var(--space-1);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-row);
 }
 
@@ -441,9 +441,9 @@ h2 {
   font-style: normal;
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-primary));
-  background: rgb(var(--bg-base) / 0.8);
-  border-radius: var(--radius-xs);
+  color: rgb(var(--text-1));
+  background: rgb(var(--surface-canvas) / 0.8);
+  border-radius: var(--r-xs);
   padding: 0 2px;
 }
 
@@ -487,19 +487,19 @@ h2 {
 }
 
 .l-primary {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 .l-secondary {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .l-tertiary {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .l-caption {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .shadow {
@@ -508,7 +508,7 @@ h2 {
   width: calc(var(--space-8) * 3);
   height: calc(var(--space-8) * 2);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
 }
 
 .lv1 {
@@ -536,18 +536,18 @@ h2 {
   gap: var(--space-1);
   padding: var(--space-2) var(--space-1);
   border-radius: var(--radius-row);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .icon-cell:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .icon-cell em {
   font-style: normal;
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .flow {
@@ -557,7 +557,7 @@ h2 {
 .think {
   margin: 0;
   font: var(--font-s);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .menu-anchor {
@@ -570,7 +570,7 @@ h2 {
 
 .json-card {
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-1));
-  border: 1px solid var(--border-l1);
+  background: rgb(var(--surface-base));
+  border: 1px solid var(--stroke-1);
 }
 </style>

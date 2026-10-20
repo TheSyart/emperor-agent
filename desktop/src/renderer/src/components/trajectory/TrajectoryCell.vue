@@ -198,18 +198,18 @@ function onClick(): void {
   grid-template-columns: var(--traj-event-width, 122px) minmax(0, 1fr);
   box-sizing: border-box;
   height: 30px;
-  border-bottom: 1px solid var(--border-l1);
-  color: rgb(var(--label-primary));
+  border-bottom: 1px solid var(--stroke-1);
+  color: rgb(var(--text-1));
   font: var(--font-xxs);
   outline: none;
   cursor: default;
   transition:
-    background-color var(--duration-fast) var(--ease-in-out),
-    opacity var(--duration-fast) var(--ease-in-out);
+    background-color var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
 }
 
 .traj-row:not([data-selected='true']):hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .traj-row:has(.traj-request-marker:hover):not([data-selected='true']) {
@@ -217,7 +217,7 @@ function onClick(): void {
 }
 
 .traj-row[data-selected='true'] {
-  background: var(--interactive-bg-active);
+  background: var(--surface-active);
 }
 
 .traj-row:focus-visible {
@@ -241,7 +241,7 @@ function onClick(): void {
   right: 0;
   left: 0;
   height: 2px;
-  background: var(--border-l1);
+  background: var(--stroke-1);
   content: '';
   pointer-events: none;
   transform: translateY(-50%);
@@ -298,19 +298,19 @@ function onClick(): void {
   top: 0;
   bottom: 0;
   width: 3px;
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
 }
 
 .traj-row[data-error='true'] .turn-rail {
   background: color-mix(
     in srgb,
-    rgb(var(--danger)) 22%,
-    rgb(var(--bg-layer-1))
+    rgb(var(--error)) 22%,
+    rgb(var(--surface-base))
   );
 }
 
 .traj-row[data-error='true'] .selection-rail {
-  background: rgb(var(--danger));
+  background: rgb(var(--error));
 }
 
 .turn-label {
@@ -324,8 +324,8 @@ function onClick(): void {
   width: max-content;
   padding: 1px calc(var(--space-1) + 1px);
   border-radius: 0 0 2px;
-  color: rgb(var(--label-tertiary));
-  background: var(--interactive-bg-hover);
+  color: rgb(var(--text-3));
+  background: var(--surface-hover);
   font: 8px / 10px var(--font-mono);
   font-variant-numeric: tabular-nums;
   user-select: none;
@@ -333,11 +333,7 @@ function onClick(): void {
 }
 
 .turn-label[data-active='true'] {
-  color: color-mix(
-    in srgb,
-    rgb(var(--accent-strong)) 70%,
-    rgb(var(--label-tertiary))
-  );
+  color: color-mix(in srgb, rgb(var(--text-link)) 70%, rgb(var(--text-3)));
   background: var(--traj-turn-accent);
 }
 
@@ -382,45 +378,45 @@ function onClick(): void {
 }
 
 .tool-name {
-  color: rgb(var(--label-primary));
-  font: 400 12px / 18px var(--font-mono);
+  color: rgb(var(--text-1));
+  font: var(--weight-regular) 12px / 18px var(--font-mono);
 }
 
 .tool-args {
   margin-left: calc(var(--space-1-5) + 1px);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .tool-call-only {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .inline-result {
   display: flex;
   align-items: center;
   min-width: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .inline-result[data-error='true'] {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .inline-result-text[data-empty='true'] {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .arrow {
   flex: none;
   margin-right: var(--space-2);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .collapsed {
   display: flex;
   align-items: center;
   min-width: 0;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font: var(--font-xxs);
   line-height: 16px;
 }
@@ -428,8 +424,8 @@ function onClick(): void {
 .collapsed-ellipsis {
   flex: none;
   margin-right: var(--space-1-5);
-  color: rgb(var(--label-tertiary));
-  font-weight: 600;
+  color: rgb(var(--text-3));
+  font-weight: var(--weight-semibold);
 }
 
 @container trajectory-table (max-width: 620px) {

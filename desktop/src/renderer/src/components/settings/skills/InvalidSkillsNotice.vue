@@ -117,7 +117,7 @@ const listId = 'invalid-skills-list'
   display: flex;
   flex-direction: column;
   min-width: 0;
-  border: 1px solid rgb(var(--state-warn) / 0.35);
+  border: 1px solid rgb(var(--warn) / 0.35);
   border-radius: var(--radius-card);
   background: rgb(var(--state-warn-soft));
 }
@@ -146,7 +146,7 @@ const listId = 'invalid-skills-list'
 .glyph {
   flex: none;
   margin-top: var(--space-0-5);
-  color: rgb(var(--state-warn));
+  color: rgb(var(--warn));
 }
 
 .text {
@@ -160,14 +160,14 @@ const listId = 'invalid-skills-list'
 .title {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--state-warn-label));
 }
 
 .subtitle {
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-wrap: pretty;
 }
 
@@ -175,7 +175,7 @@ const listId = 'invalid-skills-list'
   flex: none;
   margin-top: var(--space-1);
   color: rgb(var(--state-warn-label));
-  transition: transform var(--duration-ds-fast) var(--ease-in-out);
+  transition: transform var(--motion-fast) var(--ease-standard);
 }
 
 .invalid-notice[data-open] .chevron {

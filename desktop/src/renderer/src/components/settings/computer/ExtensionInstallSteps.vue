@@ -68,7 +68,7 @@ function copyLabel(address: ExtensionAddress): string {
           :data-state="state.folder"
           role="img"
           :aria-label="marker('folder')"
-          ><DsCheck v-if="state.folder === 'done'" :size="13" /><template v-else
+          ><DsCheck v-if="state.folder === 'done'" :size="14" /><template v-else
             >1</template
           ></span
         >
@@ -113,7 +113,7 @@ function copyLabel(address: ExtensionAddress): string {
           :data-state="state.developer"
           role="img"
           :aria-label="marker('developer')"
-          ><DsCheck v-if="state.developer === 'done'" :size="13" /><template
+          ><DsCheck v-if="state.developer === 'done'" :size="14" /><template
             v-else
             >2</template
           ></span
@@ -148,7 +148,7 @@ function copyLabel(address: ExtensionAddress): string {
           :data-state="state.load"
           role="img"
           :aria-label="marker('load')"
-          ><DsCheck v-if="state.load === 'done'" :size="13" /><template v-else
+          ><DsCheck v-if="state.load === 'done'" :size="14" /><template v-else
             >3</template
           ></span
         >
@@ -170,7 +170,7 @@ function copyLabel(address: ExtensionAddress): string {
           :data-state="state.connect"
           role="img"
           :aria-label="marker('connect')"
-          ><DsCheck v-if="state.connect === 'done'" :size="13" /><template
+          ><DsCheck v-if="state.connect === 'done'" :size="14" /><template
             v-else
             >4</template
           ></span
@@ -196,7 +196,7 @@ function copyLabel(address: ExtensionAddress): string {
   height: var(--space-6);
   border-radius: var(--radius-pill);
   font-size: var(--fs-xxs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   line-height: 1;
 }
 
@@ -206,14 +206,14 @@ function copyLabel(address: ExtensionAddress): string {
 }
 
 .marker[data-state='now'] {
-  border: 1.5px solid rgb(var(--accent-fill));
+  border: 1.5px solid rgb(var(--accent));
   background: rgb(var(--accent-soft));
-  color: rgb(var(--accent-strong));
+  color: rgb(var(--text-link));
 }
 
 .marker[data-state='todo'] {
-  border: 1px solid var(--border-l3);
-  color: rgb(var(--label-tertiary));
+  border: 1px solid var(--stroke-3);
+  color: rgb(var(--text-3));
 }
 
 .paths {
@@ -228,10 +228,10 @@ function copyLabel(address: ExtensionAddress): string {
   max-width: 100%;
   margin-top: var(--space-1-5);
   padding: var(--space-0-5) var(--space-2);
-  border: 1px solid var(--border-l1);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--stroke-1);
+  border-radius: var(--r-sm);
   background: rgb(var(--settings-card-control-fill));
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-family: var(--font-mono);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);

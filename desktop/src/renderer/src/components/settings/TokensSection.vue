@@ -343,7 +343,7 @@ function partWidth(value: number, total: number) {
 .updated {
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
 }
 
@@ -378,15 +378,15 @@ function partWidth(value: number, total: number) {
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
 }
 
 .caption,
 .muted {
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .muted {
@@ -408,14 +408,14 @@ function partWidth(value: number, total: number) {
   gap: var(--space-0-5);
   min-width: 0;
   padding: var(--space-2) var(--space-2-5);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-row);
 }
 
 .fact dt {
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .fact dd {
@@ -423,8 +423,8 @@ function partWidth(value: number, total: number) {
   overflow: hidden;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xs);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -433,7 +433,7 @@ function partWidth(value: number, total: number) {
 .rate {
   font-size: var(--fs-md);
   line-height: var(--lh-md);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: rgb(var(--state-ok-label));
   font-variant-numeric: tabular-nums;
 }
@@ -444,7 +444,7 @@ function partWidth(value: number, total: number) {
   height: var(--space-2-5);
   overflow: hidden;
   border-radius: var(--radius-pill);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .meter span {
@@ -459,7 +459,7 @@ function partWidth(value: number, total: number) {
   gap: var(--space-1-5) var(--space-4);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .legend-item {
@@ -475,8 +475,8 @@ function partWidth(value: number, total: number) {
 }
 
 .legend-item strong {
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
   font-variant-numeric: tabular-nums;
 }
 
@@ -494,7 +494,7 @@ function partWidth(value: number, total: number) {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-2);
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 .recent-row:last-child {
@@ -505,7 +505,7 @@ function partWidth(value: number, total: number) {
   font-family: var(--font-mono);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .recent-main {
@@ -518,7 +518,7 @@ function partWidth(value: number, total: number) {
   overflow: hidden;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -526,13 +526,13 @@ function partWidth(value: number, total: number) {
 .recent-main small {
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   overflow-wrap: anywhere;
 }
 
 .recent-total {
   font-size: var(--fs-xxs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
 }
 

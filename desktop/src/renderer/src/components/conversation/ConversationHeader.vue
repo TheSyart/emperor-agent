@@ -125,7 +125,7 @@ function onTab(id: string) {
 
 <style scoped>
 .source-badge {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
 }
 
@@ -142,7 +142,7 @@ function onTab(id: string) {
   bottom: 0;
   left: 0;
   height: 1px;
-  background: var(--border-l2);
+  background: var(--stroke-2);
   pointer-events: none;
 }
 
@@ -185,7 +185,7 @@ function onTab(id: string) {
 
 .sep {
   flex: none;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font-size: var(--fs-s);
   line-height: var(--space-5);
 }
@@ -198,7 +198,7 @@ function onTab(id: string) {
   border: none;
   border-radius: var(--radius-card);
   background: transparent;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-s);
   line-height: var(--space-5);
   text-overflow: ellipsis;
@@ -210,8 +210,8 @@ button.crumb {
 }
 
 button.crumb:hover {
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-secondary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-2));
 }
 
 .crumb[data-subagent] {
@@ -222,8 +222,8 @@ button.crumb:hover {
 .crumb[data-current] {
   flex: 0 1 auto;
   max-width: none;
-  color: rgb(var(--label-primary));
-  font-weight: 500;
+  color: rgb(var(--text-1));
+  font-weight: var(--weight-medium);
 }
 
 .actions {

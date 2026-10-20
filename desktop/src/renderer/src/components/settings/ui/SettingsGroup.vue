@@ -101,15 +101,15 @@ provideSurface(() => (card.value ? 'card' : 'panel'))
   margin: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  font-weight: 600;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-semibold);
+  color: rgb(var(--text-1));
 }
 
 .description {
   margin: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-wrap: pretty;
 }
 
@@ -132,7 +132,7 @@ provideSurface(() => (card.value ? 'card' : 'panel'))
 }
 
 .ds-settings-group[data-card] > .content {
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   background: rgb(var(--settings-card-fill));
 }

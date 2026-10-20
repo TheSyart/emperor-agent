@@ -47,7 +47,7 @@ function dotStyle(color: string): Record<string, string> | undefined {
   min-width: 0;
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   overflow-wrap: anywhere;
 }
 
@@ -56,6 +56,6 @@ function dotStyle(color: string): Record<string, string> | undefined {
   width: var(--space-2);
   height: var(--space-2);
   border-radius: 50%;
-  background: rgb(var(--label-caption));
+  background: rgb(var(--text-3));
 }
 </style>

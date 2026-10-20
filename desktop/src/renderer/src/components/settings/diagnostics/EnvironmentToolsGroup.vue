@@ -90,8 +90,8 @@ const jobs = computed(() => props.status?.recentJobs ?? [])
   padding: var(--space-3) 0 var(--space-0-5);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
-  font-weight: 500;
-  color: rgb(var(--label-secondary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-2));
 }
 
 .subhead:first-child {
@@ -99,7 +99,7 @@ const jobs = computed(() => props.status?.recentJobs ?? [])
 }
 
 .subhead-count {
-  font-weight: 400;
-  color: rgb(var(--label-tertiary));
+  font-weight: var(--weight-regular);
+  color: rgb(var(--text-3));
 }
 </style>

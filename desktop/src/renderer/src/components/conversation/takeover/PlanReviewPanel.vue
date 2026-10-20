@@ -150,11 +150,11 @@ function onCommentKeydown(event: KeyboardEvent) {
   width: 100%;
   max-width: var(--chat-content-width, 748px);
   max-height: min(60vh, 520px);
-  border: 1px solid rgb(var(--approval) / 0.45);
+  border: 1px solid rgb(var(--attention) / 0.45);
   border-radius: var(--radius-takeover);
   background: rgb(var(--input-major));
   box-shadow: var(--shadow-lv2);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   overflow: hidden;
   outline: none;
 }
@@ -165,7 +165,7 @@ function onCommentKeydown(event: KeyboardEvent) {
   flex-shrink: 0;
   gap: var(--space-2);
   padding: var(--space-1-5) var(--space-3) var(--space-1-5) var(--space-4);
-  background: rgb(var(--approval-soft));
+  background: rgb(var(--attention-soft));
   color: rgb(var(--approval-line));
   font-size: var(--fs-xs);
   line-height: 18px;
@@ -194,7 +194,7 @@ function onCommentKeydown(event: KeyboardEvent) {
 
 .empty {
   margin: 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .footer {
@@ -212,11 +212,11 @@ function onCommentKeydown(event: KeyboardEvent) {
   min-height: 36px;
   max-height: 120px;
   padding: var(--space-1-5) var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-card);
   background: transparent;
-  color: rgb(var(--label-primary));
-  caret-color: rgb(var(--accent-fill));
+  color: rgb(var(--text-1));
+  caret-color: rgb(var(--accent));
   font: inherit;
   font-size: var(--fs-s);
   line-height: 22px;
@@ -226,11 +226,11 @@ function onCommentKeydown(event: KeyboardEvent) {
 }
 
 .comment::placeholder {
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 
 .comment:focus {
-  border-color: rgb(var(--accent-fill));
+  border-color: rgb(var(--accent));
 }
 
 .actions {

@@ -1,6 +1,6 @@
 /* ── L3 component tokens (DS-01) ──
    Tokens owned by one component family (sidebar, menus, code, toasts,
-   avatars, materials). They reference L2 where the meaning matches; the
+   avatars, backdrops). They reference L2 where the meaning matches; the
    per-theme literals are target values with no L2 equivalent (syntax and
    avatar colours, inverted toast, scrollbars). */
 :root {
@@ -54,24 +54,15 @@
      end on the same line. */
   --shell-bar-h: 46px;
 
-  /* Materials and glass */
+  /* Backdrops: the blur behind scrims, the lightbox and floating menus */
   --mask-blur: 2px;
-  --shadow-lv1-blur: var(--elev-1);
-  --glass-bg: var(--surface-raised);
-  --glass-border-a: 0.06;
-  --glass-blur: 24px;
-  --glass-saturate: 1.4;
-  --glass-shadow: var(--elev-3);
-  --glass-solid-alpha: 0.97;
-  --material-1-bg: var(--surface-base);
-  --material-1-alpha: 0.9;
-  --material-1-blur: 12px;
-  --material-2-bg: var(--surface-base);
-  --material-2-alpha: 0.94;
-  --material-2-blur: 24px;
-  --material-3-bg: var(--surface-raised);
-  --material-3-alpha: 0.96;
-  --material-3-blur: 24px;
+  --backdrop-blur: 12px;
+  --backdrop-blur-strong: 24px;
+
+  /* Theme-invariant fills: the white plate behind site icons and favicons,
+     and the computer-use pointer drawn over screenshots */
+  --site-icon-plate: 255 255 255;
+  --pointer-ink: 15 17 21;
 }
 
 :root,
@@ -118,16 +109,7 @@
   --tone-cyan: 103 232 249;
   --tone-violet: 196 181 253;
   --tone-blue: 147 197 253;
-  --glass-alpha: 0.86;
-  --glass-border: 255 255 255;
-  --scrim-a: 0.55;
-  --text-primary: 0.92;
-  --text-secondary: 0.8;
-  --text-tertiary: 0.64;
-  --hover-bg-a: 0.05;
-  --active-bg-a: 0.08;
   --shadow-color: 0 0 0;
-  --nb-60: 249 250 251;
   /* The composer's edge: the shadow carries it on dark */
   --composer-edge: var(--elev-1);
 }
@@ -175,16 +157,7 @@
   --tone-cyan: 8 145 178;
   --tone-violet: 124 58 237;
   --tone-blue: 37 99 235;
-  --glass-alpha: 0.9;
-  --glass-border: 0 0 0;
-  --scrim-a: 0.24;
-  --text-primary: 0.9;
-  --text-secondary: 0.66;
-  --text-tertiary: 0.52;
-  --hover-bg-a: 0.045;
-  --active-bg-a: 0.08;
   --shadow-color: 28 27 25;
-  --nb-60: 245 246 247;
   /* A hairline ring as well on light */
   --composer-edge: 0 0 0 0.5px var(--hairline), var(--elev-1);
   --env-card-fill: var(--surface-base);

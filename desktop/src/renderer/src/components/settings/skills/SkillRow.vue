@@ -72,7 +72,7 @@ const status = computed(() =>
 }
 
 .skill-row-item + .skill-row-item {
-  border-top: 1px solid var(--border-l2);
+  border-top: 1px solid var(--stroke-2);
 }
 
 .skill-row {
@@ -88,11 +88,11 @@ const status = computed(() =>
   color: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--duration-ds-fast) ease;
+  transition: background-color var(--motion-fast) ease;
 }
 
 .skill-row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .skill-row:focus-visible {
@@ -120,8 +120,8 @@ const status = computed(() =>
   min-width: 0;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
-  color: rgb(var(--label-primary));
+  font-weight: var(--weight-medium);
+  color: rgb(var(--text-1));
   overflow-wrap: anywhere;
 }
 
@@ -131,7 +131,7 @@ const status = computed(() =>
   gap: var(--space-0-5);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: rgb(var(--state-warn-label));
   font-variant-numeric: tabular-nums;
 }
@@ -141,13 +141,13 @@ const status = computed(() =>
   overflow: hidden;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .chevron {
   flex: none;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
 }
 </style>

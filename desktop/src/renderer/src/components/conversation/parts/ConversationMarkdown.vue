@@ -110,7 +110,7 @@ const segments = computed<Segment[]>(() =>
 }
 
 .ds-md :deep(strong) {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 
 .ds-md :deep(h1) {
@@ -151,7 +151,7 @@ const segments = computed<Segment[]>(() =>
 .ds-md :deep(a.md-link-chip) {
   display: inline-block;
   max-width: 100%;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   cursor: pointer;
 }
 
@@ -162,7 +162,7 @@ const segments = computed<Segment[]>(() =>
   height: var(--icon-xs);
   margin-inline-end: var(--space-1);
   vertical-align: -0.06em;
-  background-color: rgb(var(--md-link-ink, var(--label-secondary)));
+  background-color: rgb(var(--md-link-ink, var(--text-2)));
   -webkit-mask: var(--md-link-ico) center / contain no-repeat;
   mask: var(--md-link-ico) center / contain no-repeat;
 }
@@ -174,10 +174,10 @@ const segments = computed<Segment[]>(() =>
   min-width: 1.6em;
   height: auto;
   padding: 0 0.35em;
-  border-radius: var(--radius-xs);
-  background: rgb(var(--md-badge-tone, var(--label-secondary)) / 0.14);
-  color: rgb(var(--md-badge-tone, var(--label-secondary)));
-  font: 700 0.625em / 1.6 var(--font-mono);
+  border-radius: var(--r-xs);
+  background: rgb(var(--md-badge-tone, var(--text-2)) / 0.14);
+  color: rgb(var(--md-badge-tone, var(--text-2)));
+  font: var(--weight-semibold) 0.625em / 1.6 var(--font-mono);
   text-align: center;
   vertical-align: 0.16em;
   -webkit-mask: none;
@@ -209,7 +209,7 @@ const segments = computed<Segment[]>(() =>
 }
 
 .ds-md :deep(a.md-link-chip[data-md-tone='danger']) {
-  --md-badge-tone: var(--danger);
+  --md-badge-tone: var(--error);
 }
 .ds-md :deep(a.md-link-chip[data-md-custom-icon][data-md-tone]) {
   --md-link-ink: var(--md-badge-tone);
@@ -217,9 +217,9 @@ const segments = computed<Segment[]>(() =>
 
 /* A file Core cannot find: struck through and dimmed, icon included. */
 .ds-md :deep(a.md-link-chip[data-md-state='missing']) {
-  --md-link-ink: var(--label-tertiary);
-  --md-badge-tone: var(--label-tertiary);
-  color: rgb(var(--label-tertiary));
+  --md-link-ink: var(--text-3);
+  --md-badge-tone: var(--text-3);
+  color: rgb(var(--text-3));
   text-decoration: line-through;
   cursor: default;
 }
@@ -264,7 +264,7 @@ const segments = computed<Segment[]>(() =>
   max-width: calc(100% - var(--space-2));
   padding: 0 var(--space-0-5);
   margin-inline: var(--space-1);
-  border-radius: var(--radius-xs);
+  border-radius: var(--r-xs);
   background: transparent;
   line-height: 1.85;
   text-decoration-thickness: 1px;
@@ -272,7 +272,7 @@ const segments = computed<Segment[]>(() =>
   transition: background var(--duration-fast) ease;
 }
 .ds-md :deep(a.md-link-chip[data-md-link='web']:hover) {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 .ds-md :deep(a.md-link-chip[data-md-link='web']:focus-visible) {
   outline: 2px solid rgb(var(--focus-ring));
@@ -289,10 +289,10 @@ const segments = computed<Segment[]>(() =>
 .ds-md :deep(a.md-link-chip[data-site-letter]::before) {
   content: attr(data-site-letter) / '';
   mask: none;
-  background: rgb(var(--accent-fill) / 0.14);
+  background: rgb(var(--accent) / 0.14);
   color: rgb(var(--text-link));
-  border-radius: var(--radius-xs);
-  font: 600 0.7em/1.4 var(--font-sans);
+  border-radius: var(--r-xs);
+  font: var(--weight-semibold) 0.7em/1.4 var(--font-sans);
   text-align: center;
   vertical-align: 0;
 }
@@ -307,8 +307,8 @@ const segments = computed<Segment[]>(() =>
   margin: 0 var(--space-1-5) 0 0;
   vertical-align: -0.125em;
   object-fit: contain;
-  border-radius: var(--radius-xs);
-  background: rgb(var(--nb-00));
+  border-radius: var(--r-xs);
+  background: rgb(var(--site-icon-plate));
 }
 
 .ds-md :deep(:is(ul, ol)) {
@@ -338,26 +338,26 @@ const segments = computed<Segment[]>(() =>
 }
 
 .ds-md :deep(li::marker) {
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .ds-md :deep(hr) {
   height: 1px;
   margin: var(--space-8) 0;
   border: none;
-  background: var(--border-l2);
+  background: var(--stroke-2);
 }
 
 .ds-md :deep(blockquote) {
   margin: var(--space-3) 0;
   padding-left: var(--space-3-5);
-  border-left: 2px solid rgb(var(--label-caption));
-  color: rgb(var(--label-secondary));
+  border-left: 2px solid rgb(var(--text-3));
+  color: rgb(var(--text-2));
 }
 
 .ds-md :deep(:not(pre) > code) {
   padding: 0 var(--space-1);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
   background: rgb(var(--inline-code-bg));
   font-family: var(--font-mono);
   font-size: 0.875em;
@@ -389,7 +389,7 @@ const segments = computed<Segment[]>(() =>
 .ds-md :deep(th) {
   min-width: 100px;
   padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--border-l3);
+  border-bottom: 1px solid var(--stroke-3);
   font: var(--weight-medium) var(--type-body-sm) var(--font-sans);
   text-align: start;
 }
@@ -397,7 +397,7 @@ const segments = computed<Segment[]>(() =>
 .ds-md :deep(td) {
   min-width: 100px;
   padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--border-l2);
+  border-bottom: 1px solid var(--stroke-2);
   font: var(--weight-regular) var(--type-body-sm) var(--font-sans);
 }
 
@@ -425,7 +425,7 @@ const segments = computed<Segment[]>(() =>
 
 .ds-md :deep(input[type='checkbox']) {
   margin: 0 var(--space-2) 0 0;
-  accent-color: rgb(var(--label-secondary));
+  accent-color: rgb(var(--text-2));
 }
 
 /* Filled color artwork must not become a solid monochrome mask. */

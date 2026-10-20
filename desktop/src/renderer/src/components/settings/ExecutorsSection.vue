@@ -1502,8 +1502,8 @@ onBeforeUnmount(() => {
   padding-top: var(--space-3);
 }
 .agent-card.ds-settings-card {
-  background: rgb(var(--bg-layer-2));
-  border-color: var(--border-l2);
+  background: rgb(var(--surface-raised));
+  border-color: var(--stroke-2);
   box-shadow: none;
 }
 .agent-card :deep(.head) {
@@ -1524,7 +1524,7 @@ onBeforeUnmount(() => {
 .agent-card h3 {
   font-size: var(--fs-s);
   line-height: 22px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.05px;
 }
 .agent-card :deep(.title-line) {
@@ -1533,7 +1533,7 @@ onBeforeUnmount(() => {
 .agent-card :deep(.description) {
   font-size: var(--fs-xs);
   line-height: 21px;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   text-wrap: pretty;
 }
 .agent-card :deep(.actions) {
@@ -1548,7 +1548,7 @@ onBeforeUnmount(() => {
   margin: 0 var(--space-4);
   padding: var(--space-3) 0 var(--space-3);
   gap: var(--space-3);
-  border-color: var(--border-l1);
+  border-color: var(--stroke-1);
 }
 .local-card :deep(.body[data-after-head]) {
   border-top: none;
@@ -1558,7 +1558,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2-5) var(--space-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: 20px;
   padding-left: calc(var(--space-8) + var(--space-5));
@@ -1572,14 +1572,14 @@ onBeforeUnmount(() => {
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: rgb(var(--accent-fill));
+  background: rgb(var(--accent));
 }
 .block-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: 20px;
   min-height: 22px;
@@ -1607,15 +1607,15 @@ onBeforeUnmount(() => {
 .specialty-tag.ds-badge {
   flex: 0 1 auto;
   font-size: var(--fs-xxs);
-  font-weight: 400;
-  border-radius: var(--radius-sm);
+  font-weight: var(--weight-regular);
+  border-radius: var(--r-sm);
   padding: var(--space-0-5) var(--space-2);
   min-height: 24px;
   line-height: 18px;
   white-space: normal;
   overflow-wrap: anywhere;
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-secondary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-2));
   overflow: visible;
 }
 .specialty-editor {
@@ -1628,7 +1628,7 @@ onBeforeUnmount(() => {
 .field-error {
   font-size: var(--fs-xxs);
   line-height: 20px;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .field-error {
   color: rgb(var(--state-error-label));
@@ -1652,21 +1652,21 @@ onBeforeUnmount(() => {
 .default-model-choice > span {
   flex: none;
   font-size: var(--fs-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .default-model-choice .ds-select {
   flex: 1;
   width: 0;
   height: 30px;
   border-radius: var(--radius-row);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 .custom-model-editor {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-2-5);
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-row);
 }
 .custom-model-actions {
@@ -1684,7 +1684,7 @@ onBeforeUnmount(() => {
   flex: none;
 }
 .model-pending {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .model-line {
   display: flex;
@@ -1695,14 +1695,14 @@ onBeforeUnmount(() => {
   line-height: 20px;
 }
 .model-line > span:first-child {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   white-space: nowrap;
   flex: none;
 }
 .model-value {
   min-width: 0;
   overflow-wrap: anywhere;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   font-family: 'SFMono-Regular', Menlo, 'PingFang SC', monospace;
   font-size: var(--fs-xxs);
 }
@@ -1715,22 +1715,22 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: 20px;
 }
 .ability-item .ds-badge {
   font-size: var(--fs-xxxs);
   min-height: 21px;
-  font-weight: 450;
+  font-weight: var(--weight-medium);
   line-height: 17px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-sm);
   padding: var(--space-0-5) var(--space-2);
   white-space: normal;
   overflow-wrap: anywhere;
 }
 .agent-details {
-  border-top: calc(var(--space-0-5) / 2) solid var(--border-l1);
+  border-top: calc(var(--space-0-5) / 2) solid var(--stroke-1);
   padding-top: var(--space-2-5);
   min-width: 0;
 }
@@ -1739,7 +1739,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
   list-style: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: 20px;
   cursor: pointer;
@@ -1748,10 +1748,10 @@ onBeforeUnmount(() => {
   display: none;
 }
 .agent-details summary:hover {
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 .agent-details summary svg {
-  transition: transform var(--duration-ds) var(--ease-in-out);
+  transition: transform var(--motion-base) var(--ease-standard);
 }
 .agent-details[open] summary svg {
   transform: rotate(180deg);
@@ -1776,13 +1776,13 @@ onBeforeUnmount(() => {
   gap: var(--space-3);
 }
 .details-content dt {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .details-content dd {
   margin: 0;
   min-width: 0;
   overflow-wrap: anywhere;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 .sign-in-block {
   display: flex;
@@ -1805,7 +1805,7 @@ onBeforeUnmount(() => {
   color: rgb(var(--text-1));
 }
 .connection-settings {
-  border-top: calc(var(--space-0-5) / 2) solid var(--border-l1);
+  border-top: calc(var(--space-0-5) / 2) solid var(--stroke-1);
   padding-top: var(--space-2);
 }
 .connection-settings .ds-text-field {
@@ -1840,11 +1840,11 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2-5);
-  background: var(--interactive-bg-hover);
-  color: rgb(var(--label-secondary));
+  background: var(--surface-hover);
+  color: rgb(var(--text-2));
 }
 .muted {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: 20px;
 }
@@ -1854,7 +1854,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--space-3);
   font-size: var(--fs-xxs);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 .profile-choice .ds-select {
   width: 170px;
@@ -1916,7 +1916,7 @@ onBeforeUnmount(() => {
   color: rgb(var(--state-error-label));
 }
 .executor-note {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
 }
 .reload-notice,
@@ -1925,7 +1925,7 @@ onBeforeUnmount(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2-5);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 .upgrade-notice > span {
   flex: 1 1 280px;
@@ -1937,7 +1937,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 32px;
   border-radius: var(--radius-row);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 .default-model-block > .block-heading .ds-button {
   font-size: var(--fs-xxs);

@@ -68,13 +68,13 @@ function dot(status: string | undefined) {
   min-width: 0;
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .id {
   flex: none;
   font: var(--font-code-small);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .label {
@@ -86,7 +86,7 @@ function dot(status: string | undefined) {
 
 .status {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .output {
@@ -94,16 +94,16 @@ function dot(status: string | undefined) {
   margin: 0;
   padding: var(--space-3) var(--space-4);
   overflow: auto;
-  border: 1px solid var(--border-l1);
+  border: 1px solid var(--stroke-1);
   border-radius: var(--radius-card);
   background: rgb(var(--code-block-bg));
   font: var(--font-code-small);
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .output[data-error] {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 </style>

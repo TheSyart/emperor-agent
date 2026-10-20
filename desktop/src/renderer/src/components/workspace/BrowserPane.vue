@@ -312,21 +312,21 @@ function hostOf(url: string): string {
         :disabled="!state?.canGoBack"
         @click="navigate('back')"
       >
-        <ArrowLeft :size="15" />
+        <ArrowLeft :size="16" />
       </IconButton>
       <IconButton
         label="前进"
         :disabled="!state?.canGoForward"
         @click="navigate('forward')"
       >
-        <ArrowRight :size="15" />
+        <ArrowRight :size="16" />
       </IconButton>
       <IconButton
         :label="state?.loading ? '停止加载' : '刷新'"
         :disabled="!hasPage"
         @click="reloadOrStop"
       >
-        <X v-if="state?.loading" :size="15" />
+        <X v-if="state?.loading" :size="16" />
         <RotateCw v-else :size="14" />
       </IconButton>
       <span v-if="historyShown" ref="historyAnchor" class="history-anchor">
@@ -347,11 +347,11 @@ function hostOf(url: string): string {
       >
         <LockKeyhole
           v-if="secure && !editing"
-          :size="13"
+          :size="14"
           class="address-glyph"
           aria-hidden="true"
         />
-        <Globe v-else :size="13" class="address-glyph" aria-hidden="true" />
+        <Globe v-else :size="14" class="address-glyph" aria-hidden="true" />
         <input
           ref="addressInput"
           v-model="address"
@@ -412,7 +412,7 @@ function hostOf(url: string): string {
       :aria-busy="loading || undefined"
     >
       <div v-if="page.error" class="browser-state" role="alert">
-        <TriangleAlert :size="22" class="state-glyph danger" />
+        <TriangleAlert :size="20" class="state-glyph danger" />
         <strong>无法打开此网页</strong>
         <p class="state-detail">{{ page.error }}</p>
         <p v-if="pageUrl" class="state-url">{{ pageUrl }}</p>
@@ -422,13 +422,13 @@ function hostOf(url: string): string {
       </div>
       <!-- Under the native view: shows while it is hidden (drags, menus). -->
       <div v-else-if="hasPage" class="browser-state">
-        <Globe :size="22" class="state-glyph" />
+        <Globe :size="20" class="state-glyph" />
         <strong>{{ pageLabel }}</strong>
         <p class="state-url">{{ pageUrl }}</p>
         <p v-if="state?.loading" class="state-detail">正在加载…</p>
       </div>
       <div v-else class="browser-state">
-        <Globe :size="22" class="state-glyph" />
+        <Globe :size="20" class="state-glyph" />
         <strong>输入网址（支持 localhost）</strong>
         <p class="state-detail">例如 localhost:5173 或 example.com</p>
         <p class="state-note">页面在独立沙箱中打开，关闭后不保留浏览数据</p>
@@ -473,7 +473,7 @@ function hostOf(url: string): string {
         在访达中显示
       </button>
       <IconButton label="关闭下载提示" @click="dismissDownload">
-        <X :size="13" />
+        <X :size="14" />
       </IconButton>
     </div>
   </div>
@@ -499,7 +499,7 @@ function hostOf(url: string): string {
   align-items: center;
   gap: var(--space-0-5);
   padding: var(--space-2) var(--space-2);
-  border-bottom: 1px solid var(--border-l1);
+  border-bottom: 1px solid var(--stroke-1);
 }
 
 .browser-address {
@@ -511,18 +511,18 @@ function hostOf(url: string): string {
   height: var(--space-7);
   margin: 0 var(--space-1);
   padding: 0 var(--space-2-5);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
   background: rgb(var(--input-major));
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .browser-address:focus-within {
-  border-color: var(--border-l4);
+  border-color: var(--stroke-4);
 }
 
 .browser-address[data-invalid] {
-  border-color: rgb(var(--danger) / 0.6);
+  border-color: rgb(var(--error) / 0.6);
 }
 
 .address-glyph {
@@ -538,14 +538,14 @@ function hostOf(url: string): string {
   outline: none;
   background: transparent;
   box-shadow: none;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   text-overflow: ellipsis;
 }
 
 .browser-address input::placeholder {
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 /* Indeterminate load bar on the toolbar's bottom hairline. */
@@ -564,8 +564,8 @@ function hostOf(url: string): string {
   position: absolute;
   inset: 0;
   width: 40%;
-  background: rgb(var(--accent-fill));
-  animation: browser-progress 1.1s var(--ease-in-out) infinite;
+  background: rgb(var(--accent));
+  animation: browser-progress 1.1s var(--ease-standard) infinite;
 }
 
 @keyframes browser-progress {
@@ -582,8 +582,8 @@ function hostOf(url: string): string {
   margin: var(--space-2) var(--space-3) 0;
   padding: var(--space-1-5) var(--space-2-5);
   border-radius: var(--radius-row);
-  background: rgb(var(--danger-soft));
-  color: rgb(var(--danger));
+  background: rgb(var(--error-soft));
+  color: rgb(var(--error));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -609,21 +609,21 @@ function hostOf(url: string): string {
 .browser-state strong {
   max-width: 100%;
   overflow: hidden;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .state-glyph {
   margin-bottom: var(--space-1);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .state-glyph.danger {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .state-detail,
@@ -631,7 +631,7 @@ function hostOf(url: string): string {
 .state-note {
   max-width: 100%;
   margin: 0;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
@@ -647,7 +647,7 @@ function hostOf(url: string): string {
 
 .state-note {
   margin-top: var(--space-2);
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-3));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
 }
@@ -655,16 +655,16 @@ function hostOf(url: string): string {
 .state-action {
   margin-top: var(--space-2);
   padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
-  transition: background-color var(--duration-ds-fast) ease;
+  transition: background-color var(--motion-fast) ease;
 }
 
 .state-action:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .state-action:focus-visible {
@@ -680,30 +680,30 @@ function hostOf(url: string): string {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
-  border-top: 1px solid var(--border-l1);
-  color: rgb(var(--label-secondary));
+  border-top: 1px solid var(--stroke-1);
+  color: rgb(var(--text-2));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }
 
 .download-glyph {
   flex: none;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
 }
 
 .browser-download[data-tone='done'] .download-glyph {
-  color: rgb(var(--state-ok));
+  color: rgb(var(--ok));
 }
 
 .browser-download[data-tone='blocked'] .download-glyph,
 .browser-download[data-tone='failed'] .download-glyph {
-  color: rgb(var(--danger));
+  color: rgb(var(--error));
 }
 
 .download-text {
   min-width: 0;
   overflow: hidden;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -712,7 +712,7 @@ function hostOf(url: string): string {
   min-width: 0;
   flex: 1;
   overflow: hidden;
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--text-3));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -721,16 +721,16 @@ function hostOf(url: string): string {
   flex: none;
   margin-left: auto;
   padding: 0 var(--space-2);
-  border: 1px solid var(--border-l2);
+  border: 1px solid var(--stroke-2);
   border-radius: var(--radius-pill);
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xs);
-  transition: background-color var(--duration-ds-fast) ease;
+  transition: background-color var(--motion-fast) ease;
 }
 
 .download-action:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .download-action:focus-visible {
