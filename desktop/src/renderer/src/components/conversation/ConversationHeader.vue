@@ -6,8 +6,9 @@
  * breadcrumb (project / ancestors / current title; ancestor crumbs
  * navigate) with the right-hand toggles — 环境信息 (the chat
  * environment card, Chat tab only; a floating-card glyph so it does not read
- * as "about") and 工作台 (the right workspace column) — then the 对话 | 轨迹
- * tab strip (13/16 medium, gap 36, 2px gold bar).
+ * as "about") and 工作台 (the right workspace column) — then, only while
+ * 显示轨迹 is on (`trajectory`, UI-S09), the 对话 | 轨迹 tab strip (13/16
+ * medium, gap 36, 2px gold bar); off, the header is that one row.
  * `slim` (the empty hero phase) renders the 工作台 toggle only, so a new chat
  * can still open the workspace (the browser works for a draft); the
  * environment card has nothing to show before the first message and stays
@@ -34,6 +35,8 @@ const props = defineProps<{
   envCardOpen: boolean
   tabsDisabled?: boolean
   slim?: boolean
+  /** The 轨迹 tab is available (设置 › 常规 › 开发者 › 显示轨迹). */
+  trajectory?: boolean
 }>()
 
 const tabs = computed(() =>
@@ -111,7 +114,7 @@ function onTab(id: string) {
       </div>
     </div>
     <Tabs
-      v-if="!slim"
+      v-if="trajectory && !slim"
       class="tabs"
       aria-label="会话视图"
       :tabs="tabs"

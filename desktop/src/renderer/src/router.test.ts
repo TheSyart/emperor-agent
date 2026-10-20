@@ -1,5 +1,9 @@
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
+import {
+  reloadUiPreferences,
+  setUiPreference,
+} from './composables/useUiPreferences'
 
 async function makeRouter() {
   const { installRouteGuards, routeRecords } = await import('./router')
@@ -18,6 +22,8 @@ async function resolve(path: string) {
 }
 
 describe('renderer routes', () => {
+  afterEach(() => reloadUiPreferences())
+
   beforeAll(async () => {
     // Cold Vite/SFC transforms are setup work. Keep loading the real views,
     // but finish that work before the short navigation assertions start.
@@ -39,6 +45,8 @@ describe('renderer routes', () => {
     expect(chat.name).toBe('chat')
     expect(chat.params.sessionId).toBe('s_123')
 
+    // UI-S09: the trajectory opens once 设置 › 常规 › 开发者 › 显示轨迹 is on.
+    setUiPreference('showTrajectory', true)
     const trajectory = await resolve('/chat/s_123/trajectory')
     expect(trajectory.name).toBe('trajectory')
     expect(trajectory.params.sessionId).toBe('s_123')
@@ -46,6 +54,14 @@ describe('renderer routes', () => {
     expect((await resolve('/chat')).name).toBe('chat')
     expect((await resolve('/')).path).toBe('/chat')
   }, 10_000)
+
+  it('UI-S09 · 3: a trajectory link while 显示轨迹 is off lands on the chat, without call', async () => {
+    const route = await resolve('/chat/s1/trajectory?call=c1&foo=1')
+    expect(route.name).toBe('chat')
+    expect(route.path).toBe('/chat/s1')
+    expect(route.query).toEqual({ foo: '1' })
+    expect((await resolve('/chat/s1/trajectory')).path).toBe('/chat/s1')
+  })
 
   it('serves the full pages', async () => {
     expect((await resolve('/scheduler')).name).toBe('scheduler')

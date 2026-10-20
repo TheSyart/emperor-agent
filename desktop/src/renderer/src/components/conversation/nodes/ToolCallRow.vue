@@ -6,8 +6,9 @@
  * for a Dot and an error row's summary is the failure's first line in the
  * danger color. The expanded body (indented 22px like a thinking body) is
  * the registry's tool view with a hover-revealed Inspect pill that jumps to
- * the trajectory. A `preparing` row (DSH-23) is the call the model is still
- * writing: the arguments parsed so far and 「准备中」, nothing to expand.
+ * the trajectory — only while 显示轨迹 is on (UI-S09). A `preparing` row
+ * (DSH-23) is the call the model is still writing: the arguments parsed so
+ * far and 「准备中」, nothing to expand.
  *
  * Props: data (tool node data), agent?, preparing?. Emits via chat context:
  * inspect(callId).
@@ -147,6 +148,7 @@ const stateLabel = computed(() => {
         </div>
         <component :is="body" :data="data" />
         <button
+          v-if="preferences.showTrajectory"
           type="button"
           class="inspect"
           @click="actions.inspect(data.callId)"

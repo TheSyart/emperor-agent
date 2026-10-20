@@ -19,7 +19,9 @@
  * frame while the reader scrolls (the turn scrubber's active tick).
  * Exposes: scrollToBottom(), scrollToKey(key) — reveal a row near the top
  * (the list is virtualized, so rows off screen are reachable only here; a
- * step inside a folded process group opens the group first).
+ * step inside a folded process group opens the group first), revealCall(id)
+ * — the same for a tool call's row, opened (a trajectory link while the
+ * trajectory is off, UI-S09).
  */
 import Spinner from '../ui/Spinner.vue'
 import {
@@ -36,6 +38,7 @@ import {
 // @ts-expect-error vue-virtual-scroller v2 beta 无类型声明（见 shims）
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
+import { conversationContextKey } from '../../conversation/assembler'
 import {
   useConversation,
   type ConversationHandle,
@@ -340,6 +343,19 @@ function scrollToKey(key: string): boolean {
   return true
 }
 
+/**
+ * Reveal the tool row of call `callId` near the top and open it. Its row key
+ * is the engine's Context key of the call; false while the call is not in
+ * the loaded window.
+ */
+function revealCall(callId: string): boolean {
+  const key = conversationContextKey('tool', callId)
+  if (snapshot.value?.nodes.get(key)?.kind !== 'tool') return false
+  if (!rowIndex.value.has(key)) return false
+  expansion.set(`tool:${callId}`, true)
+  return scrollToKey(key)
+}
+
 function onContentResize(): void {
   if (anchor !== null) restoreAnchor()
   else if (following.value) pinToBottom()
@@ -407,7 +423,7 @@ function onPointerOver(event: Event): void {
   hoverTurn.value = turn === undefined || turn === '' ? null : Number(turn)
 }
 
-defineExpose({ scrollToBottom, scrollToKey })
+defineExpose({ scrollToBottom, scrollToKey, revealCall })
 </script>
 
 <template>
