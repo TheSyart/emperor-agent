@@ -1,13 +1,15 @@
 <script setup lang="ts">
 /**
- * FilesPane — the right workspace's 文件 pane: an open-file tab strip with
- * 「+」 over a path breadcrumb and the preview, and the project tree as a
- * column on the far right with a 「筛选文件…」 filter (files.search).
+ * FilesPane — the right workspace's 文件 pane: an open-file tab strip
+ * (WorkspaceTabBar, shared with 终端) with 「+」 over a path breadcrumb and
+ * the preview, and the project tree as a column on the far right with a
+ * 「筛选文件…」 filter (files.search).
  *
- * Tabs: every opened file is a tab; 「打开文件」 is the draft tab shown when
- * nothing is open or after 「+」 (which also focuses the filter). Picking a
- * file while the draft is active replaces the draft. ⌘W (Ctrl+W off macOS)
- * closes the active tab only while focus is inside this pane.
+ * Tabs: every opened file is a tab (the strip is empty while nothing is
+ * open; UI-S06 dropped the 「打开文件」 draft tab). 「+」 shows the tree and
+ * puts the caret in its filter. ⌘W (Ctrl+W off macOS) closes the active tab
+ * only while focus is inside this pane. One 「复制路径」 menu copies the
+ * relative or the absolute path.
  *
  * Reopening (FIX-05): a request for a file that already has a tab first
  * asks Core for its size and mtime (files.stat); when either changed — or
@@ -26,22 +28,25 @@
 import EmptyState from '../ui/EmptyState.vue'
 import LinkButton from '../ui/LinkButton.vue'
 import Button from '../ui/Button.vue'
+import Menu from '../ui/Menu.vue'
+import MenuItem from '../ui/MenuItem.vue'
 import SearchField from '../ui/SearchField.vue'
+import type { TabItem } from '../ui/blockTypes'
 import type { WorkspaceFileEntry, FilePreviewResult } from '@emperor/core/api'
 import {
   ChevronDown,
   ChevronRight,
-  Clipboard,
   Copy,
   FileText,
+  FolderOpen,
   PanelRightClose,
   PanelRightOpen,
   Plus,
   RefreshCw,
-  X,
 } from 'lucide-vue-next'
 import {
   computed,
+  h,
   inject,
   markRaw,
   nextTick,
@@ -50,6 +55,7 @@ import {
   onMounted,
   ref,
   watch,
+  type Component,
 } from 'vue'
 import { useWorkspaceSnapshot } from './useWorkspaceSnapshot'
 import { core } from '../../api/http'
@@ -67,6 +73,7 @@ import { detectShortcutPlatform } from '../../shortcuts'
 import IconButton from '../ui/IconButton.vue'
 import { highlightFile } from './fileHighlight'
 import DocumentIcon from '../ui/DocumentIcon.vue'
+import WorkspaceTabBar from './WorkspaceTabBar.vue'
 import {
   FILES_TREE_MAX,
   FILES_TREE_MIN,
@@ -103,7 +110,9 @@ const MAX_FILE_TABS = 12
 const platform = detectShortcutPlatform()
 
 const paneRoot = ref<HTMLElement | null>(null)
-const tabStrip = ref<HTMLElement | null>(null)
+const tabBar = ref<HTMLElement | null>(null)
+const copyAnchor = ref<HTMLElement | null>(null)
+const copyMenu = ref(false)
 const previewBody = ref<HTMLElement | null>(null)
 const treeList = ref<HTMLElement | null>(null)
 const filterInput = ref<InstanceType<typeof SearchField> | null>(null)
@@ -111,9 +120,8 @@ const treeByDirectory = ref<Record<string, WorkspaceFileEntry[]>>({})
 const expanded = ref(new Set<string>())
 const searchResults = ref<WorkspaceFileEntry[] | null>(null)
 const tabs = ref<FileTab[]>([])
-/** '' = the 「打开文件」 draft tab. */
+/** Key of the active tab ('' while nothing is open). */
 const activePath = ref('')
-const draftOpen = ref(false)
 const projectRoot = ref('')
 const query = ref('')
 const loading = ref(false)
@@ -134,13 +142,32 @@ let fileGeneration = 0
 let treeGeneration = 0
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 
+const isDraftSession = computed(() => props.sessionId.startsWith('draft:'))
 const hasProject = computed(() =>
-  Boolean(props.projectPath && !props.sessionId.startsWith('draft:')),
+  Boolean(props.projectPath && !isDraftSession.value),
 )
 const activeTab = computed(
   () => tabs.value.find((tab) => tab.key === activePath.value) || null,
 )
-const showDraftTab = computed(() => !tabs.value.length || draftOpen.value)
+/** A file's type glyph as a Tabs icon (one per name, kept). */
+const glyphs = new Map<string, Component>()
+function fileGlyph(name: string): Component {
+  let glyph = glyphs.get(name)
+  if (!glyph) {
+    glyph = markRaw(() => h(DocumentIcon, { path: name, size: 13 }))
+    glyphs.set(name, glyph)
+  }
+  return glyph
+}
+const tabItems = computed<TabItem[]>(() =>
+  tabs.value.map((tab) => ({
+    id: tab.key,
+    label: tab.preview.name,
+    title: tab.path,
+    icon: fileGlyph(tab.preview.name),
+    closable: true,
+  })),
+)
 const crumbs = computed(() => filePathCrumbs(activeTab.value?.path ?? ''))
 
 watch(
@@ -216,13 +243,11 @@ watch(
   () => void resetSession(),
 )
 // Keep the active tab scrolled into the (scrollbar-less) strip.
-watch([activePath, showDraftTab, () => tabs.value.length], () =>
-  nextTick(revealActiveTab),
-)
+watch([activePath, () => tabs.value.length], () => nextTick(revealActiveTab))
 
 function revealActiveTab(): void {
-  const strip = tabStrip.value
-  const tab = strip?.querySelector<HTMLElement>('.file-tab.active')
+  const strip = tabBar.value?.querySelector<HTMLElement>('.ds-tabs')
+  const tab = strip?.querySelector<HTMLElement>('.tab-item[data-active]')
   if (!strip || !tab) return
   const bounds = strip.getBoundingClientRect()
   const rect = tab.getBoundingClientRect()
@@ -256,7 +281,6 @@ async function resetSession(): Promise<void> {
   searchResults.value = null
   tabs.value = []
   activePath.value = ''
-  draftOpen.value = false
   query.value = ''
   treeError.value = ''
   openError.value = ''
@@ -424,7 +448,6 @@ async function openPreview(
     if (owner !== props.sessionId || generation !== fileGeneration) return
     if (!changed) {
       activePath.value = existing.key
-      draftOpen.value = false
       await revealActiveLine()
       return
     }
@@ -453,7 +476,6 @@ async function openPreview(
       tabs.value = next
     }
     activePath.value = preview.id
-    draftOpen.value = false
     await revealActiveLine()
   } catch (cause) {
     if (owner === props.sessionId && generation === fileGeneration)
@@ -604,16 +626,11 @@ function closeTab(path: string): void {
     activePath.value = tabs.value[Math.max(0, index - 1)]?.key || ''
   currentRequest.value = activeTab.value?.request ?? null
   openError.value = ''
-  if (!tabs.value.length) draftOpen.value = false
   keepFocusInPane()
 }
 
-/** 「+」: show the draft tab and put the caret in the tree filter. */
+/** 「+」: show the tree and put the caret in its filter. */
 function startOpenFile(): void {
-  if (tabs.value.length) draftOpen.value = true
-  activePath.value = ''
-  currentRequest.value = null
-  openError.value = ''
   treeVisible.value = true
   void nextTick(() => {
     filterInput.value?.focus()
@@ -621,16 +638,8 @@ function startOpenFile(): void {
   })
 }
 
-function closeDraft(): void {
-  draftOpen.value = false
-  if (!activePath.value)
-    activePath.value = tabs.value[tabs.value.length - 1]?.key || ''
-  keepFocusInPane()
-}
-
 function closeActiveTab(): void {
   if (activePath.value) closeTab(activePath.value)
-  else if (tabs.value.length) closeDraft()
 }
 
 /** ⌘W / Ctrl+W: handled here so it never reaches the window while in the pane. */
@@ -652,8 +661,8 @@ function keepFocusInPane(): void {
   void nextTick(() => {
     const root = paneRoot.value
     if (!root || root.contains(document.activeElement)) return
-    const active = tabStrip.value?.querySelector<HTMLElement>(
-      '.file-tab.active [role="tab"]',
+    const active = tabBar.value?.querySelector<HTMLElement>(
+      '.tab-item[data-active] [role="tab"]',
     )
     ;(active ?? root).focus()
   })
@@ -665,12 +674,17 @@ function toggleSourceMode(): void {
 }
 
 async function copyPath(relative: boolean): Promise<void> {
-  const path = activeTab.value?.path
-  if (!path) return
-  await navigator.clipboard.writeText(
-    relative ? path : activeTab.value!.preview.path,
-  )
+  const tab = activeTab.value
+  if (!tab) return
+  await navigator.clipboard.writeText(relative ? tab.path : tab.preview.path)
 }
+
+/** What a preview that shows no content says instead. */
+const noPreviewNote = computed(() =>
+  activeTab.value?.preview.kind === 'directory'
+    ? '目录位置 · 可在访达中查看'
+    : '此格式暂不支持内容预览。',
+)
 
 function isCurrent(owner: string, generation: number): boolean {
   return props.sessionId === owner && requestGeneration === generation
@@ -691,79 +705,31 @@ function message(value: unknown): string {
     @scroll.capture.passive="rememberScroll"
   >
     <section class="files-main" aria-label="文件预览">
-      <header class="file-tabs-bar">
-        <div
-          ref="tabStrip"
-          class="file-tabs"
-          role="tablist"
-          aria-label="已打开文件"
+      <div ref="tabBar" class="file-tab-bar">
+        <WorkspaceTabBar
+          :model-value="activePath"
+          :tabs="tabItems"
+          label="已打开文件"
+          @update:model-value="activateTab"
+          @close="closeTab"
         >
-          <div
-            v-for="tab in tabs"
-            :key="tab.key"
-            class="file-tab"
-            :class="{ active: tab.key === activePath }"
-            :title="tab.path"
-          >
-            <button
-              type="button"
-              role="tab"
-              class="file-tab-main"
-              :aria-selected="tab.key === activePath"
-              @click="activateTab(tab.key)"
-            >
-              <DocumentIcon :path="tab.preview.name" :size="13" />
-              <span>{{ tab.preview.name }}</span>
-            </button>
-            <IconButton
-              class="file-tab-close"
-              :label="`关闭 ${tab.preview.name}`"
-              :tooltip="false"
-              size="xs"
-              @click="closeTab(tab.key)"
-            >
-              <X :size="12" />
+          <template v-if="hasProject" #after>
+            <IconButton label="打开文件" @click="startOpenFile">
+              <Plus :size="15" />
             </IconButton>
-          </div>
-          <div
-            v-if="showDraftTab && hasProject"
-            class="file-tab draft"
-            :class="{ active: !activePath }"
-          >
-            <button
-              type="button"
-              role="tab"
-              class="file-tab-main"
-              :aria-selected="!activePath"
-              @click="activateTab('')"
-            >
-              <span>打开文件</span>
-            </button>
+          </template>
+          <template v-if="hasProject" #actions>
             <IconButton
-              v-if="tabs.length"
-              class="file-tab-close"
-              label="关闭 打开文件"
-              :tooltip="false"
-              size="xs"
-              @click="closeDraft"
+              :label="treeVisible ? '隐藏目录树' : '显示目录树'"
+              :aria-pressed="treeVisible"
+              @click="treeVisible = !treeVisible"
             >
-              <X :size="12" />
+              <PanelRightClose v-if="treeVisible" :size="15" />
+              <PanelRightOpen v-else :size="15" />
             </IconButton>
-          </div>
-        </div>
-        <IconButton v-if="hasProject" label="打开文件" @click="startOpenFile">
-          <Plus :size="15" />
-        </IconButton>
-        <IconButton
-          v-if="hasProject"
-          :label="treeVisible ? '隐藏目录树' : '显示目录树'"
-          :aria-pressed="treeVisible"
-          @click="treeVisible = !treeVisible"
-        >
-          <PanelRightClose v-if="treeVisible" :size="15" />
-          <PanelRightOpen v-else :size="15" />
-        </IconButton>
-      </header>
+          </template>
+        </WorkspaceTabBar>
+      </div>
 
       <div class="file-crumbs-bar">
         <nav
@@ -785,16 +751,13 @@ function message(value: unknown): string {
           <IconButton label="刷新文件" :disabled="loading" @click="refreshFile"
             ><RefreshCw :size="13"
           /></IconButton>
-          <Button
-            v-if="
-              activeTab.preview.revealable && !sessionId.startsWith('draft:')
-            "
-            class="source-toggle"
-            size="sm"
+          <IconButton
+            v-if="activeTab.preview.revealable && !isDraftSession"
+            label="在访达中显示"
             @click="revealFile"
           >
-            Finder
-          </Button>
+            <FolderOpen :size="13" />
+          </IconButton>
           <Button
             v-if="isMarkdown"
             class="source-toggle"
@@ -803,12 +766,27 @@ function message(value: unknown): string {
           >
             {{ activeTab.sourceMode ? '预览' : '源码' }}
           </Button>
-          <IconButton label="复制相对路径" @click="copyPath(true)">
-            <Copy :size="13" />
-          </IconButton>
-          <IconButton label="复制绝对路径" @click="copyPath(false)">
-            <Clipboard :size="13" />
-          </IconButton>
+          <span ref="copyAnchor" class="copy-anchor">
+            <IconButton
+              label="复制路径"
+              aria-haspopup="menu"
+              :aria-expanded="copyMenu"
+              @click="copyMenu = !copyMenu"
+            >
+              <Copy :size="13" />
+            </IconButton>
+          </span>
+          <Menu
+            v-model:open="copyMenu"
+            :anchor="copyAnchor"
+            placement="bottom"
+            :width="180"
+            dense
+            label="复制路径"
+          >
+            <MenuItem @select="copyPath(true)">复制相对路径</MenuItem>
+            <MenuItem @select="copyPath(false)">复制绝对路径</MenuItem>
+          </Menu>
         </div>
       </div>
 
@@ -859,13 +837,7 @@ function message(value: unknown): string {
               ><code v-html="line || ' '"></code>
             </div>
           </div>
-          <div v-else class="files-muted">
-            {{
-              activeTab.preview.kind === 'directory'
-                ? '目录位置 · 可在 Finder 中查看'
-                : '此格式暂不支持内容预览。'
-            }}
-          </div>
+          <div v-else class="files-muted">{{ noPreviewNote }}</div>
           <div v-if="activeTab.request.uses?.length" class="file-source-uses">
             <button
               v-for="(use, index) in activeTab.request.uses"
@@ -878,13 +850,13 @@ function message(value: unknown): string {
           </div>
           <p class="file-preview-meta">
             {{ activeTab.preview.mimeType }} ·
-            {{ activeTab.preview.bytes.toLocaleString() }} bytes · 只读
+            {{ activeTab.preview.bytes.toLocaleString() }} 字节 · 只读
           </p>
           <small v-if="activeTab.preview.extractedText" class="file-truncated"
             >PDF 提取文本 · 不含原始排版</small
           >
           <small v-if="activeTab.preview.truncated" class="file-truncated">
-            预览已截断 · {{ activeTab.preview.bytes }} bytes
+            预览已截断 · {{ activeTab.preview.bytes.toLocaleString() }} 字节
           </small>
         </template>
         <EmptyState
@@ -1040,122 +1012,21 @@ function message(value: unknown): string {
   overflow: hidden;
 }
 
-/* ── tab strip ─────────────────────────────────────────────────────── */
-.file-tabs-bar {
-  display: flex;
-  min-height: calc(var(--space-8) + var(--space-2));
+.file-tab-bar {
   flex: none;
-  align-items: center;
-  gap: var(--space-0-5);
-  padding: 0 var(--space-1-5) 0 0;
-  border-bottom: 1px solid var(--border-l1);
-}
-
-.file-tabs {
-  display: flex;
   min-width: 0;
-  flex: 1;
-  align-self: stretch;
-  align-items: stretch;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.file-tabs::-webkit-scrollbar {
-  display: none;
-}
-
-.file-tab {
-  position: relative;
-  display: inline-flex;
-  max-width: 320px;
-  flex: none;
-  align-items: stretch;
-  border-right: 1px solid var(--border-l1);
-  color: rgb(var(--label-tertiary));
-}
-
-.file-tab:hover {
-  color: rgb(var(--label-secondary));
-}
-
-.file-tab.active {
-  color: rgb(var(--label-primary));
-  background: rgb(var(--bg-layer-1));
-}
-
-.file-tab.active::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
-  height: 2px;
-  background: rgb(var(--accent-fill));
-}
-
-.file-tab-main {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: var(--space-1-5);
-  padding: var(--space-2) var(--space-1) var(--space-2) var(--space-3);
-  color: inherit;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-}
-
-.file-tab.draft .file-tab-main {
-  padding-right: var(--space-3);
-}
-
-.file-tab.draft:has(.file-tab-close) .file-tab-main {
-  padding-right: var(--space-1);
-}
-
-.file-tab-main span {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.file-tab-main:focus-visible,
-.file-tab-close:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px rgb(var(--focus-ring) / 0.5);
-}
-
-.file-tab-close {
-  display: inline-grid;
-  align-self: center;
-  place-items: center;
-  margin-right: var(--space-1-5);
-  padding: 2px;
-  border-radius: var(--radius-xs);
-  color: rgb(var(--label-tertiary));
-  opacity: 0;
-}
-
-.file-tab:hover .file-tab-close,
-.file-tab.active .file-tab-close,
-.file-tab-close:focus-visible {
-  opacity: 1;
-}
-
-.file-tab-close:hover {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
 }
 
 /* ── breadcrumb ────────────────────────────────────────────────────── */
 .file-crumbs-bar {
   display: flex;
-  min-height: var(--space-8);
+  min-height: var(--row-h);
   flex: none;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
   padding: 0 var(--space-1-5) 0 var(--space-3);
-  border-bottom: 1px solid var(--border-l1);
+  box-shadow: inset 0 -0.5px 0 var(--hairline);
 }
 
 .file-crumbs {
@@ -1164,10 +1035,9 @@ function message(value: unknown): string {
   align-items: center;
   gap: var(--space-1);
   flex-wrap: wrap;
-  padding-block: var(--space-1-5);
-  color: rgb(var(--label-tertiary));
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
+  padding-block: var(--space-1);
+  color: rgb(var(--text-3));
+  font: var(--weight-regular) var(--type-caption) var(--font-sans);
 }
 
 .crumb {
@@ -1177,13 +1047,13 @@ function message(value: unknown): string {
 
 .crumb:last-child {
   max-width: 100%;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--text-2));
 }
 
 .crumb-root,
 .crumb-sep {
   flex: none;
-  color: rgb(var(--label-caption));
+  color: rgb(var(--text-4));
 }
 
 .file-preview-actions {
@@ -1191,6 +1061,10 @@ function message(value: unknown): string {
   flex: none;
   align-items: center;
   gap: var(--space-0-5);
+}
+
+.copy-anchor {
+  display: inline-flex;
 }
 
 .source-toggle {
@@ -1290,8 +1164,8 @@ function message(value: unknown): string {
   min-height: 0;
   flex: none;
   flex-direction: column;
-  border-left: 1px solid var(--border-l1);
-  background: rgb(var(--bg-layer-1) / 0.5);
+  background: rgb(var(--surface-canvas));
+  box-shadow: inset 0.5px 0 0 var(--hairline);
 }
 
 .file-tree-resizer {

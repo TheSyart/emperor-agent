@@ -116,7 +116,7 @@ Chat 与 Trajectory 只从 session log 的原始 `SessionEvent` 渲染，不再�
 
 `desktop/src/renderer/src/conversation/` 负责把原始事件投影成 Chat 节点：
 
-- `sessionWindow.ts`：每个 session 一个连续事件窗口，状态 `cold → opening → open`。打开时先拉尾页；拉取期间到达的 live 事件先缓冲，再按 `seq` 拼接。`seq` 是去重键；发现缺口时重新拉尾页修复；`loadOlder` 用 `beforeSeq` 向前翻页并检查连续性。
+- `sessionWindow.ts`：每个 session 一个连续事件窗口，状态 `cold → opening → open`。打开时先拉尾页；拉取期间到达的 live 事件先缓冲，再按 `seq` 拼接。`seq` 是去重键；发现缺口时重新拉尾页修复，已加载的更早页只要与新尾页相接就保留（读者位置不跳）；最多修补 3 次，仍接不上就整窗从尾页重开（`resync`），不丢弃已到的事件；`loadOlder` 用 `beforeSeq` 向前翻页并检查连续性。读取失败时窗口进入 `error`，时间线显示原因与「重试」（`handle.retry()`），再次打开该会话也会重新读取；启动失败画面的「重新连接」调用 `ConversationStore.resyncAll()` 重读所有打开的窗口（FIX-03）。
 - `assembler.ts` 与 `nodes/*` 把事件折叠成节点，`chatSnapshot.ts` 产出 Chat 快照；`composerPhase.ts` 推导 Composer 处于 `blank`、`engaging` 还是 `active`。
 - `store.ts` 的 `useConversation`：每个节点一个 `shallowRef`，流式增量只触发对应行；流式发布按 `requestAnimationFrame` 合批。一次刷新若只让流式回答的文字变长（块、空与非空、状态都不变），`chatSnapshot.ts` 返回上一个快照对象，快照 ref 不触发；`running`、`turnCount`、`planSummary` 各有自己的 ref，只在值变化时触发。快照里的事实增量维护：待办只在待办事实变化时重算，上下文用量只在带用量的模型行或请求事实变化时重算，计划摘要（`snapshot.planSummary`）只在计划行、待办或顺序变化时重算。最多保留 4 个打开的窗口（LRU），当前会话和面包屑中的父会话被 retain，不会被淘汰。所有窗口共享一个全局 `onSessionEvents` 订阅，watch 集合跟随打开的窗口变化。
 

@@ -376,7 +376,11 @@ async function userBrowser(
       // only hides the native view; same webContents, cookie and address.
       // The history menu may still be open (Escape went to the page): an
       // outside press closes it, and the view shows again a frame later.
-      await page.locator('.workspace-title').click()
+      const header = page.locator('.workspace-header')
+      const headerBox = (await header.boundingBox())!
+      await header.click({
+        position: { x: headerBox.width - 80, y: headerBox.height / 2 },
+      })
       await page
         .getByRole('menu', { name: '浏览历史' })
         .waitFor({ state: 'hidden', timeout: 5_000 })
@@ -397,9 +401,10 @@ async function userBrowser(
         )
       })
       const before = (await userView(app))!
-      await page.getByRole('button', { name: '工作台首页' }).click()
+      // UI-S06: no launcher home any more; another pane hides the page.
+      await page.locator('.workspace-panes [data-tab-id="files"]').click()
       try {
-        await page.locator('.workspace-launcher').waitFor({ timeout: 5_000 })
+        await page.locator('.files-pane').waitFor({ timeout: 5_000 })
         await until(
           async () => (await userView(app))?.visible !== true,
           5_000,
@@ -411,7 +416,7 @@ async function userBrowser(
             `the page closed with the pane: ${JSON.stringify({ before, hidden })}`,
           )
       } finally {
-        await page.locator('.segments button[data-pane="browser"]').click()
+        await page.locator('.workspace-panes [data-tab-id="browser"]').click()
       }
       await until(
         async () => (await userView(app))?.visible === true,

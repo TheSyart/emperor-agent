@@ -1,13 +1,16 @@
 <script setup lang="ts">
 /**
- * WorkspacePanel — the AppFrame's right workspace panel: a PaneHeader (pane
- * title, segmented pane switch 审查 / 终端 / 文件 / 浏览器, launcher home,
- * close) over one pane body. The 48px PaneHeader is pulled up 2px so its
- * bottom meets the conversation header's 46px row. The launcher lists the panes with their
- * shortcuts; every pane is its own async chunk (xterm, the file
- * highlighter and the diff views stay out of the shell bundle). The
- * AppFrame owns the column width and drag handle; this fills whatever the
- * column gives and stays mounted while the column is closed.
+ * WorkspacePanel — the AppFrame's right workspace panel: a PaneHeader (the
+ * segmented pane switch 审查 / 终端 / 文件 / 浏览器 on the left, close on
+ * the right; the pane name is the region's hidden heading) over one pane
+ * body. The 48px PaneHeader is pulled up 2px so its bottom meets the
+ * conversation header's 46px row. The column opens on the pane used last;
+ * before any pane has been chosen the body is WorkspaceEmpty (the four panes
+ * with their shortcuts) — there is no launcher home to go back to (UI-S06).
+ * Every pane is its own async chunk (xterm, the file highlighter and the
+ * diff views stay out of the shell bundle). The AppFrame owns the column
+ * width and drag handle; this fills whatever the column gives and stays
+ * mounted while the column is closed.
  *
  * Open state and the active pane live in frameState. Chat components ask
  * for content through workspaceState.requestWorkspace() instead of holding
@@ -44,7 +47,8 @@
  * - agentBusy: disables conflicting Git writes while the agent runs.
  */
 import EmptyState from '../ui/EmptyState.vue'
-import { House } from 'lucide-vue-next'
+import Tabs from '../ui/Tabs.vue'
+import type { TabItem } from '../ui/blockTypes'
 import {
   computed,
   defineAsyncComponent,
@@ -64,9 +68,8 @@ import {
 } from '../shell/frameState'
 import IconButton from '../ui/IconButton.vue'
 import PaneHeader from '../ui/PaneHeader.vue'
-import WorkspaceLauncher from './WorkspaceLauncher.vue'
+import WorkspaceEmpty from './WorkspaceEmpty.vue'
 import { useWorkspaceSnapshot } from './useWorkspaceSnapshot'
-import { WORKSPACE_PANE_ICONS } from './workspaceIcons'
 import { FILES_TREE_DEFAULT, clampFilesTreeWidth } from './workspaceModel'
 import {
   NO_PROJECT_REASON,
@@ -97,7 +100,14 @@ const props = defineProps<{ open: boolean; agentBusy: boolean }>()
 
 const frame = useFrameState()
 const workspace = useWorkspaceSnapshot({ active: () => props.open })
-const { sessionId, projectPath, snapshot, hasProject, hasGit } = workspace
+const {
+  sessionId,
+  viewedSessionId,
+  projectPath,
+  snapshot,
+  hasProject,
+  hasGit,
+} = workspace
 
 const reviewFilterPaths = ref<string[]>([])
 const filesTreeWidth = ref(FILES_TREE_DEFAULT)
@@ -128,12 +138,17 @@ const availability = computed<WorkspaceAvailability>(() => ({
   snapshotLoaded: Boolean(snapshot.value),
   hasGit: hasGit.value,
 }))
-const segments = computed(() =>
-  WORKSPACE_PANE_ITEMS.map((item) => ({
-    ...item,
-    icon: WORKSPACE_PANE_ICONS[item.pane],
-    reason: workspacePaneDisabledReason(item.pane, availability.value),
-  })),
+/** The pane switch; a disabled pane says why on hover. */
+const paneTabs = computed<TabItem[]>(() =>
+  WORKSPACE_PANE_ITEMS.map((item) => {
+    const reason = workspacePaneDisabledReason(item.pane, availability.value)
+    return {
+      id: item.pane,
+      label: item.label,
+      disabled: Boolean(reason),
+      ...(reason ? { title: reason } : {}),
+    }
+  }),
 )
 const reviewReason = computed(() =>
   workspacePaneDisabledReason('review', availability.value),
@@ -211,7 +226,7 @@ function handleRequest(request: WorkspaceRequest): void {
             },
             line: file.line,
           }
-    if (next.owner === sessionId.value) pendingFile.value = next
+    if (ownsFiles(next.owner)) pendingFile.value = next
   }
   if (request.pane === 'files' && request.directory !== undefined)
     pendingFile.value = { path: request.directory, directory: true }
@@ -226,16 +241,16 @@ async function flushPendingFile(): Promise<void> {
   if (!request || !filesPane.value) return
   pendingFile.value = null
   if ('directory' in request) await filesPane.value.openDirectory(request.path)
-  else if (request.owner === sessionId.value)
-    await filesPane.value.openPreview(request)
+  else if (ownsFiles(request.owner)) await filesPane.value.openPreview(request)
 }
 
-function selectPane(target: WorkspaceContentPane): void {
-  frameActions.setWorkspacePane(frame, target)
+/** The active session, or the child log on screen (its files open here). */
+function ownsFiles(owner: string): boolean {
+  return owner === sessionId.value || owner === viewedSessionId.value
 }
 
-function showLauncher(): void {
-  frameActions.setWorkspacePane(frame, 'launcher')
+function selectPane(target: string): void {
+  frameActions.setWorkspacePane(frame, target as WorkspaceContentPane)
 }
 
 function close(): void {
@@ -262,38 +277,25 @@ async function persistFilesTreeWidth(): Promise<void> {
 <template>
   <div class="workspace-panel" role="region" aria-label="工作台">
     <PaneHeader class="workspace-header">
-      <template #title>
-        <h2 class="workspace-title">{{ title }}</h2>
+      <template #tabs>
+        <h2 class="workspace-title sr-only">{{ title }}</h2>
+        <Tabs
+          class="workspace-panes"
+          variant="segmented"
+          :tabs="paneTabs"
+          :model-value="pane === 'launcher' ? '' : pane"
+          aria-label="工作台面板"
+          @update:model-value="selectPane"
+        />
       </template>
       <template #actions>
-        <div class="segments" role="group" aria-label="工作台面板">
-          <IconButton
-            v-for="segment in segments"
-            :key="segment.pane"
-            :label="segment.label"
-            :active="pane === segment.pane"
-            :aria-pressed="pane === segment.pane"
-            :disabled="Boolean(segment.reason)"
-            :data-pane="segment.pane"
-            @click="selectPane(segment.pane)"
-          >
-            <component :is="segment.icon" :size="16" />
-          </IconButton>
-        </div>
-        <IconButton
-          label="工作台首页"
-          :active="pane === 'launcher'"
-          @click="showLauncher"
-        >
-          <House :size="16" />
-        </IconButton>
         <IconButton shape="circle" label="关闭工作台" @click="close">
           <DsClose :size="14" />
         </IconButton>
       </template>
     </PaneHeader>
     <div class="workspace-body" :data-pane="pane">
-      <WorkspaceLauncher
+      <WorkspaceEmpty
         v-if="pane === 'launcher'"
         :availability="availability"
         @open="selectPane"
@@ -365,7 +367,7 @@ async function persistFilesTreeWidth(): Promise<void> {
   height: 100%;
   min-width: 0;
   background: rgb(var(--surface-base));
-  color: rgb(var(--label-primary));
+  color: rgb(var(--text-1));
 }
 
 /* The 48px PaneHeader, pulled up 2px: its bottom (and hairline) meets the
@@ -374,25 +376,10 @@ async function persistFilesTreeWidth(): Promise<void> {
   margin-top: calc(var(--shell-bar-h) - var(--pane-header-h));
 }
 
-.workspace-title {
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  font-size: var(--fs-s);
-  line-height: var(--lh-s);
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.segments {
-  display: inline-flex;
-  flex: none;
+/* The segmented switch starts where a title would (PaneHeader's left
+   inset): the header has no other title. */
+.workspace-header :deep(.tabs) {
   align-items: center;
-  gap: var(--space-0-5);
-  padding: var(--space-0-5);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-cell);
 }
 
 /* Panes scroll themselves. */

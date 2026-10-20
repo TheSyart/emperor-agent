@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import type { Agent } from '../agent/agent'
 import { WorkflowEngine, type WorkflowEngineConfig } from './engine'
 import { WorkflowError } from './errors'
-import { workerSpawnEnv } from './host'
+import type { WorkerRun } from './host'
 import type {
   ChildProvider,
   ChildProviderStartRequest,
@@ -147,20 +147,83 @@ async function waitFor(check: () => boolean, timeoutMs = 3000): Promise<void> {
 describe('workflow worker source', () => {
   it('serializes self-contained factories with no transpiler helpers', () => {
     const source = workflowWorkerSource()
-    expect(source).toContain("require('node:worker_threads')")
+    // KRN-09: the entry of a contained child process, not a worker thread.
+    expect(source).not.toContain('worker_threads')
+    expect(source).toContain('process.send')
     expect(source).not.toMatch(/\b__name\(|\b__publicField\(/)
     // Parses as a script.
     expect(() => new Function(source)).not.toThrow()
   })
-
-  it('scrubs the worker environment (Windows keeps only its temp path)', () => {
-    expect(workerSpawnEnv('darwin', '/tmp')).toEqual({})
-    expect(workerSpawnEnv('win32', 'C:\\tmp')).toEqual({
-      TMP: 'C:\\tmp',
-      TEMP: 'C:\\tmp',
-    })
-  })
 })
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+describe.runIf(process.platform === 'darwin')(
+  'WorkflowEngine in a contained process (KRN-09)',
+  () => {
+    it('4 · a run past its wall-clock limit ends as a timeout the parent sees', async () => {
+      const { engine } = engineWith(fakeProvider(), { wallClockMs: 600 })
+      const run = engine.start(request('await new Promise(() => {})'))
+      const result = await run.result
+      await run.dispose()
+      expect(result.stopReason).toBe('error')
+      expect(result.error).toMatch(/^WORKFLOW_TIMEOUT: /)
+    })
+
+    it('5 · a run past its memory ceiling ends as an error', async () => {
+      const { engine } = engineWith(fakeProvider(), { maxOldSpaceMb: 64 })
+      const run = engine.start(
+        request(
+          `const P = this.constructor.constructor('return process')()
+           P.nextTick(() => { const hold = []; for (;;) hold.push(new Array(1 << 20).fill(1.5)) })
+           await new Promise(() => {})`,
+        ),
+      )
+      const result = await run.result
+      await run.dispose()
+      expect(result.stopReason).toBe('error')
+      expect(result.error).toMatch(/exit|heap|memory/i)
+    })
+
+    it('7 · cancelling the run kills its process', async () => {
+      const { engine } = engineWith(fakeProvider())
+      const run = engine.start(request('await new Promise(() => {})'))
+      await waitFor(() => (run as WorkerRun).processId !== undefined)
+      const pid = (run as WorkerRun).processId!
+      expect(processAlive(pid)).toBe(true)
+      run.cancel('the parent turn was stopped')
+      await run.result
+      await run.dispose()
+      expect(processAlive(pid)).toBe(false)
+    })
+
+    it('an escape from the script realm reaches only the contained process', async () => {
+      const marker = 'EMPEROR_KRN09_SECRET'
+      process.env[marker] = 'must-not-leak'
+      try {
+        const { engine } = engineWith(fakeProvider())
+        const run = engine.start(
+          request(
+            `const P = this.constructor.constructor('return process')()
+             return { secret: P.env.${marker} ?? null, home: P.env.HOME ?? null }`,
+          ),
+        )
+        const result = await run.result
+        await run.dispose()
+        expect(result.value).toEqual({ secret: null, home: null })
+      } finally {
+        delete process.env[marker]
+      }
+    })
+  },
+)
 
 describe('WorkflowEngine over a real worker thread', () => {
   it('runs a script end to end: text results, phases, log, args, return value, events', async () => {

@@ -57,6 +57,32 @@ export interface ExecutorLimits {
   runTimeoutMs: number
   questionTimeoutMs: number
   estimatedBudgetUsd: number
+  /**
+   * Tokens one task may spend on API-billed runs whose price is unknown
+   * (AGT-07); absent: {@link DEFAULT_UNPRICED_TOKENS_PER_TASK}.
+   */
+  maxUnpricedTokensPerTask?: number
+}
+/** The token cap for unpriced API runs when the config sets none. */
+export const DEFAULT_UNPRICED_TOKENS_PER_TASK = 2_000_000
+/**
+ * How an executor's spend is paid (AGT-07): a subscription (Claude or
+ * ChatGPT login) has nominal cost only and is bounded by turns and time;
+ * an API key spends money and is bounded by the task's USD or token cap.
+ */
+export type ExecutorBilling = 'subscription' | 'api'
+/** A run's usage as recorded and as the budget counts it. */
+export interface ExecutorRunUsage {
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
+  reasoningTokens?: number
+  totalTokens?: number
+  /** Real API spend; never set for a subscription. */
+  estimatedUsd?: number
+  /** A subscription's reported cost: shown, never counted. */
+  nominalUsd?: number
+  billing?: ExecutorBilling
 }
 export interface ExecutorConfig {
   schemaVersion: 1
@@ -237,7 +263,7 @@ export interface DelegationRunRecord {
   receiptId?: string
   failureCode?: string
   summary?: string
-  usage?: { inputTokens?: number; outputTokens?: number; estimatedUsd?: number }
+  usage?: ExecutorRunUsage
 }
 export interface ExecutorOpenInput {
   onProcessStarted?: (
@@ -248,6 +274,8 @@ export interface ExecutorOpenInput {
   ) => void
   outputSchema?: ObjectJsonSchema
   usageBaseline?: { estimatedUsd?: number }
+  /** What an API-billed run may still spend (Claude's maxBudgetUsd). */
+  budgetUsd?: number
   policy: SandboxExecutionPolicy
   runtimeRoot: string
   secretValues?: readonly string[]
@@ -322,6 +350,9 @@ export type ExecutorEventPayload =
       type: 'usage'
       inputTokens?: number
       outputTokens?: number
+      cacheReadTokens?: number
+      reasoningTokens?: number
+      totalTokens?: number
       estimatedUsd?: number
     }
   | {

@@ -6,7 +6,6 @@
  * quiescence waits for both while synthesizing any missing end events.
  */
 
-import { Worker } from 'node:worker_threads'
 import { snapshotJsonValue } from '../../session-log/json'
 import { logger } from '../../util/log'
 import type { Agent } from '../agent/agent'
@@ -27,23 +26,15 @@ import type {
   WorkflowRun,
 } from './types'
 import { workflowWorkerSource } from './worker-source'
+import {
+  spawnWorkflowProcess,
+  type WorkflowProcessOptions,
+  type WorkflowWorkerHandle,
+} from './process-worker'
 
 interface ChildRecord {
   readonly run: ChildRun
   disposal?: Promise<void>
-}
-
-/** The scrubbed worker environment: no ambient credentials (Windows keeps its temp path). */
-export function workerSpawnEnv(
-  platform: NodeJS.Platform = process.platform,
-  tmp = process.env.TMP ?? process.env.TEMP,
-): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {}
-  if (platform === 'win32' && tmp !== undefined) {
-    env.TMP = tmp
-    env.TEMP = tmp
-  }
-  return env
 }
 
 export interface WorkerRunOptions {
@@ -56,6 +47,10 @@ export interface WorkerRunOptions {
   observer: ExecutionObserver
   signal?: AbortSignal
   callId?: string
+  /** The contained process the script runs in (KRN-09). */
+  process: Omit<WorkflowProcessOptions, 'source' | 'init'>
+  /** Wall-clock limit of the run (ms); past it the run ends as an error. */
+  wallClockMs?: number
 }
 
 /**
@@ -74,7 +69,9 @@ export class WorkerRun implements WorkflowRun {
   private workerDeathObserved = false
   private cancelReason: string | undefined
   private graceTimer: NodeJS.Timeout | undefined
-  private readonly worker: Worker
+  private readonly worker: WorkflowWorkerHandle
+  private wallClockTimer: NodeJS.Timeout | undefined
+  private timedOut: string | undefined
   private workerGone = false
   /** Accepted `child-start` messages (the terminate-path `agentsStarted`). */
   private hostStarted = 0
@@ -106,14 +103,13 @@ export class WorkerRun implements WorkflowRun {
     })
     // workerData rides the structured clone: args are plain JSON by contract,
     // so the clone doubles as the caller-isolation copy.
-    this.worker = new Worker(workflowWorkerSource(), {
-      eval: true,
-      workerData: options.init,
-      env: workerSpawnEnv(),
-      execArgv: [],
+    this.worker = spawnWorkflowProcess({
+      ...options.process,
+      source: workflowWorkerSource(),
+      init: options.init,
     })
-    this.worker.on('message', (message: WorkerToHostMessage) => {
-      this.onMessage(message)
+    this.worker.on('message', (message) => {
+      this.onMessage(message as WorkerToHostMessage)
     })
     this.worker.on('error', (error) => {
       this.onWorkerDeath(
@@ -129,11 +125,20 @@ export class WorkerRun implements WorkflowRun {
     })
     this.worker.on('exit', (code) => {
       this.workerGone = true
+      const tail = this.worker.stderrTail()
       this.onWorkerDeath(
-        `workflow worker exited before the run settled (exit code ${code})`,
+        `workflow worker exited before the run settled (exit code ${code})${tail ? `: ${tail}` : ''}`,
         true,
       )
     })
+    if (options.wallClockMs !== undefined && options.wallClockMs > 0) {
+      const limit = options.wallClockMs
+      this.wallClockTimer = setTimeout(() => {
+        this.timedOut = `WORKFLOW_TIMEOUT: workflow ran past its ${formatLimit(limit)} limit`
+        this.cancel(this.timedOut)
+      }, limit)
+      this.wallClockTimer.unref()
+    }
     const signal = options.signal
     if (signal?.aborted) {
       this.cancel('workflow start signal already aborted')
@@ -523,8 +528,25 @@ export class WorkerRun implements WorkflowRun {
     this.settled = true
     this.detachInputSignal()
     clearTimeout(this.graceTimer)
-    this.settleResolve(result)
+    clearTimeout(this.wallClockTimer)
+    // A run stopped by its wall-clock limit is a failure the parent sees.
+    this.settleResolve(
+      this.timedOut !== undefined && result.stopReason === 'cancelled'
+        ? { ...result, stopReason: 'error', error: this.timedOut }
+        : result,
+    )
   }
+
+  /** The script process's pid (tests). */
+  get processId(): number | undefined {
+    return this.worker.pid
+  }
+}
+
+function formatLimit(ms: number): string {
+  return ms >= 60_000
+    ? `${Math.round(ms / 60_000)} minute`
+    : `${Math.round(ms / 1000)} second`
 }
 
 function sleep(ms: number): Promise<void> {

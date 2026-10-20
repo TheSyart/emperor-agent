@@ -358,3 +358,23 @@ it.each([
     f.cleanup()
   },
 )
+it('caps an API-billed run with the SDK maxBudgetUsd and leaves a subscription uncapped (AGT-07)', async () => {
+  for (const budgetUsd of [3.5, undefined]) {
+    const f = fixture()
+    const session = await f.adapter.open({
+      ...f.input,
+      ...(budgetUsd === undefined ? {} : { budgetUsd }),
+    })
+    const submit = session.submit({
+      runId: 'dgr-budget',
+      messageId: 'dgm-budget',
+      text: 'fixture',
+    })
+    for await (const event of session.events)
+      if (event.type === 'turn_finished') break
+    await submit
+    expect(f.getOptions().maxBudgetUsd).toBe(budgetUsd)
+    await session.close()
+    f.cleanup()
+  }
+})

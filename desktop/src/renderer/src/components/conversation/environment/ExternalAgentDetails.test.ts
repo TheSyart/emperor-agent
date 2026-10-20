@@ -290,3 +290,48 @@ it('offers configuration on real authentication failure without retrying through
   expect(configure).toHaveBeenCalledOnce()
   expect(api.sendDelegationMessage).not.toHaveBeenCalled()
 })
+
+// AGT-07: the cost line says how the run is paid, with the ledger's number.
+function withRun(patch: Record<string, unknown>) {
+  const s = state()
+  Object.assign(s.runs['dgr-one'], patch)
+  api.getDelegation.mockResolvedValue(s)
+}
+it('7 · a subscription run reads 订阅额度，不计费用, not a dollar figure', async () => {
+  withRun({
+    usage: {
+      inputTokens: 1200,
+      outputTokens: 300,
+      nominalUsd: 12.5,
+      billing: 'subscription',
+    },
+  })
+  const body = await mount()
+  const line = body.querySelector('[data-run-usage]')!
+  expect(line.textContent).toContain('订阅额度，不计费用')
+  expect(line.textContent).not.toContain('$')
+})
+it('7 · an API run shows the same estimate the budget counted', async () => {
+  withRun({
+    usage: {
+      inputTokens: 1200,
+      outputTokens: 300,
+      estimatedUsd: 1.2345,
+      billing: 'api',
+    },
+  })
+  const body = await mount()
+  expect(body.querySelector('[data-run-usage]')!.textContent).toContain(
+    '估算 $1.2345',
+  )
+})
+it('names the task limits a run stopped at', async () => {
+  withRun({ phase: 'failed', failureCode: 'TOKEN_LIMIT' })
+  const body = await mount()
+  expect(body.textContent).toContain('已达到单任务 token 上限')
+  withRun({ phase: 'failed', failureCode: 'BUDGET_LIMIT' })
+  app?.unmount()
+  root.remove()
+  const again = await mount()
+  expect(again.textContent).toContain('已达到单任务费用上限')
+})

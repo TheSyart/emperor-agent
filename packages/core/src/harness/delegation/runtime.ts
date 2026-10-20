@@ -9,7 +9,11 @@ import {
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { DelegationError, type ExecutorProfile } from './types'
+import {
+  DelegationError,
+  type ExecutorBilling,
+  type ExecutorProfile,
+} from './types'
 import { safeDelegationKey } from './fold'
 import { durableReplaceSync } from '../../store/persistence'
 import { executorEnvironment } from './environment'
@@ -34,6 +38,11 @@ export interface PreparedRuntime {
   authenticationAvailable: boolean
   /** Codex ChatGPT login: the isolated auth.json links to the user's file. */
   codexAuth?: CodexAuthLink
+  /**
+   * How the run's spend is paid (AGT-07): a Claude OAuth token or a ChatGPT
+   * login is a subscription; any API key or credential route is API billing.
+   */
+  billing: ExecutorBilling
 }
 export interface ExecutorCredential {
   apiKey: string
@@ -354,6 +363,16 @@ export class ExecutorRuntimeService {
       }
       if (!codexAuth) removeCodexAuth(isolated)
     }
+    const billing: ExecutorBilling =
+      profile.backend === 'claude-code'
+        ? !environment.ANTHROPIC_API_KEY &&
+          !environment.ANTHROPIC_AUTH_TOKEN &&
+          environment.CLAUDE_CODE_OAUTH_TOKEN
+          ? 'subscription'
+          : 'api'
+        : codexAuth
+          ? 'subscription'
+          : 'api'
     const secretValues = [
       ...credentialSecrets,
       ...Object.entries(environment)
@@ -367,6 +386,7 @@ export class ExecutorRuntimeService {
       secretValues,
       authenticationAvailable,
       ...(codexAuth ? { codexAuth } : {}),
+      billing,
     }
   }
 }

@@ -170,6 +170,8 @@ export interface ConversationHandle {
   /** Loaded raw events (seq ascending, wire-sanitized; read-only). */
   rawEvents(): readonly WireSessionEvent[]
   loadOlder(): Promise<void>
+  /** Read the history again after a failed read (FIX-03). */
+  retry(): Promise<void>
   /** Flush pending publications synchronously (tests, imperative reads). */
   flushNow(): void
 }
@@ -272,8 +274,20 @@ export class ConversationStore {
     })
   }
 
+  /**
+   * Reopen every open window from its tail (FIX-03: after 「重新连接」, when
+   * live events may have been missed).
+   */
+  async resyncAll(): Promise<void> {
+    await Promise.all(
+      [...this.entries.values()].map((entry) => entry.window.resync()),
+    )
+  }
+
   private startOpen(entry: Entry): void {
-    if (entry.opened !== null) return
+    // A failed read is read again when the session is opened again.
+    if (entry.opened !== null && entry.window.snapshot.openState !== 'error')
+      return
     // Watch first so no live event falls between the history cut and the
     // subscription; events that race the fetch are buffered by the window.
     entry.opened = this.watchChain
@@ -407,6 +421,13 @@ export class ConversationStore {
       },
       rawEvents: () => window.window,
       loadOlder: () => window.loadOlder(),
+      retry: () => {
+        const entry = box.entry
+        if (entry === null) return Promise.resolve()
+        entry.opened = null
+        this.startOpen(entry)
+        return entry.opened ?? Promise.resolve()
+      },
       flushNow: () => {
         if (box.entry !== null) this.flush(box.entry)
       },

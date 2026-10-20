@@ -7,8 +7,8 @@
  * an asar — so a file-path entry would need per-host resolution. Instead the
  * worker-side code is written as SELF-CONTAINED factories (`createRealmKit`,
  * `createJsonSchemaKit`, `createExecutionKit`, `createSessionKit`) whose
- * compiled function text is concatenated here and started with
- * `new Worker(source, { eval: true })`. Whatever transpiler produced the
+ * compiled function text is concatenated here and run as the entry of the
+ * contained script process (KRN-09, process-worker.ts). Whatever transpiler produced the
  * running host code also produced this text, so it is always plain JS for the
  * current runtime; the factories take every dependency as an argument, so the
  * text references nothing outside itself except `require` of Node builtins.
@@ -25,7 +25,11 @@ const FOREIGN_HELPERS =
 
 let cached: string | undefined
 
-/** The eval'd worker entry: boots `runWorkerSession` on `parentPort` with `workerData`. */
+/**
+ * The script process's entry: the first IPC message is the run's init; the
+ * session talks over a port that forwards to `process.send` and buffers
+ * host messages until it listens. The process ends with its channel.
+ */
 export function workflowWorkerSource(): string {
   if (cached !== undefined) return cached
   const factories = {
@@ -43,14 +47,23 @@ export function workflowWorkerSource(): string {
   }
   cached = [
     '"use strict";',
-    "const { parentPort, workerData } = require('node:worker_threads');",
     "const vm = require('node:vm');",
     `const realm = (${factories.createRealmKit})();`,
     `const schema = (${factories.createJsonSchemaKit})();`,
     `const execution = (${factories.createExecutionKit})({ vm, realm, schema });`,
     `const session = (${factories.createSessionKit})({ execution, realm });`,
-    "if (parentPort === null) throw new Error('the workflow worker entry must be loaded inside a worker thread (no parentPort)');",
-    'void session.runWorkerSession(parentPort, workerData);',
+    "if (typeof process.send !== 'function') throw new Error('the workflow entry must run as a child process with an IPC channel');",
+    'const pending = [];',
+    'let deliver = null;',
+    "const port = { postMessage: (message) => process.send(message), on: (event, listener) => { if (event !== 'message') return; deliver = listener; for (const message of pending.splice(0)) listener(message); } };",
+    "process.on('disconnect', () => process.exit(0));",
+    "const fatal = (error) => { const message = String((error && error.stack) || error); try { process.send({ type: '__fatal', message }, () => process.exit(1)); } catch { process.exit(1); } };",
+    "process.on('uncaughtException', fatal);",
+    "process.on('unhandledRejection', fatal);",
+    "process.once('message', (init) => {",
+    "  process.on('message', (message) => { if (deliver) deliver(message); else pending.push(message); });",
+    '  void session.runWorkerSession(port, init);',
+    '});',
   ].join('\n')
   return cached
 }
