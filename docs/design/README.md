@@ -11,6 +11,7 @@
 
 | 规范                                         | 内容                                                               |
 | -------------------------------------------- | ------------------------------------------------------------------ |
+| [品牌资源规范](brand.md)                     | 标的几何与用法、应用图标、DMG 安装窗口、首启插图、退役的旧资源     |
 | [插件 Logo 设计规范](plugin-logos.md)        | 受管插件 Logo 的方框材质、渐变与光照、透明边界、尺寸和验收         |
 | [模型元数据规范](model-metadata.md)          | 随包模型目录的数据来源与许可、匹配规则、覆盖层与家族规则、刷新流程 |
 | [厂商模型列表接口规范](vendor-model-apis.md) | 各厂商模型列表接口的地址、字段、分页与坑，连接测试与错误码         |
@@ -32,7 +33,7 @@
 | 样式约束       | `desktop/src/renderer/src/style-audit.test.ts`：颜色与尺寸必须收敛到主题变量，`theme/*.css` 本身除外                                                                                                                       |
 | 样式归属       | `desktop/src/renderer/src/feature-style-owners.json`：每个界面功能的视图、控制器和样式层位置                                                                                                                               |
 | 组件           | `components/ui/`（见[组件规范](components.md)），开发模式下打开 `?ui-gallery` 查看；设置页的布局原语在 `components/settings/ui/`，打开 `?settings-gallery` 查看，搭建方法见[扩展指南](../development/extending-emperor.md) |
-| 品牌与产品图   | `assets/generated/` 下的产品字标、标志、产品图和插件 Logo；图片生成的提示词记录在 `assets/generated/PROMPTS.md`                                                                                                            |
+| 品牌与产品图   | 见[品牌资源规范](brand.md)；`assets/generated/` 下的标、首启插图、产品图和插件 Logo，图片生成的提示词记录在 `assets/generated/PROMPTS.md`                                                                                  |
 
 ## 新增规范
 
