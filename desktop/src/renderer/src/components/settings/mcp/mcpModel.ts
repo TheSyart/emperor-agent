@@ -169,13 +169,14 @@ function serverTools(
   tools: readonly McpToolLike[],
 ): McpServerTool[] {
   if (!enabled) return []
-  const prefix = `mcp_${name}_`
+  // Tool names clean server and tool names (`my.server` → `mcp_my_server_…`, KRN-04).
+  const clean = (value: string) => value.replace(/[^A-Za-z0-9_-]/g, '_')
+  const prefixes = [`mcp_${name}_`, `mcp_${clean(name)}_`]
   const described = new Map<string, string>()
   for (const tool of tools) {
     if (tool.source !== 'mcp' || tool.server !== name) continue
-    const short = tool.name.startsWith(prefix)
-      ? tool.name.slice(prefix.length)
-      : tool.name
+    const prefix = prefixes.find((candidate) => tool.name.startsWith(candidate))
+    const short = prefix ? tool.name.slice(prefix.length) : tool.name
     described.set(short, tool.description ?? '')
   }
   const names = status?.tools?.length
@@ -183,7 +184,8 @@ function serverTools(
     : [...described.keys()]
   return names.map((toolName) => ({
     name: toolName,
-    description: described.get(toolName) ?? '',
+    description:
+      described.get(toolName) ?? described.get(clean(toolName)) ?? '',
   }))
 }
 

@@ -1807,6 +1807,32 @@ test('settings MCP imports pasted JSON and manages the new card', async ({
   await expect(settings.locator('.mcp-server-card')).toHaveCount(4)
 })
 
+for (const theme of ['dark', 'light'] as const) {
+  test(`settings MCP card shows a stdio server's recent output (${theme})`, async ({
+    page,
+  }) => {
+    await open(page, '/chat/build-ui?settings=mcp', {
+      width: 1280,
+      height: 860,
+      theme,
+    })
+    const settings = fullPage(page)
+    const card = settings.locator('.mcp-server-card[data-server="github"]')
+    await card.getByRole('button', { name: /github/ }).click()
+    await card.getByRole('button', { name: '查看最近输出' }).click()
+    const output = card.locator('.server-output pre')
+    await expect(output).toContainText('GitHub MCP Server running on stdio')
+    await expect(card.getByRole('button', { name: '刷新输出' })).toBeVisible()
+    // Remote servers have no process output.
+    const remote = settings.locator('.mcp-server-card[data-server="context7"]')
+    await remote.getByRole('button', { name: /context7/ }).click()
+    await expect(remote.locator('.server-output')).toHaveCount(0)
+    await expectMcpColumnFits(page, settings)
+    await card.scrollIntoViewIfNeeded()
+    await shot(page, `settings-mcp-output-${theme}`)
+  })
+}
+
 test('settings MCP empty state explains paste import', async ({ page }) => {
   await open(page, '/chat/build-ui?settings=mcp&visualMcp=empty', {
     width: 1280,

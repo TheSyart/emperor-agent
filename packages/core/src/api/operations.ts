@@ -1704,6 +1704,9 @@ export const CORE_OPERATION_REGISTRY = {
   ),
   'mcp.getConfig': operation(z.tuple([]), (api) => api.mcp.getConfig()),
   'mcp.status': operation(z.tuple([]), (api) => api.mcp.status()),
+  'mcp.serverLog': operation(z.tuple([mcpServerRefSchema]), (api, [input]) =>
+    api.mcp.serverLog(input),
+  ),
   'mcp.saveConfig': operation(z.tuple([mcpConfigSchema]), (api, [input], ctx) =>
     api.mcp.saveConfig({ ...input }, viewOf(ctx, 'mcp.saveConfig')),
   ),

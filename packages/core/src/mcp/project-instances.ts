@@ -201,6 +201,11 @@ export class ProjectMcpInstances {
       idle: null,
     }
     this.instances.set(projectRoot, instance)
+    // Each server's tools join as it becomes ready (KRN-04).
+    client.onToolsChanged(() => {
+      if (this.instances.get(projectRoot) === instance)
+        this.options.onChanged?.()
+    })
     instance.ready = (async () => {
       try {
         await client.initialize(await this.options.environment(projectRoot))

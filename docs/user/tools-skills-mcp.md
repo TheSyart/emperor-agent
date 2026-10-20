@@ -20,7 +20,7 @@ Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资�
 | 任务与规划       | `todo_write`、`ask_user_question`、`exit_plan_mode`；目标 `get_goal`、`create_goal`、`update_goal`；定时 `scheduler`             |
 | 子代理与工作流   | `subagent`、`subagent_fork`、`send_message`、`interrupt_agent`、`list_agents`（子代理内另有 `report`）；编排 `workflow`、`ralph` |
 | 技能、记忆与配置 | `skill`、`skill_manage`、`memory_edit`、`mcp_config`                                                                             |
-| MCP              | `mcp_<server>_<tool>`，每个已连接 server 的工具各一个                                                                            |
+| MCP              | `mcp_<server>_<tool>`，每个已连接 server 的工具各一个（名字清洗规则见下文「MCP 工具」）                                          |
 
 能力页的“工具”标签只列 Emperor 内建的工具，按上表的五类分组，每组标题带数量；每行是工具名和一句说明，展开后查看完整说明、参数和 JSON schema，可以按名称和说明搜索。MCP server 的工具在“MCP”标签里按 server 列出，插件带来的工具（包括电脑操作的工具）在插件详情里；页首有这两处的链接。
 
@@ -203,11 +203,13 @@ stdio server 与 Agent 的 Shell 共用同一套进程沙箱（macOS 上是 Seat
 
 ### 管理已有 server
 
-每个 server 显示为一张卡片，包含连接状态、传输方式、工具数和启用开关。展开后可以查看地址或启动命令、请求头和环境变量的键名、最近的错误（含错误码）以及已发现的工具，也可以删除该 server；删除会从配置中移除它并断开连接。
+每个 server 显示为一张卡片，包含连接状态、传输方式、工具数和启用开关。展开后可以查看地址或启动命令、请求头和环境变量的键名、最近的错误（含错误码）以及已发现的工具，也可以删除该 server；本地（stdio）server 还有「查看最近输出」，显示它最近 200 行 stderr（密钥、token 与认证头已脱敏），启动失败时保留那次启动的输出，常能直接看出缺了什么依赖或参数；删除会从配置中移除它并断开连接。
 
 需要批量调整或设置 `tool_overrides` 时，展开页面底部“高级”中的“原始配置”，直接编辑 `mcp_config.json`。
 
-每次写入后，Core 按 server 做 diff：未变化且健康的连接保留，变化的连接重建。传输失败后按 1、4、16 秒最多重试三次；认证失败不会无限重试，修正配置并再次保存才会重新连接。取消当前 turn 会取消仍在等待的 MCP 请求。
+每次写入后，Core 按 server 做 diff：未变化且健康的连接保留，变化的连接重建。server 在后台并行连接（同时最多 4 个），启动 Emperor 时窗口不等它们：哪个先连上，它的工具就先可用；一个 server 15 秒内没有完成握手或没有列出工具，就单独标为失败，不影响其他 server。连续几次修改配置时，Core 一次只重载一遍，最后生效的是最后一次保存的配置。
+
+运行中的 server 断开后会自动重启，间隔约 1、4、16、60、60 秒（各有 ±20% 的随机浮动）；连续失败 6 次后停在「失败」，不再自动重启；修正后保存配置，或把它停用再启用，就会重新连接。稳定运行满 60 秒后重启次数清零。只有 server 返回 HTTP 401 / 403 时才算认证失败，认证失败不会自动重试，修正配置并再次保存才会重新连接；单次调用的协议错误（例如迟到的响应）只影响那一次调用，不会把 server 标为不健康。stdio server 的输出不再有累计上限，单条消息最大 16 MiB，超过的那条会被丢弃并报错，server 继续运行。取消当前 turn 会取消仍在等待的 MCP 请求。
 
 ### 让 Agent 管理 MCP
 
@@ -222,7 +224,7 @@ Agent 被要求只通过 `mcp_config` 添加 server，不使用 mcporter，也�
 
 ### MCP 工具
 
-每个已连接 server 的工具注册为 `mcp_<server>_<tool>`，参数按 server 声明转发，由 server 自行校验。MCP 工具调用本身不经过文件沙箱，也不需要审批（stdio server 进程在上文的进程沙箱里运行）；声明为只读且非独占的工具可以与其他并发安全的调用同时执行。
+每个已连接 server 的工具注册为 `mcp_<server>_<tool>`，参数按 server 声明转发，由 server 自行校验。名字里字母、数字、`-`、`_` 以外的字符换成 `_`（`my.server` 的 `search.files` 是 `mcp_my_server_search_files`），最长 64 个字符，超长时截短并加一段哈希；两个 server 清洗后同名时，本来就合法的那个保留原名，另一个加哈希。MCP 工具调用本身不经过文件沙箱，也不需要审批（stdio server 进程在上文的进程沙箱里运行）；声明为只读且非独占的工具可以与其他并发安全的调用同时执行。
 
 ## 推荐
 
@@ -245,4 +247,4 @@ Agent 被要求只通过 `mcp_config` 添加 server，不使用 mcporter，也�
 - Agent 的文件、搜索和 Shell 工具读不到 `mcp_config.json`；它只能通过 `mcp_config` 工具查看名称、地址与字段名，看不到字段值。
 - 不要把 API Key 直接写进可提交的项目文件，优先使用 `${ENV_NAME}`。MCP 标签读取配置时保留 `${ENV_NAME}`，把 args、env、headers、URL 中其余字面字符串显示为 `[REDACTED]`；保存原始配置时，未改动的掩码只从同一 server 同一字段回填，没有旧值的掩码会被拒绝。
 
-排查加载问题时，先看能力页“MCP”标签中该 server 卡片的状态和最近错误，再检查配置 JSON、执行环境和“设置 → 高级 → 诊断”。
+排查加载问题时，先看能力页“MCP”标签中该 server 卡片的状态、最近错误和最近输出，再检查配置 JSON、执行环境和“设置 → 高级 → 诊断”。

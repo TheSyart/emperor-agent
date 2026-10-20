@@ -6099,6 +6099,20 @@ export async function installVisualCoreBridge(
               return visualMcpConfig()
             case 'mcp.status':
               return visualMcpStatus()
+            case 'mcp.serverLog': {
+              const name = String((args[0] as { name?: string })?.name)
+              return {
+                name,
+                text: visualMcpServers[name]
+                  ? [
+                      'GitHub MCP Server running on stdio',
+                      'Using token sk-***',
+                      'tools/list: 3 tools',
+                      'GET https://api.github.com/search/repositories?q=emperor&token=*** 200 (182 ms)',
+                    ].join('\n')
+                  : null,
+              }
+            }
             case 'mcp.importServers':
               return visualMcpImport(args[0])
             case 'mcp.setServerEnabled': {
