@@ -47,7 +47,7 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
   onboarding.json
   AGENTS.md                # 可选的全局工作区说明，用户手写
   workspace/               # Chat 会话的工作目录
-  spill/                   # 超出内联上限的工具结果全文：session-<hash>/ 按会话，shell-*.log 等散文件不属于会话
+  spill/                   # 超出内联上限的工具结果全文与命令输出：session-<hash>/ 按会话；直接在 spill/ 下的散文件（旧版本的 shell-*.log、没有会话的调用）不属于会话
   write-staging/           # write / edit 工具的原子写暂存区，写完即改名到目标位置
   skills/<skill-name>/SKILL.md   # 个人 Skills（也接受直接放置的 <name>.md）
   plugins/
@@ -143,7 +143,7 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
 `storage/retention.ts` 的 `RetentionService` 在 Core 启动后于后台运行一次，「设置 › 高级 › 存储」的「清理」也调用它（CoreApi `storage.clean`，受 plan 模式与待决交互的变更守卫）。每一步单独进行，失败只记入结果、不中断其他步骤：
 
 - 「最近删除」里超过 30 天的会话经会话服务永久删除（连同子会话、spill 与 turn 快照）。
-- `spill/` 下不属于任何会话的内容：散文件（`shell-*.log`、没有会话的落盘结果）与 `session-<hash>/` 目录（其会话既不在 `sessions/`，也不在 `sessions/.trash/`，子会话也算），其中所有文件 30 天没有变化时删除。会话自己的 spill 目录在会话永久删除时删除（KRN-03）。
+- `spill/` 下不属于任何会话的内容：散文件（旧版本的 `shell-*.log`、没有会话的落盘结果；现在命令输出也写进会话自己的目录）与 `session-<hash>/` 目录（其会话既不在 `sessions/`，也不在 `sessions/.trash/`，子会话也算），其中所有文件 30 天没有变化时删除。会话自己的 spill 目录在会话永久删除时删除（KRN-03）。
 - `memory/versions/snapshots/` 里索引不再列出的快照，以及原子写留下的临时文件（超过一小时）。
 - `delegations/runtime/<profile>/<delegation-id>/`（外部执行器的隔离 HOME、`CODEX_HOME` 等）：委派空闲或已关闭、且所属会话已不存在时删除；没有任何委派记录的目录 30 天后删除；旧版本每次检查新建的 `dlg-probe-*`（各含一份令牌副本）与 `indexes/`、`snapshot-temp/`、`artifact-temp/` 的临时内容一天后删除。删除从不跟随符号链接（`CODEX_HOME/auth.json` 是指向用户文件的链接，只删链接）。成果 worktree 与用户仓库里的 `refs/emperor/delegations/*` 由委派流程自己清理（AGT-06）。
 
