@@ -115,7 +115,7 @@ const title = computed(() =>
   height: calc(var(--space-8) + var(--space-3));
   margin-bottom: var(--space-1);
   border-radius: var(--radius-pill);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-secondary));
 }
 
@@ -146,7 +146,7 @@ const title = computed(() =>
 code {
   padding: 0 var(--space-1-5);
   border-radius: var(--radius-sm);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-primary));
   font: var(--font-code-small);
 }

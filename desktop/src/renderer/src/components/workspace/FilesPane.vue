@@ -964,7 +964,7 @@ function message(value: unknown): string {
   border: 0;
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-row);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-secondary));
   font: var(--font-xs);
   cursor: pointer;
@@ -1077,7 +1077,7 @@ function message(value: unknown): string {
 
 .source-toggle:hover {
   color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 /* ── preview ───────────────────────────────────────────────────────── */
@@ -1224,12 +1224,12 @@ function message(value: unknown): string {
 
 .file-tree-row:hover {
   color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .file-tree-row.active {
   color: rgb(var(--label-primary));
-  background: var(--interactive-bg-active);
+  background: var(--surface-active);
 }
 
 .file-tree-row:focus-visible {

@@ -240,7 +240,7 @@ const emptyLabel = computed(() =>
 }
 
 .tool-call:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .tool-icon {

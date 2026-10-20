@@ -347,7 +347,7 @@ const actions = computed(() =>
   list-style: none;
   border: 1px solid var(--border-l2);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-3));
+  background: rgb(var(--surface-overlay));
 }
 
 .rows > li + li {
@@ -370,7 +370,7 @@ const actions = computed(() =>
 }
 
 .row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .row:focus-visible {

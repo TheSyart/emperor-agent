@@ -49,7 +49,7 @@ const dot = computed<DotState>(() => {
   overflow: hidden;
   border: 1px solid rgb(var(--approval) / 0.35);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
 }
 
 .plan-body {

@@ -103,11 +103,11 @@ const checksLabel = computed(() => {
 }
 
 .pr-row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .pr-row[data-selected] {
-  background: var(--interactive-bg-active);
+  background: var(--surface-active);
 }
 
 .pr-row:focus-visible {

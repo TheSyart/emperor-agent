@@ -1158,7 +1158,7 @@ onBeforeUnmount(() => {
   padding-top: var(--space-3);
 }
 .agent-card.ds-settings-card {
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
   border-color: var(--border-l2);
   box-shadow: none;
 }
@@ -1270,7 +1270,7 @@ onBeforeUnmount(() => {
   line-height: 18px;
   white-space: normal;
   overflow-wrap: anywhere;
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-secondary));
   overflow: visible;
 }
@@ -1315,7 +1315,7 @@ onBeforeUnmount(() => {
   width: 0;
   height: 30px;
   border-radius: var(--radius-row);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 .custom-model-editor {
   display: flex;
@@ -1476,7 +1476,7 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2-5);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-secondary));
 }
 .muted {
@@ -1561,7 +1561,7 @@ onBeforeUnmount(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-2-5);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 .upgrade-notice > span {
   flex: 1 1 280px;
@@ -1573,7 +1573,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 32px;
   border-radius: var(--radius-row);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 .default-model-block > .block-heading .ds-button {
   font-size: var(--fs-xxs);

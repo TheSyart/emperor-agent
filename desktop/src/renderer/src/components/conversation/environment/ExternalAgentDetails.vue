@@ -674,7 +674,7 @@ function costText(usage: {
 }
 .external-status {
   padding: var(--space-2) var(--space-3);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   border: 1px solid var(--border-l2);
   border-radius: var(--radius-row);
 }

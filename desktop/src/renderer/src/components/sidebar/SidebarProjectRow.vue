@@ -68,7 +68,7 @@ const emit = defineEmits<{ toggle: []; 'new-session': [] }>()
 }
 
 .project-row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .project-row:focus-visible {

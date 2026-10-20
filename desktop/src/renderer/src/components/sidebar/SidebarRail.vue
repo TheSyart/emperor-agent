@@ -158,11 +158,11 @@ function go(entry: SidebarPageEntry): void {
 }
 
 .rail-button:hover:not(:disabled) {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .rail-button[aria-current='page'] {
-  background: var(--interactive-bg-active);
+  background: var(--surface-active);
 }
 
 .rail-button:disabled {

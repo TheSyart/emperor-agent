@@ -567,7 +567,7 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
   --traj-turn-accent: color-mix(
     in srgb,
     rgb(var(--accent-fill)) 22%,
-    rgb(var(--bg-layer-1))
+    rgb(var(--surface-base))
   );
 
   position: relative;
@@ -577,7 +577,7 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   container: trajectory-table / inline-size;
 }
 
@@ -607,7 +607,7 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
   gap: var(--space-1-5);
   height: 30px;
   border-bottom: 1px solid var(--border-l2);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   color: rgb(var(--label-secondary));
   font: var(--font-xxs);
 }
@@ -629,14 +629,14 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
   width: 100%;
   height: 29px;
   border: 0;
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   color: rgb(var(--label-secondary));
   cursor: pointer;
   font: var(--font-xxs);
 }
 
 .history-button:hover:not(:disabled) {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-primary));
 }
 

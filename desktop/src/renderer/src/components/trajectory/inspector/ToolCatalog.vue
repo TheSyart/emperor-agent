@@ -85,7 +85,7 @@ defineProps<{ tools: readonly ToolSchema[] }>()
 }
 
 .summary:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .chevron,

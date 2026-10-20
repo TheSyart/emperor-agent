@@ -100,6 +100,6 @@ const folded = computed(() =>
 }
 
 .takeover-folded-action:hover {
-  background: rgb(var(--interactive-bg-hover-solid));
+  background: rgb(var(--surface-hover-solid));
 }
 </style>

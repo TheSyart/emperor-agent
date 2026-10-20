@@ -189,7 +189,7 @@ function newProject(): void {
 }
 
 .nav-item:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-primary));
 }
 

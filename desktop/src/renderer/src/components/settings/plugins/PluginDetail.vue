@@ -558,7 +558,7 @@ defineExpose({ reload: load })
   overflow: hidden;
   border: 1px solid var(--border-l2);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-3));
+  background: rgb(var(--surface-overlay));
   min-width: 0;
 }
 
@@ -684,7 +684,7 @@ defineExpose({ reload: load })
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-card);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .cross-link p {

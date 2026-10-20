@@ -867,7 +867,7 @@ provideAppContext({
   display: grid;
   place-items: center;
   height: 100dvh;
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-canvas));
   color: rgb(var(--label-secondary));
 }
 
@@ -880,7 +880,7 @@ provideAppContext({
   padding: var(--space-5) var(--space-6);
   border: 1px solid var(--border-l2);
   border-radius: var(--radius-takeover);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv2);
   font-size: var(--fs-s);
   line-height: var(--lh-s);

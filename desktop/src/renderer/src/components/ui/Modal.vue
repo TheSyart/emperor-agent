@@ -112,7 +112,7 @@ provideSurface(() => 'panel')
 .mask {
   position: absolute;
   inset: 0;
-  background: var(--mask-1);
+  background: var(--scrim);
   backdrop-filter: blur(var(--mask-blur));
 }
 
@@ -126,7 +126,7 @@ provideSurface(() => 'panel')
   overflow: hidden;
   border: 1px solid var(--border-inverted);
   border-radius: var(--radius-modal);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
   box-shadow: var(--shadow-lv3);
 }
 

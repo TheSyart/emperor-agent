@@ -234,7 +234,7 @@ watch(
 .settings-mask {
   position: absolute;
   inset: 0;
-  background: var(--mask-1);
+  background: var(--scrim);
   backdrop-filter: blur(var(--mask-blur));
 }
 
@@ -356,7 +356,7 @@ watch(
 }
 
 .settings-close:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .settings-close:focus-visible {

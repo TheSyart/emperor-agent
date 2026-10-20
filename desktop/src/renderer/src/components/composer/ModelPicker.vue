@@ -343,7 +343,7 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 .back:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .back:focus-visible {

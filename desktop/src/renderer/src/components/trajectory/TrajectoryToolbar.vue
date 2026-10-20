@@ -185,7 +185,7 @@ onBeforeUnmount(() => clearTimeout(timer))
   height: 32px;
   padding: 0 var(--space-1-5);
   border-bottom: 1px solid var(--border-l2);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
 }
 
 .actions {
@@ -213,7 +213,7 @@ onBeforeUnmount(() => clearTimeout(timer))
 .action:hover,
 .action[aria-pressed='true'] {
   color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .action:focus-visible,

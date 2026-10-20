@@ -127,7 +127,7 @@ provide(LINK_STATUS_KEY, {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-canvas));
   color: rgb(var(--label-primary));
   font-family: var(--font-sans);
 }

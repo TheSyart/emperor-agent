@@ -67,7 +67,7 @@ defineProps<{ title: string; description?: string; value?: string }>()
 }
 
 .ds-settings-link-row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .ds-settings-link-row:focus-visible {

@@ -723,7 +723,7 @@ defineExpose({ focusSearch })
 
 .head-button:hover,
 .head-button[aria-expanded='true'] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .search {

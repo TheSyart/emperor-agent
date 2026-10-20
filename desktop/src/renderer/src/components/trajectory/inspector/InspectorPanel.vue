@@ -124,7 +124,7 @@ const tabItems = computed(() =>
   min-width: 0;
   min-height: 0;
   height: 100%;
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   color: rgb(var(--label-primary));
 }
 

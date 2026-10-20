@@ -83,7 +83,7 @@ const firstContent = computed(() =>
 
 .search-result:hover,
 .search-result[data-selected] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .group-label {

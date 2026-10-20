@@ -227,7 +227,7 @@ const latestLog = computed(() => props.run.logs.at(-1))
 .run-header {
   padding: 0 var(--space-2);
   border-radius: var(--radius-row);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .run-header:focus-visible,

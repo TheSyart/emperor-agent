@@ -136,7 +136,7 @@ function onOverwrite(name: string, value: boolean) {
   gap: var(--space-1);
   min-width: 0;
   padding: var(--space-2-5) var(--space-3);
-  background: rgb(var(--bg-layer-3));
+  background: rgb(var(--surface-overlay));
 }
 
 .row + .row {

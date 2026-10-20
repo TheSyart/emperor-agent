@@ -15,7 +15,7 @@
       两表键集合一致)。任何其他文件禁止给 token 赋值;只许 var(--x) 消费。
       值统一用 RGB 三元组 + rgb(var(--x) / <alpha>) 表达透明度。
    2. 颜色/材质/动效/层级一律消费 token 或工具类,禁止裸值:
-      - 颜色 → rgb(var(--bg|fg|border|accent|brand|...)/<a>)
+      - 颜色 → rgb(var(--surface-canvas|fg|border|accent|brand|...)/<a>)
       - 材质 → materials.css 的 .glass
       - 模糊 → var(--material-*-blur|--glass-blur),禁止 blur(<px>)
       - 层级 → var(--z-base..--z-lightbox),禁止数字 z-index
@@ -62,7 +62,7 @@
     @apply w-full border px-3 py-2 text-sm outline-none transition;
     border-radius: var(--radius);
     border-color: rgb(var(--border));
-    background: rgb(var(--bg-inset));
+    background: rgb(var(--surface-sunken));
     color: rgb(var(--fg));
   }
 

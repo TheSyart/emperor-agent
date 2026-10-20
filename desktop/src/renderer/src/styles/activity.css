@@ -48,7 +48,7 @@
   margin: 0 0.125em;
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius-md);
-  background: rgb(var(--bg-elevated));
+  background: rgb(var(--surface-base));
   color: rgb(var(--fg));
   font-weight: 500;
   text-decoration: none;
@@ -61,7 +61,7 @@
 
 .markdown-body a.md-link-chip:hover {
   border-color: rgb(var(--border-strong));
-  background: rgb(var(--bg-inset));
+  background: rgb(var(--surface-sunken));
   color: rgb(var(--fg));
 }
 
@@ -87,7 +87,7 @@
 }
 
 .markdown-body a.md-link-chip[data-md-link='web']:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   text-decoration: underline;
   text-underline-offset: 4px;
 }
@@ -117,14 +117,14 @@
 
 .markdown-body code {
   @apply rounded px-1.5 py-0.5 font-mono text-[0.9em];
-  background: rgb(var(--bg-inset));
+  background: rgb(var(--surface-sunken));
   color: rgb(var(--fg));
 }
 
 .markdown-body pre {
   @apply max-w-full overflow-x-auto rounded-md border p-3.5;
   border-color: rgb(var(--border));
-  background: rgb(var(--bg-inset));
+  background: rgb(var(--surface-sunken));
   color: rgb(var(--fg));
 }
 

@@ -117,7 +117,7 @@ const LABELS = Object.fromEntries(
 }
 
 .nav-cell:hover:not(.active) {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .nav-cell.active {

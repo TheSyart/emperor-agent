@@ -170,7 +170,7 @@ onBeforeUnmount(() => {
 }
 
 .head-action:hover:not(:disabled) {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-primary));
 }
 
@@ -205,7 +205,7 @@ onBeforeUnmount(() => {
 .row:hover,
 .row:focus-visible {
   outline: none;
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .glyph {

@@ -65,7 +65,7 @@ withDefaults(
 
 .ds-chip:hover:not(:disabled),
 .ds-chip[data-active] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .ds-chip:focus-visible {

@@ -335,7 +335,7 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow: hidden;
   color: rgb(var(--label-primary));
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
 }
 
 .split {
@@ -359,7 +359,7 @@ onBeforeUnmount(() => {
   max-width: calc(100% - 280px);
   min-height: 0;
   border-left: 1px solid var(--border-l2);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
 }
 
 .resize-handle {

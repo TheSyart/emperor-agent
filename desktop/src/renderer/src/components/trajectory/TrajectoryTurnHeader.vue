@@ -53,7 +53,7 @@ const columns = computed(() => {
   height: 28px;
   padding: 0 var(--space-4) 0 var(--space-3);
   border-bottom: 1px solid var(--border-l1);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   user-select: none;
 }
 

@@ -127,7 +127,7 @@ const source = computed(() =>
 
 .row-head:hover,
 .tool-row[data-open] > .row-head {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .row-head:focus-visible {

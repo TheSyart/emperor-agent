@@ -91,7 +91,7 @@ const themeIcon = computed(() => (theme.value === 'dark' ? DsLight : DsDark))
 
 .settings:hover,
 .theme:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 [data-rail] .settings {

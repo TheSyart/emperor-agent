@@ -283,7 +283,7 @@ defineExpose({ toggleSidebar, columns })
   height: var(--space-8);
   border: 1px solid var(--border-l2);
   border-radius: var(--radius-cell);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
   opacity: 0;
   transform: translate(-50%, -50%);
   transition: opacity var(--duration-ds-slow) var(--ease-in-out);

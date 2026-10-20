@@ -533,7 +533,7 @@ onMounted(() => {
   margin-top: var(--space-3);
   padding: var(--space-3) var(--space-3-5);
   border-radius: var(--radius-cell);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
 }
 
 .connection {

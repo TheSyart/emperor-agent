@@ -104,7 +104,7 @@ const brackets = computed(() =>
 }
 
 .row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .expander {

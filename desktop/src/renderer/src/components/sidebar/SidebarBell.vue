@@ -67,7 +67,7 @@ const label = computed(() =>
 
 .bell:hover,
 .bell[aria-expanded='true'] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-primary));
 }
 

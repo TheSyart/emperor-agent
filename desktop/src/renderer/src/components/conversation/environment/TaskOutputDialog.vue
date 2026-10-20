@@ -233,7 +233,7 @@ async function stop(): Promise<void> {
   overflow: auto;
   border: 1px solid var(--border-l1);
   border-radius: var(--radius-row);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   color: rgb(var(--label-primary));
   font: var(--font-code-small);
   white-space: pre-wrap;

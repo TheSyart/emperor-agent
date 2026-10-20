@@ -447,7 +447,7 @@ function openOnGithub(): void {
   overflow: hidden;
   padding: 0 var(--space-1-5);
   border-radius: var(--radius-sm);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-secondary));
   font: var(--font-code-small);
   text-overflow: ellipsis;
@@ -605,7 +605,7 @@ function openOnGithub(): void {
 }
 
 .row--button:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .row--button:focus-visible {

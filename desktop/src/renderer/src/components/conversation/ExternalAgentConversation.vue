@@ -779,7 +779,7 @@ h1 {
   margin-left: var(--space-2);
 }
 .child-entry[data-entry-type='prompt'] {
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   border-radius: var(--radius-card);
 }
 .child-footer {

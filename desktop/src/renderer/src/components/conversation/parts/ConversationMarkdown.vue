@@ -272,7 +272,7 @@ const segments = computed<Segment[]>(() =>
   transition: background var(--duration-fast) ease;
 }
 .ds-md :deep(a.md-link-chip[data-md-link='web']:hover) {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 .ds-md :deep(a.md-link-chip[data-md-link='web']:focus-visible) {
   outline: 2px solid rgb(var(--focus-ring));

@@ -216,13 +216,13 @@ function actionLabel(action: GoalCardAction): string {
 }
 
 .icon:hover:not(:disabled) {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-secondary));
 }
 
 .icon[data-danger] {
   color: rgb(var(--danger));
-  background: var(--interactive-bg-hover-danger);
+  background: var(--surface-hover-danger);
 }
 
 .icon:disabled {

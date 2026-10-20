@@ -444,7 +444,7 @@ function partWidth(value: number, total: number) {
   height: var(--space-2-5);
   overflow: hidden;
   border-radius: var(--radius-pill);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .meter span {

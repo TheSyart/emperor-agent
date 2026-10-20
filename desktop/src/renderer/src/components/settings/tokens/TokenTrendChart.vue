@@ -281,7 +281,7 @@ function onPointerMove(event: PointerEvent) {
   padding: var(--space-2-5);
   border: 1px solid var(--border-l1);
   border-radius: var(--radius-row);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
 }
 
 .legend {
@@ -309,7 +309,7 @@ function onPointerMove(event: PointerEvent) {
 }
 
 .legend-button:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .legend-button:focus-visible {
@@ -394,7 +394,7 @@ function onPointerMove(event: PointerEvent) {
   padding: var(--space-1-5) var(--space-2);
   border: 1px solid var(--border-l2);
   border-radius: var(--radius-sm);
-  background: rgb(var(--bg-overlay));
+  background: rgb(var(--surface-strong));
   box-shadow: var(--shadow-lv1);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);

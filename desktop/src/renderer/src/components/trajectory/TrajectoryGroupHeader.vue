@@ -67,7 +67,7 @@ const title = computed(() =>
   height: 5px;
   border-radius: 50%;
   background: rgb(var(--label-caption));
-  box-shadow: 0 0 0 2px rgb(var(--bg-layer-1));
+  box-shadow: 0 0 0 2px rgb(var(--surface-base));
   content: '';
   transition:
     background-color var(--duration-fast) var(--ease-in-out),
@@ -83,7 +83,7 @@ const title = computed(() =>
   border: 1px solid var(--border-l1);
   border-radius: 2px;
   color: rgb(var(--label-secondary));
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv2);
   content: attr(data-label);
   font: 9px / 12px var(--font-mono);
@@ -106,7 +106,7 @@ const title = computed(() =>
   background: color-mix(
     in srgb,
     rgb(var(--accent-fill)) 18%,
-    rgb(var(--bg-layer-1))
+    rgb(var(--surface-base))
   );
   box-shadow: 0 0 0 1.5px rgb(var(--accent-fill));
 }

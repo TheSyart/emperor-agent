@@ -125,7 +125,7 @@ const collapsible = computed(
 }
 
 .row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .row:focus-visible {
@@ -167,7 +167,7 @@ const collapsible = computed(
   height: var(--space-1);
   overflow: hidden;
   border-radius: var(--radius-pill);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .bar i {
@@ -210,7 +210,7 @@ const collapsible = computed(
 }
 
 .expand:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-primary));
 }
 

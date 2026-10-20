@@ -95,7 +95,7 @@ withDefaults(defineProps<{ kind: TrajectoryCellKind; iconOnly?: boolean }>(), {
   white-space: nowrap;
   user-select: none;
   color: rgb(var(--label-secondary));
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .icon {
@@ -150,7 +150,7 @@ withDefaults(defineProps<{ kind: TrajectoryCellKind; iconOnly?: boolean }>(), {
   background: color-mix(
     in srgb,
     rgb(var(--tone-violet)) 15%,
-    rgb(var(--bg-layer-1))
+    rgb(var(--surface-base))
   );
 }
 
@@ -168,7 +168,7 @@ withDefaults(defineProps<{ kind: TrajectoryCellKind; iconOnly?: boolean }>(), {
   background: color-mix(
     in srgb,
     rgb(var(--approval-soft)) 58%,
-    rgb(var(--bg-layer-1))
+    rgb(var(--surface-base))
   );
 }
 </style>

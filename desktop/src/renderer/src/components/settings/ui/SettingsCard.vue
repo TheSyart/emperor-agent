@@ -171,7 +171,7 @@ function onHeaderClick(event: MouseEvent) {
 /* An open card reads as the one being worked on, not merely taller. */
 .ds-settings-card[data-open] {
   border-color: rgb(var(--label-dimmed));
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
 }
 
 .ds-settings-card[data-variant='filled'][data-open] {

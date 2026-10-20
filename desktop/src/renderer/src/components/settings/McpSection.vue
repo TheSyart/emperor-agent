@@ -476,7 +476,7 @@ async function saveDraft() {
   margin-top: var(--space-2);
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   font-family: var(--font-mono);
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);

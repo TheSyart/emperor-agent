@@ -668,7 +668,7 @@ onBeforeUnmount(() => {
   padding: var(--space-1-5) var(--space-3);
   border: 1px solid var(--border-l2);
   border-radius: var(--radius-pill);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv2);
   color: rgb(var(--label-primary));
   font: var(--font-xs);
@@ -693,7 +693,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border-l2);
   border-bottom: 0;
   border-radius: var(--radius-card) var(--radius-card) 0 0;
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
   color: rgb(var(--label-secondary));
   font: var(--font-xxs);
   text-align: start;
@@ -701,7 +701,7 @@ onBeforeUnmount(() => {
 }
 
 .cu-strip:hover {
-  background: rgb(var(--bg-layer-3));
+  background: rgb(var(--surface-overlay));
 }
 
 .cu-strip-title,
@@ -741,7 +741,7 @@ onBeforeUnmount(() => {
   padding: var(--space-2-5) var(--space-3) var(--space-3);
   border: 1px solid var(--border-l1);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   box-shadow: var(--shadow-lv2);
   color: rgb(var(--label-primary));
 }
@@ -771,7 +771,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   border: 1px solid var(--border-l1);
   border-radius: var(--radius-row);
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-canvas));
   cursor: zoom-in;
 }
 
@@ -862,7 +862,7 @@ onBeforeUnmount(() => {
   max-height: 70vh;
   object-fit: contain;
   border-radius: var(--radius-row);
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-canvas));
 }
 
 .cu-enlarged-note {

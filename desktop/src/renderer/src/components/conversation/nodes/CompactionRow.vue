@@ -95,7 +95,7 @@ const summary = computed(() => {
 }
 
 .row:not(:disabled):hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .leading {

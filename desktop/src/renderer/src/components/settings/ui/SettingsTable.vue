@@ -60,7 +60,7 @@ const template = computed(() =>
 .th {
   min-width: 0;
   padding: var(--space-2-5) var(--space-3) var(--space-2-5) 0;
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
   color: rgb(var(--label-tertiary));

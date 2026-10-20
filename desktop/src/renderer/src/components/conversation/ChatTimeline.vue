@@ -558,7 +558,7 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall })
   padding: var(--space-1) var(--space-3);
   border: none;
   border-radius: var(--radius-pill);
-  background: var(--interactive-bg-hover-solid);
+  background: var(--surface-hover-solid);
   color: rgb(var(--label-secondary));
   font-size: var(--fs-xxs);
   line-height: var(--lh-xxs);
@@ -614,7 +614,7 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall })
   padding: 0;
   border: 1px solid var(--border-l2);
   border-radius: var(--radius-pill);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
   box-shadow: var(--shadow-lv2);
   color: rgb(var(--label-primary));
   cursor: pointer;
@@ -622,6 +622,6 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall })
 }
 
 .to-bottom:hover {
-  background: var(--interactive-bg-hover-solid);
+  background: var(--surface-hover-solid);
 }
 </style>

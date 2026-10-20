@@ -385,6 +385,6 @@ async function onUninstalled(): Promise<void> {
   overflow: hidden;
   border: 1px solid var(--border-l2);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-3));
+  background: rgb(var(--surface-overlay));
 }
 </style>

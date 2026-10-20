@@ -12,7 +12,7 @@
   max-width: 16rem;
   border-radius: var(--radius-md);
   border-color: rgb(var(--border));
-  background: rgb(var(--bg-elevated));
+  background: rgb(var(--surface-base));
   box-shadow: none;
 }
 .attach-chip.is-image .attach-thumb {
@@ -76,7 +76,7 @@
   overflow: hidden;
   border: 1px solid rgb(var(--border-strong));
   border-radius: var(--radius-xl);
-  background: rgb(var(--bg-elevated));
+  background: rgb(var(--surface-base));
   box-shadow: 0 28px 90px rgb(var(--shadow-color) / 0.5);
 }
 
@@ -85,7 +85,7 @@
   max-height: calc(100vh - 118px);
   max-width: min(94vw, 1440px);
   object-fit: contain;
-  background: rgb(var(--bg-inset));
+  background: rgb(var(--surface-sunken));
 }
 
 .attachment-preview-close {
@@ -99,7 +99,7 @@
   place-items: center;
   border: 1px solid rgb(var(--border-strong));
   border-radius: 999px;
-  background: rgb(var(--bg-elevated) / 0.9);
+  background: rgb(var(--surface-base) / 0.9);
   color: rgb(var(--fg));
   font-size: 22px;
   line-height: 1;

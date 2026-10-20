@@ -86,7 +86,7 @@ function openReview(): void {
 }
 
 .changes-pill:hover {
-  background: var(--interactive-bg-hover-solid);
+  background: var(--surface-hover-solid);
   color: rgb(var(--label-primary));
 }
 

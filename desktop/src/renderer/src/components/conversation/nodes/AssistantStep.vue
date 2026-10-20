@@ -285,7 +285,7 @@ const showActions = computed(
   align-self: flex-start;
   padding: 0 var(--space-1-5);
   border-radius: var(--radius-sm);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-tertiary));
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxs);

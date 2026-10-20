@@ -487,7 +487,7 @@ const facts = [
   gap: var(--space-6);
   min-height: 100vh;
   padding: var(--space-6);
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-canvas));
   color: rgb(var(--label-primary));
   font-family: var(--font-sans);
 }
@@ -499,7 +499,7 @@ const facts = [
   max-width: 100%;
   overflow: hidden;
   border-radius: var(--radius-modal);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
   box-shadow: var(--shadow-lv3);
 }
 
@@ -571,7 +571,7 @@ const facts = [
   width: 360px;
   padding: 0 var(--space-6) var(--space-3);
   border-radius: var(--radius-takeover);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
   box-shadow: var(--shadow-lv3);
 }
 

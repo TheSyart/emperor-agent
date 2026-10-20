@@ -209,7 +209,7 @@ function onClick(): void {
 }
 
 .traj-row:not([data-selected='true']):hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .traj-row:has(.traj-request-marker:hover):not([data-selected='true']) {
@@ -217,7 +217,7 @@ function onClick(): void {
 }
 
 .traj-row[data-selected='true'] {
-  background: var(--interactive-bg-active);
+  background: var(--surface-active);
 }
 
 .traj-row:focus-visible {
@@ -305,7 +305,7 @@ function onClick(): void {
   background: color-mix(
     in srgb,
     rgb(var(--danger)) 22%,
-    rgb(var(--bg-layer-1))
+    rgb(var(--surface-base))
   );
 }
 
@@ -325,7 +325,7 @@ function onClick(): void {
   padding: 1px calc(var(--space-1) + 1px);
   border-radius: 0 0 2px;
   color: rgb(var(--label-tertiary));
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   font: 8px / 10px var(--font-mono);
   font-variant-numeric: tabular-nums;
   user-select: none;

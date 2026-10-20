@@ -82,7 +82,7 @@ defineProps<{
   cursor: pointer;
 }
 .resource-sidebar-row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 .resource-row-icon,
 .resource-thumb {

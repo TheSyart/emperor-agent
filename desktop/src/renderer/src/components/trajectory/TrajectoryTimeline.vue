@@ -593,7 +593,7 @@ onBeforeUnmount(() => {
   grid-template-columns: 44px minmax(0, 1fr);
   height: 62px;
   overflow: hidden;
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
 }
 
 .labels {
@@ -661,8 +661,8 @@ onBeforeUnmount(() => {
   border: 0;
   background: linear-gradient(
     to right,
-    rgb(var(--bg-layer-2)) 0,
-    rgb(var(--bg-layer-2)) 38%,
+    rgb(var(--surface-raised)) 0,
+    rgb(var(--surface-raised)) 38%,
     transparent 100%
   );
   color: rgb(var(--label-secondary));
@@ -741,7 +741,7 @@ onBeforeUnmount(() => {
   --traj-ttft: color-mix(
     in srgb,
     rgb(var(--tone-violet)) 54%,
-    rgb(var(--bg-layer-2))
+    rgb(var(--surface-raised))
   );
 
   background: var(--traj-decoding);
@@ -776,7 +776,7 @@ onBeforeUnmount(() => {
   z-index: var(--z-raised);
   opacity: 1;
   box-shadow:
-    0 0 0 1px rgb(var(--bg-layer-2)),
+    0 0 0 1px rgb(var(--surface-raised)),
     0 0 0 2px color-mix(in srgb, rgb(var(--accent-fill)) 80%, transparent);
 }
 
@@ -784,7 +784,7 @@ onBeforeUnmount(() => {
   z-index: var(--z-raised);
   opacity: 1;
   box-shadow:
-    0 0 0 1px rgb(var(--bg-layer-2)),
+    0 0 0 1px rgb(var(--surface-raised)),
     0 0 0 2px rgb(var(--accent-fill));
 }
 
@@ -807,8 +807,10 @@ onBeforeUnmount(() => {
   z-index: var(--z-base);
   background: color-mix(in srgb, rgb(var(--accent-fill)) 12%, transparent);
   box-shadow:
-    -100vw 0 0 100vw color-mix(in srgb, rgb(var(--bg-layer-1)) 58%, transparent),
-    100vw 0 0 100vw color-mix(in srgb, rgb(var(--bg-layer-1)) 58%, transparent);
+    -100vw 0 0 100vw
+      color-mix(in srgb, rgb(var(--surface-base)) 58%, transparent),
+    100vw 0 0 100vw
+      color-mix(in srgb, rgb(var(--surface-base)) 58%, transparent);
 }
 
 .selection[data-dragging='true'] {

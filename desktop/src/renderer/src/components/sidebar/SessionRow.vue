@@ -213,7 +213,7 @@ defineExpose({ beginRename })
 
 .session-row:hover,
 .session-row[data-menu-open] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .session-row[data-active] {
@@ -263,7 +263,7 @@ defineExpose({ beginRename })
   border: 1px solid var(--border-l2);
   border-radius: var(--radius-xs);
   outline: none;
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
   color: inherit;
   font-size: var(--fs-s);
   line-height: var(--space-5);

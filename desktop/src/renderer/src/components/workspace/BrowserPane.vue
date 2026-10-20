@@ -664,7 +664,7 @@ function hostOf(url: string): string {
 }
 
 .state-action:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .state-action:focus-visible {
@@ -730,7 +730,7 @@ function hostOf(url: string): string {
 }
 
 .download-action:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .download-action:focus-visible {

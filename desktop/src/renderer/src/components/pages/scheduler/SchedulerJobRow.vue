@@ -146,7 +146,7 @@ function onMenu(event: MouseEvent) {
 
 .job-row:hover,
 .job-row[data-menu-open] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .main {

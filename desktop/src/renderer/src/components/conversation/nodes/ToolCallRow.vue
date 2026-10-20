@@ -243,7 +243,7 @@ const stateLabel = computed(() => {
 }
 
 .inspect:hover {
-  background: var(--interactive-bg-hover-solid);
+  background: var(--surface-hover-solid);
   color: rgb(var(--label-primary));
 }
 

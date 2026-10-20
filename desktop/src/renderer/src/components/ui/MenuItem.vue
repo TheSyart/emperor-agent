@@ -96,7 +96,7 @@ function activate() {
 .item:hover:not(:disabled),
 .item:focus-visible {
   outline: none;
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .item:disabled {
@@ -110,7 +110,7 @@ function activate() {
 }
 
 .item[data-danger]:hover:not(:disabled) {
-  background: var(--interactive-bg-hover-danger);
+  background: var(--surface-hover-danger);
 }
 
 .icon {

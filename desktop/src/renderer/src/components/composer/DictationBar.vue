@@ -100,12 +100,12 @@ const live = computed(() =>
 }
 
 .dictation-cancel {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-secondary));
 }
 
 .dictation-cancel:hover {
-  background: var(--interactive-bg-active);
+  background: var(--surface-active);
   color: rgb(var(--label-primary));
 }
 
@@ -115,7 +115,7 @@ const live = computed(() =>
 }
 
 .dictation-stop:disabled {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-secondary));
   cursor: default;
 }

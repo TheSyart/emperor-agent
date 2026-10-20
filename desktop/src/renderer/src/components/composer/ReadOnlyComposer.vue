@@ -59,7 +59,7 @@ const emit = defineEmits<{ back: []; stop: []; root: [] }>()
   padding: var(--space-2-5) var(--space-4);
   border: 1px solid var(--border-l2);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   color: rgb(var(--label-tertiary));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
@@ -90,7 +90,7 @@ strong {
 }
 
 .back:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-primary));
 }
 

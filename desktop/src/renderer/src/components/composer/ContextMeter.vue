@@ -114,7 +114,7 @@ function fmt(value: number): string {
 
 .trigger:hover,
 .trigger[aria-expanded='true'] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .trigger[data-tone='warn'] {
@@ -168,7 +168,7 @@ function fmt(value: number): string {
   margin: var(--space-2-5) 0 var(--space-3);
   overflow: hidden;
   border-radius: var(--radius-pill);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .segment {

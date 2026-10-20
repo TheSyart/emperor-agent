@@ -253,7 +253,7 @@ async function end(agent: AgentView) {
 }
 .agent-row:hover,
 .agent-row[aria-current='page'] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 .agent-copy {
   display: flex;
@@ -292,7 +292,7 @@ async function end(agent: AgentView) {
   cursor: pointer;
 }
 .agent-end:hover:not(:disabled) {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 .agent-end:disabled {
   cursor: default;

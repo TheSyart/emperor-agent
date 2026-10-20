@@ -46,7 +46,7 @@ const emit = defineEmits<{ start: [] }>()
 }
 
 .dictation-mic:hover:not(:disabled) {
-  background: rgb(var(--interactive-bg-hover-solid));
+  background: rgb(var(--surface-hover-solid));
   color: rgb(var(--label-primary));
 }
 

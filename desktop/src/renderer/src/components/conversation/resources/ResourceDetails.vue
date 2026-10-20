@@ -412,7 +412,7 @@ dd {
   gap: var(--space-1);
   border: 0;
   border-radius: var(--radius-row);
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-secondary));
   padding: var(--space-1) var(--space-2);
   font: var(--font-xxs);

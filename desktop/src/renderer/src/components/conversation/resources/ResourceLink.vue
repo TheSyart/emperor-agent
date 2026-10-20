@@ -53,7 +53,7 @@ const { sessionId } = useChatContext()
 .resource-inline a:hover {
   text-decoration: underline;
   text-underline-offset: 4px;
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 .resource-inline a:focus-visible {
   outline: 2px solid rgb(var(--focus-ring));

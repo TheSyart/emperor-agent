@@ -210,7 +210,7 @@ button.crumb {
 }
 
 button.crumb:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-secondary));
 }
 

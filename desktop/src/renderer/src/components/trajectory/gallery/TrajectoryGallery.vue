@@ -133,7 +133,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-canvas));
   color: rgb(var(--label-primary));
 }
 

@@ -86,7 +86,7 @@ const sections = computed(() => {
 
 .line[data-kind='meta'] {
   color: rgb(var(--label-caption));
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   user-select: none;
 }
 
@@ -104,7 +104,7 @@ const sections = computed(() => {
   background: color-mix(
     in srgb,
     rgb(var(--danger)) 12%,
-    rgb(var(--bg-layer-1))
+    rgb(var(--surface-base))
   );
 }
 </style>

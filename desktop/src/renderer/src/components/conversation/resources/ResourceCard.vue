@@ -166,7 +166,7 @@ function open() {
   padding: var(--space-5);
   border: 1px solid var(--border-l2);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   line-height: 1.5;
   transition: border-color var(--duration-fast) ease;
 }
@@ -181,7 +181,7 @@ function open() {
   height: 40px;
   border-radius: var(--radius-cell);
   color: rgb(var(--label-secondary));
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 .resource-glyph img {
   width: 100%;
@@ -245,7 +245,7 @@ function open() {
   cursor: pointer;
 }
 .resource-actions button:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   color: rgb(var(--label-primary));
 }
 .resource-actions button:disabled {

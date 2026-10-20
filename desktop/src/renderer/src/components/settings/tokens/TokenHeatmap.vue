@@ -127,7 +127,7 @@ async function onKeydown(event: KeyboardEvent, index: number) {
   width: 100%;
   aspect-ratio: 1;
   border-radius: 2px;
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
   outline: none;
 }
 

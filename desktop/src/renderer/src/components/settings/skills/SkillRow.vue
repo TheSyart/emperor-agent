@@ -92,7 +92,7 @@ const status = computed(() =>
 }
 
 .skill-row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .skill-row:focus-visible {

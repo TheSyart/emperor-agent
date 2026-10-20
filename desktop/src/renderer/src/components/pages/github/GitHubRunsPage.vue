@@ -471,7 +471,7 @@ function stepDot(tone: string): DotState {
   list-style: none;
   border: 1px solid var(--border-l2);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-3));
+  background: rgb(var(--surface-overlay));
 }
 
 .rows > li + li,
@@ -495,7 +495,7 @@ function stepDot(tone: string): DotState {
 }
 
 .row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .row:focus-visible {

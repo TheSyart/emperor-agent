@@ -384,7 +384,7 @@ const jsonSample = {
   min-height: 100vh;
   margin: 0 auto;
   padding: var(--space-6);
-  background: rgb(var(--bg-base));
+  background: rgb(var(--surface-canvas));
   color: rgb(var(--label-primary));
   font: var(--font-s);
 }
@@ -442,7 +442,7 @@ h2 {
   font-size: var(--fs-xxxs);
   line-height: var(--lh-xxxs);
   color: rgb(var(--label-primary));
-  background: rgb(var(--bg-base) / 0.8);
+  background: rgb(var(--surface-canvas) / 0.8);
   border-radius: var(--radius-xs);
   padding: 0 2px;
 }
@@ -508,7 +508,7 @@ h2 {
   width: calc(var(--space-8) * 3);
   height: calc(var(--space-8) * 2);
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-2));
+  background: rgb(var(--surface-raised));
 }
 
 .lv1 {
@@ -540,7 +540,7 @@ h2 {
 }
 
 .icon-cell:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .icon-cell em {
@@ -570,7 +570,7 @@ h2 {
 
 .json-card {
   border-radius: var(--radius-card);
-  background: rgb(var(--bg-layer-1));
+  background: rgb(var(--surface-base));
   border: 1px solid var(--border-l1);
 }
 </style>

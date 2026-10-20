@@ -87,7 +87,7 @@ const showScope = computed(
 }
 
 .plugin-row:hover {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .plugin-row:focus-visible {

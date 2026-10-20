@@ -482,7 +482,7 @@ function onKeydown(event: KeyboardEvent) {
 .custom-row:hover,
 .custom-row:focus-within,
 .custom-row[data-active] {
-  background: var(--interactive-bg-hover);
+  background: var(--surface-hover);
 }
 
 .option[data-selected],
@@ -504,7 +504,7 @@ function onKeydown(event: KeyboardEvent) {
   height: 20px;
   margin-top: var(--space-0-5);
   border-radius: var(--radius-sm);
-  background: rgb(var(--bg-overlay));
+  background: rgb(var(--surface-strong));
   color: rgb(var(--label-secondary));
   font-size: var(--fs-xxs);
   font-weight: 500;
@@ -614,7 +614,7 @@ function onKeydown(event: KeyboardEvent) {
   margin: var(--space-2) var(--space-6) 0;
   border: 1px solid var(--border-l2);
   border-radius: var(--radius-cell);
-  background: rgb(var(--bg-overlay));
+  background: rgb(var(--surface-strong));
 }
 
 .field-block > * {
