@@ -4711,6 +4711,22 @@ export async function installVisualCoreBridge(
           return () => sessionEventListeners.delete(listener)
         },
         invokeCore: async (operationKey: string, ...args: unknown[]) => {
+          // FIX-05: the workspace panes' Core calls, in order and timed, so
+          // specs can count polls and resizes (window.__visualWorkspaceOps).
+          if (/^(?:git|terminals|files|workspace)\./.test(operationKey))
+            ((
+              window as unknown as {
+                __visualWorkspaceOps?: Array<{
+                  op: string
+                  at: number
+                  input: unknown
+                }>
+              }
+            ).__visualWorkspaceOps ??= []).push({
+              op: operationKey,
+              at: performance.now(),
+              input: args[0],
+            })
           if (
             operationKey === 'references.resolve' ||
             operationKey === 'references.preview' ||
@@ -5078,10 +5094,16 @@ export async function installVisualCoreBridge(
                 diff: 'diff --git a/README.md b/README.md\n',
                 truncated: false,
               }
+            case 'git.commit':
+              // `?visualGitCommit=reject`: the pre-commit hook says no.
+              if (visualParams.get('visualGitCommit') === 'reject')
+                throw new Error(
+                  'pre-commit hook failed: eslint found 2 problems in src/app.ts',
+                )
+              return visualGitStatus
             case 'git.stage':
             case 'git.unstage':
             case 'git.discard':
-            case 'git.commit':
             case 'git.fetch':
             case 'git.pull':
             case 'git.push':
@@ -5122,6 +5144,7 @@ export async function installVisualCoreBridge(
                 nextCursor: null,
                 truncated: false,
               }
+            case 'files.stat':
             case 'files.read':
             case 'files.preview': {
               const input = (args[0] || {}) as {
@@ -5129,6 +5152,23 @@ export async function installVisualCoreBridge(
                 relativePath?: string
               }
               const path = input.path || input.relativePath || 'README.md'
+              // FIX-05: `window.__visualFileVersion` (default 1) stands for
+              // edits on disk; `src/long.ts` is 240 lines for scrolling.
+              const version =
+                (window as unknown as { __visualFileVersion?: number })
+                  .__visualFileVersion ?? 1
+              const content = path.includes('long')
+                ? Array.from(
+                    { length: 240 },
+                    (_, index) =>
+                      `export const line${index + 1} = ${index + 1} // v${version}`,
+                  ).join('\n') + '\n'
+                : version > 1
+                  ? `# Visual Build Project\n\nA project workspace visual fixture.\n\nEdited on disk (v${version}).\n`
+                  : '# Visual Build Project\n\nA project workspace visual fixture.\n'
+              const bytes = new TextEncoder().encode(content).length
+              const modifiedAt = Date.parse(now) + version
+              if (operationKey === 'files.stat') return { bytes, modifiedAt }
               return {
                 id: `file:${projectDir}/${path}`,
                 path: `${projectDir}/${path}`,
@@ -5137,10 +5177,10 @@ export async function installVisualCoreBridge(
                 name: path.split('/').pop(),
                 kind: 'text',
                 mimeType: path.endsWith('.md') ? 'text/markdown' : 'text/plain',
-                bytes: 68,
+                bytes,
+                modifiedAt,
                 truncated: false,
-                content:
-                  '# Visual Build Project\n\nA project workspace visual fixture.\n',
+                content,
               }
             }
             case 'terminals.list':
@@ -5148,7 +5188,9 @@ export async function installVisualCoreBridge(
             case 'terminals.create':
               return visualTerminal
             case 'terminals.read':
+              // Core's shape: the terminal's summary with the chunks.
               return {
+                terminal: visualTerminal,
                 terminalId: visualTerminal.id,
                 chunks: [
                   {
