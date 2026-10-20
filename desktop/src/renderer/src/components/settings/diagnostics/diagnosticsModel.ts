@@ -536,6 +536,7 @@ export function diagnosticReportText(input: {
 export const OPENABLE_DIAGNOSTIC_PATHS: ReadonlySet<string> = new Set([
   'global-state-root',
   'active-project-path',
+  'logs-path',
 ])
 
 function commandCatalogRow(
@@ -811,6 +812,17 @@ function storagePathRows(
       modelConfig?.path || paths?.stateRoot,
     ),
     pathRow('mcp-config-path', 'MCP 配置文件', paths?.mcpConfigPath),
+    // REL-01: only a host that keeps logs (the desktop app) names the folder.
+    ...(paths?.logsRoot
+      ? [
+          pathRow(
+            'logs-path',
+            '日志',
+            paths.logsRoot,
+            '主进程 main.log、Core 的 core.log（各按 5 MB 轮转、保留 5 份，已脱敏）与崩溃转储 Crashpad；只在本机',
+          ),
+        ]
+      : []),
   ]
 }
 
