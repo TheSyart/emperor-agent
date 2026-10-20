@@ -103,7 +103,7 @@ turn/end
 
 `harness/agent/tool-calls.ts` 按模型顺序分组：连续的并发安全调用共享一个滚动池（默认最多 10 个并行），非并发安全调用单独执行并形成屏障；`tool/call` 事件和 pre-execute 按模型顺序发生，只有工具体重叠，post-execute 与 `tool/result` 严格按模型顺序提交。中止时尚未开始的调用得到合成的 `ABORTED_BEFORE_DISPATCH` 结果，保证每个调用都有结果。step 因内部故障抛错时（例如结果无法写入 log），所有还没有结果的调用在 `step/end` 之前补写错误结果：已记录 `tool/call` 的写 `TOOL_OUTCOME_UNKNOWN`（结果未知，只有只读或幂等的操作才应重试），从未开始的写 `TOOL_NOT_STARTED`；这与崩溃修复使用同一组结果（`session-log/repair.ts` 的 `ToolCallRecovery`），下一次请求因此不会带着悬空的工具调用。
 
-Post-execute 固定包含重复调用提醒（相同工具与参数连续出现时追加提示，不否决调用）、Hooks 的 PostToolUse，以及最后执行的大结果落盘：纯文本结果超过 50,000 字节时，完整文本写入 `stateRoot/spill/`，模型只看到首尾预览和文件路径。`read` 不参与落盘；界面可以通过 `tools.readResult` 读取落盘全文。
+Post-execute 固定包含重复调用提醒（相同工具与参数连续出现时追加提示，不否决调用）、Hooks 的 PostToolUse，以及最后执行的大结果落盘：纯文本结果超过 50,000 字节时，完整文本写入 `stateRoot/spill/`，模型只看到首尾预览和文件路径。`read` 不参与落盘；界面可以通过 `tools.readResult({ ref, page })` 分页读取落盘全文（每页最多 256 KiB，在字符边界处分页，返回 `{ content, page, pages, bytes }`）。
 
 ### 网络工具
 
@@ -173,7 +173,7 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 
 - **模型可见 ⟺ 已记录**：请求只从 `session.deriveMessages()` 与已记录的 `request/header` 构造。
 - **崩溃修复**：加载时容忍一条截断的尾行，并为中断的 turn 合成收尾事件：未开始的工具调用得到 `TOOL_NOT_STARTED`，结果未落盘的调用得到 `TOOL_OUTCOME_UNKNOWN`，随后补 `step/end` 和中断的 `turn/end`。审批和问题各自贡献修复，未决的请求关闭为 `unavailable`。修复不会重放任何工具副作用。
-- **Fork**：只能在 turn 边界 fork，`subagent_fork` 以父会话已完成的 turn 作为子会话种子。
+- **Fork**：只能在 turn 边界 fork，`subagent_fork` 以父会话已完成的 turn 作为子会话种子。子会话的 log 不复制这段前缀：header 记下父会话、种子长度（`seedLength`）和最后一个种子事件的类型与时间（`seedRef`），打开子会话时从父会话（内存中、磁盘上或 `sessions/.trash/` 里）读出这些事件并核对最后一个；父会话已不在或不再含有这些事件时，子会话打不开（与 header 损坏同样提示）。内存里子会话仍从完整前缀开始，历史分页、种子隐藏、修复与轨迹读到的事件不变。0.2 之前写下的子会话（前缀复制在自己的 log 里）照常打开。
 
 旧内核的 `history.jsonl`、`_checkpoint.json` 和 `runtime/events.jsonl` 已不再使用。首次启动新内核时，已有的 `sessions/` 目录会整体移到 `sessions.legacy-<时间戳>`（`harness/host/services.ts` 的 `archiveLegacySessions()`），不会删除。
 

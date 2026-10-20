@@ -223,6 +223,8 @@ const EXPECTED_OPERATIONS = [
   'skills.save',
   'skills.tools',
   'skills.validate',
+  'storage.clean',
+  'storage.usage',
   'tasks.budget',
   'tasks.cancel',
   'tasks.get',
@@ -1120,6 +1122,9 @@ describe('CoreApi tasks and tools', () => {
     writeFileSync(join(root, 'outside.txt'), 'secret')
     expect(api.tools.readResult({ ref: spilled })).toEqual({
       content: 'full text content',
+      page: 1,
+      pages: 1,
+      bytes: 17,
     })
     expect(() =>
       api.tools.readResult({ ref: join(root, 'outside.txt') }),

@@ -1559,6 +1559,28 @@ export async function installVisualCoreBridge(
         maxTotalAgents: 64,
         maxNoticeWakes: 32,
       }
+      // 设置 › 高级 › 存储 (KRN-12): sizes in bytes; 清理 frees the spill.
+      const visualStorage: Record<string, number> = {
+        sessions: 186_646_528,
+        attachments: 48_234_496,
+        spill: 31_457_280,
+        memoryVersions: 2_097_152,
+        ledger: 1_572_864,
+        delegations: 9_437_184,
+        other: 412_090_368,
+      }
+      function visualStorageUsage() {
+        const categories = Object.entries(visualStorage).map(([id, bytes]) => ({
+          id,
+          bytes,
+        }))
+        return {
+          root: '/Users/visual/.emperor',
+          total: categories.reduce((sum, item) => sum + item.bytes, 0),
+          categories,
+          measuredAt: Date.now(),
+        }
+      }
       function visualBackgroundTask(
         task: Record<string, unknown> & { id: string; kind: string },
       ) {
@@ -4877,6 +4899,27 @@ export async function installVisualCoreBridge(
               return streamVisualReply(promoted.id, input)
             }
             // 设置 › 高级 › 任务预算 (KRN-03): the defaults, saved in memory.
+            case 'storage.usage':
+              return visualStorageUsage()
+            case 'storage.clean': {
+              const freed = visualStorage.spill - 4_194_304
+              visualStorage.spill = 4_194_304
+              const none = { removed: 0, bytes: 0 }
+              return {
+                report: {
+                  sessions: none,
+                  spill: {
+                    removed: freed > 0 ? 12 : 0,
+                    bytes: Math.max(0, freed),
+                  },
+                  memoryVersions: none,
+                  delegations: none,
+                  freedBytes: Math.max(0, freed),
+                  errors: [],
+                },
+                usage: visualStorageUsage(),
+              }
+            }
             case 'tasks.budget':
               return { ...visualTaskBudget }
             case 'tasks.setBudget':

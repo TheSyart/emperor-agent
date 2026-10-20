@@ -103,6 +103,30 @@ export class AppendOnlyJournalSync<T> {
     )
   }
 
+  /**
+   * Replace the journal with its last `keep` records; older records are
+   * dropped (for journals whose latest record says everything, e.g. a
+   * session's meta snapshots). Returns how many records remain.
+   */
+  compact(keep: number): number {
+    const maxRecords = Math.max(1, Math.trunc(keep))
+    return withPersistenceLockSync(
+      this.path,
+      () => {
+        const replay = this.replayUnlocked({ repairTail: true })
+        if (replay.entries.length <= maxRecords) return replay.entries.length
+        const retained = replay.entries.slice(-maxRecords)
+        durableReplaceSync(
+          this.path,
+          encodeSyncLines(this.path, this.codec, retained),
+          this.writeOptions(),
+        )
+        return retained.length
+      },
+      this.writeOptions(),
+    )
+  }
+
   retain(options: { maxRecords: number; archivePath: string }): {
     archived: number
     retained: number

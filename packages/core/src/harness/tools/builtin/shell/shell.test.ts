@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { userText } from '../../../../llm/message'
 import { ApprovalService } from '../../../approval/service'
@@ -27,6 +27,7 @@ import {
 import { createTestHarness, type ScriptedReply } from '../../../testing'
 import { textOf, type ToolExecutionResult } from '../../definition'
 import { ToolRegistry } from '../../registry'
+import { spillSessionDir } from '../../spill'
 import type { ToolServices } from '../../services'
 import { buildShellEnv } from './env'
 import { parseExitStatus } from './render'
@@ -208,6 +209,30 @@ describe.skipIf(!posix)('bash tool', () => {
     const full = readFileSync(spillPath, 'utf8')
     expect(full).toHaveLength(5008)
     expect(full.startsWith('HEAD')).toBe(true)
+  })
+
+  it('spills a session’s output into that session’s spill folder (KRN-12)', async () => {
+    const tools = new ToolRegistry()
+    tools.register(
+      createShellTool(services('danger-full-access'), {
+        platform: 'linux',
+        maxOutputBytes: 1000,
+      }) as never,
+    )
+    const agent = { session: { header: { id: 'chat-1' }, events: [] } }
+    const result = await tools.execute({
+      callId: 'c1',
+      name: 'bash',
+      arguments: {
+        description: 'Print a lot',
+        command: 'head -c 5000 /dev/zero | tr "\\0" a',
+      },
+      signal: new AbortController().signal,
+      agent: agent as never,
+    })
+    const spillPath = meta(result)['spillPath'] as string
+    expect(dirname(spillPath)).toBe(spillSessionDir(spillRoot, 'chat-1'))
+    expect(readFileSync(spillPath, 'utf8')).toHaveLength(5000)
   })
 
   it('resolves workdir against the session workspace and rejects missing directories', async () => {
