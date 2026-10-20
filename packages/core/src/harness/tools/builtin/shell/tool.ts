@@ -41,6 +41,7 @@ import {
   type ToolRunContext,
 } from '../../definition'
 import type { ToolServices } from '../../services'
+import { spillSessionDir } from '../../spill'
 import { buildShellEnv, EMPEROR_ENV_PREFIX } from './env'
 import { DEFAULT_MAX_OUTPUT_BYTES, DEFAULT_MAX_SPILL_BYTES } from './output'
 import { DEFAULT_GRACE_MS, spawnManaged, type ManagedProcess } from './process'
@@ -321,10 +322,13 @@ export function createShellTool(
     return { argv: confined.argv, confined }
   }
 
+  // A session's output spills into its own folder (KRN-12), which goes
+  // when the session is purged.
   const spawnFor = (
     argv: string[],
     workdir: string,
     env: NodeJS.ProcessEnv,
+    sessionId: string | undefined,
     signal?: AbortSignal,
   ): ManagedProcess =>
     spawnManaged({
@@ -333,7 +337,10 @@ export function createShellTool(
       env,
       maxOutputBytes,
       maxSpillBytes,
-      spillDir: services.spillRoot,
+      spillDir:
+        sessionId === undefined
+          ? services.spillRoot
+          : spillSessionDir(services.spillRoot, sessionId),
       graceMs,
       platform,
       ...(signal === undefined ? {} : { signal }),
@@ -359,7 +366,13 @@ export function createShellTool(
     let outcome: { exitCode: number | null; signal: NodeJS.Signals | null }
     try {
       try {
-        proc = spawnFor(argv, workdir, env, limit.signal)
+        proc = spawnFor(
+          argv,
+          workdir,
+          env,
+          context.agent?.session.header.id,
+          limit.signal,
+        )
         outcome = await proc.done
       } catch (error: unknown) {
         if (context.signal.aborted) throw abortedError()
@@ -449,7 +462,12 @@ export function createShellTool(
       ...(context.agent === undefined ? {} : { owner: context.agent }),
       run: () => {
         // Background work is detached from the tool-call signal once the id is returned.
-        const proc = spawnFor(argv, workdir, env)
+        const proc = spawnFor(
+          argv,
+          workdir,
+          env,
+          context.agent?.session.header.id,
+        )
         let killed = false
         let sandbox: ShellSandboxInfo | undefined
         let spawnError: unknown

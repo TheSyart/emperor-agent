@@ -2,9 +2,10 @@
 /**
  * Settings › 高级 — settings most people leave alone (UI-S07): 网络工具 on
  * the main page, and rows into the sub pages Hooks (`page=hooks`,
- * HooksSection) and 诊断 (`page=diagnostics`, DiagnosticsSection), which
- * bring their own header actions. Old `?settings=hooks|diagnostics` links
- * land on those sub pages (settingsAlias).
+ * HooksSection), 诊断 (`page=diagnostics`, DiagnosticsSection) and 存储
+ * (`page=storage`, StorageSection, KRN-12), which bring their own header
+ * actions. Old `?settings=hooks|diagnostics` links land on those sub pages
+ * (settingsAlias).
  *
  * 网络工具 (KRN-08, settings.json › webTools): the Agent's two web tools.
  * - 网页读取 (`web_fetch`): public pages as Markdown through main's public
@@ -50,6 +51,9 @@ const HooksSection = defineAsyncComponent(() => import('./HooksSection.vue'))
 const DiagnosticsSection = defineAsyncComponent(
   () => import('./DiagnosticsSection.vue'),
 )
+const StorageSection = defineAsyncComponent(
+  () => import('./StorageSection.vue'),
+)
 
 type NetworkTools = CoreOperationResult<'tools.networkSettings'>
 type Tool = 'webFetch' | 'webSearch'
@@ -76,6 +80,7 @@ const ctx = useAppContext()
 const { page, open: openPage } = useSettingsPages({
   hooks: 'Hooks',
   diagnostics: '诊断',
+  storage: '存储',
 })
 const status = ref<NetworkTools | null>(null)
 const busy = ref<Tool | null>(null)
@@ -234,6 +239,7 @@ onMounted(() => void load())
 <template>
   <HooksSection v-if="page === 'hooks'" />
   <DiagnosticsSection v-else-if="page === 'diagnostics'" />
+  <StorageSection v-else-if="page === 'storage'" />
   <SettingsSection v-else>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <SettingsGroup
@@ -382,6 +388,12 @@ onMounted(() => void load())
         description="运行时、环境、存储路径与配置的状态；出问题时复制报告"
         data-advanced-page="diagnostics"
         @click="openPage('diagnostics')"
+      />
+      <SettingsLinkRow
+        title="存储"
+        description="会话、附件、溢出文件等各占多少磁盘空间；清理不再需要的文件"
+        data-advanced-page="storage"
+        @click="openPage('storage')"
       />
     </SettingsGroup>
   </SettingsSection>
