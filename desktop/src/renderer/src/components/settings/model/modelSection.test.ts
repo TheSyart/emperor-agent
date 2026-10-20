@@ -793,3 +793,102 @@ describe('ModelSection (MOD-05)', () => {
     expect(policy.textContent).toContain('「Main」没有单价，成本上限对它不生效')
   })
 })
+
+describe('ModelSection › DeepSeek interface (KRN-07)', () => {
+  async function openEditor(model: ModelEntry): Promise<Element> {
+    await mount(payload([model]))
+    button('编辑 Main').click()
+    await flush()
+    return container!.querySelector('[data-testid="model-editor"]')!
+  }
+
+  function advanced(editor: Element): HTMLButtonElement {
+    return [...editor.querySelectorAll('button')].find(
+      (item) => item.textContent?.trim() === '高级',
+    )!
+  }
+
+  it('shows Messages for the official host, says how medium is sent, and saves the fallback', async () => {
+    api.saveModelEntry.mockResolvedValue(
+      payload([entry({ transport: 'chat-completions' })]),
+    )
+    const editor = await openEditor(entry({}))
+    expect(
+      editor.querySelector('[data-testid="model-editor-connection"]')
+        ?.textContent,
+    ).toContain('Anthropic Messages')
+    expect(editor.textContent).toContain('medium 按 high 发送')
+    advanced(editor).click()
+    await flush()
+    labelled('接口').click()
+    await flush()
+    const fallback = [
+      ...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+    ].find((item) => item.textContent?.includes('Chat Completions'))
+    expect(fallback).toBeTruthy()
+    fallback!.click()
+    await flush()
+    ;[...editor.querySelectorAll('button')]
+      .find((item) => item.textContent?.trim() === '保存')!
+      .click()
+    await flush()
+    expect(api.saveModelEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entryId: 'main',
+        transport: 'chat-completions',
+      }),
+    )
+  })
+
+  it('saves Messages again as transport null, and leaves transport out when untouched', async () => {
+    api.saveModelEntry.mockResolvedValue(payload([entry({})]))
+    const editor = await openEditor(entry({ transport: 'chat-completions' }))
+    expect(
+      editor.querySelector('[data-testid="model-editor-connection"]')
+        ?.textContent,
+    ).toContain('OpenAI Chat Completions（回退）')
+    advanced(editor).click()
+    await flush()
+    labelled('接口').click()
+    await flush()
+    ;[...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+      .find((item) => item.textContent?.includes('Anthropic Messages'))!
+      .click()
+    await flush()
+    ;[...editor.querySelectorAll('button')]
+      .find((item) => item.textContent?.trim() === '保存')!
+      .click()
+    await flush()
+    expect(api.saveModelEntry.mock.calls[0]![0]).toMatchObject({
+      transport: null,
+    })
+
+    app?.unmount()
+    container?.remove()
+    vi.clearAllMocks()
+    api.saveModelEntry.mockResolvedValue(payload([entry({})]))
+    const plain = await openEditor(entry({}))
+    ;[...plain.querySelectorAll('button')]
+      .find((item) => item.textContent?.trim() === '保存')!
+      .click()
+    await flush()
+    expect(api.saveModelEntry.mock.calls[0]![0]).not.toHaveProperty('transport')
+  })
+
+  it('offers no interface choice for a gateway or another provider', async () => {
+    const editor = await openEditor(
+      entry({ apiBase: 'https://gw.example.com/v1' }),
+    )
+    expect(
+      editor.querySelector('[data-testid="model-editor-connection"]')
+        ?.textContent,
+    ).toContain('OpenAI Chat Completions')
+    advanced(editor).click()
+    await flush()
+    expect(
+      [...editor.querySelectorAll('label')].some(
+        (label) => label.textContent?.trim() === '接口',
+      ),
+    ).toBe(false)
+  })
+})

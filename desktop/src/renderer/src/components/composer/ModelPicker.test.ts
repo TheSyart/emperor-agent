@@ -56,3 +56,51 @@ describe('ModelPicker › 添加模型…', () => {
     expect(onAddModel).toHaveBeenCalledOnce()
   })
 })
+
+describe('ModelPicker › effort descriptions (KRN-07)', () => {
+  it('shows the note under an effort option', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    app = createApp(() =>
+      h(ModelPicker, {
+        entries: [
+          {
+            entryId: 'main',
+            provider: 'deepseek',
+            modelId: 'deepseek-flash',
+            effectiveDisplayName: 'Main',
+          } as ModelEntry,
+        ],
+        activeId: 'main',
+        label: 'Main',
+        reasoningLabel: 'High',
+        reasoningValue: 'high',
+        reasoningOptions: [
+          { value: null, label: 'Default' },
+          { value: 'low', label: 'Low' },
+          {
+            value: 'high',
+            label: 'High',
+            description: 'Medium 也按 High 发送',
+          },
+        ],
+        providerOptions: [],
+      }),
+    )
+    app.mount(host)
+    await flush()
+    host.querySelector<HTMLButtonElement>('button')!.click()
+    await flush()
+    const effortRow = [
+      ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+    ].find((item) => item.textContent?.includes('思考强度'))!
+    effortRow.click()
+    await flush()
+    const high = [
+      ...document.querySelectorAll<HTMLElement>(
+        '[aria-label="思考强度"] [role="menuitem"]',
+      ),
+    ].find((item) => item.textContent?.includes('High'))!
+    expect(high.textContent).toContain('Medium 也按 High 发送')
+  })
+})

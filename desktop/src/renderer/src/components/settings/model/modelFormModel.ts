@@ -11,6 +11,7 @@ import type {
   ModelTestResult,
   ResolvedModelProfile,
 } from '../../../types'
+import type { SelectOption } from '../../ui/inputTypes'
 
 /**
  * One line for a model test: the latency on success, otherwise why it
@@ -79,6 +80,77 @@ export const PROTOCOL_LABELS: Record<ModelProtocol, string> = {
 }
 
 export { PROTOCOL_SHORT_LABELS } from '../../../model/providerGroups'
+
+// ── DeepSeek interface (KRN-07) ────────────────────────────────────────────
+
+/**
+ * Core sends DeepSeek entries on this host over Anthropic Messages unless
+ * the entry keeps chat-completions (packages/core llm/route.ts); gateways
+ * keep the protocol they were saved with.
+ */
+const DEEPSEEK_OFFICIAL_HOST = 'api.deepseek.com'
+
+export type ModelInterface = 'messages' | 'chat-completions'
+
+function isOfficialDeepSeek(entry: Pick<ModelEntry, 'provider' | 'apiBase'>) {
+  if (entry.provider !== 'deepseek') return false
+  try {
+    const url = new URL(entry.apiBase)
+    return url.protocol === 'https:' && url.hostname === DEEPSEEK_OFFICIAL_HOST
+  } catch {
+    return false
+  }
+}
+
+/** The interface of a DeepSeek entry on the official host; null for any other entry. */
+export function deepseekInterface(
+  entry: Pick<ModelEntry, 'provider' | 'apiBase' | 'transport'>,
+): ModelInterface | null {
+  if (!isOfficialDeepSeek(entry)) return null
+  return entry.transport === 'chat-completions'
+    ? 'chat-completions'
+    : 'messages'
+}
+
+/** The interface an entry's requests actually use, as the editor names it. */
+export function entryInterfaceLabel(
+  entry: Pick<ModelEntry, 'provider' | 'apiBase' | 'protocol' | 'transport'>,
+): string {
+  switch (deepseekInterface(entry)) {
+    case 'messages':
+      return PROTOCOL_LABELS.anthropic
+    case 'chat-completions':
+      return `${PROTOCOL_LABELS.openai}（回退）`
+    default:
+      return PROTOCOL_LABELS[entry.protocol]
+  }
+}
+
+/** The editor's 接口 choice for an official DeepSeek entry ('' = the default). */
+export const INTERFACE_OPTIONS: ReadonlyArray<
+  SelectOption<'' | 'chat-completions'>
+> = [
+  {
+    value: '',
+    label: 'Anthropic Messages（默认）',
+    description: '思考签名回放、Files API 传图',
+  },
+  {
+    value: 'chat-completions',
+    label: 'OpenAI Chat Completions（回退）',
+    description: '旧接口；Messages 出问题时再用',
+  },
+]
+
+/** DeepSeek has three effort levels; Emperor's medium is sent as high. */
+export const DEEPSEEK_EFFORT_HINT =
+  'DeepSeek 只有 low / high / max 三档，medium 按 high 发送'
+
+export function reasoningHint(
+  entry: Pick<ModelEntry, 'provider'>,
+): string | undefined {
+  return entry.provider === 'deepseek' ? DEEPSEEK_EFFORT_HINT : undefined
+}
 
 export const CAPABILITY_ROWS = [
   { key: 'toolCall', label: '工具调用' },
