@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core、Electron 与 renderer 开发者<br>
-> 最后核验：2026-10-19<br>
-> 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/api/operations.ts`、`packages/core/src/harness/projection/`、`packages/core/src/llm/`、`packages/core/src/harness/tools/builtin/`、`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/pages/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/settings/`
+> 最后核验：2026-10-20<br>
+> 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/api/operations.ts`、`packages/core/src/harness/projection/`、`packages/core/src/llm/`、`packages/core/src/harness/tools/builtin/`、`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/pages/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/settings/`、`packages/core/src/harness/hooks/contained.ts`、`packages/core/src/harness/hooks/plugin-health.ts`
 
 Emperor Agent 的扩展通常横跨内核、CoreApi、Electron contract、renderer 投影和文档。先确定权威状态属于哪里：会话内的一切属于 session log；长期数据属于对应的保留服务。然后从内核或服务向外接入，不要把策略散落到组件或 prompt 文案。
 
@@ -170,6 +170,40 @@ Scheduler、Watchlist 或 Goal 触发的 turn 必须：
 - 提供暂停、取消或诊断中的至少一种可控失败路径。
 
 Scheduler 的调度、misfire 与准入逻辑在 `packages/core/src/scheduler/service.ts`，执行器在 `harness/host/scheduler.ts`。`CoreApi.create` 在插件同步之后才启动 Scheduler（`HarnessHost.startScheduler()`；单独创建的 `HarnessHost` 默认在 `create` 末尾启动），启动失败只记录在 `status().startError` 与诊断里，不会让 Core 启动失败。定时器晚于触发点超过 `SCHEDULER_WAKE_GRACE_MS`（60 秒）时按 misfire 策略处理，与冷启动一致；每次 tick 无论成败都会重新设好下一个定时器。
+
+## 插件 Hook 的运行环境
+
+插件可以带 Hook：可移植格式与 Codex 格式写在 `hooks/hooks.json` 或清单的 `hooks`，旧格式写在 `.emperor-plugin/plugin.json` 的 `hooks` 列出的文件里。插件 Hook 与用户自己写在 `stateRoot/hooks.json` 里的 Hook 用同一套事件、stdin 载荷与输出协议，但运行环境不同（`harness/hooks/contained.ts`；SEC-08 统一隔离，SEC-07 收紧环境与超时）：
+
+|          | 插件 Hook                                                                                                                                                                                                                                                       | 用户 `hooks.json` 的 Hook                       |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| 进程     | `/bin/sh -c <command>`，经受管进程运行时与[统一进程隔离](../architecture/control-and-permissions.md#统一进程隔离sec-08)（macOS Seatbelt）运行，`mode: required`：沙箱不可用时不运行                                                                             | 直接 `sh -c`，不隔离                            |
+| 文件     | workspace 与插件包只读；可写 `PLUGIN_DATA`（`stateRoot/plugins/data/<插件 ID>`）和 `TMPDIR`（`stateRoot/plugins/tmp/<插件 ID>`）；Emperor Home 的其余内容与凭据路径（`~/.ssh`、`~/.aws` 等）读写都拒绝                                                          | 与 Emperor 进程相同                             |
+| 网络     | 允许                                                                                                                                                                                                                                                            | 允许                                            |
+| 环境变量 | 安全键（`PATH`、`HOME`、`USER`、`SHELL`、`LANG`、`LC_ALL`、`TERM`、`PWD`，Windows 另有几项）；清单 `env` 声明的变量；`PLUGIN_ROOT`、`PLUGIN_DATA`、`CLAUDE_PLUGIN_ROOT`、`CLAUDE_PLUGIN_DATA`、`CLAUDE_PROJECT_DIR`；`TMPDIR`、`TMP`、`TEMP` 指向插件的临时目录 | Emperor 进程的完整环境，加 `CLAUDE_PROJECT_DIR` |
+| 超时     | 默认 30 秒；Hook 自己的 `timeout`（秒）最多算 120 秒                                                                                                                                                                                                            | 默认 600 秒，按 Hook 的 `timeout`               |
+| 失败     | 退出码不是 0 或 2、超时、被拒绝或没能启动：按 Hook 失败处理（不阻止工具调用），并记在插件详情                                                                                                                                                                   | 按 Hook 失败处理                                |
+
+插件需要的其他环境变量（例如某个服务的令牌）要在清单顶层的 `env` 里声明，值是变量名数组。三种格式都在各自的主清单里写：可移植格式的根 `plugin.json`、`.codex-plugin/plugin.json`、`.emperor-plugin/plugin.json`。
+
+```json
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "acme-lint",
+  "env": ["ACME_API_TOKEN", "ACME_REGION"]
+}
+```
+
+- 名字必须匹配 `[A-Za-z_][A-Za-z0-9_]*`，最多 64 个。安装预览拒绝不合规的 `env`（`manifest_invalid`），已安装的包只保留合规的名字。
+- 只有名字写进包里；值在 Hook 运行时从 Emperor 的环境读取。Emperor 的环境里没有的变量不会出现。从 Finder 或程序坞启动时，Emperor 拿到的是 macOS 的登录环境，不含终端 shell 配置里 `export` 的变量。
+- 声明的变量列在插件详情「信息 › 可读环境变量」里，用户启用前就能看到插件读什么。
+- `env` 只作用于 Hook。插件的 stdio MCP server 照旧只拿到安全键和它自己配置里写明的 `env`，配置里的 `${变量}` 只展开 `PLUGIN_ROOT`、`PLUGIN_DATA` 与安全键。
+
+Hook 失败时，`PluginHookHealth`（`harness/hooks/plugin-health.ts`）按插件与 Hook 成员 ID（`<事件>#<序号>`）在内存里记下最近一次失败：原因（「最近一次运行失败（退出码 1）：…」「最近一次运行超过 30 秒，已终止」「进程沙箱不可用，最近一次没有运行：…」）、可能需要的变量、时间；下一次成功即清除，重启后从空开始。状态变化时 CoreApi 发 `plugins_changed`（`reason: 'hooks'`），插件详情里这个 Hook 显示「失败」、原因和「需要的环境变量」。可能需要的变量从文本推断：声明了但 Emperor 环境里没有的变量；以及 Hook 命令和命令里点名的插件包内脚本（最多两个，各不超过 64 KiB）读到、却没有声明的变量——`$NAME` / `${NAME}`（全大写）、`process.env.NAME`、`os.environ["NAME"]`、`os.getenv("NAME")`、`ENV["NAME"]`，去掉脚本自己赋值的、安全键与 Emperor 提供的变量。
+
+仓库可以在 `.emperor/settings.json` 里写 `{ "enabledPlugins": { "<插件 ID>": true } }` 推荐插件，但这只是建议：已按项目范围安装、用户还没为这个项目选过的插件，会在能力页显示「该项目建议启用 X」，用户确认后才在这个项目启用，选择记在 `stateRoot/projects/<项目 ID>/plugins.json`（见[全局状态存储](../architecture/global-state-store.md#项目源码目录)）。
+
+改动插件 Hook 的运行方式时同步：`harness/hooks/contained.ts`、`harness/hooks/plugin-trust.test.ts`、本节、用户手册「[Plugins](../user/tools-skills-mcp.md#plugins)」与统一进程隔离的表。
 
 ## 验收矩阵
 

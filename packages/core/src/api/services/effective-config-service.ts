@@ -72,9 +72,21 @@ export class CoreEffectiveConfigService {
           escalation: 'one-shot-approval',
         },
         // SEC-08: one containment (sandbox/policy.ts) for every process.
+        // SEC-07: plugin hooks get the safe keys plus their manifest's env,
+        // 30 s by default and at most 120 s; the user's own run as written.
         hooks: {
-          user: { containment: 'none', source: 'emperor-home/hooks.json' },
-          plugin: { containment: 'contained', fallback: 'refuse' },
+          user: {
+            containment: 'none',
+            source: 'emperor-home/hooks.json',
+            env: 'inherited',
+            timeoutSec: { default: 600 },
+          },
+          plugin: {
+            containment: 'contained',
+            fallback: 'refuse',
+            env: 'safe-keys-and-manifest-env',
+            timeoutSec: { default: 30, max: 120 },
+          },
         },
         mcp: {
           containment: 'contained',
