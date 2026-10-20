@@ -21,6 +21,8 @@ import {
   previewCanonicalFile,
   type FilePreviewInput,
   type FilePreviewResult,
+  type FileStatInput,
+  type FileStatResult,
 } from '../workspace/file-preview'
 import type { RuntimePaths } from '../runtime/paths'
 import { HarnessHost, type HarnessHostOptions } from '../harness/host/host'
@@ -2592,6 +2594,14 @@ export class CoreApi {
         }),
       )
     },
+    /** Size and mtime of a preview that can change on disk (FIX-05). */
+    stat: async (input: FileStatInput): Promise<FileStatResult> =>
+      input.source === 'reference'
+        ? this.workspaceReferenceService.statFile(input)
+        : this.workspaceFilesService.stat({
+            sessionId: input.sessionId,
+            relativePath: input.path,
+          }),
     list: (
       input: Parameters<WorkspaceFilesService['list']>[0],
     ): Promise<WorkspaceFileListResult> =>

@@ -17,7 +17,7 @@ describe('Core operation registry', () => {
     const descriptors = coreOperationDescriptors()
     const descriptorKeys = descriptors.map((entry) => entry.key)
 
-    expect(coreOperationKeys()).toHaveLength(219)
+    expect(coreOperationKeys()).toHaveLength(220)
     expect(coreOperationKeys()).toEqual(descriptorKeys)
     expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(descriptorKeys)
     expect(
@@ -52,6 +52,7 @@ describe('Core operation registry', () => {
         'files.list',
         'files.search',
         'files.read',
+        'files.stat',
         'terminals.list',
         'terminals.create',
         'terminals.read',

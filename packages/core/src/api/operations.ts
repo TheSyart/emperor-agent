@@ -574,6 +574,22 @@ const filePreviewSchema = z.discriminatedUnion('source', [
     .object({ source: z.literal('attachment'), attachmentId: idSchema })
     .strict(),
 ])
+const fileStatSchema = z.discriminatedUnion('source', [
+  z
+    .object({
+      source: z.literal('project'),
+      sessionId: idSchema,
+      path: workspaceRelativePathSchema,
+    })
+    .strict(),
+  z
+    .object({
+      source: z.literal('reference'),
+      sessionId: idSchema,
+      referenceId: idSchema,
+    })
+    .strict(),
+])
 const gitStatusSchema = workspaceSessionSchema
 const gitDiffSchema = z
   .object({
@@ -1569,6 +1585,9 @@ export const CORE_OPERATION_REGISTRY = {
   'files.search': operation(
     z.tuple([workspaceFileSearchSchema]),
     (api, [input]) => api.files.search(input),
+  ),
+  'files.stat': operation(z.tuple([fileStatSchema]), (api, [input]) =>
+    api.files.stat(input),
   ),
   'git.branches': operation(z.tuple([gitStatusSchema]), (api, [input]) =>
     api.git.branches(input),
