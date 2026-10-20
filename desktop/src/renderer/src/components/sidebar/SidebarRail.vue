@@ -2,11 +2,12 @@
 /**
  * Collapsed sidebar (56px rail): the brand mark doubles as the expand
  * toggle (hover swaps in the panel icon), then back / forward, new chat,
- * search and the bell, the four full pages, and settings at the foot.
+ * search and the bell, the full pages, and settings at the foot.
  * Every control is a 36px circle with a right-side tooltip.
  */
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useAppContext } from '../../composables/useAppContext'
 import BrandMark from '../brand/BrandMark.vue'
 import { goBack, goForward, useNavHistory } from '../shell/navHistory'
 import { DsNewChat, DsPanelLeft, DsSearch } from '../icons/ds'
@@ -16,16 +17,18 @@ import SidebarFooter from './SidebarFooter.vue'
 import {
   activeSidebarPage,
   SIDEBAR_ICONS,
-  SIDEBAR_PAGES,
+  visibleSidebarPages,
   type SidebarPageEntry,
 } from './sidebarNav'
 
 const emit = defineEmits<{ toggle: []; 'new-chat': []; search: [] }>()
 
+const ctx = useAppContext()
 const route = useRoute()
 const router = useRouter()
 const nav = useNavHistory()
 const active = computed(() => activeSidebarPage(route.name))
+const pages = computed(() => visibleSidebarPages(ctx.boot.value?.plugins ?? []))
 
 function go(entry: SidebarPageEntry): void {
   void router.push(entry.to).catch(() => undefined)
@@ -94,7 +97,7 @@ function go(entry: SidebarPageEntry): void {
     </div>
     <nav class="group" aria-label="侧栏导航">
       <Tooltip
-        v-for="entry in SIDEBAR_PAGES"
+        v-for="entry in pages"
         :key="entry.name"
         :label="entry.label"
         side="right"

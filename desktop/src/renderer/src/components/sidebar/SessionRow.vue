@@ -1,9 +1,12 @@
 <script setup lang="ts">
 /**
- * One sidebar session row (dsh Rows: 32px, radius 8, 16px status slot, 14/20
- * title, 12/20 tertiary time). Running rows show the gold pixel chase and an
- * "N 个子智能体运行中" subline; hover swaps the time for a more-actions button
- * (rename / pin / archive / delete, plus move up/down under manual sort).
+ * One sidebar session row (UI-S11: 32px, radius 8, 16px status slot, 13/20
+ * title, a compact relative time — never an ISO date). The slot shows the
+ * gold dot while running, the attention dot while it waits for an answer or
+ * an approval, and the ok dot for new activity; a running row adds an
+ * "N 个子智能体运行中" subline. Hover swaps the time for 「⋯」 (rename / pin /
+ * archive / delete, plus move up/down under manual sort). Nested rows (a
+ * project's sessions) hang off a hairline guide.
  */
 import { computed, nextTick, ref } from 'vue'
 import { DsMore } from '../icons/ds'
@@ -93,6 +96,7 @@ defineExpose({ beginRename })
     :data-active="active || undefined"
     :data-nested="nested || undefined"
     :data-menu-open="menuOpen || undefined"
+    :data-session-id="session.id"
     :aria-current="active ? 'page' : undefined"
     :title="title"
     @click="editing ? undefined : emit('open')"
@@ -108,7 +112,7 @@ defineExpose({ beginRename })
         />
         <Dot
           v-else-if="indicator === 'pending'"
-          state="warn"
+          state="attention"
           :label="stateLabel"
         />
         <Dot
@@ -192,17 +196,28 @@ defineExpose({ beginRename })
 }
 
 .session-row[data-nested] {
+  position: relative;
   padding-left: calc(var(--space-2) + var(--space-5) + 2px);
 }
 
+/* The project's guide: under the folder icon's centre (row padding 8 + 8). */
+.session-row[data-nested]::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--space-4) - 0.5px);
+  width: 1px;
+  background: var(--border-l2);
+  content: '';
+}
+
 .session-row:hover,
-.session-row[data-menu-open],
-.session-row[data-active] {
+.session-row[data-menu-open] {
   background: var(--interactive-bg-hover);
 }
 
 .session-row[data-active] {
-  background: var(--interactive-bg-active);
+  background: rgb(var(--surface-selected));
 }
 
 .session-row:focus-visible {
@@ -263,7 +278,10 @@ defineExpose({ beginRename })
   flex: none;
   font-size: var(--fs-xxs);
   line-height: var(--space-5);
-  color: rgb(var(--label-tertiary));
+  color: rgb(var(--label-caption));
+  font-variant-numeric: tabular-nums;
+  /* 「6月26日」, not 「6 月 26 日」. */
+  text-autospace: no-autospace;
 }
 
 .more {

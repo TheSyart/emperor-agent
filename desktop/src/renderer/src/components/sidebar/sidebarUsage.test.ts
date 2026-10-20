@@ -52,12 +52,13 @@ describe('sidebar nav', () => {
   it('points every page entry at a named route', () => {
     const names = new Set(routeRecords.map((record) => record.name))
     for (const entry of SIDEBAR_PAGES) expect(names.has(entry.name)).toBe(true)
+    // 探索 is part of 能力 since UI-S08; Pull Request needs the GitHub plugin.
     expect(SIDEBAR_PAGES.map((entry) => entry.label)).toEqual([
       'Pull Request',
       '定时任务',
       '能力',
-      '探索',
     ])
+    expect(SIDEBAR_PAGES.filter((entry) => entry.github)).toHaveLength(1)
   })
 
   it('highlights a page entry only on its own route', () => {

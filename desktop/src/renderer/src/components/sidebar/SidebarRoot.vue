@@ -1,14 +1,16 @@
 <script setup lang="ts">
 /**
- * Sidebar column. Top to bottom: SidebarTopRow (collapse, ← →),
- * SidebarBrandRow (BrandMark + Emperor, search toggle, bell),
- * SidebarNav (新对话 + the full pages), the search capsule while
- * searching, then the session list — 置顶 (pinned, pin order), 项目
- * (projects → sessions), 对话 (chats grouped by day) — and SidebarFooter
- * (设置 / 明暗切换).
- * Collapsed, the column renders the 56px SidebarRail instead. Geometry is
- * owned by AppFrame; this fills the column it is given. The persisted
- * layout (sorts, orders, pins) lives in useSidebarState.
+ * Sidebar column (UI-S11: Emperor's own layout, redesigned). Top to bottom:
+ * SidebarTopRow (collapse, ← →), SidebarBrandRow (BrandMark + Emperor,
+ * search toggle, bell), SidebarNav (the 新对话 primary row + the full
+ * pages), the search box while searching, then the session list — 置顶
+ * (pinned, pin order), 项目 (projects → sessions), 对话 (chats grouped by
+ * day) — and SidebarFooter (设置 / 明暗切换). Search finds titles at once and
+ * contents after a pause (useContentSearch); ↑ / ↓ on a focused row move to
+ * the next one and open it. Collapsed, the column renders the 56px
+ * SidebarRail instead. Geometry is owned by AppFrame; this fills the column
+ * it is given. The persisted layout (sorts, orders, pins) lives in
+ * useSidebarState.
  */
 import { elementOf } from '../ui/elementOf'
 import IconButton from '../ui/IconButton.vue'
@@ -39,6 +41,7 @@ import SidebarRail from './SidebarRail.vue'
 import SidebarSearchResults from './SidebarSearchResults.vue'
 import SidebarSectionHeader from './SidebarSectionHeader.vue'
 import SidebarTopRow from './SidebarTopRow.vue'
+import { useContentSearch } from './useContentSearch'
 import { useSidebarState } from './useSidebarState'
 import { useAgentTree } from './agentTree'
 import { fetchSessionLineage } from '../../api/sessions'
@@ -95,9 +98,23 @@ const chatDayGroups = computed(() =>
 )
 const searching = computed(() => searchQuery.value.trim().length > 0)
 const searchVisible = computed(() => searchOpen.value || searching.value)
-const searchResults = computed(() =>
-  searchSidebarSessions(sessions.value, searchQuery.value),
-)
+const content = useContentSearch(searchQuery)
+const searchResults = computed(() => {
+  const titles = searchSidebarSessions(sessions.value, searchQuery.value)
+  const seen = new Set(titles.map((result) => result.id))
+  return [
+    ...titles.map((result) => ({ ...result, group: 'title' as const })),
+    ...content.hits.value
+      .filter((hit) => !seen.has(hit.sessionId))
+      .map((hit) => ({
+        id: hit.sessionId,
+        title: hit.title || '新会话',
+        subtitle: `${hit.role === 'user' ? '你' : '助手'}：${hit.snippet}`,
+        mode: 'chat' as const,
+        group: 'content' as const,
+      })),
+  ]
+})
 const layoutLoaded = ref(false)
 const visibleRootIds = computed(() =>
   sessions.value
@@ -358,6 +375,23 @@ function commitSearch() {
   if (result) openSearchResult(result.id)
 }
 
+/** ↑ / ↓ on a focused row: focus the next row in the list and open it. */
+function moveRow(event: KeyboardEvent, delta: -1 | 1) {
+  const row = event.target as HTMLElement | null
+  if (!row?.classList.contains('session-row')) return
+  const rows = [
+    ...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>(
+      '.session-row',
+    ),
+  ]
+  const next = rows[rows.indexOf(row) + delta]
+  event.preventDefault()
+  if (!next) return
+  next.focus()
+  const id = next.dataset.sessionId
+  if (id) openSession(id)
+}
+
 watch(searchQuery, () => {
   searchIndex.value = 0
 })
@@ -386,8 +420,12 @@ defineExpose({ focusSearch })
     aria-label="会话侧栏"
     :style="{ width: `${width}px` }"
   >
-    <SidebarTopRow @toggle="emit('toggle')" />
-    <SidebarBrandRow :search-active="searchVisible" @search="toggleSearch" />
+    <SidebarTopRow data-sidebar-block="top" @toggle="emit('toggle')" />
+    <SidebarBrandRow
+      data-sidebar-block="brand"
+      :search-active="searchVisible"
+      @search="toggleSearch"
+    />
     <SidebarNav
       :project-menu-open="newProjectMenuOpen"
       @new-chat="newChat"
@@ -399,7 +437,8 @@ defineExpose({ focusSearch })
       ref="searchInput"
       v-model="searchQuery"
       class="search"
-      placeholder="搜索对话"
+      placeholder="搜索会话标题和内容"
+      aria-label="搜索对话"
       @clear="clearSearch"
       @keydown.down.prevent="moveSearch(1)"
       @keydown.up.prevent="moveSearch(-1)"
@@ -408,19 +447,30 @@ defineExpose({ focusSearch })
       @blur="onSearchBlur"
     />
 
-    <div class="region">
+    <div class="region" data-sidebar-block="sections">
       <div v-if="loading && !sessions.length" class="empty">加载中…</div>
 
       <SidebarSearchResults
         v-else-if="searching"
         :results="searchResults"
+        :pending="content.pending.value"
         :selected-index="searchIndex"
         @hover="searchIndex = $event"
         @open="openSearchResult"
       />
 
-      <div v-else class="list">
-        <section v-if="grouped.pinned.length" class="section" aria-label="置顶">
+      <div
+        v-else
+        class="list"
+        @keydown.down="moveRow($event, 1)"
+        @keydown.up="moveRow($event, -1)"
+      >
+        <section
+          v-if="grouped.pinned.length"
+          class="section"
+          aria-label="置顶"
+          data-sidebar-section="pinned"
+        >
           <SidebarSectionHeader
             v-model:collapsed="pinnedCollapsed"
             label="置顶"
@@ -450,6 +500,7 @@ defineExpose({ focusSearch })
         <section
           v-if="sidebarState.section_order.includes('projects')"
           class="section"
+          data-sidebar-section="projects"
         >
           <SidebarSectionHeader
             v-model:collapsed="projectsCollapsed"
@@ -510,6 +561,7 @@ defineExpose({ focusSearch })
         <section
           v-if="sidebarState.section_order.includes('chats')"
           class="section"
+          data-sidebar-section="chats"
         >
           <SidebarSectionHeader v-model:collapsed="chatsCollapsed" label="对话">
             <IconButton
@@ -551,7 +603,7 @@ defineExpose({ focusSearch })
       </div>
     </div>
 
-    <SidebarFooter />
+    <SidebarFooter data-sidebar-block="footer" />
 
     <Menu
       v-model:open="newProjectMenuOpen"

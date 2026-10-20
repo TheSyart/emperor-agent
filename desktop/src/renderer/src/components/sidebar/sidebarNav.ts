@@ -1,22 +1,26 @@
 // Sidebar page entries (expanded nav rows + rail icons) and their glyphs.
+// 探索 is part of 能力 since UI-S08; Pull Request shows only while the
+// GitHub plugin is on.
 import {
   ArrowLeft,
   ArrowRight,
   Bell,
   Blocks,
   Clock,
-  Compass,
   GitPullRequest,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
+import { githubPluginOn } from '../pages/github/githubModel'
 
 export interface SidebarPageEntry {
   /** Route name the row highlights for (router.ts). */
-  name: 'pulls' | 'scheduler' | 'capabilities' | 'explore'
+  name: 'pulls' | 'scheduler' | 'capabilities'
   label: string
   to: RouteLocationRaw
   icon: Component
+  /** Shown only while the GitHub plugin is in effect and active. */
+  github?: true
 }
 
 export const SIDEBAR_PAGES: readonly SidebarPageEntry[] = [
@@ -25,6 +29,7 @@ export const SIDEBAR_PAGES: readonly SidebarPageEntry[] = [
     label: 'Pull Request',
     to: { name: 'pulls' },
     icon: GitPullRequest,
+    github: true,
   },
   {
     name: 'scheduler',
@@ -38,8 +43,15 @@ export const SIDEBAR_PAGES: readonly SidebarPageEntry[] = [
     to: { name: 'capabilities' },
     icon: Blocks,
   },
-  { name: 'explore', label: '探索', to: { name: 'explore' }, icon: Compass },
 ]
+
+/** The page entries to show with these plugins (Pull Request needs GitHub). */
+export function visibleSidebarPages(
+  plugins: Parameters<typeof githubPluginOn>[0],
+): SidebarPageEntry[] {
+  const github = githubPluginOn(plugins)
+  return SIDEBAR_PAGES.filter((entry) => !entry.github || github)
+}
 
 /** Pages reached from another entry: the GitHub plugin's tabs live under Pull Request. */
 const PAGE_OWNERS: Readonly<Record<string, SidebarPageEntry['name']>> = {

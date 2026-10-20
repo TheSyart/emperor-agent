@@ -1,17 +1,22 @@
 <script setup lang="ts">
 /**
- * Sidebar nav rows: 新对话 (the trailing + starts a Build project session),
- * then the full pages — Pull Request, 定时任务, 插件, 探索 — highlighted by
- * the current route name.
+ * Sidebar nav (UI-S11): the 新对话 primary row — a raised, hairline-edged
+ * 36px button that shows ⌘N on hover, with the + beside it starting a Build
+ * project session — then the full pages one step quieter: Pull Request
+ * (while the GitHub plugin is on), 定时任务, 能力, highlighted by the
+ * current route name.
  */
 import { elementOf } from '../ui/elementOf'
 import IconButton from '../ui/IconButton.vue'
+import Kbd from '../ui/Kbd.vue'
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useAppContext } from '../../composables/useAppContext'
+import { detectShortcutPlatform, shortcutLabel } from '../../shortcuts'
 import { DsNewChat, DsPlus } from '../icons/ds'
 import {
   activeSidebarPage,
-  SIDEBAR_PAGES,
+  visibleSidebarPages,
   type SidebarPageEntry,
 } from './sidebarNav'
 
@@ -21,9 +26,12 @@ const emit = defineEmits<{
   'new-project': [anchor: HTMLElement]
 }>()
 
+const ctx = useAppContext()
 const route = useRoute()
 const router = useRouter()
 const active = computed(() => activeSidebarPage(route.name))
+const pages = computed(() => visibleSidebarPages(ctx.boot.value?.plugins ?? []))
+const newChatShortcut = shortcutLabel('session.new', detectShortcutPlatform())
 const addButton = ref<HTMLElement | null>(null)
 
 function go(entry: SidebarPageEntry): void {
@@ -37,28 +45,34 @@ function newProject(): void {
 
 <template>
   <nav class="sidebar-nav" aria-label="侧栏导航">
-    <div class="nav-row new-chat-row">
+    <div class="new-chat-row" data-sidebar-block="new">
       <button
         type="button"
-        class="nav-item new-session"
+        class="new-chat"
+        aria-label="新对话"
         @click="emit('new-chat')"
       >
-        <DsNewChat :size="16" class="nav-icon" />
-        <span class="nav-label">新对话</span>
+        <DsNewChat :size="16" class="new-chat-icon" />
+        <span class="new-chat-label">新对话</span>
+        <Kbd v-if="newChatShortcut" class="new-chat-key">{{
+          newChatShortcut
+        }}</Kbd>
       </button>
       <IconButton
         :ref="(c) => (addButton = elementOf(c))"
         class="nav-add"
         label="新建项目会话"
-        size="xs"
+        size="sm"
         :aria-expanded="projectMenuOpen"
         @click="newProject"
       >
-        <DsPlus :size="14" />
+        <DsPlus :size="16" />
       </IconButton>
     </div>
-    <div v-for="entry in SIDEBAR_PAGES" :key="entry.name" class="nav-row">
+    <div class="pages" data-sidebar-block="pages">
       <button
+        v-for="entry in pages"
+        :key="entry.name"
         type="button"
         class="nav-item"
         :aria-current="active === entry.name ? 'page' : undefined"
@@ -76,59 +90,121 @@ function newProject(): void {
   display: flex;
   flex: none;
   flex-direction: column;
-  gap: var(--space-0-5);
-  margin-bottom: var(--space-2);
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
 }
 
-.nav-row {
+/* 新对话: the one raised object in the sidebar. */
+.new-chat-row {
   display: flex;
   align-items: center;
-  height: var(--space-8);
-  border-radius: var(--radius-row);
+  gap: var(--space-1);
 }
 
-.nav-row:hover,
-.nav-row:has([aria-expanded='true']) {
-  background: var(--interactive-bg-hover);
+.new-chat {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  height: 36px;
+  padding: 0 var(--space-3);
+  border: none;
+  border-radius: var(--r-md);
+  background: rgb(var(--surface-raised));
+  box-shadow: var(--elev-1);
+  color: rgb(var(--label-primary));
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: box-shadow var(--duration-ds) var(--ease-in-out);
 }
 
-.nav-row:has([aria-current='page']) {
-  background: var(--interactive-bg-active);
+.new-chat:hover {
+  box-shadow: var(--elev-2);
+}
+
+.new-chat:focus-visible,
+.nav-item:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px rgb(var(--focus-ring) / 0.5);
+}
+
+.new-chat-icon {
+  flex: none;
+  color: rgb(var(--label-secondary));
+}
+
+.new-chat-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-chat-key {
+  flex: none;
+  font-size: var(--fs-xxs);
+  font-weight: 400;
+  color: rgb(var(--label-caption));
+  opacity: 0;
+  transition: opacity var(--duration-ds) var(--ease-in-out);
+}
+
+.new-chat:hover .new-chat-key,
+.new-chat:focus-visible .new-chat-key {
+  opacity: 1;
+}
+
+.nav-add {
+  flex: none;
+  color: rgb(var(--label-tertiary));
+}
+
+/* The full pages, one step quieter than the sessions below. */
+.pages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
 }
 
 .nav-item {
   display: flex;
-  flex: 1;
   align-items: center;
-  gap: var(--space-1-5);
+  gap: var(--space-2);
   min-width: 0;
-  height: 100%;
+  height: var(--space-8);
   padding: 0 var(--space-2);
   border: none;
   border-radius: var(--radius-row);
   background: transparent;
-  color: rgb(var(--label-primary));
+  color: rgb(var(--label-secondary));
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   text-align: left;
   cursor: pointer;
 }
 
-.nav-item:focus-visible,
-.nav-add:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px rgb(var(--focus-ring) / 0.5);
+.nav-item:hover {
+  background: var(--interactive-bg-hover);
+  color: rgb(var(--label-primary));
 }
 
 .nav-item[aria-current='page'] {
+  background: rgb(var(--surface-selected));
+  color: rgb(var(--label-primary));
   font-weight: 500;
 }
 
 .nav-icon {
   flex: none;
-  color: rgb(var(--label-secondary));
+  color: rgb(var(--label-tertiary));
 }
 
+.nav-item:hover .nav-icon,
 .nav-item[aria-current='page'] .nav-icon {
   color: rgb(var(--label-primary));
 }
@@ -137,26 +213,5 @@ function newProject(): void {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.nav-add {
-  display: inline-grid;
-  place-items: center;
-  flex: none;
-  width: var(--space-6);
-  height: var(--space-6);
-  margin-right: var(--space-1);
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: rgb(var(--label-tertiary));
-  cursor: pointer;
-}
-
-.nav-add:hover,
-.nav-add[aria-expanded='true'] {
-  background: var(--interactive-bg-hover-strong);
-  color: rgb(var(--label-primary));
 }
 </style>
