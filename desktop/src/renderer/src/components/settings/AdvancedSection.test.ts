@@ -222,3 +222,84 @@ describe('设置 › 高级 sub pages (UI-S07)', () => {
     expect(element.textContent).not.toContain('网页读取')
   })
 })
+
+// KRN-03: 任务预算 — steps per turn, subagents at once and per task, and
+// result wakes; a field saves when it is left, out-of-range values go back.
+describe('设置 › 高级 › 任务预算', () => {
+  const DEFAULTS = {
+    maxSteps: 400,
+    maxBackgroundSteps: 120,
+    maxActiveAgents: 8,
+    maxTotalAgents: 64,
+    maxNoticeWakes: 32,
+  }
+
+  function field(element: HTMLElement, key: string): HTMLInputElement {
+    const found = element.querySelector<HTMLInputElement>(
+      `[data-budget="${key}"]`,
+    )
+    if (!found) throw new Error(`no field for ${key}`)
+    return found
+  }
+
+  async function enter(input: HTMLInputElement, value: string): Promise<void> {
+    input.value = value
+    input.dispatchEvent(new Event('input'))
+    input.dispatchEvent(new Event('change'))
+    await settle()
+  }
+
+  it('shows the four budgets with their defaults and saves a change at once', async () => {
+    let current = { ...DEFAULTS }
+    core.mockImplementation(async (operation: string, change?: unknown) => {
+      if (operation === 'tools.networkSettings') return status({})
+      if (operation === 'tasks.budget') return current
+      if (operation === 'tasks.setBudget') {
+        current = { ...current, ...(change as object) }
+        return current
+      }
+      throw new Error(`unexpected ${operation}`)
+    })
+    const element = await mount()
+    const group = element.querySelector('[data-group="task-budget"]')!
+    expect(group.textContent).toContain('任务预算')
+    expect(group.textContent).toContain('费用上限在「模型」里设置')
+    expect(
+      [...group.querySelectorAll('.ds-settings-row')].map((row) =>
+        row.querySelector('.title')?.textContent?.trim(),
+      ),
+    ).toEqual([
+      '每轮最多步数',
+      '同时运行的子智能体',
+      '每个任务最多启动的子智能体',
+      '子智能体结果最多唤醒次数',
+    ])
+    expect(
+      Object.keys(DEFAULTS).map((key) => field(element, key).value),
+    ).toEqual(['400', '120', '8', '64', '32'])
+
+    await enter(field(element, 'maxActiveAgents'), '4')
+    expect(core).toHaveBeenCalledWith('tasks.setBudget', {
+      maxActiveAgents: 4,
+    })
+    expect(field(element, 'maxActiveAgents').value).toBe('4')
+    expect(element.querySelector('[role="alert"]')).toBeNull()
+  })
+
+  it('puts an out-of-range value back and says the range, without saving', async () => {
+    core.mockImplementation(async (operation: string) => {
+      if (operation === 'tools.networkSettings') return status({})
+      if (operation === 'tasks.budget') return { ...DEFAULTS }
+      throw new Error(`unexpected ${operation}`)
+    })
+    const element = await mount()
+    await enter(field(element, 'maxActiveAgents'), '0')
+    expect(field(element, 'maxActiveAgents').value).toBe('8')
+    expect(element.querySelector('[role="alert"]')?.textContent).toBe(
+      '同时运行的子智能体必须是 1–64 之间的整数',
+    )
+    await enter(field(element, 'maxSteps'), '12.5')
+    expect(field(element, 'maxSteps').value).toBe('400')
+    expect(core).not.toHaveBeenCalledWith('tasks.setBudget', expect.anything())
+  })
+})

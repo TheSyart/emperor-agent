@@ -1524,6 +1524,13 @@ export async function installVisualCoreBridge(
        * or run for good (`visualCancelledTasks`).
        */
       const visualCancelledTasks = new Map<string, number>()
+      const visualTaskBudget = {
+        maxSteps: 400,
+        maxBackgroundSteps: 120,
+        maxActiveAgents: 8,
+        maxTotalAgents: 64,
+        maxNoticeWakes: 32,
+      }
       function visualBackgroundTask(
         task: Record<string, unknown> & { id: string; kind: string },
       ) {
@@ -4780,6 +4787,12 @@ export async function installVisualCoreBridge(
               })
               return streamVisualReply(promoted.id, input)
             }
+            // 设置 › 高级 › 任务预算 (KRN-03): the defaults, saved in memory.
+            case 'tasks.budget':
+              return { ...visualTaskBudget }
+            case 'tasks.setBudget':
+              Object.assign(visualTaskBudget, args[0] ?? {})
+              return { ...visualTaskBudget }
             case 'tasks.cancel': {
               const id = String(args[0] ?? '')
               if (!visualCancelledTasks.has(id))
