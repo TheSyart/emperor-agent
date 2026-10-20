@@ -11,7 +11,10 @@ interface StartupSessionStore {
 interface StartupBootstrap {
   boot: Ref<BootstrapPayload | null>
   error: Ref<string>
-  loadBootstrap: (showLoading?: boolean, sessionId?: string) => Promise<void>
+  loadBootstrap: (
+    showLoading?: boolean,
+    sessionId?: string,
+  ) => Promise<boolean | void>
 }
 
 export interface InitialStartupDeps {
