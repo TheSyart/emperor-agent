@@ -126,6 +126,7 @@ import { loadMcpConfig } from '../mcp/config'
 import { logger } from '../util/log'
 import { EmperorError, OperationRetiredError } from '../errors'
 import { CoreSessionApplicationService } from './services/session-application-service'
+import { searchSessionLogs, type SessionSearchHit } from '../sessions/search'
 import { CoreWorkspaceApplicationService } from './services/workspace-application-service'
 import {
   CoreCommandApplicationService,
@@ -2147,6 +2148,25 @@ export class CoreApi {
           sessionId,
         )
       return event
+    },
+    /**
+     * 命令面板 (UI-S02): sessions whose own messages or replies contain the
+     * query, newest first, one snippet each. Archived sessions are included.
+     */
+    search: async (input: {
+      query: string
+      limit?: number
+    }): Promise<{ hits: SessionSearchHit[] }> => {
+      this.host.sessions.flush(undefined, { sync: true })
+      const hits = await searchSessionLogs({
+        root: this.host.sessions.root,
+        sessions: this.sessionApplicationService.list({
+          includeArchived: true,
+        }),
+        query: input.query,
+        ...(input.limit === undefined ? {} : { limit: input.limit }),
+      })
+      return { hits }
     },
     /** Ancestor chain of a (child) session, root first. */
     lineage: (input: { sessionId: string }): SessionLineage => {

@@ -209,6 +209,7 @@ const EXPECTED_OPERATIONS = [
   'sessions.purgeDeleted',
   'sessions.rename',
   'sessions.restoreDeleted',
+  'sessions.search',
   'sessions.setDefaults',
   'sessions.watch',
   'sidebar.get',

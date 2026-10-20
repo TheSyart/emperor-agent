@@ -17,7 +17,7 @@ describe('Core operation registry', () => {
     const descriptors = coreOperationDescriptors()
     const descriptorKeys = descriptors.map((entry) => entry.key)
 
-    expect(coreOperationKeys()).toHaveLength(216)
+    expect(coreOperationKeys()).toHaveLength(217)
     expect(coreOperationKeys()).toEqual(descriptorKeys)
     expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(descriptorKeys)
     expect(
@@ -71,6 +71,7 @@ describe('Core operation registry', () => {
         'sessions.defaults',
         'sessions.setDefaults',
         'model.replaceEntry',
+        'sessions.search',
       ]),
     )
     for (const retired of [
