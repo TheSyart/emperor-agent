@@ -2,7 +2,7 @@
 // Computer Use end-to-end runner: bundles tests/electron/harness/main.ts to
 // out-e2e/harness.cjs and runs it in real Electron (ELECTRON_RUN_AS_NODE
 // removed, Emperor Home isolated), then summarises the E2E-RESULT lines.
-//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|userbrowser|browser-security|fullstack|real|references|references-real|plugins|userbrowser-app|settings|renderer-security|shell]
+//   node scripts/e2e-cu.mjs [--mode=smoke|contract|extra|userbrowser|browser-security|fullstack|real|references|references-real|plugins|userbrowser-app|settings|renderer-security]
 // `real` and `references-real` need EMPEROR_E2E_MODEL_CONFIG (a
 // model_config.json to copy). `references` runs the E-track suite (reply
 // links in a Build session); `references-real` asks a real model once.
@@ -14,10 +14,7 @@
 // `renderer-security` checks the main window's CSP, permissions, link and
 // remote image handling in the real app (SEC-05). `browser-security` checks
 // imported cookies, typing next to cross-origin frames and the inbox
-// quarantine mark in real Electron (SEC-10). `shell` checks the window
-// shell with real pointer input: no native title bar, the traffic lights in
-// the rail's top area, dragging the empty bars, real clicks on the rail and
-// bar buttons (UI-S01; needs Accessibility and Screen Recording).
+// quarantine mark in real Electron (SEC-10).
 import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -34,7 +31,7 @@ const mode =
 const outfile = join(desktop, 'out-e2e', 'harness.cjs')
 
 // fullstack / real / references / plugins / userbrowser-app / settings /
-// renderer-security / shell: the dev app
+// renderer-security: the dev app
 // (out/, run `npm run build` first) driven by Playwright from plain Node;
 // the other modes run the harness in Electron.
 const references =
@@ -43,7 +40,6 @@ const plugins = mode === '--mode=plugins'
 const userBrowserApp = mode === '--mode=userbrowser-app'
 const settingsApp = mode === '--mode=settings'
 const rendererSecurity = mode === '--mode=renderer-security'
-const shellApp = mode === '--mode=shell'
 const realModel = mode === '--mode=real' || mode === '--mode=references-real'
 const appMode =
   mode === '--mode=fullstack' ||
@@ -52,8 +48,7 @@ const appMode =
   plugins ||
   userBrowserApp ||
   settingsApp ||
-  rendererSecurity ||
-  shellApp
+  rendererSecurity
 const entry = references
   ? 'tests/electron/references/run.ts'
   : plugins
@@ -64,11 +59,9 @@ const entry = references
         ? 'tests/electron/settings/run.ts'
         : rendererSecurity
           ? 'tests/electron/renderer-security/run.ts'
-          : shellApp
-            ? 'tests/electron/shell/run.ts'
-            : appMode
-              ? 'tests/electron/fullstack/run.ts'
-              : 'tests/electron/harness/main.ts'
+          : appMode
+            ? 'tests/electron/fullstack/run.ts'
+            : 'tests/electron/harness/main.ts'
 const bundle = references
   ? join(desktop, 'out-e2e', 'references.cjs')
   : plugins
@@ -79,11 +72,9 @@ const bundle = references
         ? join(desktop, 'out-e2e', 'settings.cjs')
         : rendererSecurity
           ? join(desktop, 'out-e2e', 'renderer-security.cjs')
-          : shellApp
-            ? join(desktop, 'out-e2e', 'shell.cjs')
-            : appMode
-              ? join(desktop, 'out-e2e', 'fullstack.cjs')
-              : outfile
+          : appMode
+            ? join(desktop, 'out-e2e', 'fullstack.cjs')
+            : outfile
 
 await build({
   entryPoints: [join(desktop, entry)],

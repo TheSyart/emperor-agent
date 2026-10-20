@@ -64,6 +64,19 @@ function validateHeader(id: string, input: SessionHeader): SessionHeader {
     )
   }
   if (
+    input.seedRef !== undefined &&
+    (typeof input.seedRef !== 'object' ||
+      input.seedRef === null ||
+      typeof input.seedRef.lastType !== 'string' ||
+      !Number.isSafeInteger(input.seedRef.lastTime) ||
+      input.parentSession === undefined ||
+      !input.seedLength)
+  ) {
+    throw new Error(
+      'session header seedRef needs a parent session, a seed length, and the last seed event',
+    )
+  }
+  if (
     input.delegationDepth !== undefined &&
     (!Number.isSafeInteger(input.delegationDepth) || input.delegationDepth < 0)
   ) {

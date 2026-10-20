@@ -1,17 +1,20 @@
-// The rail's page entries (UI-S01) and their glyphs. 探索 is part of 能力
-// since UI-S08; Pull Request shows only while the GitHub plugin is on.
+// Sidebar page entries (expanded nav rows + rail icons) and their glyphs.
+// 探索 is part of 能力 since UI-S08; Pull Request shows only while the
+// GitHub plugin is on.
 import {
+  ArrowLeft,
+  ArrowRight,
   Bell,
   Blocks,
   Clock,
   GitPullRequest,
-  MessageSquare,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
+import { githubPluginOn } from '../pages/github/githubModel'
 
 export interface SidebarPageEntry {
-  /** Route name the entry highlights for (router.ts). */
+  /** Route name the row highlights for (router.ts). */
   name: 'pulls' | 'scheduler' | 'capabilities'
   label: string
   to: RouteLocationRaw
@@ -21,6 +24,13 @@ export interface SidebarPageEntry {
 }
 
 export const SIDEBAR_PAGES: readonly SidebarPageEntry[] = [
+  {
+    name: 'pulls',
+    label: 'Pull Request',
+    to: { name: 'pulls' },
+    icon: GitPullRequest,
+    github: true,
+  },
   {
     name: 'scheduler',
     label: '定时任务',
@@ -33,14 +43,15 @@ export const SIDEBAR_PAGES: readonly SidebarPageEntry[] = [
     to: { name: 'capabilities' },
     icon: Blocks,
   },
-  {
-    name: 'pulls',
-    label: 'Pull Request',
-    to: { name: 'pulls' },
-    icon: GitPullRequest,
-    github: true,
-  },
 ]
+
+/** The page entries to show with these plugins (Pull Request needs GitHub). */
+export function visibleSidebarPages(
+  plugins: Parameters<typeof githubPluginOn>[0],
+): SidebarPageEntry[] {
+  const github = githubPluginOn(plugins)
+  return SIDEBAR_PAGES.filter((entry) => !entry.github || github)
+}
 
 /** Pages reached from another entry: the GitHub plugin's tabs live under Pull Request. */
 const PAGE_OWNERS: Readonly<Record<string, SidebarPageEntry['name']>> = {
@@ -58,6 +69,7 @@ export function activeSidebarPage(
 }
 
 export const SIDEBAR_ICONS = {
+  back: ArrowLeft,
+  forward: ArrowRight,
   bell: Bell,
-  sessions: MessageSquare,
 } satisfies Record<string, Component>

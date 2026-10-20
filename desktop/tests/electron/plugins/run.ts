@@ -303,7 +303,7 @@ async function answerOpenDialog(
 
 async function sidebar(page: Page, name: string): Promise<void> {
   await page
-    .getByRole('navigation', { name: '应用导航' })
+    .getByRole('navigation', { name: '侧栏导航' })
     .getByRole('button', { name, exact: true })
     .click()
 }
@@ -367,7 +367,7 @@ async function send(page: Page, text: string): Promise<void> {
 
 async function newChat(page: Page): Promise<void> {
   await page
-    .getByRole('navigation', { name: '应用导航' })
+    .getByRole('navigation', { name: '侧栏导航' })
     .getByRole('button', { name: '新对话' })
     .first()
     .click()

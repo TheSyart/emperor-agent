@@ -9,6 +9,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -63,6 +64,7 @@ import {
 } from '../harness/workflow/records'
 import type { Session } from '../session-log/session'
 import { LOG_FILE } from '../session-log/store'
+import { readUtf8Page, type ResultPage } from '../harness/tools/spill'
 import type { SessionEvent } from '../session-log/types'
 import {
   sanitizeForWire,
@@ -132,7 +134,15 @@ import {
 import { loadMcpConfig } from '../mcp/config'
 import { logger } from '../util/log'
 import { EmperorError, OperationRetiredError } from '../errors'
-import { CoreSessionApplicationService } from './services/session-application-service'
+import {
+  CoreSessionApplicationService,
+  SESSION_TRASH_RETENTION_MS,
+} from './services/session-application-service'
+import {
+  RetentionService,
+  type RetentionReport,
+  type StorageUsage,
+} from '../storage/retention'
 import { searchSessionLogs, type SessionSearchHit } from '../sessions/search'
 import { CoreWorkspaceApplicationService } from './services/workspace-application-service'
 import {
@@ -369,6 +379,9 @@ export class CoreApi {
   readonly gitReceipts: GitOperationReceiptStore
   readonly terminalService: TerminalService
   readonly sessionApplicationService: CoreSessionApplicationService
+  /** Retention sweep and 设置 › 高级 › 存储 (KRN-12). */
+  readonly retention: RetentionService
+  private retentionAtStartup: Promise<void> | null = null
   readonly workspaceApplicationService: CoreWorkspaceApplicationService
   readonly commandApplicationService: CoreCommandApplicationService
   readonly sessionTransitionService: SessionTransitionService
@@ -1159,6 +1172,30 @@ export class CoreApi {
       activateSession: (sessionId) => this.activateSession(sessionId),
       sessionLeftList: (sessionId) => this.unpinSidebarSession(sessionId),
     })
+    this.retention = new RetentionService({
+      paths: this.paths,
+      memoryVersions: kept.sharedMemory.versions,
+      delegations: () =>
+        this.delegationRuntime.list().flatMap((state) =>
+          state.record
+            ? [
+                {
+                  id: state.record.id,
+                  rootSessionId: state.record.owner.rootSessionId,
+                  availability: state.record.availability,
+                },
+              ]
+            : [],
+        ),
+      sessions: {
+        expired: () =>
+          kept.sessionStore.trashedBefore(
+            Date.now() - SESSION_TRASH_RETENTION_MS,
+          ),
+        purgeExpired: () =>
+          this.sessionApplicationService.purgeExpiredDeleted(),
+      },
+    })
     this.workspaceApplicationService = new CoreWorkspaceApplicationService({
       requireReadableSession: (sessionId, operation) =>
         this.requireReadableSession(sessionId, operation),
@@ -1372,6 +1409,7 @@ export class CoreApi {
             error: String(error),
           }),
         )
+      api.startRetention()
       return api
     } catch (error) {
       if (api) await api.close().catch(() => {})
@@ -1397,8 +1435,33 @@ export class CoreApi {
     this.terminalService.closeAll()
   }
 
+  /**
+   * The retention sweep after startup (KRN-12): in the background, so it
+   * never holds up or fails startup; what it could not do is only logged.
+   */
+  private startRetention(): void {
+    this.retentionAtStartup = this.retention.sweep().then(
+      (report) => {
+        if (report.errors.length > 0)
+          logger.warn('retention sweep incomplete', { errors: report.errors })
+        else if (report.freedBytes > 0)
+          logger.info('retention sweep freed space', {
+            bytes: report.freedBytes,
+          })
+      },
+      (error: unknown) =>
+        logger.warn('retention sweep failed', { error: String(error) }),
+    )
+  }
+
   close(): Promise<void> {
     this.closePromise ??= (async () => {
+      // A sweep still running gets a moment; quit never waits on it longer.
+      if (this.retentionAtStartup)
+        await Promise.race([
+          this.retentionAtStartup,
+          new Promise<void>((done) => setTimeout(done, 2000).unref()),
+        ])
       this.flushAll()
       await this.executors.close()
       this.terminalService.closeAll()
@@ -3258,6 +3321,18 @@ export class CoreApi {
     },
   }
 
+  /** 设置 › 高级 › 存储 (KRN-12): what Emperor Home holds, and 「清理」. */
+  readonly storage = {
+    usage: (): Promise<StorageUsage> => this.retention.usage(),
+    clean: async (
+      view: ViewScope,
+    ): Promise<{ report: RetentionReport; usage: StorageUsage }> => {
+      this.assertMutation('storage', 'clean', view)
+      const report = await this.retention.sweep()
+      return { report, usage: await this.retention.usage() }
+    },
+  }
+
   readonly tools = {
     /** 设置 › 高级 › 网络工具: the web_fetch / web_search switches and availability. */
     networkSettings: (): WebToolsStatus => this.webToolsService.status(),
@@ -3265,22 +3340,30 @@ export class CoreApi {
       change: Partial<WebToolPreferences>,
       view: ViewScope,
     ): Promise<WebToolsStatus> => this.webToolsService.update(change, view),
-    /** Full text of a spilled tool result (`ref` is the spill file path). */
-    readResult: (opts: { ref: string }) => {
-      const spillRoot = resolve(this.paths.stateRoot, 'spill')
-      const target = resolve(String(opts?.ref ?? ''))
-      const rel = relative(spillRoot, target)
-      if (
-        !rel ||
-        rel.startsWith('..') ||
-        isAbsolute(rel) ||
-        !existsSync(target)
-      )
+    /**
+     * A spilled tool result (`ref` is the spill file path) in 256 KiB pages
+     * that end on a character boundary (KRN-12); `page` counts from 1. The
+     * real file (links resolved) must be a file inside the spill store.
+     */
+    readResult: (opts: { ref: string; page?: number }): ResultPage => {
+      let target: string | null = null
+      try {
+        const real = realpathSync(resolve(String(opts?.ref ?? '')))
+        const rel = relative(
+          realpathSync(resolve(this.paths.stateRoot, 'spill')),
+          real,
+        )
+        if (rel && !rel.startsWith('..') && !isAbsolute(rel))
+          target = statSync(real).isFile() ? real : null
+      } catch {
+        target = null
+      }
+      if (target === null)
         throw new CoreMutationGuardError(
           403,
           'tool result ref is outside the spill store',
         )
-      return { content: readFileSync(target, 'utf8') }
+      return readUtf8Page(target, opts?.page ?? 1)
     },
   }
 

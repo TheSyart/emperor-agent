@@ -1,40 +1,45 @@
 <script setup lang="ts">
 /**
- * The sidebar's 46px top bar (UI-S01): the Emperor mark and name (display
- * only), then the collapse button. It is a window drag region (the button
- * stays clickable) and starts after the traffic lights, which reach into
- * the sidebar from the rail (`--shell-lights-clear`).
+ * Brand row: the Emperor mark and name (display only), then the
+ * conversation search toggle (⌘K) and the notification bell.
  */
 import BrandMark from '../brand/BrandMark.vue'
-import { DsPanelLeft } from '../icons/ds'
+import { DsSearch } from '../icons/ds'
 import IconButton from '../ui/IconButton.vue'
-import { detectShortcutPlatform, shortcutLabel } from '../../shortcuts'
+import SidebarBell from './SidebarBell.vue'
 
-const emit = defineEmits<{ toggle: [] }>()
-const shortcut = shortcutLabel('sidebar.toggle', detectShortcutPlatform())
+defineProps<{ searchActive?: boolean }>()
+const emit = defineEmits<{ search: [] }>()
 </script>
 
 <template>
-  <div class="sidebar-bar" data-app-drag>
+  <div class="brand-row">
     <div class="brand" data-testid="sidebar-brand">
-      <BrandMark :size="20" />
+      <BrandMark :size="22" />
       <span class="brand-name">Emperor</span>
     </div>
-    <IconButton label="收起侧栏" :shortcut="shortcut" @click="emit('toggle')">
-      <DsPanelLeft :size="16" />
+    <!-- mousedown.prevent: a click toggles the capsule instead of blurring
+         (and so closing) it first. -->
+    <IconButton
+      label="搜索"
+      :active="searchActive"
+      @mousedown.prevent
+      @click="emit('search')"
+    >
+      <DsSearch :size="16" />
     </IconButton>
+    <SidebarBell />
   </div>
 </template>
 
 <style scoped>
-.sidebar-bar {
+.brand-row {
   display: flex;
   flex: none;
   align-items: center;
-  gap: var(--space-2);
-  box-sizing: border-box;
-  height: var(--shell-bar-h);
-  padding: 0 var(--space-2) 0 calc(var(--shell-lights-clear) - var(--rail-w));
+  gap: var(--space-0-5);
+  height: calc(var(--space-8) + var(--space-2));
+  margin-bottom: var(--space-1);
 }
 
 .brand {
@@ -43,14 +48,19 @@ const shortcut = shortcutLabel('sidebar.toggle', detectShortcutPlatform())
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
-  margin-right: auto;
+  height: var(--space-8);
+  margin: 0 auto 0 calc(0px - var(--space-1));
+  padding: 0 var(--space-1-5) 0 var(--space-1);
   color: inherit;
   user-select: none;
 }
 
 .brand-name {
   overflow: hidden;
-  font: var(--weight-semibold) var(--type-title-sm) var(--font-sans);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: var(--space-6);
+  letter-spacing: 0.02em;
   white-space: nowrap;
 }
 </style>

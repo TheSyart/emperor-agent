@@ -1,10 +1,9 @@
 <script setup lang="ts">
 /**
- * One project folder row of the 项目 section (34px): folder glyph (a
+ * One project folder row of the 项目 section (32px, UI-S11): folder glyph (a
  * chevron on hover), name, session count, and a hover 新建该项目会话 button.
  * Clicking the row folds / unfolds its sessions.
  */
-import Badge from '../ui/Badge.vue'
 import type { SidebarProjectGroup } from '../../runtime/sidebarModel'
 import {
   DsChevronRight,
@@ -40,11 +39,7 @@ const emit = defineEmits<{ toggle: []; 'new-session': [] }>()
       />
     </span>
     <span class="project-name">{{ project.name }}</span>
-    <Badge
-      class="project-count"
-      variant="count"
-      :label="project.sessions.length"
-    />
+    <span class="project-count">{{ project.sessions.length }}</span>
     <button
       type="button"
       class="row-action"
@@ -63,7 +58,7 @@ const emit = defineEmits<{ toggle: []; 'new-session': [] }>()
   align-items: center;
   gap: var(--space-1-5);
   box-sizing: border-box;
-  height: 34px;
+  height: var(--space-8);
   padding: 0 var(--space-2);
   border-radius: var(--radius-row);
   color: rgb(var(--label-primary));
@@ -140,6 +135,16 @@ const emit = defineEmits<{ toggle: []; 'new-session': [] }>()
 .project-row:hover .row-action,
 .project-row:focus-within .row-action {
   display: inline-flex;
+}
+
+.project-count {
+  flex: none;
+  min-width: var(--space-4);
+  font-size: var(--fs-xxs);
+  line-height: var(--lh-xxs);
+  color: rgb(var(--label-caption));
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .project-row:hover .project-count {

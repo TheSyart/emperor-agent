@@ -413,7 +413,7 @@ for (const theme of ['dark', 'light'] as const) {
     // The rail has no 探索 any more.
     await expect(
       page
-        .getByRole('navigation', { name: '应用导航' })
+        .getByRole('navigation', { name: '侧栏导航' })
         .getByRole('button', { name: '探索' }),
     ).toHaveCount(0)
   })

@@ -50,6 +50,7 @@ beforeEach(() => {
     showToast: vi.fn(),
     showError: vi.fn(),
     sessionRuntimeStates: {},
+    boot: ref({ plugins: [] }),
   }
   store.sync([])
   for (const id of Object.keys(store.expanded)) delete store.expanded[id]
@@ -127,7 +128,7 @@ async function settle() {
   for (let i = 0; i < 30; i++) await Promise.resolve()
   await nextTick()
 }
-async function mount(path: string) {
+async function mount(path: string, props = { collapsed: false, width: 280 }) {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -142,7 +143,7 @@ async function mount(path: string) {
   await router.push(path)
   root = document.createElement('div')
   document.body.append(root)
-  app = createApp(SidebarRoot, { collapsed: false, width: 280 })
+  app = createApp(SidebarRoot, props)
   app.use(router)
   app.mount(root)
   await settle()
@@ -207,76 +208,19 @@ it('preserves main session actions and search without child rows', async () => {
   ).toBe('pinned')
   expect(root.querySelectorAll('[aria-label="会话操作"]')).toHaveLength(2)
   expect(root.querySelector('[data-agent-id]')).toBeNull()
-  // Search is the rail's command palette now (UI-S02), not a capsule here.
-  expect(root.querySelector('[aria-label="搜索对话"]')).toBeNull()
-})
-
-it('keeps 置顶 on top, then 项目 and 对话 (UI-S02 8)', async () => {
-  await mount('/chat/pinned')
-  const headers = [
-    ...root.querySelectorAll<HTMLElement>('[data-sidebar-section]'),
-  ].map((el) => el.dataset.sidebarSection)
-  expect(headers[0]).toBe('pinned')
-  expect(headers).toEqual(['pinned', 'projects', 'chats'])
-})
-
-it('moves between sessions with ↑ and ↓ (UI-S02 7)', async () => {
-  const router = await mount('/chat/pinned')
-  const rows = () => [...root.querySelectorAll<HTMLElement>('.session-row')]
-  const first = rows()[0]!
-  first.focus()
-  first.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
-  )
+  ;(root.querySelector('[aria-label="搜索对话"]') as HTMLButtonElement)?.click()
   await settle()
-  const next = rows()[1]!
-  expect(document.activeElement).toBe(next)
-  expect(router.currentRoute.value.params.sessionId).toBe(
-    next.getAttribute('data-session-id'),
-  )
-  next.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }),
-  )
-  await settle()
-  expect(document.activeElement).toBe(rows()[0])
-  expect(router.currentRoute.value.params.sessionId).toBe('pinned')
 })
 
 async function chooseNewProjectFolder() {
-  root.querySelector<HTMLButtonElement>('[aria-label="项目操作"]')!.click()
+  root.querySelector<HTMLButtonElement>('[aria-label="新建项目会话"]')!.click()
   await settle()
   const item = [
     ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
-  ].find((el) => el.textContent?.includes('使用现有文件夹'))!
+  ].find((el) => el.textContent?.includes('选择项目文件夹'))!
   item.click()
   await settle()
 }
-
-it('holds only the brand bar, projects and chats (UI-S01)', async () => {
-  await mount('/chat/pinned')
-  const labels = [...root.querySelectorAll('button')].map((b) =>
-    b.getAttribute('aria-label'),
-  )
-  // New chat, search, the pages, the bell and settings live in the rail.
-  for (const moved of [
-    '新对话',
-    '新建项目会话',
-    '后退',
-    '前进',
-    '搜索',
-    '设置',
-    '定时任务',
-    '能力',
-  ])
-    expect(labels).not.toContain(moved)
-  expect(root.querySelector('nav[aria-label="侧栏导航"]')).toBeNull()
-  expect(root.querySelector('[data-testid="sidebar-theme-toggle"]')).toBeNull()
-  // The 46px top bar: brand and the collapse button, a drag region.
-  const bar = root.querySelector<HTMLElement>('.sidebar-bar')!
-  expect(bar.hasAttribute('data-app-drag')).toBe(true)
-  expect(bar.textContent).toContain('Emperor')
-  expect(bar.querySelector('[aria-label="收起侧栏"]')).not.toBeNull()
-})
 
 it('does nothing when the folder picker is cancelled (FIX-06 1)', async () => {
   mock.selectDirectory.mockResolvedValue(null)
@@ -402,4 +346,120 @@ it('reports a failed rename and keeps the old title (FIX-01 7)', async () => {
       (el) => el.getAttribute('title') === 'chat-root',
     ),
   ).toBe(true)
+})
+
+// ── UI-S11: Emperor's own sidebar, redesigned on the original structure ──
+
+it('lays the sidebar out top to bottom: top row, brand, new chat, pages, sections, footer (UI-S11 2)', async () => {
+  await mount('/chat/pinned')
+  expect(
+    [...root.querySelectorAll<HTMLElement>('[data-sidebar-block]')].map(
+      (el) => el.dataset.sidebarBlock,
+    ),
+  ).toEqual(['top', 'brand', 'new', 'pages', 'sections', 'footer'])
+  expect(
+    [...root.querySelectorAll<HTMLElement>('[data-sidebar-section]')].map(
+      (el) => el.dataset.sidebarSection,
+    ),
+  ).toEqual(['pinned', 'projects', 'chats'])
+  for (const label of ['收起侧栏', '后退', '前进', '搜索', '设置'])
+    expect(root.querySelector(`[aria-label="${label}"]`)).not.toBeNull()
+})
+
+it('shows Pull Request only while the GitHub plugin is on (UI-S11 3)', async () => {
+  await mount('/chat/pinned')
+  const pages = () =>
+    [
+      ...root.querySelectorAll<HTMLElement>(
+        '[data-sidebar-block="pages"] .nav-label',
+      ),
+    ].map((el) => el.textContent?.trim())
+  expect(pages()).toEqual(['定时任务', '能力'])
+  ;(mock.context.boot as { value: unknown }).value = {
+    plugins: [{ pluginId: 'github', effective: true, activation: 'active' }],
+  }
+  await settle()
+  expect(pages()).toEqual(['Pull Request', '定时任务', '能力'])
+})
+
+it('folds into the narrow rail with the same entries (UI-S11 4)', async () => {
+  await mount('/chat/pinned', { collapsed: true, width: 0 })
+  const rail = root.querySelector('.sidebar-rail')!
+  expect(rail).not.toBeNull()
+  for (const label of [
+    '展开侧栏',
+    '新对话',
+    '搜索对话',
+    '定时任务',
+    '能力',
+    '设置',
+  ])
+    expect(rail.querySelector(`[aria-label="${label}"]`)).not.toBeNull()
+  expect(root.querySelector('[data-sidebar-block]')).toBeNull()
+})
+
+it('searches titles at once and contents after a pause (UI-S11 8)', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  try {
+    const original = mock.core.getMockImplementation()!
+    mock.core.mockImplementation(async (key: string, input: any) =>
+      key === 'sessions.search'
+        ? {
+            hits: [
+              {
+                sessionId: 'elsewhere',
+                title: '别处的会话',
+                role: 'assistant',
+                snippet: '…提到了 pinned 的那一句…',
+              },
+            ],
+          }
+        : original(key, input),
+    )
+    await mount('/chat/chat-root')
+    root.querySelector<HTMLButtonElement>('[aria-label="搜索"]')!.click()
+    await settle()
+    const field = root.querySelector<HTMLInputElement>('.search input')!
+    field.value = 'pinned'
+    field.dispatchEvent(new Event('input'))
+    await settle()
+    const results = () =>
+      [...root.querySelectorAll<HTMLElement>('[data-search-result]')].map(
+        (el) => el.dataset.searchResult,
+      )
+    expect(results()).toEqual(['pinned'])
+    vi.advanceTimersByTime(250)
+    await settle()
+    expect(mock.core).toHaveBeenCalledWith('sessions.search', {
+      query: 'pinned',
+      limit: 20,
+    })
+    expect(results()).toEqual(['pinned', 'elsewhere'])
+    expect(
+      root.querySelector('[data-search-result="elsewhere"]')?.textContent,
+    ).toContain('提到了 pinned 的那一句')
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it('moves between sessions with ↑ and ↓ (UI-S11 9)', async () => {
+  const router = await mount('/chat/pinned')
+  const rows = () => [...root.querySelectorAll<HTMLElement>('.session-row')]
+  const first = rows()[0]!
+  first.focus()
+  first.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+  )
+  await settle()
+  const next = rows()[1]!
+  expect(document.activeElement).toBe(next)
+  expect(router.currentRoute.value.params.sessionId).toBe(
+    next.getAttribute('data-session-id'),
+  )
+  next.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }),
+  )
+  await settle()
+  expect(document.activeElement).toBe(rows()[0])
 })

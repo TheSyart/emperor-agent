@@ -17,7 +17,7 @@ describe('Core operation registry', () => {
     const descriptors = coreOperationDescriptors()
     const descriptorKeys = descriptors.map((entry) => entry.key)
 
-    expect(coreOperationKeys()).toHaveLength(220)
+    expect(coreOperationKeys()).toHaveLength(222)
     expect(coreOperationKeys()).toEqual(descriptorKeys)
     expect(Object.keys(CORE_OPERATION_REGISTRY).sort()).toEqual(descriptorKeys)
     expect(
@@ -840,7 +840,12 @@ type RenameResult = CoreOperationResult<'sessions.rename'>
 expectTypeOf<Awaited<RenameResult>>().toEqualTypeOf<SessionEntry>()
 
 type ToolResult = CoreOperationResult<'tools.readResult'>
-expectTypeOf<Awaited<ToolResult>>().toEqualTypeOf<{ content: string }>()
+expectTypeOf<Awaited<ToolResult>>().toEqualTypeOf<{
+  content: string
+  page: number
+  pages: number
+  bytes: number
+}>()
 
 expectTypeOf<
   ReturnType<typeof coreOperationDescriptors>[number]['key']

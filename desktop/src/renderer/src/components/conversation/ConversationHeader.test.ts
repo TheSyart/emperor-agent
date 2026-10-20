@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-// UI-S01 (PLAN-V020): the conversation header's first row is the center
-// panel's 46px top bar — a window drag region whose buttons stay clickable.
+// The conversation header's first row is a 46px bar whose bottom meets the
+// workspace header's (UI-S01; UI-S11 brought back the system title bar, so
+// it is no longer a window drag region).
 // UI-S09: the 对话 | 轨迹 strip exists only while 显示轨迹 is on.
 import { createApp, h, nextTick, type App } from 'vue'
 import { afterEach, expect, it } from 'vitest'
@@ -32,13 +33,13 @@ async function mount(props: { slim?: boolean; trajectory?: boolean } = {}) {
   await nextTick()
 }
 
-it('makes its first row the 46px drag bar, in both phases', async () => {
+it('makes its first row the 46px bar, in both phases', async () => {
   for (const slim of [false, true]) {
     await mount({ slim })
     const row = root.querySelector<HTMLElement>(
       '.conversation-header > .title-row',
     )!
-    expect(row.hasAttribute('data-app-drag')).toBe(true)
+    expect(row.hasAttribute('data-app-drag')).toBe(false)
     expect(row.querySelector('[aria-label="工作台"]')).not.toBeNull()
     app?.unmount()
     root.remove()

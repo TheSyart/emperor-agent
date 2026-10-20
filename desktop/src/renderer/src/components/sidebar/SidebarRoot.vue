@@ -1,19 +1,21 @@
 <script setup lang="ts">
 /**
- * Sidebar column (UI-S01/S02): projects and chats only. Top to bottom: the
- * 46px SidebarBrandRow (Emperor + collapse; a window drag region), then the
- * session list — 置顶 (pinned, pin order), 项目 (projects → sessions), 对话
- * (chats under 今天 / 昨天 / 更早). ↑ / ↓ on a focused row move to the
- * next one and open it. New chat, search (the command palette), the full
- * pages, the bell and settings live in the permanent rail (SidebarRail,
- * rendered by App beside this column). Geometry is owned by AppFrame; this
- * fills the column it is given and stays mounted (hidden by App) while
- * folded. The persisted layout (sorts, orders, pins) lives in
+ * Sidebar column (UI-S11: Emperor's own layout, redesigned). Top to bottom:
+ * SidebarTopRow (collapse, ← →), SidebarBrandRow (BrandMark + Emperor,
+ * search toggle, bell), SidebarNav (the 新对话 primary row + the full
+ * pages), the search box while searching, then the session list — 置顶
+ * (pinned, pin order), 项目 (projects → sessions), 对话 (chats grouped by
+ * day) — and SidebarFooter (设置 / 明暗切换). Search finds titles at once and
+ * contents after a pause (useContentSearch); ↑ / ↓ on a focused row move to
+ * the next one and open it. Collapsed, the column renders the 56px
+ * SidebarRail instead. Geometry is owned by AppFrame; this fills the column
+ * it is given. The persisted layout (sorts, orders, pins) lives in
  * useSidebarState.
  */
 import { elementOf } from '../ui/elementOf'
 import IconButton from '../ui/IconButton.vue'
-import { computed, onMounted, ref, watch } from 'vue'
+import SearchField from '../ui/SearchField.vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { selectDirectory } from '../../api/backend'
 import { useAppContext } from '../../composables/useAppContext'
@@ -21,23 +23,30 @@ import { useSession } from '../../composables/useSession'
 import { sessionLocation } from '../../router'
 import {
   groupSessionsByDay,
+  searchSidebarSessions,
   sessionControlPendingTag,
   sessionRuntimeIndicator,
   type SidebarProjectGroup,
 } from '../../runtime/sidebarModel'
 import type { ProjectInfo, SessionInfo } from '../../types'
-import { DsMore, DsPlus } from '../icons/ds'
+import { DsFolderClose, DsMore, DsPlus } from '../icons/ds'
 import Menu from '../ui/Menu.vue'
 import MenuItem from '../ui/MenuItem.vue'
 import SessionRow from './SessionRow.vue'
 import SidebarBrandRow from './SidebarBrandRow.vue'
+import SidebarFooter from './SidebarFooter.vue'
+import SidebarNav from './SidebarNav.vue'
 import SidebarProjectRow from './SidebarProjectRow.vue'
+import SidebarRail from './SidebarRail.vue'
+import SidebarSearchResults from './SidebarSearchResults.vue'
 import SidebarSectionHeader from './SidebarSectionHeader.vue'
+import SidebarTopRow from './SidebarTopRow.vue'
+import { useContentSearch } from './useContentSearch'
 import { useSidebarState } from './useSidebarState'
 import { useAgentTree } from './agentTree'
 import { fetchSessionLineage } from '../../api/sessions'
 
-defineProps<{ collapsed: boolean; width: number }>()
+const props = defineProps<{ collapsed: boolean; width: number }>()
 const emit = defineEmits<{ toggle: [] }>()
 
 const router = useRouter()
@@ -67,9 +76,15 @@ const layout = useSidebarState({
 })
 const { state: sidebarState, grouped } = layout
 
+const searchQuery = ref('')
+const searchOpen = ref(false)
+const searchInput = ref<InstanceType<typeof SearchField> | null>(null)
+const searchIndex = ref(0)
 const creatingBuild = ref(false)
 const projectMenuOpen = ref(false)
 const projectMenuAnchor = ref<HTMLElement | null>(null)
+const newProjectMenuOpen = ref(false)
+const newProjectMenuAnchor = ref<HTMLElement | null>(null)
 const chatMenuOpen = ref(false)
 const chatMenuAnchor = ref<HTMLElement | null>(null)
 const pinnedCollapsed = ref(false)
@@ -81,6 +96,25 @@ const chatDayGroups = computed(() =>
     ? [{ key: 'manual', label: '', sessions: grouped.value.chats }]
     : groupSessionsByDay(grouped.value.chats),
 )
+const searching = computed(() => searchQuery.value.trim().length > 0)
+const searchVisible = computed(() => searchOpen.value || searching.value)
+const content = useContentSearch(searchQuery)
+const searchResults = computed(() => {
+  const titles = searchSidebarSessions(sessions.value, searchQuery.value)
+  const seen = new Set(titles.map((result) => result.id))
+  return [
+    ...titles.map((result) => ({ ...result, group: 'title' as const })),
+    ...content.hits.value
+      .filter((hit) => !seen.has(hit.sessionId))
+      .map((hit) => ({
+        id: hit.sessionId,
+        title: hit.title || '新会话',
+        subtitle: `${hit.role === 'user' ? '你' : '助手'}：${hit.snippet}`,
+        mode: 'chat' as const,
+        group: 'content' as const,
+      })),
+  ]
+})
 const layoutLoaded = ref(false)
 const visibleRootIds = computed(() =>
   sessions.value
@@ -182,6 +216,11 @@ function openSession(id: string) {
   void router.push(sessionLocation(id)).catch(() => undefined)
 }
 
+async function newChat() {
+  const session = await create({ mode: 'chat', title: '新会话' })
+  openSession(session.id)
+}
+
 async function newProjectSession(project: SidebarProjectGroup) {
   const session = await create({
     mode: 'build',
@@ -215,6 +254,11 @@ async function pickBuildProject() {
   } finally {
     creatingBuild.value = false
   }
+}
+
+function openNewProjectMenu(anchor: HTMLElement) {
+  newProjectMenuAnchor.value = anchor
+  newProjectMenuOpen.value = !newProjectMenuOpen.value
 }
 
 function firstOtherSession(id: string): SessionInfo | undefined {
@@ -280,6 +324,57 @@ async function doRename(id: string, title: string) {
     ctx.showError(sessionActionError.value || '未知错误', '重命名失败')
 }
 
+function focusSearch() {
+  if (props.collapsed) emit('toggle')
+  searchOpen.value = true
+  void nextTick(() => searchInput.value?.focus())
+}
+
+/** Brand-row search icon: open + focus, or close an empty capsule. */
+function toggleSearch() {
+  if (searchVisible.value && !searching.value) {
+    searchOpen.value = false
+    return
+  }
+  focusSearch()
+}
+
+function clearSearch() {
+  searchQuery.value = ''
+  searchIndex.value = 0
+}
+
+/** Esc: clear the query, then close the capsule. */
+function escapeSearch() {
+  if (searching.value) {
+    clearSearch()
+    return
+  }
+  searchOpen.value = false
+  searchInput.value?.blur()
+}
+
+function onSearchBlur() {
+  if (!searching.value) searchOpen.value = false
+}
+
+function moveSearch(delta: number) {
+  const count = searchResults.value.length
+  if (!count) return
+  searchIndex.value = (searchIndex.value + delta + count) % count
+}
+
+function openSearchResult(id: string) {
+  clearSearch()
+  searchOpen.value = false
+  openSession(id)
+}
+
+function commitSearch() {
+  const result = searchResults.value[searchIndex.value]
+  if (result) openSearchResult(result.id)
+}
+
 /** ↑ / ↓ on a focused row: focus the next row in the list and open it. */
 function moveRow(event: KeyboardEvent, delta: -1 | 1) {
   const row = event.target as HTMLElement | null
@@ -297,6 +392,10 @@ function moveRow(event: KeyboardEvent, delta: -1 | 1) {
   if (id) openSession(id)
 }
 
+watch(searchQuery, () => {
+  searchIndex.value = 0
+})
+
 onMounted(async () => {
   await Promise.all([
     layout.load(),
@@ -304,18 +403,61 @@ onMounted(async () => {
   ])
   layoutLoaded.value = true
 })
+
+defineExpose({ focusSearch })
 </script>
 
 <template>
+  <SidebarRail
+    v-if="collapsed"
+    @toggle="emit('toggle')"
+    @new-chat="newChat"
+    @search="focusSearch"
+  />
   <aside
+    v-else
     class="sidebar-root"
     aria-label="会话侧栏"
     :style="{ width: `${width}px` }"
   >
-    <SidebarBrandRow class="bar" @toggle="emit('toggle')" />
+    <SidebarTopRow data-sidebar-block="top" @toggle="emit('toggle')" />
+    <SidebarBrandRow
+      data-sidebar-block="brand"
+      :search-active="searchVisible"
+      @search="toggleSearch"
+    />
+    <SidebarNav
+      :project-menu-open="newProjectMenuOpen"
+      @new-chat="newChat"
+      @new-project="openNewProjectMenu"
+    />
 
-    <div class="region">
+    <SearchField
+      v-if="searchVisible"
+      ref="searchInput"
+      v-model="searchQuery"
+      class="search"
+      placeholder="搜索会话标题和内容"
+      aria-label="搜索对话"
+      @clear="clearSearch"
+      @keydown.down.prevent="moveSearch(1)"
+      @keydown.up.prevent="moveSearch(-1)"
+      @keydown.enter.prevent="commitSearch"
+      @keydown.esc.prevent="escapeSearch"
+      @blur="onSearchBlur"
+    />
+
+    <div class="region" data-sidebar-block="sections">
       <div v-if="loading && !sessions.length" class="empty">加载中…</div>
+
+      <SidebarSearchResults
+        v-else-if="searching"
+        :results="searchResults"
+        :pending="content.pending.value"
+        :selected-index="searchIndex"
+        @hover="searchIndex = $event"
+        @open="openSearchResult"
+      />
 
       <div
         v-else
@@ -461,6 +603,32 @@ onMounted(async () => {
       </div>
     </div>
 
+    <SidebarFooter data-sidebar-block="footer" />
+
+    <Menu
+      v-model:open="newProjectMenuOpen"
+      :anchor="newProjectMenuAnchor"
+      :width="220"
+      placement="bottom"
+      label="新建项目会话"
+    >
+      <template v-if="grouped.projects.length">
+        <MenuItem variant="label">在项目中新建会话</MenuItem>
+        <MenuItem
+          v-for="project in grouped.projects.slice(0, 6)"
+          :key="project.id"
+          @select="newProjectSession(project)"
+        >
+          <template #icon><DsFolderClose :size="16" /></template>
+          {{ project.name }}
+        </MenuItem>
+        <MenuItem variant="separator" />
+      </template>
+      <MenuItem :disabled="creatingBuild" @select="pickBuildProject()">
+        选择项目文件夹…
+      </MenuItem>
+    </Menu>
+
     <Menu
       v-model:open="projectMenuOpen"
       :anchor="projectMenuAnchor"
@@ -531,16 +699,11 @@ onMounted(async () => {
   box-sizing: border-box;
   height: 100%;
   min-width: 0;
-  padding: 0 var(--space-3) var(--space-1-5);
+  padding: var(--space-1-5) var(--space-3);
   background: rgb(var(--sidebar-fill));
   color: rgb(var(--label-primary));
   font-size: var(--fs-s);
   animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
-}
-
-/* The top bar spans the column (it lines up with the traffic lights). */
-.bar {
-  margin: 0 calc(0px - var(--space-3)) var(--space-1);
 }
 
 .head-button {
@@ -561,6 +724,13 @@ onMounted(async () => {
 .head-button:hover,
 .head-button[aria-expanded='true'] {
   background: var(--interactive-bg-hover);
+}
+
+.search {
+  flex: none;
+  width: auto;
+  margin: 0 var(--space-0-5) var(--space-2);
+  animation: ds-fade-in var(--duration-ds) var(--ease-in-out);
 }
 
 .region {

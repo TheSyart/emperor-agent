@@ -158,3 +158,47 @@ for (const tab of ['plugins', 'skills', 'tools'] as const)
     await page.waitForTimeout(400)
     expect(await nestedFrames(page, '.page-shell .page-column')).toEqual([])
   })
+
+// KRN-12: 高级 › 存储 — usage by category in one card, 「清理」 in another;
+// 清理 asks first, then says what it freed and measures again.
+for (const theme of ['dark', 'light'] as const)
+  test(`advanced › storage shows usage and cleans (${theme})`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 860 })
+    await page.goto(
+      `/chat/build-ui?settings=advanced&page=storage&visualTheme=${theme}`,
+    )
+    const dialog = page.getByRole('dialog', { name: '设置' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.locator('.section-title')).toContainText('存储')
+    await expect(dialog.locator('[data-storage-category]')).toHaveCount(8)
+    await expect(
+      dialog.locator('[data-storage-category="total"]'),
+    ).toContainText('659.5 MB')
+    await expect(
+      dialog.locator('[data-storage-category="spill"]'),
+    ).toContainText('30 MB')
+    expect(await nestedFrames(page, '.settings-options')).toEqual([])
+    await page.waitForTimeout(150)
+    await page.screenshot({
+      path: resolve(screenshotDir, `advanced-storage-${theme}.png`),
+      animations: 'disabled',
+    })
+
+    await dialog.locator('[data-storage-clean]').click()
+    const ask = page.getByRole('dialog', { name: '清理不再需要的文件？' })
+    await expect(ask).toBeVisible()
+    await ask.getByRole('button', { name: '清理', exact: true }).click()
+    await expect(dialog.locator('[data-storage-summary]')).toHaveText(
+      '已释放 26 MB：溢出文件 12 项。',
+    )
+    await expect(
+      dialog.locator('[data-storage-category="spill"]'),
+    ).toContainText('4 MB')
+    await page.waitForTimeout(150)
+    await page.screenshot({
+      path: resolve(screenshotDir, `advanced-storage-cleaned-${theme}.png`),
+      animations: 'disabled',
+    })
+  })

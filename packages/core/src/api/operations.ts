@@ -2138,6 +2138,10 @@ export const CORE_OPERATION_REGISTRY = {
     (api, [id, options], ctx) =>
       api.tasks.get(id, withSession(options ?? {}, ctx, 'tasks.get')),
   ),
+  'storage.usage': operation(z.tuple([]), (api) => api.storage.usage()),
+  'storage.clean': operation(z.tuple([]), (api, _args, ctx) =>
+    api.storage.clean(viewOf(ctx, 'storage.clean')),
+  ),
   'tasks.budget': operation(z.tuple([]), (api) => api.tasks.budget()),
   'tasks.setBudget': operation(
     z.tuple([
@@ -2337,7 +2341,14 @@ export const CORE_OPERATION_REGISTRY = {
     api.tools.networkSettings(),
   ),
   'tools.readResult': operation(
-    z.tuple([z.object({ ref: idSchema }).strict()]),
+    z.tuple([
+      z
+        .object({
+          ref: idSchema,
+          page: z.number().int().min(1).optional(),
+        })
+        .strict(),
+    ]),
     (api, [input]) => api.tools.readResult(input),
   ),
   'tools.setNetworkSettings': operation(
