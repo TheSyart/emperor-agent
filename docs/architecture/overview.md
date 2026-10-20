@@ -94,7 +94,7 @@ Renderer 外壳是 `components/shell/AppFrame.vue` 的网格：会话侧栏（�
 右侧工作台（`components/workspace/WorkspacePanel.vue`）提供启动器和四个面板：审查、终端、文件、浏览器，每个面板单独分包。对话组件通过 `workspaceState.ts` 的 `requestWorkspace({ pane, paths?, file?, directory?, turn?, url?, focus? })` 请求打开某个面板或内容，不持有组件引用：`directory` 在文件树中展开一个目录，`turn` 让「审查」显示一轮对话的改动（本轮改动视图）。环境信息卡（`components/conversation/environment/EnvironmentCard.vue`）浮在对话区右上角，输入框上方的变更汇总条显示工作区 Git 改动总计；工作台、环境信息卡和变更汇总条共用 `useWorkspaceSnapshot.ts` 中按引用计数轮询的同一份 `workspace.snapshot`。
 
 - `workspace.snapshot` 聚合 Git/worktree/安全操作凭据、当前 Goal、后台任务、子代理和终端的投影。
-- 审查使用 Core 内的 Git 分层服务；环境信息卡的「比较分支」通过 `git.remote` 取得 `origin` 的网页地址。
+- 审查使用 Core 内的 Git 分层服务（「比较分支」通过 `git.remote` 取得 `origin` 的网页地址）。环境信息卡是只读汇总（UI-S05）：每节一行，点开去到审查、子智能体列表、输出对话框或资源详情，卡片本身不发出写操作。
 - 文件是只读、有界的项目文件浏览。
 - 终端的 PTY 由 Electron main 注入 Core `TerminalService`。它是用户直接操作的系统 Shell，不进入 Agent loop 或 Agent 权限，也不写聊天记录或 session log。
 - 用户内置浏览器由 Electron main 的 `BrowserViewHost`（`desktop/src/main/browser-view.ts`）在独立内存分区中托管 sandboxed `WebContentsView`；地址栏、临时历史与界面链接通过 `browser-view-policy.ts` 和 main 的链接分流校验，只加载不带账号密码的 `http(s)`。网页权限与应用内弹窗被拒绝，弹窗的外部链接交给系统浏览器；下载交给 `UserDownloads`（`user-downloads.ts`）执行文件类型、大小、保存位置和隔离标记检查。偏好经 CoreApi 保存，页面生命周期经受信桌面 IPC 管理。

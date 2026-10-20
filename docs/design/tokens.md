@@ -113,6 +113,8 @@
 
 输入框（UI-S04，[输入框](composer.md)）：`--composer-fill`（卡片底色，两套主题都是 `--surface-raised`）、`--composer-edge`（卡片边缘：深色 `--elev-1`，浅色 0.5px `--hairline` 加 `--elev-1`）。
 
+环境信息卡（UI-S05）：`--env-card-fill`（深色 `--surface-raised`，浅色 `--surface-base`）、`--env-card-edge`（两套主题都是 `--elev-2`）；卡片圆角 `--r-lg`，行高 `--row-h`，分节之间 12px、不画线。
+
 DS-04 组件尺寸（[组件规范](components.md)）：`--badge-h` 18、`--dot-sm` 6、`--dot-md` 8、`--field-h` 32、`--field-h-sm` 28、`--field-fill`（输入框底色）、`--list-row-sm` 32、`--list-row-md` 40、`--list-row-lg` 52、`--list-inset` 16（组内细线左缩进）、`--pane-header-h` 48、`--switch-thumb`（开关圆钮，两套主题都是白色）。
 
 ## L1 尺度（目标值，组件可直接使用）

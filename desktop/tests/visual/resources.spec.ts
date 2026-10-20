@@ -229,7 +229,7 @@ test('a hundred links render without starting metadata requests', async ({
   )
   expect(iconCalls).toBe(1)
   await expect(
-    page.locator('.environment-card [data-section="sources"] .section-head'),
+    page.locator('.environment-card [data-row="sources"]'),
   ).toContainText('来源')
 })
 for (const theme of ['dark', 'light'] as const) {
@@ -240,9 +240,8 @@ for (const theme of ['dark', 'light'] as const) {
     await page.setViewportSize({ width: 1600, height: 1050 })
     await page.goto(`/chat/build-ui?visualTheme=${theme}`)
     const sidebar = page.locator('.environment-card')
-    const portraits = sidebar.locator(
-      '[data-section="subagents"] [data-avatar]',
-    )
+    // UI-S05: the 子智能体 row stacks three faces.
+    const portraits = sidebar.locator('[data-row="agents"] [data-avatar]')
     await expect(portraits).toHaveCount(3)
     const characters = await portraits.evaluateAll((elements) =>
       elements.map((element) => element.getAttribute('data-avatar')),
@@ -251,10 +250,12 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(
       page.locator('.md-link-detail, .resource-inline button'),
     ).toHaveCount(0)
-    await expect(sidebar.locator('[data-section="outputs"]')).toContainText(
+    await sidebar.locator('[data-row="outputs"]').click()
+    await expect(page.getByRole('menu', { name: '全部输出' })).toContainText(
       '发布说明.md',
     )
-    await expect(sidebar.locator('[data-section="sources"]')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(sidebar.locator('[data-row="sources"]')).toBeVisible()
     await expect(
       page.locator('.resource-card[data-resource-kind="github"]').first(),
     ).toBeVisible()
@@ -348,7 +349,11 @@ test('long resource names wrap completely in cards and the source list', async (
   await page.setViewportSize({ width: 1600, height: 1050 })
   await page.goto('/chat/build-ui')
   const label = page.locator('.resource-card .resource-title')
-  const source = page.locator('.environment-card .resource-row-label')
+  // UI-S05: the card lists its sources in the 来源 menu.
+  await page.locator('.environment-card [data-row="sources"]').click()
+  const source = page
+    .getByRole('menu', { name: '全部来源' })
+    .locator('.resource-menu-item .name')
   await expect(label).toHaveText(title)
   await expect(source).toHaveText(title)
   for (const locator of [label, source]) {

@@ -15,6 +15,11 @@
   /* The chat composer card (UI-S04): raised in both themes */
   --composer-fill: var(--surface-raised);
 
+  /* The environment card (UI-S05): raised on dark, the panel fill lifted by
+     the popover shadow on light */
+  --env-card-fill: var(--surface-raised);
+  --env-card-edge: var(--elev-2);
+
   /* Settings cards sit on the panel; their controls one step down */
   --settings-card-fill: var(--surface-raised);
   --settings-card-control-fill: var(--surface-base);
@@ -182,4 +187,5 @@
   --nb-60: 245 246 247;
   /* A hairline ring as well on light */
   --composer-edge: 0 0 0 0.5px var(--hairline), var(--elev-1);
+  --env-card-fill: var(--surface-base);
 }

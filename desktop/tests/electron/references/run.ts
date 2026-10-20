@@ -837,14 +837,9 @@ async function referencesAndCard(
     const items = (await menu.getByRole('menuitem').allInnerTexts()).map(
       (text) => text.split('\n')[0]!.trim(),
     )
-    for (const item of [
-      '打开工作台',
-      '工作位置',
-      '切换分支',
-      '提交或推送',
-      '比较分支',
-    ])
-      if (!items.includes(item)) throw new Error(`menu: ${items}`)
+    // UI-S05: a read-only card; the Git actions live in 审查.
+    if (items.join('|') !== '复制项目路径|在访达中显示|隐藏此卡片')
+      throw new Error(`menu: ${items}`)
     await page.waitForTimeout(400) // let the menu finish fading in
     await page.screenshot({ path: join(shots, 'environment-card.png') })
     await page.keyboard.press('Escape')
@@ -1363,14 +1358,19 @@ async function conversationResources(
             .getByRole('button', { name: '环境信息', exact: true })
             .first()
             .click()
-        const outputs = sidebar.locator('[data-section="outputs"]')
+        // UI-S05: 输出 and 来源 are one row each; their menus list them.
+        await sidebar.locator('[data-row="outputs"]').click()
+        const outputs = page.getByRole('menu', { name: '全部输出' })
         await outputs.waitFor({ timeout: 10_000 })
         if (!(await outputs.innerText()).includes('resources-output.md'))
           throw new Error('the successful create is missing from outputs')
         if ((await outputs.innerText()).includes('资源示例.ts'))
           throw new Error('a read/cited file was promoted to output')
-        const source = sidebar
-          .locator('[data-section="sources"] .resource-sidebar-row')
+        await page.keyboard.press('Escape')
+        await sidebar.locator('[data-row="sources"]').click()
+        const source = page
+          .getByRole('menu', { name: '全部来源' })
+          .locator('.resource-menu-item')
           .filter({ hasText: 'example.com' })
         const sourceRow = source.first()
         await sourceRow.waitFor({ timeout: 10_000 })
