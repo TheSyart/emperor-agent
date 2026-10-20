@@ -29,15 +29,16 @@ export const PLUGIN_SCOPE_OPTIONS: ReadonlyArray<{
   description: string
 }> = [
   { value: 'user', label: '用户', description: '所有项目可用' },
+  // SEC-07: a project's choice is kept in Emperor, never in the repository.
   {
     value: 'project',
     label: '项目',
-    description: '写入当前项目 .emperor/settings.json',
+    description: '只在当前项目启用，选择记在 Emperor 里',
   },
   {
     value: 'local',
     label: '本地项目',
-    description: '写入当前项目 settings.local.json，不随仓库提交',
+    description: '只在当前项目启用，优先于「项目」范围的同一插件',
   },
 ]
 
