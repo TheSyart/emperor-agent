@@ -13,10 +13,43 @@ export {
   legacyDefaultStateRoot,
 } from '../runtime/paths'
 export {
+  applyPendingHomeRestore,
   bootstrapEmperorHome,
+  compareAppVersions,
+  CURRENT_DATA_VERSION,
   CURRENT_STATE_LAYOUT_VERSION,
   InstallationBootstrapError,
+  runPendingDataMigrations,
 } from '../runtime/installation'
+// REL-03: data versions, read-only newer files, 备份与恢复 (main loads the
+// backup module on demand).
+export {
+  DataFileNewerError,
+  NEWER_FILE_MESSAGE,
+  declaredVersion,
+  newerVersionOf,
+} from '../store/persistence/version'
+export { DATA_FILES, inspectDataFiles } from '../storage/data-files'
+export type { DataFileSpec, DataFileState } from '../storage/data-files'
+export {
+  BACKUP_CREDENTIALS,
+  BACKUP_EXTENSION,
+  BACKUP_MANIFEST,
+  HomeBackupError,
+  applyPendingRestore,
+  pendingRestoreExists,
+  planHomeBackup,
+  readHomeBackup,
+  scheduleHomeRestore,
+  stageHomeBackup,
+} from '../storage/backup'
+export type {
+  BackupCategoryId,
+  BackupPlan,
+  BackupPlanCategory,
+  HomeBackupManifest,
+  RestoreResult,
+} from '../storage/backup'
 export type {
   BootstrapEmperorHomeOptions,
   BootstrapEmperorHomeResult,

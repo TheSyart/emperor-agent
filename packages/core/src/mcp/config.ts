@@ -3,6 +3,7 @@ import { open, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   AtomicSnapshot,
+  assertNotNewerSync,
   type PersistenceAdapter,
   type SnapshotCodec,
 } from '../store/persistence'
@@ -298,7 +299,7 @@ function secretToSeal(name: string, value: string): boolean {
   )
 }
 
-function sealMcpSecrets(
+export function sealMcpSecrets(
   raw: Record<string, unknown>,
   sealer: SecretSealer | null | undefined,
 ): { raw: Record<string, unknown>; sealedPlaintext: boolean } {
@@ -471,6 +472,7 @@ export async function saveMcpConfig(
   )
     data.defaults = DEFAULT_MCP_CONFIG.defaults
   const path = join(root, MCP_CONFIG_FILE)
+  assertNotNewerSync(path, 'version', 1)
   const sealed = sealMcpSecrets(data, opts.sealer)
   if (sealed.sealedPlaintext) await backupBeforeSealing(path)
   await mcpConfigSnapshot(path, opts.persistenceAdapter).write(sealed.raw)
@@ -779,8 +781,9 @@ function validateRawConfig(value: unknown): Record<string, unknown> {
 
 const MCP_CONFIG_SNAPSHOT_CODEC: SnapshotCodec<Record<string, unknown>> = {
   schemaVersion: 1,
+  versionKey: 'version',
   encode(value) {
-    return value
+    return { ...value, version: 1 }
   },
   decode(input) {
     return {

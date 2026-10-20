@@ -33,7 +33,10 @@ import { MemoryStore } from '../../memory/store'
 import { TokenTracker } from '../../memory/token-tracker'
 import { OwnedProcessRuntime } from '../../processes/runtime'
 import { ProjectStore } from '../../projects/store'
-import { bootstrapEmperorHome } from '../../runtime/installation'
+import {
+  bootstrapEmperorHome,
+  runPendingDataMigrations,
+} from '../../runtime/installation'
 import {
   migrateLegacyStateRoot,
   type LegacyStateMigrationResult,
@@ -173,6 +176,9 @@ export async function createKeptServices(
         paths.stateRootSource === 'default' ? legacyDefaultStateRoot() : null,
       appVersion: opts.appVersion ?? '0.0.0-headless',
       runtimeRevision: opts.runtimeRevision ?? environmentCatalog.revision,
+    })
+    await runPendingDataMigrations(paths.stateRoot, {
+      ...(opts.appVersion ? { appVersion: opts.appVersion } : {}),
     })
   }
   ensureRuntimeStateDirs(paths)
