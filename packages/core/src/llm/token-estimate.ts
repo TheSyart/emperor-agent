@@ -71,7 +71,9 @@ export function imagePricingForRoute(
   route: Pick<RouteSpec, 'adapter' | 'protocol' | 'vision'>,
 ): ImagePricing {
   if (!route.vision) return 'text'
-  if (route.adapter === 'deepseek') return 'deepseek'
+  // Both DeepSeek wires (chat-completions and Messages) price images alike.
+  if (route.adapter === 'deepseek' || route.adapter === 'deepseek-messages')
+    return 'deepseek'
   return route.protocol === 'anthropic' ? 'anthropic' : 'openai'
 }
 

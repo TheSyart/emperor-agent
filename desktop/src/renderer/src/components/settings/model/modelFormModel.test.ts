@@ -4,13 +4,18 @@ import {
   canonicalModelApiBase,
   capabilityControlValue,
   capabilityStatus,
+  deepseekInterface,
+  DEEPSEEK_EFFORT_HINT,
+  entryInterfaceLabel,
   formatTokenPreset,
+  INTERFACE_OPTIONS,
   INPUT_TOKEN_PRESETS,
   modelTestSummary,
   OUTPUT_TOKEN_PRESETS,
   policyDraftFrom,
   policyDraftsEqual,
   reasoningChoices,
+  reasoningHint,
 } from './modelFormModel'
 
 describe('modelTestSummary', () => {
@@ -151,5 +156,48 @@ describe('model execution policy draft', () => {
     expect(
       buildModelPolicy({ ...draft, costCapUsd: ' ' }).cost.maxUsdPerAgentTurn,
     ).toBeNull()
+  })
+})
+
+describe('DeepSeek interface (KRN-07)', () => {
+  const official = {
+    provider: 'deepseek',
+    protocol: 'openai' as const,
+    apiBase: 'https://api.deepseek.com/v1',
+  }
+
+  it('names Messages as the default for the official host and chat-completions when forced', () => {
+    expect(deepseekInterface(official)).toBe('messages')
+    expect(entryInterfaceLabel(official)).toBe('Anthropic Messages')
+    const forced = { ...official, transport: 'chat-completions' as const }
+    expect(deepseekInterface(forced)).toBe('chat-completions')
+    expect(entryInterfaceLabel(forced)).toBe('OpenAI Chat Completions（回退）')
+  })
+
+  it('leaves gateways and other providers on their own protocol', () => {
+    const gateway = { ...official, apiBase: 'https://gw.example.com/v1' }
+    expect(deepseekInterface(gateway)).toBeNull()
+    expect(entryInterfaceLabel(gateway)).toBe('OpenAI Chat Completions')
+    const anthropic = {
+      provider: 'anthropic',
+      protocol: 'anthropic' as const,
+      apiBase: 'https://api.anthropic.com',
+    }
+    expect(deepseekInterface(anthropic)).toBeNull()
+    expect(entryInterfaceLabel(anthropic)).toBe('Anthropic Messages')
+  })
+
+  it('offers Messages (default) and the chat-completions fallback', () => {
+    expect(INTERFACE_OPTIONS.map((option) => option.value)).toEqual([
+      '',
+      'chat-completions',
+    ])
+  })
+
+  it('says medium is sent as high for DeepSeek only', () => {
+    expect(DEEPSEEK_EFFORT_HINT).toContain('medium')
+    expect(DEEPSEEK_EFFORT_HINT).toContain('high')
+    expect(reasoningHint({ provider: 'deepseek' })).toBe(DEEPSEEK_EFFORT_HINT)
+    expect(reasoningHint({ provider: 'openai' })).toBeUndefined()
   })
 })

@@ -30,7 +30,7 @@ Emperor Agent 可以保存多条模型配置，但全局同时只激活一个模
 
 API Key 加密后写入文件（`"apiKey": "el1:…"`），使用与凭据库相同的 Emperor 本地密钥（`computer-use/secrets/local.key`），不使用 macOS 钥匙串；每个 Key 只能在它所属的那条模型里解开。旧版本留下的明文 Key 照常可用，下一次保存模型设置时自动加密，加密前的原文件保留为 `model_config.json.pre-seal-<时间>`（含明文，确认一切正常后可以自行删除）。设置页只显示已保存 Key 的末 4 位。本地密钥丢失或被替换时（例如只复制了 `model_config.json` 到另一台电脑），受影响的模型显示「凭据需要重新输入」，其余模型和设置照常可用，重新填写 Key 并保存即可；以同一用户运行的程序仍可能读到本地密钥，这是基础保护。
 
-Provider 描述的是访问方式，不是固定模型清单。部分 Provider 支持模型发现；发现失败时仍可以手工填写模型 ID。`custom` 需要明确选择 `openai` 或 `anthropic` 协议。Provider 为 `deepseek` 时使用内置的 DeepSeek 适配器，其他 Provider 按所选协议走 OpenAI Chat Completions 或 Anthropic Messages。
+Provider 描述的是访问方式，不是固定模型清单。部分 Provider 支持模型发现；发现失败时仍可以手工填写模型 ID。`custom` 需要明确选择 `openai` 或 `anthropic` 协议。Provider 为 `deepseek` 时使用内置的 DeepSeek 适配器：官方地址默认走 Anthropic Messages，其他地址走 OpenAI Chat Completions（见下文「DeepSeek 的接口」）。其他 Provider 按所选协议走 OpenAI Chat Completions 或 Anthropic Messages。
 
 “显示名称”只保存你明确设置的自定义别名；未设置时用目录或厂商给出的名称（`metadata.name`），再没有时用模型 ID。
 
@@ -43,13 +43,29 @@ Provider 描述的是访问方式，不是固定模型清单。部分 Provider �
 - 供应商卡片上的「管理模型」直接打开这个供应商的第 2 步：已保存的模型是勾选状态，勾选新的会加入，取消勾选会删除（正在使用的模型和被备用模型引用的模型不能取消）。
 - 卡片的「⋯」：**更换 Key**（这个连接下的所有模型一起改用新 Key，确认框会写明「将同时更新 N 个模型」）、**编辑地址**（同样作用于整个连接，Key 不变）、**刷新模型资料**（先列出内置目录与当前值的差异，如上下文、输出上限、能力、单价，点「应用」才写入；你改过的值不会动）、**删除供应商**（删除它的全部模型和 Key；有正在使用的模型时要先在输入框换掉）。
 - 「测试」用已保存的配置发送一次最小请求，结果写在这一行，卡片头的连接状态随之更新（测试结果记在 `model_tests.json`，重启后仍在）。
-- 「编辑」在该行下方展开编辑器，只放常改的：显示名、上下文、每次输出（各有 32K–1M、8K–128K 的预设，旁注数值来源：手动、官方接口、内置目录、推断，以及上限）、思考强度和三项能力。连接信息只读，旁边的「编辑地址」打开卡片的同名对话框；温度和单价在「高级」里（模型不接受温度时不可填；单价留空表示未知）。你改过的数值会被锁定，之后刷新模型资料不会覆盖。
+- 「编辑」在该行下方展开编辑器，只放常改的：显示名、上下文、每次输出（各有 32K–1M、8K–128K 的预设，旁注数值来源：手动、官方接口、内置目录、推断，以及上限）、思考强度和三项能力。连接信息只读，旁边的「编辑地址」打开卡片的同名对话框；温度和单价在「高级」里（模型不接受温度时不可填；单价留空表示未知），DeepSeek 官方地址的模型在「高级」里还有「接口」。你改过的数值会被锁定，之后刷新模型资料不会覆盖。
 - 厂商已退役或即将下线的模型在行下方显示琥珀色提示；内置目录知道替代模型时有「替换为 X」：新模型占用原来的位置，沿用你设置过的值、能力覆盖、温度和 Key，正在使用它或把它当备用模型的地方一起改过去。
 - 「⋯ › 删除」先确认再删除这一个模型。
 
 模型切换在聊天输入框完成，切换从下一次请求开始生效。输入框的模型菜单分两层：「模型」按供应商分组列出已保存的模型，模型较多时可以搜索；「思考强度」列出当前模型支持的档位。
 
 能力覆盖包含 `toolCall`、`vision` 和 `reasoning`，用于修正无法自动判断的模型能力，不会让本来不支持该能力的服务端获得能力。
+
+### DeepSeek 的接口
+
+Provider 为 `deepseek`、API 地址是官方的 `https://api.deepseek.com`（带 `/v1`、`/anthropic` 等路径也算）时，请求默认走 Anthropic Messages 接口（`https://api.deepseek.com/anthropic/v1/messages`），与保存时选的协议是 OpenAI 还是 Anthropic 无关。编辑器的连接信息里会写「Anthropic Messages」。
+
+- 思考内容连同签名原样带回下一轮，只回给产生它的同一个模型；换了模型之后，之前的思考不再发送。
+- 思考强度按 DeepSeek 的三档发送：low、high、max。Emperor 的 medium 按 high 发送，「关闭」就是不开思考。编辑器、添加模型对话框和输入框的思考强度处都有这句提示。会话标题和压缩摘要不开思考。
+- 图片先上传到 DeepSeek 的 Files API，请求里只引用文件，同一张图只传一次。缓存按「地址 + Key」分开，只在内存里，重启后同一张图会再传一次。上传的文件名以 `emperor-` 开头，24 小时后在 DeepSeek 端自动删除；超过约 1300×1300 像素的图片先缩小并转成 JPEG（质量 85，还太大就试 75、60）。账号的文件存储满了时，Emperor 只删除自己上传的最旧文件，再重试一次；上传失败时这张图改为直接内嵌在请求里（单次请求的内嵌图片最多 20 MiB），之后 10 分钟内同一个地址和 Key 不再尝试上传。
+- 以前走 Chat Completions 的旧会话可以直接继续：其中的思考内容作为不带签名的思考发给同一个模型。
+
+自定义网关或代理地址仍走 OpenAI Chat Completions（`/chat/completions`），图片直接内嵌在请求里。官方地址也想回到 Chat Completions 时（例如 Messages 接口出问题），任选一种：
+
+- 在「设置 → 模型」点这个模型的「编辑」，在「高级 › 接口」选「OpenAI Chat Completions（回退）」并保存；改回「Anthropic Messages（默认）」即恢复。
+- 编辑 `model_config.json`，给这条模型加 `"transport": "chat-completions"`。把 `"protocol"` 写成 `"chat-completions"` 也可以，读取时会换算成 `"protocol": "openai"` 加 `"transport": "chat-completions"`。删掉 `transport` 即恢复默认。
+
+旧条目里的 `extraBody` 在两种接口下都会合并进请求，写的是 Chat Completions 的参数时，记得一起切回 Chat Completions。
 
 ### 重试
 

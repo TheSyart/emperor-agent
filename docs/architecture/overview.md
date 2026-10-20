@@ -41,7 +41,7 @@ flowchart LR
 | HarnessHost   | 组合 LLM、session log、Agent loop、工具、沙箱、审批、Plan、压缩、Hooks、Goal、子代理               | `packages/core/src/harness/host/`                             |
 | Agent loop    | turn → step 循环、inbox、工具调度、middleware                                                      | `packages/core/src/harness/agent/`                            |
 | Session log   | 每个 session 一份 append-only `log.jsonl`、崩溃修复、fork                                          | `packages/core/src/session-log/`                              |
-| LLM           | Provider catalog、model route、DeepSeek / pi-ai 适配器、重试策略                                   | `packages/core/src/llm/`                                      |
+| LLM           | Provider catalog、model route、DeepSeek（Messages / chat-completions）与 pi-ai 适配器、重试策略    | `packages/core/src/llm/`                                      |
 | 工具          | 内置工具、注册表、执行管线、大结果落盘                                                             | `packages/core/src/harness/tools/`                            |
 | 权限          | 沙箱模式、审批策略、权限预设、一次性提权                                                           | `packages/core/src/harness/sandbox/`、`harness/approval/`     |
 | 保留服务      | Session 索引、Memory、Projects、Skills、Plugins、MCP、Scheduler、Watchlist、环境探测               | `packages/core/src/<domain>/`、`harness/host/services.ts`     |

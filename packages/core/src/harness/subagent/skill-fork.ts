@@ -8,7 +8,11 @@
 
 import type { LlmCallConfig } from '../../llm/call-config'
 import type { LlmClient } from '../../llm/client'
-import { deepseekEffort, type RouteSpec } from '../../llm/route'
+import {
+  deepseekEffort,
+  usesDeepSeekEfforts,
+  type RouteSpec,
+} from '../../llm/route'
 import type { ResolvedSkill } from '../../skills/file-loader'
 import type { Agent } from '../agent/agent'
 import { renderSkillContent } from '../tools/builtin/skill'
@@ -45,12 +49,11 @@ export function routeEffort(
 ): string | undefined {
   if (route.reasoningEfforts.length === 0) return undefined
   const normalized = effort.trim().toLowerCase()
-  const candidate =
-    route.adapter === 'deepseek'
-      ? deepseekEffort(normalized)
-      : normalized === 'none'
-        ? 'off'
-        : normalized
+  const candidate = usesDeepSeekEfforts(route)
+    ? deepseekEffort(normalized)
+    : normalized === 'none'
+      ? 'off'
+      : normalized
   return candidate !== undefined && route.reasoningEfforts.includes(candidate)
     ? candidate
     : undefined

@@ -1,0 +1,13 @@
+{"kind":"note","text":"HTTP 429 (rate limit), then 503 (server overloaded), then success; codes and meanings from https://api-docs.deepseek.com/quick_start/error_codes. The error bodies use the Anthropic error envelope and the OpenAI one, since the guide documents neither. Hand-written, not recorded."}
+{"kind":"request","method":"POST","url":"https://api.deepseek.com/anthropic/v1/messages"}
+{"kind":"response","status":429,"headers":{"request-id":"req_rl_1"},"json":{"type":"error","error":{"type":"rate_limit_error","message":"Rate limit reached for requests"}}}
+{"kind":"request","method":"POST","url":"https://api.deepseek.com/anthropic/v1/messages"}
+{"kind":"response","status":503,"json":{"error":{"message":"Server overloaded, please retry later","type":"server_error"}}}
+{"kind":"request","method":"POST","url":"https://api.deepseek.com/anthropic/v1/messages"}
+{"kind":"response","status":200,"headers":{"content-type":"text/event-stream"}}
+{"kind":"sse","event":"message_start","data":{"type":"message_start","message":{"id":"msg_retry_1","type":"message","role":"assistant","model":"deepseek-flash","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":21,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}}
+{"kind":"sse","event":"content_block_start","data":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}
+{"kind":"sse","event":"content_block_delta","data":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"pong"}}}
+{"kind":"sse","event":"content_block_stop","data":{"type":"content_block_stop","index":0}}
+{"kind":"sse","event":"message_delta","data":{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}}
+{"kind":"sse","event":"message_stop","data":{"type":"message_stop"}}
