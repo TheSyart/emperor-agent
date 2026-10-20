@@ -650,6 +650,50 @@ export const SELECT_DIRECTORY_CHANNEL = 'emperor:select-directory'
  */
 export const OPEN_PATH_CHANNEL = 'emperor:open-path'
 /**
+ * 设置 › 高级 › 诊断 › 导出诊断包 (REL-01), trusted main window only.
+ * `prepare` (no argument) stages the bundle and answers
+ * {@link DiagnosticsBundlePrepareResult}: what the zip will hold, for the
+ * user to confirm. `export` `{ id }` asks where to save it and writes the
+ * zip ({@link DiagnosticsBundleExportResult}); `reveal` `{ id }` shows an
+ * exported zip in Finder; `discard` `{ id }` drops a staged bundle. Ids
+ * only: no path crosses IPC.
+ */
+export const DIAGNOSTICS_BUNDLE_PREPARE_CHANNEL =
+  'emperor:diagnostics:bundle-prepare'
+export const DIAGNOSTICS_BUNDLE_EXPORT_CHANNEL =
+  'emperor:diagnostics:bundle-export'
+export const DIAGNOSTICS_BUNDLE_REVEAL_CHANNEL =
+  'emperor:diagnostics:bundle-reveal'
+export const DIAGNOSTICS_BUNDLE_DISCARD_CHANNEL =
+  'emperor:diagnostics:bundle-discard'
+
+/** One file of a staged diagnostics bundle. */
+export interface DiagnosticsBundleEntryView {
+  /** Inside the zip's folder, e.g. `logs/main.log`. */
+  path: string
+  /** What it is, in the UI's words. */
+  title: string
+  bytes: number
+}
+
+export interface DiagnosticsBundleView {
+  /** `b_` + 12 hex. */
+  id: string
+  /** The zip's folder and default file name (without `.zip`). */
+  name: string
+  entries: DiagnosticsBundleEntryView[]
+  /** What the bundle never holds. */
+  excluded: string[]
+}
+
+export type DiagnosticsBundlePrepareResult =
+  { ok: true; bundle: DiagnosticsBundleView } | { ok: false; error: string }
+
+export type DiagnosticsBundleExportResult =
+  | { ok: true; name: string; location: string }
+  | { ok: false; canceled: true }
+  | { ok: false; error: string }
+/**
  * Main window → main: the composer's + › 截图 (UI-S04, macOS). Main hides
  * the window, runs the system's interactive region capture into a private
  * temporary folder, reads the PNG back, deletes it and answers
@@ -689,7 +733,8 @@ export const PET_RENDERER_CLOSE_CHANNEL = 'emperor:pet:renderer-close'
 export type OpenPathTarget =
   | {
       kind: 'diagnostic'
-      rowId: 'global-state-root' | 'active-project-path'
+      /** `logs-path`: the folder of main.log and core.log (REL-01). */
+      rowId: 'global-state-root' | 'active-project-path' | 'logs-path'
       /** The session the Diagnostics page was opened from (its project row). */
       sessionId?: string | null
     }

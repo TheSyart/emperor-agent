@@ -65,6 +65,8 @@ export interface DiagnosticsView {
 
 export interface CoreDiagnosticsServiceDeps {
   runtimePaths?: RuntimePaths | null
+  /** The host's log folder (desktop main.log / core.log), as `paths.logsRoot`. */
+  logDirectory?: string | null
   legacyStateMigration?: LegacyStateMigrationResult | null
   /** Detects private `.emperor/sessions`|`.emperor/memory` already sitting inside the
    * viewed project's own source tree. Returns null when there is no bound project. */
@@ -257,6 +259,7 @@ export class CoreDiagnosticsService {
         'migrations',
         'legacy-runtime-skills.json',
       ),
+      ...(this.deps.logDirectory ? { logsRoot: this.deps.logDirectory } : {}),
     }
   }
 

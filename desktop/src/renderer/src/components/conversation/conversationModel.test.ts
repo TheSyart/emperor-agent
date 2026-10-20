@@ -3,6 +3,7 @@ import type { SessionInfo } from '../../types'
 import {
   conversationCrumbs,
   conversationPhase,
+  sessionRunning,
   isChildLineage,
 } from './conversationModel'
 
@@ -129,4 +130,45 @@ it('uses the canonical Emperor fallback when a child creation description is abs
       titleOf: () => 'generated title',
     }).at(-1)?.label,
   ).toBe('Emperor 子智能体')
+})
+
+describe('sessionRunning: one source for the composer and the turn status (FIX-03 7)', () => {
+  it('follows the raw log projection once the window is open', () => {
+    expect(
+      sessionRunning({
+        windowOpen: true,
+        logRunning: true,
+        active: true,
+        runtimeBusy: false,
+      }),
+    ).toBe(true)
+    // A stale runtime busy never keeps the stop button on.
+    expect(
+      sessionRunning({
+        windowOpen: true,
+        logRunning: false,
+        active: true,
+        runtimeBusy: true,
+      }),
+    ).toBe(false)
+  })
+
+  it('uses the runtime busy of the active session until the window opens', () => {
+    expect(
+      sessionRunning({
+        windowOpen: false,
+        logRunning: false,
+        active: true,
+        runtimeBusy: true,
+      }),
+    ).toBe(true)
+    expect(
+      sessionRunning({
+        windowOpen: false,
+        logRunning: false,
+        active: false,
+        runtimeBusy: true,
+      }),
+    ).toBe(false)
+  })
 })

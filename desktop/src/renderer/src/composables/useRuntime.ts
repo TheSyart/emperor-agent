@@ -987,11 +987,16 @@ export function useRuntime(options: {
   }
 
   function restoreFromRuntimeEvents(events: RuntimeEventEnvelope[]) {
-    busy.value = false
-    updatePending()
     const scope = String(
       sessionId.value || options.boot.value?.runtime?.sessionId || '',
     )
+    // A bootstrap taken before live events already handled for this session
+    // (the turn ended during the round trip) must not bring busy back: the
+    // live state is newer (FIX-03, UI-20).
+    const liveSeq = runtimeControllers.controller(scope).state.lastSeq
+    const stale = Number(options.boot.value?.runtime?.latestSeq ?? 0) < liveSeq
+    busy.value = false
+    updatePending()
     rehydrating = true
     try {
       const adaptedEvents = events as WsEvent[]
@@ -1023,12 +1028,13 @@ export function useRuntime(options: {
       rehydrating = false
     }
     const runtime = options.boot.value?.runtime
+    const liveRunning = runtimeControllers.controller(scope).state.running
+    if (stale) {
+      busy.value = liveRunning
+      return
+    }
     busy.value =
-      runtime?.busy === false
-        ? false
-        : Boolean(
-            runtime?.busy || runtimeControllers.controller(scope).state.running,
-          )
+      runtime?.busy === false ? false : Boolean(runtime?.busy || liveRunning)
     if (runtime?.busy === false) clearAllSessionRunning()
   }
 

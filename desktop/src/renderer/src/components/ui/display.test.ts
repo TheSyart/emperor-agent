@@ -723,6 +723,28 @@ describe('Tabs (test 7)', () => {
     expect(onClose).toHaveBeenCalledWith('pkg')
   })
 
+  it('a tab may carry a hover title, kept on a disabled tab too (UI-S06)', () => {
+    const root = mount(() =>
+      h(Tabs, {
+        variant: 'segmented',
+        tabs: [
+          {
+            id: 'a',
+            label: '审查',
+            disabled: true,
+            title: '当前会话未绑定项目',
+          },
+          { id: 'b', label: '文件' },
+        ],
+        modelValue: 'b',
+      }),
+    )
+    const items = [...root.querySelectorAll<HTMLElement>('.tab-item')]
+    // On the wrapper: a disabled button gets no pointer events.
+    expect(items[0]!.getAttribute('title')).toBe('当前会话未绑定项目')
+    expect(items[1]!.hasAttribute('title')).toBe(false)
+  })
+
   it('Segmented is the segmented Tabs as a radio group', async () => {
     const value = ref<number>(7)
     const root = mount(() =>

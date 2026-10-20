@@ -16,6 +16,7 @@ export type McpImportResult = CoreOperationResult<'mcp.importServers'>
 export type McpImportServerPreview = McpImportResult['servers'][number]
 export type McpServerEnabledResult = CoreOperationResult<'mcp.setServerEnabled'>
 export type McpServerRemoveResult = CoreOperationResult<'mcp.removeServer'>
+export type McpServerLog = CoreOperationResult<'mcp.serverLog'>
 
 export async function getMcpConfig(): Promise<McpConfigView> {
   return invokeCore('mcp.getConfig')
@@ -52,4 +53,9 @@ export async function removeMcpServer(
   name: string,
 ): Promise<McpServerRemoveResult> {
   return invokeCore('mcp.removeServer', { name })
+}
+
+/** A stdio server's last 200 stderr lines, redacted; `text` null: not running. */
+export async function getMcpServerLog(name: string): Promise<McpServerLog> {
+  return invokeCore('mcp.serverLog', { name })
 }

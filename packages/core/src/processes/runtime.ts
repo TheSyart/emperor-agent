@@ -147,6 +147,12 @@ export interface ManagedOwnedProcessRequest extends OwnedProcessRequest {
   stdin?: string | Buffer | null
   outputPolicy?: 'terminate' | 'truncate_tail'
   outputQuotaScope?: 'combined' | 'per_stream'
+  /**
+   * `long-lived`: a server talking over its pipes for as long as it runs
+   * (MCP stdio, KRN-04). Its output is the caller's to read: the runtime
+   * captures none of it and applies no cumulative quota.
+   */
+  stream?: 'long-lived'
 }
 
 export interface OwnedProcessHandle {
@@ -663,8 +669,10 @@ export class OwnedProcessRuntime implements OwnedProcessRunner {
       if (chunk.length > remaining && outputPolicy === 'terminate')
         terminate('output_limit', 'process output quota exceeded')
     }
-    child.stdout.on('data', (chunk: Buffer | string) => append(stdout, chunk))
-    child.stderr.on('data', (chunk: Buffer | string) => append(stderr, chunk))
+    if (request.stream !== 'long-lived') {
+      child.stdout.on('data', (chunk: Buffer | string) => append(stdout, chunk))
+      child.stderr.on('data', (chunk: Buffer | string) => append(stderr, chunk))
+    }
 
     const abortFromRequest = (): void =>
       terminate(

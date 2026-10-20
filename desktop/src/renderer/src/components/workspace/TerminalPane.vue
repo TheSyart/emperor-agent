@@ -1,14 +1,17 @@
 <script setup lang="ts">
 /**
  * TerminalPane — the right workspace's 终端 pane: tabs of the session's PTYs
- * over one xterm surface (the active tab, replayed from Core on activation).
+ * (WorkspaceTabBar, the strip 文件 uses too; 「+」 opens another) over one
+ * xterm surface (the active tab, replayed from Core on activation). With no
+ * terminal the surface says so; 「+」 is the only way to start one.
  *
  * Sizing (FIX-05): fits wait until the surface size has settled for 100 ms,
  * are skipped while the column is closed (`visible` false) or the surface is
  * below 20 × 5 cells, and the PTY hears only about a size it has not been
  * sent yet (terminalFit.ts). Focus: only an explicit activation — the pane
  * picked (`focusRequest`), a tab clicked, 新建终端 — moves keyboard focus
- * into the terminal; restoring after a session switch never does.
+ * into the terminal; restoring after a session switch, or arrowing along the
+ * tabs, never does.
  *
  * Props:
  * - sessionId.
@@ -17,13 +20,16 @@
  *   is ready (WorkspacePanel sends one when the user shows this pane).
  */
 import { confirmTerminalClose } from './terminalClose'
+import EmptyState from '../ui/EmptyState.vue'
 import IconButton from '../ui/IconButton.vue'
+import type { TabItem } from '../ui/blockTypes'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import type { TerminalEvent, TerminalSummary } from '@emperor/core/api'
-import { Plus, TerminalSquare, X } from 'lucide-vue-next'
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Plus, SquareTerminal } from 'lucide-vue-next'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import WorkspaceTabBar from './WorkspaceTabBar.vue'
 import { onTerminalEvent } from '../../api/backend'
 import { core } from '../../api/http'
 import {
@@ -60,6 +66,20 @@ let resizeTimer: ReturnType<typeof setTimeout> | undefined
 let sentSize = ''
 /** The user asked for the terminal; focus it once it is ready. */
 let focusPending = false
+/** A tab is being picked with the keyboard (focus stays on the strip). */
+let pickingByKey = false
+
+const tabItems = computed<TabItem[]>(() =>
+  terminals.value.map((item, index) => {
+    const label = item.title || `终端 ${index + 1}`
+    return {
+      id: item.id,
+      label: item.exited ? `${label} · 已退出` : label,
+      icon: SquareTerminal,
+      closable: true,
+    }
+  }),
+)
 
 onMounted(async () => {
   await restore()
@@ -122,9 +142,14 @@ function newTerminal(): void {
   void createTerminal(props.sessionId, ownerGeneration, true)
 }
 
-/** A tab clicked: an explicit activation. */
+function setKeyPick(picking: boolean): void {
+  pickingByKey = picking
+}
+
+/** A tab picked: clicked is an explicit activation, arrowed to is not. */
 function selectTerminal(terminalId: string): void {
-  void activate(terminalId, props.sessionId, ownerGeneration, true)
+  if (terminalId === activeId.value) return
+  void activate(terminalId, props.sessionId, ownerGeneration, !pickingByKey)
 }
 
 async function createTerminal(
@@ -405,22 +430,6 @@ function isCurrentActivation(
   )
 }
 
-function selectAdjacentTerminal(index: number, key: string): void {
-  if (!terminals.value.length) return
-  let target = index
-  if (key === 'ArrowLeft')
-    target = (index - 1 + terminals.value.length) % terminals.value.length
-  else if (key === 'ArrowRight') target = (index + 1) % terminals.value.length
-  else if (key === 'Home') target = 0
-  else if (key === 'End') target = terminals.value.length - 1
-  else return
-  const item = terminals.value[target]
-  if (!item) return
-  void activate(item.id).then(() => {
-    document.getElementById(`terminal-tab-${item.id}`)?.focus()
-  })
-}
-
 function cssColor(
   style: CSSStyleDeclaration,
   property: string,
@@ -437,67 +446,46 @@ function message(value: unknown): string {
 
 <template>
   <div class="terminal-pane">
-    <div class="terminal-tabs" role="tablist" aria-label="项目终端">
-      <div
-        v-for="(item, index) in terminals"
-        :key="item.id"
-        class="terminal-tab-item"
-        :class="{ active: activeId === item.id, exited: item.exited }"
+    <!-- The strip's keydown runs between these two: arrowing keeps focus. -->
+    <div
+      class="terminal-tabs"
+      @keydown.capture="setKeyPick(true)"
+      @keydown="setKeyPick(false)"
+    >
+      <WorkspaceTabBar
+        :model-value="activeId"
+        :tabs="tabItems"
+        label="项目终端"
+        @update:model-value="selectTerminal"
+        @close="closeTerminal"
       >
-        <button
-          :id="`terminal-tab-${item.id}`"
-          type="button"
-          role="tab"
-          class="terminal-tab-button"
-          :aria-selected="activeId === item.id"
-          :aria-controls="`terminal-panel-${item.id}`"
-          :tabindex="activeId === item.id ? 0 : -1"
-          :class="{ active: activeId === item.id }"
-          @click="selectTerminal(item.id)"
-          @keydown="selectAdjacentTerminal(index, $event.key)"
-        >
-          <TerminalSquare :size="13" />
-          <span>{{ item.title || `Terminal ${index + 1}` }}</span>
-          <span v-if="item.exited" class="sr-only">已退出</span>
-        </button>
-        <IconButton
-          class="terminal-tab-close"
-          :label="`关闭 ${item.title || `Terminal ${index + 1}`}`"
-          :tooltip="false"
-          size="xs"
-          @click="closeTerminal(item.id)"
-        >
-          <X :size="12" />
-        </IconButton>
-      </div>
-      <IconButton
-        class="terminal-new-tab"
-        label="新建终端"
-        size="xs"
-        :disabled="terminals.length >= 8"
-        @click="newTerminal"
-      >
-        <Plus :size="14" />
-      </IconButton>
+        <template #after>
+          <IconButton
+            label="新建终端"
+            :disabled="terminals.length >= 8"
+            @click="newTerminal"
+          >
+            <Plus :size="15" />
+          </IconButton>
+        </template>
+      </WorkspaceTabBar>
     </div>
     <div v-if="error" class="terminal-error" role="alert">{{ error }}</div>
-    <button
-      v-if="!terminals.length"
-      type="button"
-      class="terminal-empty-action"
-      @click="newTerminal"
-    >
-      <TerminalSquare :size="16" />
-      新建终端
-    </button>
-    <div
-      ref="container"
-      class="terminal-surface"
-      role="tabpanel"
-      :id="activeId ? `terminal-panel-${activeId}` : undefined"
-      :aria-labelledby="activeId ? `terminal-tab-${activeId}` : undefined"
-      aria-label="交互式系统终端"
-    ></div>
+    <div class="terminal-body">
+      <div
+        ref="container"
+        class="terminal-surface"
+        role="tabpanel"
+        aria-label="交互式系统终端"
+      ></div>
+      <EmptyState
+        v-if="!terminals.length"
+        class="terminal-empty"
+        title="没有打开的终端"
+        description="用标签栏的 + 新建一个"
+        :icon="SquareTerminal"
+      />
+    </div>
   </div>
 </template>
 
@@ -512,122 +500,32 @@ function message(value: unknown): string {
 }
 
 .terminal-tabs {
-  display: flex;
-  min-height: calc(var(--space-8) + var(--space-2));
   flex: none;
-  align-items: center;
-  gap: var(--space-0-5);
-  padding: 0 var(--space-2);
-  overflow-x: auto;
-  border-bottom: 1px solid var(--border-l1);
-  scrollbar-width: none;
-}
-
-.terminal-tabs::-webkit-scrollbar {
-  display: none;
-}
-
-.terminal-tab-item {
-  display: inline-flex;
-  max-width: 140px;
-  flex: none;
-  align-items: center;
-  border-radius: var(--radius-row);
-  color: rgb(var(--label-tertiary));
-}
-
-.terminal-tab-item:hover {
-  color: rgb(var(--label-secondary));
-  background: var(--interactive-bg-hover);
-}
-
-.terminal-tab-item.active {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-active);
-}
-
-.terminal-tab-item.exited {
-  opacity: 0.6;
-}
-
-.terminal-tab-button {
-  display: inline-flex;
   min-width: 0;
-  align-items: center;
-  gap: var(--space-1-5);
-  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
-  color: inherit;
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
-}
-
-.terminal-tab-button span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.terminal-tab-close {
-  display: inline-grid;
-  place-items: center;
-  margin-right: var(--space-1);
-  padding: 2px;
-  border-radius: var(--radius-xs);
-  color: inherit;
-}
-
-.terminal-tab-close:hover {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
-}
-
-.terminal-new-tab {
-  display: inline-grid;
-  width: var(--space-7);
-  height: var(--space-7);
-  flex: none;
-  place-items: center;
-  border-radius: var(--radius-row);
-  color: rgb(var(--label-secondary));
-}
-
-.terminal-new-tab:hover:not(:disabled) {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
-}
-
-.terminal-new-tab:disabled {
-  opacity: 0.4;
 }
 
 .terminal-error {
   flex: none;
   margin: var(--space-2) var(--space-3) 0;
-  padding: var(--space-1-5) var(--space-2);
-  border-radius: var(--radius-row);
-  color: rgb(var(--danger));
-  background: rgb(var(--danger-soft));
-  font-size: var(--fs-xxs);
-  line-height: var(--lh-xxs);
+  padding: var(--space-1-5) var(--space-2-5);
+  border-radius: var(--r-sm);
+  color: rgb(var(--error));
+  background: rgb(var(--error-soft));
+  font: var(--weight-regular) var(--type-caption) var(--font-sans);
 }
 
-.terminal-empty-action {
-  display: inline-flex;
-  align-self: center;
-  align-items: center;
-  gap: var(--space-2);
-  margin: var(--space-6);
-  padding: var(--space-1-5) var(--space-3);
-  border: 1px solid var(--border-l2);
-  border-radius: var(--radius-pill);
-  color: rgb(var(--label-secondary));
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
+.terminal-body {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
 }
 
-.terminal-empty-action:hover {
-  color: rgb(var(--label-primary));
-  background: var(--interactive-bg-hover);
+.terminal-empty {
+  position: absolute;
+  inset: 0;
+  justify-content: center;
 }
 
 .terminal-surface {

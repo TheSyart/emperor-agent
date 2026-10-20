@@ -307,7 +307,11 @@ describe('TerminalPane (FIX-05)', () => {
     await settle(300)
     expect(current().focused).toBe(0)
     // Clicking a tab is.
-    root.querySelector<HTMLButtonElement>('#terminal-tab-t2')!.click()
+    root
+      .querySelector<HTMLButtonElement>(
+        '.workspace-tab-bar [data-tab-id="t2"]',
+      )!
+      .click()
     await settle(300)
     expect(current().focused).toBe(1)
     // So is 新建终端.
@@ -317,6 +321,72 @@ describe('TerminalPane (FIX-05)', () => {
     await settle(300)
     expect(current().focused).toBe(1)
     expect(document.activeElement?.className).toContain('xterm-helper-textarea')
+  })
+
+  it('6 · uses the shared editor tab bar, the same one as 文件 (UI-S06)', async () => {
+    listed = [summary('t1'), { ...summary('t2'), title: '' }]
+    const root = mount()
+    await settle(300)
+    const strip = root.querySelector<HTMLElement>(
+      '.terminal-pane .workspace-tab-bar .ds-tabs',
+    )!
+    expect(strip.dataset.variant).toBe('editor')
+    expect(
+      [...strip.querySelectorAll('[role="tab"]')].map((tab) =>
+        tab.textContent?.trim(),
+      ),
+    ).toEqual(['t1', '终端 2'])
+    expect(
+      strip.querySelector('[data-tab-id="t1"]')?.getAttribute('aria-selected'),
+    ).toBe('true')
+    // Each terminal closes from its tab.
+    expect(
+      root.querySelector('.workspace-tab-bar button[aria-label="关闭 t1"]'),
+    ).not.toBeNull()
+  })
+
+  it('arrow keys move between terminals without pulling focus into the shell', async () => {
+    listed = [summary('t1'), summary('t2')]
+    const root = mount()
+    await settle(300)
+    const first = root.querySelector<HTMLButtonElement>(
+      '.workspace-tab-bar [data-tab-id="t1"]',
+    )!
+    first.focus()
+    first.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }),
+    )
+    await settle(300)
+    expect(core).toHaveBeenCalledWith('terminals.read', {
+      sessionId: 's1',
+      terminalId: 't2',
+      afterSeq: 0,
+    })
+    expect(current().focused).toBe(0)
+    expect(document.activeElement?.getAttribute('data-tab-id')).toBe('t2')
+  })
+
+  it('an empty pane keeps only the + in the tab bar, no second big button', async () => {
+    listed = []
+    core.mockImplementation(
+      (operation: string, payload?: Record<string, unknown>) =>
+        operation === 'terminals.create'
+          ? Promise.reject(new Error('no PTY here'))
+          : fakeCore(operation, payload),
+    )
+    const root = mount()
+    await settle(300)
+    expect(root.querySelector('.terminal-empty-action')).toBeNull()
+    const buttons = [...root.querySelectorAll('button')].filter((button) =>
+      (button.getAttribute('aria-label') ?? button.textContent ?? '').includes(
+        '新建终端',
+      ),
+    )
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0]!.closest('.workspace-tab-bar')).not.toBeNull()
+    expect(root.querySelector('.terminal-empty')?.textContent).toContain(
+      '没有打开的终端',
+    )
   })
 
   it('hands xterm a resolved font family, never a CSS var()', async () => {

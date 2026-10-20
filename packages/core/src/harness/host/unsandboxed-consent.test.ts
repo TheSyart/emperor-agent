@@ -94,6 +94,8 @@ describe('a user MCP server outside an unavailable sandbox (SEC-08 test 5)', () 
     )
     const adapter = new ScriptedAdapter([{ text: 'done' }])
     const { host, events } = await makeHost(root, adapter)
+    // Servers connect in the background (KRN-04): let the first load land.
+    await host.kept.mcpClient.settled()
     expect(host.kept.mcpClient.getTools()).toEqual([])
 
     const entry = host.kept.sessionStore.create('t', { mode: 'chat' })
@@ -123,6 +125,7 @@ describe('a user MCP server outside an unavailable sandbox (SEC-08 test 5)', () 
     await host.close()
     hosts.splice(hosts.indexOf(host), 1)
     const second = await makeHost(root, new ScriptedAdapter([{ text: 'ok' }]))
+    await second.host.kept.mcpClient.settled()
     expect(
       second.host.kept.mcpClient.getTools().map((tool) => tool.name),
     ).toEqual(['mcp_notes_lookup'])

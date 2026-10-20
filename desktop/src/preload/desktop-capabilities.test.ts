@@ -19,6 +19,10 @@ import {
   BROWSER_CLOSE_CHANNEL,
   BROWSER_OPEN_CHANNEL,
   BROWSER_STATE_CHANNEL,
+  DIAGNOSTICS_BUNDLE_DISCARD_CHANNEL,
+  DIAGNOSTICS_BUNDLE_EXPORT_CHANNEL,
+  DIAGNOSTICS_BUNDLE_PREPARE_CHANNEL,
+  DIAGNOSTICS_BUNDLE_REVEAL_CHANNEL,
   EXTERNAL_OPEN_CHANNEL,
   LINK_OPEN_CHANNEL,
   MARKDOWN_REMOTE_IMAGE_CHANNEL,
@@ -121,6 +125,8 @@ describe('desktop capability preload bridge', () => {
       'chooseDownloadFolder',
       'clearBrowserData',
       'denyBrowserPairing',
+      'discardDiagnosticsBundle',
+      'exportDiagnosticsBundle',
       'installBrowserExtension',
       'loadRemoteImage',
       'macHelperReconnect',
@@ -140,10 +146,12 @@ describe('desktop capability preload bridge', () => {
       'openExternal',
       'openLink',
       'openSkillsFolder',
+      'prepareDiagnosticsBundle',
       'removeBrowserDownload',
       'removeBrowserExtension',
       'revealBrowserDownload',
       'revealBrowserExtension',
+      'revealDiagnosticsBundle',
       'revealReference',
       'revokeBrowserPairing',
       'runBrowserImport',
@@ -408,6 +416,21 @@ describe('desktop capability preload bridge', () => {
     ipc.emit(BROWSER_DOWNLOAD_EVENT_CHANNEL, view)
     expect(listener.mock.calls).toEqual([[view]])
     expect(ipc.removed).toHaveLength(1)
+  })
+
+  it('reaches the diagnostics bundle by id only (REL-01)', async () => {
+    const ipc = new FakeIpcRenderer()
+    const bridge = createDesktopCapabilityBridge(ipc)
+    await bridge.prepareDiagnosticsBundle()
+    await bridge.exportDiagnosticsBundle('b_0123456789ab')
+    await bridge.revealDiagnosticsBundle('b_0123456789ab')
+    await bridge.discardDiagnosticsBundle('b_0123456789ab')
+    expect(ipc.invoked).toEqual([
+      [DIAGNOSTICS_BUNDLE_PREPARE_CHANNEL, undefined],
+      [DIAGNOSTICS_BUNDLE_EXPORT_CHANNEL, { id: 'b_0123456789ab' }],
+      [DIAGNOSTICS_BUNDLE_REVEAL_CHANNEL, { id: 'b_0123456789ab' }],
+      [DIAGNOSTICS_BUNDLE_DISCARD_CHANNEL, { id: 'b_0123456789ab' }],
+    ])
   })
 
   it('reconnects the macOS Helper through a fixed channel without payload', async () => {

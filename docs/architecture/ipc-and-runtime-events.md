@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：桌面端与 Core 开发者<br>
 > 最后核验：2026-10-20<br>
-> 事实源：`packages/core/src/api/operations.ts`、`desktop/src/main/core-host.ts`、`desktop/src/main/ipc.ts`、`desktop/src/preload/`、`packages/core/src/harness/projection/`、`packages/core/src/session-log/history.ts`、`packages/core/src/harness/host/session-views.ts`、`packages/core/src/public/runtime-contract.ts`、`desktop/src/shared/ipc-contract.ts`、`desktop/src/main/desktop-capability-ipc.ts`、`desktop/src/main/browser-view.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/preload/desktop-capabilities.ts`、`desktop/src/main/event-bridge.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/conversation/`、`desktop/src/renderer/src/runtime/`、`desktop/src/shared/content-security-policy.ts`、`desktop/src/main/trusted-renderer.ts`、`desktop/src/main/renderer-permissions.ts`、`desktop/src/main/app-menu.ts`、`desktop/src/main/open-path-ipc.ts`、`desktop/src/main/remote-image-ipc.ts`、`desktop/src/main/screenshot-ipc.ts`、`desktop/src/renderer/src/composables/useMarkdownLinks.ts`
+> 事实源：`packages/core/src/api/operations.ts`、`desktop/src/main/core-host.ts`、`desktop/src/main/ipc.ts`、`desktop/src/preload/`、`packages/core/src/harness/projection/`、`packages/core/src/session-log/history.ts`、`packages/core/src/harness/host/session-views.ts`、`packages/core/src/public/runtime-contract.ts`、`desktop/src/shared/ipc-contract.ts`、`desktop/src/main/desktop-capability-ipc.ts`、`desktop/src/main/browser-view.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/preload/desktop-capabilities.ts`、`desktop/src/main/event-bridge.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/conversation/`、`desktop/src/renderer/src/runtime/`、`desktop/src/shared/content-security-policy.ts`、`desktop/src/main/trusted-renderer.ts`、`desktop/src/main/renderer-permissions.ts`、`desktop/src/main/app-menu.ts`、`desktop/src/main/open-path-ipc.ts`、`desktop/src/main/remote-image-ipc.ts`、`desktop/src/main/screenshot-ipc.ts`、`desktop/src/main/logging/`、`desktop/src/main/diagnostics-bundle.ts`、`desktop/src/main/diagnostics-bundle-ipc.ts`、`desktop/src/main/recovery.ts`、`desktop/src/renderer/src/composables/useMarkdownLinks.ts`
 
 Electron renderer 不直接导入 Core，也不访问本地文件。同步请求走 preload 的 Core IPC contract；异步过程分两条管线：Chat 与 Trajectory 渲染所需的原始 session 事件走独立的 session event 通道，其余状态走 runtime events（UiEvent）。
 
@@ -116,7 +116,7 @@ Chat 与 Trajectory 只从 session log 的原始 `SessionEvent` 渲染，不再�
 
 `desktop/src/renderer/src/conversation/` 负责把原始事件投影成 Chat 节点：
 
-- `sessionWindow.ts`：每个 session 一个连续事件窗口，状态 `cold → opening → open`。打开时先拉尾页；拉取期间到达的 live 事件先缓冲，再按 `seq` 拼接。`seq` 是去重键；发现缺口时重新拉尾页修复；`loadOlder` 用 `beforeSeq` 向前翻页并检查连续性。
+- `sessionWindow.ts`：每个 session 一个连续事件窗口，状态 `cold → opening → open`。打开时先拉尾页；拉取期间到达的 live 事件先缓冲，再按 `seq` 拼接。`seq` 是去重键；发现缺口时重新拉尾页修复，已加载的更早页只要与新尾页相接就保留（读者位置不跳）；最多修补 3 次，仍接不上就整窗从尾页重开（`resync`），不丢弃已到的事件；`loadOlder` 用 `beforeSeq` 向前翻页并检查连续性。读取失败时窗口进入 `error`，时间线显示原因与「重试」（`handle.retry()`），再次打开该会话也会重新读取；启动失败画面的「重新连接」调用 `ConversationStore.resyncAll()` 重读所有打开的窗口（FIX-03）。
 - `assembler.ts` 与 `nodes/*` 把事件折叠成节点，`chatSnapshot.ts` 产出 Chat 快照；`composerPhase.ts` 推导 Composer 处于 `blank`、`engaging` 还是 `active`。
 - `store.ts` 的 `useConversation`：每个节点一个 `shallowRef`，流式增量只触发对应行；流式发布按 `requestAnimationFrame` 合批。一次刷新若只让流式回答的文字变长（块、空与非空、状态都不变），`chatSnapshot.ts` 返回上一个快照对象，快照 ref 不触发；`running`、`turnCount`、`planSummary` 各有自己的 ref，只在值变化时触发。快照里的事实增量维护：待办只在待办事实变化时重算，上下文用量只在带用量的模型行或请求事实变化时重算，计划摘要（`snapshot.planSummary`）只在计划行、待办或顺序变化时重算。最多保留 4 个打开的窗口（LRU），当前会话和面包屑中的父会话被 retain，不会被淘汰。所有窗口共享一个全局 `onSessionEvents` 订阅，watch 集合跟随打开的窗口变化。
 
@@ -161,7 +161,7 @@ Renderer 对 UiEvent 的 session、task 和 replay 处理使用小型 domain act
 - `scheduler.createJob` / `updateJob`：任务载荷没写会话时绑定到调用方显示的会话。运行记录（`runHistory[]`）的 `status` 增加 `blocked`（定时 turn 遇到审批或提问，已自动拒绝），失败的记录带 `errorCode`（例如 `AUTH`、`TIMEOUT`、`NOT_CONSUMED`）；`scheduler_run_error` 同时用于 `error` 与 `blocked`，带 `status` 与 `code`。
 - `tools.readResult` 只接受位于 `stateRoot/spill/` 内的路径。
 - `mcp.getConfig` 保留 `${ENV_NAME}`，把 args、env、headers、URL 中其余字面字符串逐叶显示为 `[REDACTED]`；`mcp.saveConfig` 只从同一位置的旧值回填掩码，孤立掩码 fail closed。
-- `mcp.importServers({ raw, overwrite?, dryRun? })` 接受粘贴的 JSON 文本或对象，经 `mcp/import.ts` 规范化后按名称合并：`dryRun: true` 只返回计划（每个 server 的 `add` / `update` / `skip`、冲突与警告），不写入，也不经过 mutation guard；`overwrite` 为 `true` 或要替换的 server 名称列表，未指定时同名 server 跳过。`mcp.setServerEnabled({ name, enabled })` 与 `mcp.removeServer({ name })` 按名称修改。三者实际写入后重载 MCP，并返回掩码后的配置与 MCP 状态快照。
+- `mcp.importServers({ raw, overwrite?, dryRun? })` 接受粘贴的 JSON 文本或对象，经 `mcp/import.ts` 规范化后按名称合并：`dryRun: true` 只返回计划（每个 server 的 `add` / `update` / `skip`、冲突与警告），不写入，也不经过 mutation guard；`overwrite` 为 `true` 或要替换的 server 名称列表，未指定时同名 server 跳过。`mcp.setServerEnabled({ name, enabled })` 与 `mcp.removeServer({ name })` 按名称修改。三者实际写入后重载 MCP，并返回掩码后的配置与 MCP 状态快照。`mcp.serverLog({ name })` 返回该 server 最近 200 行 stderr（`{ name, text }`，经 `redactLogText` 脱敏，与日志相同；server 不在运行列表里时 `text` 为 null），stdio server 启动失败后保留那次启动的输出（KRN-04）。
 - `skills.*` 的读写都可以带 `sessionId`，Core 按该 session 的 Build 项目选择 Skill loader；Chat 或未知 session 只看到个人、Plugin 与内置 Skill。`skills.list` 同时返回 `invalid`（不合格 Skill 与原因）；`skills.delete` 带 `scope` 时可删除该 scope 下不合格 Skill 的文件夹；`skills.import` 的 `source.kind` 为 `content`、`folder`、`zip` 或 `url`（只接受 `https://`），`scope` 为 `user` 或 `project`，同名冲突需要 `overwrite: true`，结果的 `errors[]` 逐项带 `code`（`skill_exists`、`skill_invalid`、`skill_duplicate`、`skill_import_failed`），renderer 按 `code` 判断是否提供覆盖；`skills.validate` 校验粘贴的内容或已安装的 Skill；`skills.copyToUser` 把只读 Skill 复制为个人 Skill。内置与 Plugin Skill 的写入返回 `skill_read_only`。`skills.create` 生成个人 Skill 骨架，`skills.tools` 返回当前注册的工具目录。
 - `skills.tools` 的每项另带 `category`（内建工具在「能力 › 工具」的分组：`basic`、`network`、`planning`、`agents`、`config`；MCP 与插件的工具没有）和 `plugin_id`（带来这个工具的插件：插件 MCP server 的工具，以及 `computer-use` 的 GUI 工具）。「能力 › 工具」只列 `source` 为 `builtin` 且没有 `plugin_id` 的工具。
 - `plugins.inspect` 暂存本地文件夹、本地 zip 或 `https://` 来源并返回预览（id、格式 `portable`/`codex-compat`/`emperor-v1`、版本（可为 `null`）、digest、签名、按类别列出的成员），`plugins.install({ previewId, digest, scope })` 只确认同一份暂存内容，先校验范围再写入。预览失败时抛出 `plugin_preview_*` 错误码（如 `multiple_roots`、`identity_mismatch`、`path_unsafe`、`duplicate_member`、`member_invalid`），暂存目录随即删除；超过一天的遗留预览在启动时清理。URL 来源在签名验证通过前 activation 为 `blocked_unverified`。
@@ -257,6 +257,25 @@ Chrome 和 Edge 的智能体权限（PLAN-CAP-001 RV-09）：`computerUse.extern
 `Emperor Dictation Helper.app` 作为 Emperor 的子进程运行。打包时位于 `Contents/Library/Helpers`，首次启动前核对它的签名与主程序一致。双方在 stdin/stdout 上每行一个 JSON，单行最多 64 KiB，协议版本为 1。识别强制在本机进行（`SFSpeechRecognizer` 设 `requiresOnDeviceRecognition`）；当前语言没有本机模型时直接失败，不改用云端。音频只留在 Helper 的内存里，转写不写入会话日志。Helper 崩溃、输出无法解析或不按时响应时，main 以 `helper_exited` 或 `timeout` 结束当前听写；一分钟内异常退出三次后，一分钟内不再启动它。
 
 录音期间还有 `level` 事件：麦克风输入的音量，RMS 取对数刻度后映射到 0–1（−50 dB 及以下为 0，−10 dB 及以上为 1），两位小数，按音频帧数切窗，约每秒 15 次；只在 `started` 之后、`final` 之前出现，同样带 `seq`。它只是一个数，不含声音，renderer 保留约 3 秒的值画输入框录音条的波形。协议版本仍为 1：`level` 是新增事件，Helper 与 main 随同一次构建发布。
+
+### 日志、崩溃转储与诊断包
+
+main 在 `index.ts` 顶部、任何模块写日志之前（REL-01）：
+
+- **位置**：`logging/log-location.ts` 决定目录。默认 Emperor Home 时是 `~/Library/Logs/Emperor Agent`；设置了 `EMPEROR_CONFIG_DIR` 时是 `<home>/logs`，测试、e2e 与打包冒烟因此不写用户的 `~/Library/Logs`。`app.setAppLogsPath` 指向同一目录。macOS 上不调用 `app.getPath('logs')`，它会顺手建出默认文件夹。
+- **写入**：`logging/rotating-file.ts` 同步追加（崩溃前的最后一行已落盘），写入前会超过 5 MB 时 `main.log` → `main.log.1` …，最多 5 份；目录 0700、文件 0600；目录被删后下一次写入重建，写日志永不抛错。`logging/app-log.ts` 每行是 `<ISO 时间> [level] 消息 {字段}`，Error 字段带完整调用栈、`code` 与每一层 `cause`；整行先经 Core 的 `redactLogText`（`util/redaction.ts`）：`sk-` 密钥写成 `sk-***`，网址里的 token、key、签名等参数、URL 里的用户名密码、Authorization 与 Cookie 头、`apiKey`/`token`/`password` 等键值写成 `***`，路径与普通文字保留。级别默认 info，`EMPEROR_LOG_LEVEL` 可改。
+- **来源**：`teeConsole` 把 main 里的 `console.*` 同时写进 `main.log`；Core 的 `logger`（`util/log.ts`）经 `setCoreLogSink` 改道到 `core.log`，没有自己 sink 的 logger（共享 `logger` 及其 child）都跟着走，不再打印到控制台。启动、Core 就绪、退出、`render-process-gone` 与 `child-process-gone`（只记类型、原因和退出码，不记网址）各有一行。
+- **未捕获的错误**：`logging/process-errors.ts` 挂 `uncaughtException` 与 `unhandledRejection`，带调用栈写进 `main.log` 后继续运行（不弹 Electron 的错误框，也不因 rejection 退出）；同一分钟最多写 20 条，其余计数后汇总一行；stdout/stderr 的 EPIPE 忽略，避免打印失败再次触发。JavaScript 接不住的原生崩溃交给 Crashpad。
+- **崩溃转储**：`logging/crash-reporting.ts` 在 app ready 之前 `app.setPath('crashDumps', <logs>/Crashpad)` 再 `crashReporter.start({ uploadToServer: false })`，主进程、渲染、GPU、utility 进程崩溃都在本机留 minidump，不上传。
+- **启动失败**：`showBootstrapRecovery` 把错误整体（栈与 cause 链）写进 `main.log`；恢复页仍只显示稳定错误码，另显示 `main.log` 的位置，「打开日志」（`open_logs`）由 main 用 `shell.openPath` 打开该文件。
+- **诊断包**：`diagnostics-bundle.ts` 的 `DiagnosticsBundles.prepare()` 在系统临时目录的私有文件夹（0700）里写出 `diagnostics.json`（Core `diagnostics.get({ sessionId: null })`，Core 未运行时写明不可用；去掉 `description`、`label`、`title`、`prompt`、`text`、`content` 等会话文字字段，`*token`、`*secret`、`*password`、`apiKey`、`headers`、`env` 等键的值换成 `[已移除]`，字符串再过 `redactLogText`）、`app.json`（版本、`fuse-state.ts` 从 Electron Framework 读出的 fuse 线、Helper / 听写 / 扩展状态，每项最多等 3 秒；听写只取可用性、引擎和权限，不取设备名）、`model-config.json`（直接读文件，同样去掉密钥）、`system.json`、`crashes.json`（只有转储的文件名、大小和时间）、`logs/` 下 `main.log`、`core.log` 与各自上一份的最后 2 MB，以及 `README.txt`；用户主目录一律写成 `~`。返回的清单（路径、说明、字节数）由实际写出的文件生成；`export(id, 目标)` 用 `/usr/bin/ditto -c -k --norsrc --noextattr --noqtn --noacl --keepParent` 打包这个文件夹，先写 `.partial` 再改名，zip 为 0600，随后删除暂存。暂存 15 分钟后自动丢弃，退出时清空。
+- **诊断包通道**（受信主窗口，`diagnostics-bundle-ipc.ts`，只按 id 寻址，路径不过 IPC）：
+  - `prepareDiagnosticsBundle()` → `emperor:diagnostics:bundle-prepare`：`{ ok: true, bundle: { id, name, entries, excluded } }` 或 `{ ok: false, error }`；
+  - `exportDiagnosticsBundle(id)` → `emperor:diagnostics:bundle-export`：main 弹保存框（默认桌面、`<name>.zip`），返回 `{ ok: true, name, location }`（`location` 用 `~` 表示），取消时 `{ ok: false, canceled: true }`；
+  - `revealDiagnosticsBundle(id)` → `emperor:diagnostics:bundle-reveal`：只对这次导出过的 zip `showItemInFolder`；
+  - `discardDiagnosticsBundle(id)` → `emperor:diagnostics:bundle-discard`：丢弃未导出的暂存。
+  - 恢复页没有 Core，用同一个 `DiagnosticsBundles` 与导出函数，经 `emperor:bootstrap-recovery:action` 的 `prepare_diagnostics`、`export_diagnostics`、`discard_diagnostics`（第二个参数 `{ id }`）完成同样的流程。
+- `emperor:open-path` 的 `{ kind: 'diagnostic', rowId: 'logs-path' }` 打开日志目录；Core 经 `CoreApiCreateOptions.logDirectory` 在诊断的 `paths.logsRoot` 里报告它。
 
 ## 渲染层防护
 

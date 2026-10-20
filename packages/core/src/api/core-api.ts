@@ -133,6 +133,7 @@ import {
 } from '../plugins/service'
 import { loadMcpConfig } from '../mcp/config'
 import { logger } from '../util/log'
+import { redactLogText } from '../util/redaction'
 import { EmperorError, OperationRetiredError } from '../errors'
 import {
   CoreSessionApplicationService,
@@ -262,6 +263,8 @@ export interface CoreApiCreateOptions extends HarnessHostOptions {
   webFetchClient?: WebFetchClient | null
   /** Start the first-run profile interview after a model is configured. */
   enableFirstRunOnboarding?: boolean
+  /** Where the host writes its logs (REL-01); diagnostics show it. */
+  logDirectory?: string | null
   /** Test hook: the GitHub CLI seen by Pull Request, Issue and CI reads. */
   github?: Partial<
     Pick<
@@ -1341,6 +1344,7 @@ export class CoreApi {
     })
     this.diagnosticsService = new CoreDiagnosticsService(this.root, {
       runtimePaths: this.paths,
+      logDirectory: opts.logDirectory ?? null,
       legacyStateMigration: kept.legacyStateMigration,
       projectLegacyPrivateData: (view) => {
         const projectPath = this.viewProjectRoot(view)
@@ -1434,7 +1438,9 @@ export class CoreApi {
       await api.environmentService.initialize()
       await api.delegationRuntime.probeProfiles()
       await api.sessionTransitionService.recover()
-      await api.syncPlugins()
+      // Plugin servers connect in the background: the window never waits
+      // for one (KRN-04).
+      await api.syncPlugins({ waitForMcp: false })
       // After the plugins: a run caught up on at launch needs their Hooks.
       await host.startScheduler()
       // 最近删除 keeps a deleted session for 30 days (FIX-01).
@@ -1905,6 +1911,14 @@ export class CoreApi {
   readonly mcp = {
     getConfig: () => this.configService.getMcpConfig(),
     status: () => this.host.kept.mcpClient.snapshot(),
+    /** A server's last 200 stderr lines, redacted like the logs (KRN-04); null: not running. */
+    serverLog: (input: { name: string }) => {
+      const text = this.host.kept.mcpClient.serverStderr(input.name)
+      return {
+        name: input.name,
+        text: text === null ? null : redactLogText(text),
+      }
+    },
     saveConfig: async (raw: Dict, view: ViewScope) => {
       // Saving MCP config lets MCPClient spawn servers.*.command; guard it like any mutation.
       this.assertMutation('mcp', 'saveConfig', view)
@@ -3715,9 +3729,11 @@ export class CoreApi {
     return this.pluginService.detail(input, projectRoot)
   }
 
-  private async syncPlugins(): Promise<void> {
+  private async syncPlugins(
+    options: { waitForMcp?: boolean } = {},
+  ): Promise<void> {
     try {
-      await this.pluginActivation.sync()
+      await this.pluginActivation.sync(options)
     } catch (error) {
       logger.warn('plugin activation failed', { error: String(error) })
     }
