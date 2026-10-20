@@ -87,16 +87,16 @@ it('reports dangling symlinks rather than snapshotting a followed or invalid fil
   expect(s.excluded).toContainEqual({ path: 'dangling', reason: 'symlink' })
   expect(s.included).not.toContain('dangling')
 })
-it('requires an explicit snapshot for dirty committed base', async () => {
+it('a committed base over a dirty workspace is the last commit as it is (AGT-06)', async () => {
   const { root, repo, runner } = delegationRepository()
+  const head = fixtureGit(repo, 'rev-parse', 'HEAD')
   writeFileSync(join(repo, 'src', 'a.txt'), 'changed')
-  await expect(
-    new SnapshotService({ runner, tempRoot: join(root, 'tmp') }).capture({
-      id: 'dlg-fixture',
-      cwd: repo,
-      base: 'committed',
-    }),
-  ).rejects.toThrow('DIRTY_BASE_REQUIRES_SNAPSHOT')
+  const s = await new SnapshotService({
+    runner,
+    tempRoot: join(root, 'tmp'),
+  }).capture({ id: 'dlg-fixture', cwd: repo, base: 'committed' })
+  expect(s.commit).toBe(head)
+  expect(s.ref).toBeUndefined()
 })
 it('reports escaping links, nested repositories, and ignored files without following them', async () => {
   const { root, repo, runner } = delegationRepository()
@@ -122,17 +122,26 @@ it('reports escaping links, nested repositories, and ignored files without follo
   )
 })
 
-it('refuses a sparse oversized selected file before reading it into the snapshot digest', async () => {
+it('leaves a sparse oversized untracked file out of the snapshot without reading it (AGT-06)', async () => {
   const { root, repo, runner } = delegationRepository()
   const file = join(repo, 'oversized.bin')
   writeFileSync(file, '')
   truncateSync(file, 17 * 1024 * 1024)
-  await expect(
-    new SnapshotService({ runner, tempRoot: join(root, 'tmp') }).capture({
-      id: 'dlg-size',
-      cwd: repo,
-      base: 'snapshot',
-      untracked: ['oversized.bin'],
-    }),
-  ).rejects.toThrow('SNAPSHOT_LIMIT')
+  const s = await new SnapshotService({
+    runner,
+    tempRoot: join(root, 'tmp'),
+  }).capture({
+    id: 'dlg-size',
+    cwd: repo,
+    base: 'snapshot',
+    untracked: ['oversized.bin'],
+  })
+  expect(s.excluded).toContainEqual({
+    path: 'oversized.bin',
+    reason: 'too-large',
+  })
+  expect(s.included).not.toContain('oversized.bin')
+  expect(fixtureGit(repo, 'ls-tree', '--name-only', s.commit)).not.toContain(
+    'oversized.bin',
+  )
 })

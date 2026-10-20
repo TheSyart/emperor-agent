@@ -386,6 +386,12 @@ function setDiagnostics(on: boolean) {
   if (on) config.value.diagnosticsMode = true
   else delete config.value.diagnosticsMode
 }
+/** 高级 › 验证后再应用 (AGT-06): stored only when on. */
+function setVerifyFirst(on: boolean) {
+  if (!config.value) return
+  if (on) config.value.verifyBeforeApply = true
+  else delete config.value.verifyBeforeApply
+}
 function setInstalledClaude(profile: ExecutorProfile, installed: boolean) {
   profile.executableSource = installed ? 'system' : 'bundled'
 }
@@ -1119,6 +1125,26 @@ onBeforeUnmount(() => {
             :disabled="busy || loading"
             aria-label="诊断模式"
             @update:model-value="setDiagnostics($event)"
+        /></template>
+      </SettingsCard>
+      <SettingsCard
+        v-if="config"
+        class="agent-card advanced-card"
+        data-executor-verify-first
+      >
+        <template #title><h3>验证后再应用</h3></template>
+        <template #description
+          ><span
+            >子智能体的成果先收集回执、运行你指定的验证命令并生成整合预览，再在任务详情里应用。默认关闭：成果卡上的「应用到项目」直接把改动合并进项目，可以撤销。</span
+          ></template
+        >
+        <template #actions
+          ><Switch
+            :model-value="config.verifyBeforeApply === true"
+            data-verify-before-apply
+            :disabled="busy || loading"
+            aria-label="验证后再应用"
+            @update:model-value="setVerifyFirst($event)"
         /></template>
       </SettingsCard>
     </div>

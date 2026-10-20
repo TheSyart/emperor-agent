@@ -1946,7 +1946,7 @@ const coordinateQuit = createQuitCoordinator({
     quittingCore = coreApi
     coreApi?.flushAll()
   },
-  // Shutdown overran 5s: kill child process trees and terminals now (FIX-07).
+  // Shutdown overran 10s: kill child process trees and terminals now (FIX-07, AGT-06).
   onTimeout: () => quittingCore?.forceStop(),
   close: async () => {
     await startupTask

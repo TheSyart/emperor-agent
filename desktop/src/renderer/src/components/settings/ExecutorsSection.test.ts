@@ -664,3 +664,19 @@ it('offers diagnostics mode under 高级, off by default, and saves it only when
   await settle()
   expect(configureExecutors.mock.calls[0]![0].config.diagnosticsMode).toBe(true)
 })
+it('offers 验证后再应用 under 高级, off by default, and saves it only when turned on (AGT-06)', async () => {
+  await mount()
+  const toggle = root.querySelector<HTMLButtonElement>(
+    '[data-verify-before-apply]',
+  )!
+  expect(toggle).not.toBeNull()
+  expect(toggle.getAttribute('aria-checked')).toBe('false')
+  expect(root.textContent).toContain('验证后再应用')
+  toggle.click()
+  await settle()
+  await action('save-executors').onClick!()
+  await settle()
+  expect(configureExecutors.mock.calls[0]![0].config.verifyBeforeApply).toBe(
+    true,
+  )
+})

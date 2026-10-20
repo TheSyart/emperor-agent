@@ -11,6 +11,7 @@ import {
   integrateDelegation,
   closeDelegation,
   abandonDelegation,
+  listExecutors,
   type DelegationView,
   type DelegationDelivery,
 } from '../../../api/delegations'
@@ -53,6 +54,11 @@ let generation = 0,
   timer: ReturnType<typeof setTimeout> | undefined,
   unsubscribe = () => {}
 const failureDisposition = ref('')
+/**
+ * 高级 › 验证后再应用 (AGT-06): the receipt, independent check and preview
+ * chain shows only when it is on, or when this run already went through it.
+ */
+const verifyFirst = ref(false)
 const record = computed(() => view.value?.record),
   run = computed(() => view.value?.runs[props.runId]),
   receipt = computed(() => delivery.value?.receipt),
@@ -113,6 +119,11 @@ const verifyingNow = computed(
 )
 const canApply = computed(
   () => preview.value?.status === 'ready' && acceptance.value === 'passed',
+)
+const showChain = computed(
+  () =>
+    verifyFirst.value ||
+    Boolean(receipt.value || preview.value || delivery.value?.acceptance),
 )
 async function load() {
   const current = ++generation
@@ -242,6 +253,11 @@ function apply() {
 }
 onMounted(() => {
   void load()
+  void listExecutors()
+    .then((list) => {
+      if (alive) verifyFirst.value = list.config?.verifyBeforeApply === true
+    })
+    .catch(() => undefined)
   unsubscribe = onCoreEvent((input) => {
     if (!input || typeof input !== 'object') return
     const event = input as Record<string, unknown>
@@ -418,7 +434,9 @@ function costText(usage: {
         </p>
       </details>
       <section
-        v-if="!receipt || hasFileDelivery || delivery?.acceptance"
+        v-if="
+          showChain && (!receipt || hasFileDelivery || delivery?.acceptance)
+        "
         class="external-section"
       >
         <h3>文件交付与检查</h3>
