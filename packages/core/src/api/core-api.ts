@@ -1268,7 +1268,10 @@ export class CoreApi {
           ...kept.projectStore.detectLegacyPrivateData(projectPath),
         }
       },
-      schedulerDiagnostics: () => kept.schedulerStore.diagnostics(),
+      schedulerDiagnostics: () => ({
+        ...kept.schedulerStore.diagnostics(),
+        startError: kept.schedulerService.startFailure(),
+      }),
       runtimeStats: (view) =>
         this.runtimeStats(this.viewedSession(view)?.id ?? null),
       workspacePolicy: (view) => {
@@ -1336,7 +1339,9 @@ export class CoreApi {
 
   static async create(opts: CoreApiCreateOptions): Promise<CoreApi> {
     const root = resolve(opts.root)
-    const host = opts.host ?? (await HarnessHost.create(opts))
+    const host =
+      opts.host ??
+      (await HarnessHost.create({ ...opts, startScheduler: false }))
     let api: CoreApi | null = null
     try {
       api = new CoreApi(root, host, opts)
@@ -1348,6 +1353,8 @@ export class CoreApi {
       await api.delegationRuntime.probeProfiles()
       await api.sessionTransitionService.recover()
       await api.syncPlugins()
+      // After the plugins: a run caught up on at launch needs their Hooks.
+      await host.startScheduler()
       // 最近删除 keeps a deleted session for 30 days (FIX-01).
       await api.sessionApplicationService
         .purgeExpiredDeleted()
