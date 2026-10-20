@@ -5,18 +5,23 @@
  * plugin's driver groups deep link to their settings pages, and a narrow
  * window keeps the pages without horizontal scrolling. A relaunch with a
  * damaged vault.json still starts and 密码管理器 offers 重新开始（先备份）
- * (SEC-09). Screenshots of every page land in out-e2e/settings/.
+ * (SEC-09). 高级 › 存储 (KRN-12) shows a total within 5% of `du` and 清理
+ * removes a 40-day-old orphan spill file. Screenshots of every page land
+ * in out-e2e/settings/.
  * Prints `E2E-RESULT {json}` lines like the other Electron suites.
  *
  *   node scripts/e2e-cu.mjs --mode=settings   (after `npm run build`)
  */
 
+import { execFileSync } from 'node:child_process'
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -63,6 +68,7 @@ const SUB_PAGES: ReadonlyArray<
   // Hooks and 诊断 left the nav for 高级 (UI-S07); 已归档对话 for a row in 常规.
   ['advanced', '[data-advanced-page="hooks"]', 'hooks', 'Hooks'],
   ['advanced', '[data-advanced-page="diagnostics"]', 'diagnostics', '诊断'],
+  ['advanced', '[data-advanced-page="storage"]', 'storage', '存储'],
   ['general', '[data-testid="open-archived"]', 'archived', '已归档对话'],
 ]
 
@@ -575,6 +581,68 @@ async function settings(page: Page, home: string): Promise<void> {
   })
 }
 
+/** `659.5 MB` → bytes (StorageSection's sizes). */
+function storageBytes(text: string): number {
+  const match = /([\d.]+)\s*(B|KB|MB|GB|TB)/.exec(text)
+  if (!match) throw new Error(`no size in ${text}`)
+  const power = ['B', 'KB', 'MB', 'GB', 'TB'].indexOf(match[2]!)
+  return Number(match[1]) * 1024 ** power
+}
+
+/**
+ * KRN-12 test 8 in the real app: 高级 › 存储's total is within 5% of `du -sk`
+ * on the same Emperor Home, and 清理 (after its confirm) removes a spill
+ * file no session owns that is 40 days old.
+ */
+async function storagePage(page: Page, home: string): Promise<void> {
+  await check(
+    page,
+    '高级 › 存储 matches du and 清理 frees old spill',
+    async () => {
+      const orphan = join(home, 'spill', 'shell-1-1-e2e0e2e0e2e0-stdout.log')
+      mkdirSync(join(home, 'spill'), { recursive: true })
+      writeFileSync(orphan, 'x'.repeat(300_000))
+      const old = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000)
+      utimesSync(orphan, old, old)
+      const dialog = await openSection(page, 'advanced')
+      await dialog.locator('[data-advanced-page="storage"]').click()
+      const total = dialog.locator('[data-storage-category="total"]')
+      await until(
+        async () => /\d/.test(await total.innerText()),
+        15_000,
+        'storage total',
+      )
+      const shown = storageBytes(await total.innerText())
+      const du =
+        Number(
+          execFileSync('du', ['-sk', home], { encoding: 'utf8' }).split(
+            /\s+/,
+          )[0],
+        ) * 1024
+      const drift = Math.abs(shown - du) / du
+      if (drift >= 0.05)
+        throw new Error(
+          `total ${shown} vs du ${du} (${(drift * 100).toFixed(1)}%)`,
+        )
+      await page.screenshot({ path: join(shots, 'advanced-storage.png') })
+      await dialog.locator('[data-storage-clean]').click()
+      const ask = page.getByRole('dialog', { name: '清理不再需要的文件？' })
+      await ask.getByRole('button', { name: '清理', exact: true }).click()
+      const summary = dialog.locator('[data-storage-summary]')
+      await summary.waitFor({ timeout: 15_000 })
+      const said = (await summary.innerText()).trim()
+      if (!said.includes('溢出文件 1 项')) throw new Error(`summary ${said}`)
+      if (existsSync(orphan))
+        throw new Error('the orphan spill file is still there')
+      await page.screenshot({
+        path: join(shots, 'advanced-storage-cleaned.png'),
+      })
+      await page.keyboard.press('Escape').catch(() => undefined)
+      return { shown, du, drift: Number(drift.toFixed(4)), said }
+    },
+  )
+}
+
 /**
  * SEC-09 test 1: an unreadable vault.json no longer stops Emperor. The app
  * starts, 密码管理器 says 凭据库无法读取, and 重新开始（先备份） keeps the
@@ -626,6 +694,7 @@ async function main(): Promise<void> {
     const launched = await launch(home)
     app = launched.app
     await settings(launched.page, home)
+    await storagePage(launched.page, home)
     // Relaunch on the same Emperor Home with a damaged vault.json.
     await app.close()
     app = null

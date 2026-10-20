@@ -23,6 +23,7 @@
  */
 
 import { createHash, randomBytes } from 'node:crypto'
+import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
 import { mkdir, open } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { ContentBlock } from '../../llm/types'
@@ -106,6 +107,64 @@ export async function spillText(
     path,
     bytes: Buffer.byteLength(text, 'utf8'),
     retrievalHint: SPILL_RETRIEVAL_HINT,
+  }
+}
+
+/** One page of a saved result (`tools.readResult`, KRN-12). */
+export const RESULT_PAGE_BYTES = 256 * 1024
+
+export interface ResultPage {
+  content: string
+  /** 1-based. */
+  page: number
+  pages: number
+  /** UTF-8 bytes of the whole file. */
+  bytes: number
+}
+
+/**
+ * Page `page` (from 1) of a UTF-8 file in pages of at most `pageBytes`. A
+ * page ends before a character that would cross its limit, so every page
+ * decodes on its own and the pages concatenate to the file. Only the page
+ * and four bytes per page boundary are read.
+ */
+export function readUtf8Page(
+  path: string,
+  page: number,
+  pageBytes = RESULT_PAGE_BYTES,
+): ResultPage {
+  const fd = openSync(path, 'r')
+  try {
+    const size = fstatSync(fd).size
+    const starts = [0]
+    const probe = Buffer.alloc(4)
+    for (let start = 0; start + pageBytes < size;) {
+      const end = start + pageBytes
+      readSync(fd, probe, 0, 4, end - 3)
+      // probe[3] is the byte at `end`: cut before the character it belongs to.
+      let cut = end
+      for (let back = 0; back <= 3; back += 1)
+        if (((probe[3 - back] as number) & 0xc0) !== 0x80) {
+          cut = end - back
+          break
+        }
+      starts.push(cut)
+      start = cut
+    }
+    const pages = starts.length
+    if (!Number.isInteger(page) || page < 1 || page > pages)
+      throw new RangeError(`page ${page} does not exist (1–${pages})`)
+    const from = starts[page - 1] as number
+    const to = page < pages ? (starts[page] as number) : size
+    const buffer = Buffer.alloc(to - from)
+    for (let read = 0; read < buffer.length;) {
+      const n = readSync(fd, buffer, read, buffer.length - read, from + read)
+      if (n <= 0) break
+      read += n
+    }
+    return { content: buffer.toString('utf8'), page, pages, bytes: size }
+  } finally {
+    closeSync(fd)
   }
 }
 

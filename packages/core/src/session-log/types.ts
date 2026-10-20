@@ -44,8 +44,15 @@ export interface SessionHeader {
   readonly cwd?: string
   /** Parent session for forks and subagents. */
   readonly parentSession?: string
-  /** Number of events copied from the parent as this session's seed. */
+  /** Number of the parent's events this session starts from (its seed). */
   readonly seedLength?: number
+  /**
+   * A fork child written since KRN-12 keeps its seed out of its own log: it
+   * is the parent's first `seedLength` events, the last of which has this
+   * type and time (checked when the child is opened). Without it the seed
+   * is copied into the log (older children).
+   */
+  readonly seedRef?: { readonly lastType: string; readonly lastTime: number }
   readonly origin?: 'subagent'
   readonly delegationDepth?: number
 }
