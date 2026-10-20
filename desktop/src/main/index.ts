@@ -1542,6 +1542,10 @@ async function startup(): Promise<void> {
       sessionEventBridge,
       authorizeIpc: (event) => trustedRendererPolicy.authorizeIpc(event),
       coreOptions: {
+        // Development builds check every model request against its session
+        // log (KRN-13); production leaves it to EMPEROR_ASSERT_INVARIANT=1.
+        assertRequestInvariant:
+          !app.isPackaged || process.env.EMPEROR_ASSERT_INVARIANT === '1',
         verifyGeneratedImage: (bytes) => {
           const image = nativeImage.createFromBuffer(Buffer.from(bytes))
           const size = image.getSize()

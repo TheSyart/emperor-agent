@@ -55,8 +55,9 @@ MCP 工具不需要注册代码：`McpToolBridge` 会把每个已连接 server �
 
 ## 新 middleware 或内核子系统
 
-- 扩展点定义在 `harness/agent/middleware.ts`（`preStep`、`requestConfig`、`requestError`、`turnStopping`）和 `ToolRegistry` 的 `preExecute` / `postExecute` / guard 数组。
-- 在 `HarnessHost.compose()` 中按顺序压入。Pre-step 顺序有意义：工作区说明、记忆、Skill 目录、压缩、重复提醒、Hooks。
+- 扩展点定义在 `harness/agent/middleware.ts`（`preAssemble`、`preStep`、`requestConfig`、`requestError`、`requestEnd`、`budget`、`turnStopping`）和 `ToolRegistry` 的 `preExecute` / `postExecute` / guard 数组。
+- 内核子系统在 `HarnessHost.compose()`（唯一的组合根）中按顺序压入。Pre-step 的实际顺序是：Plan 模式、Goal 驱动、工作区说明（AGENTS.md / CLAUDE.md）、长期记忆、Skill 目录、插件引用（`@插件`）、压缩、重复调用提醒、Hooks；新的 pre-step 按它要看到或要影响的内容插在对应位置。
+- CoreApi 不直接改内核：它的扩展经 `HarnessHost.extend(extensions)` 一次注册（`HostExtensions`：`turnFiles` 回合改动记录、`workspaceAccess` 工作区写入租约、`pluginReferences`、`pluginOverrides`、`pluginSkills`、`worktrees`），Hook 配置走 `host.hookConfig`、插件 Hook 集合走 `host.pluginHooks`，工具分类与数量用 `host.toolCategory()`、`host.toolCount()`。`core-api-facade-architecture.test.ts` 检查 CoreApi 不访问 `host.tools`、`host.hooks`。新增 CoreApi 侧的内核扩展时，在 `HostExtensions` 加一个字段，由 `extend()` 应用。
 - 需要持久状态时，通过 `declare module '../../session-log/types'` 扩展 `SessionEventMap`，把事实写成 log 事件，而不是另建文件。
 - 要进入模型上下文的动态信息使用上下文消息（`contextMessage`），只在内容变化时追加；不要修改系统提示词，以保持前缀缓存稳定。
 - 需要在崩溃后收尾的交互，向 `SessionLogStore` 提供 repair contributor。

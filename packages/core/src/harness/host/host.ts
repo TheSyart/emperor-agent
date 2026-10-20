@@ -29,6 +29,7 @@ import {
   type ModelConfig,
 } from '../../config/model-config'
 import { createLlmClient } from '../../llm'
+import { assertRequestInvariant } from '../agent/invariant'
 import type { LlmClient } from '../../llm/client'
 import {
   createUserMessage,
@@ -74,12 +75,7 @@ import { PermissionPresetService } from '../approval/presets'
 import { ApprovalService, type ApprovalPolicy } from '../approval/service'
 import { CompactionEngine } from '../compaction/engine'
 import { ToolResultPruner } from '../compaction/pruner'
-import {
-  createGoalTools,
-  GoalService,
-  installGoal,
-  type InstalledGoal,
-} from '../goal'
+import { GoalService, installGoal, type InstalledGoal } from '../goal'
 import { ClaudeCodeHooks, defaultHookConfigPaths } from '../hooks'
 import { containedPluginHookRunner } from '../hooks/contained'
 import { PluginHookHealth } from '../hooks/plugin-health'
@@ -151,7 +147,16 @@ import {
 import { createSchedulerTool } from '../tools/builtin/scheduler'
 import { createTodoTool } from '../tools/builtin/todo'
 import type { WebSearchBackend } from '../tools/builtin/web-search'
-import { ToolRegistry } from '../tools/registry'
+import {
+  ToolRegistry,
+  type WorkspaceAccessLeaseProvider,
+} from '../tools/registry'
+import type { ToolCategory } from '../tools/definition'
+import type {
+  ClaudeCodeHooksDescription,
+  PluginHookScope,
+  PluginHookSet,
+} from '../hooks/claude-code'
 import { createRepeatReminder } from '../tools/repeat-reminder'
 import type { ToolServices } from '../tools/services'
 import { createSpillMiddleware, spillSessionDir } from '../tools/spill'
@@ -200,6 +205,43 @@ export type HostEventSink = (
 /** Observer of every raw log event of every attached (root or child) agent. */
 export type RawSessionTap = (sessionId: string, event: SessionEvent) => void
 
+/**
+ * What CoreApi plugs into the kernel (KRN-13), registered once through
+ * {@link HarnessHost.extend} instead of reaching into the tool registry,
+ * the hook runner or the Skill loaders.
+ */
+export interface HostExtensions {
+  /** Records the files each turn changes (watches tool writes and turn ends). */
+  readonly turnFiles?: {
+    install(port: {
+      tools: ToolRegistry
+      rawTap(listener: RawSessionTap): () => void
+    }): () => void
+  }
+  /** One workspace writer at a time: a lease for each file-writing tool call. */
+  readonly workspaceAccess?: WorkspaceAccessLeaseProvider
+  /** What `@plugin` references learn about a plugin (the plugin service). */
+  readonly pluginReferences?: PluginReferenceResolver
+  /** Which plugins' global copies a project replaces with its own. */
+  readonly pluginOverrides?: (projectRoot: string) => ReadonlySet<string>
+  /** The Skill folders of the plugins enabled for a project (null: Chat). */
+  readonly pluginSkills?: (projectRoot: string | null) => readonly string[]
+  /** Where a Build session's managed worktree is (KRN-11). */
+  readonly worktrees?: (sessionId: string, projectRoot: string) => string
+}
+
+/** Plugin hook sets, applied by the plugin activation controller. */
+export interface PluginHooksPort {
+  setPluginHooks(sets: readonly PluginHookSet[]): void
+  setPluginHookScope(scope: PluginHookScope | null): void
+}
+
+/** The user's and project's hook configuration, for 能力 › Hooks. */
+export interface HookConfigPort {
+  describe(): ClaudeCodeHooksDescription
+  reload(): void
+}
+
 export interface HarnessHostOptions extends KeptServicesOptions {
   eventSink?: HostEventSink | null
   /**
@@ -225,6 +267,12 @@ export interface HarnessHostOptions extends KeptServicesOptions {
   sandboxBackend?: SandboxBackend
   /** Test hook: replace the LLM client. */
   llm?: LlmClient
+  /**
+   * Check every model request against its session log (KRN-13): on in
+   * development builds and the packaged smoke, off in production. Default:
+   * `EMPEROR_ASSERT_INVARIANT=1`.
+   */
+  assertRequestInvariant?: boolean
   /** Desktop host port for GUI control; absent → no computer-use tools. */
   computerUsePort?: ComputerUseHostPort | null
   /** Computer-use master switch and per-driver switches. */
@@ -349,6 +397,8 @@ export class HarnessHost {
   private projectPluginOverrides: (projectRoot: string) => ReadonlySet<string> =
     () => new Set()
   private readonly agents = new Map<string, Agent>()
+  /** Uninstalls of the extensions CoreApi registered (turn file records). */
+  private readonly extensionTeardown: Array<() => void> = []
   private worktreeResolver: (sessionId: string, projectRoot: string) => string =
     (_sessionId, projectRoot) => projectRoot
   /** Each root session's task tree: its subagents, their jobs, its budget (KRN-03). */
@@ -396,6 +446,13 @@ export class HarnessHost {
           this.attachments.get(ref.attachmentId) !== null,
       })
     if (options.llm === undefined) this.applyModelConfig(kept.modelConfig)
+    if (
+      options.assertRequestInvariant ??
+      process.env.EMPEROR_ASSERT_INVARIANT === '1'
+    )
+      this.llm.observeRequests((request) =>
+        assertRequestInvariant(request, (id) => this.sessionLog(id)),
+      )
     this.watchlist = new WatchlistService(kept.paths.stateRoot, {
       llm: this.llm,
       tokenTracker: kept.tokenTracker,
@@ -549,7 +606,6 @@ export class HarnessHost {
     const ref: { host?: HarnessHost } = {}
     const kept = await createKeptServices(options, {
       emit: (event) => ref.host?.emitHost(event),
-      refreshRuntimeContext: () => {},
     })
     const host = new HarnessHost(kept, options)
     ref.host = host
@@ -835,7 +891,6 @@ export class HarnessHost {
       if (owner !== undefined)
         goal.driver.delegationSettled(this.rootOf(owner).id)
     })
-    void createGoalTools
     // A step of a project session holds the project's MCP instance (started
     // on first use) until its agent goes idle, before its tools are listed
     // (KRN-01). Then middleware (order matters): instructions, memory,
@@ -923,8 +978,53 @@ export class HarnessHost {
 
   /** Master switch: persist, (un)register the GUI tools, tell the desktop. */
   /** Answer `@plugin` gestures from the plugin service (CoreApi). */
-  setPluginReferenceResolver(resolver: PluginReferenceResolver | null): void {
-    this.pluginReferences = resolver
+  /**
+   * Register CoreApi's extensions of the kernel, once (KRN-13). Each one is
+   * optional; a second call adds or replaces the ones it names.
+   */
+  extend(extensions: HostExtensions): void {
+    if (extensions.turnFiles)
+      this.extensionTeardown.push(
+        extensions.turnFiles.install({
+          tools: this.tools,
+          rawTap: (listener) => this.rawTap(listener),
+        }),
+      )
+    if (extensions.workspaceAccess)
+      this.tools.setWorkspaceAccessLeaseProvider(extensions.workspaceAccess)
+    if (extensions.pluginReferences)
+      this.pluginReferences = extensions.pluginReferences
+    if (extensions.pluginOverrides)
+      this.projectPluginOverrides = extensions.pluginOverrides
+    if (extensions.pluginSkills)
+      this.kept.skillLoaders.setPluginSkillsResolver(extensions.pluginSkills)
+    if (extensions.worktrees) this.worktreeResolver = extensions.worktrees
+  }
+
+  /** Plugin hook sets (the plugin activation controller's port). */
+  get pluginHooks(): PluginHooksPort {
+    return {
+      setPluginHooks: (sets) => this.hooks.setPluginHooks(sets),
+      setPluginHookScope: (scope) => this.hooks.setPluginHookScope(scope),
+    }
+  }
+
+  /** The hook configuration (能力 › Hooks). */
+  get hookConfig(): HookConfigPort {
+    return {
+      describe: () => this.hooks.describe(),
+      reload: () => this.hooks.reload(),
+    }
+  }
+
+  /** A built-in tool's group on 能力 › 工具, if it has one. */
+  toolCategory(name: string): ToolCategory | undefined {
+    return this.tools.get(name)?.category
+  }
+
+  /** How many tools the kernel registered (health check). */
+  toolCount(): number {
+    return this.tools.schemas().length
   }
 
   setComputerUseEnabled(enabled: boolean): void {
@@ -1077,6 +1177,19 @@ export class HarnessHost {
   }
 
   private async start(options: HarnessHostOptions): Promise<void> {
+    // Process groups a crashed run left behind go first (KRN-13): only one
+    // whose live start identity matches its receipt is killed.
+    try {
+      const reconciled = await this.kept.processRuntime.reconcileOrphans()
+      if (reconciled.length)
+        logger.info('reconciled leftover processes', {
+          count: reconciled.length,
+        })
+    } catch (error: unknown) {
+      logger.warn('leftover process reconcile failed', {
+        error: String(error),
+      })
+    }
     this.kept.schedulerService.onJob = createSchedulerExecutor({
       // A scheduled turn runs in its own session, never moves the session in
       // view, rejects approvals nobody can answer and stops after 30 minutes.
@@ -1328,12 +1441,6 @@ export class HarnessHost {
   }
 
   /** CoreApi's worktree bindings: a session's worktree, or the root it is given. */
-  setWorktreeResolver(
-    resolver: (sessionId: string, projectRoot: string) => string,
-  ): void {
-    this.worktreeResolver = resolver
-  }
-
   /**
    * Move a session's tools to where it works now (KRN-11): after it entered
    * or left a managed worktree. A live agent gets a
@@ -1423,12 +1530,6 @@ export class HarnessHost {
   }
 
   /** Which plugins' global copies a project replaces (the plugin activation controller). */
-  setProjectPluginOverrides(
-    overrides: (projectRoot: string) => ReadonlySet<string>,
-  ): void {
-    this.projectPluginOverrides = overrides
-  }
-
   /**
    * The tools a session of `scope` sees, for views without an agent: the
    * built-in tools and the global MCP tools, plus its project's MCP tools.
@@ -2610,6 +2711,7 @@ export class HarnessHost {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    for (const teardown of this.extensionTeardown.splice(0)) teardown()
     this.delegationInteractions.cancelRoot()
     this.delegationConsent.cancelRoot()
     await this.delegations?.shutdown().catch((error) =>

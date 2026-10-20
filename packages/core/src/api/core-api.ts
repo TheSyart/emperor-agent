@@ -27,6 +27,7 @@ import {
 } from '../workspace/file-preview'
 import type { RuntimePaths } from '../runtime/paths'
 import { HarnessHost, type HarnessHostOptions } from '../harness/host/host'
+import type { WorkspaceAccessLeaseProvider } from '../harness/tools/registry'
 import {
   SessionRequiredError,
   type BackgroundTurnOptions,
@@ -456,7 +457,6 @@ export class CoreApi {
     this.configService = new CoreConfigService(
       this.paths.stateRoot,
       {
-        refreshRuntimeContext: () => {},
         reconcileProfileOnboarding: () => {
           this.onboardingService.reconcile()
         },
@@ -513,7 +513,7 @@ export class CoreApi {
     })
     this.hooksService = new CoreHooksService({
       stateRoot: this.paths.stateRoot,
-      hooks: host.hooks,
+      hooks: host.hookConfig,
       projectRoot: (view) => this.viewProjectRoot(view),
       assertMutation: (area, action, view) =>
         this.assertMutation(area, action, view),
@@ -534,7 +534,6 @@ export class CoreApi {
       sessionLog: (sessionId) => host.sessionLog(sessionId),
       compactNow: (sessionId) => host.compactNow(sessionId),
       measureContext: (sessionId) => host.measureContext(sessionId),
-      refreshRuntimeContext: () => {},
       schedulerService: kept.schedulerService,
     })
     this.pluginService = new PluginApplicationService({
@@ -627,19 +626,9 @@ export class CoreApi {
         pluginSkippedTools: (key) => kept.mcpClient.pluginSkippedTools(key),
       },
       projectMcp: host.projectMcp,
-      hooks: host.hooks,
+      hooks: host.pluginHooks,
       projectOf: (agent) => host.projectRootOfAgent(agent),
     })
-    host.setProjectPluginOverrides((projectRoot) =>
-      this.pluginActivation.replacedIn(projectRoot),
-    )
-    kept.skillLoaders.setPluginSkillsResolver((projectRoot) =>
-      this.pluginService.enabledSkillRoots(projectRoot),
-    )
-    // `@plugin` gestures read the plugin service (E-track contract §3).
-    host.setPluginReferenceResolver((id, agent) =>
-      this.pluginReference(id, host.projectRootOfAgent(agent)),
-    )
     this.skillService = new CoreSkillService(this.paths.stateRoot, {
       runtimeRoot: this.paths.runtimeRoot,
       manager: kept.skillManager,
@@ -660,7 +649,7 @@ export class CoreApi {
             // lists them); every other builtin names its category.
             if (Object.hasOwn(GUI_TOOL_CATALOG, schema.name))
               return { ...schema, pluginId: COMPUTER_USE_PLUGIN_ID }
-            const category = host.tools.get(schema.name)?.category
+            const category = host.toolCategory(schema.name)
             return category === undefined ? schema : { ...schema, category }
           }
           return {
@@ -673,7 +662,6 @@ export class CoreApi {
       library: kept.skillLibrary,
       // `null` = chat (no project Skills); callers always name the session.
       projectRootFor: (sessionId) => host.projectRootForSession(sessionId),
-      refreshRuntimeContext: () => {},
     })
     this.environmentService = new CoreEnvironmentService({
       stateRoot: this.paths.stateRoot,
@@ -693,10 +681,6 @@ export class CoreApi {
       managedEnvironment: kept.managedEnvironmentService,
     })
     this.workspaceBindings = new WorkspaceBindingStore(this.paths.stateRoot)
-    // A session in a managed worktree works there (KRN-11).
-    host.setWorktreeResolver((sessionId, projectRoot) =>
-      this.workspaceBindings.resolve(sessionId, projectRoot),
-    )
     this.gitReceipts = new GitOperationReceiptStore(this.paths.stateRoot)
     const resolveWorkspaceProject = (sessionId: string) => {
       const session = this.requireReadableSession(sessionId, 'workspace') as {
@@ -1061,7 +1045,7 @@ export class CoreApi {
         return null
       }
     }
-    host.tools.setWorkspaceAccessLeaseProvider({
+    const workspaceAccess: WorkspaceAccessLeaseProvider = {
       acquire: async (call) => {
         if (!mayWriteFiles(call.name)) return undefined
         const root = host.sandbox.resolve({
@@ -1089,7 +1073,7 @@ export class CoreApi {
           },
         )
       },
-    })
+    }
     this.turnFiles = new TurnFileRecorder({
       snapshots: new TurnSnapshots({
         exec: (cwd, args, options) => turnGit.execute(cwd, args, options),
@@ -1126,7 +1110,21 @@ export class CoreApi {
       runExclusive: (workspaceRoot, owner, action) =>
         this.workspaceMutations.runExclusive(workspaceRoot, owner, action),
     })
-    this.turnFiles.install(host)
+    // Everything CoreApi plugs into the kernel, in one registration (KRN-13).
+    host.extend({
+      turnFiles: this.turnFiles,
+      workspaceAccess,
+      pluginOverrides: (projectRoot) =>
+        this.pluginActivation.replacedIn(projectRoot),
+      pluginSkills: (projectRoot) =>
+        this.pluginService.enabledSkillRoots(projectRoot),
+      // `@plugin` gestures read the plugin service (E-track contract §3).
+      pluginReferences: (id, agent) =>
+        this.pluginReference(id, host.projectRootOfAgent(agent)),
+      // A session in a managed worktree works there (KRN-11).
+      worktrees: (sessionId, projectRoot) =>
+        this.workspaceBindings.resolve(sessionId, projectRoot),
+    })
     this.appConnections = new AppConnectionRegistry({
       [appConnectionKey(GITHUB_APP)]: {
         check: async () =>
@@ -4082,7 +4080,7 @@ export class CoreApi {
       check('process-runtime', () =>
         Boolean(kept.processRuntime.capabilityReport()),
       ),
-      check('harness-kernel', () => this.host.tools.schemas().length > 0),
+      check('harness-kernel', () => this.host.toolCount() > 0),
       check(
         'mcp',
         () => kept.mcpClient.snapshot().initialized === true,
