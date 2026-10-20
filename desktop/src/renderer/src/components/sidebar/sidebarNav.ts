@@ -11,7 +11,7 @@ import {
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
-import { githubPluginOn } from '../pages/github/githubModel'
+import { githubPluginOn } from '../pages/github/githubPlugin'
 
 export interface SidebarPageEntry {
   /** Route name the row highlights for (router.ts). */
