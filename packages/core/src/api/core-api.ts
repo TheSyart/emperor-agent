@@ -210,7 +210,11 @@ import { ExecutorRegistry } from '../harness/delegation/registry'
 import { DelegationService } from '../harness/delegation/service'
 import { ExecutorRuntimeService } from '../harness/delegation/runtime'
 import { ExecutorConsentStore } from '../harness/delegation/consent'
-import { createLoginShellEnvironment } from '../harness/delegation/login-shell'
+import {
+  createLoginShellEnvironment,
+  type LoginShellEnvironment,
+} from '../harness/delegation/login-shell'
+import { ClaudeTokenStore } from '../harness/delegation/claude-tokens'
 import { ExecutorModelCatalogService } from '../harness/delegation/models'
 import { nativeGeneratedImageRoot } from '../harness/delegation/image-proof'
 import { ClaudeExecutorAdapter } from '../harness/delegation/adapters/claude'
@@ -265,6 +269,15 @@ export interface CoreApiCreateOptions extends HarnessHostOptions {
   enableFirstRunOnboarding?: boolean
   /** Where the host writes its logs (REL-01); diagnostics show it. */
   logDirectory?: string | null
+  /**
+   * Test hook: the home, environment and login shell external executors
+   * read sign-ins from (defaults: the user's own).
+   */
+  executorHome?: {
+    home?: string
+    environment?: NodeJS.ProcessEnv
+    loginShell?: LoginShellEnvironment
+  } | null
   /** Test hook: the GitHub CLI seen by Pull Request, Issue and CI reads. */
   github?: Partial<
     Pick<
@@ -769,9 +782,20 @@ export class CoreApi {
       this.paths.delegationsRoot,
       opts.verifyGeneratedImage,
     )
+    // Claude tokens pasted in 设置 › 子智能体, under the local key (AGT-02).
+    const claudeTokens = new ClaudeTokenStore({
+      root: this.paths.delegationsRoot,
+      sealer: kept.secretSealer,
+    })
+    const executorHome = opts.executorHome ?? {}
     const executorRuntime = new ExecutorRuntimeService({
       root: this.paths.delegationsRoot,
-      loginShell: createLoginShellEnvironment(),
+      ...(executorHome.home ? { home: executorHome.home } : {}),
+      ...(executorHome.environment
+        ? { environment: executorHome.environment }
+        : {}),
+      loginShell: executorHome.loginShell ?? createLoginShellEnvironment(),
+      claudeTokens,
       resolveRoute: async (id, backend) => {
         const config = await loadModelConfig(this.paths.modelConfigFile, {
           sealer: kept.secretSealer,
@@ -813,6 +837,7 @@ export class CoreApi {
     ) => {
       const runtime = await executorRuntime.probe(profile)
       this.executorFacts.bind(profile, runtime.environment)
+      return runtime.auth
     }
     const externalWorkspaces = new DelegationWorkspaceService({
       root: this.paths.delegationsRoot,
@@ -834,6 +859,7 @@ export class CoreApi {
       root: this.paths.delegationsRoot,
       config: () => this.executorConfig.read(),
       registry: this.executorRegistry,
+      checkAuth: checkExecutorAuth,
       adapters: new Map<string, ExecutorAdapter>([
         [
           'claude-code',
@@ -1016,6 +1042,7 @@ export class CoreApi {
       refresh: () => this.delegationRuntime.probeProfiles(),
       checkAuth: checkExecutorAuth,
       consent: executorConsent,
+      claudeTokens,
     })
     host.delegationQuestionTimeoutMs = () => {
       try {
