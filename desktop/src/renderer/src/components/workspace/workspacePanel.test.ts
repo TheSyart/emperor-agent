@@ -80,6 +80,11 @@ function fakeCore(operation: string, payload?: Record<string, unknown>) {
       return Promise.resolve({ current: 'main', branches: [] })
     case 'git.worktrees':
       return Promise.resolve({ worktrees: [], owned: [] })
+    // No PTY in jsdom: the 终端 pane shows its error and no xterm.
+    case 'terminals.list':
+      return Promise.resolve([])
+    case 'terminals.create':
+      return Promise.reject(new Error('no PTY in this test'))
     case 'files.list':
       return Promise.resolve({
         projectRoot: '/tmp/demo',
@@ -430,6 +435,223 @@ describe('WorkspacePanel', () => {
     expect(document.activeElement).not.toBe(
       root.querySelector('.git-commit-form textarea'),
     )
+  })
+
+  it('5 · the browser page survives switching to 终端 and back (FIX-05)', async () => {
+    let emit: (state: unknown) => void = () => undefined
+    const browserBounds = vi.fn()
+    const browserClose = vi.fn()
+    ;(window as unknown as { emperor: unknown }).emperor = {
+      openBrowserUrl: vi.fn(),
+      browserBounds,
+      browserClose,
+      onBrowserState: (listener: (state: unknown) => void) => {
+        emit = listener
+        return () => undefined
+      },
+    }
+    const measure = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        const shown =
+          this.classList.contains('browser-viewport') &&
+          this.closest<HTMLElement>('.browser-pane')?.style.display !== 'none'
+        return {
+          x: 880,
+          y: 100,
+          ...(shown ? { width: 560, height: 700 } : { width: 0, height: 0 }),
+        } as DOMRect
+      })
+    try {
+      const root = mount()
+      await flush()
+      segment(root, 'browser').click()
+      await vi.waitFor(() =>
+        expect(root.querySelector('.browser-pane')).not.toBeNull(),
+      )
+      emit({
+        url: 'https://example.com/account',
+        title: 'Account',
+        loading: false,
+        canGoBack: true,
+        canGoForward: false,
+      })
+      await flush()
+      const address = () =>
+        root.querySelector<HTMLInputElement>('.browser-address input')!.value
+      expect(address()).toContain('example.com')
+      const rect = { x: 880, y: 100, width: 560, height: 700 }
+      await vi.waitFor(() =>
+        expect(browserBounds).toHaveBeenLastCalledWith(rect),
+      )
+
+      segment(root, 'terminal').click()
+      await flush()
+      // Hidden, not closed: the native view only stops drawing.
+      await vi.waitFor(() =>
+        expect(browserBounds).toHaveBeenLastCalledWith(null),
+      )
+      expect(browserClose).not.toHaveBeenCalled()
+      const pane = root.querySelector<HTMLElement>('.browser-pane')!
+      expect(pane.style.display).toBe('none')
+
+      segment(root, 'browser').click()
+      await flush()
+      expect(root.querySelector('.browser-pane')).toBe(pane)
+      expect(pane.style.display).toBe('')
+      expect(address()).toContain('example.com')
+      await vi.waitFor(() =>
+        expect(browserBounds).toHaveBeenLastCalledWith(rect),
+      )
+      expect(browserClose).not.toHaveBeenCalled()
+
+      // Collapsing the column hides it too; the page stays.
+      open.value = false
+      await vi.waitFor(() =>
+        expect(browserBounds).toHaveBeenLastCalledWith(null),
+      )
+      open.value = true
+      await flush()
+      expect(browserClose).not.toHaveBeenCalled()
+
+      // A session switch ends it.
+      sessionId.value = 's2'
+      await flush()
+      expect(browserClose).toHaveBeenCalledTimes(1)
+    } finally {
+      measure.mockRestore()
+    }
+  })
+
+  it('a session switch on another pane closes the browser page it left behind', async () => {
+    const browserClose = vi.fn()
+    ;(window as unknown as { emperor: unknown }).emperor = {
+      browserBounds: vi.fn(),
+      browserClose,
+      onBrowserState: () => () => undefined,
+    }
+    const root = mount()
+    await flush()
+    segment(root, 'browser').click()
+    await vi.waitFor(() =>
+      expect(root.querySelector('.browser-pane')).not.toBeNull(),
+    )
+    segment(root, 'files').click()
+    await flush()
+    expect(browserClose).not.toHaveBeenCalled()
+    sessionId.value = 's2'
+    await flush()
+    expect(browserClose).toHaveBeenCalledTimes(1)
+    expect(root.querySelector('.browser-pane')).toBeNull()
+  })
+
+  it('keeps the 文件 tabs across pane switches (FIX-05)', async () => {
+    const root = mount()
+    await flush()
+    requestWorkspace({ pane: 'files', file: { path: 'src/a.ts' } })
+    await vi.waitFor(() =>
+      expect(root.querySelector('.file-tab.active')?.textContent).toContain(
+        'a.ts',
+      ),
+    )
+    const listings = core.mock.calls.filter(
+      ([op]) => op === 'files.list',
+    ).length
+    segment(root, 'browser').click()
+    await flush()
+    segment(root, 'files').click()
+    await flush()
+    expect(root.querySelector('.file-tab.active')?.textContent).toContain(
+      'a.ts',
+    )
+    expect(core.mock.calls.filter(([op]) => op === 'files.list')).toHaveLength(
+      listings,
+    )
+  })
+
+  it('8 · a file changed on disk shows its new content at the linked line (FIX-05)', async () => {
+    const disk = { content: 'const a = 1\n', bytes: 12, modifiedAt: 1 }
+    core.mockImplementation(
+      (operation: string, payload?: Record<string, unknown>) => {
+        if (operation === 'files.stat')
+          return Promise.resolve({
+            bytes: disk.bytes,
+            modifiedAt: disk.modifiedAt,
+          })
+        if (operation === 'files.preview')
+          return Promise.resolve({
+            id: 'file:/tmp/demo/src/a.ts',
+            path: '/tmp/demo/src/a.ts',
+            mimeType: 'text/plain',
+            kind: 'text',
+            name: 'a.ts',
+            content: disk.content,
+            truncated: false,
+            bytes: disk.bytes,
+            modifiedAt: disk.modifiedAt,
+          })
+        return fakeCore(operation, payload)
+      },
+    )
+    const root = mount()
+    await flush()
+    requestWorkspace({ pane: 'files', file: { path: 'src/a.ts', line: 1 } })
+    await vi.waitFor(() =>
+      expect(root.querySelector('.file-code-view')?.textContent).toContain(
+        'const a = 1',
+      ),
+    )
+    disk.content = 'const a = 1\nconst b = 2\nconst c = 3\n'
+    disk.bytes = 36
+    disk.modifiedAt = 2
+    requestWorkspace({ pane: 'files', file: { path: 'src/a.ts', line: 3 } })
+    await vi.waitFor(() =>
+      expect(
+        root.querySelector('.file-code-line.reference-line-active')
+          ?.textContent,
+      ).toContain('const c = 3'),
+    )
+  })
+
+  it('10 · no git polling IPC while the column is closed (FIX-05)', async () => {
+    withGit = true
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    frameActions.openWorkspace(useFrameState(), 'review')
+    // Load the pane chunks first: the fake clock below must not hold them.
+    await import('./GitReviewPane.vue')
+    await import('./FilesPane.vue')
+    vi.useFakeTimers()
+    try {
+      const gitCalls = () =>
+        core.mock.calls.filter(([op]) => String(op).startsWith('git.')).length
+      open.value = false
+      const root = mount()
+      await flush()
+      await vi.advanceTimersByTimeAsync(30_000)
+      await flush()
+      expect(gitCalls()).toBe(0)
+      // Open on 审查: it loads and refreshes with the shared poll.
+      open.value = true
+      await vi.waitFor(() => expect(gitCalls()).toBeGreaterThan(0))
+      await vi.advanceTimersByTimeAsync(10_000)
+      // Closed again: quiet.
+      open.value = false
+      await flush()
+      let seen = gitCalls()
+      await vi.advanceTimersByTimeAsync(30_000)
+      await flush()
+      expect(gitCalls()).toBe(seen)
+      // Open on another pane: 审查 is not on screen, so still no git polls.
+      open.value = true
+      segment(root, 'files').click()
+      await flush()
+      seen = gitCalls()
+      await vi.advanceTimersByTimeAsync(30_000)
+      await flush()
+      expect(gitCalls()).toBe(seen)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('requestWorkspace({ pane: browser, url }) only prefills the address bar', async () => {

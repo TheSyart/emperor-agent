@@ -408,6 +408,98 @@ describe('FilesPane', () => {
     expect(root.querySelectorAll('.file-tree-row')).toHaveLength(3)
   })
 
+  it('8 · reopening an open tab rereads the file once its size or mtime changed', async () => {
+    const disk = { content: 'const v = 1\n', bytes: 12, modifiedAt: 1_000 }
+    core.mockImplementation((op: string, payload?: Record<string, unknown>) => {
+      if (op === 'files.stat')
+        return Promise.resolve({
+          bytes: disk.bytes,
+          modifiedAt: disk.modifiedAt,
+        })
+      if (op === 'files.preview')
+        return Promise.resolve({
+          id: 'file:/tmp/demo/src/a.ts',
+          path: '/tmp/demo/src/a.ts',
+          relativePath: 'src/a.ts',
+          mimeType: 'text/plain',
+          kind: 'text',
+          name: 'a.ts',
+          content: disk.content,
+          truncated: false,
+          bytes: disk.bytes,
+          modifiedAt: disk.modifiedAt,
+        })
+      return fakeCore(op, payload)
+    })
+    const root = mount('')
+    // A reply link to src/a.ts:1 (a reference) opens the tab.
+    const link = {
+      owner: 's1',
+      target: {
+        source: 'reference' as const,
+        sessionId: 's1',
+        referenceId: 'ref_src_a',
+      },
+    }
+    await exposed.openPreview({ ...link, line: 1 })
+    await flush()
+    expect(root.querySelector('.file-code-view')?.textContent).toContain(
+      'const v = 1',
+    )
+    const reads = () =>
+      core.mock.calls.filter(([op]) => op === 'files.preview').length
+    // Unchanged on disk: the tab shows again without a new read.
+    await exposed.openPreview({ ...link, line: 1 })
+    await flush()
+    expect(core).toHaveBeenLastCalledWith('files.stat', link.target)
+    expect(reads()).toBe(1)
+    // Edited on disk: following a link to line 2 shows the new text there.
+    disk.content = 'const v = 1\nconst w = 2\n'
+    disk.bytes = 24
+    disk.modifiedAt = 2_000
+    await exposed.openPreview({ ...link, line: 2 })
+    await flush()
+    expect(reads()).toBe(2)
+    expect(tabLabels(root)).toEqual(['a.ts'])
+    expect(root.querySelector('.file-code-view')?.textContent).toContain(
+      'const w = 2',
+    )
+    expect(
+      root
+        .querySelector('.file-code-line.reference-line-active')
+        ?.getAttribute('data-line'),
+    ).toBe('2')
+    // Same size, newer mtime: still a change.
+    disk.modifiedAt = 3_000
+    await exposed.openPreview({ ...link, line: 2 })
+    await flush()
+    expect(reads()).toBe(3)
+  })
+
+  it('reopens a project tab after a failed stat by reading it (the reason shows)', async () => {
+    let gone = false
+    core.mockImplementation((op: string, payload?: Record<string, unknown>) => {
+      if (op === 'files.stat')
+        return gone
+          ? Promise.reject(new Error('文件或目录不存在。'))
+          : Promise.resolve({ bytes: 24, modifiedAt: 1 })
+      if (op === 'files.preview' && gone)
+        return Promise.reject(new Error('文件或目录不存在。'))
+      return fakeCore(op, payload)
+    })
+    const root = mount('')
+    const request = {
+      owner: 's1',
+      target: { source: 'project' as const, sessionId: 's1', path: 'a.ts' },
+    }
+    await exposed.openPreview(request)
+    await flush()
+    gone = true
+    await exposed.openPreview(request)
+    await flush()
+    expect(root.textContent).toContain('文件或目录不存在。')
+  })
+
   it('reports the tree width once a keyboard resize settles', async () => {
     const root = mount()
     await flush()

@@ -26,14 +26,17 @@
  * why. It takes its own row, so the native page shrinks rather than being
  * covered; closing it hides that download for good.
  *
- * WorkspacePanel keys the pane by session: a session switch remounts it, and
+ * WorkspacePanel keeps the pane mounted behind the other panes (FIX-05):
+ * another pane or a collapsed column only hides it (`visible` false, so
+ * main hides the native view and the page keeps running with its
+ * sign-ins). It is keyed by session: a session switch remounts it, and
  * unmounting closes the view (its in-memory partition is wiped).
  *
  * The pane is the user's own browsing only. Tabs the Agent controls show in
  * the conversation's computer-use preview instead.
  *
  * Props:
- * - visible: the pane is on screen (the workspace column is open).
+ * - visible: the pane is on screen (the column is open and this pane shows).
  * - prefill?: { url, nonce } — address to prefill; a new nonce refills.
  */
 import {
@@ -192,6 +195,14 @@ const historyShown = computed(() => preferences.value.history)
 const historyAnchor = ref<HTMLElement | null>(null)
 const historyOpen = ref(false)
 const historyEntries = shallowRef<BrowserHistoryEntry[]>([])
+
+// A hidden pane leaves no menu of its own behind.
+watch(
+  () => props.visible,
+  (visible) => {
+    if (!visible) historyOpen.value = false
+  },
+)
 
 async function toggleHistory(): Promise<void> {
   if (historyOpen.value) {
