@@ -63,7 +63,8 @@ describe('unsigned preview release channel', () => {
     expect(workflow).toContain('ubuntu-24.04')
     expect(workflow).toContain('arch: arm64')
     expect(workflow).toContain('arch: x64')
-    expect(workflow).toContain('actions/setup-python@v5')
+    // REL-04: pinned to the commit of v5, with the version beside it.
+    expect(workflow).toMatch(/actions\/setup-python@[0-9a-f]{40} # v5\./)
     expect(workflow).toContain("python-version: '3.11'")
     expect(workflow).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'")
     expect(workflow).toContain('contents: read')
@@ -130,7 +131,9 @@ describe('unsigned preview release channel', () => {
     expect(workflow).toContain('id-token: write')
     expect(workflow).toContain('attestations: write')
     expect(workflow).toContain('artifact-metadata: write')
-    expect(workflow.match(/actions\/attest@v4/g)?.length).toBe(2)
+    expect(workflow.match(/actions\/attest@[0-9a-f]{40} # v4\./g)?.length).toBe(
+      2,
+    )
     expect(workflow).toContain('@cyclonedx/cyclonedx-npm@6.0.0')
     expect(workflow).toContain('assemble-preview-release-bundle.mjs')
     expect(workflow).toContain('publish-preview-release.sh')
