@@ -48,18 +48,18 @@ turn/end
 
 - **Inbox**：两个待处理列表。`next-turn` 中一条消息开启一个 turn；`next-step` 中的全部消息进入下一个 step。每次变化记录为 `agent/inbox/spliced`，恢复时从 log 精确重建。
 - **Followup / steer**：普通提交是 followup（排队到 `next-turn`）；运行中的插话是 steer（进入 `next-step`）。`chat.manageQueuedPrompt` 的 `interject` 把排队项提升到 `next-step`，`cancel` 丢弃尚未开始的项，`send` 发送一条待发送的项（见下文「消息生命周期」）。
-- **没有最大步数**：内核不限制 step 数。turn-stopping middleware（例如 Hooks 的 Stop）可以追加一步。
+- **步数与预算**：每个 step 开始前（认领 inbox 之前）`budget` middleware 可以结束本 turn：达到单轮步数上限，或本任务的费用已达上限，`turn/end` 原因为 `budget`，之前先写一条 `task-budget` 上下文消息告诉模型为什么停下（见下文「任务树与预算」）。每次模型请求返回后（失败后被重试的请求也算）`requestEnd` middleware 收到这次的 usage。turn-stopping middleware（例如 Hooks 的 Stop）可以追加一步。
 - **回合改动记录**：根会话的 turn 改过文件时，宿主在 `turn/end` 之后追加一条 `turn/files`；撤销这一轮时追加 `turn/files-reverted`。两者都不进入模型请求，做法见 [IPC 与运行时事件](ipc-and-runtime-events.md#项目工作台-ipc)。
 - **取消**：`chat.stopRuntime` 或 `/stop` 取消当前 turn，并清理该 session 的待处理交互和子代理；inbox 中等待的 harness 上下文（后台任务通知等）被丢弃，用户排队的消息保留为待发送。提交方的 AbortSignal（ACP `session/cancel`、定时任务取消）只作用于它自己的消息，见下文。`turn/end` 只记录取消原因本身的字段（`kind`，Hook 取消另带 `reason`），传输层事后附加在 abort reason 上的内容（例如 Node fetch 写入的 `stack`）不会进入 log。
-- **`turn/end` 原因**：`completed`、`aborted`、`blocked`、`error`、`max-tokens`、`interrupted`（崩溃修复补写）、`plan-dismissed`（用户关闭 Plan 审阅）。
+- **`turn/end` 原因**：`completed`、`aborted`、`blocked`、`error`、`max-tokens`、`interrupted`（崩溃修复补写）、`plan-dismissed`（用户关闭 Plan 审阅）、`budget`（`limit: 'steps'` 带 `maxSteps`，或 `limit: 'cost'` 带 `capUsdNanos`、`spentUsdNanos`，无法计价时另带 `unpricedRoutes`）。
 
 ### 消息生命周期
 
 一条消息只有在它的 `user/message` 写进 log 之后才算被消费。在那之前它一直在 inbox 里（log 中有插入它的 `agent/inbox/spliced`），应用崩溃或退出后重新打开会话仍能找回。
 
-- **两阶段认领**：step 开始时 `inbox.claim()` 只预留本 step 要取的消息（全部可取的 `next-step`，新 turn 再加 `next-turn` 中第一条可取的），消息仍留在队列里，状态为 `sending`。所有 pre-step middleware 通过后才 `commit()`：被预留的消息在 `step/start` 之前以一条 `agent/inbox/spliced` 移出 inbox，紧接着写 `user/message`（同一个同步块，落在同一批写入里）。pre-step 被停止（例如压缩期间点停止）、被拒绝（成本上限、UserPromptSubmit Hook 拒绝）或抛错时 `release()`：消息原样留在队首，顺序不变，log 中不会出现它的 `user/message`。被某个 middleware 从本 step 剔除的已认领消息（例如过期的 Goal 轮次）显式丢弃。
-- **按消息结果**：每条消息有自己的结果（`Agent.outcome(id)`）。被消费的消息在消费它的 turn 的 `turn/end` 处得到结果，同一个 step 合并进入的多条消息（多条插话、开启 turn 的消息加上插话）得到同一个 turn；插话在 step 中途到达时进入下一个 step，结果仍是这个 turn。`HarnessHost.submit()` 据此返回 `TurnResult`（`harness/host/scope.ts`）：`completed`（带最终回复）、`error`（带错误码）、`aborted`（`by: user | timeout | system`）、`blocked`（`cost-cap`、`prompt-rejected`，后台 turn 另有 `interaction-rejected`、`plan-mode`、`interaction-timeout`）、`not-consumed`（带原因）；`delivery` 为 `completed` 只表示有 turn 消费了这条消息，没有被消费的消息不会报告为 `completed`。submit 在那个 turn 完全结束（驱动空闲或进入下一个排队的 turn）后才返回，但不再等后面排队的 turn。
-- **待发送（held）**：turn 以 `error` 或 `blocked` 结束时，排在它后面的用户消息不会自动运行，结果为 `{ kind: 'not-consumed', reason: 'previous-turn-failed' }`，消息留在队列里，界面显示「待发送 · 上一轮失败」，用户点「发送」后像新消息一样运行，或点「丢弃」。停止时排队的用户消息（以及正在准备 step 时被停止的那条）同样保留为待发送，原因 `previous-turn-stopped`；重新打开会话时 inbox 中残留的用户消息都恢复为待发送，原因 `interrupted`。待发送的消息不会被后续认领取走，新发送的消息照常运行；它们也不算会话忙碌（命令照常可用），但 `/clear` 仍要求先处理。harness 上下文消息（后台任务、子代理通知等）不会被保留为待发送。
+- **两阶段认领**：step 开始时 `inbox.claim()` 只预留本 step 要取的消息（全部可取的 `next-step`，新 turn 再加 `next-turn` 中第一条可取的），消息仍留在队列里，状态为 `sending`。所有 pre-step middleware 通过后才 `commit()`：被预留的消息在 `step/start` 之前以一条 `agent/inbox/spliced` 移出 inbox，紧接着写 `user/message`（同一个同步块，落在同一批写入里）。pre-step 被停止（例如压缩期间点停止）、被拒绝（UserPromptSubmit Hook 拒绝）或抛错时 `release()`：消息原样留在队首，顺序不变，log 中不会出现它的 `user/message`。被某个 middleware 从本 step 剔除的已认领消息（例如过期的 Goal 轮次）显式丢弃。
+- **按消息结果**：每条消息有自己的结果（`Agent.outcome(id)`）。被消费的消息在消费它的 turn 的 `turn/end` 处得到结果，同一个 step 合并进入的多条消息（多条插话、开启 turn 的消息加上插话）得到同一个 turn；插话在 step 中途到达时进入下一个 step，结果仍是这个 turn。`HarnessHost.submit()` 据此返回 `TurnResult`（`harness/host/scope.ts`）：`completed`（带最终回复）、`error`（带错误码）、`aborted`（`by: user | timeout | system`）、`blocked`（`cost-cap`：任务费用上限；`step-limit`：单轮步数上限；`prompt-rejected`；后台 turn 另有 `interaction-rejected`、`plan-mode`、`interaction-timeout`）、`not-consumed`（带原因）；`delivery` 为 `completed` 只表示有 turn 消费了这条消息，没有被消费的消息不会报告为 `completed`。submit 在那个 turn 完全结束（驱动空闲或进入下一个排队的 turn）后才返回，但不再等后面排队的 turn。
+- **待发送（held）**：turn 以 `error` 或 `blocked` 结束时，排在它后面的用户消息不会自动运行，结果为 `{ kind: 'not-consumed', reason: 'previous-turn-failed' }`，消息留在队列里，界面显示「待发送 · 上一轮失败」，用户点「发送」后像新消息一样运行，或点「丢弃」。停止时排队的用户消息（以及正在准备 step 时被停止的那条）同样保留为待发送，原因 `previous-turn-stopped`，被预算停下的 turn 后面的用户消息也是这样；重新打开会话时 inbox 中残留的用户消息都恢复为待发送，原因 `interrupted`。待发送的消息不会被后续认领取走，新发送的消息照常运行；它们也不算会话忙碌（命令照常可用），但 `/clear` 仍要求先处理。harness 上下文消息（后台任务、子代理通知等）不会被保留为待发送。
 - **按消息取消**：提交方的 AbortSignal 调用 `Agent.cancelMessage(id)`：消息还在排队（或待发送）时把它丢弃，结果为 `aborted`（`turnId` 为空）；已被某个 step 预留或已被当前 turn 消费时只取消那个 turn，排在后面的消息随后照常运行。ACP 与 onboarding 的隐藏提示以 `unconsumed: 'withdraw'` 提交：没有被消费时直接丢弃，不会留在队列里等一个已经离开的提交方；ACP 此时返回 `stopReason: "refusal"` 与 `_meta.emperor.notConsumed`。
 - **显式丢弃**：消息不经消费离开 inbox 时，splice 带 `outcome: 'canceled'`，随后写一条 `agent/inbox/discarded { messageIds, reason }`，`reason` 为 `user`（用户在队列里丢弃）、`cancelled`（提交方取消）、`stopped`（停止时丢弃 harness 上下文）或 `dropped`（pre-step 剔除）。不变量：每条进入过 inbox 的用户消息，要么在某条 `user/message` 里，要么仍在 inbox，要么出现在 `agent/inbox/discarded` 中。
 - **队列状态**：`queue_item_state`（host-only，见 [IPC 与 Runtime Events](ipc-and-runtime-events.md#两条管线的分工)）通知每条用户消息的 `queued`、`sending`、`failed-previous`、`discarded`；`chat.listQueuedPrompts` 列出 `queued` 与 `failed-previous` 的项（带 `reason`），正在 `sending` 的项不列出。
@@ -182,9 +182,22 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 - `subagent` 创建不共享父上下文的子 session；`subagent_fork` 创建继承父会话已完成 turn 的子 session。两者默认后台运行并立即返回 id，结束时父会话收到通知；`run_in_background: false` 时同步等待结果。
 - `send_message` 让子代理开始新一轮，`interrupt_agent` 中断，`list_agents` 列出子代理；子代理用 `report` 向父会话汇报。最大嵌套深度 3。
 - 子代理的沙箱模式在创建时从父会话继承，审批策略为 `never`，提权请求被自动拒绝。
-- `bash` 的 `run_in_background` 把命令交给 `JobRegistry`，用 `job_output`、`job_list`、`job_kill` 管理。每个 owner 最多 10 个运行中的 job；job 结束时空闲的 owner 会被唤醒（自上次用户输入起最多连续 3 次），运行中的 owner 在下一步收到通知。
+- `bash` 的 `run_in_background` 把命令交给 `JobRegistry`，用 `job_output`、`job_list`、`job_kill` 管理。每个 owner 最多 10 个运行中的 job；job 结束时空闲的 owner 会被唤醒（默认不限次数），运行中的 owner 在下一步收到通知。用户在「后台任务」里停止的 job（`tasks.cancel`）结束后，owner 在下一步收到「用户已手动停止」的通知（不唤醒）；Agent 自己 `job_kill` 的 job 不再通知。
 - `workflow` / `ralph` 由 `WorkflowEngine` 执行：每次运行在一个 worker thread 里跑脚本（隔离事件循环、可强制终止，不是安全边界），脚本的 `agent()` 经 `spawn` provider 调用 `SubagentManager` 创建前台子代理（`callId` 为工具调用 id，结束后释放）；带 `schema` 的子代理通过仅对其可见的 `structured_output` 工具交付结果。运行记录以 `tool-workflow/*` 事件写入调用方 session，投影为 `workflow_started` / `workflow_progress` / `workflow_finished`。worker 入口是把自包含的工厂函数序列化后用 `new Worker(source, { eval: true })` 启动，源码模式与打包后的 `out/main` 走同一条路径。
 - CoreApi `tasks.*` 把后台 job、子代理会话与工作流运行（`kind: 'workflow'`，可读记录、取消）列在一起；桌面端的环境信息卡用共享 `agents.list` 树显示根会话的子智能体，用 `tasks.list` 显示后台任务，用 `tasks.transcript` 查看后台命令输出和工作流记录，用 `tasks.cancel` 停止运行中的后台命令或工作流；子会话视图用 `tasks.cancel` 停止运行中的子代理。`tasks.resume` 已退役，继续子代理需在对话中让主 Agent 使用 `send_message`。
+
+### 任务树与预算
+
+每个根会话有一棵任务树（`harness/host/task-tree.ts`）：它和它的子代理启动的全部子代理、子会话、后台 job，以及宿主为每个子代理保留的 projector 与订阅。
+
+- **生命周期**：子代理被 dispose（根会话停止、工作流收回它的子代理）时，它的后台 job 立即停止，驱动空闲后从宿主的 `agents`、`projectors`、`unsubscribes` 中移除，日志随后关闭。根会话卸载时整棵树一起清理。永久删除根会话（最近删除里「永久删除」或 30 天到期）时，按日志里的 `subagent/started` 递归找出全部子会话，删除它们的目录，以及根会话和子会话的 spill 目录（`spill/session-<hash>/`）。
+- **任务**：用户（或定时任务）每给根会话发一条消息，就开始一个新任务，直到下一条消息为止；预算按任务计算，只保存在内存里，重启后从零开始。
+- **步数**：一个 turn 最多 `maxSteps` 步（默认 400）；定时任务的 turn 与 Goal 轮次最多 `maxBackgroundSteps` 步（默认 120）。到达后下一步不再开始。
+- **费用**：`model_config.json` 的 `policy.cost.maxUsdPerAgentTurn` 现在是一个任务的上限：根会话、全部子代理和失败的请求都计入，按条目的 `pricing` 在每次请求返回后累计。达到上限（或上限开启时有无法计价的用量）后，树里每个 Agent 做完当前这一步就停下，不再启动新的子代理，根会话不再被通知唤醒，直到用户的下一条消息；根会话的 Goal 被解除自动推进。
+- **并发与总数**：同时运行的子代理最多 `maxActiveAgents` 个（默认 8），多出的等空位（排队，不报错）；在前台等待子代理结果的父代理把自己的名额让给子代理。一个任务最多启动 `maxTotalAgents` 个子代理（默认 64），再启动时工具返回 `AGENT_BUDGET_EXCEEDED`。工作流的 `agent()` 同样计入。
+- **结果唤醒**：子代理的结果（结束通知、`report`）在父代理空闲时唤醒它，每个父代理每个任务最多 `maxNoticeWakes` 次（默认 32）；之后的结果放进父代理的下一步，第一次拒绝时在父代理的日志里写一条说明。
+- **Goal**：根会话还有运行中（或排队中）的子代理或后台 job 时，Goal 不开始新一轮；它们结束后再继续。轮次提示要求模型在只剩等待时结束本轮，不要睡眠或轮询。
+- 设置在 `settings.json` 的 `taskBudget`（「设置 › 高级 › 任务预算」，CoreApi `tasks.budget` / `tasks.setBudget`），修改后从每个任务的下一次判断起生效。
 
 ## Turn 的结束语义
 
