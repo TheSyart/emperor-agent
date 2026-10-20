@@ -1,3 +1,5 @@
+import type { PluginHookVariable } from '../harness/hooks/plugin-health'
+
 export type PluginScope = 'user' | 'project' | 'local' | 'managed'
 
 export type PluginSource =
@@ -119,6 +121,8 @@ export interface ResolvedPluginPackage {
   readonly skillRoots: readonly string[]
   readonly mcpServers: readonly PluginMcpServerSpec[]
   readonly hooks: readonly PluginHookSpec[]
+  /** Names the manifest's `env` lets its hooks read from Emperor's environment (SEC-07). */
+  readonly envAllowlist: readonly string[]
   readonly components: readonly ResolvedPluginComponent[]
 }
 
@@ -192,6 +196,8 @@ export interface PluginComponentView {
   readonly description: string
   readonly state: PluginComponentState
   readonly reason: string | null
+  /** A failed hook: the variables it may need (SEC-07). */
+  readonly variables?: readonly PluginHookVariable[]
 }
 
 /** One tool a plugin brings, as its detail lists it. */
@@ -253,6 +259,8 @@ export interface PluginDetail {
   readonly permissions: {
     readonly runsCommands: boolean
     readonly network: boolean
+    /** Variables of Emperor's environment its hooks may read (manifest `env`). */
+    readonly env: readonly string[]
   }
   readonly components: readonly PluginComponentView[]
   readonly tools: PluginToolsView
@@ -297,6 +305,14 @@ export interface PluginRuntimeView {
     readonly state:
       'connected' | 'needs_connection' | 'failed' | 'disabled' | 'unsupported'
     readonly reason: string | null
+  } | null
+  /** A hook member's last failure, with the variables it may need (SEC-07). */
+  hookFailure?(
+    pluginId: string,
+    hookId: string,
+  ): {
+    readonly reason: string
+    readonly variables: readonly PluginHookVariable[]
   } | null
   /** The tools one plugin MCP server has registered while it runs (none otherwise). */
   mcpTools?(

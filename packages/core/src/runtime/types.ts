@@ -329,9 +329,9 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         }
       }
     | {
-        /** Installed plugins, their toggles, or the active project changed. */
+        /** Installed plugins, their toggles, the active project, or a plugin hook's failure changed. */
         event: 'plugins_changed'
-        reason: 'plugins' | 'project'
+        reason: 'plugins' | 'project' | 'hooks'
       }
     | {
         event: 'computer_use_changed'

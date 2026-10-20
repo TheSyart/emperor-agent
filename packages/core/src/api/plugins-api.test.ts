@@ -6,7 +6,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { invokeCoreOperation } from './operations'
 import { makeApi, tmp, type ApiFixture } from './test-helpers'
 import {
@@ -24,6 +24,7 @@ const VIEW = { sessionId: null }
 let fixture: ApiFixture | null = null
 
 afterEach(async () => {
+  vi.unstubAllEnvs()
   await fixture?.api.close()
   fixture = null
 })
@@ -572,6 +573,104 @@ describe('plugin MCP servers and hooks through CoreApi', () => {
         tools: [],
       },
     ])
+  })
+})
+
+async function installAs(
+  api: ApiFixture['api'],
+  files: PackageFiles,
+  name: string,
+  scope: 'user' | 'project',
+  view: { sessionId: string | null },
+): Promise<void> {
+  const source = writePackage(join(tmp('emperor-sec07-'), name), files)
+  const preview = await api.plugins.inspect({ kind: 'local', path: source })
+  await api.plugins.install(
+    { previewId: preview.previewId, digest: preview.digest, scope },
+    view,
+  )
+}
+
+describe('plugin trust through CoreApi (SEC-07)', () => {
+  it('2, 3: a plugin hook gets the variables its manifest declares and not the credentials; a failure reaches the detail', async () => {
+    vi.stubEnv('SEC07_DECLARED', 'declared-value')
+    vi.stubEnv('OPENAI_API_KEY', 'sk-sec07-core-api')
+    fixture = await makeApi({ replies: [...bashTurn('e1')] })
+    const { api, stateRoot, events } = fixture
+    await installAs(
+      api,
+      portablePackage(
+        'env-kit',
+        {
+          'hooks/hooks.json': {
+            hooks: {
+              PreToolUse: [
+                {
+                  matcher: 'Bash',
+                  hooks: [
+                    {
+                      type: 'command',
+                      command: 'env > "$PLUGIN_DATA/env.txt"',
+                    },
+                    {
+                      type: 'command',
+                      command:
+                        'test -n "$SEC07_NEEDED" || { echo "SEC07_NEEDED missing" >&2; exit 3; }',
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+        { env: ['SEC07_DECLARED'] },
+      ),
+      'env-kit',
+      'user',
+      VIEW,
+    )
+    events.length = 0
+    const sessionId = String(api.sessions.create({ title: 'Chat' }).id)
+    await api.chat.submit({ content: 'run', sessionId })
+
+    const env = readFileSync(
+      join(stateRoot, 'plugins', 'data', 'env-kit', 'env.txt'),
+      'utf8',
+    )
+    expect(env).toContain('SEC07_DECLARED=declared-value')
+    expect(env).not.toContain('OPENAI_API_KEY')
+    expect(env).not.toContain('sk-sec07-core-api')
+
+    const detail = await api.plugins.getDetail(
+      { pluginId: 'env-kit', scope: 'user' },
+      VIEW,
+    )
+    expect(detail.permissions.env).toEqual(['SEC07_DECLARED'])
+    expect(
+      detail.components.map(({ id, state, reason, variables }) => ({
+        id,
+        state,
+        reason,
+        variables,
+      })),
+    ).toEqual([
+      {
+        id: 'PreToolUse#1',
+        state: 'available',
+        reason: null,
+        variables: undefined,
+      },
+      {
+        id: 'PreToolUse#2',
+        state: 'failed',
+        reason: '最近一次运行失败（退出码 3）：SEC07_NEEDED missing',
+        variables: [{ name: 'SEC07_NEEDED', state: 'undeclared' }],
+      },
+    ])
+    // The open detail and list re-read when a hook starts failing.
+    expect(events).toContainEqual(
+      expect.objectContaining({ event: 'plugins_changed', reason: 'hooks' }),
+    )
   })
 })
 

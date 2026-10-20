@@ -79,6 +79,7 @@ import {
 } from '../goal'
 import { ClaudeCodeHooks, defaultHookConfigPaths } from '../hooks'
 import { containedPluginHookRunner } from '../hooks/contained'
+import { PluginHookHealth } from '../hooks/plugin-health'
 import type { UnsandboxedRequest } from '../../sandbox/consent'
 import { createJobTools, installJobsPromptSection, JobRegistry } from '../jobs'
 import { ComputerUseConfigStore } from '../computer-use/config'
@@ -310,6 +311,8 @@ export class HarnessHost {
   readonly workflows: WorkflowEngine
   readonly workflowRuns = new WorkflowRunRegistry()
   readonly hooks: ClaudeCodeHooks
+  /** Each plugin hook's last failure, for the plugin's detail page (SEC-07). */
+  readonly pluginHookHealth = new PluginHookHealth()
   readonly pending = new PendingInteractions()
   readonly attachments: AttachmentStore
   readonly watchlist: WatchlistService
@@ -442,10 +445,12 @@ export class HarnessHost {
     ])
     this.hooks = new ClaudeCodeHooks({
       configPaths: defaultHookConfigPaths({ stateRoot: kept.paths.stateRoot }),
-      // A plugin's hooks run in the process containment (SEC-08).
+      // A plugin's hooks run in the process containment (SEC-08) with the
+      // safe and declared variables and a 30 s timeout (SEC-07).
       pluginHookRunner: containedPluginHookRunner({
         runtime: kept.processRuntime,
         stateRoot: kept.paths.stateRoot,
+        health: this.pluginHookHealth,
       }),
     })
     this.projectMcp = new ProjectMcpInstances({

@@ -82,16 +82,21 @@ export function pluginComponentViews(input: {
       ...base,
       state: own.state,
       reason: own.reason === null ? null : scrub(own.reason),
+      ...(own.variables ? { variables: own.variables } : {}),
     }
   })
 }
 
-/** What the package may do once active: run local commands, reach the network. */
+/**
+ * What the package may do once active: run local commands, reach the
+ * network, read the variables its manifest's `env` names (SEC-07).
+ */
 export function pluginPermissions(resolved: ResolvedPluginPackage | null): {
   runsCommands: boolean
   network: boolean
+  env: string[]
 } {
-  if (!resolved) return { runsCommands: false, network: false }
+  if (!resolved) return { runsCommands: false, network: false, env: [] }
   return {
     runsCommands:
       resolved.mcpServers.some((server) => server.transport === 'stdio') ||
@@ -99,6 +104,7 @@ export function pluginPermissions(resolved: ResolvedPluginPackage | null): {
     network:
       resolved.mcpServers.some((server) => server.transport !== 'stdio') ||
       resolved.components.some((component) => component.kind === 'app'),
+    env: [...resolved.envAllowlist],
   }
 }
 
@@ -142,7 +148,7 @@ function memberState(
     readonly projectRoot: string | null
   },
   skills: ReturnType<PluginRuntimeView['effectiveSkills']>,
-): Pick<PluginComponentView, 'state' | 'reason'> {
+): Pick<PluginComponentView, 'state' | 'reason' | 'variables'> {
   if (component.kind === 'app') {
     const connection =
       input.runtime.appConnection?.(
@@ -179,6 +185,16 @@ function memberState(
         input.projectRoot,
       ),
     )
+  if (component.kind === 'hook') {
+    // The last run failed (SEC-07): why, and what the hook may be missing.
+    const failure = input.runtime.hookFailure?.(input.pluginId, component.id)
+    if (failure)
+      return {
+        state: 'failed',
+        reason: failure.reason,
+        variables: failure.variables.map((item) => ({ ...item })),
+      }
+  }
   return { state: 'available', reason: null }
 }
 

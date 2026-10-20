@@ -56,6 +56,8 @@ export interface PluginHookContribution {
   readonly scope: PluginScope
   /** `PLUGIN_ROOT`, `PLUGIN_DATA` and their `CLAUDE_` aliases for this package only. */
   readonly env: Record<string, string>
+  /** Names its manifest's `env` lets the hooks read when they run (SEC-07). */
+  readonly allowedEnv: readonly string[]
   readonly config: ClaudeCodeHookConfig
 }
 
@@ -102,6 +104,7 @@ export function pluginContributions(input: {
       hooks.push({
         pluginId: item.pluginId,
         scope: item.scope,
+        allowedEnv: [...item.resolved.envAllowlist],
         env: { ...vars },
         config,
       })
@@ -221,6 +224,7 @@ function hookConfig(
       ...(matcher !== undefined ? { matcher } : {}),
       hooks: [
         {
+          id: hook.id,
           command: hook.command,
           ...(hook.timeoutSec !== undefined
             ? { timeoutSec: hook.timeoutSec }
@@ -500,6 +504,7 @@ function hookSets(
     id: `${set.pluginId}@${set.scope}`,
     pluginId: set.pluginId,
     env: set.env,
+    allowedEnv: set.allowedEnv,
     config: set.config,
   }))
 }
