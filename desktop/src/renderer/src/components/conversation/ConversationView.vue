@@ -90,6 +90,7 @@ import HeroProfilePrompt from './HeroProfilePrompt.vue'
 import {
   conversationCrumbs,
   conversationPhase,
+  sessionRunning,
   isChildLineage,
 } from './conversationModel'
 import { TrajectoryViewAsync } from '../trajectory/lazy'
@@ -232,6 +233,17 @@ const isActiveSession = computed(() => viewingId.value === ctx.sessionId.value)
 const conversationRunning = computed(
   () => conversation.value?.running.value ?? false,
 )
+/** The composer and TurnStatus read the same running state (FIX-03). */
+const runningHere = computed(() =>
+  sessionRunning({
+    windowOpen:
+      conversation.value?.sessionId === viewingId.value &&
+      conversation.value.window.value.openState === 'open',
+    logRunning: conversationRunning.value,
+    active: isActiveSession.value,
+    runtimeBusy: ctx.busy.value,
+  }),
+)
 const composerPhase = computed(() =>
   deriveComposerPhase({
     content: {
@@ -242,7 +254,7 @@ const composerPhase = computed(() =>
     promptAttempted: promptedSessions.value.has(viewingId.value),
     pendingInteraction:
       isActiveSession.value && Boolean(pendingInteraction.value),
-    busy: isActiveSession.value && ctx.busy.value,
+    busy: runningHere.value,
   }),
 )
 // Durable external tasks remain useful even when this chat has no visible messages.
@@ -372,7 +384,7 @@ const buildSession = computed(
     Boolean(knownSession.value.project_path) &&
     !viewingDraft.value,
 )
-const agentBusyHere = computed(() => isActiveSession.value && ctx.busy.value)
+const agentBusyHere = runningHere
 
 // ── turn scrubber ─────────────────────────────────────────────────────────
 /** Topmost visible chat row (ChatTimeline `first-visible`). */
@@ -1120,7 +1132,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           ref="composer"
           :dictation-chat="ctx.sessionId.value"
           :hero="phase === 'hero'"
-          :busy="ctx.busy.value"
+          :busy="runningHere"
           :interaction-blocked="Boolean(pendingInteraction)"
           :queue-occupied="Boolean(ctx.queuedPrompts.value.length)"
           :goal="activeGoal"

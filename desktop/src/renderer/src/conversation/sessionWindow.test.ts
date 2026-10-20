@@ -158,4 +158,56 @@ describe('SessionWindow', () => {
     expect(window.snapshot.openState).toBe('open')
     expect(api.calls).toHaveLength(3)
   })
+
+  it('FIX-03 8 · a gap repair keeps the older pages already loaded', async () => {
+    const log = new LogBuilder()
+    for (let turn = 1; turn <= 4; turn++) {
+      log.add('turn/start', { turn })
+      log.user(`u${turn}`, `q${turn}`)
+      log.add('turn/end', { turn, reason: { kind: 'completed' } })
+    }
+    const { window, api, rows } = setup(log, 4)
+    await window.open()
+    await window.loadOlder()
+    expect(rows()).toEqual(['user: q2', 'user: q3', 'user: q4'])
+    const base = window.baseSeq
+    const missing = log.add('turn/start', { turn: 5 })
+    const after = log.user('u5', 'q5')
+    api.log.push(missing, after)
+    window.acceptLive([after])
+    await settle()
+    expect(window.tailSeq).toBe(after.seq)
+    expect(window.baseSeq).toBe(base)
+    expect(window.snapshot.hasMore).toBe(true)
+    expect(rows()).toEqual(['user: q2', 'user: q3', 'user: q4', 'user: q5'])
+  })
+
+  it('FIX-03 9 · a gap that cannot be stitched reopens the window instead of dropping events', async () => {
+    const log = conversationLog()
+    const { window, api, rows } = setup(log)
+    await window.open()
+    const missing = log.add('turn/start', { turn: 2 })
+    const after = log.user('u2', 'after gap')
+    // The tail page lags behind the live stream for every repair attempt.
+    const hidden = missing.seq
+    const history = api.history.bind(api)
+    let repairs = 0
+    api.history = async (query) => {
+      const page = await history(query)
+      if (repairs++ < 3)
+        return {
+          ...page,
+          events: page.events.filter((e) => e.seq < hidden),
+          lastSeq: hidden - 1,
+        }
+      return page
+    }
+    api.log.push(missing, after)
+    window.acceptLive([after])
+    await settle()
+    await settle()
+    expect(window.snapshot.openState).toBe('open')
+    expect(window.tailSeq).toBe(after.seq)
+    expect(rows().at(-1)).toBe('user: after gap')
+  })
 })
