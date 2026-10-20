@@ -152,7 +152,15 @@ Codex 自定义提供方继承 `query_params`（如 Azure 的 `api-version`，�
 
 Scheduler 与普通调用使用同一服务、权限与配额。无人工 answerer 的提问明确结束为 needs_user。根 stop 立即解除 Goal 自动续跑并取消全部受管后代；恢复通知不会自动恢复队列推理。
 
-默认 global concurrency=2、profile concurrency=1、queue=16、每任务32轮、深度3、运行30分钟（最多120分钟）、提问15分钟、已知估算预算10美元。未知成本保持 unknown，不按0处理；这些估算不是厂商账单。
+默认 global concurrency=2、profile concurrency=1、queue=16、每任务32轮、深度3、运行30分钟（最多120分钟）、提问15分钟、已知估算预算10美元、单价未知时每任务 200 万 token。未知成本保持 unknown，不按0处理；这些估算不是厂商账单。
+
+预算按计费方式计算（AGT-07，`budget.ts`）。任务与 KRN-03 相同：一条用户消息或一个 Goal；同一任务内同一委派的后续轮次和重启都不清零（启动时 `reconcile` 按委派日志里每轮的 `usage` 恢复）。
+
+- 计费方式由 `ExecutorRuntime.prepare` 判断：Claude 只有 `CLAUDE_CODE_OAUTH_TOKEN`（没有 API Key 或 `ANTHROPIC_AUTH_TOKEN`）、Codex 使用 ChatGPT 登录（`codexAuth`）是订阅（`subscription`）；其余（API Key、凭据路由、自定义提供方）是 API 计费。
+- 订阅：执行器报告的费用记为 `nominalUsd`，只显示不计入，界面写「订阅额度，不计费用」；由轮数与运行时长约束。
+- API 计费：费用计入任务的美元上限；Claude 另把剩余额度作为 SDK 的 `maxBudgetUsd`；轮次进行中每次用量更新都检查，越过上限即以 `BUDGET_LIMIT` 结束。执行器没有报告费用时（Codex），用 MOD-01 模型目录单价按 token 估算（`pricing.ts`）；单价未知时 token 计入 `maxUnpricedTokensPerTask`，越过以 `TOKEN_LIMIT` 结束。
+- Codex 的 token 取线程累计值的差：`thread/tokenUsage/updated` 的 `last` 只是最近一次模型请求，`total` 是线程合计，本轮用量 = 最新 `total` − 本轮第一次请求之前的 `total`（第一次的 `total − last`），重复通知不重复计数。
+- 根任务费用上限（KRN-03 `TaskTree`）：已结算轮次的 API 费用经 `taskBudget.charge` 计入根会话当前任务；任务已花完时不再开始新的委派轮次（`BUDGET_LIMIT`）。
 
 Codex 协议的 120 秒空闲计时只约束两轮之间与启动阶段：轮次进行中（`CodexRpc.hold()`）或有待回答的 server request（提问）时暂停，长时间没有输出的命令或几分钟后才回答的问题不会被判空闲。运行时限（`runTimeoutMs`）是长轮次的唯一兜底，到时中断并以 `cancelled` + `RUN_TIMEOUT` 结束。续聊的 `thread/resume` 带 `excludeTurns: true`，不再把整段历史放进一个响应帧；恢复检查改用 `thread/read`（不含轮次）取状态，再按新到旧分页调用 `thread/turns/list`（`itemsView: summary`），单页结果超过 1 MiB 时减半重取，最多取最近 20 轮。
 

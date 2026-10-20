@@ -1372,6 +1372,16 @@ export class HarnessHost {
           : 'model',
     }
   }
+  /** Whether a delegation's root task has spent its cost cap (AGT-07). */
+  delegationTaskSpent(owner: DelegationOwner): boolean {
+    return this.taskTree(owner.rootSessionId).spent()
+  }
+
+  /** Charge a settled external run's API cost to its root task (AGT-07). */
+  chargeDelegation(owner: DelegationOwner, usd: number): void {
+    this.taskTree(owner.rootSessionId).chargeUsd(usd)
+  }
+
   delegationParent(owner: DelegationOwner): DelegationParentContext {
     const parent =
       this.agents.get(owner.parentAgentId) ??

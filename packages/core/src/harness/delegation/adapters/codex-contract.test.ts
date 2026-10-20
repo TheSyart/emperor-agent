@@ -43,7 +43,7 @@ it('maps only public agent text and tool state; reasoning never crosses the norm
     }),
   ).toEqual([{ type: 'turn_finished', status: 'interrupted' }])
 })
-it('uses per-turn last token usage rather than cumulative thread totals and never invents USD cost', () => {
+it('without a run meter reads only the last request, and never invents USD cost', () => {
   expect(
     normalizeCodexNotification('thread/tokenUsage/updated', {
       tokenUsage: {
