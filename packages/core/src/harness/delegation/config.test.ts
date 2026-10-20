@@ -312,3 +312,23 @@ it('keeps diagnostics mode off unless saved on, and writes the flag only when on
     rmSync(root, { recursive: true, force: true })
   }
 })
+it('验证后再应用 is off by default and stored only when on (AGT-06)', async () => {
+  const { defaultExecutorConfig } = await import('./config')
+  const root = mkdtempSync(join(tmpdir(), 'executor-verify-first-'))
+  try {
+    const store = new ExecutorConfigStore(root)
+    expect(store.read().verifyBeforeApply).toBeUndefined()
+    const on = store.update(store.read().revision, {
+      ...defaultExecutorConfig(),
+      verifyBeforeApply: true,
+    })
+    expect(on.verifyBeforeApply).toBe(true)
+    const off = store.update(on.revision, { ...on, verifyBeforeApply: false })
+    expect(off.verifyBeforeApply).toBeUndefined()
+    expect(readFileSync(join(root, 'config.json'), 'utf8')).not.toContain(
+      'verifyBeforeApply',
+    )
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

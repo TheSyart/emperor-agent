@@ -103,6 +103,23 @@ export function mayWriteFiles(name: string): boolean {
   )
 }
 
+/**
+ * A call that may change the project's files, arguments considered:
+ * collect_agent with apply writes a subagent's result into it, so the turn
+ * takes its before snapshot first and the turn's card can undo the apply
+ * (AGT-06). It holds no workspace lease (the apply takes its own).
+ */
+export function callMayWriteFiles(call: {
+  name: string
+  arguments?: unknown
+}): boolean {
+  if (mayWriteFiles(call.name)) return true
+  return (
+    call.name === 'collect_agent' &&
+    (call.arguments as { apply?: unknown } | null | undefined)?.apply === true
+  )
+}
+
 type Setup =
   | { mode: 'git'; place: TurnRepository; before: TurnSnapshot }
   | { mode: 'git'; skipped: 'timeout' | 'git-error' }
@@ -139,7 +156,7 @@ export class TurnFileRecorder {
     ): () => void
   }): () => void {
     const before: PreExecuteMiddleware = async (call) => {
-      if (call.agent !== undefined && mayWriteFiles(call.name))
+      if (call.agent !== undefined && callMayWriteFiles(call))
         await this.beforeWrite(call.agent)
       return undefined
     }

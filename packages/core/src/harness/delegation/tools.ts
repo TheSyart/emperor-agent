@@ -22,9 +22,11 @@ import {
 import type {
   DelegationOwner,
   DelegationRecord,
+  DelegationResult,
   DelegationRunRecord,
   DelegationStart,
 } from './types'
+import { resultLine } from './notices'
 import type { DelegationState } from './fold'
 import { buildDelegationContext, type DelegationBriefInput } from './context'
 import { jsonSchema } from '../tools/json-schema'
@@ -62,13 +64,13 @@ const EXTERNAL_START_FIELDS = {
     .enum(['isolated-worktree', 'shared-readonly', 'shared-exclusive'])
     .optional()
     .describe(
-      'External backends only: where the child works. shared-readonly reviews without writing (the only choice in Plan mode or a read-only session); isolated-worktree (default otherwise) writes in a separate worktree.',
+      'External backends only: where the child works. shared-readonly reviews without writing (the only choice in Plan mode or a read-only session, and the default outside Git); isolated-worktree (default otherwise) writes in a separate worktree (a folder copy outside Git), and its changes come back as a result to apply.',
     ),
   base: z
     .enum(['committed', 'snapshot'])
     .optional()
     .describe(
-      'External backends only: the code the child starts from, the last commit (default) or a snapshot of the current changes.',
+      'External backends only: the code a writing child starts from: snapshot (default) is the workspace as it is now, uncommitted and new files included (.gitignore respected); committed is the last commit only (use it above 10,000 changed files).',
     ),
   model: z
     .string()
@@ -112,6 +114,12 @@ export interface DelegationToolService {
   ): Promise<DelegationRunRecord>
   /** End a run that has no outcome (AGT-04). */
   abandon?(id: string, by: 'user' | 'model'): Promise<DelegationRecord>
+  /** Apply a run's result to the project (AGT-06). */
+  applyResult?(
+    id: string,
+    runId: string,
+    by: 'user' | 'model',
+  ): Promise<DelegationResult>
 }
 export interface DelegationToolOptions {
   internalManager: SubagentManager
@@ -122,7 +130,9 @@ export interface DelegationToolOptions {
     agent: Agent,
   ) => Omit<DelegationBriefInput, 'prompt' | 'description' | 'context'>
   parentReadOnly?: (agent: Agent) => boolean
-  /** Ask the user (collect_agent abandon); absent: the request fails closed. */
+  /** The parent works in a Git project (absent: assumed). Outside Git a task defaults to a review (AGT-06). */
+  parentInGit?: (agent: Agent) => boolean
+  /** Ask the user (collect_agent abandon, apply); absent: the request fails closed. */
   approve?: (request: {
     agent: Agent
     callId: string
@@ -169,6 +179,7 @@ function closingText(
       providerSessionId: record.providerSessionId,
       providerTurnId: run.providerTurnId,
     }) +
+    resultLine(run) +
     '\n' +
     (run.summary ?? '(executor returned no closing text)')
   )
@@ -262,7 +273,18 @@ export function createDelegationTools(
         if (ctx.signal.aborted)
           throw new ToolError('parent turn was cancelled', 'ABORTED')
         const owner = options.ownerResolver(agent, ctx.callId),
-          context = args.context ?? 'isolated'
+          context = args.context ?? 'isolated',
+          // Outside Git, or a read-only parent: a review in place. A write
+          // starts from the workspace as it is now (AGT-06).
+          workspace =
+            args.workspace ??
+            (options.parentReadOnly?.(agent) ||
+            options.parentInGit?.(agent) === false
+              ? 'shared-readonly'
+              : 'isolated-worktree'),
+          base =
+            args.base ??
+            (workspace === 'shared-readonly' ? 'committed' : 'snapshot')
         if (args.output_schema)
           jsonSchema.assertObjectJsonSchema(args.output_schema)
         const prompt = buildDelegationContext({
@@ -279,12 +301,8 @@ export function createDelegationTools(
             description: args.description,
             prompt,
             context,
-            workspace:
-              args.workspace ??
-              (options.parentReadOnly?.(agent)
-                ? 'shared-readonly'
-                : 'isolated-worktree'),
-            base: args.base ?? 'committed',
+            workspace,
+            base,
             model: args.model,
             outputSchema: args.output_schema,
             runInBackground: args.run_in_background ?? true,
@@ -370,6 +388,95 @@ export function createDelegationTools(
         }
       },
     })
+  /** collect_agent({apply}): the user decides on an approval card (AGT-06). */
+  const applyResult = async (
+    id: string,
+    runId: string,
+    state: DelegationState,
+    ctx: ToolRunContext,
+  ) => {
+    const run = state.runs[runId]!,
+      result = run.result
+    if (!result || result.totals.files === 0)
+      throw new ToolError(
+        'NOTHING_TO_APPLY: run ' + runId + ' left no changed files',
+        'NOTHING_TO_APPLY',
+      )
+    if (result.state !== 'ready' && result.state !== 'conflicted')
+      throw new ToolError(
+        'RESULT_SETTLED: the result of run ' +
+          runId +
+          ' was already ' +
+          result.state,
+        'RESULT_SETTLED',
+      )
+    const s = service()
+    if (!s.applyResult || !options.approve)
+      throw new ToolError(
+        'applying a result needs the user, but no approval channel is available',
+        'APPROVAL_UNAVAILABLE',
+      )
+    const { files, additions, deletions } = result.totals
+    const outcome = await options.approve({
+      agent: caller(ctx),
+      callId: ctx.callId,
+      reason:
+        'Apply the result of external task "' +
+        (state.record!.startSpec?.description || id) +
+        '" (' +
+        id +
+        ', run ' +
+        runId +
+        '): ' +
+        files +
+        (files === 1 ? ' file' : ' files') +
+        ' +' +
+        additions +
+        ' −' +
+        deletions +
+        ', merged into the current workspace. A conflict applies nothing.',
+      signal: ctx.signal,
+    })
+    if (outcome !== 'allowed-once')
+      throw new ToolError(
+        outcome === 'rejected'
+          ? 'APPROVAL_REJECTED: the user did not allow applying this result'
+          : 'APPROVAL_' +
+              outcome.toUpperCase() +
+              ': applying this result was not approved',
+        outcome === 'rejected'
+          ? 'APPROVAL_REJECTED'
+          : 'APPROVAL_' + outcome.toUpperCase(),
+      )
+    const applied = await s.applyResult(id, runId, 'model')
+    const meta = {
+      subagentId: id,
+      runId,
+      result: {
+        state: applied.state,
+        totals: applied.totals,
+        ...(applied.conflicts ? { conflicts: applied.conflicts } : {}),
+      },
+    }
+    if (applied.state === 'conflicted')
+      return {
+        content:
+          'Not applied: these files also changed in the project: ' +
+          (applied.conflicts ?? []).join(', ') +
+          '. Nothing was written; the result is kept for the user to resolve or discard.',
+        meta,
+        isError: true,
+      }
+    return {
+      content:
+        'Applied ' +
+        applied.totals.files +
+        (applied.totals.files === 1 ? ' file' : ' files') +
+        " to the project with the user's approval: " +
+        applied.files.map((file) => file.path).join(', '),
+      meta,
+    }
+  }
   return [
     start('subagent'),
     start('subagent_fork'),
@@ -530,7 +637,7 @@ export function createDelegationTools(
       category: 'agents',
       name: 'collect_agent',
       description:
-        'Wait for a specific external run and collect its summary, structured output and delivery check state. Successful text results can be used directly. Check changed files before final delivery or integration; execution completion is not evidence that tests passed. ' +
+        'Wait for a specific external run and collect its summary, structured output and delivery check state. Successful text results can be used directly. A writing run changes files only in its isolated workspace; its result lists them, and apply=true asks the user to apply them to the project (a three-way merge into the current workspace; a conflict applies nothing and lists the files). Check changed files before final delivery; execution completion is not evidence that tests passed. ' +
         'If the last run ended without an outcome (Emperor or the computer restarted, or its stop could not be confirmed), abandon=true asks the user to mark it as ended, which releases its workspace and lets the task and any Goal move on.',
       input: z.object({
         agent_id: z.string(),
@@ -540,6 +647,12 @@ export function createDelegationTools(
           .optional()
           .describe(
             'Mark the run as ended as it is, after the user approves. Only for a run that has no outcome; a live run is stopped with interrupt_agent.',
+          ),
+        apply: z
+          .boolean()
+          .optional()
+          .describe(
+            "Apply the settled run's changed files to the project, after the user approves on an approval card.",
           ),
       }),
       execute: async (args, ctx) => {
@@ -555,6 +668,7 @@ export function createDelegationTools(
             'run is not part of this conversation',
             'RUN_NOT_FOUND',
           )
+        if (args.apply) return applyResult(args.agent_id, runId, state, ctx)
         if (args.abandon) {
           const run = state.runs[runId]!
           if (

@@ -342,3 +342,115 @@ for (const theme of ['light', 'dark'] as const) {
     await shot(page, `chat-turn-files-undo-${theme}`)
   })
 }
+
+// AGT-06: subagent result cards — the same shape as the turn files card,
+// one gold action, conflicts named, an applied result with 撤销, and the
+// 14-day cleanup prompt.
+for (const theme of ['light', 'dark'] as const) {
+  test(`subagent result cards (${theme})`, async ({ page }) => {
+    await open(page, 'subagent-results', theme, { width: 1000, height: 1600 })
+    await toTop(page)
+    const cards = page.locator('[data-delegation-result]')
+    await expect(cards).toHaveCount(4)
+    const ready = cards.nth(0)
+    await expect(ready.locator('.headline')).toHaveText('Codex 改了 6 个文件')
+    await expect(ready.locator('.head .add')).toHaveText('+120')
+    await expect(ready.locator('.head .del')).toHaveText('−8')
+    await expect(ready.locator('.file')).toHaveCount(3)
+    await expect(ready.locator('[data-variant="primary"]')).toHaveCount(1)
+    await expect(ready.locator('[data-action="apply"]')).toHaveText(
+      '应用到项目',
+    )
+    const badge = (await ready.locator('.icon-badge').boundingBox())!
+    expect(badge.width).toBeGreaterThanOrEqual(40)
+    expect(await ready.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(
+      true,
+    )
+    await ready.screenshot({
+      path: resolve(screenshotDir, `subagent-result-ready-${theme}.png`),
+      animations: 'disabled',
+    })
+    const conflicted = cards.nth(1)
+    await expect(conflicted.locator('[data-result-conflict]')).toContainText(
+      '1 个文件与项目里的改动冲突',
+    )
+    await expect(conflicted.locator('.file').first()).toContainText('冲突')
+    await conflicted.screenshot({
+      path: resolve(screenshotDir, `subagent-result-conflict-${theme}.png`),
+      animations: 'disabled',
+    })
+    const applied = cards.nth(2)
+    await expect(applied.locator('.status')).toHaveText('已应用到项目')
+    await expect(applied.locator('[data-action="undo"]')).toBeVisible()
+    await expect(cards.nth(3).locator('[data-result-cleanup]')).toContainText(
+      '已保留 15 天',
+    )
+    await shot(page, `chat-subagent-results-${theme}`)
+  })
+}
+
+test('subagent result card at a narrow width keeps its actions inside', async ({
+  page,
+}) => {
+  await open(page, 'subagent-results', 'light', { width: 520, height: 1600 })
+  await toTop(page)
+  const ready = page.locator('[data-delegation-result]').first()
+  expect(await ready.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(
+    true,
+  )
+  const card = (await ready.boundingBox())!
+  const apply = (await ready.locator('[data-action="apply"]').boundingBox())!
+  expect(apply.x + apply.width).toBeLessThanOrEqual(card.x + card.width)
+  await ready.screenshot({
+    path: resolve(screenshotDir, 'subagent-result-ready-narrow.png'),
+    animations: 'disabled',
+  })
+})
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`subagent result diff dialog (${theme})`, async ({ page }) => {
+    // Only the one Core call the dialog makes.
+    await page.addInitScript(() => {
+      ;(window as unknown as { emperor: unknown }).emperor = {
+        invokeCore: async (operation: string, input: { path: string }) => {
+          if (operation !== 'delegations.diff')
+            throw new Error('not in this fixture')
+          return {
+            path: input.path,
+            truncated: false,
+            diff: [
+              `diff --git a/${input.path} b/${input.path}`,
+              `--- a/${input.path}`,
+              `+++ b/${input.path}`,
+              '@@ -1,6 +1,9 @@',
+              ' <template>',
+              '-  <form class="login">',
+              '+  <form class="login" :class="{ compact }">',
+              '+    <LoginHero v-if="!compact" />',
+              '     <EmailField v-model="email" />',
+              '     <PasswordField v-model="password" />',
+              '+    <RememberMe v-model="remember" />',
+              '   </form>',
+              ' </template>',
+              '',
+            ].join('\n'),
+          }
+        },
+      }
+    })
+    await open(page, 'subagent-results', theme, { width: 1100, height: 900 })
+    await toTop(page)
+    await page
+      .locator('[data-delegation-result]')
+      .first()
+      .locator('[data-action="diff"]')
+      .click()
+    const dialog = page.getByRole('dialog', { name: 'Codex 的改动' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.locator('.ds-diff .line--add').first()).toBeVisible()
+    await expect(dialog.locator('[aria-selected="true"]')).toContainText(
+      'LoginForm.vue',
+    )
+    await shot(page, `chat-subagent-result-diff-${theme}`)
+  })
+}

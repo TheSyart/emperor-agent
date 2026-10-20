@@ -1,5 +1,9 @@
 import type { SandboxMode, SandboxExecutionPolicy } from '../sandbox/policy'
 import type { ObjectJsonSchema } from '../tools/json-schema'
+import type {
+  TurnFileEntry,
+  TurnRevertSkip,
+} from '../../workspace/turn-snapshots'
 export type ExecutorBackend = 'internal' | 'claude-code' | 'codex'
 export type ExternalBackend = Exclude<ExecutorBackend, 'internal'>
 export type RunPhase =
@@ -102,6 +106,12 @@ export interface ExecutorConfig {
    * run's process group when it ends. Off by default.
    */
   diagnosticsMode?: boolean
+  /**
+   * Settings › 子智能体 › 高级 › 验证后再应用 (AGT-06): results go through
+   * the receipt, an independent check and an integration preview before
+   * they reach the project; 应用到项目 on the result card is refused.
+   */
+  verifyBeforeApply?: boolean
 }
 export interface ExecutorProbe {
   status:
@@ -222,7 +232,32 @@ export interface DelegationRecord {
   availability: 'idle' | 'active' | 'needs_recovery' | 'closed'
   createdAt: number
 }
+/**
+ * What a write run left in its isolated workspace (AGT-06): its base and
+ * result commits, the files and lines it changed, and what became of it.
+ * `ready` waits for 应用到项目 / 丢弃; `conflicted` was not applied (the
+ * listed files changed in the project too); `applied` can be undone
+ * (`undo` holds the before/after records) and then reads `reverted`.
+ */
+export interface DelegationResult {
+  base: string
+  commit: string
+  files: TurnFileEntry[]
+  totals: { files: number; additions: number; deletions: number }
+  truncated?: true
+  state: 'ready' | 'conflicted' | 'applied' | 'reverted' | 'discarded'
+  conflicts?: string[]
+  /** When the run's result was recorded. */
+  at: number
+  /** When it last changed state. */
+  changedAt?: number
+  by?: 'user' | 'model'
+  undo?: { before: string; after: string }
+  reverted?: { reverted: string[]; skipped: TurnRevertSkip[] }
+}
 export interface DelegationRunRecord {
+  /** The run's file changes, waiting to be applied or discarded (AGT-06). */
+  result?: DelegationResult
   goalFailureDisposition?: { source: 'human'; reason: string; at: number }
   /**
    * "标记为已结束" (AGT-04): the user, or the model with the user's

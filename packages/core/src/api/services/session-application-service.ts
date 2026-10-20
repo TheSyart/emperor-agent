@@ -27,6 +27,11 @@ export interface SessionApplicationServiceDeps {
   forgetSessionTree?(sessionId: string, dir: string): void
   /** Drop a purged session's kept turn snapshots (turnFiles.forgetSession). */
   forgetTurnFiles(sessionId: string, projectRoot: string | null): Promise<void>
+  /**
+   * Remove what a purged session's subagents left: result worktrees, folder
+   * copies, private refs and undo records (AGT-06).
+   */
+  forgetDelegations?(sessionId: string): Promise<void>
   closeTerminals(sessionId: string): void
   activateSession(sessionId: string): SessionEntry
   /** Optional: interrupt a running turn when the session is archived (host.stop). */
@@ -141,6 +146,7 @@ export class CoreSessionApplicationService {
     const record = this.deps.sessions.purgeTrashed(sessionId)
     if (!record) throw new Error('该会话已不在最近删除中')
     await this.forgetTurnFiles(record)
+    await this.forgetDelegations(sessionId)
     return { purged: true }
   }
 
@@ -154,6 +160,7 @@ export class CoreSessionApplicationService {
       const record = this.deps.sessions.purgeTrashed(id)
       if (!record) continue
       await this.forgetTurnFiles(record)
+      await this.forgetDelegations(id)
       purged.push(id)
     }
     return purged
@@ -168,6 +175,10 @@ export class CoreSessionApplicationService {
     } catch {
       // The session itself is still purged; leftovers are only disk space.
     }
+  }
+
+  private async forgetDelegations(sessionId: string): Promise<void> {
+    await this.deps.forgetDelegations?.(sessionId).catch(() => undefined)
   }
 
   private async forgetTurnFiles(record: TrashedSession): Promise<void> {

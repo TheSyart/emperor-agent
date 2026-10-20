@@ -171,6 +171,7 @@ function nodeTime(node: ChatNode | undefined): number | null {
     case 'turnTail':
       return node.data.endedAt
     case 'turnFiles':
+    case 'delegationResult':
     case 'workflowRun':
       return null
     default:

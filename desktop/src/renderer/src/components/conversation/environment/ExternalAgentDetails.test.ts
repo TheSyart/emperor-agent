@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   integrateDelegation: vi.fn(),
   closeDelegation: vi.fn(),
   abandonDelegation: vi.fn(),
+  listExecutors: vi.fn(),
   core: vi.fn(),
 }))
 vi.mock('../../../api/delegations', () => api)
@@ -68,6 +69,7 @@ async function mount() {
   return document.body
 }
 beforeEach(() => {
+  api.listExecutors.mockResolvedValue({ config: {}, profiles: [] })
   api.getDelegation.mockResolvedValue(state())
   api.getDelegationReceipt.mockResolvedValue({
     receipt: null,
@@ -334,4 +336,19 @@ it('names the task limits a run stopped at', async () => {
   root.remove()
   const again = await mount()
   expect(again.textContent).toContain('已达到单任务费用上限')
+})
+it('keeps the receipt, check and preview chain out of sight by default (AGT-06)', async () => {
+  const dom = await mount()
+  expect(dom.textContent).not.toContain('文件交付与检查')
+  expect(dom.textContent).not.toContain('收集成果')
+  expect(dom.textContent).not.toContain('生成整合预览')
+})
+it('shows the chain again under 高级 › 验证后再应用 (AGT-06)', async () => {
+  api.listExecutors.mockResolvedValue({
+    config: { verifyBeforeApply: true },
+    profiles: [],
+  })
+  const dom = await mount()
+  expect(dom.textContent).toContain('文件交付与检查')
+  expect(dom.textContent).toContain('收集成果')
 })

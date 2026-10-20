@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, readFileSync, realpathSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { isAbsolute, join, relative, sep } from 'node:path'
 import type {
   DelegationOwner,
   DelegationStart,
 } from '../harness/delegation/types'
 import { DelegationError } from '../harness/delegation/types'
-import type { SnapshotService, BaseSnapshot } from './delegation-snapshot'
+import {
+  placedGit,
+  type SnapshotService,
+  type BaseSnapshot,
+} from './delegation-snapshot'
 import type { HardenedGitRunner } from './git-runner'
 import type { WorkspaceMutationCoordinator } from './mutation-coordinator'
 import {
@@ -14,12 +18,6 @@ import {
   withPersistenceLockSync,
 } from '../store/persistence'
 import { safeDelegationKey } from '../harness/delegation/fold'
-import {
-  ArtifactStore,
-  artifactTreeDigest,
-  workspaceArtifacts,
-  sha256,
-} from '../harness/delegation/artifacts'
 export interface DelegationWorkspaceLease {
   id: string
   revision: number
@@ -29,7 +27,19 @@ export interface DelegationWorkspaceLease {
   mode: DelegationStart['workspace']
   status: 'preparing' | 'ready' | 'retained' | 'released'
   snapshot?: BaseSnapshot
+  /**
+   * A folder outside Git that a child may write (AGT-06): it works in a
+   * copy (`path`), a private Git directory keeps the copy's baseline
+   * commit, and `source` is the folder a result applies back to.
+   */
+  copy?: { gitDir: string; base: string; source: string }
+  /** Its result was applied, discarded or its conversation purged (AGT-06). */
+  cleaned?: boolean
 }
+/** A copy refuses folders with more files than this (review in place instead). */
+export const COPY_FILE_LIMIT = 10_000
+/** Never copied into a child's folder copy. */
+const COPY_EXCLUDES = ['.git', 'node_modules/', '.DS_Store', '.env*']
 export class DelegationWorkspaceService {
   constructor(
     private readonly options: {
@@ -40,41 +50,6 @@ export class DelegationWorkspaceService {
       save?: (path: string, text: string) => void
     },
   ) {}
-  private async archiveBaseline(
-    lease: DelegationWorkspaceLease,
-  ): Promise<void> {
-    const store = new ArtifactStore(join(this.options.root, 'artifacts'))
-    await this.options.mutations.runExclusive(lease.cwd, 'agent', async () => {
-      const captured = await workspaceArtifacts(
-        lease.cwd,
-        store,
-        this.options.runner,
-      )
-      const after = await workspaceArtifacts(
-        lease.cwd,
-        store,
-        this.options.runner,
-      )
-      const digest = artifactTreeDigest(captured.files)
-      if (artifactTreeDigest(after.files) !== digest)
-        throw new DelegationError(
-          'TREE_CHANGED',
-          'workspace changed while recording its initial baseline',
-        )
-      durableReplaceSync(
-        join(this.options.root, 'baselines', lease.id + '.json'),
-        JSON.stringify({
-          schemaVersion: 1,
-          leaseId: lease.id,
-          cwd: lease.cwd,
-          ownerDigest: sha256(JSON.stringify(lease.owner)),
-          digest,
-          files: captured.files,
-          excluded: captured.excluded,
-        }) + '\n',
-      )
-    })
-  }
   private path(id: string): string {
     safeDelegationKey(id)
     return join(this.options.root, 'leases', id + '.json')
@@ -101,12 +76,93 @@ export class DelegationWorkspaceService {
       )
     return value
   }
+  /**
+   * A non-Git folder's copy: the folder is read once (`git add` into a
+   * private repository), the baseline committed there, and the copy
+   * written from those objects, so the child never touches the folder.
+   */
+  private async copyFolder(
+    id: string,
+    source: string,
+    path: string,
+  ): Promise<DelegationWorkspaceLease['copy']> {
+    const gitDir = join(this.options.root, 'workspaces', id + '.git')
+    mkdirSync(path, { recursive: true, mode: 0o700 })
+    await this.options.runner.execute(join(this.options.root, 'workspaces'), [
+      'init',
+      '-q',
+      '--bare',
+      gitDir,
+    ])
+    mkdirSync(join(gitDir, 'info'), { recursive: true })
+    // Emperor's own state inside the folder is never part of the copy.
+    const own = relative(source, realpathSync(this.options.root))
+    const excludes = [
+      ...COPY_EXCLUDES,
+      ...(own && !own.startsWith('..') && !isAbsolute(own)
+        ? ['/' + own.split(sep).join('/') + '/']
+        : []),
+    ]
+    writeFileSync(join(gitDir, 'info', 'exclude'), excludes.join('\n') + '\n')
+    const from = placedGit(this.options.runner, source, [
+      `--git-dir=${gitDir}`,
+      `--work-tree=${source}`,
+    ])
+    const tooMany = () =>
+      new DelegationError(
+        'COPY_LIMIT',
+        `more than ${COPY_FILE_LIMIT} files to copy; review the folder in place (shared-readonly) instead`,
+      )
+    // Counted before anything is read.
+    if (
+      (await from(['ls-files', '-z', '--others', '--exclude-standard'])).stdout
+        .split('\0')
+        .filter(Boolean).length > COPY_FILE_LIMIT
+    )
+      throw tooMany()
+    await from(['add', '-A', '--ignore-errors'], { allowedExitCodes: [0, 1] })
+    const staged = (await from(['ls-files', '--stage', '-z'])).stdout
+      .split('\0')
+      .filter(Boolean)
+    if (staged.length > COPY_FILE_LIMIT) throw tooMany()
+    // Links and nested repositories are not copied (a link could lead out).
+    const unsupported = staged
+      .filter((line) => /^(120000|160000) /.test(line))
+      .map((line) => line.slice(line.indexOf('\t') + 1))
+    if (unsupported.length)
+      await from(['update-index', '-z', '--force-remove', '--stdin'], {
+        stdin: unsupported.join('\0') + '\0',
+      })
+    const tree = (await from(['write-tree'])).stdout.trim()
+    const base = (
+      await from(['commit-tree', '--no-gpg-sign', tree], {
+        stdin: 'Emperor delegation folder baseline\n',
+        env: {
+          GIT_AUTHOR_NAME: 'Emperor Agent',
+          GIT_AUTHOR_EMAIL: 'delegation@localhost',
+          GIT_COMMITTER_NAME: 'Emperor Agent',
+          GIT_COMMITTER_EMAIL: 'delegation@localhost',
+        },
+      })
+    ).stdout.trim()
+    await from(['update-ref', 'HEAD', base])
+    const into = placedGit(this.options.runner, path, [
+      `--git-dir=${gitDir}`,
+      `--work-tree=${path}`,
+    ])
+    await into(['read-tree', base])
+    // -u keeps the index's stat data for the copy: status stays cheap.
+    await into(['checkout-index', '-a', '-f', '-u'])
+    return { gitDir, base, source }
+  }
   async prepare(
     owner: DelegationOwner,
     spec: Pick<DelegationStart, 'workspace' | 'base'> & {
       cwd: string
       readOnly?: boolean
       untracked?: string[]
+      /** Stopping the run ends a wait for the workspace (AGT-06). */
+      signal?: AbortSignal | null
     },
   ): Promise<DelegationWorkspaceLease> {
     if (
@@ -119,7 +175,7 @@ export class DelegationWorkspaceService {
       )
     const source = realpathSync(spec.cwd),
       id = 'dwl-' + randomUUID()
-    const path =
+    const isolated =
       spec.workspace === 'isolated-worktree'
         ? join(this.options.root, 'workspaces', id)
         : source
@@ -128,11 +184,12 @@ export class DelegationWorkspaceService {
       revision: 1,
       owner: structuredClone(owner),
       cwd: source,
-      path,
+      path: isolated,
       mode: spec.workspace,
       status: 'preparing',
     }
-    // Intent survives any Git operation or final-save failure; no automatic deletion of these paths.
+    // Intent survives any Git operation or final-save failure; the paths go
+    // with their result (applied, discarded, conversation purged; AGT-06).
     this.save(lease)
     const probe = await this.options.runner.execute(
       source,
@@ -140,15 +197,17 @@ export class DelegationWorkspaceService {
       { allowedExitCodes: [0, 128] },
     )
     if (probe.exitCode !== 0) {
-      if (spec.workspace === 'isolated-worktree')
-        throw new DelegationError(
-          'NOT_GIT_WORKSPACE',
-          'non-Git writes require explicit shared-exclusive',
-        )
-      lease = { ...lease, revision: 2, status: 'ready' }
-      await this.archiveBaseline(lease)
+      // Outside Git (AGT-06): a review reads the folder in place; a write
+      // works in a copy, so the main session is never locked out.
+      if (spec.workspace !== 'shared-readonly') {
+        const path = join(this.options.root, 'workspaces', id)
+        lease = { ...lease, path, cwd: path }
+        this.save(lease)
+        const copy = await this.copyFolder(id, source, path)
+        lease = { ...lease, copy, revision: 2, status: 'ready' }
+      } else lease = { ...lease, revision: 2, status: 'ready' }
       this.save(lease)
-      return lease
+      return structuredClone(lease)
     }
     const capture = () =>
       this.options.snapshots.capture({
@@ -161,7 +220,12 @@ export class DelegationWorkspaceService {
     const snapshot =
       spec.workspace === 'shared-readonly'
         ? await capture()
-        : await this.options.mutations.runExclusive(source, 'agent', capture)
+        : await this.options.mutations.runExclusive(
+            source,
+            'agent',
+            capture,
+            spec.signal,
+          )
     if (spec.workspace === 'isolated-worktree') {
       if (
         snapshot.excluded.some((e) =>
@@ -181,11 +245,14 @@ export class DelegationWorkspaceService {
             ).slice(0, 8192),
         )
       }
-      const lock = await this.options.snapshots.resources.acquire({
-        keys: ['git:' + snapshot.commonDir],
-        mode: 'exclusive',
-        owner: id,
-      })
+      const lock = await this.options.snapshots.resources.acquire(
+        {
+          keys: ['git:' + snapshot.commonDir],
+          mode: 'exclusive',
+          owner: id,
+        },
+        spec.signal,
+      )
       try {
         mkdirSync(join(this.options.root, 'workspaces'), {
           recursive: true,
@@ -195,7 +262,7 @@ export class DelegationWorkspaceService {
           'worktree',
           'add',
           '--detach',
-          path,
+          isolated,
           snapshot.commit,
         ])
       } finally {
@@ -206,13 +273,12 @@ export class DelegationWorkspaceService {
       ...lease,
       cwd:
         spec.workspace === 'isolated-worktree'
-          ? join(path, snapshot.prefix)
+          ? join(isolated, snapshot.prefix)
           : source,
       snapshot,
       status: 'ready',
       revision: 2,
     }
-    await this.archiveBaseline(lease)
     this.save(lease)
     return structuredClone(lease)
   }
@@ -249,6 +315,17 @@ export class DelegationWorkspaceService {
           'workspace belongs to another task',
         )
       lease.status = 'released'
+      lease.revision++
+      this.save(lease)
+      return lease
+    })
+  }
+  /** Its directories are gone with its result (AGT-06): released for good. */
+  retire(id: string): DelegationWorkspaceLease {
+    return withPersistenceLockSync(this.path(id), () => {
+      const lease = this.get(id)
+      lease.status = 'released'
+      lease.cleaned = true
       lease.revision++
       this.save(lease)
       return lease

@@ -120,7 +120,19 @@ export class DelegationReceipts {
       for (const file of baseline.files) this.artifacts.read(file)
       return baseline.files
     }
-    if (!lease.snapshot) {
+    // A folder copy (AGT-06) keeps its baseline in its private Git directory.
+    const git = lease.copy
+      ? {
+          commit: lease.copy.base,
+          commonDir: lease.copy.gitDir,
+          prefix: '',
+          repositoryRoot: lease.copy.source,
+          args: [`--git-dir=${lease.copy.gitDir}`],
+        }
+      : lease.snapshot
+        ? { ...lease.snapshot, args: [] as string[] }
+        : undefined
+    if (!git) {
       const path = join(this.options.root, 'baselines', lease.id + '.json')
       if (!existsSync(path))
         throw new DelegationError(
@@ -131,12 +143,17 @@ export class DelegationReceipts {
       for (const file of files) this.artifacts.read(file)
       return files
     }
-    const { commit, commonDir, prefix } = lease.snapshot,
+    const { commit, commonDir, prefix } = git,
       files: ArtifactFile[] = []
-    const listing = await this.options.runner.execute(
-      lease.snapshot.repositoryRoot,
-      ['ls-tree', '-r', '-z', commit, '--', prefix || '.'],
-    )
+    const listing = await this.options.runner.execute(git.repositoryRoot, [
+      ...git.args,
+      'ls-tree',
+      '-r',
+      '-z',
+      commit,
+      '--',
+      prefix || '.',
+    ])
     if (listing.stdoutTruncated)
       throw new DelegationError(
         'ARTIFACT_LIMIT',
@@ -165,9 +182,9 @@ export class DelegationReceipts {
         // The original worktree usually still holds the pinned base bytes.
         // Verify the Git blob id before using them; changed/deleted files fall
         // back to the immutable object database without decoding binary stdout.
-        const original = join(lease.snapshot.repositoryRoot, repoPath)
+        const original = join(git.repositoryRoot, repoPath)
         let physical: Buffer | undefined,
-          parent = lease.snapshot.repositoryRoot,
+          parent = git.repositoryRoot,
           safe = true
         for (const part of repoPath.split('/')) {
           parent = join(parent, part)
@@ -445,9 +462,11 @@ export class DelegationReceipts {
           version: record.executorVersion ?? 'unknown',
           createdAt: Date.now(),
           cwd: record.cwd,
-          originCwd: lease.snapshot
-            ? join(lease.snapshot.repositoryRoot, lease.snapshot.prefix)
-            : record.cwd,
+          originCwd: lease.copy
+            ? lease.copy.source
+            : lease.snapshot
+              ? join(lease.snapshot.repositoryRoot, lease.snapshot.prefix)
+              : record.cwd,
           leaseId: lease.id,
           ...(lease.snapshot ? { baseCommit: lease.snapshot.commit } : {}),
           baseTreeDigest: artifactTreeDigest(baseFiles),

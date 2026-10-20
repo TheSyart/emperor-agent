@@ -29,6 +29,17 @@ export class DelegationResources {
       (r) => r.keys.includes(key) && r.owner !== exceptOwner,
     )
   }
+  /** Owners of the leases a request would wait for now (AGT-06). */
+  blockers(request: Omit<ResourceRequest, 'owner'>): string[] {
+    const probe = { ...request, owner: '' }
+    return [
+      ...new Set(
+        [...this.active]
+          .filter((active) => conflicts(active, probe))
+          .map((active) => active.owner),
+      ),
+    ]
+  }
   /** Recovered unknown writers block new work without waiting on other quarantines. */
   quarantine(keys: string[], owner: string): ResourceLease {
     const request: ResourceRequest = {
