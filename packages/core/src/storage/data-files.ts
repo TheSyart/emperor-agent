@@ -12,6 +12,11 @@
  * Main owns the credential vault and the two download records; Core owns
  * the rest (the Agent's browser profiles, site permissions and restorable
  * tabs included). Loaded on demand (the settings page), never at startup.
+ *
+ * Not in the inventory: the user's own `mcp_config.json` and `hooks.json`
+ * (USER_OWNED_FILES). Emperor saves them only when the user does, as the
+ * user wrote them, and never writes a version into them or reads one out
+ * of them; no migration touches them (PL-10, FIX-08).
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -44,12 +49,16 @@ function file(
   return { id, path, key, supported, label, owner }
 }
 
+/** The user's own files in the Emperor Home: never versioned or migrated. */
+export const USER_OWNED_FILES: readonly string[] = [
+  'mcp_config.json',
+  'hooks.json',
+]
+
 export const DATA_FILES: readonly DataFileSpec[] = [
   file('installation', 'installation.json', 'schemaVersion', 1, '安装信息'),
   file('settings', 'settings.json', 'version', 1, '设置'),
   file('modelConfig', 'model_config.json', 'schemaVersion', 2, '模型配置'),
-  file('mcpConfig', 'mcp_config.json', 'version', 1, 'MCP 服务器'),
-  file('hooks', 'hooks.json', 'version', 1, 'Hooks'),
   file('scheduler', 'scheduler/jobs.json', 'version', 1, '定时任务'),
   file('sessions', 'sessions/index.json', 'version', 1, '会话索引'),
   file(

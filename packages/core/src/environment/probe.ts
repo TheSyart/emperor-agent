@@ -30,6 +30,7 @@ import {
 } from './models'
 import {
   buildEffectivePath,
+  type EffectivePath,
   queryWindowsRegistryPaths,
   windowsEnvValue,
   type WindowsRegistryPaths,
@@ -80,6 +81,8 @@ const REQUIREMENT_ALIASES: Record<string, EnvironmentToolId> = {
   volta: 'volta',
 }
 const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
+/** Distinct probe answers kept (projects × PATHs × Skill sets). */
+const PROBE_CACHE_LIMIT = 16
 const PROBE_ENV_KEYS = [
   'LANG',
   'LC_ALL',
@@ -204,7 +207,18 @@ export class EnvironmentProbe {
   private readonly runner: EnvironmentProcessRunner
   private readonly resolveExecutable: EnvironmentExecutableResolver
   private readonly windowsPathProvider?: () => Promise<WindowsRegistryPaths>
-  private cache: { key: string; value: EnvironmentProbeStatus } | null = null
+  /**
+   * One answer per question (cache key), newest last, at most
+   * PROBE_CACHE_LIMIT. The execution environment (managed bin on PATH, no
+   * Skills) and the Git / gh runtime check (process PATH, every Skill) ask
+   * different questions for every Git command; one shared slot made each
+   * evict the other and probe the whole catalog again (FIX-08).
+   */
+  private readonly cache = new Map<string, EnvironmentProbeStatus>()
+  /** Probes in flight per question, shared by callers without a signal. */
+  private readonly pending = new Map<string, Promise<EnvironmentProbeStatus>>()
+  /** Bumped by invalidate(): a probe started before must not be cached. */
+  private generation = 0
 
   constructor(opts: EnvironmentProbeOptions) {
     const catalog = opts.catalog
@@ -224,7 +238,9 @@ export class EnvironmentProbe {
   }
 
   invalidate(): void {
-    this.cache = null
+    this.generation += 1
+    this.cache.clear()
+    this.pending.clear()
   }
 
   async getStatus(
@@ -287,9 +303,85 @@ export class EnvironmentProbe {
           ]),
       ),
     })
-    if (!request.forceRefresh && this.cache?.key === cacheKey)
-      return structuredClone(this.cache.value)
+    if (!request.forceRefresh) {
+      const cached = this.cache.get(cacheKey)
+      if (cached) {
+        // Most recently used last.
+        this.cache.delete(cacheKey)
+        this.cache.set(cacheKey, cached)
+        return structuredClone(cached)
+      }
+    }
+    // Callers asking the same question at once share one probe; a caller
+    // with its own signal runs alone so its cancel stays its own.
+    const shared = !request.signal
+    if (shared && !request.forceRefresh) {
+      const running = this.pending.get(cacheKey)
+      if (running) return structuredClone(await running)
+    }
+    const generation = this.generation
+    const probing = this.probeAll({
+      request,
+      loaded,
+      env,
+      project,
+      skills,
+      effectivePath,
+      windowsPaths,
+      homeDir,
+      cacheKey,
+    })
+    if (shared) {
+      this.pending.set(cacheKey, probing)
+      void probing.then(
+        () => this.forgetPending(cacheKey, probing),
+        () => this.forgetPending(cacheKey, probing),
+      )
+    }
+    const value = await probing
+    if (generation === this.generation) this.remember(cacheKey, value)
+    return structuredClone(value)
+  }
 
+  private forgetPending(
+    key: string,
+    probing: Promise<EnvironmentProbeStatus>,
+  ): void {
+    if (this.pending.get(key) === probing) this.pending.delete(key)
+  }
+
+  private remember(key: string, value: EnvironmentProbeStatus): void {
+    this.cache.delete(key)
+    this.cache.set(key, structuredClone(value))
+    while (this.cache.size > PROBE_CACHE_LIMIT) {
+      const oldest = this.cache.keys().next().value
+      if (oldest === undefined) break
+      this.cache.delete(oldest)
+    }
+  }
+
+  private async probeAll(opts: {
+    request: EnvironmentProbeRequest
+    loaded: LoadedToolCatalog
+    env: Record<string, string | undefined>
+    project: ProjectEnvironmentDetection
+    skills: SkillEnvironmentRequirement[]
+    effectivePath: EffectivePath
+    windowsPaths: WindowsRegistryPaths
+    homeDir: string
+    cacheKey: string
+  }): Promise<EnvironmentProbeStatus> {
+    const {
+      request,
+      loaded,
+      env,
+      project,
+      skills,
+      effectivePath,
+      windowsPaths,
+      homeDir,
+      cacheKey,
+    } = opts
     const required = requiredTools(project, skills, loaded.catalog.tools)
     const processEnv = minimalProbeEnvironment(
       env,
@@ -337,8 +429,7 @@ export class EnvironmentProbe {
       skills: skillStates,
       diagnostics: [...new Set(diagnostics)],
     })
-    this.cache = { key: cacheKey, value: structuredClone(value) }
-    return structuredClone(value)
+    return value
   }
 
   private async probeTool(opts: {

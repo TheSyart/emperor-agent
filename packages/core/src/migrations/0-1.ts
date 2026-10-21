@@ -1,10 +1,12 @@
 /**
- * 0 → 1: every persistent file carries its version (REL-03). Files an
- * older Emperor wrote without one get the version this build writes:
- * `settings.json`, `mcp_config.json` and `hooks.json` (`{"version": 1}`,
- * first key; the rest unchanged). The other files of the inventory had a
- * version already (`schemaVersion`, or `version` on each session entry).
- * A file that is not a JSON object is left for its store to deal with.
+ * 0 → 1: every persistent file carries its version (REL-03). Emperor's own
+ * `settings.json`, written by an older Emperor without one, gets the version
+ * this build writes (`{"version": 1}`, first key; the rest unchanged). The
+ * other files of the inventory had a version already (`schemaVersion`, or
+ * `version` on each session entry). The user's own `mcp_config.json` and
+ * `hooks.json` are not Emperor's to stamp (PL-10, FIX-08): no step names,
+ * backs up or writes them. A file that is not a JSON object is left for
+ * its store to deal with.
  */
 import {
   chmodSync,
@@ -20,7 +22,7 @@ import {
 import { join } from 'node:path'
 import type { DataMigration } from './types'
 
-const STAMPED = ['settings.json', 'mcp_config.json', 'hooks.json'] as const
+const STAMPED = ['settings.json'] as const
 
 function unversioned(path: string): Record<string, unknown> | null {
   if (!existsSync(path)) return null

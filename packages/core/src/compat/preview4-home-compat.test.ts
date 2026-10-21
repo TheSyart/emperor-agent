@@ -9,7 +9,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  statSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -41,6 +40,8 @@ interface Manifest {
     model: { modelId: string; displayName: string }
     memoryLine: string
   }
+  /** Each file's mode as preview.4 wrote it (octal); git keeps only 644/755. */
+  modes: Record<string, string>
 }
 
 const manifest = JSON.parse(
@@ -69,7 +70,9 @@ function preview4Home(): string {
         .split('__PREVIEW4_RUNTIME__')
         .join(join(work, 'preview4-runtime')),
     )
-    chmodSync(target, statSync(file).mode & 0o777)
+    const mode = manifest.modes[relative(source, file)]
+    if (!mode) throw new Error(`fixture.json records no mode for ${file}`)
+    chmodSync(target, Number.parseInt(mode, 8))
   }
   return home
 }

@@ -167,9 +167,22 @@ async function refreshHelper(): Promise<void> {
   }
 }
 
+/**
+ * One reload at a time; asking again while one runs reads once more after
+ * it, so a change made meanwhile is never answered by a read that started
+ * before it (FIX-08).
+ */
 async function reload(): Promise<void> {
-  if (reloading !== null) return reloading
-  reloading = loadStatus()
+  if (reloading !== null) {
+    reloadAgain = true
+    return reloading
+  }
+  reloading = (async () => {
+    do {
+      reloadAgain = false
+      await loadStatus()
+    } while (reloadAgain)
+  })()
   try {
     await reloading
   } finally {
@@ -178,10 +191,15 @@ async function reload(): Promise<void> {
 }
 
 let reloading: Promise<void> | null = null
+let reloadAgain = false
+/** Bumped by every status a switch brings back: older reads are stale. */
+let statusSeq = 0
 
 async function loadStatus(): Promise<void> {
   try {
-    status.value = await core('computerUse.status')
+    const seq = statusSeq
+    const next = await core('computerUse.status')
+    if (seq === statusSeq) status.value = next
     await refreshHelper()
     error.value = ''
   } catch (cause) {
@@ -208,14 +226,19 @@ async function act(task: () => Promise<unknown>): Promise<void> {
 }
 
 // The master switch is the emergency stop: it works while another action
-// (重新连接, a permission request) is still waiting.
+// (重新连接, a permission request) is still waiting. It shows the state Core
+// answers at once; the Helper's status follows (FIX-08: it may take seconds).
 async function setEnabled(next: boolean): Promise<void> {
   if (next === enabled.value || switching.value) return
   switching.value = true
   error.value = ''
   try {
-    await withCoreDeadline(core('computerUse.setEnabled', next))
-    await reload()
+    const answered = await withCoreDeadline(
+      core('computerUse.setEnabled', next),
+    )
+    statusSeq += 1
+    status.value = answered
+    void reload()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {

@@ -602,11 +602,17 @@ async function turnFileRecord(
       const pane = page.locator('.git-review-pane')
       await pane.waitFor({ timeout: 10_000 })
       const unstaged = pane.locator('[data-group="unstaged"] .change-row')
+      // FIX-08: a read gives up after 20 s with a reason; wait past that and
+      // fail with the pane's reason rather than a bare timeout.
+      const readError = pane.locator('[data-git-read-error]')
       await until(
-        async () => (await unstaged.count()) >= 3,
-        10_000,
+        async () =>
+          (await unstaged.count()) >= 3 || (await readError.count()) > 0,
+        25_000,
         'the turn’s changes in 未暂存',
       )
+      if ((await unstaged.count()) < 3)
+        throw new Error(`审查: ${(await readError.innerText()).trim()}`)
       const paths = await unstaged.evaluateAll((rows) =>
         rows.map((row) => (row as HTMLElement).dataset.path ?? ''),
       )
