@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-21（对照 `a33caa42`）<br>
-> 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/`（`SidebarRoot.vue`、`SidebarTopRow.vue`、`SidebarBrandRow.vue`、`SidebarNav.vue`、`SessionRow.vue`、`SidebarProjectRow.vue`、`SidebarSectionHeader.vue`、`SidebarSearchResults.vue`、`useContentSearch.ts`、`SidebarFooter.vue`、`SidebarRail.vue`、`sidebarNav.ts`）、`desktop/src/renderer/src/runtime/sidebarModel.ts`、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）、`components/conversation/`（`ConversationView.vue`、`ChatTimeline.vue`、`environment/EnvironmentCard.vue`）、`components/composer/ComposerCard.vue`、`components/pages/PageShell.vue`、`components/ui/`（`Modal.vue`、`PaneHeader.vue`）、`components/workspace/WorkspacePanel.vue`、`components/workspace/SourcesView.vue`；测试 `SidebarRoot.integration.test.ts`、`SessionRow.test.ts`、`sidebarDayGroups.test.ts`、`desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/settings-groups.spec.ts`
+> 最后核验：2026-10-22（对照 `1a5cef69`）<br>
+> 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/`（`SidebarRoot.vue`、`SidebarTopRow.vue`、`SidebarBrandRow.vue`、`SidebarNav.vue`、`SessionRow.vue`、`SidebarProjectRow.vue`、`SidebarSectionHeader.vue`、`SidebarSearchResults.vue`、`useContentSearch.ts`、`SidebarFooter.vue`、`SidebarRail.vue`、`sidebarNav.ts`）、`desktop/src/renderer/src/runtime/sidebarModel.ts`、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）、`components/conversation/`（`ConversationView.vue`、`ChatTimeline.vue`、`environment/EnvironmentCard.vue`、`environment/EnvironmentRow.vue`）、`components/composer/ComposerCard.vue`、`components/pages/PageShell.vue`、`components/ui/`（`Modal.vue`、`PaneHeader.vue`）、`components/workspace/WorkspacePanel.vue`、`components/workspace/SourcesView.vue`；测试 `SidebarRoot.integration.test.ts`、`SessionRow.test.ts`、`sidebarDayGroups.test.ts`、`desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/settings-groups.spec.ts`
 
 主窗口用系统标题栏，下面是平铺的几栏：侧栏、中栏（对话、轨迹或整页）、右侧工作台。侧栏画在 `--surface-canvas` 上，中栏与工作台在 `--surface-base` 上，栏与栏之间只有一条 0.5px 发丝线（`--border-l1`）。布局与入口位置是 Emperor 自己的；质感参考了 Codex（颜色、字体、间距、圆角、阴影），布局不照搬（2026-10-20 决定）。
 
@@ -51,22 +51,22 @@
 
 内容列都在组件里设置宽度上限、在栏里居中；L1 的 `--content-chat` / `--content-page` / `--content-form` 目前没有组件使用。
 
-| 内容                       | 宽度                                                                                                                                                      | 实现                                               |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| 对话的消息列               | 最宽 748（`--chat-content-width`），列外左右留 32、底部留 56                                                                                              | `ConversationView`、`ChatTimeline`                 |
-| 输入框卡片                 | 最宽 780（`--composer-card-max` = 748 + 32），比消息列宽 32；队列、改动、待办、目标几条 dock 在卡片内缩                                                   | `ComposerCard`、`QueueDock`、`TodoDock`、`GoalBar` |
-| 接管卡（审批、提问、计划） | 与消息列同宽 748；收起后的一行 780                                                                                                                        | `ApprovalPanel`、`PlanReviewPanel`、`TakeoverSeat` |
-| 用户气泡                   | 最宽为消息列的 80%                                                                                                                                        | `UserBubble`                                       |
-| 整页                       | 880 加左右各 24 的内边距，居中；Pull Request 的列表与详情占满宽度，标题行仍在 880 列里；PR 详情最宽 960                                                   | `PageShell`、`PullRequestDetail`                   |
-| 设置面板的选项区           | 最宽 720                                                                                                                                                  | `SettingsModal`                                    |
-| 对话框                     | 默认 380；按内容取 400–880（确认框 400，导入与密钥类 440–480，导出与诊断 520，MCP 与 Skill 导入 560，定时任务 600，添加模型 760），窄窗口里不超过可用宽度 | `Modal` 的 `width`                                 |
+| 内容                       | 宽度                                                                                                                                                      | 实现                                                               |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| 对话的消息列               | 最宽 748（`--chat-content-width`），列外左右留 32、底部留 56                                                                                              | `ConversationView`、`ChatTimeline`                                 |
+| 输入框卡片                 | 最宽 780（`--composer-card-max` = 748 + 32），比消息列宽 32；改动、子智能体状态条、待办、目标、队列几条 dock 在卡片内缩                                   | `ComposerCard`、`QueueDock`、`SubagentDock`、`TodoDock`、`GoalBar` |
+| 接管卡（审批、提问、计划） | 与消息列同宽 748；收起后的一行 780                                                                                                                        | `ApprovalPanel`、`PlanReviewPanel`、`TakeoverSeat`                 |
+| 用户气泡                   | 最宽为消息列的 80%                                                                                                                                        | `UserBubble`                                                       |
+| 整页                       | 880 加左右各 24 的内边距，居中；Pull Request 的列表与详情占满宽度，标题行仍在 880 列里；PR 详情最宽 960                                                   | `PageShell`、`PullRequestDetail`                                   |
+| 设置面板的选项区           | 最宽 720                                                                                                                                                  | `SettingsModal`                                                    |
+| 对话框                     | 默认 380；按内容取 400–880（确认框 400，导入与密钥类 440–480，导出与诊断 520，MCP 与 Skill 导入 560，定时任务 600，添加模型 760），窄窗口里不超过可用宽度 | `Modal` 的 `width`                                                 |
 
 ## 环境信息卡
 
 - 宽 `min(340px, 42cqi)`（`--env-card-width`，按对话栏宽度计算），贴在对话栏右上角（距顶 12、距右 16），圆角 `--r-lg`。
 - 对话栏宽度 ≥ 1120 时，卡片默认显示在对话旁边；更窄时默认收起，用会话头的按钮打开。用户在宽栏里关掉、或在窄栏里打开，都记为手动选择（`frameState.ts`）。
 - 卡片打开时，消息区与输入框右侧让出卡片宽度加 16，内容不被遮住；电脑操作预览同样在 ≥ 1120 时放在旁边，更窄时折成一个计数标签。
-- 每一项是一行 32 的 `EnvironmentRow`，分节之间 12、不画线。「来源」是一个小节（UI-S13）：12/18 的小标题「来源」和右侧的总数，下面最多 3 行（你提供的 → 已查看 → 搜索命中，名字放不下时截断），超过 3 个时多一行「查看全部 N 个 ›」；没有「输出」一行。
+- 每一项是一行 32 的 `EnvironmentRow`，分节之间 12、不画线。一行放不下时（UI-S14）：「子智能体」「后台任务」这类行名保持完整，值截断成省略号、指针停留时显示全部；分支名、计划标题和来源名是数据，截断的是它们，值保持完整。子智能体一行的值在有运行或等待回答的子智能体时不计已完成的。「来源」是一个小节（UI-S13）：12/18 的小标题「来源」和右侧的总数，下面最多 3 行（你提供的 → 已查看 → 搜索命中，名字放不下时截断），超过 3 个时多一行「查看全部 N 个 ›」；没有「输出」一行。
 
 ## 顶栏对齐
 
