@@ -1,8 +1,10 @@
-// Per-turn file records on a real HarnessHost with a scripted model and a
-// real Git project: the before snapshot waits for the first write, the
-// turn's end lists the files (file tools and the shell alike), read-only
-// turns record nothing, undo restores and is recorded once, and a project
-// outside Git counts the file tools only.
+// File records on a real HarnessHost with a scripted model and a real Git
+// project: the before snapshot waits for the first write, the end of the
+// task lists the files (file tools and the shell alike), read-only tasks
+// record nothing, undo restores and is recorded once, and a project
+// outside Git counts the file tools only. UI-S15: a task — a message the
+// user sent and every turn a subagent's or background job's result woke —
+// is recorded once, when nothing of it runs any more, under its last turn.
 import { spawnSync } from 'node:child_process'
 import {
   existsSync,
@@ -15,12 +17,19 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import type { LlmAdapter } from '../../llm/adapter'
 import { LlmClient } from '../../llm/client'
+import type { GenerateOptions, StreamChunk } from '../../llm/types'
 import { HardenedGitRunner } from '../../workspace/git-runner'
 import { WorkspaceMutationCoordinator } from '../../workspace/mutation-coordinator'
 import { TurnSnapshots } from '../../workspace/turn-snapshots'
 import type { SandboxBackend } from '../sandbox/backend'
-import { ScriptedAdapter, testRoute, type ScriptedReply } from '../testing'
+import {
+  ScriptedAdapter,
+  replyChunks,
+  testRoute,
+  type ScriptedReply,
+} from '../testing'
 import { HarnessHost } from './host'
 import {
   TurnFileRecorder,
@@ -79,13 +88,17 @@ async function setup(
     budgetMs?: number
     busy?: () => boolean
     others?: () => boolean
+    /** Answers instead of the scripted replies (e.g. by session). */
+    adapter?: LlmAdapter
   } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'emperor-turn-files-')))
   const project = options.git === false ? join(root, 'plain') : gitProject(root)
   mkdirSync(project, { recursive: true })
   const adapter = new ScriptedAdapter(replies)
-  const llm = new LlmClient({ adapterFor: () => adapter })
+  const llm = new LlmClient({
+    adapterFor: () => options.adapter ?? adapter,
+  })
   llm.setRoutes([testRoute()], 'test-route')
   const host = await HarnessHost.create({
     root,
@@ -304,6 +317,7 @@ describe('TurnFileRecorder', () => {
     await waitFor(() => records(host, sessionId).length === 1)
     expect(records(host, sessionId)[0]).toEqual({
       turn: 1,
+      task: { firstTurn: 1, lastTurn: 1 },
       mode: 'git',
       status: 'skipped',
       skipReason: 'timeout',
@@ -338,6 +352,7 @@ describe('TurnFileRecorder', () => {
     await waitFor(() => records(host, sessionId).length === 1)
     expect(records(host, sessionId)[0]).toEqual({
       turn: 1,
+      task: { firstTurn: 1, lastTurn: 1 },
       mode: 'tools',
       status: 'recorded',
       // Created with one line, then one more: the second write adds one.
@@ -358,6 +373,336 @@ describe('TurnFileRecorder', () => {
       git(project, 'for-each-ref', '--format=%(refname)', 'refs/emperor/'),
     ).toBe('')
   })
+})
+
+/** Answers the root from `root` and every subagent from `child`, in order. */
+class RoutedAdapter implements LlmAdapter {
+  constructor(
+    private readonly root: () => ScriptedReply,
+    private readonly child: () => ScriptedReply | Promise<ScriptedReply>,
+  ) {}
+
+  async *stream(
+    _route: unknown,
+    options: GenerateOptions,
+  ): AsyncIterable<StreamChunk> {
+    const reply = options.sessionId?.startsWith('sub-')
+      ? await this.child()
+      : this.root()
+    if (typeof reply === 'function') {
+      yield* await reply(options)
+      return
+    }
+    if ('hang' in reply) throw new Error('no hanging replies here')
+    yield* replyChunks(reply)
+  }
+}
+
+function queue(
+  replies: ScriptedReply[],
+  fallback: ScriptedReply = { text: 'ok' },
+) {
+  const left = [...replies]
+  return (): ScriptedReply => left.shift() ?? fallback
+}
+
+const write = (file_path: string, content = 'x\n') => ({
+  name: 'write',
+  args: { file_path, content },
+})
+
+/**
+ * A file outside the project the test creates when a waiting command may
+ * go on (no sleeps: the suite runs on a busy machine too).
+ */
+function gate(): { path: string; open(): void } {
+  const path = join(mkdtempSync(join(tmpdir(), 'emperor-gate-')), 'open')
+  return { path, open: () => writeFileSync(path, '') }
+}
+const after = (open: { path: string }, command: string) =>
+  `while [ ! -e '${open.path}' ]; do sleep 0.05; done; ${command}`
+const backgroundJob = (command: string) => ({
+  name: 'bash',
+  args: {
+    command,
+    description: 'Work in the background',
+    run_in_background: true,
+  },
+})
+const events = (host: HarnessHost, sessionId: string) =>
+  host.sessionLog(sessionId)?.events ?? []
+const turnEnds = (host: HarnessHost, sessionId: string) =>
+  events(host, sessionId).filter((event) => event.type === 'turn/end').length
+const paths = (record: TurnFilesRecord | undefined) =>
+  record?.files.map((file) => `${file.status} ${file.path}`)
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+/** A test with a scripted model, Git and background work: room to breathe. */
+const SLOW = 60_000
+
+describe('one record per task (UI-S15)', () => {
+  it(
+    '1 · 2 · 3 a turn its background job woke belongs to the task: no record until the task is over, then one for all of it',
+    async () => {
+      const job = gate()
+      const { host, recorder, sessionId } = await setup([
+        {
+          tools: [
+            write('a.txt', 'a\n'),
+            backgroundJob(after(job, "printf 'j\\n' > job.txt")),
+          ],
+        },
+        { text: 'started the job' },
+        // Woken by the job's result.
+        { tools: [write('b.txt', 'b\n')] },
+        { text: 'all done' },
+      ])
+      await host.submit({
+        sessionId,
+        content: 'write a, then wait for the job',
+      })
+      // The first turn is over but its job still runs: no record yet.
+      await pause(300)
+      expect(turnEnds(host, sessionId)).toBe(1)
+      expect(records(host, sessionId)).toEqual([])
+      job.open()
+      await waitFor(() => records(host, sessionId).length === 1, 30_000)
+      expect(turnEnds(host, sessionId)).toBe(2)
+      const [record] = records(host, sessionId)
+      expect(record).toMatchObject({
+        turn: 2,
+        task: { firstTurn: 1, lastTurn: 2 },
+        mode: 'git',
+        status: 'recorded',
+        totals: { files: 3, additions: 3, deletions: 0 },
+      })
+      // The job wrote between the turns: the task still counts it.
+      expect(paths(record)).toEqual([
+        'added a.txt',
+        'added b.txt',
+        'added job.txt',
+      ])
+      // 4 · 查看变更 covers the whole task, the first turn's file too.
+      expect(
+        (await recorder.diff({ sessionId, turn: 2, path: 'a.txt' })).diff,
+      ).toContain('+a')
+      await pause(200)
+      expect(records(host, sessionId)).toHaveLength(1)
+    },
+    SLOW,
+  )
+
+  it(
+    '1 · 3 a background subagent’s writes after the root’s turn ended count in the task',
+    async () => {
+      let release!: () => void
+      const released = new Promise<void>((done) => (release = done))
+      const adapter = new RoutedAdapter(
+        queue([
+          {
+            tools: [
+              {
+                name: 'subagent',
+                args: { description: 'writer', prompt: 'write the chapter' },
+              },
+            ],
+          },
+          { text: 'waiting for the writer' },
+          // Woken by the subagent's result.
+          { text: 'the chapter is in' },
+        ]),
+        (() => {
+          const replies = queue([
+            { tools: [write('chapter.md', '# One\n\nText\n')] },
+            { text: 'written' },
+          ])
+          return async () => {
+            await released
+            return replies()
+          }
+        })(),
+      )
+      const { host, sessionId } = await setup([], { adapter })
+      await host.submit({
+        sessionId,
+        content: 'have a subagent write a chapter',
+      })
+      expect(records(host, sessionId)).toEqual([])
+      release()
+      await waitFor(() => records(host, sessionId).length === 1, 30_000)
+      const [record] = records(host, sessionId)
+      expect(record).toMatchObject({
+        turn: 2,
+        task: { firstTurn: 1, lastTurn: 2 },
+        totals: { files: 1, additions: 3, deletions: 0 },
+      })
+      expect(paths(record)).toEqual(['added chapter.md'])
+    },
+    SLOW,
+  )
+
+  it(
+    '1 · a message inserted while the task runs does not start a task',
+    async () => {
+      const shell = gate()
+      const { host, sessionId } = await setup([
+        {
+          tools: [
+            write('a.txt'),
+            {
+              name: 'bash',
+              args: { command: after(shell, 'true'), description: 'Wait' },
+            },
+          ],
+        },
+        { tools: [write('b.txt')] },
+        { text: 'did both' },
+      ])
+      const first = host.submit({ sessionId, content: 'write a' })
+      await waitFor(
+        () =>
+          events(host, sessionId).some(
+            (event) => event.type === 'tool/call' && event.data.name === 'bash',
+          ),
+        30_000,
+      )
+      await host.submit({
+        sessionId,
+        content: 'also write b',
+        delivery: 'interject',
+      })
+      shell.open()
+      await first
+      await waitFor(() => records(host, sessionId).length === 1, 30_000)
+      await pause(200)
+      expect(records(host, sessionId)).toHaveLength(1)
+      expect(records(host, sessionId)[0]).toMatchObject({
+        turn: 1,
+        task: { firstTurn: 1, lastTurn: 1 },
+      })
+      expect(paths(records(host, sessionId)[0])).toEqual([
+        'added a.txt',
+        'added b.txt',
+      ])
+    },
+    SLOW,
+  )
+
+  it(
+    '1 · a new message ends the running task, even while its job still runs; the job’s wake belongs to the new task',
+    async () => {
+      const job = gate()
+      const { host, project, sessionId } = await setup([
+        {
+          tools: [
+            write('a.txt'),
+            backgroundJob(after(job, "printf 'late\\n' > late.txt")),
+          ],
+        },
+        { text: 'started' },
+        // The user's next message: a new task.
+        { tools: [write('c.txt')] },
+        { text: 'wrote c' },
+        // Woken by the first task's job, inside the second task.
+        { text: 'the job finished' },
+      ])
+      await host.submit({ sessionId, content: 'write a and start the job' })
+      await host.submit({ sessionId, content: 'now write c' })
+      // The first task was recorded when the second began, its job waiting.
+      await waitFor(() => records(host, sessionId).length >= 1, 30_000)
+      expect(existsSync(join(project, 'late.txt'))).toBe(false)
+      expect(records(host, sessionId)[0]).toMatchObject({
+        turn: 1,
+        task: { firstTurn: 1, lastTurn: 1 },
+      })
+      expect(paths(records(host, sessionId)[0])).toEqual(['added a.txt'])
+      // The second task waits for the job, which wakes it once more.
+      await pause(200)
+      expect(records(host, sessionId)).toHaveLength(1)
+      job.open()
+      await waitFor(() => records(host, sessionId).length === 2, 30_000)
+      expect(records(host, sessionId)[1]).toMatchObject({
+        turn: 3,
+        task: { firstTurn: 2, lastTurn: 3 },
+      })
+      expect(paths(records(host, sessionId)[1])).toEqual([
+        'added c.txt',
+        'added late.txt',
+      ])
+    },
+    SLOW,
+  )
+
+  it(
+    '5 · 撤销 puts the whole task back and skips a file changed since',
+    async () => {
+      const job = gate()
+      const { host, recorder, project, sessionId } = await setup([
+        {
+          tools: [
+            write('a.txt', 'a\n'),
+            backgroundJob(after(job, "printf 'j\\n' > job.txt")),
+          ],
+        },
+        { text: 'started' },
+        { tools: [write('b.txt', 'b\n')] },
+        { text: 'done' },
+      ])
+      await host.submit({ sessionId, content: 'go' })
+      job.open()
+      await waitFor(() => records(host, sessionId).length === 1, 30_000)
+      writeFileSync(join(project, 'b.txt'), 'the user kept this\n')
+      const result = await recorder.revert({ sessionId, turn: 2 })
+      expect(result).toEqual({
+        turn: 2,
+        reverted: ['a.txt', 'job.txt'],
+        skipped: [{ path: 'b.txt', reason: 'changed-since' }],
+      })
+      expect(existsSync(join(project, 'a.txt'))).toBe(false)
+      expect(existsSync(join(project, 'job.txt'))).toBe(false)
+      expect(readFileSync(join(project, 'b.txt'), 'utf8')).toBe(
+        'the user kept this\n',
+      )
+    },
+    SLOW,
+  )
+
+  it(
+    '7 · outside Git, the file tools of every turn of the task make one record',
+    async () => {
+      const job = gate()
+      const { host, sessionId } = await setup(
+        [
+          {
+            tools: [
+              write('a.txt', 'a\n'),
+              backgroundJob(after(job, "printf 'j\\n' > job.txt")),
+            ],
+          },
+          { text: 'started' },
+          { tools: [write('a.txt', 'a\nmore\n'), write('c.txt', 'c\n')] },
+          { text: 'done' },
+        ],
+        { git: false },
+      )
+      await host.submit({ sessionId, content: 'go' })
+      await pause(300)
+      expect(records(host, sessionId)).toEqual([])
+      job.open()
+      await waitFor(() => records(host, sessionId).length === 1, 30_000)
+      expect(records(host, sessionId)[0]).toEqual({
+        turn: 2,
+        task: { firstTurn: 1, lastTurn: 2 },
+        mode: 'tools',
+        status: 'recorded',
+        files: [
+          { path: 'a.txt', status: 'added', additions: 2, deletions: 0 },
+          { path: 'c.txt', status: 'added', additions: 1, deletions: 0 },
+        ],
+        totals: { files: 2, additions: 3, deletions: 0 },
+      })
+    },
+    SLOW,
+  )
 })
 
 describe('calls that write the project (AGT-06)', () => {

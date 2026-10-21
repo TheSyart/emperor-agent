@@ -1015,7 +1015,12 @@ export class CoreApi {
         const receipt = this.delegationReceipts.get(id)
         return requiresArtifactAcceptance(record, receipt)
       },
-      onState: (state, event) => this.projectDelegation(state, event),
+      onState: (state, event) => {
+        this.projectDelegation(state, event)
+        // A settled run may end its root's task (UI-S15).
+        const root = state.record?.owner.rootSessionId
+        if (root !== undefined) host.noteTaskSettled(root)
+      },
       onEvent: (event) => {
         if (
           event.type !== 'text_delta' &&
@@ -3009,7 +3014,7 @@ export class CoreApi {
       if (!recorded)
         throw new WorkspaceOperationError(
           'turn_file_not_recorded',
-          '这一轮没有该文件的改动记录。',
+          '这份改动记录里没有这个文件。',
         )
       // The persisted record authorizes this exact path, not the whole Chat workspace.
       // Reuse the existing bounded reader and canonical path / symlink checks.
