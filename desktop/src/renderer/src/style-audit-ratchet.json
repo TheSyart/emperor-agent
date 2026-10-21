@@ -157,7 +157,6 @@
       "components/pages/scheduler/SchedulerJobDialog.vue": 3,
       "components/pages/scheduler/SchedulerPage.vue": 2,
       "components/settings/computer/ExtensionInstallSteps.vue": 2,
-      "components/settings/ExecutorsSection.vue": 1,
       "components/settings/hooks/HooksConfigTab.vue": 3,
       "components/settings/hooks/HooksTestTab.vue": 2,
       "components/settings/HooksSection.vue": 1,
