@@ -177,18 +177,19 @@ describe('Chrome/Edge settings through CoreApi', () => {
     ).toMatchObject({ sites: [{ pattern: '*.bank.example' }] })
   })
 
-  it('guards a change that lets the Agent do more, never one that narrows', async () => {
+  it('FIX-10 · changes either way while the chat shown is in plan mode', async () => {
     const { api: core } = await api()
     const id = String(core.sessions.create({ title: 'Chat' }).id)
     core.sessions.activate(id)
     core.control.setMode('plan', id)
     const view = { sessionId: id }
-    expect(() =>
+    // Settings are global; Plan mode limits the Agent, not the user.
+    expect(
       core.computerUse.setExternalBrowserSettings(
         { defaults: { download: 'allow' } },
         view,
       ),
-    ).toThrow(/plan mode/)
+    ).toMatchObject({ defaults: { download: 'allow' } })
     expect(
       core.computerUse.setExternalBrowserSettings(
         {
@@ -201,10 +202,10 @@ describe('Chrome/Edge settings through CoreApi', () => {
         view,
       ),
     ).toMatchObject({ defaults: { browse: 'ask' }, history: 'never' })
-    // Removing that block widens again.
-    expect(() =>
+    // Removing that block widens again, and saves too.
+    expect(
       core.computerUse.setExternalBrowserSettings({ sites: [] }, view),
-    ).toThrow(/plan mode/)
+    ).toMatchObject({ sites: [] })
   })
 
   it('says what is wrong with a pattern in words the user reads', async () => {

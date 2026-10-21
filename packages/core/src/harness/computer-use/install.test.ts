@@ -447,10 +447,12 @@ describe('computer use master switch', () => {
     const id = String(core.sessions.create({ title: 'GUI' }).id)
     const submitted = core.chat.submit({ content: 'go', sessionId: id })
     await waitFor(() => eventOf(events, 'ask_request') !== undefined)
-    // Pending cards in the session shown block ordinary mutations, but
-    // never switching off.
+    // A card pending in the chat shown gates no setting (FIX-10); switching
+    // off refuses the card.
     const shown = { sessionId: id }
-    await expect(core.computerUse.setEnabled(true, shown)).rejects.toThrow()
+    await expect(
+      core.computerUse.setEnabled(true, shown),
+    ).resolves.toMatchObject({ enabled: true })
     await core.computerUse.setEnabled(false, shown)
     expect((await submitted).content).toBe('stopped')
     expect(refused).toContain('PERMISSION_DENIED')
