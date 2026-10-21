@@ -104,6 +104,32 @@ describe('copy audit (UI-S10)', () => {
     ).toEqual(['Unknown'])
   })
 
+  it('FIX-09 · 5 · English behind `as const`, in a titles map or table, a `label` computed and a meta key fails too', () => {
+    expect(
+      auditScript(
+        'fixture.ts',
+        [
+          "const groups = [{ label: 'Commands' as const }, { label: 'Run tests' satisfies string }]",
+          "const BUILTIN_TITLES = new Map<string, string>([['new', 'New chat'], ['plan', '计划模式']])",
+          "const STEP_TITLE: Record<string, string> = { read: 'Read file', write: '写入' }",
+          "const label = computed(() => (mode === 'goal' ? 'Goal' : 'Plan'))",
+          "const item = { meta: tags || 'Project Skill', tags: source === 'user' ? 'User Skill' : '' }",
+          // Not shown: keys, comparisons, ids.
+          "const ids = new Map([['Commands', 1]]); const kind = mode === 'Plan' ? 1 : 2",
+        ].join('\n'),
+      ).map((item) => item.text),
+    ).toEqual([
+      'Commands',
+      'Run tests',
+      'New chat',
+      'Read file',
+      'Goal',
+      'Plan',
+      'Project Skill',
+      'User Skill',
+    ])
+  })
+
   it('3 · a retired term fails the audit', () => {
     expect(bannedTermsIn('等待执行器输出…')).toEqual(['执行器'])
     expect(

@@ -47,10 +47,23 @@ const VISIBLE_KEYS = new Set([
   'tooltip',
   'emptyText',
   'subtitle',
+  // The grey text at the end of a picker row (`项目 Skill`).
+  'meta',
+  'tags',
 ])
 
-/** Functions that return what the UI shows (`reasoningLabel`, `stateTitle`…). */
-const VISIBLE_FUNCTION = /(?:Label|Title|Text|Description|Caption|Summary)$/
+/** Other keys that name what they show (`sourceLabel`, `emptyTitle`). */
+const VISIBLE_KEY = /(?:Label|Title)$/
+
+/**
+ * Functions that return what the UI shows (`reasoningLabel`, `stateTitle`…),
+ * and computeds named for it (`const label = computed(…)`).
+ */
+const VISIBLE_FUNCTION =
+  /(?:^(?:label|title|text|description|caption|summary)|Label|Title|Text|Description|Caption|Summary)$/
+
+/** Tables of shown text: `BUILTIN_TITLES`, `STEP_TITLE`, `stateLabels`. */
+const VISIBLE_TABLE = /(?:titles?|labels?|captions?)$/i
 
 /** Elements whose text is code, a command or a key, never prose. */
 const CODE_ELEMENTS = new Set(['code', 'pre', 'kbd', 'samp'])
@@ -66,6 +79,9 @@ const ALLOWED_PHRASES = [
   'Emperor Computer Helper',
   'Pull Requests',
   'Pull Request',
+  // Wire protocols, by their own names (设置 › 模型 › 协议).
+  'OpenAI Chat Completions',
+  'Anthropic Messages',
 ]
 
 /**
@@ -233,7 +249,13 @@ function classify(
  * Comparison operands and call arguments (`state === 'running'`) are not.
  */
 function shownStrings(node: ts.Expression): string[] {
-  if (ts.isParenthesizedExpression(node)) return shownStrings(node.expression)
+  if (
+    ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isSatisfiesExpression(node) ||
+    ts.isNonNullExpression(node)
+  )
+    return shownStrings(node.expression)
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
     return [node.text]
   if (ts.isTemplateExpression(node))
@@ -332,6 +354,29 @@ export function auditVue(file: string, source: string): CopyFinding[] {
   return out
 }
 
+/** The shown values of a table initializer (an object or `new Map([...])`). */
+function tableValues(node: ts.Expression): string[] {
+  while (ts.isAsExpression(node) || ts.isSatisfiesExpression(node))
+    node = node.expression
+  if (ts.isObjectLiteralExpression(node))
+    return node.properties.flatMap((property) =>
+      ts.isPropertyAssignment(property) &&
+      !VISIBLE_KEYS.has(property.name.getText().replace(/['"]/g, ''))
+        ? shownStrings(property.initializer)
+        : [],
+    )
+  const [entries] =
+    ts.isNewExpression(node) && node.expression.getText() === 'Map'
+      ? (node.arguments ?? [])
+      : []
+  if (!entries || !ts.isArrayLiteralExpression(entries)) return []
+  return entries.elements.flatMap((pair) =>
+    ts.isArrayLiteralExpression(pair) && pair.elements[1]
+      ? shownStrings(pair.elements[1])
+      : [],
+  )
+}
+
 /** Visible string constants of a script (object keys and *Label functions). */
 export function auditScript(file: string, source: string): CopyFinding[] {
   const out: CopyFinding[] = []
@@ -352,9 +397,20 @@ export function auditScript(file: string, source: string): CopyFinding[] {
           out.push({ file, where: 'template', text: part.text, kind: 'banned' })
     if (ts.isPropertyAssignment(node)) {
       const key = node.name.getText(sf).replace(/['"]/g, '')
-      if (VISIBLE_KEYS.has(key))
+      if (VISIBLE_KEYS.has(key) || VISIBLE_KEY.test(key))
         for (const value of shownStrings(node.initializer))
           classify(file, key, value, out, false)
+    }
+    // A table of shown text: every value of `{ key: '…' }`, and the second
+    // item of every `[key, '…']` pair of `new Map([...])`.
+    if (
+      ts.isVariableDeclaration(node) &&
+      node.initializer &&
+      VISIBLE_TABLE.test(node.name.getText(sf))
+    ) {
+      const table = node.name.getText(sf)
+      for (const value of tableValues(node.initializer))
+        classify(file, table, value, out, false)
     }
     let inner = fn
     if (
