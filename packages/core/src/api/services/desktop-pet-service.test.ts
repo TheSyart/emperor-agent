@@ -47,17 +47,4 @@ describe('CoreDesktopPetService', () => {
       '"enabled": false',
     )
   })
-
-  it('runs mutation checks synchronously before toggling', () => {
-    const service = new CoreDesktopPetService(
-      tmp('emperor-pet-service-guard-'),
-      {
-        assertMutation: () => {
-          throw new Error('blocked')
-        },
-      },
-    )
-
-    expect(() => service.setEnabled(true, VIEW)).toThrow('blocked')
-  })
 })

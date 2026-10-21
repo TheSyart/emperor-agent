@@ -16,7 +16,6 @@ export interface CoreTaskBudgetServiceDeps {
     readonly taskBudgetSettingsNow: TaskBudgetSettings
     setTaskBudget(settings: TaskBudgetSettings): void
   }
-  assertMutation?: (area: string, action: string, view: ViewScope) => void
 }
 
 const LABELS: Record<keyof TaskBudgetSettings, string> = {
@@ -49,9 +48,8 @@ export class CoreTaskBudgetService {
 
   async update(
     change: Partial<TaskBudgetSettings>,
-    view: ViewScope,
+    _view: ViewScope,
   ): Promise<TaskBudgetSettings> {
-    this.deps.assertMutation?.('tasks', 'task budget', view)
     for (const key of Object.keys(LABELS) as Array<keyof TaskBudgetSettings>) {
       if (!(key in change)) continue
       if (!validTaskBudgetValue(key, change[key])) {

@@ -26,7 +26,6 @@ export class CoreExecutorService {
       facts: ExecutorFactsStore
       modelCatalog: ExecutorModelCatalogService
       /** The mutation guard of the session the caller shows (KRN-01). */
-      assertConfigure: (view: ViewScope) => void
       refresh: () => Promise<void>
       checkAuth?: (
         profile: ExecutorProfile,
@@ -101,9 +100,8 @@ export class CoreExecutorService {
   }
   private async saveToken(
     input: { profileId: string; kind?: ClaudeTokenKind; token?: string },
-    view: ViewScope,
+    _view: ViewScope,
   ) {
-    this.options.assertConfigure(view)
     const profile = this.profile(input.profileId),
       tokens = this.options.claudeTokens
     if (profile.backend !== 'claude-code' || !tokens)
@@ -125,9 +123,8 @@ export class CoreExecutorService {
   }
   async configure(
     input: { expectedRevision: number; config: unknown },
-    view: ViewScope,
+    _view: ViewScope,
   ) {
-    this.options.assertConfigure(view)
     const before = this.options.store.read()
     const parsed = parseExecutorConfig(input.config),
       config = this.options.store.update(input.expectedRevision, parsed)

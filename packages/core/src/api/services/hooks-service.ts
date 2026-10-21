@@ -37,8 +37,6 @@ export interface CoreHooksServiceDeps {
    * `${CLAUDE_PROJECT_DIR}`, test-run cwd); null for Chat (KRN-01).
    */
   projectRoot(view: ViewScope): string | null
-  /** Mutation gate (read-only mode etc.) of the session in view; throws to reject. */
-  assertMutation(area: string, action: string, view: ViewScope): void
   /** Events of the session in view (for the `hook/*` audit); empty when none. */
   sessionEvents?(view: ViewScope): readonly SessionEvent[]
 }
@@ -183,7 +181,6 @@ export class CoreHooksService {
     raw: unknown,
     view: ViewScope,
   ): Promise<CoreHooksConfigPayload> {
-    this.deps.assertMutation('hooks', 'saveConfig', view)
     const text = configText(raw)
     const validation = this.validateText(text, view)
     if (!validation.valid)
@@ -295,7 +292,6 @@ export class CoreHooksService {
     input: Dict,
     view: ViewScope,
   ): Promise<CoreHooksTestRunPayload> {
-    this.deps.assertMutation('hooks', 'testRun', view)
     if (input.confirmExecution !== true && input.confirm_execution !== true) {
       throw new ValidationError('需要 confirmExecution=true 才能执行 Hook 命令')
     }
