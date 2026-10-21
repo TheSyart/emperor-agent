@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、维护者<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 最后核验：2026-10-22（对照 `1a5cef69`）<br>
 > 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/host/scope.ts`、`packages/core/src/harness/host/task-tree.ts`、`packages/core/src/harness/agent/inbox.ts`、`packages/core/src/harness/agent/`、`packages/core/src/session-log/`、`packages/core/src/llm/`、`packages/core/src/harness/compaction/`、`packages/core/src/mcp/`、`packages/core/src/skills/`
 
 Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript 实现，采用 deepseek-harness standard 模式的语义，但不含插件框架：各子系统在 `HarnessHost.compose()` 中把自己的处理函数压入有序的 middleware 数组。`HarnessHost` 是唯一组合根，每个 session 持有一个 `Agent`。
@@ -49,7 +49,7 @@ turn/end
 - **Inbox**：两个待处理列表。`next-turn` 中一条消息开启一个 turn；`next-step` 中的全部消息进入下一个 step。每次变化记录为 `agent/inbox/spliced`，恢复时从 log 精确重建。
 - **Followup / steer**：普通提交是 followup（排队到 `next-turn`）；运行中的插话是 steer（进入 `next-step`）。`chat.manageQueuedPrompt` 的 `interject` 把排队项提升到 `next-step`，`cancel` 丢弃尚未开始的项，`send` 发送一条待发送的项（见下文「消息生命周期」）。
 - **步数与预算**：每个 step 开始前（认领 inbox 之前）`budget` middleware 可以结束本 turn：达到单轮步数上限，或本任务的费用已达上限，`turn/end` 原因为 `budget`，之前先写一条 `task-budget` 上下文消息告诉模型为什么停下（见下文「任务树与预算」）。每次模型请求返回后（失败后被重试的请求也算）`requestEnd` middleware 收到这次的 usage。turn-stopping middleware（例如 Hooks 的 Stop）可以追加一步。
-- **回合改动记录**：根会话的 turn 改过文件时，宿主在 `turn/end` 之后追加一条 `turn/files`；撤销这一轮时追加 `turn/files-reverted`。两者都不进入模型请求，做法见 [IPC 与运行时事件](ipc-and-runtime-events.md#项目工作台-ipc)。
+- **任务改动记录**（UI-S15）：一个任务是发给根会话的一条消息（用户或定时任务）加上之后被结果叫醒继续的各轮；任务改过文件时，宿主在任务结束后追加一条 `turn/files`（记在任务最后一轮名下，带 `task`）；撤销时追加 `turn/files-reverted`。任务结束由 `HarnessHost.onTaskQuiet` 通知：根会话空闲，任务树里没有运行或排队的子智能体和后台任务，没有未结束的外部运行，目标不在自动续跑。两者都不进入模型请求，做法见 [IPC 与运行时事件](ipc-and-runtime-events.md#项目工作台-ipc)。
 - **取消**：`chat.stopRuntime` 或 `/stop`（`HarnessHost.stop()`）取消当前 turn，并清理该 session 的待处理交互和子智能体；进行中的 Goal 持久化为「已暂停」（其他状态的 Goal 只解除自动续跑），同时调用 `DelegationService.stopRoot` 停止这个根会话的 Claude Code / Codex 轮次，并取消待回答的委派交互与同意卡；inbox 中等待的 harness 上下文（后台任务通知等）被丢弃，用户排队的消息保留为待发送。提交方的 AbortSignal（ACP `session/cancel`、定时任务取消）只作用于它自己的消息，见下文。`turn/end` 只记录取消原因本身的字段（`kind`，Hook 取消另带 `reason`），传输层事后附加在 abort reason 上的内容（例如 Node fetch 写入的 `stack`）不会进入 log。
 - **`turn/end` 原因**：`completed`、`aborted`、`blocked`、`error`、`max-tokens`、`interrupted`（崩溃修复补写）、`plan-dismissed`（用户关闭 Plan 审阅）、`budget`（`limit: 'steps'` 带 `maxSteps`，或 `limit: 'cost'` 带 `capUsdNanos`、`spentUsdNanos`，无法计价时另带 `unpricedRoutes`）。
 

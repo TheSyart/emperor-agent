@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-10-22（对照 `7798011a`）<br>
+> 最后核验：2026-10-22（对照 `1a5cef69`）<br>
 > 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/single-instance.ts`、`desktop/src/main/logging/log-location.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/user-downloads.ts`、`packages/core/src/workspace/turn-snapshots.ts`、`packages/core/src/workspace/delegation-workspaces.ts`、`packages/core/src/harness/delegation/`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store、`packages/core/src/updates/service.ts`
 
 ## 两个根的区分
@@ -238,7 +238,7 @@ Core 不会在项目目录下创建 session、memory、附件或 Goal 数据。
 
 项目是 Git 仓库时，Emperor 在它的 `.git` 里写对象和隐藏引用，不碰你的分支、暂存区和工作区：
 
-- `refs/emperor/turns/<会话>/<turn>/`：每个回合前后的项目快照（两个提交，用于「已编辑 N 个文件」与撤销），每个会话保留最近 50 轮，删除会话时一起删除；应用子智能体成果时另有 `refs/emperor/turns/<会话>/applied/<run>/{before,after}`，供撤销。
+- `refs/emperor/turns/<会话>/<turn>/`：每个任务前后的项目快照（两个提交，用于「已编辑 N 个文件」与撤销；`<turn>` 是任务的最后一轮，0.2 之前是每一轮），每个会话保留最近 50 份，删除会话时一起删除；应用子智能体成果时另有 `refs/emperor/turns/<会话>/applied/<run>/{before,after}`，供撤销。
 - `refs/emperor/delegations/<lease>/base` 与 `…/runs/<run>`：子智能体任务的起点快照与成果；应用或丢弃成果时删除。
 - 通过「审查」创建的 worktree 在 Git 里登记（目录在 Emperor Home 的 `git/worktrees/`）。只有在你把 Skill 保存或导入到项目 scope 时，Core 才会写入上面 `.emperor/skills/`。在设置里打开项目 Skills 文件夹只是查看：目录还不存在时会提示，不会为此在项目里建目录。如果旧版本留下了 `.emperor/sessions`、`.emperor/memory` 等目录，Diagnostics 只提示“检测到旧私有数据”，不会自动删除或搬移。
 

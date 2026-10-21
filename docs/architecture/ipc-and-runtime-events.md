@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：桌面端与 Core 开发者<br>
-> 最后核验：2026-10-22（对照 `7798011a`）<br>
+> 最后核验：2026-10-22（对照 `1a5cef69`）<br>
 > 事实源：`packages/core/src/api/operations.ts`、`desktop/src/main/core-host.ts`、`desktop/src/main/ipc.ts`、`desktop/src/preload/`、`packages/core/src/harness/projection/`、`packages/core/src/session-log/history.ts`、`packages/core/src/harness/host/session-views.ts`、`packages/core/src/public/runtime-contract.ts`、`desktop/src/shared/ipc-contract.ts`、`desktop/src/main/desktop-capability-ipc.ts`、`desktop/src/main/browser-view.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/preload/desktop-capabilities.ts`、`desktop/src/main/event-bridge.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/conversation/`、`desktop/src/renderer/src/runtime/`、`desktop/src/shared/content-security-policy.ts`、`desktop/src/main/trusted-renderer.ts`、`desktop/src/main/renderer-permissions.ts`、`desktop/src/main/app-menu.ts`、`desktop/src/main/open-path-ipc.ts`、`desktop/src/main/app-version-ipc.ts`、`desktop/src/main/remote-image-ipc.ts`、`desktop/src/main/screenshot-ipc.ts`、`desktop/src/main/logging/`、`desktop/src/main/diagnostics-bundle.ts`、`desktop/src/main/diagnostics-bundle-ipc.ts`、`desktop/src/main/recovery.ts`、`desktop/src/renderer/src/composables/useMarkdownLinks.ts`、`packages/core/src/harness/projection/wire-names.ts`、`packages/core/src/updates/`、`desktop/src/main/update-host.ts`
 
 Electron renderer 不直接导入 Core，也不访问本地文件。同步请求走 preload 的 Core IPC contract；异步过程分两条管线：Chat 与 Trajectory 渲染所需的原始 session 事件走独立的 session event 通道，其余状态走 runtime events（UiEvent）。
@@ -77,12 +77,14 @@ Operation 的名称与参数 schema 定义在 `packages/core/src/api/operations.
 - `github.listIssues/viewIssue/listRuns/viewRun` 复用同一个 gh 执行、超时、输出上限和错误 code，只在 GitHub 插件生效且处于启用状态时可用，否则在运行 gh 之前返回 `github_plugin_disabled`。`listIssues` 查询 `is:issue is:open` 加 `involves:@me` / `user:@me`（名下仓库）/ `assignee:@me` / `author:@me` / `mentions:@me` 之一和校验过的搜索文本；`viewIssue` 带最近 30 条评论和评论总数；`listRuns` 是 `gh api --method GET repos/<owner>/<name>/actions/runs`，可选分支；`viewRun` 再读 `…/runs/<id>/jobs`（每页 100 个作业，含步骤）。仓库名、编号、运行 ID 和分支名先经校验；标题、描述等内容原样作为数据返回，由 renderer 以文本或净化后的 Markdown 显示。
 - 插件详情里 app 成员的状态来自 Core 的应用连接注册表（`plugins/connections.ts`）：打开详情时刷新，结果缓存 30 秒。GitHub 的 app 以 `pullRequests.status` 为准：已登录为可用（附登录名），`gh` 缺失或未登录为需要连接，其他失败为失败；只装了 `gh` 不算已连接。
 - `files.list/search/read` 只接受项目相对路径，执行 realpath containment、symlink escape、防 traversal、大小和 MIME 限制；`.git` 不可读取。
-- **回合改动记录**（`packages/core/src/harness/host/turn-files.ts`，Git 机制在 `workspace/turn-snapshots.ts`）：
-  - **快照时机**：Build 项目在 Git 中时，一轮里第一次可能写文件的调用（`write`、`edit`、shell、`skill_manage`、`mcp_*`，根会话或子智能体发起）先等一次影子快照；根会话的 turn 结束时再拍一次。
-  - **快照做法**：复制用户 index 为临时 index，执行 `add -A`、`write-tree`、`commit-tree`，不改用户的 index 和文件。未跟踪文件超过 10 MB 的排除，并标为过大。单次快照限时 5 秒，超时本轮记为未记录。
-  - **记录**：有改动时写 `turn/files` 事件，两次快照留在 `refs/emperor/turns/<会话>/<回合>/{before,after}`。每个会话保留最近 50 轮，会话被永久删除（最近删除里永久删除或 30 天到期）时一并删除；普通 `git push` 不会推送这些引用。
-  - **非 Git 目录**：只统计 Emperor 文件工具的写入，`mode` 为 `tools`，不能撤销。
-  - **查看与撤销**：`workspace.turnDiff({ sessionId, turn, path })` 返回一个文件在两次快照间的 diff（上限 2 MiB）。`workspace.revertTurn({ sessionId, turn, paths? })` 只恢复仍与回合结束时一致的文件，其余记 `changed-since`；快照已清理的记 `missing`。撤销结果写 `turn/files-reverted`，每轮只能撤销一次。
+- **任务改动记录**（`packages/core/src/harness/host/turn-files.ts`，Git 机制在 `workspace/turn-snapshots.ts`；UI-S15 起一个任务一条，之前是一轮一条）：
+  - **任务**：从发给根会话的一条消息（用户或定时任务，`source.kind === 'user'`）开始；之后不由这样的消息开启的 turn——子智能体、Claude Code / Codex 或后台任务的结果把会话叫醒的、目标的下一轮——都属于同一个任务。哪条消息开启了一轮由 `turnOpener`（`harness/host/turn-opener.ts`，纯函数，renderer 经 `@emperor/core/runtime-contract` 用同一条规则给被叫醒的一轮加标）判断第一步的消息：经 `next-step` 收件箱进入的用户消息（运行中插入）不算。
+  - **任务结束**：宿主在根会话或子智能体变为空闲、后台任务结束、外部运行状态变化、目标变化时，等当前同步工作和微任务跑完（`setTimeout 0`），再看根会话是否空闲、任务树里是否还有运行或排队的子智能体与后台任务、是否还有未结束的外部运行（`hasOutstanding`）、目标是否仍在自动续跑；都没有时通知 `onTaskQuiet` 监听者，记录器结束这个任务。新的用户消息开启一轮时，还没结束的上一个任务立即结束（它的子智能体之后做的事算进新任务）。
+  - **快照时机**：Build 项目在 Git 中时，任务里第一次可能写文件的调用（`write`、`edit`、shell、`skill_manage`、`mcp_*`、带 `apply` 的 `collect_agent`，根会话或子智能体发起，turn 进行中或两轮之间都算）先等一次影子快照；任务结束时再拍一次。任务已经结束后（例如你在子智能体页面给它发消息）的写入不计入任何任务。
+  - **快照做法**：复制用户 index 为临时 index，执行 `add -A`、`write-tree`、`commit-tree`，不改用户的 index 和文件。未跟踪文件超过 10 MB 的排除，并标为过大。单次快照限时 5 秒，超时这个任务记为未记录。
+  - **记录**：有改动时写 `turn/files` 事件：`turn` 是任务的最后一轮，`task: { firstTurn, lastTurn }`；两次快照留在 `refs/emperor/turns/<会话>/<最后一轮>/{before,after}`。每个会话保留最近 50 份，会话被永久删除（最近删除里永久删除或 30 天到期）时一并删除；普通 `git push` 不会推送这些引用。进程在任务中途退出时，这个任务没有记录。0.2 之前的记录没有 `task`，是一轮一条。
+  - **非 Git 目录**：只统计 Emperor 文件工具的写入（整个任务内按路径累加），`mode` 为 `tools`，不能撤销。
+  - **查看与撤销**：`workspace.turnDiff({ sessionId, turn, path })` 返回一个文件在记录的两次快照间（即整个任务）的 diff（上限 2 MiB）。`workspace.revertTurn({ sessionId, turn, paths? })` 一次撤回整个任务：只恢复仍与任务结束时一致的文件，其余记 `changed-since`；快照已清理的记 `missing`。撤销结果写 `turn/files-reverted`，每条记录只能撤销一次。
   - **撤销限制**：同一工作区有 Agent 运行时拒绝撤销；撤销与快照都经 workspace mutation coordinator，与 `git.*` 写操作串行。
 - `terminals.*` 以 session owner 和 terminal ID 双重授权，PTY 初始 cwd 来自受信 Build session 的项目路径。
 

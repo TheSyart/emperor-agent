@@ -2,17 +2,17 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-21（对照 `a33caa42`）<br>
-> 事实源：`desktop/src/renderer/src/components/conversation/`（`processModel.ts`、`ChatTimeline.vue`、`nodes/ProcessGroup.vue`、`nodes/ToolCallRow.vue`、`nodes/UserBubble.vue`、`parts/ConversationMarkdown.vue`、`parts/MarkdownHtml.vue`、`nodes/TurnTail.vue`）、`conversation/nodes/turnFiles.ts`、`composables/markdownBlocks.ts`、`composables/useStreamingText.ts`、`components/ui/DisclosureRow.vue`、`components/ui/IoBlock.vue`、`components/motion/CollapseTransition.vue`、`conversation/events.ts`；`components/conversation/trajectoryGate.ts`；测试 `processModel.test.ts`、`processGroup.test.ts`、`CollapseTransition.test.ts`、`trajectoryGate.test.ts`、`markdownBlocks.test.ts`、`desktop/tests/visual/process.spec.ts`、`desktop/tests/visual/streaming.spec.ts`、`desktop/tests/visual/trajectory-gate.spec.ts`
+> 最后核验：2026-10-22（对照 `1a5cef69`）<br>
+> 事实源：`desktop/src/renderer/src/components/conversation/`（`processModel.ts`、`ChatTimeline.vue`、`nodes/ProcessGroup.vue`、`nodes/ToolCallRow.vue`、`nodes/UserBubble.vue`、`parts/ConversationMarkdown.vue`、`parts/MarkdownHtml.vue`、`nodes/TurnTail.vue`）、`conversation/nodes/turnFiles.ts`、`nodes/TurnFilesCard.vue`、`packages/core/src/harness/host/turn-opener.ts`、`composables/markdownBlocks.ts`、`composables/useStreamingText.ts`、`components/ui/DisclosureRow.vue`、`components/ui/IoBlock.vue`、`components/motion/CollapseTransition.vue`、`conversation/events.ts`；`components/conversation/trajectoryGate.ts`；测试 `processModel.test.ts`、`processGroup.test.ts`、`TurnFilesCard.test.ts`、`CollapseTransition.test.ts`、`trajectoryGate.test.ts`、`markdownBlocks.test.ts`、`desktop/tests/visual/process.spec.ts`、`desktop/tests/visual/streaming.spec.ts`、`desktop/tests/visual/trajectory-gate.spec.ts`、`desktop/tests/visual/chat-gallery.spec.ts`
 
-对话面板里从上到下是一条会话流：你的消息、Agent 处理这一轮的过程、回答、本轮改动卡和轮末操作。默认只显示结论，过程收成一行，细节按需展开。
+对话面板里从上到下是一条会话流：你的消息、Agent 处理这一轮的过程、回答、轮末操作；一个任务结束时，它最后一轮的轮末之前多一张改动卡。默认只显示结论，过程收成一行，细节按需展开。
 
 ## 过程组
 
 一轮里从提示之后到最终回答之前的步骤组成一个「过程组」，在虚拟列表里是一行：
 
 - **成员**：思考、工具调用（含交给子智能体、工作流）、重试、切换备用模型、上下文压缩；打开「设置 › 常规 › 开发者 › 显示系统步骤」后还有上下文注入（ContextRow）与 Hook（HookRow）。没打开时这两种行在任何地方都不显示。
-- **边界**：用户消息（包括运行中插入的消息）、目标变更、错误与输出上限等提示、本轮改动卡和轮末都不进过程组；它们把一轮的过程切成前后两组。
+- **边界**：用户消息（包括运行中插入的消息）、目标变更、错误与输出上限等提示、改动卡和轮末都不进过程组；它们把一轮的过程切成前后两组。
 - **回答**：最后一次工具调用之后、带正文（文字、图片）的模型步骤是回答，排在过程组之后。回答的思考块留在过程组里，正文在组外。
 - **没有工具调用的一轮**不建过程组，思考仍是单独一行可折叠的「思考」。例外是运行中：还没有回答的思考也显示为运行中的过程行。
 - **步数**：展开后列表里的每一行算一步——一个思考块、一次工具调用（含准备中的调用）、一条系统或提示行。步骤之间的叙述文字不算步数。
@@ -21,6 +21,8 @@
 | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 运行中 | 一行：转圈 + 当前步骤的动作与对象（中性 shimmer）+「· 第 N 步」，例如「正在读取 SettingsView.vue · 第 4 步」；运行超过 15 秒后加用时。没有步骤在执行时是「正在思考 · 第 N+1 步」 |
 | 完成后 | 一行「已处理 N 步 · 用时 X ›」，13/20，`--text-3`，悬停 `--text-2`                                                                                                               |
+
+- **被叫醒的一轮**（UI-S15）：子智能体（本地、Claude Code、Codex）或后台任务的结果把会话叫醒继续的那一轮，第一个过程组的完成行在 › 之后加一个中性 Badge：「子智能体完成后继续」或「后台任务完成后继续」。判断看这一轮第一步的消息（`turnOpener`，与 Core 判断任务边界是同一条规则）：有你发的消息（运行中插入的除外）就是新任务，不加标；目标的下一轮、其他原因也不加标。运行中的过程行不显示它。
 
 - 运行中的过程行就是这一轮的状态行，下面不再另显示一行状态；只有还没有过程（等第一个 token）或回答正在输出时，才显示原来的状态行。
 - 用时：一轮的第一组从这一轮开始算起，以后的组从第一步算起；一轮已经结束且这是最后一组时到这一轮结束为止（与轮末的「用时」一致），否则到下一行开始时为止。
@@ -58,9 +60,16 @@
 - **链接与行内引用**：文字用 `--text-link`，前面是 12px 的来源图标：本地文件用文件类型图标，网页用站点图标（打开「设置 › 常规 › 会话 › 显示网站图标」时取网站自己的图标，否则是首字母）。
 - 过程组里的叙述文字是 `--text-2`，比回答低一级。
 
+## 改动卡（一个任务一张）
+
+- **任务**（UI-S15）：从你发出一条消息（定时任务发出的也算）开始，到 Emperor 停下、会话里也没有还能把它叫醒的子智能体、后台任务、外部运行或待开始的目标轮为止；中间被结果叫醒继续的几轮属于同一个任务，运行中插入的消息不开始新任务。任务还没结束时你又发了消息，新消息开始新任务，上一个任务就此结束。边界由 Core 判断（`turn-files.ts`、`turnOpener`），记录写在任务的最后一轮名下（`turn/files` 带 `task`）。
+- **任务进行中不出卡片**；结束时在最后一轮之后出一张「已编辑 N 个文件」：标题下面是增删行数，后面接一个说明文字色的「这次任务」，列表同一个文件只占一行（按任务开始与结束时的项目对比）。新建、删除、重命名的文件用 Badge 标出。
+- 「查看变更」在审查里打开「这次任务的改动」；「撤销」一次撤回整个任务，确认框写「撤销这次任务的改动？」。
+- 0.2 之前的会话记录每一轮一张卡，不带「这次任务」，文字说「本轮」。
+
 ## 轮末
 
-轮末是一轮的最后一行：顺序是回答、错误等提示、本轮改动卡、轮末（UI-S13）。改动卡的记录在下一轮开始后才写完时，仍排在原来那一轮的轮末之前；回答和轮末之间隔着改动卡时，复制仍由轮末负责，回答下方不另加复制按钮。
+轮末是一轮的最后一行：顺序是回答、错误等提示、改动卡（任务在这一轮结束时）、轮末（UI-S13）。改动卡的记录在下一轮开始后才写完时，仍排在原来那一轮的轮末之前；回答和轮末之间隔着改动卡时，复制仍由轮末负责，回答下方不另加复制按钮。
 
 复制回答、时间与「用时 · 首字 · tok/s」、token 数合成一行操作，只在指针停在这一轮（提示、过程、回答、改动卡任一处）或键盘焦点进入这一行时出现，平时不占视觉；这一行的高度始终保留，出现时下面的内容不动。用时写作「8 秒」「1 分 12 秒」「1 小时 2 分」。
 
