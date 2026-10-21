@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test'
+import type { Page } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -59,12 +60,13 @@ async function shot(page: Page, name: string): Promise<void> {
 }
 
 for (const theme of ['light', 'dark'] as const) {
-  test(`full turn (${theme})`, async ({ page }) => {
+  test(`full turn (${theme}) @baseline`, async ({ page }) => {
     await open(page, 'showcase', theme, { width: 1000, height: 2200 })
     await toTop(page)
     await expect(page.locator('.user-bubble')).toBeVisible()
     await expect(page.locator('[data-turn-tail]')).toBeAttached()
     await shot(page, `chat-full-${theme}`)
+    await expectBaseline(page, 'conversation', `full-turn-${theme}`)
   })
 
   test(`tools expanded (${theme})`, async ({ page }) => {

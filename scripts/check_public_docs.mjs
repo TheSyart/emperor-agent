@@ -2,6 +2,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, relative, resolve, sep } from 'node:path'
+import { checkDesignDocs } from './lib/design-docs.mjs'
 
 const root = process.cwd()
 const allowedRootDocuments = new Set([
@@ -91,11 +92,15 @@ for (const path of publicMarkdown) {
   }
 }
 
+// docs/design/: the four-line status header and an entry in both indexes.
+const designProblems = checkDesignDocs(root)
+
 if (
   unexpectedRootDocuments.length ||
   unexpected.length ||
   brokenLinks.length ||
-  privateLinks.length
+  privateLinks.length ||
+  designProblems.length
 ) {
   if (unexpectedRootDocuments.length) {
     console.error('Tracked Markdown/JSON files outside the root allowlist:')
@@ -112,6 +117,12 @@ if (
   if (privateLinks.length) {
     console.error('Public documentation links to private development material:')
     for (const item of privateLinks) console.error(`  - ${item}`)
+  }
+  if (designProblems.length) {
+    console.error(
+      'Design documents without the status header or an index entry:',
+    )
+    for (const item of designProblems) console.error(`  - ${item}`)
   }
   process.exit(1)
 }

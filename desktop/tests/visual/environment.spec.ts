@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import type { Page } from '@playwright/test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -236,7 +236,9 @@ async function expectNoHorizontalOverflow(page: Page) {
 const card = (page: Page) => page.locator('.environment-card')
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`Build card beside a wide chat (${theme})`, async ({ page }) => {
+  test(`Build card beside a wide chat (${theme}) @baseline`, async ({
+    page,
+  }) => {
     await open(page, '/chat/build-ui', { theme })
     const envCard = card(page)
     await expect(envCard).toBeVisible()
@@ -296,6 +298,7 @@ for (const theme of ['dark', 'light'] as const) {
     expect(padding).toBeGreaterThanOrEqual(340)
     await expectNoHorizontalOverflow(page)
     await shot(page, `card-wide-build-${theme}`)
+    await expectBaseline(page, 'conversation', `environment-card-${theme}`)
   })
 
   test(`Build card in a narrow chat (${theme})`, async ({ page }) => {

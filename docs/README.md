@@ -68,7 +68,13 @@
 - [厂商模型列表接口规范](design/vendor-model-apis.md)
 - [设计令牌](design/tokens.md)
 - [颜色使用规范](design/color.md)
+- [排版](design/typography.md)
 - [组件规范](design/components.md)
+- [浮层规范](design/overlays.md)
+- [外壳布局](design/layout.md)
+- [动效](design/motion.md)
+- [会话流](design/conversation.md)
+- [输入框](design/composer.md)
 - [界面文案规范](design/writing.md)
 
 ### 发布与安全

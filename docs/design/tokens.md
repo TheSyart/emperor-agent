@@ -5,7 +5,7 @@
 > 最后核验：2026-10-21<br>
 > 事实源：`desktop/src/renderer/src/theme/`（`primitives.css`、`semantic.dark.css`、`semantic.light.css`、`components.css`、`base.css`、`retired-tokens.json`、`legacy-keys.json`、`tokens.test.ts`）、`desktop/src/renderer/src/style-audit.test.ts` 与 `style-audit-ratchet.json`、`scripts/codemods/tokens-v2.mjs`、`desktop/src/main/window-background.ts`
 
-界面的颜色、尺寸、字号、圆角、间距和动效都来自三层令牌。组件只用 L2 与 L3，不直接写颜色值，也不直接用 L1 的颜色原子；新增样式先加令牌再使用。
+界面的颜色、尺寸、字号、圆角、间距和动效都来自三层令牌。组件只用 L2 与 L3，不直接写颜色值，也不直接用 L1 的颜色原子；新增样式先加令牌再使用。这里列出令牌本身；怎样用见[颜色使用规范](color.md)、[排版](typography.md)、[外壳布局](layout.md)与[动效](motion.md)。
 
 | 层       | 文件                                              | 内容                                                                                                                           | 谁可以引用                                                |
 | -------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------- |
@@ -65,26 +65,27 @@
 
 ### 描边（Strokes，完整颜色；DS-02 起以 0.5px box-shadow 绘制）
 
-| 令牌                    | 用途                   |
-| ----------------------- | ---------------------- |
-| `--stroke-1`            | 最弱分隔               |
-| `--stroke-2`            | 默认细线               |
-| `--stroke-3`            | 强细线                 |
-| `--stroke-4`            | 最强细线               |
-| `--stroke-inverted`     | 反色底上的细线         |
-| `--stroke-solid`        | 不透明边框（三元组）   |
-| `--stroke-solid-strong` | 不透明强边框（三元组） |
+| 令牌                    | 用途                                                 |
+| ----------------------- | ---------------------------------------------------- |
+| `--stroke-1`            | 最弱分隔                                             |
+| `--stroke-2`            | 默认细线                                             |
+| `--stroke-3`            | 强细线                                               |
+| `--stroke-4`            | 最强细线                                             |
+| `--stroke-inverted`     | 反色底上的细线                                       |
+| `--stroke-solid`        | 不透明边框（三元组）                                 |
+| `--stroke-solid-strong` | 不透明强边框（三元组）                               |
+| `--hairline`            | 默认的 0.5px 分隔线（`--stroke-2`），画成 box-shadow |
 
 ### 强调色（Emperor 金，克制使用，见 [color.md](color.md)）
 
-| 令牌             | 用途                           |
-| ---------------- | ------------------------------ |
-| `--accent`       | 发送、每屏唯一主按钮、开关选中 |
-| `--accent-hover` | 强调色悬停                     |
-| `--accent-soft`  | 选中／三级强调填充             |
-| `--brand`        | 品牌标                         |
-| `--focus-ring`   | 焦点环颜色（三元组）           |
-| `--bubble-user`  | 用户消息气泡                   |
+| 令牌             | 用途                                              |
+| ---------------- | ------------------------------------------------- |
+| `--accent`       | 发送、每屏唯一主按钮、开关选中                    |
+| `--accent-hover` | 强调色悬停                                        |
+| `--accent-soft`  | 选中／三级强调填充                                |
+| `--brand`        | 品牌标                                            |
+| `--focus-ring`   | 焦点环颜色（三元组；画法见 [color.md](color.md)） |
+| `--bubble-user`  | 用户消息气泡                                      |
 
 ### 状态（Status）
 
@@ -94,10 +95,12 @@
 | `--warn`           | 警告                 |
 | `--error`          | 错误、破坏性操作     |
 | `--attention`      | 等待用户的审批与计划 |
+| `--info`           | 中性的说明与提示     |
 | `--ok-soft`        | 成功底色             |
 | `--warn-soft`      | 警告底色             |
 | `--error-soft`     | 错误底色             |
 | `--attention-soft` | 待处理底色           |
+| `--info-soft`      | 说明底色             |
 
 ### 层级与遮罩（Elevation、scrim）
 
@@ -133,9 +136,9 @@ DS-04 组件尺寸（[组件规范](components.md)）：`--badge-h` 18、`--dot-
 | 字号/行高 | `--type-caption` 12/18、`--type-footnote` 13/20、`--type-body-sm` 14/22、`--type-body` 15/26、`--type-title-sm` 16/24、`--type-title` 20/28、`--type-display` 28/36；Markdown `--md-h1..h3` |
 | 字重      | `--weight-regular` 400、`--weight-medium` 500、`--weight-semibold` 600                                                                                                                      |
 | 动效      | `--motion-fast` 120ms、`--motion-base` 200ms、`--motion-slow` 320ms；`--ease-standard`、`--ease-exit`                                                                                       |
-| 内容宽度  | `--content-chat` 760、`--content-page` 880、`--content-form` 640                                                                                                                            |
+| 内容宽度  | `--content-chat` 760、`--content-page` 880、`--content-form` 640（目前没有组件使用；实际的列宽见[外壳布局](layout.md#内容宽度)）                                                            |
 
-旧尺度（`--radius-row/cell/card/takeover/composer/modal/pill`、`--fs-*`/`--lh-*` 与 `--font-*` 简写、`--space-*`、`--z-*`、`--duration-*`、`--ease-out/spring/in`）仍在 L1，组件可以继续使用；DS-02 删除了旧的 `--radius-xs/sm/md/lg/xl`、`--font-size-*` 别名与 dsh 动效时长。
+旧尺度（`--radius-row/cell/card/takeover/composer/modal/pill`、`--fs-*`/`--lh-*` 与 `--font-*` 简写、`--space-*`、`--z-*`、`--duration-*`、`--ease-out/spring/in`）仍在 L1，组件可以继续使用；DS-02 删除了旧的 `--radius-xs/sm/md/lg/xl`、`--font-size-*` 别名与 dsh 动效时长。`--tracking-*`、`--leading-*` 定义在 L1 但没有使用者。两套字号刻度怎样对应见[排版](typography.md#字号与行高)，两套时长见[动效](motion.md#时长与缓动)。
 
 ## DS-02 吸附表
 

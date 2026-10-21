@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import type { Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -41,7 +41,7 @@ async function recorded<T>(page: Page, name: string): Promise<T[]> {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`REL-03 存储 names read-only files and offers 备份与恢复 (${theme})`, async ({
+  test(`REL-03 存储 names read-only files and offers 备份与恢复 (${theme}) @baseline`, async ({
     page,
   }) => {
     const settings = await openStorage(page, theme)
@@ -61,6 +61,7 @@ for (const theme of ['dark', 'light'] as const) {
       path: resolve(screenshotDir, `storage-${theme}.png`),
       animations: 'disabled',
     })
+    await expectBaseline(page, 'settings', `storage-${theme}`)
   })
 
   test(`REL-03 导出备份 with the vault under a passphrase (${theme})`, async ({

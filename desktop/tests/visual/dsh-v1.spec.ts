@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { BASELINE_TAG, expect, expectBaseline, test } from './baseline'
 import type { Locator, Page } from '@playwright/test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -92,7 +92,7 @@ async function expectPageColumnFits(page: Page) {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`hero empty session (${theme})`, async ({ page }) => {
+  test(`hero empty session (${theme}) @baseline`, async ({ page }) => {
     await open(page, '/chat/chat-main', { theme })
     const root = page.locator('.conversation-root')
     await expect(root).toHaveAttribute('data-phase', 'hero')
@@ -103,9 +103,12 @@ for (const theme of ['dark', 'light'] as const) {
     expect(box.width).toBeLessThanOrEqual(780)
     await expectNoHorizontalOverflow(page)
     await shot(page, `hero-empty-${theme}`)
+    await expectBaseline(page, 'conversation', `hero-empty-${theme}`)
   })
 
-  test(`active conversation with docks (${theme})`, async ({ page }) => {
+  test(`active conversation with docks (${theme}) @baseline`, async ({
+    page,
+  }) => {
     await open(
       page,
       '/chat/build-ui?visualQueue=on&visualGoal=executing&visualTodos=on',
@@ -120,6 +123,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(page.locator('.goal-dock')).toBeVisible()
     await expect(page.locator('.todo-dock')).toBeVisible()
     await shot(page, `docks-${theme}`)
+    await expectBaseline(page, 'conversation', `docks-${theme}`)
     await page.locator('.todo-dock .header').click()
     await shot(page, `docks-todo-expanded-${theme}`)
   })
@@ -164,7 +168,7 @@ test('narrow window auto-collapses the sidebar to the rail', async ({
 })
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`composer chips and menus (${theme})`, async ({ page }) => {
+  test(`composer chips and menus (${theme}) @baseline`, async ({ page }) => {
     await open(page, '/chat/build-ui?visualProgress=final', { theme })
     const card = page.locator('.composer-root .card')
     await expect(card).toBeVisible()
@@ -179,6 +183,7 @@ for (const theme of ['dark', 'light'] as const) {
     const modelMenu = page.getByRole('menu', { name: '模型与思考' })
     await expect(modelMenu).toBeVisible()
     await shot(page, `composer-model-menu-${theme}`)
+    await expectBaseline(page, 'conversation', `composer-model-menu-${theme}`)
     // dsh two-level menu: drill into the provider-grouped model list …
     await modelMenu.getByRole('menuitem', { name: /^模型/ }).click()
     await expect(
@@ -221,23 +226,34 @@ test('composer slash palette and plan chip', async ({ page }) => {
 
 for (const theme of ['dark', 'light'] as const) {
   for (const control of ['permission', 'ask-multi', 'plan'] as const) {
-    test(`takeover ${control} (${theme})`, async ({ page }) => {
-      await open(page, `/chat/build-ui?visualControl=${control}`, { theme })
-      const kind =
-        control === 'permission'
-          ? 'approval'
-          : control === 'plan'
-            ? 'plan'
-            : 'question'
-      const card = page.locator(`[data-takeover="${kind}"]`)
-      await expect(card).toBeVisible()
-      await expect(page.locator('.composer-root .card')).toBeHidden()
-      if (control === 'ask-multi') {
-        await card.getByText('侧栏').click()
-        await card.getByText('输入框').click()
-      }
-      await shot(page, `takeover-${control}-${theme}`)
-    })
+    test(
+      `takeover ${control} (${theme})`,
+      // The approval card is the key screen; the other two stay archive-only.
+      { tag: control === 'permission' ? BASELINE_TAG : [] },
+      async ({ page }) => {
+        await open(page, `/chat/build-ui?visualControl=${control}`, { theme })
+        const kind =
+          control === 'permission'
+            ? 'approval'
+            : control === 'plan'
+              ? 'plan'
+              : 'question'
+        const card = page.locator(`[data-takeover="${kind}"]`)
+        await expect(card).toBeVisible()
+        await expect(page.locator('.composer-root .card')).toBeHidden()
+        if (control === 'ask-multi') {
+          await card.getByText('侧栏').click()
+          await card.getByText('输入框').click()
+        }
+        await shot(page, `takeover-${control}-${theme}`)
+        if (control === 'permission')
+          await expectBaseline(
+            page,
+            'conversation',
+            `takeover-approval-${theme}`,
+          )
+      },
+    )
   }
 }
 
@@ -1883,7 +1899,7 @@ async function scrollOptions(page: Page, to: 'top' | 'bottom') {
 // pages.spec.ts.
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`settings memory tabs, overview and versions (${theme})`, async ({
+  test(`settings memory tabs, overview and versions (${theme}) @baseline`, async ({
     page,
   }) => {
     await open(page, '/chat/build-ui?settings=memory', {
@@ -1902,6 +1918,7 @@ for (const theme of ['dark', 'light'] as const) {
     expect(box.height).toBeGreaterThan(300)
     await expectOptionsFit(page)
     await shot(page, `settings-memory-${theme}`)
+    await expectBaseline(page, 'settings', `memory-${theme}`)
 
     await dialog.getByRole('button', { name: /上下文概览/ }).click()
     await expect(dialog.getByText('语义压缩')).toBeVisible()
@@ -1964,7 +1981,9 @@ test('settings memory profile tab edits USER.local.md', async ({ page }) => {
 })
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`settings tokens dashboard views (${theme})`, async ({ page }) => {
+  test(`settings tokens dashboard views (${theme}) @baseline`, async ({
+    page,
+  }) => {
     await open(page, '/chat/build-ui?settings=tokens', {
       width: 1280,
       height: 860,
@@ -1981,6 +2000,7 @@ for (const theme of ['dark', 'light'] as const) {
       .hover({ position: { x: 300, y: 120 } })
     await expectOptionsFit(page)
     await shot(page, `settings-tokens-trend-${theme}`)
+    await expectBaseline(page, 'settings', `usage-${theme}`)
 
     // 详细: the heatmap, the ranking and the cache view.
     await dialog.getByTestId('usage-details').click()

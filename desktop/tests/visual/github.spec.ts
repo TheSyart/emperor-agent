@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import type { Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -69,7 +69,7 @@ const issues = (page: Page) => page.locator('[data-issue]')
 const runs = (page: Page) => page.locator('[data-run]')
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`issue list and detail (${theme})`, async ({ page }) => {
+  test(`issue list and detail (${theme}) @baseline`, async ({ page }) => {
     await open(page, '/github/issues', { theme })
     await expect(
       page.getByRole('heading', { name: 'GitHub', level: 1 }),
@@ -102,6 +102,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(detail.locator('[data-issue-comments] li')).toHaveCount(2)
     await expect(detail.locator('img[src="x"]')).toHaveCount(0)
     await shot(page, `issues-detail-${theme}`)
+    await expectBaseline(page, 'pages', `issues-${theme}`)
     expect(
       await page.evaluate(
         () =>
