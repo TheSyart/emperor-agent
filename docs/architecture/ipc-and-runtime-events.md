@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：桌面端与 Core 开发者<br>
-> 最后核验：2026-10-21（对照 `8f954763`）<br>
+> 最后核验：2026-10-21（对照 `f764443d`）<br>
 > 事实源：`packages/core/src/api/operations.ts`、`desktop/src/main/core-host.ts`、`desktop/src/main/ipc.ts`、`desktop/src/preload/`、`packages/core/src/harness/projection/`、`packages/core/src/session-log/history.ts`、`packages/core/src/harness/host/session-views.ts`、`packages/core/src/public/runtime-contract.ts`、`desktop/src/shared/ipc-contract.ts`、`desktop/src/main/desktop-capability-ipc.ts`、`desktop/src/main/browser-view.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/preload/desktop-capabilities.ts`、`desktop/src/main/event-bridge.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/conversation/`、`desktop/src/renderer/src/runtime/`、`desktop/src/shared/content-security-policy.ts`、`desktop/src/main/trusted-renderer.ts`、`desktop/src/main/renderer-permissions.ts`、`desktop/src/main/app-menu.ts`、`desktop/src/main/open-path-ipc.ts`、`desktop/src/main/app-version-ipc.ts`、`desktop/src/main/remote-image-ipc.ts`、`desktop/src/main/screenshot-ipc.ts`、`desktop/src/main/logging/`、`desktop/src/main/diagnostics-bundle.ts`、`desktop/src/main/diagnostics-bundle-ipc.ts`、`desktop/src/main/recovery.ts`、`desktop/src/renderer/src/composables/useMarkdownLinks.ts`、`packages/core/src/harness/projection/wire-names.ts`、`packages/core/src/updates/`、`desktop/src/main/update-host.ts`
 
 Electron renderer 不直接导入 Core，也不访问本地文件。同步请求走 preload 的 Core IPC contract；异步过程分两条管线：Chat 与 Trajectory 渲染所需的原始 session 事件走独立的 session event 通道，其余状态走 runtime events（UiEvent）。
@@ -44,7 +44,7 @@ Operation 的名称与参数 schema 定义在 `packages/core/src/api/operations.
 | `agents.*`                                                                                                     | `agents.list({ rootSessionIds })`：根会话拥有的全部子智能体（本地与外部）的共享树；`agents.send({ sessionId, text })`：给运行中的本地子智能体发一条用户消息                                                                                                                    |
 | `executors.*`                                                                                                  | Claude Code / Codex 的设置：`list`、`probe`、`models`、`configure`（带 `expectedRevision`），`setCredential` / `clearCredential`（Claude Code 令牌，只回末 4 位）                                                                                                              |
 | `delegations.*`                                                                                                | 外部委派：`get`、`history`、`send`、`interrupt`、`recover`、`abandon`（标记为已结束）、`collect`、`receipt`、`validate`、`integrate`、`diff`、`apply`、`undo`、`discard`、`close`，见下文与[外部子智能体](external-agent-delegation.md)                                        |
-| `storage.*`                                                                                                    | 「设置 › 高级 › 存储」：`usage`（各类占用）、`clean`（经 mutation guard）、`versions`（数据版本、更新版本写入的只读文件、降级与上次恢复）                                                                                                                                      |
+| `storage.*`                                                                                                    | 「设置 › 高级 › 存储」：`usage`（各类占用）、`clean`（任何时候都可以清理）、`versions`（数据版本、更新版本写入的只读文件、降级与上次恢复）                                                                                                                                     |
 | `tools.readResult`                                                                                             | 读取落盘到 `stateRoot/spill/` 的完整工具结果                                                                                                                                                                                                                                   |
 | `tools.networkSettings`、`tools.setNetworkSettings`                                                            | 「设置 › 高级 › 网络工具」：`web_fetch` / `web_search` 的开关与可用性，变更后广播 `web_tools_changed`                                                                                                                                                                          |
 | `sessions.defaults`、`sessions.setDefaults`                                                                    | 「设置 › 常规 › 会话 › 新会话的权限」：新会话（以及还没有日志的会话和草稿）起始的权限预设，存于 `settings.json` › `sessions.defaultPermission`                                                                                                                                 |
@@ -59,7 +59,7 @@ Operation 的名称与参数 schema 定义在 `packages/core/src/api/operations.
 | `scheduler.*`                                                                                                  | 定时任务                                                                                                                                                                                                                                                                       |
 | `environment.*`、`diagnostics.*`、`processes.*`、`onboarding.*`、`desktopPet.*`、`attachments.*`、`projects.*` | 其他宿主能力                                                                                                                                                                                                                                                                   |
 
-会修改状态的 operation 经过 CoreApi mutation guard：调用方显示的会话（调用上下文的 `view`）有待处理交互时返回 409，处于 Plan 模式时返回 403；`view` 为 `null` 时不拦截。进程内调用不带 `view` 时返回 `SESSION_REQUIRED`。
+属于某个对话的写入（`delegations.*` 的发送与成果操作、`processes.reparent`）经过 CoreApi mutation guard：那个对话有待处理交互时返回 409 `mutation_blocked_pending`，处于 Plan 模式时返回 403 `mutation_blocked_plan`。设置类 operation 是全局的，不受调用方显示的会话影响（FIX-10），见[权限与控制](control-and-permissions.md#coreapi-mutation-guard)。
 
 `bootstrap` 的结果带 `sessionId`：它描述的会话，即界面显示的会话（`bootstrap({ sessionId })` 会先激活它）。`sessions.activate` 只改变这一项，不影响任何会话里正在运行的东西。
 
@@ -161,7 +161,7 @@ Renderer 对 UiEvent 的 session、task 和 replay 处理使用小型 domain act
 
 ## 其他 operation 约束
 
-- `tasks.*` 的 `sessionId` 未写时为调用方显示的会话；`tasks.wait`、`tasks.readOutput`、`tasks.transcript` 只读；`tasks.cancel` 经过所属会话的 mutation guard。
+- `tasks.*` 的 `sessionId` 未写时为调用方显示的会话；`tasks.wait`、`tasks.readOutput`、`tasks.transcript` 只读；`tasks.cancel` 任何时候都可以停止，不经过 mutation guard。
 - `chat.stopRuntime({ taskId?, sessionId? })`：带 `taskId` 时停止该任务，否则停止 `sessionId` 指明的会话的 turn；两者都没有时返回 `SESSION_REQUIRED`，不再默认到任何会话。
 - `processes.list/cancel/reparent` 只作用于参数 `sessionId` 指明的会话的受管进程，缺少时返回 `SESSION_REQUIRED`；cancel/reparent 要求 lease，reparent 不能跨 session。
 - `goals.get/pause/resume(goalId, sessionId?)`、`goals.cancel(goalId, reason?, sessionId?)`、`goals.list({ sessionId? })`：会话未写时为调用方显示的会话；renderer 写明当前会话。
@@ -176,7 +176,7 @@ Renderer 对 UiEvent 的 session、task 和 replay 处理使用小型 domain act
 - `plugins.getDetail` 的结果另带 `tools: { note, groups }`：每组 `{ id, kind, title, note, tools }`，`tools` 的每项是 `{ name, description, parameters, readOnly }`。`computer-use` 按驱动给出 `ui`（通用）、`embedded-browser`、`external-browser`、`desktop` 四组，取自四个工具工厂的静态定义（列出时不执行任何工具），电脑操作关闭时照样列出，`note` 为「打开电脑操作后可用」（不支持的主机上为「这台电脑不能使用电脑操作」）；其他插件每个 MCP 成员一组（`kind: 'mcp'`，`id` 为成员名），只在 server 运行时列出它注册的工具，否则 `tools` 为空、组的 `note` 说明原因。说明文字与成员一样不含本机路径。
 - `config.effective` 是只读解释面，返回可复现的脱敏 snapshot、来源与覆盖轨迹。
 - `model.saveEntries({ connection, entries, activateEntryId? })` 一次写盘、只刷新一次模型配置：先逐条校验，任何一条不合格整批不写，错误写明第几个模型；同一连接的条目共用 `connectionId`。`model.updateConnection({ connectionId | entryId, apiKey?, apiBase? })` 更新同一连接的全部条目并返回受影响条目数。`model.refreshMetadata({ entryIds | connectionId, apply? })` 先返回与内置目录的差异，`apply: true` 时写入且跳过 `userLocked` 字段（只读预览不经过 mutation guard）。`model.lookupDefaults` 给手动填写的模型查默认值与来源。`model.discardRejected({ key })` 删除文件里无法读取的条目；`model.getConfig` 的 `rejectedEntries` 只含位置、id、模型 ID、供应商和原因，不含条目原文。所有对 `model_config.json` 的读改写经同一把进程内锁。MOD-05：`model.replaceEntry({ entryId, modelId })` 用同一连接上的另一个模型替换一条（退役模型的「替换为 X」）：新条目占原位置，`activeModelId` 与备用模型引用一起改过去，锁定字段、能力覆盖、温度与 Key 保留，其余按内置目录，一次写盘，返回 `replacedEntryId`；同一连接下已有这个模型时拒绝。`model.saveEntry` 可带 `sampling: { temperature }`（`null` 删除）与 `lockFields`（并入 `metadata.userLocked`）。`model.getConfig` 的每条带 `lifecycle`（保存的，否则内置目录的）和 `lastTest`（`model.test` 的最近一次结果，存于 `stateRoot/model_tests.json`，`failure: 'auth' | 'error'`）。
-- `model.discoverModels` 与 `model.probeConnection` 只读，不经过 mutation guard，接受添加模型表单的草稿连接：表单里的 Key 优先；Key 为空或为掩码时，只有 `entryId` / `connectionId` 指向的条目与草稿的供应商、协议和规范化地址一致才借用已保存的 Key。结果不含 Key，错误信息抹掉 Key；成功的列表按连接哈希在内存中缓存 15 分钟。接口、字段与错误码见[厂商模型列表接口规范](../design/vendor-model-apis.md)。
+- `model.discoverModels` 与 `model.probeConnection` 只读，接受添加模型表单的草稿连接：表单里的 Key 优先；Key 为空或为掩码时，只有 `entryId` / `connectionId` 指向的条目与草稿的供应商、协议和规范化地址一致才借用已保存的 Key。结果不含 Key，错误信息抹掉 Key；成功的列表按连接哈希在内存中缓存 15 分钟。接口、字段与错误码见[厂商模型列表接口规范](../design/vendor-model-apis.md)。
 
 ## 桌面能力 IPC
 

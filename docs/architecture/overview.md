@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、开发者、希望理解产品边界的用户<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 最后核验：2026-10-21（对照 `f764443d`）<br>
 > 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/api/core-api.ts`、`packages/core/src/api/operations.ts`、`desktop/src/main/`、`desktop/src/preload/`、`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/workspace/`、`packages/core/src/harness/delegation/`、`desktop/src/main/logging/`、`desktop/src/main/home-backup.ts`
 
 Emperor Agent 的桌面主产品是本地单用户 Electron 应用。Electron main 进程内创建一个 TypeScript `CoreApi`；`CoreApi` 背后是唯一的内核组合根 `HarnessHost`。Vue renderer 只能通过 preload 暴露的 IPC contract 请求 Core，并通过 runtime events 接收过程状态。源码还提供默认不随桌面安装包开放的 ACP V1 stdio operator preview，它为受信本机 client 创建独立的 `CoreApi`。产品主线没有 Python runtime、HTTP backend 或 WebSocket backend。
@@ -37,7 +37,7 @@ flowchart LR
 | ------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
 | Renderer      | 界面、用户输入、纯 runtime projection 与可取消 effect，不持有权威业务状态                          | `desktop/src/renderer/src/`                                   |
 | Preload / IPC | 限定 renderer 可调用的 operation、可订阅事件和少量桌面能力（文件选择、打开文件夹、内置浏览器视图） | `desktop/src/preload/`、`desktop/src/main/core-host.ts`       |
-| CoreApi       | 进程内 API 门面、输入校验、mutation guard、工作台与配置服务                                        | `packages/core/src/api/`                                      |
+| CoreApi       | 进程内 API 门面、输入校验、对话内写入的 mutation guard、工作台与配置服务                           | `packages/core/src/api/`                                      |
 | HarnessHost   | 组合 LLM、session log、Agent loop、工具、沙箱、审批、Plan、压缩、Hooks、Goal、子智能体             | `packages/core/src/harness/host/`                             |
 | Agent loop    | turn → step 循环、inbox、工具调度、middleware                                                      | `packages/core/src/harness/agent/`                            |
 | Session log   | 每个 session 一份 append-only `log.jsonl`、崩溃修复、fork                                          | `packages/core/src/session-log/`                              |
@@ -120,7 +120,7 @@ ACP 的 `session/prompt` 也进入同一个 `chat.submit`。`session/new` 只能
 - Session log 是会话内容、权限选择、Plan 状态、Goal、审批和问题记录的唯一事实源。
 - Runtime event 是界面投影，可以随时从 log 重建，不替代 log。
 - Memory、Projects、Skills、Scheduler、MCP 等保留服务各自持有自己的文件事实源。
-- Skills 与 MCP 配置有两条写入路径：界面经 CoreApi 的 `skills.*` / `mcp.*`（受 mutation guard 保护），Agent 经 `skill_manage` / `mcp_config` 工具（`danger-full-access` 以外每次写入都要审批）。两条路径共用 `skills/library.ts` 与 `mcp/manage.ts`，写入后分别刷新 Skill 目录或重载 MCP。
+- Skills 与 MCP 配置有两条写入路径：界面经 CoreApi 的 `skills.*` / `mcp.*`（用户在设置里的操作，随时可用），Agent 经 `skill_manage` / `mcp_config` 工具（`danger-full-access` 以外每次写入都要审批）。两条路径共用 `skills/library.ts` 与 `mcp/manage.ts`，写入后分别刷新 Skill 目录或重载 MCP。
 - `stateRoot` 与应用资源所在的 `runtimeRoot` 相互独立。
 
 数据布局见[全局私有存储根](global-state-store.md)，权限与 Plan 见[权限与 Plan 架构](control-and-permissions.md)，Goal 见 [Goal 架构](goal-mode.md)。
