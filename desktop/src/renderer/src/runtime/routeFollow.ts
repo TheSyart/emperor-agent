@@ -26,3 +26,19 @@ export function shouldFollowActiveSession(input: FollowActiveInput): boolean {
   if (input.routeSessionIsDraft) return true
   return input.routeSessionKnown
 }
+
+/**
+ * A draft id in the route that the store does not know. Drafts live only in
+ * the window's memory, so after a reload the route names a draft nobody has;
+ * the route then moves to the active session (the fresh draft) instead of
+ * showing 「没有找到这个会话。」 (FIX-08). A child session is never a draft.
+ */
+export function isStaleDraftRoute(
+  input: Omit<FollowActiveInput, 'activeId'>,
+): boolean {
+  return (
+    input.routeSessionIsDraft &&
+    !input.routeSessionKnown &&
+    Boolean(input.routeSessionId)
+  )
+}
