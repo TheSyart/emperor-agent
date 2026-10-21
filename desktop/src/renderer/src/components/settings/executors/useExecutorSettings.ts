@@ -79,6 +79,11 @@ export function createExecutorSettings() {
   const signingIn = computed(() => signIn.value?.state === 'running')
   /** Sign-ins (by `startedAt`) that already ended: a late reply is ignored. */
   const endedSignIns = new Set<number>()
+  /**
+   * Counts the sign-ins this page saw start: a list read asked before the
+   * latest one cannot say that it ended.
+   */
+  let signInEpoch = 0
   /** Once after the upgrade that deleted a saved Claude token (AGT-12). */
   const signInNotice = ref(false)
   const error = ref('')
@@ -168,14 +173,16 @@ export function createExecutorSettings() {
     if (!next) return
     if (next.state !== 'running') endedSignIns.add(next.startedAt)
     else if (endedSignIns.has(next.startedAt)) return
+    else if (signIn.value?.startedAt !== next.startedAt) signInEpoch++
     signIn.value =
       next.state === 'running' || next.state === 'failed' ? next : null
   }
 
-  function adoptFacts(result: ListResult) {
+  /** `epoch`: {@link signInEpoch} when the list was asked for. */
+  function adoptFacts(result: ListResult, epoch: number) {
     signInNotice.value = result.signInNotice === true
     if (result.signIn) adoptSignIn(result.signIn)
-    else if (signingIn.value) {
+    else if (signingIn.value && epoch === signInEpoch) {
       // It ended while the page did not hear: ask claude what it says now.
       const ended = signIn.value
       signIn.value = null
@@ -270,12 +277,13 @@ export function createExecutorSettings() {
     loading.value = true
     error.value = ''
     try {
+      const epoch = signInEpoch
       const result = await listExecutors()
       if (current !== generation) return
       pending.length = 0
       if (result.config) adoptConfig(result.config)
       else config.value = null
-      adoptFacts(result)
+      adoptFacts(result, epoch)
       probeErrors.value = {}
       for (const profile of config.value?.profiles ?? [])
         void loadModels(profile, forceProbe, false)
@@ -348,10 +356,11 @@ export function createExecutorSettings() {
       pending.splice(0, count)
       adoptConfig(result)
       // Enabling or re-pointing an executor changes what Core can tell.
+      const epoch = signInEpoch
       const refreshed = await listExecutors()
       if (disposed || current !== generation) return
       if (refreshed.config?.revision === saved?.revision) {
-        adoptFacts(refreshed)
+        adoptFacts(refreshed, epoch)
         probeErrors.value = {}
       }
     } catch (cause) {
@@ -401,9 +410,10 @@ export function createExecutorSettings() {
     )
       return
     try {
+      const epoch = signInEpoch
       const result = await listExecutors()
       if (disposed || busy.value || saving.value || pending.length > 0) return
-      adoptFacts(result)
+      adoptFacts(result, epoch)
       if (
         result.config &&
         config.value &&

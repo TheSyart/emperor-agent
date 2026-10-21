@@ -1168,6 +1168,41 @@ it('FIX-11 · 3 · a failed or timed-out sign-in says why and gives the command 
   )
 })
 
+it('FIX-11 · 2 · a list read that started before the sign-in does not end it', async () => {
+  const value = claudeProbe(SIGNED_OUT)
+  signInExecutor.mockResolvedValue({ signIn: { ...RUNNING } })
+  await mount()
+  // The 10-second refresh asks for the list…
+  let answer!: (result: unknown) => void
+  listExecutors.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        answer = resolve
+      }),
+  )
+  window.dispatchEvent(new Event('focus'))
+  await settle()
+  // …the user starts the sign-in meanwhile…
+  row('claude-code')
+    .querySelector<HTMLButtonElement>('[data-claude-sign-in-start]')!
+    .click()
+  await settle()
+  expect(root.querySelector('[data-claude-sign-in-pending]')).not.toBeNull()
+  // …and the older answer, without it, arrives afterwards.
+  answer({ ...value, signIn: null })
+  await settle()
+  expect(root.querySelector('[data-claude-sign-in-pending]')).not.toBeNull()
+  // A list read after the start that no longer has it: it ended unheard.
+  probeExecutor.mockClear()
+  probeExecutor.mockResolvedValue({ ...SIGNED_IN })
+  listExecutors.mockResolvedValue({ ...value, signIn: null })
+  window.dispatchEvent(new Event('focus'))
+  await settle()
+  await settle()
+  expect(root.querySelector('[data-claude-sign-in-pending]')).toBeNull()
+  expect(probeExecutor).toHaveBeenCalledWith({ profileId: 'profile-0' })
+})
+
 it('FIX-11 · 2 · a sign-in already running when the page opens shows as running', async () => {
   const value = claudeProbe(SIGNED_OUT)
   value.signIn = { ...RUNNING }
