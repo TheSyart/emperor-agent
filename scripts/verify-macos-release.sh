@@ -50,9 +50,17 @@ verify_app() {
 
 verify_app "$APP" >/dev/null
 
-MOUNT="$(mktemp -d "${TMPDIR:-/tmp}/emperor-dmg.XXXXXX")"
-ZIP_EXTRACT="$(mktemp -d "${TMPDIR:-/tmp}/emperor-zip.XXXXXX")"
+MOUNT="$(mktemp -d -t emperor-dmg)"
+ZIP_EXTRACT="$(mktemp -d -t emperor-zip)"
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+# The DMG and ZIP copies are checked and run here only: LaunchServices
+# forgets them before they go.
+forget_copies() {
+  "$LSREGISTER" -u "$MOUNT/Emperor Agent.app" >/dev/null 2>&1 || true
+  "$LSREGISTER" -u "$ZIP_EXTRACT/Emperor Agent.app" >/dev/null 2>&1 || true
+}
 cleanup() {
+  forget_copies
   hdiutil detach "$MOUNT" -quiet >/dev/null 2>&1 || true
   rmdir "$MOUNT" >/dev/null 2>&1 || true
   rm -rf "$ZIP_EXTRACT"
@@ -66,9 +74,11 @@ SEAL="$(verify_app "$MOUNTED_APP")"
 ditto -x -k "$ZIP" "$ZIP_EXTRACT"
 verify_app "$ZIP_EXTRACT/Emperor Agent.app" >/dev/null
 
-node "$ROOT/desktop/scripts/run-packaged-smoke.cjs" \
+# Through npm, as in CI: the smoke's Seatbelt probe runs the host npm.
+npm --prefix "$ROOT/desktop" run -s package:smoke -- \
   --app "$MOUNTED_APP/Contents/MacOS/Emperor Agent"
 
+forget_copies
 hdiutil detach "$MOUNT" -quiet
 rmdir "$MOUNT"
 rm -rf "$ZIP_EXTRACT"
