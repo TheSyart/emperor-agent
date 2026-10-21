@@ -388,6 +388,128 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     expect(pkg.scripts?.build).toContain('node scripts/audit-preload.cjs')
   })
 
+  it('ships turndown and its DOM, which the main bundle imports at run time (REL-05)', () => {
+    const config = fs.readFileSync(
+      path.join(desktopRoot, 'electron-builder.yml'),
+      'utf8',
+    )
+    for (const pattern of [
+      '  - node_modules/turndown/package.json',
+      '  - node_modules/turndown/lib/turndown.cjs.js',
+      '  - node_modules/@mixmark-io/domino/package.json',
+      '  - node_modules/@mixmark-io/domino/lib/**/*.js',
+    ])
+      expect(config, pattern).toContain(pattern)
+    const hook = require(
+      path.join(desktopRoot, 'scripts', 'after-pack.cjs'),
+    ) as { isAllowedNodeModuleEntry(entry: string): boolean }
+    for (const entry of [
+      '/node_modules/turndown',
+      '/node_modules/turndown/package.json',
+      '/node_modules/turndown/lib',
+      '/node_modules/turndown/lib/turndown.cjs.js',
+      '/node_modules/@mixmark-io',
+      '/node_modules/@mixmark-io/domino',
+      '/node_modules/@mixmark-io/domino/package.json',
+      '/node_modules/@mixmark-io/domino/lib',
+      '/node_modules/@mixmark-io/domino/lib/index.js',
+    ])
+      expect(hook.isAllowedNodeModuleEntry(entry), entry).toBe(true)
+    for (const entry of [
+      '/node_modules/turndown/lib/turndown.browser.umd.js',
+      '/node_modules/turndown/dist/turndown.js',
+      '/node_modules/@mixmark-io/domino/lib/index.d.ts',
+      '/node_modules/@mixmark-io/domino/test/w3c.js',
+      '/node_modules/@mixmark-io/other/package.json',
+    ])
+      expect(hook.isAllowedNodeModuleEntry(entry), entry).toBe(false)
+  })
+
+  it('refuses a package whose main bundle imports what app.asar does not ship (REL-05)', async () => {
+    const hook = require(
+      path.join(desktopRoot, 'scripts', 'after-pack.cjs'),
+    ) as {
+      runtimeImportProblems(asarPath: string, entries: string[]): string[]
+    }
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'emperor-imports-'))
+    const build = async (
+      name: string,
+      files: Record<string, string>,
+    ): Promise<{ asar: string; entries: string[] }> => {
+      const stage = path.join(root, name)
+      for (const [file, body] of Object.entries(files)) {
+        fs.mkdirSync(path.dirname(path.join(stage, file)), { recursive: true })
+        fs.writeFileSync(path.join(stage, file), body)
+      }
+      const asar = path.join(root, `${name}.asar`)
+      await createPackage(stage, asar)
+      await waitForCompleteAsar(asar, regularFileBytes(stage))
+      const { listPackage } = require('@electron/asar') as {
+        listPackage(path: string): string[]
+      }
+      return { asar, entries: listPackage(asar) }
+    }
+    const main = [
+      'import { app } from "electron";',
+      'import * as fs from "node:fs";',
+      'import { EventEmitter } from "events";',
+      'import TurndownService from "turndown";',
+      'import * as nodePty from "node-pty";',
+      'const lazy = () => import("@scope/lazy/sub");',
+      // A string that only looks like an import is not one.
+      'const text = `require("ajv-formats/dist/formats")`;',
+      '',
+    ].join('\n')
+    const ptyPackage = JSON.stringify({
+      name: 'node-pty',
+      dependencies: { 'node-addon-api': '^7.1.0' },
+    })
+    const turndownPackage = JSON.stringify({
+      name: 'turndown',
+      main: 'lib/turndown.cjs.js',
+      dependencies: { '@mixmark-io/domino': '^2.2.0' },
+    })
+    try {
+      const nothing = await build('nothing', {
+        'out/main/index.js': main,
+        'node_modules/node-pty/package.json': ptyPackage,
+      })
+      expect(hook.runtimeImportProblems(nothing.asar, nothing.entries)).toEqual(
+        [
+          '/out/main/index.js imports turndown, which app.asar does not ship',
+          '/out/main/index.js imports @scope/lazy, which app.asar does not ship',
+        ],
+      )
+
+      const noDom = await build('no-dom', {
+        'out/main/index.js': main,
+        'out/main/chunk.js': 'import "@scope/lazy";\n',
+        'node_modules/node-pty/package.json': ptyPackage,
+        'node_modules/turndown/package.json': turndownPackage,
+        'node_modules/@scope/lazy/package.json': '{"name":"@scope/lazy"}',
+      })
+      expect(hook.runtimeImportProblems(noDom.asar, noDom.entries)).toEqual([
+        'turndown needs @mixmark-io/domino, which app.asar does not ship',
+      ])
+
+      const complete = await build('complete', {
+        'out/main/index.js': main,
+        'node_modules/node-pty/package.json': ptyPackage,
+        'node_modules/turndown/package.json': turndownPackage,
+        'node_modules/@mixmark-io/domino/package.json':
+          '{"name":"@mixmark-io/domino"}',
+        'node_modules/@scope/lazy/package.json': '{"name":"@scope/lazy"}',
+      })
+      // node-pty's node-addon-api only builds the addon; the prebuilt
+      // binary never loads it.
+      expect(
+        hook.runtimeImportProblems(complete.asar, complete.entries),
+      ).toEqual([])
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it("8. ships only the build architecture's Claude SDK binary (AGT-01)", () => {
     const config = fs.readFileSync(
       path.join(desktopRoot, 'electron-builder.yml'),

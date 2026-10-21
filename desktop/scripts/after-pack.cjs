@@ -5,6 +5,7 @@ const {
   readFileSync,
   rmSync,
 } = require('node:fs')
+const { builtinModules } = require('node:module')
 const { join } = require('node:path')
 const { extractFile, listPackage } = require('@electron/asar')
 const { validateRuntimeManifest } = require('./before-pack.cjs')
@@ -59,6 +60,18 @@ const TYPESCRIPT_ASAR_ENTRIES = new Set([
   '/node_modules/typescript/package.json',
 ])
 
+/** turndown (CommonJS build only) and the DOM it requires (REL-05). */
+const TURNDOWN_ASAR_ENTRIES = new Set([
+  '/node_modules/turndown',
+  '/node_modules/turndown/package.json',
+  '/node_modules/turndown/lib',
+  '/node_modules/turndown/lib/turndown.cjs.js',
+  '/node_modules/@mixmark-io',
+  '/node_modules/@mixmark-io/domino',
+  '/node_modules/@mixmark-io/domino/package.json',
+  '/node_modules/@mixmark-io/domino/lib',
+])
+
 function isAllowedNodeModuleEntry(
   entry,
   platform = process.platform,
@@ -86,6 +99,8 @@ function isAllowedNodeModuleEntry(
   const nodePtyBuild = `${nodePtyRoot}/build`
   return (
     TYPESCRIPT_ASAR_ENTRIES.has(entry) ||
+    TURNDOWN_ASAR_ENTRIES.has(entry) ||
+    /^\/node_modules\/@mixmark-io\/domino\/lib\/[^/]+\.js$/.test(entry) ||
     entry === nodePtyRoot ||
     entry === `${nodePtyRoot}/package.json` ||
     entry === nodePtyLib ||
@@ -98,6 +113,73 @@ function isAllowedNodeModuleEntry(
     entry === `${nodePtyBuild}/Release` ||
     entry.startsWith(`${nodePtyBuild}/Release/`)
   )
+}
+
+/**
+ * Dependencies a shipped package declares that its shipped form never
+ * loads: node-pty's node-addon-api only compiles the addon, and the package
+ * ships the prebuilt binary.
+ */
+const BUILD_ONLY_DEPENDENCIES = { 'node-pty': ['node-addon-api'] }
+
+function bareImportPackage(specifier) {
+  if (/^(?:\.|\/|node:|data:|file:)/.test(specifier)) return null
+  const parts = specifier.split('/')
+  const name = specifier.startsWith('@')
+    ? parts.slice(0, 2).join('/')
+    : parts[0]
+  if (name === 'electron' || builtinModules.includes(name)) return null
+  return name
+}
+
+/**
+ * Every package the main bundle loads at run time (its static imports and
+ * literal dynamic imports) ships in app.asar, and so does every dependency
+ * of a shipped package. Node resolves a bare import by walking up from
+ * app.asar, so a package left out is found only when the app sits inside a
+ * build checkout (desktop/dist next to node_modules) and the installed app
+ * cannot start (REL-05: turndown).
+ */
+function runtimeImportProblems(asarPath, entries) {
+  const listed = new Set(entries.map(normalizeArchiveEntry))
+  const shipped = (name) => listed.has(`/node_modules/${name}/package.json`)
+  const problems = []
+  const imported = new Map()
+  for (const entry of [...listed]
+    .filter((item) => /^\/out\/main\/[^/]+\.js$/.test(item))
+    .sort()) {
+    const source = extractFile(asarPath, entry.slice(1)).toString('utf8')
+    const specifiers = [
+      ...source.matchAll(
+        /^(?:import|export)\b[^\n;]*?\bfrom\s*["']([^"'\n]+)["'];?[ \t]*$/gm,
+      ),
+      ...source.matchAll(/^import\s*["']([^"'\n]+)["'];?[ \t]*$/gm),
+      ...source.matchAll(/\bimport\(\s*["']([^"'\n]+)["']\s*\)/g),
+    ].map((match) => match[1])
+    for (const specifier of specifiers) {
+      const name = bareImportPackage(specifier)
+      if (name && !imported.has(name)) imported.set(name, entry)
+    }
+  }
+  for (const [name, entry] of imported)
+    if (!shipped(name))
+      problems.push(`${entry} imports ${name}, which app.asar does not ship`)
+  for (const entry of [...listed].sort()) {
+    const match = /^\/node_modules\/((?:@[^/]+\/)?[^/@]+)\/package\.json$/.exec(
+      entry,
+    )
+    if (!match) continue
+    const meta = JSON.parse(
+      extractFile(asarPath, entry.slice(1)).toString('utf8'),
+    )
+    const buildOnly = BUILD_ONLY_DEPENDENCIES[match[1]] ?? []
+    for (const dependency of Object.keys(meta.dependencies ?? {}))
+      if (!buildOnly.includes(dependency) && !shipped(dependency))
+        problems.push(
+          `${match[1]} needs ${dependency}, which app.asar does not ship`,
+        )
+  }
+  return problems
 }
 
 function validatePackagedAppResources(
@@ -167,6 +249,11 @@ function validatePackagedAppResources(
   if (parserBytes < 1_000_000 || parserBytes > 15 * 1024 * 1024)
     throw new Error('packaged TypeScript parser size is invalid')
   assertNoDevelopmentPaths(asarPath, archiveEntries)
+  const missingImports = runtimeImportProblems(asarPath, archiveEntries)
+  if (missingImports.length)
+    throw new Error(
+      `packaged app cannot load its own imports:\n- ${missingImports.join('\n- ')}`,
+    )
   validatePackagedNodePty(resourcesRoot, platform, arch)
   validatePackagedClaudeSdk(resourcesRoot, entries, platform, arch)
   if (platform === 'darwin') {
@@ -548,6 +635,7 @@ module.exports = afterPack
 module.exports.validatePackagedAppResources = validatePackagedAppResources
 module.exports.validatePackagedClaudeSdk = validatePackagedClaudeSdk
 module.exports.isAllowedNodeModuleEntry = isAllowedNodeModuleEntry
+module.exports.runtimeImportProblems = runtimeImportProblems
 module.exports.targetNodePtyFiles = targetNodePtyFiles
 module.exports.prunePackagedNodePty = prunePackagedNodePty
 module.exports.PET_RESOURCE_FILES = PET_RESOURCE_FILES
