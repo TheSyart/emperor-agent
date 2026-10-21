@@ -99,7 +99,7 @@ test('2 · tool rows offer no Inspect by default', async ({ page }) => {
     'true',
   )
   await expect(row.locator('.inspect')).toHaveCount(0)
-  await expect(page.getByText('Inspect', { exact: true })).toHaveCount(0)
+  await expect(row.getByText('查看', { exact: true })).toHaveCount(0)
 })
 
 test('3 · a trajectory link while off opens the chat at the call, with a toast', async ({
