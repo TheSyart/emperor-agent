@@ -223,6 +223,7 @@ function onFocusOut(event: FocusEvent) {
 .ds-list-row[data-wrap] .title,
 .ds-list-row[data-wrap] .subtitle {
   overflow: visible;
+  text-overflow: clip;
   white-space: normal;
   overflow-wrap: anywhere;
 }

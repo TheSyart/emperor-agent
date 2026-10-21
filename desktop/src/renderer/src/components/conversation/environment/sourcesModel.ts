@@ -151,5 +151,6 @@ export function sourceNote(
   if (queries.length) parts.push(`搜索「${queries.join('、')}」`)
   const uses = resource.uses?.length ?? 0
   if (uses > 1) parts.push(`${uses} 处记录`)
-  return parts.join(' · ')
+  // No space beside full-width punctuation (writing.md).
+  return parts.join(' · ').replace('」 ·', '」·')
 }

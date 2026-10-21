@@ -203,7 +203,7 @@ describe('sourceNote (UI-S13)', () => {
     // The call that is still loaded names its query; the count stays.
     expect(
       sourceNote(hit, new Map([['tool:s1', search('s1', ['three.js'])]])),
-    ).toBe('搜索「three.js」 · 2 处记录')
+    ).toBe('搜索「three.js」· 2 处记录')
     expect(
       sourceNote(hit, new Map([['tool:s1', search('s1', 'not a list')]])),
     ).toBe('2 处记录')
