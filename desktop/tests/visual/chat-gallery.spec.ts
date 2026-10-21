@@ -225,8 +225,9 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(rows.nth(3).locator('[data-agent-status]')).toHaveText(
       '等待回答',
     )
-    await expect(rows.nth(4).locator('[data-agent-status]')).toContainText(
-      '后台运行中',
+    // Running in the background reads 运行中, as in the design.
+    await expect(rows.nth(4).locator('[data-agent-status]')).toHaveText(
+      /^运行中 · \d+ 秒$/,
     )
     await expect(rows.nth(4).locator('[data-agent-summary]')).toHaveCount(0)
     await toTop(page)

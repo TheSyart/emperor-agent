@@ -115,7 +115,8 @@ describe('subagent calls (UI-S14 · 1)', () => {
   })
 
   it.each([
-    [{ background: true }, '后台运行中 · 49 秒', 'running'],
+    // Running in the background reads like any running child (the design).
+    [{ background: true }, '运行中 · 49 秒', 'running'],
     [
       { status: 'settled', stopReason: 'completed', settledAt: T0 + 72_000 },
       '已完成 · 用时 1 分 12 秒',

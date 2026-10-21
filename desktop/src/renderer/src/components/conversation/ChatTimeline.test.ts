@@ -485,7 +485,8 @@ describe('subagent rows (UI-S14)', () => {
     const status = () =>
       root.querySelector('[data-subagent-row] [data-agent-status]')
         ?.textContent ?? ''
-    expect(status()).toContain('后台运行中')
+    // A background child reads 运行中, as in the design.
+    expect(status()).toMatch(/^运行中 · /)
     expect(root.querySelector('[data-agent-summary]')).toBeNull()
     fixture!.emit('s', [done(log, 'sub-a', '## 第一章\n写完了，1100 字。')])
     await settle()

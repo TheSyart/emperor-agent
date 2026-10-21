@@ -33,7 +33,6 @@ export type SubagentState =
   | 'queued'
   | 'preparing'
   | 'running'
-  | 'background'
   | 'waiting'
   | 'stopping'
   | 'completed'
@@ -61,7 +60,6 @@ const STATES: Readonly<Record<SubagentState, StateSpec>> = {
   queued: { label: '等待调度', tone: 'running', phase: 'running' },
   preparing: { label: '正在准备', tone: 'running', phase: 'running' },
   running: { label: '运行中', tone: 'running', phase: 'running' },
-  background: { label: '后台运行中', tone: 'running', phase: 'running' },
   waiting: { label: '等待回答', tone: 'attention', phase: 'waiting' },
   stopping: { label: '正在停止', tone: 'running', phase: 'running' },
   completed: { label: '已完成', tone: 'done', phase: 'completed' },
@@ -144,13 +142,14 @@ function callState(data: ToolChatData): SubagentState {
     if (data.status === 'interrupted') return 'interrupted'
     return data.result?.isError === true ? 'failed' : 'completed'
   }
-  if (sub.status === 'running') return sub.background ? 'background' : 'running'
+  // In the background or not, a running child reads 运行中 (the design).
+  if (sub.status === 'running') return 'running'
   return LOCAL_STOP[sub.stopReason ?? 'completed'] ?? 'completed'
 }
 
 /**
  * The agent list's phase decides; the call refines the words when it agrees
- * (a background run, an external run being prepared, a finer failure).
+ * (an external run being queued or prepared, a finer failure).
  */
 function mergedState(call: SubagentState, agent: AgentView): SubagentState {
   const own = STATES[call].phase
