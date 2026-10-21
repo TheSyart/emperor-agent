@@ -27,7 +27,7 @@ export function recordInspectorTabs(
   const tabs = trajectoryDetailTabs(record.cell)
   return record.cell.kind === 'compacted'
     ? tabs.map((tab) =>
-        tab.id === 'raw' ? { id: 'raw', label: 'Raw Output' } : tab,
+        tab.id === 'raw' ? { id: 'raw', label: '原始输出' } : tab,
       )
     : tabs
 }
@@ -128,7 +128,7 @@ export function inspectRequest(
     info,
     state,
     location: compaction
-      ? `Compaction · ${trajectorySectionLabel(selection.turn)}`
+      ? `压缩 · ${trajectorySectionLabel(selection.turn)}`
       : trajectorySectionLabel(selection.turn),
     compaction,
     toolCalls: groupRecords.filter((record) => record.cell.kind === 'tool')
@@ -157,7 +157,7 @@ export function requestTimingRows(
   if (info?.startedAt !== undefined) {
     const completed = info.completedAt
     rows.push({
-      label: 'Duration',
+      label: '时长',
       value:
         completed === null || completed === undefined
           ? 'Running'
@@ -169,7 +169,7 @@ export function requestTimingRows(
   if (ttft !== undefined && ttft !== null)
     rows.push({ label: 'TTFT', value: formatDurationMs(ttft) })
   if (decode !== undefined && decode !== null)
-    rows.push({ label: 'Decode', value: formatDurationMs(decode) })
+    rows.push({ label: '解码', value: formatDurationMs(decode) })
   const output = inspection.usage?.output
   if (
     decode !== undefined &&
@@ -178,17 +178,17 @@ export function requestTimingRows(
     output !== undefined
   )
     rows.push({
-      label: 'Throughput',
+      label: '吞吐',
       value: `${(output / (decode / 1_000)).toFixed(1)} tok/s`,
     })
   if (info?.retry !== undefined)
     rows.push({
-      label: 'Retry',
+      label: '重试',
       value: `Scheduled ${info.retry}${info.maxRetries === undefined ? '' : ` of ${info.maxRetries}`}`,
     })
   if (info?.retryDelayMs !== undefined)
     rows.push({
-      label: 'Retry delay',
+      label: '重试等待',
       value: formatDurationMs(info.retryDelayMs),
     })
   return rows

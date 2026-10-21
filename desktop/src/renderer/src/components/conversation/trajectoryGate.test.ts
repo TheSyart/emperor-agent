@@ -170,7 +170,7 @@ describe('tool rows under the trajectory gate (UI-S09)', () => {
       'npm run lint',
     )
     expect(row.querySelector('.inspect')).toBeNull()
-    expect(row.textContent).not.toContain('Inspect')
+    expect(row.textContent).not.toContain('查看')
   })
 
   it('4 · offers Inspect once 显示轨迹 is on', async () => {
@@ -183,7 +183,7 @@ describe('tool rows under the trajectory gate (UI-S09)', () => {
     )!
     row.querySelector<HTMLElement>('[data-disclosure-row]')!.click()
     await settle()
-    expect(row.querySelector('.inspect')?.textContent).toContain('Inspect')
+    expect(row.querySelector('.inspect')?.textContent).toContain('查看')
   })
 
   it('3 · revealCall opens the folded group and the call’s row', async () => {

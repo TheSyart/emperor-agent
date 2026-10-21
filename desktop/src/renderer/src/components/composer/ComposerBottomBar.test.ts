@@ -280,7 +280,7 @@ describe('the composer bottom bar', () => {
     props.control = { ...control, plan: true }
     props.lifecycleMode = 'plan'
     await settle()
-    const capsule = barButton(root, '退出 Plan')
+    const capsule = barButton(root, '退出计划')
     expect(capsule.textContent?.trim()).toBe('Plan')
     capsule.click()
     expect(props.onDismissLifecycle).toHaveBeenCalledOnce()
@@ -332,11 +332,11 @@ describe('the + menu', () => {
       '上传图片或文件',
       '插入 Skill 或插件',
       '截图',
-      'Plan 模式',
-      'Goal 模式',
+      '计划模式',
+      '目标模式',
     ])
     ;[...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')]
-      .find((item) => item.textContent?.includes('Plan 模式'))!
+      .find((item) => item.textContent?.includes('计划模式'))!
       .click()
     expect(props.onActivatePlan).toHaveBeenCalledOnce()
   })

@@ -590,6 +590,25 @@ describe('GitReviewPane (UI-S06)', () => {
     expect(root.querySelector('.change-diff')).toBeNull()
   })
 
+  it('7 · the Git actions are named in Chinese, with the git command as their tooltip (UI-S10)', async () => {
+    status = gitStatus(['README.md'], HEAD, {
+      branch: 'feature/x',
+      upstream: null,
+    })
+    const root = mount()
+    await settle()
+    const opened = await openBranchMenu(root)
+    for (const [action, label, command] of [
+      ['fetch', '获取', 'git fetch'],
+      ['pull', '拉取', 'git pull --ff-only'],
+      ['push', '推送', 'git push --set-upstream'],
+    ] as const) {
+      expect(menuItem(action).textContent).toContain(label)
+      expect(menuItem(action).getAttribute('title')).toBe(command)
+    }
+    expect(opened.textContent).not.toMatch(/\b(?:Fetch|Pull|Push)\b/)
+  })
+
   it('3 · the 分支名 ▾ menu holds every Git action, and each one runs', async () => {
     status = gitStatus(['README.md'], HEAD, {
       branch: 'feature/x',

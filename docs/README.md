@@ -68,6 +68,7 @@
 - [设计令牌](design/tokens.md)
 - [颜色使用规范](design/color.md)
 - [组件规范](design/components.md)
+- [界面文案规范](design/writing.md)
 
 ### 发布与安全
 

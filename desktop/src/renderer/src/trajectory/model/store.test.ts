@@ -144,9 +144,9 @@ describe('lazy trajectory target', () => {
         group.cells.map((cell) => cell.kind),
       ]),
     ).toEqual([
-      ['Message', ['user']],
-      ['Step 1', ['message', 'tool']],
-      ['Step 2', ['message']],
+      ['消息', ['user']],
+      ['第 1 步', ['message', 'tool']],
+      ['第 2 步', ['message']],
     ])
     expect(model.requestNumbers.map((request) => request.number)).toEqual([
       1, 2,

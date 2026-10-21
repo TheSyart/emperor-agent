@@ -2,7 +2,7 @@
 /**
  * GitBranchMenu — the 审查 pane's 「分支名 ▾」 button and every Git action
  * behind it (UI-S06): 切换分支 ▸ (the branch list), 新建分支… (a name box),
- * Fetch, Pull, Push, 比较分支 ↗ (the provider's compare page) and the
+ * 获取 (fetch), 拉取 (pull), 推送 (push), 比较分支 ↗ (the provider's compare page) and the
  * worktree: 新建并进入, or 离开 / 安全删除 while in one. These are also the
  * writes the environment card's 「…」 menu used to hold.
  *
@@ -64,6 +64,10 @@ const pushHint = computed(() => {
   if (!current?.upstream) return '推送并设为上游分支'
   return current.ahead ? `推送 ${current.ahead} 个提交` : '与上游一致'
 })
+// The git command behind each action, as its tooltip (writing.md).
+const pushCommand = computed(() =>
+  status.value?.upstream ? 'git push' : 'git push --set-upstream',
+)
 const compareHint = computed(() => {
   const link = compare.value
   return link.url === null ? link.reason : '在浏览器打开比较页'
@@ -153,29 +157,32 @@ async function create(): Promise<void> {
     <MenuItem variant="separator" />
     <MenuItem
       data-action="fetch"
+      title="git fetch"
       :disabled="!status || writing || loading"
       description="获取远端的最新引用"
       @select="review.fetchRemote"
     >
-      Fetch
+      获取
       <template #icon><RefreshCw :size="16" /></template>
     </MenuItem>
     <MenuItem
       data-action="pull"
+      title="git pull --ff-only"
       :disabled="writesDisabled"
       :description="pullHint"
       @select="review.pull"
     >
-      Pull
+      拉取
       <template #icon><ArrowDownToLine :size="16" /></template>
     </MenuItem>
     <MenuItem
       data-action="push"
+      :title="pushCommand"
       :disabled="writesDisabled"
       :description="pushHint"
       @select="review.push"
     >
-      Push
+      推送
       <template #icon><ArrowUpFromLine :size="16" /></template>
     </MenuItem>
     <MenuItem variant="separator" />

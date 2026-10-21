@@ -54,7 +54,7 @@
 - 输入 `/model`，确认可以选择当前会话使用的模型；已安装 Skill 应以自己的 token 出现，例如 `/agent-reach`。
 - 创建 Build 后让 Agent 读取一个项目文件，确认路径属于刚才选择的 workspace。
 
-如果模型回复正常但文件或命令被拒绝，先查看当前权限预设，而不是反复重试。新会话默认使用 `workspace-write`：可以写当前 workspace，超出范围时会弹出一次性批准。Shell 命令在 macOS（Seatbelt）和 Linux（bubblewrap）上受系统沙箱限制；其他平台没有沙箱后端，只有切换到 `danger-full-access` 后才能运行 Shell 命令。详见 [Plan 与 Goal](plan-goal.md) 和 [诊断与排障](diagnostics-troubleshooting.md)。
+如果模型回复正常但文件或命令被拒绝，先查看当前权限预设，而不是反复重试。新会话默认使用 `workspace-write`：可以写当前 workspace，超出范围时会弹出一次性批准。Shell 命令在 macOS（Seatbelt）和 Linux（bubblewrap）上受系统沙箱限制；其他平台没有沙箱后端，只有切换到 `danger-full-access` 后才能运行 Shell 命令。详见 [计划与目标](plan-goal.md) 和 [诊断与排障](diagnostics-troubleshooting.md)。
 
 ## 5. 数据与联网
 

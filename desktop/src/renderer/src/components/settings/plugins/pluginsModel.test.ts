@@ -190,7 +190,7 @@ describe('plugin detail model', () => {
             title: 'a',
             description: '',
             state: 'unsupported',
-            reason: 'Emperor 不支持插件里的子代理',
+            reason: 'Emperor 不支持插件里的子智能体',
           },
           {
             kind: 'command',

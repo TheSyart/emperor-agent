@@ -117,7 +117,7 @@ describe('能力 › 工具', () => {
       ['basic', '基础工具 3', ['read', 'bash', 'job_list']],
       ['network', '网络 1', ['web_search']],
       ['planning', '任务与规划 2', ['todo_write', 'scheduler']],
-      ['agents', '子代理与工作流 1', ['subagent']],
+      ['agents', '子智能体与工作流 1', ['subagent']],
       ['config', '技能、记忆与配置 2', ['skill', 'memory_edit']],
       ['other', '其他 1', ['mystery']],
     ])

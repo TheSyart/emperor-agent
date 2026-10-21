@@ -16,8 +16,8 @@ export function composerSendDisabled(opts: {
 export function composerStopPresentation(goalActive: boolean) {
   return goalActive
     ? {
-        title: '暂停当前 Goal',
-        label: '暂停 Goal',
+        title: '暂停当前目标',
+        label: '暂停目标',
       }
     : {
         title: '停止当前任务',

@@ -1,3 +1,4 @@
+import { CORE_BRIDGE_UNAVAILABLE_MESSAGE } from '../api/backend'
 import type { SessionEffect, SessionEffectOutput } from './sessionProjection'
 
 export interface SessionEffectExecutorOptions {
@@ -14,7 +15,7 @@ export class SessionEffectExecutor {
   execute(effect: SessionEffect, signal: AbortSignal): SessionEffectOutput {
     if (signal.aborted) throw abortError()
     if (!this.options.isAvailable())
-      throw new Error('Desktop CoreApi bridge is unavailable')
+      throw new Error(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
     if (effect.replace && this.unsubscribe) {
       this.unsubscribe()
       this.unsubscribe = null

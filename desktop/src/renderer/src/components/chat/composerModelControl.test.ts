@@ -32,7 +32,7 @@ describe('composer effort options', () => {
       'max',
     ])
     expect(options.find((option) => option.value === 'high')).toMatchObject({
-      description: 'Medium 也按 High 发送',
+      description: '选「中」时也按「高」发送',
     })
     expect(
       options.filter((option) => 'description' in option && option.description),

@@ -22,7 +22,7 @@ const schema = computed(() =>
 </script>
 
 <template>
-  <p v-if="!record.cell.schemaDetail" class="no-payload">Schema unavailable</p>
+  <p v-if="!record.cell.schemaDetail" class="no-payload">没有参数结构</p>
   <div
     v-else-if="schema !== undefined"
     class="schema"
@@ -34,7 +34,7 @@ const schema = computed(() =>
         {{ schema.description }}
       </p>
     </header>
-    <h4 class="parameters-title">Parameters</h4>
+    <h4 class="parameters-title">参数</h4>
     <JsonTree :value="schema.parameters" :expand-depth="preview ? 1 : 3" />
   </div>
   <pre v-else class="payload">{{ record.cell.schemaDetail }}</pre>

@@ -322,12 +322,12 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(wsCtor).not.toHaveBeenCalled()
     expect(runtime.status.value).toBe('error')
     expect(runtime.pending).toMatchObject({
-      label: '桌面 IPC 不可用',
-      detail: '请在 Electron 桌面窗口中使用；普通浏览器没有 CoreApi bridge。',
+      label: '无法连接 Emperor 核心',
+      detail: '请在 Emperor 桌面窗口中使用；普通浏览器连不上 Emperor 核心。',
       tone: 'error',
     })
     expect(showToast).toHaveBeenCalledWith(
-      '桌面 IPC 不可用，请在 Electron 桌面窗口中使用',
+      '无法连接 Emperor 核心：请在 Emperor 桌面窗口中打开。',
     )
   })
 
@@ -1514,7 +1514,7 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(
       runtime.sendInteractionAnswer('ask_1', { scope: { choice: '完整' } }),
     ).toBe(true)
-    for (let i = 0; i < 5; i += 1) await Promise.resolve()
+    await flushPromises()
 
     expect(calls.map((call) => call[0])).toEqual([
       'control.answerInteraction',
@@ -1523,7 +1523,9 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
     expect(refreshSessions).toHaveBeenCalledTimes(1)
     expect(boot.value.control?.pending).toBeNull()
     expect(runtime.busy.value).toBe(false)
-    expect(showToast).toHaveBeenCalledWith('Internal error · ipc_deadbeef')
+    expect(showToast).toHaveBeenCalledWith(
+      '发生内部错误，请查看日志。 · ipc_deadbeef',
+    )
   })
 
   it('sanitizes reactive interaction answers before crossing the Core IPC boundary', async () => {

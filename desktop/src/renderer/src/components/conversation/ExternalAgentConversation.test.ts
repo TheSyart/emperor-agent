@@ -201,7 +201,9 @@ it('renders canonical title, public readonly output and actual ancestry; return 
     name: 'chat',
     params: { sessionId: 'sub-parent' },
   })
-  buttons.find((b) => b.textContent?.includes('返回主会话继续派工'))!.click()
+  buttons
+    .find((b) => b.textContent?.includes('返回主会话继续安排任务'))!
+    .click()
   await settle()
   expect(bridge.push).toHaveBeenLastCalledWith({
     name: 'chat',
@@ -534,7 +536,7 @@ it('opens an archived direct route as historical output without activation or co
   expect(dom.querySelector('[data-stop-child]')).toBeNull()
   expect(
     [...dom.querySelectorAll('button')].some((b) =>
-      b.textContent?.includes('继续派工'),
+      b.textContent?.includes('继续安排任务'),
     ),
   ).toBe(false)
   expect(dom.textContent).not.toContain('返回父智能体')
@@ -563,7 +565,7 @@ it('updates an open viewer after local archive even without a running child even
   expect(dom.querySelector('[data-stop-child]')).toBeNull()
   expect(
     [...dom.querySelectorAll('button')].some((b) =>
-      b.textContent?.includes('继续派工'),
+      b.textContent?.includes('继续安排任务'),
     ),
   ).toBe(false)
 })
@@ -653,7 +655,7 @@ it.each(['missing', 'foreign', 'conflicting', 'self-cycle', 'cycle'])(
     expect(dom.textContent).not.toContain('返回父智能体')
     expect(path.querySelector('button')).toBeNull()
     ;[...dom.querySelectorAll<HTMLButtonElement>('button')]
-      .find((b) => b.textContent?.includes('返回主会话继续派工'))!
+      .find((b) => b.textContent?.includes('返回主会话继续安排任务'))!
       .click()
     await settle()
     expect(bridge.push).toHaveBeenLastCalledWith({

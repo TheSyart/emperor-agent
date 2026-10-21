@@ -249,10 +249,10 @@ async function runGoalAction(
   applyGoalResult(owner, result)
   showToast(
     action === 'pause'
-      ? 'Goal 已暂停'
+      ? '目标已暂停'
       : action === 'resume'
-        ? 'Goal 已恢复'
-        : 'Goal 已清除',
+        ? '目标已恢复'
+        : '目标已清除',
   )
   return result
 }

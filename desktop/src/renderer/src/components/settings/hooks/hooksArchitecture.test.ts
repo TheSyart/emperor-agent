@@ -42,7 +42,7 @@ describe('Hooks settings controller/view ownership', () => {
   })
 
   it('keeps the tab accessibility contract', () => {
-    expect(views.section).toContain('aria-label="Hooks views"')
+    expect(views.section).toContain('aria-label="Hooks 视图"')
     expect(views.section).toContain('<Tabs')
   })
 })

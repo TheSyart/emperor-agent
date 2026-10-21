@@ -61,8 +61,10 @@ describe('with an injected Core IPC bridge', () => {
     await expect(
       invokeCore('model.test', { entryId: 'main' }),
     ).rejects.toMatchObject({
-      message: 'Internal error',
+      // Shown in Chinese (errors/messages.ts); the raw text stays copyable.
+      message: '发生内部错误，请查看日志。',
       errorId: 'ipc_abc123',
+      detail: 'Internal error · ipc_abc123',
     })
   })
 

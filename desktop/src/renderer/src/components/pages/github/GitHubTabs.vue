@@ -14,7 +14,7 @@ const router = useRouter()
 
 const TABS = [
   { id: 'pulls', label: 'Pull Request' },
-  { id: 'github-issues', label: 'Issue' },
+  { id: 'github-issues', label: '议题' },
   { id: 'github-ci', label: 'CI' },
 ]
 

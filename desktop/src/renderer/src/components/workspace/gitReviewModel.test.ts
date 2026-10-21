@@ -138,6 +138,27 @@ describe('git review model (UI-S06)', () => {
     expect(pullRequestProblem(new Error('boom\nstack'))).toBe(
       '无法读取 Pull Request：boom',
     )
+    // From invokeCore: the shown text is Chinese, the decision reads the code
+    // and Core's own message.
+    const failed = Object.assign(
+      new Error(
+        'GitHub CLI 命令失败：You are not logged into any GitHub hosts',
+      ),
+      {
+        code: 'git_gh_failed',
+        detail: 'git_gh_failed · You are not logged into any GitHub hosts',
+      },
+    )
+    expect(pullRequestProblem(failed)).toBe(
+      'GitHub CLI 未登录：在终端运行 gh auth login',
+    )
+    const notFound = Object.assign(new Error('GitHub CLI 命令失败：HTTP 404'), {
+      code: 'git_gh_failed',
+      detail: 'git_gh_failed · HTTP 404',
+    })
+    expect(pullRequestProblem(notFound)).toBe(
+      '无法读取 Pull Request：GitHub CLI 命令失败：HTTP 404',
+    )
   })
 
   it('states a Pull Request in Chinese', () => {

@@ -120,14 +120,20 @@ export function pullRequestRoute(
   return match ? { owner: match[1]!, repo: match[2]!, number: match[3]! } : null
 }
 
-/** Why the current branch's PR cannot be read, in one line. */
+/**
+ * Why the current branch's PR cannot be read, in one line. Decided by the
+ * error code and Core's own message (`detail`), not by the shown text,
+ * which errors/messages.ts has already put into Chinese.
+ */
 export function pullRequestProblem(cause: unknown): string {
-  const text = cause instanceof Error ? cause.message : String(cause)
-  if (/git_gh_unavailable|GitHub CLI/i.test(text))
+  const error = (cause ?? {}) as { code?: unknown; detail?: unknown }
+  const shown = cause instanceof Error ? cause.message : String(cause)
+  const raw = typeof error.detail === 'string' ? error.detail : shown
+  if (error.code === 'git_gh_unavailable' || /git_gh_unavailable/.test(raw))
     return 'GitHub CLI 不可用，无法读取 Pull Request'
-  if (/not logged|auth|login/i.test(text))
+  if (/not logged|auth login|authenticat/i.test(raw))
     return 'GitHub CLI 未登录：在终端运行 gh auth login'
-  return `无法读取 Pull Request：${text.split('\n')[0]}`
+  return `无法读取 Pull Request：${shown.split('\n')[0]}`
 }
 
 /** A PR's state in one word. */

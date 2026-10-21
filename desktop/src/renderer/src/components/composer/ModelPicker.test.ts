@@ -81,7 +81,7 @@ describe('ModelPicker › effort descriptions (KRN-07)', () => {
           {
             value: 'high',
             label: 'High',
-            description: 'Medium 也按 High 发送',
+            description: '选「中」时也按「高」发送',
           },
         ],
         providerOptions: [],
@@ -101,6 +101,6 @@ describe('ModelPicker › effort descriptions (KRN-07)', () => {
         '[aria-label="思考强度"] [role="menuitem"]',
       ),
     ].find((item) => item.textContent?.includes('High'))!
-    expect(high.textContent).toContain('Medium 也按 High 发送')
+    expect(high.textContent).toContain('选「中」时也按「高」发送')
   })
 })

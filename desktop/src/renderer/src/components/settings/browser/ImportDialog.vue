@@ -154,7 +154,7 @@ const REASONS: Record<string, string> = {
   'browser-running': '请先完全关闭该浏览器，再导入。',
   'vault-locked': '请先解锁密码管理器，再导入密码。',
   'vault-unavailable': '密码管理器当前不可用。',
-  'no-target-profile': '请选择要写入登录状态的 profile。',
+  'no-target-profile': '请选择要写入的登录档案。',
   'read-failed': '读取浏览器数据失败，请确认浏览器已完全关闭。',
   'nothing-selected': '请至少选择一项要导入的数据。',
   internal: '导入失败，请稍后再试。',
@@ -184,7 +184,7 @@ async function submit(): Promise<void> {
       try {
         target = await resolveTargetProfile(source)
       } catch {
-        error.value = '无法新建登录状态 profile，请在「登录状态」里手动新建。'
+        error.value = '无法新建登录档案，请在「登录状态」里手动新建。'
         return
       }
     }
@@ -287,7 +287,7 @@ watch(
               :model-value="targetProfileId"
               :options="targetOptions"
               :disabled="busy"
-              aria-label="写入的登录状态 profile"
+              aria-label="写入的登录档案"
               @update:model-value="
                 (value?: string) =>
                   value !== undefined && (targetProfileId = value)

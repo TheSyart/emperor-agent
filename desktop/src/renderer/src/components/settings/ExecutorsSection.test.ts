@@ -150,7 +150,9 @@ it('renders exactly local and two vendor rows, minimal controls and truthful loc
   expect(root.querySelectorAll('[data-executor-profile]')).toHaveLength(1)
   expect(root.querySelectorAll('input')).toHaveLength(0)
   expect(root.textContent).toContain('本机登录配置可读')
-  expect(root.textContent).not.toMatch(/已登录|可直接派工|调度配额|认证方式/)
+  expect(root.textContent).not.toMatch(
+    /已登录|可直接交给子智能体|调度配额|认证方式/,
+  )
 })
 it('edits, clears and restores independent specialty defaults without changing hidden model configuration', async () => {
   await mount()
@@ -760,7 +762,7 @@ it('1 · 设置令牌 sends the pasted token once and shows only 已设置 · �
   expect(signIn().textContent).toContain('已设置 · 末 4 位 a1b2')
   expect(document.body.innerHTML).not.toContain(token)
   expect(row('claude-code').querySelector('.readiness')!.textContent).toBe(
-    '执行器就绪',
+    '子智能体就绪',
   )
 })
 it('1 · the API Key choice asks for ANTHROPIC_API_KEY and refuses a subscription token in it', async () => {

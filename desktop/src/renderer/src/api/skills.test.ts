@@ -114,7 +114,7 @@ describe('Skills API Core IPC', () => {
     expect(skillErrorInfo(error)).toEqual({
       code: 'skill_exists',
       action: 'overwrite',
-      message: 'A Skill named "x" already exists',
+      message: '同名 Skill 已经存在。',
     })
     expect(skillErrorInfo('boom')).toEqual({
       code: null,

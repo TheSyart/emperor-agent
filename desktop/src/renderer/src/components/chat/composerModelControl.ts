@@ -91,7 +91,7 @@ export function useComposerModelControl(
       : `${currentModelLabel.value} · 思考 ${currentReasoningLabel.value}`,
   )
   const reasoningOptions = computed(() => [
-    { value: null, label: 'Default' },
+    { value: null, label: '默认' },
     ...(props.currentModel?.reasoningEfforts || []).map((option) => ({
       value: option,
       label: reasoningLabel(option),
@@ -140,7 +140,7 @@ export function useComposerModelControl(
 }
 
 /** Under High in a DeepSeek model's effort list. */
-export const DEEPSEEK_HIGH_NOTE = 'Medium 也按 High 发送'
+export const DEEPSEEK_HIGH_NOTE = '选「中」时也按「高」发送'
 
 export function normalizeReasoningValue(value?: string | null): string {
   return String(value || '')
@@ -150,13 +150,13 @@ export function normalizeReasoningValue(value?: string | null): string {
 
 export function reasoningLabel(value?: string | null): string {
   const normalized = normalizeReasoningValue(value)
-  if (!normalized) return 'Default'
-  if (normalized === 'max') return 'Max'
-  if (normalized === 'xhigh') return 'XHigh'
-  if (normalized === 'high') return 'High'
-  if (normalized === 'medium') return 'Medium'
-  if (normalized === 'low') return 'Low'
-  if (normalized === 'minimal') return 'Minimal'
-  if (normalized === 'none') return 'None'
+  if (!normalized) return '默认'
+  if (normalized === 'max') return '最高'
+  if (normalized === 'xhigh') return '超高'
+  if (normalized === 'high') return '高'
+  if (normalized === 'medium') return '中'
+  if (normalized === 'low') return '低'
+  if (normalized === 'minimal') return '最低'
+  if (normalized === 'none') return '关闭'
   return normalized
 }

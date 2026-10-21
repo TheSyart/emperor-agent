@@ -546,7 +546,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(selected).toHaveAttribute('data-kind', 'tool')
     await expect(selected).toContainText('grep')
     await expect(
-      inspector.getByRole('tab', { name: 'Summary', exact: true }),
+      inspector.getByRole('tab', { name: '摘要', exact: true }),
     ).toHaveAttribute('aria-selected', 'true')
     await expect(
       page.getByRole('button', { name: '详情', exact: true }),
@@ -1080,7 +1080,7 @@ const TOOL_GROUPS = [
   /^基础工具\s*9$/,
   /^网络\s*1$/,
   /^任务与规划\s*7$/,
-  /^子代理与工作流\s*7$/,
+  /^子智能体与工作流\s*7$/,
   /^技能、记忆与配置\s*4$/,
 ]
 

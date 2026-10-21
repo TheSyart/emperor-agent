@@ -19,6 +19,7 @@ const xterm = vi.hoisted(() => ({
     options: Record<string, unknown>
     focused: number
     disposed: boolean
+    lines: string[]
   }>,
 }))
 
@@ -43,8 +44,11 @@ vi.mock('@xterm/xterm', () => ({
     onData() {
       return { dispose() {} }
     }
+    lines: string[] = []
     write() {}
-    writeln() {}
+    writeln(line: string) {
+      this.lines.push(line)
+    }
     focus() {
       this.focused += 1
       this.textarea?.focus()
@@ -115,7 +119,7 @@ function summary(id: string) {
     title: id,
     createdAt: 1,
     exited: false,
-    exitCode: null,
+    exitCode: null as number | null,
   }
 }
 
@@ -132,7 +136,9 @@ function fakeCore(operation: string, payload?: Record<string, unknown>) {
     }
     case 'terminals.read':
       return Promise.resolve({
-        terminal: summary(String(payload?.terminalId)),
+        terminal:
+          listed.find((item) => item.id === payload?.terminalId) ??
+          summary(String(payload?.terminalId)),
         chunks: [],
         latestSeq: 0,
       })
@@ -364,6 +370,17 @@ describe('TerminalPane (FIX-05)', () => {
     })
     expect(current().focused).toBe(0)
     expect(document.activeElement?.getAttribute('data-tab-id')).toBe('t2')
+  })
+
+  it('5 · an exited terminal says so in Chinese, with its exit code (UI-S10)', async () => {
+    listed = [{ ...summary('t1'), exited: true, exitCode: 0 }]
+    const root = mount()
+    await settle(300)
+    expect(current().lines).toContain('\r\n[进程已退出，退出码 0]')
+    expect(current().lines.join('')).not.toContain('process exited')
+    expect(
+      root.querySelector('.workspace-tab-bar [data-tab-id="t1"]')?.textContent,
+    ).toContain('已退出')
   })
 
   it('an empty pane keeps only the + in the tab bar, no second big button', async () => {

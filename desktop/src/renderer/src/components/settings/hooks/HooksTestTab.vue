@@ -194,10 +194,10 @@ const resultJson = computed(() =>
             :tone="hookOutcomeTone(testResult.decision)"
             variant="dot-label"
           >
-            decision {{ testResult.decision || '—' }}
+            决定 {{ testResult.decision || '—' }}
           </Badge>
           <Badge :tone="hookExitTone(testResult.exitCode)" mono>
-            exit {{ testResult.exitCode ?? '—' }}
+            退出码 {{ testResult.exitCode ?? '—' }}
           </Badge>
           <Badge mono>{{ testResult.durationMs }}ms</Badge>
         </div>

@@ -155,7 +155,7 @@ function metadataWarnings(skill: SkillInfoPayload): SkillCommandWarning[] {
       ...base,
       field: 'agent',
       reason: 'agent_definitions_unsupported',
-      message: `agent "${metadata.agent}" 已忽略：内核不再提供 AgentDefinition，fork 使用默认子代理。`,
+      message: `agent "${metadata.agent}" 已忽略：内核不再提供 AgentDefinition，fork 使用默认子智能体。`,
     })
   if (metadata.context !== 'fork') {
     if (metadata.allowedTools.length)

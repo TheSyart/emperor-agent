@@ -84,7 +84,7 @@ const source = computed(() =>
       </div>
 
       <div class="block">
-        <h4 class="block-title">Schema</h4>
+        <h4 class="block-title">参数结构</h4>
         <CodeEditor
           :model-value="schema"
           language="json"
