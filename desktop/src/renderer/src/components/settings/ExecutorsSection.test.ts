@@ -1384,17 +1384,19 @@ it('6 · after the upgrade the page says once that Claude Code now uses its own 
   expect(configureExecutors).not.toHaveBeenCalled()
 })
 
-it('8 · Claude Code and Codex are named in text with a neutral icon, never a logo', async () => {
+it('FIX-12 · Claude Code and Codex rows show their own logos again, beside their names', async () => {
   claudeProbe(SIGNED_IN)
   await mount()
-  for (const vendor of ['claude-code', 'codex']) {
+  for (const [vendor, file] of [
+    ['claude-code', 'claude.svg'],
+    ['codex', 'codex.svg'],
+  ] as const) {
     const avatar = row(vendor).querySelector<HTMLElement>('.ds-avatar')!
-    expect(avatar.dataset.shown).toBe('glyph')
-    expect(avatar.querySelector('img')).toBeNull()
+    expect(avatar.dataset.shown, vendor).toBe('mask')
+    expect(avatar.innerHTML + avatar.outerHTML, vendor).toContain(file)
   }
   expect(row('claude-code').textContent).toContain('Claude Code')
   expect(row('codex').textContent).toContain('Codex')
-  expect(document.body.innerHTML).not.toMatch(/claude\.svg|codex\.svg/)
 })
 
 it('8 · no copy in the app, Core or the manuals asks for a Claude token or offers 设置令牌', async () => {

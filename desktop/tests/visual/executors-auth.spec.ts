@@ -95,15 +95,18 @@ test('1 · at 1280×800 the three subagents fit on one screen without scrolling'
   expect(scrolled).toBe(false)
 })
 
-/** No logo, no Claude token anywhere on the page (AGT-12). */
-async function noLogoNoToken(page: Page, dialog: Locator) {
+/**
+ * Claude Code and Codex rows carry their own logos (FIX-12), and no Claude
+ * token or 设置令牌 appears anywhere on the page (AGT-12).
+ */
+async function logosNoToken(page: Page, dialog: Locator) {
   for (const agent of ['claude-code', 'codex']) {
     const avatar = dialog.locator(`[data-settings-agent="${agent}"] .ds-avatar`)
     if (await avatar.count())
-      await expect(avatar).toHaveAttribute('data-shown', 'glyph')
+      await expect(avatar).toHaveAttribute('data-shown', 'mask')
   }
   const html = await page.content()
-  expect(html).not.toMatch(/claude\.svg|codex\.svg|setup-token|设置令牌/)
+  expect(html).not.toMatch(/setup-token|设置令牌/)
 }
 
 for (const theme of ['dark', 'light'] as const) {
@@ -119,7 +122,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(dialog.locator('[data-executor-task-settings]')).toContainText(
       '改代码的位置',
     )
-    await noLogoNoToken(page, dialog)
+    await logosNoToken(page, dialog)
     await shot(page, `main-${theme}`)
     const detailPage = await detail(dialog, 'claude-code')
     await expect(detailPage.locator('[data-claude-auth-state]')).toHaveText(
@@ -155,7 +158,7 @@ for (const theme of ['dark', 'light'] as const) {
       '请点「登录 Claude Code」登录一次',
     )
     await expect(dialog.locator('input[type="password"]')).toHaveCount(0)
-    await noLogoNoToken(page, dialog)
+    await logosNoToken(page, dialog)
     await shot(page, `main-signed-out-${theme}`)
     const detailPage = await detail(dialog, 'claude-code')
     await expect(detailPage.locator('[data-claude-auth-state]')).toHaveText(
@@ -231,7 +234,7 @@ for (const theme of ['dark', 'light'] as const) {
       '复制命令',
     )
     await detailPage.locator('[data-claude-sign-in]').scrollIntoViewIfNeeded()
-    await noLogoNoToken(page, dialog)
+    await logosNoToken(page, dialog)
     await shot(page, `detail-claude-sign-in-failed-${theme}`)
   })
 
@@ -287,7 +290,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(claude.locator('[data-executor-summary]')).toHaveText(
       '没有找到 claude。在终端运行 curl -fsSL https://claude.ai/install.sh | bash 安装后重新检测',
     )
-    await noLogoNoToken(page, dialog)
+    await logosNoToken(page, dialog)
     await shot(page, `main-missing-${theme}`)
     const detailPage = await detail(dialog, 'claude-code')
     await expect(

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用自动化能力的用户<br>
-> 最后核验：2026-10-22（对照 `7798011a`）<br>
+> 最后核验：2026-10-22（对照 `30b48900`）<br>
 > 事实源：`packages/core/src/scheduler/`、`packages/core/src/harness/host/scheduler.ts`、`packages/core/src/harness/hooks/`、`packages/core/src/api/services/hooks-service.ts`、`packages/core/src/watchlist/`、DesktopPet service、`packages/core/src/harness/delegation/`、`packages/core/src/runtime/agent-view.ts`、`desktop/src/renderer/src/components/pages/scheduler/`、`desktop/src/renderer/src/components/settings/`（高级 › Hooks、记忆、常规 › 外观 › 桌宠、子智能体）、`desktop/src/renderer/src/components/conversation/nodes/DelegationResultCard.vue`
 
 本页介绍定时任务、Hooks、Watchlist、桌宠和子智能体。它们都通过与普通对话相同的内核运行，不获得额外权限。
@@ -108,7 +108,7 @@ Watchlist 由 `memory/watchlist.md` 定义，在「设置 › 记忆」右上角
 
 - **可用的子智能体**：
   - 「本地子智能体」右侧选它用哪个模型：默认「跟随对话」，也可以固定为「设置 › 模型」里的某一条（例如让子任务用便宜一些的模型）。那条模型删除后暂时按对话的模型运行，行内写明「（已删除）」。
-  - Claude Code、Codex 每行有状态（「子智能体就绪」「已关闭」「未登录」「未安装」「可能不兼容」「版本不兼容」「未找到命令行程序」等）和一句说明，右侧是启用开关和进入详情页的箭头。两者都只用文字名称和中性图标标出。打开并就绪后，行内可以选默认模型；Claude Code 打开了但还没有登录时，这个位置换成「登录 Claude Code」；没有安装时，这一行写出官方安装命令。
+  - Claude Code、Codex 每行有状态（「子智能体就绪」「已关闭」「未登录」「未安装」「可能不兼容」「版本不兼容」「未找到命令行程序」等）和一句说明，右侧是启用开关和进入详情页的箭头。两者用各自的标志标出。打开并就绪后，行内可以选默认模型；Claude Code 打开了但还没有登录时，这个位置换成「登录 Claude Code」；没有安装时，这一行写出官方安装命令。
 - **子任务**：「同时运行」（Claude Code 和 Codex 合计 1–4 个，默认 2 个，超过后排队）、「改代码的位置」（见下面「工作区与成果」）、「单个任务的费用上限」（$1 / $2 / $5 / $10，默认 $10），以及「高级」。
 - **高级**：「运行」组有每次运行最多轮数、单次运行时长上限；「开发环境」组；「排查」组的「验证后再应用」「诊断模式」。各项见下文。
 - **详情页**（Claude Code、Codex 各一页）：状态（找不到程序时有安装命令或「安装说明」，以及「更正路径」）、登录（只有 Claude Code）、默认模型（「刷新模型」重新读取列表；下拉里还有「跟随本机 CLI」和「新增自定义模型…」）、擅长的任务（「编辑专长」或「恢复默认」，主会话据此决定交给谁）和能力与运行情况。
