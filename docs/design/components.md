@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-21<br>
+> 最后核验：2026-10-21（对照 `a33caa42`）<br>
 > 事实源：`desktop/src/renderer/src/components/ui/`（组件、`index.ts`、`floatingMenu.ts`、`headTailCap.ts`、`useCopyFeedback.ts`、`elapsed.ts`，测试 `display.test.ts`、`actions.test.ts`、`primitives.test.ts`、`overlays.test.ts`）、`desktop/src/renderer/src/components/settings/ui/`、`desktop/src/renderer/src/theme/components.css`；开发模式下打开 `?ui-gallery`、`?settings-gallery` 查看全部组件与状态
 
 界面控件统一来自 `components/ui/`。组件只用 [设计令牌](tokens.md) 的 L2/L3 令牌，深浅两套主题都成立；可交互的控件都能用键盘操作，焦点统一画 `--focus-ring`。文字规格见[排版](typography.md)，动效见[动效](motion.md)，弹窗、确认框与轻提示见[浮层规范](overlays.md)。下面只写已经实现的组件；新增变体先改组件和这里，再在页面里用。
@@ -29,7 +29,7 @@
 | Dot    | 状态圆点，6 / 8px：ok / warn / error / running（金色脉冲，一屏只有一个「运行中」）/ idle / attention（等待用户的审批与计划）。有 `label` 时读屏可读，否则只作装饰                                        |
 | Avatar | 16 / 20 / 24 / 28 / 40。sprite（子智能体头像）/ color（六种头像色之一 + 首字）/ logo（模型商标志或插件图片，失败时退回颜色块）/ initials（中性底首字）；刻度以外的尺寸取最近一档并报错                   |
 
-子智能体头像从 1254px 的整张素材里裁出，裁剪和缩放用一次 `createImageBitmap` 完成，画进尺寸正好是「显示尺寸 × 设备像素比」的 canvas；页面上不保留整张素材，同一头像同一尺寸只解码一次。
+子智能体头像是透明底的角色，没有方片和外框（UI-S13），从 448px 的整张素材里裁出，占头像框的 94%；裁剪和缩放用一次 `createImageBitmap` 完成，画进尺寸正好是「显示尺寸 × 设备像素比」的 canvas；页面上不保留整张素材，同一头像同一尺寸只解码一次。
 
 ## 列表与表面
 

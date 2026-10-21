@@ -527,12 +527,12 @@ describe('Avatar sprite (test 5)', () => {
     )
   })
 
-  it('keeps the 8% breathing room and the aspect of the measured window', () => {
-    // 302 × 354 fitted into the 84% content box of 100 device pixels.
+  it('keeps 3% room and the aspect of the measured window (UI-S13)', () => {
+    // 108 × 126 fitted into the 94% content box of 100 device pixels.
     const layout = portraitLayout([174, 297, 108, 126], 100)
-    expect(layout.height).toBe(84)
-    expect(layout.width).toBe(Math.round((84 * 302) / 354))
-    expect(layout.y).toBe(8)
+    expect(layout.height).toBe(94)
+    expect(layout.width).toBe(Math.round((94 * 108) / 126))
+    expect(layout.y).toBe(3)
     expect(layout.x).toBe(Math.round((100 - layout.width) / 2))
   })
 

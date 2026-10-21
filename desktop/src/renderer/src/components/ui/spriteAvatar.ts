@@ -18,8 +18,11 @@ export interface SpriteLayout {
   height: number
 }
 
-/** Equal 8% breathing room on every side keeps ears and antennae in. */
-const CONTENT_PERCENT = 84
+/**
+ * 3% room on every side: the portraits have no tile any more (UI-S13), so
+ * the character fills the box; ears and antennae stay inside.
+ */
+const CONTENT_PERCENT = 94
 
 /** Fit the measured window into the content box, centred (aspect "meet"). */
 export function portraitLayout(rect: SpriteRect, pixels: number): SpriteLayout {
