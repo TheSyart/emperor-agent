@@ -79,9 +79,7 @@ export function buildSlashPaletteGroups(
   const commands = visible.filter((item) => item.kind === 'command')
   const skills = visible.filter((item) => item.kind === 'skill')
   return [
-    ...(commands.length
-      ? [{ label: '命令' as const, items: commands }]
-      : []),
+    ...(commands.length ? [{ label: '命令' as const, items: commands }] : []),
     ...(skills.length ? [{ label: 'Skills' as const, items: skills }] : []),
   ]
 }
