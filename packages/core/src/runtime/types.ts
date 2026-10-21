@@ -9,6 +9,8 @@
  * Browser-safe: type-only, no imports from kernel modules.
  */
 
+import type { UpdateStatus } from '../updates/types'
+
 export type RuntimeEventPayload = Record<string, unknown>
 
 export interface RuntimeEventEnvelope {
@@ -315,6 +317,18 @@ export type RuntimeEvent = RuntimeEventEnvelope &
       }
     | { event: 'skill_catalog_changed'; catalog_version?: number }
     | { event: 'browser_preferences_changed'; preferences: BrowserPreferences }
+    | {
+        /** 检查更新 (REL-02): the check, the offer or the download changed. */
+        event: 'update_status'
+        status: UpdateStatus
+      }
+    | {
+        /** A check found a newer release (once per version and launch). */
+        event: 'update_available'
+        version: string
+        tag: string
+        notesUrl: string
+      }
     | {
         /** 设置 › 高级 › 网络工具 changed: the Agent's tool list did too. */
         event: 'web_tools_changed'

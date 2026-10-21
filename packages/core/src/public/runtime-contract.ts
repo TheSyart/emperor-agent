@@ -10,6 +10,16 @@ export type {
   RuntimeGoalView,
 } from '../runtime/types'
 export { DRAFT_SESSION_PREFIX } from '../sessions/constants'
+// REL-02: the update status the settings page and the bell read.
+export type {
+  UpdateAttestation,
+  UpdateChannel,
+  UpdateDiagnostics,
+  UpdateDownloadState,
+  UpdateElectronFacts,
+  UpdateRelease,
+  UpdateStatus,
+} from '../updates/types'
 export type {
   ActionOutcome,
   BrowserProfileView,

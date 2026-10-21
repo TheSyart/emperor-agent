@@ -78,6 +78,8 @@ export const RUNTIME_EVENT_NAMES = [
   'subagent_tool_call',
   'subagent_tool_error',
   'subagent_tool_result',
+  'update_available',
+  'update_status',
   'web_tools_changed',
 ] as const
 
