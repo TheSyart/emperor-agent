@@ -474,6 +474,72 @@ describe('tools', () => {
     expectConverges(log)
   })
 
+  it('keeps when a subagent started and settled (UI-S14: its row says how long)', () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.call(1, 1, 'd', 'subagent', { description: 'bg' })
+    const started = log.add('subagent/started', {
+      subagentId: 'sub-1',
+      description: 'bg',
+      mode: 'spawn',
+      background: true,
+      callId: 'd',
+    })
+    log.result(1, 1, 'd', 'started sub-1')
+    const settled = log.add('subagent/settled', {
+      subagentId: 'sub-1',
+      stopReason: 'completed',
+      text: 'done',
+    })
+    const tool = nodeOf(replay(log.events).snapshot, 'tool')
+    expect(tool.data.subagent).toMatchObject({
+      startedAt: (started as { time: number }).time,
+      settledAt: (settled as { time: number }).time,
+    })
+    expectConverges(log)
+  })
+
+  it('keeps an external run’s start, end and summary (UI-S14)', () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.call(1, 1, 'x', 'subagent', { backend: 'codex', description: 'w' })
+    const projection = (task: Record<string, unknown>) =>
+      log.add('delegation/projection', {
+        event: 'delegation_run_changed',
+        delegation_id: 'dlg-one',
+        run_id: 'dgr-one',
+        current_run_id: 'dgr-one',
+        parent_call_id: 'x',
+        backend: 'codex',
+        journal_seq: 1,
+        task,
+      })
+    projection({ status: 'running', started_at: 1000, finished_at: null })
+    expect(
+      nodeOf(replay(log.events).snapshot, 'tool').data.externalAgent,
+    ).toMatchObject({ startedAt: 1000 })
+    expect(
+      nodeOf(replay(log.events).snapshot, 'tool').data.externalAgent,
+    ).not.toHaveProperty('finishedAt')
+    projection({
+      status: 'failed',
+      started_at: 1000,
+      finished_at: 15_000,
+      detail: '模型被这个账号拒绝（400）',
+    })
+    expect(
+      nodeOf(replay(log.events).snapshot, 'tool').data.externalAgent,
+    ).toMatchObject({
+      phase: 'failed',
+      startedAt: 1000,
+      finishedAt: 15_000,
+      detail: '模型被这个账号拒绝（400）',
+    })
+    expectConverges(log)
+  })
+
   it('attaches a background job even when it finishes before the result', () => {
     for (const early of [true, false]) {
       const log = new LogBuilder()
