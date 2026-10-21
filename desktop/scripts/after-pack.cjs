@@ -77,20 +77,14 @@ function isAllowedNodeModuleEntry(
   platform = process.platform,
   arch = process.arch,
 ) {
-  // The Claude Agent SDK and the binary for this build's platform and
-  // architecture only (AGT-01) ship for Claude Code; nothing else from
-  // @anthropic-ai is allowed in.
-  const sdkNested = '/node_modules/@anthropic-ai/claude-agent-sdk/node_modules'
-  if (entry === sdkNested) return true
-  if (entry.startsWith(sdkNested + '/'))
-    entry = '/node_modules' + entry.slice(sdkNested.length)
+  // The Claude Agent SDK's JavaScript only (AGT-12): it drives the user's
+  // installed claude. No Claude Code binary — no platform package, packed
+  // or nested — and nothing else from @anthropic-ai is allowed in.
   if (entry === '/node_modules/@anthropic-ai') return true
-  const target = /^[a-z0-9]+$/.test(platform) && /^[a-z0-9]+$/.test(arch)
   if (
-    target &&
-    new RegExp(
-      `^/node_modules/@anthropic-ai/claude-agent-sdk(?:-${platform}-${arch}(?:-musl)?)?(?:/(?:package\\.json|sdk\\.mjs|manifest(?:\\.zst)?\\.json|claude(?:\\.exe)?))?$`,
-    ).test(entry)
+    /^\/node_modules\/@anthropic-ai\/claude-agent-sdk(?:\/(?:package\.json|sdk\.mjs|manifest(?:\.zst)?\.json))?$/.test(
+      entry,
+    )
   )
     return true
   const nodePtyRoot = '/node_modules/node-pty'
@@ -327,47 +321,41 @@ function validatePackagedAppResources(
 }
 
 /**
- * Claude Code runs the binary bundled with the Agent SDK (AGT-01): the SDK
- * is in the archive, and exactly this build's binary is unpacked and
- * executable. Another architecture's 200+ MB binary must not ride along.
+ * Emperor runs the user's installed, unmodified Claude Code (AGT-12): the
+ * Agent SDK's JavaScript is in the archive, and no Claude Code binary is in
+ * the package — not unpacked beside the archive, not as an SDK platform
+ * package. Anthropic's terms allow running the user's own claude; shipping
+ * one is a different agreement.
  */
-function validatePackagedClaudeSdk(resourcesRoot, entries, platform, arch) {
-  if (platform !== 'darwin') return
+function validatePackagedClaudeSdk(resourcesRoot, entries, _platform, _arch) {
   const sdk = '/node_modules/@anthropic-ai/claude-agent-sdk'
   for (const file of ['package.json', 'sdk.mjs', 'manifest.json'])
     if (!entries.includes(`${sdk}/${file}`))
       throw new Error(`packaged app is missing the Claude Agent SDK ${file}`)
-  const scope = join(
-    resourcesRoot,
-    'app.asar.unpacked',
-    'node_modules',
-    '@anthropic-ai',
+  const stray = entries.find((entry) =>
+    /^\/node_modules\/@anthropic-ai\/(?:claude-agent-sdk-|claude-code(?:\/|$))|\/claude-agent-sdk\/node_modules\//.test(
+      entry,
+    ),
   )
-  const expected = `claude-agent-sdk-${platform}-${arch}`
-  const found = []
-  for (const directory of [
-    scope,
-    join(scope, 'claude-agent-sdk', 'node_modules', '@anthropic-ai'),
-  ])
-    if (existsSync(directory))
-      for (const name of readdirSync(directory))
-        if (name.startsWith('claude-agent-sdk-'))
-          found.push(join(directory, name))
-  const stray = found.find((path) => !path.endsWith(`/${expected}`))
   if (stray)
     throw new Error(
-      `packaged Claude binary for ${stray.slice(stray.lastIndexOf('claude-agent-sdk-') + 'claude-agent-sdk-'.length)} must not ship in a ${platform}-${arch} build`,
+      `packaged app must not ship a Claude Code binary or package: ${stray}`,
     )
-  if (!found.length)
-    throw new Error(
-      `packaged app is missing the Claude Code binary for ${platform}-${arch}`,
-    )
-  for (const directory of found) {
-    const binary = join(directory, 'claude')
-    assertRegularFile(binary, `Claude Code binary for ${platform}-${arch}`)
-    if ((lstatSync(binary).mode & 0o111) === 0)
-      throw new Error('packaged Claude Code binary is not executable')
+  const unpacked = join(resourcesRoot, 'app.asar.unpacked', 'node_modules')
+  const found = []
+  const walk = (directory, depth) => {
+    if (depth > 6 || !existsSync(directory)) return
+    for (const name of readdirSync(directory)) {
+      const path = join(directory, name)
+      if (/^claude-agent-sdk-|^claude-code$/.test(name)) found.push(path)
+      else if (lstatSync(path).isDirectory()) walk(path, depth + 1)
+    }
   }
+  walk(join(unpacked, '@anthropic-ai'), 0)
+  if (found.length)
+    throw new Error(
+      `packaged app must not ship a Claude Code binary: ${found[0].slice(resourcesRoot.length)}`,
+    )
 }
 
 const BROWSER_EXTENSION_FILES = [

@@ -189,18 +189,6 @@ describe('ad-hoc hardened-runtime seal (SEC-04)', () => {
     code(path.join(c, 'Library', 'Helpers', 'emperor-nm-host'))
     code(path.join(c, 'Resources', 'native', 'credential-auth'))
     code(path.join(c, 'Resources', 'native', 'delegation-scan'))
-    // Anthropic's and node-pty's binaries keep their own signatures.
-    code(
-      path.join(
-        c,
-        'Resources',
-        'app.asar.unpacked',
-        'node_modules',
-        '@anthropic-ai',
-        'claude-agent-sdk-darwin-arm64',
-        'claude',
-      ),
-    )
     fs.mkdirSync(path.join(c, 'Resources', 'runtime-defaults'), {
       recursive: true,
     })
