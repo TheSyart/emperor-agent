@@ -408,6 +408,11 @@ export interface TurnFilesChatData {
   readonly concurrent: boolean
   /** Snapshots were kept: the task (turn) can be reviewed and undone. */
   readonly reviewable: boolean
+  /**
+   * Recorded when the session was next opened after Emperor stopped mid-task
+   * (UI-S15): compared with the project then, outside changes included.
+   */
+  readonly recovered?: boolean
   /** The task (turn) was undone (`turn/files-reverted`). */
   readonly reverted?: {
     readonly reverted: readonly string[]

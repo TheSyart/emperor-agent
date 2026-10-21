@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  RECOVERED_REVERT_NOTE,
   fileCounts,
   fileStatusTag,
   revertSkipLabel,
@@ -114,5 +115,22 @@ describe('turn files card model', () => {
     })
     expect(turnReviewTitle('task')).toBe('这次任务的改动')
     expect(turnReviewTitle('turn')).toBe('本轮改动')
+  })
+
+  it('says when a task was recorded only after Emperor came back', () => {
+    const task = { firstTurn: 2, lastTurn: 4 }
+    expect(
+      turnFilesCaption({
+        mode: 'git',
+        truncated: false,
+        task,
+        recovered: true,
+      }),
+    ).toBe(
+      '按这次任务开始与重新打开 Emperor 时的项目对比（任务中途 Emperor 退出过，这段时间在 Emperor 之外的改动也算在内）',
+    )
+    expect(RECOVERED_REVERT_NOTE).toBe(
+      '这次任务进行中 Emperor 退出过，列表按重新打开时的项目对比，可能含有在 Emperor 之外做的改动。',
+    )
   })
 })

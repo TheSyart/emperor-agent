@@ -1062,6 +1062,24 @@ describe('turn files', () => {
       firstTurn: 1,
       lastTurn: 2,
     })
+    expect(nodeOf(snapshot, 'turnFiles').data.recovered).toBe(false)
+    expectConverges(log)
+  })
+
+  it('carries that a task was recorded only after Emperor came back (UI-S15)', () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.message(1, 1, [{ type: 'text', text: 'half done' }])
+    log.add('step/end', { turn: 1, step: 1 })
+    log.add('turn/end', { turn: 1, reason: { kind: 'interrupted' } })
+    log.add('turn/files', {
+      ...record,
+      task: { firstTurn: 1, lastTurn: 1 },
+      recovered: true,
+    })
+    const { snapshot } = replay(log.events)
+    expect(nodeOf(snapshot, 'turnFiles').data.recovered).toBe(true)
     expectConverges(log)
   })
 

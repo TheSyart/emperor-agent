@@ -327,4 +327,18 @@ describe('TurnFilesCard', () => {
       '本轮改动',
     )
   })
+
+  it('warns that a task recorded after Emperor came back may hold outside changes', async () => {
+    const root = mount(
+      data({ task: { firstTurn: 1, lastTurn: 3 }, recovered: true }),
+    )
+    expect(root.querySelector('.scope-info')?.getAttribute('aria-label')).toBe(
+      '按这次任务开始与重新打开 Emperor 时的项目对比（任务中途 Emperor 退出过，这段时间在 Emperor 之外的改动也算在内）',
+    )
+    root.querySelector<HTMLButtonElement>('[data-action="undo"]')!.click()
+    await flush()
+    expect(
+      document.body.querySelector('[data-turn-revert-recovered]')?.textContent,
+    ).toContain('Emperor 退出过')
+  })
 })

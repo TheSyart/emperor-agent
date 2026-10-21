@@ -8,7 +8,8 @@
  * warns when another session ran in the same workspace during the task.
  *
  * Props: sessionId, turn (the record's), files, concurrent, scope (what the
- * record covers, for the words). v-model:open.
+ * record covers, for the words), recovered (recorded after Emperor came
+ * back: it may hold outside changes). v-model:open.
  * Emits: done (the Core result; the card updates from the session log).
  */
 import { computed, ref, watch } from 'vue'
@@ -23,6 +24,7 @@ import Checkbox from '../../ui/Checkbox.vue'
 import Modal from '../../ui/Modal.vue'
 import {
   fileStatusTag,
+  RECOVERED_REVERT_NOTE,
   splitFilePath,
   turnRevertCopy,
   type TurnFilesScope,
@@ -35,8 +37,9 @@ const props = withDefaults(
     files: readonly TurnFileEntry[]
     concurrent: boolean
     scope?: TurnFilesScope
+    recovered?: boolean
   }>(),
-  { scope: 'turn' },
+  { scope: 'turn', recovered: false },
 )
 const open = defineModel<boolean>('open', { default: false })
 const emit = defineEmits<{ done: [result: TurnFilesReverted] }>()
@@ -95,6 +98,9 @@ async function confirm(): Promise<void> {
   >
     <p v-if="concurrent" class="warning" data-turn-revert-concurrent>
       {{ copy.concurrent }}
+    </p>
+    <p v-if="recovered" class="warning" data-turn-revert-recovered>
+      {{ RECOVERED_REVERT_NOTE }}
     </p>
     <ul class="files" aria-label="要撤销的文件">
       <li v-for="file in files" :key="file.path">

@@ -237,6 +237,7 @@ function openFile(path: string): void {
       :files="data.files"
       :concurrent="data.concurrent"
       :scope="scope"
+      :recovered="data.recovered === true"
     />
   </section>
 </template>

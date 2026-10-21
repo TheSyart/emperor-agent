@@ -76,6 +76,7 @@ function viewData(state: TurnFilesState): TurnFilesChatData | null {
     totals: record.totals,
     truncated: record.truncated === true,
     concurrent: record.concurrent === true,
+    recovered: record.recovered === true,
     reviewable:
       record.mode === 'git' &&
       record.status === 'recorded' &&
