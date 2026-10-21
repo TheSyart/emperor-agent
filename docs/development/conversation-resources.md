@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Renderer、工具与 Core 开发者<br>
-> 最后核验：2026-10-16<br>
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
 > 事实源：`components/conversation/resources/`、`components/composer/editor/resourceDecorations.ts`、`documentIcons.ts`、`packages/core/src/workspace/references.ts`、`reference-preview.ts`、`api/operations.ts`
 
 ## 身份与渲染
@@ -40,7 +40,7 @@ meta: {
 
 ### 网站图标
 
-网站图标默认关闭（设置 › 常规 ›「显示网站图标」，偏好存于本机 `emperor.ui.prefs.v1`）：关闭时不发出任何图标请求，链接只显示通用图标；打开后，可见网页引用显示真实 favicon；正文、卡片、搜索结果与来源清单共用图标加载器。离屏内容和流式未结束的正文不批量请求。输入框复用已取得的图标缓存，不因输入尚未发送的网址而联网。加载失败保留域名首字母，链接文字与打开行为不变。
+网站图标默认关闭（「设置 › 常规 › 会话 › 显示网站图标」，偏好存于本机 `emperor.ui.prefs.v1`）：关闭时不发出任何图标请求，链接只显示通用图标；打开后，可见网页引用显示真实 favicon；正文、卡片、搜索结果与来源清单共用图标加载器。离屏内容和流式未结束的正文不批量请求。输入框复用已取得的图标缓存，不因输入尚未发送的网址而联网。加载失败保留域名首字母，链接文字与打开行为不变。
 
 `references.siteIcon({ sessionId, referenceId })` 使用 opaque 引用，每次请求及返回前校验可读会话与引用归属。后端只读取 HTTPS origin 的 favicon／apple-touch-icon，必要时解析最多 256 KiB 的首页中的 icon link，不读取文章 URL 或 OpenGraph 预览图。第一方未提供可用栅格图标时，以公共 hostname 请求 `icons.duckduckgo.com/ip3/<hostname>.ico`；不发送链接路径、查询参数、Cookie 或浏览器登录状态。私网／非法地址在 DNS 与重定向校验处停止，不进入第三方 fallback。
 

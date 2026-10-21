@@ -2,32 +2,35 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、开发者<br>
-> 最后核验：2026-10-15<br>
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
 > 事实源：当前 TypeScript / Electron 主线与根目录 `README.md`
 
 这里是 Emperor Agent 的文档入口。根目录 [README](../README.md) 负责介绍产品和最短使用路径；本目录保存操作手册、架构说明、开发指南、设计规范和发布流程。
 
 ## 我想做什么
 
-| 目的                                      | 从这里开始                                                   |
-| ----------------------------------------- | ------------------------------------------------------------ |
-| 安装并完成第一次对话                      | [首次使用](user/getting-started.md)                          |
-| 理解 Chat 与 Build                        | [会话与项目工作](user/chat-build.md)                         |
-| 使用右侧工作台、快捷键或 Pull Request 页  | [会话与项目工作](user/chat-build.md#右侧工作台)              |
-| 权限预设、先规划再执行或持续推进目标      | [Plan 与 Goal](user/plan-goal.md)                            |
-| 配置模型、记忆和附件                      | [模型、记忆与附件](user/models-memory-attachments.md)        |
-| 使用 Tools、Skills、Plugins 或 MCP        | [工具与扩展能力](user/tools-skills-mcp.md)                   |
-| 使用 `/` 命令和真正的新上下文             | [Slash command 平台](architecture/slash-command-platform.md) |
-| 使用定时任务、Hooks 或桌宠                | [定时任务、Hooks 与桌宠](user/automation-collaboration.md)   |
-| 浏览网页、管理下载与导入 Chrome/Edge 登录 | [浏览器设置与数据](user/chat-build.md#浏览器设置与数据)      |
-| 在聊天输入框使用 macOS 本机听写           | [语音听写](user/chat-build.md#语音听写)                      |
-| 使用受控浏览器或 macOS 桌面操作           | [电脑操作（实验）](user/computer-use.md)                     |
-| 排查启动、模型、数据或打包问题            | [诊断与排障](user/diagnostics-troubleshooting.md)            |
-| 了解系统为什么这样设计                    | [架构总览](architecture/overview.md)                         |
-| 修改或扩展项目                            | [开发指南](development/README.md)                            |
-| 查看品牌、主题与插件 Logo 等设计规范      | [设计规范](design/README.md)                                 |
-| 通过 ACP stdio 运行 Headless Core         | [Headless ACP operator preview](development/headless-acp.md) |
-| 构建公开 Preview                          | [Preview 发布手册](release/preview-release-runbook.md)       |
+| 目的                                           | 从这里开始                                                          |
+| ---------------------------------------------- | ------------------------------------------------------------------- |
+| 安装并完成第一次对话                           | [首次使用](user/getting-started.md)                                 |
+| 理解 Chat 与 Build                             | [会话与项目工作](user/chat-build.md)                                |
+| 使用右侧工作台、快捷键或 Pull Request 页       | [会话与项目工作](user/chat-build.md#右侧工作台)                     |
+| 权限预设、先规划再执行或持续推进目标           | [计划与目标](user/plan-goal.md)                                     |
+| 配置模型、记忆和附件                           | [模型、记忆与附件](user/models-memory-attachments.md)               |
+| 使用 Tools、Skills、Plugins 或 MCP             | [工具与扩展能力](user/tools-skills-mcp.md)                          |
+| 使用 `/` 命令和真正的新上下文                  | [Slash command 平台](architecture/slash-command-platform.md)        |
+| 使用定时任务、Hooks 或桌宠                     | [定时任务、Hooks、桌宠与子智能体](user/automation-collaboration.md) |
+| 把子任务交给本地子智能体、Claude Code 或 Codex | [子智能体](user/automation-collaboration.md#子智能体)               |
+| 浏览网页、管理下载与导入 Chrome/Edge 登录      | [浏览器设置与数据](user/chat-build.md#浏览器设置与数据)             |
+| 在聊天输入框使用 macOS 本机听写                | [语音听写](user/chat-build.md#语音听写)                             |
+| 使用受控浏览器或 macOS 桌面操作                | [电脑操作（实验）](user/computer-use.md)                            |
+| 排查启动、模型、数据或打包问题                 | [诊断与排障](user/diagnostics-troubleshooting.md)                   |
+| 备份与恢复、查看日志或导出诊断包               | [备份与恢复](user/diagnostics-troubleshooting.md#备份与恢复)        |
+| 了解系统为什么这样设计                         | [架构总览](architecture/overview.md)                                |
+| 修改或扩展项目                                 | [开发指南](development/README.md)                                   |
+| 查看品牌、主题与插件 Logo 等设计规范           | [设计规范](design/README.md)                                        |
+| 通过 ACP stdio 运行 Headless Core              | [Headless ACP operator preview](development/headless-acp.md)        |
+| 发布正式版（Stable，未签名）                   | [Stable 发布手册](release/stable-release-runbook.md)                |
+| 构建公开 Preview                               | [Preview 发布手册](release/preview-release-runbook.md)              |
 
 ## 当前维护的文档
 
@@ -36,10 +39,10 @@
 - [用户手册首页](user/README.md)
 - [首次使用](user/getting-started.md)
 - [Chat 与 Build](user/chat-build.md)
-- [Plan 与 Goal](user/plan-goal.md)
+- [计划与目标](user/plan-goal.md)
 - [模型、记忆与附件](user/models-memory-attachments.md)
 - [Tools、Skills 与 MCP](user/tools-skills-mcp.md)
-- [定时任务、Hooks 与桌宠](user/automation-collaboration.md)
+- [定时任务、Hooks、桌宠与子智能体](user/automation-collaboration.md)
 - [电脑操作（实验）](user/computer-use.md)
 - [诊断与排障](user/diagnostics-troubleshooting.md)
 
@@ -53,11 +56,13 @@
 - [Goal 架构](architecture/goal-mode.md)
 - [全局私有存储根](architecture/global-state-store.md)
 - [可选能力生命周期](architecture/optional-capabilities.md)
+- [Claude Code 与 Codex 子智能体](architecture/external-agent-delegation.md)
 - [开发指南](development/README.md)
 - [CI 门禁](development/ci.md)
 - [扩展 Emperor Agent](development/extending-emperor.md)
 - [对话资源展示契约](development/conversation-resources.md)
 - [Headless ACP operator preview](development/headless-acp.md)
+- [开发与验证外部子智能体](development/external-agent-adapters.md)
 
 ### 设计规范
 
@@ -79,16 +84,17 @@
 
 ### 发布与安全
 
-- [未签名 Preview 安全说明](release/unsigned-preview-notice.md)
+- [未签名安装包安全说明](release/unsigned-preview-notice.md)
 - [Preview 发布手册](release/preview-release-runbook.md)
 - [Stable 发布手册](release/stable-release-runbook.md)
+- [Stable Release 正文模板](release/stable-release-notes.md)
 - [ToolCatalog 发布审核](release/tool-catalog-review.md)
 - [Security Policy](../.github/SECURITY.md)
 - [Changelog](release/CHANGELOG.md)
 
 ## 文档状态
 
-每份当前文档的开头都应标明状态、读者、最后核验日期和主要事实源。
+每份当前文档的开头都应标明状态、读者、最后核验日期（可附核验所对照的提交）和主要事实源；`scripts/check_public_docs.mjs` 检查这四行，以及正文改过之后最后核验是否跟着更新。
 
 | 状态         | 含义                                                 |
 | ------------ | ---------------------------------------------------- |
@@ -99,9 +105,4 @@
 
 ## 维护规则
 
-文档分类、事实源映射、归档规则和人工验收清单见 [文档维护规范](DOCUMENTATION.md)。源码开发约定见[开发指南](development/README.md)。
-
-## 外部 Agent 调度
-
-- [调度架构、生命周期与验收](architecture/external-agent-delegation.md)
-- [适配器开发与真实验收](development/external-agent-adapters.md)
+文档分类、事实源映射、归档规则和人工检查清单见 [文档维护规范](DOCUMENTATION.md)。源码开发约定见[开发指南](development/README.md)。

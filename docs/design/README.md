@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-21<br>
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
 > 事实源：`desktop/src/renderer/src/theme/`、`desktop/src/renderer/src/components/ui/`、`desktop/src/renderer/src/style-audit.test.ts`、`desktop/src/renderer/src/feature-style-owners.json`、`desktop/tests/visual/__baselines__/`、`scripts/lib/design-docs.mjs`、`assets/generated/`
 
 本目录集中维护 Emperor Agent 的设计规范，包括品牌与图形资源、界面主题与样式、插件 Logo、模型元数据目录等。系统怎样运转见[架构文档](../architecture/overview.md)，怎样开发和扩展见[开发指南](../development/README.md)；根目录 README 只链接到这里，不复制规范正文。
@@ -12,7 +12,7 @@
 | 规范                                         | 内容                                                                 |
 | -------------------------------------------- | -------------------------------------------------------------------- |
 | [品牌资源规范](brand.md)                     | 标的几何与用法、应用图标、DMG 安装窗口、首启插图、退役的旧资源       |
-| [插件 Logo 设计规范](plugin-logos.md)        | 受管插件 Logo 的方框材质、渐变与光照、透明边界、尺寸和验收           |
+| [插件 Logo 设计规范](plugin-logos.md)        | 受管插件 Logo 的方框材质、渐变与光照、透明边界、尺寸和检查           |
 | [模型元数据规范](model-metadata.md)          | 随包模型目录的数据来源与许可、匹配规则、覆盖层与家族规则、刷新流程   |
 | [厂商模型列表接口规范](vendor-model-apis.md) | 各厂商模型列表接口的地址、字段、分页与坑，连接测试与错误码           |
 | [设计令牌](tokens.md)                        | L1 原子、L2 语义、L3 组件三层令牌，全部 L2/L3 令牌与用途，迁移进度   |

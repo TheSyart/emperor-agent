@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-21<br>
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
 > 事实源：`desktop/src/renderer/src/theme/primitives.css`（`--motion-*`、`--duration-*`、`--ease-*`）、`styles/dsh/animations.css`、`styles/a11y.css`、`components/motion/`（`AppTransition.vue`、`CollapseTransition.vue`）、`composables/useSpring.ts`、`composables/useResizable.ts`、`composables/useReducedMotion.ts`、`composables/useStreamingText.ts`、`components/ui/`（`Spinner.vue`、`Dot.vue`、`Skeleton.vue`、`Shimmer.vue`、`useTooltip.ts`、`ImageLightbox.vue`）、`components/conversation/ChatTimeline.vue`、`components/shell/AppFrame.vue`；测试 `style-audit.test.ts`、`styleAuditRules.ts`、`CollapseTransition.test.ts`、`desktop/tests/visual/baseline-stability.spec.ts`
 
 动效只用来说明变化：东西从哪里来、展开到哪里、什么还在运行。它要短、可以被打断、不挡操作；关掉系统的动态效果之后，界面照样完整可用。
@@ -79,7 +79,7 @@
 
 ## 滚动与流式输出
 
-- 没有平滑滚动（不使用 `scroll-behavior: smooth`）。只有设置 › 诊断里跳到某一项时用一次平滑的 `scrollIntoView`。
+- 没有平滑滚动（不使用 `scroll-behavior: smooth`）。只有在「设置 › 高级 › 诊断」里跳到某一项时用一次平滑的 `scrollIntoView`。
 - 会话跟随底部时直接把滚动位置设到最底，不做动画；离底部 25px 以内算「在底部」。用户向上滚动后停止跟随，出现「回到底部」按钮（没有动效）。
 - 流式回答每 80ms 最多重绘一次正文（`useStreamingText`），输出结束立即显示全文。
 
