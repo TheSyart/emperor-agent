@@ -280,7 +280,13 @@ for (const theme of ['dark', 'light'] as const) {
     // UI-S05: each section is one summary row.
     const agents = envCard.locator('[data-row="agents"]')
     await expect(agents).toContainText('子智能体')
-    await expect(agents).toContainText('1 运行 · 3 完成 · 1 失败')
+    // 完成 is left out while one runs (UI-S14).
+    await expect(agents).toContainText('1 运行 · 1 失败')
+    await expect(agents).not.toContainText('完成')
+    // A plan's title is data: it shrinks, the value stays whole.
+    await expect(
+      envCard.locator('[data-row="plan"] .label[data-shrink]'),
+    ).toHaveCount(1)
     await expect(agents).toHaveAttribute('aria-expanded', 'false')
     await expect(agents.locator('[data-agent-face]')).toHaveCount(3)
     await expect(envCard.locator('.agent-row')).toHaveCount(0)

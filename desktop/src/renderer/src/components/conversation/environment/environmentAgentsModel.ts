@@ -72,12 +72,19 @@ const SUMMARY_ORDER = [
   ['unknown', '待确认'],
 ] as const satisfies ReadonlyArray<readonly [AgentView['phase'], string]>
 
-/** The 子智能体 row's value (UI-S05): 「1 运行 · 3 完成 · 1 失败」. */
+/**
+ * The 子智能体 row's value (UI-S05): 「1 运行 · 1 失败」 while any runs or
+ * waits — the finished ones are left out then (UI-S14) — and 「3 完成 ·
+ * 1 失败」 once none is active.
+ */
 export function agentSummary(agents: readonly AgentView[]): string {
   const counts = new Map<string, number>()
   for (const agent of agents)
     counts.set(agent.phase, (counts.get(agent.phase) ?? 0) + 1)
-  return SUMMARY_ORDER.filter(([phase]) => counts.get(phase))
+  const busy = agents.some(active)
+  return SUMMARY_ORDER.filter(
+    ([phase]) => counts.get(phase) && !(busy && phase === 'completed'),
+  )
     .map(([phase, label]) => `${counts.get(phase)} ${label}`)
     .join(' · ')
 }
