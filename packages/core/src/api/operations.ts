@@ -1092,13 +1092,14 @@ export const CORE_OPERATION_REGISTRY = {
     (api, [input], ctx) =>
       api.executors.configure(input, viewOf(ctx, 'executors.configure')),
   ),
-  // AGT-02: a Claude token pasted in 设置 › 子智能体; one line, no spaces.
+  // AGT-12: the user's own API key for Claude Code (使用 API Key); one line,
+  // no spaces. Claude.ai sign-ins are claude's own (executors.signIn).
   'executors.setCredential': operation(
     z.tuple([
       z
         .object({
           profileId: z.string().min(1).max(64),
-          kind: z.enum(['oauth-token', 'api-key']),
+          kind: z.literal('api-key'),
           token: z
             .string()
             .trim()
@@ -1120,6 +1121,34 @@ export const CORE_OPERATION_REGISTRY = {
       api.executors.clearCredential(
         input,
         viewOf(ctx, 'executors.clearCredential'),
+      ),
+  ),
+  // AGT-12: 登录 Claude Code opens macOS Terminal on the installed claude's
+  // own `auth login` (`--console` for API billing); 退出登录 runs
+  // `claude auth logout`; 知道了 on the notice after the upgrade.
+  'executors.signIn': operation(
+    z.tuple([
+      z
+        .object({
+          profileId: z.string().min(1).max(64),
+          method: z.enum(['claude-ai', 'console']),
+        })
+        .strict(),
+    ]),
+    (api, [input], ctx) =>
+      api.executors.signIn(input, viewOf(ctx, 'executors.signIn')),
+  ),
+  'executors.signOut': operation(
+    z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),
+    (api, [input], ctx) =>
+      api.executors.signOut(input, viewOf(ctx, 'executors.signOut')),
+  ),
+  'executors.dismissNotice': operation(
+    z.tuple([z.object({ notice: z.literal('claude-sign-in') }).strict()]),
+    (api, [input], ctx) =>
+      api.executors.dismissNotice(
+        input,
+        viewOf(ctx, 'executors.dismissNotice'),
       ),
   ),
   'delegations.get': operation(z.tuple([externalRef]), (api, [input], ctx) =>

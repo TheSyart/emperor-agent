@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import { parse } from 'smol-toml'
 import { durableReplaceSync } from '../../store/persistence'
 import { ManagedAgentProcess } from './process'
-import { claudeExecutableSource } from './executable'
 import {
   readNativeModels,
   type NativeModel,
@@ -44,6 +43,11 @@ export class ExecutorModelCatalogService {
         profile: ExecutorProfile,
         runtime: PreparedExecutor,
       ) => Promise<NativeModel[]>
+      /**
+       * False when the last check found Claude Code not signed in (its own
+       * login is claude's, AGT-12): its CLI is not started for a list.
+       */
+      signedIn?: (profile: ExecutorProfile) => boolean
     },
   ) {
     this.file = join(options.root, 'model-catalog-cache.json')
@@ -147,7 +151,6 @@ export class ExecutorModelCatalogService {
         provider,
         model: configuredModel,
         executable: profile.executablePath,
-        source: claudeExecutableSource(profile) ?? null,
         authRef: profile.authRef,
         credentials: runtime.secretValues,
       }
@@ -163,6 +166,9 @@ export class ExecutorModelCatalogService {
       if (!runtime.authenticationAvailable) {
         diagnostic =
           '当前隔离执行读取不到认证，仅展示配置与参考候选；执行前请完成登录接入。'
+      } else if (this.options.signedIn?.(profile) === false) {
+        diagnostic =
+          'Claude Code 还没有登录，仅展示配置与参考候选；登录后点「刷新模型」。'
       } else if (
         !refresh &&
         validCache &&

@@ -16,11 +16,8 @@ import {
   parseVersion,
   type CodexProtocol,
 } from './compatibility'
-import {
-  bundledClaudeExecutable,
-  claudeExecutableSource,
-  executorExecutable,
-} from './executable'
+import { locateExecutable } from './executable'
+import type { LoginShellEnvironment } from './login-shell'
 import {
   DelegationError,
   ExecutorAuthError,
@@ -38,8 +35,8 @@ export class ExecutorRegistry {
     private readonly options: {
       home?: string
       environment?: NodeJS.ProcessEnv
-      /** Test hook: where the SDK-bundled claude lives. */
-      bundledClaude?: () => string | undefined
+      /** Where a Dock launch finds a claude only ~/.zshrc puts on PATH. */
+      loginShell?: LoginShellEnvironment
       /** Test hook: the verified Codex protocols. */
       codexProtocols?: readonly CodexProtocol[]
     } = {},
@@ -59,29 +56,37 @@ export class ExecutorRegistry {
   private environment(): NodeJS.ProcessEnv {
     return executorEnvironment(this.options.environment, this.options.home)
   }
+  /**
+   * The installed claude a Claude Code profile runs (AGT-12: Emperor ships
+   * none): PATH, the usual install folders, then the login shell's PATH.
+   */
+  locate(profile: ExecutorProfile): Promise<string | undefined> {
+    return locateExecutable(profile.executablePath, {
+      path: this.environment().PATH,
+      ...(this.options.loginShell
+        ? { loginShell: this.options.loginShell }
+        : {}),
+    })
+  }
   async probe(
     profile: ExecutorProfile,
     signal?: AbortSignal,
   ): Promise<ExecutorProbe> {
-    const source = claudeExecutableSource(profile)
     const base = {
       capabilities: this.capabilities(profile.backend),
       checkedAt: Date.now(),
       authVerified: false,
-      ...(source ? { executableSource: source } : {}),
     }
-    let executable: string
-    try {
-      executable = executorExecutable(
-        profile,
-        this.options.bundledClaude ?? bundledClaudeExecutable,
-      )
-    } catch (error) {
-      return {
-        ...base,
-        status: 'missing',
-        diagnostic: (error as Error).message.replace(/^EXECUTOR_MISSING: /, ''),
-      }
+    let executable = profile.executablePath
+    if (profile.backend === 'claude-code') {
+      const found = await this.locate(profile)
+      if (!found)
+        return {
+          ...base,
+          status: 'missing',
+          diagnostic: 'claude is not installed',
+        }
+      executable = found
     }
     let stdout: string
     try {

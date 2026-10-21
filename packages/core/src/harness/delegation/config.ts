@@ -18,6 +18,8 @@ const profile = z
     id: segment,
     backend: z.enum(['claude-code', 'codex']),
     enabled: z.boolean(),
+    // Legacy (AGT-01's bundled Claude Code, gone in AGT-12): accepted,
+    // ignored and dropped; every profile runs the installed CLI.
     executableSource: z.enum(['bundled', 'system']).optional(),
     executablePath: z
       .string()
@@ -119,15 +121,6 @@ export const executorConfigSchema = z
   })
   .strict()
   .superRefine((c, ctx) => {
-    if (
-      c.profiles.some(
-        (p) => p.backend === 'codex' && p.executableSource === 'bundled',
-      )
-    )
-      ctx.addIssue({
-        code: 'custom',
-        message: 'only Claude Code ships a bundled binary',
-      })
     for (const ids of [
       c.profiles.map((p) => p.id),
       c.profiles.map((p) => p.stateDirectoryId),
@@ -151,14 +144,20 @@ export function parseExecutorConfig(value: unknown): ExecutorConfig {
     if (profile.authRef.kind === 'model-route' && !profile.authRef.routeId)
       profile.authRef = { kind: 'managed-cli-login' }
     delete profile.expectedVersion
+    delete profile.executableSource
   }
   return result.data
 }
-function hasLegacyVersionPin(value: unknown): boolean {
+function hasLegacyProfileField(value: unknown): boolean {
   const profiles = (value as { profiles?: unknown } | null)?.profiles
   return (
     Array.isArray(profiles) &&
-    profiles.some((p) => !!p && typeof p === 'object' && 'expectedVersion' in p)
+    profiles.some(
+      (p) =>
+        !!p &&
+        typeof p === 'object' &&
+        ('expectedVersion' in p || 'executableSource' in p),
+    )
   )
 }
 export function defaultExecutorConfig(): ExecutorConfig {
@@ -172,7 +171,6 @@ export function defaultExecutorConfig(): ExecutorConfig {
         id: 'claude-default',
         backend: 'claude-code',
         enabled: false,
-        executableSource: 'bundled',
         executablePath: 'claude',
         authRef: { kind: 'managed-cli-login' },
         stateDirectoryId: 'claude-default',
@@ -224,7 +222,7 @@ export class ExecutorConfigStore {
     // External executors are opt-in (AGT-05). A file the user never saved
     // through settings (no touchedAt) holds the old enabled default, not a
     // choice: turn those off once and explain it on the settings page.
-    let rewrite = hasLegacyVersionPin(raw)
+    let rewrite = hasLegacyProfileField(raw)
     if (
       config.touchedAt === undefined &&
       config.profiles.some((p) => p.enabled)
@@ -233,9 +231,10 @@ export class ExecutorConfigStore {
       config.upgradeNotice = 'external-default-off'
       rewrite = true
     }
-    // Compatibility is a handshake now (AGT-01). Drop the old exact-version
-    // pin from the file once. The revision is unchanged in both cases: no
-    // choice of the user's changed.
+    // Compatibility is a handshake now (AGT-01) and Claude Code is always
+    // the installed one (AGT-12): drop the old version pin and binary choice
+    // from the file once. The revision is unchanged: no choice of the
+    // user's changed.
     if (rewrite)
       try {
         durableReplaceSync(this.file, JSON.stringify(config, null, 2) + '\n')

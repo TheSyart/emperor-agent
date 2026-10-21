@@ -63,16 +63,18 @@ import {
 } from './process'
 import { delegationNeedsExit } from '../../runtime/agent-view'
 import { durableReplaceSync } from '../../store/persistence'
-import { codexAuthWritableFile, type CodexAuthLink } from './codex-auth'
+import type { CodexAuthLink } from './codex-auth'
+import { executorGrants } from './environment'
 export interface DelegationServiceOptions {
   facts?: ExecutorFactsStore
   root: string
   config: () => ExecutorConfig
   registry: Pick<ExecutorRegistry, 'requireAvailable' | 'capabilities'>
   /**
-   * Claude Code's sign-in (AGT-02): resolves what was found, throws
-   * ExecutorAuthError without a usable credential. Checked with the
-   * version at startup and before a dispatch asks the user.
+   * Claude Code's sign-in (AGT-12): what `claude auth status` reports in
+   * the run's environment; throws ExecutorAuthError when it is not signed
+   * in. Checked with the version at startup and before a dispatch asks the
+   * user.
    */
   checkAuth?: (
     profile: ExecutorProfile,
@@ -100,6 +102,8 @@ export interface DelegationServiceOptions {
     environment: Record<string, string>
     runtimeRoot: string
     tempRoot: string
+    /** Absent: the run's own folder only (AGT-12). */
+    stateRoots?: string[]
     secretValues?: string[]
     codexAuth?: CodexAuthLink
     /** Absent: API billing (AGT-07). */
@@ -480,12 +484,10 @@ export class DelegationService {
           policy: {
             mode: 'read-only',
             workspaceRoot: record.cwd,
-            runtimeStateRoots: [runtime.runtimeRoot],
             privateTempRoot: runtime.tempRoot,
-            // Opening the thread may refresh the shared Codex login too.
-            ...(runtime.codexAuth
-              ? { writableFiles: [codexAuthWritableFile(runtime.codexAuth)] }
-              : {}),
+            // Opening the thread may refresh the shared Codex login, or
+            // Claude Code's own, too.
+            ...executorGrants(runtime),
           },
           onProcessStarted: async (identity) => {
             ownership = {
@@ -945,9 +947,7 @@ export class DelegationService {
     const parts = [
       'status=' +
         (probe?.status === 'needs_auth'
-          ? 'unavailable (not signed in' +
-            (probe.auth?.problem === 'expired' ? ', token expired' : '') +
-            '; do not dispatch: the user sets a token in Settings › 子智能体)'
+          ? 'unavailable (not signed in; do not dispatch: the user signs in under Settings › 子智能体 › Claude Code)'
           : (probe?.status ?? 'unchecked')),
       ...(probe?.compatibility === 'unverified'
         ? ['protocol unverified (a failure may be the version)']
@@ -1709,16 +1709,15 @@ export class DelegationService {
         policy: {
           mode: record.effectivePermission,
           workspaceRoot: record.cwd,
-          runtimeStateRoots: [runtime.runtimeRoot],
           privateTempRoot: runtime.tempRoot,
           readOnlyRoots: lease?.snapshot
             ? [lease.snapshot.commonDir, join(lease.path, '.git')]
             : [],
-          // A token refresh rewrites the user's Codex login in place through
-          // the isolated home's link; nothing beside that one file.
-          ...(runtime.codexAuth
-            ? { writableFiles: [codexAuthWritableFile(runtime.codexAuth)] }
-            : {}),
+          // Its own folders (Claude Code: the dedicated config and home,
+          // AGT-12), and a token refresh rewriting the user's Codex login
+          // in place through the isolated home's link, or Claude Code's
+          // own login file; nothing beside those.
+          ...executorGrants(runtime),
         },
       })
       e.session = session

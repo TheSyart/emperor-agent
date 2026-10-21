@@ -233,10 +233,7 @@ describe('AGT-02 · maxTurns', () => {
       generation: 1,
       signal: new AbortController().signal,
     }
-    const adapter = new ClaudeExecutorAdapter({
-      startup: start,
-      bundledClaude: () => process.execPath,
-    })
+    const adapter = new ClaudeExecutorAdapter({ startup: start })
     return { input, adapter, options: () => options! }
   }
 

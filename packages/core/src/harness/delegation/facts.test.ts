@@ -159,7 +159,7 @@ it.each(['defaultModel', 'executablePath'] as const)(
     expect(f.store.view(profile).nativeCapabilities.search.status).toBe('stale')
   },
 )
-it('invalidates Claude proof when it switches between the bundled and the installed claude', () => {
+it('invalidates Claude proof when it runs another installed claude', () => {
   const f = fixture('claude-code')
   metadata(f)
   search(f, 'search')
@@ -167,12 +167,12 @@ it('invalidates Claude proof when it switches between the bundled and the instal
   expect(f.store.view(f.profile).nativeCapabilities.search.status).toBe(
     'available',
   )
-  const installed: ExecutorProfile = {
+  const other: ExecutorProfile = {
     ...f.profile,
-    executableSource: 'system',
+    executablePath: '/opt/homebrew/bin/claude',
   }
-  f.store.bind(installed, f.environment)
-  expect(f.store.view(installed).nativeCapabilities.search.status).toBe('stale')
+  f.store.bind(other, f.environment)
+  expect(f.store.view(other).nativeCapabilities.search.status).toBe('stale')
 })
 it('invalidates old tool proof on provider-reported model change', () => {
   const f = fixture()
@@ -287,13 +287,13 @@ it('invalidates positive evidence when the executor becomes unavailable', () => 
   })
   expect(f.store.view(f.profile).nativeCapabilities.search.status).toBe('stale')
 })
-it('invalidates Claude OAuth login changes and rejects superficially labelled PNG files', () => {
+it('invalidates Claude API key changes and rejects superficially labelled PNG files', () => {
   const f = fixture('claude-code')
-  f.store.bind(f.profile, { CLAUDE_CODE_OAUTH_TOKEN: 'oauth-account-a' })
+  f.store.bind(f.profile, { ANTHROPIC_API_KEY: 'api-account-a' })
   metadata(f)
   search(f, 'search')
   search(f, 'fetch')
-  f.store.bind(f.profile, { CLAUDE_CODE_OAUTH_TOKEN: 'oauth-account-b' })
+  f.store.bind(f.profile, { ANTHROPIC_API_KEY: 'api-account-b' })
   expect(f.store.view(f.profile).nativeCapabilities.search.status).toBe('stale')
   const codex = fixture()
   metadata(codex)

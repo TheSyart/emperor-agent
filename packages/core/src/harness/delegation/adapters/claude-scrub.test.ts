@@ -14,7 +14,8 @@ import { delegationTestDirectory } from '../testing'
 
 /**
  * AGT-02 test 9 · the Bash a Claude run starts does not inherit Claude's
- * credentials. A real child process stands in for the CLI: it holds the
+ * credentials (since AGT-12 the only one Emperor passes is the user's own
+ * API key; Claude.ai sign-ins stay inside claude). A real child process stands in for the CLI: it holds the
  * environment Emperor spawned it with and runs `printenv` the way Claude
  * Code 2.1's Bash tool does, which drops the credential variables when
  * CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set (the names below are the ones
@@ -28,11 +29,11 @@ const scrubbed = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_CUSTOM
 const env = { ...process.env }
 if (truthy(env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)) for (const name of scrubbed) delete env[name]
 const printed = execFileSync('/bin/sh', ['-c', 'printenv'], { env, encoding: 'utf8' })
-const token = process.env.CLAUDE_CODE_OAUTH_TOKEN
+const token = process.env.ANTHROPIC_API_KEY
 process.stdout.write(JSON.stringify({
   cliHasToken: typeof token === 'string' && token.length > 0,
   scrub: process.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB ?? null,
-  bashNamesToken: /^CLAUDE_CODE_OAUTH_TOKEN=/m.test(printed),
+  bashNamesToken: /^ANTHROPIC_API_KEY=/m.test(printed),
   bashHasValue: !!token && printed.includes(token),
   bashNames: printed.split('\\n').map((l) => l.split('=')[0]).filter(Boolean),
 }) + '\\n')
@@ -41,17 +42,17 @@ process.stdin.resume()
 const cleanups: (() => void)[] = []
 afterEach(() => cleanups.splice(0).forEach((c) => c()))
 
-it('9 · printenv in the run’s shell has no CLAUDE_CODE_OAUTH_TOKEN', async () => {
+it('9 · printenv in the run’s shell has no ANTHROPIC_API_KEY', async () => {
   const f = delegationTestDirectory()
   cleanups.push(f.cleanup)
   const script = join(f.root, 'instrumented-claude.cjs')
   writeFileSync(script, INSTRUMENTED_CLI)
-  // A subscription token in the (temporary) ~/.claude/settings.json.
+  // An API key in the (temporary) ~/.claude/settings.json.
   mkdirSync(join(f.root, 'home', '.claude'), { recursive: true })
   writeFileSync(
     join(f.root, 'home', '.claude', 'settings.json'),
     JSON.stringify({
-      env: { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-fixture-scrub-token-9999' },
+      env: { ANTHROPIC_API_KEY: 'sk-ant-api03-fixture-scrub-key-9999' },
     }),
   )
   const profile = {
@@ -101,7 +102,6 @@ it('9 · printenv in the run’s shell has no CLAUDE_CODE_OAUTH_TOKEN', async ()
   }
   const session = await new ClaudeExecutorAdapter({
     startup,
-    bundledClaude: () => process.execPath,
   }).open({
     delegationId: 'dlg-scrub',
     profile,
@@ -112,7 +112,7 @@ it('9 · printenv in the run’s shell has no CLAUDE_CODE_OAUTH_TOKEN', async ()
     policy: {
       mode: 'workspace-write',
       workspaceRoot: f.root,
-      runtimeStateRoots: [runtime.runtimeRoot],
+      runtimeStateRoots: runtime.stateRoots,
       privateTempRoot: runtime.tempRoot,
     },
     boundaryReceiptId: 'boundary',
@@ -127,7 +127,7 @@ it('9 · printenv in the run’s shell has no CLAUDE_CODE_OAUTH_TOKEN', async ()
     // …and its shell was not.
     expect(seen.bashNamesToken).toBe(false)
     expect(seen.bashHasValue).toBe(false)
-    expect(seen.bashNames).not.toContain('CLAUDE_CODE_OAUTH_TOKEN')
+    expect(seen.bashNames).not.toContain('ANTHROPIC_API_KEY')
     expect(seen.bashNames).toContain('HOME')
   } finally {
     await session.close()

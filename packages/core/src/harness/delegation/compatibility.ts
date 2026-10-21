@@ -4,17 +4,16 @@ import codex01534 from './protocol/codex-0.153.4/digest.json'
 /**
  * Compatibility is a capability handshake (AGT-01), not an exact version
  * pinned in the user's configuration:
- * - Claude Code: Emperor runs the `claude` binary bundled with the Agent SDK
- *   it ships, so its version moves with Emperor releases. A user may opt into
- *   the installed claude; it then needs at least the bundled minor, and the
- *   SDK `init` message is checked at run time.
+ * - Claude Code: Emperor runs the user's installed, unmodified claude
+ *   (AGT-12: it ships none). It needs `claude auth status` (2.1.41) and
+ *   `claude auth login --console` (2.1.79), so at least 2.1.79; the SDK
+ *   `init` message is checked again at run time.
  * - Codex: the installed CLI must share a major.minor with a protocol Emperor
  *   has verified. Within that minor, a digest of the CLI's generated JSON
  *   schema tells "verified" from "may be incompatible".
  */
 
-/** The `claude` binary shipped by `@anthropic-ai/claude-agent-sdk`. */
-export const CLAUDE_BUNDLED_VERSION = '2.1.281'
+/** The Agent SDK Emperor drives the installed claude with. */
 export const CLAUDE_SDK_VERSION = '0.3.281'
 
 export interface SemanticVersion {
@@ -38,14 +37,13 @@ function compare(a: SemanticVersion, b: SemanticVersion): number {
   return a.major - b.major || a.minor - b.minor || a.patch - b.patch
 }
 
-const bundled = parseVersion(CLAUDE_BUNDLED_VERSION)!
-/** An installed claude needs at least the bundled minor. */
+/** The first claude with `auth status` (2.1.41) and `auth login --console`. */
 export const CLAUDE_MINIMUM_VERSION: SemanticVersion = {
-  major: bundled.major,
-  minor: bundled.minor,
-  patch: 0,
+  major: 2,
+  minor: 1,
+  patch: 79,
 }
-export const CLAUDE_REQUIRED_RANGE = `>= ${bundled.major}.${bundled.minor}`
+export const CLAUDE_REQUIRED_RANGE = `>= ${formatVersion(CLAUDE_MINIMUM_VERSION)}`
 
 export function claudeVersionSupported(version: SemanticVersion): boolean {
   return compare(version, CLAUDE_MINIMUM_VERSION) >= 0

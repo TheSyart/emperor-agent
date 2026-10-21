@@ -190,6 +190,22 @@ describe('protected path table (SEC-06)', () => {
       [join(s.home, '.netrc'), 'credential'],
       [join(s.home, '.codex', 'auth.json'), 'credential'],
       [join(s.home, '.claude', '.credentials.json'), 'credential'],
+      // The login Claude Code keeps in its folder under Emperor Home when
+      // the Keychain refuses it (AGT-12): Emperor's own tools never read it.
+      [
+        join(
+          state,
+          'delegations',
+          'claude-code',
+          'config',
+          '.credentials.json',
+        ),
+        'credential',
+      ],
+      [
+        join(state, 'delegations', 'claude-code', 'config', 'settings.json'),
+        null,
+      ],
       [state, null],
       [join(state, 'sessions', 'log.jsonl'), null],
       [join(state, 'skills', 'settings.json'), null],

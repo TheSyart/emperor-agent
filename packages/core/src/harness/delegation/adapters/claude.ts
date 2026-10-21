@@ -34,11 +34,7 @@ import { readClaudeSessionHistory } from './claude-history'
 import { CLAUDE_HOST_TOOLS, publicReferences } from '../facts'
 import { claudeInitIssue } from '../compatibility'
 import { projectInstructions } from '../dev-environment'
-import {
-  bundledClaudeExecutable,
-  claudeExecutableSource,
-  executorExecutable,
-} from '../executable'
+import { findExecutable } from '../executable'
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -305,8 +301,6 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
       startup?: (
         options: Options,
       ) => Promise<Pick<WarmQuery, 'query' | 'close'>>
-      /** Test hook: where the SDK-bundled claude lives. */
-      bundledClaude?: () => string | undefined
       /** Test hook: the SDK entry the history reader imports. */
       sdkUrl?: () => string
     } = {},
@@ -465,11 +459,11 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
       })()
       return closePromise
     }
-    // The SDK-bundled binary unless the user chose the installed claude.
-    const executable = executorExecutable(
-      input.profile,
-      this.options.bundledClaude ?? bundledClaudeExecutable,
-    )
+    // The user's installed, unmodified claude (AGT-12: Emperor ships none);
+    // the runtime put its folder on PATH.
+    const executable =
+      findExecutable(input.profile.executablePath, input.environment.PATH) ??
+      input.profile.executablePath
     try {
       const options: Options = {
         cwd: input.cwd,
@@ -692,11 +686,10 @@ export class ClaudeExecutorAdapter implements ExecutorAdapter {
                   'PROVIDER_SESSION_CHANGED',
                   'Claude resumed a different session',
                 )
-              // Capability handshake (AGT-01): an installed claude must
+              // Capability handshake (AGT-01): the installed claude must
               // report a supported version and honour the requested mode.
               const incompatible = claudeInitIssue(raw, {
-                requireVersion:
-                  claudeExecutableSource(input.profile) === 'system',
+                requireVersion: true,
               })
               if (incompatible)
                 throw new DelegationError('EXECUTOR_INCOMPATIBLE', incompatible)

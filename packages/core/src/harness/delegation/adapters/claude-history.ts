@@ -4,7 +4,9 @@ import { DelegationError, type NativeSessionInspection } from '../types'
 /**
  * The reader runs in a worker thread. The SDK memoizes its config directory
  * from `process.env`, so it gets a fresh module instance and an environment
- * of its own: the delegation's `CLAUDE_CONFIG_DIR` never reaches the host.
+ * of its own: the delegation's `CLAUDE_CONFIG_DIR` — Claude Code's one
+ * dedicated folder, where every run keeps its sessions (AGT-12) — never
+ * reaches the host.
  * It used to run as `process.execPath` with `ELECTRON_RUN_AS_NODE`, which
  * packaged builds turn off (the RunAsNode fuse, SEC-04).
  */

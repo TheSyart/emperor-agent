@@ -39,11 +39,10 @@ export interface ExecutorProfile {
   backend: ExternalBackend
   enabled: boolean
   /**
-   * Claude Code only: `bundled` (default) runs the binary shipped with
-   * Emperor's Agent SDK; `system` runs `executablePath`. Codex always runs
-   * `executablePath`.
+   * The installed CLI: a bare name (`claude`, `codex`) found on PATH, the
+   * login shell's PATH and the usual install folders, or an absolute path.
+   * Emperor ships no Claude Code of its own (AGT-12).
    */
-  executableSource?: 'bundled' | 'system'
   executablePath: string
   customModels?: string[]
   defaultModel?: string
@@ -150,9 +149,7 @@ export interface ExecutorProbe {
     | 'containment_unavailable'
   executableVersion?: string
   sdkVersion?: string
-  /** Claude Code: which binary was checked. */
-  executableSource?: 'bundled' | 'system'
-  /** The range a refused or old CLI needs, e.g. `>= 2.1` or `0.153.x`. */
+  /** The range a refused or old CLI needs, e.g. `>= 2.1.79` or `0.153.x`. */
   requiredVersion?: string
   /**
    * Codex: `verified` when the CLI's protocol digest is a known one;
@@ -165,34 +162,55 @@ export interface ExecutorProbe {
   checkedAt: number
   authVerified: boolean
   localAuthChecked?: boolean
-  /** Claude Code: the sign-in the check found, or why there is none (AGT-02). */
+  /** Claude Code: what `claude auth status` said, or why it could not (AGT-12). */
   auth?: ExecutorAuthState
   diagnostic?: string
 }
 /**
- * Where Claude Code's credential comes from (AGT-02), in the order the
- * sources are read: a token pasted into Emperor, ~/.claude/settings.json
- * `env`, `.credentials.json`, the environment Emperor started with, the
- * login shell. Never the macOS Keychain.
+ * How Claude Code signs in (AGT-12). `method` and the account are what
+ * `claude auth status` reports in the run's own environment; `source` is
+ * the credential Emperor hands claude besides its own sign-in, which then
+ * outranks it: an API key saved in Emperor, or an API key / gateway token
+ * from ~/.claude/settings.json `env`, the environment Emperor started
+ * with or the login shell. Never a Claude.ai token, never the Keychain.
  */
 export interface ExecutorAuthState {
   source:
     | 'emperor'
     | 'settings'
-    | 'credentials-file'
     | 'environment'
     | 'login-shell'
     | 'model-route'
     | null
-  kind?: 'oauth-token' | 'api-key' | 'auth-token'
-  /** Emperor's own token: its last four characters, for 已设置 · 末 4 位. */
+  kind?: 'api-key' | 'auth-token'
+  /** Emperor's own API key: its last four characters, for 末 4 位. */
   last4?: string
-  /** Set when there is no usable credential. */
-  problem?: 'missing' | 'expired' | 'unreadable'
-  /** `.credentials.json`'s expiry (epoch ms). */
-  expiresAt?: number
-  /** It expires within ten minutes: still used, with a warning. */
-  expiresSoon?: boolean
+  /** A non-Anthropic endpoint in effect (the ANTHROPIC_BASE_URL host). */
+  endpoint?: string
+  /**
+   * `claude auth status` authMethod: `claude.ai` (its own sign-in),
+   * `api_key`, `oauth_token` (a bearer token, e.g. a gateway's
+   * ANTHROPIC_AUTH_TOKEN), `api_key_helper`, `third_party` (Bedrock,
+   * Vertex, Foundry), `none`, or `other` for a value this build does not know.
+   */
+  method?:
+    | 'claude.ai'
+    | 'oauth_token'
+    | 'api_key'
+    | 'api_key_helper'
+    | 'third_party'
+    | 'none'
+    | 'other'
+  /** The account claude says it signed in with. */
+  email?: string
+  organization?: string
+  subscription?: string
+  /**
+   * `missing`: no sign-in; `unreadable`: Emperor's API key no longer opens
+   * (the local key changed); `status-failed`: `claude auth status` did not
+   * answer.
+   */
+  problem?: 'missing' | 'unreadable' | 'status-failed'
 }
 export type NativeCapabilityStatus =
   | 'unverified'
@@ -534,15 +552,27 @@ export class DelegationError extends Error {
         'inspect_retained_results',
       ],
       AUTH_REQUIRED: [
-        '子智能体没有可用的登录，请在「设置 › 子智能体」设置令牌。',
+        'Claude Code 还没有登录，请在「设置 › 子智能体 › Claude Code」点「登录 Claude Code」。',
         'configure_executor',
       ],
       AUTH_EXPIRED: [
-        '子智能体的登录令牌已过期，请在「设置 › 子智能体」重新设置令牌。',
+        'Claude Code 的登录已失效或过期，请在「设置 › 子智能体 › Claude Code」重新登录。',
+        'configure_executor',
+      ],
+      AUTH_STATUS_FAILED: [
+        '读不到 Claude Code 的登录状态，请在「设置 › 子智能体」重新检测。',
+        'configure_executor',
+      ],
+      AUTH_SIGN_OUT_FAILED: [
+        'Claude Code 没有退出登录，请稍后重试。',
+        'configure_executor',
+      ],
+      TERMINAL_UNAVAILABLE: [
+        '无法打开 macOS 的「终端」，请确认它没有被停用后再试。',
         'configure_executor',
       ],
       EXECUTOR_MISSING: [
-        '找不到 Claude Code / Codex 的命令行程序，请检查安装与可执行文件路径。',
+        '找不到 Claude Code / Codex 的命令行程序，请先安装，或在「设置 › 子智能体」更正路径。',
         'configure_executor',
       ],
       EXECUTOR_DISABLED: [
@@ -550,7 +580,7 @@ export class DelegationError extends Error {
         'configure_executor',
       ],
       EXECUTOR_INCOMPATIBLE: [
-        'CLI 版本不在支持范围内，请按设置 › 子智能体中显示的版本安装，或改用 Emperor 内置的 Claude Code。',
+        'CLI 版本不在支持范围内，请按「设置 › 子智能体」中显示的版本升级后重新检测。',
         'configure_executor',
       ],
       CONTAINMENT_UNAVAILABLE: [
@@ -566,13 +596,17 @@ export class DelegationError extends Error {
   }
 }
 
-/** No usable credential; `auth` says what the check found (AGT-02). */
+/**
+ * Claude Code is not signed in (`AUTH_REQUIRED`) or its status could not be
+ * read (`AUTH_STATUS_FAILED`); `auth` says what the check found (AGT-12).
+ */
 export class ExecutorAuthError extends DelegationError {
   constructor(
     readonly auth: ExecutorAuthState,
     detail: string,
+    code: 'AUTH_REQUIRED' | 'AUTH_STATUS_FAILED' = 'AUTH_REQUIRED',
   ) {
-    super(auth.problem === 'expired' ? 'AUTH_EXPIRED' : 'AUTH_REQUIRED', detail)
+    super(code, detail)
   }
 }
 export interface ExecutorModelCandidate {

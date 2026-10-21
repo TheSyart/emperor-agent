@@ -5,7 +5,8 @@
 import { assertRequestInvariant } from '../harness/agent/invariant'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fakeClaude } from '../harness/delegation/testing'
 import { LlmClient } from '../llm/client'
 import type { RouteSpec } from '../llm/route'
 import type { GenerateOptions, StreamChunk } from '../llm/types'
@@ -105,12 +106,20 @@ export async function makeApi(
       events.push(event)
     },
     // External executors look for sign-ins in a temporary home, never the
-    // user's ~/.claude or ~/.codex, and never run the login shell.
-    executorHome: {
-      home: join(root, 'executor-home'),
-      environment: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
-      loginShell: { read: async () => ({}) },
-    },
+    // user's ~/.claude or ~/.codex, and never run the login shell. A fake
+    // claude comes first on PATH: tests never run the real one (AGT-12),
+    // and 登录 Claude Code never opens Terminal.
+    executorHome:
+      options.extra?.executorHome === undefined
+        ? {
+            home: join(root, 'executor-home'),
+            environment: {
+              PATH: `${dirname(fakeClaude(join(root, 'fake-claude-bin')))}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+            },
+            loginShell: { read: async () => ({}) },
+            openTerminal: async () => undefined,
+          }
+        : options.extra.executorHome,
     ...options.extra,
   })
   ref.api = api
