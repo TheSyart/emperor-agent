@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、维护者<br>
-> 最后核验：2026-09-22<br>
-> 事实源：`packages/core/src/harness/goal/`、`packages/core/src/api/services/goal-service.ts`、`packages/core/src/harness/projection/projector.ts`
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 事实源：`packages/core/src/harness/goal/`、`packages/core/src/api/services/goal-service.ts`、`packages/core/src/harness/projection/projector.ts`、`packages/core/src/harness/host/host.ts`（`installGoal`、`stop`）
 
 Goal 让同一个 session 在用户不再输入时继续推进一个目标。它是同 session 的状态：每个 session 最多一个当前 Goal，全部事实记录在该 session 的 `log.jsonl` 中，没有独立的 Goal 存储目录。
 
@@ -40,6 +40,10 @@ Activation 从不持久化：进程重启、恢复或 fork 后首次观察到的
 
 用户的输入始终优先：预留尚未被接纳时有新的用户消息排队，该预留作废，在下一个空闲检查点重新预留。
 
+还有等着它的工作时不开始新一轮：根会话的 Claude Code / Codex 委派没结束（`hasOutstandingDelegations`），或任务树里还有运行中、排队中的子智能体与后台 job（`taskTreeBusy`）；它们结束时驱动器重新检查。续跑轮属于后台步数预算，每轮最多 120 步（`taskBudget.maxBackgroundSteps`）。
+
+用户按停止（`HarnessHost.stop()`）时，`active` 的 Goal 持久化为 `paused`（界面「已暂停」，`/goal resume` 继续），其他状态只 disarm；权限收窄或任务费用用尽只 disarm。Composer 在目标进行中切到计划模式会先取消这个 Goal。
+
 ## 工具与授权
 
 模型通过三个工具读写 Goal：`get_goal`、`create_goal`、`update_goal`（动作 `edit`、`pause`、`resume`、`complete`、`blocked`）。所有工具只能在调用方 Agent 的活动 turn 内执行，变更使用 `goal_id` + `revision` 做 compare-and-set。
@@ -47,7 +51,7 @@ Activation 从不持久化：进程重启、恢复或 fork 后首次观察到的
 - `create_goal`、`edit`、`pause`、`resume` 要求本 turn 中顶层 Agent 接收过用户直接输入。
 - `complete` 与 `blocked` 要求用户直接输入，或本 turn 正是当前 Goal 的最新续跑轮。
 - 在续跑轮中自报 `blocked`，至少要已经进行过 3 轮。
-- 子代理不是顶层 Agent，不具备这些授权。
+- 子智能体不是顶层 Agent，不具备这些授权。
 
 在续跑轮中完成或阻塞时，内核会追加一条收尾上下文，让模型给出简洁的总结。
 
@@ -70,7 +74,7 @@ CoreApi `goals.*`（`api/services/goal-service.ts`）是对同一服务的门面
 
 ## 投影
 
-`SessionProjector` 用 `harness/goal/fold.ts` 折叠 Goal 事件，产生 `goal_updated` runtime event；`HarnessHost.goalView()` 返回 GoalView，供 bootstrap、`workspace.snapshot` 和 Composer 状态条使用。Goal 与 log 一起回放，没有单独的恢复协议。
+`SessionProjector` 用 `harness/goal/fold.ts` 折叠 Goal 事件，产生 `goal_updated` runtime event；`HarnessHost.goalView()` 返回 GoalView，供 bootstrap、`workspace.snapshot` 和输入框上方的目标条使用。Goal 与 log 一起回放，没有单独的恢复协议。
 
 ## 边界
 
@@ -80,4 +84,4 @@ CoreApi `goals.*`（`api/services/goal-service.ts`）是对同一服务的门面
 
 ## 必需外部任务
 
-自动 Goal 续轮在 outstanding 外部工作期间等待，用户消息不被此门禁阻塞。子任务按稳定 Goal ID 归属和计费，普通 revision 变化不丢历史。complete 前重查所有必需子任务的当前宿主验收；关闭失败子会话本身不足以绕过，需用户另填明确失败处置理由。根 stop 立即解除自动续跑，重启不重发队列。[调度边界](external-agent-delegation.md#goalscheduler-与默认限额)。
+自动 Goal 续轮在 outstanding 外部工作期间等待，用户消息不被此门禁阻塞。子任务按稳定 Goal ID 归属和计费，普通 revision 变化不丢历史。complete 前重查所有必需子任务的当前宿主验证；关闭失败子会话本身不足以绕过，需用户另填明确失败处置理由。根 stop 把进行中的 Goal 暂停（见上文），重启不重发队列。[调度边界](external-agent-delegation.md#goalscheduler-与默认限额)。

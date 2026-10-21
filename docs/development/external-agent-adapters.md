@@ -1,8 +1,8 @@
-# 开发与验证外部执行器
+# 开发与验证外部子智能体
 
 > 文档状态：Active<br>
 > 面向读者：贡献者、发布维护者<br>
-> 最后核验：2026-10-19<br>
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
 > 事实源：`packages/core/src/harness/delegation/adapters/`、`packages/core/src/harness/delegation/process.ts`、`packages/core/src/harness/delegation/journal.ts`、`packages/core/src/harness/delegation/codex-auth.ts`、`packages/core/src/harness/delegation/login-shell.ts`、`packages/core/src/harness/delegation/compatibility.ts`、`packages/core/src/harness/delegation/executable.ts`、`packages/core/src/harness/delegation/protocol/`、`scripts/codex-protocol-digest.mjs`、`scripts/smoke-external-agents.mjs`、`desktop/tests/external-agents.e2e.mjs`、`desktop/electron-builder.yml`、`desktop/scripts/after-pack.cjs`
 
 ## 版本兼容：能力握手
@@ -21,11 +21,11 @@ Claude 使用 SDK startup 与自定义 managed spawn，业务问题经过权限�
 - 只经 `ManagedAgentProcess` 启动：进程是自己进程组的组长（`detached`），句柄只有 `terminate()`（`SIGTERM` 给组，5 秒后 `SIGKILL`）和 `interrupt()`（`SIGINT`，5 秒后转 `terminate()`）。`closed` 收据的 `quiescent` 表示进程组已空；根进程退出后组里剩下的成员也按同样时间线停止。没有 `captureDescendants`、`onObserved` 或任何轮询；适配器不要再自己扫描进程。
 - 测试可用 `stopGraceMs` 缩短 5 秒间隔、用 `observeProcesses` 注入进程表（只在组还回应信号时读一次）。`identityMatches` 用来模拟无法核实身份、拒绝发信号的情况。
 - 读进程身份统一用 `processBirth(pid)` / `processTable()`（`LC_ALL=C`）；空出生时间永不匹配，进程表缺少 Emperor 自身即返回 null。ownership 记录带 `bootTime`（`currentBootTime()`），`terminateRecordedProcess(ownership, { bootTime, graceMs })` 遇到不同开机标记直接返回已停止、不发信号，PID 出生时间不符返回 `OWNER_MISMATCH`。
-- 诊断模式（执行器配置 `diagnosticsMode`）打开时，`ManagedAgentProcess` 的 `diagnostics()` 返回 true，才会写 `/private/tmp/emperor-boundary-<tag>-{denied,allowed}` 并在运行结束时用扫描器处理逃逸进程；扫描器缺失时静默跳过。`cleanBoundaryMarkers()` 在 `DelegationService.reconcile` 中删除超过一天的标记，服务测试用 `boundaryMarkerDir` 指向临时目录，避免碰真实 `/private/tmp`。
+- 诊断模式（子智能体配置 `diagnosticsMode`）打开时，`ManagedAgentProcess` 的 `diagnostics()` 返回 true，才会写 `/private/tmp/emperor-boundary-<tag>-{denied,allowed}` 并在运行结束时用扫描器处理逃逸进程；扫描器缺失时静默跳过。`cleanBoundaryMarkers()` 在 `DelegationService.reconcile` 中删除超过一天的标记，服务测试用 `boundaryMarkerDir` 指向临时目录，避免碰真实 `/private/tmp`。
 - 委派日志在 `DelegationJournal` 内存中折叠，`append` 返回 `changed`；不改变状态的事件不写入，`DelegationService.append` 也不会为它调用 `onState`。新增事件类型时注意 fold 的结果要能区分「有变化」。`run-changed` 不会覆盖已结束轮次已有的 `failureCode`，也不会为没有变化的补丁增加 revision。
 - 结束一个没有结果的轮次走 `DelegationService.abandon(id, by)`（Core 操作 `delegations.abandon`，模型侧 `collect_agent({ abandon: true })` 经 `DelegationToolOptions.approve` 审批）。判断是否需要这个出口统一用 `delegationNeedsExit(record, run)`（`runtime/agent-view.ts`，renderer 也可用）。
 
-源码运行 macOS helper 先执行 `node scripts/build-delegation-scanner.mjs`；Core pretest 与 desktop native build 会执行同一脚本。安装包携带已编译 helper，无需用户编译器；它只在诊断模式下使用。Preview 打包由 after-pack 做 ad-hoc 封签（带 hardened runtime，见[发布手册](../release/preview-release-runbook.md#不签名不等于不封签)），`app.asar.unpacked` 里的 Claude binary 保留 Anthropic 的原签名，不被重签；可选的正式发布签名流程独立保留。SDK 作为 main external 依赖，打包包含 SDK 和**当前构建架构**的 Claude binary：`electron-builder.yml` 的 `files` 与 `asarUnpack` 用 `${arch}` 只选 `claude-agent-sdk-darwin-${arch}`，binary 在 asar 外；after-pack 要求 SDK 与本架构 binary 存在且可执行，发现其他架构的 binary 即构建失败。跨架构打包（例如在 arm64 机器上打 x64）需要先安装对应架构的 SDK 平台包，否则 after-pack 报缺失。Codex 不由应用安装，需要本机 CLI 在支持范围内。
+源码运行 macOS helper 先执行 `node scripts/build-delegation-scanner.mjs`；Core pretest 与 desktop native build 会执行同一脚本。安装包携带已编译 helper，无需用户编译器；它只在诊断模式下使用。Preview 与 Stable 打包都由 after-pack 做 ad-hoc 封签（带 hardened runtime，见[发布手册](../release/preview-release-runbook.md#不签名不等于不封签)），`app.asar.unpacked` 里的 Claude binary 保留 Anthropic 的原签名，不被重签；没有 Developer ID 签名流程。SDK 作为 main external 依赖，打包包含 SDK 和**当前构建架构**的 Claude binary：`electron-builder.yml` 的 `files` 与 `asarUnpack` 用 `${arch}` 只选 `claude-agent-sdk-darwin-${arch}`，binary 在 asar 外；after-pack 要求 SDK 与本架构 binary 存在且可执行，发现其他架构的 binary 即构建失败。跨架构打包（例如在 arm64 机器上打 x64）需要先安装对应架构的 SDK 平台包，否则 after-pack 报缺失。Codex 不由应用安装，需要本机 CLI 在支持范围内。
 
 ## Codex 登录、长等待与续聊
 
@@ -41,10 +41,10 @@ Claude 使用 SDK startup 与自定义 managed spawn，业务问题经过权限�
 
 - 新增或修改本地子智能体工具（`subagent/tools.ts` 的 `createSubagentTools`）时，`delegation/tool-descriptions.test.ts` 会对照 `delegation/__golden__/local-subagent-tools.json`；有意修改后用 `UPDATE_GOLDEN=1 npx vitest run src/harness/delegation/tool-descriptions.test.ts` 刷新。组合工具（`delegation/tools.ts`）复用导出的本地 schema（`subagentInput`、`SEND_MESSAGE_INPUT` 等），外部字段一律写明 "External … only"。
 - `DelegationServiceOptions.consent` 返回 false 时 `start` 抛 `EXECUTOR_CONSENT_DENIED`，不建记录；调用方（工具、工作流）应改走本地子智能体。宿主实现见 `ExecutorConsentBridge.decide`，「以后都允许」存于 `delegations/consent.json`（`ExecutorConsentStore`），`CoreExecutorService.configure` 在 profile 由开变关时清除，`executors.list` 的每行带 `consent: 'always' | null`。
-- 真实验收脚本 `external-agent-scenario.mjs` 在全新状态目录里预先写入两个默认 profile 的 `consent.json`（该运行由 `--real` 明确授权）；`smoke-external-controls.mjs` 以 `source: 'human'` 直接启动，不需要同意卡。
-- 父模型的执行器上下文必须在没有启用任何外部执行器时为空，启用时保持在 600 token 以内（`service-consent.test.ts` 按 ASCII 4 字符/token、其余 1.5 token/字符估算）。
+- 真实验证脚本 `external-agent-scenario.mjs` 在全新状态目录里预先写入两个默认 profile 的 `consent.json`（该运行由 `--real` 明确授权）；`smoke-external-controls.mjs` 以 `source: 'human'` 直接启动，不需要同意卡。
+- 父模型的子智能体上下文必须在没有启用任何外部子智能体时为空，启用时保持在 600 token 以内（`service-consent.test.ts` 按 ASCII 4 字符/token、其余 1.5 token/字符估算）。
 
-## 真实验收
+## 真实验证
 
 下面两个入口会实际调用配置的父模型及启用的外部 CLI，消耗真实额度。必须显式 `--real`，state/workspace 必须为空；不得指向开发工作区或用户的真实 Emperor Home。认证从既有配置引用读取，原配置不修改；只把活动父模型复制到0600私有状态。失败保留目录，下一次使用新的目录。
 
@@ -66,14 +66,14 @@ scenario receipt 分别记录真实父调用、两个后端的身份映射、固
 
 `node scripts/smoke-external-controls.mjs --real` 在全新临时仓库额外验证真实 Claude 队列、Codex 当前轮 steer、两家中断后延迟写不存在，以及越界与 Git 指针写入拒绝。
 
-`make check`、`npm --prefix desktop run package:verify` 与真实外部协作分别是独立门禁。构建、mock、版本 probe 或截图存在都不能代替真实成功执行。macOS 证据只覆盖该机系统和架构；Linux、Windows 及其他架构必须保留未验证状态，直到目标机实际运行对应检查。
+`make check`、`npm --prefix desktop run package:verify` 与真实外部协作分别是独立门禁。构建、mock、版本 probe 或截图存在都不能代替真实成功执行。产品只支持 macOS；一台机器上的证据只覆盖它的系统版本和架构，另一种架构（arm64 / x64）保留未验证状态，直到在对应的机器上实际运行检查。
 
 ## 扩展接口
 
 适配器实现 ExecutorAdapter/open/inspect，输出带 delegationId/runId/generation 的规范化事件。新后端必须明确声明 persistent session、queue、steer、问题、usage 和 OS 边界能力；不得假定与已有后端相同。只准经 ManagedAgentProcess 启动，以 shell=false、私有环境、受管 ownership 与严格输出上限运行。原生会话恢复、终态、错误和当前 turn fencing 都必须有 contract 与真实证据。
 
-公共入口集中在 `api/operations.ts` 的严格 schema；renderer 只调用已有通用 IPC。不要添加任意 argv/env/owner 的启动接口，也不要让子代理控制宿主验收或 Git 应用。验证命令是单独的人工授权 criteria，不是原生启动参数。
+公共入口集中在 `api/operations.ts` 的严格 schema；renderer 只调用已有通用 IPC。不要添加任意 argv/env/owner 的启动接口，也不要让子智能体控制宿主验证或 Git 应用。验证命令是单独的人工授权 criteria，不是原生启动参数。
 
-桌面主进程的秘密统一由 `desktop/src/main/local-secret-store.ts`（`LocalSecretStore`）封装，密钥在 `<stateRoot>/computer-use/secrets/local.key`，不使用钥匙串，也不导入 Electron safeStorage。packaged smoke 通过 `packaged-secrets-smoke.ts` 真实验证本地密钥、凭据库重载与主密码往返；外部执行器不另建密钥存储。
+桌面主进程的秘密统一由 `desktop/src/main/local-secret-store.ts`（`LocalSecretStore`）封装，密钥在 `<stateRoot>/computer-use/secrets/local.key`，不使用钥匙串，也不导入 Electron safeStorage。packaged smoke 通过 `packaged-secrets-smoke.ts` 真实验证本地密钥、凭据库重载与主密码往返；外部子智能体不另建密钥存储。
 
 模型列表由 `ExecutorModelCatalogService` 经实际隔离运行时发现，Codex 的配置导入和 Claude 的模型/别名策略在 `local-model-config.ts`、`runtime.ts` 维护。新增提供方兼容须同时验证发现与执行一致，覆盖刷新失败保留缓存、认证/提供方变化隔离、下拉草稿及默认模型的修订冲突。候选 API 只执行初始化与控制查询，不发送推理提示；不得由返回目录推断原生工具可用。

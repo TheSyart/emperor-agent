@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core、Electron 与 renderer 开发者<br>
-> 最后核验：2026-10-20<br>
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
 > 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/api/operations.ts`、`packages/core/src/harness/projection/`、`packages/core/src/llm/`、`packages/core/src/harness/tools/builtin/`、`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/pages/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/settings/`、`packages/core/src/harness/hooks/contained.ts`、`packages/core/src/harness/hooks/plugin-health.ts`
 
 Emperor Agent 的扩展通常横跨内核、CoreApi、Electron contract、renderer 投影和文档。先确定权威状态属于哪里：会话内的一切属于 session log；长期数据属于对应的保留服务。然后从内核或服务向外接入，不要把策略散落到组件或 prompt 文案。
@@ -170,7 +170,7 @@ Scheduler、Watchlist 或 Goal 触发的 turn 必须：
 - 重启后不自动重放可能已有副作用的工作；
 - 提供暂停、取消或诊断中的至少一种可控失败路径。
 
-Scheduler 的调度、misfire 与准入逻辑在 `packages/core/src/scheduler/service.ts`，执行器在 `harness/host/scheduler.ts`。`CoreApi.create` 在插件同步之后才启动 Scheduler（`HarnessHost.startScheduler()`；单独创建的 `HarnessHost` 默认在 `create` 末尾启动），启动失败只记录在 `status().startError` 与诊断里，不会让 Core 启动失败。定时器晚于触发点超过 `SCHEDULER_WAKE_GRACE_MS`（60 秒）时按 misfire 策略处理，与冷启动一致；每次 tick 无论成败都会重新设好下一个定时器。
+Scheduler 的调度、misfire 与准入逻辑在 `packages/core/src/scheduler/service.ts`，运行任务的部分在 `harness/host/scheduler.ts`。`CoreApi.create` 在插件同步之后才启动 Scheduler（`HarnessHost.startScheduler()`；单独创建的 `HarnessHost` 默认在 `create` 末尾启动），启动失败只记录在 `status().startError` 与诊断里，不会让 Core 启动失败。定时器晚于触发点超过 `SCHEDULER_WAKE_GRACE_MS`（60 秒）时按 misfire 策略处理，与冷启动一致；每次 tick 无论成败都会重新设好下一个定时器。
 
 ## 插件 Hook 的运行环境
 
@@ -206,12 +206,12 @@ Hook 失败时，`PluginHookHealth`（`harness/hooks/plugin-health.ts`）按插�
 
 改动插件 Hook 的运行方式时同步：`harness/hooks/contained.ts`、`harness/hooks/plugin-trust.test.ts`、本节、用户手册「[Plugins](../user/tools-skills-mcp.md#plugins)」与统一进程隔离的表。
 
-## 验收矩阵
+## 验证矩阵
 
 | 检查面        | 最低要求                                              |
 | ------------- | ----------------------------------------------------- |
 | 类型与 schema | 静态类型和运行时输入校验一致                          |
-| 权限          | 三种预设、一次性提权、Plan 模式与子代理均有覆盖       |
+| 权限          | 三种预设、一次性提权、Plan 模式与子智能体均有覆盖     |
 | 持久化        | 重启、崩溃修复、重复请求、损坏与迁移行为明确          |
 | IPC           | Core、main、preload、renderer contract 同步           |
 | Runtime       | live / replay / bootstrap 一致且按 session 隔离       |

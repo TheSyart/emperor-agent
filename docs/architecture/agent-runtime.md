@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、维护者<br>
-> 最后核验：2026-10-20<br>
-> 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/agent/`、`packages/core/src/session-log/`、`packages/core/src/llm/`、`packages/core/src/harness/compaction/`、`packages/core/src/mcp/`、`packages/core/src/skills/`
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/host/scope.ts`、`packages/core/src/harness/host/task-tree.ts`、`packages/core/src/harness/agent/inbox.ts`、`packages/core/src/harness/agent/`、`packages/core/src/session-log/`、`packages/core/src/llm/`、`packages/core/src/harness/compaction/`、`packages/core/src/mcp/`、`packages/core/src/skills/`
 
 Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript 实现，采用 deepseek-harness standard 模式的语义，但不含插件框架：各子系统在 `HarnessHost.compose()` 中把自己的处理函数压入有序的 middleware 数组。`HarnessHost` 是唯一组合根，每个 session 持有一个 `Agent`。
 
@@ -24,12 +24,12 @@ Emperor 的 Agent 内核是 `packages/core/src/harness/` 下的纯 TypeScript �
 | 压缩                              | `harness/compaction/`          |
 | 后台任务（jobs）                  | `harness/jobs/`                |
 | Goal                              | `harness/goal/`                |
-| 子代理                            | `harness/subagent/`            |
+| 子智能体                          | `harness/subagent/`            |
 | 工作流与 Ralph                    | `harness/workflow/`            |
 | Hooks                             | `harness/hooks/`               |
 | 待处理交互（审批/问题/Plan 审阅） | `harness/host/interactions.ts` |
 | MCP 工具桥                        | `harness/host/mcp-tools.ts`    |
-| Scheduler 执行器                  | `harness/host/scheduler.ts`    |
+| Scheduler 子智能体                | `harness/host/scheduler.ts`    |
 
 系统提示词由 `templates/agent/persona.md` 与各子系统登记的 prompt section 组成；persona 之后固定有一段文件链接说明（`links`），让模型把希望用户点开的文件写成 Markdown 链接（可读名称加路径），对话里显示为带类型图标的链接。提示词本身保持稳定，以维持 provider 前缀缓存；persona 不写当前模型和工作目录，这两项与其他会变化的运行时信息（沙箱与审批策略、Plan 模式、Goal、委派说明）一起以 `form: 'snapshot'` 的上下文消息进入 log，只在内容变化时追加，所以切换模型不会改写提示词前缀。
 
@@ -50,7 +50,7 @@ turn/end
 - **Followup / steer**：普通提交是 followup（排队到 `next-turn`）；运行中的插话是 steer（进入 `next-step`）。`chat.manageQueuedPrompt` 的 `interject` 把排队项提升到 `next-step`，`cancel` 丢弃尚未开始的项，`send` 发送一条待发送的项（见下文「消息生命周期」）。
 - **步数与预算**：每个 step 开始前（认领 inbox 之前）`budget` middleware 可以结束本 turn：达到单轮步数上限，或本任务的费用已达上限，`turn/end` 原因为 `budget`，之前先写一条 `task-budget` 上下文消息告诉模型为什么停下（见下文「任务树与预算」）。每次模型请求返回后（失败后被重试的请求也算）`requestEnd` middleware 收到这次的 usage。turn-stopping middleware（例如 Hooks 的 Stop）可以追加一步。
 - **回合改动记录**：根会话的 turn 改过文件时，宿主在 `turn/end` 之后追加一条 `turn/files`；撤销这一轮时追加 `turn/files-reverted`。两者都不进入模型请求，做法见 [IPC 与运行时事件](ipc-and-runtime-events.md#项目工作台-ipc)。
-- **取消**：`chat.stopRuntime` 或 `/stop` 取消当前 turn，并清理该 session 的待处理交互和子代理；inbox 中等待的 harness 上下文（后台任务通知等）被丢弃，用户排队的消息保留为待发送。提交方的 AbortSignal（ACP `session/cancel`、定时任务取消）只作用于它自己的消息，见下文。`turn/end` 只记录取消原因本身的字段（`kind`，Hook 取消另带 `reason`），传输层事后附加在 abort reason 上的内容（例如 Node fetch 写入的 `stack`）不会进入 log。
+- **取消**：`chat.stopRuntime` 或 `/stop`（`HarnessHost.stop()`）取消当前 turn，并清理该 session 的待处理交互和子智能体；进行中的 Goal 持久化为「已暂停」（其他状态的 Goal 只解除自动续跑），同时调用 `DelegationService.stopRoot` 停止这个根会话的 Claude Code / Codex 轮次，并取消待回答的委派交互与同意卡；inbox 中等待的 harness 上下文（后台任务通知等）被丢弃，用户排队的消息保留为待发送。提交方的 AbortSignal（ACP `session/cancel`、定时任务取消）只作用于它自己的消息，见下文。`turn/end` 只记录取消原因本身的字段（`kind`，Hook 取消另带 `reason`），传输层事后附加在 abort reason 上的内容（例如 Node fetch 写入的 `stack`）不会进入 log。
 - **`turn/end` 原因**：`completed`、`aborted`、`blocked`、`error`、`max-tokens`、`interrupted`（崩溃修复补写）、`plan-dismissed`（用户关闭 Plan 审阅）、`budget`（`limit: 'steps'` 带 `maxSteps`，或 `limit: 'cost'` 带 `capUsdNanos`、`spentUsdNanos`，无法计价时另带 `unpricedRoutes`）。
 
 ### 消息生命周期
@@ -59,7 +59,7 @@ turn/end
 
 - **两阶段认领**：step 开始时 `inbox.claim()` 只预留本 step 要取的消息（全部可取的 `next-step`，新 turn 再加 `next-turn` 中第一条可取的），消息仍留在队列里，状态为 `sending`。所有 pre-step middleware 通过后才 `commit()`：被预留的消息在 `step/start` 之前以一条 `agent/inbox/spliced` 移出 inbox，紧接着写 `user/message`（同一个同步块，落在同一批写入里）。pre-step 被停止（例如压缩期间点停止）、被拒绝（UserPromptSubmit Hook 拒绝）或抛错时 `release()`：消息原样留在队首，顺序不变，log 中不会出现它的 `user/message`。被某个 middleware 从本 step 剔除的已认领消息（例如过期的 Goal 轮次）显式丢弃。
 - **按消息结果**：每条消息有自己的结果（`Agent.outcome(id)`）。被消费的消息在消费它的 turn 的 `turn/end` 处得到结果，同一个 step 合并进入的多条消息（多条插话、开启 turn 的消息加上插话）得到同一个 turn；插话在 step 中途到达时进入下一个 step，结果仍是这个 turn。`HarnessHost.submit()` 据此返回 `TurnResult`（`harness/host/scope.ts`）：`completed`（带最终回复）、`error`（带错误码）、`aborted`（`by: user | timeout | system`）、`blocked`（`cost-cap`：任务费用上限；`step-limit`：单轮步数上限；`prompt-rejected`；后台 turn 另有 `interaction-rejected`、`plan-mode`、`interaction-timeout`）、`not-consumed`（带原因）；`delivery` 为 `completed` 只表示有 turn 消费了这条消息，没有被消费的消息不会报告为 `completed`。submit 在那个 turn 完全结束（驱动空闲或进入下一个排队的 turn）后才返回，但不再等后面排队的 turn。
-- **待发送（held）**：turn 以 `error` 或 `blocked` 结束时，排在它后面的用户消息不会自动运行，结果为 `{ kind: 'not-consumed', reason: 'previous-turn-failed' }`，消息留在队列里，界面显示「待发送 · 上一轮失败」，用户点「发送」后像新消息一样运行，或点「丢弃」。停止时排队的用户消息（以及正在准备 step 时被停止的那条）同样保留为待发送，原因 `previous-turn-stopped`，被预算停下的 turn 后面的用户消息也是这样；重新打开会话时 inbox 中残留的用户消息都恢复为待发送，原因 `interrupted`。待发送的消息不会被后续认领取走，新发送的消息照常运行；它们也不算会话忙碌（命令照常可用），但 `/clear` 仍要求先处理。harness 上下文消息（后台任务、子代理通知等）不会被保留为待发送。
+- **待发送（held）**：turn 以 `error` 或 `blocked` 结束时，排在它后面的用户消息不会自动运行，结果为 `{ kind: 'not-consumed', reason: 'previous-turn-failed' }`，消息留在队列里，界面显示「待发送 · 上一轮失败」，用户点「发送」后像新消息一样运行，或点「丢弃」。停止时排队的用户消息（以及正在准备 step 时被停止的那条）同样保留为待发送，原因 `previous-turn-stopped`（「待发送 · 上一轮已停止」），被预算停下的 turn 后面的用户消息也是这样；重新打开会话时 inbox 中残留的用户消息都恢复为待发送，原因 `interrupted`（「待发送 · 应用重启前未发出」）。待发送的消息不会被后续认领取走，新发送的消息照常运行；它们也不算会话忙碌（命令照常可用），但用 `/new` 创建新上下文（会话转换）前仍要求先处理它们（`assertClearBoundary`）。harness 上下文消息（后台任务、子智能体通知等）不会被保留为待发送。
 - **按消息取消**：提交方的 AbortSignal 调用 `Agent.cancelMessage(id)`：消息还在排队（或待发送）时把它丢弃，结果为 `aborted`（`turnId` 为空）；已被某个 step 预留或已被当前 turn 消费时只取消那个 turn，排在后面的消息随后照常运行。ACP 与 onboarding 的隐藏提示以 `unconsumed: 'withdraw'` 提交：没有被消费时直接丢弃，不会留在队列里等一个已经离开的提交方；ACP 此时返回 `stopReason: "refusal"` 与 `_meta.emperor.notConsumed`。
 - **显式丢弃**：消息不经消费离开 inbox 时，splice 带 `outcome: 'canceled'`，随后写一条 `agent/inbox/discarded { messageIds, reason }`，`reason` 为 `user`（用户在队列里丢弃）、`cancelled`（提交方取消）、`stopped`（停止时丢弃 harness 上下文）或 `dropped`（pre-step 剔除）。不变量：每条进入过 inbox 的用户消息，要么在某条 `user/message` 里，要么仍在 inbox，要么出现在 `agent/inbox/discarded` 中。
 - **队列状态**：`queue_item_state`（host-only，见 [IPC 与 Runtime Events](ipc-and-runtime-events.md#两条管线的分工)）通知每条用户消息的 `queued`、`sending`、`failed-previous`、`discarded`；`chat.listQueuedPrompts` 列出 `queued` 与 `failed-previous` 的项（带 `reason`），正在 `sending` 的项不列出。
@@ -69,21 +69,21 @@ turn/end
 ### 选中会话只决定显示
 
 - 界面正在看哪个会话，只决定界面显示什么。CoreApi 自己记着它（`focusedSessionId`）：只有 `activateSession()`（用户切换会话、`bootstrap({ sessionId })`、`/new` 等）写它，只有 `bootstrap()` 读它（界面的起始状态，结果的 `sessionId` 即这一项）。`HarnessHost` 没有焦点。`core-api-facade-architecture.test.ts` 断言除这两处之外没有代码读它，Core 源码里也没有 `activeSessionId`、`activeWorkspaceRoot` 一类的读取。
-- 其余依赖「哪个会话」的东西都显式拿到会话。`SessionScope { sessionId, projectRoot, workspaceRoot, kind }`（`harness/host/scope.ts`）由 `HarnessHost.scopeFor(sessionId)` 从会话索引算出：Build 会话的 `projectRoot` 是项目根，Chat 会话为 null；`workspaceRoot` 是文件与 Shell 工具的工作目录（项目、会话进入的托管 worktree，或 Chat 工作区）。子代理用根会话的 scope；ACP 会话是以其 cwd 为项目的 Build 会话。
-- 会话工作目录跟随 worktree（KRN-11）：CoreApi 把 worktree 绑定（`workspace/git-worktrees.ts` 的 `WorkspaceBindingStore`）经 `HarnessHost.extend({ worktrees })` 交给 host，`workspaceRootFor()`、`scopeFor()`、新会话的 `cwd` 都按它取 worktree 路径。`git.enterWorktree` / `git.exitWorktree` 成功后 `moveWorkingDirectory()` 给打开着的根会话追加 `working-directory/change { from, to, reason }`（路径为规范路径；`reason` 为 `worktree-enter`、`worktree-exit`，重新打开时绑定已变为 `worktree-resync`）；会话没打开时下次打开即按绑定校正。`Session.cwd` 是最后一次变化的 `to`，否则是 header 的 `cwd`；文件工具与 grep / glob 的相对路径、沙箱的可写根（`SandboxPolicyService.resolve`）、Shell 的默认工作目录、Hook 的工作目录、AGENTS.md 查找、子代理与 fork 的起始目录都读它，回合改动记录与「审查」用同一个 worktree 路径。运行时上下文的 `session:environment` 写当前工作目录，在 worktree 里时加一句「这是项目的托管 git worktree，原 checkout 不在可写范围内」；沙箱策略的写入根随之变化，快照只在文本变化时追加。MCP 项目实例与插件仍按原项目根。正在运行的子代理保持启动时的目录。
-- 界面发起的调用带上它显示的会话：preload 在每个 core 通道的参数前放调用上下文 `{ emperorCoreCall: 1, view: { sessionId } }`（renderer 切换会话时用 `setViewingSession` 更新，草稿为 null），main 取下后作为 `CoreOperationContext.view` 交给 operation，Core 与 main 都不记住它。Operation 的输入没写会话时用它（`tasks.*`、`skills.*`、`goals.*`、`delegations.*`、`memory.compact` 等）；mutation guard、插件列表与详情、Hooks 测试与审计、环境状态、诊断和记忆里与会话有关的字段也取它。进程内调用方（ACP、main、测试）要么写明会话，要么传 view。都没有时 Core 返回 `SESSION_REQUIRED`（`SessionRequiredError`）。`chat.stopRuntime`（不带 `taskId` 时）与 `processes.*` 只认输入里写明的 `sessionId`；renderer 停止时写明当前会话。
+- 其余依赖「哪个会话」的东西都显式拿到会话。`SessionScope { sessionId, projectRoot, workspaceRoot, kind }`（`harness/host/scope.ts`）由 `HarnessHost.scopeFor(sessionId)` 从会话索引算出：Build 会话的 `projectRoot` 是项目根，Chat 会话为 null；`workspaceRoot` 是文件与 Shell 工具的工作目录（项目、会话进入的托管 worktree，或 Chat 工作区）。子智能体用根会话的 scope；ACP 会话是以其 cwd 为项目的 Build 会话。
+- 会话工作目录跟随 worktree（KRN-11）：CoreApi 把 worktree 绑定（`workspace/git-worktrees.ts` 的 `WorkspaceBindingStore`）经 `HarnessHost.extend({ worktrees })` 交给 host，`workspaceRootFor()`、`scopeFor()`、新会话的 `cwd` 都按它取 worktree 路径。`git.enterWorktree` / `git.exitWorktree` 成功后 `moveWorkingDirectory()` 给打开着的根会话追加 `working-directory/change { from, to, reason }`（路径为规范路径；`reason` 为 `worktree-enter`、`worktree-exit`，重新打开时绑定已变为 `worktree-resync`）；会话没打开时下次打开即按绑定校正。`Session.cwd` 是最后一次变化的 `to`，否则是 header 的 `cwd`；文件工具与 grep / glob 的相对路径、沙箱的可写根（`SandboxPolicyService.resolve`）、Shell 的默认工作目录、Hook 的工作目录、AGENTS.md 查找、子智能体与 fork 的起始目录都读它，回合改动记录与「审查」用同一个 worktree 路径。运行时上下文的 `session:environment` 写当前工作目录，在 worktree 里时加一句「这是项目的托管 git worktree，原 checkout 不在可写范围内」；沙箱策略的写入根随之变化，快照只在文本变化时追加。MCP 项目实例与插件仍按原项目根。正在运行的子智能体保持启动时的目录。
+- 界面发起的调用带上它显示的会话：preload 在每个 core 通道的参数前放调用上下文 `{ emperorCoreCall: 1, view: { sessionId } }`（renderer 切换会话时用 `setViewingSession` 更新，草稿为 null），main 取下后作为 `CoreOperationContext.view`（类型 `ViewScope`，`harness/host/scope.ts`）交给 operation，Core 与 main 都不记住它。Operation 的输入没写会话时用它（`tasks.*`、`skills.*`、`goals.*`、`delegations.*`、`memory.compact` 等）；mutation guard、插件列表与详情、Hooks 测试与审计、环境状态、诊断和记忆里与会话有关的字段也取它。进程内调用方（ACP、main、测试）要么写明会话，要么传 view。都没有时 Core 返回 `SESSION_REQUIRED`（`SessionRequiredError`）。`chat.stopRuntime`（不带 `taskId` 时）与 `processes.*` 只认输入里写明的 `sessionId`；renderer 停止时写明当前会话。
 - Mutation guard（`assertMutation(area, action, view)`）检查调用方显示的会话有没有待处理交互、是否处于 Plan 模式；`view.sessionId` 为 null（草稿或没有会话）时不拦截，另一个会话的状态不影响它。外部子会话的控制由所属根会话自己的状态把关。
 
 ### 后台 turn
 
-- `HarnessHost.submit()` 不改变任何焦点。定时任务、ACP 与 onboarding 走 `HarnessHost.runBackgroundTurn(scope, content, options)`：在 scope 指明的会话里运行一轮，返回 `TurnResult`。`interactionPolicy: 'auto-reject'` 时，这一轮（含它的子代理）的审批、提问、Plan 审阅和电脑操作授权卡立即按拒绝处理，审批与问题照常写入 log；一轮完成但有被拒绝的交互时结果为 `blocked`（`interaction-rejected`，Plan 审阅被拒绝时为 `plan-mode`），`detail` 列出被拒绝的工具。`wait` 时交给界面，与桌面 turn 相同。`timeoutMs` 到时取消这一轮：结果为 `aborted`（`by: 'timeout'`），当时正等待界面回答的为 `blocked`（`interaction-timeout`）。「这一轮」指根会话当前 turn 正是消费了后台消息的那个 turn：后台消息排在桌面 turn 后面等待时，桌面 turn 的交互不受影响。
-- 定时任务的执行器（`harness/host/scheduler.ts`）用 `runBackgroundTurn`，默认超时 30 分钟、`auto-reject`，并把结果写进运行记录：completed → `ok`；error → `error`，记录 `errorCode`（例如 401/403 为 `AUTH`）；aborted → `cancelled`（超时的 `errorCode` 为 `TIMEOUT`）；blocked → `blocked`（界面显示「需要审批，已拒绝」，`error` 写明被拒绝的操作）；not-consumed → `error`（`NOT_CONSUMED`）。一次运行结束（包括超时）就离开 in-flight 集合，后续触发照常进行；`error` 与 `blocked` 发 `scheduler_run_error`（带 `status` 与 `code`）。没有绑定会话的旧任务在最近更新的会话（没有时新建一个）里运行，不改变界面显示；创建或编辑任务时，没有写明会话的任务绑定到创建者显示的会话（调用的 `view`）。
-- ACP 通过 `chat.runBackground` 提交（policy `wait`：ACP 自己取消交互并返回 refusal）；onboarding 访谈以 `wait` 运行，用户在访谈会话里回答。Goal 的轮次由会话自己的驱动器唤醒（`agent.followup`），从不经过 host 的提交，同样按所在会话的 scope 取得 MCP 工具与 Hooks。
+- `HarnessHost.submit()` 不改变任何焦点。定时任务、ACP 与 onboarding 走 `HarnessHost.runBackgroundTurn(scope, content, options)`：在 scope 指明的会话里运行一轮，返回 `TurnResult`。`interactionPolicy: 'auto-reject'` 时，这一轮（含它的子智能体）的审批、提问、Plan 审阅和电脑操作授权卡立即按拒绝处理，审批与问题照常写入 log；一轮完成但有被拒绝的交互时结果为 `blocked`（`interaction-rejected`，Plan 审阅被拒绝时为 `plan-mode`），`detail` 列出被拒绝的工具。`wait` 时交给界面，与桌面 turn 相同。`timeoutMs` 到时取消这一轮：结果为 `aborted`（`by: 'timeout'`），当时正等待界面回答的为 `blocked`（`interaction-timeout`）。「这一轮」指根会话当前 turn 正是消费了后台消息的那个 turn：后台消息排在桌面 turn 后面等待时，桌面 turn 的交互不受影响。
+- 定时任务的子智能体（`harness/host/scheduler.ts`）用 `runBackgroundTurn`，默认超时 30 分钟、`auto-reject`，并把结果写进运行记录：completed → `ok`；error → `error`，记录 `errorCode`（例如 401/403 为 `AUTH`）；aborted → `cancelled`（超时的 `errorCode` 为 `TIMEOUT`）；blocked → `blocked`（界面显示「需要审批，已拒绝」，`error` 写明被拒绝的操作）；not-consumed → `error`（`NOT_CONSUMED`）。一次运行结束（包括超时）就离开 in-flight 集合，后续触发照常进行；`error` 与 `blocked` 发 `scheduler_run_error`（带 `status` 与 `code`）。没有绑定会话的旧任务在最近更新的会话（没有时新建一个）里运行，不改变界面显示；创建或编辑任务时，没有写明会话的任务绑定到创建者显示的会话（调用的 `view`）。
+- ACP 通过 CoreApi 的进程内方法 `chat.runBackground`（不是 IPC operation）提交（policy `wait`：ACP 自己取消交互并返回 refusal）；onboarding 访谈以 `wait` 运行，用户在访谈会话里回答。Goal 的轮次由会话自己的驱动器唤醒（`agent.followup`），从不经过 host 的提交，同样按所在会话的 scope 取得 MCP 工具与 Hooks。
 
 ### MCP 与插件按 scope 生效
 
 - 全局 server：`mcp_config.json` 的 server，以及用户范围和随 Emperor 提供的插件的 server，在 host 自己的 `MCPClient` 中运行，stdio 工作目录与沙箱写入根为 Chat 工作区，不属于任何会话。
-- 项目实例：项目（`project`、`local` 范围）插件的 server 按项目根各有一个实例（`mcp/project-instances.ts` 的 `ProjectMcpInstances`；`start()` 是实例启动的唯一入口，客户端由 host 创建，只运行交给它的插件 server，不读 `mcp_config.json`），工作目录与沙箱写入根为该项目。会话的每一步在装配提示词之前（`middleware.preAssemble`）持有所在项目的实例（第一次使用时启动并等待连接结果），该 agent 空闲、子代理结束或会话删除时释放；没有任何持有者 5 分钟后停止，停止时它的工具先从所有会话的列表中移除。同一项目的多个会话共享一个实例，一个项目的实例启动失败只影响该项目。诊断的 `kernel.projectMcp` 列出各实例的项目、持有者数与状态。
+- 项目实例：项目（`project`、`local` 范围）插件的 server 按项目根各有一个实例（`mcp/project-instances.ts` 的 `ProjectMcpInstances`；`start()` 是实例启动的唯一入口，客户端由 host 创建，只运行交给它的插件 server，不读 `mcp_config.json`），工作目录与沙箱写入根为该项目。会话的每一步在装配提示词之前（`middleware.preAssemble`）持有所在项目的实例（第一次使用时启动并等待连接结果），该 agent 空闲、子智能体结束或会话删除时释放；没有任何持有者 5 分钟后停止，停止时它的工具先从所有会话的列表中移除。同一项目的多个会话共享一个实例，一个项目的实例启动失败只影响该项目。诊断的 `kernel.projectMcp` 列出各实例的项目、持有者数与状态。
 - 工具按 scope 过滤：`McpToolBridge` 对每个工具名只注册一次，按调用方 agent 所在项目选出服务它的 server（项目自己的实例优先；项目用自己范围的插件替换了用户范围的同一插件时，隐藏全局那一份）。Chat 会话只看到全局工具，A 项目的会话看不到 B 项目实例的工具；同名工具的描述与参数按调用方给出。项目插件的 server 键与全局 server 的键不会重名。
 - 插件 Hook 同样按 scope 计算：`ClaudeCodeHooks` 的全局集合来自用户范围和随 Emperor 提供的插件；项目会话另加该项目自己插件的集合（`setPluginHookScope`），全局集合中被项目替换的插件除外。Chat 会话不会触发任何项目的插件 Hook。`PluginActivationController` 对每个项目按需计算并缓存这些贡献，插件安装、启停、卸载后重算；切换显示的会话不触发任何重算，只发 `plugins_changed`（`reason: project`）让界面刷新列表。
 
@@ -102,7 +102,7 @@ turn/end
   - 一次修复：请求被拒（400 / 404）且还没有输出任何内容时，最多再发一次：错误提到文件时作废这次引用的 file id、图片改为内嵌；错误提到签名或 thinking 且请求里有不带签名的 thinking 时去掉它们。
 - `llm/retry-policy.ts`：默认对 `EMPTY_RESPONSE`、`RATE_LIMIT`、`SERVER`、`TIMEOUT`、`TRANSPORT` 最多重试 5 次，指数退避 500 ms 到 10 s、±10% 抖动；不大于上限的 provider Retry-After 会替换本地延迟。每次重试写入 `llm/retry` 事件。
 
-全局只激活一个模型。`model_config.json` 中默认关闭的执行策略由 `harness/agent/model-policy.ts` 执行：备用模型是排在重试 middleware 之后的 request-error handler，重试用尽且错误类型命中触发条件时写入 `llm/fallback`，本轮剩余请求改用备用条目，下一轮回到主模型；每轮成本上限是 pre-step handler，累计本轮已计价用量达到上限后拒绝下一个 step（`llm/cost-cap`）。请求的模型与上一次请求不同（用户切换了模型、备用模型接手或下一轮回到主模型）时，Agent 在这次请求之前写入一条 `model-switch` 上下文通知，告诉模型“本步起由 X 模型继续，之前的回复来自 Y”；会话的第一次请求不写。
+全局只激活一个模型。`model_config.json` 中默认关闭的执行策略由 `harness/agent/model-policy.ts` 执行：备用模型是排在重试 middleware 之后的 request-error handler，重试用尽且错误类型命中触发条件时写入 `llm/fallback`，本轮剩余请求改用备用条目，下一轮回到主模型。`maxUsdPerAgentTurn` 不再是每轮的 pre-step handler，而是任务树保管的每个任务的费用上限（见下文「任务树与预算」）；`llm/cost-cap` 事件只为能读取 KRN-03 之前写下的日志而保留。请求的模型与上一次请求不同（用户切换了模型、备用模型接手或下一轮回到主模型）时，Agent 在这次请求之前写入一条 `model-switch` 上下文通知，告诉模型“本步起由 X 模型继续，之前的回复来自 Y”；会话的第一次请求不写。
 
 ## 工具执行
 
@@ -123,7 +123,7 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 
 ## 交互阻塞在工具调用内
 
-`ask_user_question`、`exit_plan_mode` 的审阅和一次性提权审批都在工具调用内部等待，没有“暂停 turn 再恢复”的机制。`PendingInteractions` 把等待中的请求投影到 `control.pending`，renderer 通过 `control.answerInteraction`、`control.approvePlan`、`control.commentPlan` 或 `control.cancelInteraction` 回答。turn 被中止时等待自动以 `cancelled` 结束；应答通道不可用时以 `unavailable` 结束（fail closed）。用户关闭 Plan 审阅（改为自己输入）时，`exit_plan_mode` 返回成功结果并声明结束本 turn，`turn/end` 原因为 `plan-dismissed`，不再为等待用户多请求一次模型。
+`ask_user_question`、`exit_plan_mode` 的审阅和一次性提权审批都在工具调用内部等待，没有“暂停 turn 再恢复”的机制。`PendingInteractions` 把等待中的请求投影到 `control.get` 返回的 `pending` 字段，renderer 通过 `control.answerInteraction`、`control.approvePlan`、`control.commentPlan` 或 `control.cancelInteraction` 回答。turn 被中止时等待自动以 `cancelled` 结束；应答通道不可用时以 `unavailable` 结束（fail closed）。用户关闭 Plan 审阅（改为自己输入）时，`exit_plan_mode` 返回成功结果并声明结束本 turn，`turn/end` 原因为 `plan-dismissed`，不再为等待用户多请求一次模型。
 
 ## 压缩
 
@@ -175,7 +175,7 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 
 ### 跟随权限预设的配置工具
 
-`skill_manage` 与 `mcp_config` 修改的是应用状态而不是 workspace 文件，因此不走文件沙箱，而是直接询问 `ApprovalService`：当前 session 的沙箱模式为 `danger-full-access` 时直接执行；否则每次写入都以工具名和一句可读原因写入 `approval/asked`，只有 `allowed-once` 才继续，审批策略为 `never`（例如子代理）时被拒绝。只读动作（`list`、`validate`、`reload`）不询问。
+`skill_manage` 与 `mcp_config` 修改的是应用状态而不是 workspace 文件，因此不走文件沙箱，而是直接询问 `ApprovalService`：当前 session 的沙箱模式为 `danger-full-access` 时直接执行；否则每次写入都以工具名和一句可读原因写入 `approval/asked`，只有 `allowed-once` 才继续，审批策略为 `never`（例如子智能体）时被拒绝。只读动作（`list`、`validate`、`reload`）不询问。
 
 ## Session log 与恢复
 
@@ -187,31 +187,32 @@ Post-execute 固定包含重复调用提醒（相同工具与参数连续出现�
 
 旧内核的 `history.jsonl`、`_checkpoint.json` 和 `runtime/events.jsonl` 已不再使用。首次启动新内核时，已有的 `sessions/` 目录会整体移到 `sessions.legacy-<时间戳>`（`harness/host/services.ts` 的 `archiveLegacySessions()`），不会删除。
 
-## 子代理与后台任务
+## 子智能体与后台任务
 
 - `subagent` 创建不共享父上下文的子 session；`subagent_fork` 创建继承父会话已完成 turn 的子 session。两者默认后台运行并立即返回 id，结束时父会话收到通知；`run_in_background: false` 时同步等待结果。
-- `send_message` 让子代理开始新一轮，`interrupt_agent` 中断，`list_agents` 列出子代理；子代理用 `report` 向父会话汇报。最大嵌套深度 3。
-- 子代理的沙箱模式在创建时从父会话继承，审批策略为 `never`，提权请求被自动拒绝。
+- `send_message` 让子智能体开始新一轮，`interrupt_agent` 中断，`list_agents` 列出子智能体；子智能体用 `report` 向父会话汇报。最大嵌套深度 3。
+- 子智能体的沙箱模式在创建时从父会话继承，审批策略为 `never`，提权请求被自动拒绝。
 - `bash` 的 `run_in_background` 把命令交给 `JobRegistry`，用 `job_output`、`job_list`、`job_kill` 管理。每个 owner 最多 10 个运行中的 job；job 结束时空闲的 owner 会被唤醒（默认不限次数），运行中的 owner 在下一步收到通知。用户在「后台任务」里停止的 job（`tasks.cancel`）结束后，owner 在下一步收到「用户已手动停止」的通知（不唤醒）；Agent 自己 `job_kill` 的 job 不再通知。
-- `workflow` / `ralph` 由 `WorkflowEngine` 执行：每次运行在一个受 SEC-08 约束的 Node 子进程里跑脚本（KRN-09，`process-worker.ts`：不读工作区与 Emperor Home、只写自己的临时目录、无网络，`--max-old-space-size` 默认 512 MB，运行超过 30 分钟以 `WORKFLOW_TIMEOUT` 结束；Electron 中以 `ELECTRON_RUN_AS_NODE` 运行应用自带的二进制；沙箱不可用时拒绝运行，不在沙箱外静默运行。脚本仍在 vm realm 内，realm 被绕过时也只能拿到这个受限进程；消息走结构化克隆的 IPC 通道），脚本的 `agent()` 经 `spawn` provider 调用 `SubagentManager` 创建前台子代理（`callId` 为工具调用 id，结束后释放）；带 `schema` 的子代理通过仅对其可见的 `structured_output` 工具交付结果。运行记录以 `tool-workflow/*` 事件写入调用方 session，投影为 `workflow_started` / `workflow_progress` / `workflow_finished`。进程入口是把自包含的工厂函数序列化后写进该次运行的临时目录、作为子进程脚本启动，源码模式与打包后的 `out/main` 走同一条路径。`run_in_background: true` 的 `workflow` 作为 `workflow` 类后台任务登记到 `JobRegistry`：调用立即返回任务编号，运行结束时按后台任务的规则通知或唤醒调用方，`job_kill` 取消运行。
-- CoreApi `tasks.*` 把后台 job、子代理会话与工作流运行（`kind: 'workflow'`，可读记录、取消）列在一起；桌面端的环境信息卡用共享 `agents.list` 树显示根会话的子智能体，用 `tasks.list` 显示后台任务，用 `tasks.transcript` 查看后台命令输出和工作流记录，用 `tasks.cancel` 停止运行中的后台命令或工作流；子会话视图用 `tasks.cancel` 停止运行中的子代理。`tasks.resume` 已退役，继续子代理需在对话中让主 Agent 使用 `send_message`。
+- `workflow` / `ralph` 由 `WorkflowEngine` 执行：每次运行在一个受 SEC-08 约束的 Node 子进程里跑脚本（KRN-09，`process-worker.ts`：不读工作区与 Emperor Home、只写自己的临时目录、无网络，`--max-old-space-size` 默认 512 MB，运行超过 30 分钟以 `WORKFLOW_TIMEOUT` 结束；Electron 中以 `ELECTRON_RUN_AS_NODE` 运行应用自带的二进制；沙箱不可用时拒绝运行，不在沙箱外静默运行。脚本仍在 vm realm 内，realm 被绕过时也只能拿到这个受限进程；消息走结构化克隆的 IPC 通道），脚本的 `agent()` 经 `spawn` provider 调用 `SubagentManager` 创建前台子智能体（`callId` 为工具调用 id，结束后释放）；带 `schema` 的子智能体通过仅对其可见的 `structured_output` 工具交付结果。运行记录以 `tool-workflow/*` 事件写入调用方 session，投影为 `workflow_started` / `workflow_progress` / `workflow_finished`。进程入口是把自包含的工厂函数序列化后写进该次运行的临时目录、作为子进程脚本启动，源码模式与打包后的 `out/main` 走同一条路径。`run_in_background: true` 的 `workflow` 作为 `workflow` 类后台任务登记到 `JobRegistry`：调用立即返回任务编号，运行结束时按后台任务的规则通知或唤醒调用方，`job_kill` 取消运行。
+- 本地子智能体的子会话页面用 CoreApi `agents.send({ sessionId, text })`（`HarnessHost.messageSubagent` → `SubagentManager.userFollowup`）把用户的消息作为子智能体下一轮的用户输入；空消息返回 `validation_error`，不是子会话或子智能体已关闭返回 `subagent_not_live`。「设置 › 子智能体」可以给本地子智能体固定一条模型（`localSubagentModel`）：`SubagentManager` 起子智能体时，没有显式 `callConfig` 就用 `childCallConfig()`，那条模型仍在路由表里就用它，删掉了就回到对话的模型；父会话自己的模型不受影响。
+- CoreApi `tasks.*` 把后台 job、子智能体会话与工作流运行（`kind: 'workflow'`，可读记录、取消）列在一起；桌面端的环境信息卡用共享 `agents.list` 树显示根会话的子智能体，用 `tasks.list` 显示后台任务，用 `tasks.transcript` 查看后台命令输出和工作流记录，用 `tasks.cancel` 停止运行中的后台命令或工作流；子会话视图用 `tasks.cancel` 停止运行中的子智能体。`tasks.resume` 已退役（返回 `OperationRetiredError`）：继续子智能体用上面的 `agents.send`，或在对话中让主 Agent 使用 `send_message`。
 
 ### 任务树与预算
 
-每个根会话有一棵任务树（`harness/host/task-tree.ts`）：它和它的子代理启动的全部子代理、子会话、后台 job，以及宿主为每个子代理保留的 projector 与订阅。
+每个根会话有一棵任务树（`harness/host/task-tree.ts`）：它和它的子智能体启动的全部子智能体、子会话、后台 job，以及宿主为每个子智能体保留的 projector 与订阅。
 
-- **生命周期**：子代理被 dispose（根会话停止、工作流收回它的子代理）时，它的后台 job 立即停止，驱动空闲后从宿主的 `agents`、`projectors`、`unsubscribes` 中移除，日志随后关闭。根会话卸载时整棵树一起清理。永久删除根会话（最近删除里「永久删除」或 30 天到期）时，按日志里的 `subagent/started` 递归找出全部子会话，删除它们的目录，以及根会话和子会话的 spill 目录（`spill/session-<hash>/`）。
-- **任务**：用户（或定时任务）每给根会话发一条消息，就开始一个新任务，直到下一条消息为止；预算按任务计算，只保存在内存里，重启后从零开始。
+- **生命周期**：子智能体被 dispose（根会话停止、工作流收回它的子智能体）时，它的后台 job 立即停止，驱动空闲后从宿主的 `agents`、`projectors`、`unsubscribes` 中移除，日志随后关闭。根会话卸载时整棵树一起清理。永久删除根会话（最近删除里「永久删除」或 30 天到期）时，按日志里的 `subagent/started` 递归找出全部子会话，删除它们的目录，以及根会话和子会话的 spill 目录（`spill/session-<hash>/`）。
+- **任务**：每一次送进根会话的消息（`HarnessHost.deliver()`：用户、定时任务、ACP、onboarding 的后台 turn 与插话，以及 `chat.manageQueuedPrompt` 的 `send` / `interject`）都开始一个新任务，直到下一条消息为止；预算按任务计算，只保存在内存里，重启后从零开始（Claude Code / Codex 的用量另由委派日志恢复，见[外部子智能体](external-agent-delegation.md)）。
 - **步数**：一个 turn 最多 `maxSteps` 步（默认 400）；定时任务的 turn 与 Goal 轮次最多 `maxBackgroundSteps` 步（默认 120）。到达后下一步不再开始。
-- **费用**：`model_config.json` 的 `policy.cost.maxUsdPerAgentTurn` 现在是一个任务的上限：根会话、全部子代理和失败的请求都计入，按条目的 `pricing` 在每次请求返回后累计。达到上限（或上限开启时有无法计价的用量）后，树里每个 Agent 做完当前这一步就停下，不再启动新的子代理，根会话不再被通知唤醒，直到用户的下一条消息；根会话的 Goal 被解除自动推进。
-- **并发与总数**：同时运行的子代理最多 `maxActiveAgents` 个（默认 8），多出的等空位（排队，不报错）；在前台等待子代理结果的父代理把自己的名额让给子代理。一个任务最多启动 `maxTotalAgents` 个子代理（默认 64），再启动时工具返回 `AGENT_BUDGET_EXCEEDED`。工作流的 `agent()` 同样计入。
-- **结果唤醒**：子代理的结果（结束通知、`report`）在父代理空闲时唤醒它，每个父代理每个任务最多 `maxNoticeWakes` 次（默认 32）；之后的结果放进父代理的下一步，第一次拒绝时在父代理的日志里写一条说明。
-- **Goal**：根会话还有运行中（或排队中）的子代理或后台 job 时，Goal 不开始新一轮；它们结束后再继续。轮次提示要求模型在只剩等待时结束本轮，不要睡眠或轮询。
-- 设置在 `settings.json` 的 `taskBudget`（「设置 › 高级 › 任务预算」，CoreApi `tasks.budget` / `tasks.setBudget`），修改后从每个任务的下一次判断起生效。
+- **费用**：`model_config.json` 的 `policy.cost.maxUsdPerAgentTurn`（「设置 › 模型」的「每个任务的费用上限」）现在是一个任务的上限：根会话、全部子智能体和失败的请求都计入，按条目的 `pricing` 在每次请求返回后累计；没有单价的用量不计入，也不会因此停止（`TaskTree.verdict()` 只比较已计价的花费，超过上限时才在结果里附 `unpricedRoutes`）。达到上限后，树里每个 Agent 做完当前这一步就停下，不再启动新的子智能体，根会话不再被通知唤醒，直到用户的下一条消息；根会话的 Goal 被解除自动推进。
+- **并发与总数**：同时运行的子智能体最多 `maxActiveAgents` 个（默认 8），多出的等空位（排队，不报错）；在前台等待子智能体结果的父智能体把自己的名额让给子智能体。一个任务最多启动 `maxTotalAgents` 个子智能体（默认 64），再启动时工具返回 `AGENT_BUDGET_EXCEEDED`。工作流的 `agent()` 同样计入。
+- **结果唤醒**：子智能体的结果（结束通知、`report`）在父智能体空闲时唤醒它，每个父智能体每个任务最多 `maxNoticeWakes` 次（默认 32）；之后的结果放进父智能体的下一步，第一次拒绝时在父智能体的日志里写一条说明。
+- **Goal**：根会话还有运行中（或排队中）的子智能体或后台 job 时，Goal 不开始新一轮；它们结束后再继续。轮次提示要求模型在只剩等待时结束本轮，不要睡眠或轮询。
+- 步数、并发、总数与唤醒次数设置在 `settings.json` 的 `taskBudget`（「设置 › 高级 › 任务预算」，CoreApi `tasks.budget` / `tasks.setBudget`），修改后从每个任务的下一次判断起生效；费用上限在「设置 › 模型」。
 
 ## Turn 的结束语义
 
-最终回复只表示该 turn 停止生成，不代表做过验收。需要跨多轮持续推进的任务使用 Goal，见 [Goal 架构](goal-mode.md)。
+最终回复只表示该 turn 停止生成，不代表做过验证。需要跨多轮持续推进的任务使用 Goal，见 [Goal 架构](goal-mode.md)。
 
 ## 修改时的同步面
 
