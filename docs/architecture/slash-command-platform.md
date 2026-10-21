@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、Skill 作者和桌面端开发者<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 最后核验：2026-10-21（对照 `79d2b7e6`）<br>
 > 事实源：`packages/core/src/commands/`、`packages/core/src/api/services/command-application-service.ts`、CoreApi `commands.*`、`desktop/src/renderer/src/composables/useSlashCommands.ts`
 
 Emperor 的斜杠命令由 Core 注册、解析、校验和调度。Renderer 只展示候选、补全参数、打开界面并投影结果；它不能提供 handler、Skill 路径、来源或工具范围。
@@ -113,7 +113,7 @@ Token 默认由 Skill 名称规范化为小写 kebab-case；显式 `name` 时以
 
 ## Renderer 投影
 
-Composer 输入 `/` 后用 Core descriptor 构建候选列表，分为 `Commands` 与 `Skills`；Skill 显示 `Personal`、`Project`、`Built-in` 或 `Plugin` 来源。上下键移动，Tab 补全，Enter 执行或插入参数提示，Escape 关闭。
+Composer 输入 `/` 后用 Core descriptor 构建候选列表，分为「命令」与「Skills」两组。内置命令的标题由 renderer 的 `BUILTIN_TITLES` 给出中文名（说明与分类来自 Core descriptor，也是中文），右侧显示命令名；Skill 显示「项目 Skill」「个人 Skill」「插件 Skill」「内置 Skill」来源。参数补全的类型显示为中文（模型、思考强度、执行权限），思考强度的值用与模型芯片相同的中文名。上下键移动，Tab 补全，Enter 执行或插入参数提示，Escape 关闭。
 
 Renderer 在启动、切换会话、收到 `assistant_done`、收到 `skill_catalog_changed` 以及每次打开菜单时调用 `commands.list`；刷新是 single-flight，失败时保留上一次成功的列表。
 
