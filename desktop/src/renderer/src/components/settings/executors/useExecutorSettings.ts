@@ -25,9 +25,12 @@ import { core } from '../../../api/http'
 import {
   clearExecutorCredential,
   configureExecutors,
+  dismissExecutorNotice,
   listExecutorModels,
   listExecutors,
   probeExecutor,
+  signInExecutor,
+  signOutExecutor,
 } from '../../../api/delegations'
 import { modelSourceName, type ExecutorFacts } from './executorText'
 
@@ -62,8 +65,15 @@ export function createExecutorSettings() {
   const loading = ref(false)
   const saving = ref(false)
   const tokenBusy = ref(false)
-  /** The Claude profile 设置令牌 is open for (AGT-02). */
-  const tokenDialog = ref<ExecutorProfile | null>(null)
+  /** The Claude profile 使用 API Key is open for (AGT-12). */
+  const apiKeyDialog = ref<ExecutorProfile | null>(null)
+  /**
+   * Profiles whose 登录 Claude Code is open in Terminal: checked again
+   * when Emperor comes back to the front (AGT-12).
+   */
+  const signInPending = ref<Record<string, boolean>>({})
+  /** Once after the upgrade that deleted a saved Claude token (AGT-12). */
+  const signInNotice = ref(false)
   const error = ref('')
   let generation = 0
   let disposed = false
@@ -147,6 +157,7 @@ export function createExecutorSettings() {
   }
 
   function adoptFacts(result: ListResult) {
+    signInNotice.value = result.signInNotice === true
     runtimes.value = Object.fromEntries(
       result.profiles.map((entry) => [entry.profile.id, entry.runtime]),
     )
@@ -262,8 +273,11 @@ export function createExecutorSettings() {
                 JSON.stringify(
                   config.value?.profiles.find((p) => p.id === profile.id),
                 ) === key
-              )
+              ) {
                 probes.value[profile.id] = probe
+                if (probe.status === 'available')
+                  delete signInPending.value[profile.id]
+              }
             } catch (cause) {
               if (current === generation)
                 probeErrors.value[profile.id] = message(cause)
@@ -376,7 +390,7 @@ export function createExecutorSettings() {
     }
   }
 
-  function tokenSaved(profile: ExecutorProfile, probe: ExecutorProbe) {
+  function keySaved(profile: ExecutorProfile, probe: ExecutorProbe) {
     probes.value[profile.id] = probe
     delete probeErrors.value[profile.id]
     // 「读取不到认证」 no longer holds; 刷新模型 lists the account's models.
@@ -384,7 +398,7 @@ export function createExecutorSettings() {
     if (catalog) catalogs.value[profile.id] = { ...catalog, diagnostic: null }
   }
 
-  async function clearToken(profile: ExecutorProfile) {
+  async function clearKey(profile: ExecutorProfile) {
     if (tokenBusy.value) return
     tokenBusy.value = true
     error.value = ''
@@ -393,10 +407,74 @@ export function createExecutorSettings() {
         await clearExecutorCredential({ profileId: profile.id })
       ).probe
     } catch (cause) {
-      error.value = `移除令牌失败：${message(cause)}`
+      error.value = `移除 API Key 失败：${message(cause)}`
     } finally {
       tokenBusy.value = false
     }
+  }
+
+  /** 登录 Claude Code: Core opens macOS Terminal on claude's own login. */
+  async function signIn(
+    profile: ExecutorProfile,
+    method: 'claude-ai' | 'console' = 'claude-ai',
+  ) {
+    if (tokenBusy.value) return
+    tokenBusy.value = true
+    error.value = ''
+    try {
+      await signInExecutor({ profileId: profile.id, method })
+      signInPending.value[profile.id] = true
+    } catch (cause) {
+      error.value = `没有打开登录：${message(cause)}`
+    } finally {
+      tokenBusy.value = false
+    }
+  }
+
+  /** Back from Terminal (or 重新检测): ask claude again. */
+  async function recheck(profile: ExecutorProfile) {
+    try {
+      const probe = await probeExecutor({ profileId: profile.id })
+      if (disposed) return
+      keySaved(profile, probe)
+      if (probe.status === 'available') delete signInPending.value[profile.id]
+    } catch (cause) {
+      if (!disposed) probeErrors.value[profile.id] = message(cause)
+    }
+  }
+
+  async function signOut(profile: ExecutorProfile) {
+    if (tokenBusy.value) return
+    tokenBusy.value = true
+    error.value = ''
+    try {
+      probes.value[profile.id] = (
+        await signOutExecutor({ profileId: profile.id })
+      ).probe
+      delete signInPending.value[profile.id]
+    } catch (cause) {
+      error.value = `退出登录失败：${message(cause)}`
+    } finally {
+      tokenBusy.value = false
+    }
+  }
+
+  async function dismissSignInNotice() {
+    signInNotice.value = false
+    try {
+      await dismissExecutorNotice({ notice: 'claude-sign-in' })
+    } catch {
+      // Shown again next time; nothing else depends on it.
+    }
+  }
+
+  /** Emperor is in front again: a pending sign-in is checked first. */
+  function onFocus() {
+    const pending = (config.value?.profiles ?? []).filter(
+      (p) => signInPending.value[p.id],
+    )
+    if (pending.length) for (const profile of pending) void recheck(profile)
+    else void refreshFacts()
   }
 
   let timer: ReturnType<typeof setInterval> | undefined
@@ -404,12 +482,12 @@ export function createExecutorSettings() {
     void load()
     void loadModelChoices()
     timer = setInterval(() => void refreshFacts(), 10_000)
-    window.addEventListener('focus', refreshFacts)
+    window.addEventListener('focus', onFocus)
   })
   onBeforeUnmount(() => {
     disposed = true
     if (timer) clearInterval(timer)
-    window.removeEventListener('focus', refreshFacts)
+    window.removeEventListener('focus', onFocus)
     generation++
   })
 
@@ -428,15 +506,21 @@ export function createExecutorSettings() {
     saving,
     busy,
     tokenBusy,
-    tokenDialog,
+    apiKeyDialog,
+    signInPending,
+    signInNotice,
     error,
     modelOptionsOf,
     load,
     loadModels,
     change,
     changeProfile,
-    tokenSaved,
-    clearToken,
+    keySaved,
+    clearKey,
+    signIn,
+    recheck,
+    signOut,
+    dismissSignInNotice,
   }
 }
 

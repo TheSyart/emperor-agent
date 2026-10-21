@@ -1,16 +1,20 @@
 <script setup lang="ts">
 /**
  * 设置 › 子智能体 › Claude Code / Codex (AGT-10): everything the main page
- * leaves out, in plain words — the status and its fix, Claude's sign-in
- * (AGT-02), the default model and custom models, what it is good at, and
- * what Core verified about it (「联网搜索：已验证」). Saved at once; the
- * text editors save on 保存 / 完成.
+ * leaves out, in plain words — the status and its fix (for a missing
+ * claude, the official install command), Claude's sign-in (AGT-12: its own
+ * login in macOS Terminal, the Console sign-in, 退出登录, 使用 API Key and
+ * what outranks the login), the default model and custom models, what it
+ * is good at, and what Core verified about it (「联网搜索：已验证」).
+ * Saved at once; the text editors save on 保存 / 完成.
  */
 import { computed, ref } from 'vue'
 import type { ExecutorProfile } from '@emperor/core/runtime-contract'
 import { executorSpecialties } from '@emperor/core/runtime-contract'
 import { openExternal } from '../../../api/backend'
 import Button from '../../ui/Button.vue'
+import LinkButton from '../../ui/LinkButton.vue'
+import { writeClipboard } from '../../ui/useCopyFeedback'
 import { DsRefresh } from '../../icons/ds'
 import {
   Badge,
@@ -25,19 +29,20 @@ import {
 import {
   authIssue,
   capabilityLines,
+  CLAUDE_INSTALL_COMMAND,
+  claudeMissing,
   compatibilityWarning,
   consentText,
   executorName,
-  hasEmperorToken,
+  hasEmperorKey,
   hasIssue,
-  SIGN_IN_ALERT_TITLE,
-  signInAlert,
+  precedenceText,
+  signedInWithClaude,
   signInText,
   signsInHere,
   statusDetail,
   statusLabel,
   statusTone,
-  usesBundledClaude,
   versionText,
 } from './executorText'
 import { ADD_CUSTOM_MODEL, useExecutorSettings } from './useExecutorSettings'
@@ -45,7 +50,7 @@ import { ADD_CUSTOM_MODEL, useExecutorSettings } from './useExecutorSettings'
 const props = defineProps<{ backend: 'claude-code' | 'codex' }>()
 
 const s = useExecutorSettings()
-const { busy, tokenBusy, catalogs, catalogBusy, runtimes } = s
+const { busy, tokenBusy, catalogs, catalogBusy, runtimes, signInPending } = s
 const name = computed(() => executorName(props.backend))
 const row = computed(() => s.rowOf(props.backend))
 const profile = computed(() => row.value.profile)
@@ -66,6 +71,10 @@ function savePath(target: ExecutorProfile) {
   void s.changeProfile(target.id, (p) => {
     p.executablePath = path
   })
+}
+const copied = ref(false)
+async function copyInstall() {
+  copied.value = await writeClipboard(CLAUDE_INSTALL_COMMAND)
 }
 async function installHelp(target: ExecutorProfile) {
   try {
@@ -236,7 +245,10 @@ const runFacts = computed(() => {
             }}</Badge></template
           >
           <template #description
-            ><span v-if="hasIssue(facts) && !authIssue(profile, facts)">{{
+            ><span v-if="claudeMissing(profile, facts)"
+              >没有找到 claude。Emperor 运行你自己安装的 Claude
+              Code，在终端运行下面的命令安装，装好后点「重新检测」。</span
+            ><span v-else-if="hasIssue(facts) && !authIssue(profile, facts)">{{
               statusDetail(profile, facts)
             }}</span
             ><span v-else data-executor-consent>{{
@@ -253,7 +265,6 @@ const runFacts = computed(() => {
               >安装说明</Button
             >
             <Button
-              v-if="!usesBundledClaude(profile)"
               size="sm"
               variant="ghost"
               data-executor-recovery
@@ -263,15 +274,30 @@ const runFacts = computed(() => {
           </div>
         </SettingsRow>
         <SettingsRow
+          v-if="claudeMissing(profile, facts)"
+          title="安装命令"
+          layout="stacked"
+          data-claude-install
+        >
+          <div class="editor">
+            <code class="command" data-claude-install-command>{{
+              CLAUDE_INSTALL_COMMAND
+            }}</code>
+            <Button
+              size="sm"
+              variant="secondary"
+              data-claude-install-copy
+              @click="copyInstall"
+              >{{ copied ? '已复制' : '复制命令' }}</Button
+            >
+          </div>
+        </SettingsRow>
+        <SettingsRow
           v-if="compatibilityWarning(profile, facts)"
           :description="compatibilityWarning(profile, facts)"
           data-executor-warning
         />
-        <SettingsRow
-          v-if="pathEditing && !usesBundledClaude(profile)"
-          title="可执行文件路径"
-          layout="stacked"
-        >
+        <SettingsRow v-if="pathEditing" title="可执行文件路径" layout="stacked">
           <div class="editor">
             <TextField
               v-model="pathText"
@@ -313,72 +339,96 @@ const runFacts = computed(() => {
         title="登录"
         data-claude-sign-in
       >
-        <SettingsRow v-if="!authIssue(profile, facts)" title="登录方式">
+        <SettingsRow title="Claude Code 的登录">
           <template #description
-            ><span data-claude-auth-source>{{
+            ><span data-claude-auth-state>{{
               signInText(facts)
             }}</span></template
           >
-          <div v-if="!signInAlert(profile, facts)" class="inline-actions">
+          <div class="inline-actions">
             <Button
-              v-if="hasEmperorToken(facts)"
+              v-if="signedInWithClaude(facts)"
               size="sm"
               variant="ghost"
-              data-claude-token-clear
+              data-claude-sign-out
               :disabled="busy || tokenBusy"
-              @click="s.clearToken(profile)"
-              >移除令牌</Button
+              @click="s.signOut(profile)"
+              >退出登录</Button
             ><Button
               size="sm"
-              variant="ghost"
-              data-claude-token-set
-              :disabled="busy || tokenBusy"
-              @click="s.tokenDialog.value = profile"
-              >{{ hasEmperorToken(facts) ? '更换令牌' : '设置令牌' }}</Button
+              :variant="signedInWithClaude(facts) ? 'ghost' : 'secondary'"
+              data-claude-sign-in-start
+              :disabled="busy || tokenBusy || claudeMissing(profile, facts)"
+              @click="s.signIn(profile)"
+              >{{
+                signedInWithClaude(facts) ? '重新登录' : '登录 Claude Code'
+              }}</Button
             >
           </div>
         </SettingsRow>
         <Notice
-          v-if="signInAlert(profile, facts)"
-          tone="warn"
-          :title="SIGN_IN_ALERT_TITLE[signInAlert(profile, facts) || 'missing']"
+          v-if="signInPending[profile.id]"
+          tone="info"
+          title="已在「终端」里打开登录"
+          data-claude-sign-in-pending
         >
-          <span data-claude-sign-in-help>
-            <template v-if="signInAlert(profile, facts) === 'soon'"
-              >长任务可能中途失败。在终端运行
-              <code>claude setup-token</code
-              >，把生成的长期令牌粘贴到这里。</template
-            ><template v-else-if="signInAlert(profile, facts) === 'expired'"
-              >~/.claude/.credentials.json 里的登录已过期。在终端运行
-              <code>claude setup-token</code
-              >，把生成的长期令牌粘贴到这里。</template
-            ><template v-else-if="signInAlert(profile, facts) === 'unreadable'"
-              >保存在 Emperor
-              的令牌已无法读取（本地密钥变了），请重新设置。</template
-            ><template v-else
-              >订阅账号：在终端运行
-              <code>claude setup-token</code>，把生成的令牌粘贴到这里；API
-              Key：粘贴 ANTHROPIC_API_KEY。Emperor 不读取钥匙串，终端里 /login
-              的登录在这里不可用。</template
-            >
-          </span>
+          按「终端」里的提示在浏览器里完成登录，回到 Emperor 后会自动重新检测。
           <template #actions>
             <Button
               size="sm"
               variant="secondary"
-              data-claude-token-set
-              :disabled="busy || tokenBusy"
-              @click="s.tokenDialog.value = profile"
-              >设置令牌</Button
-            ><Button
-              size="sm"
-              variant="ghost"
               :disabled="busy"
-              @click="s.load(true)"
+              @click="s.recheck(profile)"
               >重新检测</Button
             >
           </template>
         </Notice>
+        <Notice
+          v-if="precedenceText(facts)"
+          tone="info"
+          :title="precedenceText(facts)"
+          data-claude-precedence
+        />
+        <SettingsRow
+          title="API Key"
+          description="也可以用你在 Anthropic Console 创建的 API Key，按用量计费；它优先于上面的登录。"
+        >
+          <div class="inline-actions">
+            <Button
+              v-if="hasEmperorKey(facts)"
+              size="sm"
+              variant="ghost"
+              data-claude-api-key-clear
+              :disabled="busy || tokenBusy"
+              @click="s.clearKey(profile)"
+              >移除</Button
+            ><Button
+              size="sm"
+              variant="ghost"
+              data-claude-api-key-set
+              :disabled="busy || tokenBusy"
+              @click="s.apiKeyDialog.value = profile"
+              >{{
+                hasEmperorKey(facts) ? '更换 API Key' : '使用 API Key'
+              }}</Button
+            >
+          </div>
+        </SettingsRow>
+        <SettingsRow layout="stacked">
+          <p class="sign-in-help" data-claude-sign-in-help>
+            「登录 Claude Code」会打开 macOS 的「终端」，按 Claude Code
+            自己的流程在浏览器里登录一次。登录由 Claude Code 保存在 Emperor
+            为它准备的专用目录里；Emperor 不读取、不保存你的 Claude 登录。
+          </p>
+          <p class="sign-in-help">
+            用 Anthropic Console 账号？<LinkButton
+              data-claude-sign-in-console
+              :disabled="busy || tokenBusy || claudeMissing(profile, facts)"
+              @click="s.signIn(profile, 'console')"
+              >用 Console 账号登录（按用量计费）</LinkButton
+            >，同样在「终端」里完成。
+          </p>
+        </SettingsRow>
       </SettingsGroup>
 
       <SettingsGroup title="默认模型">
@@ -553,6 +603,21 @@ const runFacts = computed(() => {
 .editor > :first-child {
   flex: 1;
   min-width: 0;
+}
+.command {
+  overflow-x: auto;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--r-xs);
+  background: rgb(var(--surface-sunken));
+  color: rgb(var(--text-1));
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.sign-in-help {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: rgb(var(--text-3));
 }
 .specialty-tags {
   display: flex;

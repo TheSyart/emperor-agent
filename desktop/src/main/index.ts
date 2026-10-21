@@ -1724,13 +1724,24 @@ async function startup(): Promise<void> {
         }),
         ...(coreSecretSealer ? { secretSealer: coreSecretSealer } : {}),
         // Dev-build e2e only: external executors look for sign-ins in this
-        // folder instead of ~/.claude and never run the login shell (AGT-02).
+        // folder instead of ~/.claude and never run the login shell (AGT-02);
+        // 登录 Claude Code runs its script here instead of opening Terminal,
+        // against the harness's fake claude (AGT-12).
         ...(!app.isPackaged && process.env.EMPEROR_E2E_EXECUTOR_HOME
           ? {
               executorHome: {
                 home: process.env.EMPEROR_E2E_EXECUTOR_HOME,
                 environment: { PATH: process.env.PATH ?? '' },
                 loginShell: { read: async () => ({}) },
+                openTerminal: (script: string) =>
+                  new Promise<void>((done, fail) =>
+                    execFile(
+                      '/bin/bash',
+                      [script],
+                      { env: { PATH: '/usr/bin:/bin' }, timeout: 15_000 },
+                      (error) => (error ? fail(error) : done()),
+                    ),
+                  ),
               },
             }
           : {}),

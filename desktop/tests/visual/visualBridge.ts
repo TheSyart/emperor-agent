@@ -227,15 +227,16 @@ export async function installVisualCoreBridge(
         visualAgentTab !== null
       if (visualTheme === 'light' || visualTheme === 'dark')
         localStorage.setItem('emperor.theme', visualTheme)
-      // AGT-02: `?visualExecutors=signed-out|expired|soon|token` gives
-      // 设置 › 子智能体 an enabled Claude Code in that sign-in state.
+      // AGT-12: `?visualExecutors=signed-out|signed-in|api-key|endpoint|
+      // missing|notice` gives 设置 › 子智能体 an enabled Claude Code in that
+      // state (`notice`: signed out, right after the upgrade that deleted a
+      // saved token).
       const visualExecutorsMode = visualParams.get('visualExecutors')
       const visualExecutorProfiles = [
         {
           id: 'claude-default',
           backend: 'claude-code',
           enabled: true,
-          executableSource: 'bundled',
           executablePath: 'claude',
           authRef: { kind: 'managed-cli-login' },
           stateDirectoryId: 'claude-default',
@@ -267,27 +268,34 @@ export async function installVisualCoreBridge(
         },
       }
       const visualClaudeAuth = (mode: string | null) =>
-        mode === 'token'
-          ? { source: 'emperor', kind: 'oauth-token', last4: 'a1b2' }
-          : mode === 'soon'
+        mode === 'signed-in'
+          ? {
+              source: null,
+              method: 'claude.ai',
+              email: 'ada@example.com',
+              organization: 'Ada Lab',
+              subscription: 'max',
+            }
+          : mode === 'api-key'
             ? {
-                source: 'credentials-file',
-                kind: 'oauth-token',
-                expiresAt: Date.now() + 6 * 60_000,
-                expiresSoon: true,
+                source: 'emperor',
+                kind: 'api-key',
+                last4: 'c3d4',
+                method: 'api_key',
               }
-            : mode === 'expired'
+            : mode === 'endpoint'
               ? {
-                  source: null,
-                  problem: 'expired',
-                  expiresAt: Date.now() - 3_600_000,
+                  source: 'settings',
+                  kind: 'auth-token',
+                  endpoint: 'api.deepseek.com',
+                  method: 'oauth_token',
                 }
-              : { source: null, problem: 'missing' }
+              : { source: null, method: 'none', problem: 'missing' }
       const visualExecutorProbe = (id: string, mode: string | null) => {
         const base = {
           checkedAt: Date.now(),
           authVerified: false,
-          executableVersion: id === 'codex-default' ? '0.153.4' : '2.1.281',
+          executableVersion: id === 'codex-default' ? '0.153.4' : '2.1.300',
           capabilities: {
             persistentSession: true,
             queuedFollowup: true,
@@ -301,29 +309,38 @@ export async function installVisualCoreBridge(
         }
         if (id === 'codex-default')
           return { ...base, status: 'available', localAuthChecked: true }
+        if (mode === 'missing')
+          return {
+            checkedAt: Date.now(),
+            authVerified: false,
+            capabilities: base.capabilities,
+            status: 'missing',
+            diagnostic: 'claude is not installed',
+          }
         const auth = visualClaudeAuth(mode)
-        return auth.source
+        return auth.method !== 'none'
           ? {
               ...base,
               status: 'available',
               localAuthChecked: true,
-              executableSource: 'bundled',
+              requiredVersion: '>= 2.1.79',
               auth,
             }
           : {
               ...base,
               status: 'needs_auth',
               localAuthChecked: false,
-              executableSource: 'bundled',
-              diagnostic:
-                auth.problem === 'expired' ? 'AUTH_EXPIRED' : 'AUTH_REQUIRED',
+              requiredVersion: '>= 2.1.79',
+              diagnostic: 'AUTH_REQUIRED',
               auth,
             }
       }
+      let visualSignInNotice = visualExecutorsMode === 'notice'
       let visualClaudeMode = visualExecutorsMode
       const visualExecutorList = () => ({
         config: visualExecutorConfig,
         diagnostic: null,
+        signInNotice: visualSignInNotice,
         profiles: visualExecutorProfiles.map((profile) => ({
           profile,
           probe: visualExecutorProbe(profile.id, visualClaudeMode),
@@ -8106,16 +8123,26 @@ export async function installVisualCoreBridge(
               return visualExecutorConfig
             }
             case 'executors.setCredential':
-            case 'executors.clearCredential': {
+            case 'executors.clearCredential':
+            case 'executors.signOut': {
               if (!visualExecutorsMode) return {}
               visualClaudeMode =
                 operationKey === 'executors.setCredential'
-                  ? 'token'
+                  ? 'api-key'
                   : 'signed-out'
               return {
                 probe: visualExecutorProbe('claude-default', visualClaudeMode),
               }
             }
+            case 'executors.signIn': {
+              if (!visualExecutorsMode) return {}
+              // As if the user signed in in Terminal: the next check sees it.
+              visualClaudeMode = 'signed-in'
+              return { opened: true }
+            }
+            case 'executors.dismissNotice':
+              visualSignInNotice = false
+              return {}
             default:
               return {}
           }

@@ -2,8 +2,9 @@
 /**
  * 设置 › 子智能体 › 高级 (AGT-10): what most people never change — Claude
  * Code's turns per run, how long one run may take, the development
- * environment a task may use (AGT-08), which claude runs, and the switches
- * for tracking problems down (验证后再应用, 诊断模式). Saved at once.
+ * environment a task may use (AGT-08), and the switches for tracking
+ * problems down (验证后再应用, 诊断模式). Saved at once. (Claude Code is
+ * always the installed one since AGT-12: there is no binary to choose.)
  */
 import { computed } from 'vue'
 import type { ExecutorConfig } from '@emperor/core/runtime-contract'
@@ -14,7 +15,6 @@ import {
   SettingsSection,
   Switch,
 } from '../ui'
-import { usesBundledClaude } from './executorText'
 import { useExecutorSettings } from './useExecutorSettings'
 
 const s = useExecutorSettings()
@@ -118,18 +118,6 @@ function setDevEnv(key: DevEnvKey, on: boolean) {
   })
 }
 
-const claude = computed(() => s.rowOf('claude-code').profile)
-const claudeFacts = computed(() =>
-  claude.value ? s.factsOf(claude.value) : {},
-)
-function setInstalledClaude(installed: boolean) {
-  const profile = claude.value
-  if (!profile) return
-  void s.changeProfile(profile.id, (p) => {
-    p.executableSource = installed ? 'system' : 'bundled'
-  })
-}
-
 function setVerifyFirst(on: boolean) {
   void s.change((draft) => {
     if (on) draft.verifyBeforeApply = true
@@ -198,20 +186,6 @@ function setDiagnostics(on: boolean) {
             :disabled="busy"
             :aria-label="row.title"
             @update:model-value="setDevEnv(row.key, $event)"
-          />
-        </SettingsRow>
-      </SettingsGroup>
-      <SettingsGroup v-if="claude" title="Claude Code">
-        <SettingsRow
-          title="使用本机安装的 claude"
-          :description="`默认使用随 Emperor 发布的 Claude Code，不受本机 CLI 自动更新影响。改用本机安装的 claude 时需要 ${claudeFacts.probe?.requiredVersion ?? '>= 2.1'}。`"
-        >
-          <Switch
-            :model-value="!usesBundledClaude(claude)"
-            data-claude-installed-binary
-            aria-label="使用本机安装的 claude"
-            :disabled="busy"
-            @update:model-value="setInstalledClaude"
           />
         </SettingsRow>
       </SettingsGroup>

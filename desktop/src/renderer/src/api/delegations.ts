@@ -9,13 +9,24 @@ export const configureExecutors = (
 ) => invokeCore('executors.configure', input)
 export const probeExecutor = (input: CoreOperationArgs<'executors.probe'>[0]) =>
   invokeCore('executors.probe', input)
-/** 设置令牌 (AGT-02): the token goes to Core once and never comes back. */
+/** 使用 API Key (AGT-12): the key goes to Core once and never comes back. */
 export const setExecutorCredential = (
   input: CoreOperationArgs<'executors.setCredential'>[0],
 ) => invokeCore('executors.setCredential', input)
 export const clearExecutorCredential = (
   input: CoreOperationArgs<'executors.clearCredential'>[0],
 ) => invokeCore('executors.clearCredential', input)
+/** 登录 Claude Code (AGT-12): Core opens macOS Terminal on claude's own login. */
+export const signInExecutor = (
+  input: CoreOperationArgs<'executors.signIn'>[0],
+) => invokeCore('executors.signIn', input)
+/** 退出登录: `claude auth logout` in the run's environment. */
+export const signOutExecutor = (
+  input: CoreOperationArgs<'executors.signOut'>[0],
+) => invokeCore('executors.signOut', input)
+export const dismissExecutorNotice = (
+  input: CoreOperationArgs<'executors.dismissNotice'>[0],
+) => invokeCore('executors.dismissNotice', input)
 export const getDelegation = (input: CoreOperationArgs<'delegations.get'>[0]) =>
   invokeCore('delegations.get', input)
 export const getDelegationReceipt = (

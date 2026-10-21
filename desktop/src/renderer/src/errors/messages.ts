@@ -74,9 +74,16 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   PLAN_MODE_UNSUPPORTED: '计划模式下子智能体只能做只读审查。',
   OUTCOME_UNKNOWN: '还不能确认子智能体已经停止，请检查保留的成果与原生历史。',
   DELIVERY_UNKNOWN: '消息是否送达还不确定，请先查看原生历史，避免重复发送。',
-  AUTH_REQUIRED: '子智能体没有可用的登录，请在「设置 › 子智能体」设置令牌。',
-  AUTH_EXPIRED: '子智能体的登录令牌已过期，请在「设置 › 子智能体」重新设置。',
-  EXECUTOR_MISSING: '找不到 Claude Code / Codex 的命令行程序。',
+  AUTH_REQUIRED:
+    'Claude Code 还没有登录，请在「设置 › 子智能体 › Claude Code」点「登录 Claude Code」。',
+  AUTH_EXPIRED:
+    'Claude Code 的登录已失效或过期，请在「设置 › 子智能体 › Claude Code」重新登录。',
+  AUTH_STATUS_FAILED:
+    '读不到 Claude Code 的登录状态，请在「设置 › 子智能体」重新检测。',
+  AUTH_SIGN_OUT_FAILED: 'Claude Code 没有退出登录，请稍后重试。',
+  TERMINAL_UNAVAILABLE: '无法打开 macOS 的「终端」，请确认它没有被停用后再试。',
+  EXECUTOR_MISSING:
+    '找不到 Claude Code / Codex 的命令行程序，请先安装，或在「设置 › 子智能体」更正路径。',
   EXECUTOR_DISABLED: '请先在「设置 › 子智能体」里启用它。',
   EXECUTOR_INCOMPATIBLE: '命令行程序的版本不在支持范围内。',
   CONTAINMENT_UNAVAILABLE:

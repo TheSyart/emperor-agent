@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -12,8 +12,6 @@ import {
 describe('providerIcons', () => {
   it.each([
     ['openai', 'openai.svg'],
-    ['codex', 'codex.svg'],
-    ['claude-code', 'claude.svg'],
     ['anthropic', 'anthropic.svg'],
     ['dashscope', 'qwen.svg'],
     ['moonshot', 'kimi.svg'],
@@ -28,9 +26,17 @@ describe('providerIcons', () => {
       new RegExp(`/provider-logos/${fileName}$`),
     )
   })
-  it('keeps external agent logos readable as monochrome masks in both themes', () => {
-    expect(providerIconIsMonochrome('codex')).toBe(true)
-    expect(providerIconIsMonochrome('claude-code')).toBe(true)
+  it('8 · draws Claude Code and Codex with a neutral glyph, never their logos (AGT-12)', () => {
+    for (const id of ['claude-code', 'claude_code', 'codex']) {
+      expect(providerIconAsset(id), id).toBeNull()
+      expect(providerIconGlyph(id), id).toBe('agent')
+    }
+    const logos = resolve(__dirname, '../assets/provider-logos')
+    expect(existsSync(resolve(logos, 'claude.svg'))).toBe(false)
+    expect(existsSync(resolve(logos, 'codex.svg'))).toBe(false)
+    expect(readFileSync(resolve(logos, 'NOTICE.md'), 'utf8')).not.toMatch(
+      /claude\.svg|codex\.svg/,
+    )
   })
 
   it('returns null for providers without a copied upstream asset', () => {

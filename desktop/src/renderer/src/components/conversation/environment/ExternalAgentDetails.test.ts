@@ -369,10 +369,10 @@ async function failedWith(code: string) {
 it('6 · AUTH_EXPIRED says the sign-in expired and how to sign in again', async () => {
   const { note, configureButton } = await failedWith('AUTH_EXPIRED')
   expect(note.dataset.failureCode).toBe('AUTH_EXPIRED')
-  expect(note.textContent).toContain('登录令牌已失效或过期')
-  expect(note.textContent).toContain('claude setup-token')
-  expect(note.textContent).toContain('设置令牌')
-  expect(note.textContent).not.toContain('auth login')
+  expect(note.textContent).toContain('登录已失效或过期')
+  expect(note.textContent).toContain('「登录 Claude Code」')
+  expect(note.textContent).toContain('API Key')
+  expect(note.textContent).not.toMatch(/setup-token|设置令牌/)
   expect(configureButton).toBeTruthy()
 })
 it('7 · RATE_LIMITED says it hit a rate or usage limit and to wait', async () => {
