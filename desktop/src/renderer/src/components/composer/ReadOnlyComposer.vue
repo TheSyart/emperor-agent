@@ -38,7 +38,7 @@ const emit = defineEmits<{ back: []; stop: []; root: [] }>()
       {{ stopping ? '正在停止…' : '停止子智能体' }}
     </Button>
     <Button size="sm" variant="secondary" @click="emit('root')">
-      返回主会话继续派工
+      返回主会话继续安排任务
     </Button>
     <Button size="sm" @click="emit('back')">返回父智能体</Button>
   </div>

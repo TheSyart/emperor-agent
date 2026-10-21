@@ -267,7 +267,7 @@ export function contextGroups(memory: MemoryPayload | null): ContextGroup[] {
   if (runtime) {
     groups.push({
       key: 'runtime',
-      title: 'Runtime',
+      title: '运行时',
       warn: false,
       items: [
         {
@@ -306,7 +306,7 @@ export function contextGroups(memory: MemoryPayload | null): ContextGroup[] {
           term: '下次维护',
           value: next
             ? `${next.toLocaleDateString('zh-CN')} ${next.toLocaleTimeString('zh-CN', { hour12: false })}`
-            : '暂无 · Scheduler 未安排',
+            : '暂无 · 定时任务未安排',
         },
       ],
     })

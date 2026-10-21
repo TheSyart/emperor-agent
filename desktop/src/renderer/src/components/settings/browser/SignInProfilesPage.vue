@@ -137,13 +137,13 @@ onMounted(() => {
 
 <template>
   <SettingsSection
-    intro="Emperor 操作网页时用这些 profile，持久的会保留网站登录。"
+    intro="Emperor 操作网页时用这些登录档案，持久的会保留网站登录。"
   >
     <Notice v-if="error && !dialog" tone="error" :title="error" />
-    <SettingsGroup title="持久 profile">
+    <SettingsGroup title="持久登录档案">
       <EmptyState
         v-if="!persistent.length"
-        title="还没有持久 profile"
+        title="还没有持久登录档案"
         description="点右上角的「新建」创建一个，或从 Chrome 导入登录。"
         variant="inline"
         framed
@@ -179,7 +179,7 @@ onMounted(() => {
         >
       </SettingsRow>
     </SettingsGroup>
-    <SettingsGroup v-if="temporary.length" title="临时 profile">
+    <SettingsGroup v-if="temporary.length" title="临时登录档案">
       <SettingsRow
         v-for="profile in temporary"
         :key="profile.profileId"
@@ -191,7 +191,7 @@ onMounted(() => {
     </SettingsGroup>
     <Modal
       :open="dialog !== null"
-      :title="dialog?.profile ? '重命名 profile' : '新建 profile'"
+      :title="dialog?.profile ? '重命名登录档案' : '新建登录档案'"
       @update:open="onDialogOpen"
     >
       <form id="profile-form" class="profile-form" @submit.prevent="submit">

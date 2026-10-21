@@ -522,7 +522,7 @@ async function stop() {
         data-root-archived
       >
         主会话已归档 ·
-        可查看历史公开输出；继续派工、停止任务和本地文件访问不可用。
+        可查看历史公开输出；继续安排任务、停止任务和本地文件访问不可用。
       </p>
       <p
         v-if="!loading && availability !== 'ready' && availability !== 'error'"
@@ -653,14 +653,14 @@ async function stop() {
           ? '返回主会话'
           : run?.phase === 'waiting_input'
             ? '返回主会话回答'
-            : '返回主会话继续派工'
+            : '返回主会话继续安排任务'
       }}</Button
       ><Button
         v-if="needsExit && controlsAvailable && !live"
         data-abandon-child
         size="sm"
         variant="secondary"
-        title="这次运行没有正常结束（例如 Emperor 或电脑重启过）。标记为已结束会释放它占用的工作区，Goal 可以继续；保留的文件不受影响。"
+        title="这次运行没有正常结束（例如 Emperor 或电脑重启过）。标记为已结束会释放它占用的工作区，目标可以继续；保留的文件不受影响。"
         :disabled="ending"
         @click="end"
         >{{ ending ? '正在结束…' : '标记为已结束' }}</Button

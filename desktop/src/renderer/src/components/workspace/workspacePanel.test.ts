@@ -29,6 +29,11 @@ import {
   workspaceRequest,
 } from './workspaceState'
 
+// Panes are async chunks: on a cold transform cache (CI) the first one can
+// take seconds to load, more than vi.waitFor's default second.
+const PANE_LOAD = { timeout: 10_000 }
+vi.setConfig({ testTimeout: 20_000 })
+
 const SNAPSHOT = {
   sessionId: 's1',
   capturedAt: 1,
@@ -256,8 +261,9 @@ describe('WorkspacePanel', () => {
     resetFrameStateForTest()
     const root = mount()
     await flush()
-    await vi.waitFor(() =>
-      expect(root.querySelector('.files-pane')).not.toBeNull(),
+    await vi.waitFor(
+      () => expect(root.querySelector('.files-pane')).not.toBeNull(),
+      PANE_LOAD,
     )
     expect(root.querySelector('.workspace-start')).toBeNull()
     expect(root.querySelector('.workspace-launcher')).toBeNull()
@@ -281,8 +287,9 @@ describe('WorkspacePanel', () => {
     expect(useFrameState().workspace).toBeGreaterThan(0)
     expect(useFrameState().workspacePane).toBe('terminal')
     expect(root.querySelector('.workspace-start')).toBeNull()
-    await vi.waitFor(() =>
-      expect(root.querySelector('.terminal-pane')).not.toBeNull(),
+    await vi.waitFor(
+      () => expect(root.querySelector('.terminal-pane')).not.toBeNull(),
+      PANE_LOAD,
     )
   })
 

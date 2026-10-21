@@ -145,6 +145,11 @@ export function formatDurationMillis(milliseconds: number | null): string {
  * @param seconds - Duration seconds, or `null` when absent.
  * @returns `—` when unknown, otherwise an integer-millisecond label.
  */
+/** Title of a step group (`第 N 步`); `trajectoryRequestStep` reads it back. */
+export function trajectoryStepTitle(step: number): string {
+  return `第 ${step} 步`
+}
+
 export function formatElapsedSeconds(seconds: number | null): string {
   return formatDurationMillis(seconds === null ? null : seconds * 1000)
 }

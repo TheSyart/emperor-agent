@@ -190,10 +190,10 @@ function builtinOrder(name: string): number {
 }
 
 function sourceLabel(source: CommandDescriptor['source']): string {
-  if (source === 'project_skill') return 'Project'
-  if (source === 'user_skill') return 'Personal'
+  if (source === 'project_skill') return '项目'
+  if (source === 'user_skill') return '个人'
   if (source === 'plugin' || source === 'verified_plugin') return 'Plugin'
-  if (source === 'builtin_skill') return 'Built-in'
+  if (source === 'builtin_skill') return '内置'
   return ''
 }
 

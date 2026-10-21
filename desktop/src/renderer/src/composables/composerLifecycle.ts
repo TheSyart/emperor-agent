@@ -81,7 +81,7 @@ export function createComposerLifecycleController(
   }
 
   async function activatePlan(): Promise<LifecycleTransitionResult> {
-    if (mode() === 'plan') return ok(false, 'Plan 模式已经开启。')
+    if (mode() === 'plan') return ok(false, '计划模式已经开启。')
     const blocked = switchBlocked()
     if (blocked) return fail(blocked)
 
@@ -99,7 +99,7 @@ export function createComposerLifecycleController(
           cancelledGoalId = activeGoal.id
         } catch (error) {
           handledGoalTerminals.delete(activeGoal.id)
-          return fail(`Goal 取消失败：${errorMessage(error)}`)
+          return fail(`目标取消失败：${errorMessage(error)}`)
         }
       } else if (options.currentGoalCaptureStatus() === 'armed') {
         options.clearGoalCapture()
@@ -110,13 +110,13 @@ export function createComposerLifecycleController(
       } catch (error) {
         if (cancelledGoalId) {
           await options.setPlanEnabled(false).catch(() => undefined)
-          return fail(`Goal 已取消，但 Plan 开启失败：${errorMessage(error)}`)
+          return fail(`目标已取消，但计划开启失败：${errorMessage(error)}`)
         }
-        return fail(`Plan 模式开启失败：${errorMessage(error)}`)
+        return fail(`计划模式开启失败：${errorMessage(error)}`)
       }
       return ok(
         true,
-        cancelledGoalId ? 'Goal 已取消，已切换到 Plan。' : 'Plan 模式已开启。',
+        cancelledGoalId ? '目标已取消，已切换到计划。' : '计划模式已开启。',
       )
     } finally {
       transitioning = false
@@ -125,25 +125,25 @@ export function createComposerLifecycleController(
 
   async function deactivatePlan(): Promise<LifecycleTransitionResult> {
     if (mode() === 'goal')
-      return fail('当前顶层模式是 Goal；`/plan off` 不会修改 Goal 内部规划。')
-    if (mode() !== 'plan') return ok(false, 'Plan 模式已经关闭。')
+      return fail('当前顶层模式是目标；`/plan off` 不会修改目标内部的规划。')
+    if (mode() !== 'plan') return ok(false, '计划模式已经关闭。')
     const blocked = switchBlocked()
     if (blocked) return fail(blocked)
     transitioning = true
     try {
       await options.setPlanEnabled(false)
-      return ok(true, 'Plan 模式已关闭。')
+      return ok(true, '计划模式已关闭。')
     } catch (error) {
-      return fail(`Plan 模式关闭失败：${errorMessage(error)}`)
+      return fail(`计划模式关闭失败：${errorMessage(error)}`)
     } finally {
       transitioning = false
     }
   }
 
   async function activateGoalCapture(): Promise<LifecycleTransitionResult> {
-    if (options.currentGoal()) return fail('当前会话已有 active Goal。')
+    if (options.currentGoal()) return fail('当前会话已有进行中的目标。')
     if (options.currentGoalCaptureStatus() === 'armed')
-      return ok(false, 'Goal 正在等待输入 Outcome。')
+      return ok(false, '目标正在等待输入目标描述。')
     const blocked = switchBlocked()
     if (blocked) return fail(blocked)
 
@@ -153,11 +153,11 @@ export function createComposerLifecycleController(
         try {
           await options.setPlanEnabled(false)
         } catch (error) {
-          return fail(`Plan 模式关闭失败：${errorMessage(error)}`)
+          return fail(`计划模式关闭失败：${errorMessage(error)}`)
         }
       }
       const armed = options.armGoalCapture()
-      if (!armed.ok) return fail(armed.error || 'Goal 待输入状态开启失败。')
+      if (!armed.ok) return fail(armed.error || '目标待输入状态开启失败。')
       return ok(true, '请描述要持续完成的目标。')
     } finally {
       transitioning = false
@@ -168,8 +168,8 @@ export function createComposerLifecycleController(
     outcome: string,
   ): Promise<GoalOperationResult> {
     const normalized = outcome.trim()
-    if (!normalized) throw new Error('Outcome 不能为空。')
-    if (options.currentGoal()) throw new Error('当前会话已有 active Goal。')
+    if (!normalized) throw new Error('目标描述不能为空。')
+    if (options.currentGoal()) throw new Error('当前会话已有进行中的目标。')
     const blocked = switchBlocked()
     if (blocked) throw new Error(blocked)
 
@@ -193,7 +193,7 @@ export function createComposerLifecycleController(
     if (blocked) return fail(blocked)
     if (options.currentGoalCaptureStatus() === 'armed') {
       options.clearGoalCapture()
-      return ok(true, '已退出 Goal 待输入状态。')
+      return ok(true, '已退出目标待输入状态。')
     }
 
     const activeGoal = options.currentGoal()
@@ -205,10 +205,10 @@ export function createComposerLifecycleController(
       await options.cancelGoal(activeGoal.id, 'user_confirmed_cancel')
       if (options.currentControl()?.plan === true)
         await options.setPlanEnabled(false)
-      return ok(true, 'Goal 已取消。')
+      return ok(true, '目标已取消。')
     } catch (error) {
       handledGoalTerminals.delete(activeGoal.id)
-      return fail(`Goal 取消失败：${errorMessage(error)}`)
+      return fail(`目标取消失败：${errorMessage(error)}`)
     } finally {
       transitioning = false
     }
@@ -221,9 +221,9 @@ export function createComposerLifecycleController(
     if (options.currentControl()?.plan !== true) return ok(false)
     try {
       await options.setPlanEnabled(false)
-      return ok(true, 'Goal 已结束，执行权限已恢复。')
+      return ok(true, '目标已结束，执行权限已恢复。')
     } catch (error) {
-      return fail(`Goal 已结束，但执行权限恢复失败：${errorMessage(error)}`)
+      return fail(`目标已结束，但执行权限恢复失败：${errorMessage(error)}`)
     }
   }
 

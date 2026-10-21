@@ -657,7 +657,7 @@ function unsupported(
   id: string,
   sourcePath: string,
 ): ResolvedPluginComponent {
-  const label = { agent: '子代理', command: '命令', lsp: 'LSP' }[kind]
+  const label = { agent: '子智能体', command: '命令', lsp: 'LSP' }[kind]
   return {
     kind,
     id,

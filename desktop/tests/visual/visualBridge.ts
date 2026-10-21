@@ -366,11 +366,11 @@ export async function installVisualCoreBridge(
           busyPolicy: 'after_turn',
           dangerous: true,
         }),
-        visualCommand('plan', '模型与执行', '开启 Plan 并生成实施方案', {
+        visualCommand('plan', '模型与执行', '开启计划并生成实施方案', {
           busyPolicy: 'after_turn',
           argumentHint: '[on|off|status|open|description]',
         }),
-        visualCommand('goal', '模型与执行', '启动或管理长期 Goal', {
+        visualCommand('goal', '模型与执行', '启动或管理长期目标', {
           busyPolicy: 'after_turn',
           argumentHint: '[start|status|list|pause|resume|cancel]',
         }),
@@ -2120,8 +2120,8 @@ export async function installVisualCoreBridge(
             id: 'goal_visual_lifecycle',
             status: 'active',
             phase: normalizedGoalPhase,
-            outcome: '让 Composer 的 Goal 生命周期清晰、可控并且可恢复',
-            objective: '让 Composer 的 Goal 生命周期清晰、可控并且可恢复',
+            outcome: '让 Composer 的目标生命周期清晰、可控并且可恢复',
+            objective: '让 Composer 的目标生命周期清晰、可控并且可恢复',
             revision: 1,
             roundsStarted: 2,
             maxGoalRounds: 8,

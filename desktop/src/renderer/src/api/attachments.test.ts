@@ -50,7 +50,7 @@ describe('attachment API Core IPC (MIG-IPC-010)', () => {
     const file = new File(['hello'], 'note.txt', { type: 'text/plain' })
 
     await expect(uploadAttachment(file)).rejects.toThrow(
-      'Core IPC bridge is unavailable; use the Electron desktop window.',
+      '无法连接 Emperor 核心：请在 Emperor 桌面窗口中打开。',
     )
     expect(fetchSpy).not.toHaveBeenCalled()
   })

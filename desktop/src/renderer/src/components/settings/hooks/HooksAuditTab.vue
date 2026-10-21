@@ -119,13 +119,13 @@ function details(record: HookAuditRecordPayload): DefinitionItem[] {
         expandable
         :open="selectedAudit === record"
         :title="record.handlerId"
-        :description="`${record.eventName} · turn ${record.turn}`"
+        :description="`${record.eventName} · 第 ${record.turn} 轮`"
         data-testid="hooks-audit-record"
         @update:open="toggleAudit(record, $event)"
       >
         <template #meta>
           <Badge :tone="hookOutcomeTone(record.outcome)" variant="dot-label">
-            {{ record.outcome || 'none' }}
+            {{ record.outcome || '无' }}
           </Badge>
         </template>
         <template #actions>

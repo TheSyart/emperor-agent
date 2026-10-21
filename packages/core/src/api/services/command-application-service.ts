@@ -276,7 +276,7 @@ export class CoreCommandApplicationService {
       return completed(
         context,
         'skill_forked',
-        `Skill ${binding.name} 已在子代理中运行。`,
+        `Skill ${binding.name} 已在子智能体中运行。`,
         { subagentId, skill: binding.name },
       )
     }
@@ -397,13 +397,13 @@ function planMessage(
   active: boolean,
 ): string {
   if (outcome === 'noop')
-    return active ? '已处于 Plan 模式。' : '当前未处于 Plan 模式。'
+    return active ? '已处于计划模式。' : '当前未处于计划模式。'
   if (outcome === 'queued')
     return active
-      ? 'Plan 模式将在当前步骤结束后开启。'
-      : 'Plan 模式将在当前步骤结束后关闭。'
-  if (outcome === 'cancelled') return '已撤销尚未生效的 Plan 模式切换。'
-  return active ? 'Plan 模式已开启。' : 'Plan 模式已关闭。'
+      ? '计划模式将在当前步骤结束后开启。'
+      : '计划模式将在当前步骤结束后关闭。'
+  if (outcome === 'cancelled') return '已撤销尚未生效的计划模式切换。'
+  return active ? '计划模式已开启。' : '计划模式已关闭。'
 }
 
 function rejected(code: string, message: string): CommandInvocationResult {

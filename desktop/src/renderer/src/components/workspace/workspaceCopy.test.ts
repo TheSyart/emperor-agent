@@ -83,8 +83,11 @@ function copyOf(source: string): string[] {
 }
 
 function englishWords(text: string): string[] {
-  // Example addresses (example.com, localhost:5173) are not words.
-  const prose = text.replace(/\b[\w-]+(?:\.[\w-]+)+(?::\d+)?\b/g, ' ')
+  // Example addresses (example.com, localhost:5173) and command flags
+  // (`git pull --ff-only` in a tooltip) are not words.
+  const prose = text
+    .replace(/\b[\w-]+(?:\.[\w-]+)+(?::\d+)?\b/g, ' ')
+    .replace(/(?:^|\s)--?[\w-]+/g, ' ')
   return [...prose.matchAll(/[A-Za-z][A-Za-z-]+/g)]
     .map((match) => match[0])
     .filter((word) => !TERMS.has(word.toLowerCase()))

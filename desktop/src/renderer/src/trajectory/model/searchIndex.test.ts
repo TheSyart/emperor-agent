@@ -10,7 +10,7 @@ const turns: readonly TrajectoryTurnModel[] = [
     turn: 1,
     groups: [
       {
-        title: 'Message',
+        title: '消息',
         cells: [
           {
             index: 1,
@@ -23,7 +23,7 @@ const turns: readonly TrajectoryTurnModel[] = [
         ],
       },
       {
-        title: 'Step 1',
+        title: '第 1 步',
         cells: [
           {
             index: 2,
@@ -69,7 +69,7 @@ describe('TrajectorySearchIndex', () => {
     ])
     expect(index.search('bash color')?.size).toBe(0)
     expect(
-      trajectorySearchMatchIndexes([turns], index.search('step 1')),
+      trajectorySearchMatchIndexes([turns], index.search('第 1 步')),
     ).toEqual(new Set([3]))
     expect(trajectorySearchMatchIndexes([turns], null)).toBeNull()
   })

@@ -73,7 +73,7 @@ export const routeRecords: RouteRecordRaw[] = [
     path: '/chat/:sessionId/trajectory',
     name: 'trajectory',
     component: ConversationView,
-    meta: { label: 'Trajectory', tab: 'trajectory' },
+    meta: { label: '轨迹', tab: 'trajectory' },
     // UI-S09: opens only while 设置 › 常规 › 开发者 › 显示轨迹 is on.
     beforeEnter: trajectoryRouteGuard,
   },
@@ -81,7 +81,7 @@ export const routeRecords: RouteRecordRaw[] = [
     path: '/chat/:sessionId?',
     name: 'chat',
     component: ConversationView,
-    meta: { label: 'Chat', tab: 'chat' },
+    meta: { label: '对话', tab: 'chat' },
   },
   // Full pages (no workspace column).
   {
@@ -118,7 +118,7 @@ export const routeRecords: RouteRecordRaw[] = [
     path: '/github/issues/:owner?/:repo?/:number?',
     name: 'github-issues',
     component: GitHubIssuesPage,
-    meta: { label: 'Issue', page: true },
+    meta: { label: '议题', page: true },
   },
   {
     path: '/github/ci/:owner?/:repo?/:runId?',

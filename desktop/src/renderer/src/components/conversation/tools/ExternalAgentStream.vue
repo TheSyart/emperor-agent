@@ -87,7 +87,7 @@ watch(
         :text="run.text"
         :streaming="live"
       />
-      <p v-else-if="live" class="stream-note">等待执行器输出…</p>
+      <p v-else-if="live" class="stream-note">等待子智能体输出…</p>
       <ol v-if="run.activity.length" class="stream-tools">
         <li v-for="(tool, index) in run.activity" :key="index">
           <span>{{

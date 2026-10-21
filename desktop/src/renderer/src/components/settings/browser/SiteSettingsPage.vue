@@ -191,7 +191,7 @@ onMounted(() => {
         <Field label="权限">
           <Select v-model="kind" :options="KINDS" block />
         </Field>
-        <Field label="profile">
+        <Field label="登录档案">
           <Select v-model="profileId" :options="profileOptions" block />
         </Field>
         <Field label="有效分钟数" hint="留空表示一直有效">

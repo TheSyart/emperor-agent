@@ -156,7 +156,7 @@ describe('model API Core IPC (MIG-IPC-010)', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
 
     await expect(testModelEntry('entry-1', 'text')).rejects.toThrow(
-      'Core IPC bridge is unavailable; use the Electron desktop window.',
+      '无法连接 Emperor 核心：请在 Emperor 桌面窗口中打开。',
     )
     expect(fetchSpy).not.toHaveBeenCalled()
   })

@@ -39,7 +39,7 @@ describe('ComposerCard controller/view ownership', () => {
     expect(controller).toContain('useAttachments(')
     expect(modelControl).toContain("emit('set-permission', mode)")
     expect(controller).toContain("emit('start-goal', content)")
-    expect(controller).toContain('Goal Outcome 暂仅支持纯文字')
+    expect(controller).toContain('目标描述暂仅支持纯文字')
     expect(controller).toContain('uploading.value.size > 0')
     expect(palette).toContain('buildCapabilityPickerGroups(')
   })
@@ -60,8 +60,8 @@ describe('ComposerCard controller/view ownership', () => {
     expect(model).toContain("emit('select-model', entry.entryId)")
     expect(model).toContain('entry.entryId === activeId')
     expect(modelControl).toContain('currentModel?.reasoningEfforts')
-    expect(modelControl).toContain("if (normalized === 'xhigh') return 'XHigh'")
-    expect(modelControl).toContain("if (normalized === 'max') return 'Max'")
+    expect(modelControl).toContain("if (normalized === 'xhigh') return '超高'")
+    expect(modelControl).toContain("if (normalized === 'max') return '最高'")
   })
 
   it('caps the draft at the dsh 14-line height', () => {

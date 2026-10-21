@@ -105,8 +105,13 @@ export interface VaultStatus {
   handles: VaultEntry[]
 }
 
+// The Chinese texts of Core's error codes (errors/messages.ts): a chunk of
+// its own, fetched as soon as this module loads, so its 176 texts stay out
+// of the startup bundle and are in hand by the first failed call.
+const errorTexts = import('../errors/messages').catch(() => null)
+
 export const CORE_BRIDGE_UNAVAILABLE_MESSAGE =
-  'Core IPC bridge is unavailable; use the Electron desktop window.'
+  '无法连接 Emperor 核心：请在 Emperor 桌面窗口中打开。'
 
 interface EmperorBridge {
   vaultStatus?: () => Promise<VaultStatus>
@@ -523,11 +528,18 @@ export async function invokeCore<Key extends CoreOperationKey>(
   const result = await invoke(operationKey, ...args)
   if (isCoreIpcErrorEnvelope(result)) {
     const safeError = safeCoreIpcError(result)
-    const error = new Error(safeError.message) as Error & {
+    // The message is what the UI shows; the code and Core's own message
+    // stay on the error for logic and for copying.
+    const texts = await errorTexts
+    const error = new Error(
+      texts ? texts.coreErrorText(safeError) : safeError.message,
+    ) as Error & {
       errorId?: string
       code?: string
       action?: string
+      detail?: string
     }
+    if (texts) error.detail = texts.coreErrorDetail(safeError)
     if (safeError.errorId) error.errorId = safeError.errorId
     if (safeError.code) error.code = safeError.code
     if (safeError.action) error.action = safeError.action
