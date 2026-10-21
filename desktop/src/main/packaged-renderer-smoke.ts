@@ -141,6 +141,11 @@ export interface PackagedRendererSmokeReceipt {
   nodeGlobalsAbsent: boolean
   coreBridge: boolean
   coreBootstrap: boolean
+  /**
+   * REL-05: what the renderer read from window.emperor.appVersion(), which
+   * main answers with app.getVersion(); must be the app's own version.
+   */
+  appVersion: string | null
   deepLinkRenders: boolean
   attachment: { ok: boolean; bytes: number }
   webPreferences: {
@@ -195,6 +200,8 @@ export async function verifyPackagedRenderer(opts: {
   createWindow: () => PackagedSmokeWindowLike
   /** What the real main window loads (renderer-url.ts mainRendererUrl). */
   rendererUrl: string
+  /** app.getVersion(): what the renderer must read over the bridge (REL-05). */
+  appVersion: string
   attachmentUrl: string
   attachmentContent: string
   /** REL-04: what a request that escaped its app:// root would return. */
@@ -273,6 +280,7 @@ export async function verifyPackagedRenderer(opts: {
       nodeGlobalsAbsent: probe.nodeGlobalsAbsent === true,
       coreBridge: probe.bridgeExposed === true,
       coreBootstrap: probe.bootstrapOk === true,
+      appVersion: boundedVersion(probe.appVersion),
       deepLinkRenders:
         probe.appMounted === true && deepProbe.appMounted === true,
       attachment: {
@@ -295,6 +303,8 @@ export async function verifyPackagedRenderer(opts: {
       !receipt.nodeGlobalsAbsent && 'node-globals',
       !receipt.coreBridge && 'core-bridge',
       !receipt.coreBootstrap && 'core-bootstrap',
+      receipt.appVersion !== opts.appVersion &&
+        `app-version (${receipt.appVersion ?? 'none'}, expected ${opts.appVersion})`,
       !receipt.deepLinkRenders && 'deep-link-render',
       (!receipt.attachment.ok || receipt.attachment.bytes !== expectedBytes) &&
         'attachment',
@@ -360,6 +370,13 @@ export function rendererProbeSource(
       const boot = await bridge.invokeCore('bootstrap')
       bootstrapOk = Boolean(boot && boot.app === 'Emperor Agent')
     }
+    // REL-05: the version the renderer reads, from main's app.getVersion().
+    let appVersion = null
+    if (bridgeExposed && typeof bridge.appVersion === 'function') {
+      try {
+        appVersion = await bridge.appVersion()
+      } catch {}
+    }
     let response
     try {
       response = await fetch(${url})
@@ -419,6 +436,7 @@ export function rendererProbeSource(
       rendererSandboxed,
       appMounted,
       bootstrapOk,
+      appVersion,
       attachmentOk: response.ok && body === ${content},
       attachmentBytes: new TextEncoder().encode(body).byteLength,
       cspHeader,
@@ -435,6 +453,12 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object'
     ? (value as Record<string, unknown>)
     : {}
+}
+
+function boundedVersion(value: unknown): string | null {
+  return typeof value === 'string' && /^[0-9A-Za-z.+-]{1,64}$/.test(value)
+    ? value
+    : null
 }
 
 function boundedInteger(value: unknown): number {

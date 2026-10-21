@@ -82,6 +82,7 @@ import { applicationMenuTemplate, menuRoles } from './app-menu'
 import { defaultSessionPermission } from './renderer-permissions'
 import { hardenSession } from './computer-use/session-hardening'
 import { registerOpenPathIpc } from './open-path-ipc'
+import { registerAppVersionIpc } from './app-version-ipc'
 import { registerRemoteImageIpc } from './remote-image-ipc'
 import {
   createScreenshotCapture,
@@ -489,6 +490,13 @@ ipcMain.handle(SELECT_DIRECTORY_CHANNEL, async (event) => {
     : await dialog.showOpenDialog(options)
   if (result.canceled || !result.filePaths.length) return null
   return result.filePaths[0]
+})
+
+// REL-05: the renderer's app version is app.getVersion(), never the preload's.
+registerAppVersionIpc({
+  ipcMain,
+  authorize: (event) => trustedRendererPolicy.authorizeIpc(event),
+  version: () => app.getVersion(),
 })
 
 // MAIN-27: only folders Core vouches for, never a renderer-chosen path.
@@ -2012,6 +2020,8 @@ async function startup(): Promise<void> {
                 isPackaged: app.isPackaged,
                 env: process.env,
               }),
+              // REL-05: the renderer must read this over the bridge.
+              appVersion: app.getVersion(),
               attachmentUrl: attachment.url,
               attachmentContent: attachment.content,
               // REL-04: what an app:// request outside its root would return.

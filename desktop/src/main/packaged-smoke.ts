@@ -326,6 +326,7 @@ export async function runPackagedSmoke(
     const renderer = assertRendererReceipt(
       await opts.verifyRenderer(),
       opts.platform,
+      opts.appVersion,
     )
     // Before the helpers: loading the real UI can start the Computer Use
     // helper, and the helper check is what shuts it down and forgets it.
@@ -691,12 +692,15 @@ function packagedLifecycleReceipt(value: unknown): {
 function assertRendererReceipt(
   value: PackagedRendererSmokeReceipt,
   platform: NodeJS.Platform | string,
+  appVersion: string,
 ): PackagedRendererSmokeReceipt {
   const valid =
     value?.ok === true &&
     value.nodeGlobalsAbsent === true &&
     value.coreBridge === true &&
     value.coreBootstrap === true &&
+    // REL-05: the renderer read the app's own version from main.
+    value.appVersion === appVersion &&
     value.deepLinkRenders === true &&
     value.attachment?.ok === true &&
     Number.isSafeInteger(value.attachment.bytes) &&
@@ -731,6 +735,7 @@ function assertRendererReceipt(
     nodeGlobalsAbsent: true,
     coreBridge: true,
     coreBootstrap: true,
+    appVersion,
     deepLinkRenders: true,
     attachment: { ok: true, bytes: value.attachment.bytes },
     webPreferences: {
@@ -758,6 +763,7 @@ function failedRendererReceipt(): PackagedRendererSmokeReceipt {
     nodeGlobalsAbsent: false,
     coreBridge: false,
     coreBootstrap: false,
+    appVersion: null,
     deepLinkRenders: false,
     attachment: { ok: false, bytes: 0 },
     webPreferences: {

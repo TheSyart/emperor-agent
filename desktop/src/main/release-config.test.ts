@@ -214,15 +214,26 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       /extendInfo:\r?\n\s+NSMicrophoneUsageDescription: \S/,
     )
     expect(config).toMatch(/\n\s+NSSpeechRecognitionUsageDescription: \S/)
-    for (const file of [
-      'entitlements.mac.plist',
-      'entitlements.mac.inherit.plist',
-    ])
-      expect(
-        fs.readFileSync(path.join(desktopRoot, 'build', file), 'utf8'),
-      ).toMatch(
-        /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\/>/,
-      )
+    // Every public build (Preview and Stable, REL-05) is sealed ad hoc with
+    // these: the app holds the microphone, its Electron helpers do not.
+    const audioInput =
+      /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\/>/
+    expect(
+      fs.readFileSync(
+        path.join(desktopRoot, 'build', 'entitlements.preview.mac.plist'),
+        'utf8',
+      ),
+    ).toMatch(audioInput)
+    expect(
+      fs.readFileSync(
+        path.join(
+          desktopRoot,
+          'build',
+          'entitlements.preview.mac.inherit.plist',
+        ),
+        'utf8',
+      ),
+    ).not.toMatch(audioInput)
     const assemble = fs.readFileSync(
       path.join(
         desktopRoot,
@@ -375,6 +386,128 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     expect(viteConfig).toContain("include: ['typescript', 'node-pty']")
     expect(pkg.scripts?.['terminal:smoke']).toContain('smoke-node-pty.cjs')
     expect(pkg.scripts?.build).toContain('node scripts/audit-preload.cjs')
+  })
+
+  it('ships turndown and its DOM, which the main bundle imports at run time (REL-05)', () => {
+    const config = fs.readFileSync(
+      path.join(desktopRoot, 'electron-builder.yml'),
+      'utf8',
+    )
+    for (const pattern of [
+      '  - node_modules/turndown/package.json',
+      '  - node_modules/turndown/lib/turndown.cjs.js',
+      '  - node_modules/@mixmark-io/domino/package.json',
+      '  - node_modules/@mixmark-io/domino/lib/**/*.js',
+    ])
+      expect(config, pattern).toContain(pattern)
+    const hook = require(
+      path.join(desktopRoot, 'scripts', 'after-pack.cjs'),
+    ) as { isAllowedNodeModuleEntry(entry: string): boolean }
+    for (const entry of [
+      '/node_modules/turndown',
+      '/node_modules/turndown/package.json',
+      '/node_modules/turndown/lib',
+      '/node_modules/turndown/lib/turndown.cjs.js',
+      '/node_modules/@mixmark-io',
+      '/node_modules/@mixmark-io/domino',
+      '/node_modules/@mixmark-io/domino/package.json',
+      '/node_modules/@mixmark-io/domino/lib',
+      '/node_modules/@mixmark-io/domino/lib/index.js',
+    ])
+      expect(hook.isAllowedNodeModuleEntry(entry), entry).toBe(true)
+    for (const entry of [
+      '/node_modules/turndown/lib/turndown.browser.umd.js',
+      '/node_modules/turndown/dist/turndown.js',
+      '/node_modules/@mixmark-io/domino/lib/index.d.ts',
+      '/node_modules/@mixmark-io/domino/test/w3c.js',
+      '/node_modules/@mixmark-io/other/package.json',
+    ])
+      expect(hook.isAllowedNodeModuleEntry(entry), entry).toBe(false)
+  })
+
+  it('refuses a package whose main bundle imports what app.asar does not ship (REL-05)', async () => {
+    const hook = require(
+      path.join(desktopRoot, 'scripts', 'after-pack.cjs'),
+    ) as {
+      runtimeImportProblems(asarPath: string, entries: string[]): string[]
+    }
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'emperor-imports-'))
+    const build = async (
+      name: string,
+      files: Record<string, string>,
+    ): Promise<{ asar: string; entries: string[] }> => {
+      const stage = path.join(root, name)
+      for (const [file, body] of Object.entries(files)) {
+        fs.mkdirSync(path.dirname(path.join(stage, file)), { recursive: true })
+        fs.writeFileSync(path.join(stage, file), body)
+      }
+      const asar = path.join(root, `${name}.asar`)
+      await createPackage(stage, asar)
+      await waitForCompleteAsar(asar, regularFileBytes(stage))
+      const { listPackage } = require('@electron/asar') as {
+        listPackage(path: string): string[]
+      }
+      return { asar, entries: listPackage(asar) }
+    }
+    const main = [
+      'import { app } from "electron";',
+      'import * as fs from "node:fs";',
+      'import { EventEmitter } from "events";',
+      'import TurndownService from "turndown";',
+      'import * as nodePty from "node-pty";',
+      'const lazy = () => import("@scope/lazy/sub");',
+      // A string that only looks like an import is not one.
+      'const text = `require("ajv-formats/dist/formats")`;',
+      '',
+    ].join('\n')
+    const ptyPackage = JSON.stringify({
+      name: 'node-pty',
+      dependencies: { 'node-addon-api': '^7.1.0' },
+    })
+    const turndownPackage = JSON.stringify({
+      name: 'turndown',
+      main: 'lib/turndown.cjs.js',
+      dependencies: { '@mixmark-io/domino': '^2.2.0' },
+    })
+    try {
+      const nothing = await build('nothing', {
+        'out/main/index.js': main,
+        'node_modules/node-pty/package.json': ptyPackage,
+      })
+      expect(hook.runtimeImportProblems(nothing.asar, nothing.entries)).toEqual(
+        [
+          '/out/main/index.js imports turndown, which app.asar does not ship',
+          '/out/main/index.js imports @scope/lazy, which app.asar does not ship',
+        ],
+      )
+
+      const noDom = await build('no-dom', {
+        'out/main/index.js': main,
+        'out/main/chunk.js': 'import "@scope/lazy";\n',
+        'node_modules/node-pty/package.json': ptyPackage,
+        'node_modules/turndown/package.json': turndownPackage,
+        'node_modules/@scope/lazy/package.json': '{"name":"@scope/lazy"}',
+      })
+      expect(hook.runtimeImportProblems(noDom.asar, noDom.entries)).toEqual([
+        'turndown needs @mixmark-io/domino, which app.asar does not ship',
+      ])
+
+      const complete = await build('complete', {
+        'out/main/index.js': main,
+        'node_modules/node-pty/package.json': ptyPackage,
+        'node_modules/turndown/package.json': turndownPackage,
+        'node_modules/@mixmark-io/domino/package.json':
+          '{"name":"@mixmark-io/domino"}',
+        'node_modules/@scope/lazy/package.json': '{"name":"@scope/lazy"}',
+      })
+      // node-pty's node-addon-api only builds the addon; the prebuilt
+      // binary never loads it.
+      expect(
+        hook.runtimeImportProblems(complete.asar, complete.entries),
+      ).toEqual([])
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it("8. ships only the build architecture's Claude SDK binary (AGT-01)", () => {
@@ -600,6 +733,61 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     expect(runner).toContain("LOCALAPPDATA: join(homeRoot, 'AppData', 'Local')")
     expect(runner).toContain('TEMP: tempRoot')
     expect(runner).toContain('TMP: tempRoot')
+  })
+
+  it('names the commit in the smoke receipt from a worktree too (REL-05)', () => {
+    const { readGitCommit } = require(
+      path.join(desktopRoot, 'scripts', 'build-commit.cjs'),
+    ) as { readGitCommit(root: string): string }
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'emperor-commit-'))
+    const head = 'd'.repeat(40)
+    const packed = 'e'.repeat(40)
+    try {
+      // A plain checkout: .git is a folder, HEAD names a loose ref.
+      const plain = path.join(root, 'plain')
+      fs.mkdirSync(path.join(plain, '.git', 'refs', 'heads'), {
+        recursive: true,
+      })
+      fs.writeFileSync(
+        path.join(plain, '.git', 'HEAD'),
+        'ref: refs/heads/main\n',
+      )
+      fs.writeFileSync(
+        path.join(plain, '.git', 'refs', 'heads', 'main'),
+        `${head}\n`,
+      )
+      expect(readGitCommit(plain)).toBe(head)
+
+      // A worktree: .git is a file naming its git dir, whose commondir holds
+      // the refs; the branch is only in packed-refs.
+      const common = path.join(root, 'main', '.git')
+      const gitDir = path.join(common, 'worktrees', 'rel')
+      fs.mkdirSync(gitDir, { recursive: true })
+      fs.writeFileSync(path.join(gitDir, 'HEAD'), 'ref: refs/heads/rel\n')
+      fs.writeFileSync(path.join(gitDir, 'commondir'), '../..\n')
+      fs.writeFileSync(
+        path.join(common, 'packed-refs'),
+        `# pack-refs with: peeled fully-peeled sorted\n${packed} refs/heads/rel\n`,
+      )
+      const worktree = path.join(root, 'rel')
+      fs.mkdirSync(worktree)
+      fs.writeFileSync(path.join(worktree, '.git'), `gitdir: ${gitDir}\n`)
+      expect(readGitCommit(worktree)).toBe(packed)
+
+      // A detached worktree HEAD is the commit itself.
+      fs.writeFileSync(path.join(gitDir, 'HEAD'), `${head}\n`)
+      expect(readGitCommit(worktree)).toBe(head)
+
+      expect(readGitCommit(path.join(root, 'nowhere'))).toBe('local')
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+    expect(
+      fs.readFileSync(
+        path.join(desktopRoot, 'scripts', 'run-packaged-smoke.cjs'),
+        'utf8',
+      ),
+    ).toContain("require('./build-commit.cjs')")
   })
 
   it('build_desktop_release does not require the Python backend bundle', () => {

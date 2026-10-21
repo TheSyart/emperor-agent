@@ -17,6 +17,8 @@ const PROBE = {
   bridgeExposed: true,
   rendererSandboxed: true,
   bootstrapOk: true,
+  // REL-05: what window.emperor.appVersion() answered (app.getVersion()).
+  appVersion: '0.2.0',
   appMounted: true,
   attachmentOk: true,
   attachmentBytes: 22,
@@ -75,6 +77,7 @@ describe('packaged renderer smoke', () => {
     const receipt = await verifyPackagedRenderer({
       createWindow: () => win,
       rendererUrl: 'app://bundle/index.html',
+      appVersion: '0.2.0',
       attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
       attachmentContent: 'emperor-renderer-smoke',
       traversal: TRAVERSAL,
@@ -95,6 +98,7 @@ describe('packaged renderer smoke', () => {
       nodeGlobalsAbsent: true,
       coreBridge: true,
       coreBootstrap: true,
+      appVersion: '0.2.0',
       deepLinkRenders: true,
       attachment: { ok: true, bytes: 22 },
       webPreferences: {
@@ -129,6 +133,7 @@ describe('packaged renderer smoke', () => {
         verifyPackagedRenderer({
           createWindow: () => win,
           rendererUrl,
+          appVersion: '0.2.0',
           attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
           attachmentContent: 'emperor-renderer-smoke',
           traversal: TRAVERSAL,
@@ -163,6 +168,7 @@ describe('packaged renderer smoke', () => {
         verifyPackagedRenderer({
           createWindow: () => win,
           rendererUrl: 'app://bundle/index.html',
+          appVersion: '0.2.0',
           attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
           attachmentContent: 'emperor-renderer-smoke',
           traversal: TRAVERSAL,
@@ -195,6 +201,7 @@ describe('packaged renderer smoke', () => {
       verifyPackagedRenderer({
         createWindow: () => win,
         rendererUrl: 'app://bundle/index.html',
+        appVersion: '0.2.0',
         attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
         attachmentContent: 'emperor-renderer-smoke',
         traversal: TRAVERSAL,
@@ -210,6 +217,44 @@ describe('packaged renderer smoke', () => {
     expect(destroy).toHaveBeenCalledOnce()
   })
 
+  it.each([
+    ['another version', { appVersion: '0.1.0' }],
+    ['no version at all', { appVersion: null }],
+    ['a bridge without appVersion', { appVersion: undefined }],
+  ])(
+    '5. fails when the renderer sees %s instead of app.getVersion() (REL-05)',
+    async (_name, override) => {
+      const { win, destroy } = fakeWindow({ probe: { ...PROBE, ...override } })
+      await expect(
+        verifyPackagedRenderer({
+          createWindow: () => win,
+          rendererUrl: 'app://bundle/index.html',
+          appVersion: '0.2.0',
+          attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
+          attachmentContent: 'emperor-renderer-smoke',
+          traversal: TRAVERSAL,
+          chromiumSandboxDisabledForTest: false,
+          webPreferences: {
+            sandbox: true,
+            contextIsolation: true,
+            nodeIntegration: false,
+          },
+          security: security(),
+        }),
+      ).rejects.toThrow(/app-version/)
+      expect(destroy).toHaveBeenCalledOnce()
+    },
+  )
+
+  it('5. asks the preload bridge for the version, the way the renderer does (REL-05)', () => {
+    const source = rendererProbeSource(
+      'app://attachments/att_2099-01_abcdef12/raw',
+      'emperor-renderer-smoke',
+      TRAVERSAL,
+    )
+    expect(source).toContain('bridge.appVersion()')
+  })
+
   it('rejects a deep-link reload whose renderer stays blank', async () => {
     const { win, destroy } = fakeWindow()
     vi.mocked(win.webContents.executeJavaScript)
@@ -220,6 +265,7 @@ describe('packaged renderer smoke', () => {
       verifyPackagedRenderer({
         createWindow: () => win,
         rendererUrl: 'app://bundle/index.html',
+        appVersion: '0.2.0',
         attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
         attachmentContent: 'emperor-renderer-smoke',
         traversal: TRAVERSAL,
@@ -275,6 +321,7 @@ describe('packaged renderer smoke', () => {
       verifyPackagedRenderer({
         createWindow: () => win,
         rendererUrl: 'app://bundle/index.html',
+        appVersion: '0.2.0',
         attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
         attachmentContent: 'emperor-renderer-smoke',
         traversal: TRAVERSAL,

@@ -1,99 +1,90 @@
-# Stable 受信发布手册
+# Stable 发布手册
 
-> 文档状态：Frozen<br>
-> 面向读者：未来的发布维护者<br>
-> 冻结说明：workflow 和验证链已保留，但当前公开渠道不是 Stable；Stable tag 不会自动触发，仓库变量 `EMPEROR_STABLE_RELEASE_ENABLED` 在解冻前必须保持未设置<br>
-> 签名决定：2026-10-01 起 GitHub 发布包不签名（见[未签名 Preview 发布手册](preview-release-runbook.md#发布包不签名)）。本手册的签名与公证链不再是启用目标，不要为它申请证书或配置签名密钥，除非这个决定被撤销<br>
-> 最后核验：2026-07-19<br>
-> 事实源：`.github/workflows/release.yml`、`scripts/build_desktop_release.sh`、`scripts/verify-*-release.*`、`scripts/publish-release.sh`
+> 文档状态：Active<br>
+> 面向读者：发布维护者<br>
+> 最后核验：2026-10-21<br>
+> 事实源：`.github/workflows/release.yml`、`desktop/electron-builder.release.cjs`、`desktop/scripts/after-pack.cjs`、`desktop/scripts/harden-package.cjs`、`desktop/scripts/verify-unsigned-app.cjs`、`scripts/build_desktop_release.sh`、`scripts/verify-macos-release.sh`、`scripts/assemble-release-bundle.mjs`、`scripts/release-contract.mjs`、`scripts/generate-release-sbom.sh`、`scripts/publish-release.sh`、`scripts/release-dry-run.mjs`、`scripts/ci/check-unsigned-release.mjs`、`docs/release/stable-release-notes.md`
 
-本手册描述仓库中已存在但尚未作为当前公开渠道启用的受信发布链。不能因为 workflow 文件存在，就对外宣称已经提供 Stable 包。
+Stable 是 0.2.0 起的正式发布渠道，只发 macOS（Apple 芯片 arm64 与 Intel x64）。它和 Preview 一样不签名、不公证，见[发布包不签名](preview-release-runbook.md#发布包不签名)；区别只在版本号没有 `-preview.<n>` 后缀、文件名不带 `UNSIGNED-PREVIEW`、由维护者手动触发，以及公开为正式 Release 而不是 Pre-release。
 
-## 启用门槛
+## 不签名
 
-- macOS Developer ID 证书与 App Store Connect API 凭证可用，arm64 / x64 均能签名并 notarize。
-- Windows Azure Artifact Signing 配置、publisher 和服务凭证可用，NSIS 包通过 Authenticode 验证。
-- Linux AppImage / DEB 在受支持 Ubuntu 矩阵完成安装、smoke 与移除。
-- 三平台 candidate receipt、聚合 contract、checksum、SBOM 和 attestation 完整通过。
-- 在非公开 tag 或受控演练中完成一次端到端候选验收，并由维护者明确解除 Frozen 状态。
-- README、Security、Changelog 与 Release notes 已从 Preview 边界切换到 Stable 事实。
+- 没有 Apple Developer ID 签名，不做 Apple 公证，也没有 Windows 发布者签名。不要为 Stable 申请证书、配置签名 secret 或打开 `forceCodeSigning`、`notarize`。
+- `desktop/electron-builder.release.cjs` 不设签名身份（`mac.identity: null`），`release.yml` 在整个 workflow 上设 `CSC_IDENTITY_AUTO_DISCOVERY=false`，`scripts/build_desktop_release.sh` 本机也这样打包。electron-builder 因此既不签名也不公证。
+- 发布 workflow 除 GitHub token 外不使用任何 secret。
+- `make check` 运行 `scripts/ci/check-unsigned-release.mjs`：workflow、两份发布用的 electron-builder 配置和发布脚本里出现签名 secret、签名变量（`CSC_LINK`、`APPLE_TEAM_ID` 等）、公证（`notarytool`、`stapler`）、钥匙串导入或 ad-hoc `-` 以外的 `codesign --sign`，检查就失败。`scripts/ci/fixtures/signed-release/` 是一份签名发布的反例，测试确认检查会拒绝它。
+- 来源和完整性由 `SHA256SUMS.txt`、GitHub 构建来源证明（SLSA provenance）和 CycloneDX SBOM 证明，它们都不是代码签名。
 
-任一条件未满足时，继续使用[未签名 Preview 渠道](preview-release-runbook.md)。不得把 unsigned candidate 放进 Stable workflow，也不得删除签名校验以求通过。
+## 封签与 fuse 检查
 
-## 手动触发与机器门禁
+不签名不等于不封签：Stable 与 Preview 走同一套打包加固，具体保证见[不签名不等于不封签](preview-release-runbook.md#不签名不等于不封签)。Stable 候选依次经过这些检查，任何一项失败发布就停在那一步：
 
-`.github/workflows/release.yml` 只接受 `workflow_dispatch`，推送任何 Stable tag 都不会自动运行。维护者必须显式输入现有 `stable_tag`；`release-policy` 会在任何候选 job 前验证：
+1. **打包时**（`desktop/scripts/after-pack.cjs`）：先翻转 Electron fuses 并读回比对，再由内到外给每段代码做带 hardened runtime 的 ad-hoc 封签，最后 `verifyMacHardening` 核对封签、标识、runtime、entitlements 与 fuses。配置里没有签名身份，正是这一步替代了签名。
+2. **候选核验**（`scripts/verify-macos-release.sh <arch>`）：`desktop/dist` 里的应用、DMG 里的应用和 ZIP 解压出的应用分别经过 `desktop/scripts/verify-unsigned-app.cjs`——`codesign --verify --deep --strict` 通过；应用、Electron Framework、两个 Helper、NM host 与 `credential-auth` 的架构正确，且都只有 ad-hoc 封签，没有 Authority、没有 Team ID；标识为 `com.emperor.agent.desktop`；每段 Emperor 代码都带 runtime 与规定的 entitlements；fuses 正确。然后从挂载的 DMG 运行打包冒烟（启动前再查一次封签；渲染层经 `appVersion()` 读到的版本必须等于 `app.getVersion()`），写出 `SHA256SUMS-macos-<arch>.txt` 和候选回执（`signingStatus: unsigned`、`notarized: false`、封签摘要）。
+3. **反向探测**（`scripts/ci/gate-negative-probe.mjs`）：把同一个包复制三份，分别去掉签名、去掉 runtime、打开 `RunAsNode` 再封签；打包冒烟必须在启动前拒绝每一份。
+4. **聚合**（`scripts/assemble-release-bundle.mjs`）：回执写着已签名、已公证、带 Team ID、缺 runtime 或 fuses 未核验，冒烟回执缺封签、版本或提交不对，或者混入 Preview、Internal、其他平台的文件，都直接失败。
 
-- tag 只能是无 prerelease 后缀的 `v<major>.<minor>.<patch>`；
-- tag 必须已经存在且是 annotated tag；
-- tag 必须与其 commit 中 `desktop/package.json` 的版本一致；
-- tag commit 必须位于默认分支历史中。
+每次重新封签都会改变 cdhash：用户更新后要重新允许辅助功能、屏幕录制、麦克风与语音识别，Release 正文写明了这一点。
 
-`publish=false` 只执行签名候选、smoke、receipt、SBOM 与 attestation 演练，不创建 GitHub Release。公开发布同时要求：
+## 发布步骤
 
-1. 手动输入 `publish=true`；
-2. 仓库变量 `EMPEROR_STABLE_RELEASE_ENABLED` 明确设置为 `true`；
-3. `stable-release` GitHub Environment 配置 required reviewers 并通过审批。
+1. **准备**：`desktop/package.json`、`packages/core/package.json` 与两份 lockfile 的版本一致（`v<version>` 的 `<version>`）；[Changelog](CHANGELOG.md) 写好这个版本；[Release 正文模板](stable-release-notes.md)仍与当前包一致。正文第一段必须写明未签名与首次打开步骤，`scripts/release-contract.mjs` 会检查，缺一项聚合就失败。
+2. **本机演练**（建议）：在 Mac 上打一个本机架构的候选并跑完发布流程，不碰 GitHub：
 
-当前 Frozen 期间必须保持 `EMPEROR_STABLE_RELEASE_ENABLED` 未设置，即使误触手动 workflow 也不能进入 `publish-release`。解除冻结必须先按本手册完成候选演练，再通过单独 code review 同时变更仓库变量和 Environment 保护设置。
+   ```bash
+   scripts/build_desktop_release.sh
+   scripts/verify-macos-release.sh arm64
+   node scripts/ci/gate-negative-probe.mjs --app "desktop/dist/mac-arm64/Emperor Agent.app"
+   node scripts/release-dry-run.mjs --out "$TMPDIR/emperor-release-dry-run"
+   ```
 
-## 凭证
+   `release-dry-run.mjs` 在输出目录里写出 `release-inputs/`（workflow 下载的候选）、`release-bundle/`（将要上传的全部文件：安装包、`ARTIFACT-SHA256SUMS.txt`、`release-manifest.json`、`RELEASE-NOTES.md`、SBOM、`SHA256SUMS.txt`）和 `draft-release.json`（草稿的标题、正文、资产清单与将要执行的 `gh` 命令）。它不创建 tag、Release 或草稿，也不运行 `gh`；SBOM 由 `scripts/generate-release-sbom.sh` 经 `npx` 生成，已有文件时可用 `--sbom <文件>`。只打了一个架构时结果标为 partial，真正的发布脚本会拒绝它。
 
-macOS job fail closed 地要求：
+3. **nightly 是绿的**：最近 72 小时内有一次完整通过的 nightly，且没有未关闭的 `nightly-failure` issue；否则 `release.yml` 第一步 `scripts/ci/require-green-nightly.mjs` 就会失败（见 [CI 门禁](../development/ci.md)）。
+4. **打 tag**：在已进入默认分支的发布提交上创建 annotated tag `v<version>` 并推送。推送 tag 不会触发任何 workflow。
+5. **演练运行**：在 Actions 里手动运行 `release`，`stable_tag` 填 `v<version>`，`publish` 保持 `false`。`release-policy` 先检查 nightly，再要求 tag 是无后缀的 `v<major>.<minor>.<patch>`、是 annotated tag、与该提交里 `desktop/package.json` 的版本一致、位于默认分支历史中。两个架构的候选、核验、反向探测、聚合、SBOM、`SHA256SUMS.txt` 与两份证明都通过后，下载 `stable-release-bundle` 产物核对。
+6. **正式发布**：公开发布同时要求三件事——手动输入 `publish=true`；仓库变量 `EMPEROR_STABLE_RELEASE_ENABLED` 设为 `true`；`stable-release` Environment 配置了 required reviewers 并通过审批。`publish-release` 是唯一有写权限的 job：重新核验 bundle 与证明，以 `RELEASE-NOTES.md` 为正文创建草稿，核对草稿的资产清单与 bundle 完全一致，再公开；任何一步失败都会删掉草稿。
 
-- `MACOS_CERTIFICATE`
-- `MACOS_CERTIFICATE_PASSWORD`
-- `APPLE_API_KEY_BASE64`
-- `APPLE_API_KEY_ID`
-- `APPLE_API_ISSUER`
-- `APPLE_TEAM_ID`
-
-Windows job fail closed 地要求：
-
-- `WINDOWS_SIGNING_ENDPOINT`
-- `WINDOWS_SIGNING_PROFILE`
-- `WINDOWS_SIGNING_ACCOUNT`
-- `WINDOWS_SIGNING_PUBLISHER`
-- `AZURE_TENANT_ID`
-- `AZURE_CLIENT_ID`
-- `AZURE_CLIENT_SECRET`
-
-凭证只进入 GitHub Actions secrets，不写入仓库、receipt、日志、SBOM 或安装资产。
-
-## 候选与验证链
+## Workflow 阶段
 
 ```mermaid
 flowchart LR
-  Manual["Manual stable_tag input"] --> Policy["Annotated tag + default branch policy"]
-  Policy --> Mac["Signed + notarized macOS"]
-  Policy --> Win["Authenticode Windows"]
-  Policy --> Linux["Linux build + lifecycle smoke"]
-  Mac --> Aggregate["Fail-closed aggregate"]
-  Win --> Aggregate
-  Linux --> Aggregate
-  Aggregate --> Attest["Checksums + SBOM + attestations"]
+  Manual["stable_tag + publish"] --> Policy["Green nightly + annotated tag policy"]
+  Policy --> Mac["macOS arm64 / x64: make check, build, verify, negative probe"]
+  Mac --> Aggregate["Fail-closed bundle + notes"]
+  Aggregate --> SBOM["CycloneDX SBOM + SHA256SUMS"]
+  SBOM --> Attest["Provenance + SBOM attestations"]
   Attest --> Gate["publish=true + repository variable + protected environment"]
-  Gate --> Publish["Atomic GitHub Release"]
+  Gate --> Publish["Draft, asset check, public Release"]
 ```
 
-- macOS：构建签名候选，验证签名、notarization、DMG 和 packaged smoke；smoke 必须报告可用 `macos-seatbelt`。
-- Windows：构建签名 NSIS，验证 Authenticode，并完成安装、smoke、卸载；在 Job Object + ACL backend 实现前必须报告 `windows-unsupported`，不能伪装 sandboxed。
-- Linux：构建 AppImage / DEB，在 Ubuntu 22.04 / 24.04 验证完整生命周期，并记录 `linux-bwrap` 的真实 available/unavailable/error capability。
-- 所有平台的 packaged smoke schema 2 必须显示 Lifecycle Supervisor 为 `ready`，全部 required service 为 ready，并由真实 ASAR renderer 证明 Node globals absent、Core bridge/bootstrap、attachment 字节、sandbox/context-isolation/node-integration 全部通过；缺项、failed、stop timeout 或非 Linux 平台关闭 Chromium sandbox 都不得进入聚合发布。
-- Aggregate：只接受完整平台矩阵和 receipt，生成合并 SBOM 与 checksum，并上传 GitHub attestations。
-- Publish：重新核验所有材料，先 draft、核对 inventory，再原子公开。
+平台 job 没有发布权限，聚合 job 只有证明所需的权限。
 
-平台 build job 没有发布权限。唯一公开入口是通过 aggregate 后的 `publish-release` job。
+## 发布内容
 
-## 启用时的最终验收
+| 文件                                              | 内容                                                                             |
+| ------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `Emperor-Agent-<version>-macos-arm64.dmg`、`.zip` | Apple 芯片安装包                                                                 |
+| `Emperor-Agent-<version>-macos-x64.dmg`、`.zip`   | Intel 安装包                                                                     |
+| `ARTIFACT-SHA256SUMS.txt`                         | 四个安装包的 SHA-256，SBOM 证明的对象                                            |
+| `release-manifest.json`                           | `channel: stable`、`signingStatus: unsigned`、`notarized: false`、平台与回执记录 |
+| `RELEASE-NOTES.md`                                | 由模板生成的 Release 正文                                                        |
+| `emperor-agent-v<version>.cdx.json`               | CycloneDX 1.6 SBOM（Core 与 Desktop）                                            |
+| `SHA256SUMS.txt`                                  | 上面每个文件的 SHA-256，构建来源证明的对象                                       |
 
-- [ ] 两个 macOS 架构均显示预期 Developer ID，notarization ticket 可验证。
-- [ ] Windows EXE publisher 与 policy 中的 publisher 完全一致。
-- [ ] Linux 两个 Ubuntu 版本的安装、smoke、移除 receipts 齐全。
-- [ ] 所有资产通过 `SHA256SUMS.txt` 和 GitHub attestation 验证。
-- [ ] SBOM 与发布 commit、lockfile 和资产 inventory 一致。
-- [ ] GitHub Release 不是 Pre-release，且没有 `UNSIGNED` 标识。
-- [ ] 从全新用户环境安装并完成模型配置、Chat 与 Build smoke。
-- [ ] 回滚方案是撤下 Release 并发布新版本，不是原地替换同名二进制。
+## 发布后验收
 
-解除 Frozen 状态必须单独 code review，同时更新文档中心、README 和 Security 支持范围。
+- [ ] Release 不是 Pre-release，标题为 `Emperor Agent v<version>`，正文第一段是未签名说明与首次打开步骤。
+- [ ] 资产与上表一致，没有 `UNSIGNED-PREVIEW`、Windows 或 Linux 文件。
+- [ ] 两个架构各下载至少一个安装包，用 `SHA256SUMS.txt` 复核，并通过 `gh attestation verify <file> --repo TheSyart/emperor-agent`。
+- [ ] 在一台没装过 Emperor 的 Mac 上按正文第一段的步骤打开；`codesign -dv --verbose=4` 显示 `Signature=adhoc`，`flags` 含 `runtime`。
+- [ ] 按正文重新授权后，电脑操作与听写可用。
+
+## 失败处理
+
+- 候选、核验或探测失败：修复后删除 tag，在新的提交上重新打 tag 再运行；不要手工补资产，不要为了通过而去掉任何检查。
+- 聚合或证明失败：保留 Actions 日志，查明原因后重新运行整个 workflow。
+- 草稿已建但未公开：脚本失败时会删除草稿；残留时核对后手动删除，未通过检查的草稿不得手工公开。
+- 已公开的资产有错：撤下这个 Release，记录影响，修复后发布新版本；不要原地替换同名文件。
+
+用户看到系统拦截时，按正文第一段的步骤处理，不要建议关闭整机的 Gatekeeper。参考 [Apple：Safely open apps on your Mac](https://support.apple.com/en-us/102445)。

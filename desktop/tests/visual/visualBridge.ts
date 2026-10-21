@@ -21,7 +21,8 @@ type VisualOpenPathTarget =
   | { kind: 'invalid-skill'; path: string; sessionId?: string | null }
 
 type VisualBridge = {
-  version: string
+  /** REL-05: main's app.getVersion() over the preload bridge. */
+  appVersion: () => Promise<string>
   platform: string
   selectDirectory: () => Promise<string>
   getPathForFile: (file: File) => string
@@ -4537,7 +4538,7 @@ export async function installVisualCoreBridge(
       }
 
       window.emperor = {
-        version: '0.1.0-visual',
+        appVersion: async () => '0.2.0-visual',
         // `?visualDictation=live` is a Mac, so the composer shows its mic.
         platform:
           visualParams.get('visualDictation') === 'live' ? 'darwin' : 'visual',

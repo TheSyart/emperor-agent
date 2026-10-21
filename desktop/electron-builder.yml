@@ -25,6 +25,14 @@ files:
   - node_modules/@anthropic-ai/claude-agent-sdk/node_modules/@anthropic-ai/claude-agent-sdk-darwin-${arch}/claude
   - node_modules/typescript/package.json
   - node_modules/typescript/lib/typescript.js
+  # web_fetch's HTML → Markdown (Core network/html-markdown.ts): the main
+  # bundle imports turndown at load, and turndown requires its DOM. Node
+  # resolves both from app.asar; after-pack refuses a main bundle that imports
+  # a package the asar does not ship (REL-05).
+  - node_modules/turndown/package.json
+  - node_modules/turndown/lib/turndown.cjs.js
+  - node_modules/@mixmark-io/domino/package.json
+  - node_modules/@mixmark-io/domino/lib/**/*.js
   - node_modules/node-pty/package.json
   - node_modules/node-pty/lib/**/*.js
   - '!node_modules/node-pty/lib/**/*.test.js'

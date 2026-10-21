@@ -20,6 +20,7 @@ const {
   readPackagedFuses,
   verifyMacHardening,
 } = require('./harden-package.cjs')
+const { readGitCommit } = require('./build-commit.cjs')
 const { checkStartupLog } = require('./packaged-log-check.cjs')
 const {
   UPGRADE_FIXTURE,
@@ -403,6 +404,8 @@ function validateReceipt(receipt) {
     renderer.nodeGlobalsAbsent !== true ||
     renderer.coreBridge !== true ||
     renderer.coreBootstrap !== true ||
+    // REL-05: the renderer read the app's own version from main.
+    renderer.appVersion !== receipt.appVersion ||
     renderer.deepLinkRenders !== true ||
     renderer.attachment?.ok !== true ||
     !Number.isSafeInteger(renderer.attachment?.bytes) ||
@@ -437,29 +440,6 @@ function writeAtomic(path, value) {
   } catch (error) {
     rmSync(temporary, { force: true })
     throw error
-  }
-}
-
-function readGitCommit(root) {
-  try {
-    const gitDir = join(root, '.git')
-    const head = readFileSync(join(gitDir, 'HEAD'), 'utf8').trim()
-    if (/^[a-f0-9]{40}$/i.test(head)) return head.toLowerCase()
-    if (!head.startsWith('ref: ')) return 'local'
-    const ref = head.slice(5).trim()
-    const loose = join(gitDir, ...ref.split('/'))
-    if (existsSync(loose)) {
-      const value = readFileSync(loose, 'utf8').trim()
-      if (/^[a-f0-9]{40}$/i.test(value)) return value.toLowerCase()
-    }
-    const packed = readFileSync(join(gitDir, 'packed-refs'), 'utf8')
-    const line = packed
-      .split(/\r?\n/)
-      .find((value) => value.endsWith(` ${ref}`))
-    const value = line?.split(' ')[0] || ''
-    return /^[a-f0-9]{40}$/i.test(value) ? value.toLowerCase() : 'local'
-  } catch {
-    return 'local'
   }
 }
 
