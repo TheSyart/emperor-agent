@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：发布维护者<br>
-> 最后核验：2026-10-22（对照 `84245509`）<br>
+> 最后核验：2026-10-22（对照 `7798011a`）<br>
 > 事实源：`.github/workflows/release.yml`、`desktop/electron-builder.release.cjs`、`desktop/scripts/after-pack.cjs`、`desktop/scripts/harden-package.cjs`、`desktop/scripts/verify-unsigned-app.cjs`、`scripts/build_desktop_release.sh`、`scripts/verify-macos-release.sh`、`scripts/assemble-release-bundle.mjs`、`scripts/release-contract.mjs`、`scripts/generate-release-sbom.sh`、`scripts/publish-release.sh`、`scripts/release-dry-run.mjs`、`scripts/ci/check-unsigned-release.mjs`、`docs/release/stable-release-notes.md`
 
 Stable 是 0.2.0 起的正式发布渠道，只发 macOS（Apple 芯片 arm64 与 Intel x64）。它和 Preview 一样不签名、不公证，见[发布包不签名](preview-release-runbook.md#发布包不签名)；区别只在版本号没有 `-preview.<n>` 后缀、文件名不带 `UNSIGNED-PREVIEW`、由维护者手动触发，以及公开为正式 Release 而不是 Pre-release。
@@ -20,7 +20,7 @@ Stable 是 0.2.0 起的正式发布渠道，只发 macOS（Apple 芯片 arm64 �
 Emperor 可以把子任务交给用户电脑上安装的 Claude Code。按 Anthropic 的 [Claude Code 法律与合规说明](https://code.claude.com/docs/en/legal-and-compliance)：
 
 - 在产品里预装或运行 Claude Code 需要同意 Anthropic 的商业条款（Commercial Terms）。**公开发布任何一个会运行 Claude Code 的 Emperor 版本（Stable 与 Preview 都算）之前，发布者必须先以发布者的身份同意这份条款。** 这是人工事项，没有自动检查；没有同意时不要发布。
-- 安装包不附带 Claude Code（after-pack 拒绝任何 Claude Code binary 或 `claude-code` 包），只运行用户自己安装的、未经修改的 `claude`。用户经 Anthropic 自己的流程登录（「登录 Claude Code」在 macOS「终端」里运行 `claude auth login`）；Emperor 不收集、不保存、不转交 Claude.ai 凭据，也不代付或转售用量。用户自己的 API Key 与第三方端点照常可用。
+- 安装包不附带 Claude Code（after-pack 拒绝任何 Claude Code binary 或 `claude-code` 包），只运行用户自己安装的、未经修改的 `claude`。用户经 Anthropic 自己的流程登录（「登录 Claude Code」由 Emperor 启动本机的 `claude auth login`，用户在浏览器里完成，回调直接回到 claude，Emperor 不读它的输出）；Emperor 不收集、不保存、不转交 Claude.ai 凭据，也不代付或转售用量。用户自己的 API Key 与第三方端点照常可用。
 - 界面与文档只用文字如实写「Claude Code」，不使用 Anthropic 或 Claude 的 logo（需要书面许可）；Codex 同样只用文字。
 
 ## 封签与 fuse 检查

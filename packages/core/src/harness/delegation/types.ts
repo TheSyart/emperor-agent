@@ -212,6 +212,29 @@ export interface ExecutorAuthState {
    */
   problem?: 'missing' | 'unreadable' | 'status-failed'
 }
+/**
+ * 登录 Claude Code (FIX-11): the installed claude's own `claude auth login`,
+ * which Core starts and the user finishes in the browser. One at a time.
+ * It carries nothing claude printed: the link and the code prompt stay
+ * between claude, the browser and the user.
+ */
+export interface ClaudeSignInView {
+  profileId: string
+  method: 'claude-ai' | 'console'
+  state: 'running' | 'signed-in' | 'failed' | 'cancelled'
+  startedAt: number
+  finishedAt?: number
+  /**
+   * Why a sign-in failed: `exit` (claude ended unsuccessfully), `timeout`
+   * (ten minutes went by), `start` (claude could not be started),
+   * `not-signed-in` (claude ended, yet `claude auth status` still says no).
+   */
+  reason?: 'exit' | 'timeout' | 'start' | 'not-signed-in'
+  /** claude's exit code, when it ended by itself. */
+  exitCode?: number
+  /** A failed sign-in: the same login as one line for the user's Terminal. */
+  command?: string
+}
 export type NativeCapabilityStatus =
   | 'unverified'
   | 'verifying'
@@ -565,10 +588,6 @@ export class DelegationError extends Error {
       ],
       AUTH_SIGN_OUT_FAILED: [
         'Claude Code 没有退出登录，请稍后重试。',
-        'configure_executor',
-      ],
-      TERMINAL_UNAVAILABLE: [
-        '无法打开 macOS 的「终端」，请确认它没有被停用后再试。',
         'configure_executor',
       ],
       EXECUTOR_MISSING: [

@@ -1123,9 +1123,10 @@ export const CORE_OPERATION_REGISTRY = {
         viewOf(ctx, 'executors.clearCredential'),
       ),
   ),
-  // AGT-12: 登录 Claude Code opens macOS Terminal on the installed claude's
-  // own `auth login` (`--console` for API billing); 退出登录 runs
-  // `claude auth logout`; 知道了 on the notice after the upgrade.
+  // AGT-12 / FIX-11: 登录 Claude Code starts the installed claude's own
+  // `auth login` (`--console` for API billing), finished in the browser;
+  // 取消 ends it; 退出登录 runs `claude auth logout`; 知道了 on the notice
+  // after the upgrade.
   'executors.signIn': operation(
     z.tuple([
       z
@@ -1137,6 +1138,11 @@ export const CORE_OPERATION_REGISTRY = {
     ]),
     (api, [input], ctx) =>
       api.executors.signIn(input, viewOf(ctx, 'executors.signIn')),
+  ),
+  'executors.cancelSignIn': operation(
+    z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),
+    (api, [input], ctx) =>
+      api.executors.cancelSignIn(input, viewOf(ctx, 'executors.cancelSignIn')),
   ),
   'executors.signOut': operation(
     z.tuple([z.object({ profileId: z.string().min(1).max(64) }).strict()]),

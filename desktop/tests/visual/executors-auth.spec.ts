@@ -10,7 +10,9 @@ import { installVisualCoreBridge } from './visualBridge'
 // field, never echoed back), a third-party endpoint, a claude that is not
 // installed, the notice after the upgrade, and the 详情 and 高级 sub pages.
 // Claude Code and Codex are named in text with a neutral icon, no logo.
-// Screenshots in screenshots/executors-auth/.
+// FIX-11: 登录 Claude Code runs claude auth login from Core — 正在浏览器中登录
+// with 取消, the pushed result, and a failed sign-in with the one-line
+// command for Terminal. Screenshots in screenshots/executors-auth/.
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'executors-auth')
 
 test.beforeAll(() => {
@@ -52,6 +54,14 @@ const shot = (page: Page, name: string) =>
     path: resolve(screenshotDir, `${name}.png`),
     animations: 'disabled',
   })
+
+/** Ends the running 登录 Claude Code the way Core pushes it (FIX-11). */
+const endSignIn = (page: Page, outcome: 'signed-in' | 'exit' | 'timeout') =>
+  page.evaluate((value) => {
+    ;(
+      window as unknown as { __visualClaudeSignIn: (o: string) => void }
+    ).__visualClaudeSignIn(value)
+  }, outcome)
 
 test('1 · at 1280×800 the three subagents fit on one screen without scrolling', async ({
   page,
@@ -139,7 +149,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(claude.locator('.readiness')).toHaveText('未登录')
     await expect(claude).toHaveAttribute('data-needs-sign-in', 'true')
     await expect(claude.locator('[data-executor-summary]')).toContainText(
-      '在 macOS 的「终端」里登录一次',
+      '在浏览器里登录一次',
     )
     await expect(dialog.locator('[data-claude-sign-in-notice]')).toContainText(
       '请点「登录 Claude Code」登录一次',
@@ -156,23 +166,73 @@ for (const theme of ['dark', 'light'] as const) {
     ).toHaveText('用 Console 账号登录（按用量计费）')
     await detailPage.locator('[data-claude-sign-in]').scrollIntoViewIfNeeded()
     await shot(page, `detail-claude-signed-out-${theme}`)
-    // 登录 Claude Code: Core opens Terminal; the page waits for the user.
+    await expect(detailPage).not.toContainText('终端')
+    // 登录 Claude Code: Core runs claude auth login; the browser does the rest.
     await detailPage
       .locator('[data-claude-sign-in] [data-claude-sign-in-start]')
       .click()
+    const pending = detailPage.locator('[data-claude-sign-in-pending]')
+    await expect(pending).toContainText('正在浏览器中登录 Claude Code…')
+    await expect(pending).toContainText('在浏览器里完成后会自动回来')
+    await expect(pending.locator('[data-claude-sign-in-cancel]')).toHaveText(
+      '取消',
+    )
     await expect(
-      detailPage.locator('[data-claude-sign-in-pending]'),
-    ).toContainText('已在「终端」里打开登录')
-    // Back from Terminal (重新检测): signed in.
-    await detailPage
-      .locator('[data-claude-sign-in-pending] button', { hasText: '重新检测' })
-      .click()
+      detailPage.locator('[data-claude-sign-in] [data-claude-sign-in-start]'),
+    ).toBeDisabled()
+    await detailPage.locator('[data-claude-sign-in]').scrollIntoViewIfNeeded()
+    await shot(page, `detail-claude-signing-in-${theme}`)
+    // claude got the browser's callback: Core pushes the new state.
+    await endSignIn(page, 'signed-in')
     await expect(detailPage.locator('[data-claude-auth-state]')).toHaveText(
       '已登录 Claude 账号 · ada@example.com · Ada Lab',
     )
+    await expect(pending).toHaveCount(0)
+  })
+
+  test(`登录 Claude Code: 取消, and a failed sign-in with the command for Terminal (${theme})`, async ({
+    page,
+  }) => {
+    const { dialog, claude } = await open(page, 'signed-out', theme)
+    // From the main page's row.
+    await claude.locator('[data-claude-sign-in-start]').click()
+    const pending = dialog.locator('[data-claude-sign-in-pending]')
+    await expect(pending).toContainText('正在浏览器中登录 Claude Code…')
+    await expect(claude.locator('[data-claude-sign-in-start]')).toBeDisabled()
+    await shot(page, `main-signing-in-${theme}`)
+    // 取消: back to 未登录, nothing left on the page.
+    await pending.locator('[data-claude-sign-in-cancel]').click()
+    await expect(pending).toHaveCount(0)
+    await expect(claude.locator('.readiness')).toHaveText('未登录')
+    // Ten minutes go by without a sign-in.
+    await claude.locator('[data-claude-sign-in-start]').click()
+    await expect(pending).toBeVisible()
+    await endSignIn(page, 'timeout')
+    const failed = dialog.locator('[data-claude-sign-in-failed]')
+    await expect(failed).toContainText('10 分钟')
+    await expect(failed).toContainText('也可以在「终端」里运行下面这行命令')
+    await expect(failed.locator('[data-claude-sign-in-command]')).toContainText(
+      "'/Users/ada/.local/bin/claude' auth login",
+    )
+    await expect(pending).toHaveCount(0)
+    await shot(page, `main-sign-in-failed-${theme}`)
+    // On 详情 › 登录: claude ended without signing in.
+    const detailPage = await detail(dialog, 'claude-code')
+    await detailPage
+      .locator('[data-claude-sign-in] [data-claude-sign-in-start]')
+      .click()
+    await endSignIn(page, 'exit')
+    const detailFailed = detailPage.locator('[data-claude-sign-in-failed]')
+    await expect(detailFailed).toContainText('退出码 1')
     await expect(
-      detailPage.locator('[data-claude-sign-in-pending]'),
-    ).toHaveCount(0)
+      detailFailed.locator('[data-claude-sign-in-command]'),
+    ).toContainText('CLAUDE_CONFIG_DIR=')
+    await expect(detailFailed.locator('[data-claude-sign-in-copy]')).toHaveText(
+      '复制命令',
+    )
+    await detailPage.locator('[data-claude-sign-in]').scrollIntoViewIfNeeded()
+    await noLogoNoToken(page, dialog)
+    await shot(page, `detail-claude-sign-in-failed-${theme}`)
   })
 
   test(`使用 API Key: a masked field, and the key outranks the login (${theme})`, async ({

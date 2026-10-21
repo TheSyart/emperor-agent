@@ -84,6 +84,7 @@ const EXPECTED_OPERATIONS = [
   'environment.getInstallLog',
   'environment.getStatus',
   'environment.install',
+  'executors.cancelSignIn',
   'executors.clearCredential',
   'executors.configure',
   'executors.dismissNotice',

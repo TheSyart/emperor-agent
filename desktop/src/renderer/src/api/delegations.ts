@@ -16,10 +16,17 @@ export const setExecutorCredential = (
 export const clearExecutorCredential = (
   input: CoreOperationArgs<'executors.clearCredential'>[0],
 ) => invokeCore('executors.clearCredential', input)
-/** 登录 Claude Code (AGT-12): Core opens macOS Terminal on claude's own login. */
+/**
+ * 登录 Claude Code (FIX-11): Core starts claude's own `auth login`; the
+ * user finishes in the browser and `executor_sign_in` says how it ended.
+ */
 export const signInExecutor = (
   input: CoreOperationArgs<'executors.signIn'>[0],
 ) => invokeCore('executors.signIn', input)
+/** 取消: Core ends the running sign-in. */
+export const cancelExecutorSignIn = (
+  input: CoreOperationArgs<'executors.cancelSignIn'>[0],
+) => invokeCore('executors.cancelSignIn', input)
 /** 退出登录: `claude auth logout` in the run's environment. */
 export const signOutExecutor = (
   input: CoreOperationArgs<'executors.signOut'>[0],

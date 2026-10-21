@@ -108,7 +108,7 @@ export async function makeApi(
     // External executors look for sign-ins in a temporary home, never the
     // user's ~/.claude or ~/.codex, and never run the login shell. A fake
     // claude comes first on PATH: tests never run the real one (AGT-12),
-    // and 登录 Claude Code never opens Terminal.
+    // so 登录 Claude Code runs the fake's `auth login` (FIX-11).
     executorHome:
       options.extra?.executorHome === undefined
         ? {
@@ -117,7 +117,6 @@ export async function makeApi(
               PATH: `${dirname(fakeClaude(join(root, 'fake-claude-bin')))}:${process.env.PATH ?? '/usr/bin:/bin'}`,
             },
             loginShell: { read: async () => ({}) },
-            openTerminal: async () => undefined,
           }
         : options.extra.executorHome,
     ...options.extra,

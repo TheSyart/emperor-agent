@@ -11,24 +11,36 @@ const {
   setExecutorCredential,
   clearExecutorCredential,
   signInExecutor,
+  cancelExecutorSignIn,
   signOutExecutor,
   dismissExecutorNotice,
   openExternal,
+  onCoreEvent,
+  coreListeners,
   core,
-} = vi.hoisted(() => ({
-  listExecutors: vi.fn(),
-  configureExecutors: vi.fn(),
-  probeExecutor: vi.fn(),
-  listExecutorModels: vi.fn(),
-  setExecutorCredential: vi.fn(),
-  clearExecutorCredential: vi.fn(),
-  signInExecutor: vi.fn(),
-  signOutExecutor: vi.fn(),
-  dismissExecutorNotice: vi.fn(),
-  openExternal: vi.fn(),
-  core: vi.fn(),
-}))
-vi.mock('../../api/backend', () => ({ openExternal }))
+} = vi.hoisted(() => {
+  const coreListeners = new Set<(event: unknown) => void>()
+  return {
+    listExecutors: vi.fn(),
+    configureExecutors: vi.fn(),
+    probeExecutor: vi.fn(),
+    listExecutorModels: vi.fn(),
+    setExecutorCredential: vi.fn(),
+    clearExecutorCredential: vi.fn(),
+    signInExecutor: vi.fn(),
+    cancelExecutorSignIn: vi.fn(),
+    signOutExecutor: vi.fn(),
+    dismissExecutorNotice: vi.fn(),
+    openExternal: vi.fn(),
+    coreListeners,
+    onCoreEvent: vi.fn((listener: (event: unknown) => void) => {
+      coreListeners.add(listener)
+      return () => coreListeners.delete(listener)
+    }),
+    core: vi.fn(),
+  }
+})
+vi.mock('../../api/backend', () => ({ openExternal, onCoreEvent }))
 vi.mock('../../api/http', () => ({ core }))
 vi.mock('../../api/delegations', () => ({
   listExecutors,
@@ -38,9 +50,14 @@ vi.mock('../../api/delegations', () => ({
   setExecutorCredential,
   clearExecutorCredential,
   signInExecutor,
+  cancelExecutorSignIn,
   signOutExecutor,
   dismissExecutorNotice,
 }))
+/** Core pushes a host event (FIX-11: executor_sign_in). */
+function pushCoreEvent(event: Record<string, unknown>) {
+  for (const listener of coreListeners) listener({ seq: 0, ...event })
+}
 function payload() {
   const profiles = ['claude-code', 'codex', 'claude-code'].map(
     (backend, i) => ({
@@ -189,6 +206,7 @@ beforeEach(() => {
 afterEach(() => {
   app?.unmount()
   root?.remove()
+  coreListeners.clear()
   vi.restoreAllMocks()
   vi.clearAllMocks()
   vi.unstubAllGlobals()
@@ -280,7 +298,9 @@ it('3 · Claude without a sign-in fills its row with the reason and 登录 Claud
   expect(claude.querySelector('.readiness')!.textContent).toBe('未登录')
   expect(
     claude.querySelector('[data-executor-summary]')!.textContent,
-  ).toContain('在 macOS 的「终端」里登录一次')
+  ).toContain('在浏览器里登录一次')
+  // FIX-11: the sign-in no longer goes through Terminal.
+  expect(root.textContent).not.toContain('终端')
   expect(claude.querySelector('[data-claude-sign-in-start]')!.textContent).toBe(
     '登录 Claude Code',
   )
@@ -988,13 +1008,23 @@ function typeInto(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event('input'))
 }
 
-it('5 · 登录 Claude Code asks Core to open Terminal, and the page checks again when Emperor is back in front', async () => {
+const RUNNING = {
+  profileId: 'profile-0',
+  method: 'claude-ai',
+  state: 'running',
+  startedAt: 1_000,
+}
+const COMMAND =
+  "env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CONFIG_DIR='/Users/ada/.emperor/delegations/claude-code/config' HOME='/Users/ada/.emperor/delegations/claude-code/home' XDG_CONFIG_HOME='/Users/ada/.emperor/delegations/claude-code/home/.config' XDG_CACHE_HOME='/Users/ada/.emperor/delegations/claude-code/home/.cache' '/Users/ada/.local/bin/claude' auth login"
+
+it('FIX-11 · 2 · 登录 Claude Code signs in in the browser, and the pushed result shows 已登录 on its own', async () => {
   claudeProbe(SIGNED_OUT)
-  signInExecutor.mockResolvedValue({ opened: true })
+  signInExecutor.mockResolvedValue({ signIn: { ...RUNNING } })
   await mount()
-  row('claude-code')
-    .querySelector<HTMLButtonElement>('[data-claude-sign-in-start]')!
-    .click()
+  const start = row('claude-code').querySelector<HTMLButtonElement>(
+    '[data-claude-sign-in-start]',
+  )!
+  start.click()
   await settle()
   expect(signInExecutor).toHaveBeenCalledWith({
     profileId: 'profile-0',
@@ -1005,23 +1035,188 @@ it('5 · 登录 Claude Code asks Core to open Terminal, and the page checks agai
   const pending = root.querySelector<HTMLElement>(
     '[data-claude-sign-in-pending]',
   )!
-  expect(pending.textContent).toContain('已在「终端」里打开登录')
-  // The user signs in there and comes back: the probe runs again.
-  probeExecutor.mockResolvedValue({ ...SIGNED_IN })
+  expect(pending.textContent).toContain('正在浏览器中登录 Claude Code…')
+  expect(pending.textContent).toContain('在浏览器里完成后会自动回来')
+  expect(pending.textContent).not.toContain('终端')
+  expect(
+    pending.querySelector('[data-claude-sign-in-cancel]')!.textContent,
+  ).toBe('取消')
+  // One sign-in at a time.
+  expect(
+    row('claude-code').querySelector<HTMLButtonElement>(
+      '[data-claude-sign-in-start]',
+    )!.disabled,
+  ).toBe(true)
+  // claude got the browser's callback: Core pushes the new state.
   probeExecutor.mockClear()
-  window.dispatchEvent(new Event('focus'))
+  pushCoreEvent({
+    event: 'executor_sign_in',
+    signIn: { ...RUNNING, state: 'signed-in', finishedAt: 2_000 },
+    probe: { ...SIGNED_IN },
+  })
   await settle()
-  await settle()
-  expect(probeExecutor).toHaveBeenCalledWith({ profileId: 'profile-0' })
   expect(row('claude-code').querySelector('.readiness')!.textContent).toBe(
     '子智能体就绪',
   )
+  expect(row('claude-code').textContent).toContain('已登录 Claude 账号')
   expect(root.querySelector('[data-claude-sign-in-pending]')).toBeNull()
+  // No 重新检测 needed.
+  expect(probeExecutor).not.toHaveBeenCalled()
+})
+
+it('FIX-11 · 4 · 取消 asks Core to end the sign-in', async () => {
+  claudeProbe(SIGNED_OUT)
+  signInExecutor.mockResolvedValue({ signIn: { ...RUNNING } })
+  cancelExecutorSignIn.mockResolvedValue({
+    signIn: { ...RUNNING, state: 'cancelled', finishedAt: 1_500 },
+  })
+  await mount()
+  const block = await signIn()
+  block.querySelector<HTMLButtonElement>('[data-claude-sign-in-start]')!.click()
+  await settle()
+  const pending = block.querySelector<HTMLElement>(
+    '[data-claude-sign-in-pending]',
+  )!
+  expect(pending.textContent).toContain('正在浏览器中登录 Claude Code…')
+  pending
+    .querySelector<HTMLButtonElement>('[data-claude-sign-in-cancel]')!
+    .click()
+  await settle()
+  expect(cancelExecutorSignIn).toHaveBeenCalledWith({ profileId: 'profile-0' })
+  expect(block.querySelector('[data-claude-sign-in-pending]')).toBeNull()
+  expect(block.querySelector('[data-claude-sign-in-failed]')).toBeNull()
+  // The event that follows changes nothing.
+  pushCoreEvent({
+    event: 'executor_sign_in',
+    signIn: { ...RUNNING, state: 'cancelled', finishedAt: 1_500 },
+  })
+  await settle()
+  expect(block.querySelector('[data-claude-sign-in-pending]')).toBeNull()
+  expect(
+    block.querySelector<HTMLButtonElement>('[data-claude-sign-in-start]')!
+      .disabled,
+  ).toBe(false)
+})
+
+it('FIX-11 · 3 · a failed or timed-out sign-in says why and gives the command to run in Terminal', async () => {
+  claudeProbe(SIGNED_OUT)
+  signInExecutor.mockResolvedValue({ signIn: { ...RUNNING } })
+  const writeText = vi.fn(async () => undefined)
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText },
+  })
+  await mount()
+  const block = await signIn()
+  block.querySelector<HTMLButtonElement>('[data-claude-sign-in-start]')!.click()
+  await settle()
+  pushCoreEvent({
+    event: 'executor_sign_in',
+    signIn: {
+      ...RUNNING,
+      state: 'failed',
+      reason: 'exit',
+      exitCode: 3,
+      command: COMMAND,
+      finishedAt: 2_000,
+    },
+  })
+  await settle()
+  expect(block.querySelector('[data-claude-sign-in-pending]')).toBeNull()
+  const failed = block.querySelector<HTMLElement>(
+    '[data-claude-sign-in-failed]',
+  )!
+  expect(failed.textContent).toContain('登录没有完成')
+  expect(failed.textContent).toContain('退出码 3')
+  expect(failed.textContent).toContain('也可以在「终端」里运行下面这行命令')
+  expect(
+    failed.querySelector('[data-claude-sign-in-command]')!.textContent,
+  ).toBe(COMMAND)
+  failed.querySelector<HTMLButtonElement>('[data-claude-sign-in-copy]')!.click()
+  await settle()
+  expect(writeText).toHaveBeenCalledWith(COMMAND)
+  expect(failed.querySelector('[data-claude-sign-in-copy]')!.textContent).toBe(
+    '已复制',
+  )
+  // Ten minutes without a sign-in.
+  pushCoreEvent({
+    event: 'executor_sign_in',
+    signIn: {
+      ...RUNNING,
+      startedAt: 3_000,
+      state: 'failed',
+      reason: 'timeout',
+      command: COMMAND,
+      finishedAt: 603_000,
+    },
+  })
+  await settle()
+  expect(
+    block.querySelector('[data-claude-sign-in-failed]')!.textContent,
+  ).toContain('10 分钟')
+  // The user ran the command in Terminal and checks again.
+  probeExecutor.mockResolvedValue({ ...SIGNED_IN })
+  block
+    .querySelector<HTMLButtonElement>('[data-claude-sign-in-recheck]')!
+    .click()
+  await settle()
+  await settle()
+  expect(probeExecutor).toHaveBeenCalledWith({ profileId: 'profile-0' })
+  expect(block.querySelector('[data-claude-sign-in-failed]')).toBeNull()
+  expect(block.querySelector('[data-claude-auth-state]')!.textContent).toBe(
+    '已登录 Claude 账号 · ada@example.com · Ada Lab',
+  )
+})
+
+it('FIX-11 · 2 · a list read that started before the sign-in does not end it', async () => {
+  const value = claudeProbe(SIGNED_OUT)
+  signInExecutor.mockResolvedValue({ signIn: { ...RUNNING } })
+  await mount()
+  // The 10-second refresh asks for the list…
+  let answer!: (result: unknown) => void
+  listExecutors.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        answer = resolve
+      }),
+  )
+  window.dispatchEvent(new Event('focus'))
+  await settle()
+  // …the user starts the sign-in meanwhile…
+  row('claude-code')
+    .querySelector<HTMLButtonElement>('[data-claude-sign-in-start]')!
+    .click()
+  await settle()
+  expect(root.querySelector('[data-claude-sign-in-pending]')).not.toBeNull()
+  // …and the older answer, without it, arrives afterwards.
+  answer({ ...value, signIn: null })
+  await settle()
+  expect(root.querySelector('[data-claude-sign-in-pending]')).not.toBeNull()
+  // A list read after the start that no longer has it: it ended unheard.
+  probeExecutor.mockClear()
+  probeExecutor.mockResolvedValue({ ...SIGNED_IN })
+  listExecutors.mockResolvedValue({ ...value, signIn: null })
+  window.dispatchEvent(new Event('focus'))
+  await settle()
+  await settle()
+  expect(root.querySelector('[data-claude-sign-in-pending]')).toBeNull()
+  expect(probeExecutor).toHaveBeenCalledWith({ profileId: 'profile-0' })
+})
+
+it('FIX-11 · 2 · a sign-in already running when the page opens shows as running', async () => {
+  const value = claudeProbe(SIGNED_OUT)
+  value.signIn = { ...RUNNING }
+  await mount()
+  expect(
+    root.querySelector('[data-claude-sign-in-pending]')!.textContent,
+  ).toContain('正在浏览器中登录 Claude Code…')
 })
 
 it('5 · 详情 › 登录 offers the Console sign-in and 退出登录, and says Emperor never keeps the login', async () => {
   claudeProbe(SIGNED_OUT)
-  signInExecutor.mockResolvedValue({ opened: true })
+  signInExecutor.mockResolvedValue({
+    signIn: { ...RUNNING, method: 'console' },
+  })
   await mount()
   let block = await signIn()
   expect(block.querySelector('[data-claude-auth-state]')!.textContent).toBe(
@@ -1030,6 +1225,9 @@ it('5 · 详情 › 登录 offers the Console sign-in and 退出登录, and says
   expect(
     block.querySelector('[data-claude-sign-in-help]')!.textContent,
   ).toContain('Emperor 不读取、不保存你的 Claude 登录')
+  // FIX-11: the browser, not Terminal.
+  expect(block.textContent).toContain('浏览器')
+  expect(block.textContent).not.toContain('终端')
   block
     .querySelector<HTMLButtonElement>('[data-claude-sign-in-console]')!
     .click()

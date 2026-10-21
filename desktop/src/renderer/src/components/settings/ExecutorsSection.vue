@@ -4,7 +4,8 @@
  *
  * - The main page: one card with the three subagents (本地, Claude Code,
  *   Codex — status, model, on/off; a missing sign-in fills the row with its
- *   reason and 登录 Claude Code, AGT-12) and one card with the three task
+ *   reason and 登录 Claude Code, AGT-12, which Core runs and the user
+ *   finishes in the browser, FIX-11) and one card with the three task
  *   settings (同时运行, 改代码的位置, 费用上限), then 高级.
  * - Sub pages: 高级 (turns, run time, 开发环境, 排查) and each external
  *   subagent's 详情 (status, sign-in, model, specialties, capabilities in
@@ -32,6 +33,7 @@ import {
   useSettingsHeader,
 } from './ui'
 import { useSettingsPages } from './settingsHeader'
+import ClaudeSignInNotice from './executors/ClaudeSignInNotice.vue'
 import ExecutorAdvancedPage from './executors/ExecutorAdvancedPage.vue'
 import ExecutorDetailPage from './executors/ExecutorDetailPage.vue'
 import {
@@ -106,10 +108,13 @@ function showsModel(profile: ExecutorProfile | undefined) {
     !hasIssue(s.factsOf(profile))
   )
 }
-/** 登录 Claude Code is open in Terminal for this profile (AGT-12). */
-const pendingClaude = computed(() => {
+/** 登录 Claude Code running, or failed, for the row's profile (FIX-11). */
+const claudeSignIn = computed(() => {
   const profile = s.rowOf('claude-code').profile
-  return profile && s.signInPending.value[profile.id] ? profile : null
+  const signIn = s.signIn.value
+  return profile && signIn?.profileId === profile.id
+    ? { profile, signIn }
+    : null
 })
 function setEnabled(profile: ExecutorProfile, on: boolean) {
   void s.changeProfile(profile.id, (p) => {
@@ -248,23 +253,13 @@ useSettingsHeader({
         >
       </template>
     </Notice>
-    <Notice
-      v-if="pendingClaude"
-      tone="info"
-      title="已在「终端」里打开登录"
-      data-claude-sign-in-pending
-    >
-      按「终端」里的提示在浏览器里完成登录，回到 Emperor 后会自动重新检测。
-      <template #actions>
-        <Button
-          size="sm"
-          variant="secondary"
-          :disabled="busy"
-          @click="s.recheck(pendingClaude)"
-          >重新检测</Button
-        >
-      </template>
-    </Notice>
+    <ClaudeSignInNotice
+      v-if="claudeSignIn"
+      :sign-in="claudeSignIn.signIn"
+      :busy="busy"
+      @cancel="s.cancelSignIn()"
+      @recheck="s.recheck(claudeSignIn.profile)"
+    />
 
     <SettingsGroup title="可用的子智能体" data-executor-list>
       <SettingsRow
@@ -327,8 +322,8 @@ useSettingsHeader({
             size="sm"
             variant="secondary"
             data-claude-sign-in-start
-            :disabled="busy || s.tokenBusy.value"
-            @click="s.signIn(row.profile)"
+            :disabled="busy || s.tokenBusy.value || s.signingIn.value"
+            @click="s.startSignIn(row.profile)"
             >登录 Claude Code</Button
           >
           <Select

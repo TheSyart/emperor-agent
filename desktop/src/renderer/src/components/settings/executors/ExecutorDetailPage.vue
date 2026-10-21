@@ -3,8 +3,9 @@
  * 设置 › 子智能体 › Claude Code / Codex (AGT-10): everything the main page
  * leaves out, in plain words — the status and its fix (for a missing
  * claude, the official install command), Claude's sign-in (AGT-12: its own
- * login in macOS Terminal, the Console sign-in, 退出登录, 使用 API Key and
- * what outranks the login), the default model and custom models, what it
+ * login, which Core runs and the user finishes in the browser, FIX-11; the
+ * Console sign-in, 退出登录, 使用 API Key and what outranks the login),
+ * the default model and custom models, what it
  * is good at, and what Core verified about it (「联网搜索：已验证」).
  * Saved at once; the text editors save on 保存 / 完成.
  */
@@ -45,16 +46,23 @@ import {
   statusTone,
   versionText,
 } from './executorText'
+import ClaudeSignInNotice from './ClaudeSignInNotice.vue'
 import { ADD_CUSTOM_MODEL, useExecutorSettings } from './useExecutorSettings'
 
 const props = defineProps<{ backend: 'claude-code' | 'codex' }>()
 
 const s = useExecutorSettings()
-const { busy, tokenBusy, catalogs, catalogBusy, runtimes, signInPending } = s
+const { busy, tokenBusy, catalogs, catalogBusy, runtimes, signingIn } = s
 const name = computed(() => executorName(props.backend))
 const row = computed(() => s.rowOf(props.backend))
 const profile = computed(() => row.value.profile)
 const facts = computed(() => (profile.value ? s.factsOf(profile.value) : {}))
+/** 登录 Claude Code running, or failed, for this profile (FIX-11). */
+const signIn = computed(() =>
+  profile.value && s.signIn.value?.profileId === profile.value.id
+    ? s.signIn.value
+    : null,
+)
 
 // ── 状态 ─────────────────────────────────────────────────────────────
 
@@ -358,31 +366,23 @@ const runFacts = computed(() => {
               size="sm"
               :variant="signedInWithClaude(facts) ? 'ghost' : 'secondary'"
               data-claude-sign-in-start
-              :disabled="busy || tokenBusy || claudeMissing(profile, facts)"
-              @click="s.signIn(profile)"
+              :disabled="
+                busy || tokenBusy || signingIn || claudeMissing(profile, facts)
+              "
+              @click="s.startSignIn(profile)"
               >{{
                 signedInWithClaude(facts) ? '重新登录' : '登录 Claude Code'
               }}</Button
             >
           </div>
         </SettingsRow>
-        <Notice
-          v-if="signInPending[profile.id]"
-          tone="info"
-          title="已在「终端」里打开登录"
-          data-claude-sign-in-pending
-        >
-          按「终端」里的提示在浏览器里完成登录，回到 Emperor 后会自动重新检测。
-          <template #actions>
-            <Button
-              size="sm"
-              variant="secondary"
-              :disabled="busy"
-              @click="s.recheck(profile)"
-              >重新检测</Button
-            >
-          </template>
-        </Notice>
+        <ClaudeSignInNotice
+          v-if="signIn"
+          :sign-in="signIn"
+          :busy="busy"
+          @cancel="s.cancelSignIn()"
+          @recheck="s.recheck(profile)"
+        />
         <Notice
           v-if="precedenceText(facts)"
           tone="info"
@@ -416,17 +416,20 @@ const runFacts = computed(() => {
         </SettingsRow>
         <SettingsRow layout="stacked">
           <p class="sign-in-help" data-claude-sign-in-help>
-            「登录 Claude Code」会打开 macOS 的「终端」，按 Claude Code
-            自己的流程在浏览器里登录一次。登录由 Claude Code 保存在 Emperor
-            为它准备的专用目录里；Emperor 不读取、不保存你的 Claude 登录。
+            「登录 Claude Code」会运行 Claude Code
+            自己的登录并打开浏览器，在浏览器里登录一次即可。登录由 Claude Code
+            保存在 Emperor 为它准备的专用目录里；Emperor 不读取、不保存你的
+            Claude 登录。
           </p>
           <p class="sign-in-help">
             用 Anthropic Console 账号？<LinkButton
               data-claude-sign-in-console
-              :disabled="busy || tokenBusy || claudeMissing(profile, facts)"
-              @click="s.signIn(profile, 'console')"
+              :disabled="
+                busy || tokenBusy || signingIn || claudeMissing(profile, facts)
+              "
+              @click="s.startSignIn(profile, 'console')"
               >用 Console 账号登录（按用量计费）</LinkButton
-            >，同样在「终端」里完成。
+            >，同样在浏览器里完成。
           </p>
         </SettingsRow>
       </SettingsGroup>

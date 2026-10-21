@@ -291,8 +291,8 @@ export interface CoreApiCreateOptions extends HarnessHostOptions {
     home?: string
     environment?: NodeJS.ProcessEnv
     loginShell?: LoginShellEnvironment
-    /** 登录 Claude Code: instead of opening macOS Terminal (AGT-12). */
-    openTerminal?: (script: string) => Promise<void>
+    /** 登录 Claude Code's time limit (FIX-11; default ten minutes). */
+    signInTimeoutMs?: number
   } | null
   /** Test hook: the GitHub CLI seen by Pull Request, Issue and CI reads. */
   github?: Partial<
@@ -817,7 +817,11 @@ export class CoreApi {
       sealer: kept.secretSealer,
     }
     this.claudeKeysMigrated = import('../harness/delegation/claude-sign-in')
-      .then((m) => new m.ClaudeKeyStore(claudeKeys).migrate())
+      .then((m) => {
+        // Scripts an earlier 0.2 build left for Terminal (FIX-11).
+        m.removeSignInScripts(this.paths.delegationsRoot)
+        return new m.ClaudeKeyStore(claudeKeys).migrate()
+      })
       .catch(() => false)
     const executorHome = opts.executorHome ?? {}
     const executorLoginShell =
@@ -900,7 +904,10 @@ export class CoreApi {
       })
     }
     const claudeSignIn = {
-      signIn: async (
+      // 登录 Claude Code (FIX-11): the installed claude's own `auth login`
+      // in the run's folders, started here; the user finishes in the
+      // browser. Its output is never read.
+      start: async (
         profile: Parameters<typeof executorRuntime.prepare>[0],
         console: boolean,
       ) => {
@@ -911,17 +918,24 @@ export class CoreApi {
             'claude is not installed',
           )
         const runtime = await executorRuntime.probe(profile)
-        const { openClaudeSignIn } =
-          await import('../harness/delegation/claude-sign-in')
-        await openClaudeSignIn({
-          root: this.paths.delegationsRoot,
+        const sign = await import('../harness/delegation/claude-sign-in')
+        const login = await sign.startClaudeLogin({
           executable,
           environment: runtime.environment,
+          cwd: sign.prepareClaudeDirectories(this.paths.delegationsRoot).home,
           console,
-          ...(executorHome.openTerminal
-            ? { open: executorHome.openTerminal }
+          ...(executorHome.signInTimeoutMs
+            ? { timeoutMs: executorHome.signInTimeoutMs }
             : {}),
         })
+        return {
+          login,
+          command: sign.claudeSignInCommand({
+            executable,
+            environment: runtime.environment,
+            console,
+          }),
+        }
       },
       signOut: async (
         profile: Parameters<typeof executorRuntime.prepare>[0],
@@ -1158,6 +1172,8 @@ export class CoreApi {
       consent: executorConsent,
       claudeKeys,
       claudeSignIn,
+      signInChanged: (change) =>
+        host.emitHost({ event: 'executor_sign_in', ...change }),
     })
     host.delegationQuestionTimeoutMs = () => {
       try {

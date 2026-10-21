@@ -81,7 +81,6 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   AUTH_STATUS_FAILED:
     '读不到 Claude Code 的登录状态，请在「设置 › 子智能体」重新检测。',
   AUTH_SIGN_OUT_FAILED: 'Claude Code 没有退出登录，请稍后重试。',
-  TERMINAL_UNAVAILABLE: '无法打开 macOS 的「终端」，请确认它没有被停用后再试。',
   EXECUTOR_MISSING:
     '找不到 Claude Code / Codex 的命令行程序，请先安装，或在「设置 › 子智能体」更正路径。',
   EXECUTOR_DISABLED: '请先在「设置 › 子智能体」里启用它。',

@@ -7,12 +7,14 @@
  * damaged vault.json still starts and 密码管理器 offers 重新开始（先备份）
  * (SEC-09). 高级 › 存储 (KRN-12) shows a total within 5% of `du` and 清理
  * removes a 40-day-old orphan spill file. 子智能体 › Claude Code: 登录 Claude
- * Code runs claude's own `auth login` in its dedicated folder and the page
- * then shows the account; 退出登录 signs out; 使用 API Key seals the key and
- * shows only 末 4 位 (AGT-12). A fake claude stands in for the installed
- * one, the sign-in script runs without Terminal, and sign-ins are read
- * from an empty folder instead of ~/.claude. Screenshots of every page
- * land in out-e2e/settings/.
+ * Code runs claude's own `auth login` from Core in its dedicated folder
+ * (FIX-11: no Terminal), shows 正在浏览器中登录 and then the account on its
+ * own; 取消 ends claude's whole process group; a failed sign-in shows why
+ * and the one-line command for Terminal, and nothing claude printed reaches
+ * the logs; 退出登录 signs out; 使用 API Key seals the key and shows only 末
+ * 4 位 (AGT-12). A fake claude stands in for the installed one, and
+ * sign-ins are read from an empty folder instead of ~/.claude. Screenshots
+ * of every page land in out-e2e/settings/.
  * Prints `E2E-RESULT {json}` lines like the other Electron suites.
  *
  *   node scripts/e2e-cu.mjs --mode=settings   (after `npm run build`)
@@ -103,10 +105,19 @@ function report(result: Result): void {
 
 class Abort extends Error {}
 
+/** What the fake `claude auth login` prints, as the CLI does (FIX-11). */
+const LOGIN_LINK =
+  'https://claude.com/cai/oauth/authorize?code=true&state=E2E-STATE-5b4a'
+const LOGIN_CODE = 'E2E-CODE-3f2e1d'
+
 /**
  * The installed claude's stand-in: `--version`, and `auth status | login |
  * logout` answered like the CLI (JSON; exit 0 signed in, 1 not), keyed to
- * its CLAUDE_CONFIG_DIR. Returns its folder.
+ * its CLAUDE_CONFIG_DIR. `auth login` prints a sign-in link and a code
+ * prompt like the CLI, then follows `<its folder>/login-mode`: empty waits
+ * a moment (the browser), signs in and exits 0; `fail` exits 3; `hang`
+ * waits on a child `sleep` until it is stopped, with both pids in
+ * `<its folder>/login-pids`. Returns its folder.
  */
 function fakeClaude(dir: string): string {
   mkdirSync(dir, { recursive: true })
@@ -115,8 +126,18 @@ function fakeClaude(dir: string): string {
     [
       '#!/bin/sh',
       'dir="$CLAUDE_CONFIG_DIR"',
+      'bin="$(dirname "$0")"',
       'if [ "$1" = "--version" ]; then echo "2.1.300 (Claude Code)"; exit 0; fi',
-      'if [ "$1" = "auth" ] && [ "$2" = "login" ]; then echo signed-in > "$dir/e2e-signed-in"; echo "Login successful."; exit 0; fi',
+      'if [ "$1" = "auth" ] && [ "$2" = "login" ]; then',
+      '  echo "Opening browser to sign in…"',
+      `  echo "If the browser didn't open, visit: ${LOGIN_LINK}"`,
+      `  printf 'Paste code here if prompted > '`,
+      `  echo "${LOGIN_CODE}" >&2`,
+      '  mode="$(cat "$bin/login-mode" 2>/dev/null)"',
+      '  if [ "$mode" = fail ]; then exit 3; fi',
+      '  if [ "$mode" = hang ]; then sleep 600 & echo "$$ $!" > "$bin/login-pids"; wait; exit 0; fi',
+      '  sleep 1; echo signed-in > "$dir/e2e-signed-in"; echo "Login successful."; exit 0',
+      'fi',
       'if [ "$1" = "auth" ] && [ "$2" = "logout" ]; then rm -f "$dir/e2e-signed-in"; exit 0; fi',
       'if [ "$1" = "auth" ] && [ "$2" = "status" ]; then',
       '  if [ -n "$ANTHROPIC_API_KEY" ]; then printf \'{"loggedIn":true,"authMethod":"api_key","apiProvider":"firstParty","apiKeySource":"ANTHROPIC_API_KEY"}\\n\'; exit 0; fi',
@@ -300,7 +321,7 @@ async function settings(page: Page, home: string): Promise<void> {
 
   await check(
     page,
-    'Claude Code: 登录 runs claude’s own sign-in in its folder; 退出登录; 使用 API Key shows only 末 4 位',
+    'Claude Code: 登录 runs claude’s own sign-in from Core, 取消 and a failed sign-in; 退出登录; 使用 API Key shows only 末 4 位',
     async () => {
       const key = 'sk-ant-api03-e2e-fixture-not-a-real-key-9f3c'
       const dialog = await openSection(page, 'executors')
@@ -320,14 +341,18 @@ async function settings(page: Page, home: string): Promise<void> {
       )
       if (await dialog.locator('input[type="password"]').count())
         throw new Error('the page asks for a token')
-      // 登录 Claude Code: the script Core would open in Terminal runs here.
+      if ((await signIn.innerText()).includes('终端'))
+        throw new Error('the sign-in still points at Terminal')
+      // 登录 Claude Code: Core runs the fake claude's auth login itself;
+      // it "signs in in the browser" for a second and exits 0.
       await signIn.locator('[data-claude-sign-in-start]').click()
-      await signIn.locator('[data-claude-sign-in-pending]').waitFor()
-      await signIn
-        .locator('[data-claude-sign-in-pending] button', {
-          hasText: '重新检测',
-        })
-        .click()
+      const pending = signIn.locator('[data-claude-sign-in-pending]')
+      await pending.waitFor()
+      const running = await pending.innerText()
+      if (!running.includes('正在浏览器中登录 Claude Code'))
+        throw new Error(`running: ${running}`)
+      await page.screenshot({ path: join(shots, 'claude-signing-in.png') })
+      // No 重新检测: the pushed result shows the account.
       await until(
         async () =>
           (await state.innerText()).includes(
@@ -336,10 +361,13 @@ async function settings(page: Page, home: string): Promise<void> {
         30_000,
         '已登录 Claude 账号',
       )
+      await pending.waitFor({ state: 'detached', timeout: 10_000 })
       await page.screenshot({ path: join(shots, 'claude-signed-in.png') })
       const config = join(home, 'delegations', 'claude-code', 'config')
       if (!existsSync(join(config, 'e2e-signed-in')))
         throw new Error('claude did not sign in in its dedicated folder')
+      if (existsSync(join(home, 'delegations', 'claude-code', 'sign-in')))
+        throw new Error('a Terminal script folder was made')
       // 退出登录.
       await signIn.locator('[data-claude-sign-out]').click()
       await until(
@@ -347,6 +375,77 @@ async function settings(page: Page, home: string): Promise<void> {
         30_000,
         'signed out',
       )
+      // 取消: claude and the child it started are both gone.
+      const bin = join(home, 'executor-bin')
+      writeFileSync(join(bin, 'login-mode'), 'hang')
+      await signIn.locator('[data-claude-sign-in-start]').click()
+      await pending.waitFor()
+      await until(
+        () => existsSync(join(bin, 'login-pids')),
+        10_000,
+        'the fake claude waiting for the browser',
+      )
+      const pids = readFileSync(join(bin, 'login-pids'), 'utf8')
+        .trim()
+        .split(/\s+/)
+        .map(Number)
+      await pending.locator('[data-claude-sign-in-cancel]').click()
+      await pending.waitFor({ state: 'detached', timeout: 10_000 })
+      await until(
+        () =>
+          pids.every((pid) => {
+            try {
+              process.kill(pid, 0)
+              return false
+            } catch {
+              return true
+            }
+          }),
+        10_000,
+        'claude and its child stopped',
+      )
+      if (!(await state.innerText()).includes('尚未登录'))
+        throw new Error('取消 changed the sign-in')
+      // A failed sign-in: why, and the command to run in Terminal.
+      writeFileSync(join(bin, 'login-mode'), 'fail')
+      await signIn.locator('[data-claude-sign-in-start]').click()
+      const failed = signIn.locator('[data-claude-sign-in-failed]')
+      await failed.waitFor({ timeout: 30_000 })
+      const why = await failed.innerText()
+      if (!why.includes('退出码 3')) throw new Error(`failed: ${why}`)
+      const command = await failed
+        .locator('[data-claude-sign-in-command]')
+        .innerText()
+      for (const part of [
+        'env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN',
+        `CLAUDE_CONFIG_DIR='${config}'`,
+        `'${join(bin, 'claude')}' auth login`,
+      ])
+        if (!command.includes(part)) throw new Error(`command: ${command}`)
+      await page.screenshot({ path: join(shots, 'claude-sign-in-failed.png') })
+      writeFileSync(join(bin, 'login-mode'), '')
+      // What claude printed is nowhere in Emperor's logs or on the page.
+      const printed = [LOGIN_LINK, 'E2E-STATE-5b4a', LOGIN_CODE]
+      const logs = join(home, 'logs')
+      const walk = (dir: string): string[] =>
+        existsSync(dir)
+          ? readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+              entry.isDirectory()
+                ? walk(join(dir, entry.name))
+                : [join(dir, entry.name)],
+            )
+          : []
+      const logFiles = walk(logs)
+      for (const file of logFiles) {
+        const text = readFileSync(file, 'latin1')
+        for (const value of printed)
+          if (text.includes(value))
+            throw new Error(`${file} has what claude printed`)
+      }
+      const html = await page.content()
+      for (const value of printed)
+        if (html.includes(value))
+          throw new Error('the page shows claude output')
       // 使用 API Key: sealed, 末 4 位 only.
       await signIn.locator('[data-claude-api-key-set]').click()
       const keyDialog = page.getByRole('dialog', { name: '使用 API Key' })
@@ -376,6 +475,9 @@ async function settings(page: Page, home: string): Promise<void> {
       )
       return {
         signedIn: true,
+        cancelled: true,
+        failed: true,
+        logFiles: logFiles.length,
         sealed: true,
         cleared: !readFileSync(file, 'utf8').includes('el1:'),
       }

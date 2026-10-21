@@ -76,6 +76,11 @@ export function delegationTestDirectory(): { root: string; cleanup(): void } {
   return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) }
 }
 
+/** What the fake `claude auth login` prints, as the CLI does (FIX-11). */
+export const FAKE_LOGIN_LINK =
+  'https://claude.com/cai/oauth/authorize?code=true&state=FAKE-STATE-0f1e2d'
+export const FAKE_LOGIN_CODE = 'FAKE-CODE-9c1d8b7a'
+
 /**
  * A stand-in for the installed `claude` (AGT-12), written as `<dir>/claude`:
  * `--version`, and `auth status | login | logout` answered the way the CLI
@@ -84,6 +89,13 @@ export function delegationTestDirectory(): { root: string; cleanup(): void } {
  * ANTHROPIC_API_KEY, then its own sign-in. Every call appends its
  * arguments and environment to `<CLAUDE_CONFIG_DIR>/fake-claude.log`
  * ({@link fakeClaudeCalls}). Tests never run the real claude.
+ *
+ * `auth login` (FIX-11) prints a sign-in link and a code-like line the way
+ * the CLI does ({@link FAKE_LOGIN_LINK}, {@link FAKE_LOGIN_CODE}), records
+ * its pid and process group in `fake-login-pid` / `fake-login-pgid`, then
+ * follows `<CLAUDE_CONFIG_DIR>/fake-login-mode`: empty signs in and exits
+ * 0; `fail` exits 3; `signed-out` exits 0 without signing in; `hang` waits
+ * on a child `sleep` (its pid in `fake-login-child`) until it is stopped.
  */
 export function fakeClaude(
   dir: string,
@@ -127,6 +139,18 @@ export function fakeClaude(
       status,
       '      ;;',
       '    login)',
+      '      mode="$(cat "$dir/fake-login-mode" 2>/dev/null)"',
+      '      echo $$ > "$dir/fake-login-pid"',
+      `      /bin/ps -o pgid= -p $$ | tr -d ' ' > "$dir/fake-login-pgid"`,
+      '      echo "Opening browser to sign in…"',
+      `      echo "If the browser didn't open, visit: ${FAKE_LOGIN_LINK}"`,
+      `      printf 'Paste code here if prompted > '`,
+      `      echo "${FAKE_LOGIN_CODE}" >&2`,
+      '      case "$mode" in',
+      '        fail) exit 3 ;;',
+      '        signed-out) exit 0 ;;',
+      '        hang) sleep 600 & echo $! > "$dir/fake-login-child"; wait; exit 0 ;;',
+      '      esac',
       '      if [ "$3" = "--console" ]; then echo console > "$dir/fake-signed-in"; else echo claude.ai > "$dir/fake-signed-in"; fi',
       '      echo "Login successful."; exit 0',
       '      ;;',
@@ -141,6 +165,42 @@ export function fakeClaude(
     { mode: 0o755 },
   )
   return path
+}
+
+/** The fake `claude auth login`'s pid, process group and child (FIX-11). */
+export function fakeLoginProcess(configDirectory: string): {
+  pid?: number
+  pgid?: number
+  child?: number
+} {
+  const read = (name: string) => {
+    try {
+      const value = Number(
+        readFileSync(join(configDirectory, name), 'utf8').trim(),
+      )
+      return value > 0 ? value : undefined
+    } catch {
+      return undefined
+    }
+  }
+  const pid = read('fake-login-pid'),
+    pgid = read('fake-login-pgid'),
+    child = read('fake-login-child')
+  return {
+    ...(pid ? { pid } : {}),
+    ...(pgid ? { pgid } : {}),
+    ...(child ? { child } : {}),
+  }
+}
+
+/** A process is still there (not yet reaped counts as there). */
+export function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
 }
 
 /** What the fake `claude` was asked, with the environment it saw. */

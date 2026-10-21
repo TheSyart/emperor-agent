@@ -337,10 +337,13 @@ export async function installVisualCoreBridge(
       }
       let visualSignInNotice = visualExecutorsMode === 'notice'
       let visualClaudeMode = visualExecutorsMode
+      /** 登录 Claude Code as Core runs it (FIX-11): running until a spec ends it. */
+      let visualSignIn: Record<string, unknown> | null = null
       const visualExecutorList = () => ({
         config: visualExecutorConfig,
         diagnostic: null,
         signInNotice: visualSignInNotice,
+        signIn: visualSignIn?.state === 'running' ? visualSignIn : null,
         profiles: visualExecutorProfiles.map((profile) => ({
           profile,
           probe: visualExecutorProbe(profile.id, visualClaudeMode),
@@ -8136,9 +8139,71 @@ export async function installVisualCoreBridge(
             }
             case 'executors.signIn': {
               if (!visualExecutorsMode) return {}
-              // As if the user signed in in Terminal: the next check sees it.
-              visualClaudeMode = 'signed-in'
-              return { opened: true }
+              const input = (args[0] || {}) as {
+                profileId?: string
+                method?: string
+              }
+              // One at a time, as in Core: a second click joins the first.
+              if (visualSignIn?.state !== 'running')
+                visualSignIn = {
+                  profileId: String(input.profileId),
+                  method: input.method === 'console' ? 'console' : 'claude-ai',
+                  state: 'running',
+                  startedAt: Date.now(),
+                }
+              // A spec ends it the way Core pushes the end of claude auth
+              // login: window.__visualClaudeSignIn('signed-in' | 'exit' |
+              // 'timeout').
+              ;(
+                window as unknown as {
+                  __visualClaudeSignIn?: (outcome: string) => void
+                }
+              ).__visualClaudeSignIn = (outcome) => {
+                if (!visualSignIn) return
+                const command =
+                  "env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CONFIG_DIR='/Users/ada/.emperor/delegations/claude-code/config' HOME='/Users/ada/.emperor/delegations/claude-code/home' XDG_CONFIG_HOME='/Users/ada/.emperor/delegations/claude-code/home/.config' XDG_CACHE_HOME='/Users/ada/.emperor/delegations/claude-code/home/.cache' '/Users/ada/.local/bin/claude' auth login" +
+                  (visualSignIn.method === 'console' ? ' --console' : '')
+                if (outcome === 'signed-in') visualClaudeMode = 'signed-in'
+                visualSignIn = {
+                  ...visualSignIn,
+                  finishedAt: Date.now(),
+                  ...(outcome === 'signed-in'
+                    ? { state: 'signed-in' }
+                    : outcome === 'timeout'
+                      ? { state: 'failed', reason: 'timeout', command }
+                      : {
+                          state: 'failed',
+                          reason: 'exit',
+                          exitCode: 1,
+                          command,
+                        }),
+                }
+                const event = {
+                  event: 'executor_sign_in',
+                  seq: 0,
+                  signIn: visualSignIn,
+                  ...(outcome === 'signed-in'
+                    ? {
+                        probe: visualExecutorProbe(
+                          String(visualSignIn.profileId),
+                          visualClaudeMode,
+                        ),
+                      }
+                    : {}),
+                }
+                for (const target of environmentListeners) target(event)
+              }
+              return { signIn: visualSignIn }
+            }
+            case 'executors.cancelSignIn': {
+              if (!visualExecutorsMode) return {}
+              if (visualSignIn?.state !== 'running') return { signIn: null }
+              visualSignIn = {
+                ...visualSignIn,
+                state: 'cancelled',
+                finishedAt: Date.now(),
+              }
+              return { signIn: visualSignIn }
             }
             case 'executors.dismissNotice':
               visualSignInNotice = false

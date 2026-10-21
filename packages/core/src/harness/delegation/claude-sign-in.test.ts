@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { execFile } from 'node:child_process'
+import { execFile, type spawn } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import {
   existsSync,
   mkdirSync,
@@ -8,25 +9,35 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
+import { PassThrough, Writable } from 'node:stream'
 import { promisify } from 'node:util'
 import { createLocalKeySealer } from '../../security/secret-sealer'
 import {
   CLAUDE_SHELL_KEYS,
+  CLAUDE_SIGN_IN_TIMEOUT_MS,
   ClaudeKeyStore,
   checkClaudeSignIn,
   claudeDirectories,
-  claudeSignInScript,
-  openClaudeSignIn,
+  claudeSignInCommand,
+  claudeSignInEnvironment,
   parseClaudeAuthStatus,
+  prepareClaudeDirectories,
+  removeSignInScripts,
   signOutClaude,
-  terminalOpener,
+  startClaudeLogin,
 } from './claude-sign-in'
 import { defaultExecutorConfig } from './config'
 import { ManagedAgentProcess } from './process'
 import { ExecutorRegistry } from './registry'
 import { ExecutorRuntimeService } from './runtime'
 import type { SandboxBackend } from '../sandbox/backend'
-import { delegationTestDirectory, fakeClaude, fakeClaudeCalls } from './testing'
+import {
+  delegationTestDirectory,
+  fakeClaude,
+  fakeClaudeCalls,
+  fakeLoginProcess,
+  processAlive,
+} from './testing'
 
 /**
  * AGT-12 · Claude Code signs in through its own, unmodified login. Every
@@ -156,14 +167,13 @@ describe('AGT-12 · Claude Code’s own sign-in in a dedicated folder', () => {
     })
 
     // 登录 runs the same claude with the same folders, then the check sees it.
-    const script = claudeSignInScript({
+    const started = await startClaudeLogin({
       executable: s.executable,
       environment: probe.environment,
+      cwd: s.dirs.home,
       console: false,
     })
-    const path = join(s.root, 'login.command')
-    writeFileSync(path, script, { mode: 0o700 })
-    await run('/bin/bash', [path], { env: { PATH: '/usr/bin:/bin' } })
+    expect(await started.done).toEqual({ ended: 'exit', exitCode: 0 })
     const login = fakeClaudeCalls(s.dirs.config).at(-1)!
     expect(login.args).toBe('auth login')
     expect(login.env).toMatchObject({
@@ -460,60 +470,6 @@ describe('AGT-12 · Claude Code’s own sign-in in a dedicated folder', () => {
     ).toMatchObject({ status: 'available', executableVersion: '2.1.79' })
   })
 
-  it('5 · 登录 Claude Code opens macOS Terminal on a script that runs claude auth login', async () => {
-    const s = setup()
-    const probe = await s.runtime.probe(claude())
-    const opened: string[] = []
-    const script = await openClaudeSignIn({
-      root: s.root,
-      executable: s.executable,
-      environment: probe.environment,
-      console: false,
-      open: async (path) => {
-        opened.push(path)
-      },
-    })
-    expect(opened).toEqual([script])
-    expect(script.startsWith(join(s.dirs.root, 'sign-in') + '/')).toBe(true)
-    expect(script.endsWith('.command')).toBe(true)
-    expect(statSync(script).mode & 0o777).toBe(0o700)
-    const text = readFileSync(script, 'utf8')
-    expect(text).toContain(`export CLAUDE_CONFIG_DIR='${s.dirs.config}'`)
-    expect(text).toContain(`export HOME='${s.dirs.home}'`)
-    expect(text).toContain(`'${s.executable}' auth login`)
-    expect(text).not.toMatch(/osascript|security |sk-ant/)
-    // Run as Terminal would: the fake claude signs in with those folders.
-    await run('/bin/bash', [script], { env: { PATH: '/usr/bin:/bin' } })
-    expect(fakeClaudeCalls(s.dirs.config).at(-1)).toMatchObject({
-      args: 'auth login',
-    })
-    // The script removes itself when it is done.
-    expect(existsSync(script)).toBe(false)
-
-    // Console (API billing).
-    const consoleScript = await openClaudeSignIn({
-      root: s.root,
-      executable: s.executable,
-      environment: probe.environment,
-      console: true,
-      open: async () => undefined,
-    })
-    expect(readFileSync(consoleScript, 'utf8')).toContain(
-      `'${s.executable}' auth login --console`,
-    )
-
-    // The default opener is macOS Terminal through open(1): no AppleScript,
-    // not Emperor's own terminal pane.
-    const calls: unknown[][] = []
-    await terminalOpener(((...args: unknown[]) => {
-      calls.push(args.slice(0, 2))
-      ;(args.at(-1) as (e: null) => void)(null)
-    }) as never)('/tmp/x.command')
-    expect(calls).toEqual([
-      ['/usr/bin/open', ['-a', 'Terminal', '/tmp/x.command']],
-    ])
-  })
-
   it('6 · an upgrade deletes a Claude OAuth token an earlier build saved, and says so once', () => {
     const s = setup()
     mkdirSync(s.root, { recursive: true })
@@ -560,6 +516,265 @@ describe('AGT-12 · Claude Code’s own sign-in in a dedicated folder', () => {
     const fresh = setup()
     expect(fresh.keys.migrate()).toBe(false)
     expect(fresh.keys.noticePending()).toBe(false)
+  })
+})
+
+/** A spawned child Node would hand back, for checking how Core starts it. */
+function childDouble() {
+  const writes: Buffer[] = []
+  const child = Object.assign(new EventEmitter(), {
+    pid: 4242,
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
+    stdin: new Writable({
+      write(chunk: Buffer, _encoding, done) {
+        writes.push(chunk)
+        done()
+      },
+    }),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+  })
+  const exit = (code: number) => {
+    child.exitCode = code
+    child.emit('exit', code, null)
+    child.emit('close', code, null)
+  }
+  return { child, writes, exit }
+}
+
+async function gone(pids: Array<number | undefined>, ms = 3000) {
+  const until = Date.now() + ms
+  while (pids.some((pid) => pid && processAlive(pid)) && Date.now() < until)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  return pids.every((pid) => !pid || !processAlive(pid))
+}
+
+describe('FIX-11 · 登录 Claude Code: Core runs claude auth login itself', () => {
+  it('1 · claude auth login [--console] with the dedicated folders, no credentials, its own process group, stdin a pipe never written, output drained', async () => {
+    const s = setup({
+      environment: {
+        ANTHROPIC_AUTH_TOKEN: 'ambient-gateway-token',
+        CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-ambient-must-not-cross',
+        ANTHROPIC_BASE_URL: 'https://gateway.example.com',
+      },
+    })
+    s.keys.set('claude-default', API_KEY)
+    const probe = await s.runtime.probe(claude())
+    // The run's own environment carries the user's API credential…
+    expect(probe.environment.ANTHROPIC_API_KEY).toBe(API_KEY)
+    // …the sign-in's does not: claude would sign in with it instead.
+    const env = claudeSignInEnvironment(probe.environment)
+    for (const key of [
+      'ANTHROPIC_API_KEY',
+      'ANTHROPIC_AUTH_TOKEN',
+      'CLAUDE_CODE_OAUTH_TOKEN',
+      'ANTHROPIC_BASE_URL',
+    ])
+      expect(env[key], key).toBeUndefined()
+    expect(env).toMatchObject({
+      CLAUDE_CONFIG_DIR: s.dirs.config,
+      HOME: s.dirs.home,
+      XDG_CONFIG_HOME: join(s.dirs.home, '.config'),
+      XDG_CACHE_HOME: join(s.dirs.home, '.cache'),
+      PATH: probe.environment.PATH,
+    })
+
+    const { child, writes, exit } = childDouble()
+    const spawnDouble = vi.fn(() => {
+      queueMicrotask(() => child.emit('spawn'))
+      return child
+    })
+    const login = await startClaudeLogin({
+      executable: s.executable,
+      environment: probe.environment,
+      cwd: s.dirs.home,
+      console: true,
+      spawn: spawnDouble as unknown as typeof spawn,
+    })
+    expect(login.started).toBe(true)
+    expect(spawnDouble).toHaveBeenCalledTimes(1)
+    const [command, args, options] = spawnDouble.mock.calls[0] as unknown as [
+      string,
+      string[],
+      Record<string, unknown>,
+    ]
+    // The installed claude itself: no shell, no Terminal, no sandbox-exec.
+    expect(command).toBe(s.executable)
+    expect(args).toEqual(['auth', 'login', '--console'])
+    expect(options).toMatchObject({
+      cwd: s.dirs.home,
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: false,
+      // A process group of its own: 取消 and the time limit stop all of it.
+      detached: true,
+    })
+    // claude waits on stdin for a code it may ask for: nothing is written,
+    // and it is not closed while claude runs.
+    child.stdout.write('visit: https://claude.com/cai/oauth/authorize?x=1\n')
+    child.stderr.write('Paste code here if prompted >')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(writes).toEqual([])
+    expect(child.stdin.writableEnded).toBe(false)
+    // Its output is drained and dropped, never read into Emperor.
+    expect(child.stdout.readableFlowing).toBe(true)
+    expect(child.stderr.readableFlowing).toBe(true)
+    exit(0)
+    expect(await login.done).toEqual({ ended: 'exit', exitCode: 0 })
+    expect(child.stdout.destroyed && child.stdin.destroyed).toBe(true)
+
+    // Without --console for a Claude account; a real run of the fake claude
+    // sees the same folders and is the leader of its own process group.
+    const real = await startClaudeLogin({
+      executable: s.executable,
+      environment: probe.environment,
+      cwd: s.dirs.home,
+      console: false,
+    })
+    expect(await real.done).toEqual({ ended: 'exit', exitCode: 0 })
+    const call = fakeClaudeCalls(s.dirs.config).at(-1)!
+    expect(call.args).toBe('auth login')
+    expect(call.env).toMatchObject({
+      CLAUDE_CONFIG_DIR: s.dirs.config,
+      HOME: s.dirs.home,
+    })
+    expect(call.env.ANTHROPIC_API_KEY).toBeUndefined()
+    expect(call.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined()
+    expect(call.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+    const { pid, pgid } = fakeLoginProcess(s.dirs.config)
+    expect(pid).toBeGreaterThan(0)
+    expect(pgid).toBe(pid)
+    expect(existsSync(join(s.dirs.root, 'sign-in'))).toBe(false)
+    expect(CLAUDE_SIGN_IN_TIMEOUT_MS).toBe(10 * 60_000)
+  })
+
+  it('3 · the fallback is the same sign-in on one line for the user’s own Terminal, safely quoted', async () => {
+    const s = setup()
+    const environment = {
+      ...(await s.runtime.probe(claude())).environment,
+      CLAUDE_CONFIG_DIR: "/Users/a b/it's/config",
+    }
+    const command = claudeSignInCommand({
+      executable: s.executable,
+      environment,
+      console: false,
+    })
+    expect(command).toBe(
+      'env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN ' +
+        `CLAUDE_CONFIG_DIR='/Users/a b/it'\\''s/config' ` +
+        `HOME='${s.dirs.home}' ` +
+        `XDG_CONFIG_HOME='${join(s.dirs.home, '.config')}' ` +
+        `XDG_CACHE_HOME='${join(s.dirs.home, '.cache')}' ` +
+        `'${s.executable}' auth login`,
+    )
+    expect(command).not.toContain('\n')
+    expect(
+      claudeSignInCommand({
+        executable: s.executable,
+        environment,
+        console: true,
+      }).endsWith(' auth login --console'),
+    ).toBe(true)
+    // Pasted into a shell that exports credentials: claude still sees none,
+    // and signs in in the dedicated folder.
+    const ok = claudeSignInCommand({
+      executable: s.executable,
+      environment: (await s.runtime.probe(claude())).environment,
+      console: false,
+    })
+    await run('/bin/sh', ['-c', ok], {
+      env: {
+        PATH: '/usr/bin:/bin',
+        ANTHROPIC_API_KEY: 'shell-key',
+        ANTHROPIC_AUTH_TOKEN: 'shell-token',
+        CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-shell',
+      },
+    })
+    const call = fakeClaudeCalls(s.dirs.config).at(-1)!
+    expect(call.args).toBe('auth login')
+    expect(call.env.CLAUDE_CONFIG_DIR).toBe(s.dirs.config)
+    expect(call.env.ANTHROPIC_API_KEY).toBeUndefined()
+    expect(call.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined()
+    expect(call.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+  })
+
+  it('3 · a login that does not finish in time is stopped with its whole process group', async () => {
+    const s = setup()
+    const probe = await s.runtime.probe(claude())
+    writeFileSync(join(s.dirs.config, 'fake-login-mode'), 'hang')
+    const login = await startClaudeLogin({
+      executable: s.executable,
+      environment: probe.environment,
+      cwd: s.dirs.home,
+      console: false,
+      timeoutMs: 1500,
+      graceMs: 200,
+    })
+    expect(login.started).toBe(true)
+    const until = Date.now() + 3000
+    while (!fakeLoginProcess(s.dirs.config).child && Date.now() < until)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    const { pid, child } = fakeLoginProcess(s.dirs.config)
+    expect(child).toBeGreaterThan(0)
+    const outcome = await login.done
+    expect(outcome.ended).toBe('timeout')
+    expect(await gone([pid, child])).toBe(true)
+  })
+
+  it('3 · a claude that cannot start says so at once', async () => {
+    const s = setup()
+    const probe = await s.runtime.probe(claude())
+    const login = await startClaudeLogin({
+      executable: join(s.bin, 'no-such-claude'),
+      environment: probe.environment,
+      cwd: s.dirs.home,
+      console: false,
+    })
+    expect(login.started).toBe(false)
+    expect(await login.done).toEqual({ ended: 'start', exitCode: null })
+  })
+
+  it('4 · 取消 stops claude and everything it started', async () => {
+    const s = setup()
+    const probe = await s.runtime.probe(claude())
+    writeFileSync(join(s.dirs.config, 'fake-login-mode'), 'hang')
+    const login = await startClaudeLogin({
+      executable: s.executable,
+      environment: probe.environment,
+      cwd: s.dirs.home,
+      console: false,
+      graceMs: 500,
+    })
+    const until = Date.now() + 3000
+    while (!fakeLoginProcess(s.dirs.config).child && Date.now() < until)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    const { pid, child } = fakeLoginProcess(s.dirs.config)
+    expect(child).toBeGreaterThan(0)
+    expect(processAlive(child!)).toBe(true)
+    expect(await login.cancel()).toMatchObject({ ended: 'cancelled' })
+    expect(await gone([pid, child])).toBe(true)
+    // Cancelling again, or after it ended, changes nothing.
+    expect(await login.cancel()).toMatchObject({ ended: 'cancelled' })
+  })
+
+  it('6 · the scripts an earlier build left for Terminal are deleted, then their folder', () => {
+    const s = setup()
+    const dirs = prepareClaudeDirectories(s.root)
+    const folder = join(dirs.root, 'sign-in')
+    mkdirSync(folder, { recursive: true, mode: 0o700 })
+    for (const id of ['1a2b3c4d', '5e6f7a8b', '9c0d1e2f'])
+      writeFileSync(
+        join(folder, `claude-sign-in-${id}.command`),
+        '#!/bin/bash\n',
+        { mode: 0o700 },
+      )
+    removeSignInScripts(s.root)
+    expect(existsSync(folder)).toBe(false)
+    // The login itself is untouched.
+    expect(existsSync(dirs.config)).toBe(true)
+    // Nothing left: nothing to do.
+    expect(() => removeSignInScripts(s.root)).not.toThrow()
   })
 })
 
