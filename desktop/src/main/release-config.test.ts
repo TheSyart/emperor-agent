@@ -214,15 +214,26 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       /extendInfo:\r?\n\s+NSMicrophoneUsageDescription: \S/,
     )
     expect(config).toMatch(/\n\s+NSSpeechRecognitionUsageDescription: \S/)
-    for (const file of [
-      'entitlements.mac.plist',
-      'entitlements.mac.inherit.plist',
-    ])
-      expect(
-        fs.readFileSync(path.join(desktopRoot, 'build', file), 'utf8'),
-      ).toMatch(
-        /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\/>/,
-      )
+    // Every public build (Preview and Stable, REL-05) is sealed ad hoc with
+    // these: the app holds the microphone, its Electron helpers do not.
+    const audioInput =
+      /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\/>/
+    expect(
+      fs.readFileSync(
+        path.join(desktopRoot, 'build', 'entitlements.preview.mac.plist'),
+        'utf8',
+      ),
+    ).toMatch(audioInput)
+    expect(
+      fs.readFileSync(
+        path.join(
+          desktopRoot,
+          'build',
+          'entitlements.preview.mac.inherit.plist',
+        ),
+        'utf8',
+      ),
+    ).not.toMatch(audioInput)
     const assemble = fs.readFileSync(
       path.join(
         desktopRoot,
@@ -600,6 +611,61 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     expect(runner).toContain("LOCALAPPDATA: join(homeRoot, 'AppData', 'Local')")
     expect(runner).toContain('TEMP: tempRoot')
     expect(runner).toContain('TMP: tempRoot')
+  })
+
+  it('names the commit in the smoke receipt from a worktree too (REL-05)', () => {
+    const { readGitCommit } = require(
+      path.join(desktopRoot, 'scripts', 'build-commit.cjs'),
+    ) as { readGitCommit(root: string): string }
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'emperor-commit-'))
+    const head = 'd'.repeat(40)
+    const packed = 'e'.repeat(40)
+    try {
+      // A plain checkout: .git is a folder, HEAD names a loose ref.
+      const plain = path.join(root, 'plain')
+      fs.mkdirSync(path.join(plain, '.git', 'refs', 'heads'), {
+        recursive: true,
+      })
+      fs.writeFileSync(
+        path.join(plain, '.git', 'HEAD'),
+        'ref: refs/heads/main\n',
+      )
+      fs.writeFileSync(
+        path.join(plain, '.git', 'refs', 'heads', 'main'),
+        `${head}\n`,
+      )
+      expect(readGitCommit(plain)).toBe(head)
+
+      // A worktree: .git is a file naming its git dir, whose commondir holds
+      // the refs; the branch is only in packed-refs.
+      const common = path.join(root, 'main', '.git')
+      const gitDir = path.join(common, 'worktrees', 'rel')
+      fs.mkdirSync(gitDir, { recursive: true })
+      fs.writeFileSync(path.join(gitDir, 'HEAD'), 'ref: refs/heads/rel\n')
+      fs.writeFileSync(path.join(gitDir, 'commondir'), '../..\n')
+      fs.writeFileSync(
+        path.join(common, 'packed-refs'),
+        `# pack-refs with: peeled fully-peeled sorted\n${packed} refs/heads/rel\n`,
+      )
+      const worktree = path.join(root, 'rel')
+      fs.mkdirSync(worktree)
+      fs.writeFileSync(path.join(worktree, '.git'), `gitdir: ${gitDir}\n`)
+      expect(readGitCommit(worktree)).toBe(packed)
+
+      // A detached worktree HEAD is the commit itself.
+      fs.writeFileSync(path.join(gitDir, 'HEAD'), `${head}\n`)
+      expect(readGitCommit(worktree)).toBe(head)
+
+      expect(readGitCommit(path.join(root, 'nowhere'))).toBe('local')
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+    expect(
+      fs.readFileSync(
+        path.join(desktopRoot, 'scripts', 'run-packaged-smoke.cjs'),
+        'utf8',
+      ),
+    ).toContain("require('./build-commit.cjs')")
   })
 
   it('build_desktop_release does not require the Python backend bundle', () => {

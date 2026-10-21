@@ -1,6 +1,6 @@
 {
   "name": "emperor-agent-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Emperor Agent desktop application (Electron + Vue) that hosts CoreApi in process.",

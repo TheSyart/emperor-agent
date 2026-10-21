@@ -25,7 +25,7 @@ const publicationContract = join(
   'scripts',
   'preview-publication-contract.mjs',
 )
-const tag = 'v0.1.0-preview.1'
+const tag = 'v0.2.0-preview.1'
 const version = tag.slice(1)
 const commit = 'a'.repeat(40)
 const runId = '123456'
@@ -114,6 +114,42 @@ describe('unsigned Preview release bundle assembler', () => {
       platform: 'darwin',
       mutate: (r: ReturnType<typeof packagedSmokeFixture>) => {
         r.operations.seatbelt.protectedStateDenied = false
+      },
+    },
+    // REL-05: the release side holds the seal and the version to the receipt too.
+    {
+      name: 'a renderer that saw another version',
+      platform: 'darwin',
+      mutate: (r: ReturnType<typeof packagedSmokeFixture>) => {
+        r.operations.renderer.appVersion = '0.1.0'
+      },
+    },
+    {
+      name: 'no seal check of the package',
+      platform: 'darwin',
+      mutate: (r: ReturnType<typeof packagedSmokeFixture>) => {
+        Reflect.deleteProperty(r, 'package')
+      },
+    },
+    {
+      name: 'RunAsNode back on',
+      platform: 'darwin',
+      mutate: (r: ReturnType<typeof packagedSmokeFixture>) => {
+        r.package.fuses.RunAsNode = true
+      },
+    },
+    {
+      name: 'a helper without the hardened runtime',
+      platform: 'darwin',
+      mutate: (r: ReturnType<typeof packagedSmokeFixture>) => {
+        r.package.runtime!['Computer Helper'] = false
+      },
+    },
+    {
+      name: 'a Computer Use helper that did not answer',
+      platform: 'darwin',
+      mutate: (r: ReturnType<typeof packagedSmokeFixture>) => {
+        r.operations.helpers.computerUse.handshake = false
       },
     },
   ])('rejects a rehashed smoke receipt with $name', ({ platform, mutate }) => {
@@ -249,7 +285,7 @@ describe('unsigned Preview release bundle assembler', () => {
 
   it('rejects a non-Preview tag or a tag outside the desktop base version', () => {
     const fixture = createFixture()
-    const stable = runAssembler(fixture, 'v0.1.0')
+    const stable = runAssembler(fixture, 'v0.2.0')
     expect(stable.status).toBe(1)
     expect(stable.stderr).toMatch(/Preview tag/i)
 

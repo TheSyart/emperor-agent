@@ -641,6 +641,11 @@ export type DictationStartResult =
 // ── Main window and pet windows (SEC-05: main and preload use these
 // constants, no channel name is a string literal there) ──────────────────
 
+/**
+ * Renderer → main: the running app's version, `app.getVersion()` (REL-05);
+ * the preload carries no version of its own.
+ */
+export const APP_VERSION_CHANNEL = 'emperor:app-version'
 /** Renderer → main: the native folder picker; answers the path or null. */
 export const SELECT_DIRECTORY_CHANNEL = 'emperor:select-directory'
 /**

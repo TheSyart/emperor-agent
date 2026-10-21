@@ -1,3 +1,39 @@
+/**
+ * What run-packaged-smoke.cjs adds as `package`: on macOS the seal
+ * (harden-package.cjs verifyMacHardening), elsewhere the fuses alone.
+ */
+export interface PackagedSmokeSealFixture {
+  codesignStrict?: boolean
+  identifier?: string
+  sealedCode?: number
+  runtime?: Record<string, boolean>
+  fuses: Record<string, boolean>
+}
+
+function sealFixture(platform: string): PackagedSmokeSealFixture {
+  const fuses = {
+    RunAsNode: false,
+    EnableCookieEncryption: false,
+    EnableNodeOptionsEnvironmentVariable: false,
+    EnableNodeCliInspectArguments: false,
+    EnableEmbeddedAsarIntegrityValidation: platform === 'darwin',
+    OnlyLoadAppFromAsar: true,
+    GrantFileProtocolExtraPrivileges: false,
+  }
+  if (platform !== 'darwin') return { fuses }
+  return {
+    codesignStrict: true,
+    identifier: 'com.emperor.agent.desktop',
+    sealedCode: 20,
+    runtime: {
+      'Computer Helper': true,
+      'Dictation Helper': true,
+      'Native Messaging host': true,
+    },
+    fuses,
+  }
+}
+
 /** Complete, hand-written schema 2 fixture for the release consumers. */
 export function packagedSmokeFixture(
   platform: string,
@@ -55,6 +91,7 @@ export function packagedSmokeFixture(
         nodeGlobalsAbsent: true,
         coreBridge: true,
         coreBootstrap: true,
+        appVersion,
         deepLinkRenders: true,
         attachment: { ok: true, bytes: 34 },
         webPreferences: {
@@ -83,5 +120,6 @@ export function packagedSmokeFixture(
         dictation: { available: platform === 'darwin' },
       },
     },
+    package: sealFixture(platform),
   }
 }

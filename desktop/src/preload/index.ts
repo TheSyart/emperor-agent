@@ -5,6 +5,7 @@ import { createTerminalEventBridge } from './terminal-events'
 import { createDesktopCapabilityBridge } from './desktop-capabilities'
 import { createDictationBridge } from './dictation'
 import {
+  APP_VERSION_CHANNEL,
   OPEN_PATH_CHANNEL,
   PET_CLOSE_CHANNEL,
   PET_OPEN_CHANNEL,
@@ -17,7 +18,8 @@ import {
 
 // Expose a minimal, read-only desktop surface to the renderer.
 contextBridge.exposeInMainWorld('emperor', {
-  version: '0.1.0',
+  /** The running app's version, as main's app.getVersion() reports it. */
+  appVersion: () => ipcRenderer.invoke(APP_VERSION_CHANNEL),
   platform: process.platform,
   sandboxed: process.sandboxed === true,
   selectDirectory: () => ipcRenderer.invoke(SELECT_DIRECTORY_CHANNEL),

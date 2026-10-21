@@ -17,6 +17,8 @@ function rendererReceipt() {
     nodeGlobalsAbsent: true,
     coreBridge: true,
     coreBootstrap: true,
+    // REL-05: the renderer saw the app's own version (appVersion below).
+    appVersion: '0.1.0',
     deepLinkRenders: true,
     attachment: { ok: true, bytes: 34 },
     webPreferences: {
@@ -475,6 +477,35 @@ describe('packaged smoke contract', () => {
         verifyWindows: async () => windowsReceipt(),
       }),
     ).rejects.toThrow(/renderer sandbox receipt/i)
+  })
+
+  it('5. fails closed when the renderer saw another version than the app (REL-05)', async () => {
+    for (const appVersion of ['0.2.0', null]) {
+      const fixture = smokeFixture()
+      const { core } = makeCore()
+      await expect(
+        runPackagedSmoke({
+          core,
+          runtimeRoot: fixture.runtimeRoot,
+          stateRoot: fixture.stateRoot,
+          receiptPath: fixture.receiptPath,
+          appVersion: '0.1.0',
+          runtimeRevision: 'a'.repeat(64),
+          commit: 'b'.repeat(40),
+          platform: 'darwin',
+          arch: 'arm64',
+          verifySeatbelt: async () => ({
+            ok: true as const,
+            mode: 'workspace-write' as const,
+            commands: 18,
+            protectedStateDenied: true as const,
+          }),
+          verifyRenderer: async () => ({ ...rendererReceipt(), appVersion }),
+          verifyWindows: async () => windowsReceipt(),
+          verifyHelpers: async () => helpersReceipt(),
+        }),
+      ).rejects.toThrow(/renderer sandbox receipt/i)
+    }
   })
 
   it('fails closed when bootstrap exposes anything beyond the built-in skills', async () => {

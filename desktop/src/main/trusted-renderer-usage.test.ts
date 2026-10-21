@@ -54,6 +54,8 @@ describe('trusted renderer policy wiring', () => {
       'registerOpenPathIpc',
       'registerRemoteImageIpc',
       'registerScreenshotIpc',
+      // REL-05: the renderer's app version comes from app.getVersion().
+      'registerAppVersionIpc',
     ])
       expect(source).toMatch(
         new RegExp(
