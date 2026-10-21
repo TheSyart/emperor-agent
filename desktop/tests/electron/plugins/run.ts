@@ -10,9 +10,11 @@
  *   the tool is unknown and the hook stays silent. The user's own
  *   mcp_config.json and hooks.json are never written.
  *   Managed: GitHub's detail follows the local gh (logged in, then logged
- *   out through an empty GH_CONFIG_DIR — the real login is not touched) and
- *   its Issue / CI tabs follow its switch; Computer Use's switch is the
- *   Settings switch.
+ *   out through an empty GH_CONFIG_DIR) and its 议题 / CI tabs follow its
+ *   switch; Computer Use's switch is the Settings switch. The gh is a
+ *   stand-in first on PATH (FIX-08): the suite needs no network and no real
+ *   GitHub login, so it runs the same on a CI runner, and the real login is
+ *   never touched.
  * Prints `E2E-RESULT {json}` lines like the other Electron suites.
  *
  *   node scripts/e2e-cu.mjs --mode=plugins   (after `npm run build`)
@@ -181,6 +183,44 @@ function prepareHome(home: string, model: FakeModel): void {
   // The user's own MCP and Hook files: plugins must never write them.
   writeFileSync(join(home, 'mcp_config.json'), '{"servers":{}}\n')
   writeFileSync(join(home, 'hooks.json'), '{"hooks":{}}\n')
+}
+
+/**
+ * A stand-in GitHub CLI in `<root>/bin`, answering what Emperor asks of gh:
+ * its version, and the login of `api user` while `GH_CONFIG_DIR` holds a
+ * hosts.yml (otherwise gh's own logged-out answer, exit 4). Every other call
+ * answers an empty list. `<root>/config` is a logged-in config dir.
+ */
+function fakeGh(root: string): { bin: string; loggedIn: string } {
+  const bin = join(root, 'bin')
+  const loggedIn = join(root, 'config')
+  mkdirSync(bin, { recursive: true })
+  mkdirSync(loggedIn, { recursive: true })
+  writeFileSync(
+    join(loggedIn, 'hosts.yml'),
+    'github.com:\n    user: e2e-octocat\n',
+  )
+  writeFileSync(
+    join(bin, 'gh'),
+    [
+      '#!/bin/sh',
+      'if [ "$1" = "--version" ]; then',
+      '  echo "gh version 2.101.0 (2026-09-15)"',
+      '  exit 0',
+      'fi',
+      'if [ ! -f "${GH_CONFIG_DIR:-/nonexistent}/hosts.yml" ]; then',
+      '  echo "To get started with GitHub CLI, please run:  gh auth login" >&2',
+      '  exit 4',
+      'fi',
+      'case " $* " in',
+      '  *" api "*" user "*) echo "e2e-octocat" ;;',
+      '  *) echo "[]" ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  )
+  return { bin, loggedIn }
 }
 
 /** The three packages: a portable folder, a portable zip and an old emperor-v1 folder. */
@@ -688,23 +728,38 @@ async function managed(page: Page, model: FakeModel): Promise<void> {
         'the gh connection',
       )
       const reason = (await app.innerText()).split('\n').pop() ?? ''
-      if (!reason.startsWith('已登录 ')) throw new Error(`reason ${reason}`)
+      // The stand-in gh's login: the real one is never asked.
+      if (reason !== '已登录 e2e-octocat') throw new Error(`reason ${reason}`)
       await page.screenshot({ path: join(shots, 'github-logged-in.png') })
 
+      // Off, the Pull Request entry leaves the sidebar (since UI-S01 it shows
+      // only while GitHub is on). FIX-08: this used to open the page right
+      // after the click and pass only while the sidebar lagged behind.
       await detail.locator('[data-plugin-toggle] [role="switch"]').click()
-      await sidebar(page, 'Pull Request')
-      await page
-        .getByRole('heading', { name: 'Pull Request', level: 1 })
-        .waitFor()
-      if ((await page.locator('[data-github-tabs]').count()) !== 0)
-        throw new Error('GitHub tabs while the plugin is off')
+      const entry = page
+        .getByRole('navigation', { name: '侧栏导航' })
+        .getByRole('button', { name: 'Pull Request', exact: true })
+      await until(
+        async () =>
+          (
+            await core<Array<{ pluginId: string; activation: string }>>(
+              page,
+              'plugins.list',
+            )
+          ).some(
+            (plugin) =>
+              plugin.pluginId === 'github' && plugin.activation === 'disabled',
+          ) && (await entry.count()) === 0,
+        10_000,
+        'GitHub off and its Pull Request entry gone',
+      )
 
       const again = await openDetail(page, 'github')
       await again.locator('[data-plugin-toggle] [role="switch"]').click()
       await sidebar(page, 'Pull Request')
       await page.getByRole('heading', { name: 'GitHub', level: 1 }).waitFor()
       await page.locator('[data-github-tabs]').waitFor()
-      return { reason: reason.replace(/已登录 .+/, '已登录 <login>') }
+      return { reason }
     },
   )
 
@@ -893,18 +948,24 @@ async function main(): Promise<void> {
   const home = mkdtempSync(join(tmpdir(), 'emperor-e2e-plugins-home-'))
   const packagesRoot = mkdtempSync(join(tmpdir(), 'emperor-e2e-plugins-src-'))
   const emptyGh = mkdtempSync(join(tmpdir(), 'emperor-e2e-gh-'))
+  const ghRoot = mkdtempSync(join(tmpdir(), 'emperor-e2e-fake-gh-'))
+  const gh = fakeGh(ghRoot)
+  const ghPath = `${gh.bin}:${process.env.PATH ?? ''}`
   let app: ElectronApplication | null = null
   try {
     prepareHome(home, model)
     const packages = preparePackages(packagesRoot)
-    let launched = await launch(home)
+    let launched = await launch(home, {
+      PATH: ghPath,
+      GH_CONFIG_DIR: gh.loggedIn,
+    })
     app = launched.app
     await installs(app, launched.page, packages)
     await runsForReal(launched.page, model, home)
     await managed(launched.page, model)
     await app.close()
-    // gh logged out, without touching the real login: an empty config dir.
-    launched = await launch(home, { GH_CONFIG_DIR: emptyGh })
+    // gh logged out: an empty config dir.
+    launched = await launch(home, { PATH: ghPath, GH_CONFIG_DIR: emptyGh })
     app = launched.app
     await loggedOut(launched.page, model)
     if (model.errors.length > 0)
@@ -927,6 +988,7 @@ async function main(): Promise<void> {
     rmSync(home, { recursive: true, force: true })
     rmSync(packagesRoot, { recursive: true, force: true })
     rmSync(emptyGh, { recursive: true, force: true })
+    rmSync(ghRoot, { recursive: true, force: true })
     process.stdout.write('E2E-DONE\n')
   }
 }
