@@ -518,5 +518,16 @@ describe('timeline model', () => {
         ]) as never,
       ),
     ).toEqual(new Set(['a']))
+    // UI-S13: the files card sits between the answer and its footer.
+    expect(
+      closingAssistantKeys(
+        ['a', 'f', 'b'],
+        new Map([
+          ['a', { kind: 'assistant' }],
+          ['f', { kind: 'turnFiles' }],
+          ['b', { kind: 'turnTail' }],
+        ]) as never,
+      ),
+    ).toEqual(new Set(['a']))
   })
 })

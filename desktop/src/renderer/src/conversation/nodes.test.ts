@@ -885,14 +885,23 @@ describe('turn files', () => {
     return log
   }
 
-  it('shows the card after the turn’s footer, even when it lands late', () => {
+  it('shows the card before the turn’s footer, even when it lands late (UI-S13)', () => {
     const log = turnWithFiles()
     const { snapshot } = replay(log.events)
     const kinds = describeNodes(snapshot)
+    // The footer is the turn's last row; the record landed after turn 2
+    // began and still sits inside turn 1.
     expect(kinds.slice(-2)).toEqual([
-      'turnTail: turn 1 steps=1',
       'turnFiles: turn 1 files=1',
+      'turnTail: turn 1 steps=1',
     ])
+    const tail = nodeOf(snapshot, 'turnTail')
+    const files = nodeOf(snapshot, 'turnFiles')
+    expect(files.turn).toBe(1)
+    expect(files.anchorSeq).toBeLessThan(tail.anchorSeq)
+    // Nothing of the turn's own steps comes after the card.
+    const ordered = snapshot.order.map((key) => snapshot.nodes.get(key)!)
+    expect(ordered.at(-3)?.kind).toBe('assistant')
     expect(nodeOf(snapshot, 'turnFiles').data).toMatchObject({
       turn: 1,
       mode: 'git',
@@ -904,6 +913,49 @@ describe('turn files', () => {
       totals: record.totals,
     })
     expectConverges(log)
+  })
+
+  it('keeps the footer last when the record lands before the next turn (UI-S13)', () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.message(1, 1, [{ type: 'text', text: 'done' }])
+    log.add('step/end', { turn: 1, step: 1 })
+    log.add('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    log.add('turn/files', record)
+    log.user('u2', 'next')
+    const { snapshot } = replay(log.events)
+    expect(describeNodes(snapshot).slice(-3, -1)).toEqual([
+      'turnFiles: turn 1 files=1',
+      'turnTail: turn 1 steps=1',
+    ])
+    expectConverges(log)
+  })
+
+  it('puts the card after the turn’s notice, before the next prompt (UI-S13)', () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.message(1, 1, [{ type: 'text', text: 'half' }])
+    log.add('step/end', { turn: 1, step: 1 })
+    log.add('turn/end', {
+      turn: 1,
+      reason: {
+        kind: 'error',
+        error: { message: 'provider down', code: 'SERVER' },
+      },
+    })
+    log.user('u2', 'again')
+    log.add('turn/files', record)
+    const kinds = describeNodes(snapshot(log))
+    const notice = kinds.indexOf('turnError: provider down')
+    expect(kinds[notice + 1]).toBe('turnFiles: turn 1 files=1')
+    expect(kinds.at(-1)?.startsWith('user')).toBe(true)
+    expectConverges(log)
+
+    function snapshot(builder: LogBuilder) {
+      return replay(builder.events).snapshot
+    }
   })
 
   it('marks the card undone once the turn is reverted', () => {

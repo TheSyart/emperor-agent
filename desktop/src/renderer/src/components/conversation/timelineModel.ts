@@ -68,7 +68,10 @@ export function turnStatusLabel(snapshot: ChatSnapshot): string {
   }
 }
 
-/** Keys of assistant rows directly followed by their turn tail. */
+/**
+ * Keys of assistant rows followed by their turn tail, with at most the
+ * turn's files card between them (UI-S13).
+ */
 export function closingAssistantKeys(
   order: readonly string[],
   nodes: ReadonlyMap<string, ChatNode>,
@@ -77,7 +80,9 @@ export function closingAssistantKeys(
   for (let index = 1; index < order.length; index++) {
     const node = nodes.get(order[index] ?? '')
     if (node?.kind !== 'turnTail') continue
-    const previous = order[index - 1]
+    let previous = order[index - 1]
+    if (previous !== undefined && nodes.get(previous)?.kind === 'turnFiles')
+      previous = order[index - 2]
     if (previous !== undefined && nodes.get(previous)?.kind === 'assistant')
       keys.add(previous)
   }
