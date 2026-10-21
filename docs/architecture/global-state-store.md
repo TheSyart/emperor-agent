@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-10-22（对照 `84245509`）<br>
+> 最后核验：2026-10-22（对照 `7798011a`）<br>
 > 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/single-instance.ts`、`desktop/src/main/logging/log-location.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/user-downloads.ts`、`packages/core/src/workspace/turn-snapshots.ts`、`packages/core/src/workspace/delegation-workspaces.ts`、`packages/core/src/harness/delegation/`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store、`packages/core/src/updates/service.ts`
 
 ## 两个根的区分
@@ -155,7 +155,6 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
     claude-code/             # Claude Code 的专用目录（AGT-12，0700，跨运行持久；Emperor 不读其中的登录）
       config/                # 每次运行、claude auth status、登录与退出登录共用的 CLAUDE_CONFIG_DIR：Claude Code 自己的设置、会话记录（projects/）与登录（钥匙串条目以此目录为键，钥匙串不可用时为 .credentials.json）；settings.json 由 Emperor 写，只含模型设置
       home/                  # 它们共用的 HOME（与 XDG_CONFIG_HOME、XDG_CACHE_HOME）
-      sign-in/               # 「登录 Claude Code」交给「终端」的 .command 脚本，运行完删除自己，遗留的 10 分钟后删除
     runtime-facts.json       # 能力验证事实
     model-catalog-cache.json # Claude Code / Codex 的模型候选缓存
     conversations/<dlg-id>/  # journal.jsonl、snapshot.json、runs/
