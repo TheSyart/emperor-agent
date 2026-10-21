@@ -141,6 +141,17 @@ async function expectUiError(
 }
 
 describe('ComputerUseService', () => {
+  // FIX-08: status() serves Settings, the plugin page and every switch; it
+  // must not ask the host to start a helper. The model's
+  // ui_get_capabilities still may.
+  it('reads its status without asking the host to start a helper', async () => {
+    const k = setup()
+    await k.service.status()
+    expect(k.port.capabilityOptions).toEqual([{ connect: false }])
+    await k.service.capabilities()
+    expect(k.port.capabilityOptions.at(-1)?.connect).not.toBe(false)
+  })
+
   it('opens, observes and acts with journal and target facts on the right logs', async () => {
     const k = setup()
     const { record, observation, ref } = await openForm(k)

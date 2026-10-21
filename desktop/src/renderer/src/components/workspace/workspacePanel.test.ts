@@ -3,7 +3,10 @@ import { createApp, h, nextTick, ref, type App } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { core } = vi.hoisted(() => ({ core: vi.fn() }))
-vi.mock('../../api/http', () => ({ core }))
+vi.mock('../../api/http', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api/http')>()),
+  core,
+}))
 vi.mock('../../api/backend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../api/backend')>()),
   onTerminalEvent: vi.fn(() => () => undefined),

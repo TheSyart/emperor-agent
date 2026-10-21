@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -55,6 +56,10 @@ function legacyHome(): string {
   return home
 }
 
+function read(home: string, name: string): string {
+  return readFileSync(join(home, name), 'utf8')
+}
+
 function logOf(home: string): Array<Record<string, unknown>> {
   const file = join(home, 'migrations', 'log.jsonl')
   if (!existsSync(file)) return []
@@ -84,12 +89,7 @@ describe('data migrations', () => {
 
   it('back the files up first and log the run (4)', () => {
     const home = legacyHome()
-    const originals = Object.fromEntries(
-      ['settings.json', 'mcp_config.json', 'hooks.json'].map((name) => [
-        name,
-        readFileSync(join(home, name), 'utf8'),
-      ]),
-    )
+    const originals = { 'settings.json': read(home, 'settings.json') }
 
     const result = runDataMigrations({ home, now: NOW, appVersion: '0.2.0' })
     expect(result).toMatchObject({
@@ -99,11 +99,11 @@ describe('data migrations', () => {
       failed: null,
     })
 
-    // 0-1 gives every file without one a version.
-    for (const name of ['settings.json', 'mcp_config.json', 'hooks.json'])
-      expect(JSON.parse(readFileSync(join(home, name), 'utf8'))).toMatchObject({
-        version: 1,
-      })
+    // 0-1 gives Emperor's own settings.json a version (FIX-08: the user's
+    // mcp_config.json and hooks.json are not Emperor's to stamp).
+    expect(JSON.parse(read(home, 'settings.json'))).toMatchObject({
+      version: 1,
+    })
     expect(
       JSON.parse(readFileSync(join(home, 'settings.json'), 'utf8')),
     ).toMatchObject({ webui: { port: 9001 }, enabledPlugins: { a: true } })
@@ -124,7 +124,7 @@ describe('data migrations', () => {
         status: 'applied',
         appVersion: '0.2.0',
         backup: `migrations/${backup}`,
-        files: ['hooks.json', 'mcp_config.json', 'settings.json'],
+        files: ['settings.json'],
       }),
     ])
     expect(readInstalledDataVersion(home)).toBe(CURRENT_DATA_VERSION)
@@ -132,6 +132,36 @@ describe('data migrations', () => {
     // Nothing is pending any more: a second run changes nothing.
     expect(runDataMigrations({ home, now: NOW }).applied).toEqual([])
     expect(logOf(home)).toHaveLength(1)
+  })
+
+  // FIX-08 (PL-10): the user's own MCP and Hook files are theirs; no
+  // migration writes, backs up or moves them, whatever they hold.
+  it('leave the user files mcp_config.json and hooks.json byte for byte', async () => {
+    const home = legacyHome()
+    const user = {
+      'mcp_config.json': '{"servers":{}}\n',
+      'hooks.json': '{"hooks":{}}\n',
+    }
+    for (const [name, text] of Object.entries(user))
+      writeFileSync(join(home, name), text)
+    const stamps = Object.fromEntries(
+      Object.keys(user).map((name) => [
+        name,
+        statSync(join(home, name)).mtimeMs,
+      ]),
+    )
+
+    const ran = await runPendingDataMigrations(home, { appVersion: '0.2.0' })
+    expect(ran?.applied).toEqual(['0-1'])
+
+    for (const [name, text] of Object.entries(user)) {
+      expect(read(home, name)).toBe(text)
+      expect(statSync(join(home, name)).mtimeMs).toBe(stamps[name])
+    }
+    const [backup] = backups(home)
+    for (const name of Object.keys(user))
+      expect(existsSync(join(home, 'migrations', backup!, name))).toBe(false)
+    expect(DATA_MIGRATIONS[0]!.files(legacyHome())).toEqual(['settings.json'])
   })
 
   it('puts the backup back when a step fails (5)', () => {

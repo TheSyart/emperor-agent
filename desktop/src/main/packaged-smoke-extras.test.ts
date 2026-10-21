@@ -46,6 +46,15 @@ interface UpgradeManifest {
 const tempDir = (prefix: string) =>
   fs.mkdtempSync(path.join(os.tmpdir(), prefix))
 
+const walkFiles = (dir: string): string[] =>
+  fs
+    .readdirSync(dir, { withFileTypes: true })
+    .flatMap((entry) =>
+      entry.isDirectory()
+        ? walkFiles(path.join(dir, entry.name))
+        : [path.join(dir, entry.name)],
+    )
+
 /** A stand-in for emperor-nm-host: answers the way the real one does. */
 function fakeHost(body: string): string {
   const dir = tempDir('emperor-fake-nm-host-')
@@ -258,6 +267,51 @@ describe('0.1.0-preview.4 upgrade fixture (REL-04 test 7)', () => {
     expect(
       fs.statSync(path.join(stateRoot, 'model_config.json')).mode & 0o777,
     ).toBe(0o600)
+  })
+
+  // FIX-08: git keeps only 100644 / 100755, so a fresh checkout has every
+  // fixture file at 0644 whatever preview.4 wrote; the modes come from
+  // fixture.json, never from the checkout.
+  it('gives each file the mode fixture.json records, not the checkout mode', () => {
+    const checkout = path.join(tempDir('emperor-upgrade-checkout-'), 'fixture')
+    fs.cpSync(extras.UPGRADE_FIXTURE, checkout, { recursive: true })
+    const home = path.join(checkout, 'home')
+    const files = walkFiles(home).map((file) => path.relative(home, file))
+    for (const file of files) fs.chmodSync(path.join(home, file), 0o644)
+    const modes = (
+      JSON.parse(
+        fs.readFileSync(path.join(checkout, 'fixture.json'), 'utf8'),
+      ) as { modes?: Record<string, string> }
+    ).modes
+    // Every file of the fixture has its mode recorded.
+    expect(Object.keys(modes ?? {}).sort()).toEqual([...files].sort())
+
+    const stateRoot = path.join(tempDir('emperor-upgrade-'), 'state')
+    extras.prepareUpgradeHome(checkout, stateRoot)
+    for (const file of files)
+      expect(
+        (fs.statSync(path.join(stateRoot, file)).mode & 0o777).toString(8),
+        file,
+      ).toBe(modes![file])
+    for (const secret of [
+      'model_config.json',
+      'settings.json',
+      'installation.json',
+      'sessions/index.json',
+    ])
+      expect(fs.statSync(path.join(stateRoot, secret)).mode & 0o777).toBe(0o600)
+  })
+
+  it('refuses a fixture file whose mode fixture.json does not record', () => {
+    const checkout = path.join(tempDir('emperor-upgrade-checkout-'), 'fixture')
+    fs.cpSync(extras.UPGRADE_FIXTURE, checkout, { recursive: true })
+    fs.writeFileSync(path.join(checkout, 'home', 'unrecorded.json'), '{}')
+    expect(() =>
+      extras.prepareUpgradeHome(
+        checkout,
+        path.join(tempDir('emperor-upgrade-'), 'state'),
+      ),
+    ).toThrow(/unrecorded\.json/)
   })
 
   function goodReceipt(manifest: UpgradeManifest) {

@@ -3,7 +3,6 @@ import { open, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   AtomicSnapshot,
-  assertNotNewerSync,
   type PersistenceAdapter,
   type SnapshotCodec,
 } from '../store/persistence'
@@ -472,7 +471,6 @@ export async function saveMcpConfig(
   )
     data.defaults = DEFAULT_MCP_CONFIG.defaults
   const path = join(root, MCP_CONFIG_FILE)
-  assertNotNewerSync(path, 'version', 1)
   const sealed = sealMcpSecrets(data, opts.sealer)
   if (sealed.sealedPlaintext) await backupBeforeSealing(path)
   await mcpConfigSnapshot(path, opts.persistenceAdapter).write(sealed.raw)
@@ -779,11 +777,14 @@ function validateRawConfig(value: unknown): Record<string, unknown> {
   return raw
 }
 
+/**
+ * The user's own file (PL-10, FIX-08): no Emperor version is written into
+ * it or read out of it; a `version` key there is the user's.
+ */
 const MCP_CONFIG_SNAPSHOT_CODEC: SnapshotCodec<Record<string, unknown>> = {
   schemaVersion: 1,
-  versionKey: 'version',
   encode(value) {
-    return { ...value, version: 1 }
+    return value
   },
   decode(input) {
     return {

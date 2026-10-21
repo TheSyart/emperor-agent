@@ -459,6 +459,49 @@ describe('ComputerUseSection main page', () => {
     })
   })
 
+  // FIX-08: the switch waited for a full reload after Core answered, and a
+  // reload waits for the Helper's status (a launch that may take seconds or
+  // never connect): the switch stayed off and the Helper on 「检查中」.
+  it('shows the new state as soon as Core answers, while the Helper is still checked', async () => {
+    const root = await mount({ enabled: false })
+    helperStatus.mockReturnValue(new Promise(() => undefined))
+    let enabledNow = false
+    core.mockImplementation(async (op: string, value?: unknown) => {
+      if (op === 'computerUse.setEnabled') enabledNow = value === true
+      return { ...status, enabled: enabledNow }
+    })
+    const master = root.querySelector<HTMLButtonElement>(
+      '#computer-use-enabled',
+    )!
+    master.click()
+    await settle()
+    expect(master.getAttribute('aria-checked')).toBe('true')
+    expect(master.disabled).toBe(false)
+  })
+
+  it('a status read that started before the switch does not undo it', async () => {
+    const root = await mount({ enabled: false })
+    // Every status read from now on waits until the test answers it.
+    const reads: Array<(value: ComputerUseStatusView) => void> = []
+    core.mockImplementation((op: string, value?: unknown) =>
+      op === 'computerUse.setEnabled'
+        ? Promise.resolve({ ...status, enabled: value === true })
+        : new Promise((resolve) => reads.push(resolve)),
+    )
+    // Coming back to the window starts a reload whose read is slow.
+    window.dispatchEvent(new Event('focus'))
+    await settle()
+    root.querySelector<HTMLButtonElement>('#computer-use-enabled')!.click()
+    await settle()
+    // The slow read answers with what Core said before the switch.
+    expect(reads.length).toBeGreaterThan(0)
+    reads[0]!({ ...status, enabled: false })
+    await settle()
+    expect(
+      root.querySelector('#computer-use-enabled')?.getAttribute('aria-checked'),
+    ).toBe('true')
+  })
+
   it('reports an action that failed', async () => {
     const root = await mount({ enabled: false })
     core.mockRejectedValueOnce(new Error('另一项操作正在等待确认'))

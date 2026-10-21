@@ -9,11 +9,10 @@ const {
   mkdirSync,
   readFileSync,
   readdirSync,
-  statSync,
   writeFileSync,
 } = require('node:fs')
 const { userInfo } = require('node:os')
-const { dirname, join, relative, resolve } = require('node:path')
+const { dirname, join, relative, resolve, sep } = require('node:path')
 
 /** The pinned extension id of Emperor's Chrome/Edge extension. */
 const NM_EXTENSION_ORIGIN =
@@ -236,7 +235,10 @@ function walk(dir) {
 /**
  * Copies the fixture's Emperor Home to `stateRoot` with its path tokens
  * filled in (its own location, and a runtime root that does not exist) and
- * the modes preview.4 gave each file. Returns fixture.json.
+ * the modes preview.4 gave each file. The modes come from fixture.json's
+ * `modes` (octal strings): git keeps only 100644 / 100755, so a checkout's
+ * own modes say nothing (FIX-08). A file without a recorded mode is refused.
+ * Returns fixture.json.
  */
 function prepareUpgradeHome(fixtureRoot, stateRoot) {
   const manifest = JSON.parse(
@@ -244,7 +246,16 @@ function prepareUpgradeHome(fixtureRoot, stateRoot) {
   )
   const source = join(fixtureRoot, 'home')
   const runtime = join(dirname(stateRoot), 'preview4-runtime')
+  const modes = manifest.modes ?? {}
   for (const file of walk(source)) {
+    const name = relative(source, file).split(sep).join('/')
+    const mode = /^[0-7]{3}$/.test(modes[name] ?? '')
+      ? Number.parseInt(modes[name], 8)
+      : null
+    if (mode === null)
+      throw new Error(
+        `upgrade fixture: fixture.json records no mode for ${name}`,
+      )
     const target = join(stateRoot, relative(source, file))
     mkdirSync(dirname(target), { recursive: true, mode: 0o700 })
     writeFileSync(
@@ -255,7 +266,7 @@ function prepareUpgradeHome(fixtureRoot, stateRoot) {
         .split('__PREVIEW4_RUNTIME__')
         .join(runtime),
     )
-    chmodSync(target, statSync(file).mode & 0o777)
+    chmodSync(target, mode)
   }
   return manifest
 }

@@ -1745,7 +1745,6 @@ export async function installVisualCoreBridge(
               newer ? 3 : 2,
               2,
             ),
-            file('mcpConfig', 'mcp_config.json', 'MCP 服务器', 1, 1),
             file('scheduler', 'scheduler/jobs.json', '定时任务', 1, 1),
             file(
               'vault',

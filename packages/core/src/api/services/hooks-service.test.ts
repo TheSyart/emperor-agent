@@ -88,9 +88,9 @@ describe('CoreHooksService', () => {
 
   it('saves raw JSON atomically, reloads the bridge, and returns the new config', async () => {
     const f = fixture()
-    // REL-03: the file says its version (first); the rest is kept.
-    const text = JSON.stringify({ version: 1, ...config }, null, 2)
-    const saved = await f.service.saveConfig(JSON.stringify(config), VIEW)
+    // The user's file, as typed (FIX-08: Emperor never stamps a version).
+    const text = JSON.stringify(config, null, 2)
+    const saved = await f.service.saveConfig(text, VIEW)
     expect(f.assertMutation).toHaveBeenCalledWith('hooks', 'saveConfig', VIEW)
     expect(readFileSync(join(f.stateRoot, 'hooks.json'), 'utf8')).toBe(
       `${text}\n`,
@@ -109,8 +109,11 @@ describe('CoreHooksService', () => {
     await f.service.saveConfig({ config }, VIEW)
     expect(
       JSON.parse(readFileSync(join(f.stateRoot, 'hooks.json'), 'utf8')),
-    ).toEqual({ version: 1, ...config })
+    ).toEqual(config)
     await f.service.saveConfig({ content: '{"hooks":{}}' }, VIEW)
+    expect(readFileSync(join(f.stateRoot, 'hooks.json'), 'utf8')).toBe(
+      '{"hooks":{}}\n',
+    )
     expect((await f.service.getConfig()).events).toEqual({})
   })
 

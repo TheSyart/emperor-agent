@@ -14,6 +14,8 @@ export class FakeComputerUsePort implements ComputerUseHostPort {
   extraDrivers: DriverCapability[] = []
   /** How often the service asked for capabilities (a real host may launch the Helper). */
   capabilityCalls = 0
+  /** The options of every capabilities() call, in order. */
+  readonly capabilityOptions: Array<{ readonly connect?: boolean }> = []
 
   constructor(
     browser = new FakeBrowserDriver(),
@@ -40,8 +42,11 @@ export class FakeComputerUsePort implements ComputerUseHostPort {
     return null
   }
 
-  async capabilities(): Promise<DriverCapability[]> {
+  async capabilities(
+    options: { readonly connect?: boolean } = {},
+  ): Promise<DriverCapability[]> {
     this.capabilityCalls += 1
+    this.capabilityOptions.push(options)
     return [this.browser.capability(), ...this.extraDrivers]
   }
 

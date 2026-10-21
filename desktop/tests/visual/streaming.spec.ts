@@ -21,6 +21,10 @@ import {
 // 6 and 8 also run on a 4× slower CPU (DevTools CPU throttling), where they
 // must stay above 50 fps. Measurements land in
 // screenshots/streaming/perf-*.json.
+// 6 and 8 measure wall-clock time and carry the @perf tag: the nightly runs
+// them alone on one worker after the rest of the suite (`visual:perf`, one
+// retry of what failed); they failed when other workers shared the CPU.
+// 7 measures nothing and stays in the main run.
 const outDir = resolve(process.cwd(), 'screenshots', 'streaming')
 const SESSION = 'build-ui'
 const FRAME_MS = 1000 / 60
@@ -284,40 +288,42 @@ function record(name: string, report: Record<string, unknown>): void {
   console.log(`[FIX-04] ${name}`, JSON.stringify(report))
 }
 
-test('6 · streaming into a 500-turn session: script per frame p95 < 8 ms', async ({
-  page,
-  browser,
-}) => {
-  test.setTimeout(240_000)
-  const session = await openLongSession(page)
-  const reply = longMarkdownReply(4_000)
-  const { result: raf, events } = await traced(browser, page, () =>
-    stream(page, session, reply, { size: 4, perFrame: 2 }),
-  )
-  const report = analyzeTrace(events, raf)
-  record('500-turns-cpu1', { ...report, cpu: 1, replyChars: reply.length })
-  await expect(streamingAnswer(page, session)).toContainText('第 1 部分')
-  expect(report.frames).toBeGreaterThan(100)
-  expect(report.scriptP95).toBeLessThan(8)
-})
+test(
+  '6 · streaming into a 500-turn session: script per frame p95 < 8 ms',
+  { tag: '@perf' },
+  async ({ page, browser }) => {
+    test.setTimeout(240_000)
+    const session = await openLongSession(page)
+    const reply = longMarkdownReply(4_000)
+    const { result: raf, events } = await traced(browser, page, () =>
+      stream(page, session, reply, { size: 4, perFrame: 2 }),
+    )
+    const report = analyzeTrace(events, raf)
+    record('500-turns-cpu1', { ...report, cpu: 1, replyChars: reply.length })
+    await expect(streamingAnswer(page, session)).toContainText('第 1 部分')
+    expect(report.frames).toBeGreaterThan(100)
+    expect(report.scriptP95).toBeLessThan(8)
+  },
+)
 
 // The same stream on a 4× slower CPU (a stand-in for an older Mac): the
 // numbers go to the receipt's before/after table; it must keep its frames.
-test('6 · streaming into a 500-turn session keeps its frames on a 4× slower CPU', async ({
-  page,
-  browser,
-}) => {
-  test.setTimeout(240_000)
-  const session = await openLongSession(page)
-  await throttleCpu(page, 4)
-  const reply = longMarkdownReply(4_000)
-  const { result: raf, events } = await traced(browser, page, () =>
-    stream(page, session, reply, { size: 4, perFrame: 2 }),
-  )
-  const report = analyzeTrace(events, raf)
-  record('500-turns-cpu4', { ...report, cpu: 4, replyChars: reply.length })
-  expect(report.traceFps).toBeGreaterThan(50)
-})
+test(
+  '6 · streaming into a 500-turn session keeps its frames on a 4× slower CPU',
+  { tag: '@perf' },
+  async ({ page, browser }) => {
+    test.setTimeout(240_000)
+    const session = await openLongSession(page)
+    await throttleCpu(page, 4)
+    const reply = longMarkdownReply(4_000)
+    const { result: raf, events } = await traced(browser, page, () =>
+      stream(page, session, reply, { size: 4, perFrame: 2 }),
+    )
+    const report = analyzeTrace(events, raf)
+    record('500-turns-cpu4', { ...report, cpu: 4, replyChars: reply.length })
+    expect(report.traceFps).toBeGreaterThan(50)
+  },
+)
 
 test('7 · a completed block stays selected while the reply grows', async ({
   page,
@@ -361,26 +367,27 @@ test('7 · a completed block stays selected while the reply grows', async ({
 })
 
 for (const cpu of [1, 4]) {
-  test(`8 · a 50 KB reply streams without dropping frames, > 50 fps (CPU ×${cpu})`, async ({
-    page,
-    browser,
-  }) => {
-    test.setTimeout(300_000)
-    const session = await openLongSession(page)
-    await throttleCpu(page, cpu)
-    const reply = longMarkdownReply(50_000)
-    const { result: raf, events } = await traced(browser, page, () =>
-      stream(page, session, reply, { size: 40, perFrame: 2 }),
-    )
-    const report = analyzeTrace(events, raf)
-    record(`50kb-cpu${cpu}`, {
-      ...report,
-      cpu,
-      replyChars: reply.length,
-      replyBytes: Buffer.byteLength(reply, 'utf8'),
-    })
-    expect(Buffer.byteLength(reply, 'utf8')).toBeGreaterThanOrEqual(50_000)
-    const fps = report.mainFrames > 0 ? report.traceFps : report.rafFps
-    expect(fps).toBeGreaterThan(50)
-  })
+  test(
+    `8 · a 50 KB reply streams without dropping frames, > 50 fps (CPU ×${cpu})`,
+    { tag: '@perf' },
+    async ({ page, browser }) => {
+      test.setTimeout(300_000)
+      const session = await openLongSession(page)
+      await throttleCpu(page, cpu)
+      const reply = longMarkdownReply(50_000)
+      const { result: raf, events } = await traced(browser, page, () =>
+        stream(page, session, reply, { size: 40, perFrame: 2 }),
+      )
+      const report = analyzeTrace(events, raf)
+      record(`50kb-cpu${cpu}`, {
+        ...report,
+        cpu,
+        replyChars: reply.length,
+        replyBytes: Buffer.byteLength(reply, 'utf8'),
+      })
+      expect(Buffer.byteLength(reply, 'utf8')).toBeGreaterThanOrEqual(50_000)
+      const fps = report.mainFrames > 0 ? report.traceFps : report.rafFps
+      expect(fps).toBeGreaterThan(50)
+    },
+  )
 }

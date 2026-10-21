@@ -449,7 +449,7 @@ async function fullstack(
       const profileForm = page.locator('form.profile-form')
       await profileForm.locator('input').fill('E2E profile')
       await page
-        .getByRole('dialog', { name: '新建 profile' })
+        .getByRole('dialog', { name: '新建登录档案' })
         .getByRole('button', { name: '新建' })
         .click()
       await profileForm.waitFor({ state: 'hidden' })

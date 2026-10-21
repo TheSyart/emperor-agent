@@ -11,7 +11,9 @@
 //   HOME=$(mktemp -d) node_modules/.bin/vite-node \
 //     packages/core/fixtures/emperor-home-0.1.0-preview.4/generate.ts -- "$src"
 //
-// Session ids are random: copy the printed ids into fixture.json.
+// Session ids are random: copy the printed ids into fixture.json, and the
+// printed modes into its `modes` (git keeps only 100644 / 100755, so the
+// checkout cannot carry the 0600 preview.4 gave its secret files).
 import { createHash } from 'node:crypto'
 import {
   chmodSync,
@@ -123,7 +125,9 @@ const walk = (dir: string): string[] =>
     entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)],
   )
 rmSync(out, { recursive: true, force: true })
+const modes: Record<string, string> = {}
 for (const file of walk(home)) {
+  modes[relative(home, file)] = (statSync(file).mode & 0o777).toString(8)
   const target = join(out, relative(home, file))
   mkdirSync(dirname(target), { recursive: true })
   writeFileSync(
@@ -136,4 +140,7 @@ for (const file of walk(home)) {
   )
   chmodSync(target, statSync(file).mode & 0o777)
 }
-console.log(JSON.stringify({ first, second, out }, null, 2))
+const sorted = Object.fromEntries(
+  Object.entries(modes).sort(([a], [b]) => (a < b ? -1 : 1)),
+)
+console.log(JSON.stringify({ first, second, out, modes: sorted }, null, 2))
