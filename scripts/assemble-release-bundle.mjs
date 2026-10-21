@@ -28,6 +28,7 @@ import { assertPackagedSmokeReceipt } from './packaged-smoke-contract.mjs'
 import {
   STABLE_ARCHES,
   assertCommit,
+  bundledElectronVersion,
   checksumText,
   fileRecord,
   notesProblems,
@@ -141,7 +142,11 @@ function main(argv) {
     join(repoRoot, 'docs', 'release', 'stable-release-notes.md'),
     'utf8',
   )
-  const notes = renderReleaseNotes(template, { tag, version })
+  const notes = renderReleaseNotes(template, {
+    tag,
+    version,
+    electron: bundledElectronVersion(repoRoot),
+  })
   const problems = notesProblems(notes, { version })
   if (problems.length) throw new Error(problems.join('\n'))
 
