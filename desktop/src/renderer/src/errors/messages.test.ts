@@ -2,11 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
-import {
-  ERROR_MESSAGES,
-  coreErrorDetail,
-  coreErrorText,
-} from './messages'
+import { ERROR_MESSAGES, coreErrorDetail, coreErrorText } from './messages'
 
 // UI-S10 test 4: every error code Core can send over IPC has Chinese text.
 // The codes are read from the sources, so a new one fails here until it is
@@ -14,7 +10,8 @@ import {
 // UiError) have no toSafe(): they reach the model, and IPC turns them into
 // an internal error.
 
-const CORE = new URL('../../../../../packages/core/src/', import.meta.url).pathname
+const CORE = new URL('../../../../../packages/core/src/', import.meta.url)
+  .pathname
 const MAIN_IPC = new URL('../../../main/ipc.ts', import.meta.url).pathname
 
 function sources(dir: string): string[] {
@@ -22,7 +19,8 @@ function sources(dir: string): string[] {
   for (const entry of readdirSync(dir)) {
     const path = join(dir, entry)
     if (statSync(path).isDirectory()) out.push(...sources(path))
-    else if (/\.ts$/.test(entry) && !/\.(test|d)\.ts$/.test(entry)) out.push(path)
+    else if (/\.ts$/.test(entry) && !/\.(test|d)\.ts$/.test(entry))
+      out.push(path)
   }
   return out
 }
@@ -40,10 +38,16 @@ const CODE_FIRST = new Set(['WorkspaceOperationError', 'GoalServiceError'])
 
 function publicCoreErrorCodes(): Set<string> {
   const files = sources(CORE).map((path) =>
-    ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true),
+    ts.createSourceFile(
+      path,
+      readFileSync(path, 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+    ),
   )
   const literal = (node: ts.Node | undefined): string | null =>
-    node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+    node &&
+    (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
       ? node.text
       : null
   // The EmperorError family: every class that extends it, directly or not.
@@ -92,9 +96,14 @@ function publicCoreErrorCodes(): Set<string> {
         add(literal(node.initializer))
       if (ts.isTypeAliasDeclaration(node) && node.name.text in CODE_UNIONS) {
         const prefix = CODE_UNIONS[node.name.text]!
-        const members = ts.isUnionTypeNode(node.type) ? node.type.types : [node.type]
+        const members = ts.isUnionTypeNode(node.type)
+          ? node.type.types
+          : [node.type]
         for (const member of members)
-          if (ts.isLiteralTypeNode(member) && ts.isStringLiteral(member.literal))
+          if (
+            ts.isLiteralTypeNode(member) &&
+            ts.isStringLiteral(member.literal)
+          )
             add(prefix + member.literal.text)
       }
       if (
@@ -118,9 +127,8 @@ function publicCoreErrorCodes(): Set<string> {
       )
         for (const property of node.initializer.properties)
           if (property.name) add(property.name.getText(sf).replace(/['"]/g, ''))
-      if (inClass === 'DelegationError' && ts.isStringLiteral(node)) add(
-        node.text === 'EXTERNAL_OPERATION_FAILED' ? node.text : null,
-      )
+      if (inClass === 'DelegationError' && ts.isStringLiteral(node))
+        add(node.text === 'EXTERNAL_OPERATION_FAILED' ? node.text : null)
       ts.forEachChild(node, visit)
       inClass = outer
     }
@@ -128,8 +136,10 @@ function publicCoreErrorCodes(): Set<string> {
   }
   // Main's own interruption codes (desktop/src/main/ipc.ts).
   const ipc = readFileSync(MAIN_IPC, 'utf8')
-  const interruption = /function benignTurnInterruption[\s\S]*?\n}\n/.exec(ipc)?.[0] ?? ''
-  for (const match of interruption.matchAll(/code: '([a-z_]+)'/g)) add(match[1]!)
+  const interruption =
+    /function benignTurnInterruption[\s\S]*?\n}\n/.exec(ipc)?.[0] ?? ''
+  for (const match of interruption.matchAll(/code: '([a-z_]+)'/g))
+    add(match[1]!)
   return codes
 }
 
@@ -160,7 +170,9 @@ describe('Core error messages (UI-S10)', () => {
   })
 
   it('4 · every public Core error code has Chinese text', () => {
-    const missing = [...codes].filter((code) => !(code in ERROR_MESSAGES)).sort()
+    const missing = [...codes]
+      .filter((code) => !(code in ERROR_MESSAGES))
+      .sort()
     expect(missing).toEqual([])
     for (const [code, text] of Object.entries(ERROR_MESSAGES)) {
       expect(CJK.test(text), code).toBe(true)
@@ -190,16 +202,18 @@ describe('Core error messages (UI-S10)', () => {
         code: 'git_command_failed',
         message: "fatal: couldn't find remote ref main\nhint: …",
       }),
-    ).toBe(`${ERROR_MESSAGES.git_command_failed}：fatal: couldn't find remote ref main`)
+    ).toBe(
+      `${ERROR_MESSAGES.git_command_failed}：fatal: couldn't find remote ref main`,
+    )
   })
 
   it('falls back to a general sentence for an unknown English error', () => {
-    expect(coreErrorText({ code: 'brand_new_code', message: 'Something broke' })).toBe(
-      '操作没有完成。错误详情可以复制给开发者。',
-    )
-    expect(coreErrorText({ message: 'Internal error', errorId: 'ipc_abc' })).toBe(
-      '发生内部错误，请查看日志。',
-    )
+    expect(
+      coreErrorText({ code: 'brand_new_code', message: 'Something broke' }),
+    ).toBe('操作没有完成。错误详情可以复制给开发者。')
+    expect(
+      coreErrorText({ message: 'Internal error', errorId: 'ipc_abc' }),
+    ).toBe('发生内部错误，请查看日志。')
   })
 
   it('puts the code, the original message and the error id in the copyable detail', () => {
@@ -209,7 +223,11 @@ describe('Core error messages (UI-S10)', () => {
         message: "MCP server 'aihot' request timed out",
         errorId: 'ipc_1',
       }),
-    ).toBe("mcp_transport_timeout · MCP server 'aihot' request timed out · ipc_1")
-    expect(coreErrorDetail({ message: 'Internal error' })).toBe('Internal error')
+    ).toBe(
+      "mcp_transport_timeout · MCP server 'aihot' request timed out · ipc_1",
+    )
+    expect(coreErrorDetail({ message: 'Internal error' })).toBe(
+      'Internal error',
+    )
   })
 })

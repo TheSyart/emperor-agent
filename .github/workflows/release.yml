@@ -24,20 +24,31 @@ jobs:
   release-policy:
     name: Validate explicit Stable release request
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # Reads the nightly's last run and its failure issue (REL-04).
+      actions: read
+      issues: read
     outputs:
       tag: ${{ steps.policy.outputs.tag }}
       commit: ${{ steps.policy.outputs.commit }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: |
             package-lock.json
             desktop/package-lock.json
+      # A red nightly blocks the release, never a pull request (REL-04).
+      - name: Require a green nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EMPEROR_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node scripts/ci/require-green-nightly.mjs
       - id: policy
         name: Require an annotated Stable tag on the default branch
         shell: bash
@@ -89,11 +100,11 @@ jobs:
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.release-policy.outputs.tag }}
           fetch-depth: 1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
           cache: npm
@@ -124,7 +135,7 @@ jobs:
       - name: Verify signature, notarization, DMG and smoke
         run: scripts/verify-macos-release.sh "${{ matrix.arch }}"
       - name: Upload macOS candidate
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: macos-${{ matrix.arch }}-candidate
           path: |
@@ -152,11 +163,11 @@ jobs:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.release-policy.outputs.tag }}
           fetch-depth: 1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
           cache: npm
@@ -199,7 +210,7 @@ jobs:
         shell: pwsh
         run: ./scripts/verify-windows-release.ps1
       - name: Upload Windows candidate
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: windows-x64-candidate
           path: |
@@ -219,11 +230,11 @@ jobs:
       EMPEROR_RELEASE_TAG: ${{ needs.release-policy.outputs.tag }}
       EMPEROR_RELEASE_COMMIT: ${{ needs.release-policy.outputs.commit }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.release-policy.outputs.tag }}
           fetch-depth: 1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
           cache: npm
@@ -244,7 +255,7 @@ jobs:
       - name: Verify package metadata and create checksums
         run: scripts/verify-linux-release.sh prepare
       - name: Upload Linux candidate
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: linux-x64-candidate
           path: |
@@ -272,11 +283,11 @@ jobs:
       attestations: write
       artifact-metadata: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.release-policy.outputs.tag }}
           fetch-depth: 1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
           cache: npm
@@ -288,13 +299,13 @@ jobs:
           npm ci
           npm --prefix desktop ci
       - name: Download platform candidates
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: '*-candidate'
           path: release-inputs
           merge-multiple: true
       - name: Download Linux lifecycle receipts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: 'linux-*-receipts'
           path: release-inputs
@@ -338,11 +349,11 @@ jobs:
             sha256sum --check SHA256SUMS.txt
           )
       - name: Attest release provenance
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: release-bundle/SHA256SUMS.txt
       - name: Attest artifact SBOM
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: release-bundle/ARTIFACT-SHA256SUMS.txt
           sbom-path: release-bundle/emperor-agent-${{ needs.release-policy.outputs.tag }}.cdx.json
@@ -378,7 +389,7 @@ jobs:
             done
           done <release-bundle/ARTIFACT-SHA256SUMS.txt
       - name: Upload attested release bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: trusted-release-bundle
           path: release-bundle
@@ -395,12 +406,12 @@ jobs:
       contents: write
       attestations: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.release-policy.outputs.tag }}
           fetch-depth: 1
       - name: Download attested release bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: trusted-release-bundle
           path: release-bundle
@@ -444,15 +455,15 @@ jobs:
           - runner: ubuntu-24.04
             version: '24.04'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.release-policy.outputs.tag }}
           fetch-depth: 1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       - name: Download Linux candidate
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: linux-x64-candidate
           path: desktop/dist
@@ -462,7 +473,7 @@ jobs:
           EMPEROR_RELEASE_COMMIT: ${{ needs.release-policy.outputs.commit }}
         run: scripts/verify-linux-release.sh smoke
       - name: Upload Linux smoke receipts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: linux-${{ matrix.version }}-receipts
           path: desktop/dist/linux-receipts/*.json
