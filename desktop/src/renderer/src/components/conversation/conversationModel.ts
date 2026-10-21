@@ -91,9 +91,9 @@ export function conversationCrumbs(input: {
         sessionId: entry.sessionId,
         current,
         subagent: index > 0 && !current,
-        ...(index > 0
-          ? { source: 'Emperor', nativeSessionId: entry.sessionId }
-          : {}),
+        // A local subagent shows its avatar; only Claude Code / Codex name
+        // where they run (AGT-10).
+        ...(index > 0 ? { nativeSessionId: entry.sessionId } : {}),
       }
     })
   }

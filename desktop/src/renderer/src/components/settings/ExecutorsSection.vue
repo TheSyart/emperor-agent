@@ -1,1949 +1,404 @@
 <script setup lang="ts">
-/** Minimal source controls. Hidden settings are round-tripped without edits. */
+/**
+ * 设置 › 子智能体 (AGT-10): the conclusion first, details on demand.
+ *
+ * - The main page: one card with the three subagents (本地, Claude Code,
+ *   Codex — status, model, on/off; a missing sign-in fills the row with its
+ *   reason and 设置令牌) and one card with the three task settings (同时运行,
+ *   改代码的位置, 费用上限), then 高级.
+ * - Sub pages: 高级 (turns, run time, 开发环境, 排查) and each external
+ *   subagent's 详情 (status, sign-in, model, specialties, capabilities in
+ *   plain words).
+ *
+ * Every change is saved at once (executors/useExecutorSettings.ts); the
+ * header keeps only 重新检测.
+ */
+import { computed, defineAsyncComponent } from 'vue'
+import type { ExecutorProfile } from '@emperor/core/runtime-contract'
+import Avatar from '../ui/Avatar.vue'
+import Badge from '../ui/Badge.vue'
+import Button from '../ui/Button.vue'
+import IconButton from '../ui/IconButton.vue'
+import SubagentAvatarPreview from '../ui/SubagentAvatarPreview.vue'
+import { DsChevronRight } from '../icons/ds'
 import {
-  computed,
-  defineAsyncComponent,
-  onBeforeUnmount,
-  onMounted,
-  ref,
-} from 'vue'
-import type {
-  ExecutorAuthState,
-  ExecutorConfig,
-  ExecutorModelCatalog,
-  ExecutorProfile,
-  ExecutorProbe,
-  ExecutorRuntimeFacts,
-  NativeCapabilityStatus,
-  NativeCapabilityEvidence,
-} from '@emperor/core/runtime-contract'
-import {
-  executorIntroduction,
-  executorSpecialties,
-} from '@emperor/core/runtime-contract'
-import { openExternal } from '../../api/backend'
-import {
-  listExecutors,
-  configureExecutors,
-  probeExecutor,
-  listExecutorModels,
-  clearExecutorCredential,
-} from '../../api/delegations'
-import {
+  Notice,
+  Select,
   SettingsGroup,
+  SettingsLinkRow,
   SettingsRow,
   SettingsSection,
-  TextField,
-  Select,
   Switch,
   useSettingsHeader,
 } from './ui'
-import Button from '../ui/Button.vue'
-import SettingsCard from './ui/SettingsCard.vue'
-import Badge from '../ui/Badge.vue'
-import Notice from '../ui/Notice.vue'
-import { DsChevronDown, DsRefresh } from '../icons/ds'
-import Avatar from '../ui/Avatar.vue'
-import SubagentAvatarPreview from '../ui/SubagentAvatarPreview.vue'
+import { useSettingsPages } from './settingsHeader'
+import ExecutorAdvancedPage from './executors/ExecutorAdvancedPage.vue'
+import ExecutorDetailPage from './executors/ExecutorDetailPage.vue'
+import {
+  executorName,
+  hasIssue,
+  rowSummary,
+  signInAlert,
+  statusLabel,
+  statusTone,
+} from './executors/executorText'
+import { provideExecutorSettings } from './executors/useExecutorSettings'
+
 // 设置令牌 (AGT-02) loads when it is opened.
 const ClaudeTokenDialog = defineAsyncComponent(
   () => import('./ClaudeTokenDialog.vue'),
 )
-const config = ref<ExecutorConfig | null>(null),
-  runtimes = ref<Record<string, ExecutorRuntimeFacts | undefined>>({}),
-  editingSpecialties = ref<Record<string, boolean>>({}),
-  specialtyText = ref<Record<string, string>>({}),
-  specialtyErrors = ref<Record<string, string>>({}),
-  probes = ref<Record<string, ExecutorProbe | null>>({}),
-  /** 以后都允许 chosen in a conversation's consent card (AGT-05). */
-  consents = ref<Record<string, 'always' | null>>({}),
-  probeErrors = ref<Record<string, string>>({}),
-  selected = ref<Record<string, string>>({}),
-  recovery = ref<Record<string, boolean>>({}),
-  loading = ref(false),
-  busy = ref(false),
-  error = ref(''),
-  saved = ref(''),
-  reloadRequested = ref(false),
-  stale = ref(false)
-const catalogs = ref<Record<string, ExecutorModelCatalog | undefined>>({}),
-  catalogBusy = ref<Record<string, boolean>>({}),
-  modelEditor = ref<Record<string, boolean>>({}),
-  modelText = ref<Record<string, string>>({})
-let generation = 0,
-  disposed = false
-let runtimeTimer: ReturnType<typeof setInterval> | undefined
-const localIntro =
-  'Emperor 内置子智能体，可在独立子会话中并行处理任务，在主会话允许的工具与权限范围内执行，并向主智能体汇报结果。'
-const addModelId = '__add_custom_model__'
-const modelSourceNames = {
-  cli: '本机发现',
-  configuration: '本机配置',
-  cache: '缓存',
-  builtin: '内置参考',
-  custom: '自定义',
-}
-function modelOptions(profile: ExecutorProfile) {
-  const rows = new Map(
-    (catalogs.value[profile.id]?.models ?? []).map((item) => [
-      item.id,
-      {
-        value: item.id,
-        label: item.id,
-        description:
-          modelSourceNames[item.source] +
-          (item.name !== item.id ? ' · ' + item.name : ''),
-      },
-    ]),
-  )
-  for (const id of profile.customModels ?? [])
-    rows.set(id, { value: id, label: id, description: '自定义' })
-  if (profile.defaultModel && !rows.has(profile.defaultModel))
-    rows.set(profile.defaultModel, {
-      value: profile.defaultModel,
-      label: profile.defaultModel,
-      description: '当前配置',
-    })
-  return [
-    { value: '', label: '跟随本机 CLI', description: '沿用当前接入与默认模型' },
-    ...rows.values(),
-    {
-      value: addModelId,
-      label: '新增自定义模型…',
-      description: '第三方模型 ID 或网关别名',
-    },
+
+const s = provideExecutorSettings()
+const { config, rows, models, busy, loading, tokenDialog } = s
+const { page, open: openPage } = useSettingsPages({
+  advanced: '高级',
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+})
+
+const detailBackend = computed(() =>
+  page.value === 'claude-code' || page.value === 'codex' ? page.value : null,
+)
+
+// ── 本地子智能体 ────────────────────────────────────────────────────────
+
+const localModel = computed(() => config.value?.localSubagentModel ?? '')
+const localModelOptions = computed(() => {
+  const options = [
+    { value: '', label: '跟随对话', description: '使用当前对话的模型' },
+    ...models.value.map((choice) => ({ ...choice })),
   ]
-}
-function selectModel(profile: ExecutorProfile, id: string) {
-  if (id === addModelId) {
-    modelEditor.value[profile.id] = true
-    modelText.value[profile.id] = ''
-    return
-  }
-  if (id) profile.defaultModel = id
-  else delete profile.defaultModel
-  modelEditor.value[profile.id] = false
-}
-function modelError(profile: ExecutorProfile) {
-  const text = (modelText.value[profile.id] ?? '').trim()
-  if (!text) return '请输入模型 ID'
-  if (text.length > 256) return '模型 ID 最多 256 字'
   if (
-    [...text].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127) ||
-    text === addModelId
+    localModel.value &&
+    !models.value.some((choice) => choice.value === localModel.value)
   )
-    return '模型 ID 无效'
-  if (
-    (profile.customModels?.length ?? 0) >= 64 &&
-    !profile.customModels?.includes(text)
-  )
-    return '最多保存 64 个自定义模型'
-  return ''
-}
-function addModel(profile: ExecutorProfile) {
-  if (modelError(profile)) return
-  const id = modelText.value[profile.id]!.trim()
-  profile.customModels = [...new Set([...(profile.customModels ?? []), id])]
-  selectModel(profile, id)
-}
-async function loadModels(
-  profile: ExecutorProfile,
-  refresh = false,
-  refreshRuntime = refresh,
-) {
-  if (catalogBusy.value[profile.id]) return
-  catalogBusy.value[profile.id] = true
-  const identity = JSON.stringify({
-    path: profile.executablePath,
-    auth: profile.authRef,
+    options.push({
+      value: localModel.value,
+      label: `${localModel.value}（已删除）`,
+      description: '这条模型配置已删除，暂时按对话的模型运行',
+    })
+  return options
+})
+const localSummary = computed(() => {
+  if (!localModel.value) return '使用当前对话的模型，始终可用'
+  const choice = models.value.find((c) => c.value === localModel.value)
+  return choice
+    ? `使用「${choice.label}」，始终可用`
+    : '选定的模型已删除，暂时使用当前对话的模型'
+})
+function setLocalModel(value: string | null | undefined) {
+  void s.change((draft) => {
+    if (value) draft.localSubagentModel = value
+    else delete draft.localSubagentModel
   })
-  try {
-    const value = await listExecutorModels({
-      profileId: profile.id,
-      ...(refresh ? { refresh: true } : {}),
-    })
-    const current = config.value?.profiles.find((p) => p.id === profile.id)
-    if (
-      !disposed &&
-      current &&
-      JSON.stringify({
-        path: current.executablePath,
-        auth: current.authRef,
-      }) === identity
-    ) {
-      catalogs.value[profile.id] = value
-      if (refreshRuntime) {
-        const result = await listExecutors()
-        if (!disposed && result.config?.revision === config.value?.revision)
-          runtimes.value = Object.fromEntries(
-            result.profiles.map((entry) => [entry.profile.id, entry.runtime]),
-          )
-      }
-    }
-  } catch {
-    if (!disposed)
-      catalogs.value[profile.id] = {
-        profileId: profile.id,
-        models: catalogs.value[profile.id]?.models ?? [],
-        configuredModel: null,
-        provider: null,
-        checkedAt: null,
-        diagnostic: '模型列表暂不可读取，仍可保留当前选择或新增自定义模型。',
-      }
-  } finally {
-    if (!disposed) catalogBusy.value[profile.id] = false
-  }
 }
-function visibleCapabilities(profile: ExecutorProfile) {
-  return (['search', 'imageGeneration'] as const).filter(
-    (kind) => capability(profile, kind).status !== 'unsupported',
-  )
+
+// ── Claude Code / Codex ────────────────────────────────────────────────
+
+function needsToken(profile: ExecutorProfile | undefined) {
+  if (!profile?.enabled) return false
+  const alert = signInAlert(profile, s.factsOf(profile))
+  return alert === 'missing' || alert === 'expired' || alert === 'unreadable'
 }
-function capabilityTone(value: NativeCapabilityStatus) {
+function showsModel(profile: ExecutorProfile | undefined) {
   return (
-    {
-      available: 'ok',
-      unavailable: 'error',
-      verifying: 'accent',
-      stale: 'warn',
-      unverified: 'neutral',
-      unsupported: 'neutral',
-    } as const
-  )[value]
-}
-function readinessTone(profile: ExecutorProfile) {
-  if (!profile.enabled) return 'neutral'
-  if (
-    hasIssue(profile) ||
-    warning(profile) ||
-    probes.value[profile.id]?.auth?.expiresSoon
+    !!profile?.enabled && !needsToken(profile) && !hasIssue(s.factsOf(profile))
   )
-    return 'warn'
-  return probes.value[profile.id]?.status === 'available' ? 'ok' : 'neutral'
 }
-async function refreshFacts() {
-  if (
-    disposed ||
-    loading.value ||
-    busy.value ||
-    document.hidden ||
-    !document.hasFocus()
-  )
-    return
-  try {
-    const result = await listExecutors()
-    if (disposed || loading.value || busy.value) return
-    runtimes.value = Object.fromEntries(
-      result.profiles.map((entry) => [entry.profile.id, entry.runtime]),
-    )
-    probes.value = Object.fromEntries(
-      result.profiles.map((entry) => [entry.profile.id, entry.probe]),
-    )
-    rememberConsents(result.profiles)
-    if (
-      result.config &&
-      config.value &&
-      result.config.revision !== config.value.revision
-    ) {
-      if (dirty.value) {
-        stale.value = true
-        reloadRequested.value = true
-        error.value = '配置已在其他位置更新，你的修改已保留。'
-      } else {
-        config.value = clone(result.config)
-        saved.value = JSON.stringify(config.value)
-      }
-    }
-  } catch {
-    /* Keep the last known runtime facts on transient failure. */
-  }
+function setEnabled(profile: ExecutorProfile, on: boolean) {
+  void s.changeProfile(profile.id, (p) => {
+    p.enabled = on
+  })
 }
-const dirty = computed(
-  () => config.value !== null && JSON.stringify(config.value) !== saved.value,
+function setModel(profile: ExecutorProfile, id: string | null | undefined) {
+  void s.changeProfile(profile.id, (p) => {
+    if (id) p.defaultModel = id
+    else delete p.defaultModel
+  })
+}
+
+// ── 子任务 ────────────────────────────────────────────────────────────
+
+const concurrencyOptions = [1, 2, 3, 4].map((n) => ({
+  value: String(n),
+  label: `${n} 个`,
+}))
+const workspace = computed(
+  () => config.value?.defaultWorkspace ?? 'isolated-worktree',
 )
-const rows = computed(() =>
-  (['claude-code', 'codex'] as const).map((backend) => {
-    const profiles =
-      config.value?.profiles.filter((profile) => profile.backend === backend) ??
-      []
-    return {
-      backend,
-      name: backend === 'codex' ? 'Codex' : 'Claude Code',
-      profiles,
-      profile:
-        profiles.find((profile) => profile.id === selected.value[backend]) ??
-        profiles[0],
-    }
-  }),
-)
-const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
-const message = (cause: unknown) =>
-  cause instanceof Error ? cause.message : String(cause)
-const invalidSpecialties = computed(() =>
-  Object.values(specialtyErrors.value).some(Boolean),
-)
-const capabilityLabels: Record<NativeCapabilityStatus, string> = {
-  unverified: '未验证',
-  verifying: '验证中',
-  available: '已验证可用',
-  unavailable: '不可用',
-  unsupported: '当前接入不支持',
-  stale: '验证已失效',
-}
-function editSpecialties(profile: ExecutorProfile) {
-  editingSpecialties.value[profile.id] = !editingSpecialties.value[profile.id]
-  specialtyText.value[profile.id] = executorSpecialties(profile).join('，')
-}
-function updateSpecialties(profile: ExecutorProfile, text: string) {
-  specialtyText.value[profile.id] = text
-  const items = text
-    .split(/[,，、;；\n]/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-  specialtyErrors.value[profile.id] =
-    items.length > 6
-      ? '最多 6 项专长'
-      : items.some((s) => [...s].length > 24)
-        ? '每项最多 24 字'
-        : ''
-  profile.specialties = items
-}
-function resetSpecialties(profile: ExecutorProfile) {
-  delete profile.specialties
-  specialtyText.value[profile.id] = executorSpecialties(profile).join('，')
-  delete specialtyErrors.value[profile.id]
-}
-function capability(
-  profile: ExecutorProfile,
-  kind: 'search' | 'imageGeneration',
-): NativeCapabilityEvidence {
-  return (
-    runtimes.value[profile.id]?.nativeCapabilities[kind] ?? {
-      status:
-        profile.backend === 'claude-code' && kind === 'imageGeneration'
-          ? ('unsupported' as const)
-          : ('unverified' as const),
-    }
-  )
-}
-function capabilityDetail(
-  profile: ExecutorProfile,
-  kind: 'search' | 'imageGeneration',
-) {
-  const fact = capability(profile, kind)
-  return [
-    fact.checkedAt ? new Date(fact.checkedAt).toLocaleString() : null,
-    fact.searchMode === 'live'
-      ? '实时搜索'
-      : fact.searchMode === 'cached'
-        ? '缓存搜索'
-        : null,
-  ]
-    .filter(Boolean)
-    .join(' · ')
-}
-function label(profile: ExecutorProfile) {
-  if (!profile.enabled) return '已停用'
-  if (loading.value) return '检测中…'
-  if (probeErrors.value[profile.id]) return '检测失败'
-  const probe = probes.value[profile.id]
-  if (!probe) return '未检测'
-  if (probe.diagnostic === 'executor version probe failed') return '检测失败'
-  if (probe.diagnostic === 'AUTH_EXPIRED' || probe.auth?.problem === 'expired')
-    return '令牌已过期'
-  if (probe.diagnostic === 'AUTH_REQUIRED') return '需要登录配置'
-  if (probe.status === 'available' && probe.auth?.expiresSoon)
-    return '令牌即将过期'
-  if (probe.diagnostic === 'AUTH_ROUTE_UNAVAILABLE') return '凭据不可用'
-  if (probe.status === 'available' && probe.compatibility === 'unverified')
-    return '可能不兼容'
-  return {
-    available: '子智能体就绪',
-    missing: '未找到 CLI',
-    needs_auth: '需要登录配置',
-    incompatible: '版本不兼容',
-    containment_unavailable: '运行环境不可用',
-  }[probe.status]
-}
-function detail(profile: ExecutorProfile) {
-  if (probeErrors.value[profile.id])
-    return `检测失败：${probeErrors.value[profile.id]}`
-  const probe = probes.value[profile.id]
-  if (!probe) return ''
-  if (probe.diagnostic === 'executor version probe failed')
-    return 'CLI 版本检测失败，请检查可执行权限及本机运行环境后重试。'
-  if (probe.diagnostic === 'AUTH_ROUTE_UNAVAILABLE')
-    return '所选模型凭据不可读，请在模型设置检查原配置。'
-  // Claude Code's own sign-in has its help in the 登录 block (AGT-02).
-  if (probe.status === 'needs_auth' || probe.diagnostic === 'AUTH_REQUIRED')
-    return profile.authRef.kind === 'model-route'
-      ? '所选模型凭据不可读，请在模型设置检查原配置。'
-      : '请在终端运行 codex login，配置完成后重新检测。'
-  if (probe.status === 'missing')
-    return usesBundledClaude(profile)
-      ? 'Emperor 内置的 Claude Code 缺失，请重新安装 Emperor，或在「查看详情」里改用本机安装的 claude。'
-      : '未找到 CLI，请检查本机安装或更正路径后保存。'
-  if (probe.status === 'incompatible') {
-    const name = profile.backend === 'codex' ? 'Codex' : 'claude'
-    const installed = probe.executableVersion ?? '版本未知'
-    if (!probe.requiredVersion)
-      return `本机 ${name}（${installed}）不在支持范围内，请检查本机 CLI 版本。`
-    return (
-      `本机 ${name} ${installed} 不在支持范围内，需要 ${probe.requiredVersion}。` +
-      (profile.backend === 'codex'
-        ? '请安装对应版本后重新检测。'
-        : '可以升级本机 claude，或关闭「使用本机安装的 claude」改用 Emperor 内置版本。')
-    )
-  }
-  if (probe.status === 'containment_unavailable')
-    return '本机运行环境不可用，请检查 CLI 运行环境后重试。'
-  return ''
-}
-/** Claude Code runs the binary bundled with Emperor unless switched. */
-function usesBundledClaude(profile: ExecutorProfile) {
-  return (
-    profile.backend === 'claude-code' && profile.executableSource !== 'system'
-  )
-}
-/** 高级 › 诊断模式 (AGT-04): stored only when on. */
-function setDiagnostics(on: boolean) {
-  if (!config.value) return
-  if (on) config.value.diagnosticsMode = true
-  else delete config.value.diagnosticsMode
-}
-/** 高级 › 开发环境 (AGT-08): what a task's environment passes through. */
-type DevEnvKey = keyof NonNullable<ExecutorConfig['developmentEnvironment']>
-const DEV_ENV_DEFAULTS: Record<DevEnvKey, boolean> = {
-  gitIdentity: true,
-  proxy: true,
-  sshAgent: false,
-  toolchains: false,
-  github: false,
-}
-const DEV_ENV_ROWS: ReadonlyArray<{
-  key: DevEnvKey
-  title: string
-  description: string
-}> = [
+const workspaceOptions = [
   {
-    key: 'gitIdentity',
-    title: 'Git 身份',
-    description: '子智能体提交时使用你 git 配置里的姓名和邮箱。',
+    value: 'isolated-worktree',
+    label: '独立工作树',
+    description: '验证后再合并回项目',
   },
   {
-    key: 'proxy',
-    title: '网络代理',
-    description: '沿用 Emperor 的 HTTP(S)_PROXY 与 NO_PROXY。',
-  },
-  {
-    key: 'sshAgent',
-    title: 'SSH 代理',
-    description:
-      '子智能体可以用你的 SSH 密钥访问远端仓库（经 SSH agent，不复制密钥）。',
-  },
-  {
-    key: 'toolchains',
-    title: '开发工具链',
-    description:
-      'nvm、volta、rustup / cargo、pyenv 安装的 node、rust、python 可用。',
-  },
-  {
-    key: 'github',
-    title: '允许子智能体使用 GitHub 登录',
-    description:
-      '把 gh 当前登录的令牌交给子任务（GH_TOKEN），子智能体可以用 gh 读写你的仓库。',
+    value: 'shared-exclusive',
+    label: '当前工作区',
+    description: '直接改项目，期间主会话不能同时改',
   },
 ]
-function devEnv(key: DevEnvKey): boolean {
-  return (config.value?.developmentEnvironment ?? DEV_ENV_DEFAULTS)[key]
-}
-function setDevEnv(key: DevEnvKey, on: boolean) {
-  if (!config.value) return
-  const next = {
-    ...(config.value.developmentEnvironment ?? DEV_ENV_DEFAULTS),
-    [key]: on,
-  }
-  // Stored only when it differs from the defaults.
-  if (
-    (Object.keys(next) as DevEnvKey[]).every(
-      (k) => next[k] === DEV_ENV_DEFAULTS[k],
-    )
-  )
-    delete config.value.developmentEnvironment
-  else config.value.developmentEnvironment = next
-}
-/** 高级 › 验证后再应用 (AGT-06): stored only when on. */
-function setVerifyFirst(on: boolean) {
-  if (!config.value) return
-  if (on) config.value.verifyBeforeApply = true
-  else delete config.value.verifyBeforeApply
-}
-function setInstalledClaude(profile: ExecutorProfile, installed: boolean) {
-  profile.executableSource = installed ? 'system' : 'bundled'
-}
-/** Runnable, but the CLI's protocol only matched by version (AGT-01). */
-function warning(profile: ExecutorProfile) {
-  const probe = probes.value[profile.id]
-  if (probe?.status !== 'available' || probe.compatibility !== 'unverified')
-    return ''
-  return `本机 Codex ${probe.executableVersion ?? ''} 的协议与已验证的 ${probe.protocolVersion ?? '版本'} 不同，可能不兼容；仍可运行，失败时会注明可能是版本原因。`
-}
-function versionText(profile: ExecutorProfile) {
-  const probe = probes.value[profile.id]
-  if (!probe?.executableVersion) return '未知'
-  if (profile.backend !== 'claude-code') return probe.executableVersion
-  return (
-    probe.executableVersion +
-    (probe.executableSource === 'system' ? '（本机）' : '（随 Emperor 内置）')
-  )
-}
-// ── Claude Code 登录 (AGT-02) ──────────────────────────────────────────
-// Sources, in Core's order: Emperor's own token, ~/.claude/settings.json,
-// .credentials.json, the environment, the login shell. Never the Keychain.
-const tokenDialog = ref<ExecutorProfile | null>(null),
-  tokenBusy = ref(false)
-const KIND_LABEL = {
-  'oauth-token': '订阅账号',
-  'api-key': 'API Key',
-  'auth-token': '网关令牌',
-} as const
-const SOURCE_LABEL = {
-  settings: '来自 ~/.claude/settings.json',
-  'credentials-file': '来自 ~/.claude/.credentials.json',
-  environment: '来自启动 Emperor 时的环境变量',
-  'login-shell': '来自登录 shell 的环境变量（如 ~/.zshrc）',
-  'model-route': '使用已有模型配置',
-} as const
-/** A Claude profile that signs in on its own (not through a model route). */
-function signsInHere(profile: ExecutorProfile) {
-  return (
-    profile.backend === 'claude-code' &&
-    profile.authRef.kind === 'managed-cli-login'
-  )
-}
-function minutesLeft(auth: ExecutorAuthState) {
-  return Math.max(1, Math.ceil(((auth.expiresAt ?? 0) - Date.now()) / 60_000))
-}
-function authOf(profile: ExecutorProfile) {
-  return probes.value[profile.id]?.auth
-}
-function hasEmperorToken(profile: ExecutorProfile) {
-  const auth = authOf(profile)
-  return auth?.source === 'emperor' || auth?.problem === 'unreadable'
-}
-function signInText(profile: ExecutorProfile) {
-  const auth = authOf(profile)
-  if (!auth)
-    return probes.value[profile.id]?.localAuthChecked
-      ? '本机登录配置可读'
-      : '尚未检测'
-  if (auth.source === 'emperor')
-    return `已设置 · 末 4 位 ${auth.last4 ?? ''}（${KIND_LABEL[auth.kind ?? 'oauth-token']}）`
-  if (auth.source)
-    return [
-      SOURCE_LABEL[auth.source],
-      ...(auth.kind && auth.source !== 'model-route'
-        ? [KIND_LABEL[auth.kind]]
-        : []),
-      ...(auth.expiresSoon ? [`${minutesLeft(auth)} 分钟内过期`] : []),
-    ].join(' · ')
-  return auth.problem === 'expired'
-    ? '.credentials.json 里的令牌已过期'
-    : auth.problem === 'unreadable'
-      ? '保存在 Emperor 的令牌已无法读取'
-      : '未登录'
-}
-/** Claude's sign-in is what is missing: its help replaces the generic notice. */
-function authIssue(profile: ExecutorProfile) {
-  const probe = probes.value[profile.id]
-  return (
-    signsInHere(profile) &&
-    !!probe &&
-    (probe.status === 'needs_auth' ||
-      probe.diagnostic === 'AUTH_REQUIRED' ||
-      probe.diagnostic === 'AUTH_EXPIRED')
-  )
-}
-const ALERT_TITLE = {
-  missing: '尚未登录',
-  expired: '令牌已过期',
-  unreadable: '令牌无法读取',
-  soon: '令牌即将过期',
-} as const
-/** What the 登录 block has to tell: no sign-in, or one about to expire. */
-function signInAlert(profile: ExecutorProfile): keyof typeof ALERT_TITLE | '' {
-  const auth = authOf(profile)
-  if (authIssue(profile))
-    return auth?.problem === 'expired' || auth?.problem === 'unreadable'
-      ? auth.problem
-      : 'missing'
-  return probes.value[profile.id]?.status === 'available' && auth?.expiresSoon
-    ? 'soon'
-    : ''
-}
-function tokenSaved(profile: ExecutorProfile, probe: ExecutorProbe) {
-  probes.value[profile.id] = probe
-  delete probeErrors.value[profile.id]
-  tokenDialog.value = null
-  // 「读取不到认证」 no longer holds; 刷新模型 lists the account's models.
-  const catalog = catalogs.value[profile.id]
-  if (catalog) catalogs.value[profile.id] = { ...catalog, diagnostic: null }
-}
-async function clearToken(profile: ExecutorProfile) {
-  if (tokenBusy.value) return
-  tokenBusy.value = true
-  error.value = ''
-  try {
-    probes.value[profile.id] = (
-      await clearExecutorCredential({ profileId: profile.id })
-    ).probe
-  } catch (cause) {
-    error.value = `移除令牌失败：${message(cause)}`
-  } finally {
-    tokenBusy.value = false
-  }
-}
-// 高级 › 每次运行最多轮数: absent means Core's default of 200.
-const DEFAULT_MAX_TURNS = 200
-function turnOptions() {
-  const current = config.value?.limits.claudeMaxTurns ?? DEFAULT_MAX_TURNS
-  return [...new Set([50, 100, 200, 300, 500, 1000, current])]
+const workspaceDescription = computed(() =>
+  workspace.value === 'shared-exclusive'
+    ? 'Claude Code、Codex 直接改当前工作区；改完之前，主会话不能同时修改文件'
+    : 'Claude Code、Codex 在独立的 Git 工作树里改，验证后再合并回来',
+)
+const budgetOptions = computed(() => {
+  const current = config.value?.limits.estimatedBudgetUsd ?? 10
+  return [...new Set([1, 2, 5, 10, current])]
     .sort((a, b) => a - b)
-    .map((n) => ({
-      value: String(n),
-      label: n === DEFAULT_MAX_TURNS ? `${n} 轮（默认）` : `${n} 轮`,
-    }))
+    .map((n) => ({ value: String(n), label: `$${n}` }))
+})
+function setConcurrency(value: string | null | undefined) {
+  const n = Number(value)
+  if (!Number.isInteger(n) || n < 1 || n > 4) return
+  void s.change((draft) => {
+    draft.limits.globalConcurrency = n
+  })
 }
-function setMaxTurns(value: string) {
-  if (!config.value) return
-  const turns = Number(value)
-  if (turns === DEFAULT_MAX_TURNS) delete config.value.limits.claudeMaxTurns
-  else config.value.limits.claudeMaxTurns = turns
+function setWorkspace(value: string | null | undefined) {
+  void s.change((draft) => {
+    if (value === 'shared-exclusive') draft.defaultWorkspace = value
+    else delete draft.defaultWorkspace
+  })
 }
-function hasIssue(profile: ExecutorProfile) {
-  return (
-    !!probeErrors.value[profile.id] ||
-    (!!probes.value[profile.id] &&
-      probes.value[profile.id]!.status !== 'available')
-  )
+function setBudget(value: string | null | undefined) {
+  const n = Number(value)
+  if (!(n > 0 && n <= 10)) return
+  void s.change((draft) => {
+    draft.limits.estimatedBudgetUsd = n
+  })
 }
-function rememberConsents(
-  profiles: { profile: ExecutorProfile; consent?: 'always' | null }[],
-) {
-  consents.value = Object.fromEntries(
-    profiles.map((entry) => [entry.profile.id, entry.consent ?? null]),
-  )
+
+/** Acknowledge the upgrade notice: any save clears it (AGT-05). */
+function dismissNotice() {
+  void s.change((draft) => {
+    delete draft.upgradeNotice
+  })
 }
-function consentText(profile: ExecutorProfile) {
-  return consents.value[profile.id] === 'always'
-    ? '已选择「以后都允许」：交给子智能体前不再询问。关闭后再打开会恢复询问。'
-    : '第一次交给子智能体前会在对话中征得你的同意（本次允许 / 以后都允许 / 不允许）。'
-}
-/** Acknowledge the upgrade notice by saving the last saved config as is. */
-async function dismissNotice() {
-  if (busy.value || loading.value || !saved.value) return
-  const current = ++generation,
-    base = JSON.parse(saved.value) as ExecutorConfig
-  delete base.upgradeNotice
-  busy.value = true
-  error.value = ''
-  try {
-    const result = await configureExecutors({
-      expectedRevision: base.revision,
-      config: base,
-    })
-    if (current !== generation) return
-    const draft = config.value
-    if (dirty.value && draft) {
-      // Keep the unsaved edits on top of the new revision.
-      draft.revision = result.revision
-      delete draft.upgradeNotice
-      if (result.touchedAt !== undefined) draft.touchedAt = result.touchedAt
-      saved.value = JSON.stringify(result)
-    } else {
-      config.value = clone(result)
-      saved.value = JSON.stringify(config.value)
-    }
-  } catch (cause) {
-    if (current !== generation) return
-    error.value = message(cause)
-  } finally {
-    if (current === generation) busy.value = false
-  }
-}
-async function load(forceProbe = false, discard = false) {
-  if (loading.value || busy.value) return
-  if (dirty.value && !discard) {
-    reloadRequested.value = true
-    return
-  }
-  const current = ++generation
-  loading.value = true
-  error.value = ''
-  reloadRequested.value = false
-  try {
-    const result = await listExecutors()
-    if (current !== generation) return
-    config.value = clone(result.config)
-    editingSpecialties.value = {}
-    specialtyErrors.value = {}
-    specialtyText.value = {}
-    runtimes.value = Object.fromEntries(
-      result.profiles.map((entry) => [entry.profile.id, entry.runtime]),
-    )
-    saved.value = JSON.stringify(config.value)
-    for (const profile of config.value?.profiles ?? [])
-      void loadModels(profile, forceProbe, false)
-    stale.value = false
-    probes.value = Object.fromEntries(
-      result.profiles.map((entry) => [entry.profile.id, entry.probe]),
-    )
-    rememberConsents(result.profiles)
-    probeErrors.value = {}
-    if (result.diagnostic)
-      error.value = `${result.diagnostic}；请检查原配置后重新检测。`
-    let didProbe = false
-    await Promise.all(
-      result.profiles
-        .filter((entry) => forceProbe || !entry.probe?.localAuthChecked)
-        .map(async (entry) => {
-          const profile = config.value?.profiles.find(
-            (profile) => profile.id === entry.profile.id,
-          )
-          if (!profile) return
-          const key = JSON.stringify(profile)
-          try {
-            didProbe = true
-            const probe = await probeExecutor({ profileId: profile.id })
-            if (
-              current === generation &&
-              JSON.stringify(
-                config.value?.profiles.find((p) => p.id === profile.id),
-              ) === key
-            )
-              probes.value[profile.id] = probe
-          } catch (cause) {
-            if (current === generation)
-              probeErrors.value[profile.id] = message(cause)
-          }
-        }),
-    )
-    if (didProbe && current === generation) {
-      const refreshed = await listExecutors()
-      if (current === generation)
-        runtimes.value = Object.fromEntries(
-          refreshed.profiles.map((entry) => [entry.profile.id, entry.runtime]),
-        )
-    }
-  } catch (cause) {
-    if (current === generation)
-      error.value = `读取配置失败：${message(cause)}；请重新检测。`
-  } finally {
-    if (current === generation) loading.value = false
-  }
-}
-async function installHelp(profile: ExecutorProfile) {
-  try {
-    await openExternal(
-      profile.backend === 'codex'
-        ? 'https://learn.chatgpt.com/docs/codex/cli'
-        : 'https://code.claude.com/docs/en/setup',
-    )
-  } catch {
-    error.value = '无法打开安装说明，请检查系统浏览器后重试。'
-  }
-}
-async function save() {
-  if (
-    busy.value ||
-    loading.value ||
-    !config.value ||
-    !dirty.value ||
-    invalidSpecialties.value ||
-    stale.value
-  )
-    return
-  const current = ++generation,
-    draft = clone(config.value)
-  busy.value = true
-  error.value = ''
-  try {
-    const result = await configureExecutors({
-      expectedRevision: draft.revision,
-      config: draft,
-    })
-    if (current !== generation) return
-    config.value = clone(result)
-    saved.value = JSON.stringify(config.value)
-    const refreshed = await listExecutors()
-    if (current !== generation) return
-    if (refreshed.config?.revision !== result.revision) {
-      stale.value = true
-      reloadRequested.value = true
-      error.value = '配置已在其他位置更新，请重新读取。'
-      return
-    }
-    probes.value = Object.fromEntries(
-      refreshed.profiles.map((entry) => [entry.profile.id, entry.probe]),
-    )
-    rememberConsents(refreshed.profiles)
-    runtimes.value = Object.fromEntries(
-      refreshed.profiles.map((entry) => [entry.profile.id, entry.runtime]),
-    )
-    probeErrors.value = {}
-    reloadRequested.value = false
-  } catch (cause) {
-    if (current !== generation) return
-    error.value = message(cause)
-    if (error.value.includes('STALE_REVISION')) {
-      stale.value = true
-      reloadRequested.value = true
-    }
-  } finally {
-    if (current === generation) busy.value = false
-  }
-}
+
 useSettingsHeader({
   actions: () => [
     {
       id: 'detect-executors',
       label: loading.value ? '检测中…' : '重新检测',
-      onClick: () => load(true),
-      disabled: loading.value || busy.value,
+      onClick: () => s.load(true),
+      disabled: busy.value,
       busy: loading.value,
-    },
-    {
-      id: 'save-executors',
-      label: '保存配置',
-      kind: 'primary',
-      onClick: save,
-      disabled:
-        busy.value ||
-        loading.value ||
-        !dirty.value ||
-        stale.value ||
-        invalidSpecialties.value,
-      busy: busy.value,
     },
   ],
 })
-onMounted(() => {
-  void load()
-  runtimeTimer = setInterval(() => void refreshFacts(), 10000)
-  window.addEventListener('focus', refreshFacts)
-})
-onBeforeUnmount(() => {
-  disposed = true
-  if (runtimeTimer) clearInterval(runtimeTimer)
-  window.removeEventListener('focus', refreshFacts)
-  generation++
-})
 </script>
+
 <template>
   <SettingsSection
-    intro="主会话统一安排子任务；能力状态以当前模型与运行验证为准。"
+    v-if="page === null"
+    intro="Emperor 可以把子任务交给本地子智能体，或交给你电脑上已登录的 Claude Code、Codex。主任务、权限和验证始终由 Emperor 负责。"
   >
-    <p v-if="error" class="executor-error message" role="alert">{{ error }}</p>
+    <Notice
+      v-if="s.error.value"
+      tone="error"
+      :title="s.error.value"
+      data-executor-error
+    />
     <p v-if="loading && !config" class="executor-note" role="status">
       正在读取子智能体配置…
     </p>
-    <div v-if="reloadRequested" class="reload-notice message" role="status">
-      <span>有未保存的修改。重新读取会丢弃这些修改。</span
-      ><Button
-        size="sm"
-        variant="secondary"
-        data-discard-executor-edits
-        :disabled="busy || loading"
-        @click="load(true, true)"
-        >丢弃修改并重新读取</Button
-      >
-    </div>
-    <div
+    <Notice
       v-if="config?.upgradeNotice === 'external-default-off'"
-      class="upgrade-notice message"
-      role="status"
+      tone="info"
+      title="Claude Code 和 Codex 现在默认关闭"
       data-executor-upgrade-notice
     >
-      <span
-        >Claude Code 和 Codex
-        子智能体现在默认关闭，因为它们会使用你自己的订阅额度或 API
-        计费。升级前它们按旧版默认开启，你没有改过这项设置，所以已关闭；需要时在下面打开，第一次交给子智能体前会在对话中征得你的同意。</span
-      ><Button
-        size="sm"
-        variant="secondary"
-        data-dismiss-upgrade-notice
-        :disabled="busy || loading"
-        @click="dismissNotice"
-        >知道了</Button
-      >
-    </div>
-    <div class="agent-cards">
-      <SettingsCard class="agent-card local-card" data-settings-agent="local">
-        <template #leading><SubagentAvatarPreview /></template
-        ><template #title><h3>本地</h3></template
-        ><template #meta><Badge tone="accent">内置</Badge></template>
-        <template #description
-          ><span>{{ localIntro }}</span></template
+      它们会使用你自己的订阅额度或 API
+      计费。升级前它们按旧版默认开启，你没有改过这项设置，所以已关闭；需要时在下面打开，第一次把任务交给它们前会在对话里征得你的同意。
+      <template #actions>
+        <Button
+          size="sm"
+          variant="secondary"
+          data-dismiss-upgrade-notice
+          :disabled="busy"
+          @click="dismissNotice"
+          >知道了</Button
         >
-        <div class="local-features">
-          <span
-            v-for="text in ['独立子会话', '并行分工', '进度汇报']"
-            :key="text"
-            ><i />{{ text }}</span
-          >
-        </div>
-      </SettingsCard>
-      <SettingsCard
+      </template>
+    </Notice>
+
+    <SettingsGroup title="可用的子智能体" data-executor-list>
+      <SettingsRow
+        title="本地子智能体"
+        :description="localSummary"
+        data-settings-agent="local"
+      >
+        <template #leading><SubagentAvatarPreview :size="28" /></template>
+        <Select
+          :model-value="localModel"
+          :options="localModelOptions"
+          size="sm"
+          data-local-model
+          aria-label="本地子智能体使用的模型"
+          :disabled="!config || busy"
+          @update:model-value="setLocalModel"
+        />
+      </SettingsRow>
+      <SettingsRow
         v-for="row in rows"
         :key="row.backend"
-        class="agent-card external-card"
+        :title="executorName(row.backend)"
         :data-settings-agent="row.backend"
+        :data-needs-token="needsToken(row.profile) || undefined"
       >
         <template #leading
           ><Avatar
             kind="logo"
             :icon-id="row.backend"
-            :label="row.name"
-            :size="40" /></template
-        ><template #title
-          ><h3>{{ row.name }}</h3></template
-        >
-        <template #meta
+            :label="executorName(row.backend)"
+            :size="28"
+        /></template>
+        <template #badge
           ><Badge
             class="readiness"
-            :tone="row.profile ? readinessTone(row.profile) : 'neutral'"
+            :tone="
+              row.profile
+                ? statusTone(row.profile, s.factsOf(row.profile))
+                : 'neutral'
+            "
             >{{
-              row.profile ? label(row.profile) : loading ? '读取中…' : '未配置'
+              row.profile
+                ? statusLabel(row.profile, s.factsOf(row.profile))
+                : loading
+                  ? '读取中…'
+                  : '未配置'
             }}</Badge
           ></template
         >
         <template #description
-          ><span data-executor-introduction>{{
-            executorIntroduction(row.backend)
+          ><span data-executor-summary>{{
+            row.profile
+              ? rowSummary(row.profile, s.factsOf(row.profile))
+              : '没有这个子智能体的配置'
           }}</span></template
         >
-        <template #actions
-          ><Switch
-            v-if="row.profile"
-            v-model="row.profile.enabled"
-            data-executor-enabled
-            :disabled="busy || loading"
-            :aria-label="`启用 ${row.name}`"
-        /></template>
-        <template v-if="row.profile">
-          <p
-            v-if="row.profile.enabled"
-            class="field-hint consent-hint"
-            data-executor-consent
-          >
-            {{ consentText(row.profile) }}
-          </p>
-          <div v-if="row.profiles.length > 1" class="profile-choice">
-            <span>使用配置</span
-            ><Select
-              :model-value="row.profile.id"
-              :options="row.profiles.map((p) => ({ value: p.id, label: p.id }))"
-              size="sm"
-              data-executor-profile
-              :aria-label="`${row.name} 配置`"
-              :disabled="busy || loading"
-              @change="selected[row.backend] = $event"
-            />
-          </div>
-          <div
-            v-if="warning(row.profile)"
-            class="message recovery-message"
-            data-executor-warning
-          >
-            <p role="status">{{ warning(row.profile) }}</p>
-          </div>
-          <div
-            v-if="signsInHere(row.profile)"
-            class="sign-in-block"
-            data-claude-sign-in
-          >
-            <div class="block-heading">
-              <span>登录</span>
-              <div v-if="!signInAlert(row.profile)" class="inline-actions">
-                <Button
-                  v-if="hasEmperorToken(row.profile)"
-                  size="sm"
-                  variant="ghost"
-                  data-claude-token-clear
-                  :disabled="busy || loading || tokenBusy"
-                  @click="clearToken(row.profile)"
-                  >移除令牌</Button
-                ><Button
-                  size="sm"
-                  variant="ghost"
-                  data-claude-token-set
-                  :disabled="busy || loading || tokenBusy"
-                  @click="tokenDialog = row.profile"
-                  >{{
-                    hasEmperorToken(row.profile) ? '更换令牌' : '设置令牌'
-                  }}</Button
-                >
-              </div>
-            </div>
-            <p
-              v-if="!authIssue(row.profile)"
-              class="sign-in-status"
-              data-claude-auth-source
-            >
-              {{ signInText(row.profile) }}
-            </p>
-            <Notice
-              v-if="signInAlert(row.profile)"
-              tone="warn"
-              :title="ALERT_TITLE[signInAlert(row.profile) || 'missing']"
-            >
-              <span data-claude-sign-in-help>
-                <template v-if="signInAlert(row.profile) === 'soon'"
-                  >长任务可能中途失败。在终端运行
-                  <code>claude setup-token</code
-                  >，把生成的长期令牌粘贴到这里。</template
-                ><template v-else-if="signInAlert(row.profile) === 'expired'"
-                  >~/.claude/.credentials.json 里的登录已过期。在终端运行
-                  <code>claude setup-token</code
-                  >，把生成的长期令牌粘贴到这里。</template
-                ><template v-else-if="signInAlert(row.profile) === 'unreadable'"
-                  >保存在 Emperor
-                  的令牌已无法读取（本地密钥变了），请重新设置。</template
-                ><template v-else
-                  >订阅账号：在终端运行
-                  <code>claude setup-token</code>，把生成的令牌粘贴到这里；API
-                  Key：粘贴 ANTHROPIC_API_KEY。Emperor 不读取钥匙串，终端里
-                  /login 的登录在这里不可用。</template
-                >
-              </span>
-              <template #actions>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  data-claude-token-set
-                  :disabled="busy || loading || tokenBusy"
-                  @click="tokenDialog = row.profile"
-                  >设置令牌</Button
-                ><Button
-                  size="sm"
-                  variant="ghost"
-                  :disabled="busy || loading"
-                  @click="load(true)"
-                  >重新检测</Button
-                >
-              </template>
-            </Notice>
-          </div>
-          <div
-            v-if="hasIssue(row.profile) && !authIssue(row.profile)"
-            class="message recovery-message"
-          >
-            <p role="status">{{ detail(row.profile) }}</p>
-            <div class="inline-actions">
-              <Button
-                v-if="probes[row.profile.id]?.status === 'missing'"
-                size="sm"
-                variant="ghost"
-                data-executor-install-help
-                @click="installHelp(row.profile)"
-                >安装说明</Button
-              ><Button
-                size="sm"
-                variant="ghost"
-                :disabled="busy || loading"
-                @click="load(true)"
-                >重试</Button
-              ><Button
-                v-if="!usesBundledClaude(row.profile)"
-                size="sm"
-                variant="ghost"
-                data-executor-recovery
-                @click="recovery[row.profile.id] = !recovery[row.profile.id]"
-                >更正路径</Button
-              >
-            </div>
-            <TextField
-              v-if="recovery[row.profile.id] && !usesBundledClaude(row.profile)"
-              v-model="row.profile.executablePath"
-              :aria-label="`${row.name} 可执行文件路径`"
-              :disabled="busy || loading"
-              autocomplete="off"
-            />
-          </div>
-          <div class="specialty-block">
-            <div class="block-heading">
-              <span>擅长的任务</span>
-              <div class="inline-actions">
-                <Button
-                  v-if="editingSpecialties[row.profile.id]"
-                  size="sm"
-                  variant="ghost"
-                  data-reset-specialties
-                  :disabled="busy || loading"
-                  @click="resetSpecialties(row.profile)"
-                  >恢复默认</Button
-                ><Button
-                  size="sm"
-                  variant="ghost"
-                  data-edit-specialties
-                  :disabled="busy || loading"
-                  @click="editSpecialties(row.profile)"
-                  >{{
-                    editingSpecialties[row.profile.id] ? '收起编辑' : '编辑专长'
-                  }}</Button
-                >
-              </div>
-            </div>
-            <div class="specialty-tags" data-specialties>
-              <Badge
-                v-for="(text, i) in executorSpecialties(row.profile)"
-                :key="i"
-                class="specialty-tag"
-                >{{ text }}</Badge
-              ><span
-                v-if="!executorSpecialties(row.profile).length"
-                class="muted"
-                >未设置专长</span
-              >
-            </div>
-            <div
-              v-if="editingSpecialties[row.profile.id]"
-              class="specialty-editor"
-            >
-              <TextField
-                :model-value="specialtyText[row.profile.id]"
-                data-specialty-input
-                :aria-label="`${row.name} 专长`"
-                :invalid="!!specialtyErrors[row.profile.id]"
-                :disabled="busy || loading"
-                placeholder="逗号分隔，最多 6 项，每项 24 字"
-                @update:model-value="updateSpecialties(row.profile, $event)"
-              />
-              <p
-                v-if="specialtyErrors[row.profile.id]"
-                class="field-error"
-                role="alert"
-              >
-                {{ specialtyErrors[row.profile.id] }}
-              </p>
-              <p v-else class="field-hint">
-                擅长的任务供主会话分配时参考，可清空；不会启用额外工具。
-              </p>
-            </div>
-          </div>
-          <div class="runtime-summary">
-            <div class="default-model-block">
-              <div class="block-heading">
-                <span>默认模型</span
-                ><Button
-                  size="sm"
-                  variant="ghost"
-                  data-refresh-models
-                  :aria-label="`刷新 ${row.name} 模型`"
-                  :disabled="catalogBusy[row.profile.id] || busy || loading"
-                  @click="loadModels(row.profile, true)"
-                  ><DsRefresh :size="12" />{{
-                    catalogBusy[row.profile.id] ? '获取中…' : '刷新模型'
-                  }}</Button
-                >
-              </div>
-              <Select
-                :model-value="row.profile.defaultModel ?? ''"
-                :options="modelOptions(row.profile)"
-                :aria-label="`${row.name} 默认模型`"
-                data-default-model
-                :disabled="busy || loading"
-                @update:model-value="selectModel(row.profile, $event ?? '')"
-              />
-              <div
-                v-if="modelEditor[row.profile.id]"
-                class="custom-model-editor"
-              >
-                <TextField
-                  v-model="modelText[row.profile.id]"
-                  data-custom-model-input
-                  :aria-label="`${row.name} 自定义模型 ID`"
-                  :disabled="busy || loading"
-                  placeholder="提供方的模型 ID，如 team/coder-v2"
-                  autocomplete="off"
-                  @keydown.enter.prevent="addModel(row.profile)"
-                  @keydown.esc="modelEditor[row.profile.id] = false"
-                />
-                <div class="custom-model-actions">
-                  <p
-                    :class="
-                      modelText[row.profile.id] && modelError(row.profile)
-                        ? 'field-error'
-                        : 'field-hint'
-                    "
-                  >
-                    {{
-                      modelText[row.profile.id] && modelError(row.profile)
-                        ? modelError(row.profile)
-                        : '添加后可复用，随顶部配置一起保存。'
-                    }}
-                  </p>
-                  <div class="inline-actions">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      @click="modelEditor[row.profile.id] = false"
-                      >取消</Button
-                    ><Button
-                      size="sm"
-                      variant="secondary"
-                      data-add-custom-model
-                      :disabled="busy || loading || !!modelError(row.profile)"
-                      @click="addModel(row.profile)"
-                      >添加</Button
-                    >
-                  </div>
-                </div>
-              </div>
-              <p class="field-hint">
-                沿用本机 CLI 的连接与认证；更换模型后，下次交给它时生效。
-              </p>
-              <p
-                v-if="catalogs[row.profile.id]?.diagnostic"
-                class="field-hint"
-                role="status"
-              >
-                {{ catalogs[row.profile.id]?.diagnostic }}
-              </p>
-            </div>
-            <div class="model-line">
-              <span>最近运行模型</span
-              ><span
-                class="model-value"
-                data-reported-model
-                :title="runtimes[row.profile.id]?.modelSource ?? ''"
-                >{{ runtimes[row.profile.id]?.reportedModel ?? '未知' }}</span
-              >
-            </div>
-            <div
-              v-if="visibleCapabilities(row.profile).length"
-              class="ability-list"
-            >
-              <div
-                v-for="kind in visibleCapabilities(row.profile)"
-                :key="kind"
-                class="ability-item"
-              >
-                <span>{{ kind === 'search' ? '搜索' : '生图' }}</span
-                ><Badge
-                  :tone="capabilityTone(capability(row.profile, kind).status)"
-                  :data-native-capability="kind"
-                  :data-status="capability(row.profile, kind).status"
-                  :title="capabilityDetail(row.profile, kind)"
-                  >{{
-                    capabilityLabels[capability(row.profile, kind).status]
-                  }}</Badge
-                >
-              </div>
-            </div>
-          </div>
-          <details class="agent-details">
-            <summary><span>查看详情</span><DsChevronDown :size="14" /></summary>
-            <div class="details-content">
-              <dl>
-                <div v-if="!signsInHere(row.profile)">
-                  <dt>认证来源</dt>
-                  <dd>
-                    {{
-                      row.profile.authRef.kind === 'managed-cli-login'
-                        ? probes[row.profile.id]?.localAuthChecked
-                          ? '本机登录配置可读'
-                          : '本机 CLI 配置'
-                        : '已有模型配置'
-                    }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>CLI 版本</dt>
-                  <dd>{{ versionText(row.profile) }}</dd>
-                </div>
-                <div>
-                  <dt>配置模型</dt>
-                  <dd>
-                    {{
-                      row.profile.defaultModel ??
-                      catalogs[row.profile.id]?.configuredModel ??
-                      runtimes[row.profile.id]?.configuredModel ??
-                      '跟随本机 CLI'
-                    }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>模型来源</dt>
-                  <dd>
-                    {{ runtimes[row.profile.id]?.modelSource ?? '尚无运行报告'
-                    }}<span v-if="runtimes[row.profile.id]?.provider">
-                      · {{ runtimes[row.profile.id]?.provider }}</span
-                    >
-                  </dd>
-                </div>
-                <div>
-                  <dt>提供方</dt>
-                  <dd>{{ catalogs[row.profile.id]?.provider ?? '未知' }}</dd>
-                </div>
-                <div v-if="runtimes[row.profile.id]?.observedAt">
-                  <dt>报告时间</dt>
-                  <dd>
-                    {{
-                      new Date(
-                        runtimes[row.profile.id]!.observedAt!,
-                      ).toLocaleString()
-                    }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>模型列表</dt>
-                  <dd>
-                    {{
-                      catalogs[row.profile.id]?.checkedAt
-                        ? new Date(
-                            catalogs[row.profile.id]!.checkedAt!,
-                          ).toLocaleString()
-                        : '尚未获取'
-                    }}
-                    · 候选与内置参考不代表账号已获授权
-                  </dd>
-                </div>
-                <div>
-                  <dt>宿主开放工具</dt>
-                  <dd>
-                    {{
-                      runtimes[row.profile.id]?.hostAllowedTools?.join('、') ||
-                      '未知'
-                    }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>运行时公布</dt>
-                  <dd>
-                    {{
-                      runtimes[row.profile.id]?.advertisedTools?.join('、') ||
-                      '未知'
-                    }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>实际调用</dt>
-                  <dd>
-                    {{
-                      runtimes[row.profile.id]?.observedTools?.join('、') ||
-                      '尚未观察到'
-                    }}
-                  </dd>
-                </div>
-                <div
-                  v-for="kind in visibleCapabilities(row.profile)"
-                  :key="kind"
-                >
-                  <dt>{{ kind === 'search' ? '搜索验证' : '生图验证' }}</dt>
-                  <dd>
-                    {{ capabilityDetail(row.profile, kind) || '尚无验证记录'
-                    }}<span v-if="capability(row.profile, kind).runId">
-                      · {{ capability(row.profile, kind).runId }}</span
-                    >
-                  </dd>
-                </div>
-              </dl>
-              <div
-                v-if="row.profile.backend === 'claude-code'"
-                class="connection-settings"
-              >
-                <div class="block-heading">
-                  <span>使用本机安装的 claude</span
-                  ><Switch
-                    :model-value="!usesBundledClaude(row.profile)"
-                    data-claude-installed-binary
-                    :disabled="busy || loading"
-                    aria-label="使用本机安装的 claude"
-                    @update:model-value="
-                      setInstalledClaude(row.profile, $event)
-                    "
-                  />
-                </div>
-                <p class="field-hint">
-                  默认使用随 Emperor 发布的 Claude Code，不受本机 CLI
-                  自动更新影响。改用本机安装的 claude 时需要
-                  {{ probes[row.profile.id]?.requiredVersion ?? '>= 2.1' }}。
-                </p>
-              </div>
-              <div
-                v-if="!hasIssue(row.profile) && !usesBundledClaude(row.profile)"
-                class="connection-settings"
-              >
-                <div class="block-heading">
-                  <span>连接配置</span
-                  ><Button
-                    size="sm"
-                    variant="ghost"
-                    data-executor-recovery
-                    @click="
-                      recovery[row.profile.id] = !recovery[row.profile.id]
-                    "
-                    >更正路径</Button
-                  >
-                </div>
-                <TextField
-                  v-if="recovery[row.profile.id]"
-                  v-model="row.profile.executablePath"
-                  :aria-label="`${row.name} 可执行文件路径`"
-                  :disabled="busy || loading"
-                />
-              </div>
-            </div>
-          </details>
-        </template>
-      </SettingsCard>
-      <SettingsCard
-        v-if="config"
-        class="agent-card advanced-card"
-        data-executor-advanced
-      >
-        <template #title><h3>高级</h3></template>
-        <template #description
-          ><span
-            >诊断模式：停止外部子智能体时，额外用原生扫描器查找并停止离开了它进程组的进程。默认关闭，排查问题时再打开。</span
-          ></template
-        >
-        <template #actions
-          ><Switch
-            :model-value="config.diagnosticsMode === true"
-            data-diagnostics-mode
-            :disabled="busy || loading"
-            aria-label="诊断模式"
-            @update:model-value="setDiagnostics($event)"
-        /></template>
-      </SettingsCard>
-      <SettingsCard
-        v-if="config"
-        class="agent-card advanced-card"
-        data-executor-verify-first
-      >
-        <template #title><h3>验证后再应用</h3></template>
-        <template #description
-          ><span
-            >子智能体的成果先收集回执、运行你指定的验证命令并生成整合预览，再在任务详情里应用。默认关闭：成果卡上的「应用到项目」直接把改动合并进项目，可以撤销。</span
-          ></template
-        >
-        <template #actions
-          ><Switch
-            :model-value="config.verifyBeforeApply === true"
-            data-verify-before-apply
-            :disabled="busy || loading"
-            aria-label="验证后再应用"
-            @update:model-value="setVerifyFirst($event)"
-        /></template>
-      </SettingsCard>
-      <SettingsGroup
-        v-if="config"
-        title="开发环境"
-        description="子智能体在隔离的主目录里运行，默认只带上 git 身份和网络代理；其余按需打开。"
-        data-executor-dev-env
-      >
-        <SettingsRow
-          v-for="row in DEV_ENV_ROWS"
-          :key="row.key"
-          :title="row.title"
-          :description="row.description"
-        >
-          <Switch
-            :model-value="devEnv(row.key)"
-            :data-dev-env="row.key"
-            :disabled="busy || loading"
-            :aria-label="row.title"
-            @update:model-value="setDevEnv(row.key, $event)"
-          />
-        </SettingsRow>
-      </SettingsGroup>
-      <SettingsCard
-        v-if="config"
-        class="agent-card advanced-card"
-        data-executor-max-turns
-      >
-        <template #title><h3>每次运行最多轮数</h3></template>
-        <template #description
-          ><span
-            >Claude Code 一次运行里最多调用模型的轮数，默认 200，可设
-            50–1000。用完时这次运行以「达到最多轮数」结束，主会话可以发消息让它继续。</span
-          ></template
-        >
-        <template #actions
-          ><Select
-            :model-value="
-              String(config.limits.claudeMaxTurns ?? DEFAULT_MAX_TURNS)
-            "
-            :options="turnOptions()"
+        <div class="row-controls">
+          <Button
+            v-if="needsToken(row.profile)"
             size="sm"
-            data-claude-max-turns
-            aria-label="Claude Code 每次运行最多轮数"
-            :disabled="busy || loading"
-            @update:model-value="setMaxTurns(String($event))"
-        /></template>
-      </SettingsCard>
-    </div>
-    <ClaudeTokenDialog
-      v-if="tokenDialog"
-      :profile-id="tokenDialog.id"
-      :kind="
-        authOf(tokenDialog)?.kind === 'api-key' ? 'api-key' : 'oauth-token'
-      "
-      @close="tokenDialog = null"
-      @saved="tokenSaved(tokenDialog, $event)"
-    />
-  </SettingsSection>
-</template>
-<style scoped>
-.agent-cards {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3-5);
-  padding-top: var(--space-3);
-}
-.agent-card.ds-settings-card {
-  background: rgb(var(--surface-raised));
-  border-color: var(--stroke-2);
-  box-shadow: none;
-}
-.agent-card :deep(.head) {
-  align-items: flex-start;
-  padding: var(--space-4) var(--space-4) var(--space-3-5);
-  gap: var(--space-3);
-}
-.agent-card :deep(.leading) {
-  margin-top: calc(var(--space-0-5) / 2);
-}
-.agent-card :deep(.head-text) {
-  gap: var(--space-2);
-}
-.agent-card :deep(.title) {
-  overflow: visible;
-  white-space: normal;
-}
-.agent-card h3 {
-  font-size: var(--fs-s);
-  line-height: 22px;
-  font-weight: var(--weight-semibold);
-  letter-spacing: 0.05px;
-}
-.agent-card :deep(.title-line) {
-  gap: var(--space-2);
-}
-.agent-card :deep(.description) {
-  font-size: var(--fs-xs);
-  line-height: 21px;
-  color: rgb(var(--text-2));
-  text-wrap: pretty;
-}
-.agent-card :deep(.actions) {
-  padding-top: var(--space-0-5);
-}
-.agent-card .readiness {
-  font-size: var(--fs-xxxs);
-  padding: calc(var(--space-0-5) / 2) var(--space-2);
-  line-height: 16px;
-}
-.agent-card :deep(.body[data-after-head]) {
-  margin: 0 var(--space-4);
-  padding: var(--space-3) 0 var(--space-3);
-  gap: var(--space-3);
-  border-color: var(--stroke-1);
-}
-.local-card :deep(.body[data-after-head]) {
-  border-top: none;
-  padding-top: 0;
-}
-.local-features {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2-5) var(--space-5);
-  color: rgb(var(--text-3));
-  font-size: var(--fs-xxs);
-  line-height: 20px;
-  padding-left: calc(var(--space-8) + var(--space-5));
-}
-.local-features span {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.local-features i {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: rgb(var(--accent));
-}
-.block-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  color: rgb(var(--text-3));
-  font-size: var(--fs-xxs);
-  line-height: 20px;
-  min-height: 22px;
-}
-.inline-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  flex-wrap: wrap;
-}
-.inline-actions .ds-button {
-  gap: var(--space-1);
-  font-size: var(--fs-xxs);
-  min-height: 24px;
-  height: auto;
-  padding: var(--space-0-5) var(--space-1);
-}
-.specialty-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1-5);
-  margin-top: var(--space-2);
-  min-width: 0;
-}
-.specialty-tag.ds-badge {
-  flex: 0 1 auto;
-  font-size: var(--fs-xxs);
-  font-weight: var(--weight-regular);
-  border-radius: var(--r-sm);
-  padding: var(--space-0-5) var(--space-2);
-  min-height: 24px;
-  line-height: 18px;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  background: var(--surface-hover);
-  color: rgb(var(--text-2));
-  overflow: visible;
-}
-.specialty-editor {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1-5);
-  margin-top: var(--space-2-5);
-}
-.field-hint,
-.field-error {
-  font-size: var(--fs-xxs);
-  line-height: 20px;
-  color: rgb(var(--text-3));
-}
-.field-error {
-  color: rgb(var(--state-error-label));
-}
-.runtime-summary {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-.default-model-block {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-.default-model-choice {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  min-width: 0;
-}
-.default-model-choice > span {
-  flex: none;
-  font-size: var(--fs-xxs);
-  color: rgb(var(--text-3));
-}
-.default-model-choice .ds-select {
-  flex: 1;
-  width: 0;
-  height: 30px;
-  border-radius: var(--radius-row);
-  background: var(--surface-hover);
-}
-.custom-model-editor {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-2-5);
-  border: 1px solid var(--stroke-1);
-  border-radius: var(--radius-row);
-}
-.custom-model-actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-.custom-model-actions > p {
-  flex: 1;
-  min-width: 140px;
-}
-.custom-model-actions .inline-actions {
-  flex: none;
-}
-.model-pending {
-  color: rgb(var(--text-3));
-}
-.model-line {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-4);
-  min-width: 0;
-  font-size: var(--fs-xxs);
-  line-height: 20px;
-}
-.model-line > span:first-child {
-  color: rgb(var(--text-3));
-  white-space: nowrap;
-  flex: none;
-}
-.model-value {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  color: rgb(var(--text-2));
-  font-family: 'SFMono-Regular', Menlo, 'PingFang SC', monospace;
-  font-size: var(--fs-xxs);
-}
-.ability-list {
-  display: flex;
-  gap: var(--space-3) var(--space-5);
-  flex-wrap: wrap;
-}
-.ability-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: rgb(var(--text-3));
-  font-size: var(--fs-xxs);
-  line-height: 20px;
-}
-.ability-item .ds-badge {
-  font-size: var(--fs-xxxs);
-  min-height: 21px;
-  font-weight: var(--weight-medium);
-  line-height: 17px;
-  border-radius: var(--r-sm);
-  padding: var(--space-0-5) var(--space-2);
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-.agent-details {
-  border-top: calc(var(--space-0-5) / 2) solid var(--stroke-1);
-  padding-top: var(--space-2-5);
-  min-width: 0;
-}
-.agent-details summary {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  list-style: none;
-  color: rgb(var(--text-3));
-  font-size: var(--fs-xxs);
-  line-height: 20px;
-  cursor: pointer;
-}
-.agent-details summary::-webkit-details-marker {
-  display: none;
-}
-.agent-details summary:hover {
-  color: rgb(var(--text-1));
-}
-.agent-details summary svg {
-  transition: transform var(--motion-base) var(--ease-standard);
-}
-.agent-details[open] summary svg {
-  transform: rotate(180deg);
-}
-.details-content {
-  padding-top: var(--space-3);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3-5);
-  font-size: var(--fs-xxs);
-  line-height: 20px;
-}
-.details-content dl {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin: 0;
-}
-.details-content dl > div {
-  display: grid;
-  grid-template-columns: 90px minmax(0, 1fr);
-  gap: var(--space-3);
-}
-.details-content dt {
-  color: rgb(var(--text-3));
-}
-.details-content dd {
-  margin: 0;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  color: rgb(var(--text-2));
-}
-.sign-in-block {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1-5);
-}
-.sign-in-status {
-  margin: 0;
-  font-size: var(--fs-xxs);
-  line-height: 20px;
-  color: rgb(var(--text-2));
-  overflow-wrap: anywhere;
-}
-.sign-in-block code {
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  padding: 0 var(--space-1);
-  border-radius: var(--r-xs);
-  background: rgb(var(--surface-sunken));
-  color: rgb(var(--text-1));
-}
-.connection-settings {
-  border-top: calc(var(--space-0-5) / 2) solid var(--stroke-1);
-  padding-top: var(--space-2);
-}
-.connection-settings .ds-text-field {
-  margin-top: var(--space-2);
-}
-.message {
-  border-radius: var(--radius-row);
-  padding: var(--space-3) var(--space-3);
-  font-size: var(--fs-xxs);
-  line-height: 20px;
-  margin-bottom: var(--space-3);
-}
-.agent-card .message {
-  margin-bottom: 0;
-}
-.recovery-message {
-  background: rgb(var(--state-warn-soft));
-  color: rgb(var(--state-warn-label));
-}
-.recovery-message .inline-actions {
-  margin: var(--space-2) 0 0;
-}
-.recovery-message .ds-text-field {
-  margin-top: var(--space-2);
-}
-.error-message {
-  background: rgb(var(--state-error-soft));
-  color: rgb(var(--state-error-label));
-}
-.discard-message {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2-5);
-  background: var(--surface-hover);
-  color: rgb(var(--text-2));
-}
-.muted {
-  color: rgb(var(--text-3));
-  font-size: var(--fs-xxs);
-  line-height: 20px;
-}
-.profile-choice {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--space-3);
-  font-size: var(--fs-xxs);
-  color: rgb(var(--text-3));
-}
-.profile-choice .ds-select {
-  width: 170px;
-}
-@container executor-section (max-width:460px) {
-  .settings-layout {
-    flex-direction: column;
-  }
-  .settings-header {
-    padding: var(--space-2-5) var(--space-3-5) var(--space-2-5)
-      calc(var(--space-4) + var(--space-0-5));
-  }
-  .settings-options {
-    padding: 0 calc(var(--space-4) + var(--space-0-5))
-      calc(var(--space-4) + var(--space-0-5));
-  }
-  .agent-card :deep(.head) {
-    padding: var(--space-3-5) var(--space-3);
-    gap: var(--space-2-5);
-  }
-  .agent-card :deep(.body[data-after-head]) {
-    margin: 0 var(--space-3);
-    padding-bottom: var(--space-3);
-  }
-  .profile-choice {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .profile-choice .ds-select {
-    width: 100%;
-  }
-  .local-features {
-    padding-left: 0;
-    gap: var(--space-2) var(--space-3-5);
-  }
-  .details-content dl > div {
-    grid-template-columns: 80px minmax(0, 1fr);
-    gap: var(--space-2);
-  }
-  .ability-list {
-    gap: var(--space-2) var(--space-4);
-  }
-  .agent-card :deep(.title-line) {
-    gap: var(--space-1);
-  }
-  .agent-card :deep(.head-text) {
-    gap: var(--space-1-5);
-  }
-  .agent-card .readiness {
-    font-size: var(--fs-xxxs);
-  }
-}
+            variant="secondary"
+            data-claude-token-set
+            :disabled="busy || s.tokenBusy.value"
+            @click="tokenDialog = row.profile ?? null"
+            >设置令牌</Button
+          >
+          <Select
+            v-else-if="row.profile && showsModel(row.profile)"
+            :model-value="row.profile.defaultModel ?? ''"
+            :options="s.modelOptionsOf(row.profile)"
+            size="sm"
+            data-row-model
+            :aria-label="`${executorName(row.backend)} 默认模型`"
+            :disabled="busy"
+            @update:model-value="setModel(row.profile, $event)"
+          />
+          <Switch
+            v-if="row.profile"
+            :model-value="row.profile.enabled"
+            data-executor-enabled
+            :aria-label="`启用 ${executorName(row.backend)}`"
+            :disabled="busy"
+            @update:model-value="setEnabled(row.profile, $event)"
+          />
+          <IconButton
+            :label="`${executorName(row.backend)} 详情`"
+            size="sm"
+            data-executor-details
+            @click="openPage(row.backend)"
+            ><DsChevronRight :size="16"
+          /></IconButton>
+        </div>
+      </SettingsRow>
+    </SettingsGroup>
 
-.agent-cards {
-  container-type: inline-size;
-  container-name: executor-section;
-}
-.executor-error {
-  color: rgb(var(--state-error-label));
-}
+    <SettingsGroup v-if="config" title="子任务" data-executor-task-settings>
+      <SettingsRow
+        title="同时运行"
+        description="Claude Code 和 Codex 合计；超过后排队等候"
+      >
+        <Select
+          :model-value="String(config.limits.globalConcurrency)"
+          :options="concurrencyOptions"
+          size="sm"
+          data-global-concurrency
+          aria-label="同时运行的子任务数"
+          :disabled="busy"
+          @update:model-value="setConcurrency"
+        />
+      </SettingsRow>
+      <SettingsRow title="改代码的位置" :description="workspaceDescription">
+        <Select
+          :model-value="workspace"
+          :options="workspaceOptions"
+          size="sm"
+          data-default-workspace
+          aria-label="改代码的位置"
+          :disabled="busy"
+          @update:model-value="setWorkspace"
+        />
+      </SettingsRow>
+      <SettingsRow
+        title="单个任务的费用上限"
+        description="按 API 计费时的估算费用；订阅额度不计费用"
+      >
+        <Select
+          :model-value="String(config.limits.estimatedBudgetUsd)"
+          :options="budgetOptions"
+          size="sm"
+          data-task-budget
+          aria-label="单个任务的费用上限"
+          :disabled="busy"
+          @update:model-value="setBudget"
+        />
+      </SettingsRow>
+      <SettingsLinkRow
+        title="高级"
+        description="最多轮数、运行时长、开发环境与排查"
+        data-executor-advanced-link
+        @click="openPage('advanced')"
+      />
+    </SettingsGroup>
+  </SettingsSection>
+  <ExecutorAdvancedPage v-else-if="page === 'advanced'" />
+  <ExecutorDetailPage v-else-if="detailBackend" :backend="detailBackend" />
+  <ClaudeTokenDialog
+    v-if="tokenDialog"
+    :profile-id="tokenDialog.id"
+    :kind="
+      s.factsOf(tokenDialog).probe?.auth?.kind === 'api-key'
+        ? 'api-key'
+        : 'oauth-token'
+    "
+    @close="tokenDialog = null"
+    @saved="
+      (probe) => {
+        if (tokenDialog) s.tokenSaved(tokenDialog, probe)
+        tokenDialog = null
+      }
+    "
+  />
+</template>
+
+<style scoped>
 .executor-note {
+  margin: 0;
+  font-size: var(--fs-xs);
   color: rgb(var(--text-3));
-  font-size: var(--fs-xxs);
 }
-.reload-notice,
-.upgrade-notice {
+.row-controls {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2-5);
-  background: var(--surface-hover);
+  gap: var(--space-2);
 }
-.upgrade-notice > span {
-  flex: 1 1 280px;
-}
-.consent-hint {
-  margin: 0;
-}
-.default-model-block > .ds-select {
-  width: 100%;
-  height: 32px;
-  border-radius: var(--radius-row);
-  background: var(--surface-hover);
-}
-.default-model-block > .block-heading .ds-button {
-  font-size: var(--fs-xxs);
-  min-height: 24px;
-  padding: var(--space-0-5) var(--space-1);
+.readiness {
+  font-size: var(--fs-xxxs);
 }
 </style>

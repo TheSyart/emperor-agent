@@ -5,11 +5,12 @@
  * recent, five at first). The list opens by itself when the viewed page is
  * one of them. 「标记为已结束」 stays on an external task with no outcome.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Users } from 'lucide-vue-next'
 import {
   agentAncestry,
+  agentDuration,
   agentStack,
   agentSummary,
 } from './environmentAgentsModel'
@@ -33,6 +34,17 @@ const router = useRouter()
 const model = useAgentTree()
 const all = ref(false)
 const open = ref(false)
+// 用时 of a running agent moves on while the card is open (AGT-10).
+const now = ref(Date.now())
+let clock: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  clock = setInterval(() => {
+    now.value = Date.now()
+  }, 15_000)
+})
+onBeforeUnmount(() => {
+  if (clock) clearInterval(clock)
+})
 const readableRoot = computed(() =>
   props.rootSessionId && !/^(sub-|dlg-|dgr-|draft:)/.test(props.rootSessionId)
     ? props.rootSessionId
@@ -177,7 +189,12 @@ async function end(agent: AgentView) {
               >{{ ancestry(agent).unavailable }}</small
             ></span
           >
-          <span class="agent-phase">{{ agentPhaseLabel(agent.phase) }}</span>
+          <span class="agent-phase" data-agent-phase
+            >{{ agentPhaseLabel(agent.phase)
+            }}<small v-if="agentDuration(agent, now)" data-agent-duration>{{
+              agentDuration(agent, now)
+            }}</small></span
+          >
         </button>
         <button
           v-if="agent.needsExit && readableRoot"
@@ -279,6 +296,13 @@ async function end(agent: AgentView) {
 }
 .agent-phase {
   flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-0-5);
+}
+.agent-phase small {
+  font-variant-numeric: tabular-nums;
 }
 .agent-end {
   display: block;

@@ -197,8 +197,11 @@ describe('executor configuration', () => {
   it('rejects quotas that exceed the architectural bounds', () => {
     const store = setup()
     const config = store.read()
-    config.limits.globalConcurrency = 3
+    // 同时运行 is 1–4 (AGT-10): two executors of up to two runs each.
+    config.limits.globalConcurrency = 5
     expect(() => store.update(0, config)).toThrow(/EXECUTOR_CONFIG_INVALID/)
+    config.limits.globalConcurrency = 4
+    expect(store.update(0, config).limits.globalConcurrency).toBe(4)
   })
 })
 
@@ -331,4 +334,64 @@ it('验证后再应用 is off by default and stored only when on (AGT-06)', asyn
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+describe('子智能体 settings (AGT-10)', () => {
+  it('stores the local subagent model only when one is chosen', async () => {
+    const { defaultExecutorConfig, localSubagentModelOf } =
+      await import('./config')
+    const root = mkdtempSync(join(tmpdir(), 'executor-local-model-'))
+    roots.push(root)
+    const store = new ExecutorConfigStore(root)
+    expect(localSubagentModelOf(store.read())).toBeUndefined()
+    const chosen = store.update(store.read().revision, {
+      ...defaultExecutorConfig(),
+      localSubagentModel: 'entry-fast',
+    })
+    expect(localSubagentModelOf(chosen)).toBe('entry-fast')
+    const following = store.update(chosen.revision, {
+      ...chosen,
+      localSubagentModel: undefined,
+    })
+    expect(localSubagentModelOf(following)).toBeUndefined()
+    expect(readFileSync(join(root, 'config.json'), 'utf8')).not.toContain(
+      'localSubagentModel',
+    )
+  })
+
+  it('stores where external tasks change code only when it is not the worktree default', async () => {
+    const { defaultExecutorConfig, defaultWorkspaceOf } =
+      await import('./config')
+    const root = mkdtempSync(join(tmpdir(), 'executor-workspace-'))
+    roots.push(root)
+    const store = new ExecutorConfigStore(root)
+    expect(defaultWorkspaceOf(store.read())).toBe('isolated-worktree')
+    const shared = store.update(store.read().revision, {
+      ...defaultExecutorConfig(),
+      defaultWorkspace: 'shared-exclusive',
+    })
+    expect(defaultWorkspaceOf(shared)).toBe('shared-exclusive')
+    const back = store.update(shared.revision, {
+      ...shared,
+      defaultWorkspace: 'isolated-worktree',
+    })
+    expect(back.defaultWorkspace).toBeUndefined()
+    expect(readFileSync(join(root, 'config.json'), 'utf8')).not.toContain(
+      'defaultWorkspace',
+    )
+  })
+
+  it('rejects a read-only review as the place to change code, and an empty model id', async () => {
+    const { defaultExecutorConfig } = await import('./config')
+    const store = setup()
+    expect(() =>
+      store.update(0, {
+        ...defaultExecutorConfig(),
+        defaultWorkspace: 'shared-readonly' as never,
+      }),
+    ).toThrow(/EXECUTOR_CONFIG_INVALID/)
+    expect(() =>
+      store.update(0, { ...defaultExecutorConfig(), localSubagentModel: '' }),
+    ).toThrow(/EXECUTOR_CONFIG_INVALID/)
+  })
 })

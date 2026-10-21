@@ -11,13 +11,19 @@ import type { SessionEvent } from '../../session-log/types'
 import { Agent } from '../agent/agent'
 import { ApprovalService } from '../approval/service'
 import { SandboxPolicyService } from '../sandbox/policy'
-import { createTestHarness, replyChunks, type TestHarness } from '../testing'
+import {
+  createTestHarness,
+  replyChunks,
+  testRoute,
+  type TestHarness,
+} from '../testing'
 import { SubagentManager } from './manager'
 import { installSubagents } from './tools'
 
 function setup(
   maxDepth?: number,
   logRoot?: string,
+  extra: Partial<ConstructorParameters<typeof SubagentManager>[0]> = {},
 ): {
   h: TestHarness
   manager: SubagentManager
@@ -51,6 +57,7 @@ function setup(
     sandbox,
     approval,
     ...(maxDepth === undefined ? {} : { maxDepth }),
+    ...extra,
   })
   installSubagents(manager, h.tools, h.prompt)
   const root = h.agent('root')
@@ -355,5 +362,89 @@ describe('SubagentManager', () => {
       data: { reason: { kind: 'aborted', reason: { kind: 'disposed' } } },
     })
     await settleAll(agents)
+  })
+})
+
+describe('子智能体 settings in the manager (AGT-10)', () => {
+  const delegate = {
+    tools: [
+      {
+        id: 'd1',
+        name: 'subagent',
+        args: { description: 'worker', prompt: 'start' },
+      },
+    ],
+  }
+
+  it('4 · a chosen model entry runs the child while the parent keeps its own', async () => {
+    let chosen: string | undefined = 'fast-route'
+    const { h, agents, root } = setup(undefined, undefined, {
+      childCallConfig: () =>
+        chosen === undefined
+          ? undefined
+          : () => h.llm.defaultCallConfig(chosen),
+    })
+    h.llm.setRoutes(
+      [testRoute(), testRoute({ id: 'fast-route', modelId: 'fast-model' })],
+      'test-route',
+    )
+    routed(h, {
+      root: [delegate, { text: 'started' }, { text: 'ack' }],
+      child: [{ text: 'child done' }],
+    })
+    root.followup(userText('go'))
+    await settleAll(agents)
+    const childId = root.session.lastOf('subagent/started')!.data.subagentId
+    const childRequest = h.adapter.requests.find(
+      (r) => r.sessionId === childId,
+    )!
+    expect(childRequest.model).toBe('fast-model')
+    expect(
+      h.adapter.requests
+        .filter((r) => r.sessionId === 'root')
+        .map((r) => r.model),
+    ).toEqual(['test-model', 'test-model', 'test-model'])
+
+    // 跟随对话: no choice, the conversation's model.
+    chosen = undefined
+    routed(h, {
+      root: [delegate, { text: 'started again' }, { text: 'ack again' }],
+      child: [{ text: 'second child done' }],
+    })
+    root.followup(userText('again'))
+    await settleAll(agents)
+    const second = root.session.lastOf('subagent/started')!.data.subagentId
+    expect(second).not.toBe(childId)
+    expect(h.adapter.requests.find((r) => r.sessionId === second)!.model).toBe(
+      'test-model',
+    )
+  })
+
+  it('6 · the user writes to a live child: the message starts its next turn as the user', async () => {
+    const { h, agents, root, manager } = setup()
+    routed(h, {
+      root: [delegate, { text: 'started' }, { text: 'ack' }],
+      child: [{ text: 'child done' }],
+    })
+    root.followup(userText('go'))
+    await settleAll(agents)
+    const childId = root.session.lastOf('subagent/started')!.data.subagentId
+    routed(h, {
+      root: [{ text: 'parent saw the settle' }],
+      child: [{ text: 'did the extra step' }],
+    })
+    manager.userFollowup(childId, '顺便把测试也跑一下')
+    await settleAll(agents)
+    const continued = h.adapter.requests
+      .filter((r) => r.sessionId === childId)
+      .at(-1)!
+    expect(textOf(continued)).toContain('顺便把测试也跑一下')
+    const message = agents
+      .get(childId)!
+      .session.deriveMessages()
+      .find((m) => messageText(m) === '顺便把测试也跑一下')!
+    expect(message.role).toBe('user')
+    expect(message.source).toMatchObject({ kind: 'user' })
+    expect(() => manager.userFollowup('sub-missing', 'hi')).toThrow(/not live/)
   })
 })

@@ -11,6 +11,7 @@ const {
   setExecutorCredential,
   clearExecutorCredential,
   openExternal,
+  core,
 } = vi.hoisted(() => ({
   listExecutors: vi.fn(),
   configureExecutors: vi.fn(),
@@ -19,8 +20,10 @@ const {
   setExecutorCredential: vi.fn(),
   clearExecutorCredential: vi.fn(),
   openExternal: vi.fn(),
+  core: vi.fn(),
 }))
 vi.mock('../../api/backend', () => ({ openExternal }))
+vi.mock('../../api/http', () => ({ core }))
 vi.mock('../../api/delegations', () => ({
   listExecutors,
   configureExecutors,
@@ -59,7 +62,7 @@ function payload() {
         questionTimeoutMs: 900000,
         estimatedBudgetUsd: 10,
       },
-    },
+    } as any,
     diagnostic: null,
     profiles: profiles.map((profile) => ({
       profile,
@@ -67,8 +70,8 @@ function payload() {
         status: 'available',
         authVerified: false,
         localAuthChecked: true,
-      },
-    })),
+      } as any,
+    })) as any[],
   }
 }
 let app: App | undefined,
@@ -88,7 +91,7 @@ async function mount() {
   await settle()
   return root
 }
-const action = (id: string) => header.actions.value.find((a) => a.id === id)!
+const action = (id: string) => header.actions.value.find((a) => a.id === id)
 const row = (vendor: string) =>
   root.querySelector<HTMLElement>(`[data-settings-agent="${vendor}"]`)!
 async function toggle(vendor = 'claude-code') {
@@ -97,6 +100,27 @@ async function toggle(vendor = 'claude-code') {
     .click()
   await settle()
 }
+async function openDetail(vendor: string) {
+  row(vendor)
+    .querySelector<HTMLButtonElement>('[data-executor-details]')!
+    .click()
+  await settle()
+  return root.querySelector<HTMLElement>(`[data-executor-detail="${vendor}"]`)!
+}
+async function openAdvanced() {
+  root
+    .querySelector<HTMLButtonElement>('[data-executor-advanced-link]')!
+    .click()
+  await settle()
+  return root.querySelector<HTMLElement>('[data-executor-advanced]')!
+}
+async function choose(trigger: HTMLElement, value: string) {
+  trigger.click()
+  await settle()
+  document.querySelector<HTMLElement>(`[data-value="${value}"]`)!.click()
+  await settle()
+}
+const lastSaved = () => configureExecutors.mock.calls.at(-1)![0]
 beforeEach(() => {
   vi.spyOn(document, 'hasFocus').mockReturnValue(true)
   vi.stubGlobal(
@@ -108,6 +132,25 @@ beforeEach(() => {
     configurable: true,
     value: async () => {},
   })
+  core.mockImplementation(async (operation: string) =>
+    operation === 'model.getConfig'
+      ? {
+          models: [
+            {
+              entryId: 'entry-fast',
+              modelId: 'deepseek-flash',
+              displayName: 'DeepSeek Flash',
+              effectiveDisplayName: 'DeepSeek Flash',
+            },
+            {
+              entryId: 'entry-pro',
+              modelId: 'deepseek-v4-pro',
+              effectiveDisplayName: 'DeepSeek V4 Pro',
+            },
+          ],
+        }
+      : null,
+  )
   listExecutorModels.mockImplementation(async ({ profileId }) => ({
     profileId,
     models: [{ id: 'discovered-model', name: 'Discovered', source: 'cli' }],
@@ -141,163 +184,201 @@ afterEach(() => {
   vi.clearAllMocks()
   vi.unstubAllGlobals()
 })
-it('renders exactly local and two vendor rows, minimal controls and truthful local readiness', async () => {
+
+// ── The main page (AGT-10) ─────────────────────────────────────────────
+
+it('1 · lists the three subagents in one card, then the task settings and 高级', async () => {
   await mount()
-  expect(root.querySelectorAll('[data-settings-agent]')).toHaveLength(3)
-  expect(row('local').textContent).toContain('内置')
+  const list = root.querySelector<HTMLElement>('[data-executor-list]')!
+  expect(
+    [...list.querySelectorAll<HTMLElement>('[data-settings-agent]')].map(
+      (el) => el.dataset.settingsAgent,
+    ),
+  ).toEqual(['local', 'claude-code', 'codex'])
   expect(row('local').querySelector('[data-avatar-preview]')).toBeTruthy()
+  expect(row('local').textContent).toContain('使用当前对话的模型')
   expect(root.querySelectorAll('[data-executor-enabled]')).toHaveLength(2)
-  expect(root.querySelectorAll('[data-executor-profile]')).toHaveLength(1)
   expect(root.querySelectorAll('input')).toHaveLength(0)
-  expect(root.textContent).toContain('本机登录配置可读')
+  const settings = root.querySelector<HTMLElement>(
+    '[data-executor-task-settings]',
+  )!
+  expect(settings.textContent).toContain('同时运行')
+  expect(settings.textContent).toContain('改代码的位置')
+  expect(settings.textContent).toContain('单个任务的费用上限')
+  expect(settings.querySelector('[data-executor-advanced-link]')).toBeTruthy()
+  expect(root.textContent).toContain('主任务、权限和验证始终由 Emperor 负责')
+  // The engineering facts live on each subagent's 详情 page.
   expect(root.textContent).not.toMatch(
-    /已登录|可直接交给子智能体|调度配额|认证方式/,
+    /宿主开放工具|运行时公布|模型来源|擅长的任务|最近运行模型/,
   )
 })
-it('edits, clears and restores independent specialty defaults without changing hidden model configuration', async () => {
+
+it('2 · a switch takes effect at once: saved with every other field kept, no 保存配置', async () => {
   await mount()
-  expect(row('claude-code').textContent).toContain('代码库理解')
-  expect(row('codex').textContent).toContain('联网调研')
-  row('claude-code')
-    .querySelector<HTMLButtonElement>('[data-edit-specialties]')!
-    .click()
-  await settle()
-  const input = row('claude-code').querySelector<HTMLInputElement>(
-    '[data-specialty-input]',
-  )!
-  input.value = '接口设计，定位故障'
-  input.dispatchEvent(new Event('input', { bubbles: true }))
-  await settle()
-  await action('save-executors').onClick!()
-  await settle()
-  expect(configureExecutors.mock.calls[0]![0].config.profiles[0]).toMatchObject(
-    { specialties: ['接口设计', '定位故障'], defaultModel: 'kept-model-0' },
-  )
-  expect(row('claude-code').textContent).toContain('已停用')
-  expect(row('claude-code').textContent).toContain('本机登录配置可读')
-  input.value = ''
-  input.dispatchEvent(new Event('input', { bubbles: true }))
-  await settle()
-  await action('save-executors').onClick!()
-  await settle()
-  expect(
-    configureExecutors.mock.calls[1]![0].config.profiles[0].specialties,
-  ).toEqual([])
-  row('claude-code')
-    .querySelector<HTMLButtonElement>('[data-reset-specialties]')!
-    .click()
-  await settle()
-  expect(row('claude-code').textContent).toContain('代码库理解')
-})
-it('rejects oversized specialty drafts and never upgrades unknown tool facts because CLI is ready', async () => {
-  await mount()
-  expect(
-    row('codex').querySelector('[data-native-capability="search"]')
-      ?.textContent,
-  ).toContain('未验证')
-  row('codex')
-    .querySelector<HTMLButtonElement>('[data-edit-specialties]')!
-    .click()
-  await settle()
-  const input = row('codex').querySelector<HTMLInputElement>(
-    '[data-specialty-input]',
-  )!
-  input.value = '字'.repeat(25)
-  input.dispatchEvent(new Event('input', { bubbles: true }))
-  await settle()
-  expect(action('save-executors').disabled).toBe(true)
-  expect(row('codex').textContent).toContain('每项最多 24 字')
-})
-it('shows reported model provenance and exact capability verification status from Core', async () => {
-  const result = payload() as any
-  result.profiles[1].runtime = {
-    reportedModel: 'real-model',
-    modelSource: 'provider-response',
-    provider: 'gateway.example',
-    advertisedTools: null,
-    hostAllowedTools: [],
-    observedTools: ['webSearch'],
-    searchMode: 'live',
-    nativeCapabilities: {
-      search: { status: 'available', checkedAt: 1000 },
-      imageGeneration: { status: 'stale' },
-    },
-  }
-  listExecutors.mockResolvedValue(result)
-  await mount()
-  expect(row('codex').textContent).toContain('real-model')
-  expect(row('codex').textContent).toContain('gateway.example')
-  expect(
-    row('codex').querySelector('[data-native-capability="search"]')
-      ?.textContent,
-  ).toContain('已验证可用')
-  expect(
-    row('codex').querySelector('[data-native-capability="imageGeneration"]')
-      ?.textContent,
-  ).toContain('验证已失效')
-})
-it('saves only explicit selected profile edits and preserves every hidden field and limit', async () => {
-  await mount()
+  expect(action('save-executors')).toBeUndefined()
+  expect(header.actions.value.map((a) => a.id)).toEqual(['detect-executors'])
   await toggle()
-  await action('save-executors').onClick!()
-  await settle()
   const expected = payload().config
   expected.profiles[0]!.enabled = true
+  expect(configureExecutors).toHaveBeenCalledTimes(1)
   expect(configureExecutors).toHaveBeenCalledWith({
     expectedRevision: 7,
     config: expected,
   })
-  expect(action('save-executors').disabled).toBe(true)
-})
-it('selects a second vendor profile without modifying its sibling', async () => {
-  await mount()
-  row('claude-code')
-    .querySelector<HTMLButtonElement>('[data-executor-profile]')!
-    .click()
-  await settle()
-  document.querySelector<HTMLButtonElement>('[data-value="profile-2"]')!.click()
-  await settle()
-  await toggle()
-  await action('save-executors').onClick!()
-  await settle()
-  const profiles = configureExecutors.mock.calls[0]![0].config.profiles
-  expect(profiles[0]).toEqual(payload().config.profiles[0])
-  expect(profiles[2].enabled).toBe(true)
-  expect(profiles[2].authRef).toEqual({
-    kind: 'model-route',
-    routeId: 'kept-route',
-  })
-})
-it('retains dirty edits on refresh until explicit discard and reload', async () => {
-  await mount()
-  await toggle()
-  await action('detect-executors').onClick!()
-  await settle()
-  expect(listExecutors).toHaveBeenCalledTimes(1)
   expect(row('claude-code').querySelector('[aria-checked="true"]')).toBeTruthy()
-  root
-    .querySelector<HTMLButtonElement>('[data-discard-executor-edits]')!
-    .click()
+  // The next change goes on top of the saved revision.
+  await toggle('codex')
+  expect(lastSaved().expectedRevision).toBe(8)
+  expect(lastSaved().config.profiles[0].enabled).toBe(true)
+  expect(lastSaved().config.profiles[1].enabled).toBe(true)
+})
+
+it('2 · changes made while a save is running are saved after it, in order', async () => {
+  await mount()
+  let release!: () => void
+  const first = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const save = configureExecutors.getMockImplementation()!
+  configureExecutors.mockImplementationOnce(async (input) => {
+    await first
+    return save(input)
+  })
+  await toggle()
+  await toggle('codex')
+  expect(configureExecutors).toHaveBeenCalledTimes(1)
+  release()
   await settle()
-  // Refresh runtime facts after the lightweight credential probe as well.
-  expect(listExecutors).toHaveBeenCalledTimes(3)
+  await settle()
+  expect(configureExecutors).toHaveBeenCalledTimes(2)
+  expect(lastSaved().expectedRevision).toBe(8)
+  expect(lastSaved().config.profiles[1].enabled).toBe(true)
+})
+
+it('3 · Claude without a sign-in fills its row with the reason and 设置令牌', async () => {
+  const value = payload()
+  value.config.profiles[0]!.enabled = true
+  Object.assign(value.profiles[0]!.probe, {
+    status: 'needs_auth',
+    diagnostic: 'AUTH_REQUIRED',
+    auth: { source: null, problem: 'missing' },
+  })
+  listExecutors.mockResolvedValue(value)
+  probeExecutor.mockResolvedValue(value.profiles[0]!.probe)
+  await mount()
+  const claude = row('claude-code')
+  expect(claude.dataset.needsToken).toBe('true')
+  expect(claude.querySelector('.readiness')!.textContent).toBe('需要登录令牌')
+  expect(
+    claude.querySelector('[data-executor-summary]')!.textContent,
+  ).toContain('claude setup-token')
+  expect(claude.querySelector('[data-claude-token-set]')!.textContent).toBe(
+    '设置令牌',
+  )
+  // No model picker while it cannot run.
+  expect(claude.querySelector('[data-row-model]')).toBeNull()
+  expect(row('codex').querySelector('[data-claude-token-set]')).toBeNull()
+})
+
+it('4 · the local subagent runs on a chosen model; 跟随对话 removes the choice', async () => {
+  await mount()
+  const select = row('local').querySelector<HTMLElement>('[data-local-model]')!
+  expect(select.textContent).toContain('跟随对话')
+  await choose(select, 'entry-fast')
+  expect(lastSaved().config.localSubagentModel).toBe('entry-fast')
+  expect(row('local').textContent).toContain('使用「DeepSeek Flash」')
+  await choose(
+    row('local').querySelector<HTMLElement>('[data-local-model]')!,
+    '',
+  )
+  expect(lastSaved().config).not.toHaveProperty('localSubagentModel')
+})
+
+it('4 · a chosen model that was deleted says so and the subagent follows the conversation', async () => {
+  const value = payload()
+  value.config.localSubagentModel = 'entry-gone'
+  listExecutors.mockResolvedValue(value)
+  await mount()
+  expect(row('local').textContent).toContain('选定的模型已删除')
+  expect(
+    row('local').querySelector('[data-local-model]')!.textContent,
+  ).toContain('entry-gone（已删除）')
+})
+
+it('saves 同时运行, 改代码的位置 and the cost cap at once, each only as it changes', async () => {
+  await mount()
+  await choose(
+    root.querySelector<HTMLElement>('[data-global-concurrency]')!,
+    '4',
+  )
+  expect(lastSaved().config.limits.globalConcurrency).toBe(4)
+  await choose(
+    root.querySelector<HTMLElement>('[data-default-workspace]')!,
+    'shared-exclusive',
+  )
+  expect(lastSaved().config.defaultWorkspace).toBe('shared-exclusive')
+  expect(root.textContent).toContain('直接改当前工作区')
+  await choose(
+    root.querySelector<HTMLElement>('[data-default-workspace]')!,
+    'isolated-worktree',
+  )
+  expect(lastSaved().config).not.toHaveProperty('defaultWorkspace')
+  await choose(root.querySelector<HTMLElement>('[data-task-budget]')!, '2')
+  expect(lastSaved().config.limits.estimatedBudgetUsd).toBe(2)
+  // Every other limit is kept as it was.
+  expect(lastSaved().config.limits.maxRunsPerTask).toBe(32)
+})
+
+it('a failed save puts the switch back and says why', async () => {
+  await mount()
+  configureExecutors.mockRejectedValueOnce(new Error('write failed'))
+  await toggle()
+  await settle()
+  expect(root.textContent).toContain('保存失败：write failed')
+  expect(
+    row('claude-code').querySelector('[aria-checked="false"]'),
+  ).toBeTruthy()
+  // The next change saves on the last confirmed revision.
+  await toggle()
+  expect(lastSaved().expectedRevision).toBe(7)
+})
+
+it('a save refused as stale reloads the latest settings and says so', async () => {
+  await mount()
+  const newer = payload()
+  newer.config.revision = 9
+  newer.config.profiles[1]!.enabled = true
+  configureExecutors.mockRejectedValueOnce(
+    Object.assign(new Error('任务状态已经变化，请刷新后重试。'), {
+      code: 'STALE_REVISION',
+    }),
+  )
+  listExecutors.mockResolvedValue(newer)
+  await toggle()
+  await settle()
+  expect(root.textContent).toContain('已在别处更新，已重新读取')
+  expect(row('codex').querySelector('[aria-checked="true"]')).toBeTruthy()
   expect(
     row('claude-code').querySelector('[aria-checked="false"]'),
   ).toBeTruthy()
 })
-it('retains draft and stale error after one fenced save, never replays it', async () => {
-  await mount()
-  await toggle()
-  configureExecutors.mockRejectedValue(new Error('STALE_REVISION: changed'))
-  void action('save-executors').onClick!()
-  void action('save-executors').onClick!()
-  await settle()
-  expect(configureExecutors).toHaveBeenCalledTimes(1)
-  expect(listExecutors).toHaveBeenCalledTimes(1)
-  expect(root.textContent).toContain('STALE_REVISION')
-  expect(row('claude-code').querySelector('[aria-checked="true"]')).toBeTruthy()
-  expect(action('save-executors').disabled).toBe(true)
+
+it('adopts a revision saved elsewhere when nothing is waiting to be saved', async () => {
+  vi.useFakeTimers()
+  try {
+    await mount()
+    const newer = payload()
+    newer.config.revision = 9
+    newer.config.profiles[1]!.enabled = true
+    listExecutors.mockResolvedValue(newer)
+    await vi.advanceTimersByTimeAsync(10_000)
+    await settle()
+    expect(row('codex').querySelector('[aria-checked="true"]')).toBeTruthy()
+  } finally {
+    vi.useRealTimers()
+  }
 })
+
 it('reads and probes saved profiles through the real API, shows loading and keeps controls fenced', async () => {
   await mount()
   const finishes: ((value: unknown) => void)[] = []
@@ -307,27 +388,36 @@ it('reads and probes saved profiles through the real API, shows loading and keep
         finishes.push(resolve)
       }),
   )
-  const pending = action('detect-executors').onClick!()
+  const pending = action('detect-executors')!.onClick!()
   await settle()
   expect(listExecutors).toHaveBeenCalledTimes(2)
   expect(probeExecutor).toHaveBeenCalledTimes(3)
-  expect(action('detect-executors').label).toContain('检测中')
-  expect(action('save-executors').disabled).toBe(true)
-  // Resolve all requests via a fresh implementation in other tests; teardown must fence these pending results.
+  expect(action('detect-executors')!.label).toContain('检测中')
+  expect(
+    row('claude-code')
+      .querySelector<HTMLButtonElement>('[data-executor-enabled]')!
+      .getAttribute('aria-disabled') === 'true' ||
+      row('claude-code').querySelector<HTMLButtonElement>(
+        '[data-executor-enabled]',
+      )!.disabled,
+  ).toBe(true)
+  // Teardown must fence these pending results.
   app!.unmount()
   app = undefined
   finishes.forEach((finish) => finish({ status: 'missing' }))
   await pending
   await settle()
 })
-it('renders built-in and unavailable vendors on read failure without creating config', async () => {
+
+it('renders the local subagent and unavailable vendors on read failure without creating config', async () => {
   listExecutors.mockRejectedValue(new Error('read failed'))
   await mount()
-  expect(row('local').textContent).toContain('内置')
+  expect(row('local').textContent).toContain('本地子智能体')
   expect(root.textContent).toContain('read failed')
   expect(root.querySelectorAll('[data-executor-enabled]')).toHaveLength(0)
   expect(configureExecutors).not.toHaveBeenCalled()
 })
+
 it('does not invent absent profiles', async () => {
   const value = payload()
   value.config.profiles = []
@@ -337,134 +427,7 @@ it('does not invent absent profiles', async () => {
   expect(root.textContent).toContain('未配置')
   expect(configureExecutors).not.toHaveBeenCalled()
 })
-it.each([
-  ['missing', undefined, '内置的 Claude Code 缺失'],
-  ['needs_auth', 'AUTH_REQUIRED', 'claude setup-token'],
-  ['incompatible', 'AUTH_ROUTE_UNAVAILABLE', '模型凭据'],
-  ['incompatible', undefined, '需要 >= 2.1'],
-  ['containment_unavailable', undefined, '运行环境'],
-  ['incompatible', 'executor version probe failed', '可执行权限'],
-  ['incompatible', 'AUTH_REQUIRED', '粘贴 ANTHROPIC_API_KEY'],
-])(
-  'shows useful inline recovery for %s/%s',
-  async (status, diagnostic, message) => {
-    const value = payload()
-    Object.assign(value.profiles[0]!.probe, {
-      status,
-      diagnostic,
-      executableVersion: '1.0',
-      ...(status === 'incompatible' && !diagnostic
-        ? { requiredVersion: '>= 2.1' }
-        : {}),
-    })
-    listExecutors.mockResolvedValue(value)
-    await mount()
-    expect(row('claude-code').textContent).toContain(message)
-    if (status === 'incompatible' && !diagnostic) {
-      // 3. The row names the installed version and the version it needs.
-      expect(row('claude-code').textContent).toContain('1.0')
-      expect(row('claude-code').textContent).not.toContain('预期')
-    }
-  },
-)
-it('shows path correction only on request and saves it without changing other fields', async () => {
-  const value = payload()
-  Object.assign(value.config.profiles[0]!, { executableSource: 'system' })
-  value.profiles[0]!.probe.status = 'missing'
-  listExecutors.mockResolvedValue(value)
-  await mount()
-  expect(root.querySelectorAll('input')).toHaveLength(0)
-  row('claude-code')
-    .querySelector<HTMLButtonElement>('[data-executor-recovery]')!
-    .click()
-  await settle()
-  const input = row('claude-code').querySelector<HTMLInputElement>('input')!
-  input.value = '/opt/bin/claude'
-  input.dispatchEvent(new Event('input'))
-  await settle()
-  await action('save-executors').onClick!()
-  await settle()
-  const expected = payload().config
-  Object.assign(expected.profiles[0]!, { executableSource: 'system' })
-  expected.profiles[0]!.executablePath = '/opt/bin/claude'
-  expect(configureExecutors.mock.calls[0]![0].config).toEqual(expected)
-})
-it('offers reinstall or the installed claude, not a path, when the bundled Claude is missing', async () => {
-  const value = payload()
-  Object.assign(value.profiles[0]!.probe, {
-    status: 'missing',
-    executableSource: 'bundled',
-  })
-  listExecutors.mockResolvedValue(value)
-  await mount()
-  expect(row('claude-code').textContent).toContain('重新安装 Emperor')
-  expect(
-    row('claude-code').querySelector(
-      '.recovery-message [data-executor-recovery]',
-    ),
-  ).toBeNull()
-})
-it('warns that a same-minor Codex may be incompatible while keeping it runnable', async () => {
-  const value = payload()
-  value.config.profiles[1]!.enabled = true
-  Object.assign(value.profiles[1]!.probe, {
-    status: 'available',
-    executableVersion: '0.153.9',
-    compatibility: 'unverified',
-    protocolVersion: '0.153.4',
-  })
-  listExecutors.mockResolvedValue(value)
-  await mount()
-  const codex = row('codex')
-  expect(codex.querySelector('.readiness')!.textContent).toContain('可能不兼容')
-  expect(codex.textContent).toContain('0.153.9')
-  expect(codex.textContent).toContain('0.153.4')
-  expect(codex.textContent).toContain('仍可运行')
-})
-it('shows the version range a refused Codex needs', async () => {
-  const value = payload()
-  Object.assign(value.profiles[1]!.probe, {
-    status: 'incompatible',
-    executableVersion: '0.154.0',
-    requiredVersion: '0.153.x',
-  })
-  listExecutors.mockResolvedValue(value)
-  await mount()
-  expect(row('codex').textContent).toContain('0.154.0')
-  expect(row('codex').textContent).toContain('需要 0.153.x')
-})
-it('switches Claude Code between the bundled binary and the installed claude', async () => {
-  const value = payload()
-  Object.assign(value.profiles[0]!.probe, {
-    executableSource: 'bundled',
-    executableVersion: '2.1.281',
-  })
-  listExecutors.mockResolvedValue(value)
-  await mount()
-  const claude = row('claude-code')
-  expect(claude.textContent).toContain('2.1.281（随 Emperor 内置）')
-  expect(
-    row('codex').querySelector('[data-claude-installed-binary]'),
-  ).toBeNull()
-  claude
-    .querySelector<HTMLButtonElement>('[data-claude-installed-binary]')!
-    .click()
-  await settle()
-  await action('save-executors').onClick!()
-  await settle()
-  expect(
-    configureExecutors.mock.calls[0]![0].config.profiles[0].executableSource,
-  ).toBe('system')
-})
-it('shows per-profile probe failures inline with retry', async () => {
-  const value = payload()
-  value.profiles[0]!.probe = null!
-  listExecutors.mockResolvedValue(value)
-  probeExecutor.mockRejectedValue(new Error('probe failed'))
-  await mount()
-  expect(row('claude-code').textContent).toContain('probe failed')
-  expect(row('claude-code').textContent).toContain('重试')
-})
+
 it('does not probe or apply a late config read after teardown', async () => {
   let finish!: (value: unknown) => void
   listExecutors.mockImplementationOnce(
@@ -485,28 +448,7 @@ it('does not probe or apply a late config read after teardown', async () => {
   await settle()
   expect(probeExecutor).not.toHaveBeenCalled()
 })
-it('retains edits after a non-stale save failure and permits an explicit retry', async () => {
-  await mount()
-  await toggle()
-  configureExecutors.mockRejectedValueOnce(new Error('write failed'))
-  await action('save-executors').onClick!()
-  await settle()
-  expect(root.textContent).toContain('write failed')
-  expect(action('save-executors').disabled).toBe(false)
-  expect(listExecutors).toHaveBeenCalledTimes(1)
-  await action('save-executors').onClick!()
-  await settle()
-  expect(configureExecutors).toHaveBeenCalledTimes(2)
-  expect(configureExecutors.mock.calls[1]![0].expectedRevision).toBe(7)
-})
-it('gives Codex login help without executing it', async () => {
-  const value = payload()
-  value.profiles[1]!.probe.status = 'needs_auth'
-  listExecutors.mockResolvedValue(value)
-  await mount()
-  expect(row('codex').textContent).toContain('codex login')
-  expect(configureExecutors).not.toHaveBeenCalled()
-})
+
 it('retains the preview instance across settings edits and releases RAF on teardown', async () => {
   await mount()
   const preview = root.querySelector('[data-avatar-preview]')!,
@@ -520,6 +462,270 @@ it('retains the preview instance across settings edits and releases RAF on teard
   expect(cancelAnimationFrame).toHaveBeenCalledTimes(1)
 })
 
+it('explains once that external subagents are now off by default; dismissing saves only that', async () => {
+  const value = payload() as any
+  value.config.upgradeNotice = 'external-default-off'
+  listExecutors.mockResolvedValue(value)
+  await mount()
+  const notice = root.querySelector('[data-executor-upgrade-notice]')!
+  expect(notice.textContent).toContain('默认关闭')
+  expect(notice.textContent).toContain('已关闭')
+  notice
+    .querySelector<HTMLButtonElement>('[data-dismiss-upgrade-notice]')!
+    .click()
+  await settle()
+  expect(configureExecutors).toHaveBeenCalledTimes(1)
+  const sent = lastSaved()
+  expect(sent.expectedRevision).toBe(7)
+  expect(sent.config.upgradeNotice).toBeUndefined()
+  expect(sent.config.profiles[1].enabled).toBe(false)
+  expect(root.querySelector('[data-executor-upgrade-notice]')).toBeNull()
+})
+
+it('a vendor row shows its model and saves a new choice at once', async () => {
+  const value = payload()
+  value.config.profiles[1]!.enabled = true
+  listExecutors.mockResolvedValue(value)
+  await mount()
+  await choose(
+    row('codex').querySelector<HTMLElement>('[data-row-model]')!,
+    'discovered-model',
+  )
+  expect(lastSaved().config.profiles[1].defaultModel).toBe('discovered-model')
+})
+
+// ── 详情 ────────────────────────────────────────────────────────────────
+
+it('the 详情 page edits, clears and restores specialties, saved on 完成', async () => {
+  await mount()
+  const page = await openDetail('claude-code')
+  expect(page.textContent).toContain('代码库理解')
+  page.querySelector<HTMLButtonElement>('[data-edit-specialties]')!.click()
+  await settle()
+  const input = page.querySelector<HTMLInputElement>('[data-specialty-input]')!
+  input.value = '接口设计，定位故障'
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
+  expect(configureExecutors).not.toHaveBeenCalled()
+  page.querySelector<HTMLButtonElement>('[data-specialty-save]')!.click()
+  await settle()
+  expect(lastSaved().config.profiles[0]).toMatchObject({
+    specialties: ['接口设计', '定位故障'],
+    defaultModel: 'kept-model-0',
+  })
+  page.querySelector<HTMLButtonElement>('[data-edit-specialties]')!.click()
+  await settle()
+  const again = page.querySelector<HTMLInputElement>('[data-specialty-input]')!
+  again.value = ''
+  again.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
+  page.querySelector<HTMLButtonElement>('[data-specialty-save]')!.click()
+  await settle()
+  expect(lastSaved().config.profiles[0].specialties).toEqual([])
+  page.querySelector<HTMLButtonElement>('[data-edit-specialties]')!.click()
+  await settle()
+  page.querySelector<HTMLButtonElement>('[data-reset-specialties]')!.click()
+  await settle()
+  expect(lastSaved().config.profiles[0]).not.toHaveProperty('specialties')
+  expect(page.textContent).toContain('代码库理解')
+})
+
+it('the 详情 page refuses oversized specialties and says capabilities are unverified', async () => {
+  await mount()
+  const page = await openDetail('codex')
+  expect(
+    page.querySelector('[data-native-capability="search"]')?.textContent,
+  ).toContain('联网搜索：还没有验证')
+  page.querySelector<HTMLButtonElement>('[data-edit-specialties]')!.click()
+  await settle()
+  const input = page.querySelector<HTMLInputElement>('[data-specialty-input]')!
+  input.value = '字'.repeat(25)
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
+  expect(page.textContent).toContain('每项最多 24 字')
+  expect(
+    page.querySelector<HTMLButtonElement>('[data-specialty-save]')!.disabled,
+  ).toBe(true)
+})
+
+it('the 详情 page says in plain words what Core verified and what the last run reported', async () => {
+  const result = payload() as any
+  result.profiles[1].runtime = {
+    reportedModel: 'real-model',
+    modelSource: 'provider-response',
+    provider: 'gateway.example',
+    advertisedTools: null,
+    hostAllowedTools: [],
+    observedTools: ['webSearch'],
+    searchMode: 'live',
+    nativeCapabilities: {
+      search: { status: 'available', checkedAt: 1000, searchMode: 'live' },
+      imageGeneration: { status: 'stale' },
+    },
+  }
+  listExecutors.mockResolvedValue(result)
+  await mount()
+  const page = await openDetail('codex')
+  expect(page.querySelector('[data-reported-model]')!.textContent).toBe(
+    'real-model',
+  )
+  expect(page.textContent).toContain('gateway.example')
+  expect(page.textContent).toContain('webSearch')
+  expect(
+    page.querySelector('[data-native-capability="search"]')?.textContent,
+  ).toContain('联网搜索：已验证（实时）')
+  expect(
+    page.querySelector('[data-native-capability="imageGeneration"]')
+      ?.textContent,
+  ).toContain('验证已失效')
+  // Claude Code cannot generate images: no line for it.
+  header.back()
+  await settle()
+  const claude = await openDetail('claude-code')
+  expect(
+    claude.querySelector('[data-native-capability="imageGeneration"]'),
+  ).toBeNull()
+})
+
+it('the 详情 page picks a second vendor profile without modifying its sibling', async () => {
+  await mount()
+  const page = await openDetail('claude-code')
+  await choose(
+    page.querySelector<HTMLElement>('[data-executor-profile]')!,
+    'profile-2',
+  )
+  header.back()
+  await settle()
+  await toggle()
+  const profiles = lastSaved().config.profiles
+  expect(profiles[0]).toEqual(payload().config.profiles[0])
+  expect(profiles[2].enabled).toBe(true)
+  expect(profiles[2].authRef).toEqual({
+    kind: 'model-route',
+    routeId: 'kept-route',
+  })
+})
+
+it.each([
+  ['missing', undefined, '内置的 Claude Code 缺失'],
+  ['needs_auth', 'AUTH_REQUIRED', 'claude setup-token'],
+  ['incompatible', 'AUTH_ROUTE_UNAVAILABLE', '模型的凭据'],
+  ['incompatible', undefined, '需要 >= 2.1'],
+  ['containment_unavailable', undefined, '运行环境'],
+  ['incompatible', 'executor version probe failed', '可执行权限'],
+  ['incompatible', 'AUTH_REQUIRED', '粘贴 ANTHROPIC_API_KEY'],
+])(
+  'the 详情 page shows useful recovery for %s/%s',
+  async (status, diagnostic, message) => {
+    const value = payload()
+    Object.assign(value.profiles[0]!.probe, {
+      status,
+      diagnostic,
+      executableVersion: '1.0',
+      ...(status === 'incompatible' && !diagnostic
+        ? { requiredVersion: '>= 2.1' }
+        : {}),
+    })
+    listExecutors.mockResolvedValue(value)
+    await mount()
+    const page = await openDetail('claude-code')
+    expect(page.textContent).toContain(message)
+    if (status === 'incompatible' && !diagnostic) {
+      // The page names the installed version and the version it needs.
+      expect(page.textContent).toContain('1.0')
+      expect(page.textContent).not.toContain('预期')
+    }
+  },
+)
+
+it('the 详情 page corrects a path only on request and saves just that field', async () => {
+  const value = payload()
+  Object.assign(value.config.profiles[0]!, { executableSource: 'system' })
+  value.profiles[0]!.probe.status = 'missing'
+  listExecutors.mockResolvedValue(value)
+  await mount()
+  const page = await openDetail('claude-code')
+  expect(page.querySelectorAll('input')).toHaveLength(0)
+  page.querySelector<HTMLButtonElement>('[data-executor-recovery]')!.click()
+  await settle()
+  const input = page.querySelector<HTMLInputElement>('input')!
+  input.value = '/opt/bin/claude'
+  input.dispatchEvent(new Event('input'))
+  await settle()
+  page.querySelector<HTMLButtonElement>('[data-executor-path-save]')!.click()
+  await settle()
+  const expected = payload().config
+  Object.assign(expected.profiles[0]!, { executableSource: 'system' })
+  expected.profiles[0]!.executablePath = '/opt/bin/claude'
+  expect(lastSaved().config).toEqual(expected)
+})
+
+it('offers reinstall or the installed claude, not a path, when the bundled Claude is missing', async () => {
+  const value = payload()
+  Object.assign(value.profiles[0]!.probe, {
+    status: 'missing',
+    executableSource: 'bundled',
+  })
+  listExecutors.mockResolvedValue(value)
+  await mount()
+  const page = await openDetail('claude-code')
+  expect(page.textContent).toContain('重新安装 Emperor')
+  expect(page.querySelector('[data-executor-recovery]')).toBeNull()
+})
+
+it('warns that a same-minor Codex may be incompatible while keeping it runnable', async () => {
+  const value = payload()
+  value.config.profiles[1]!.enabled = true
+  Object.assign(value.profiles[1]!.probe, {
+    status: 'available',
+    executableVersion: '0.153.9',
+    compatibility: 'unverified',
+    protocolVersion: '0.153.4',
+  })
+  listExecutors.mockResolvedValue(value)
+  await mount()
+  const codex = row('codex')
+  expect(codex.querySelector('.readiness')!.textContent).toContain('可能不兼容')
+  expect(codex.textContent).toContain('0.153.9')
+  expect(codex.textContent).toContain('0.153.4')
+  expect(codex.textContent).toContain('仍可运行')
+})
+
+it('shows the version range a refused Codex needs', async () => {
+  const value = payload()
+  value.config.profiles[1]!.enabled = true
+  Object.assign(value.profiles[1]!.probe, {
+    status: 'incompatible',
+    executableVersion: '0.154.0',
+    requiredVersion: '0.153.x',
+  })
+  listExecutors.mockResolvedValue(value)
+  await mount()
+  expect(row('codex').textContent).toContain('0.154.0')
+  expect(row('codex').textContent).toContain('需要 0.153.x')
+})
+
+it('shows per-profile probe failures in the row, with 重新检测 in the header', async () => {
+  const value = payload()
+  value.config.profiles[0]!.enabled = true
+  value.profiles[0]!.probe = null!
+  listExecutors.mockResolvedValue(value)
+  probeExecutor.mockRejectedValue(new Error('probe failed'))
+  await mount()
+  expect(row('claude-code').textContent).toContain('probe failed')
+  expect(action('detect-executors')!.label).toBe('重新检测')
+})
+
+it('gives Codex login help without executing it', async () => {
+  const value = payload()
+  value.config.profiles[1]!.enabled = true
+  value.profiles[1]!.probe.status = 'needs_auth'
+  listExecutors.mockResolvedValue(value)
+  await mount()
+  expect(row('codex').textContent).toContain('codex login')
+  expect(configureExecutors).not.toHaveBeenCalled()
+})
+
 it.each([
   ['claude-code', 0, 'https://code.claude.com/docs/en/setup'],
   ['codex', 1, 'https://learn.chatgpt.com/docs/codex/cli'],
@@ -530,7 +736,8 @@ it.each([
     value.profiles[index as number]!.probe.status = 'missing'
     listExecutors.mockResolvedValue(value)
     await mount()
-    row(vendor as string)
+    const page = await openDetail(vendor as string)
+    page
       .querySelector<HTMLButtonElement>('[data-executor-install-help]')!
       .click()
     await settle()
@@ -539,158 +746,192 @@ it.each([
   },
 )
 
-it('does not attach another revision runtime facts after saving a specialty draft', async () => {
+it('does not attach another revision’s runtime facts after a save', async () => {
   const current = payload(),
-    newer = payload()
-  newer.config.revision = 9
-  listExecutors.mockResolvedValueOnce(current).mockResolvedValueOnce(newer)
+    newer = payload() as any
+  newer.config.revision = 99
+  newer.profiles[0].runtime = { reportedModel: 'from-elsewhere' }
+  listExecutors.mockResolvedValueOnce(current)
   await mount()
+  listExecutors.mockResolvedValue(newer)
   await toggle()
-  await action('save-executors').onClick!()
-  await settle()
-  expect(action('save-executors').disabled).toBe(true)
-  expect(root.textContent).toContain('配置已在其他位置更新')
+  const page = await openDetail('claude-code')
+  expect(page.querySelector('[data-reported-model]')!.textContent).not.toBe(
+    'from-elsewhere',
+  )
 })
 
-it('uses light cards, a local introduction and a persistent custom model picker without rewriting the reported model', async () => {
+it('the 详情 page adds a custom model, saved with the choice, without rewriting the reported model', async () => {
   await mount()
-  expect(row('local').textContent).toContain('在主会话允许的工具与权限范围')
-  // Local and two vendors; the 高级 card follows them.
-  expect(
-    root.querySelectorAll('.ds-settings-card[data-settings-agent]'),
-  ).toHaveLength(3)
-  expect(
-    root.querySelector('.ds-settings-card[data-executor-advanced]'),
-  ).not.toBeNull()
-  expect(
-    root.querySelector(
-      '[data-native-capability="imageGeneration"][data-status="unsupported"]',
-    ),
-  ).toBeNull()
-  const choice = row('claude-code').querySelector<HTMLButtonElement>(
-    '[data-default-model]',
-  )!
-  expect(choice).toBeTruthy()
-  choice.click()
-  await settle()
-  document
-    .querySelector<HTMLButtonElement>('[data-value="__add_custom_model__"]')!
-    .click()
-  await settle()
-  const input = row('claude-code').querySelector<HTMLInputElement>(
+  const page = await openDetail('claude-code')
+  await choose(
+    page.querySelector<HTMLElement>('[data-default-model]')!,
+    '__add_custom_model__',
+  )
+  const input = page.querySelector<HTMLInputElement>(
     '[data-custom-model-input]',
   )!
   input.value = 'gateway/team-coder'
   input.dispatchEvent(new Event('input', { bubbles: true }))
   await settle()
-  row('claude-code')
-    .querySelector<HTMLButtonElement>('[data-add-custom-model]')!
-    .click()
+  page.querySelector<HTMLButtonElement>('[data-add-custom-model]')!.click()
   await settle()
-  await action('save-executors').onClick!()
-  await settle()
-  expect(configureExecutors.mock.calls[0]![0].config.profiles[0]).toMatchObject(
-    {
-      defaultModel: 'gateway/team-coder',
-      customModels: ['gateway/team-coder'],
-    },
+  expect(lastSaved().config.profiles[0]).toMatchObject({
+    defaultModel: 'gateway/team-coder',
+    customModels: ['gateway/team-coder'],
+  })
+  expect(page.querySelector('[data-reported-model]')!.textContent).toContain(
+    '还没有运行过',
   )
-  expect(
-    row('claude-code').querySelector('[data-reported-model]')!.textContent,
-  ).toContain('未知')
 })
-it('refreshes model candidates independently and preserves unsaved specialty and model drafts', async () => {
+
+it('the 详情 page refreshes model candidates on its own', async () => {
   await mount()
-  row('codex').querySelector<HTMLButtonElement>('[data-default-model]')!.click()
+  const page = await openDetail('codex')
+  await choose(
+    page.querySelector<HTMLElement>('[data-default-model]')!,
+    'discovered-model',
+  )
+  page.querySelector<HTMLButtonElement>('[data-refresh-models]')!.click()
   await settle()
-  document
-    .querySelector<HTMLButtonElement>('[data-value="discovered-model"]')!
-    .click()
-  await settle()
-  await row('codex')
-    .querySelector<HTMLButtonElement>('[data-refresh-models]')!
-    .click()
-  await settle()
-  await action('save-executors').onClick!()
-  await settle()
-  expect(
-    configureExecutors.mock.calls[0]![0].config.profiles[1].defaultModel,
-  ).toBe('discovered-model')
+  expect(lastSaved().config.profiles[1].defaultModel).toBe('discovered-model')
   expect(listExecutorModels).toHaveBeenCalledWith({
     profileId: 'profile-1',
     refresh: true,
   })
 })
-it('explains once that external subagents are now off by default; dismissing saves nothing else', async () => {
-  const value = payload() as any
-  value.config.upgradeNotice = 'external-default-off'
-  listExecutors.mockResolvedValue(value)
-  await mount()
-  const notice = root.querySelector('[data-executor-upgrade-notice]')!
-  expect(notice.textContent).toContain('默认关闭')
-  expect(notice.textContent).toContain('已关闭')
-  // A draft edit on the page is not saved by dismissing the notice.
-  await toggle('codex')
-  notice
-    .querySelector<HTMLButtonElement>('[data-dismiss-upgrade-notice]')!
-    .click()
-  await settle()
-  expect(configureExecutors).toHaveBeenCalledTimes(1)
-  const sent = configureExecutors.mock.calls[0]![0]
-  expect(sent.expectedRevision).toBe(7)
-  expect(sent.config.upgradeNotice).toBeUndefined()
-  expect(sent.config.profiles[1].enabled).toBe(false)
-  expect(root.querySelector('[data-executor-upgrade-notice]')).toBeNull()
-  // The draft survives and can still be saved.
-  expect(action('save-executors').disabled).toBe(false)
-})
-it('says that Emperor asks before the first dispatch, or that the user chose always', async () => {
+
+it('the 详情 page says that Emperor asks before the first task, or that the user chose always', async () => {
   const value = payload() as any
   value.config.profiles[0].enabled = true
   value.config.profiles[1].enabled = true
   value.profiles[1].consent = 'always'
   listExecutors.mockResolvedValue(value)
   await mount()
+  const codex = await openDetail('codex')
+  expect(codex.querySelector('[data-executor-consent]')!.textContent).toContain(
+    '以后都允许',
+  )
+  header.back()
+  await settle()
+  const claude = await openDetail('claude-code')
   expect(
-    row('codex').querySelector('[data-executor-consent]')!.textContent,
-  ).toContain('以后都允许')
-  expect(
-    row('claude-code').querySelector('[data-executor-consent]')!.textContent,
+    claude.querySelector('[data-executor-consent]')!.textContent,
   ).toContain('征得你的同意')
 })
-it('offers diagnostics mode under 高级, off by default, and saves it only when turned on', async () => {
+
+// ── 高级 ────────────────────────────────────────────────────────────────
+
+it('高级 offers diagnostics mode, off by default, saved at once only when on', async () => {
   await mount()
-  const toggle = root.querySelector<HTMLButtonElement>(
+  const page = await openAdvanced()
+  const toggle = page.querySelector<HTMLButtonElement>(
     '[data-diagnostics-mode]',
   )!
-  expect(toggle).not.toBeNull()
   expect(toggle.getAttribute('aria-checked')).toBe('false')
-  expect(root.textContent).toContain('诊断模式')
+  expect(page.textContent).toContain('诊断模式')
   toggle.click()
   await settle()
-  await action('save-executors').onClick!()
-  await settle()
-  expect(configureExecutors.mock.calls[0]![0].config.diagnosticsMode).toBe(true)
-})
-it('offers 验证后再应用 under 高级, off by default, and saves it only when turned on (AGT-06)', async () => {
-  await mount()
-  const toggle = root.querySelector<HTMLButtonElement>(
-    '[data-verify-before-apply]',
-  )!
-  expect(toggle).not.toBeNull()
-  expect(toggle.getAttribute('aria-checked')).toBe('false')
-  expect(root.textContent).toContain('验证后再应用')
+  expect(lastSaved().config.diagnosticsMode).toBe(true)
   toggle.click()
   await settle()
-  await action('save-executors').onClick!()
-  await settle()
-  expect(configureExecutors.mock.calls[0]![0].config.verifyBeforeApply).toBe(
-    true,
-  )
+  expect(lastSaved().config).not.toHaveProperty('diagnosticsMode')
 })
 
-// AGT-02 · Claude Code sign-in: 设置令牌, the sources Emperor reads, and
-// copy that never sends the user to `claude auth login`.
+it('高级 offers 验证后再应用, off by default, saved at once only when on (AGT-06)', async () => {
+  await mount()
+  const page = await openAdvanced()
+  const toggle = page.querySelector<HTMLButtonElement>(
+    '[data-verify-before-apply]',
+  )!
+  expect(toggle.getAttribute('aria-checked')).toBe('false')
+  toggle.click()
+  await settle()
+  expect(lastSaved().config.verifyBeforeApply).toBe(true)
+})
+
+it('高级 switches Claude Code between the bundled binary and the installed claude', async () => {
+  const value = payload()
+  Object.assign(value.profiles[0]!.probe, {
+    executableSource: 'bundled',
+    executableVersion: '2.1.281',
+  })
+  listExecutors.mockResolvedValue(value)
+  await mount()
+  const detail = await openDetail('claude-code')
+  expect(detail.textContent).toContain('2.1.281（随 Emperor 内置）')
+  header.back()
+  await settle()
+  const page = await openAdvanced()
+  page
+    .querySelector<HTMLButtonElement>('[data-claude-installed-binary]')!
+    .click()
+  await settle()
+  expect(lastSaved().config.profiles[0].executableSource).toBe('system')
+})
+
+it('8 · 高级 sets Claude Code’s turns per run, 200 by default, stored only when changed', async () => {
+  await mount()
+  const page = await openAdvanced()
+  const select = page.querySelector<HTMLElement>('[data-claude-max-turns]')!
+  expect(select.textContent).toContain('200')
+  select.click()
+  await settle()
+  const values = [
+    ...document.querySelectorAll<HTMLElement>('[data-value]'),
+  ].map((o) => o.dataset.value)
+  expect(values).toEqual(
+    expect.arrayContaining(['50', '100', '200', '500', '1000']),
+  )
+  document.querySelector<HTMLElement>('[data-value="500"]')!.click()
+  await settle()
+  expect(lastSaved().config.limits.claudeMaxTurns).toBe(500)
+  await choose(
+    page.querySelector<HTMLElement>('[data-claude-max-turns]')!,
+    '200',
+  )
+  expect(lastSaved().config.limits).not.toHaveProperty('claudeMaxTurns')
+})
+
+it('高级 sets how long one run may take, up to 120 minutes', async () => {
+  await mount()
+  const page = await openAdvanced()
+  const select = page.querySelector<HTMLElement>('[data-run-timeout]')!
+  expect(select.textContent).toContain('30 分钟')
+  await choose(select, '60')
+  expect(lastSaved().config.limits.runTimeoutMs).toBe(3_600_000)
+})
+
+it('高级 offers 开发环境: git identity and proxies on, the rest off; saves only a change (AGT-08)', async () => {
+  await mount()
+  const page = await openAdvanced()
+  const group = page.querySelector<HTMLElement>('[data-executor-dev-env]')!
+  expect(group.textContent).toContain('开发环境')
+  const toggle = (key: string) =>
+    group.querySelector<HTMLButtonElement>(`[data-dev-env="${key}"]`)!
+  expect(toggle('gitIdentity').getAttribute('aria-checked')).toBe('true')
+  expect(toggle('proxy').getAttribute('aria-checked')).toBe('true')
+  for (const key of ['sshAgent', 'toolchains', 'github'])
+    expect(toggle(key).getAttribute('aria-checked')).toBe('false')
+  expect(group.textContent).toContain('允许子智能体使用 GitHub 登录')
+  toggle('sshAgent').click()
+  await settle()
+  expect(lastSaved().config.developmentEnvironment).toEqual({
+    gitIdentity: true,
+    proxy: true,
+    sshAgent: true,
+    toolchains: false,
+    github: false,
+  })
+  // Back to the defaults: the field is not stored at all.
+  toggle('sshAgent').click()
+  await settle()
+  expect(lastSaved().config.developmentEnvironment).toBeUndefined()
+})
+
+// ── AGT-02 · Claude Code sign-in: 设置令牌, the sources Emperor reads, and
+// copy that never sends the user to `claude auth login`. ──────────────
+
 function claudeProbe(probe: Record<string, unknown>) {
   const value = payload() as any
   value.config.profiles[0].enabled = true
@@ -699,8 +940,12 @@ function claudeProbe(probe: Record<string, unknown>) {
   probeExecutor.mockResolvedValue(value.profiles[0].probe)
   return value
 }
-const signIn = () =>
-  row('claude-code').querySelector<HTMLElement>('[data-claude-sign-in]')!
+async function signIn() {
+  const page =
+    root.querySelector<HTMLElement>('[data-executor-detail="claude-code"]') ??
+    (await openDetail('claude-code'))
+  return page.querySelector<HTMLElement>('[data-claude-sign-in]')!
+}
 async function dialogReady() {
   for (let i = 0; i < 5; i++) {
     await vi.dynamicImportSettled()
@@ -715,7 +960,7 @@ function typeInto(input: HTMLInputElement, value: string) {
   input.value = value
   input.dispatchEvent(new Event('input'))
 }
-it('1 · 设置令牌 sends the pasted token once and shows only 已设置 · 末 4 位', async () => {
+it('1 · 设置令牌 from the row sends the pasted token once and shows only 已设置 · 末 4 位', async () => {
   const token = 'sk-ant-oat01-pasted-subscription-token-a1b2'
   claudeProbe({
     status: 'needs_auth',
@@ -737,8 +982,9 @@ it('1 · 设置令牌 sends the pasted token once and shows only 已设置 · �
     return { probe: next.profiles[0].probe }
   })
   await mount()
-  expect(signIn().textContent).toContain('未登录')
-  signIn().querySelector<HTMLButtonElement>('[data-claude-token-set]')!.click()
+  row('claude-code')
+    .querySelector<HTMLButtonElement>('[data-claude-token-set]')!
+    .click()
   const dialog = await dialogReady()
   expect(dialog.textContent).toContain('在终端运行')
   expect(dialog.textContent).toContain('claude setup-token')
@@ -759,11 +1005,11 @@ it('1 · 设置令牌 sends the pasted token once and shows only 已设置 · �
     token,
   })
   expect(document.querySelector('[data-claude-token-dialog]')).toBeNull()
-  expect(signIn().textContent).toContain('已设置 · 末 4 位 a1b2')
-  expect(document.body.innerHTML).not.toContain(token)
   expect(row('claude-code').querySelector('.readiness')!.textContent).toBe(
     '子智能体就绪',
   )
+  expect((await signIn()).textContent).toContain('已设置 · 末 4 位 a1b2')
+  expect(document.body.innerHTML).not.toContain(token)
 })
 it('1 · the API Key choice asks for ANTHROPIC_API_KEY and refuses a subscription token in it', async () => {
   claudeProbe({
@@ -772,7 +1018,9 @@ it('1 · the API Key choice asks for ANTHROPIC_API_KEY and refuses a subscriptio
     auth: { source: null, problem: 'missing' },
   })
   await mount()
-  signIn().querySelector<HTMLButtonElement>('[data-claude-token-set]')!.click()
+  ;(await signIn())
+    .querySelector<HTMLButtonElement>('[data-claude-token-set]')!
+    .click()
   const dialog = await dialogReady()
   ;[...dialog.querySelectorAll<HTMLButtonElement>('[role="radio"]')]
     .find((b) => b.textContent?.includes('API Key'))!
@@ -804,17 +1052,16 @@ it('1 · 移除令牌 forgets Emperor’s token', async () => {
     return { probe: next.profiles[0].probe }
   })
   await mount()
-  expect(signIn().textContent).toContain('已设置 · 末 4 位 c3d4')
-  expect(signIn().textContent).toContain('API Key')
-  signIn()
-    .querySelector<HTMLButtonElement>('[data-claude-token-clear]')!
-    .click()
+  const block = await signIn()
+  expect(block.textContent).toContain('已设置 · 末 4 位 c3d4')
+  expect(block.textContent).toContain('API Key')
+  block.querySelector<HTMLButtonElement>('[data-claude-token-clear]')!.click()
   await settle()
   await settle()
   expect(clearExecutorCredential).toHaveBeenCalledWith({
     profileId: 'profile-0',
   })
-  expect(signIn().textContent).toContain('未登录')
+  expect((await signIn()).textContent).toContain('尚未登录')
 })
 it.each([
   ['settings', '~/.claude/settings.json'],
@@ -824,7 +1071,7 @@ it.each([
 ])('names where the sign-in came from (%s)', async (source, text) => {
   claudeProbe({ auth: { source, kind: 'oauth-token' } })
   await mount()
-  expect(signIn().textContent).toContain(text)
+  expect((await signIn()).textContent).toContain(text)
 })
 it('3 · an expired .credentials.json reads 令牌已过期 and says what to do', async () => {
   claudeProbe({
@@ -837,8 +1084,8 @@ it('3 · an expired .credentials.json reads 令牌已过期 and says what to do'
   expect(row('claude-code').querySelector('.readiness')!.textContent).toBe(
     '令牌已过期',
   )
-  expect(row('claude-code').textContent).toContain('已过期')
   expect(row('claude-code').textContent).toContain('claude setup-token')
+  expect((await signIn()).textContent).toContain('已过期')
 })
 it('3 · warns ten minutes before the .credentials.json token expires', async () => {
   claudeProbe({
@@ -854,8 +1101,10 @@ it('3 · warns ten minutes before the .credentials.json token expires', async ()
   expect(row('claude-code').querySelector('.readiness')!.textContent).toBe(
     '令牌即将过期',
   )
-  expect(row('claude-code').textContent).toMatch(/[45] 分钟内过期/)
-  expect(row('claude-code').textContent).toContain('claude setup-token')
+  expect(row('claude-code').textContent).toMatch(/[45] 分钟内过期|即将过期/)
+  const block = await signIn()
+  expect(block.textContent).toMatch(/[45] 分钟内过期/)
+  expect(block.textContent).toContain('claude setup-token')
 })
 it('10 · the sign-in help never says claude auth login (snapshot)', async () => {
   claudeProbe({
@@ -864,11 +1113,10 @@ it('10 · the sign-in help never says claude auth login (snapshot)', async () =>
     auth: { source: null, problem: 'missing' },
   })
   await mount()
-  const help = row('claude-code').querySelector('[data-claude-sign-in-help]')!
+  const help = (await signIn()).querySelector('[data-claude-sign-in-help]')!
   expect(help.textContent!.replace(/\s+/g, ' ').trim()).toMatchInlineSnapshot(
     `"订阅账号：在终端运行 claude setup-token，把生成的令牌粘贴到这里；API Key：粘贴 ANTHROPIC_API_KEY。Emperor 不读取钥匙串，终端里 /login 的登录在这里不可用。"`,
   )
-  expect(row('claude-code').textContent).not.toContain('auth login')
   expect(document.body.textContent).not.toContain('claude auth login')
 })
 it('10 · no copy in the app, Core or the user manual says claude auth login', async () => {
@@ -900,72 +1148,4 @@ it('10 · no copy in the app, Core or the user manual says claude auth login', a
   ])
     walk(join(repo, dir))
   expect(offenders).toEqual([])
-})
-it('8 · 高级 sets Claude Code’s turns per run, 200 by default, stored only when changed', async () => {
-  await mount()
-  const select = root.querySelector<HTMLButtonElement>(
-    '[data-claude-max-turns]',
-  )!
-  expect(select.textContent).toContain('200')
-  select.click()
-  await settle()
-  const values = [
-    ...document.querySelectorAll<HTMLElement>('[data-value]'),
-  ].map((o) => o.dataset.value)
-  expect(values).toEqual(
-    expect.arrayContaining(['50', '100', '200', '500', '1000']),
-  )
-  document.querySelector<HTMLElement>('[data-value="500"]')!.click()
-  await settle()
-  await action('save-executors').onClick!()
-  await settle()
-  expect(
-    configureExecutors.mock.calls[0]![0].config.limits.claudeMaxTurns,
-  ).toBe(500)
-  root.querySelector<HTMLButtonElement>('[data-claude-max-turns]')!.click()
-  await settle()
-  document.querySelector<HTMLElement>('[data-value="200"]')!.click()
-  await settle()
-  await action('save-executors').onClick!()
-  await settle()
-  expect(configureExecutors.mock.calls[1]![0].config.limits).not.toHaveProperty(
-    'claudeMaxTurns',
-  )
-})
-
-it('offers 开发环境 under 高级: git identity and proxies on, the rest off; saves only a change (AGT-08)', async () => {
-  await mount()
-  const group = root.querySelector<HTMLElement>('[data-executor-dev-env]')!
-  expect(group).not.toBeNull()
-  expect(group.textContent).toContain('开发环境')
-  const toggle = (key: string) =>
-    group.querySelector<HTMLButtonElement>(`[data-dev-env="${key}"]`)!
-  expect(toggle('gitIdentity').getAttribute('aria-checked')).toBe('true')
-  expect(toggle('proxy').getAttribute('aria-checked')).toBe('true')
-  for (const key of ['sshAgent', 'toolchains', 'github'])
-    expect(toggle(key).getAttribute('aria-checked')).toBe('false')
-  expect(group.textContent).toContain('允许子智能体使用 GitHub 登录')
-
-  toggle('sshAgent').click()
-  await settle()
-  await action('save-executors').onClick!()
-  await settle()
-  expect(
-    configureExecutors.mock.calls.at(-1)![0].config.developmentEnvironment,
-  ).toEqual({
-    gitIdentity: true,
-    proxy: true,
-    sshAgent: true,
-    toolchains: false,
-    github: false,
-  })
-
-  // Back to the defaults: the field is not stored at all.
-  toggle('sshAgent').click()
-  await settle()
-  await action('save-executors').onClick!()
-  await settle()
-  expect(
-    configureExecutors.mock.calls.at(-1)![0].config.developmentEnvironment,
-  ).toBeUndefined()
 })

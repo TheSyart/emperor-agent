@@ -8,6 +8,7 @@ import {
   onDeactivated,
   ref,
   defineAsyncComponent,
+  inject,
   shallowRef,
   watch,
 } from 'vue'
@@ -43,8 +44,12 @@ import {
   abandonDelegation,
   getDelegation,
   interruptDelegation,
+  sendDelegationMessage,
   type DelegationView,
 } from '../../api/delegations'
+import { APP_CONTEXT_KEY } from '../../composables/useAppContext'
+import ChildComposer from '../composer/ChildComposer.vue'
+import TakeoverSeat from './takeover/TakeoverSeat.vue'
 import {
   createExternalHistoryFeed,
   type ExternalHistoryPage,
@@ -199,6 +204,53 @@ async function navigate(id: string) {
 function parent() {
   if (controlsAvailable.value && ancestry.value?.parentId)
     void navigate(ancestry.value.parentId)
+  else if (canOpenRoot.value) root()
+}
+
+// Writing to the task and answering its questions here (AGT-10).
+const appContext = inject(APP_CONTEXT_KEY, null)
+const childComposer = ref<InstanceType<typeof ChildComposer> | null>(null)
+const sending = ref(false)
+const sendError = ref('')
+/** A running Claude Code / Codex that can be steered takes the message now. */
+const steerable = computed(
+  () =>
+    run.value?.phase === 'running' &&
+    record.value?.capabilitySnapshot?.steer === true,
+)
+/** The question this task is waiting on, from the main conversation. */
+const question = computed(() => {
+  const interaction = appContext?.pendingInteractionsBySession[rootId.value]
+  return interaction?.meta?.external_delegation_id === delegationId.value
+    ? interaction
+    : null
+})
+const closedReason = computed(() => {
+  if (rootAvailability.value === 'archived')
+    return '主会话已归档，不能再给它发消息。'
+  if (!controlsAvailable.value && !loading.value) return '现在不能给它发消息。'
+  return undefined
+})
+async function send(text: string) {
+  if (!controlsAvailable.value || sending.value) return
+  sending.value = true
+  sendError.value = ''
+  try {
+    await sendDelegationMessage({
+      id: delegationId.value,
+      sessionId: rootId.value,
+      messageId: `dgm-${crypto.randomUUID()}`,
+      text,
+      delivery: steerable.value ? 'steer' : 'queue',
+      ...(live.value && run.value ? { expectedRunId: run.value.id } : {}),
+    })
+    childComposer.value?.clear()
+    await feed?.refresh()
+  } catch (cause) {
+    sendError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    sending.value = false
+  }
 }
 function root() {
   void navigate(rootId.value)
@@ -642,20 +694,26 @@ async function stop() {
       </DynamicScroller>
     </div>
     <footer class="child-footer">
-      <span>子智能体对话 · 只读</span
-      ><Button
-        v-if="controlsAvailable && ancestry?.parentId"
-        size="sm"
-        @click="parent"
-        >返回父智能体</Button
-      ><Button v-if="canOpenRoot" size="sm" @click="root">{{
-        availability !== 'ready'
-          ? '返回主会话'
-          : run?.phase === 'waiting_input'
-            ? '返回主会话回答'
-            : '返回主会话继续安排任务'
-      }}</Button
-      ><Button
+      <TakeoverSeat v-if="question" :interaction="question" />
+      <ChildComposer
+        v-else
+        ref="childComposer"
+        :parent-title="ancestry?.ancestors.at(-1)?.title"
+        :running="live"
+        :stopping="!!stopping || run?.phase === 'cancelling'"
+        :can-stop="controlsAvailable"
+        :can-back="controlsAvailable && !!ancestry?.parentId"
+        :can-root="canOpenRoot"
+        :sending="sending"
+        :steer="steerable"
+        :error="sendError || undefined"
+        :closed="closedReason"
+        @send="send"
+        @stop="stop"
+        @back="parent"
+        @root="root"
+      />
+      <Button
         v-if="needsExit && controlsAvailable && !live"
         data-abandon-child
         size="sm"
@@ -664,16 +722,6 @@ async function stop() {
         :disabled="ending"
         @click="end"
         >{{ ending ? '正在结束…' : '标记为已结束' }}</Button
-      ><Button
-        v-if="live && controlsAvailable"
-        data-stop-child
-        size="sm"
-        variant="danger"
-        :disabled="!!stopping || run?.phase === 'cancelling'"
-        @click="stop"
-        >{{
-          stopping || run?.phase === 'cancelling' ? '正在停止…' : '停止子智能体'
-        }}</Button
       >
     </footer>
     <ExternalAgentDetails
@@ -785,17 +833,10 @@ h1 {
 .child-footer {
   flex: none;
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+  flex-direction: column;
   align-items: center;
-  padding: var(--space-3) var(--space-5);
-  border-top: 1px solid var(--stroke-2);
-}
-.child-footer > span {
-  flex: 1 0 auto;
-  white-space: nowrap;
-  font: var(--font-code-small);
-  color: rgb(var(--text-3));
+  gap: var(--space-2);
+  padding-top: var(--space-3);
 }
 .child-note,
 .child-more {

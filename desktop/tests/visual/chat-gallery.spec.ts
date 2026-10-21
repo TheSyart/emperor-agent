@@ -150,7 +150,8 @@ test('subagent row and child session (kernel log)', async ({ page }) => {
   await open(page, 'kernel', 'light', { width: 1000, height: 900 }, EXPANDED)
   await expect(page.locator('[data-subagent-line]')).toBeVisible()
   await shot(page, 'chat-subagent-light')
-  await page.locator('[data-subagent-line] .open-link').click()
+  // The entry above the tool row opens the child (UI-S03).
+  await page.locator('[data-agent-entry]').first().click()
   await expect(page.locator('.crumbs')).toBeVisible()
   await expect(page.getByText('child found x').first()).toBeVisible()
   await shot(page, 'chat-subagent-child-light')

@@ -661,14 +661,14 @@ test('subagent row opens the child session and the breadcrumb returns', async ({
 }) => {
   await listProcessSteps(page)
   await open(page, '/chat/build-ui')
-  const line = page.locator('[data-subagent-line]').first()
-  await line.scrollIntoViewIfNeeded()
-  await line.locator('.open-link').click()
+  const entry = page.locator('[data-agent-entry]').first()
+  await entry.scrollIntoViewIfNeeded()
+  await entry.click()
   await expect(page).toHaveURL(/\/chat\/showcase-child/)
   const crumbs = page.locator('.conversation-header .crumbs')
   await expect(crumbs.locator('.crumb')).toHaveCount(2)
   await expect(crumbs.locator('.crumb').first()).toHaveText('构建 Visual UI')
-  await expect(page.locator('.read-only-composer')).toBeVisible()
+  await expect(page.locator('[data-child-composer]')).toBeVisible()
   await expect(page.locator('.composer-root .card')).toHaveCount(0)
   await expect(
     page.locator('.user-bubble, [data-chat-flow-kind]').first(),
@@ -676,7 +676,7 @@ test('subagent row opens the child session and the breadcrumb returns', async ({
   await shot(page, 'app-child-session')
   await crumbs.locator('button.crumb').first().click()
   await expect(page).toHaveURL(/\/chat\/build-ui(\?|$)/)
-  await expect(page.locator('.read-only-composer')).toHaveCount(0)
+  await expect(page.locator('[data-child-composer]')).toHaveCount(0)
 })
 
 test('nested depth-3 subagent: breadcrumb chain and read-only composer', async ({
@@ -688,8 +688,10 @@ test('nested depth-3 subagent: breadcrumb chain and read-only composer', async (
   const crumbs = page.locator('.conversation-header .crumbs .crumb')
   await expect(crumbs).toHaveText(['构建 Visual UI', '调研子任务', '深入检索'])
   await expect(crumbs.last()).toHaveAttribute('aria-current', 'page')
-  await expect(page.locator('.read-only-composer')).toBeVisible()
-  await expect(page.locator('.read-only-composer')).toContainText('调研子任务')
+  await expect(page.locator('[data-child-composer]')).toBeVisible()
+  await expect(page.locator('[data-child-composer]')).toContainText(
+    '调研子任务',
+  )
   await expect(page.getByText('child found x').first()).toBeVisible()
   await shot(page, 'app-child-depth3')
 
@@ -698,8 +700,8 @@ test('nested depth-3 subagent: breadcrumb chain and read-only composer', async (
   await page.locator('.conversation-header button.crumb').nth(1).click()
   await expect(page).toHaveURL(new RegExp(`/chat/${NESTED_IDS.kid1}`))
   await expect(crumbs).toHaveText(['构建 Visual UI', '调研子任务'])
-  await expect(page.locator('.read-only-composer')).toBeVisible()
-  await page.locator('[data-subagent-line] .open-link').first().click()
+  await expect(page.locator('[data-child-composer]')).toBeVisible()
+  await page.locator('[data-agent-entry]').first().click()
   await expect(page).toHaveURL(new RegExp(`/chat/${NESTED_IDS.kid2}`))
   await expect(crumbs).toHaveCount(3)
 

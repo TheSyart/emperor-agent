@@ -2,6 +2,10 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import Avatar from './Avatar.vue'
 import { subagentFrames, subagentSheet } from './subagentAvatars'
+import type { AvatarSize } from './avatar'
+
+// 40 in a card hero; 28 in a settings row beside the vendor logos (AGT-10).
+const props = withDefaults(defineProps<{ size?: AvatarSize }>(), { size: 40 })
 import { createAvatarPreviewPlayer } from './avatarPreview'
 // Same approved order as the visual reference; coprime stride visits all 36.
 const start = subagentFrames.findIndex((frame) => frame.id === 'C07')
@@ -83,6 +87,7 @@ onBeforeUnmount(() => dispose?.())
     ref="container"
     class="avatar-preview"
     data-avatar-preview
+    :style="{ width: `${props.size}px`, height: `${props.size}px` }"
     :title="failed ? '角色头像预览加载失败' : undefined"
     :data-preview-error="failed || undefined"
     role="img"
@@ -95,14 +100,14 @@ onBeforeUnmount(() => dispose?.())
         kind="sprite"
         id="settings-preview"
         :frame-id="frames[current]!.id"
-        :size="40"
+        :size="props.size"
     /></span>
     <span ref="second" class="layer" aria-hidden="true"
       ><Avatar
         kind="sprite"
         id="settings-preview"
         :frame-id="frames[next]!.id"
-        :size="40"
+        :size="props.size"
     /></span>
   </span>
 </template>
@@ -110,8 +115,6 @@ onBeforeUnmount(() => dispose?.())
 .avatar-preview {
   position: relative;
   display: inline-block;
-  width: 40px;
-  height: 40px;
   flex: none;
   background: transparent;
 }
