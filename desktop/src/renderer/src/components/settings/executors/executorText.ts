@@ -5,6 +5,7 @@
  * the main page, the detail page and their tests read the same words.
  */
 import type {
+  ClaudeSignInView,
   ExecutorProbe,
   ExecutorProfile,
   ExecutorRuntimeFacts,
@@ -133,7 +134,7 @@ export function statusDetail(
     return profile.authRef.kind === 'model-route'
       ? '所选模型的凭据读不到，请在「设置 › 模型」里检查这条配置。'
       : profile.backend === 'claude-code'
-        ? '请点「登录 Claude Code」，在 macOS 的「终端」里登录一次。'
+        ? '请点「登录 Claude Code」，在浏览器里登录一次。'
         : '请在终端运行 codex login，登录后重新检测。'
   if (probe.status === 'missing')
     return profile.backend === 'claude-code'
@@ -176,10 +177,11 @@ export function versionText(
 }
 
 // ── Claude Code 登录 (AGT-12) ──────────────────────────────────────────
-// Claude Code signs in with its own login (登录 Claude Code, in macOS
-// Terminal); `auth` is what `claude auth status` says, plus the API
-// credential Emperor passes, which outranks that login. Emperor never
-// reads or keeps the login itself.
+// Claude Code signs in with its own login (登录 Claude Code: Core runs
+// `claude auth login` and the user finishes in the browser, FIX-11);
+// `auth` is what `claude auth status` says, plus the API credential
+// Emperor passes, which outranks that login. Emperor never reads or keeps
+// the login itself.
 
 const SOURCE_LABEL = {
   settings: '来自 ~/.claude/settings.json',
@@ -244,6 +246,25 @@ export function signInText(facts: ExecutorFacts): string {
 }
 
 /**
+ * Why 登录 Claude Code did not finish (FIX-11), in one line: from the way
+ * claude ended, never from anything it printed.
+ */
+export function signInFailureText(signIn: ClaudeSignInView): string {
+  switch (signIn.reason) {
+    case 'timeout':
+      return '登录没有完成：10 分钟内没有在浏览器里完成，已停止'
+    case 'start':
+      return '登录没有开始：claude 没能启动'
+    case 'not-signed-in':
+      return '登录没有完成：claude 已结束，但仍显示尚未登录'
+    default:
+      return signIn.exitCode === undefined
+        ? '登录没有完成：claude 意外结束'
+        : `登录没有完成：claude 以退出码 ${signIn.exitCode} 结束`
+  }
+}
+
+/**
  * The credential Emperor passes outranks claude's own login (claude's
  * order: a gateway token, then an API key, then its sign-in): what to undo
  * to sign in with a Claude account instead. Empty when nothing outranks it.
@@ -290,7 +311,7 @@ export function rowSummary(
   if (needsSignIn(profile, facts))
     return facts.probe?.diagnostic === 'AUTH_STATUS_FAILED'
       ? '读不到 Claude Code 的登录状态，请重新检测'
-      : '在 macOS 的「终端」里登录一次，登录由 Claude Code 自己保存'
+      : '在浏览器里登录一次，登录由 Claude Code 自己保存'
   const detail = statusDetail(profile, facts)
   if (detail) return detail
   const warning = compatibilityWarning(profile, facts)

@@ -15,14 +15,17 @@ import {
   type InjectionKey,
 } from 'vue'
 import type {
+  ClaudeSignInView,
   ExecutorConfig,
   ExecutorModelCatalog,
   ExecutorProbe,
   ExecutorProfile,
   ExecutorRuntimeFacts,
 } from '@emperor/core/runtime-contract'
+import { onCoreEvent } from '../../../api/backend'
 import { core } from '../../../api/http'
 import {
+  cancelExecutorSignIn,
   clearExecutorCredential,
   configureExecutors,
   dismissExecutorNotice,
@@ -68,10 +71,14 @@ export function createExecutorSettings() {
   /** The Claude profile 使用 API Key is open for (AGT-12). */
   const apiKeyDialog = ref<ExecutorProfile | null>(null)
   /**
-   * Profiles whose 登录 Claude Code is open in Terminal: checked again
-   * when Emperor comes back to the front (AGT-12).
+   * 登录 Claude Code (FIX-11): the one Core is running, or the last one that
+   * failed (its reason and the command for Terminal) until it is retried or
+   * a check finds the sign-in. Core pushes the changes (`executor_sign_in`).
    */
-  const signInPending = ref<Record<string, boolean>>({})
+  const signIn = ref<ClaudeSignInView | null>(null)
+  const signingIn = computed(() => signIn.value?.state === 'running')
+  /** Sign-ins (by `startedAt`) that already ended: a late reply is ignored. */
+  const endedSignIns = new Set<number>()
   /** Once after the upgrade that deleted a saved Claude token (AGT-12). */
   const signInNotice = ref(false)
   const error = ref('')
@@ -156,8 +163,27 @@ export function createExecutorSettings() {
     ]
   }
 
+  /** A sign-in as Core reports it: running and failed stay on the page. */
+  function adoptSignIn(next: ClaudeSignInView | null | undefined) {
+    if (!next) return
+    if (next.state !== 'running') endedSignIns.add(next.startedAt)
+    else if (endedSignIns.has(next.startedAt)) return
+    signIn.value =
+      next.state === 'running' || next.state === 'failed' ? next : null
+  }
+
   function adoptFacts(result: ListResult) {
     signInNotice.value = result.signInNotice === true
+    if (result.signIn) adoptSignIn(result.signIn)
+    else if (signingIn.value) {
+      // It ended while the page did not hear: ask claude what it says now.
+      const ended = signIn.value
+      signIn.value = null
+      const profile = config.value?.profiles.find(
+        (p) => p.id === ended?.profileId,
+      )
+      if (profile) void recheck(profile)
+    }
     runtimes.value = Object.fromEntries(
       result.profiles.map((entry) => [entry.profile.id, entry.runtime]),
     )
@@ -275,8 +301,7 @@ export function createExecutorSettings() {
                 ) === key
               ) {
                 probes.value[profile.id] = probe
-                if (probe.status === 'available')
-                  delete signInPending.value[profile.id]
+                if (probe.status === 'available') clearFailedSignIn(profile)
               }
             } catch (cause) {
               if (current === generation)
@@ -413,34 +438,81 @@ export function createExecutorSettings() {
     }
   }
 
-  /** 登录 Claude Code: Core opens macOS Terminal on claude's own login. */
-  async function signIn(
+  /** A failed sign-in's notice goes once claude is signed in after all. */
+  function clearFailedSignIn(profile: ExecutorProfile) {
+    if (
+      signIn.value?.state === 'failed' &&
+      signIn.value.profileId === profile.id
+    )
+      signIn.value = null
+  }
+
+  /**
+   * 登录 Claude Code (FIX-11): Core starts claude's own `auth login`; the
+   * user signs in in the browser and Core pushes the result.
+   */
+  async function startSignIn(
     profile: ExecutorProfile,
     method: 'claude-ai' | 'console' = 'claude-ai',
   ) {
-    if (tokenBusy.value) return
+    if (tokenBusy.value || signingIn.value) return
     tokenBusy.value = true
     error.value = ''
     try {
-      await signInExecutor({ profileId: profile.id, method })
-      signInPending.value[profile.id] = true
+      adoptSignIn(
+        (await signInExecutor({ profileId: profile.id, method })).signIn,
+      )
     } catch (cause) {
-      error.value = `没有打开登录：${message(cause)}`
+      error.value = `没有开始登录：${message(cause)}`
     } finally {
       tokenBusy.value = false
     }
   }
 
-  /** Back from Terminal (or 重新检测): ask claude again. */
+  /** 取消: Core ends claude's sign-in. */
+  async function cancelSignIn() {
+    const running = signIn.value
+    if (!running || running.state !== 'running') return
+    try {
+      const result = await cancelExecutorSignIn({
+        profileId: running.profileId,
+      })
+      endedSignIns.add(running.startedAt)
+      if (signIn.value?.startedAt === running.startedAt)
+        signIn.value = result.signIn?.state === 'failed' ? result.signIn : null
+    } catch (cause) {
+      error.value = `取消登录失败：${message(cause)}`
+    }
+  }
+
+  /** 重新检测 (after the command in Terminal, or any time): ask claude again. */
   async function recheck(profile: ExecutorProfile) {
     try {
       const probe = await probeExecutor({ profileId: profile.id })
       if (disposed) return
       keySaved(profile, probe)
-      if (probe.status === 'available') delete signInPending.value[profile.id]
+      if (probe.status === 'available') clearFailedSignIn(profile)
     } catch (cause) {
       if (!disposed) probeErrors.value[profile.id] = message(cause)
     }
+  }
+
+  /** What Core pushes while 登录 Claude Code runs and when it ends. */
+  function onSignInEvent(event: unknown) {
+    const data = event as {
+      event?: unknown
+      signIn?: ClaudeSignInView
+      probe?: ExecutorProbe
+    } | null
+    if (data?.event !== 'executor_sign_in' || !data.signIn || disposed) return
+    const profile = config.value?.profiles.find(
+      (p) => p.id === data.signIn!.profileId,
+    )
+    if (profile && data.probe) keySaved(profile, data.probe)
+    adoptSignIn(data.signIn)
+    // Signed in, but the check that followed did not answer: ask again.
+    if (profile && data.signIn.state === 'signed-in' && !data.probe)
+      void recheck(profile)
   }
 
   async function signOut(profile: ExecutorProfile) {
@@ -451,7 +523,7 @@ export function createExecutorSettings() {
       probes.value[profile.id] = (
         await signOutExecutor({ profileId: profile.id })
       ).probe
-      delete signInPending.value[profile.id]
+      clearFailedSignIn(profile)
     } catch (cause) {
       error.value = `退出登录失败：${message(cause)}`
     } finally {
@@ -468,17 +540,22 @@ export function createExecutorSettings() {
     }
   }
 
-  /** Emperor is in front again: a pending sign-in is checked first. */
+  /**
+   * Emperor is in front again: after a failed sign-in the user may have run
+   * the command in Terminal, so that profile is checked first.
+   */
   function onFocus() {
-    const pending = (config.value?.profiles ?? []).filter(
-      (p) => signInPending.value[p.id],
-    )
-    if (pending.length) for (const profile of pending) void recheck(profile)
+    const failed = signIn.value?.state === 'failed' ? signIn.value : null
+    const profile =
+      failed && config.value?.profiles.find((p) => p.id === failed.profileId)
+    if (profile) void recheck(profile)
     else void refreshFacts()
   }
 
   let timer: ReturnType<typeof setInterval> | undefined
+  let unsubscribe: (() => void) | undefined
   onMounted(() => {
+    unsubscribe = onCoreEvent(onSignInEvent)
     void load()
     void loadModelChoices()
     timer = setInterval(() => void refreshFacts(), 10_000)
@@ -486,6 +563,7 @@ export function createExecutorSettings() {
   })
   onBeforeUnmount(() => {
     disposed = true
+    unsubscribe?.()
     if (timer) clearInterval(timer)
     window.removeEventListener('focus', onFocus)
     generation++
@@ -507,7 +585,8 @@ export function createExecutorSettings() {
     busy,
     tokenBusy,
     apiKeyDialog,
-    signInPending,
+    signIn,
+    signingIn,
     signInNotice,
     error,
     modelOptionsOf,
@@ -517,7 +596,8 @@ export function createExecutorSettings() {
     changeProfile,
     keySaved,
     clearKey,
-    signIn,
+    startSignIn,
+    cancelSignIn,
     recheck,
     signOut,
     dismissSignInNotice,
