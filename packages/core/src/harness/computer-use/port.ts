@@ -572,7 +572,14 @@ export interface NativeDesktopDriver extends TargetDriver {
     hooks: ActHooks,
     signal: AbortSignal,
   ): Promise<CredentialFillOutcome>
-  permissions(): Promise<Readonly<Record<string, PermissionStatus>>>
+  /**
+   * The helper's TCC grants. `connect: false` (a status read) asks only a
+   * helper that is already running and otherwise answers what is known,
+   * never starting one (FIX-08).
+   */
+  permissions(options?: {
+    readonly connect?: boolean
+  }): Promise<Readonly<Record<string, PermissionStatus>>>
   /**
    * Keep or drop the low-rate capture stream that makes macOS badge the
    * window as shared (E-M16). Resolves whether a stream runs afterwards.
@@ -615,8 +622,15 @@ export interface ComputerUseHostPort {
   externalBrowser(): BrowserDriver | null
   /** Null while the helper is unavailable. */
   desktop(): NativeDesktopDriver | null
-  /** Live capability negotiation, one entry per driver kind. */
-  capabilities(): Promise<DriverCapability[]>
+  /**
+   * Live capability negotiation, one entry per driver kind. `connect: false`
+   * (status reads: Settings, the plugin page, the switches) reports what is
+   * known without starting a helper; the model's ui_get_capabilities may
+   * start one (FIX-08).
+   */
+  capabilities(options?: {
+    readonly connect?: boolean
+  }): Promise<DriverCapability[]>
   /** Drive the on-screen "being controlled" indicator (§6.6). */
   indicateControl(state: ControlIndicatorState): void
   /** The credential vault; null where none is available. */

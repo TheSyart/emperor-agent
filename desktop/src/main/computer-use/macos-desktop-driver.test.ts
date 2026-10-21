@@ -273,6 +273,41 @@ describe('MacosDesktopDriver', () => {
     })
   })
 
+  // FIX-08: Settings and the plugin page read the status; that read started
+  // the Helper and waited for it (8 s and more when it cannot connect).
+  it('a status read neither starts the Helper nor waits for it', async () => {
+    const connect = vi.fn()
+    const k = fixture(undefined, undefined, undefined, undefined, undefined, {})
+    const driver = new MacosDesktopDriver({
+      connect: async () => {
+        connect()
+        return k.client
+      },
+      self: SELF,
+      processPaths: async () => new Map(),
+    })
+    const port = new DesktopComputerUsePort({
+      platform: 'darwin',
+      desktop: () => driver,
+    })
+    expect(await driver.permissions({ connect: false })).toEqual({})
+    expect((await port.capabilities({ connect: false }))[2]).toMatchObject({
+      driver: 'desktop',
+      available: false,
+    })
+    expect(connect).not.toHaveBeenCalled()
+
+    // Once something started it, a status read refreshes the grants.
+    await driver.listApps(new AbortController().signal)
+    expect(connect).toHaveBeenCalledTimes(1)
+    k.setPermissions('granted')
+    expect((await port.capabilities({ connect: false }))[2]).toMatchObject({
+      available: true,
+      permissions: { accessibility: 'granted', 'screen-recording': 'granted' },
+    })
+    expect(connect).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects protected apps even if the helper unexpectedly binds one', async () => {
     const k = fixture()
     const original = k.request.getMockImplementation()!
