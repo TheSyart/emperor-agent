@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import type { Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -103,7 +103,7 @@ for (const theme of ['dark', 'light'] as const) {
     await shot(page, `list-mine-${theme}`)
   })
 
-  test(`detail overview (${theme})`, async ({ page }) => {
+  test(`detail overview (${theme}) @baseline`, async ({ page }) => {
     await openPulls(page, DETAIL, { theme })
     const detail = page.locator('article.pr-detail')
     await expect(
@@ -131,6 +131,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(detail.locator('[data-pr-files] li')).toHaveCount(4)
     await noHorizontalOverflow(page)
     await shot(page, `detail-overview-${theme}`)
+    await expectBaseline(page, 'pages', `pull-request-${theme}`)
   })
 
   test(`diff tab (${theme})`, async ({ page }) => {

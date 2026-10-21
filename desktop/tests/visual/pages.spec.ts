@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import type { Locator, Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -88,7 +88,9 @@ async function openJobMenu(page: Page, shell: Locator, id: string) {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`scheduler page tabs and rows (${theme})`, async ({ page }) => {
+  test(`scheduler page tabs and rows (${theme}) @baseline`, async ({
+    page,
+  }) => {
     const shell = await open(page, '/scheduler', { theme })
     await expect(
       shell.getByRole('heading', { name: '定时任务', level: 1 }),
@@ -121,6 +123,7 @@ for (const theme of ['dark', 'light'] as const) {
     )
     await expectPageFits(page)
     await shot(page, `scheduler-all-${theme}`)
+    await expectBaseline(page, 'pages', `scheduler-${theme}`)
 
     const tabs: Array<[string, string, string[]]> = [
       [
@@ -146,7 +149,9 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(shell.getByText('没有匹配的任务')).toBeVisible()
   })
 
-  test(`scheduler edit and create dialogs (${theme})`, async ({ page }) => {
+  test(`scheduler edit and create dialogs (${theme}) @baseline`, async ({
+    page,
+  }) => {
     const shell = await open(page, '/scheduler', { theme })
     await jobRow(shell, 'job_daily_digest').locator('.main').click()
     const dialog = page.getByTestId('scheduler-job-dialog')
@@ -155,6 +160,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(dialog.getByText('运行历史')).toBeVisible()
     await expect(page.locator('[data-action="save-job"]')).toBeVisible()
     await shot(page, `scheduler-edit-${theme}`)
+    await expectBaseline(page, 'pages', `scheduler-edit-${theme}`)
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden()
 
@@ -261,7 +267,7 @@ test('scheduler row menu runs, pauses, resumes, creates and deletes', async ({
 // ── 能力 ────────────────────────────────────────────────────────────────
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`capabilities page tabs (${theme})`, async ({ page }) => {
+  test(`capabilities page tabs (${theme}) @baseline`, async ({ page }) => {
     const shell = await open(page, '/capabilities', { theme })
     await expect(
       shell.getByRole('heading', { name: '能力', level: 1 }),
@@ -280,6 +286,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(shell.locator('[data-plugin-id]').first()).toBeVisible()
     await expectPageFits(page)
     await shot(page, `plugins-plugins-${theme}`)
+    await expectBaseline(page, 'pages', `plugins-${theme}`)
 
     await shell.getByRole('tab', { name: 'Skills' }).click()
     await expect(page).toHaveURL(/\/capabilities\/skills/)
@@ -382,7 +389,7 @@ function picks(shell: Locator) {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`能力 opens with 推荐, filtered by the tab (${theme})`, async ({
+  test(`能力 opens with 推荐, filtered by the tab (${theme}) @baseline`, async ({
     page,
   }) => {
     const shell = await open(page, '/explore', { theme })
@@ -401,6 +408,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(first.getByRole('button')).toHaveCount(1)
     await expectPageFits(page)
     await shot(page, `capabilities-recommended-${theme}`)
+    await expectBaseline(page, 'pages', `capabilities-${theme}`)
 
     await shell.getByRole('tab', { name: 'Skills' }).click()
     await expect(picks(shell)).toHaveCount(4)

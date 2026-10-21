@@ -18,6 +18,8 @@
     "test": "vitest run && node --test tests/chrome-debugger-probe/worker.test.js",
     "lint": "eslint src tests --max-warnings=0",
     "screenshots": "playwright test -c playwright.config.ts",
+    "visual:baselines": "node scripts/visual-baselines.mjs",
+    "visual:baselines:update": "node scripts/visual-baselines.mjs --update",
     "e2e:cu": "node scripts/e2e-cu.mjs --mode=smoke && node scripts/e2e-cu.mjs --mode=contract",
     "typecheck:test": "tsc --noEmit -p tsconfig.test-web.json && tsc --noEmit -p tsconfig.test-node.json",
     "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",

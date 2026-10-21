@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import type { Page } from '@playwright/test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -138,7 +138,7 @@ async function requestWorkspace(page: Page, request: unknown) {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`UI-S06 1 · with no history, the four pane entries (${theme})`, async ({
+  test(`UI-S06 1 · with no history, the four pane entries (${theme}) @baseline`, async ({
     page,
   }) => {
     await open(page, '/chat/build-ui?visualProgress=final', theme, 'launcher')
@@ -160,6 +160,7 @@ for (const theme of ['dark', 'light'] as const) {
       page.locator('.workspace-panes [aria-selected="true"]'),
     ).toHaveCount(0)
     await shot(page, `start-${theme}`)
+    await expectBaseline(page, 'workspace', `start-${theme}`)
   })
 
   test(`UI-S06 1 · empty state without a project (${theme})`, async ({
@@ -180,7 +181,9 @@ for (const theme of ['dark', 'light'] as const) {
     await shot(page, `start-no-project-${theme}`)
   })
 
-  test(`files: tabs, right tree and filter (${theme})`, async ({ page }) => {
+  test(`files: tabs, right tree and filter (${theme}) @baseline`, async ({
+    page,
+  }) => {
     await open(page, '/chat/build-ui?visualProgress=final', theme, 'files')
     const pane = page.locator('.files-pane')
     const tree = pane.locator('.file-tree-column')
@@ -221,6 +224,7 @@ for (const theme of ['dark', 'light'] as const) {
     await filter.fill('read')
     await expect(tree.locator('.file-tree-row').first()).toBeVisible()
     await shot(page, `files-tabs-filter-${theme}`)
+    await expectBaseline(page, 'workspace', `files-${theme}`)
 
     // ⌘W / Ctrl+W inside the pane closes the active tab, not the window.
     // (The fixture names every read file README.md; tabs carry the path.)
@@ -660,7 +664,7 @@ test('UI-S06 1 · reopening the column shows the pane used last', async ({
 })
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`UI-S06 review: groups, row actions, diff and the branch menu (${theme})`, async ({
+  test(`UI-S06 review: groups, row actions, diff and the branch menu (${theme}) @baseline`, async ({
     page,
   }) => {
     await open(page, '/chat/build-ui?visualProgress=final', theme, 'review')
@@ -695,6 +699,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(pane).not.toContainText('SHA1')
     await expect(pane).not.toContainText('Branches')
     await shot(page, `review-${theme}`)
+    await expectBaseline(page, 'workspace', `review-${theme}`)
 
     // Hover shows 暂存 and 丢弃 in place of the counts.
     const actions = row.locator('.change-actions')
@@ -843,7 +848,7 @@ test('UI-S06 5 · without gh the Pull Request line is one hint', async ({
 })
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`UI-S06 6 · 文件 and 终端 share one tab bar (${theme})`, async ({
+  test(`UI-S06 6 · 文件 and 终端 share one tab bar (${theme}) @baseline`, async ({
     page,
   }) => {
     await open(page, '/chat/build-ui?visualProgress=final', theme, 'files')
@@ -880,5 +885,6 @@ for (const theme of ['dark', 'light'] as const) {
     expect(files.variant).toBe('editor')
     expect(terminal).toEqual(files)
     await shot(page, `tabs-terminal-${theme}`)
+    await expectBaseline(page, 'workspace', `terminal-${theme}`)
   })
 }

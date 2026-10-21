@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -10,7 +10,9 @@ test.beforeAll(() => {
 })
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`ui gallery renders every primitive (${theme})`, async ({ page }) => {
+  test(`ui gallery renders every primitive (${theme}) @baseline`, async ({
+    page,
+  }) => {
     await page.addInitScript((value) => {
       localStorage.setItem('emperor.theme', value)
     }, theme)
@@ -80,6 +82,7 @@ for (const theme of ['dark', 'light'] as const) {
       path: resolve(screenshotDir, `components-${theme}.png`),
       animations: 'disabled',
     })
+    await expectBaseline(kit, 'gallery', `components-${theme}`)
 
     await page.screenshot({
       path: resolve(screenshotDir, `gallery-${theme}.png`),
