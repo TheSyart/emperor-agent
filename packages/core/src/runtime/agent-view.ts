@@ -29,7 +29,7 @@ export interface AgentView {
     | 'needs_recovery'
 }
 export function agentSourceLabel(backend: AgentBackend): string {
-  return { internal: 'Emperor', 'claude-code': 'Claude Code', codex: 'Codex' }[
+  return { internal: '本地', 'claude-code': 'Claude Code', codex: 'Codex' }[
     backend
   ]
 }
@@ -39,7 +39,9 @@ export function agentTitle(
 ): string {
   return typeof description === 'string' && description.trim()
     ? description
-    : `${agentSourceLabel(backend)} 子智能体`
+    : backend === 'internal'
+      ? '本地子智能体'
+      : `${agentSourceLabel(backend)} 子智能体`
 }
 export function agentPhaseLabel(phase: AgentPhase): string {
   return {

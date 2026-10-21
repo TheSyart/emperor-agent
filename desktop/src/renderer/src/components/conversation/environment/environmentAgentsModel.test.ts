@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentView } from '@emperor/core/api'
-import { agentStack, agentSummary } from './environmentAgentsModel'
+import {
+  agentDuration,
+  agentStack,
+  agentSummary,
+} from './environmentAgentsModel'
 
 const agent = (
   id: string,
@@ -64,5 +68,32 @@ describe('agentStack', () => {
   it('keeps short lists whole', () => {
     expect(agentStack([agent('a', 'completed')])).toHaveLength(1)
     expect(agentStack([])).toEqual([])
+  })
+})
+
+describe('agentDuration (AGT-10)', () => {
+  const at = (
+    phase: AgentView['phase'],
+    createdAt: number,
+    updatedAt: number,
+  ) => ({ phase, createdAt, updatedAt }) as AgentView
+  it('8 · says how long a finished agent took and how long a running one has run', () => {
+    expect(agentDuration(at('completed', 0, 42_000), 999_999)).toBe(
+      '用时 42 秒',
+    )
+    expect(agentDuration(at('failed', 0, 5 * 60_000 + 10_000), 0)).toBe(
+      '用时 5 分钟',
+    )
+    expect(agentDuration(at('running', 0, 1000), 90 * 60_000)).toBe(
+      '已运行 1 小时 30 分',
+    )
+    expect(agentDuration(at('waiting', 0, 1000), 400)).toBe('已运行 不到 1 秒')
+    expect(agentDuration(at('completed', 0, 2 * 3_600_000), 0)).toBe(
+      '用时 2 小时',
+    )
+  })
+  it('says nothing for an agent with no trustworthy times', () => {
+    expect(agentDuration(at('unknown', 0, 0), 1000)).toBe('')
+    expect(agentDuration(at('completed', 5000, 1000), 9000)).toBe('')
   })
 })

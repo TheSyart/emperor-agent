@@ -129,7 +129,7 @@ it('uses the canonical Emperor fallback when a child creation description is abs
       lineage: { chain: [{ sessionId: 'root' }, { sessionId: 'sub-child' }] },
       titleOf: () => 'generated title',
     }).at(-1)?.label,
-  ).toBe('Emperor 子智能体')
+  ).toBe('本地子智能体')
 })
 
 describe('sessionRunning: one source for the composer and the turn status (FIX-03 7)', () => {
