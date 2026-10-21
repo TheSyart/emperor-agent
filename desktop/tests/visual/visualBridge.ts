@@ -5437,6 +5437,43 @@ export async function installVisualCoreBridge(
                     queue.push({ session: id, parent: id })
                   }
                 }
+                // Claude Code / Codex runs of the root (UI-S14): the same
+                // phases Core's agent list gives them.
+                const runs = new Map<string, Record<string, unknown>>()
+                for (const event of rawLogs.get(root)?.events ?? []) {
+                  if (event.type !== 'delegation/projection') continue
+                  const data = event.data ?? {}
+                  const task = (data.task ?? {}) as Record<string, unknown>
+                  const status = String(task.status ?? 'running')
+                  const id = String(data.delegation_id)
+                  const createdAt = Number(task.started_at ?? 1782475200000)
+                  runs.set(id, {
+                    id,
+                    kind: 'external',
+                    backend: data.backend,
+                    rootSessionId: root,
+                    parentAgentId: root,
+                    title: String(task.description ?? id),
+                    phase:
+                      status === 'waiting_input'
+                        ? 'waiting'
+                        : status === 'completed'
+                          ? 'completed'
+                          : status === 'interrupted'
+                            ? 'interrupted'
+                            : status === 'failed' || status === 'cancelled'
+                              ? 'failed'
+                              : status === 'outcome_unknown'
+                                ? 'unknown'
+                                : 'running',
+                    createdAt,
+                    updatedAt: Number(task.finished_at ?? createdAt),
+                    ...(data.parent_call_id
+                      ? { parentCallId: data.parent_call_id }
+                      : {}),
+                  })
+                }
+                agents.push(...runs.values())
               }
               return { agents }
             }

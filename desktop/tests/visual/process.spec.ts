@@ -91,13 +91,15 @@ for (const theme of ['light', 'dark'] as const) {
     await open(page, 'showcase', { theme, height: 2400 })
     await toTop(page)
     await expect(group(page)).toHaveCount(1)
-    await expect(header(page)).toHaveText(/^已处理 11 步 · 用时 .+秒/)
+    // The subagent is a row of its own after the process (UI-S14).
+    await expect(header(page)).toHaveText(/^已处理 10 步 · 用时 .+秒/)
+    await expect(page.locator('[data-agents-row]')).toHaveCount(1)
     await expect(header(page)).toHaveAttribute('aria-expanded', 'false')
     await shot(page, `process-folded-${theme}`)
     await expectBaseline(page, 'conversation', `process-folded-${theme}`)
     await header(page).click()
     await expect(body(page)).toBeVisible()
-    await expect(body(page).locator('[data-process-step]')).toHaveCount(11)
+    await expect(body(page).locator('[data-process-step]')).toHaveCount(10)
     await page.waitForTimeout(400)
     await shot(page, `process-expanded-${theme}`)
     await header(page).click()
@@ -130,7 +132,9 @@ test('4 · 始终展开 lists every step on load', async ({ page }) => {
   })
   await expect(body(page)).toBeVisible()
   await expect(header(page)).toHaveAttribute('aria-expanded', 'true')
-  await expect(page.locator('.tool-row')).toHaveCount(10)
+  // The subagent is a row of its own outside the process (UI-S14).
+  await expect(page.locator('.tool-row')).toHaveCount(9)
+  await expect(page.locator('[data-subagent-row]')).toHaveCount(1)
 })
 
 test('5 · context and hook rows need 显示系统步骤', async ({ page }) => {
@@ -148,7 +152,7 @@ test('5 · context and hook rows need 显示系统步骤', async ({ page }) => {
   await expect(next.locator('[data-process-body] .context-row')).toHaveCount(1)
   await expect(
     next.locator('[data-process-body] [data-process-step]'),
-  ).toHaveCount(12)
+  ).toHaveCount(11)
 })
 
 test('6 · a call the model is still writing shows 准备中 and the file name', async ({

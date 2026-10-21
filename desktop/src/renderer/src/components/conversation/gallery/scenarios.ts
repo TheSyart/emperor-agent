@@ -1443,6 +1443,435 @@ export function typographyScenario(now = Date.now()): Scenario {
   }
 }
 
+// ── UI-S14: subagents in the conversation ──────────────────────────────
+
+const CHAPTERS = [
+  '订单',
+  '回声',
+  '旧磁带',
+  '桥下',
+  '另一个我',
+  '白噪',
+  '物证',
+  '潮汐舱',
+  '回声的源头',
+  '末班潮',
+] as const
+
+const COVER_REFUSED = '模型 gpt-6.1-sol 被这个 ChatGPT 账号拒绝（400）'
+
+interface Writer {
+  readonly callId: string
+  readonly id: string
+  readonly description: string
+  readonly backend?: 'codex' | 'claude-code'
+}
+
+/** The eleven subagents of the novel: ten chapters and a cover. */
+function novelWriters(): Writer[] {
+  const writers: Writer[] = CHAPTERS.map((title, index) => {
+    const chapter = index + 1
+    const description = `写第 ${chapter} 章 ${title}`
+    if (chapter === 5)
+      return {
+        callId: `call_ch${chapter}`,
+        id: `dlg-ch${chapter}`,
+        description: `codex ${description}`,
+        backend: 'codex',
+      }
+    if (chapter === 10)
+      return {
+        callId: `call_ch${chapter}`,
+        id: `dlg-ch${chapter}`,
+        description,
+        backend: 'claude-code',
+      }
+    return { callId: `call_ch${chapter}`, id: `sub-ch${chapter}`, description }
+  })
+  writers.push({
+    callId: 'call_cover',
+    id: 'dlg-cover',
+    description: 'codex 生图做小说封面',
+    backend: 'codex',
+  })
+  return writers
+}
+
+function externalRun(
+  log: ShowcaseLog,
+  writer: Writer,
+  task: Record<string, unknown>,
+): void {
+  log.add('delegation/projection', {
+    event: 'delegation_run_changed',
+    delegation_id: writer.id,
+    run_id: `run-${writer.id}`,
+    current_run_id: `run-${writer.id}`,
+    parent_call_id: writer.callId,
+    backend: writer.backend,
+    journal_seq: 1,
+    task: { description: writer.description, ...task },
+  })
+}
+
+/**
+ * One step sends the ten chapters and the cover out in the background
+ * (UI-S14). `running`: eight still write, Codex refused both of its tasks,
+ * Claude Code's run could not confirm its outcome. `continued`: two minutes
+ * on, three chapters are back and the conversation went on below the group
+ * (the status bar's case). `done`: every chapter is back, 6 分 12 秒 after
+ * they started.
+ */
+export function subagentsScenario(
+  now = Date.now(),
+  stage: 'running' | 'continued' | 'done' = 'running',
+): Scenario {
+  const started =
+    stage === 'running'
+      ? now - 49_000
+      : stage === 'continued'
+        ? now - 130_000
+        : now - 420_000
+  const log = new ShowcaseLog(started - 41_000)
+  log.user(
+    '设定圣经写好了。派 10 个子智能体并行写十章，每章 1100 字左右；再让 Codex 生成一张封面。',
+  )
+  log.turnStart(1)
+  log.toolStep(
+    1,
+    1,
+    [
+      { reasoning: '先读设定圣经，再分章节交给执笔者。' },
+      { text: '先读一下设定圣经。' },
+    ],
+    [
+      {
+        id: 'call_bible',
+        name: 'read',
+        args: { file_path: 'novel/00-设定圣经.md' },
+        result: readResult(
+          'novel/00-设定圣经.md',
+          '# 设定圣经\n\n时间线：九月。',
+        ),
+        extra: {
+          meta: {
+            path: 'novel/00-设定圣经.md',
+            startLine: 1,
+            endLine: 3,
+            totalLines: 3,
+          },
+        },
+      },
+    ],
+  )
+  const writers = novelWriters()
+  log.stepStart(1, 2)
+  log.stream(1, 2, [
+    { text: '我把设定圣经交给每个执笔者，十章同时开写；封面交给 Codex。' },
+    ...writers.map((writer) => ({
+      tool: {
+        id: writer.callId,
+        name: 'subagent',
+        args: { description: writer.description },
+      },
+    })),
+  ])
+  log.tick(Math.max(0, started - (log.events.at(-1)?.time ?? started)))
+  for (const writer of writers) {
+    const args = {
+      description: writer.description,
+      prompt: `按设定圣经写「${writer.description}」，1100 字左右。`,
+      run_in_background: true,
+      ...(writer.backend ? { backend: writer.backend } : {}),
+    }
+    log.call(1, 2, writer.callId, 'subagent', args)
+    if (writer.backend)
+      externalRun(log, writer, { status: 'running', started_at: started })
+    else
+      log.add('subagent/started', {
+        subagentId: writer.id,
+        description: writer.description,
+        mode: 'spawn',
+        background: true,
+        callId: writer.callId,
+      })
+    log.add(
+      'tool/result',
+      {
+        turn: 1,
+        step: 2,
+        message: {
+          id: `result-${writer.callId}`,
+          role: 'user',
+          source: { kind: 'tool', callId: writer.callId },
+          content: [
+            {
+              type: 'tool-result',
+              toolCallId: writer.callId,
+              content: [{ type: 'text', text: `started ${writer.id}` }],
+            },
+          ],
+        },
+        meta: { kind: 'continuable', subagentId: writer.id },
+      },
+      { surfaceOp: 'append' },
+    )
+  }
+  log.stepEnd(1, 2)
+  // Codex refused both of its tasks within seconds.
+  for (const writer of writers.filter((item) => item.backend === 'codex'))
+    externalRun(log, writer, {
+      status: 'failed',
+      started_at: started,
+      finished_at: started + (writer.id === 'dlg-cover' ? 7_000 : 14_000),
+      detail: COVER_REFUSED,
+    })
+  log.stepStart(1, 3)
+  log.stream(1, 3, [
+    {
+      text: '十章都在写，封面那边 Codex 报错了（账号不支持 gpt-6.1-sol），我改用本地生图脚本补上。等剩下的章节写完，我再统一校对、汇编全书。',
+    },
+  ])
+  log.stepEnd(1, 3)
+  log.turnEnd(1)
+  const chapterTen = writers.find((writer) => writer.id === 'dlg-ch10')!
+  if (stage !== 'done') {
+    externalRun(log, chapterTen, {
+      status: 'outcome_unknown',
+      started_at: started,
+    })
+    if (stage === 'continued') continueBelow(log, writers, started)
+  } else {
+    writers.forEach((writer, index) => {
+      if (writer.backend === 'codex') return
+      const ended = started + 300_000 + index * 8_000
+      const report = `${writer.description.replace(/^写/u, '')}已写完，1100 字左右；人物称谓与时间线按设定圣经统一为九月。`
+      if (writer.backend)
+        externalRun(log, writer, {
+          status: 'completed',
+          started_at: started,
+          finished_at: started + 372_000,
+          detail: report,
+        })
+      else {
+        log.tick(Math.max(0, ended - (log.events.at(-1)?.time ?? ended)))
+        log.add('subagent/settled', {
+          subagentId: writer.id,
+          stopReason: 'completed',
+          text: `## ${writer.description}\n\n${report}`,
+        })
+      }
+    })
+  }
+  return {
+    id: stage === 'done' ? 'subagents-done' : `subagents-${stage}`,
+    label: stage === 'done' ? '子智能体（已结束）' : '子智能体（进行中）',
+    sessions: [{ id: `subagents-${stage}`, events: log.events }],
+  }
+}
+
+/** Chapters 1–3 come back; the user asks to check them; a long answer. */
+function continueBelow(
+  log: ShowcaseLog,
+  writers: readonly Writer[],
+  started: number,
+): void {
+  writers.slice(0, 3).forEach((writer, index) => {
+    log.tick(
+      Math.max(
+        0,
+        started + 70_000 + index * 4_000 - (log.events.at(-1)?.time ?? 0),
+      ),
+    )
+    log.add('subagent/settled', {
+      subagentId: writer.id,
+      stopReason: 'completed',
+      text: `${writer.description} 已写完，1100 字左右。`,
+    })
+  })
+  log.user('先核对已经交回的章节。')
+  log.turnStart(2)
+  log.toolStep(
+    2,
+    1,
+    [{ text: '逐章对照设定圣经。' }],
+    ['01-订单', '02-回声', '03-旧磁带'].map((name, index) => ({
+      id: `call_check_${index + 1}`,
+      name: 'read',
+      args: { file_path: `novel/${name}.md` },
+      result: readResult(`novel/${name}.md`, `# ${name}\n\n正文……`),
+      extra: {
+        meta: {
+          path: `novel/${name}.md`,
+          startLine: 1,
+          endLine: 3,
+          totalLines: 3,
+        },
+      },
+    })),
+  )
+  log.stepStart(2, 2)
+  log.stream(2, 2, [
+    {
+      text: [
+        '## 先核对已经交回的 3 章',
+        '',
+        '趁其他章节还在写，我把已经交回的第 1、2、3 章逐段对照设定圣经：',
+        '',
+        '- 第 1 章「订单」：人物出场顺序与设定一致；「七月」日期与时间线冲突，已记下，汇编时统一改成九月。',
+        '- 第 2 章「回声」：林砚的病理写成「重复三天前听到的话」，与设定一致，后面几章都要沿用。',
+        '- 第 3 章「旧磁带」：1542 字，比其余章节长；节奏偏慢，汇编时再看要不要压。',
+        '',
+        '## 封面',
+        '',
+        'Codex 那边的账号不支持 gpt-6.1-sol，我改写本地脚本 `tools/compose_cover.py`：标题、作者和副标题排版，背景用纯色渐变，生成后你再看一眼。',
+        '',
+        '## 接下来',
+        '',
+        '等第 4 到第 10 章交回，我再整体校对：统一时间线和人物称谓，检查每章的字数，最后汇编成 `novel/全书.md`。',
+      ].join('\n'),
+    },
+  ])
+  log.stepEnd(2, 2)
+  log.turnEnd(2)
+}
+
+/**
+ * UI-S14: one subagent per turn, in each state a single row shows — a
+ * report, a refusal, Claude Code's review, a question, one still writing.
+ */
+export function subagentRowsScenario(now = Date.now()): Scenario {
+  const log = new ShowcaseLog(now - 600_000)
+  let turn = 0
+  const dispatch = (
+    prompt: string,
+    writer: Writer,
+    settle: (log: ShowcaseLog, startedAt: number) => void,
+    answer: string,
+  ): void => {
+    turn += 1
+    log.user(prompt)
+    log.turnStart(turn)
+    log.stepStart(turn, 1)
+    log.stream(turn, 1, [
+      {
+        tool: {
+          id: writer.callId,
+          name: 'subagent',
+          args: { description: writer.description },
+        },
+      },
+    ])
+    log.call(turn, 1, writer.callId, 'subagent', {
+      description: writer.description,
+      prompt: writer.description,
+      run_in_background: true,
+      ...(writer.backend ? { backend: writer.backend } : {}),
+    })
+    const startedAt = log.events.at(-1)?.time ?? now
+    if (writer.backend)
+      externalRun(log, writer, { status: 'running', started_at: startedAt })
+    else
+      log.add('subagent/started', {
+        subagentId: writer.id,
+        description: writer.description,
+        mode: 'spawn',
+        background: true,
+        callId: writer.callId,
+      })
+    log.result(turn, 1, writer.callId, `started ${writer.id}`, {
+      meta: { kind: 'continuable', subagentId: writer.id },
+    })
+    log.stepEnd(turn, 1)
+    settle(log, startedAt)
+    log.stepStart(turn, 2)
+    log.stream(turn, 2, [{ text: answer }])
+    log.stepEnd(turn, 2)
+    log.turnEnd(turn)
+  }
+  dispatch(
+    '看看 tankwar 的素材和文档能不能瘦身。',
+    {
+      callId: 'call_assets',
+      id: 'sub-assets',
+      description: '分析 tankwar 的素材与文档',
+    },
+    (l) => {
+      l.tick(60_000)
+      l.add('subagent/settled', {
+        subagentId: 'sub-assets',
+        stopReason: 'completed',
+        text: '报告已交回：public/ 没有 publicDir 覆盖，assets/audio 24.4 MB 可以压缩到 6 MB 以内，docs/ 里有 3 份重复的截图。',
+      })
+    },
+    '报告交回来了，音频是大头。',
+  )
+  const chapterFive: Writer = {
+    callId: 'call_codex_ch5',
+    id: 'dlg-codex-ch5',
+    description: 'codex 写第 5 章 另一个我',
+    backend: 'codex',
+  }
+  dispatch(
+    '第 5 章交给 Codex 写。',
+    chapterFive,
+    (l, startedAt) =>
+      externalRun(l, chapterFive, {
+        status: 'failed',
+        started_at: startedAt,
+        finished_at: startedAt + 14_000,
+        detail: COVER_REFUSED,
+      }),
+    'Codex 那边账号不支持这个模型，第 5 章我改派本地子智能体。',
+  )
+  const review: Writer = {
+    callId: 'call_review',
+    id: 'dlg-review',
+    description: '审查 math.js',
+    backend: 'claude-code',
+  }
+  dispatch(
+    '让 Claude Code 审一下 math.js。',
+    review,
+    (l, startedAt) =>
+      externalRun(l, review, {
+        status: 'completed',
+        started_at: startedAt,
+        finished_at: startedAt + 38_000,
+        detail: '没有参数校验；PI 精度只有两位，建议用 Math.PI。',
+      }),
+    '审查结果在上面，两处都值得改。',
+  )
+  const question: Writer = {
+    callId: 'call_question',
+    id: 'dlg-question',
+    description: '整理发布说明',
+    backend: 'codex',
+  }
+  dispatch(
+    '发布说明交给 Codex 整理。',
+    question,
+    (l, startedAt) =>
+      externalRun(l, question, {
+        status: 'waiting_input',
+        started_at: startedAt,
+      }),
+    'Codex 在问版本号写 0.2.0 还是 0.2，回答后它会继续。',
+  )
+  log.tick(Math.max(0, now - 49_000 - (log.events.at(-1)?.time ?? now)))
+  dispatch(
+    '第 9 章也开始写吧。',
+    { callId: 'call_ch9', id: 'sub-ch9', description: '写第 9 章 回声的源头' },
+    () => undefined,
+    '第 9 章在写，写完我再看。',
+  )
+  return {
+    id: 'subagent-rows',
+    label: '子智能体行',
+    sessions: [{ id: 'subagent-rows', events: log.events }],
+  }
+}
+
 export const SCENARIO_BUILDERS: Record<string, (now: number) => Scenario> = {
   showcase: showcaseScenario,
   notices: noticesScenario,
@@ -1460,6 +1889,9 @@ export const SCENARIO_BUILDERS: Record<string, (now: number) => Scenario> = {
   preparing: preparingScenario,
   'long-process': longProcessScenario,
   typography: typographyScenario,
+  subagents: (now) => subagentsScenario(now, 'running'),
+  'subagents-done': (now) => subagentsScenario(now, 'done'),
+  'subagent-rows': subagentRowsScenario,
 }
 
 /** History page over one fixture session (cut at turn boundaries). */
