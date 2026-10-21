@@ -136,6 +136,44 @@ describe('process rows (DSH-22)', () => {
     ])
   })
 
+  it('ends the turn with its footer, after the files card (UI-S13)', () => {
+    const log = new LogBuilder()
+    log.user('u1', 'fix it')
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.message(1, 1, [
+      { type: 'tool-call', id: 'w', name: 'write', arguments: '{}' },
+    ])
+    log.call(1, 1, 'w', 'write', { file_path: 'a.ts' })
+    log.result(1, 1, 'w', 'ok')
+    log.add('step/end', { turn: 1, step: 1 })
+    log.add('step/start', { turn: 1, step: 2 })
+    log.message(1, 2, [{ type: 'text', text: 'done' }])
+    log.add('step/end', { turn: 1, step: 2 })
+    log.add('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    // The snapshot lands after the next prompt.
+    log.user('u2', 'next')
+    log.add('turn/files', {
+      turn: 1,
+      mode: 'git',
+      status: 'recorded',
+      files: [{ path: 'a.ts', status: 'added', additions: 1, deletions: 0 }],
+      totals: { files: 1, additions: 1, deletions: 0 },
+      snapshot: { before: 'b'.repeat(40), after: 'a'.repeat(40) },
+    })
+    const snapshot = snapshotOf(log.events)
+    // The answer still counts as closing: its copy action lives in the
+    // footer, with the files card between them.
+    expect(describeRows(snapshot)).toEqual([
+      'user',
+      'process[done] steps=1: tool:write',
+      'assistant(closing)',
+      'turnFiles',
+      'turnTail',
+      'user',
+    ])
+  })
+
   it('moves the answer’s thinking into the process row', () => {
     const snapshot = snapshotOf(loadScenario('fresh-round-trip'))
     expect(describeRows(snapshot)).toEqual([

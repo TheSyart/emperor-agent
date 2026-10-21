@@ -238,13 +238,9 @@ async function end(agent: AgentView) {
   display: inline-flex;
   align-items: center;
 }
-/* Overlapping faces, each ringed in the card fill. */
+/* Overlapping cut-out faces (UI-S13): no ring, no tile. */
 .faces > * + * {
   margin-left: calc(-1 * var(--space-1-5));
-}
-.faces > * {
-  border-radius: var(--r-full);
-  box-shadow: 0 0 0 1.5px rgb(var(--env-card-fill));
 }
 .agent-list {
   padding: var(--space-0-5) 0 var(--space-1) var(--space-2);

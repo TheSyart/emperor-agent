@@ -222,9 +222,10 @@ const colorSlot = computed(() =>
   border-radius: var(--r-md);
 }
 
-/* Portrait sheets have a warm neutral ground in both themes. */
+/* Portraits are cut out of their sheets (UI-S13): no tile, no frame. */
 .ds-avatar[data-shown='sprite'] {
-  background: rgb(var(--avatar-surface));
+  border-radius: 0;
+  background: transparent;
 }
 
 /* Provider logos sit on a panel tile with a hairline; 16px is bare. */

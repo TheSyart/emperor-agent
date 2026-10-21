@@ -25,8 +25,6 @@ body {
 
 /* Image lightboxes use a constant dark viewing surface in both themes. */
 :root {
-  /* Warm neutral of the local generated portrait sheets, invariant by theme. */
-  --avatar-surface: 233 230 223;
   --image-viewer-bg: 9 10 12;
   --image-viewer-veil: 0.94; /* alpha of the viewer backdrop (0.98 with reduced transparency) */
   --image-viewer-ink: 243 243 244;

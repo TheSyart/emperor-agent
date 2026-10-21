@@ -1,7 +1,8 @@
 // The files a turn changed (E-track contract §5): `turn/files` written by
 // the host after the turn ends, `turn/files-reverted` once it is undone.
-// The card sits just after the turn's footer, even when the record lands
-// after the next turn began (the snapshot takes a moment).
+// The card sits just before the turn's footer, which stays the turn's last
+// row (UI-S13), even when the record lands after the next turn began (the
+// snapshot takes a moment).
 import type {
   TurnFilesRecord,
   TurnFilesReverted,
@@ -13,7 +14,7 @@ import type {
 } from '../assembler'
 import { isEvent } from '../events'
 import type { TurnFilesChatData } from '../types'
-import { chatNode } from './common'
+import { CHAT_SYNTHETIC_SEQ_OFFSETS, chatNode } from './common'
 
 interface TurnFilesState {
   /** `turn/end` of the turn (the card's anchor). */
@@ -107,8 +108,9 @@ export const turnFilesDefinition: ConversationDefinition<TurnFilesState> = {
     const state = context.state ?? fallback(context)
     const data = viewData(state)
     if (data === null || state.record === null) return null
-    // Just after the turn's footer (anchored at turn/end).
-    const anchor = (state.endSeq ?? state.record.seq) + 0.5
+    // Just before the turn's footer (anchored at turn/end).
+    const anchor =
+      (state.endSeq ?? state.record.seq) + CHAT_SYNTHETIC_SEQ_OFFSETS.turnFiles
     return chatNode(context, 'turnFiles', anchor, data)
   },
 }

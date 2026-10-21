@@ -51,8 +51,8 @@ it('keeps the same portrait across reorder, phase changes and remount, with an i
     number,
   ]
   const layout = portraitLayout(rect, 100)
-  expect(Math.max(layout.width, layout.height)).toBe(84)
-  expect(Math.min(layout.x, layout.y)).toBe(8)
+  expect(Math.max(layout.width, layout.height)).toBe(94)
+  expect(Math.min(layout.x, layout.y)).toBe(3)
   ids.value.reverse()
   phase.value = 'completed'
   await nextTick()

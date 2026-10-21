@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-21<br>
+> 最后核验：2026-10-21（对照 `a33caa42`）<br>
 > 事实源：`desktop/src/renderer/src/components/ui/`（组件、`index.ts`、`floatingMenu.ts`、`headTailCap.ts`、`useCopyFeedback.ts`、`elapsed.ts`，测试 `display.test.ts`、`actions.test.ts`、`primitives.test.ts`、`overlays.test.ts`）、`desktop/src/renderer/src/components/settings/ui/`、`desktop/src/renderer/src/theme/components.css`；开发模式下打开 `?ui-gallery`、`?settings-gallery` 查看全部组件与状态
 
 界面控件统一来自 `components/ui/`。组件只用 [设计令牌](tokens.md) 的 L2/L3 令牌，深浅两套主题都成立；可交互的控件都能用键盘操作，焦点统一画 `--focus-ring`。文字规格见[排版](typography.md)，动效见[动效](motion.md)，弹窗、确认框与轻提示见[浮层规范](overlays.md)。下面只写已经实现的组件；新增变体先改组件和这里，再在页面里用。
@@ -29,20 +29,20 @@
 | Dot    | 状态圆点，6 / 8px：ok / warn / error / running（金色脉冲，一屏只有一个「运行中」）/ idle / attention（等待用户的审批与计划）。有 `label` 时读屏可读，否则只作装饰                                        |
 | Avatar | 16 / 20 / 24 / 28 / 40。sprite（子智能体头像）/ color（六种头像色之一 + 首字）/ logo（模型商标志或插件图片，失败时退回颜色块）/ initials（中性底首字）；刻度以外的尺寸取最近一档并报错                   |
 
-子智能体头像从 1254px 的整张素材里裁出，裁剪和缩放用一次 `createImageBitmap` 完成，画进尺寸正好是「显示尺寸 × 设备像素比」的 canvas；页面上不保留整张素材，同一头像同一尺寸只解码一次。
+子智能体头像是透明底的角色，没有方片和外框（UI-S13），从 448px 的整张素材里裁出，占头像框的 94%；裁剪和缩放用一次 `createImageBitmap` 完成，画进尺寸正好是「显示尺寸 × 设备像素比」的 canvas；页面上不保留整张素材，同一头像同一尺寸只解码一次。
 
 ## 列表与表面
 
-| 组件               | 用途与变体                                                                                                                                                                                                                          |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ListRow            | 列表行，高 32 / 40 / 52。插槽 leading、标题、subtitle、meta、trailing；`selected`、`nested`（缩进一级）、`danger`、`disabled`。trailing 的操作只在悬停或键盘聚焦时出现；上下方向键、Home / End 在同一列表内移动，Enter / Space 选择 |
-| List / ListSection | List 是 listbox，行是 option；ListSection 是带 12/500 三级文字标题的分组，组内行之间画左缩进 16 的 0.5px 细线（选中行两侧不画）。列表不再套卡片                                                                                     |
-| Surface            | 面板级容器：raised（默认，比面板高一级 + 细线）/ sunken（代码、凹陷区）/ overlay（浮层 + 层级阴影）；`pad` none / sm 12 / md 16；`radius` md 12 / lg 16；`interactive` 加悬停与焦点（配 `as="button"`）                             |
-| EmptyState         | block（20px 图标 + 标题 + 描述 + 按钮，居中）/ inline（单行，可带一个尾部操作）；`framed` 画虚线框，放在卡片里时自动去掉                                                                                                            |
-| Notice             | 提示条：左侧图标 + 标题 + 说明 + 可选操作；tone 与 Badge 相同，warn / error 以 role=alert 播报。只在问题存在时出现                                                                                                                  |
-| DisclosureRow      | 会话流里的 28px 可折叠行：14px 图标（悬停换成箭头）、13px 标题与摘要、「·」分隔、可选尾部操作；正文左缩进 22px，展开收起用 CollapseTransition（见[会话流](conversation.md)）                                                        |
-| IoBlock            | 工具展开后的 IN / OUT 块：`--surface-raised`、`--r-md`、无边框，每段最高 150px，过长时「展开全部」；`tree` 把对象显示为 JsonTree（未知工具的通用正文）                                                                              |
-| PaneHeader         | 面板顶栏，固定 48px：标题 + 可选 Tabs + 右侧操作；长标题截断，高度不随内容变化。工作台用它做顶栏，上移 2px 与会话头 46px 的第一行底边对齐，左侧是 segmented 面板切换、右侧关闭，不放标题（见[外壳布局](layout.md)）                 |
+| 组件               | 用途与变体                                                                                                                                                                                                                                                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ListRow            | 列表行，高 32 / 40 / 52。插槽 leading、标题、subtitle、meta、trailing；`selected`、`nested`（缩进一级）、`danger`、`disabled`；`wrap` 让行随文字长高，标题和副标题换行不截断，leading 对齐第一行（工作台「来源」）。trailing 的操作只在悬停或键盘聚焦时出现；上下方向键、Home / End 在同一列表内移动，Enter / Space 选择 |
+| List / ListSection | List 是 listbox，行是 option；ListSection 是带 12/500 三级文字标题的分组，组内行之间画左缩进 16 的 0.5px 细线（选中行两侧不画）。列表不再套卡片                                                                                                                                                                          |
+| Surface            | 面板级容器：raised（默认，比面板高一级 + 细线）/ sunken（代码、凹陷区）/ overlay（浮层 + 层级阴影）；`pad` none / sm 12 / md 16；`radius` md 12 / lg 16；`interactive` 加悬停与焦点（配 `as="button"`）                                                                                                                  |
+| EmptyState         | block（20px 图标 + 标题 + 描述 + 按钮，居中）/ inline（单行，可带一个尾部操作）；`framed` 画虚线框，放在卡片里时自动去掉                                                                                                                                                                                                 |
+| Notice             | 提示条：左侧图标 + 标题 + 说明 + 可选操作；tone 与 Badge 相同，warn / error 以 role=alert 播报。只在问题存在时出现                                                                                                                                                                                                       |
+| DisclosureRow      | 会话流里的 28px 可折叠行：14px 图标（悬停换成箭头）、13px 标题与摘要、「·」分隔、可选尾部操作；正文左缩进 22px，展开收起用 CollapseTransition（见[会话流](conversation.md)）                                                                                                                                             |
+| IoBlock            | 工具展开后的 IN / OUT 块：`--surface-raised`、`--r-md`、无边框，每段最高 150px，过长时「展开全部」；`tree` 把对象显示为 JsonTree（未知工具的通用正文）                                                                                                                                                                   |
+| PaneHeader         | 面板顶栏，固定 48px：标题 + 可选 Tabs + 右侧操作；长标题截断，高度不随内容变化。工作台用它做顶栏，上移 2px 与会话头 46px 的第一行底边对齐，左侧是 segmented 面板切换、右侧关闭，不放标题（见[外壳布局](layout.md)）                                                                                                      |
 
 ## 输入
 

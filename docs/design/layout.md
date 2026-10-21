@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-21<br>
-> 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/`（`SidebarRoot.vue`、`SidebarTopRow.vue`、`SidebarBrandRow.vue`、`SidebarNav.vue`、`SessionRow.vue`、`SidebarProjectRow.vue`、`SidebarSectionHeader.vue`、`SidebarSearchResults.vue`、`useContentSearch.ts`、`SidebarFooter.vue`、`SidebarRail.vue`、`sidebarNav.ts`）、`desktop/src/renderer/src/runtime/sidebarModel.ts`、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）、`components/conversation/`（`ConversationView.vue`、`ChatTimeline.vue`、`environment/EnvironmentCard.vue`）、`components/composer/ComposerCard.vue`、`components/pages/PageShell.vue`、`components/ui/`（`Modal.vue`、`PaneHeader.vue`）、`components/workspace/WorkspacePanel.vue`；测试 `SidebarRoot.integration.test.ts`、`SessionRow.test.ts`、`sidebarDayGroups.test.ts`、`desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/settings-groups.spec.ts`
+> 最后核验：2026-10-21（对照 `a33caa42`）<br>
+> 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/`（`SidebarRoot.vue`、`SidebarTopRow.vue`、`SidebarBrandRow.vue`、`SidebarNav.vue`、`SessionRow.vue`、`SidebarProjectRow.vue`、`SidebarSectionHeader.vue`、`SidebarSearchResults.vue`、`useContentSearch.ts`、`SidebarFooter.vue`、`SidebarRail.vue`、`sidebarNav.ts`）、`desktop/src/renderer/src/runtime/sidebarModel.ts`、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）、`components/conversation/`（`ConversationView.vue`、`ChatTimeline.vue`、`environment/EnvironmentCard.vue`）、`components/composer/ComposerCard.vue`、`components/pages/PageShell.vue`、`components/ui/`（`Modal.vue`、`PaneHeader.vue`）、`components/workspace/WorkspacePanel.vue`、`components/workspace/SourcesView.vue`；测试 `SidebarRoot.integration.test.ts`、`SessionRow.test.ts`、`sidebarDayGroups.test.ts`、`desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/settings-groups.spec.ts`
 
 主窗口用系统标题栏，下面是平铺的几栏：侧栏、中栏（对话、轨迹或整页）、右侧工作台。侧栏画在 `--surface-canvas` 上，中栏与工作台在 `--surface-base` 上，栏与栏之间只有一条 0.5px 发丝线（`--border-l1`）。布局与入口位置是 Emperor 自己的；质感参考了 Codex（颜色、字体、间距、圆角、阴影），布局不照搬（2026-10-20 决定）。
 
@@ -18,7 +18,7 @@
 | 工作台 | 默认 560，可拖 360–960；关闭为 0         | `--surface-base`   | 审查 / 终端 / 文件 / 浏览器                              |
 
 - 没有圆角面板和外围留边；层级靠底色明度与发丝线区分。卡片、代码块等在 `--surface-base` 上再抬一级。
-- 会话头第一行高 46（`--shell-bar-h`），工作台 `PaneHeader` 高 48、上移 2px，两者底边对齐。工作台顶栏左侧是四个面板的 segmented 切换，右侧是关闭；打开时回到上次用的面板，还没选过面板时显示四个面板的入口，没有「首页」（UI-S06）。
+- 会话头第一行高 46（`--shell-bar-h`），工作台 `PaneHeader` 高 48、上移 2px，两者底边对齐。工作台顶栏左侧是四个面板的 segmented 切换，右侧是关闭；打开时回到上次用的面板，还没选过面板时显示四个面板的入口，没有「首页」（UI-S06）。环境信息卡的「查看全部」打开的「来源」是盖在面板上的临时视图（UI-S13）：没有自己的页签，打开时切换器不选中任何一项，也不记为上次用的面板；返回、选一个面板、在工作台打开别的内容、关闭工作台或换会话都会关掉它，原来的面板（审查与文件的状态）原样留在下面。
 - 整页（定时任务、能力、GitHub）没有会话头，标题在页面内容里（PageShell）：内容宽 880、居中，标题 20/600，页签在标题下。Pull Request 是唯一占满宽度的页面，但它的标题行和页签仍在同一个 880 列、同一高度，所以 GitHub 的 PR / Issue / CI 三个标签切换时标题不动。
 
 ## 侧栏
@@ -66,6 +66,7 @@
 - 宽 `min(340px, 42cqi)`（`--env-card-width`，按对话栏宽度计算），贴在对话栏右上角（距顶 12、距右 16），圆角 `--r-lg`。
 - 对话栏宽度 ≥ 1120 时，卡片默认显示在对话旁边；更窄时默认收起，用会话头的按钮打开。用户在宽栏里关掉、或在窄栏里打开，都记为手动选择（`frameState.ts`）。
 - 卡片打开时，消息区与输入框右侧让出卡片宽度加 16，内容不被遮住；电脑操作预览同样在 ≥ 1120 时放在旁边，更窄时折成一个计数标签。
+- 每一项是一行 32 的 `EnvironmentRow`，分节之间 12、不画线。「来源」是一个小节（UI-S13）：12/18 的小标题「来源」和右侧的总数，下面最多 3 行（你提供的 → 已查看 → 搜索命中，名字放不下时截断），超过 3 个时多一行「查看全部 N 个 ›」；没有「输出」一行。
 
 ## 顶栏对齐
 

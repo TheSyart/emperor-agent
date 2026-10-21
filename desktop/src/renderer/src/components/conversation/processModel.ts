@@ -3,7 +3,8 @@
 // prompt and the answer — thinking, tool calls, delegated work, retries,
 // compaction and, with 显示系统步骤, context injections and hooks — fold into
 // one `process` row; the prompt, the answer, the files card, the turn tail
-// and the notices stay rows of their own. The running turn's trailing steps
+// (the turn's last row, after the files card) and the notices stay rows of
+// their own. The running turn's trailing steps
 // form a live row, and calls the model is still writing (no `tool/call` yet)
 // join it as preparing members. A step is one row of the expanded list: a
 // thinking block, a tool call, a system or notice row; narration is not.
@@ -60,7 +61,10 @@ export interface NodeRow {
   readonly id: string
   /** An answer whose thinking moved into the process row before it. */
   readonly answerOnly?: true
-  /** An assistant row directly followed by its turn tail. */
+  /**
+   * An assistant row followed by its turn tail, with at most the turn's
+   * files card between them (UI-S13): the tail carries its copy action.
+   */
   readonly closing?: true
 }
 
@@ -332,7 +336,9 @@ function finish(rows: TimelineRow[], input: TimelineRowsInput): TimelineRow[] {
   }
   return rows.map((row, index) => {
     if (row.kind === 'node') {
-      const next = rows[index + 1]
+      let next = rows[index + 1]
+      if (next?.kind === 'node' && nodes.get(next.id)?.kind === 'turnFiles')
+        next = rows[index + 2]
       const closing =
         nodes.get(row.id)?.kind === 'assistant' &&
         next?.kind === 'node' &&

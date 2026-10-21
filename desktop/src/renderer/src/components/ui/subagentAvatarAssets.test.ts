@@ -30,3 +30,19 @@ it('keeps every frame of frames.json inside a 448px sheet', () => {
     expect(Math.min(w, h), id).toBeGreaterThanOrEqual(80)
   }
 })
+
+// UI-S13 · 1: the portraits have no backdrop: every sheet is a WebP with an
+// alpha channel (VP8X with the alpha flag, and an ALPH chunk). Which pixels
+// are clear is checked in the browser (tests/visual/subagent-avatars.spec.ts).
+it('UI-S13 · 1 · every sheet carries an alpha channel', () => {
+  const sheets = readdirSync(DIR).filter((name) => name.endsWith('.webp'))
+  for (const name of sheets) {
+    const bytes = readFileSync(join(DIR, name))
+    expect(bytes.toString('ascii', 0, 4), name).toBe('RIFF')
+    expect(bytes.toString('ascii', 8, 12), name).toBe('WEBP')
+    expect(bytes.toString('ascii', 12, 16), name).toBe('VP8X')
+    // VP8X flags: bit 4 = alpha.
+    expect(bytes[20]! & 0x10, name).toBe(0x10)
+    expect(bytes.includes(Buffer.from('ALPH')), name).toBe(true)
+  }
+})

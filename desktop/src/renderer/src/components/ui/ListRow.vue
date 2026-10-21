@@ -5,6 +5,8 @@
  * the row is hovered or has keyboard focus.
  *   size: sm 32 (default) | md 40 | lg 52
  *   selected · nested (indented one step) · danger (error text) · disabled
+ *   wrap: the row grows with its text — title and subtitle wrap instead of
+ *   ending in an ellipsis, the leading glyph stays on the first line
  * Keyboard: ArrowUp / ArrowDown / Home / End move between the rows of the
  * same list; Enter / Space select. A click selects too, except on the
  * trailing actions. Inside <List> the row is an option of the listbox.
@@ -25,6 +27,7 @@ const props = withDefaults(
     nested?: boolean
     danger?: boolean
     disabled?: boolean
+    wrap?: boolean
   }>(),
   {
     title: '',
@@ -34,6 +37,7 @@ const props = withDefaults(
     nested: false,
     danger: false,
     disabled: false,
+    wrap: false,
   },
 )
 
@@ -92,6 +96,7 @@ function onFocusOut(event: FocusEvent) {
     :data-selected="selected || undefined"
     :data-nested="nested || undefined"
     :data-danger="danger || undefined"
+    :data-wrap="wrap || undefined"
     :data-reveal="reveal || undefined"
     :aria-selected="list ? selected : undefined"
     :aria-pressed="list ? undefined : selected || undefined"
@@ -146,6 +151,13 @@ function onFocusOut(event: FocusEvent) {
   padding: 0 var(--space-3);
 }
 
+.ds-list-row[data-wrap] {
+  align-items: flex-start;
+  height: auto;
+  min-height: var(--list-row-sm);
+  padding-block: var(--space-2);
+}
+
 .ds-list-row[data-nested] {
   padding-left: calc(var(--space-2) + var(--space-5));
 }
@@ -180,6 +192,10 @@ function onFocusOut(event: FocusEvent) {
   color: rgb(var(--text-2));
 }
 
+.ds-list-row[data-wrap] .leading {
+  height: var(--lh-xs);
+}
+
 .ds-list-row[data-danger] .leading {
   color: inherit;
 }
@@ -202,6 +218,14 @@ function onFocusOut(event: FocusEvent) {
 .subtitle {
   color: rgb(var(--text-3));
   font: var(--weight-regular) var(--type-caption) var(--font-sans);
+}
+
+.ds-list-row[data-wrap] .title,
+.ds-list-row[data-wrap] .subtitle {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .meta {

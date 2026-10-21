@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
-> 事实源：`desktop/src/renderer/src/components/conversation/`（`processModel.ts`、`ChatTimeline.vue`、`nodes/ProcessGroup.vue`、`nodes/ToolCallRow.vue`、`nodes/UserBubble.vue`、`parts/ConversationMarkdown.vue`、`parts/MarkdownHtml.vue`、`nodes/TurnTail.vue`）、`composables/markdownBlocks.ts`、`composables/useStreamingText.ts`、`components/ui/DisclosureRow.vue`、`components/ui/IoBlock.vue`、`components/motion/CollapseTransition.vue`、`conversation/events.ts`；`components/conversation/trajectoryGate.ts`；测试 `processModel.test.ts`、`processGroup.test.ts`、`CollapseTransition.test.ts`、`trajectoryGate.test.ts`、`markdownBlocks.test.ts`、`desktop/tests/visual/process.spec.ts`、`desktop/tests/visual/streaming.spec.ts`、`desktop/tests/visual/trajectory-gate.spec.ts`
+> 最后核验：2026-10-21（对照 `a33caa42`）<br>
+> 事实源：`desktop/src/renderer/src/components/conversation/`（`processModel.ts`、`ChatTimeline.vue`、`nodes/ProcessGroup.vue`、`nodes/ToolCallRow.vue`、`nodes/UserBubble.vue`、`parts/ConversationMarkdown.vue`、`parts/MarkdownHtml.vue`、`nodes/TurnTail.vue`）、`conversation/nodes/turnFiles.ts`、`composables/markdownBlocks.ts`、`composables/useStreamingText.ts`、`components/ui/DisclosureRow.vue`、`components/ui/IoBlock.vue`、`components/motion/CollapseTransition.vue`、`conversation/events.ts`；`components/conversation/trajectoryGate.ts`；测试 `processModel.test.ts`、`processGroup.test.ts`、`CollapseTransition.test.ts`、`trajectoryGate.test.ts`、`markdownBlocks.test.ts`、`desktop/tests/visual/process.spec.ts`、`desktop/tests/visual/streaming.spec.ts`、`desktop/tests/visual/trajectory-gate.spec.ts`
 
 对话面板里从上到下是一条会话流：你的消息、Agent 处理这一轮的过程、回答、本轮改动卡和轮末操作。默认只显示结论，过程收成一行，细节按需展开。
 
@@ -53,14 +53,16 @@
 
 ## 消息与正文
 
-- **用户气泡**：`--bubble-user` 底色、`--r-xl` 圆角、内边距 10/16、正文 15/26、最宽为内容列的 80%、无边框；附件用 Tag 显示在气泡上方。
+- **用户气泡**：`--bubble-user` 底色、`--r-xl` 圆角、内边距 10/16、正文 15/26、最宽为内容列的 80%、无边框；附件用 Tag 显示在气泡上方。气泡下方的来源小字只写有意义的两种：「运行中插入」「定时任务」；其他来源（`chat` 等原始值）不显示（UI-S13）。
 - **回答正文**：不套容器，15/26，段落之间 12px。Markdown 标题用 `--md-h1` / `--md-h2` / `--md-h3`（20 / 18 / 16，都小于页面标题）；表格 14/22。
 - **链接与行内引用**：文字用 `--text-link`，前面是 12px 的来源图标：本地文件用文件类型图标，网页用站点图标（打开「设置 › 常规 › 会话 › 显示网站图标」时取网站自己的图标，否则是首字母）。
 - 过程组里的叙述文字是 `--text-2`，比回答低一级。
 
 ## 轮末
 
-复制回答、时间与「用时 · 首字 · tok/s」、token 数合成一行操作，只在指针停在这一轮（提示、过程、回答任一处）或键盘焦点进入这一行时出现，平时不占视觉；这一行的高度始终保留，出现时下面的内容不动。用时写作「8 秒」「1 分 12 秒」「1 小时 2 分」。
+轮末是一轮的最后一行：顺序是回答、错误等提示、本轮改动卡、轮末（UI-S13）。改动卡的记录在下一轮开始后才写完时，仍排在原来那一轮的轮末之前；回答和轮末之间隔着改动卡时，复制仍由轮末负责，回答下方不另加复制按钮。
+
+复制回答、时间与「用时 · 首字 · tok/s」、token 数合成一行操作，只在指针停在这一轮（提示、过程、回答、改动卡任一处）或键盘焦点进入这一行时出现，平时不占视觉；这一行的高度始终保留，出现时下面的内容不动。用时写作「8 秒」「1 分 12 秒」「1 小时 2 分」。
 
 ## 动效
 

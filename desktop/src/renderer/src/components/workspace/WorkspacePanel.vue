@@ -28,6 +28,14 @@
  *   ends it (keyed by session; unmounting closes the view).
  * - 终端 remounts per visit (Core keeps the PTYs and replays them).
  *
+ * Temporary views (UI-S13): a request with `view` (the environment card's
+ * 来源) shows that component over the body without choosing a pane — no
+ * tab is selected, the pane used last stays remembered and the hidden
+ * heading takes the view's title. Picking a pane, any later request, its
+ * 返回 (`close`), closing the column or leaving its chat closes it; 审查
+ * and 文件 keep their state underneath (KeepAlive) and the native browser
+ * view hides meanwhile.
+ *
  * Pane contract (what a request turns into):
  * - review: `focus-paths` (request.paths) and `commit-focus` (the request
  *   nonce of focus 'commit'; the pane scrolls to and focuses the commit box,
@@ -55,6 +63,7 @@ import {
   nextTick,
   onMounted,
   ref,
+  shallowRef,
   watch,
 } from 'vue'
 import { core } from '../../api/http'
@@ -85,6 +94,7 @@ import {
   type TurnReviewRequest,
   type WorkspaceRequest,
   type WorkspaceFileRequest,
+  type WorkspaceView,
 } from './workspaceState'
 
 // Every pane is its own async chunk (xterm, highlighter, diff views).
@@ -132,7 +142,14 @@ const turnReview = ref<TurnReviewRequest | null>(null)
 let storedRightWorkspace: RightWorkspaceState | null = null
 
 const pane = computed<WorkspacePane>(() => frame.workspacePane)
-const title = computed(() => workspacePaneTitle(pane.value))
+/** A temporary view over the pane (never a pane of its own). */
+const view = shallowRef<WorkspaceView | null>(null)
+const title = computed(
+  () => view.value?.title ?? workspacePaneTitle(pane.value),
+)
+function closeView(): void {
+  view.value = null
+}
 const availability = computed<WorkspaceAvailability>(() => ({
   hasProject: hasProject.value,
   snapshotLoaded: Boolean(snapshot.value),
@@ -174,8 +191,18 @@ watch(sessionId, () => {
   turnReview.value = null
   terminalFocus.value = 0
 })
+// A temporary view belongs to its chat and to this visit of the column.
+watch([sessionId, viewedSessionId], ([session, viewed]) => {
+  const owner = view.value?.sessionId
+  if (owner !== undefined && owner !== session && owner !== viewed) closeView()
+})
+watch(
+  () => props.open,
+  (isOpen) => !isOpen && closeView(),
+)
 // Focus / prefill requests are one-shot: they target the pane showing now.
 watch(pane, (next) => {
+  closeView()
   if (next !== 'review') commitFocus.value = 0
   if (next !== 'browser') browserPrefill.value = null
 })
@@ -205,6 +232,7 @@ watch(filesPane, () => void flushPendingFile())
 
 function handleRequest(request: WorkspaceRequest): void {
   consumeWorkspaceRequest(request)
+  view.value = request.view ?? null
   if (request.pane === 'review') {
     turnReview.value = request.turn ?? null
     reviewFilterPaths.value = [
@@ -250,6 +278,7 @@ function ownsFiles(owner: string): boolean {
 }
 
 function selectPane(target: string): void {
+  closeView()
   frameActions.setWorkspacePane(frame, target as WorkspaceContentPane)
 }
 
@@ -283,7 +312,7 @@ async function persistFilesTreeWidth(): Promise<void> {
           class="workspace-panes"
           variant="segmented"
           :tabs="paneTabs"
-          :model-value="pane === 'launcher' ? '' : pane"
+          :model-value="view || pane === 'launcher' ? '' : pane"
           aria-label="工作台面板"
           @update:model-value="selectPane"
         />
@@ -294,9 +323,15 @@ async function persistFilesTreeWidth(): Promise<void> {
         </IconButton>
       </template>
     </PaneHeader>
-    <div class="workspace-body" :data-pane="pane">
+    <div class="workspace-body" :data-pane="view ? 'view' : pane">
+      <component
+        :is="view.component"
+        v-if="view"
+        v-bind="view.props.value"
+        @close="closeView"
+      />
       <WorkspaceEmpty
-        v-if="pane === 'launcher'"
+        v-else-if="pane === 'launcher'"
         :availability="availability"
         @open="selectPane"
       />
@@ -330,7 +365,7 @@ async function persistFilesTreeWidth(): Promise<void> {
       <!-- Drafts, open tabs and scroll positions survive pane switches. -->
       <KeepAlive>
         <GitReviewPane
-          v-if="pane === 'review' && !reviewReason && !turnReview"
+          v-if="!view && pane === 'review' && !reviewReason && !turnReview"
           :session-id="sessionId"
           :has-project="hasProject"
           :agent-busy="agentBusy"
@@ -340,7 +375,7 @@ async function persistFilesTreeWidth(): Promise<void> {
           @commit-focused="commitFocus = 0"
         />
         <FilesPane
-          v-else-if="pane === 'files'"
+          v-else-if="!view && pane === 'files'"
           ref="filesPane"
           :session-id="sessionId"
           :project-path="projectPath"
@@ -351,9 +386,9 @@ async function persistFilesTreeWidth(): Promise<void> {
       <!-- Hidden, not closed, behind the other panes (its page stays). -->
       <BrowserPane
         v-if="browserSession && browserSession === sessionId"
-        v-show="pane === 'browser'"
+        v-show="!view && pane === 'browser'"
         :key="sessionId"
-        :visible="open && pane === 'browser'"
+        :visible="open && !view && pane === 'browser'"
         :prefill="browserPrefill"
       />
     </div>

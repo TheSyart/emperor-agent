@@ -85,6 +85,25 @@ function buildLog(): VisualSessionLog {
         name: 'web_search',
         args: { queries: ['desktop agent environment panel'] },
         result: '1. https://example.com/agent-desktop',
+        // Search hits (UI-S13: 来源 groups them under 搜索命中).
+        extra: {
+          meta: {
+            sources: [
+              {
+                url: 'https://example.com/agent-desktop',
+                title: 'Agent desktop layout',
+              },
+              {
+                url: 'https://docs.example.com/environment-panel',
+                title: '环境面板设计说明',
+              },
+              {
+                url: 'https://github.com/example/agent-desktop',
+                title: 'example/agent-desktop',
+              },
+            ],
+          },
+        },
       },
       {
         id: 'call_fetch',
@@ -277,14 +296,28 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(envCard.locator('[data-row="background"]')).toContainText(
       '2 个运行中',
     )
-    const sources = envCard.locator('[data-row="sources"]')
-    await expect(sources).toContainText('来源')
-    await expect(sources).toContainText('5')
-    await expect(sources.locator('[data-resource-face]')).toHaveCount(3)
-    // At most eight controls on the card itself.
-    expect(await envCard.locator('button:visible').count()).toBeLessThanOrEqual(
-      8,
+    // UI-S13: no 输出 row; 来源 is a section listing three sources —
+    // yours first, then what was read — and 查看全部 for the rest.
+    await expect(envCard.locator('[data-row="outputs"]')).toHaveCount(0)
+    const sources = envCard.locator('[data-section="sources"]')
+    await expect(sources.locator('.sources-head')).toHaveText(/^来源\s*7$/)
+    await expect(sources.locator('[data-source-item] .label')).toHaveText([
+      'codex-environment-notes.md',
+      'card-mock.png',
+      'example.com/agent-desktop',
+    ])
+    await expect(sources.locator('[data-source-item] .value')).toHaveText([
+      '提供的参考',
+      '提供的参考',
+      '已查看',
+    ])
+    await expect(sources.locator('[data-row="sources-all"]')).toHaveText(
+      '查看全部 7 个',
     )
+    // At most eight controls on the card itself, besides the listed sources.
+    expect(
+      await envCard.locator('button:visible:not([data-source-item])').count(),
+    ).toBeLessThanOrEqual(8)
 
     // The chat body and the composer make room for the card.
     const cardBox = (await envCard.boundingBox())!
@@ -438,24 +471,44 @@ test('card rows open the review, the subagent list, all sources and the plan', a
   // A menu's Escape never closes the card.
   await expect(envCard).toBeVisible()
 
-  await envCard.locator('[data-row="sources"]').click()
-  const sourcesMenu = page.getByRole('menu', { name: '全部来源' })
-  await expect(sourcesMenu).toBeVisible()
-  await expect(sourcesMenu).toContainText('example.com/agent-desktop')
-  await expect(sourcesMenu).toContainText('github')
-  await expect(sourcesMenu).toContainText('codex-environment-notes.md')
+  // UI-S13: 查看全部 opens the 来源 view over the workbench, no pane chosen.
+  await envCard.locator('[data-row="sources-all"]').click()
+  const view = page.locator('.workspace-col [data-sources-view]')
+  await expect(view).toBeVisible()
+  await expect(page.locator('.workspace-col .workspace-body')).toHaveAttribute(
+    'data-pane',
+    'view',
+  )
+  await expect(
+    page.locator('.workspace-panes [aria-selected="true"]'),
+  ).toHaveCount(0)
+  await expect(view.locator('[data-source-group] .section-title')).toHaveText([
+    '你提供的 · 2',
+    '已查看 · 1',
+    '搜索命中 · 2',
+    '已使用 · 2',
+  ])
   // An image attachment as a thumbnail, a file by its type icon.
-  await expect(sourcesMenu.locator('img.menu-thumb')).toHaveAttribute(
+  await expect(view.locator('img.thumb')).toHaveAttribute(
     'src',
     'app://attachments/att-card-mock/raw',
   )
   await expect(
-    sourcesMenu.locator('.document-icon[data-kind="document"]'),
+    view.locator('.document-icon[data-kind="document"]'),
   ).toHaveCount(1)
-  await shot(page, 'card-sources-menu')
-  // A click leaves focus on the row; Escape still closes the menu first.
-  await page.keyboard.press('Escape')
-  await expect(sourcesMenu).toHaveCount(0)
+  // Address without its scheme; what found it, from the loaded call.
+  const fetched = view
+    .locator('[data-source-entry]')
+    .filter({ hasText: 'example.com/agent-desktop' })
+  await expect(fetched.locator('.location')).toHaveText(
+    'example.com/agent-desktop',
+  )
+  await expect(fetched.locator('.note')).toHaveText(
+    '搜索「desktop agent environment panel」· 2 处记录',
+  )
+  await shot(page, 'card-sources-view')
+  await view.getByRole('button', { name: '返回', exact: true }).click()
+  await expect(view).toHaveCount(0)
   await expect(envCard).toBeVisible()
 
   await page.locator('[data-conversation-scroll]').evaluate((el) => {
@@ -473,6 +526,35 @@ test('card rows open the review, the subagent list, all sources and the plan', a
     'review',
   )
 })
+
+// UI-S13: the card's 来源 section and the workbench's 来源 view, for review.
+for (const theme of ['dark', 'light'] as const) {
+  test(`来源 section and view (${theme})`, async ({ page }) => {
+    await open(page, '/chat/build-ui', { theme })
+    const envCard = card(page)
+    const section = envCard.locator('[data-section="sources"]')
+    await expect(section.locator('[data-source-item]')).toHaveCount(3)
+    await page.mouse.move(0, 0)
+    await page.waitForTimeout(300)
+    await envCard.screenshot({
+      path: resolve(screenshotDir, `card-sources-${theme}.png`),
+      animations: 'disabled',
+    })
+    await section.locator('[data-row="sources-all"]').click()
+    const view = page.locator('[data-sources-view]')
+    await expect(view.locator('[data-source-entry]')).toHaveCount(7)
+    // Paths and addresses wrap; nothing runs out of the column.
+    expect(await view.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(
+      true,
+    )
+    await page.mouse.move(0, 0)
+    await shot(page, `sources-view-${theme}`)
+    await view.screenshot({
+      path: resolve(screenshotDir, `sources-view-panel-${theme}.png`),
+      animations: 'disabled',
+    })
+  })
+}
 
 test('「隐藏此卡片」 closes the card and remembers it', async ({ page }) => {
   await open(page, '/chat/build-ui', { envCard: 'auto' })

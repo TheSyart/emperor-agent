@@ -1431,7 +1431,7 @@ async function conversationResources(
 
     await check(
       page,
-      'the resource sidebar distinguishes created output and retained source uses',
+      'the 来源 view lists each source once and keeps every use',
       async () => {
         await closeResourceDetails(page)
         const sidebar = page.locator('.environment-card')
@@ -1440,25 +1440,39 @@ async function conversationResources(
             .getByRole('button', { name: '环境信息', exact: true })
             .first()
             .click()
-        // UI-S05: 输出 and 来源 are one row each; their menus list them.
-        await sidebar.locator('[data-row="outputs"]').click()
-        const outputs = page.getByRole('menu', { name: '全部输出' })
-        await outputs.waitFor({ timeout: 10_000 })
-        if (!(await outputs.innerText()).includes('resources-output.md'))
-          throw new Error('the successful create is missing from outputs')
-        if ((await outputs.innerText()).includes('资源示例.ts'))
-          throw new Error('a read/cited file was promoted to output')
-        await page.keyboard.press('Escape')
-        await sidebar.locator('[data-row="sources"]').click()
-        const source = page
-          .getByRole('menu', { name: '全部来源' })
-          .locator('.resource-menu-item')
+        // UI-S13: no 输出 row; 来源 lists three and opens the rest in the
+        // workbench's 来源 view.
+        if ((await sidebar.locator('[data-row="outputs"]').count()) !== 0)
+          throw new Error('the card still has an 输出 row')
+        const listed = await sidebar
+          .locator('[data-section="sources"] [data-source-item]')
+          .count()
+        if (listed !== 3) throw new Error(`the card lists ${listed} sources`)
+        const workbench = page.getByRole('button', {
+          name: '关闭工作台',
+          exact: true,
+        })
+        const wasOpen = await workbench.isVisible()
+        await sidebar.locator('[data-row="sources-all"]').click()
+        const view = page.locator('[data-sources-view]')
+        await view.waitFor({ timeout: 10_000 })
+        const groups = await view
+          .locator('[data-source-group] .section-title')
+          .allInnerTexts()
+        if (!groups.some((title) => title.startsWith('已查看')))
+          throw new Error(`no 已查看 group: ${JSON.stringify(groups)}`)
+        const read = view.locator('[data-source-group="read"]')
+        if (!(await read.innerText()).includes('guide.md'))
+          throw new Error('the file the agent read is not under 已查看')
+        const source = view
+          .locator('[data-source-entry]')
           .filter({ hasText: 'example.com' })
-        const sourceRow = source.first()
-        await sourceRow.waitFor({ timeout: 10_000 })
         if ((await source.count()) !== 1)
           throw new Error('the repeated website was not deduplicated')
-        await sourceRow.click()
+        await page.screenshot({
+          path: join(shots, 'resource-sources-view.png'),
+        })
+        await source.first().click()
         const dialog = page.locator('[data-resource-dialog]')
         await dialog.waitFor({ timeout: 10_000 })
         const uses = await dialog
@@ -1474,8 +1488,11 @@ async function conversationResources(
           )
         await page.screenshot({ path: join(shots, 'resource-source-uses.png') })
         await closeResourceDetails(page)
+        await view.getByRole('button', { name: '返回', exact: true }).click()
+        if (!wasOpen && (await workbench.isVisible())) await workbench.click()
         return {
-          createdOutput: 'notes/resources-output.md',
+          listedOnCard: listed,
+          groups,
           sourceRows: 1,
           uses: uses.length,
         }

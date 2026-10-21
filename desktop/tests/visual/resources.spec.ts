@@ -229,7 +229,7 @@ test('a hundred links render without starting metadata requests', async ({
   )
   expect(iconCalls).toBe(1)
   await expect(
-    page.locator('.environment-card [data-row="sources"]'),
+    page.locator('.environment-card [data-section="sources"] .sources-head'),
   ).toContainText('来源')
 })
 for (const theme of ['dark', 'light'] as const) {
@@ -250,12 +250,10 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(
       page.locator('.md-link-detail, .resource-inline button'),
     ).toHaveCount(0)
-    await sidebar.locator('[data-row="outputs"]').click()
-    await expect(page.getByRole('menu', { name: '全部输出' })).toContainText(
-      '发布说明.md',
-    )
-    await page.keyboard.press('Escape')
-    await expect(sidebar.locator('[data-row="sources"]')).toBeVisible()
+    // UI-S13: no 输出 row (a turn's files are in its files card); 来源 is
+    // a section of its own.
+    await expect(sidebar.locator('[data-row="outputs"]')).toHaveCount(0)
+    await expect(sidebar.locator('[data-section="sources"]')).toBeVisible()
     await expect(
       page.locator('.resource-card[data-resource-kind="github"]').first(),
     ).toBeVisible()
@@ -321,7 +319,7 @@ for (const theme of ['dark', 'light'] as const) {
   })
 }
 
-test('long resource names wrap completely in cards and the source list', async ({
+test('long resource names wrap completely in cards and the 来源 view', async ({
   page,
 }) => {
   const title =
@@ -332,7 +330,10 @@ test('long resource names wrap completely in cards and the source list', async (
   records.stepStart(1, 1)
   records.stream(1, 1, [
     {
-      text: `[${title}](https://docs.example.com/a-very-long-resource-name-without-ellipsis?view=full#details)`,
+      text: [
+        `[${title}](https://docs.example.com/a-very-long-resource-name-without-ellipsis?view=full#details)`,
+        '[一](https://one.example.com)、[二](https://two.example.com)、[三](https://three.example.com)',
+      ].join('\n\n'),
     },
   ])
   records.stepEnd(1, 1)
@@ -349,12 +350,17 @@ test('long resource names wrap completely in cards and the source list', async (
   await page.setViewportSize({ width: 1600, height: 1050 })
   await page.goto('/chat/build-ui')
   const label = page.locator('.resource-card .resource-title')
-  // UI-S05: the card lists its sources in the 来源 menu.
-  await page.locator('.environment-card [data-row="sources"]').click()
-  const source = page
-    .getByRole('menu', { name: '全部来源' })
-    .locator('.resource-menu-item .name')
   await expect(label).toHaveText(title)
+  // UI-S13: a card row is one line (the full name on hover); the 来源 view
+  // shows every name in full.
+  const row = page
+    .locator('.environment-card [data-source-item]')
+    .filter({ hasText: title.slice(0, 8) })
+  await expect(row).toHaveAttribute('title', title)
+  await page.locator('.environment-card [data-row="sources-all"]').click()
+  const source = page
+    .locator('[data-sources-view] [data-source-entry] .title')
+    .filter({ hasText: title.slice(0, 8) })
   await expect(source).toHaveText(title)
   for (const locator of [label, source]) {
     const style = await locator.evaluate((element) => {

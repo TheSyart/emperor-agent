@@ -31,6 +31,7 @@ import {
   requestWorkspace,
   workspaceRequest,
 } from './workspaceState'
+import SourcesView from './SourcesView.vue'
 
 // Panes are async chunks: on a cold transform cache (CI) the first one can
 // take seconds to load, more than vi.waitFor's default second.
@@ -789,5 +790,118 @@ describe('WorkspacePanel', () => {
     } finally {
       measure.mockRestore()
     }
+  })
+  // UI-S13: 「查看全部」 on the environment card opens the 来源 view.
+  function openSources(session = 's1'): void {
+    const view = {
+      sessionId: session,
+      sources: [
+        {
+          id: 'file:/tmp/demo/src/a.ts',
+          kind: 'file',
+          href: '/tmp/demo/src/a.ts',
+          label: 'a.ts',
+          subtitle: '/tmp/demo/src/a.ts',
+          sourceMessageId: 'm1',
+          role: 'source',
+          provenance: 'read',
+        },
+      ],
+      nodes: new Map(),
+      hasMore: false,
+    }
+    requestWorkspace({
+      pane: 'launcher',
+      view: {
+        sessionId: session,
+        title: '来源',
+        component: SourcesView,
+        props: ref({ view }),
+      },
+    })
+  }
+
+  const viewShown = (root: HTMLElement) =>
+    root.querySelector('[data-sources-view]') !== null
+
+  it('shows the 来源 view over the pane used last, which stays chosen (UI-S13)', async () => {
+    frameActions.setWorkspacePane(useFrameState(), 'files')
+    frameActions.closeWorkspace(useFrameState())
+    const root = mount()
+    await flush()
+    openSources()
+    await vi.waitFor(
+      () => expect(root.querySelector('[data-sources-view]')).not.toBeNull(),
+      PANE_LOAD,
+    )
+    expect(useFrameState().workspace).toBeGreaterThan(0)
+    expect(useFrameState().workspacePane).toBe('files')
+    expect(root.querySelector('.files-pane')).toBeNull()
+    // Not a fifth pane: no tab for it, none selected while it shows.
+    expect(
+      root.querySelectorAll('.workspace-panes [data-tab-id]'),
+    ).toHaveLength(4)
+    expect(
+      root.querySelector('.workspace-panes [aria-selected="true"]'),
+    ).toBeNull()
+    expect(root.querySelector('.workspace-title')?.textContent).toBe('来源')
+    expect(window.localStorage.getItem(FRAME_STORAGE_KEY) ?? '').not.toContain(
+      'sources',
+    )
+    // 返回 shows the pane again.
+    root
+      .querySelector<HTMLButtonElement>(
+        '[data-sources-view] [aria-label="返回"]',
+      )!
+      .click()
+    await flush()
+    expect(root.querySelector('[data-sources-view]')).toBeNull()
+    await vi.waitFor(
+      () => expect(root.querySelector('.files-pane')).not.toBeNull(),
+      PANE_LOAD,
+    )
+    expect(segment(root, 'files').getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('closes the 来源 view when a pane is picked, a file opens or the column closes (UI-S13)', async () => {
+    const root = mount()
+    await flush()
+    openSources()
+    await vi.waitFor(
+      () => expect(root.querySelector('[data-sources-view]')).not.toBeNull(),
+      PANE_LOAD,
+    )
+    segment(root, 'browser').click()
+    await flush()
+    expect(viewShown(root)).toBe(false)
+    expect(useFrameState().workspacePane).toBe('browser')
+
+    openSources()
+    await vi.waitFor(() => expect(viewShown(root)).toBe(true), PANE_LOAD)
+    expect(segment(root, 'browser').getAttribute('aria-selected')).toBe('false')
+    requestWorkspace({ pane: 'files', file: { path: './src/a.ts', line: 1 } })
+    await flush()
+    expect(viewShown(root)).toBe(false)
+    expect(useFrameState().workspacePane).toBe('files')
+
+    openSources()
+    await vi.waitFor(() => expect(viewShown(root)).toBe(true), PANE_LOAD)
+    open.value = false
+    await flush()
+    expect(viewShown(root)).toBe(false)
+  })
+
+  it('closes the 来源 view of another session (UI-S13)', async () => {
+    const root = mount()
+    await flush()
+    openSources()
+    await vi.waitFor(
+      () => expect(root.querySelector('[data-sources-view]')).not.toBeNull(),
+      PANE_LOAD,
+    )
+    sessionId.value = 's2'
+    await flush()
+    expect(viewShown(root)).toBe(false)
+    expect(root.querySelector('[data-sources-view]')).toBeNull()
   })
 })

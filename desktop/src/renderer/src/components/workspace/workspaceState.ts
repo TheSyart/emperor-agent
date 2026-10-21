@@ -4,7 +4,7 @@
  * holding a component ref: the request lands here, the frame opens the
  * column on the requested pane, and WorkspacePanel consumes the payload.
  */
-import { shallowRef } from 'vue'
+import { shallowRef, type Component, type Ref } from 'vue'
 import type { FilePreviewInput } from '@emperor/core/api'
 import type { TurnFileEntry } from '@emperor/core/runtime-contract'
 import {
@@ -20,6 +20,22 @@ export interface TurnReviewRequest {
   files: readonly TurnFileEntry[]
   /** The file to show first. */
   path?: string
+}
+
+/**
+ * A temporary view shown over the column instead of a pane (UI-S13: the
+ * environment card's 来源). It gets no tab and is never remembered; the
+ * requester owns the component (its chunk stays out of the startup graph)
+ * and keeps `props` current while it shows.
+ */
+export interface WorkspaceView {
+  /** The chat window it belongs to: leaving that chat closes it. */
+  sessionId: string
+  /** The panel's hidden heading while it shows. */
+  title: string
+  /** Emits `close` (返回). */
+  component: Component
+  props: Readonly<Ref<Record<string, unknown>>>
 }
 
 export interface WorkspaceFileRequest {
@@ -44,6 +60,11 @@ export interface WorkspaceRequest {
   turn?: TurnReviewRequest
   /** Control to focus once the pane shows ('commit': the review commit box). */
   focus?: 'commit'
+  /**
+   * Show this view over the column; with pane 'launcher' the pane used last
+   * stays chosen. Any later request closes it.
+   */
+  view?: WorkspaceView
   nonce: number
 }
 

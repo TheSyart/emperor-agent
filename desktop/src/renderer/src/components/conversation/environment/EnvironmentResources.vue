@@ -1,32 +1,33 @@
 <script setup lang="ts">
 /**
- * 输出 and 来源 on the environment card (UI-S05): one row each, with up to
- * three faces (image thumbnails, file type icons, site icons) and the
- * count; the row opens a menu listing every one. An image opens the
- * lightbox, anything else the resource detail. The menu's label says when
- * only the loaded window is counted (older history not loaded yet).
+ * 来源 on the environment card (UI-S13): a small head 「来源」 with the
+ * count, then at most three sources, one row each — what you provided
+ * first, then what was read, then search hits (sourcesModel.ts) — with the
+ * icon or thumbnail, the name and how it came (PROVENANCE_LABEL of its
+ * strongest way in, sourceProvenance). Beyond
+ * three, 「查看全部 N 个」 opens the 来源 view in the workbench
+ * (workspace/SourcesView.vue, an async chunk of this card handed over as a
+ * temporary view: `requestWorkspace({ view })`), which this card keeps up
+ * to date while it stays mounted. A source opens as before: an image in the lightbox, anything else
+ * in the resource detail. While older history is not loaded the head and
+ * the link say 已加载.
  *
- * Sources and outputs come from the loaded transcript (resourcesFromSnapshot):
- * attachments, 网页搜索, MCP servers, Skills; files the agent wrote. MCP
- * names missing from the boot tool list are resolved once via skills.tools.
+ * There is no 输出 row: a turn's files are in its 「已编辑 N 个文件」 card.
+ *
+ * Sources come from the loaded transcript (resourcesFromSnapshot):
+ * attachments, 网页搜索, MCP servers, Skills. MCP names missing from the
+ * boot tool list are resolved once via skills.tools.
  *
  * Props: sessionId, snapshot, hasMore (older history is not loaded).
  */
-import {
-  computed,
-  onBeforeUnmount,
-  onMounted,
-  ref,
-  shallowRef,
-  watch,
-} from 'vue'
+import { ChevronRight, Link } from 'lucide-vue-next'
+import { computed, defineAsyncComponent, shallowRef, watch } from 'vue'
 import { attachmentRawUrl } from '../../../api/attachments'
 import { core } from '../../../api/http'
 import { useAppContext } from '../../../composables/useAppContext'
 import type { ChatSnapshot } from '../../../conversation/types'
-import Menu from '../../ui/Menu.vue'
-import MenuItem from '../../ui/MenuItem.vue'
 import { type SourceToolInfo } from '../../workspace/workspaceSources'
+import { requestWorkspace } from '../../workspace/workspaceState'
 import { resourcesFromSnapshot } from '../resources/resourceIndex'
 import { requestResourceDetail } from '../resources/resourceEvents'
 import { openResourceImages } from '../resources/resourceImages'
@@ -35,8 +36,18 @@ import {
   type DisplayResource,
 } from '../resources/resourceModel'
 import ResourceIcon from '../resources/ResourceIcon.vue'
-import { elementOf } from '../../ui/elementOf'
 import EnvironmentRow from './EnvironmentRow.vue'
+import {
+  CARD_SOURCE_LIMIT,
+  orderSources,
+  sourceProvenance,
+  type SourcesViewState,
+} from './sourcesModel'
+
+// Loaded from this chunk, not the workbench's: its imports are already here.
+const SourcesView = defineAsyncComponent(
+  () => import('../../workspace/SourcesView.vue'),
+)
 
 const props = defineProps<{
   sessionId: string
@@ -51,9 +62,12 @@ let toolsRequested = false
 const toolCatalog = computed<readonly SourceToolInfo[]>(
   () => fetchedTools.value ?? ctx.boot.value?.tools ?? [],
 )
-const resources = computed(() =>
-  resourcesFromSnapshot(props.snapshot, { tools: toolCatalog.value }),
+const sources = computed(() =>
+  orderSources(
+    resourcesFromSnapshot(props.snapshot, { tools: toolCatalog.value }).sources,
+  ),
 )
+const shown = computed(() => sources.value.slice(0, CARD_SOURCE_LIMIT))
 // Tool names never change once a row exists: rescan only for new rows.
 watch(
   () => props.snapshot.order.length,
@@ -80,194 +94,127 @@ watch(
   { immediate: true },
 )
 
-const groups = computed(() =>
-  [
-    {
-      key: 'outputs' as const,
-      label: '输出',
-      all: '全部输出',
-      loaded: '已加载输出',
-      items: resources.value.outputs,
-    },
-    {
-      key: 'sources' as const,
-      label: '来源',
-      all: '全部来源',
-      loaded: '已加载来源',
-      items: resources.value.sources,
-    },
-  ].filter((group) => group.items.length),
-)
-const everything = computed(() => [
-  ...resources.value.sources,
-  ...resources.value.outputs,
-])
-
-const anchors: Record<string, HTMLElement | null> = {}
-const openMenu = ref<'outputs' | 'sources' | null>(null)
-
-/**
- * Escape closes an open menu first: a click leaves focus on the row, out of
- * the menu's own key handling, and the card must not close instead.
- */
-function onKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Escape' || !openMenu.value) return
-  if (event.defaultPrevented || event.isComposing) return
-  event.preventDefault()
-  openMenu.value = null
+function viewState(): SourcesViewState {
+  return {
+    sessionId: props.sessionId,
+    sources: sources.value,
+    nodes: props.snapshot.nodes,
+    hasMore: props.hasMore === true,
+  }
 }
-onMounted(() => document.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
+/** The 来源 view's props, following the list once it was opened. */
+const viewProps = shallowRef<Record<string, unknown>>({})
+let viewOpened = false
+watch([sources, () => props.hasMore], () => {
+  if (viewOpened) viewProps.value = { view: viewState() }
+})
+function openAll(): void {
+  viewOpened = true
+  viewProps.value = { view: viewState() }
+  requestWorkspace({
+    pane: 'launcher',
+    view: {
+      sessionId: props.sessionId,
+      title: '来源',
+      component: SourcesView,
+      props: viewProps,
+    },
+  })
+}
 
 function isImage(resource: DisplayResource): boolean {
   return resource.kind === 'image' && Boolean(resource.attachmentId)
 }
-function uses(resource: DisplayResource): string {
-  return resource.uses && resource.uses.length > 1
-    ? `×${resource.uses.length}`
-    : ''
-}
 function select(resource: DisplayResource): void {
   if (isImage(resource))
-    openResourceImages(resource, props.sessionId, everything.value)
+    openResourceImages(resource, props.sessionId, sources.value)
   else requestResourceDetail(resource, props.sessionId)
 }
 </script>
 
 <template>
-  <div v-if="groups.length" class="resources">
-    <template v-for="group in groups" :key="group.key">
-      <EnvironmentRow
-        :ref="(c) => (anchors[group.key] = elementOf(c))"
-        :data-row="group.key"
-        :label="group.label"
-        :value="String(group.items.length)"
-        menu
-        :expanded="openMenu === group.key"
-        @click="openMenu = openMenu === group.key ? null : group.key"
-      >
-        <template #lead>
-          <span class="faces">
-            <template v-for="item in group.items.slice(0, 3)" :key="item.id">
-              <img
-                v-if="isImage(item)"
-                class="thumb"
-                :src="attachmentRawUrl(item.attachmentId!)"
-                alt=""
-                loading="lazy"
-                data-resource-face
-              />
-              <span v-else class="face" data-resource-face
-                ><ResourceIcon
-                  :resource="item"
-                  :session-id="sessionId"
-                  :size="14"
-              /></span>
-            </template>
-          </span>
-        </template>
-      </EnvironmentRow>
-      <Menu
-        :open="openMenu === group.key"
-        :anchor="anchors[group.key] ?? null"
-        placement="bottom"
-        :width="264"
-        dense
-        :label="group.all"
-        @update:open="(next: boolean) => !next && (openMenu = null)"
-      >
-        <MenuItem variant="label"
-          >{{ hasMore ? group.loaded : group.all }} ·
-          {{ group.items.length }}</MenuItem
-        >
-        <MenuItem
-          v-for="item in group.items"
-          :key="item.id"
-          class="resource-menu-item"
-          @select="select(item)"
-        >
-          <template #icon>
-            <img
-              v-if="isImage(item)"
-              class="menu-thumb"
-              :src="attachmentRawUrl(item.attachmentId!)"
-              alt=""
-              loading="lazy"
-            />
-            <ResourceIcon
-              v-else
-              :resource="item"
-              :session-id="sessionId"
-              :size="16"
-            />
-          </template>
-          <span class="name">{{ item.label }}</span
-          ><span class="kind"
-            >{{ PROVENANCE_LABEL[item.provenance]
-            }}<template v-if="item.kind === 'web' || item.kind === 'github'">
-              · {{ item.subtitle }}</template
-            >
-            {{ uses(item) }}</span
-          >
-        </MenuItem>
-      </Menu>
-    </template>
-  </div>
+  <section
+    v-if="sources.length"
+    class="sources"
+    data-section="sources"
+    :aria-label="hasMore ? '已加载来源' : '来源'"
+  >
+    <div class="sources-head">
+      <span>{{ hasMore ? '已加载来源' : '来源' }}</span>
+      <span class="count">{{ sources.length }}</span>
+    </div>
+    <EnvironmentRow
+      v-for="item in shown"
+      :key="item.id"
+      data-source-item
+      :label="item.label"
+      :title="item.label"
+      :value="PROVENANCE_LABEL[sourceProvenance(item)]"
+      @click="select(item)"
+    >
+      <template #lead>
+        <img
+          v-if="isImage(item)"
+          class="thumb"
+          :src="attachmentRawUrl(item.attachmentId!)"
+          alt=""
+          loading="lazy"
+        />
+        <ResourceIcon
+          v-else
+          :resource="item"
+          :session-id="sessionId"
+          :size="16"
+        />
+      </template>
+    </EnvironmentRow>
+    <EnvironmentRow
+      v-if="sources.length > CARD_SOURCE_LIMIT"
+      class="all"
+      data-row="sources-all"
+      :label="
+        hasMore
+          ? `查看已加载的 ${sources.length} 个`
+          : `查看全部 ${sources.length} 个`
+      "
+      @click="openAll"
+    >
+      <template #lead><Link :size="16" /></template>
+      <template #value><ChevronRight :size="14" /></template>
+    </EnvironmentRow>
+  </section>
 </template>
 
 <style scoped>
-.resources {
+.sources {
   display: flex;
   flex-direction: column;
   gap: var(--space-0-5);
 }
 
-.faces {
-  display: inline-flex;
-  align-items: center;
+/* The ListSection head: 12/18 medium, tertiary. */
+.sources-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: var(--space-0-5) var(--space-2);
+  color: rgb(var(--text-3));
+  font: var(--weight-medium) var(--type-caption) var(--font-sans);
 }
 
-/* Overlapping faces, each ringed in the card fill. */
-.faces > * + * {
-  margin-left: calc(-1 * var(--space-1));
-}
-
-.face,
-.thumb {
-  display: inline-grid;
-  width: var(--icon-lg);
-  height: var(--icon-lg);
-  place-items: center;
-  border-radius: var(--r-xs);
-  background: rgb(var(--surface-base));
-  box-shadow: 0 0 0 1.5px rgb(var(--env-card-fill));
+.count {
+  font-weight: var(--weight-regular);
+  font-variant-numeric: tabular-nums;
 }
 
 .thumb {
-  object-fit: cover;
-}
-
-.menu-thumb {
   width: var(--icon-md);
   height: var(--icon-md);
   border-radius: var(--r-xs);
   object-fit: cover;
 }
 
-.resource-menu-item :deep(.item-label) {
-  overflow: visible;
-  white-space: normal;
-  text-overflow: clip;
-  overflow-wrap: anywhere;
-}
-
-.name,
-.kind {
-  display: block;
-}
-
-.kind {
-  color: rgb(var(--text-3));
-  font: var(--font-xxxs);
+.sources .all {
+  color: rgb(var(--text-2));
 }
 </style>

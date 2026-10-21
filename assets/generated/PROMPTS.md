@@ -175,9 +175,11 @@ Avoid: misspelled text, extra slogans, spaces between emperor and agent, upperca
 
 `subagent-avatars/*-sheet-1254.webp` 是生图原图（1254×1254 无损 WebP，四张共约 5 MB），`frames-1254.json` 是在原图上量出的 36 个头像框。应用里用的是缩小后的版本 `desktop/src/renderer/src/assets/subagent-avatars/`：
 
+头像是透明底（UI-S13）：原图的米色底和每个头像下的投影用 `subagent-avatars/matte.py` 抠掉。和底色相近且不比底色亮、或比底色暗的平滑灰色（投影），只要和图边连通就算背景；先把候选区收窄 3 px 再从图边扩张，白色机器人、幽灵这类表面光滑的头像不会从窄缝漏进去；边缘按颜色差给半透明，并把底色从半透明像素里减掉。缩小时用预乘透明度，边缘不带杂色：
+
 ```sh
-dwebp X-sheet-1254.webp -o X.png
-cwebp -q 88 -m 6 -sharp_yuv -resize 448 448 X.png -o X-sheet.webp
+python3 -I -c "import importlib.util as u; s=u.spec_from_file_location('m','matte.py'); m=u.module_from_spec(s); s.loader.exec_module(m); m.matte('X-sheet-1254.webp','X.png')"
+python3 -I -c "from PIL import Image; Image.open('X.png').convert('RGBa').resize((448,448), Image.LANCZOS).convert('RGBA').save('X-sheet.webp','WEBP',quality=90,alpha_quality=95,method=6)"
 ```
 
-头像框按 448 / 1254 等比缩放并取整（`frames.json`）。四张合计约 100 KB；每个头像约 110–160 px，够 40 px 头像在 2 倍屏上显示。以后重新裁框，在原图上量，再按同样比例换算。
+头像框按 448 / 1254 等比缩放并取整（`frames.json`）。四张合计约 225 KB；每个头像约 110–160 px，够 40 px 头像在 2 倍屏上显示。以后重新裁框，在原图上量，再按同样比例换算；换了原图要重新抠底，并在深色与浅色背景上逐个看一遍（`tests/visual/subagent-avatars.spec.ts` 检查每张图角落透明、每个头像中心不透明）。
