@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import type { Locator, Page } from '@playwright/test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -128,7 +128,7 @@ async function sessionMenu(page: Page, title: string) {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`expanded sidebar (${theme})`, async ({ page }) => {
+  test(`expanded sidebar (${theme}) @baseline`, async ({ page }) => {
     await open(page, '/chat/build-ui', { theme })
     const root = sidebar(page)
     await expect(root).toBeVisible()
@@ -181,6 +181,7 @@ for (const theme of ['dark', 'light'] as const) {
     // The search capsule stays folded until the search icon opens it.
     await expect(page.getByLabel('搜索对话')).toHaveCount(0)
     await shot(page, `expanded-${theme}`)
+    await expectBaseline(page, 'shell', `sidebar-${theme}`)
 
     // The footer's theme toggle flips light / dark in place of 帮助.
     const other = theme === 'dark' ? 'light' : 'dark'
@@ -199,7 +200,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
   })
 
-  test(`collapsed rail (${theme})`, async ({ page }) => {
+  test(`collapsed rail (${theme}) @baseline`, async ({ page }) => {
     await open(page, '/chat/build-ui', { theme, frame: { sidebar: 0 } })
     const rail = page.locator('.sidebar-rail')
     await expect(rail).toBeVisible()
@@ -229,6 +230,7 @@ for (const theme of ['dark', 'light'] as const) {
     await rail.getByRole('button', { name: '能力' }).hover()
     await expect(page.getByRole('tooltip', { name: '能力' })).toBeVisible()
     await shot(page, `rail-${theme}`)
+    await expectBaseline(page, 'shell', `rail-${theme}`)
 
     await rail.getByRole('button', { name: '定时任务' }).click()
     await expect(page).toHaveURL(/\/scheduler/)
@@ -295,7 +297,7 @@ for (const theme of ['dark', 'light'] as const) {
     ).not.toHaveAttribute('aria-current', 'page')
   })
 
-  test(`notifications popover (${theme})`, async ({ page }) => {
+  test(`notifications popover (${theme}) @baseline`, async ({ page }) => {
     await seedNotifications(page)
     await open(page, '/chat/chat-main', { theme })
     await expect(bell(page)).toHaveAccessibleName('通知，2 条未读')
@@ -308,6 +310,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(popover.getByText('2 分钟前')).toBeVisible()
     await expect(popover.getByText('3 天前')).toBeVisible()
     await shot(page, `notifications-${theme}`)
+    await expectBaseline(page, 'shell', `notifications-${theme}`)
 
     await popover.getByRole('button', { name: '全部已读' }).click()
     await expect(popover.locator('.row[data-unread]')).toHaveCount(0)

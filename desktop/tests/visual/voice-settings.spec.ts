@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import type { Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -50,7 +50,7 @@ async function noHorizontalOverflow(page: Page) {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`voice settings on this Mac (${theme})`, async ({ page }) => {
+  test(`voice settings on this Mac (${theme}) @baseline`, async ({ page }) => {
     const dialog = await openVoice(page, { theme })
     // A working helper and two granted permissions need no decision: 听写
     // first, the permissions as one line in the last card, no notice.
@@ -71,6 +71,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(dialog.getByText('⇧⌘D')).toBeVisible()
     await noHorizontalOverflow(page)
     await shot(page, `voice-${theme}`)
+    await expectBaseline(page, 'settings', `voice-${theme}`)
   })
 }
 

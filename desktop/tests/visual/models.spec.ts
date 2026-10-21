@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import type { Locator, Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -135,7 +135,7 @@ test('管理模型 opens the provider at step 2 with its models checked', async 
 // MOD-05: the model list — a card per provider with the connection's state,
 // its ⋯ (更换 Key, 刷新模型资料), rows with a retired model's replacement.
 for (const theme of ['dark', 'light'] as const) {
-  test(`model list: cards, menus and a retired model (${theme})`, async ({
+  test(`model list: cards, menus and a retired model (${theme}) @baseline`, async ({
     page,
   }) => {
     const settings = await openModels(page, theme, 1280)
@@ -153,6 +153,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(retired).toContainText('已于 2026-07-24 退役')
     await noHorizontalOverflow(page)
     await shot(page, `model-list-${theme}`)
+    await expectBaseline(page, 'settings', `models-${theme}`)
 
     // 更换 Key names how many models change.
     await settings.getByRole('button', { name: 'Anthropic 的更多操作' }).click()
