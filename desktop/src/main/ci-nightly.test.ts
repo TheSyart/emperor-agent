@@ -27,6 +27,7 @@ interface PlannedStep {
   cwd?: string
   skip?: string
   hook?: string
+  retry?: string[]
 }
 
 describe('the nightly plan (REL-04 test 3)', () => {
@@ -38,6 +39,7 @@ describe('the nightly plan (REL-04 test 3)', () => {
     expect(steps.map((step) => step.id)).toEqual([
       'build',
       'visual',
+      'visual:perf',
       'visual-baselines',
       'e2e:smoke',
       'e2e:contract',
@@ -61,9 +63,18 @@ describe('the nightly plan (REL-04 test 3)', () => {
     ])
     const byId = Object.fromEntries(steps.map((step) => [step.id, step]))
     expect(byId['visual']).toMatchObject({
-      command: ['npx', 'playwright', 'test', '-c', 'playwright.config.ts'],
+      command: [
+        'npx',
+        'playwright',
+        'test',
+        '-c',
+        'playwright.config.ts',
+        '--grep-invert',
+        '@perf',
+      ],
       cwd: 'desktop',
     })
+    expect(byId['visual']?.retry).toBeUndefined()
     expect(byId['e2e:settings']).toMatchObject({
       command: ['node', 'scripts/e2e-cu.mjs', '--mode=settings'],
       cwd: 'desktop',
@@ -83,6 +94,60 @@ describe('the nightly plan (REL-04 test 3)', () => {
     // Modes that call a real model or real executors are listed, with why.
     for (const id of ['e2e:real', 'e2e:references-real', 'external-agents'])
       expect(byId[id]?.skip, id).toMatch(/real model/)
+  })
+
+  // FIX-08: frame-rate and frame-time budgets measure wall-clock time. In
+  // the main visual run they share the machine with the other workers and
+  // failed under load; they run alone, and only they get one retry of what
+  // failed, reported as such.
+  it('runs the timing budgets alone, after the visual suite, with one retry', () => {
+    const steps = plan()
+    const perf = steps.find((step) => step.id === 'visual:perf')
+    expect(perf).toMatchObject({
+      command: [
+        'npx',
+        'playwright',
+        'test',
+        '-c',
+        'playwright.config.ts',
+        '--grep',
+        '@perf',
+        '--workers=1',
+      ],
+      retry: [
+        'npx',
+        'playwright',
+        'test',
+        '-c',
+        'playwright.config.ts',
+        '--grep',
+        '@perf',
+        '--workers=1',
+        '--last-failed',
+      ],
+      cwd: 'desktop',
+    })
+    // No other step retries: their failures are real.
+    expect(steps.filter((step) => step.retry).map((step) => step.id)).toEqual([
+      'visual:perf',
+    ])
+  })
+
+  it('tags every wall-clock budget of the streaming suite @perf', () => {
+    const source = fs.readFileSync(
+      path.join(repoRoot, 'desktop', 'tests', 'visual', 'streaming.spec.ts'),
+      'utf8',
+    )
+    const titles = [
+      ...source.matchAll(/test\(\s*`?'?([^'`]+)['`],\s*(\{[^}]*\})?/g),
+    ]
+    const timing = titles.filter(([, title]) => /fps|p95|frames/.test(title!))
+    expect(timing.length).toBeGreaterThanOrEqual(3)
+    for (const [, title, details] of timing)
+      expect(details ?? '', title).toContain("tag: '@perf'")
+    // The selection test measures nothing and stays in the main run.
+    const selection = titles.find(([, title]) => /stays selected/.test(title!))
+    expect(selection?.[2] ?? '').not.toContain('@perf')
   })
 
   it('leaves a named hook for the DS-06 pixel baselines', () => {
@@ -183,6 +248,50 @@ describe('the nightly runner', () => {
       'one',
     ])
     expect(summary.ok).toBe(true)
+  })
+
+  it('retries a step once when it says how, and says it passed on retry', () => {
+    const dir = tempDir('emperor-nightly-retry-')
+    const marker = path.join(dir, 'tried')
+    const flaky = `const fs = require('node:fs'); if (fs.existsSync(${JSON.stringify(marker)})) process.exit(0); fs.writeFileSync(${JSON.stringify(marker)}, '1'); console.error('fps 41'); process.exit(1)`
+    const { result, summary, report } = runPlan([
+      {
+        id: 'perf',
+        command: ['node', '-e', flaky],
+        retry: ['node', '-e', flaky],
+      },
+      {
+        id: 'perf-broken',
+        command: ['node', '-e', 'process.exit(1)'],
+        retry: ['node', '-e', 'console.error("still slow"); process.exit(2)'],
+      },
+      { id: 'plain', command: ['node', '-e', 'process.exit(1)'] },
+    ])
+    expect(result.status).toBe(1)
+    expect(summary.steps).toMatchObject([
+      {
+        id: 'perf',
+        status: 'passed',
+        exitCode: 0,
+        retried: true,
+        firstExitCode: 1,
+      },
+      {
+        id: 'perf-broken',
+        status: 'failed',
+        exitCode: 2,
+        retried: true,
+        firstExitCode: 1,
+      },
+      { id: 'plain', status: 'failed', exitCode: 1 },
+    ])
+    expect(summary.steps[2].retried).toBeUndefined()
+    expect(summary.steps[1].logTail).toContain('still slow')
+    const log = fs.readFileSync(path.join(report, 'logs', 'perf.log'), 'utf8')
+    expect(log).toContain('fps 41')
+    expect(log).toContain('nightly: retrying')
+    const markdown = fs.readFileSync(path.join(report, 'report.md'), 'utf8')
+    expect(markdown).toMatch(/\| perf \| passed \| 0 \| passed on retry/)
   })
 
   it('runs the Electron modes without ELECTRON_RUN_AS_NODE', () => {

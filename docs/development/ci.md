@@ -43,11 +43,11 @@ scripts/ci/pr-gate.sh --app "desktop/dist/mac-arm64/Emperor Agent.app"
 
 ## Nightly
 
-`node scripts/ci/nightly.mjs --list` 列出全部步骤。顺序是：desktop build；视觉套件（`playwright.config.ts`，本机与其他 checkout 并行时可用 `EMPEROR_NIGHTLY_PLAYWRIGHT_CONFIG` 指向自己的端口配置）；像素基线钩子（desktop 的 npm script `visual:baselines`，存在时运行，不存在时记为跳过）；`e2e-cu.mjs` 的 smoke、contract、extra、userbrowser、browser-security、fullstack、references、plugins、userbrowser-app、settings、renderer-security、diagnostics；kill -9 恢复各 20 次（`scripts/session-log-kill9.mjs`，另一组在每次 kill 后截掉日志尾部模拟断电）；`package:dir` 与 `package:probe`。
+`node scripts/ci/nightly.mjs --list` 列出全部步骤。顺序是：desktop build；视觉套件（`playwright.config.ts`，不含 `@perf` 用例；本机与其他 checkout 并行时可用 `EMPEROR_NIGHTLY_PLAYWRIGHT_CONFIG` 指向自己的端口配置）；视觉计时预算 `visual:perf`（带 `@perf` 标签的流式帧率与每帧脚本时间用例，单 worker 单独运行）；像素基线钩子（desktop 的 npm script `visual:baselines`，存在时运行，不存在时记为跳过）；`e2e-cu.mjs` 的 smoke、contract、extra、userbrowser、browser-security、fullstack、references、plugins、userbrowser-app、settings、renderer-security、diagnostics；kill -9 恢复各 20 次（`scripts/session-log-kill9.mjs`，另一组在每次 kill 后截掉日志尾部模拟断电）；`package:dir` 与 `package:probe`。
 
 需要真实模型或真实外部执行器的步骤只列出、不运行：`e2e-cu.mjs --mode=real`、`--mode=references-real`、`desktop/tests/external-agents.e2e.mjs`（它只接受 `--real`，同时驱动真实的 Codex 与 Claude Code）。委派的假执行器测试在 `make check` 里。
 
-每一步都会运行，前一步失败也不停；任何一步失败，退出码为 1。报告写在 `--report` 目录（默认 `desktop/dist/nightly-report`）：`summary.json`、`report.md` 和每一步的完整日志 `logs/<步骤>.log`。
+每一步都会运行，前一步失败也不停；任何一步失败，退出码为 1。只有 `visual:perf` 会重试：它量的是墙钟时间，和其他 worker 或机器上的其他负载同时跑时会掉到 50 fps 以下（REL-04 本机运行时负载 13–17），所以单独、单 worker 运行，失败时用 `--last-failed` 把失败的用例再跑一次。重试通过记为通过，`summary.json` 里带 `retried: true` 与第一次的退出码，`report.md` 写「passed on retry」；重试仍失败才算失败。其他步骤（e2e、视觉断言、kill -9、打包）的失败是真实的，不重试。新增量墙钟时间的视觉用例时加 `{ tag: '@perf' }`。报告写在 `--report` 目录（默认 `desktop/dist/nightly-report`）：`summary.json`、`report.md` 和每一步的完整日志 `logs/<步骤>.log`。
 
 失败时 `open-failure-issue.mjs` 开一个带 `nightly-failure`、`release-blocker` 标签的 issue，已有未关闭的就追加评论；完整运行（没有填 `only`）通过后自动关闭它。`--dry-run` 只打印计划，不调用 `gh`。
 
