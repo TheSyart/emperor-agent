@@ -14,7 +14,11 @@ import {
 } from '../../composables/useUiPreferences'
 import ChatTimeline from './ChatTimeline.vue'
 import { createFixtureStore, type FixtureStore } from './gallery/fixtureStore'
-import { noticesScenario, showcaseScenario } from './gallery/scenarios'
+import {
+  noticesScenario,
+  showcaseScenario,
+  taskFilesScenario,
+} from './gallery/scenarios'
 
 globalThis.IntersectionObserver ??= class {
   observe(): void {}
@@ -391,5 +395,47 @@ describe('process groups (UI-S03)', () => {
       .dispatchEvent(new Event('pointerleave'))
     await settle()
     expect(tail.hasAttribute('data-revealed')).toBe(false)
+  })
+})
+
+describe('a task its subagents woke again (UI-S15)', () => {
+  const flowKinds = (root: HTMLElement) =>
+    [...root.querySelectorAll('[data-chat-flow-kind]')].map((row) =>
+      row.getAttribute('data-chat-flow-kind'),
+    )
+
+  it('2 · shows no files card while the writers still run', async () => {
+    const { root } = mount(
+      'task-files-running',
+      taskFilesScenario(Date.now(), 'running').sessions,
+    )
+    await settle()
+    expect(groups(root)).toHaveLength(1)
+    expect(root.querySelectorAll('[data-turn-files]')).toHaveLength(0)
+    expect(root.querySelector('[data-process-continued]')).toBeNull()
+  })
+
+  it('3 · 6 · ends with one card after the woken turn, before its footer, and tags that turn', async () => {
+    const { root } = mount(
+      'task-files',
+      taskFilesScenario(Date.now(), 'done').sessions,
+    )
+    await settle()
+    const cards = root.querySelectorAll<HTMLElement>('[data-turn-files]')
+    expect(cards).toHaveLength(1)
+    expect(cards[0]!.getAttribute('data-turn-files')).toBe('2')
+    expect(text(cards[0]!.querySelector('.scope'))).toBe('这次任务')
+    expect(text(cards[0]!.querySelector('.headline'))).toBe('已编辑 5 个文件')
+    const [first, woken] = groups(root)
+    expect(first!.querySelector('[data-process-continued]')).toBeNull()
+    expect(text(woken!.querySelector('[data-process-continued]'))).toBe(
+      '子智能体完成后继续',
+    )
+    expect(text(header(woken!))).toMatch(/^已处理 \d+ 步 · 用时 /u)
+    expect(flowKinds(root).slice(-3)).toEqual([
+      'assistant',
+      'turnFiles',
+      'turnTail',
+    ])
   })
 })

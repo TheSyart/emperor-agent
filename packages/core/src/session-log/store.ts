@@ -315,6 +315,8 @@ export interface SessionLogStoreOptions {
 
 export class SessionLogStore {
   private readonly live = new Map<string, LiveEntry>()
+  /** Told when a stored log is opened, after crash repair (UI-S15). */
+  private readonly openListeners = new Set<(session: Session) => void>()
   private readonly persist: boolean
   private readonly delayMs: number
   private readonly retryDelayMs: number
@@ -346,6 +348,18 @@ export class SessionLogStore {
 
   addRepairContributor(contributor: RepairContributor): void {
     this.repairContributors.push(contributor)
+  }
+
+  /**
+   * Listen for stored logs being opened (after crash repair): what a
+   * stopped process left unfinished that needs more than an appended
+   * closer (the turn file recorder's open task). Returns an unsubscribe.
+   */
+  onOpened(listener: (session: Session) => void): () => void {
+    this.openListeners.add(listener)
+    return () => {
+      this.openListeners.delete(listener)
+    }
   }
 
   private dir(id: string): string {
@@ -435,6 +449,16 @@ export class SessionLogStore {
     const { session, bytes } = this.load(id, true)
     this.attach(session, bytes)
     this.repair(session)
+    for (const listener of [...this.openListeners]) {
+      try {
+        listener(session)
+      } catch (error: unknown) {
+        logger.warn('session log: an open listener failed', {
+          session: id,
+          error: String(error),
+        })
+      }
+    }
     return session
   }
 

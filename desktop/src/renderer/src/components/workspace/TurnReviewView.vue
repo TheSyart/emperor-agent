@@ -1,9 +1,11 @@
 <script setup lang="ts">
 /**
- * TurnReviewView — the 审查 pane's 本轮改动 mode (plan 7.6): the files one
- * recorded turn changed and, for the chosen file, the diff between the
- * turn's two snapshots (`workspace.turnDiff`). Read-only; 返回 goes back to
- * the working-tree review. Opened from the 「已编辑 N 个文件」 card.
+ * TurnReviewView — the 审查 pane's review of one recorded task (plan 7.6,
+ * UI-S15; 本轮改动 for a turn of an older log): the files it changed and,
+ * for the chosen file, the diff between its two snapshots — before the
+ * task's first write and after its last turn (`workspace.turnDiff`).
+ * Read-only; 返回 goes back to the working-tree review. Opened from the
+ * 「已编辑 N 个文件」 card.
  *
  * Props: request (TurnReviewRequest). Emits: close.
  */
@@ -16,6 +18,8 @@ import {
   fileCounts,
   fileStatusTag,
   splitFilePath,
+  turnFilesScope,
+  turnReviewTitle,
 } from '../conversation/nodes/turnFilesModel'
 import { splitPullRequestDiff } from '../pages/pulls/pullDiff'
 import DiffBlock from '../ui/DiffBlock.vue'
@@ -25,6 +29,7 @@ import type { TurnReviewRequest } from './workspaceState'
 const props = defineProps<{ request: TurnReviewRequest }>()
 const emit = defineEmits<{ close: [] }>()
 
+const title = computed(() => turnReviewTitle(turnFilesScope(props.request)))
 const selected = ref('')
 const diff = ref('')
 const truncated = ref(false)
@@ -97,15 +102,16 @@ function noteOf(entry: TurnFileEntry): string {
 <template>
   <section
     class="turn-review"
-    aria-label="本轮改动"
+    :aria-label="title"
     :data-turn-review="request.turn"
+    :data-task-first-turn="request.task?.firstTurn"
   >
     <header class="head">
       <IconButton label="返回审查" @click="emit('close')">
         <ArrowLeft :size="14" />
       </IconButton>
       <div class="title">
-        <strong>本轮改动</strong>
+        <strong>{{ title }}</strong>
         <span class="summary">
           {{ request.files.length }} 个文件
           <span class="add">+{{ totals.additions }}</span>
@@ -113,7 +119,7 @@ function noteOf(entry: TurnFileEntry): string {
         </span>
       </div>
     </header>
-    <ul class="files" role="listbox" aria-label="本轮改动的文件">
+    <ul class="files" role="listbox" :aria-label="`${title}里的文件`">
       <li v-for="entry in request.files" :key="entry.path">
         <button
           type="button"

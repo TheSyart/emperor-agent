@@ -1,8 +1,11 @@
-// The files a turn changed (E-track contract §5): `turn/files` written by
-// the host after the turn ends, `turn/files-reverted` once it is undone.
-// The card sits just before the turn's footer, which stays the turn's last
-// row (UI-S13), even when the record lands after the next turn began (the
-// snapshot takes a moment).
+// The files a task changed (E-track contract §5, UI-S15): `turn/files`
+// written by the host once the task is over — a message the user sent and
+// every turn a subagent's or job's result woke — under the task's last
+// turn; `turn/files-reverted` once it is undone. Older logs hold one record
+// per turn. The card sits just before that turn's footer, which stays the
+// turn's last row (UI-S13), even when the record lands after the next turn
+// began (the snapshot takes a moment, and the user's next message ends a
+// task that still had work running).
 import type {
   TurnFilesRecord,
   TurnFilesReverted,
@@ -56,6 +59,14 @@ function viewData(state: TurnFilesState): TurnFilesChatData | null {
   if (record === undefined) return null
   return {
     turn: record.turn,
+    ...(record.task === undefined
+      ? {}
+      : {
+          task: {
+            firstTurn: record.task.firstTurn,
+            lastTurn: record.task.lastTurn,
+          },
+        }),
     mode: record.mode,
     status: record.status,
     ...(record.skipReason === undefined
@@ -65,6 +76,7 @@ function viewData(state: TurnFilesState): TurnFilesChatData | null {
     totals: record.totals,
     truncated: record.truncated === true,
     concurrent: record.concurrent === true,
+    recovered: record.recovered === true,
     reviewable:
       record.mode === 'git' &&
       record.status === 'recorded' &&
@@ -80,7 +92,7 @@ function viewData(state: TurnFilesState): TurnFilesChatData | null {
   }
 }
 
-/** The 「已编辑 N 个文件」 card of one turn. */
+/** The 「已编辑 N 个文件」 card of one task (one turn in older logs). */
 export const turnFilesDefinition: ConversationDefinition<TurnFilesState> = {
   kind: 'turnFiles',
   target: 'chat',

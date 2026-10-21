@@ -255,8 +255,8 @@ for (const theme of ['light', 'dark'] as const) {
   })
 }
 
-// RF-06: the 「已编辑 N 个文件」 card — recorded, undone and unrecorded turns,
-// expanding the list and the undo confirmation.
+// RF-06: the 「已编辑 N 个文件」 card — recorded, undone and unrecorded tasks
+// (UI-S15: one task each), expanding the list and the undo confirmation.
 for (const theme of ['light', 'dark'] as const) {
   for (const width of [1000, 500]) {
     test(`turn files summary layout (${theme}, ${width})`, async ({ page }) => {
@@ -295,10 +295,10 @@ for (const theme of ['light', 'dark'] as const) {
         card.getByRole('button', { name: '收起文件列表' }),
       ).toBeVisible()
       await card
-        .getByRole('img', { name: '按本轮开始与结束时的项目对比' })
+        .getByRole('img', { name: '按这次任务开始与结束时的项目对比' })
         .focus()
       await expect(page.getByRole('tooltip')).toContainText(
-        '按本轮开始与结束时的项目对比',
+        '按这次任务开始与结束时的项目对比',
       )
     })
   }
@@ -319,8 +319,9 @@ for (const theme of ['light', 'dark'] as const) {
       '已撤销，跳过 1 个',
     )
     await expect(page.locator('[data-turn-files="3"]')).toHaveText(
-      '本轮改动未记录：项目快照超过 5 秒',
+      '这次任务的改动未记录：项目快照超过 5 秒',
     )
+    await expect(first.locator('.scope')).toHaveText('这次任务')
     // UI-S13: the card sits before the turn's footer, the turn's last row.
     const order = await page
       .locator('[data-chat-flow-kind]')
@@ -336,13 +337,90 @@ for (const theme of ['light', 'dark'] as const) {
     ])
     await shot(page, `chat-turn-files-${theme}`)
     await first.locator('[data-action="undo"]').click()
-    const dialog = page.getByRole('dialog', { name: '撤销这一轮的改动？' })
+    const dialog = page.getByRole('dialog', { name: '撤销这次任务的改动？' })
     await expect(dialog).toBeVisible()
     await expect(dialog.locator('[data-turn-revert-concurrent]')).toBeVisible()
     await expect(dialog.locator('[data-action="confirm"]')).toHaveText(
       '撤销 7 个文件',
     )
     await shot(page, `chat-turn-files-undo-${theme}`)
+  })
+}
+
+// UI-S15: a task whose subagents woke Emperor again. While they run there
+// is no files card; once the woken turn ends, one card sums the task after
+// that turn, before its footer, and the woken turn's folded line says why
+// it went on.
+for (const theme of ['light', 'dark'] as const) {
+  test(`task files card after a woken turn (${theme}) @baseline`, async ({
+    page,
+  }) => {
+    await open(page, 'task-files-running', theme, { width: 1000, height: 900 })
+    await toTop(page)
+    await expect(page.locator('[data-process-group]')).toHaveCount(1)
+    await expect(page.locator('[data-turn-files]')).toHaveCount(0)
+    await expect(page.locator('[data-process-continued]')).toHaveCount(0)
+    await shot(page, `task-running-${theme}`)
+
+    await open(page, 'task-files', theme, { width: 1000, height: 1300 })
+    await toTop(page)
+    const cards = page.locator('[data-turn-files]')
+    await expect(cards).toHaveCount(1)
+    const card = page.locator('[data-turn-files="2"]')
+    await expect(card).toHaveAttribute('data-task-first-turn', '1')
+    await expect(card.locator('.headline')).toHaveText('已编辑 5 个文件')
+    await expect(card.locator('.scope')).toHaveText('这次任务')
+    await expect(card.locator('.head .add')).toHaveText('+1400')
+    const tags = page.locator('[data-process-continued]')
+    await expect(tags).toHaveCount(1)
+    await expect(tags).toHaveText('子智能体完成后继续')
+    await expect(
+      page
+        .locator('[data-process-group]')
+        .nth(1)
+        .locator('[data-process-continued]'),
+    ).toHaveCount(1)
+    // The card after the woken turn's answer, the footer last.
+    const order = await page
+      .locator('[data-chat-flow-kind]')
+      .evaluateAll((rows) =>
+        rows.map((row) => row.getAttribute('data-chat-flow-kind')),
+      )
+    expect(order).toEqual([
+      'user',
+      'process',
+      'assistant',
+      'turnTail',
+      'process',
+      'assistant',
+      'turnFiles',
+      'turnTail',
+    ])
+    // The tag sits on the folded line, after the chevron.
+    const header = page.locator('[data-process-header]').nth(1)
+    const summary = (await header.locator('.summary').boundingBox())!
+    const tag = (await tags.boundingBox())!
+    expect(tag.x).toBeGreaterThan(summary.x + summary.width)
+    expect(
+      Math.abs(tag.y + tag.height / 2 - (summary.y + summary.height / 2)),
+    ).toBeLessThan(3)
+    await shot(page, `task-done-${theme}`)
+    await expectBaseline(page, 'conversation', `task-files-${theme}`)
+    await card.screenshot({
+      path: resolve(screenshotDir, `task-card-${theme}.png`),
+      animations: 'disabled',
+    })
+    await header.screenshot({
+      path: resolve(screenshotDir, `task-continued-${theme}.png`),
+      animations: 'disabled',
+    })
+    await card.locator('[data-action="undo"]').click()
+    const dialog = page.getByRole('dialog', { name: '撤销这次任务的改动？' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.locator('[data-action="confirm"]')).toHaveText(
+      '撤销 5 个文件',
+    )
+    await shot(page, `task-undo-${theme}`)
   })
 }
 

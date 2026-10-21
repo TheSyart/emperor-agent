@@ -132,6 +132,11 @@ export type {
 
 export { mergeExternalTranscript } from '../runtime/external-transcript'
 
+// UI-S15: what opened a turn (a task starts with the user's message; a
+// subagent's or job's result continues it).
+export { turnOpener, TURN_OPENER_PRODUCERS } from '../harness/host/turn-opener'
+export type { TurnOpener, TurnOpenerSource } from '../harness/host/turn-opener'
+
 export {
   agentTitle,
   agentSourceLabel,

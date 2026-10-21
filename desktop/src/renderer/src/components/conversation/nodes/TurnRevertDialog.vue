@@ -1,12 +1,15 @@
 <script setup lang="ts">
 /**
- * TurnRevertDialog — confirms undoing one recorded turn (plan 7.6): every
- * file is listed and checked, each can be unchecked; files too large to
- * have been recorded cannot be chosen. Core restores only the files that
- * still match the turn's end and skips the rest; there is no redo. A note
- * warns when another session ran in the same workspace during the turn.
+ * TurnRevertDialog — confirms undoing one recorded task (plan 7.6, UI-S15;
+ * one turn in older logs): every file is listed and checked, each can be
+ * unchecked; files too large to have been recorded cannot be chosen. Core
+ * restores only the files that still match the task's end and skips the
+ * rest, in one pass over the task's snapshots; there is no redo. A note
+ * warns when another session ran in the same workspace during the task.
  *
- * Props: sessionId, turn, files, concurrent. v-model:open.
+ * Props: sessionId, turn (the record's), files, concurrent, scope (what the
+ * record covers, for the words), recovered (recorded after Emperor came
+ * back: it may hold outside changes). v-model:open.
  * Emits: done (the Core result; the card updates from the session log).
  */
 import { computed, ref, watch } from 'vue'
@@ -19,14 +22,25 @@ import Badge from '../../ui/Badge.vue'
 import Button from '../../ui/Button.vue'
 import Checkbox from '../../ui/Checkbox.vue'
 import Modal from '../../ui/Modal.vue'
-import { fileStatusTag, splitFilePath } from './turnFilesModel'
+import {
+  fileStatusTag,
+  RECOVERED_REVERT_NOTE,
+  splitFilePath,
+  turnRevertCopy,
+  type TurnFilesScope,
+} from './turnFilesModel'
 
-const props = defineProps<{
-  sessionId: string
-  turn: number
-  files: readonly TurnFileEntry[]
-  concurrent: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    sessionId: string
+    turn: number
+    files: readonly TurnFileEntry[]
+    concurrent: boolean
+    scope?: TurnFilesScope
+    recovered?: boolean
+  }>(),
+  { scope: 'turn', recovered: false },
+)
 const open = defineModel<boolean>('open', { default: false })
 const emit = defineEmits<{ done: [result: TurnFilesReverted] }>()
 
@@ -34,6 +48,7 @@ const chosen = ref(new Set<string>())
 const busy = ref(false)
 const error = ref('')
 
+const copy = computed(() => turnRevertCopy(props.scope))
 const choosable = computed(() => props.files.filter((file) => !file.tooLarge))
 const count = computed(() => chosen.value.size)
 
@@ -75,14 +90,17 @@ async function confirm(): Promise<void> {
 <template>
   <Modal
     v-model:open="open"
-    title="撤销这一轮的改动？"
-    description="只恢复这一轮结束后没有再改过的文件，改过的会跳过并列出。撤销后不能重做。"
+    :title="copy.title"
+    :description="copy.description"
     :width="460"
     :close-on-mask="!busy"
     :closable="!busy"
   >
     <p v-if="concurrent" class="warning" data-turn-revert-concurrent>
-      这一轮期间，同一工作区还有其他会话在运行，列表里可能有它们的改动。
+      {{ copy.concurrent }}
+    </p>
+    <p v-if="recovered" class="warning" data-turn-revert-recovered>
+      {{ RECOVERED_REVERT_NOTE }}
     </p>
     <ul class="files" aria-label="要撤销的文件">
       <li v-for="file in files" :key="file.path">

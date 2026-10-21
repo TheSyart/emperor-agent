@@ -11,6 +11,9 @@
  *   `turn/files` matching `git diff` against the project's start, without
  *   touching the user's index; the turn ends with the 「已编辑 N 个文件」
  *   card, 审核 shows its diff in 审查, and 撤销 puts the files back.
+ *   UI-S15: a turn a background job's result woke belongs to the task —
+ *   no card while the job runs, then one card after the woken turn that
+ *   sums the task (the job's own file too), and the woken turn is tagged.
  *   Resource upgrade: real Core/IPC and renderer cards, on-demand metadata,
  *   file line navigation and SVGs, output/source lists, GitHub routes, and
  *   ordinary Chat attachments. Only Finder's final native launch is recorded.
@@ -437,6 +440,7 @@ interface TurnFiles {
   }>
   totals: { files: number; additions: number; deletions: number }
   snapshot?: { before: string; after: string }
+  task?: { firstTurn: number; lastTurn: number }
 }
 
 async function turnRecords(page: Page, sessionId: string) {
@@ -550,6 +554,10 @@ async function turnFileRecord(
     await card.waitFor({ timeout: 10_000 })
     const headline = (await card.locator('.headline').innerText()).trim()
     if (headline !== '已编辑 3 个文件') throw new Error(`headline ${headline}`)
+    // UI-S15: the record names its task; the card says 这次任务.
+    const scope = (await card.locator('.scope').innerText()).trim()
+    if (scope !== '这次任务' || record.task?.lastTurn !== record.turn)
+      throw new Error(`scope ${scope}, task ${JSON.stringify(record.task)}`)
     const names = await card.locator('.file .name').allInnerTexts()
     const geometry = await card.evaluate((element) => {
       const title = element.querySelector('.headline')!.getBoundingClientRect()
@@ -670,7 +678,7 @@ async function turnFileRecord(
       if (record === undefined) throw new Error('no record')
       const card = page.locator(`[data-turn-files="${record.turn}"]`)
       await card.locator('[data-action="undo"]').click()
-      const dialog = page.getByRole('dialog', { name: '撤销这一轮的改动？' })
+      const dialog = page.getByRole('dialog', { name: '撤销这次任务的改动？' })
       await dialog.waitFor({ timeout: 5_000 })
       await dialog.locator('[data-action="confirm"]').click()
       await until(
@@ -852,7 +860,7 @@ async function referencesAndCard(
         'the reply',
       )
       const sessionId = await sessionIdOf(page)
-      // The turn's record lands as the turn ends, just after the reply.
+      // The task's record lands as it ends, just after the reply.
       await until(
         async () =>
           (await turnRecords(page, sessionId))
@@ -867,7 +875,7 @@ async function referencesAndCard(
       const card = page.locator(`[data-turn-files="${record.turn}"]`)
       await card.waitFor({ timeout: 10_000 })
       await card.locator('[data-action="undo"]').click()
-      const dialog = page.getByRole('dialog', { name: '撤销这一轮的改动？' })
+      const dialog = page.getByRole('dialog', { name: '撤销这次任务的改动？' })
       await dialog.waitFor({ timeout: 5_000 })
       await dialog.locator('[data-action="confirm"]').click()
       await until(
@@ -886,6 +894,91 @@ async function referencesAndCard(
         throw new Error('the later edit was overwritten')
       await page.screenshot({ path: join(shots, 'turn-files-skipped.png') })
       return { summary }
+    },
+  )
+
+  await check(
+    page,
+    'a turn its background job woke belongs to the task: one card, after it (UI-S15)',
+    async () => {
+      const sessionId = await sessionIdOf(page)
+      const before = (await turnRecords(page, sessionId)).length
+      model.enqueue(
+        () => ({
+          tools: [
+            {
+              name: 'write',
+              args: { file_path: 'notes/task-a.md', content: '# A\n' },
+            },
+            {
+              name: 'bash',
+              args: {
+                command: "sleep 3 && printf '# Job\\n' > notes/task-job.md",
+                description: 'Write a note in the background',
+                run_in_background: true,
+              },
+            },
+          ],
+        }),
+        () => ({ text: '后台任务已经开始。' }),
+        // Woken by the job's result: the same task goes on.
+        () => ({
+          tools: [
+            {
+              name: 'write',
+              args: { file_path: 'notes/task-b.md', content: '# B\n' },
+            },
+          ],
+        }),
+        () => ({ text: '后台任务完成，三份笔记都在。' }),
+      )
+      await send(page, '写一份笔记，再在后台写一份，后台写完再写一份。')
+      await until(
+        () => assistantSaid(page, '后台任务已经开始'),
+        30_000,
+        'the first reply',
+      )
+      // The first turn is over and its job still runs: no record, no card.
+      await page.waitForTimeout(800)
+      const early = (await turnRecords(page, sessionId)).length
+      if (early !== before) throw new Error('a record before the task ended')
+      await until(
+        () => assistantSaid(page, '三份笔记都在'),
+        30_000,
+        'the woken turn',
+      )
+      await until(
+        async () => (await turnRecords(page, sessionId)).length === before + 1,
+        15_000,
+        'the task record',
+      )
+      const record = (await turnRecords(page, sessionId)).at(-1)!
+      const paths = record.files.map((file) => file.path).join(',')
+      if (paths !== 'notes/task-a.md,notes/task-b.md,notes/task-job.md')
+        throw new Error(`files ${paths}`)
+      if (
+        record.task?.firstTurn !== record.turn - 1 ||
+        record.task.lastTurn !== record.turn
+      )
+        throw new Error(`task ${JSON.stringify(record.task)}`)
+      const card = page.locator(`[data-turn-files="${record.turn}"]`)
+      await card.waitFor({ timeout: 10_000 })
+      if (
+        (await page.locator(`[data-turn-files="${record.turn - 1}"]`).count()) >
+        0
+      )
+        throw new Error('a card after the first turn')
+      const scope = (await card.locator('.scope').innerText()).trim()
+      if (scope !== '这次任务') throw new Error(`scope ${scope}`)
+      const tag = page.locator(
+        `[data-chat-turn="${record.turn}"] [data-process-continued]`,
+      )
+      await tag.waitFor({ timeout: 10_000 })
+      const tagText = (await tag.innerText()).trim()
+      if (tagText !== '后台任务完成后继续') throw new Error(`tag ${tagText}`)
+      await card.scrollIntoViewIfNeeded()
+      await page.screenshot({ path: join(shots, 'task-files-woken.png') })
+      return { files: paths, task: record.task, tag: tagText }
     },
   )
 

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：开发者、维护者<br>
-> 最后核验：2026-10-22（对照 `7798011a`）<br>
+> 最后核验：2026-10-22（对照 `1a5cef69`）<br>
 > 事实源：`packages/core/src/harness/delegation/`（含 `consent.ts`）、`packages/core/src/workspace/delegation-*.ts`（含 `delegation-results.ts`）、`packages/core/src/api/services/delegation-service.ts`、`packages/core/src/runtime/agent-view.ts`、`packages/core/src/harness/host/host.ts`（`stop`、`close`）、`desktop/src/renderer/src/components/settings/executors/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/sidebar/agentTree.ts`
 
 Emperor 的父 Agent 可以通过原有子智能体工具选择 `internal`、`claude-code` 或 `codex`。未指定 backend 时仍用 internal。两个外部 profile 复用本机 CLI 登录，但默认关闭：它们使用用户自己的订阅额度或 API 计费，需要用户在设置里打开，并在第一次交出任务时于对话中确认（见下文「默认关闭与首次同意」）。设置「子智能体」统一展示本地、Claude Code 与 Codex；外部来源可切换启用状态，通过全局检测读取 CLI 与本地登录可用条件，异常时按需更正可执行文件路径。多份 profile 以来源内选择器切换，不合并或覆盖其他 profile。设置保留既有认证及调度限制；默认模型支持跟随 CLI、候选选择和自定义，修改后只用于之后的任务。已有配置中的开关、路径和有效凭据引用保持不变；旧版空引用按本机登录解析，不自动覆写文件。backend 与内部 provider/model 路由是不同维度。
@@ -176,7 +176,7 @@ Emperor 正常退出时，`HarnessHost.close()` 调用 `DelegationService.shutdo
 
 清理：应用、丢弃时删除成果 worktree（`git worktree remove --force` + `prune`；副本则删目录）与 `refs/emperor/delegations/<lease>/` 下的全部引用（也包括该委派的回执补丁引用和整合预览 worktree），租约记为 `released` + `cleaned`，委派关闭（之后不能在这个工作区续聊）；应用过的副本保留私有 Git 目录供撤销。会话被彻底删除（「最近删除」清除或 30 天到期）时，`forgetRoot` 删除它所有委派的成果、副本、私有 Git 目录与撤销记录；软删除可以恢复，不清理。成果 `ready`/`conflicted` 超过 14 天（`RESULT_CLEANUP_AFTER_MS`，`resultNeedsCleanup`）时成果卡提示「清理」（即丢弃）。
 
-`collect_agent({apply:true})` 在一个回合里执行时，回合的改动记录（`turn/files`）也会包含应用的文件：`callMayWriteFiles` 把它当作写操作，先等回合的 before 快照；它不取工作区访问租约（应用自己取写入互斥）。
+`collect_agent({apply:true})` 在一个任务里执行时，任务的改动记录（`turn/files`）也会包含应用的文件：`callMayWriteFiles` 把它当作写操作，先等任务的 before 快照；它不取工作区访问租约（应用自己取写入互斥）。
 
 ## 验证与整合（高级 › 验证后再应用）
 

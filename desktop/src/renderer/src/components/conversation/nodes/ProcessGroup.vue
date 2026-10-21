@@ -7,7 +7,9 @@
  * 用时 1 分 12 秒 ›」 (13/20 text-3, text-2 on hover). Either line toggles the
  * step list (CollapseTransition); the open state lives in the timeline's
  * expansion store under the 处理过程 preference's key, so it survives the
- * virtual list and 完成后收起 folds a list opened while the turn ran.
+ * virtual list and 完成后收起 folds a list opened while the turn ran. A
+ * turn a subagent's or background job's result woke carries a Badge after
+ * the folded line (「子智能体完成后继续」, UI-S15).
  *
  * The steps are the member rows themselves (ChatNodeSeat, dense), plus the
  * preparing calls (DSH-23).
@@ -20,11 +22,13 @@ import type { ChatNode } from '../../../conversation/types'
 import { useUiPreferences } from '../../../composables/useUiPreferences'
 import { DsChevronDown } from '../../icons/ds'
 import CollapseTransition from '../../motion/CollapseTransition.vue'
+import Badge from '../../ui/Badge.vue'
 import ElapsedClock from '../../ui/ElapsedClock.vue'
 import Spinner from '../../ui/Spinner.vue'
 import ChatNodeSeat from '../ChatNodeSeat.vue'
 import { useChatContext } from '../chatContext'
 import {
+  processContinuedLabel,
   processExpansionKey,
   processLiveStep,
   processSummary,
@@ -129,6 +133,12 @@ function memberKey(member: ProcessMember): string {
         <template v-else>
           <span class="summary">{{ summary }}</span>
           <DsChevronDown :size="12" class="chevron" />
+          <Badge
+            v-if="row.continued"
+            class="continued"
+            data-process-continued
+            :label="processContinuedLabel(row.continued)"
+          />
         </template>
       </button>
       <CollapseTransition>
@@ -221,6 +231,11 @@ function memberKey(member: ProcessMember): string {
 
 .clock {
   color: rgb(var(--text-4));
+}
+
+/* The woken turn's tag keeps its words; the summary gives way. */
+.continued {
+  margin-inline-start: var(--space-0-5);
 }
 
 /* Collapsed the chevron points right; open, down. */

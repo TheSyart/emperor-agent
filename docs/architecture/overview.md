@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、开发者、希望理解产品边界的用户<br>
-> 最后核验：2026-10-21（对照 `f764443d`）<br>
+> 最后核验：2026-10-22（对照 `1a5cef69`）<br>
 > 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/api/core-api.ts`、`packages/core/src/api/operations.ts`、`desktop/src/main/`、`desktop/src/preload/`、`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/workspace/`、`packages/core/src/harness/delegation/`、`desktop/src/main/logging/`、`desktop/src/main/home-backup.ts`
 
 Emperor Agent 的桌面主产品是本地单用户 Electron 应用。Electron main 进程内创建一个 TypeScript `CoreApi`；`CoreApi` 背后是唯一的内核组合根 `HarnessHost`。Vue renderer 只能通过 preload 暴露的 IPC contract 请求 Core，并通过 runtime events 接收过程状态。源码还提供默认不随桌面安装包开放的 ACP V1 stdio operator preview，它为受信本机 client 创建独立的 `CoreApi`。产品主线没有 Python runtime、HTTP backend 或 WebSocket backend。
@@ -99,7 +99,7 @@ Renderer 外壳是 `components/shell/AppFrame.vue` 的网格：会话侧栏（�
 
 ## 右侧工作台与环境信息卡
 
-右侧工作台（`components/workspace/WorkspacePanel.vue`）提供四个面板：审查、终端、文件、浏览器，每个面板单独分包；还没选过面板时显示列出四个面板的空状态（`WorkspaceEmpty`），没有启动器首页。对话组件通过 `workspaceState.ts` 的 `requestWorkspace({ pane, paths?, file?, directory?, turn?, url?, focus? })` 请求打开某个面板或内容，不持有组件引用：`directory` 在文件树中展开一个目录，`turn` 让「审查」显示一轮对话的改动（本轮改动视图）。环境信息卡（`components/conversation/environment/EnvironmentCard.vue`）浮在对话区右上角，输入框上方的变更汇总条显示工作区 Git 改动总计；工作台、环境信息卡和变更汇总条共用 `useWorkspaceSnapshot.ts` 中按引用计数轮询的同一份 `workspace.snapshot`。
+右侧工作台（`components/workspace/WorkspacePanel.vue`）提供四个面板：审查、终端、文件、浏览器，每个面板单独分包；还没选过面板时显示列出四个面板的空状态（`WorkspaceEmpty`），没有启动器首页。对话组件通过 `workspaceState.ts` 的 `requestWorkspace({ pane, paths?, file?, directory?, turn?, url?, focus? })` 请求打开某个面板或内容，不持有组件引用：`directory` 在文件树中展开一个目录，`turn` 让「审查」显示一个任务的改动（UI-S15；0.2 之前的记录是一轮）。环境信息卡（`components/conversation/environment/EnvironmentCard.vue`）浮在对话区右上角，输入框上方的变更汇总条显示工作区 Git 改动总计；工作台、环境信息卡和变更汇总条共用 `useWorkspaceSnapshot.ts` 中按引用计数轮询的同一份 `workspace.snapshot`。
 
 - `workspace.snapshot` 聚合 Git/worktree/安全操作凭据、当前 Goal、后台任务、子智能体和终端的投影。
 - 审查使用 Core 内的 Git 分层服务（「比较分支」通过 `git.remote` 取得 `origin` 的网页地址）。环境信息卡是只读汇总（UI-S05）：每节一行，点开去到审查、子智能体列表、输出对话框或资源详情，卡片本身不发出写操作。

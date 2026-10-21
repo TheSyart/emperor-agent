@@ -107,11 +107,11 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   workspace_path_not_directory: '目标路径不是目录。',
   workspace_path_not_file: '目标路径不是文件。',
   workspace_agent_running: '这个工作区有 Agent 正在运行，等它结束后再试。',
-  turn_already_reverted: '这一轮已经撤销过。',
-  turn_file_not_recorded: '这一轮没有这个文件的改动记录。',
-  turn_file_unknown: '这个文件不在这一轮的改动里。',
-  turn_files_unavailable: '这一轮没有可查看或撤销的改动记录。',
-  turn_snapshot_dropped: '这一轮的快照已经清理。',
+  turn_already_reverted: '这些改动已经撤销过。',
+  turn_file_not_recorded: '这份改动记录里没有这个文件。',
+  turn_file_unknown: '这个文件不在这份改动记录里。',
+  turn_files_unavailable: '没有可查看或撤销的改动记录。',
+  turn_snapshot_dropped: '这份改动记录的快照已经清理。',
 
   // 终端
   terminal_unavailable: '当前环境不能打开终端。',
