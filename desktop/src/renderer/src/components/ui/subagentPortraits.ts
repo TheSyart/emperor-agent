@@ -11,7 +11,11 @@ const sheets: Record<string, string> = {
   D: imagination,
 }
 
-/** Local imagegen originals, losslessly encoded; framing never edits pixels. */
+/**
+ * The imagegen portraits as 448px lossy WebP sheets, about 25 KB each
+ * (SUB-30: the 1254px lossless originals were 5 MB; they stay in
+ * assets/generated/subagent-avatars for a re-cut). Framing never edits pixels.
+ */
 export const SUBAGENT_PORTRAITS = frames.map((frame) => ({
   ...frame,
   sheet: sheets[frame.group]!,

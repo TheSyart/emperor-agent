@@ -1,6 +1,6 @@
 /**
  * Sprite avatars (DS-04). A child agent's portrait is a measured window of
- * a 1254px sheet. The window is cropped and scaled in one createImageBitmap
+ * a 448px sheet (SUB-30). The window is cropped and scaled in one createImageBitmap
  * call to the device-pixel size the avatar is drawn at, then painted into a
  * canvas of exactly that size: the page never keeps the whole sheet on
  * screen or rescales it on every paint. Crops are shared per portrait and
