@@ -12,7 +12,7 @@
 // scripts/ci/open-failure-issue.mjs turns a failed summary into an issue.
 // Steps that call a real model or real external executors are listed as
 // skipped: the nightly never spends money or needs secrets.
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import {
   createWriteStream,
   mkdirSync,
@@ -258,12 +258,13 @@ function markdown(summary) {
 
 function gitCommit() {
   if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA
-  try {
-    const head = readFileSync(join(repoRoot, '.git', 'HEAD'), 'utf8').trim()
-    return head.startsWith('ref: ') ? 'local' : head
-  } catch {
-    return 'local'
-  }
+  // `git rev-parse`, not .git/HEAD: in a worktree .git is a file.
+  const result = spawnSync('git', ['rev-parse', 'HEAD'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  })
+  const commit = (result.stdout || '').trim()
+  return /^[0-9a-f]{40}$/.test(commit) ? commit : 'local'
 }
 
 async function main(argv) {
