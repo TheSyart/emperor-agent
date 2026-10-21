@@ -19,6 +19,7 @@ import Avatar from '../ui/Avatar.vue'
 import IconButton from '../ui/IconButton.vue'
 import Tabs from '../ui/Tabs.vue'
 import type { HeaderCrumb } from './conversationModel'
+import { DsChevronLeft } from '../icons/ds'
 
 const emit = defineEmits<{
   navigate: [sessionId: string]
@@ -50,6 +51,13 @@ const tabs = computed(() =>
   })),
 )
 
+/** A subagent's page goes back one level: 「← 主会话 / 子智能体名」 (AGT-10). */
+const parentCrumb = computed(() => {
+  if (props.crumbs.length < 2 || !props.crumbs.at(-1)?.current) return null
+  const parent = props.crumbs.at(-2)
+  return parent?.sessionId ? parent : null
+})
+
 function onTab(id: string) {
   if (id === 'chat' || id === 'trajectory') emit('tab', id)
 }
@@ -58,6 +66,14 @@ function onTab(id: string) {
 <template>
   <header class="conversation-header" :data-slim="slim || undefined">
     <div class="title-row">
+      <IconButton
+        v-if="!slim && parentCrumb"
+        :label="`返回「${parentCrumb.label}」`"
+        size="sm"
+        data-crumb-back
+        @click="emit('navigate', parentCrumb.sessionId!)"
+        ><DsChevronLeft :size="16"
+      /></IconButton>
       <nav v-if="!slim" class="crumbs" aria-label="会话路径">
         <template v-for="(crumb, index) in crumbs" :key="crumb.id">
           <span v-if="index > 0" class="sep" aria-hidden="true">/</span>

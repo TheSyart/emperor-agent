@@ -231,7 +231,17 @@ export function questionInteraction(
     parent_call_id: asked.callId ?? null,
     questions: uiQuestions(asked.questions),
     answers: {},
-    meta: { interaction_type: 'question', question_id: asked.id },
+    meta: {
+      interaction_type: 'question',
+      question_id: asked.id,
+      // An external subagent's question: its page answers it too (AGT-10).
+      ...(asked.external
+        ? {
+            external_delegation_id: asked.external.delegationId,
+            external_run_id: asked.external.runId,
+          }
+        : {}),
+    },
   }
 }
 

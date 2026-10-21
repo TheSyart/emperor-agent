@@ -77,7 +77,7 @@ import ComposerCard from '../composer/ComposerCard.vue'
 import GoalBar from '../composer/GoalBar.vue'
 import QueueDock from '../composer/QueueDock.vue'
 import { draftHandoff, takeDraftHandoff } from '../chat/draftHandoff'
-import ReadOnlyComposer from '../composer/ReadOnlyComposer.vue'
+import ChildComposer from '../composer/ChildComposer.vue'
 import TodoDock from '../composer/TodoDock.vue'
 import { frameActions, useFrameState } from '../shell/frameState'
 import { useAgentTree } from '../sidebar/agentTree'
@@ -856,6 +856,39 @@ watch(childRunning, (running) => {
   if (!running) stoppingChild.value = false
 })
 
+// A subagent's own page (AGT-10): the user writes to the child itself, and
+// a question it asked is answered here instead of in the main conversation.
+const childComposer = ref<InstanceType<typeof ChildComposer> | null>(null)
+const childSending = ref(false)
+const childSendError = ref('')
+const childClosed = ref('')
+const childInteraction = computed(() =>
+  child.value && viewingId.value
+    ? (ctx.pendingInteractionsBySession[viewingId.value] ?? null)
+    : null,
+)
+watch(viewingId, () => {
+  childSendError.value = ''
+  childClosed.value = ''
+})
+async function sendToChild(text: string): Promise<void> {
+  const id = viewingId.value
+  if (!id || childSending.value) return
+  childSending.value = true
+  childSendError.value = ''
+  try {
+    await core('agents.send', { sessionId: id, text })
+    childComposer.value?.clear()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if ((error as { code?: unknown } | null)?.code === 'subagent_not_live')
+      childClosed.value = message
+    else childSendError.value = message
+  } finally {
+    childSending.value = false
+  }
+}
+
 async function stopChild(): Promise<void> {
   const id = viewingId.value
   if (!id || stoppingChild.value) return
@@ -1095,15 +1128,23 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
 
     <div v-if="tab === 'chat'" class="composer-seat">
       <EmptyHero v-if="phase === 'hero'" :project-name="projectName" />
-      <ReadOnlyComposer
-        v-if="child"
-        :parent-title="parentCrumb?.label"
-        :running="childRunning"
-        :stopping="stoppingChild"
-        @back="backToParent"
-        @root="navigate(lineage?.chain[0]?.sessionId ?? ctx.sessionId.value)"
-        @stop="stopChild"
-      />
+      <template v-if="child">
+        <TakeoverSeat v-if="childInteraction" :interaction="childInteraction" />
+        <ChildComposer
+          v-else
+          ref="childComposer"
+          :parent-title="parentCrumb?.label"
+          :running="childRunning"
+          :stopping="stoppingChild"
+          :sending="childSending"
+          :error="childSendError || undefined"
+          :closed="childClosed || undefined"
+          @send="sendToChild"
+          @back="backToParent"
+          @root="navigate(lineage?.chain[0]?.sessionId ?? ctx.sessionId.value)"
+          @stop="stopChild"
+        />
+      </template>
       <div v-else class="stack">
         <ChangesPill
           v-if="!takeoverOpen && viewingId"

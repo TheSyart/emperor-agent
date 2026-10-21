@@ -107,7 +107,7 @@ describe('conversation shell model', () => {
     expect(crumbs[1]!.nativeSessionId).toBe('kid1')
     expect(crumbs[2]!.nativeSessionId).toBe('kid2')
     expect(crumbs[2]!.current).toBe(true)
-    expect(crumbs[2]!.source).toBe('Emperor')
+    expect(crumbs[2]!.source).toBeUndefined()
   })
 })
 it('keeps retained external task controls reachable even when the visible chat transcript is empty', () => {
