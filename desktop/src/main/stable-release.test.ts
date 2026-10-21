@@ -361,7 +361,9 @@ describe('unsigned Stable release: the package', () => {
     expect(verifier).toContain('hdiutil attach')
     expect(verifier).toContain('hdiutil detach')
     expect(verifier).toContain('ditto -x -k')
-    expect(verifier).toContain('run -s package:smoke -- \\\n  --app "$MOUNTED_APP')
+    expect(verifier).toContain(
+      'run -s package:smoke -- \\\n  --app "$MOUNTED_APP',
+    )
     expect(verifier).toContain('shasum -a 256')
     expect(verifier).toContain("signingStatus: 'unsigned'")
     for (const gone of [
