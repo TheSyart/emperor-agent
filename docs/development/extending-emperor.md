@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core、Electron 与 renderer 开发者<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 最后核验：2026-10-21（对照 `f764443d`）<br>
 > 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/api/operations.ts`、`packages/core/src/harness/projection/`、`packages/core/src/llm/`、`packages/core/src/harness/tools/builtin/`、`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/pages/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/settings/`、`packages/core/src/harness/hooks/contained.ts`、`packages/core/src/harness/hooks/plugin-health.ts`
 
 Emperor Agent 的扩展通常横跨内核、CoreApi、Electron contract、renderer 投影和文档。先确定权威状态属于哪里：会话内的一切属于 session log；长期数据属于对应的保留服务。然后从内核或服务向外接入，不要把策略散落到组件或 prompt 文案。
@@ -13,7 +13,7 @@ Emperor Agent 的扩展通常横跨内核、CoreApi、Electron contract、render
 2. 确定权威状态：session log 事件，还是某个保留服务的文件。
 3. 在 `packages/core/src/harness/<子系统>/` 或 `packages/core/src/<domain>/` 实现。
 4. 在 `HarnessHost.compose()` 中组合（工具、prompt section、middleware）。
-5. 需要界面调用时由 CoreApi 暴露最小 operation，并接入 validation 与 mutation guard。
+5. 需要界面调用时由 CoreApi 暴露最小 operation 并接入 validation；只有属于某个对话的写入才接 mutation guard，设置类操作不接（FIX-10）。
 6. 同步 Electron main contract、preload 和 renderer API。
 7. 需要异步投影时扩展 projector 与 renderer runtime。
 8. 加测试、诊断、用户文档、架构文档和 changelog。

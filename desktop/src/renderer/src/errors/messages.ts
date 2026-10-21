@@ -87,6 +87,11 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
     '子智能体的操作没有成功，请刷新任务详情并检查保留的日志。',
   subagent_worktree_unavailable: '无法为子智能体创建隔离 worktree。',
   subagent_not_live: '这个子智能体已经结束，不能再发消息。',
+  mutation_blocked_pending:
+    '这个对话有等你回复的提问或计划审批，先处理它再试。',
+  mutation_blocked_plan: '这个对话处于计划模式，先批准计划或退出计划模式再试。',
+  mutation_forbidden: '这项操作不属于当前对话，已拒绝。',
+  mutation_conflict: '当前对话的状态不允许这项操作，请稍后再试。',
 
   // 工作区与文件
   workspace_project_required: '当前会话没有绑定项目。',

@@ -8,7 +8,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { ClaudeCodeHooks } from '../../harness/hooks/claude-code'
 import {
   CLAUDE_HOOK_EVENTS,
@@ -46,15 +46,13 @@ function fixture(options: { project?: boolean; events?: SessionEvent[] } = {}) {
     logger: silent as never,
   })
   disposers.push(() => hooks.dispose())
-  const assertMutation = vi.fn()
   const service = new CoreHooksService({
     stateRoot,
     hooks,
     projectRoot: () => projectDir,
-    assertMutation,
     sessionEvents: () => options.events ?? [],
   })
-  return { stateRoot, projectDir, hooks, service, assertMutation }
+  return { stateRoot, projectDir, hooks, service }
 }
 
 const config = {
@@ -91,7 +89,6 @@ describe('CoreHooksService', () => {
     // The user's file, as typed (FIX-08: Emperor never stamps a version).
     const text = JSON.stringify(config, null, 2)
     const saved = await f.service.saveConfig(text, VIEW)
-    expect(f.assertMutation).toHaveBeenCalledWith('hooks', 'saveConfig', VIEW)
     expect(readFileSync(join(f.stateRoot, 'hooks.json'), 'utf8')).toBe(
       `${text}\n`,
     )
@@ -275,7 +272,6 @@ describe('CoreHooksService', () => {
       },
       VIEW,
     )
-    expect(f.assertMutation).toHaveBeenCalledWith('hooks', 'testRun', VIEW)
     expect(result).toMatchObject({
       eventName: 'PreToolUse',
       exitCode: 2,

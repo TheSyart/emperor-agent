@@ -648,6 +648,57 @@ async function settings(page: Page, home: string): Promise<void> {
     if (over.length) throw new Error(`overflow ${JSON.stringify(over)}`)
     return { checked: Object.keys(widths).length }
   })
+
+  await check(
+    page,
+    'FIX-10 · a setting saves while the chat behind the window is in plan mode',
+    async () => {
+      // The user's report: a chat waiting in Plan mode made every save in
+      // 设置 fail with 「发生内部错误」.
+      if (await dialogOf(page).isVisible()) await page.keyboard.press('Escape')
+      // Earlier checks left 能力 open: start a chat (a draft is not gated,
+      // a real chat is), then turn on Plan mode from 添加.
+      await page.getByRole('button', { name: '新对话' }).first().click()
+      const box = page.getByLabel('消息输入框').first()
+      await box.waitFor({ timeout: 10_000 })
+      await box.click()
+      await box.fill('你好')
+      await box.press('Enter')
+      await page.getByText('你好').first().waitFor({ timeout: 10_000 })
+      await page.getByRole('button', { name: '添加' }).first().click()
+      await page
+        .getByRole('menuitem', { name: /计划模式/ })
+        .first()
+        .click()
+      const capsule = page.getByRole('button', { name: '退出计划' })
+      await capsule.waitFor({ timeout: 10_000 })
+      const codexSwitch = (dialog: Locator) =>
+        dialog.locator(
+          '[data-settings-agent="codex"] [data-executor-enabled] [role="switch"], [data-settings-agent="codex"] [role="switch"][data-executor-enabled]',
+        )
+      let dialog = await openSection(page, 'executors')
+      await codexSwitch(dialog).first().click()
+      await page.waitForTimeout(1_000)
+      if (await dialog.getByText('保存失败').count())
+        throw new Error(
+          `save failed: ${await dialog.getByRole('alert').first().innerText()}`,
+        )
+      // Read back from Core: close and open the section again.
+      await page.keyboard.press('Escape')
+      dialog = await openSection(page, 'executors')
+      const checked = await codexSwitch(dialog)
+        .first()
+        .getAttribute('aria-checked')
+      if (checked !== 'true') throw new Error(`Codex switch ${checked}`)
+      // Put it back, then leave Plan mode.
+      await codexSwitch(dialog).first().click()
+      await page.waitForTimeout(500)
+      await page.keyboard.press('Escape')
+      await capsule.click()
+      await capsule.waitFor({ state: 'detached', timeout: 10_000 })
+      return { saved: true }
+    },
+  )
 }
 
 /** `659.5 MB` → bytes (StorageSection's sizes). */

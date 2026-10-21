@@ -50,9 +50,7 @@ import { GUI_TOOL_CATALOG } from '../harness/computer-use/tools/catalog'
 import { listGuiTools } from '../harness/computer-use/tools/listing'
 import {
   DEFAULT_EXTERNAL_BROWSER_SETTINGS,
-  applyExternalBrowserSettingsPatch,
   externalBrowserSettingsView,
-  widensExternalBrowserSettings,
   type ExternalBrowserSettingsPatch,
   type ExternalBrowserSettingsView,
 } from '../harness/computer-use/external-site-rules'
@@ -493,15 +491,11 @@ export class CoreApi {
     )
     this.desktopPetService = new CoreDesktopPetService(this.root, {
       stateRoot: this.paths.stateRoot,
-      assertMutation: (area, action, view) =>
-        this.assertMutation(area, action, view),
     })
     this.browserPreferencesService = new CoreBrowserPreferencesService(
       this.root,
       {
         stateRoot: this.paths.stateRoot,
-        assertMutation: (area, action, view) =>
-          this.assertMutation(area, action, view),
         changed: (preferences) =>
           host.emitHost({ event: 'browser_preferences_changed', preferences }),
       },
@@ -509,20 +503,14 @@ export class CoreApi {
     this.sessionDefaultsService = new CoreSessionDefaultsService(this.root, {
       stateRoot: this.paths.stateRoot,
       host,
-      assertMutation: (area, action, view) =>
-        this.assertMutation(area, action, view),
     })
     this.taskBudgetService = new CoreTaskBudgetService(this.root, {
       stateRoot: this.paths.stateRoot,
       host,
-      assertMutation: (area, action, view) =>
-        this.assertMutation(area, action, view),
     })
     this.webToolsService = new CoreWebToolsService(this.root, {
       stateRoot: this.paths.stateRoot,
       tools: host.webTools,
-      assertMutation: (area, action, view) =>
-        this.assertMutation(area, action, view),
       changed: (status) =>
         host.emitHost({ event: 'web_tools_changed', settings: status }),
     })
@@ -535,8 +523,6 @@ export class CoreApi {
       stateRoot: this.paths.stateRoot,
       hooks: host.hookConfig,
       projectRoot: (view) => this.viewProjectRoot(view),
-      assertMutation: (area, action, view) =>
-        this.assertMutation(area, action, view),
       sessionEvents: (view) => {
         const sessionId = this.viewedSession(view)?.id ?? null
         return sessionId === null
@@ -1077,8 +1063,6 @@ export class CoreApi {
       facts: this.executorFacts,
       store: this.executorConfig,
       registry: this.executorRegistry,
-      assertConfigure: (view) =>
-        this.assertMutation('executors', 'configure', view),
       refresh: () => this.delegationRuntime.probeProfiles(),
       checkAuth: checkExecutorAuth,
       consent: executorConsent,
@@ -1976,9 +1960,8 @@ export class CoreApi {
     get: (): UserConfigPayload => this.configService.getUserConfig(),
     save: async (
       body: { content?: unknown } | string | undefined,
-      view: ViewScope,
+      _view: ViewScope,
     ): Promise<UserConfigPayload> => {
-      this.assertMutation('config', 'save', view)
       const content =
         typeof body === 'string' ? body : String(body?.content ?? '')
       await this.hooksService.authorizeConfigChange('config.save', { content })
@@ -2008,9 +1991,8 @@ export class CoreApi {
         text: text === null ? null : redactLogText(text),
       }
     },
-    saveConfig: async (raw: Dict, view: ViewScope) => {
+    saveConfig: async (raw: Dict, _view: ViewScope) => {
       // Saving MCP config lets MCPClient spawn servers.*.command; guard it like any mutation.
-      this.assertMutation('mcp', 'saveConfig', view)
       await this.hooksService.authorizeConfigChange('mcp.saveConfig', raw)
       return this.configService.saveMcpConfig(raw)
     },
@@ -2021,10 +2003,9 @@ export class CoreApi {
         overwrite?: boolean | string[]
         dryRun?: boolean
       },
-      view?: ViewScope,
+      _view?: ViewScope,
     ) => {
       if (input.dryRun !== true) {
-        this.assertMutation('mcp', 'importServers', view)
         await this.hooksService.authorizeConfigChange(
           'mcp.importServers',
           input,
@@ -2035,9 +2016,8 @@ export class CoreApi {
     },
     setServerEnabled: async (
       input: { name: string; enabled: boolean },
-      view: ViewScope,
+      _view: ViewScope,
     ) => {
-      this.assertMutation('mcp', 'setServerEnabled', view)
       await this.hooksService.authorizeConfigChange(
         'mcp.setServerEnabled',
         input,
@@ -2045,8 +2025,7 @@ export class CoreApi {
       const result = await this.configService.setMcpServerEnabled(input)
       return { ...result, status: this.host.kept.mcpClient.snapshot() }
     },
-    removeServer: async (input: { name: string }, view: ViewScope) => {
-      this.assertMutation('mcp', 'removeServer', view)
+    removeServer: async (input: { name: string }, _view: ViewScope) => {
       await this.hooksService.authorizeConfigChange('mcp.removeServer', input)
       const result = await this.configService.removeMcpServer(input)
       return { ...result, status: this.host.kept.mcpClient.snapshot() }
@@ -2088,25 +2067,22 @@ export class CoreApi {
     ) => this.modelService.resolveProfile(input),
     saveEntry: async (
       entry: Parameters<CoreModelService['saveEntry']>[0],
-      view: ViewScope,
+      _view: ViewScope,
     ) => {
-      this.assertMutation('model', 'saveEntry', view)
       await this.hooksService.authorizeConfigChange('model.saveEntry', entry)
       return this.modelService.saveEntry(entry)
     },
     saveEntries: async (
       input: Parameters<CoreModelService['saveEntries']>[0],
-      view: ViewScope,
+      _view: ViewScope,
     ) => {
-      this.assertMutation('model', 'saveEntries', view)
       await this.hooksService.authorizeConfigChange('model.saveEntries', input)
       return this.modelService.saveEntries(input)
     },
     updateConnection: async (
       input: Parameters<CoreModelService['updateConnection']>[0],
-      view: ViewScope,
+      _view: ViewScope,
     ) => {
-      this.assertMutation('model', 'updateConnection', view)
       await this.hooksService.authorizeConfigChange('model.updateConnection', {
         ...input,
         apiKey: input.apiKey ? '***' : input.apiKey,
@@ -2115,11 +2091,10 @@ export class CoreApi {
     },
     refreshMetadata: async (
       input: Parameters<CoreModelService['refreshMetadata']>[0],
-      view: ViewScope,
+      _view: ViewScope,
     ) => {
       // A preview only reads; applying writes the file.
       if (input.apply) {
-        this.assertMutation('model', 'refreshMetadata', view)
         await this.hooksService.authorizeConfigChange(
           'model.refreshMetadata',
           input,
@@ -2129,17 +2104,15 @@ export class CoreApi {
     },
     replaceEntry: async (
       input: Parameters<CoreModelService['replaceEntry']>[0],
-      view: ViewScope,
+      _view: ViewScope,
     ) => {
-      this.assertMutation('model', 'replaceEntry', view)
       await this.hooksService.authorizeConfigChange('model.replaceEntry', input)
       return this.modelService.replaceEntry(input)
     },
     lookupDefaults: (
       input: Parameters<CoreModelService['lookupDefaults']>[0],
     ) => this.modelService.lookupDefaults(input),
-    discardRejected: async ({ key }: { key: string }, view: ViewScope) => {
-      this.assertMutation('model', 'discardRejected', view)
+    discardRejected: async ({ key }: { key: string }, _view: ViewScope) => {
       await this.hooksService.authorizeConfigChange('model.discardRejected', {
         key,
       })
@@ -2147,21 +2120,18 @@ export class CoreApi {
     },
     savePolicy: async (
       policy: Parameters<CoreModelService['savePolicy']>[0],
-      view: ViewScope,
+      _view: ViewScope,
     ) => {
-      this.assertMutation('model', 'savePolicy', view)
       await this.hooksService.authorizeConfigChange('model.savePolicy', policy)
       return this.modelService.savePolicy(policy)
     },
-    deleteEntry: async ({ entryId }: { entryId: string }, view: ViewScope) => {
-      this.assertMutation('model', 'deleteEntry', view)
+    deleteEntry: async ({ entryId }: { entryId: string }, _view: ViewScope) => {
       await this.hooksService.authorizeConfigChange('model.deleteEntry', {
         entryId,
       })
       return this.modelService.deleteEntry(entryId)
     },
-    activate: async ({ entryId }: { entryId: string }, view: ViewScope) => {
-      this.assertMutation('model', 'activate', view)
+    activate: async ({ entryId }: { entryId: string }, _view: ViewScope) => {
       await this.hooksService.authorizeConfigChange('model.activate', {
         entryId,
       })
@@ -2175,9 +2145,8 @@ export class CoreApi {
         entryId: string
         reasoningEffort: string | null
       },
-      view: ViewScope,
+      _view: ViewScope,
     ) => {
-      this.assertMutation('model', 'setReasoningEffort', view)
       await this.hooksService.authorizeConfigChange(
         'model.setReasoningEffort',
         { entryId, reasoningEffort },
@@ -2260,7 +2229,6 @@ export class CoreApi {
     }),
     /** A job without a session runs in the one the creator shows (`view`). */
     createJob: (args: Dict, view: ViewScope) => {
-      this.assertMutation('scheduler', 'create', view)
       const schedule = SchedulerSchedule.fromDict(
         requiredRecord(args.schedule, 'schedule'),
       )
@@ -2283,7 +2251,6 @@ export class CoreApi {
       }
     },
     updateJob: (jobId: string, args: Dict, view: ViewScope) => {
-      this.assertMutation('scheduler', 'update', view)
       const current = this.host.kept.schedulerService.getJob(jobId)
       if (!current) throw new Error(`scheduler job not found: ${jobId}`)
       if (current.protected)
@@ -2319,16 +2286,14 @@ export class CoreApi {
         scheduler: this.scheduler.get(),
       }
     },
-    runJob: async (jobId: string, view: ViewScope) => {
-      this.assertMutation('scheduler', 'run', view)
+    runJob: async (jobId: string, _view: ViewScope) => {
       const ran = await this.host.kept.schedulerService.runJob(jobId, {
         force: true,
       })
       if (!ran) throw new Error(`scheduler job not found: ${jobId}`)
       return { scheduler: this.scheduler.get() }
     },
-    pauseJob: (jobId: string, view: ViewScope) => {
-      this.assertMutation('scheduler', 'pause', view)
+    pauseJob: (jobId: string, _view: ViewScope) => {
       const job = this.host.kept.schedulerService.enableJob(jobId, false)
       if (job === 'not_found')
         throw new Error(`scheduler job not found: ${jobId}`)
@@ -2337,8 +2302,7 @@ export class CoreApi {
         scheduler: this.scheduler.get(),
       }
     },
-    resumeJob: (jobId: string, view: ViewScope) => {
-      this.assertMutation('scheduler', 'resume', view)
+    resumeJob: (jobId: string, _view: ViewScope) => {
       const job = this.host.kept.schedulerService.enableJob(jobId, true)
       if (job === 'not_found')
         throw new Error(`scheduler job not found: ${jobId}`)
@@ -2347,8 +2311,7 @@ export class CoreApi {
         scheduler: this.scheduler.get(),
       }
     },
-    deleteJob: (jobId: string, view: ViewScope) => {
-      this.assertMutation('scheduler', 'delete', view)
+    deleteJob: (jobId: string, _view: ViewScope) => {
       const result = this.host.kept.schedulerService.removeJob(jobId)
       if (result === 'not_found')
         throw new Error(`scheduler job not found: ${jobId}`)
@@ -2686,7 +2649,6 @@ export class CoreApi {
         opts.sessionId,
         'processes.cancel',
       )
-      this.assertMutation('processes', 'cancel', { sessionId })
       this.assertProcessOwner(processId, sessionId)
       return this.host.kept.processRuntime.cancel(
         processId,
@@ -3022,9 +2984,8 @@ export class CoreApi {
       this.skillService.get(name, opts),
     create: (
       input: Parameters<CoreSkillService['create']>[0],
-      view: ViewScope,
+      _view: ViewScope,
     ) => {
-      this.assertMutation('skills', 'create', view)
       return this.skillService.create(input)
     },
     validate: (input: Parameters<CoreSkillService['validate']>[0]) =>
@@ -3033,9 +2994,8 @@ export class CoreApi {
       name: string,
       content: string,
       opts: { sessionId: string | null },
-      view: ViewScope,
+      _view: ViewScope,
     ) => {
-      this.assertMutation('skills', 'save', view)
       return this.skillService.save(name, content, opts)
     },
     delete: (
@@ -3044,23 +3004,20 @@ export class CoreApi {
         sessionId: string | null
         scope?: 'user' | 'project' | null
       },
-      view: ViewScope,
+      _view: ViewScope,
     ) => {
-      this.assertMutation('skills', 'delete', view)
       return this.skillService.delete(name, opts)
     },
     import: async (
       input: Parameters<CoreSkillService['import']>[0],
-      view: ViewScope,
+      _view: ViewScope,
     ) => {
-      this.assertMutation('skills', 'import', view)
       return await this.skillService.import(input)
     },
     copyToUser: (
       input: Parameters<CoreSkillService['copyToUser']>[0],
-      view: ViewScope,
+      _view: ViewScope,
     ) => {
-      this.assertMutation('skills', 'copyToUser', view)
       return this.skillService.copyToUser(input)
     },
     /** Electron main-only capability: the Skills folder of a scope (created when missing). */
@@ -3087,7 +3044,6 @@ export class CoreApi {
       input: Parameters<PluginApplicationService['install']>[0],
       view: ViewScope,
     ) => {
-      this.assertMutation('plugins', 'install', view)
       const result = await this.pluginService.install(
         input,
         this.viewProjectRoot(view),
@@ -3099,7 +3055,6 @@ export class CoreApi {
       input: Parameters<PluginApplicationService['uninstall']>[0],
       view: ViewScope,
     ) => {
-      this.assertMutation('plugins', 'uninstall', view)
       const result = this.pluginService.uninstall(
         input,
         this.viewProjectRoot(view),
@@ -3111,18 +3066,6 @@ export class CoreApi {
       input: Parameters<PluginApplicationService['setEnabled']>[0],
       view: ViewScope,
     ) => {
-      // Switching Computer Use off narrows what the Agent can do: like its
-      // Settings switch, a pending card never blocks it.
-      const narrowsComputerUse =
-        input.scope === 'managed' &&
-        input.pluginId === COMPUTER_USE_PLUGIN_ID &&
-        !input.enabled
-      if (!narrowsComputerUse)
-        this.assertMutation(
-          'plugins',
-          input.enabled ? 'enable' : 'disable',
-          view,
-        )
       const result = this.pluginService.setEnabled(
         input,
         this.viewProjectRoot(view),
@@ -3192,9 +3135,8 @@ export class CoreApi {
       ),
     cancelInstall: (
       input: Parameters<CoreEnvironmentService['cancelInstall']>[0],
-      view: ViewScope,
+      _view: ViewScope,
     ) => {
-      this.assertMutation('environment', 'cancel install', view)
       return this.environmentService.cancelInstall(input)
     },
     getInstallLog: (
@@ -3247,9 +3189,8 @@ export class CoreApi {
   }
 
   /**
-   * Computer Use (GUI control). Switching off and revoking never call
-   * `assertMutation`: narrowing capability must work while a grant card or
-   * plan mode is pending.
+   * Computer Use (GUI control). Its switches are settings: the chat shown
+   * behind the window never gates them (FIX-10).
    */
   readonly computerUse = {
     status: async (): Promise<ComputerUseStatusView> =>
@@ -3261,9 +3202,8 @@ export class CoreApi {
         driver: DriverKind
         enabled: boolean
       },
-      view: ViewScope,
+      _view: ViewScope,
     ): Promise<ComputerUseStatusView> => {
-      if (input.enabled) this.assertMutation('computerUse', 'enable', view)
       this.host.setComputerUseDriverEnabled(input.driver, input.enabled)
       return await this.computerUse.status()
     },
@@ -3297,9 +3237,8 @@ export class CoreApi {
     /** Master switch. Turning on is a guarded mutation; turning off never is. */
     setEnabled: async (
       enabled: boolean,
-      view: ViewScope,
+      _view: ViewScope,
     ): Promise<ComputerUseStatusView> => {
-      if (enabled) this.assertMutation('computerUse', 'enable', view)
       this.host.setComputerUseEnabled(enabled)
       // The Computer Use plugin mirrors this switch (plugin contract §5).
       this.pluginsChanged()
@@ -3319,13 +3258,12 @@ export class CoreApi {
         profileId?: string
         name?: string
       },
-      view: ViewScope,
+      _view: ViewScope,
     ): Promise<{ profile?: BrowserProfileView; revokedGrants?: number }> => {
       const service = this.host.computerUse?.service
       if (service === undefined)
         throw new Error('computer use is not available on this host')
       if (input.action === 'create' || input.action === 'rename') {
-        this.assertMutation('computerUse', `${input.action}Profile`, view)
         if (input.name === undefined)
           throw new Error('a profile name is required')
         if (input.action === 'create')
@@ -3353,13 +3291,12 @@ export class CoreApi {
         allow: boolean
         minutes?: number
       },
-      view: ViewScope,
+      _view: ViewScope,
     ): { permissions: SitePermission[] } => {
       const service = this.host.computerUse?.service
       if (service === undefined)
         throw new Error('computer use is not available on this host')
       if (input.allow) {
-        this.assertMutation('computerUse', 'allowSitePermission', view)
         service.allowSitePermission({
           profileId: input.profileId,
           origin: input.origin,
@@ -3390,15 +3327,11 @@ export class CoreApi {
      */
     setExternalBrowserSettings: (
       patch: ExternalBrowserSettingsPatch,
-      view: ViewScope,
+      _view: ViewScope,
     ): ExternalBrowserSettingsView => {
       const service = this.host.computerUse?.service
       if (service === undefined)
         throw new Error('computer use is not available on this host')
-      const before = service.externalBrowserSettings()
-      const after = applyExternalBrowserSettingsPatch(before, patch)
-      if (widensExternalBrowserSettings(before, after))
-        this.assertMutation('computerUse', 'externalBrowserSettings', view)
       return externalBrowserSettingsView(
         service.setExternalBrowserSettings(patch),
       )
@@ -3538,10 +3471,6 @@ export class CoreApi {
       opts: { reason?: string; sessionId?: string | null } = {},
     ): Promise<Dict> => {
       const task = this.requireTask(taskId, opts.sessionId)
-      if (task.kind !== 'external-agent')
-        this.assertMutation('tasks', 'cancel', {
-          sessionId: opts.sessionId ?? task.session_id,
-        })
       if (task.kind === 'external-agent')
         await this.delegationService.interrupt({
           id: task.delegation_id!,
@@ -3570,9 +3499,8 @@ export class CoreApi {
   readonly storage = {
     usage: (): Promise<StorageUsage> => this.retention.usage(),
     clean: async (
-      view: ViewScope,
+      _view: ViewScope,
     ): Promise<{ report: RetentionReport; usage: StorageUsage }> => {
-      this.assertMutation('storage', 'clean', view)
       const report = await this.retention.sweep()
       return { report, usage: await this.retention.usage() }
     },

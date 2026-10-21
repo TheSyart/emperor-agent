@@ -152,13 +152,13 @@ describe('storage operations (KRN-12)', () => {
     expect(result.usage.categories).toHaveLength(7)
   })
 
-  it('refuses to clean in plan mode', async () => {
+  it('FIX-10 · cleans while the chat behind the window is in plan mode', async () => {
     const { api } = await setup()
     const id = String(api.sessions.create({ title: 'Plan' }).id)
     api.control.setMode('plan', id)
-    await expect(api.storage.clean({ sessionId: id })).rejects.toBeInstanceOf(
-      CoreMutationGuardError,
-    )
+    await expect(api.storage.clean({ sessionId: id })).resolves.toMatchObject({
+      report: expect.any(Object),
+    })
   })
 })
 

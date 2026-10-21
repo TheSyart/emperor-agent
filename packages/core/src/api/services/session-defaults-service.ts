@@ -18,7 +18,6 @@ export interface CoreSessionDefaultsServiceDeps {
     readonly defaultPreset: string
     setDefaultPreset(preset: SessionPermission): void
   }
-  assertMutation?: (area: string, action: string, view: ViewScope) => void
 }
 
 /**
@@ -45,9 +44,8 @@ export class CoreSessionDefaultsService {
 
   async update(
     change: { permission: SessionPermission },
-    view: ViewScope,
+    _view: ViewScope,
   ): Promise<SessionDefaults> {
-    this.deps.assertMutation?.('sessions', 'session defaults', view)
     if (!isSessionPermission(change?.permission))
       throw new Error(`未知的权限：${String(change?.permission)}`)
     const config = await loadLocalConfig(this.stateRoot)

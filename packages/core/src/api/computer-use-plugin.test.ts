@@ -228,12 +228,12 @@ describe('the Computer Use plugin', () => {
     const submitted = api.chat.submit({ content: 'go', sessionId })
     await waitFor(() => eventOf(events, 'ask_request') !== undefined)
 
-    // Widening waits for the card in the session shown; narrowing never
-    // does, as in Settings.
+    // A card pending in the chat shown gates no setting (FIX-10): turning
+    // it on again is a no-op, turning it off stops the Agent's request.
     const shown = { sessionId }
     await expect(
       api.plugins.setEnabled({ ...REF, enabled: true }, shown),
-    ).rejects.toThrow()
+    ).resolves.toMatchObject({ changed: false })
     await api.plugins.setEnabled({ ...REF, enabled: false }, shown)
     expect((await submitted).content).toBe('stopped')
     expect(refused).toContain('PERMISSION_DENIED')

@@ -823,62 +823,66 @@ describe('CoreApi control', () => {
 })
 
 describe('CoreApi mutation guard', () => {
-  it('rejects config, MCP, and model writes while plan mode is active', async () => {
+  it('FIX-10 · 1 · settings save while the chat behind the window is in plan mode', async () => {
     const { api } = await setup()
     const id = session(api)
     api.sessions.activate(id)
     api.control.setMode('plan', id)
-    // The guard reads the session the caller shows (KRN-01: passed, not focused).
+    // Settings are global: the chat the window shows does not gate them.
     const view = { sessionId: id }
-    await expect(api.config.save('x', view)).rejects.toBeInstanceOf(
-      CoreMutationGuardError,
-    )
+    await expect(
+      api.config.save('## 偏好设置\n\n- 回复用中文\n', view),
+    ).resolves.toBeDefined()
     await expect(
       api.mcp.saveConfig({ servers: {} }, view),
-    ).rejects.toBeInstanceOf(CoreMutationGuardError)
+    ).resolves.toBeDefined()
     const pasted = { mcpServers: { docs: { url: 'https://docs.test/mcp' } } }
     await expect(
       api.mcp.importServers({ raw: pasted }, view),
-    ).rejects.toBeInstanceOf(CoreMutationGuardError)
-    await expect(
-      api.mcp.importServers({ raw: pasted, dryRun: true }),
-    ).resolves.toMatchObject({ dryRun: true, added: ['docs'] })
+    ).resolves.toMatchObject({ added: ['docs'] })
     await expect(
       api.mcp.setServerEnabled({ name: 'docs', enabled: false }, view),
-    ).rejects.toBeInstanceOf(CoreMutationGuardError)
+    ).resolves.toBeDefined()
     await expect(
       api.mcp.removeServer({ name: 'docs' }, view),
-    ).rejects.toBeInstanceOf(CoreMutationGuardError)
-    await expect(
-      api.model.saveEntry(validModelEntry('blocked') as never, view),
-    ).rejects.toBeInstanceOf(CoreMutationGuardError)
-    await expect(
-      api.model.deleteEntry({ entryId: 'entry-1' }, view),
-    ).rejects.toBeInstanceOf(CoreMutationGuardError)
-    expect(() => api.scheduler.createJob({}, view)).toThrow(
-      CoreMutationGuardError,
-    )
-    expect(() =>
-      api.skills.save('blocked-save', '# Blocked', { sessionId: null }, view),
-    ).toThrow(CoreMutationGuardError)
-    expect(() =>
-      api.skills.delete('blocked-delete', { sessionId: null }, view),
-    ).toThrow(CoreMutationGuardError)
-    await expect(api.hooks.saveConfig('{}', view)).rejects.toBeInstanceOf(
-      CoreMutationGuardError,
-    )
-    // A caller that names no session cannot pass the guard.
-    await expect(
-      api.config.save('x', undefined as never),
-    ).rejects.toMatchObject({ code: 'SESSION_REQUIRED' })
-    // Another session without plan mode is not blocked by this one.
-    const other = session(api)
-    await expect(
-      api.mcp.saveConfig({ servers: {} }, { sessionId: other }),
     ).resolves.toBeDefined()
+    await expect(
+      api.model.saveEntry(validModelEntry('in-plan') as never, view),
+    ).resolves.toBeDefined()
+    expect(() =>
+      api.skills.save(
+        'in-plan',
+        '---\nname: in-plan\ndescription: Saved in plan mode\n---\n# In plan\n',
+        { sessionId: null },
+        view,
+      ),
+    ).not.toThrow()
+    await expect(api.hooks.saveConfig('{}', view)).resolves.toBeDefined()
+    await expect(api.storage.clean(view)).resolves.toBeDefined()
+    // Stopping is never gated.
+    await expect(
+      api.environment.cancelInstall({ id: 'none' } as never, view),
+    ).resolves.not.toMatchObject({ code: 'mutation_blocked_plan' })
+    expect(() =>
+      api.processes.cancel('proc-missing', { sessionId: id, leaseId: 'l' }),
+    ).toThrow(expect.objectContaining({ code: 'mutation_forbidden' }))
+    // A process changes owner only with its own chat's consent.
+    expect(() =>
+      api.processes.reparent('proc-missing', {
+        sessionId: id,
+        leaseId: 'l',
+        ownerKind: 'task',
+        ownerId: 't',
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        code: 'mutation_blocked_plan',
+        message: expect.stringContaining('计划模式'),
+      }),
+    )
   })
 
-  it('rejects config, MCP, and model writes while an interaction is pending', async () => {
+  it('FIX-10 · 1 · settings save while the chat behind the window waits on a question', async () => {
     const { api, events } = await setup({
       replies: [askColor, { text: 'done' }],
     })
@@ -886,23 +890,28 @@ describe('CoreApi mutation guard', () => {
     const submitted = api.chat.submit({ content: 'pick', sessionId: id })
     await waitFor(() => eventOf(events, 'ask_request') !== undefined)
     const view = { sessionId: id }
-    await expect(api.config.save('x', view)).rejects.toBeInstanceOf(
-      CoreMutationGuardError,
-    )
+    await expect(
+      api.config.save('## 偏好设置\n\n- 回复用中文\n', view),
+    ).resolves.toBeDefined()
     await expect(
       api.mcp.saveConfig({ servers: {} }, view),
-    ).rejects.toBeInstanceOf(CoreMutationGuardError)
+    ).resolves.toBeDefined()
     await expect(
-      api.model.saveEntry(validModelEntry('blocked') as never, view),
-    ).rejects.toBeInstanceOf(CoreMutationGuardError)
+      api.model.saveEntry(validModelEntry('pending') as never, view),
+    ).resolves.toBeDefined()
+    expect(() =>
+      api.processes.reparent('proc-missing', {
+        sessionId: id,
+        leaseId: 'l',
+        ownerKind: 'task',
+        ownerId: 't',
+      }),
+    ).toThrow(expect.objectContaining({ code: 'mutation_blocked_pending' }))
     await api.control.answerInteraction(
       pendingInteractionId(events, 'ask_request'),
       { color: { choice: 'red', freeform: '' } },
     )
     await submitted
-    await expect(
-      api.mcp.saveConfig({ servers: {} }, view),
-    ).resolves.toBeDefined()
   })
 
   it('keeps retired install operations retired', async () => {

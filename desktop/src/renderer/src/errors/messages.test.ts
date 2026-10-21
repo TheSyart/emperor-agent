@@ -39,6 +39,8 @@ const CODE_FIRST = new Set([
   'GoalServiceError',
   'UpdateError',
 ])
+/** Constructors whose third argument is the code (FIX-10). */
+const CODE_THIRD = new Set(['CoreMutationGuardError'])
 
 function publicCoreErrorCodes(): Set<string> {
   const files = sources(CORE).map((path) =>
@@ -54,6 +56,23 @@ function publicCoreErrorCodes(): Set<string> {
     (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
       ? node.text
       : null
+  // Every literal an argument can be: both sides of `??` / `||`, both
+  // branches of `?:` (`code ?? (status === 403 ? 'a' : 'b')`).
+  const literals = (node: ts.Node | undefined): string[] => {
+    if (!node) return []
+    const text = literal(node)
+    if (text !== null) return [text]
+    if (ts.isParenthesizedExpression(node)) return literals(node.expression)
+    if (ts.isConditionalExpression(node))
+      return [...literals(node.whenTrue), ...literals(node.whenFalse)]
+    if (
+      ts.isBinaryExpression(node) &&
+      (node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken ||
+        node.operatorToken.kind === ts.SyntaxKind.BarBarToken)
+    )
+      return [...literals(node.left), ...literals(node.right)]
+    return []
+  }
   // The EmperorError family: every class that extends it, directly or not.
   const bases = new Map<string, string>()
   for (const sf of files)
@@ -81,6 +100,7 @@ function publicCoreErrorCodes(): Set<string> {
       if (ts.isNewExpression(node) && ts.isIdentifier(node.expression)) {
         const args = node.arguments ?? []
         if (CODE_FIRST.has(node.expression.text)) add(literal(args[0]))
+        if (CODE_THIRD.has(node.expression.text)) add(literal(args[2]))
         if (node.expression.text === 'EmperorError') add(literal(args[1]))
       }
       if (
@@ -89,7 +109,7 @@ function publicCoreErrorCodes(): Set<string> {
         inClass &&
         family(inClass)
       )
-        add(literal(node.arguments[1]))
+        for (const code of literals(node.arguments[1])) add(code)
       // `readonly code = '…'` on an error class with its own toSafe().
       if (
         ts.isPropertyDeclaration(node) &&

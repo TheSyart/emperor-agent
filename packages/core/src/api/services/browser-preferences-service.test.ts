@@ -64,17 +64,4 @@ describe('CoreBrowserPreferencesService', () => {
     await again.update({ downloadDirectory: null }, VIEW)
     expect((await service.get()).downloadDirectory).toBeNull()
   })
-
-  it('is a guarded mutation', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'emperor-browser-prefs-'))
-    const service = new CoreBrowserPreferencesService(root, {
-      assertMutation: () => {
-        throw new Error('a card is pending')
-      },
-    })
-    await expect(service.update({ history: false }, VIEW)).rejects.toThrow(
-      /card is pending/,
-    )
-    expect((await service.get()).history).toBe(true)
-  })
 })

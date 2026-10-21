@@ -15,7 +15,6 @@ export interface CoreWebToolsServiceDeps {
     status(): WebToolsStatus
     update(settings: WebToolPreferences): void
   }
-  assertMutation?: (area: string, action: string, view: ViewScope) => void
   /** The tool list changed: tell every window. */
   changed?: (status: WebToolsStatus) => void
 }
@@ -41,9 +40,8 @@ export class CoreWebToolsService {
 
   async update(
     change: Partial<WebToolPreferences>,
-    view: ViewScope,
+    _view: ViewScope,
   ): Promise<WebToolsStatus> {
-    this.deps.assertMutation?.('tools', 'network settings', view)
     const config = await loadLocalConfig(this.stateRoot)
     const webTools = normalizeWebToolPreferences({
       ...config.webTools,

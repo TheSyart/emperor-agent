@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、安全审查者、维护者<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 最后核验：2026-10-21（对照 `f764443d`）<br>
 > 事实源：`packages/core/src/sandbox/`、`packages/core/src/harness/sandbox/`、`packages/core/src/mcp/containment.ts`、`packages/core/src/harness/hooks/contained.ts`、`packages/core/src/harness/workflow/process-worker.ts`、`packages/core/src/api/services/session-defaults-service.ts`、`packages/core/src/harness/approval/`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/questions/`、`packages/core/src/harness/host/interactions.ts`、`packages/core/src/harness/computer-use/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/api/mutation-guard.ts`、`packages/core/src/workspace/git-runner.ts`、`packages/core/src/security/`、`packages/core/src/config/model-config.ts`、`packages/core/src/mcp/config.ts`
 
 Agent 能做什么由两个独立旋钮决定：**沙箱模式**限制文件写入范围，**审批策略**决定需要批准的操作是否询问用户。用户看到的是把两者打包在一起的**权限预设**。Plan 模式是独立的会话状态，不是第四种权限。
@@ -164,7 +164,11 @@ Plan 模式与权限预设相互独立：在 Plan 模式中切换预设，只改
 
 ## CoreApi mutation guard
 
-`packages/core/src/api/mutation-guard.ts` 保护由界面发起的状态修改（Scheduler、Skills、Plugins、模型与 MCP 配置、Task 取消等）：调用方显示的会话（每次调用带的 `view`，见 [Agent 执行链路](agent-runtime.md#选中会话只决定显示)）有待处理交互时返回 409，处于 Plan 模式时返回 403；界面没有显示会话（`view.sessionId` 为 null）时不拦截，进程内调用不带 `view` 时返回 `SESSION_REQUIRED`。外部子会话与任务的控制由所属会话自己的状态把关。Git 写操作另外通过 workspace mutation coordinator 按 worktree 串行。
+`packages/core/src/api/mutation-guard.ts` 只保护**属于某个对话**的、由界面发起的写入：给子智能体发消息、应用或丢弃它的成果（`delegations.*`，按任务所属的主会话判断），以及把后台进程转给别的属主（`processes.reparent`）。这个对话有待处理的提问、权限或计划审批时返回 409（`mutation_blocked_pending`），处于 Plan 模式时返回 403（`mutation_blocked_plan`）。
+
+设置是全局的，不看窗口背后显示的是哪个对话、它处于什么状态（FIX-10）：模型、MCP、Skills、插件、Hooks、定时任务、子智能体、浏览器与电脑操作、存储清理、会话默认值、任务预算、网络工具和用户配置随时可以保存。停止也总是可用：`tasks.cancel`、`processes.cancel`、取消环境安装不经守卫。Plan 模式约束的是 Agent（见上文的工具与子智能体限制），不是用户自己的设置。
+
+守卫与 CoreApi 的其他拒绝（例如进程不属于这个会话 `mutation_forbidden`、状态冲突 `mutation_conflict`）都是 `EmperorError`，错误码与中文说明经 IPC 原样到达界面，不会显示成「发生内部错误」。Git 写操作另外通过 workspace mutation coordinator 按 worktree 串行。
 
 ## 用户直控 Terminal
 
