@@ -181,6 +181,7 @@ async function revealCommitBox(): Promise<void> {
       />
       <p v-else-if="readError" class="review-read-error" data-git-read-error>
         {{ readError }}
+        <LinkButton @click="review.refresh()">重试</LinkButton>
       </p>
       <template v-if="status">
         <div v-if="focusFilterActive && filterCount" class="task-filter">

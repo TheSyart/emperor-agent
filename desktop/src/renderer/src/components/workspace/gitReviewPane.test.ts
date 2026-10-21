@@ -13,7 +13,10 @@ const { core, openLink } = vi.hoisted(() => ({
   core: vi.fn(),
   openLink: vi.fn(),
 }))
-vi.mock('../../api/http', () => ({ core }))
+vi.mock('../../api/http', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api/http')>()),
+  core,
+}))
 vi.mock('../../api/backend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../api/backend')>()),
   openLink,
@@ -26,6 +29,7 @@ import {
   resetWorkspaceSnapshotForTest,
   WORKSPACE_POLL_MS,
 } from './useWorkspaceSnapshot'
+import { GIT_REVIEW_READ_TIMEOUT_MS } from './workspaceModel'
 
 const HEAD = 'a'.repeat(40)
 const REVISION = 'b'.repeat(64)
@@ -354,6 +358,38 @@ describe('GitReviewPane (FIX-05)', () => {
     expect(root.querySelector('[data-git-write-error]')?.textContent).toContain(
       'pre-commit hook failed',
     )
+  })
+
+  // FIX-08: a read that never answers (status, branches or worktrees) used
+  // to leave 「正在读取 Git 状态…」 up for good.
+  it('a read that does not answer stops with a reason and 重试', async () => {
+    hold = new Promise<never>(() => {})
+    const root = mount()
+    await settle()
+    expect(root.querySelector('.review-loading')).not.toBeNull()
+
+    await vi.advanceTimersByTimeAsync(GIT_REVIEW_READ_TIMEOUT_MS)
+    await settle()
+    expect(root.querySelector('.review-loading')).toBeNull()
+    const error = root.querySelector<HTMLElement>('[data-git-read-error]')
+    expect(error?.textContent).toContain(
+      `读取 Git 状态超过 ${GIT_REVIEW_READ_TIMEOUT_MS / 1000} 秒没有完成`,
+    )
+    const retry = [...error!.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === '重试',
+    )
+    expect(retry).toBeDefined()
+
+    // Git answers again: 重试 reads it and the reason goes.
+    hold = null
+    const reads = calls('git.status')
+    retry!.click()
+    await settle()
+    expect(calls('git.status')).toBe(reads + 1)
+    expect(root.querySelector('[data-git-read-error]')).toBeNull()
+    expect(
+      root.querySelector('[data-group="unstaged"] .change-row')?.textContent,
+    ).toContain('README.md')
   })
 
   it('2 · a poll keeps the commit box enabled and focused, and every key lands', async () => {

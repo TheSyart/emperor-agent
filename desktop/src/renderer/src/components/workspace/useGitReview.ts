@@ -10,8 +10,10 @@
  * makes no Git calls. Polls are silent: they never set `loading`.
  *
  * Errors: a failed read (status, diff) is `readError` and clears on the next
- * good read; a failed write is `writeError` and stays until dismissed or the
- * next write starts. Writes carry the status `revision` (expectedRevision),
+ * good read; a read that takes longer than GIT_REVIEW_READ_TIMEOUT_MS stops
+ * waiting with that reason (the pane offers 重试), so 「正在读取 Git 状态…」
+ * never stays up for good (FIX-08). A failed write is `writeError` and stays
+ * until dismissed or the next write starts. Writes carry the status `revision` (expectedRevision),
  * ask first where the 审查 rules always asked, and wait while the agent runs
  * or a Git operation is unfinished (`blockedReason`). A session switch
  * clears every draft and both errors.
@@ -35,7 +37,7 @@ import {
   type InjectionKey,
 } from 'vue'
 import { openLink } from '../../api/backend'
-import { core } from '../../api/http'
+import { core, CoreTimeoutError, withCoreDeadline } from '../../api/http'
 import { confirm, type ConfirmOptions } from '../ui/confirm'
 import type { DiffHunk } from '../ui/diffRows'
 import { splitPullRequestDiff } from '../pages/pulls/pullDiff'
@@ -48,8 +50,10 @@ import {
 } from './gitReviewModel'
 import { useWorkspaceSnapshot } from './useWorkspaceSnapshot'
 import {
+  GIT_REVIEW_READ_TIMEOUT_MS,
   GIT_REVIEW_SLOW_TTL_MS,
   filterGitFilesByPaths,
+  gitReadTimeoutMessage,
   gitTransientLabel,
 } from './workspaceModel'
 import { isGitStatus } from './workspaceTypes'
@@ -92,7 +96,31 @@ export function injectGitReview(): GitReview {
 }
 
 function message(value: unknown): string {
+  if (value instanceof CoreTimeoutError) return gitReadTimeoutMessage()
   return value instanceof Error ? value.message : String(value)
+}
+
+/** Status, branches and worktrees in one read that gives up in time. */
+function readRepository(sessionId: string) {
+  return withCoreDeadline(
+    Promise.all([
+      core('git.status', { sessionId }),
+      core('git.branches', { sessionId }),
+      core('git.worktrees', { sessionId }),
+    ]),
+    { timeoutMs: GIT_REVIEW_READ_TIMEOUT_MS },
+  )
+}
+
+/** Branches and worktrees after a write, with the same deadline. */
+function readLists(sessionId: string) {
+  return withCoreDeadline(
+    Promise.all([
+      core('git.branches', { sessionId }),
+      core('git.worktrees', { sessionId }),
+    ]),
+    { timeoutMs: GIT_REVIEW_READ_TIMEOUT_MS },
+  )
 }
 
 export function useGitReview(
@@ -223,11 +251,7 @@ export function useGitReview(
     const generation = ++refreshGeneration
     if (!options.silent) loadingToken.value = generation
     try {
-      const [next, branchPayload, worktreePayload] = await Promise.all([
-        core('git.status', { sessionId: owner }),
-        core('git.branches', { sessionId: owner }),
-        core('git.worktrees', { sessionId: owner }),
-      ])
+      const [next, branchPayload, worktreePayload] = await readRepository(owner)
       if (!isCurrentRefresh(owner, generation)) return
       status.value = next
       readError.value = ''
@@ -538,14 +562,17 @@ export function useGitReview(
     writeError.value = ''
     try {
       const next = await action(current.revision)
-      const [branchPayload, worktreePayload] = await Promise.all([
-        core('git.branches', { sessionId: owner }),
-        core('git.worktrees', { sessionId: owner }),
-      ])
-      if (isCurrentRefresh(owner, generation)) {
-        status.value = next
-        applyBranches(branchPayload.branches)
-        ownedWorktrees.value = worktreePayload.owned
+      if (isCurrentRefresh(owner, generation)) status.value = next
+      // The write is done; a list that does not come back is a read error.
+      try {
+        const [branchPayload, worktreePayload] = await readLists(owner)
+        if (isCurrentRefresh(owner, generation)) {
+          applyBranches(branchPayload.branches)
+          ownedWorktrees.value = worktreePayload.owned
+        }
+      } catch (cause) {
+        if (isCurrentRefresh(owner, generation))
+          readError.value = message(cause)
       }
       if (owner === props.sessionId) {
         void workspace.refresh({ force: true })
