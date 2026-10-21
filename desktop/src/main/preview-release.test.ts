@@ -40,7 +40,7 @@ function runContract(...args: string[]) {
 }
 
 describe('unsigned preview release channel', () => {
-  it('routes Preview tags automatically while keeping Frozen Stable manual', () => {
+  it('routes Preview tags automatically while keeping Stable manual', () => {
     const stable = readWorkflow('release.yml')
     const preview = readWorkflow('release-preview.yml')
 
@@ -207,8 +207,15 @@ describe('unsigned preview release channel', () => {
     expect(readme).not.toContain('.github/workflows/release-preview.yml')
     expect(previewRunbook).toContain('默认分支')
     expect(previewRunbook).toContain('annotated tag')
-    expect(stableRunbook).toContain('Frozen')
+    // REL-05: Stable is the current, unsigned release path, not Frozen.
+    expect(stableRunbook).toContain('> 文档状态：Active')
+    expect(stableRunbook).not.toContain('Frozen')
     expect(stableRunbook).toContain('.github/workflows/release.yml')
+    expect(stableRunbook).toContain('scripts/release-dry-run.mjs')
+    expect(stableRunbook).toContain('stable-release-notes.md')
+    expect(stableRunbook).toContain('#不签名不等于不封签')
+    expect(previewRunbook).not.toContain('Frozen')
+    expect(previewRunbook).toContain('stable-release-runbook.md')
 
     // Decided 2026-10-01: packages on GitHub Releases are never signed.
     const devGuide = fs.readFileSync(
@@ -320,6 +327,34 @@ describe('unsigned preview release channel', () => {
     )
     expect(refused.status).toBe(1)
     expect(refused.stderr).toContain('renderer sandbox')
+
+    fs.rmSync(root, { recursive: true, force: true })
+  })
+
+  it('refuses a Stable-named macOS artifact (REL-05 naming) as Preview input', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'emperor-preview-'))
+    const dist = path.join(root, 'dist')
+    fs.mkdirSync(path.join(dist, 'packaged-smoke'), { recursive: true })
+    for (const name of [
+      'Emperor-Agent-0.2.0-preview.1-UNSIGNED-PREVIEW-macos-arm64.dmg',
+      'Emperor-Agent-0.2.0-preview.1-UNSIGNED-PREVIEW-macos-arm64.zip',
+      'Emperor-Agent-0.2.0-macos-arm64.dmg',
+    ])
+      fs.writeFileSync(path.join(dist, name), `fixture:${name}\n`)
+
+    const result = runContract(
+      'candidate',
+      dist,
+      'v0.2.0-preview.1',
+      'a'.repeat(40),
+      '123456',
+      'macos',
+      'arm64',
+    )
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(
+      'non-Preview artifact input: Emperor-Agent-0.2.0-macos-arm64.dmg',
+    )
 
     fs.rmSync(root, { recursive: true, force: true })
   })

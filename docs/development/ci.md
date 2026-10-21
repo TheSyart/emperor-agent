@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：贡献者、发布维护者<br>
 > 最后核验：2026-10-21<br>
-> 事实源：`.github/workflows/ci.yml`、`nightly.yml`、`weekly-model-metadata.yml`、`release-preview.yml`、`release.yml`、`scripts/ci/`、`scripts/session-log-kill9.mjs`、`desktop/scripts/run-packaged-smoke.cjs`
+> 事实源：`.github/workflows/ci.yml`、`nightly.yml`、`weekly-model-metadata.yml`、`release-preview.yml`、`release.yml`、`scripts/ci/`（含 `check-unsigned-release.mjs`）、`scripts/session-log-kill9.mjs`、`desktop/scripts/run-packaged-smoke.cjs`
 
 CI 只跑 macOS（项目不支持 Windows 和 Linux）。每个 job 只调用一个脚本，脚本里写着它做的全部事情，所以本机用同一条命令就能重跑；GitHub 只负责按时间或事件把它们排上 runner。
 
@@ -18,10 +18,11 @@ CI 只跑 macOS（项目不支持 Windows 和 Linux）。每个 job 只调用一
 | `release-preview.yml`、`release.yml` 的第一步                 | Preview tag；Stable 手动                        | 各自的 job                   | `scripts/ci/require-green-nightly.mjs`：最近一次 nightly 不绿、超过 72 小时或有未关闭的失败 issue 时，发布直接失败          | 需要 `gh` 登录：`node scripts/ci/require-green-nightly.mjs`                                            |
 | `release-internal.yml`、`environment-installers-internal.yml` | 手动                                            | `macos-15`、`macos-15-intel` | 内部未签名包与 macOS 环境适配器回执                                                                                         | `npm --prefix desktop run package:verify`                                                              |
 
-`make check`（`scripts/check.sh`）本身还运行 `scripts/ci/check-action-pins.mjs` 与 `scripts/ci/check-workflows.mjs`：
+`make check`（`scripts/check.sh`）本身还运行 `scripts/ci/check-action-pins.mjs`、`scripts/ci/check-workflows.mjs` 与 `scripts/ci/check-unsigned-release.mjs`：
 
 - 每个 `uses:` 都必须写成 40 位提交哈希，版本号写在旁边的注释里，例如 `actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0`。升级一个 action 时，先 `git ls-remote https://github.com/actions/checkout refs/tags/v4.4.0` 查到提交，再同时改哈希和注释。
-- 工作流 lint 检查上表的对应关系：PR gate 在 arm64 和 Intel 上调用 `pr-gate.sh`；nightly 只按计划运行，从不在 pull request 或 push 上运行，并在失败时开 issue；weekly 是每周一次并有开 PR 所需的权限；两个发布 workflow 都先检查 nightly；除只做汇总、证明和发布的 job（`release-preview.yml` 的 aggregate / publish，以及 `release.yml` 里尚未改为未签名路径的冻结签名链）外，所有 job 都跑在 macOS 上；workflow 里引用的 `scripts/ci/*` 都存在。
+- 工作流 lint 检查上表的对应关系：PR gate 在 arm64 和 Intel 上调用 `pr-gate.sh`；nightly 只按计划运行，从不在 pull request 或 push 上运行，并在失败时开 issue；weekly 是每周一次并有开 PR 所需的权限；两个发布 workflow 都先检查 nightly；`release.yml` 在 arm64 和 Intel 上用 `scripts/build_desktop_release.sh` 构建、用 `scripts/verify-macos-release.sh` 核验 Stable 候选；除只检查 tag、汇总、证明和发布的 job（`release-preview.yml` 的 aggregate / publish，`release.yml` 的 release-policy / release-aggregate / publish-release）外，所有 job 都跑在 macOS 上；workflow 里引用的 `scripts/ci/*` 都存在。
+- 未签名检查：发布 workflow（`release*.yml`）除 GitHub token 外不引用任何 secret；所有 workflow、两份 electron-builder 发布配置和发布脚本里都没有签名变量（`CSC_LINK`、`APPLE_TEAM_ID` 等）、公证（`notarytool`、`stapler`）、钥匙串导入（`security import`）或 ad-hoc `-` 以外的 `codesign --sign`；`release.yml` 与 `release-preview.yml` 在整个 workflow 上关闭 `CSC_IDENTITY_AUTO_DISCOVERY`。`scripts/ci/fixtures/signed-release/` 是一份签名发布的反例，测试确认检查会拒绝它。
 
 ## PR gate
 
@@ -61,6 +62,6 @@ GitHub 不会为 `GITHUB_TOKEN` 创建的 PR 自动触发 `ci.yml`：合并前�
 
 ## 不做的事
 
-- 不签名、不公证，workflow 里没有 Apple 或 Windows 签名凭据（`release.yml` 里冻结的 Stable 签名链将改为与 Preview 相同的未签名路径）。
+- 不签名、不公证，workflow 里没有 Apple 或 Windows 签名凭据：Stable（`release.yml`）与 Preview 走同一条未签名、ad-hoc 封签的路径（[Stable 发布手册](../release/stable-release-runbook.md)）。
 - 不使用 macOS 钥匙串；打包冒烟用临时 HOME 运行，凭据走 Emperor 自己的本地密钥。
 - 不调用真实模型或付费接口。

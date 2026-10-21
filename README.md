@@ -342,7 +342,7 @@ npm --prefix desktop run package:verify
 | Headless ACP stdio               | [Headless ACP operator preview](docs/development/headless-acp.md) |
 | 未签名 Preview 的安装安全        | [未签名预览版说明](docs/release/unsigned-preview-notice.md)       |
 | 当前 Preview 构建与发布          | [Preview 发布手册](docs/release/preview-release-runbook.md)       |
-| 未来 Stable 发布边界             | [Stable 发布手册](docs/release/stable-release-runbook.md)         |
+| Stable 发布流程（同样未签名）    | [Stable 发布手册](docs/release/stable-release-runbook.md)         |
 | 环境工具 catalog 变更            | [工具 catalog 审查流程](docs/release/tool-catalog-review.md)      |
 | 安全边界与私密报告               | [Security Policy](.github/SECURITY.md)                            |
 | 版本变化                         | [Changelog](docs/release/CHANGELOG.md)                            |
