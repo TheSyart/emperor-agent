@@ -382,6 +382,10 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(pill).toContainText('3 个文件已更改')
     await expect(pill).toContainText('+18')
     await expect(pill).toContainText('−4')
+    // This fixture has a running subagent with no loaded row: the status
+    // bar joins the docks after its 300ms delay (UI-S14) and moves the pill
+    // up. Hover once the docks have settled.
+    await expect(page.locator('[data-subagent-dock]')).toBeVisible()
     const pillBox = (await pill.boundingBox())!
     const todoBox = (await page.locator('.todo-dock').boundingBox())!
     expect(pillBox.y + pillBox.height).toBeLessThanOrEqual(todoBox.y)
