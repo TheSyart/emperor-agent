@@ -121,8 +121,12 @@ it('shows stable internal and external identities, canonical names, sources and 
     name: 'chat',
     params: { sessionId: 'sub-parent' },
   })
-  expect(el.textContent).toContain('Emperor')
+  // A local subagent is 本地, an external one names where it runs (AGT-10).
+  expect(el.textContent).toContain('本地')
+  expect(el.textContent).not.toContain('Emperor')
   expect(el.textContent).toContain('Claude Code')
+  // 8 · each row says how long it took or has run.
+  expect(el.querySelectorAll('[data-agent-duration]').length).toBeGreaterThan(0)
   expect(el.querySelectorAll('[data-agent-id]')).toHaveLength(3)
   expect(el.textContent).not.toContain('dgr-')
 })

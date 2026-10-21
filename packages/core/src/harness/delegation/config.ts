@@ -73,7 +73,8 @@ export const executorConfigSchema = z
     profiles: z.array(profile).max(32),
     limits: z
       .object({
-        globalConcurrency: z.number().int().min(1).max(2),
+        // 设置 › 子智能体 › 同时运行 (AGT-10): two executors of up to two runs.
+        globalConcurrency: z.number().int().min(1).max(4),
         maxQueuedMessages: z.number().int().min(1).max(16),
         maxRunsPerTask: z.number().int().min(1).max(32),
         maxDepth: z.number().int().min(1).max(3),
@@ -106,6 +107,14 @@ export const executorConfigSchema = z
         github: z.boolean(),
       })
       .strict()
+      .optional(),
+    // 设置 › 子智能体 › 本地子智能体 › 使用的模型 (AGT-10): a model entry id;
+    // absent follows the conversation's model.
+    localSubagentModel: z.string().min(1).max(256).optional(),
+    // 设置 › 子智能体 › 改代码的位置 (AGT-10): where a writing external task
+    // works when the model does not say; absent is an isolated worktree.
+    defaultWorkspace: z
+      .enum(['isolated-worktree', 'shared-exclusive'])
       .optional(),
   })
   .strict()
@@ -269,9 +278,29 @@ export class ExecutorConfigStore {
       )
     )
       delete next.developmentEnvironment
+    if (next.localSubagentModel === undefined) delete next.localSubagentModel
+    if (
+      next.defaultWorkspace === undefined ||
+      next.defaultWorkspace === 'isolated-worktree'
+    )
+      delete next.defaultWorkspace
     durableReplaceSync(this.file, JSON.stringify(next, null, 2) + '\n')
     return next
   }
+}
+
+/** The model entry local subagents use; undefined follows the conversation. */
+export function localSubagentModelOf(
+  config: Pick<ExecutorConfig, 'localSubagentModel'>,
+): string | undefined {
+  return config.localSubagentModel
+}
+
+/** Where a writing external task works when the model does not say. */
+export function defaultWorkspaceOf(
+  config: Pick<ExecutorConfig, 'defaultWorkspace'>,
+): 'isolated-worktree' | 'shared-exclusive' {
+  return config.defaultWorkspace ?? 'isolated-worktree'
 }
 
 /** What a task's environment passes through: the saved switches, else the defaults. */

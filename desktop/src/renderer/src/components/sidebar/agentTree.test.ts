@@ -273,3 +273,75 @@ describe('unified sidebar agent tree', () => {
     ).toEqual({ name: 'chat', params: { sessionId: 'sub-a' } })
   })
 })
+
+describe('agent tree storage (SUB-34, AGT-10 test 11)', () => {
+  function memory(initial: Record<string, unknown>) {
+    let saved = JSON.stringify(initial)
+    return {
+      storage: {
+        getItem: () => saved,
+        setItem: (_: string, value: string) => {
+          saved = value
+        },
+      },
+      read: () =>
+        JSON.parse(saved) as {
+          expanded: Record<string, boolean>
+          showAll: Record<string, boolean>
+        },
+    }
+  }
+
+  it('11 · keeps entries only for sessions and agents that still exist, once every tree loaded', async () => {
+    const stale: Record<string, boolean> = {}
+    for (let i = 0; i < 40; i += 1) stale[`gone-${i}`] = true
+    const saved = memory({
+      expanded: { ...stale, root: false, 'sub-a': true, other: true },
+      showAll: { 'gone-1': true, 'sub-a': true },
+    })
+    const trees: Record<string, AgentView[]> = {
+      root: [agent('sub-a')],
+      other: [agent('dlg-b', 'other', { rootSessionId: 'other' })],
+    }
+    const store = createAgentTreeStore(
+      async ({ rootSessionIds }) => ({ agents: trees[rootSessionIds[0]!]! }),
+      { storage: saved.storage },
+    )
+    store.sync(['root', 'other'])
+    await vi.waitFor(() =>
+      expect(store.trees.root && store.trees.other).toBeDefined(),
+    )
+    store.toggle('dlg-b')
+    const { expanded, showAll } = saved.read()
+    const existing = ['root', 'other', 'sub-a', 'dlg-b']
+    expect(Object.keys(expanded).every((id) => existing.includes(id))).toBe(
+      true,
+    )
+    expect(Object.keys(expanded).length).toBeLessThanOrEqual(existing.length)
+    expect(Object.keys(showAll)).toEqual(['sub-a'])
+    // What the user chose for the remaining ones is kept.
+    expect(expanded.root).toBe(false)
+    expect(expanded['sub-a']).toBe(true)
+  })
+
+  it('does not drop a tree’s entries before that tree has loaded', async () => {
+    const saved = memory({ expanded: { 'sub-late': true }, showAll: {} })
+    let release!: (value: { agents: AgentView[] }) => void
+    const store = createAgentTreeStore(
+      ({ rootSessionIds }) =>
+        rootSessionIds[0] === 'late'
+          ? new Promise((resolve) => {
+              release = resolve
+            })
+          : Promise.resolve({ agents: [] }),
+      { storage: saved.storage },
+    )
+    store.sync(['root', 'late'])
+    await vi.waitFor(() => expect(store.trees.root).toBeDefined())
+    store.toggle('root')
+    expect(saved.read().expanded['sub-late']).toBe(true)
+    release({ agents: [agent('sub-late', 'late', { rootSessionId: 'late' })] })
+    await vi.waitFor(() => expect(store.trees.late).toBeDefined())
+    expect(saved.read().expanded['sub-late']).toBe(true)
+  })
+})

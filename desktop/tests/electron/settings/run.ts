@@ -67,6 +67,14 @@ const SUB_PAGES: ReadonlyArray<
   ['browser', '[data-action="manage-profiles"]', 'profiles', '登录状态'],
   ['browser', '[data-action="manage-downloads"]', 'downloads', '下载历史记录'],
   ['browser', '[data-action="manage-sites"]', 'sites', '网站设置'],
+  // 子智能体 keeps its main page to one screen (AGT-10).
+  ['executors', '[data-executor-advanced-link]', 'advanced', '高级'],
+  [
+    'executors',
+    '[data-settings-agent="claude-code"] [data-executor-details]',
+    'claude-code',
+    'Claude Code',
+  ],
   // Hooks and 诊断 left the nav for 高级 (UI-S07); 已归档对话 for a row in 常规.
   ['advanced', '[data-advanced-page="hooks"]', 'hooks', 'Hooks'],
   ['advanced', '[data-advanced-page="diagnostics"]', 'diagnostics', '诊断'],
@@ -263,8 +271,13 @@ async function settings(page: Page, home: string): Promise<void> {
     async () => {
       const token = 'sk-ant-oat01-e2e-fixture-not-a-real-token-9f3c'
       const dialog = await openSection(page, 'executors')
-      const card = dialog.locator('[data-settings-agent="claude-code"]')
-      const signIn = card.locator('[data-claude-sign-in]')
+      // The sign-in lives on Claude Code's 详情 page (AGT-10).
+      await dialog
+        .locator('[data-settings-agent="claude-code"] [data-executor-details]')
+        .click()
+      const signIn = dialog.locator(
+        '[data-executor-detail="claude-code"] [data-claude-sign-in]',
+      )
       await signIn.waitFor({ timeout: 15_000 })
       await until(
         async () => (await signIn.innerText()).includes('尚未登录'),

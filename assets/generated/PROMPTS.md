@@ -166,3 +166,14 @@ Text (verbatim): "emperoragent"
 Constraints: Render the text exactly as "emperoragent" with correct spelling, all lowercase, no spaces. The background must be one uniform #00ff00 color with no shadows, gradients, texture, reflections, floor plane, or lighting variation. Keep the lettering fully separated from background with crisp edges. No cast shadow, no contact shadow, no watermark.
 Avoid: misspelled text, extra slogans, spaces between emperor and agent, uppercase letters, Chinese characters, crowns, faces, cartoon look, purple gradients, overly ornate calligraphy, thin unreadable hairlines.
 ```
+
+## 子智能体头像图集（SUB-30，2026-10-21）
+
+`subagent-avatars/*-sheet-1254.webp` 是生图原图（1254×1254 无损 WebP，四张共约 5 MB），`frames-1254.json` 是在原图上量出的 36 个头像框。应用里用的是缩小后的版本 `desktop/src/renderer/src/assets/subagent-avatars/`：
+
+```sh
+dwebp X-sheet-1254.webp -o X.png
+cwebp -q 88 -m 6 -sharp_yuv -resize 448 448 X.png -o X-sheet.webp
+```
+
+头像框按 448 / 1254 等比缩放并取整（`frames.json`）。四张合计约 100 KB；每个头像约 110–160 px，够 40 px 头像在 2 倍屏上显示。以后重新裁框，在原图上量，再按同样比例换算。

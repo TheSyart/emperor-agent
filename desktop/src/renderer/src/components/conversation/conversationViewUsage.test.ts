@@ -142,8 +142,22 @@ describe('ConversationView composer seat integration', () => {
     expect(source).toContain('@first-visible="firstVisibleKey = $event"')
   })
 
-  it('shows the read-only composer for child sessions', () => {
-    expect(source).toContain('<ReadOnlyComposer')
+  it('6 · 7 · a child session writes to the child and answers its own questions (AGT-10)', () => {
+    expect(source).toContain('<ChildComposer')
+    expect(source).toContain("core('agents.send', { sessionId: id, text })")
+    expect(source).toContain(
+      'ctx.pendingInteractionsBySession[viewingId.value]',
+    )
+    expect(source).toContain(
+      '<TakeoverSeat v-if="childInteraction" :interaction="childInteraction" />',
+    )
+    expect(source).not.toContain('ReadOnlyComposer')
+    // 5 · the child's page is the same ChatTimeline as the main one, keyed
+    // by the viewed session and rooted at its main conversation.
+    expect(source).toContain(':session-id="viewingId"')
+    expect(source).toContain(
+      ':root-session-id="lineage?.chain[0]?.sessionId ?? viewingId"',
+    )
     expect(source).toContain('fetchSessionLineage')
   })
 })

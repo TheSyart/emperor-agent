@@ -95,3 +95,29 @@ export function agentStack(agents: readonly AgentView[]): AgentView[] {
     )
     .slice(0, 3)
 }
+
+function spanText(ms: number): string {
+  const seconds = Math.floor(ms / 1000)
+  if (seconds < 1) return '不到 1 秒'
+  if (seconds < 60) return `${seconds} 秒`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes} 分钟`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest ? `${hours} 小时 ${rest} 分` : `${hours} 小时`
+}
+
+/**
+ * 用时 on a list row (AGT-10): how long a finished agent took (its last
+ * change), how long a running one has run so far. Empty when the times are
+ * not to be trusted.
+ */
+export function agentDuration(agent: AgentView, now: number): string {
+  if (!(agent.createdAt > 0) && !(agent.updatedAt > 0)) return ''
+  if (agent.phase === 'running' || agent.phase === 'waiting')
+    return now >= agent.createdAt
+      ? `已运行 ${spanText(now - agent.createdAt)}`
+      : ''
+  if (agent.phase === 'unknown' || agent.updatedAt < agent.createdAt) return ''
+  return `用时 ${spanText(agent.updatedAt - agent.createdAt)}`
+}

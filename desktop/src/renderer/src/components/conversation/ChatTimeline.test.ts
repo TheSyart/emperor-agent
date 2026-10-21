@@ -280,7 +280,7 @@ describe('ChatTimeline over the recorded kernel log', () => {
     await settle()
     const entry = root.querySelector<HTMLAnchorElement>('[data-agent-entry]')!
     expect(entry?.textContent).toContain('original native creation')
-    expect(entry?.textContent).toContain('Emperor')
+    expect(entry?.textContent).toContain('本地 · 子智能体')
     expect(entry?.getAttribute('href')).toBe('/chat/sub-existing')
     expect(
       entry.querySelector('[data-agent-identity="sub-existing"]'),
@@ -292,7 +292,7 @@ describe('ChatTimeline over the recorded kernel log', () => {
       'original native creation',
     )
     expect(root.querySelector('.tool-row')?.textContent).toContain(
-      'Emperor · 运行中',
+      '本地 · 运行中',
     )
     entry.click()
     expect(opened).toEqual(['sub-existing'])
@@ -354,7 +354,7 @@ describe('ChatTimeline over the recorded kernel log', () => {
     expect(tools[0]).toContain('print alpha')
     expect(tools[2]).toContain('已回答 1/1 · Which color?')
     expect(tools[3]).toContain('research')
-    expect(tools[3]).toContain('Emperor · 已完成')
+    expect(tools[3]).toContain('本地 · 已完成')
     expect(root.querySelector('[data-subagent-line]')?.textContent).toContain(
       'child found x',
     )

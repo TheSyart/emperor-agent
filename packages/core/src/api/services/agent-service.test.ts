@@ -114,10 +114,10 @@ function child(
 describe('unified child-agent read index', () => {
   it('uses creation descriptions verbatim and separate provider/phase labels', () => {
     expect(agentTitle('  exact task  ', 'codex')).toBe('  exact task  ')
-    expect(agentTitle('', 'internal')).toBe('Emperor 子智能体')
+    expect(agentTitle('', 'internal')).toBe('本地子智能体')
     expect(agentTitle(undefined, 'claude-code')).toBe('Claude Code 子智能体')
     expect(agentTitle('   ', 'codex')).toBe('Codex 子智能体')
-    expect(agentSourceLabel('internal')).toBe('Emperor')
+    expect(agentSourceLabel('internal')).toBe('本地')
     expect(agentPhaseLabel('waiting')).toBe('等待回答')
     expect(agentPhaseLabel('unknown')).toBe('结果待确认')
   })

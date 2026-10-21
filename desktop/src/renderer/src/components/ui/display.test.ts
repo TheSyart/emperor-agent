@@ -477,8 +477,8 @@ describe('Avatar sprite (test 5)', () => {
       class {
         src = ''
         decoding = ''
-        naturalWidth = 1254
-        naturalHeight = 1254
+        naturalWidth = 448
+        naturalHeight = 448
         decode() {
           return Promise.resolve()
         }
@@ -504,12 +504,12 @@ describe('Avatar sprite (test 5)', () => {
     expect(canvas.width).toBe(48)
     expect(canvas.height).toBe(48)
     expect(avatar.style.width).toBe('24px')
-    // No <image>/<img> holding the 1254px sheet in the DOM.
+    // No <image>/<img> holding the whole sheet in the DOM.
     expect(root.querySelector('image, img')).toBeNull()
 
     expect(createImageBitmap).toHaveBeenCalledOnce()
     const [, sx, sy, sw, sh, options] = createImageBitmap.mock.calls[0]!
-    expect([sx, sy, sw, sh]).toEqual([486, 832, 302, 354])
+    expect([sx, sy, sw, sh]).toEqual([174, 297, 108, 126])
     const layout = portraitLayout(
       portrait.rect as [number, number, number, number],
       48,
@@ -529,7 +529,7 @@ describe('Avatar sprite (test 5)', () => {
 
   it('keeps the 8% breathing room and the aspect of the measured window', () => {
     // 302 × 354 fitted into the 84% content box of 100 device pixels.
-    const layout = portraitLayout([486, 832, 302, 354], 100)
+    const layout = portraitLayout([174, 297, 108, 126], 100)
     expect(layout.height).toBe(84)
     expect(layout.width).toBe(Math.round((84 * 302) / 354))
     expect(layout.y).toBe(8)

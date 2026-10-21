@@ -26,6 +26,7 @@ const VIEW = { sessionId: null }
 
 const EXPECTED_OPERATIONS = [
   'agents.list',
+  'agents.send',
   'attachments.rawPath',
   'attachments.save',
   'bootstrap',
@@ -1762,5 +1763,53 @@ describe('CoreApi sessions and kept services', () => {
     await expect(
       api.files.list({ sessionId: id, relativePath: '' } as never),
     ).rejects.toMatchObject({ code: 'workspace_project_required' })
+  })
+})
+
+describe('CoreApi agents.send (AGT-10)', () => {
+  it('6 · the user writes to a child from its page and the child answers in its own conversation', async () => {
+    const { api } = await setup({
+      replies: [
+        {
+          tools: [
+            {
+              id: 'd1',
+              name: 'subagent',
+              args: {
+                description: 'research',
+                prompt: 'find x',
+                run_in_background: false,
+              },
+            },
+          ],
+        },
+        { text: 'child found x' },
+        { text: 'parent done' },
+        { text: 'child checked again' },
+        { text: 'parent saw it' },
+      ],
+    })
+    const id = session(api)
+    await api.chat.submit({ content: 'delegate', sessionId: id })
+    const childId = api.sessions.children({ sessionId: id })[0]!.subagentId
+    const sent = api.agents.send({ sessionId: childId, text: '再检查一遍' })
+    expect(sent.messageId).toEqual(expect.any(String))
+    await waitFor(() =>
+      JSON.stringify(
+        api.sessions.history({ sessionId: childId }).events,
+      ).includes('child checked again'),
+    )
+    const events = JSON.stringify(
+      api.sessions.history({ sessionId: childId }).events,
+    )
+    expect(events).toContain('再检查一遍')
+    // Only a subagent's own conversation takes a message this way.
+    expect(() => api.agents.send({ sessionId: id, text: 'x' })).toThrow(
+      /子智能体/,
+    )
+    expect(() =>
+      api.agents.send({ sessionId: 'sub-missing', text: 'x' }),
+    ).toThrow(/子智能体/)
+    expect(() => api.agents.send({ sessionId: childId, text: '  ' })).toThrow()
   })
 })

@@ -29,6 +29,7 @@ import type {
   RepairStep,
   SessionLogStore,
 } from '../../session-log/store'
+import type { LlmCallConfig } from '../../llm/call-config'
 import type { SessionEvent, TurnEndReason } from '../../session-log/types'
 import { logger } from '../../util/log'
 import type { Agent, AgentAdmission, AgentOptions } from '../agent/agent'
@@ -199,6 +200,12 @@ export interface SubagentManagerDeps {
   maxDepth?: number
   /** The task budget (total, pool, result wakes); none: unbounded. */
   budget?: SubagentBudget
+  /**
+   * The request config of a child nobody narrowed: the model chosen in
+   * 设置 › 子智能体 › 本地子智能体 (AGT-10). Undefined follows the
+   * conversation's model.
+   */
+  childCallConfig?: () => (() => LlmCallConfig) | undefined
 }
 
 function stopReasonOf(reason: TurnEndReason | undefined): SubagentStopReason {
@@ -400,8 +407,11 @@ export class SubagentManager {
         staged: new Map(),
       })
     const admission = this.deps.budget?.admission(parent)
+    const callConfig =
+      request.agentOptions?.callConfig ?? this.deps.childCallConfig?.()
     const child = this.deps.createAgent(session, {
       ...request.agentOptions,
+      ...(callConfig === undefined ? {} : { callConfig }),
       owner: parent,
       ...(admission === undefined ? {} : { admission }),
     })
@@ -591,6 +601,22 @@ export class SubagentManager {
     // A follow-up is the parent's new instruction, delivered as written; only
     // the first turn carries the task's name (AGT-05, SUB-27).
     const message = contextMessage('subagent-parent', text, { form: 'relay' })
+    entry.agent.followup(message)
+    return message.id
+  }
+
+  /**
+   * The user writes to a live child from its conversation page (AGT-10): the
+   * message starts the child's next turn as the user's own words.
+   */
+  userFollowup(childId: string, text: string): string {
+    const entry = this.children.get(childId)
+    if (entry === undefined)
+      throw new SubagentError(`subagent "${childId}" is not live`, 'NOT_FOUND')
+    const message = createUserMessage({
+      content: [{ type: 'text', text }],
+      source: { kind: 'user' },
+    })
     entry.agent.followup(message)
     return message.id
   }

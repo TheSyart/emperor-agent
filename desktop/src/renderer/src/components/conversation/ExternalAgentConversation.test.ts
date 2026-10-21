@@ -13,6 +13,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import ExternalAgentConversation from './ExternalAgentConversation.vue'
 import { EMPTY_CHAT_SNAPSHOT } from '../../conversation/chatSnapshot'
 import { useSession } from '../../composables/useSession'
+import { APP_CONTEXT_KEY } from '../../composables/useAppContext'
 const bridge = vi.hoisted(() => ({
   invokeCore: vi.fn(),
   push: vi.fn(),
@@ -92,10 +93,11 @@ async function settle() {
   // guards reject synthetic clicks in the same millisecond as mounting.
   await new Promise((resolve) => setTimeout(resolve, 1))
 }
-async function mount() {
+async function mount(context?: Record<string, unknown>) {
   root = document.createElement('div')
   document.body.append(root)
   app = createApp(ExternalAgentConversation)
+  if (context) app.provide(APP_CONTEXT_KEY, context as never)
   app.mount(root)
   await settle()
   return root
@@ -193,7 +195,8 @@ it('renders canonical title, public readonly output and actual ancestry; return 
   expect(dom.textContent).toContain('检验图片')
   expect(dom.textContent).toContain('父任务')
   expect(dom.textContent).toContain('公开结果')
-  expect(dom.querySelector('textarea,input,select')).toBeNull()
+  // Its page writes to the task itself (AGT-10); the links only navigate.
+  expect(dom.querySelector('[data-child-input]')).not.toBeNull()
   const buttons = [...dom.querySelectorAll<HTMLButtonElement>('button')]
   buttons.find((b) => b.textContent === '返回父智能体')!.click()
   await settle()
@@ -201,9 +204,7 @@ it('renders canonical title, public readonly output and actual ancestry; return 
     name: 'chat',
     params: { sessionId: 'sub-parent' },
   })
-  buttons
-    .find((b) => b.textContent?.includes('返回主会话继续安排任务'))!
-    .click()
+  buttons.find((b) => b.textContent === '返回主会话')!.click()
   await settle()
   expect(bridge.push).toHaveBeenLastCalledWith({
     name: 'chat',
@@ -655,7 +656,7 @@ it.each(['missing', 'foreign', 'conflicting', 'self-cycle', 'cycle'])(
     expect(dom.textContent).not.toContain('返回父智能体')
     expect(path.querySelector('button')).toBeNull()
     ;[...dom.querySelectorAll<HTMLButtonElement>('button')]
-      .find((b) => b.textContent?.includes('返回主会话继续安排任务'))!
+      .find((b) => b.textContent === '返回主会话')!
       .click()
     await settle()
     expect(bridge.push).toHaveBeenLastCalledWith({
@@ -793,4 +794,123 @@ it('offers 标记为已结束 for a run without an outcome and refreshes after e
   })
   await settle()
   expect(dom.querySelector('[data-abandon-child]')).toBeNull()
+})
+
+// AGT-10 · the user writes to the task and answers it on its own page.
+function acceptSend(record: Record<string, unknown> = {}) {
+  const original = bridge.invokeCore.getMockImplementation()!
+  bridge.invokeCore.mockImplementation(
+    async (key: string, input: Record<string, unknown>) => {
+      if (key === 'delegations.send') return {}
+      const value = await original(key, input)
+      if (key === 'delegations.get')
+        value.record = { ...value.record, ...record }
+      return value
+    },
+  )
+}
+async function write(dom: HTMLElement, text: string) {
+  const input = dom.querySelector<HTMLTextAreaElement>('[data-child-input]')!
+  input.value = text
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
+  input.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+  )
+  await settle()
+}
+const sent = () =>
+  bridge.invokeCore.mock.calls.filter(([key]) => key === 'delegations.send')
+it('6 · a message from the page goes to the task after its turn, or straight in when it can be steered', async () => {
+  acceptSend()
+  const dom = await mount()
+  expect(dom.textContent).toContain('这一轮结束后送达')
+  await write(dom, '顺便检查一下深色主题')
+  expect(sent()).toHaveLength(1)
+  expect(sent()[0]![1]).toMatchObject({
+    id: 'dlg-one',
+    sessionId: 'root',
+    text: '顺便检查一下深色主题',
+    delivery: 'queue',
+    expectedRunId: 'dgr-one',
+  })
+  expect(String(sent()[0]![1].messageId)).toMatch(/^dgm-[a-zA-Z0-9-]+$/)
+  // Sent: the draft is cleared.
+  expect(
+    dom.querySelector<HTMLTextAreaElement>('[data-child-input]')!.value,
+  ).toBe('')
+  app!.unmount()
+  root.remove()
+  acceptSend({ capabilitySnapshot: { steer: true } })
+  const steering = await mount()
+  expect(steering.textContent).toContain('消息会直接插进去')
+  await write(steering, '先停下改用 PNG')
+  expect(sent().at(-1)![1]).toMatchObject({ delivery: 'steer' })
+})
+it('6 · a refused message keeps the draft and says why', async () => {
+  const original = bridge.invokeCore.getMockImplementation()!
+  bridge.invokeCore.mockImplementation(
+    async (key: string, input: Record<string, unknown>) => {
+      if (key === 'delegations.send')
+        throw new Error('任务状态已经变化，请刷新后重试。')
+      return original(key, input)
+    },
+  )
+  const dom = await mount()
+  await write(dom, '再试一次')
+  expect(dom.querySelector('[data-child-send-error]')!.textContent).toContain(
+    '任务状态已经变化',
+  )
+  expect(
+    dom.querySelector<HTMLTextAreaElement>('[data-child-input]')!.value,
+  ).toBe('再试一次')
+})
+it('7 · the question the task is waiting on is answered on its page, not two pages away', async () => {
+  const sendInteractionAnswer = vi.fn(() => true)
+  const question = {
+    id: 'question:external-1',
+    kind: 'ask',
+    status: 'waiting',
+    questions: [
+      {
+        id: 'q1',
+        header: 'codex',
+        question: '用哪种图片格式？',
+        options: [{ label: 'PNG' }, { label: 'WebP' }],
+      },
+    ],
+    answers: {},
+    meta: {
+      interaction_type: 'question',
+      question_id: 'external-1',
+      external_delegation_id: 'dlg-one',
+      external_run_id: 'dgr-one',
+    },
+  }
+  const context = {
+    pendingInteractionsBySession: { root: question },
+    sendInteractionAnswer,
+    cancelInteraction: vi.fn(),
+    showToast: vi.fn(),
+    boot: ref(null),
+    runSafely: vi.fn(),
+    skipProfileInterview: vi.fn(),
+  }
+  const dom = await mount(context)
+  expect(dom.textContent).toContain('用哪种图片格式？')
+  expect(dom.querySelector('[data-child-composer]')).toBeNull()
+  app!.unmount()
+  root.remove()
+  // Another task's question stays in the main conversation.
+  const other = await mount({
+    ...context,
+    pendingInteractionsBySession: {
+      root: {
+        ...question,
+        meta: { ...question.meta, external_delegation_id: 'dlg-two' },
+      },
+    },
+  })
+  expect(other.textContent).not.toContain('用哪种图片格式？')
+  expect(other.querySelector('[data-child-composer]')).not.toBeNull()
 })

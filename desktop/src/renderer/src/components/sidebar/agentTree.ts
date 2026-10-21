@@ -120,7 +120,22 @@ export function createAgentTreeStore(
   const seen = new Map<string, Set<string>>()
   const revisions = new Map<string, number>()
   let roots = new Set<string>()
+  let synced = false
+  /**
+   * SUB-34: forget entries of sessions and agents that no longer exist —
+   * only once every current tree has loaded, so a tree still on its way
+   * keeps what the user chose for it.
+   */
+  function prune(): void {
+    if (!synced || [...roots].some((root) => trees[root] === undefined)) return
+    const live = new Set(roots)
+    for (const root of roots)
+      for (const agent of trees[root]?.agents ?? []) live.add(agent.id)
+    for (const map of [expanded, showAll])
+      for (const id of Object.keys(map)) if (!live.has(id)) delete map[id]
+  }
   function persist(): void {
+    prune()
     try {
       storage?.setItem(
         AGENT_TREE_STORAGE_KEY,
@@ -200,6 +215,7 @@ export function createAgentTreeStore(
     }
     const added = [...next].filter((id) => !roots.has(id))
     roots = next
+    synced = true
     for (const id of added) void refresh(id)
   }
   function handleEvent(event: unknown): void {

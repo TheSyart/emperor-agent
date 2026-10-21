@@ -49,11 +49,21 @@
     },
     "executors": {
       "view": "components/settings/ExecutorsSection.vue",
-      "controller": "api/delegations.ts",
+      "controller": "components/settings/executors/useExecutorSettings.ts",
       "layers": [
         {
           "role": "component-scoped",
           "path": "components/settings/ExecutorsSection.vue",
+          "scoped": true
+        },
+        {
+          "role": "component-scoped",
+          "path": "components/settings/executors/ExecutorDetailPage.vue",
+          "scoped": true
+        },
+        {
+          "role": "component-scoped",
+          "path": "components/settings/executors/ExecutorAdvancedPage.vue",
           "scoped": true
         }
       ]

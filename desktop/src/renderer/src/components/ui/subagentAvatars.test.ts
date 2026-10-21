@@ -8,7 +8,7 @@ import { subagentFrame, subagentFrames } from './subagentAvatars'
 it('uses all 36 measured frames including the D08 left crop and FNV1a mapping', () => {
   expect(subagentFrames).toHaveLength(36)
   expect(subagentFrames.find((f) => f.id === 'D08')?.rect).toEqual([
-    486, 832, 302, 354,
+    174, 297, 108, 126,
   ])
   expect(subagentFrame('sub-parent').id).toBe('A05')
   expect(

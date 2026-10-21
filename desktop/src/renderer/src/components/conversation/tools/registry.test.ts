@@ -332,7 +332,7 @@ describe('tool registry titles and summaries', () => {
     )
     const view = toolView('send_message', undefined, child)
     expect(view.title(native)).toBe('creation task')
-    expect(view.summary(native)).toBe('Emperor · 等待回答')
+    expect(view.summary(native)).toBe('本地 · 等待回答')
     expect(nativeAgentTarget(native)).toBe(child.id)
     expect(
       view.title(
@@ -413,10 +413,10 @@ describe('tool registry titles and summaries', () => {
     )
     expect(row(running)).toMatchObject({
       title: 'research',
-      summary: 'Emperor · 后台运行中',
+      summary: '本地 · 后台运行中',
       body: 'subagent',
     })
-    expect(row(tool('subagent', {})).title).toBe('Emperor 子智能体')
+    expect(row(tool('subagent', {})).title).toBe('本地子智能体')
     expect(
       row(
         tool(

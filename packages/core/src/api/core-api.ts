@@ -187,6 +187,8 @@ import { SnapshotService } from '../workspace/delegation-snapshot'
 import { DelegationResults } from '../workspace/delegation-results'
 import {
   developmentEnvironmentOf,
+  localSubagentModelOf,
+  defaultWorkspaceOf,
   ExecutorConfigStore,
 } from '../harness/delegation/config'
 import { ExecutorFactsStore } from '../harness/delegation/facts'
@@ -1134,6 +1136,11 @@ export class CoreApi {
       // A session in a managed worktree works there (KRN-11).
       worktrees: (sessionId, projectRoot) =>
         this.workspaceBindings.resolve(sessionId, projectRoot),
+      // 设置 › 子智能体 › 本地子智能体 › 使用的模型 (AGT-10).
+      localSubagentModel: () =>
+        localSubagentModelOf(this.executorConfig.read()),
+      // 设置 › 子智能体 › 改代码的位置 (AGT-10).
+      defaultWorkspace: () => defaultWorkspaceOf(this.executorConfig.read()),
     })
     this.appConnections = new AppConnectionRegistry({
       [appConnectionKey(GITHUB_APP)]: {
@@ -2327,6 +2334,31 @@ export class CoreApi {
           )
       }
       return this.agentService.list(roots)
+    },
+    /**
+     * The user writes to a local subagent from its conversation page
+     * (AGT-10): the message starts the child's next turn.
+     */
+    send: (input: { sessionId: string; text: string }) => {
+      const id = String(input.sessionId).trim()
+      const text = String(input.text).trim()
+      if (!text) throw new EmperorError('消息不能为空。', 'validation_error')
+      const live =
+        id.startsWith('sub-') &&
+        this.host.kept.sessionStore.get(id) !== undefined
+      if (!live)
+        throw new EmperorError(
+          '这个会话不是子智能体，不能这样发消息。',
+          'subagent_not_live',
+        )
+      try {
+        return { messageId: this.host.messageSubagent(id, text) }
+      } catch {
+        throw new EmperorError(
+          '这个子智能体已经结束，不能再发消息。可以在主会话里让 Agent 重新安排任务。',
+          'subagent_not_live',
+        )
+      }
     },
   }
 
