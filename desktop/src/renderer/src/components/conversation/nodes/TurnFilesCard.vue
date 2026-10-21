@@ -1,10 +1,15 @@
 <script setup lang="ts">
 /**
- * TurnFilesCard — 「已编辑 N 个文件 +A −D」 at the end of a turn (plan 7.6):
- * one row per file (folder dim, name bright, lines added and removed), the
- * first three until expanded. 查看变更 opens the 审查 pane's 本轮改动 mode (file rows open current content in Files) and 撤销 asks before undoing; both need the
- * turn's snapshots (a Git project). An undone turn says so and lists what
- * was skipped. A turn whose snapshot failed says it was not recorded.
+ * TurnFilesCard — 「已编辑 N 个文件 +A −D」 once a task is over (plan 7.6,
+ * UI-S15): after the task's last turn, before its footer, labelled 这次任务
+ * beside the totals. A task is a message the user sent and every turn a
+ * subagent's or job's result woke; older logs hold one card per turn (no
+ * label, 本轮 wording). One row per file (folder dim, name bright, lines
+ * added and removed), the first three until expanded. 查看变更 opens the
+ * 审查 pane's review of the task (file rows open current content in Files)
+ * and 撤销 asks before undoing the task; both need its snapshots (a Git
+ * project). An undone task says so and lists what was skipped. A task
+ * whose snapshot failed says it was not recorded.
  *
  * Coexists with ChangesPill: this card is what one turn changed, the pill
  * is how far the workspace is from HEAD now.
@@ -28,13 +33,17 @@ import {
   revertSkipLabel,
   revertSummary,
   splitFilePath,
+  TASK_SCOPE_LABEL,
   turnFilesCaption,
+  turnFilesScope,
   turnFilesSkippedText,
+  turnReviewTitle,
 } from './turnFilesModel'
 
 const props = defineProps<{ node: TurnFilesChatNode }>()
 const { sessionId } = useChatContext()
 const data = computed(() => props.node.data)
+const scope = computed(() => turnFilesScope(data.value))
 const expanded = useExpansion(() => `${props.node.key}:files`)
 const confirming = ref(false)
 
@@ -72,6 +81,7 @@ function review(path?: string): void {
       turn: data.value.turn,
       files: data.value.files,
       ...(path === undefined ? {} : { path }),
+      ...(data.value.task === undefined ? {} : { task: data.value.task }),
     },
   })
 }
@@ -92,6 +102,7 @@ function openFile(path: string): void {
   <section
     class="turn-files"
     :data-turn-files="data.turn"
+    :data-task-first-turn="data.task?.firstTurn"
     :data-state="
       data.status === 'skipped'
         ? 'skipped'
@@ -99,11 +110,11 @@ function openFile(path: string): void {
           ? 'reverted'
           : 'recorded'
     "
-    aria-label="本轮改动"
+    :aria-label="turnReviewTitle(scope)"
   >
     <p v-if="data.status === 'skipped'" class="skipped">
       <FileDiff :size="14" aria-hidden="true" />
-      {{ turnFilesSkippedText(data.skipReason) }}
+      {{ turnFilesSkippedText(data.skipReason, scope) }}
     </p>
     <template v-else>
       <header class="head">
@@ -127,12 +138,17 @@ function openFile(path: string): void {
                 </span>
               </Tooltip>
             </div>
-            <div
-              class="totals"
-              :aria-label="`新增 ${data.totals.additions} 行，删除 ${data.totals.deletions} 行`"
-            >
-              <span class="add">+{{ data.totals.additions }}</span>
-              <span class="del">−{{ data.totals.deletions }}</span>
+            <div class="totals-line">
+              <div
+                class="totals"
+                :aria-label="`新增 ${data.totals.additions} 行，删除 ${data.totals.deletions} 行`"
+              >
+                <span class="add">+{{ data.totals.additions }}</span>
+                <span class="del">−{{ data.totals.deletions }}</span>
+              </div>
+              <span v-if="scope === 'task'" class="scope">{{
+                TASK_SCOPE_LABEL
+              }}</span>
             </div>
           </div>
         </div>
@@ -220,6 +236,7 @@ function openFile(path: string): void {
       :turn="data.turn"
       :files="data.files"
       :concurrent="data.concurrent"
+      :scope="scope"
     />
   </section>
 </template>
@@ -299,10 +316,23 @@ function openFile(path: string): void {
   outline-offset: 3px;
 }
 
+.totals-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-top: var(--space-0-5);
+}
+
 .totals {
   display: flex;
   gap: var(--space-2);
-  margin-top: var(--space-0-5);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+
+.scope {
+  color: rgb(var(--text-3));
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
 }

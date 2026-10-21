@@ -388,7 +388,10 @@ export interface TurnTailChatData {
 
 /** `turnFiles`: the files one turn changed (E-track contract §5). */
 export interface TurnFilesChatData {
+  /** The task's last turn (the turn itself in logs from before UI-S15). */
   readonly turn: number
+  /** The task the record covers (UI-S15); absent in older logs (one turn). */
+  readonly task?: { readonly firstTurn: number; readonly lastTurn: number }
   /** tools: not a Git project; only Emperor's file tools were counted. */
   readonly mode: 'git' | 'tools'
   readonly status: 'recorded' | 'skipped'
@@ -401,11 +404,11 @@ export interface TurnFilesChatData {
   }
   /** More than the listed files changed. */
   readonly truncated: boolean
-  /** Another session ran in the workspace during the turn. */
+  /** Another session ran in the workspace during the task (turn). */
   readonly concurrent: boolean
-  /** Snapshots were kept: the turn can be reviewed and undone. */
+  /** Snapshots were kept: the task (turn) can be reviewed and undone. */
   readonly reviewable: boolean
-  /** The turn was undone (`turn/files-reverted`). */
+  /** The task (turn) was undone (`turn/files-reverted`). */
   readonly reverted?: {
     readonly reverted: readonly string[]
     readonly skipped: TurnFilesReverted['skipped']

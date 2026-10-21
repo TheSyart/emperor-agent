@@ -267,4 +267,64 @@ describe('TurnFilesCard', () => {
     expect(root.querySelector('.file .document-icon')).not.toBeNull()
     expect(root.textContent).not.toContain('只统计')
   })
+
+  it('labels a task’s card 「这次任务」; 查看变更 and 撤销 cover the task (UI-S15)', async () => {
+    core.mockResolvedValue({ turn: 3, reverted: ['src/a.ts'], skipped: [] })
+    const task = { firstTurn: 1, lastTurn: 3 }
+    const root = mount(data({ task, concurrent: true }))
+    const card = root.querySelector('.turn-files')!
+    expect(card.getAttribute('aria-label')).toBe('这次任务的改动')
+    expect(card.getAttribute('data-task-first-turn')).toBe('1')
+    expect(root.querySelector('.scope')?.textContent?.trim()).toBe('这次任务')
+    expect(root.querySelector('.scope-info')?.getAttribute('aria-label')).toBe(
+      '按这次任务开始与结束时的项目对比',
+    )
+    root.querySelector<HTMLButtonElement>('[data-action="review"]')!.click()
+    expect(requestWorkspace).toHaveBeenLastCalledWith({
+      pane: 'review',
+      turn: { sessionId: 's1', turn: 3, files, task },
+    })
+    root.querySelector<HTMLButtonElement>('[data-action="undo"]')!.click()
+    await flush()
+    const dialog = document.body.querySelector('[role="dialog"]')!
+    expect(dialog.textContent).toContain('撤销这次任务的改动？')
+    expect(dialog.textContent).toContain('只恢复这次任务结束后没有再改过的文件')
+    expect(
+      dialog.querySelector('[data-turn-revert-concurrent]')?.textContent,
+    ).toContain('这次任务期间')
+    dialog.querySelector<HTMLButtonElement>('[data-action="confirm"]')!.click()
+    await flush()
+    expect(core).toHaveBeenCalledWith('workspace.revertTurn', {
+      sessionId: 's1',
+      turn: 3,
+      paths: [
+        'src/a.ts',
+        'src/b.ts',
+        'docs/old.md',
+        'logo.png',
+        'c.ts',
+        'z.ts',
+      ],
+    })
+  })
+
+  it('says a task went unrecorded in the task’s words, and keeps older cards unlabeled', () => {
+    const skipped = mount(
+      data({
+        task: { firstTurn: 2, lastTurn: 4 },
+        status: 'skipped',
+        skipReason: 'git-error',
+        files: [],
+        totals: { files: 0, additions: 0, deletions: 0 },
+        reviewable: false,
+      }),
+    )
+    expect(skipped.textContent?.trim()).toBe('这次任务的改动未记录：Git 出错')
+    container?.remove()
+    const older = mount(data())
+    expect(older.querySelector('.scope')).toBeNull()
+    expect(older.querySelector('.turn-files')?.getAttribute('aria-label')).toBe(
+      '本轮改动',
+    )
+  })
 })

@@ -5,8 +5,12 @@ import {
   revertSkipLabel,
   revertSummary,
   splitFilePath,
+  TASK_SCOPE_LABEL,
   turnFilesCaption,
+  turnFilesScope,
   turnFilesSkippedText,
+  turnRevertCopy,
+  turnReviewTitle,
 } from './turnFilesModel'
 
 describe('turn files card model', () => {
@@ -75,5 +79,40 @@ describe('turn files card model', () => {
     expect(revertSkipLabel('changed-since')).toBe('之后又改过，已跳过')
     expect(revertSkipLabel('missing')).toBe('快照已清理，已跳过')
     expect(revertSkipLabel('error')).toBe('无法恢复，已跳过')
+  })
+
+  it('speaks of the task for a task’s record, of the turn for an older one (UI-S15)', () => {
+    const task = { firstTurn: 1, lastTurn: 3 }
+    expect(turnFilesScope({ task })).toBe('task')
+    expect(turnFilesScope({})).toBe('turn')
+    expect(TASK_SCOPE_LABEL).toBe('这次任务')
+    expect(turnFilesCaption({ mode: 'git', truncated: false, task })).toBe(
+      '按这次任务开始与结束时的项目对比',
+    )
+    expect(turnFilesCaption({ mode: 'tools', truncated: false, task })).toBe(
+      '只统计 Emperor 文件工具写入的文件',
+    )
+    expect(turnFilesSkippedText('timeout', 'task')).toBe(
+      '这次任务的改动未记录：项目快照超过 5 秒',
+    )
+    expect(turnFilesSkippedText('git-error', 'task')).toBe(
+      '这次任务的改动未记录：Git 出错',
+    )
+    expect(turnRevertCopy('task')).toEqual({
+      title: '撤销这次任务的改动？',
+      description:
+        '只恢复这次任务结束后没有再改过的文件，改过的会跳过并列出。撤销后不能重做。',
+      concurrent:
+        '这次任务期间，同一工作区还有其他会话在运行，列表里可能有它们的改动。',
+    })
+    expect(turnRevertCopy('turn')).toEqual({
+      title: '撤销这一轮的改动？',
+      description:
+        '只恢复这一轮结束后没有再改过的文件，改过的会跳过并列出。撤销后不能重做。',
+      concurrent:
+        '这一轮期间，同一工作区还有其他会话在运行，列表里可能有它们的改动。',
+    })
+    expect(turnReviewTitle('task')).toBe('这次任务的改动')
+    expect(turnReviewTitle('turn')).toBe('本轮改动')
   })
 })

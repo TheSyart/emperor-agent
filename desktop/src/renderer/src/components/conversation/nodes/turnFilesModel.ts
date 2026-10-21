@@ -1,5 +1,7 @@
 /**
- * Words and shapes of the 「已编辑 N 个文件」 card (plan 7.6). Pure.
+ * Words and shapes of the 「已编辑 N 个文件」 card (plan 7.6). Pure. A
+ * record covers a task (UI-S15: a message the user sent and every turn a
+ * result woke) or, in logs from before it, one turn; the words follow.
  */
 import type {
   TurnFileEntry,
@@ -42,22 +44,42 @@ export function fileStatusTag(file: TurnFileEntry): string | null {
   }
 }
 
+/** What a record covers: a task, or one turn (logs from before UI-S15). */
+export type TurnFilesScope = 'task' | 'turn'
+
+/** The label beside a task card's totals. */
+export const TASK_SCOPE_LABEL = '这次任务'
+
+export function turnFilesScope(data: { task?: unknown }): TurnFilesScope {
+  return data.task === undefined ? 'turn' : 'task'
+}
+
+/** The card's name for screen readers and the review pane's heading. */
+export function turnReviewTitle(scope: TurnFilesScope): string {
+  return scope === 'task' ? '这次任务的改动' : '本轮改动'
+}
+
 export function turnFilesSkippedText(
   reason: 'timeout' | 'git-error' | undefined,
+  scope: TurnFilesScope = 'turn',
 ): string {
+  const head = scope === 'task' ? '这次任务的改动未记录' : '本轮改动未记录'
   return reason === 'timeout'
-    ? '本轮改动未记录：项目快照超过 5 秒'
-    : '本轮改动未记录：Git 出错'
+    ? `${head}：项目快照超过 5 秒`
+    : `${head}：Git 出错`
 }
 
 /** The footnote: how the list was made. */
 export function turnFilesCaption(data: {
   mode: 'git' | 'tools'
   truncated: boolean
+  task?: unknown
 }): string {
   const parts = [
     data.mode === 'git'
-      ? '按本轮开始与结束时的项目对比'
+      ? turnFilesScope(data) === 'task'
+        ? '按这次任务开始与结束时的项目对比'
+        : '按本轮开始与结束时的项目对比'
       : '只统计 Emperor 文件工具写入的文件',
   ]
   if (data.truncated) parts.push('只列出前 200 个')
@@ -83,5 +105,19 @@ export function revertSkipLabel(
       return '快照已清理，已跳过'
     default:
       return '无法恢复，已跳过'
+  }
+}
+
+/** The undo dialog's words. */
+export function turnRevertCopy(scope: TurnFilesScope): {
+  title: string
+  description: string
+  concurrent: string
+} {
+  const what = scope === 'task' ? '这次任务' : '这一轮'
+  return {
+    title: `撤销${what}的改动？`,
+    description: `只恢复${what}结束后没有再改过的文件，改过的会跳过并列出。撤销后不能重做。`,
+    concurrent: `${what}期间，同一工作区还有其他会话在运行，列表里可能有它们的改动。`,
   }
 }
