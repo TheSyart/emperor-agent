@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：开发者、维护者<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 最后核验：2026-10-22（对照 `84245509`）<br>
 > 事实源：`packages/core/src/harness/delegation/`（含 `consent.ts`）、`packages/core/src/workspace/delegation-*.ts`（含 `delegation-results.ts`）、`packages/core/src/api/services/delegation-service.ts`、`packages/core/src/runtime/agent-view.ts`、`packages/core/src/harness/host/host.ts`（`stop`、`close`）、`desktop/src/renderer/src/components/settings/executors/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/sidebar/agentTree.ts`
 
 Emperor 的父 Agent 可以通过原有子智能体工具选择 `internal`、`claude-code` 或 `codex`。未指定 backend 时仍用 internal。两个外部 profile 复用本机 CLI 登录，但默认关闭：它们使用用户自己的订阅额度或 API 计费，需要用户在设置里打开，并在第一次交出任务时于对话中确认（见下文「默认关闭与首次同意」）。设置「子智能体」统一展示本地、Claude Code 与 Codex；外部来源可切换启用状态，通过全局检测读取 CLI 与本地登录可用条件，异常时按需更正可执行文件路径。多份 profile 以来源内选择器切换，不合并或覆盖其他 profile。设置保留既有认证及调度限制；默认模型支持跟随 CLI、候选选择和自定义，修改后只用于之后的任务。已有配置中的开关、路径和有效凭据引用保持不变；旧版空引用按本机登录解析，不自动覆写文件。backend 与内部 provider/model 路由是不同维度。
@@ -11,7 +11,7 @@ Emperor 的父 Agent 可以通过原有子智能体工具选择 `internal`、`cl
 flowchart TD
   Parent[Emperor 父 Agent] --> Tools[subagent / send_message / collect_agent]
   Tools --> Service[DelegationService: journal / budget / ownership]
-  Service --> Claude[Claude SDK + 随包 claude（可改用本机）]
+  Service --> Claude[Claude Agent SDK + 本机安装的 claude（专用配置目录）]
   Service --> Codex[独占 stdio Codex app-server]
   Service --> Workspace[隔离工作区：worktree / 文件夹副本]
   Claude --> Result[成果：base 与 result 两个提交 + 文件与增删行]
@@ -32,7 +32,7 @@ flowchart TD
 
 ## 版本兼容
 
-兼容性按能力握手判断，不读配置里的精确版本（旧 `expectedVersion` 读取时忽略并清除）。Claude Code 默认运行随 Agent SDK 发布的 `claude`，版本随 Emperor 固定；选择「使用本机安装的 claude」时检测要求 `>= 2.1`，运行时由 SDK `init` 消息核对版本与权限模式。Codex 使用本机 CLI：major.minor 不在已验证协议之列即 `incompatible` 并给出所需范围；同一 minor 时比对 `app-server generate-json-schema` 输出的协议摘要，已知为 `verified`，否则为 `unverified`（可运行、提示可能不兼容、失败结果注明可能的版本原因）。探测结果的 `executableSource`、`requiredVersion`、`compatibility`、`protocolVersion` 供设置页与父 Agent 使用；委派记录保存当时的 `executorVersion`，成果回执的版本取自它。维护流程见 [开发与验证外部子智能体](../development/external-agent-adapters.md)。
+兼容性按能力握手判断，不读配置里的精确版本（旧 `expectedVersion` 与 `executableSource` 读取时忽略并清除）。Claude Code 运行用户本机安装的、未经修改的 `claude`（AGT-12：安装包不再附带 Claude Code；`executable.ts` 依次在 `PATH`、常见安装位置与登录 shell 的 `PATH` 里找，`registry.locate`），检测要求 `>= 2.1.79`（`claude auth status` 自 2.1.41、`claude auth login --console` 自 2.1.79），运行时由 SDK `init` 消息再核对版本与权限模式；找不到时探测为 `missing`（`claude is not installed`），设置页给出官方安装命令。Codex 使用本机 CLI：major.minor 不在已验证协议之列即 `incompatible` 并给出所需范围；同一 minor 时比对 `app-server generate-json-schema` 输出的协议摘要，已知为 `verified`，否则为 `unverified`（可运行、提示可能不兼容、失败结果注明可能的版本原因）。探测结果的 `requiredVersion`、`compatibility`、`protocolVersion` 供设置页与父 Agent 使用；委派记录保存当时的 `executorVersion`，成果回执的版本取自它。维护流程见 [开发与验证外部子智能体](../development/external-agent-adapters.md)。
 
 ## 专长与原生能力事实
 
@@ -44,7 +44,7 @@ flowchart TD
 
 适配器只归一化公开模型元数据和原生工具结果，不转发推理、密钥或原始协议正文。原生搜索与页面读取须在同一轮取得成功证据；Codex 标明请求的实时搜索模式。原生生图还须产生工作区范围内的有效图片。Claude 当前宿主工具清单开放 WebSearch、WebFetch，不提供原生生图。完成文本、自述、脚本绘图、CLI 版本或凭据文件均不能把原生能力升级为已验证可用。
 
-证据绑定 profile、配置模型、认证摘要和固定适配器工具策略；模型报告变化使先前能力失效。模型、可执行文件路径、Claude 所用二进制（随包或本机）或账号变化也使旧证据失效，修改专长保留证据。重启后须重新绑定当前认证身份才能恢复匹配的记录，检测不发起模型推理。父 Agent 优先遵从明确来源和已有任务会话，结合专长、模型、工具与证据选择；未知能力可以通过普通授权任务尝试，失败如实交接。
+证据绑定 profile、配置模型、认证摘要和固定适配器工具策略；模型报告变化使先前能力失效。模型、可执行文件路径或账号（Claude Code 自己登录时以它的配置目录为身份）变化也使旧证据失效，修改专长保留证据。重启后须重新绑定当前认证身份才能恢复匹配的记录，检测不发起模型推理。父 Agent 优先遵从明确来源和已有任务会话，结合专长、模型、工具与证据选择；未知能力可以通过普通授权任务尝试，失败如实交接。
 
 ## 模型候选与本机接入
 
@@ -107,20 +107,18 @@ Codex 只导入所选模型、所选提供方的连接/认证字段和显式模�
 
 崩溃或重启后恢复以前运行的进程（`terminateRecordedProcess`）从不只凭 PID 下手：记录里的开机标记（`kern.bootsessionuuid`，旧系统用 `kern.boottime`）与当前不同，进程必然已不存在，不发任何信号；PID 还活着但出生时间（`ps lstart`）与记录不符，说明 PID 已被复用，不发信号（`OWNER_MISMATCH`）；组长已退出但组里还有成员时，因为进程组还在、组号不会被复用，按同样的时间线停止整个组。旧版本记录的后代 PID 只有出生时间仍一致时才处理，且不再以 PID 为种子去搜索它的子进程。
 
-每个会话有私有 HOME/config/temp。默认从本机 CLI 设置和凭据文件读取窄认证配置，支持显式 CLAUDE_CONFIG_DIR / CODEX_HOME；也可选择模型凭据引用。认证不传到 renderer、日志摘要或公共 receipt。运行环境不继承宿主全部密钥，也不导入本机插件或 hooks。
+Codex 每个会话有私有 HOME / `CODEX_HOME` / temp。Claude Code 的每次运行、`claude auth status`、登录与退出登录共用一个专用目录（AGT-12）：`CLAUDE_CONFIG_DIR=<delegations>/claude-code/config`、`HOME`（及 `XDG_CONFIG_HOME`、`XDG_CACHE_HOME`）`=<delegations>/claude-code/home`，0700，跨运行持久；`TMPDIR`、`CLAUDE_CODE_TMPDIR` 仍是每次运行自己的。Claude Code 自己把登录存在这个目录对应的钥匙串条目里（钥匙串拒绝写入时存为目录里的 `.credentials.json`），会话记录也在这里，所以续聊（`resume`、`claude-history.ts` 的历史读取）在同一目录里找；旧版本留在 `runtime/<profile>/<id>/claude/projects` 的会话在下一次准备时复制过来。目录里 `settings.json` 由 Emperor 写，只含模型设置，内容相同就不重写。Seatbelt 让 Claude 运行写这两个目录（`PreparedRuntime.stateRoots`，经 `executorGrants`），并单独放行它自己的 `.credentials.json`；受保护路径表把这个文件列为凭据（`PROTECTED_STATE_CREDENTIAL_FILES`），其他进程（包括 Emperor 自己的 Shell 与文件工具）在没有提权时读不到。本机 CLI 的设置只取窄配置（模型与 `env` 里的端点和 API 凭据），支持显式 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` 作为来源；也可选择模型凭据引用。认证不传到 renderer、日志摘要或公共 receipt。运行环境不继承宿主全部密钥，也不导入本机插件或 hooks。
 
 开发环境（AGT-08，`harness/delegation/dev-environment.ts`）：`ExecutorRuntimeService.prepare()`（登录探测除外）按执行者配置的 `developmentEnvironment`（与默认值相同时不写入）补上：`gitIdentity`（默认开，`git config --global user.name/email` 读用户真实 HOME，注入 `GIT_AUTHOR_*` / `GIT_COMMITTER_*`）、`proxy`（默认开，即原有的代理变量透传；关闭时移除）、`sshAgent`（`SSH_AUTH_SOCK`）、`toolchains`（`NVM_DIR` 与 nvm default 别名的 node bin、`VOLTA_HOME`、`RUSTUP_HOME`、`CARGO_HOME`、`PYENV_ROOT` 及其 bin 前置到 PATH）、`github`（`gh auth token` → `GH_TOKEN`，并写私有 `$XDG_CONFIG_HOME/gh/hosts.yml`（0600），因为 Claude Code 的 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` 会从它的 Bash 里去掉令牌变量；关闭时删除该文件，令牌进 `secretValues` 供脱敏）。进程环境里没有的变量从登录 shell 读取（只在对应开关打开时）。Codex 的 `shell_environment_policy` 不继承，`set` 里加上 `DEVELOPMENT_ENVIRONMENT_KEYS`。项目说明：Claude 不加载项目设置（`settingSources: []`，项目 `.claude/settings.json` 的 permissions 可能在 `canUseTool` 之前放行工具），改为把 `CLAUDE.md`、`.claude/CLAUDE.md`、`AGENTS.md` 的文本（每个最多 16 KiB）追加到 system prompt；Codex 的 `developerInstructions` 附 `AGENTS.md` 摘要（最多 8 KiB）。
 
-Claude Code 的认证（AGT-02，`claude-auth.ts`，随第一次 Claude 运行或「设置令牌」按需加载，不在启动路径上）按顺序取第一个有凭据的来源，该来源的凭据变量（`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、`CLAUDE_CODE_OAUTH_TOKEN`）一起使用，其他来源的不混入：
+Claude Code 的登录（AGT-12，`claude-sign-in.ts`，随第一次 Claude 运行或设置页检测按需加载）是 Claude Code 自己的：Anthropic 的条款允许最终用户用自己的订阅登录未修改的 `claude`，但第三方产品不得收集、保存或转交 Claude.ai 凭据，登录必须经 Anthropic 自己的流程。所以：
 
-1. Emperor 凭据：「设置 › 子智能体」Claude Code 一行或详情页的「设置令牌」，`executors.setCredential { profileId, kind: oauth-token | api-key, token }` / `executors.clearCredential`（按 view 校验的写操作）。存在 `<delegations>/credentials.json`（0600），值是 SEC-06/SEC-09 本地密钥（`LocalSecretStore`，与模型 Key、凭据库同一把）的 `el1:` 信封，关联数据绑定 profile 与 kind；明文只留末 4 位。本地密钥变化后解不开时状态为 `unreadable`，继续看后面的来源。订阅令牌作为 `CLAUDE_CODE_OAUTH_TOKEN`、API Key 作为 `ANTHROPIC_API_KEY` 传入。
-2. `~/.claude/settings.json`（或 `CLAUDE_CONFIG_DIR`）的 `env`。
-3. `.credentials.json` 的 `claudeAiOauth.accessToken`；`expiresAt` 已过则跳过并记为 `expired`，10 分钟内到期时照常使用并标 `expiresSoon`。refresh token 不进入隔离目录（与 Codex 相同的理由：隔离进程刷新会让用户自己的 CLI 失效），所以长任务应改用 `claude setup-token` 的长期令牌。
-4. 宿主进程环境，然后登录 shell（`login-shell.ts`，只取 `CLAUDE_SHELL_KEYS` 白名单：三个凭据变量与 `ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL`；进程内每组变量名只运行一次）。
+- **状态**：设置页检测、启动时的 `probeProfiles` 与 `start`（征求同意之前）都用 `checkClaudeSignIn` 在运行同样的环境与 Seatbelt 里执行 `claude auth status`（JSON；已登录退出码 0，否则 1），只取 `authMethod`（`claude.ai`、`api_key`、`oauth_token`、`api_key_helper`、`third_party`、`none`，未知值记为 `other`）、`apiProvider`、`email`、`orgName`、`subscriptionType`、`configDirectory`，不取 `orgId` 或任何像令牌的值。未登录抛 `ExecutorAuthError`（`AUTH_REQUIRED`，探测为 `needs_auth`），命令失败或输出不是 JSON 为 `AUTH_STATUS_FAILED`（探测为 `incompatible`）。父模型的子智能体上下文写 `status=unavailable (not signed in…)`，交给它直接以 `AUTH_REQUIRED` 失败，不弹同意卡。
+- **登录**：`executors.signIn { profileId, method: claude-ai | console }`（按 view 校验）在 `<delegations>/claude-code/sign-in/` 写一个 0700 的 `.command` 脚本（导出 `CLAUDE_CONFIG_DIR`、`HOME`、`XDG_*`，`unset` 终端里可能导出的 `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`CLAUDE_CODE_OAUTH_TOKEN`，运行 `'<本机 claude>' auth login`，Console 加 `--console`，结束后删除自己），用 `/usr/bin/open -a Terminal <脚本>` 打开 macOS「终端」：不经 AppleScript（没有自动化授权提示），也不经 Emperor 自己的终端面板。超过 10 分钟的遗留脚本在下一次登录时删除。设置页在窗口回到前台或点「重新检测」时再检测。`executors.signOut` 在同一环境运行 `claude auth logout`（失败为 `AUTH_SIGN_OUT_FAILED`）。打不开「终端」为 `TERMINAL_UNAVAILABLE`。
+- **Emperor 传的凭据**只有用户自己的 API 凭据，按顺序取第一个有的来源，该来源的 `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` 一起使用：① 「使用 API Key」保存的 Console Key（`executors.setCredential { profileId, kind: 'api-key', token }` / `executors.clearCredential`；`<delegations>/credentials.json`（0600），值是 SEC-06/SEC-09 本地密钥的 `el1:` 信封，关联数据绑定 profile，明文只留末 4 位；解不开时为 `unreadable`）；② `~/.claude/settings.json`（或 `CLAUDE_CONFIG_DIR`）的 `env`，例如第三方 Anthropic 兼容端点的 `ANTHROPIC_BASE_URL` 与它的令牌；③ 宿主进程环境；④ 登录 shell（`CLAUDE_SHELL_KEYS`：两个凭据变量与 `ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL`）。都没有时不传，Claude Code 用自己的登录。它们优先于那份登录（Claude Code 自己的顺序），探测的 `auth` 同时写 `source`、`kind`、`last4`、`endpoint`（非 `api.anthropic.com` 的 `ANTHROPIC_BASE_URL` 主机名）与 `claude auth status` 的结果，设置页据此说明实际生效的是哪一个、要改用 Claude 账号该去掉哪一处。
+- **不做的事**：不读 `~/.claude/.credentials.json` 或钥匙串（不调用 `security`，不用 safeStorage），不保存 Claude.ai 令牌，任何来源的 `CLAUDE_CODE_OAUTH_TOKEN` 都不转交；任何变量里以 `sk-ant-oat` / `sk-ant-ort` 开头的值（Claude.ai 令牌）都丢弃，「使用 API Key」也拒收。升级时 `ClaudeKeyStore.migrate()`（CoreApi 创建时）删除旧版本保存的 `oauth-token` 行并在同一文件写 `notice: 'claude-sign-in'`；`executors.list` 返回 `signInNotice`，设置页提示一次，`executors.dismissNotice { notice: 'claude-sign-in' }` 清除。
 
-不读取 macOS 钥匙串（不调用 `security`，不用 safeStorage）。结果写在 `PreparedRuntime.auth`（`ExecutorAuthState`：`source`、`kind`、`last4`、`problem: missing | expired | unreadable`、`expiresAt`、`expiresSoon`）；没有凭据时抛 `ExecutorAuthError`（`AUTH_EXPIRED` 或 `AUTH_REQUIRED`，消息告诉父模型请用户运行 `claude setup-token` 并设置令牌）。`registry.checkSignIn` 把它并入探测：启动时 `probeProfiles` 对已启用的 Claude profile 检查一次，`start` 在征求同意前再检查一次，设置页检测同样如此；没有登录时探测为 `needs_auth` 并带 `auth`，父模型的子智能体上下文写 `status=unavailable (not signed in…)`，交给子智能体直接以 `AUTH_REQUIRED` / `AUTH_EXPIRED` 失败，不弹同意卡。
-
-Claude 子进程设置 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`。对 SDK 0.3.281 / CLI 2.1.281 的影响（从随包二进制核对）：Bash 工具、hooks 与 MCP 子进程的环境去掉 `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_CUSTOM_HEADERS`、`CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CODE_OAUTH_REFRESH_TOKEN` 等凭据变量，以及名字像密钥（`*_TOKEN`、`*_KEY`、`*_SECRET`、`*PASSWORD*` 等）的变量；权限模式固定为 `default`（Emperor 本来就请求 `default`，AGT-01 的 init 检查不受影响）；`--await-claim` 不可用（Emperor 不用）；配置里的 `${VAR}` 展开不再取到凭据。CLI 自身仍用这些变量认证。
+Claude 子进程设置 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`。对 SDK 0.3.281 / CLI 2.1.281 的影响（AGT-02 时从当时随包的二进制核对）：Bash 工具、hooks 与 MCP 子进程的环境去掉 `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_CUSTOM_HEADERS`、`CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CODE_OAUTH_REFRESH_TOKEN` 等凭据变量，以及名字像密钥（`*_TOKEN`、`*_KEY`、`*_SECRET`、`*PASSWORD*` 等）的变量；权限模式固定为 `default`（Emperor 本来就请求 `default`，AGT-01 的 init 检查不受影响）；`--await-claim` 不可用（Emperor 不用）；配置里的 `${VAR}` 展开不再取到凭据。CLI 自身仍用这些变量认证。
 
 Claude 一轮失败时，适配器从 SDK result 的 subtype、`terminal_reason`、`api_error_status` 与 `result`/`errors` 文本得出 `failureCode`（`turn_finished.failureCode`，服务写进运行记录）：`error_max_turns` 或 `max_turns` → `MAX_TURNS`；`prompt_too_long`、`blocking_limit`、`rapid_refill_breaker` 或「prompt is too long」→ `CONTEXT_OVERFLOW`；402 或余额/计费文字 → `BILLING`；401 或认证、API key、OAuth token、`/login` 文字 → `AUTH_EXPIRED`；429、rate limit、usage limit → `RATE_LIMITED`；其余 `EXECUTOR_TURN_FAILED`。失败摘要保留子智能体的错误文本（经秘密脱敏），不再是「Claude execution failed」。任务详情按代码显示中文原因与下一步。
 
@@ -198,7 +196,7 @@ Emperor 正常退出时，`HarnessHost.close()` 调用 `DelegationService.shutdo
 
 预算按计费方式计算（AGT-07，`budget.ts`）。任务与 KRN-03 相同：一条用户消息或一个 Goal；同一任务内同一委派的后续轮次和重启都不清零（启动时 `reconcile` 按委派日志里每轮的 `usage` 恢复）。
 
-- 计费方式由 `ExecutorRuntime.prepare` 判断：Claude 只有 `CLAUDE_CODE_OAUTH_TOKEN`（没有 API Key 或 `ANTHROPIC_AUTH_TOKEN`）、Codex 使用 ChatGPT 登录（`codexAuth`）是订阅（`subscription`）；其余（API Key、凭据路由、自定义提供方）是 API 计费。
+- 计费方式由 `ExecutorRuntime.prepare` 判断：Claude 没有 Emperor 传的 API Key 或 `ANTHROPIC_AUTH_TOKEN`（用它自己的登录）、Codex 使用 ChatGPT 登录（`codexAuth`）是订阅（`subscription`）；最近一次 `claude auth status` 报告 `api_key`（Console 登录）时 CoreApi 改记为 API 计费；其余（API Key、凭据路由、自定义提供方）是 API 计费。
 - 订阅：子智能体报告的费用记为 `nominalUsd`，只显示不计入，界面写「订阅额度，不计费用」；由轮数与运行时长约束。
 - API 计费：费用计入任务的美元上限；Claude 另把剩余额度作为 SDK 的 `maxBudgetUsd`；轮次进行中每次用量更新都检查，越过上限即以 `BUDGET_LIMIT` 结束。子智能体没有报告费用时（Codex），用 MOD-01 模型目录单价按 token 估算（`pricing.ts`）；单价未知时 token 计入 `maxUnpricedTokensPerTask`，越过以 `TOKEN_LIMIT` 结束。
 - Codex 的 token 取线程累计值的差：`thread/tokenUsage/updated` 的 `last` 只是最近一次模型请求，`total` 是线程合计，本轮用量 = 最新 `total` − 本轮第一次请求之前的 `total`（第一次的 `total − last`），重复通知不重复计数。

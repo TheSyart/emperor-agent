@@ -4,8 +4,8 @@
  *
  * - The main page: one card with the three subagents (本地, Claude Code,
  *   Codex — status, model, on/off; a missing sign-in fills the row with its
- *   reason and 设置令牌) and one card with the three task settings (同时运行,
- *   改代码的位置, 费用上限), then 高级.
+ *   reason and 登录 Claude Code, AGT-12) and one card with the three task
+ *   settings (同时运行, 改代码的位置, 费用上限), then 高级.
  * - Sub pages: 高级 (turns, run time, 开发环境, 排查) and each external
  *   subagent's 详情 (status, sign-in, model, specialties, capabilities in
  *   plain words).
@@ -37,20 +37,20 @@ import ExecutorDetailPage from './executors/ExecutorDetailPage.vue'
 import {
   executorName,
   hasIssue,
+  needsSignIn,
   rowSummary,
-  signInAlert,
   statusLabel,
   statusTone,
 } from './executors/executorText'
 import { provideExecutorSettings } from './executors/useExecutorSettings'
 
-// 设置令牌 (AGT-02) loads when it is opened.
-const ClaudeTokenDialog = defineAsyncComponent(
-  () => import('./ClaudeTokenDialog.vue'),
+// 使用 API Key (AGT-12) loads when it is opened.
+const ClaudeApiKeyDialog = defineAsyncComponent(
+  () => import('./ClaudeApiKeyDialog.vue'),
 )
 
 const s = provideExecutorSettings()
-const { config, rows, models, busy, loading, tokenDialog } = s
+const { config, rows, models, busy, loading, apiKeyDialog } = s
 const { page, open: openPage } = useSettingsPages({
   advanced: '高级',
   'claude-code': 'Claude Code',
@@ -96,16 +96,21 @@ function setLocalModel(value: string | null | undefined) {
 
 // ── Claude Code / Codex ────────────────────────────────────────────────
 
-function needsToken(profile: ExecutorProfile | undefined) {
-  if (!profile?.enabled) return false
-  const alert = signInAlert(profile, s.factsOf(profile))
-  return alert === 'missing' || alert === 'expired' || alert === 'unreadable'
+function signInNeeded(profile: ExecutorProfile | undefined) {
+  return !!profile && needsSignIn(profile, s.factsOf(profile))
 }
 function showsModel(profile: ExecutorProfile | undefined) {
   return (
-    !!profile?.enabled && !needsToken(profile) && !hasIssue(s.factsOf(profile))
+    !!profile?.enabled &&
+    !signInNeeded(profile) &&
+    !hasIssue(s.factsOf(profile))
   )
 }
+/** 登录 Claude Code is open in Terminal for this profile (AGT-12). */
+const pendingClaude = computed(() => {
+  const profile = s.rowOf('claude-code').profile
+  return profile && s.signInPending.value[profile.id] ? profile : null
+})
 function setEnabled(profile: ExecutorProfile, on: boolean) {
   void s.changeProfile(profile.id, (p) => {
     p.enabled = on
@@ -225,6 +230,42 @@ useSettingsHeader({
       </template>
     </Notice>
 
+    <Notice
+      v-if="s.signInNotice.value"
+      tone="info"
+      title="Claude Code 现在用它自己的登录"
+      data-claude-sign-in-notice
+    >
+      请点「登录 Claude Code」登录一次。之前在 Emperor
+      里设置的令牌已删除；Emperor 不读取、不保存你的 Claude 登录。
+      <template #actions>
+        <Button
+          size="sm"
+          variant="secondary"
+          data-dismiss-sign-in-notice
+          @click="s.dismissSignInNotice()"
+          >知道了</Button
+        >
+      </template>
+    </Notice>
+    <Notice
+      v-if="pendingClaude"
+      tone="info"
+      title="已在「终端」里打开登录"
+      data-claude-sign-in-pending
+    >
+      按「终端」里的提示在浏览器里完成登录，回到 Emperor 后会自动重新检测。
+      <template #actions>
+        <Button
+          size="sm"
+          variant="secondary"
+          :disabled="busy"
+          @click="s.recheck(pendingClaude)"
+          >重新检测</Button
+        >
+      </template>
+    </Notice>
+
     <SettingsGroup title="可用的子智能体" data-executor-list>
       <SettingsRow
         title="本地子智能体"
@@ -247,7 +288,7 @@ useSettingsHeader({
         :key="row.backend"
         :title="executorName(row.backend)"
         :data-settings-agent="row.backend"
-        :data-needs-token="needsToken(row.profile) || undefined"
+        :data-needs-sign-in="signInNeeded(row.profile) || undefined"
       >
         <template #leading
           ><Avatar
@@ -282,13 +323,13 @@ useSettingsHeader({
         >
         <div class="row-controls">
           <Button
-            v-if="needsToken(row.profile)"
+            v-if="row.profile && signInNeeded(row.profile)"
             size="sm"
             variant="secondary"
-            data-claude-token-set
+            data-claude-sign-in-start
             :disabled="busy || s.tokenBusy.value"
-            @click="tokenDialog = row.profile ?? null"
-            >设置令牌</Button
+            @click="s.signIn(row.profile)"
+            >登录 Claude Code</Button
           >
           <Select
             v-else-if="row.profile && showsModel(row.profile)"
@@ -369,19 +410,14 @@ useSettingsHeader({
   </SettingsSection>
   <ExecutorAdvancedPage v-else-if="page === 'advanced'" />
   <ExecutorDetailPage v-else-if="detailBackend" :backend="detailBackend" />
-  <ClaudeTokenDialog
-    v-if="tokenDialog"
-    :profile-id="tokenDialog.id"
-    :kind="
-      s.factsOf(tokenDialog).probe?.auth?.kind === 'api-key'
-        ? 'api-key'
-        : 'oauth-token'
-    "
-    @close="tokenDialog = null"
+  <ClaudeApiKeyDialog
+    v-if="apiKeyDialog"
+    :profile-id="apiKeyDialog.id"
+    @close="apiKeyDialog = null"
     @saved="
       (probe) => {
-        if (tokenDialog) s.tokenSaved(tokenDialog, probe)
-        tokenDialog = null
+        if (apiKeyDialog) s.keySaved(apiKeyDialog, probe)
+        apiKeyDialog = null
       }
     "
   />

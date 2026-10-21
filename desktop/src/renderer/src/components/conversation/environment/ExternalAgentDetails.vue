@@ -282,15 +282,15 @@ const LIMIT_LABEL: Record<string, string> = {
   TOKEN_LIMIT: '已达到单任务 token 上限（模型单价未知）',
   RUN_LIMIT: '已达到单任务运行次数上限',
 }
-/** Why a run failed and what to do next (AGT-02). */
+/** Why a run failed and what to do next (AGT-02, AGT-12). */
 const FAILURE: Record<string, [reason: string, next: string]> = {
   AUTH_EXPIRED: [
-    '登录令牌已失效或过期。',
-    '订阅账号：在终端运行 claude setup-token，把新令牌粘贴到 设置 › 子智能体 的「设置令牌」；API Key：在那里粘贴新的 ANTHROPIC_API_KEY。',
+    'Claude Code 的登录已失效或过期。',
+    '在「设置 › 子智能体 › Claude Code」点「登录 Claude Code」重新登录；用 API Key 时，在那里换一个新的 API Key。',
   ],
   AUTH_REQUIRED: [
-    '子智能体没有可用的登录。',
-    '在 设置 › 子智能体 设置令牌，然后让主会话重试。',
+    'Claude Code 还没有登录。',
+    '在「设置 › 子智能体 › Claude Code」点「登录 Claude Code」，然后让主会话重试。',
   ],
   RATE_LIMITED: [
     '被限流了：订阅额度或接口的速率已用尽。',

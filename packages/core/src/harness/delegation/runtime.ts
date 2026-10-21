@@ -9,14 +9,14 @@ import {
   unlinkSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import {
   DelegationError,
-  ExecutorAuthError,
   type ExecutorAuthState,
   type ExecutorBilling,
   type ExecutorProfile,
 } from './types'
+import { locateExecutable } from './executable'
 import { safeDelegationKey } from './fold'
 import { durableReplaceSync } from '../../store/persistence'
 import { executorEnvironment } from './environment'
@@ -42,17 +42,24 @@ export const PROBE_RUNTIME_ID = 'probe'
 export interface PreparedRuntime {
   runtimeRoot: string
   tempRoot: string
+  /**
+   * What the run may write besides its workspace and temp folder: its own
+   * folder, and for Claude Code its dedicated config and home (AGT-12).
+   */
+  stateRoots: string[]
   environment: Record<string, string>
   secretValues: string[]
   authenticationAvailable: boolean
   /** Codex ChatGPT login: the isolated auth.json links to the user's file. */
   codexAuth?: CodexAuthLink
   /**
-   * How the run's spend is paid (AGT-07): a Claude OAuth token or a ChatGPT
-   * login is a subscription; any API key or credential route is API billing.
+   * How the run's spend is paid (AGT-07): Claude Code's own sign-in or a
+   * ChatGPT login is a subscription; any API key or credential route is
+   * API billing. (CoreApi turns a Claude Code subscription into API billing
+   * when the last `claude auth status` said `api_key`, a Console sign-in.)
    */
   billing: ExecutorBilling
-  /** Claude Code: where its credential came from, or why there is none. */
+  /** Claude Code: the API credential Emperor passes, if any (AGT-12). */
   auth?: ExecutorAuthState
 }
 export interface ExecutorCredential {
@@ -87,8 +94,8 @@ export class ExecutorRuntimeService {
       ) => Promise<ExecutorCredential>
       /** Provider keys exported in ~/.zshrc (absent from a Dock launch). */
       loginShell?: LoginShellEnvironment
-      /** Where tokens pasted into 设置 › 子智能体 live (AGT-02), read first. */
-      claudeTokens?: { root: string; sealer: SecretSealer }
+      /** The API key saved in 设置 › 子智能体 › 使用 API Key, read first. */
+      claudeKeys?: { root: string; sealer: SecretSealer }
       /** What a task's environment passes through (设置 › 子智能体 › 高级, AGT-08). */
       developmentEnvironment?: () => DevelopmentEnvironmentSettings
       /** Test hooks: the git identity and gh token readers. */
@@ -139,12 +146,13 @@ export class ExecutorRuntimeService {
         id,
       ),
       tempRoot = join(runtimeRoot, 'tmp')
+    const claude = profile.backend === 'claude-code'
     for (const path of [
       runtimeRoot,
       tempRoot,
-      join(runtimeRoot, 'home'),
-      join(runtimeRoot, 'claude'),
-      join(runtimeRoot, 'codex'),
+      ...(claude
+        ? []
+        : [join(runtimeRoot, 'home'), join(runtimeRoot, 'codex')]),
     ])
       mkdirSync(path, { recursive: true, mode: 0o700 })
     const ambient = executorEnvironment(
@@ -152,27 +160,37 @@ export class ExecutorRuntimeService {
       this.options.home,
     )
     const credentialSecrets: string[] = []
+    const stateRoots = [runtimeRoot]
     const environment: Record<string, string> = Object.fromEntries(
       baseKeys.flatMap((key) => (ambient[key] ? [[key, ambient[key]!]] : [])),
     )
+    // Claude Code: one config folder and home for every run, status check
+    // and sign-in, so the login claude saves is the one it finds (AGT-12).
+    const sign = claude ? await import('./claude-sign-in') : undefined
+    const claudeDirs = sign?.prepareClaudeDirectories(this.options.root)
+    if (sign && claudeDirs) {
+      Object.assign(environment, sign.claudeProcessEnvironment(claudeDirs))
+      stateRoots.push(claudeDirs.config, claudeDirs.home)
+      sign.adoptLegacyClaudeSessions(runtimeRoot, claudeDirs)
+    } else
+      Object.assign(environment, {
+        HOME: join(runtimeRoot, 'home'),
+        USERPROFILE: join(runtimeRoot, 'home'),
+        XDG_CONFIG_HOME: join(runtimeRoot, 'home', '.config'),
+        XDG_CACHE_HOME: join(runtimeRoot, 'home', '.cache'),
+        CODEX_HOME: join(runtimeRoot, 'codex'),
+      })
     Object.assign(environment, {
-      HOME: join(runtimeRoot, 'home'),
-      USERPROFILE: join(runtimeRoot, 'home'),
-      XDG_CONFIG_HOME: join(runtimeRoot, 'home', '.config'),
-      XDG_CACHE_HOME: join(runtimeRoot, 'home', '.cache'),
-      CLAUDE_CONFIG_DIR: join(runtimeRoot, 'claude'),
-      CLAUDE_CODE_TMPDIR: tempRoot,
-      CODEX_HOME: join(runtimeRoot, 'codex'),
+      ...(claude ? { CLAUDE_CODE_TMPDIR: tempRoot } : {}),
       TMPDIR: tempRoot,
       TMP: tempRoot,
       TEMP: tempRoot,
     })
-    // These are host-generated, per-child files; never retain a prior provider after configuration changes.
-    for (const path of [
-      join(environment.CODEX_HOME!, 'config.toml'),
-      join(environment.CLAUDE_CONFIG_DIR!, 'settings.json'),
-    ])
-      if (existsSync(path)) unlinkSync(path)
+    // Codex's per-child file: never retain a prior provider after a change.
+    if (!claude) {
+      const codexConfig = join(environment.CODEX_HOME!, 'config.toml')
+      if (existsSync(codexConfig)) unlinkSync(codexConfig)
+    }
     if (profile.authRef.kind === 'model-route') {
       if (!profile.authRef.routeId || !this.options.resolveRoute)
         throw new DelegationError(
@@ -208,10 +226,13 @@ export class ExecutorRuntimeService {
           )
         }
       }
-    } else if (profile.backend === 'claude-code') {
+    } else if (sign && claudeDirs) {
       const home = this.options.home ?? homedir(),
         sourceDirectory = ambient.CLAUDE_CONFIG_DIR || join(home, '.claude'),
         settings = join(sourceDirectory, 'settings.json')
+      // The user's own Claude Code settings lend their model choices and
+      // `env` (a third-party endpoint with its API credential); never their
+      // login: .credentials.json and the Keychain are claude's alone.
       let configured: Record<string, unknown> = {},
         modelSettings: Record<string, unknown> = {}
       if (existsSync(settings)) {
@@ -229,24 +250,18 @@ export class ExecutorRuntimeService {
           )
         }
       }
-      // The credential comes from one source, in AGT-02's order.
-      const {
-        resolveClaudeCredential,
-        isClaudeCredentialKey,
-        signInMissing,
-        ClaudeTokenStore,
-      } = await import('./claude-auth')
-      const tokens = this.options.claudeTokens
-      const resolved = await resolveClaudeCredential({
+      const keys = this.options.claudeKeys
+      const resolved = await sign.resolveClaudeCredential({
         stored: () =>
-          tokens ? new ClaudeTokenStore(tokens).read(profile.id) : null,
+          keys ? new sign.ClaudeKeyStore(keys).read(profile.id) : null,
         settingsEnv: configured,
-        configDirectory: sourceDirectory,
         ambient,
-        loginShell: this.options.loginShell,
+        ...(this.options.loginShell
+          ? { loginShell: this.options.loginShell }
+          : {}),
       })
       auth = resolved.auth
-      const keys = new Set([
+      const names = new Set([
         'ANTHROPIC_BASE_URL',
         'ANTHROPIC_MODEL',
         'ANTHROPIC_DEFAULT_MODEL',
@@ -255,13 +270,15 @@ export class ExecutorRuntimeService {
           /^ANTHROPIC_DEFAULT_[A-Z0-9_]+_MODEL(?:_NAME)?$/.test(k),
         ),
       ])
-      for (const key of keys) {
+      for (const key of names) {
         const value = ambient[key] ?? configured[key]
         if (typeof value === 'string' && value) environment[key] = value
       }
       for (const [key, value] of Object.entries(resolved.variables))
-        if (isClaudeCredentialKey(key) || !environment[key])
+        if (sign.isClaudeCredentialKey(key) || !environment[key])
           environment[key] = value
+      const endpoint = anthropicEndpoint(environment.ANTHROPIC_BASE_URL)
+      if (auth.source && endpoint) auth = { ...auth, endpoint }
       const model =
         profile.defaultModel ??
         environment.ANTHROPIC_MODEL ??
@@ -281,16 +298,21 @@ export class ExecutorRuntimeService {
           }),
         )
         .digest('hex')
-      if (Object.keys(modelSettings).length)
-        durableReplaceSync(
-          join(environment.CLAUDE_CONFIG_DIR!, 'settings.json'),
-          JSON.stringify(modelSettings),
-        )
-      if (!auth.source) {
-        if (!options.allowUnauthenticatedConfig)
-          throw new ExecutorAuthError(auth, signInMissing(auth))
-        authenticationAvailable = false
+      // Emperor's settings.json in the dedicated folder holds the model
+      // choices only. Every run writes the same bytes; a change replaces it
+      // atomically, so runs sharing the folder never see half a file.
+      const ours = join(claudeDirs.config, 'settings.json')
+      const body = Object.keys(modelSettings).length
+        ? JSON.stringify(modelSettings)
+        : null
+      let current: string | null = null
+      try {
+        current = readFileSync(ours, 'utf8')
+      } catch {
+        current = null
       }
+      if (body !== null && body !== current) durableReplaceSync(ours, body)
+      else if (body === null && current !== null) rmSync(ours, { force: true })
     } else {
       const sourceDirectory =
         ambient.CODEX_HOME || join(this.options.home ?? homedir(), '.codex')
@@ -374,13 +396,28 @@ export class ExecutorRuntimeService {
       }
       if (!codexAuth) removeCodexAuth(isolated)
     }
+    if (claude) {
+      // The installed claude (AGT-12): a folder only the login shell knows
+      // goes on PATH, so the run, the status check and the model list find it.
+      const executable = await locateExecutable(profile.executablePath, {
+        path: environment.PATH,
+        ...(this.options.loginShell
+          ? { loginShell: this.options.loginShell }
+          : {}),
+      })
+      if (
+        executable &&
+        !(environment.PATH ?? '').split(delimiter).includes(dirname(executable))
+      )
+        environment.PATH = [environment.PATH, dirname(executable)]
+          .filter(Boolean)
+          .join(delimiter)
+    }
     const billing: ExecutorBilling =
       profile.backend === 'claude-code'
-        ? !environment.ANTHROPIC_API_KEY &&
-          !environment.ANTHROPIC_AUTH_TOKEN &&
-          environment.CLAUDE_CODE_OAUTH_TOKEN
-          ? 'subscription'
-          : 'api'
+        ? environment.ANTHROPIC_API_KEY || environment.ANTHROPIC_AUTH_TOKEN
+          ? 'api'
+          : 'subscription'
         : codexAuth
           ? 'subscription'
           : 'api'
@@ -412,19 +449,27 @@ export class ExecutorRuntimeService {
       credentialSecrets.push(...dev.secrets)
       // Claude Code scrubs *_TOKEN from its Bash (AGT-02), so gh also gets
       // a private hosts.yml in the task's own config folder; it goes away
-      // with the switch.
+      // with the switch. Claude Code's home is shared by its runs (AGT-12):
+      // the same bytes are written only when they change, and removal
+      // tolerates a race.
       const ghHosts = join(environment.XDG_CONFIG_HOME!, 'gh', 'hosts.yml')
       if (dev.env.GH_TOKEN) {
-        mkdirSync(join(environment.XDG_CONFIG_HOME!, 'gh'), {
-          recursive: true,
-          mode: 0o700,
-        })
-        durableReplaceSync(
-          ghHosts,
-          `github.com:\n    oauth_token: ${dev.env.GH_TOKEN}\n    git_protocol: https\n`,
-        )
-        chmodSync(ghHosts, 0o600)
-      } else if (existsSync(ghHosts)) unlinkSync(ghHosts)
+        const body = `github.com:\n    oauth_token: ${dev.env.GH_TOKEN}\n    git_protocol: https\n`
+        let current: string | null = null
+        try {
+          current = readFileSync(ghHosts, 'utf8')
+        } catch {
+          current = null
+        }
+        if (current !== body) {
+          mkdirSync(join(environment.XDG_CONFIG_HOME!, 'gh'), {
+            recursive: true,
+            mode: 0o700,
+          })
+          durableReplaceSync(ghHosts, body)
+          chmodSync(ghHosts, 0o600)
+        }
+      } else rmSync(ghHosts, { force: true })
     }
     const secretValues = [
       ...credentialSecrets,
@@ -435,6 +480,7 @@ export class ExecutorRuntimeService {
     return {
       runtimeRoot,
       tempRoot,
+      stateRoots,
       environment,
       secretValues,
       authenticationAvailable,
@@ -442,5 +488,16 @@ export class ExecutorRuntimeService {
       billing,
       ...(auth ? { auth } : {}),
     }
+  }
+}
+
+/** A non-Anthropic endpoint's host, for 设置 › 子智能体 (AGT-12). */
+function anthropicEndpoint(baseUrl: string | undefined): string | undefined {
+  if (!baseUrl) return undefined
+  try {
+    const host = new URL(baseUrl).hostname
+    return host && host !== 'api.anthropic.com' ? host : undefined
+  } catch {
+    return undefined
   }
 }

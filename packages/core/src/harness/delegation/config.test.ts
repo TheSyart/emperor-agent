@@ -182,17 +182,24 @@ describe('executor configuration', () => {
       'expectedVersion',
     )
   })
-  it('defaults Claude Code to the bundled binary and keeps Codex on the installed CLI', () => {
+  it('runs the installed CLI for both; an old bundled/installed choice is read and dropped (AGT-12)', () => {
     const store = setup()
     const [claude, codex] = store.read().profiles
-    expect(claude!.executableSource).toBe('bundled')
-    expect(codex!.executableSource).toBeUndefined()
-    const config = store.read()
-    config.profiles[1]!.executableSource = 'bundled'
-    expect(() => store.update(0, config)).toThrow(/EXECUTOR_CONFIG_INVALID/)
-    const local = store.read()
-    local.profiles[0]!.executableSource = 'system'
-    expect(store.update(0, local).profiles[0]!.executableSource).toBe('system')
+    expect(claude).not.toHaveProperty('executableSource')
+    expect(claude!.executablePath).toBe('claude')
+    expect(codex!.executablePath).toBe('codex')
+    // A file an earlier build wrote still loads, without the field.
+    const legacy = JSON.parse(JSON.stringify(store.read()))
+    legacy.profiles[0].executableSource = 'bundled'
+    legacy.profiles[1].executableSource = 'system'
+    writeFileSync(store.file, JSON.stringify({ ...legacy, touchedAt: 1 }))
+    const loaded = store.read()
+    expect(loaded.profiles[0]).not.toHaveProperty('executableSource')
+    expect(readFileSync(store.file, 'utf8')).not.toContain('executableSource')
+    // A renderer still holding it can save once more.
+    expect(
+      store.update(loaded.revision, legacy).profiles[0],
+    ).not.toHaveProperty('executableSource')
   })
   it('rejects quotas that exceed the architectural bounds', () => {
     const store = setup()

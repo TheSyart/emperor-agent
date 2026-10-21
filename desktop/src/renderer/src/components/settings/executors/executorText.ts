@@ -5,7 +5,6 @@
  * the main page, the detail page and their tests read the same words.
  */
 import type {
-  ExecutorAuthState,
   ExecutorProbe,
   ExecutorProfile,
   ExecutorRuntimeFacts,
@@ -28,12 +27,9 @@ export function executorName(backend: ExecutorProfile['backend']): string {
   return backend === 'codex' ? 'Codex' : 'Claude Code'
 }
 
-/** Claude Code runs the binary bundled with Emperor unless switched. */
-export function usesBundledClaude(profile: ExecutorProfile): boolean {
-  return (
-    profile.backend === 'claude-code' && profile.executableSource !== 'system'
-  )
-}
+/** The official install command (code.claude.com/docs/en/setup, macOS). */
+export const CLAUDE_INSTALL_COMMAND =
+  'curl -fsSL https://claude.ai/install.sh | bash'
 
 /** A Claude profile that signs in on its own (not through a model route). */
 export function signsInHere(profile: ExecutorProfile): boolean {
@@ -48,27 +44,42 @@ export function statusLabel(
   profile: ExecutorProfile,
   facts: ExecutorFacts,
 ): string {
+  // Emperor brings no Claude Code (AGT-12): say so whether it is on or off.
+  if (claudeMissing(profile, facts)) return '未安装'
   if (!profile.enabled) return '已关闭'
   if (facts.loading) return '检测中…'
   if (facts.probeError) return '检测失败'
   const probe = facts.probe
   if (!probe) return '未检测'
-  if (probe.diagnostic === 'executor version probe failed') return '检测失败'
-  if (probe.diagnostic === 'AUTH_EXPIRED' || probe.auth?.problem === 'expired')
-    return '令牌已过期'
-  if (probe.diagnostic === 'AUTH_REQUIRED') return '需要登录令牌'
-  if (probe.status === 'available' && probe.auth?.expiresSoon)
-    return '令牌即将过期'
+  if (
+    probe.diagnostic === 'executor version probe failed' ||
+    probe.diagnostic === 'AUTH_STATUS_FAILED'
+  )
+    return '检测失败'
   if (probe.diagnostic === 'AUTH_ROUTE_UNAVAILABLE') return '凭据不可用'
+  if (probe.status === 'needs_auth' || probe.diagnostic === 'AUTH_REQUIRED')
+    return signsInHere(profile) ? '未登录' : '需要登录'
   if (probe.status === 'available' && probe.compatibility === 'unverified')
     return '可能不兼容'
   return {
     available: '子智能体就绪',
     missing: '未找到命令行程序',
-    needs_auth: '需要登录令牌',
+    needs_auth: '需要登录',
     incompatible: '版本不兼容',
     containment_unavailable: '运行环境不可用',
   }[probe.status]
+}
+
+/** Claude Code is not installed (Emperor ships none, AGT-12). */
+export function claudeMissing(
+  profile: ExecutorProfile,
+  facts: ExecutorFacts,
+): boolean {
+  return (
+    profile.backend === 'claude-code' &&
+    !facts.loading &&
+    facts.probe?.status === 'missing'
+  )
 }
 
 export type StatusTone = 'ok' | 'warn' | 'neutral'
@@ -78,12 +89,7 @@ export function statusTone(
   facts: ExecutorFacts,
 ): StatusTone {
   if (!profile.enabled) return 'neutral'
-  if (
-    hasIssue(facts) ||
-    compatibilityWarning(profile, facts) ||
-    facts.probe?.auth?.expiresSoon
-  )
-    return 'warn'
+  if (hasIssue(facts) || compatibilityWarning(profile, facts)) return 'warn'
   return facts.probe?.status === 'available' ? 'ok' : 'neutral'
 }
 
@@ -105,7 +111,7 @@ export function authIssue(
     !!probe &&
     (probe.status === 'needs_auth' ||
       probe.diagnostic === 'AUTH_REQUIRED' ||
-      probe.diagnostic === 'AUTH_EXPIRED')
+      probe.diagnostic === 'AUTH_STATUS_FAILED')
   )
 }
 
@@ -121,13 +127,17 @@ export function statusDetail(
     return '读不到命令行程序的版本，请检查可执行权限和本机运行环境后重新检测。'
   if (probe.diagnostic === 'AUTH_ROUTE_UNAVAILABLE')
     return '所选模型的凭据读不到，请在「设置 › 模型」里检查这条配置。'
+  if (probe.diagnostic === 'AUTH_STATUS_FAILED')
+    return '读不到 Claude Code 的登录状态（claude auth status 没有正常结束），请重新检测。'
   if (probe.status === 'needs_auth' || probe.diagnostic === 'AUTH_REQUIRED')
     return profile.authRef.kind === 'model-route'
       ? '所选模型的凭据读不到，请在「设置 › 模型」里检查这条配置。'
-      : '请在终端运行 codex login，登录后重新检测。'
+      : profile.backend === 'claude-code'
+        ? '请点「登录 Claude Code」，在 macOS 的「终端」里登录一次。'
+        : '请在终端运行 codex login，登录后重新检测。'
   if (probe.status === 'missing')
-    return usesBundledClaude(profile)
-      ? 'Emperor 内置的 Claude Code 缺失，请重新安装 Emperor，或在「高级」里改用本机安装的 claude。'
+    return profile.backend === 'claude-code'
+      ? `没有找到 claude。在终端运行 ${CLAUDE_INSTALL_COMMAND} 安装后重新检测`
       : '没有找到命令行程序，请检查本机安装，或在详情里更正路径。'
   if (probe.status === 'incompatible') {
     const name = profile.backend === 'codex' ? 'Codex' : 'claude'
@@ -138,7 +148,7 @@ export function statusDetail(
       `本机 ${name} ${installed} 不在支持范围内，需要 ${probe.requiredVersion}。` +
       (profile.backend === 'codex'
         ? '请安装对应版本后重新检测。'
-        : '可以升级本机 claude，或在「高级」里关掉「使用本机安装的 claude」，改用 Emperor 内置版本。')
+        : '请在终端运行 claude update 升级后重新检测。')
     )
   }
   if (probe.status === 'containment_unavailable')
@@ -159,86 +169,106 @@ export function compatibilityWarning(
 }
 
 export function versionText(
-  profile: ExecutorProfile,
+  _profile: ExecutorProfile,
   facts: ExecutorFacts,
 ): string {
-  const probe = facts.probe
-  if (!probe?.executableVersion) return '未知'
-  if (profile.backend !== 'claude-code') return probe.executableVersion
-  return (
-    probe.executableVersion +
-    (probe.executableSource === 'system' ? '（本机）' : '（随 Emperor 内置）')
-  )
+  return facts.probe?.executableVersion ?? '未知'
 }
 
-// ── Claude Code 登录 (AGT-02) ──────────────────────────────────────────
-// Sources, in Core's order: Emperor's own token, ~/.claude/settings.json,
-// .credentials.json, the environment, the login shell. Never the Keychain.
-
-const KIND_LABEL = {
-  'oauth-token': '订阅账号',
-  'api-key': 'API Key',
-  'auth-token': '网关令牌',
-} as const
+// ── Claude Code 登录 (AGT-12) ──────────────────────────────────────────
+// Claude Code signs in with its own login (登录 Claude Code, in macOS
+// Terminal); `auth` is what `claude auth status` says, plus the API
+// credential Emperor passes, which outranks that login. Emperor never
+// reads or keeps the login itself.
 
 const SOURCE_LABEL = {
   settings: '来自 ~/.claude/settings.json',
-  'credentials-file': '来自 ~/.claude/.credentials.json',
   environment: '来自启动 Emperor 时的环境变量',
   'login-shell': '来自登录 shell 的环境变量（如 ~/.zshrc）',
-  'model-route': '使用已有模型配置',
 } as const
 
-function minutesLeft(auth: ExecutorAuthState): number {
-  return Math.max(1, Math.ceil(((auth.expiresAt ?? 0) - Date.now()) / 60_000))
-}
-
-export function hasEmperorToken(facts: ExecutorFacts): boolean {
+/** Emperor keeps the user's own API key (使用 API Key). */
+export function hasEmperorKey(facts: ExecutorFacts): boolean {
   const auth = facts.probe?.auth
   return auth?.source === 'emperor' || auth?.problem === 'unreadable'
 }
 
-export function signInText(facts: ExecutorFacts): string {
+/** claude's own sign-in is in effect (退出登录 applies). */
+export function signedInWithClaude(facts: ExecutorFacts): boolean {
   const auth = facts.probe?.auth
-  if (!auth)
-    return facts.probe?.localAuthChecked ? '本机登录配置可读' : '尚未检测'
-  if (auth.source === 'emperor')
-    return `已设置 · 末 4 位 ${auth.last4 ?? ''}（${KIND_LABEL[auth.kind ?? 'oauth-token']}）`
-  if (auth.source)
-    return [
-      SOURCE_LABEL[auth.source],
-      ...(auth.kind && auth.source !== 'model-route'
-        ? [KIND_LABEL[auth.kind]]
-        : []),
-      ...(auth.expiresSoon ? [`${minutesLeft(auth)} 分钟内过期`] : []),
-    ].join(' · ')
-  return auth.problem === 'expired'
-    ? '.credentials.json 里的令牌已过期'
-    : auth.problem === 'unreadable'
-      ? '保存在 Emperor 的令牌已无法读取'
-      : '未登录'
+  return (
+    !!auth &&
+    !auth.source &&
+    (auth.method === 'claude.ai' || auth.method === 'api_key')
+  )
 }
 
-export const SIGN_IN_ALERT_TITLE = {
-  missing: '尚未登录',
-  expired: '令牌已过期',
-  unreadable: '令牌无法读取',
-  soon: '令牌即将过期',
-} as const
+/** Which credential claude uses, in one line. */
+export function signInText(facts: ExecutorFacts): string {
+  const auth = facts.probe?.auth
+  if (
+    facts.probe?.diagnostic === 'AUTH_STATUS_FAILED' ||
+    auth?.problem === 'status-failed'
+  )
+    return '读不到 Claude Code 的登录状态（claude auth status 没有正常结束），请重新检测。'
+  if (!auth) return facts.probe?.localAuthChecked ? '已登录' : '尚未检测'
+  if (auth.source === 'model-route') return '使用已有模型配置'
+  if (auth.source) {
+    const from =
+      auth.source === 'emperor'
+        ? `Emperor 保存 · 末 4 位 ${auth.last4 ?? ''}`
+        : SOURCE_LABEL[auth.source]
+    if (auth.endpoint) return `使用第三方端点 ${auth.endpoint} · ${from}`
+    return `${auth.kind === 'auth-token' ? '使用网关令牌' : '使用 API Key'} · ${from}`
+  }
+  switch (auth.method) {
+    case 'claude.ai':
+      return ['已登录 Claude 账号', auth.email, auth.organization]
+        .filter(Boolean)
+        .join(' · ')
+    case 'api_key':
+      return '已登录 Console 账号（按用量计费）'
+    case 'oauth_token':
+      return '使用 Claude Code 自己配置的令牌'
+    case 'api_key_helper':
+      return '使用 Claude Code 的 apiKeyHelper'
+    case 'third_party':
+      return '使用云服务商（Bedrock、Vertex 或 Foundry）'
+    case undefined:
+      return facts.probe?.localAuthChecked ? '已登录' : '尚未检测'
+    default:
+      return auth.problem === 'unreadable'
+        ? '保存在 Emperor 的 API Key 已无法读取'
+        : '尚未登录'
+  }
+}
 
-export type SignInAlert = keyof typeof SIGN_IN_ALERT_TITLE
+/**
+ * The credential Emperor passes outranks claude's own login (claude's
+ * order: a gateway token, then an API key, then its sign-in): what to undo
+ * to sign in with a Claude account instead. Empty when nothing outranks it.
+ */
+export function precedenceText(facts: ExecutorFacts): string {
+  switch (facts.probe?.auth?.source) {
+    case 'emperor':
+      return 'API Key 优先于 Claude Code 自己的登录。要改用 Claude 账号，先移除这里的 API Key。'
+    case 'settings':
+      return '~/.claude/settings.json 里的凭据优先于 Claude Code 自己的登录。要改用 Claude 账号，在那里去掉它。'
+    case 'environment':
+      return '启动 Emperor 时环境变量里的凭据优先于 Claude Code 自己的登录。要改用 Claude 账号，去掉这个环境变量后重新启动 Emperor。'
+    case 'login-shell':
+      return '登录 shell（如 ~/.zshrc）里导出的凭据优先于 Claude Code 自己的登录。要改用 Claude 账号，去掉那一行后重新启动 Emperor。'
+    default:
+      return ''
+  }
+}
 
-/** What the sign-in has to tell: no sign-in, or one about to expire. */
-export function signInAlert(
+/** Claude Code needs 登录 Claude Code (or the status could not be read). */
+export function needsSignIn(
   profile: ExecutorProfile,
   facts: ExecutorFacts,
-): SignInAlert | '' {
-  const auth = facts.probe?.auth
-  if (authIssue(profile, facts))
-    return auth?.problem === 'expired' || auth?.problem === 'unreadable'
-      ? auth.problem
-      : 'missing'
-  return facts.probe?.status === 'available' && auth?.expiresSoon ? 'soon' : ''
+): boolean {
+  return !!profile.enabled && authIssue(profile, facts)
 }
 
 export function consentText(facts: ExecutorFacts): string {
@@ -255,24 +285,18 @@ export function rowSummary(
   profile: ExecutorProfile,
   facts: ExecutorFacts,
 ): string {
+  if (claudeMissing(profile, facts)) return statusDetail(profile, facts)
   if (!profile.enabled) return '会使用你自己的订阅额度或 API 计费，需要时再打开'
-  const alert = signInAlert(profile, facts)
-  if (alert === 'missing')
-    return '订阅账号请在终端运行 claude setup-token，把令牌粘贴进来'
-  if (alert === 'expired' || alert === 'unreadable')
-    return '请重新设置令牌（终端运行 claude setup-token）'
-  if (alert === 'soon') return '令牌即将过期，长任务可能中途失败'
+  if (needsSignIn(profile, facts))
+    return facts.probe?.diagnostic === 'AUTH_STATUS_FAILED'
+      ? '读不到 Claude Code 的登录状态，请重新检测'
+      : '在 macOS 的「终端」里登录一次，登录由 Claude Code 自己保存'
   const detail = statusDetail(profile, facts)
   if (detail) return detail
   const warning = compatibilityWarning(profile, facts)
   if (warning) return warning
   if (!facts.probe) return facts.loading ? '正在检测…' : '尚未检测'
-  const probe = facts.probe
-  const version = probe.executableVersion
-    ? (profile.backend === 'claude-code' && probe.executableSource !== 'system'
-        ? '内置 '
-        : '') + probe.executableVersion
-    : '版本未知'
+  const version = facts.probe.executableVersion ?? '版本未知'
   return profile.backend === 'codex'
     ? `${version} · 沿用你的模型与供应商配置`
     : `${version} · ${shortSignIn(facts)}`
@@ -281,10 +305,14 @@ export function rowSummary(
 /** Claude's sign-in in a few words, for the one-line row. */
 function shortSignIn(facts: ExecutorFacts): string {
   const auth = facts.probe?.auth
-  if (!auth) return '沿用本机登录'
-  if (auth.source === 'emperor') return `令牌末 4 位 ${auth.last4 ?? ''}`
+  if (!auth) return '已登录'
   if (auth.source === 'model-route') return '使用已有模型配置'
-  return '沿用本机登录'
+  if (auth.endpoint) return `第三方端点 ${auth.endpoint}`
+  if (auth.source === 'emperor') return `API Key 末 4 位 ${auth.last4 ?? ''}`
+  if (auth.source) return '使用 API Key'
+  if (auth.method === 'claude.ai') return '已登录 Claude 账号'
+  if (auth.method === 'api_key') return '已登录 Console 账号'
+  return '已登录'
 }
 
 // ── 能力 (detail page) ─────────────────────────────────────────────────

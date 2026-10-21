@@ -50,6 +50,28 @@ export const GOLDEN_CASES: Record<string, GoldenCase> = {
     stateRoot: STATE,
     home: HOME,
   },
+  // AGT-12: a Claude Code run writes its own login and home under Emperor
+  // Home (one folder for every run, the status check and 登录); the login
+  // file is opened again after the credential table closes it.
+  'delegation-claude-code': {
+    kind: 'confine',
+    policy: {
+      mode: 'workspace-write',
+      workspaceRoot: '/fixture/ws',
+      privateTempRoot: `${STATE}/delegations/runtime/claude-default/dlg-1/tmp`,
+      runtimeStateRoots: [
+        `${STATE}/delegations/runtime/claude-default/dlg-1`,
+        `${STATE}/delegations/claude-code/config`,
+        `${STATE}/delegations/claude-code/home`,
+      ],
+      readOnlyRoots: ['/fixture/ws/.git'],
+      writableFiles: [
+        `${STATE}/delegations/claude-code/config/.credentials.json`,
+      ],
+    },
+    stateRoot: STATE,
+    home: HOME,
+  },
   'delegation-workspace-write': {
     kind: 'confine',
     policy: {

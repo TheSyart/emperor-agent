@@ -291,6 +291,8 @@ export interface CoreApiCreateOptions extends HarnessHostOptions {
     home?: string
     environment?: NodeJS.ProcessEnv
     loginShell?: LoginShellEnvironment
+    /** 登录 Claude Code: instead of opening macOS Terminal (AGT-12). */
+    openTerminal?: (script: string) => Promise<void>
   } | null
   /** Test hook: the GitHub CLI seen by Pull Request, Issue and CI reads. */
   github?: Partial<
@@ -394,7 +396,9 @@ export class CoreApi {
   workspaceWaitNoticeMs = WORKSPACE_WAIT_NOTICE_MS
   readonly executorConfig: ExecutorConfigStore
   readonly executorFacts: ExecutorFactsStore
-  readonly executorRegistry = new ExecutorRegistry()
+  readonly executorRegistry: ExecutorRegistry
+  /** The upgrade that deletes an earlier build's Claude token (AGT-12). */
+  private readonly claudeKeysMigrated: Promise<boolean>
   readonly delegationRuntime: DelegationService
   readonly delegationService: CoreDelegationService
   readonly delegations: CoreDelegationService
@@ -805,20 +809,34 @@ export class CoreApi {
       this.paths.delegationsRoot,
       opts.verifyGeneratedImage,
     )
-    // Claude tokens pasted in 设置 › 子智能体, under the local key (AGT-02).
-    const claudeTokens = {
+    // The user's own Claude Code API key (使用 API Key), under the local key
+    // (AGT-12). A Claude.ai token an earlier build kept is deleted
+    // here, once, and 设置 › 子智能体 says so.
+    const claudeKeys = {
       root: this.paths.delegationsRoot,
       sealer: kept.secretSealer,
     }
+    this.claudeKeysMigrated = import('../harness/delegation/claude-sign-in')
+      .then((m) => new m.ClaudeKeyStore(claudeKeys).migrate())
+      .catch(() => false)
     const executorHome = opts.executorHome ?? {}
+    const executorLoginShell =
+      executorHome.loginShell ?? createLoginShellEnvironment()
+    this.executorRegistry = new ExecutorRegistry({
+      ...(executorHome.home ? { home: executorHome.home } : {}),
+      ...(executorHome.environment
+        ? { environment: executorHome.environment }
+        : {}),
+      loginShell: executorLoginShell,
+    })
     const executorRuntime = new ExecutorRuntimeService({
       root: this.paths.delegationsRoot,
       ...(executorHome.home ? { home: executorHome.home } : {}),
       ...(executorHome.environment
         ? { environment: executorHome.environment }
         : {}),
-      loginShell: executorHome.loginShell ?? createLoginShellEnvironment(),
-      claudeTokens,
+      loginShell: executorLoginShell,
+      claudeKeys,
       // 设置 › 子智能体 › 高级 › 开发环境 (AGT-08).
       developmentEnvironment: () =>
         developmentEnvironmentOf(this.executorConfig.read()),
@@ -858,12 +876,71 @@ export class CoreApi {
       // 诊断模式: boundary markers and the native scanner (AGT-04).
       diagnostics: () => this.executorConfig.read().diagnosticsMode === true,
     })
+    // Claude Code's sign-in is what `claude auth status` says in the run's
+    // own environment and sandbox (AGT-12); a model route needs no check.
     const checkExecutorAuth = async (
       profile: Parameters<typeof executorRuntime.prepare>[0],
     ) => {
       const runtime = await executorRuntime.probe(profile)
       this.executorFacts.bind(profile, runtime.environment)
-      return runtime.auth
+      if (
+        profile.backend !== 'claude-code' ||
+        profile.authRef.kind !== 'managed-cli-login'
+      )
+        return runtime.auth
+      const executable = await this.executorRegistry.locate(profile)
+      if (!executable)
+        throw new DelegationError('EXECUTOR_MISSING', 'claude is not installed')
+      const { checkClaudeSignIn } =
+        await import('../harness/delegation/claude-sign-in')
+      return checkClaudeSignIn({
+        executable,
+        runtime,
+        processes: executorProcesses,
+      })
+    }
+    const claudeSignIn = {
+      signIn: async (
+        profile: Parameters<typeof executorRuntime.prepare>[0],
+        console: boolean,
+      ) => {
+        const executable = await this.executorRegistry.locate(profile)
+        if (!executable)
+          throw new DelegationError(
+            'EXECUTOR_MISSING',
+            'claude is not installed',
+          )
+        const runtime = await executorRuntime.probe(profile)
+        const { openClaudeSignIn } =
+          await import('../harness/delegation/claude-sign-in')
+        await openClaudeSignIn({
+          root: this.paths.delegationsRoot,
+          executable,
+          environment: runtime.environment,
+          console,
+          ...(executorHome.openTerminal
+            ? { open: executorHome.openTerminal }
+            : {}),
+        })
+      },
+      signOut: async (
+        profile: Parameters<typeof executorRuntime.prepare>[0],
+      ) => {
+        const executable = await this.executorRegistry.locate(profile)
+        if (!executable)
+          throw new DelegationError(
+            'EXECUTOR_MISSING',
+            'claude is not installed',
+          )
+        const runtime = await executorRuntime.probe(profile)
+        const { signOutClaude } =
+          await import('../harness/delegation/claude-sign-in')
+        await signOutClaude({
+          executable,
+          runtime,
+          processes: executorProcesses,
+        })
+      },
     }
     const externalWorkspaces = new DelegationWorkspaceService({
       root: this.paths.delegationsRoot,
@@ -897,7 +974,16 @@ export class CoreApi {
       workspaces: externalWorkspaces,
       results: delegationResults,
       mutations: this.workspaceMutations,
-      runtime: (profile, id) => executorRuntime.prepare(profile, id),
+      // Claude Code's own Console sign-in is API billing too (AGT-07): the
+      // last claude auth status says which sign-in it is (AGT-12).
+      runtime: async (profile, id) => {
+        const prepared = await executorRuntime.prepare(profile, id)
+        return profile.backend === 'claude-code' &&
+          prepared.billing === 'subscription' &&
+          this.executorFacts.probe(profile)?.auth?.method === 'api_key'
+          ? { ...prepared, billing: 'api' as const }
+          : prepared
+      },
       // AGT-07: API-billed runs priced from the bundled catalog, and their
       // settled cost counted in the root task's budget.
       estimateUsd: estimateExecutorUsd,
@@ -1057,6 +1143,10 @@ export class CoreApi {
         root: this.paths.delegationsRoot,
         runtime: executorRuntime,
         processes: executorProcesses,
+        // A claude the last check found signed out is not started (AGT-12).
+        signedIn: (profile) =>
+          profile.backend !== 'claude-code' ||
+          this.executorFacts.probe(profile)?.status !== 'needs_auth',
         onPrepared: (profile, runtime) =>
           this.executorFacts.bind(profile, runtime.environment),
       }),
@@ -1066,7 +1156,8 @@ export class CoreApi {
       refresh: () => this.delegationRuntime.probeProfiles(),
       checkAuth: checkExecutorAuth,
       consent: executorConsent,
-      claudeTokens,
+      claudeKeys,
+      claudeSignIn,
     })
     host.delegationQuestionTimeoutMs = () => {
       try {
@@ -1502,6 +1593,7 @@ export class CoreApi {
     let api: CoreApi | null = null
     try {
       api = new CoreApi(root, host, opts)
+      await api.claudeKeysMigrated
       await api.delegationRuntime.reconcile()
       api.agentService.rebuild()
       await api.delegationAcceptance.reconcile()

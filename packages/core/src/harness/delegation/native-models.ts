@@ -12,11 +12,11 @@ import { AsyncQueue } from './adapters/async-queue'
 import type { ExecutorProfile } from './types'
 import type { ExecutorRuntimeService } from './runtime'
 import { claudeModelSettings } from './local-model-config'
-import { executorExecutable } from './executable'
+import { findExecutable } from './executable'
+import { executorGrants } from './environment'
 import {
   CODEX_FILE_CREDENTIALS,
   acquireCodexAuth,
-  codexAuthWritableFile,
   type CodexAuthLease,
 } from './codex-auth'
 export interface NativeModel {
@@ -44,11 +44,8 @@ export async function readNativeModels(
   const policy = {
     mode: 'read-only' as const,
     workspaceRoot: runtime.runtimeRoot,
-    runtimeStateRoots: [runtime.runtimeRoot],
     privateTempRoot: runtime.tempRoot,
-    ...(runtime.codexAuth
-      ? { writableFiles: [codexAuthWritableFile(runtime.codexAuth)] }
-      : {}),
+    ...executorGrants(runtime),
   }
   try {
     if (profile.backend === 'codex') {
@@ -160,7 +157,10 @@ export async function readNativeModels(
     }
     const options: Options = {
       cwd: runtime.runtimeRoot,
-      pathToClaudeCodeExecutable: executorExecutable(profile),
+      // The installed claude (AGT-12); runtime.prepare put its folder on PATH.
+      pathToClaudeCodeExecutable:
+        findExecutable(profile.executablePath, runtime.environment.PATH) ??
+        profile.executablePath,
       env: runtime.environment,
       abortController: controller,
       settingSources: [],

@@ -3,7 +3,6 @@ import { validPng } from './image-proof'
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, relative, sep } from 'node:path'
 import { durableReplaceSync } from '../../store/persistence'
-import { claudeExecutableSource } from './executable'
 import type {
   ExecutorProfile,
   ExecutorProbe,
@@ -31,7 +30,6 @@ const key = (p: ExecutorProfile) =>
     id: p.id,
     backend: p.backend,
     path: p.executablePath,
-    source: claudeExecutableSource(p) ?? null,
     model: p.defaultModel ?? null,
     auth: p.authRef,
     policy: EXECUTOR_TOOL_POLICY,
@@ -202,7 +200,8 @@ export class ExecutorFactsStore {
           ? account
           : (environment.ANTHROPIC_API_KEY ??
             environment.ANTHROPIC_AUTH_TOKEN ??
-            environment.CLAUDE_CODE_OAUTH_TOKEN ??
+            // Claude Code's own sign-in: its folder (AGT-12).
+            environment.CLAUDE_CONFIG_DIR ??
             null),
       provider:
         environment.ANTHROPIC_BASE_URL ??

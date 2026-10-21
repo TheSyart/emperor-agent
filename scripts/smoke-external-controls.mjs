@@ -105,7 +105,7 @@ try {
   for (const profile of config.profiles) {
     profile.enabled = true
     profile.authRef = { kind: 'managed-cli-login' }
-    // Claude Code runs the binary bundled with Emperor (AGT-01).
+    // Claude Code runs the installed claude on PATH (AGT-12).
     if (profile.backend === 'codex')
       profile.executablePath = '/opt/homebrew/bin/codex'
   }

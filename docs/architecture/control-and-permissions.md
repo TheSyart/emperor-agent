@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、安全审查者、维护者<br>
-> 最后核验：2026-10-21（对照 `f764443d`）<br>
+> 最后核验：2026-10-22（对照 `84245509`）<br>
 > 事实源：`packages/core/src/sandbox/`、`packages/core/src/harness/sandbox/`、`packages/core/src/mcp/containment.ts`、`packages/core/src/harness/hooks/contained.ts`、`packages/core/src/harness/workflow/process-worker.ts`、`packages/core/src/api/services/session-defaults-service.ts`、`packages/core/src/harness/approval/`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/questions/`、`packages/core/src/harness/host/interactions.ts`、`packages/core/src/harness/computer-use/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/api/mutation-guard.ts`、`packages/core/src/workspace/git-runner.ts`、`packages/core/src/security/`、`packages/core/src/config/model-config.ts`、`packages/core/src/mcp/config.ts`
 
 Agent 能做什么由两个独立旋钮决定：**沙箱模式**限制文件写入范围，**审批策略**决定需要批准的操作是否询问用户。用户看到的是把两者打包在一起的**权限预设**。Plan 模式是独立的会话状态，不是第四种权限。
@@ -98,11 +98,11 @@ Seatbelt 取最后一条匹配的规则，所以 profile 分层写：宽泛放�
 
 `sandbox/protected-state.ts` 定义一张表，分三类：
 
-| 类别         | 路径                                                                                                                                         | 读                                          | 写  |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | --- |
-| `state`      | `<stateRoot>/computer-use`、`<stateRoot>/browser`                                                                                            | 拒                                          | 拒  |
-| `config`     | `<stateRoot>` 下直接以 `model_config`、`mcp_config`、`settings.json`、`hooks.json` 开头的文件（含 `.pre-seal-*`、`.tmp-*`、`.corrupt-*` 等） | 拒                                          | 拒  |
-| `credential` | `~/.ssh`、`~/.aws`、`~/.config/gcloud`、`~/.docker/config.json`、`~/.netrc`、`~/.codex/auth.json`、`~/.claude/.credentials.json`             | 仅 `danger-full-access`（常设或一次性提权） | 拒  |
+| 类别         | 路径                                                                                                                                                                                                                                                                                | 读                                          | 写  |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | --- |
+| `state`      | `<stateRoot>/computer-use`、`<stateRoot>/browser`                                                                                                                                                                                                                                   | 拒                                          | 拒  |
+| `config`     | `<stateRoot>` 下直接以 `model_config`、`mcp_config`、`settings.json`、`hooks.json` 开头的文件（含 `.pre-seal-*`、`.tmp-*`、`.corrupt-*` 等）                                                                                                                                        | 拒                                          | 拒  |
+| `credential` | `~/.ssh`、`~/.aws`、`~/.config/gcloud`、`~/.docker/config.json`、`~/.netrc`、`~/.codex/auth.json`、`~/.claude/.credentials.json`；`<stateRoot>/delegations/claude-code/config/.credentials.json`（Claude Code 在专用目录里自己保存的登录，AGT-12；只对 Claude Code 自己的运行放行） | 仅 `danger-full-access`（常设或一次性提权） | 拒  |
 
 - 文件工具：`write` / `edit` 对三类都返回 `FS_PROTECTED_PATH`，任何模式、任何提权都一样；`read` 对 `state` / `config` 返回 `FS_PROTECTED_PATH`，对 `credential` 在受限模式下返回 `FS_SANDBOX_DENIED` 并提示带 `sandbox_permissions="danger-full-access"` 重试。判断按真实路径（符号链接、大小写、`/System/Volumes/Data` 别名），再按文件身份（硬链接）。
 - 搜索工具：搜索根落在表内时报 `SEARCH_PROTECTED_PATH`，从上级目录搜索时略过表内条目；`credential` 只在 `danger-full-access` 下可搜，搜索不提供提权。

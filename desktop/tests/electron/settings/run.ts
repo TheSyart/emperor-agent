@@ -6,10 +6,13 @@
  * window keeps the pages without horizontal scrolling. A relaunch with a
  * damaged vault.json still starts and 密码管理器 offers 重新开始（先备份）
  * (SEC-09). 高级 › 存储 (KRN-12) shows a total within 5% of `du` and 清理
- * removes a 40-day-old orphan spill file. 子智能体 › Claude Code 设置令牌
- * seals the pasted token and shows only 末 4 位, reading sign-ins from an
- * empty folder instead of ~/.claude (AGT-02). Screenshots of every page land
- * in out-e2e/settings/.
+ * removes a 40-day-old orphan spill file. 子智能体 › Claude Code: 登录 Claude
+ * Code runs claude's own `auth login` in its dedicated folder and the page
+ * then shows the account; 退出登录 signs out; 使用 API Key seals the key and
+ * shows only 末 4 位 (AGT-12). A fake claude stands in for the installed
+ * one, the sign-in script runs without Terminal, and sign-ins are read
+ * from an empty folder instead of ~/.claude. Screenshots of every page
+ * land in out-e2e/settings/.
  * Prints `E2E-RESULT {json}` lines like the other Electron suites.
  *
  *   node scripts/e2e-cu.mjs --mode=settings   (after `npm run build`)
@@ -100,6 +103,34 @@ function report(result: Result): void {
 
 class Abort extends Error {}
 
+/**
+ * The installed claude's stand-in: `--version`, and `auth status | login |
+ * logout` answered like the CLI (JSON; exit 0 signed in, 1 not), keyed to
+ * its CLAUDE_CONFIG_DIR. Returns its folder.
+ */
+function fakeClaude(dir: string): string {
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(
+    join(dir, 'claude'),
+    [
+      '#!/bin/sh',
+      'dir="$CLAUDE_CONFIG_DIR"',
+      'if [ "$1" = "--version" ]; then echo "2.1.300 (Claude Code)"; exit 0; fi',
+      'if [ "$1" = "auth" ] && [ "$2" = "login" ]; then echo signed-in > "$dir/e2e-signed-in"; echo "Login successful."; exit 0; fi',
+      'if [ "$1" = "auth" ] && [ "$2" = "logout" ]; then rm -f "$dir/e2e-signed-in"; exit 0; fi',
+      'if [ "$1" = "auth" ] && [ "$2" = "status" ]; then',
+      '  if [ -n "$ANTHROPIC_API_KEY" ]; then printf \'{"loggedIn":true,"authMethod":"api_key","apiProvider":"firstParty","apiKeySource":"ANTHROPIC_API_KEY"}\\n\'; exit 0; fi',
+      '  if [ -f "$dir/e2e-signed-in" ]; then printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"e2e@example.com","orgName":"E2E Lab","subscriptionType":"max"}\\n\'; exit 0; fi',
+      '  printf \'{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}\\n\'; exit 1',
+      'fi',
+      'exit 2',
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  )
+  return dir
+}
+
 async function check<T>(
   page: Page,
   name: string,
@@ -171,9 +202,11 @@ async function launch(
   delete env.ELECTRON_RUN_AS_NODE
   env.EMPEROR_CONFIG_DIR = home
   // Claude/Codex sign-ins come from an empty folder, never ~/.claude, and
-  // the login shell does not run (AGT-02).
+  // the login shell does not run (AGT-02). A fake claude comes first on
+  // PATH: the real one never runs (AGT-12).
   env.EMPEROR_E2E_EXECUTOR_HOME = join(home, 'executor-home')
   mkdirSync(env.EMPEROR_E2E_EXECUTOR_HOME, { recursive: true })
+  env.PATH = `${fakeClaude(join(home, 'executor-bin'))}:${env.PATH ?? ''}`
   const app = await _electron.launch({
     args: ['.'],
     cwd: desktop,
@@ -267,9 +300,9 @@ async function settings(page: Page, home: string): Promise<void> {
 
   await check(
     page,
-    'Claude Code 设置令牌 seals the token and shows only 末 4 位',
+    'Claude Code: 登录 runs claude’s own sign-in in its folder; 退出登录; 使用 API Key shows only 末 4 位',
     async () => {
-      const token = 'sk-ant-oat01-e2e-fixture-not-a-real-token-9f3c'
+      const key = 'sk-ant-api03-e2e-fixture-not-a-real-key-9f3c'
       const dialog = await openSection(page, 'executors')
       // The sign-in lives on Claude Code's 详情 page (AGT-10).
       await dialog
@@ -279,41 +312,70 @@ async function settings(page: Page, home: string): Promise<void> {
         '[data-executor-detail="claude-code"] [data-claude-sign-in]',
       )
       await signIn.waitFor({ timeout: 15_000 })
+      const state = signIn.locator('[data-claude-auth-state]')
       await until(
-        async () => (await signIn.innerText()).includes('尚未登录'),
+        async () => (await state.innerText()).includes('尚未登录'),
         30_000,
         'Claude Code 尚未登录',
       )
-      if ((await dialog.innerText()).includes('auth login'))
-        throw new Error('the page still says auth login')
-      await signIn.locator('[data-claude-token-set]').click()
-      const tokenDialog = page.getByRole('dialog', {
-        name: '设置 Claude Code 令牌',
-      })
-      await tokenDialog.waitFor()
-      await tokenDialog.locator('[data-claude-token-input]').fill(token)
-      await tokenDialog.locator('[data-claude-token-save]').click()
-      await tokenDialog.waitFor({ state: 'hidden', timeout: 30_000 })
-      const status = signIn.locator('[data-claude-auth-source]')
+      if (await dialog.locator('input[type="password"]').count())
+        throw new Error('the page asks for a token')
+      // 登录 Claude Code: the script Core would open in Terminal runs here.
+      await signIn.locator('[data-claude-sign-in-start]').click()
+      await signIn.locator('[data-claude-sign-in-pending]').waitFor()
+      await signIn
+        .locator('[data-claude-sign-in-pending] button', {
+          hasText: '重新检测',
+        })
+        .click()
       await until(
-        async () => (await status.innerText()).includes('末 4 位 9f3c'),
+        async () =>
+          (await state.innerText()).includes(
+            '已登录 Claude 账号 · e2e@example.com',
+          ),
         30_000,
-        '已设置 · 末 4 位',
+        '已登录 Claude 账号',
       )
-      await page.screenshot({ path: join(shots, 'claude-token-set.png') })
+      await page.screenshot({ path: join(shots, 'claude-signed-in.png') })
+      const config = join(home, 'delegations', 'claude-code', 'config')
+      if (!existsSync(join(config, 'e2e-signed-in')))
+        throw new Error('claude did not sign in in its dedicated folder')
+      // 退出登录.
+      await signIn.locator('[data-claude-sign-out]').click()
+      await until(
+        async () => (await state.innerText()).includes('尚未登录'),
+        30_000,
+        'signed out',
+      )
+      // 使用 API Key: sealed, 末 4 位 only.
+      await signIn.locator('[data-claude-api-key-set]').click()
+      const keyDialog = page.getByRole('dialog', { name: '使用 API Key' })
+      await keyDialog.waitFor()
+      await keyDialog.locator('[data-claude-api-key-input]').fill(key)
+      await keyDialog.locator('[data-claude-api-key-save]').click()
+      await keyDialog.waitFor({ state: 'hidden', timeout: 30_000 })
+      await until(
+        async () => (await state.innerText()).includes('末 4 位 9f3c'),
+        30_000,
+        '使用 API Key · 末 4 位',
+      )
+      await page.screenshot({ path: join(shots, 'claude-api-key.png') })
       const file = join(home, 'delegations', 'credentials.json')
       const raw = readFileSync(file, 'utf8')
-      if (!raw.includes('el1:') || raw.includes(token))
+      if (!raw.includes('el1:') || raw.includes(key))
         throw new Error('credentials.json is not sealed')
-      if ((await page.content()).includes(token))
-        throw new Error('the page shows the token')
-      await signIn.locator('[data-claude-token-clear]').click()
+      if (raw.includes('oauth-token'))
+        throw new Error('a Claude token was saved')
+      if ((await page.content()).includes(key))
+        throw new Error('the page shows the key')
+      await signIn.locator('[data-claude-api-key-clear]').click()
       await until(
-        async () => (await signIn.innerText()).includes('尚未登录'),
+        async () => (await state.innerText()).includes('尚未登录'),
         30_000,
         'Claude Code back to 尚未登录',
       )
       return {
+        signedIn: true,
         sealed: true,
         cleared: !readFileSync(file, 'utf8').includes('el1:'),
       }

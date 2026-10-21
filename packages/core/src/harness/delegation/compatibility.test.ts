@@ -24,22 +24,22 @@ it('reads versions from CLI banners and user agents', () => {
   })
   expect(parseVersion('no version')).toBeUndefined()
 })
-it('requires at least the bundled Claude minor, never an exact build', () => {
-  expect(CLAUDE_REQUIRED_RANGE).toBe('>= 2.1')
-  for (const version of ['2.1.0', '2.1.290', '2.2.0', '3.0.1'])
+it('requires a claude with auth status and auth login --console, never an exact build', () => {
+  expect(CLAUDE_REQUIRED_RANGE).toBe('>= 2.1.79')
+  for (const version of ['2.1.79', '2.1.290', '2.2.0', '3.0.1'])
     expect(
       claudeInitIssue(
         { claude_code_version: version },
         { requireVersion: true },
       ),
     ).toBeUndefined()
-  expect(
-    claudeInitIssue(
-      { claude_code_version: '2.0.99' },
-      { requireVersion: true },
-    ),
-  ).toContain('>= 2.1')
-  // The bundled binary is ours; a missing field only matters for the installed one.
+  for (const version of ['2.0.99', '2.1.78'])
+    expect(
+      claudeInitIssue(
+        { claude_code_version: version },
+        { requireVersion: true },
+      ),
+    ).toContain('>= 2.1.79')
   expect(claudeInitIssue({}, { requireVersion: false })).toBeUndefined()
   expect(claudeInitIssue({}, { requireVersion: true })).toMatch(/version/)
   expect(

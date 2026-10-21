@@ -16,7 +16,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { defaultExecutorConfig } from './config'
 import { ExecutorRegistry } from './registry'
 import {
-  CLAUDE_BUNDLED_VERSION,
   CLAUDE_SDK_VERSION,
   KNOWN_CODEX_PROTOCOLS,
   codexProtocolDigest,
@@ -181,55 +180,56 @@ describe('compatibility handshake (AGT-01)', () => {
     executablePath,
   })
 
-  it('1. runs the Claude bundled with Emperor even when the installed claude is newer', async () => {
+  it('1. runs the installed claude found on PATH or the usual install folders (AGT-12)', async () => {
     const root = tempRoot()
-    versionScript(root, 'claude', '2.1.290 (Claude Code)')
-    const bundled = versionScript(root, 'bundled', '2.1.281 (Claude Code)')
+    // A Dock launch: PATH has none of the user's folders; the usual install
+    // folders (here ~/.volta/bin, which comes first) are searched too. The
+    // login shell's PATH is the last resort (executable.test.ts).
+    const bin = join(root, '.volta', 'bin')
+    mkdirSync(bin, { recursive: true })
+    versionScript(bin, 'claude', '2.1.300 (Claude Code)')
     const registry = new ExecutorRegistry({
       home: root,
-      environment: { PATH: root + ':/usr/bin:/bin' },
-      bundledClaude: () => bundled,
+      environment: { PATH: '/usr/bin:/bin' },
     })
-    expect(claudeProfile().executableSource ?? 'bundled').toBe('bundled')
+    expect(await registry.locate(claudeProfile())).toBe(join(bin, 'claude'))
     expect(await registry.probe(claudeProfile())).toMatchObject({
       status: 'available',
-      executableSource: 'bundled',
-      executableVersion: '2.1.281',
+      executableVersion: '2.1.300',
     })
   })
-  it('2. accepts an installed claude at or above the locked minor', async () => {
+  it('2. says claude is not installed when nothing is found, and keeps a named path', async () => {
     const root = tempRoot()
-    const installed = versionScript(root, 'claude', '2.1.290 (Claude Code)')
-    const registry = new ExecutorRegistry({
+    const missing = await new ExecutorRegistry({
       home: root,
-      bundledClaude: () => undefined,
+      environment: { PATH: root },
+      loginShell: { read: async () => ({}) },
+    }).probe({ ...claudeProfile(), executablePath: join(root, 'no-claude') })
+    expect(missing).toMatchObject({
+      status: 'missing',
+      diagnostic: 'claude is not installed',
     })
+    const installed = versionScript(root, 'my-claude', '2.1.290 (Claude Code)')
     expect(
-      await registry.probe({
+      await new ExecutorRegistry({ home: root }).probe({
         ...claudeProfile(),
-        executableSource: 'system',
         executablePath: installed,
       }),
-    ).toMatchObject({
-      status: 'available',
-      executableSource: 'system',
-      executableVersion: '2.1.290',
-    })
+    ).toMatchObject({ status: 'available', executableVersion: '2.1.290' })
   })
   it('3. names the version it needs when the installed claude is too old', async () => {
     const root = tempRoot()
-    const installed = versionScript(root, 'claude', '2.0.14 (Claude Code)')
+    const installed = versionScript(root, 'claude', '2.1.40 (Claude Code)')
     const probe = await new ExecutorRegistry({ home: root }).probe({
       ...claudeProfile(),
-      executableSource: 'system',
       executablePath: installed,
     })
     expect(probe).toMatchObject({
       status: 'incompatible',
-      executableVersion: '2.0.14',
-      requiredVersion: '>= 2.1',
+      executableVersion: '2.1.40',
+      requiredVersion: '>= 2.1.79',
     })
-    expect(probe.diagnostic).toContain('>= 2.1')
+    expect(probe.diagnostic).toContain('>= 2.1.79')
   })
   it('4. treats a Codex whose protocol digest is known as compatible', async () => {
     const root = tempRoot()
@@ -298,13 +298,10 @@ describe('compatibility handshake (AGT-01)', () => {
       expect(protocol.digests).toContain(digest)
     }
   })
-  it('keeps the bundled Claude version in step with the SDK that ships it', () => {
+  it('names the Agent SDK it drives the installed claude with', () => {
     const sdk = dirname(
       createRequire(import.meta.url).resolve('@anthropic-ai/claude-agent-sdk'),
     )
-    expect(
-      JSON.parse(readFileSync(join(sdk, 'manifest.json'), 'utf8')).version,
-    ).toBe(CLAUDE_BUNDLED_VERSION)
     expect(
       JSON.parse(readFileSync(join(sdk, 'package.json'), 'utf8')).version,
     ).toBe(CLAUDE_SDK_VERSION)

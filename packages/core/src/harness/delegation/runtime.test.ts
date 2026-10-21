@@ -89,7 +89,11 @@ it('reuses explicit local CLI authentication directories without importing their
       },
       'dlg-custom-codex',
     )
-    expect(a.environment.CLAUDE_CODE_OAUTH_TOKEN).toBe('custom-claude-token')
+    // Claude's own login file is claude's: Emperor never reads it (AGT-12).
+    expect(JSON.stringify(a.environment)).not.toContain('custom-claude-token')
+    expect(a.environment.CLAUDE_CONFIG_DIR).toBe(
+      join(f.root, 'claude-code', 'config'),
+    )
     expect(b.environment.OPENAI_API_KEY).toBe('custom-codex-key')
     expect(a.environment.CLAUDE_CONFIG_DIR).not.toBe(claude)
     expect(b.environment.CODEX_HOME).not.toBe(codex)

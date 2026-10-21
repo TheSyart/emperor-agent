@@ -109,9 +109,12 @@ export const actionIcons = {
 } satisfies Record<string, IconComponent>
 
 // ── Model providers without an upstream logo ────────────────────────────────
+// `agent`: Claude Code and Codex, named in text with a neutral glyph — their
+// logos are their makers' marks (AGT-12).
 export const providerGlyphIcons = {
   server: Server,
   custom: Plug,
+  agent: Terminal,
 } satisfies Record<string, IconComponent>
 
 // ── Tools ───────────────────────────────────────────────────────────────────

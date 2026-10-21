@@ -226,7 +226,7 @@ it('rebinding model discovery after account changes makes old verified evidence 
   expect(facts.view(f.profile).nativeCapabilities.search.status).toBe('stale')
 })
 
-it('keeps configured and native fallback choices without login and never starts an unauthenticated CLI', async () => {
+it('keeps configured and native fallback choices without login and never starts a claude that is not signed in', async () => {
   const f = fixture(),
     home = join(f.root, 'unauthenticated-home')
   mkdirSync(join(home, '.claude'), { recursive: true })
@@ -240,20 +240,27 @@ it('keeps configured and native fallback choices without login and never starts 
       environment: { PATH: '/fixture' },
     }),
     readNative = vi.fn(async () => [])
-  const service = new ExecutorModelCatalogService({ ...f, runtime, readNative })
+  // The last 设置 check: claude auth status said it is not signed in.
+  const service = new ExecutorModelCatalogService({
+    ...f,
+    runtime,
+    readNative,
+    signedIn: () => false,
+  })
   const value = await service.list(defaultExecutorConfig().profiles[0]!, true)
   expect(value.configuredModel).toBe('opus')
   expect(value.models.map((m) => m.id)).toEqual(
     expect.arrayContaining(['opus', 'sonnet', 'haiku']),
   )
-  expect(value.diagnostic).toBeTruthy()
+  expect(value.diagnostic).toContain('还没有登录')
   expect(readNative).not.toHaveBeenCalled()
-  await expect(
-    runtime.prepare(
-      defaultExecutorConfig().profiles[0]!,
-      'dlg-still-requires-login',
-    ),
-  ).rejects.toThrow('AUTH_REQUIRED')
+  // Whether it is signed in is claude's to say (AGT-12): the runtime
+  // prepares without a credential of Emperor's.
+  const prepared = await runtime.prepare(
+    defaultExecutorConfig().profiles[0]!,
+    'dlg-own-login',
+  )
+  expect(prepared.auth).toEqual({ source: null })
 })
 
 it('reads a Codex model without login while keeping ordinary execution authentication strict', async () => {

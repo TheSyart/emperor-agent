@@ -137,9 +137,9 @@ function walk(root, visit) {
 }
 
 /**
- * Third-party code keeps its own signature: the Claude Code binary is
- * Anthropic's (Developer ID, hardened runtime), and node-pty's binaries are
- * recorded with their hashes in the ASAR header.
+ * Third-party code keeps its own signature: node-pty's binaries are
+ * recorded with their hashes in the ASAR header. (Emperor ships no Claude
+ * Code binary since AGT-12; it runs the user's installed claude.)
  */
 function isUnpackedThirdParty(rel) {
   return rel.startsWith(`Contents${sep}Resources${sep}app.asar.unpacked${sep}`)

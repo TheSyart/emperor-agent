@@ -13,8 +13,12 @@
  *   (`mcp_config`, `skill_manage`), which never go through the file tools.
  * - `credential`: `~/.ssh`, `~/.aws`, `~/.config/gcloud`,
  *   `~/.docker/config.json`, `~/.netrc`, `~/.codex/auth.json`,
- *   `~/.claude/.credentials.json`. Read only under danger-full-access (a
- *   standing session or one approved escalation); never written.
+ *   `~/.claude/.credentials.json`, and the login Claude Code keeps in its
+ *   folder under Emperor Home when the Keychain refuses it
+ *   (`<stateRoot>/delegations/claude-code/config/.credentials.json`,
+ *   AGT-12; Claude Code's own runs get it back as a granted file). Read
+ *   only under danger-full-access (a standing session or one approved
+ *   escalation); never written.
  *
  * One judgment for every way in: Seatbelt (backend.ts) writes the same
  * table into the Shell profile; `read` / `edit` / `write` and `grep` /
@@ -38,6 +42,11 @@ export const PROTECTED_CONFIG_NAMES = [
   'mcp_config',
   'settings.json',
   'hooks.json',
+] as const
+
+/** Credentials under Emperor Home that are not Emperor's (AGT-12). */
+export const PROTECTED_STATE_CREDENTIAL_FILES = [
+  'delegations/claude-code/config/.credentials.json',
 ] as const
 
 /** The user's credential locations, relative to the home folder. */
@@ -128,6 +137,11 @@ export function protectedEntries(scope: ProtectedPathScope): ProtectedEntry[] {
       class: 'credential' as const,
       match: entry.kind === 'dir' ? ('subtree' as const) : ('exact' as const),
       path: canonicalNearest(join(home, entry.path)),
+    })),
+    ...PROTECTED_STATE_CREDENTIAL_FILES.map((path) => ({
+      class: 'credential' as const,
+      match: 'exact' as const,
+      path: canonicalNearest(join(root, path)),
     })),
   ]
 }

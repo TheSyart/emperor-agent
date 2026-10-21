@@ -510,17 +510,17 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     }
   })
 
-  it("8. ships only the build architecture's Claude SDK binary (AGT-01)", () => {
+  it('7 · ships no Claude Code binary, only the Agent SDK it drives the installed claude with (AGT-12)', () => {
     const config = fs.readFileSync(
       path.join(desktopRoot, 'electron-builder.yml'),
       'utf8',
     )
-    // electron-builder expands ${arch} per build, so an arm64 package never
-    // picks up an installed x64 binary (or the reverse).
+    // Emperor runs the user's own, unmodified claude; the package carries
+    // the SDK's JavaScript and no platform binary, packed or unpacked.
+    expect(config).not.toMatch(/claude-agent-sdk-(?:darwin|\$\{|\*)/)
     expect(config).toContain(
-      '  - node_modules/@anthropic-ai/claude-agent-sdk-darwin-${arch}/claude',
+      '  - node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs',
     )
-    expect(config).not.toMatch(/claude-agent-sdk-\*/)
     const hook = require(
       path.join(desktopRoot, 'scripts', 'after-pack.cjs'),
     ) as {
@@ -537,21 +537,21 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       ): void
     }
     const sdk = '/node_modules/@anthropic-ai/claude-agent-sdk'
-    const binary = (arch: string) =>
-      `/node_modules/@anthropic-ai/claude-agent-sdk-darwin-${arch}/claude`
-    expect(
-      hook.isAllowedNodeModuleEntry(binary('arm64'), 'darwin', 'arm64'),
-    ).toBe(true)
-    expect(
-      hook.isAllowedNodeModuleEntry(binary('x64'), 'darwin', 'arm64'),
-    ).toBe(false)
-    expect(
-      hook.isAllowedNodeModuleEntry(
-        sdk + '/node_modules/@anthropic-ai/claude-agent-sdk-darwin-x64/claude',
-        'darwin',
-        'arm64',
-      ),
-    ).toBe(false)
+    for (const file of ['package.json', 'sdk.mjs', 'manifest.json'])
+      expect(
+        hook.isAllowedNodeModuleEntry(`${sdk}/${file}`, 'darwin', 'arm64'),
+      ).toBe(true)
+    for (const entry of [
+      '/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64',
+      '/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude',
+      '/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/package.json',
+      sdk + '/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude',
+      '/node_modules/@anthropic-ai/claude-code/cli.js',
+    ])
+      expect(
+        hook.isAllowedNodeModuleEntry(entry, 'darwin', 'arm64'),
+        entry,
+      ).toBe(false)
     const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'emperor-claude-sdk-'))
     try {
       const entries = [
@@ -560,29 +560,30 @@ describe('desktop release packaging (MIG-REL-001)', () => {
         sdk + '/sdk.mjs',
         sdk + '/manifest.json',
       ]
-      const unpacked = (arch: string) =>
-        path.join(
-          temp,
-          'app.asar.unpacked',
-          'node_modules',
-          '@anthropic-ai',
-          `claude-agent-sdk-darwin-${arch}`,
-        )
-      for (const arch of ['arm64', 'x64']) {
-        fs.mkdirSync(unpacked(arch), { recursive: true })
-        fs.writeFileSync(path.join(unpacked(arch), 'claude'), 'native', {
-          mode: 0o755,
-        })
-      }
       const validate = () =>
         hook.validatePackagedClaudeSdk(temp, entries, 'darwin', 'arm64')
-      expect(validate).toThrow(/darwin-x64/)
-      fs.rmSync(unpacked('x64'), { recursive: true })
       expect(validate).not.toThrow()
-      fs.chmodSync(path.join(unpacked('arm64'), 'claude'), 0o644)
-      expect(validate).toThrow(/not executable/)
-      fs.rmSync(unpacked('arm64'), { recursive: true })
-      expect(validate).toThrow(/darwin-arm64/)
+      expect(() =>
+        hook.validatePackagedClaudeSdk(
+          temp,
+          entries.filter((e) => !e.endsWith('sdk.mjs')),
+          'darwin',
+          'arm64',
+        ),
+      ).toThrow(/sdk\.mjs/)
+      // A Claude Code binary anywhere in the unpacked tree fails the build.
+      const unpacked = path.join(
+        temp,
+        'app.asar.unpacked',
+        'node_modules',
+        '@anthropic-ai',
+        'claude-agent-sdk-darwin-arm64',
+      )
+      fs.mkdirSync(unpacked, { recursive: true })
+      fs.writeFileSync(path.join(unpacked, 'claude'), 'native', {
+        mode: 0o755,
+      })
+      expect(validate).toThrow(/must not ship a Claude Code binary/)
     } finally {
       fs.rmSync(temp, { recursive: true, force: true })
     }
@@ -955,8 +956,7 @@ describe('desktop release packaging (MIG-REL-001)', () => {
       path.join(ptyStage, 'lib', 'index.js'),
       'module.exports={};\n',
     )
-    // AGT-01: the Agent SDK in the archive, this architecture's Claude
-    // binary unpacked beside it.
+    // The Agent SDK in the archive; no Claude Code binary (AGT-12).
     const sdkStage = path.join(
       appStage,
       'node_modules',
@@ -966,18 +966,6 @@ describe('desktop release packaging (MIG-REL-001)', () => {
     fs.mkdirSync(sdkStage, { recursive: true })
     for (const file of ['package.json', 'sdk.mjs', 'manifest.json'])
       fs.writeFileSync(path.join(sdkStage, file), '{}\n')
-    const claudeUnpacked = path.join(
-      appOutDir,
-      'resources',
-      'app.asar.unpacked',
-      'node_modules',
-      '@anthropic-ai',
-      'claude-agent-sdk-darwin-arm64',
-    )
-    fs.mkdirSync(claudeUnpacked, { recursive: true })
-    fs.writeFileSync(path.join(claudeUnpacked, 'claude'), 'native-fixture', {
-      mode: 0o755,
-    })
     const asarPath = path.join(appOutDir, 'resources', 'app.asar')
     const payloadBytes = regularFileBytes(appStage)
     await createPackage(appStage, asarPath)

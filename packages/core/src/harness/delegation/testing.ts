@@ -1,4 +1,10 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type {
@@ -68,6 +74,97 @@ export class FakeClock {
 export function delegationTestDirectory(): { root: string; cleanup(): void } {
   const root = mkdtempSync(join(tmpdir(), 'emperor-delegation-test-'))
   return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) }
+}
+
+/**
+ * A stand-in for the installed `claude` (AGT-12), written as `<dir>/claude`:
+ * `--version`, and `auth status | login | logout` answered the way the CLI
+ * answers them — JSON, exit 0 signed in, 1 not — keyed to its own
+ * CLAUDE_CONFIG_DIR. Like the CLI it prefers ANTHROPIC_AUTH_TOKEN, then
+ * ANTHROPIC_API_KEY, then its own sign-in. Every call appends its
+ * arguments and environment to `<CLAUDE_CONFIG_DIR>/fake-claude.log`
+ * ({@link fakeClaudeCalls}). Tests never run the real claude.
+ */
+export function fakeClaude(
+  dir: string,
+  options: { version?: string; status?: 'fail' | 'garbage' } = {},
+): string {
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'claude')
+  const status =
+    options.status === 'fail'
+      ? '      echo "status exploded" >&2; exit 3'
+      : options.status === 'garbage'
+        ? '      echo "Logged in somehow"; exit 0'
+        : [
+            '      source=ANTHROPIC_API_KEY',
+            '      if [ -n "$ANTHROPIC_AUTH_TOKEN" ]; then method=oauth_token; ok=true',
+            '      elif [ -n "$ANTHROPIC_API_KEY" ]; then method=api_key; ok=true',
+            '      elif [ "$(cat "$dir/fake-signed-in" 2>/dev/null)" = console ]; then method=api_key; ok=true; source="/login managed key"',
+            '      elif [ -f "$dir/fake-signed-in" ]; then method=claude.ai; ok=true',
+            '      else method=none; ok=false; fi',
+            '      if [ "$method" = claude.ai ]; then',
+            `        printf '{\\n  "loggedIn": true,\\n  "authMethod": "claude.ai",\\n  "apiProvider": "firstParty",\\n  "configDirectory": "%s",\\n  "email": "ada@example.com",\\n  "orgId": "11111111-2222-3333-4444-555555555555",\\n  "orgName": "Ada Lab",\\n  "subscriptionType": "max"\\n}\\n' "$dir"`,
+            '      elif [ "$method" = api_key ]; then',
+            `        printf '{\\n  "loggedIn": true,\\n  "authMethod": "api_key",\\n  "apiProvider": "firstParty",\\n  "configDirectory": "%s",\\n  "apiKeySource": "%s"\\n}\\n' "$dir" "$source"`,
+            '      else',
+            `        printf '{\\n  "loggedIn": %s,\\n  "authMethod": "%s",\\n  "apiProvider": "firstParty",\\n  "configDirectory": "%s"\\n}\\n' "$ok" "$method" "$dir"`,
+            '      fi',
+            '      [ "$ok" = true ] && exit 0 || exit 1',
+          ].join('\n')
+  writeFileSync(
+    path,
+    [
+      '#!/bin/sh',
+      'dir="$CLAUDE_CONFIG_DIR"',
+      'if [ -n "$dir" ] && [ -d "$dir" ]; then',
+      `  { printf '\\036ARGS %s\\n' "$*"; env; } >> "$dir/fake-claude.log"`,
+      'fi',
+      `if [ "$1" = "--version" ]; then echo "${options.version ?? '2.1.300'} (Claude Code)"; exit 0; fi`,
+      'if [ "$1" = "auth" ]; then',
+      '  case "$2" in',
+      '    status)',
+      status,
+      '      ;;',
+      '    login)',
+      '      if [ "$3" = "--console" ]; then echo console > "$dir/fake-signed-in"; else echo claude.ai > "$dir/fake-signed-in"; fi',
+      '      echo "Login successful."; exit 0',
+      '      ;;',
+      '    logout)',
+      '      rm -f "$dir/fake-signed-in"; echo "Successfully logged out from your Anthropic account."; exit 0',
+      '      ;;',
+      '  esac',
+      'fi',
+      'exit 2',
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  )
+  return path
+}
+
+/** What the fake `claude` was asked, with the environment it saw. */
+export function fakeClaudeCalls(
+  configDirectory: string,
+): Array<{ args: string; env: Record<string, string> }> {
+  let log = ''
+  try {
+    log = readFileSync(join(configDirectory, 'fake-claude.log'), 'utf8')
+  } catch {
+    return []
+  }
+  return log
+    .split('\u001eARGS ')
+    .slice(1)
+    .map((chunk) => {
+      const [args = '', ...lines] = chunk.split('\n')
+      const env: Record<string, string> = {}
+      for (const line of lines) {
+        const at = line.indexOf('=')
+        if (at > 0) env[line.slice(0, at)] = line.slice(at + 1)
+      }
+      return { args, env }
+    })
 }
 
 import type { DelegationRecord, DelegationRunRecord } from './types'

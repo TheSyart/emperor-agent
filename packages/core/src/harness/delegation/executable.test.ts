@@ -1,69 +1,72 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
-import { defaultExecutorConfig } from './config'
 import {
-  bundledClaudeExecutable,
-  claudeExecutableSource,
-  executorExecutable,
+  CLAUDE_INSTALL_COMMAND,
+  findExecutable,
+  locateExecutable,
 } from './executable'
 
 const roots: string[] = []
 afterEach(() =>
   roots.splice(0).forEach((p) => rmSync(p, { recursive: true, force: true })),
 )
-const [claude, codex] = defaultExecutorConfig().profiles
+function root() {
+  const dir = mkdtempSync(join(tmpdir(), 'emperor-executable-'))
+  roots.push(dir)
+  return dir
+}
 
-it('finds the SDK platform binary the way the SDK launcher does', () => {
-  const path = bundledClaudeExecutable()
-  expect(path).toMatch(
-    new RegExp(
-      `claude-agent-sdk-${process.platform}-${process.arch}[\\\\/]claude$`,
-    ),
-  )
-  expect(bundledClaudeExecutable({ platform: 'linux', arch: 'ppc64' })).toBe(
-    undefined,
-  )
+it('finds an executable file on PATH, by name or by absolute path (AGT-12)', () => {
+  const dir = root()
+  const a = join(dir, 'a'),
+    b = join(dir, 'b')
+  mkdirSync(a)
+  mkdirSync(b)
+  writeFileSync(join(a, 'claude'), 'not executable', { mode: 0o644 })
+  writeFileSync(join(b, 'claude'), '#!/bin/sh\n', { mode: 0o755 })
+  mkdirSync(join(a, 'codex'))
+  expect(findExecutable('claude', `${a}:${b}`)).toBe(join(b, 'claude'))
+  expect(findExecutable('codex', a)).toBeUndefined()
+  expect(findExecutable(join(b, 'claude'), '')).toBe(join(b, 'claude'))
+  expect(findExecutable(join(a, 'claude'), '')).toBeUndefined()
+  expect(findExecutable('bin/claude', b)).toBeUndefined()
+  expect(findExecutable('claude', 'relative:')).toBeUndefined()
+  // A Homebrew or npm link counts.
+  symlinkSync(join(b, 'claude'), join(a, 'linked'))
+  expect(findExecutable('linked', a)).toBe(join(a, 'linked'))
 })
-it('runs the packaged binary from app.asar.unpacked', () => {
-  const resources = mkdtempSync(join(tmpdir(), 'emperor-resources-'))
-  roots.push(resources)
-  const binary = join(
-    resources,
-    'app.asar.unpacked',
-    'node_modules',
-    '@anthropic-ai',
-    'claude-agent-sdk-darwin-x64',
-    'claude',
-  )
-  mkdirSync(join(binary, '..'), { recursive: true })
-  writeFileSync(binary, 'native', { mode: 0o755 })
+
+it('asks the login shell for its PATH only when PATH has no claude', async () => {
+  const dir = root()
+  writeFileSync(join(dir, 'claude'), '#!/bin/sh\n', { mode: 0o755 })
+  const asked: string[][] = []
+  const shell = {
+    read: async (names: readonly string[]) => {
+      asked.push([...names])
+      return { PATH: dir }
+    },
+  }
   expect(
-    bundledClaudeExecutable({
-      platform: 'darwin',
-      arch: 'x64',
-      resourcesPath: resources,
-    }),
-  ).toBe(binary)
+    await locateExecutable('claude', { path: dir, loginShell: shell }),
+  ).toBe(join(dir, 'claude'))
+  expect(asked).toEqual([])
+  expect(
+    await locateExecutable('claude', { path: '/usr/bin', loginShell: shell }),
+  ).toBe(join(dir, 'claude'))
+  expect(asked).toEqual([['PATH']])
+  expect(await locateExecutable('claude', { path: '/usr/bin' })).toBeUndefined()
 })
-it('chooses the bundled Claude unless the installed claude is selected', () => {
-  expect(claudeExecutableSource(claude!)).toBe('bundled')
-  expect(
-    claudeExecutableSource({ ...claude!, executableSource: undefined }),
-  ).toBe('bundled')
-  expect(claudeExecutableSource(codex!)).toBeUndefined()
-  expect(executorExecutable(claude!, () => '/bundled/claude')).toBe(
-    '/bundled/claude',
-  )
-  expect(
-    executorExecutable(
-      { ...claude!, executableSource: 'system', executablePath: '/usr/x' },
-      () => '/bundled/claude',
-    ),
-  ).toBe('/usr/x')
-  expect(executorExecutable(codex!, () => '/bundled/claude')).toBe('codex')
-  expect(() => executorExecutable(claude!, () => undefined)).toThrow(
-    /EXECUTOR_MISSING.*reinstall Emperor/,
+
+it('quotes the official install command (code.claude.com/docs/en/setup)', () => {
+  expect(CLAUDE_INSTALL_COMMAND).toBe(
+    'curl -fsSL https://claude.ai/install.sh | bash',
   )
 })

@@ -119,15 +119,15 @@ describe('the data file inventory', () => {
       { expectedRevision: listed.config!.revision, config: listed.config! },
       VIEW,
     )
-    // AGT-02: the Claude Code token pasted in 设置 › 子智能体.
+    // AGT-12: the user's own API key for Claude Code (使用 API Key).
     const claude = listed.config!.profiles.find(
       (profile) => profile.backend === 'claude-code',
     )!
     await api.executors.setCredential(
       {
         profileId: claude.id,
-        kind: 'oauth-token',
-        token: 'sk-ant-oat01-rel03-inventory-scan',
+        kind: 'api-key',
+        token: 'sk-ant-api03-rel03-inventory-scan',
       },
       VIEW,
     )

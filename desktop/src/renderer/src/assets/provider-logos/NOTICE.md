@@ -1,6 +1,6 @@
 # Provider logo notices
 
-The provider logo files in this directory, except the Claude and Codex additions below, were copied from
+The provider logo files in this directory were copied from
 [`farion1231/cc-switch`](https://github.com/farion1231/cc-switch), directory
 `src/icons/extracted/`, at the pinned commit
 `3d176b98cc0bfd151a42882e88ab59b62083b92f`.
@@ -15,14 +15,10 @@ distributed under the MIT License. Provider names and logos may additionally
 be trademarks of their respective owners; inclusion here does not imply
 endorsement.
 
-## External agent logos
+## External agents
 
-`claude.svg` and `codex.svg` were copied without modification from
-[`lobehub/lobe-icons`](https://github.com/lobehub/lobe-icons/tree/8a1b2821bb768c484fe8da20c5e1838b6bf551a9/packages/static-svg/icons)
-at commit `8a1b2821bb768c484fe8da20c5e1838b6bf551a9`:
-`packages/static-svg/icons/claude.svg` and `packages/static-svg/icons/codex.svg`.
-The MIT License, Copyright (c) 2023 LobeHub, is preserved in
-`lobe-icons.LICENSE.txt` alongside the files.
+Claude Code and Codex have no logo here: the interface names them in text
+with a neutral glyph, because their logos are their makers' marks.
 
 The model reasoning/profile rules in `packages/core/src/model/profile.ts` were
 adapted from OpenCode `ProviderTransform.reasoningVariants`, pinned to
@@ -59,7 +55,8 @@ All paths below are relative to the pinned cc-switch commit:
 
 These files were copied unmodified from the npm package
 [`@lobehub/icons-static-svg`](https://www.npmjs.com/package/@lobehub/icons-static-svg)
-version `1.95.1` (MIT License, Copyright (c) LobeHub), directory `icons/`:
+version `1.95.1` (MIT License, Copyright (c) LobeHub, preserved in
+`lobe-icons.LICENSE.txt` alongside the files), directory `icons/`:
 
 - `icons/groq.svg` → `groq.svg`
 - `icons/lmstudio.svg` → `lmstudio.svg`

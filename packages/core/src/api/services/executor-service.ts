@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { ViewScope } from '../../harness/host/scope'
 import {
   ExecutorConfigStore,
@@ -11,7 +13,6 @@ import type { ExecutorFactsStore } from '../../harness/delegation/facts'
 import { executorSpecialties } from '../../harness/delegation/specialties'
 import type { ExecutorModelCatalogService } from '../../harness/delegation/models'
 import type { ExecutorConsentStore } from '../../harness/delegation/consent'
-import type { ClaudeTokenKind } from '../../harness/delegation/claude-auth'
 import type { SecretSealer } from '../../security/secret-sealer'
 import {
   DelegationError,
@@ -32,8 +33,17 @@ export class CoreExecutorService {
       ) => Promise<ExecutorAuthState | undefined>
       /** "以后都允许" per profile (AGT-05). */
       consent?: ExecutorConsentStore
-      /** Where tokens pasted into 设置 › 子智能体 live (AGT-02). */
-      claudeTokens?: { root: string; sealer: SecretSealer }
+      /** Where 使用 API Key keeps the user's own key (AGT-12). */
+      claudeKeys?: { root: string; sealer: SecretSealer }
+      /**
+       * Claude Code's own sign-in (AGT-12): 登录 Claude Code opens macOS
+       * Terminal on `claude auth login`; 退出登录 runs `claude auth logout`,
+       * both in the run's environment.
+       */
+      claudeSignIn?: {
+        signIn(profile: ExecutorProfile, console: boolean): Promise<void>
+        signOut(profile: ExecutorProfile): Promise<void>
+      }
     },
   ) {}
   close() {
@@ -49,6 +59,8 @@ export class CoreExecutorService {
       return {
         config,
         diagnostic: null,
+        /** Once after the upgrade that deleted a saved Claude token (AGT-12). */
+        signInNotice: this.signInNotice(),
         profiles: config.profiles.map((profile) => ({
           profile,
           probe: this.options.facts.probe(profile),
@@ -64,6 +76,7 @@ export class CoreExecutorService {
       return {
         config: null,
         diagnostic: 'EXECUTOR_CONFIG_INVALID: original configuration retained',
+        signInNotice: false,
         profiles: [],
       }
     }
@@ -87,39 +100,108 @@ export class CoreExecutorService {
     this.options.facts.setProbe(profile, value)
     return value
   }
-  // 设置令牌 / 移除令牌 (AGT-02): the reply is the new probe; its `auth`
-  // shows 末 4 位, never the token.
-  setCredential(
-    input: { profileId: string; kind?: ClaudeTokenKind; token?: string },
-    view: ViewScope,
-  ) {
-    return this.saveToken(input, view)
-  }
-  clearCredential(input: { profileId: string }, view: ViewScope) {
-    return this.saveToken(input, view)
-  }
-  private async saveToken(
-    input: { profileId: string; kind?: ClaudeTokenKind; token?: string },
-    _view: ViewScope,
-  ) {
-    const profile = this.profile(input.profileId),
-      tokens = this.options.claudeTokens
-    if (profile.backend !== 'claude-code' || !tokens)
+  private claudeProfile(profileId: string): ExecutorProfile {
+    const profile = this.profile(profileId)
+    if (profile.backend !== 'claude-code')
       throw new DelegationError(
         'UNSUPPORTED_OPTION',
-        'only Claude Code takes a token pasted into Emperor',
+        'only Claude Code signs in or takes an API key here',
       )
-    const { ClaudeTokenStore } =
-      await import('../../harness/delegation/claude-auth')
+    return profile
+  }
+  private keyStore() {
+    const keys = this.options.claudeKeys
+    if (!keys)
+      throw new DelegationError(
+        'UNSUPPORTED_OPTION',
+        'this Emperor keeps no Claude Code API key',
+      )
+    return import('../../harness/delegation/claude-sign-in').then(
+      (m) => new m.ClaudeKeyStore(keys),
+    )
+  }
+  private signInNotice(): boolean {
+    const keys = this.options.claudeKeys
+    if (!keys) return false
     try {
-      new ClaudeTokenStore(tokens).set(profile.id, input.kind, input.token)
+      const raw = JSON.parse(
+        readFileSync(join(keys.root, 'credentials.json'), 'utf8'),
+      ) as { notice?: unknown }
+      return raw.notice === 'claude-sign-in'
+    } catch {
+      return false
+    }
+  }
+  // 使用 API Key / 移除 (AGT-12): the user's own Console key, sealed; the
+  // reply is the new probe, whose `auth` shows 末 4 位, never the key.
+  async setCredential(
+    input: { profileId: string; kind: 'api-key'; token: string },
+    _view: ViewScope,
+  ) {
+    const profile = this.claudeProfile(input.profileId)
+    const { isClaudeAiToken } =
+      await import('../../harness/delegation/claude-sign-in')
+    // A Claude.ai token is claude's own sign-in: 登录 Claude Code instead.
+    if (input.kind !== 'api-key' || isClaudeAiToken(input.token))
+      throw new DelegationError(
+        'UNSUPPORTED_OPTION',
+        'only an API key is saved in Emperor; sign in to Claude Code with its own login',
+      )
+    const store = await this.keyStore()
+    try {
+      store.set(profile.id, input.token)
     } catch {
       throw new DelegationError(
         'CREDENTIAL_UNAVAILABLE',
-        "Emperor's local key cannot seal the token",
+        "Emperor's local key cannot seal the API key",
       )
     }
     return { probe: await this.probe(input) }
+  }
+  async clearCredential(input: { profileId: string }, _view: ViewScope) {
+    const profile = this.claudeProfile(input.profileId)
+    const store = await this.keyStore()
+    try {
+      store.clear(profile.id)
+    } catch {
+      throw new DelegationError(
+        'CREDENTIAL_UNAVAILABLE',
+        "Emperor's local key file cannot be changed",
+      )
+    }
+    return { probe: await this.probe(input) }
+  }
+  /** 登录 Claude Code: macOS Terminal on the installed claude's own login. */
+  async signIn(
+    input: { profileId: string; method: 'claude-ai' | 'console' },
+    _view: ViewScope,
+  ) {
+    const profile = this.claudeProfile(input.profileId)
+    const signIn = this.options.claudeSignIn
+    if (!signIn)
+      throw new DelegationError(
+        'UNSUPPORTED_OPTION',
+        'this Emperor cannot open a sign-in',
+      )
+    await signIn.signIn(profile, input.method === 'console')
+    return { opened: true as const }
+  }
+  /** 退出登录: `claude auth logout` in the run's environment. */
+  async signOut(input: { profileId: string }, _view: ViewScope) {
+    const profile = this.claudeProfile(input.profileId)
+    const signIn = this.options.claudeSignIn
+    if (!signIn)
+      throw new DelegationError(
+        'UNSUPPORTED_OPTION',
+        'this Emperor cannot sign out',
+      )
+    await signIn.signOut(profile)
+    return { probe: await this.probe(input) }
+  }
+  /** 知道了 on the upgrade notice (AGT-12). */
+  async dismissNotice(_input: { notice: 'claude-sign-in' }, _view: ViewScope) {
+    if (this.options.claudeKeys) (await this.keyStore()).dismissNotice()
+    return {}
   }
   async configure(
     input: { expectedRevision: number; config: unknown },
