@@ -44,7 +44,7 @@ scripts/ci/pr-gate.sh --app "desktop/dist/mac-arm64/Emperor Agent.app"
 
 ## Nightly
 
-`node scripts/ci/nightly.mjs --list` 列出全部步骤。顺序是：desktop build；视觉套件（`playwright.config.ts`，不含 `@perf` 用例；本机与其他 checkout 并行时可用 `EMPEROR_NIGHTLY_PLAYWRIGHT_CONFIG` 指向自己的端口配置）；视觉计时预算 `visual:perf`（带 `@perf` 标签的流式帧率与每帧脚本时间用例，单 worker 单独运行）；像素基线钩子（desktop 的 npm script `visual:baselines`，存在时运行，不存在时记为跳过；它只跑带 `@baseline` 的测试并与 `desktop/tests/visual/__baselines__/` 逐像素比对，用 `playwright.config.ts`，换端口用 `EMPEROR_VISUAL_PORT`，见[开发指南](README.md#质量门禁)）；`e2e-cu.mjs` 的 smoke、contract、extra、userbrowser、browser-security、fullstack、references、plugins、userbrowser-app、settings、renderer-security、diagnostics；kill -9 恢复各 20 次（`scripts/session-log-kill9.mjs`，另一组在每次 kill 后截掉日志尾部模拟断电）；`package:dir` 与 `package:probe`。
+`node scripts/ci/nightly.mjs --list` 列出全部步骤。顺序是：desktop build；视觉套件（`playwright.config.ts`，不含 `@perf` 用例；本机与其他 checkout 并行时可用 `EMPEROR_NIGHTLY_PLAYWRIGHT_CONFIG` 指向自己的端口配置）；视觉计时预算 `visual:perf`（带 `@perf` 标签的流式帧率与每帧脚本时间用例，单 worker 单独运行）；像素基线钩子（desktop 的 npm script `visual:baselines`，存在时运行，不存在时记为跳过；它只跑带 `@baseline` 的测试并与 `desktop/tests/visual/__baselines__/` 逐像素比对，用 `playwright.config.ts`，换端口用 `EMPEROR_VISUAL_PORT`，见[开发指南](README.md#质量门禁)）；`e2e-cu.mjs` 的 smoke、contract、extra、userbrowser、browser-security、fullstack、references、plugins、userbrowser-app、settings、renderer-security、diagnostics、updates（检查更新，对本机的假发布源）；kill -9 恢复各 20 次（`scripts/session-log-kill9.mjs`，另一组在每次 kill 后截掉日志尾部模拟断电）；`package:dir` 与 `package:probe`。
 
 需要真实模型或真实外部执行器的步骤只列出、不运行：`e2e-cu.mjs --mode=real`、`--mode=references-real`、`desktop/tests/external-agents.e2e.mjs`（它只接受 `--real`，同时驱动真实的 Codex 与 Claude Code）。委派的假执行器测试在 `make check` 里。
 
