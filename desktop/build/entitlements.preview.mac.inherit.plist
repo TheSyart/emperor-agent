@@ -2,9 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <!--
-  Ad-hoc Preview, Electron helper processes (renderer, GPU, plugin, utility),
-  hardened runtime (SEC-04). The main app's set without the microphone: the
-  renderer is refused getUserMedia (SEC-05).
+  Ad-hoc seal of every public build (Preview and Stable), Electron helper
+  processes (renderer, GPU, plugin, utility), hardened runtime (SEC-04). The
+  main app's set without the microphone: the renderer is refused
+  getUserMedia (SEC-05).
 -->
 <dict>
   <key>com.apple.security.cs.allow-jit</key>

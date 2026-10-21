@@ -1,0 +1,20 @@
+# A signed release workflow; scripts/ci/check-unsigned-release.mjs must
+# refuse it (REL-05 test 1, negative fixture).
+name: release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  macos-candidate:
+    runs-on: macos-15
+    env:
+      CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
+      CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - name: Build the signed candidate
+        run: npx electron-builder --config electron-builder.release.cjs --mac dmg zip
+      - name: Notarize
+        run: xcrun notarytool submit desktop/dist/Emperor.dmg --keychain-profile release --wait

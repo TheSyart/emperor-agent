@@ -2,7 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <!--
-  Ad-hoc Preview, main app, hardened runtime (SEC-04, scripts/harden-package.cjs).
+  Ad-hoc seal of every public build (Preview and Stable), main app, hardened
+  runtime (SEC-04, scripts/harden-package.cjs).
   JIT: V8 (MAP_JIT; no unsigned executable memory needed, as Electron's own
   osx-sign defaults). Library validation off: an ad-hoc seal has no Team ID,
   and dyld refuses the ad-hoc Electron Framework otherwise ("different Team

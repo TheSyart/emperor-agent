@@ -1,36 +1,174 @@
-import { afterEach, describe, expect, it } from 'vitest'
+// REL-05: Stable is unsigned, like Preview (decided 2026-10-01). The same
+// ad-hoc seal (after-pack, harden-package.cjs), no signing secret anywhere,
+// macOS arm64 and x64 only, artifacts named
+// Emperor-Agent-<version>-macos-<arch>.{dmg,zip}, notes that open with the
+// unsigned statement, and SHA256SUMS, provenance and a CycloneDX SBOM.
+import { spawnSync } from 'node:child_process'
 import * as fs from 'node:fs'
+import * as os from 'node:os'
 import * as path from 'node:path'
 import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
+import { describe, expect, it } from 'vitest'
 
 const desktopRoot = path.resolve(__dirname, '..', '..')
 const repoRoot = path.resolve(desktopRoot, '..')
-const require = createRequire(import.meta.url)
-const releaseEnvNames = [
-  'EMPEROR_RELEASE_TARGET',
-  'WINDOWS_SIGNING_ENDPOINT',
-  'WINDOWS_SIGNING_PROFILE',
-  'WINDOWS_SIGNING_ACCOUNT',
-  'WINDOWS_SIGNING_PUBLISHER',
-] as const
-const originalReleaseEnv = Object.fromEntries(
-  releaseEnvNames.map((name) => [name, process.env[name]]),
+const workflowsRoot = path.join(repoRoot, '.github', 'workflows')
+const fixturesRoot = path.join(
+  repoRoot,
+  'scripts',
+  'ci',
+  'fixtures',
+  'signed-release',
 )
+const require = createRequire(import.meta.url)
 
-afterEach(() => {
-  for (const name of releaseEnvNames) {
-    const value = originalReleaseEnv[name]
-    if (value === undefined) delete process.env[name]
-    else process.env[name] = value
-  }
+interface WorkflowStep {
+  name?: string
+  run?: string
+  uses?: string
+  with?: Record<string, unknown>
+}
+
+interface WorkflowJob {
+  'runs-on'?: string
+  needs?: string | string[]
+  if?: string
+  environment?: string
+  permissions?: Record<string, string>
+  strategy?: { matrix?: { include?: Array<Record<string, string>> } }
+  env?: Record<string, string>
+  steps?: WorkflowStep[]
+}
+
+interface Workflow {
+  env?: Record<string, string>
+  jobs: Record<string, WorkflowJob>
+}
+
+function readText(...parts: string[]): string {
+  return fs.readFileSync(path.join(repoRoot, ...parts), 'utf8')
+}
+
+/** release.yml parsed by the same YAML package the workflow lint uses. */
+function stableWorkflow(): Workflow {
+  const result = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      "import YAML from 'yaml'; import { readFileSync } from 'node:fs'; process.stdout.write(JSON.stringify(YAML.parse(readFileSync(process.argv[1], 'utf8'))))",
+      path.join(workflowsRoot, 'release.yml'),
+    ],
+    { cwd: repoRoot, encoding: 'utf8' },
+  )
+  expect(result.status, result.stderr).toBe(0)
+  return JSON.parse(result.stdout) as Workflow
+}
+
+function runs(job: WorkflowJob | undefined): string[] {
+  return (job?.steps ?? [])
+    .map((step) => (typeof step.run === 'string' ? step.run.trim() : ''))
+    .filter(Boolean)
+}
+
+function needs(job: WorkflowJob): string[] {
+  if (!job.needs) return []
+  return Array.isArray(job.needs) ? job.needs : [job.needs]
+}
+
+function checkUnsigned(args: string[] = []) {
+  return spawnSync(
+    process.execPath,
+    [
+      path.join(repoRoot, 'scripts', 'ci', 'check-unsigned-release.mjs'),
+      ...args,
+    ],
+    { cwd: repoRoot, encoding: 'utf8' },
+  )
+}
+
+async function releaseContract(): Promise<{
+  firstParagraph(markdown: string): string
+  renderReleaseNotes(
+    template: string,
+    values: { tag: string; version: string },
+  ): string
+  UNSIGNED_NOTICE_MARKERS: readonly string[]
+}> {
+  return (await import(
+    pathToFileURL(path.join(repoRoot, 'scripts', 'release-contract.mjs')).href
+  )) as never
+}
+
+describe('unsigned Stable release: no signing anywhere (REL-05 test 1)', () => {
+  it('passes the unsigned-release check that make check runs', () => {
+    const result = checkUnsigned()
+    expect(result.stderr).toBe('')
+    expect(result.status).toBe(0)
+    expect(result.stdout).toMatch(/^unsigned releases: /)
+    expect(readText('scripts', 'check.sh')).toContain(
+      'node scripts/ci/check-unsigned-release.mjs',
+    )
+  })
+
+  it('fails the signed fixture and names each kind of signing it finds', () => {
+    const result = checkUnsigned([
+      '--workflows',
+      path.join(fixturesRoot, 'workflows'),
+      '--builder',
+      path.join(fixturesRoot, 'electron-builder.release.cjs'),
+      '--script',
+      path.join(fixturesRoot, 'build-release.sh'),
+    ])
+
+    expect(result.status).toBe(1)
+    for (const problem of [
+      'release.yml: references secrets.MACOS_CERTIFICATE',
+      'release.yml: references secrets.APPLE_API_KEY_BASE64',
+      'release.yml: uses the signing variable CSC_LINK',
+      'release.yml: uses the signing variable APPLE_TEAM_ID',
+      'release.yml: runs xcrun notarytool',
+      'release.yml: does not turn off CSC_IDENTITY_AUTO_DISCOVERY',
+      'electron-builder.release.cjs: mac.identity is not null',
+      'electron-builder.release.cjs: sets forceCodeSigning',
+      'electron-builder.release.cjs: sets mac.notarize',
+      'electron-builder.release.cjs: sets win.azureSignOptions',
+      'build-release.sh: runs security import',
+      'build-release.sh: signs with an identity other than - (codesign --sign "Developer ID Application',
+    ])
+      expect(result.stderr).toContain(problem)
+  })
+
+  it('fails when a signing secret comes back into release.yml', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'emperor-unsigned-'))
+    for (const name of fs.readdirSync(workflowsRoot))
+      fs.copyFileSync(path.join(workflowsRoot, name), path.join(dir, name))
+    const file = path.join(dir, 'release.yml')
+    const text = fs.readFileSync(file, 'utf8')
+    const next = text.replace(
+      '\njobs:\n',
+      '\njobs:\n  sign:\n    runs-on: macos-15\n    env:\n      CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}\n    steps:\n      - run: echo sign\n',
+    )
+    expect(next).not.toBe(text)
+    fs.writeFileSync(file, next)
+
+    const result = checkUnsigned(['--workflows', dir])
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(
+      'release.yml: references secrets.MACOS_CERTIFICATE_PASSWORD',
+    )
+    expect(result.stderr).toContain(
+      'release.yml: uses the signing variable CSC_KEY_PASSWORD',
+    )
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
 })
 
-describe('trusted release configuration', () => {
-  it('keeps Frozen Stable manual, tag-verified and environment-protected', () => {
-    const workflow = fs.readFileSync(
-      path.join(repoRoot, '.github', 'workflows', 'release.yml'),
-      'utf8',
-    )
+describe('unsigned Stable release: the workflow', () => {
+  it('stays manual, tag-verified and environment-protected', () => {
+    const workflow = readText('.github', 'workflows', 'release.yml')
 
     expect(workflow).toContain('workflow_dispatch:')
     expect(workflow).not.toMatch(/^\s*push:\s*$/m)
@@ -40,252 +178,303 @@ describe('trusted release configuration', () => {
     expect(workflow.indexOf('commit="$(git rev-parse')).toBeLessThan(
       workflow.indexOf('version="$(git show'),
     )
-    expect(workflow).toContain('needs: release-policy')
     expect(workflow).toContain(
       "if: inputs.publish == true && vars.EMPEROR_STABLE_RELEASE_ENABLED == 'true'",
     )
     expect(workflow).toContain('environment: stable-release')
   })
 
-  it('hard-gates signed and notarized macOS candidates', () => {
-    process.env.EMPEROR_RELEASE_TARGET = 'mac'
-    const configFactory = require(
-      path.join(desktopRoot, 'electron-builder.release.cjs'),
-    ) as () => Record<string, unknown>
-    const config = configFactory() as {
-      extends?: string
-      mac?: Record<string, unknown>
-    }
+  it('checks the nightly first, and every job waits for that check', () => {
+    const { jobs } = stableWorkflow()
 
-    expect(config.extends).toBe('./electron-builder.yml')
-    expect(config.mac).toMatchObject({
-      forceCodeSigning: true,
-      hardenedRuntime: true,
-      minimumSystemVersion: '14.0',
-      notarize: true,
-      entitlements: 'build/entitlements.mac.plist',
-      entitlementsInherit: 'build/entitlements.mac.inherit.plist',
+    expect(runs(jobs['release-policy'])[0]).toBe(
+      'node scripts/ci/require-green-nightly.mjs',
+    )
+    const reaches = (id: string, seen = new Set<string>()): boolean => {
+      if (id === 'release-policy') return true
+      if (seen.has(id)) return false
+      seen.add(id)
+      return needs(jobs[id]).some((parent) => reaches(parent, seen))
+    }
+    for (const id of Object.keys(jobs)) expect(reaches(id), id).toBe(true)
+  })
+
+  it('builds macOS arm64 and x64 only, with signing discovery off', () => {
+    const workflow = stableWorkflow()
+    const { jobs } = workflow
+
+    expect(Object.keys(jobs).sort()).toEqual([
+      'macos-candidate',
+      'publish-release',
+      'release-aggregate',
+      'release-policy',
+    ])
+    expect(workflow.env?.CSC_IDENTITY_AUTO_DISCOVERY).toBe('false')
+    expect(jobs['macos-candidate'].strategy?.matrix?.include).toEqual([
+      { runner: 'macos-15', arch: 'arm64' },
+      { runner: 'macos-15-intel', arch: 'x64' },
+    ])
+    const text = readText('.github', 'workflows', 'release.yml')
+    for (const gone of [
+      'windows-',
+      'linux-',
+      'ubuntu-22.04',
+      'AppImage',
+      'EMPEROR_RELEASE_TARGET',
+      'secrets.',
+    ])
+      expect(text, gone).not.toContain(gone)
+  })
+
+  it('builds, verifies and probes each candidate before uploading it', () => {
+    const candidate = stableWorkflow().jobs['macos-candidate']
+    const commands = runs(candidate)
+    const at = (command: string) =>
+      commands.findIndex((run) => run.includes(command))
+
+    expect(commands).toContain('scripts/ci/select-xcode.sh')
+    expect(commands).toContain('make check')
+    expect(at('scripts/build_desktop_release.sh')).toBeGreaterThan(
+      at('make check'),
+    )
+    expect(at('scripts/verify-macos-release.sh "${{ matrix.arch }}"')).toBe(
+      at('scripts/build_desktop_release.sh') + 1,
+    )
+    expect(at('scripts/ci/gate-negative-probe.mjs')).toBeGreaterThan(
+      at('scripts/verify-macos-release.sh'),
+    )
+    const upload = candidate.steps?.find((step) =>
+      String(step.uses).startsWith('actions/upload-artifact@'),
+    )
+    expect(String(upload?.with?.path).split('\n').filter(Boolean)).toEqual([
+      'desktop/dist/Emperor-Agent-*-macos-${{ matrix.arch }}.dmg',
+      'desktop/dist/Emperor-Agent-*-macos-${{ matrix.arch }}.zip',
+      'desktop/dist/SHA256SUMS-macos-${{ matrix.arch }}.txt',
+      'desktop/dist/packaged-smoke/darwin-${{ matrix.arch }}.json',
+      'desktop/dist/release-receipts/macos-${{ matrix.arch }}.json',
+    ])
+  })
+
+  it('attests the checksums and the SBOM before the one job that can write publishes', () => {
+    const { jobs } = stableWorkflow()
+    const aggregate = jobs['release-aggregate']
+    const publish = jobs['publish-release']
+    const text = readText('.github', 'workflows', 'release.yml')
+
+    expect(needs(aggregate)).toEqual(['release-policy', 'macos-candidate'])
+    expect(aggregate.permissions).toMatchObject({
+      'id-token': 'write',
+      attestations: 'write',
+      'artifact-metadata': 'write',
     })
-  })
-
-  it('keeps macOS entitlements minimal and suitable for Electron helpers', () => {
-    for (const name of [
-      'entitlements.mac.plist',
-      'entitlements.mac.inherit.plist',
-    ]) {
-      const content = fs.readFileSync(
-        path.join(desktopRoot, 'build', name),
-        'utf8',
-      )
-      expect(content).toContain('com.apple.security.cs.allow-jit')
-      expect(content).toContain(
-        'com.apple.security.cs.allow-unsigned-executable-memory',
-      )
-      expect(content).not.toContain('com.apple.security.app-sandbox')
-      expect(content).not.toContain(
-        'com.apple.security.cs.allow-dyld-environment-variables',
-      )
-    }
-  })
-
-  it('builds macOS arm64 and x64 candidates without publishing from build jobs', () => {
-    const workflow = fs.readFileSync(
-      path.join(repoRoot, '.github', 'workflows', 'release.yml'),
-      'utf8',
+    const commands = runs(aggregate)
+    const at = (command: string) =>
+      commands.findIndex((run) => run.includes(command))
+    expect(at('scripts/assemble-release-bundle.mjs')).toBeGreaterThanOrEqual(0)
+    expect(at('scripts/generate-release-sbom.sh')).toBeGreaterThan(
+      at('scripts/assemble-release-bundle.mjs'),
+    )
+    expect(at('scripts/release-contract.mjs checksums')).toBeGreaterThan(
+      at('scripts/generate-release-sbom.sh'),
+    )
+    expect(at('scripts/release-contract.mjs publication')).toBeGreaterThan(
+      at('scripts/release-contract.mjs checksums'),
+    )
+    const attests = (aggregate.steps ?? []).filter((step) =>
+      String(step.uses).startsWith('actions/attest@'),
+    )
+    expect(attests.map((step) => step.with)).toEqual([
+      { 'subject-checksums': 'release-bundle/SHA256SUMS.txt' },
+      {
+        'subject-checksums': 'release-bundle/ARTIFACT-SHA256SUMS.txt',
+        'sbom-path':
+          'release-bundle/emperor-agent-${{ needs.release-policy.outputs.tag }}.cdx.json',
+      },
+    ])
+    expect(text).toContain('gh attestation verify')
+    expect(readText('scripts', 'generate-release-sbom.sh')).toContain(
+      '@cyclonedx/cyclonedx-npm@6.0.0',
     )
 
-    expect(workflow).toContain('macos-15')
-    expect(workflow).toContain('macos-15-intel')
-    expect(workflow).toContain('EMPEROR_RELEASE_TARGET: mac')
-    expect(workflow).toContain('APPLE_API_KEY_BASE64')
-    expect(workflow).toContain('CSC_LINK')
-    expect(workflow).toContain('verify-macos-release.sh')
-    expect(workflow).not.toContain('desktop-pet/package-lock.json')
-    expect(workflow).not.toContain('working-directory: desktop-pet')
-    expect(workflow).not.toContain('softprops/action-gh-release')
+    expect(needs(publish)).toEqual(['release-policy', 'release-aggregate'])
+    expect(publish.permissions).toEqual({
+      contents: 'write',
+      attestations: 'read',
+    })
+    expect(text.match(/contents: write/g)).toHaveLength(1)
+    expect(runs(publish)).toContain('scripts/publish-release.sh release-bundle')
+    expect(text).not.toContain('softprops/action-gh-release')
   })
+})
 
-  it('verifies Developer ID, Gatekeeper, stapling, DMG mount and packaged smoke', () => {
-    const verifier = fs.readFileSync(
-      path.join(repoRoot, 'scripts', 'verify-macos-release.sh'),
-      'utf8',
-    )
-
-    expect(verifier).toContain('codesign --verify --deep --strict')
-    expect(verifier).toContain('TeamIdentifier=')
-    expect(verifier).toContain('spctl --assess')
-    expect(verifier).toContain('xcrun stapler validate')
-    expect(verifier).toContain('hdiutil attach')
-    expect(verifier).toContain('hdiutil detach')
-    expect(verifier).toContain('run-packaged-smoke.cjs')
-    expect(verifier).toContain('shasum -a 256')
-    expect(verifier).toContain('LIPO_ARCH="x86_64"')
-  })
-
-  it('hard-gates Azure Artifact Signing for Windows x64', () => {
-    process.env.EMPEROR_RELEASE_TARGET = 'win'
-    process.env.WINDOWS_SIGNING_ENDPOINT = 'https://eus.codesigning.azure.net/'
-    process.env.WINDOWS_SIGNING_PROFILE = 'emperor-release'
-    process.env.WINDOWS_SIGNING_ACCOUNT = 'emperor-signing'
-    process.env.WINDOWS_SIGNING_PUBLISHER = 'Emperor Agent LLC'
-    const configFactory = require(
+describe('unsigned Stable release: the package', () => {
+  it('3. names the artifacts Emperor-Agent-<version>-macos-<arch>.{dmg,zip}', () => {
+    const config = require(
       path.join(desktopRoot, 'electron-builder.release.cjs'),
-    ) as () => Record<string, unknown>
-    const config = configFactory() as {
-      win?: Record<string, unknown>
-      nsis?: Record<string, unknown>
-    }
+    ) as Record<string, unknown>
 
-    expect(config.win).toMatchObject({
-      forceCodeSigning: true,
-      publisherName: ['Emperor Agent LLC'],
-      azureSignOptions: {
-        endpoint: 'https://eus.codesigning.azure.net/',
-        certificateProfileName: 'emperor-release',
-        codeSigningAccountName: 'emperor-signing',
+    expect(config).toEqual({
+      extends: './electron-builder.yml',
+      mac: {
+        target: ['dmg', 'zip'],
+        identity: null,
+        artifactName: 'Emperor-Agent-${version}-macos-${arch}.${ext}',
       },
     })
-    expect(config.win).not.toHaveProperty('signtoolOptions')
-    expect(config.nsis).toMatchObject({
-      oneClick: false,
-      perMachine: false,
-      allowToChangeInstallationDirectory: true,
-    })
   })
 
-  it('requires Windows signing metadata before configuration is usable', () => {
-    process.env.EMPEROR_RELEASE_TARGET = 'win'
-    delete process.env.WINDOWS_SIGNING_ENDPOINT
-    const configFactory = require(
+  it('2. is sealed exactly like Preview: no identity, so after-pack seals it ad hoc', () => {
+    const stable = require(
       path.join(desktopRoot, 'electron-builder.release.cjs'),
-    ) as () => Record<string, unknown>
+    ) as { mac: Record<string, unknown> }
+    const preview = require(
+      path.join(desktopRoot, 'electron-builder.preview.cjs'),
+    ) as { mac: Record<string, unknown> }
+    const afterPack = fs.readFileSync(
+      path.join(desktopRoot, 'scripts', 'after-pack.cjs'),
+      'utf8',
+    )
 
-    expect(() => configFactory()).toThrow(/WINDOWS_SIGNING_ENDPOINT/)
+    expect(stable.mac.identity).toBeNull()
+    expect(preview.mac.identity).toBeNull()
+    expect(afterPack).toMatch(
+      /context\.packager\.config\?\.mac\?\.identity === null[\s\S]{0,200}sealMacApp\(app, PREVIEW_ENTITLEMENTS\)[\s\S]{0,120}verifyMacHardening\(app\)/,
+    )
   })
 
-  it('builds and verifies a signed Windows NSIS candidate without publishing', () => {
-    const workflow = fs.readFileSync(
-      path.join(repoRoot, '.github', 'workflows', 'release.yml'),
-      'utf8',
-    )
-    const verifier = fs.readFileSync(
-      path.join(repoRoot, 'scripts', 'verify-windows-release.ps1'),
-      'utf8',
-    )
+  it('builds the candidate with the Stable config and signing discovery off', () => {
+    const script = readText('scripts', 'build_desktop_release.sh')
 
-    expect(workflow).toContain('windows-2022')
-    expect(workflow).toContain('EMPEROR_RELEASE_TARGET: win')
-    expect(workflow).toContain('AZURE_TENANT_ID')
-    expect(workflow).toContain('AZURE_CLIENT_ID')
-    expect(workflow).toContain('AZURE_CLIENT_SECRET')
-    expect(workflow).toContain('verify-windows-release.ps1')
-    expect(workflow).not.toContain('softprops/action-gh-release')
-    expect(verifier).toContain('Get-AuthenticodeSignature')
-    expect(verifier).toContain('X509NameType]::SimpleName')
-    expect(verifier).toContain('/S')
-    expect(verifier).toContain('/D=')
+    expect(script).toContain('CSC_IDENTITY_AUTO_DISCOVERY=false')
+    expect(script).toContain('--config electron-builder.release.cjs')
+    expect(script).toContain('--mac dmg zip')
+    expect(script).toContain('--publish never')
+    expect(script).not.toContain('EMPEROR_RELEASE_TARGET')
+  })
+
+  it('verifies the seal, the fuses, the DMG, the ZIP and the packaged smoke of each candidate', () => {
+    const verifier = readText('scripts', 'verify-macos-release.sh')
+
+    expect(verifier).toContain('Emperor-Agent-$VERSION-macos-$ARCH.dmg')
+    expect(verifier).toContain('Emperor-Agent-$VERSION-macos-$ARCH.zip')
+    expect(verifier).toContain('desktop/scripts/verify-unsigned-app.cjs')
+    expect(verifier).toContain('hdiutil attach')
+    expect(verifier).toContain('hdiutil detach')
+    expect(verifier).toContain('ditto -x -k')
     expect(verifier).toContain('run-packaged-smoke.cjs')
-    expect(verifier).toContain('Uninstall Emperor Agent.exe')
-    expect(verifier).toContain('Get-FileHash')
+    expect(verifier).toContain('shasum -a 256')
+    expect(verifier).toContain("signingStatus: 'unsigned'")
+    for (const gone of [
+      'spctl',
+      'stapler',
+      'TeamIdentifier=',
+      'APPLE_TEAM_ID',
+      'Developer ID',
+    ])
+      expect(verifier, gone).not.toContain(gone)
   })
 
-  it('builds both AppImage and DEB from the trusted Linux configuration', () => {
-    process.env.EMPEROR_RELEASE_TARGET = 'linux'
-    const configFactory = require(
-      path.join(desktopRoot, 'electron-builder.release.cjs'),
-    ) as () => Record<string, unknown>
-    const config = configFactory() as {
-      linux?: Record<string, unknown>
+  it('refuses a package any part of which carries a signing identity', () => {
+    const { unsignedIdentityProblems } = require(
+      path.join(desktopRoot, 'scripts', 'verify-unsigned-app.cjs'),
+    ) as {
+      unsignedIdentityProblems(
+        entries: Array<{
+          label: string
+          adHoc: boolean
+          authority: string | null
+          teamId: string | null
+        }>,
+      ): string[]
     }
+    const adHoc = { adHoc: true, authority: null, teamId: 'not set' }
 
-    expect(config.linux).toMatchObject({
-      target: ['AppImage', 'deb'],
-      artifactName: 'Emperor-Agent-${version}-linux-x64.${ext}',
-      maintainer: 'Emperor Agent maintainers',
-      vendor: 'Emperor Agent',
-    })
+    expect(
+      unsignedIdentityProblems([
+        { label: 'app', ...adHoc },
+        { label: 'Computer Helper', ...adHoc },
+      ]),
+    ).toEqual([])
+    expect(
+      unsignedIdentityProblems([
+        {
+          label: 'app',
+          adHoc: false,
+          authority: 'Developer ID Application: Someone (ABCDE12345)',
+          teamId: 'ABCDE12345',
+        },
+        {
+          label: 'Computer Helper',
+          adHoc: true,
+          authority: null,
+          teamId: null,
+        },
+      ]),
+    ).toEqual([
+      'app is signed by Developer ID Application: Someone (ABCDE12345); every release is sealed ad hoc only',
+    ])
   })
 
-  it('provides the package metadata required by DEB', () => {
-    const metadata = JSON.parse(
-      fs.readFileSync(path.join(desktopRoot, 'package.json'), 'utf8'),
-    ) as { author?: string; homepage?: string }
-
-    expect(metadata.author).toBe('Emperor Agent maintainers')
-    expect(metadata.homepage).toBe('https://github.com/TheSyart/emperor-agent')
-  })
-
-  it('builds once on Ubuntu 22.04 and smokes on Ubuntu 22.04 and 24.04', () => {
-    const workflow = fs.readFileSync(
-      path.join(repoRoot, '.github', 'workflows', 'release.yml'),
-      'utf8',
-    )
-
-    expect(workflow).toContain('linux-build:')
-    expect(workflow).toContain('linux-smoke:')
-    expect(workflow).toContain('ubuntu-22.04')
-    expect(workflow).toContain('ubuntu-24.04')
-    expect(workflow).toContain('EMPEROR_RELEASE_TARGET: linux')
-    expect(workflow).toContain('--linux AppImage deb --x64')
-    expect(workflow).toContain('verify-linux-release.sh prepare')
-    expect(workflow).toContain('verify-linux-release.sh smoke')
-    expect(workflow).not.toContain('softprops/action-gh-release')
-  })
-
-  it('verifies Linux metadata, checksums, AppImage and DEB lifecycle receipts', () => {
-    const verifier = fs.readFileSync(
+  it('no longer carries the signed chain: no Developer ID entitlements, no Windows or Linux verifiers', () => {
+    for (const gone of [
+      path.join(desktopRoot, 'build', 'entitlements.mac.plist'),
+      path.join(desktopRoot, 'build', 'entitlements.mac.inherit.plist'),
+      path.join(repoRoot, 'scripts', 'verify-windows-release.ps1'),
       path.join(repoRoot, 'scripts', 'verify-linux-release.sh'),
-      'utf8',
-    )
-    const runner = fs.readFileSync(
-      path.join(desktopRoot, 'scripts', 'run-packaged-smoke.cjs'),
-      'utf8',
-    )
+    ])
+      expect(fs.existsSync(gone), gone).toBe(false)
+  })
+})
 
-    expect(verifier).toContain('dpkg-deb --info')
-    expect(verifier).toContain('sha256sum --check')
-    expect(verifier).toContain('APPIMAGE_EXTRACT_AND_RUN=1')
-    expect(verifier).toContain('run-packaged-smoke.cjs')
-    expect(verifier).toContain(
-      'sudo env DEBIAN_FRONTEND=noninteractive apt-get install --yes "$DEB"',
-    )
-    expect(verifier).toContain('sudo apt-get remove --yes "$DEB_PACKAGE"')
-    expect(verifier).not.toContain('sudo dpkg --install')
-    expect(verifier).toContain('AppImage wrapper/FUSE failure')
-    expect(verifier).toContain('Chromium sandbox failure')
-    expect(runner).toContain("APPIMAGE_EXTRACT_AND_RUN: '1'")
+describe('unsigned Stable release: notes and publication', () => {
+  it('8. opens the release notes with the unsigned statement and the first-open steps', async () => {
+    const { firstParagraph, renderReleaseNotes, UNSIGNED_NOTICE_MARKERS } =
+      await releaseContract()
+    const template = readText('docs', 'release', 'stable-release-notes.md')
+    const notes = renderReleaseNotes(template, {
+      tag: 'v0.2.0',
+      version: '0.2.0',
+    })
+    const first = firstParagraph(notes)
+
+    expect(UNSIGNED_NOTICE_MARKERS.length).toBeGreaterThan(0)
+    for (const marker of UNSIGNED_NOTICE_MARKERS)
+      expect(first, marker).toContain(marker)
+    expect(first).toContain('未签名')
+    expect(first).toContain('Apple 公证')
+    expect(first).toContain('「应用程序」')
+    expect(first).toContain('「系统设置 › 隐私与安全性」')
+    expect(first).toContain('「仍要打开」')
+    expect(first).toContain('0.2.0')
+    expect(first).toContain('SHA256SUMS.txt')
+    expect(notes.trimStart().startsWith(first)).toBe(true)
+    expect(notes).not.toContain('{{')
+    expect(notes).not.toContain('<!--')
+    expect(notes).not.toMatch(/spctl\s+--master-disable/i)
+    expect(notes).not.toMatch(/disable\s+Gatekeeper/i)
   })
 
-  it('attests a complete candidate bundle before the publish job can run', () => {
-    const workflow = fs.readFileSync(
-      path.join(repoRoot, '.github', 'workflows', 'release.yml'),
-      'utf8',
-    )
+  it('publishes draft first with the rendered notes and rolls back, or only plans it', () => {
+    const publisher = readText('scripts', 'publish-release.sh')
 
-    expect(workflow).toContain('release-aggregate:')
-    expect(workflow).toContain('publish-release:')
-    expect(workflow).toContain('needs: [release-policy, release-aggregate]')
-    expect(workflow).toContain('id-token: write')
-    expect(workflow).toContain('attestations: write')
-    expect(workflow).toContain('artifact-metadata: write')
-    expect(workflow).toContain('@cyclonedx/cyclonedx-npm@6.0.0')
-    expect(workflow).toContain('scripts/merge-cyclonedx-sboms.mjs')
-    expect(workflow.match(/actions\/attest@[0-9a-f]{40} # v4\./g)?.length).toBe(
-      2,
-    )
-    expect(workflow).toContain('subject-checksums:')
-    expect(workflow).toContain('sbom-path:')
-    expect(workflow).toContain('gh attestation verify')
-    expect(workflow).toContain('scripts/assemble-release-bundle.mjs')
-    expect(workflow).toContain('scripts/publish-release.sh')
-    expect(workflow).not.toContain('softprops/action-gh-release')
+    for (const part of [
+      'scripts/release-contract.mjs',
+      'gh release create "$TAG"',
+      '--draft',
+      '--verify-tag',
+      '--notes-file "$NOTES"',
+      'gh release upload "$TAG"',
+      'gh release edit "$TAG" --draft=false',
+      'gh release delete "$TAG"',
+      '--dry-run',
+    ])
+      expect(publisher, part).toContain(part)
+    expect(publisher).not.toContain('--generate-notes')
+    expect(publisher).not.toContain('--prerelease')
   })
 
   it('keeps unsigned internal packages manual, short-lived and unpublishable', () => {
-    const workflow = fs.readFileSync(
-      path.join(repoRoot, '.github', 'workflows', 'release-internal.yml'),
-      'utf8',
-    )
+    const workflow = readText('.github', 'workflows', 'release-internal.yml')
 
     expect(workflow).toContain('workflow_dispatch:')
     expect(workflow).not.toContain('push:')
@@ -293,29 +482,5 @@ describe('trusted release configuration', () => {
     expect(workflow).toContain('retention-days: 7')
     expect(workflow).not.toContain('contents: write')
     expect(workflow).not.toContain('gh release')
-  })
-
-  it('fails closed on incomplete, unsigned or receipt-less release bundles', () => {
-    const assembler = fs.readFileSync(
-      path.join(repoRoot, 'scripts', 'assemble-release-bundle.mjs'),
-      'utf8',
-    )
-    const publisher = fs.readFileSync(
-      path.join(repoRoot, 'scripts', 'publish-release.sh'),
-      'utf8',
-    )
-
-    expect(assembler).toContain('UNSIGNED-INTERNAL')
-    expect(assembler).toContain('macos-arm64.json')
-    expect(assembler).toContain('windows-x64.json')
-    expect(assembler).toContain('24.04-lifecycle.json')
-    expect(assembler).toContain('ARTIFACT-SHA256SUMS.txt')
-    expect(assembler).toContain('release-manifest.json')
-    expect(publisher).toContain('gh release create')
-    expect(publisher).toContain('--draft')
-    expect(publisher).toContain('gh release upload')
-    expect(publisher).toContain('gh release edit')
-    expect(publisher).toContain('--draft=false')
-    expect(publisher).toContain('gh release delete')
   })
 })

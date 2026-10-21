@@ -1,10 +1,11 @@
 // SEC-04: binary hardening of a packaged Emperor, shared by after-pack (which
 // applies it) and the packaged smoke (which checks it on the built package).
 //
-// Unsigned is not unsealed: a Preview carries no Developer ID, but its
-// Electron fuses are flipped and every piece of code Emperor ships is sealed
-// ad hoc with the hardened runtime, so no other process of the user can run
-// its own code under Emperor's identity (cdhash, TCC grants).
+// Unsigned is not unsealed: no public build (Preview or Stable) carries a
+// Developer ID, but its Electron fuses are flipped and every piece of code
+// Emperor ships is sealed ad hoc with the hardened runtime, so no other
+// process of the user can run its own code under Emperor's identity
+// (cdhash, TCC grants).
 const { spawnSync } = require('node:child_process')
 const {
   closeSync,

@@ -123,6 +123,47 @@ describe('workflow lint: which job runs which script, and only on macOS', () => 
     )
   })
 
+  it('fails a Windows or Linux candidate in the Stable release (REL-05)', () => {
+    const dir = tempDir('emperor-workflows-')
+    for (const name of fs.readdirSync(workflowsRoot))
+      fs.copyFileSync(path.join(workflowsRoot, name), path.join(dir, name))
+    const file = path.join(dir, 'release.yml')
+    const text = fs.readFileSync(file, 'utf8')
+    const next = text.replace(
+      '\njobs:\n',
+      '\njobs:\n  windows-candidate:\n    runs-on: windows-2022\n    steps:\n      - run: echo build\n  linux-build:\n    runs-on: ubuntu-22.04\n    steps:\n      - run: echo build\n',
+    )
+    expect(next).not.toBe(text)
+    fs.writeFileSync(file, next)
+    const result = node(ci('check-workflows.mjs'), [dir])
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(
+      'release.yml: job windows-candidate runs on windows-2022, not macOS',
+    )
+    expect(result.stderr).toContain(
+      'release.yml: job linux-build runs on ubuntu-22.04, not macOS',
+    )
+  })
+
+  it('fails a Stable release whose macOS candidates stop building or verifying (REL-05)', () => {
+    const dir = tempDir('emperor-workflows-')
+    for (const name of fs.readdirSync(workflowsRoot))
+      fs.copyFileSync(path.join(workflowsRoot, name), path.join(dir, name))
+    const file = path.join(dir, 'release.yml')
+    const text = fs.readFileSync(file, 'utf8')
+    const next = text.replace(
+      'run: scripts/verify-macos-release.sh "${{ matrix.arch }}"',
+      'run: echo skipped',
+    )
+    expect(next).not.toBe(text)
+    fs.writeFileSync(file, next)
+    const result = node(ci('check-workflows.mjs'), [dir])
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(
+      'release.yml: no macOS arm64 and x64 job builds with scripts/build_desktop_release.sh and verifies with scripts/verify-macos-release.sh',
+    )
+  })
+
   it('fails when a gate stops calling its script or loses its trigger', () => {
     const dir = tempDir('emperor-workflows-')
     for (const name of fs.readdirSync(workflowsRoot))

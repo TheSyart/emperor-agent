@@ -11,6 +11,9 @@
 // - weekly-model-metadata.yml: weekly; runs scripts/ci/weekly-model-metadata.mjs.
 // - release-preview.yml, release.yml: refuse to build on a red nightly
 //   (scripts/ci/require-green-nightly.mjs).
+// - release.yml (REL-05): the unsigned Stable candidates are built with
+//   scripts/build_desktop_release.sh and verified with
+//   scripts/verify-macos-release.sh on macOS arm64 and x64.
 // - Every job runs on macOS, except the few that only attest or publish
 //   (NON_MACOS_JOBS); every scripts/ci/* a workflow runs exists.
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
@@ -23,16 +26,8 @@ const repoRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)))
 /** Jobs that build nothing: they verify, attest and publish what macOS built. */
 const NON_MACOS_JOBS = {
   'release-preview.yml': ['preview-aggregate', 'preview-publish'],
-  // REL-05 replaces the signed Stable path, its Windows and Linux candidates
-  // among it, with the unsigned macOS one; until then they stay as they are.
-  'release.yml': [
-    'release-policy',
-    'windows-candidate',
-    'linux-build',
-    'linux-smoke',
-    'release-aggregate',
-    'publish-release',
-  ],
+  // Checks the tag and the nightly, attests and publishes (REL-05).
+  'release.yml': ['release-policy', 'release-aggregate', 'publish-release'],
 }
 const REQUIRED = ['ci.yml', 'nightly.yml', 'weekly-model-metadata.yml']
 const RELEASES = ['release-preview.yml', 'release.yml']
@@ -205,6 +200,23 @@ export function lintWorkflows(files, root = repoRoot) {
     )
       problems.push(
         'weekly-model-metadata.yml: needs contents: write and pull-requests: write to open its pull request',
+      )
+  }
+
+  const stable = parsed.get('release.yml')
+  if (stable) {
+    const jobs = Object.values(stable.jobs ?? {})
+    const builds = (job) =>
+      runs(job).includes('scripts/build_desktop_release.sh') &&
+      runs(job).some((run) => run.startsWith('scripts/verify-macos-release.sh'))
+    const arm64 = jobs.some(
+      (job) =>
+        builds(job) && runnersOf(job).some((r) => isMacos(r) && !isIntel(r)),
+    )
+    const x64 = jobs.some((job) => builds(job) && runnersOf(job).some(isIntel))
+    if (!arm64 || !x64)
+      problems.push(
+        'release.yml: no macOS arm64 and x64 job builds with scripts/build_desktop_release.sh and verifies with scripts/verify-macos-release.sh',
       )
   }
 

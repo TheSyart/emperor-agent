@@ -20,7 +20,10 @@ const {
   verifyMacHardening,
 } = require('./harden-package.cjs')
 
-/** Entitlements of the ad-hoc Preview seal (harden-package.cjs). */
+/**
+ * Entitlements of the ad-hoc seal (harden-package.cjs) of every public
+ * build: Preview and, since REL-05, Stable, neither of which is signed.
+ */
 const PREVIEW_ENTITLEMENTS = {
   app: join(__dirname, '..', 'build', 'entitlements.preview.mac.plist'),
   electronHelper: join(
@@ -517,12 +520,14 @@ async function afterPack(context) {
     }),
     platform,
   )
-  // Preview has no developer certificate. Seal the bundle ad hoc, every
-  // piece of code with the hardened runtime, so the main executable has a
-  // stable bundle identifier, the helper can bind a local peer to this exact
-  // build's cdhash, and no DYLD_* variable loads foreign code into a process
-  // that holds Emperor's TCC grants. This remains an untrusted Preview for
-  // Gatekeeper and needs TCC re-authorization after every changed build.
+  // Public builds (Preview and Stable, electron-builder.preview.cjs and
+  // electron-builder.release.cjs) have no developer certificate. Seal the
+  // bundle ad hoc, every piece of code with the hardened runtime, so the
+  // main executable has a stable bundle identifier, the helper can bind a
+  // local peer to this exact build's cdhash, and no DYLD_* variable loads
+  // foreign code into a process that holds Emperor's TCC grants. Gatekeeper
+  // still treats the build as unidentified, and every changed build needs
+  // TCC re-authorization.
   if (
     platform === 'darwin' &&
     context.packager.config?.mac?.identity === null
