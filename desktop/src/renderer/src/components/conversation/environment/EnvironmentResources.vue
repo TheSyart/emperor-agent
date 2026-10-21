@@ -3,7 +3,8 @@
  * 来源 on the environment card (UI-S13): a small head 「来源」 with the
  * count, then at most three sources, one row each — what you provided
  * first, then what was read, then search hits (sourcesModel.ts) — with the
- * icon or thumbnail, the name and how it came (PROVENANCE_LABEL). Beyond
+ * icon or thumbnail, the name and how it came (PROVENANCE_LABEL of its
+ * strongest way in, sourceProvenance). Beyond
  * three, 「查看全部 N 个」 opens the 来源 view in the workbench
  * (workspace/SourcesView.vue, an async chunk of this card handed over as a
  * temporary view: `requestWorkspace({ view })`), which this card keeps up
@@ -39,6 +40,7 @@ import EnvironmentRow from './EnvironmentRow.vue'
 import {
   CARD_SOURCE_LIMIT,
   orderSources,
+  sourceProvenance,
   type SourcesViewState,
 } from './sourcesModel'
 
@@ -147,7 +149,7 @@ function select(resource: DisplayResource): void {
       data-source-item
       :label="item.label"
       :title="item.label"
-      :value="PROVENANCE_LABEL[item.provenance]"
+      :value="PROVENANCE_LABEL[sourceProvenance(item)]"
       @click="select(item)"
     >
       <template #lead>

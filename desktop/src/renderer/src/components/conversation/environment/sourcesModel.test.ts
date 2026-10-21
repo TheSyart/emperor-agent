@@ -13,6 +13,7 @@ import {
   sourceGroups,
   sourceLocation,
   sourceNote,
+  sourceProvenance,
 } from './sourcesModel'
 
 function source(
@@ -77,6 +78,42 @@ describe('orderSources (UI-S13)', () => {
       'skill',
     ])
     expect(CARD_SOURCE_LIMIT).toBe(3)
+  })
+})
+
+describe('sourceProvenance (UI-S13)', () => {
+  it('groups a source by its strongest way in, not by its last use', () => {
+    const use = (provenance: ResourceProvenance) => ({
+      nodeKey: `n:${provenance}`,
+      sourceMessageId: 'm',
+      provenance,
+    })
+    // A link you pasted that the answer cited later is still yours.
+    const pasted = source('pasted', 'cited', {
+      uses: [use('provided'), use('cited')],
+    })
+    // A search hit the agent then opened was read.
+    const opened = source('opened', 'read', {
+      uses: [use('discovered'), use('read')],
+    })
+    // A file read and then cited stays 已查看.
+    const read = source('read', 'cited', { uses: [use('read'), use('cited')] })
+    expect(sourceProvenance(pasted)).toBe('provided')
+    expect(sourceProvenance(opened)).toBe('read')
+    expect(sourceProvenance(read)).toBe('read')
+    expect(sourceProvenance(source('plain', 'used'))).toBe('used')
+    expect(orderSources([read, opened, pasted]).map((item) => item.id)).toEqual(
+      ['pasted', 'read', 'opened'],
+    )
+    expect(
+      sourceGroups([read, opened, pasted], new Map()).map((group) => [
+        group.label,
+        group.entries.length,
+      ]),
+    ).toEqual([
+      ['你提供的', 1],
+      ['已查看', 2],
+    ])
   })
 })
 

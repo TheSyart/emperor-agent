@@ -1,7 +1,10 @@
 // 来源 on the environment card and in the workbench's 来源 view (UI-S13).
 // Pure. The card lists the first CARD_SOURCE_LIMIT sources in display
 // order — what you provided, then what was read, then search hits, then the
-// rest — and the view groups all of them the same way. Each source shows
+// rest — and the view groups all of them the same way. A source counts by
+// its strongest way in over all its uses (sourceProvenance): a link you
+// pasted stays yours after the answer cites it, a search hit the agent
+// opened counts as read. Each source shows
 // where it is (a path with home as `~`, an address without its scheme, else
 // what it is) and, only when the loaded transcript says so, what produced it
 // (the search that found it) and how many places used it.
@@ -43,9 +46,23 @@ const GROUP_LABEL: Partial<Record<ResourceProvenance, string>> = {
   provided: '你提供的',
 }
 
-function rank(resource: DisplayResource): number {
-  const at = GROUP_ORDER.indexOf(resource.provenance)
+function rankOf(provenance: ResourceProvenance): number {
+  const at = GROUP_ORDER.indexOf(provenance)
   return at < 0 ? GROUP_ORDER.length : at
+}
+
+/** How a source came in: the strongest provenance among its uses. */
+export function sourceProvenance(
+  resource: DisplayResource,
+): ResourceProvenance {
+  let best = resource.provenance
+  for (const use of resource.uses ?? [])
+    if (rankOf(use.provenance) < rankOf(best)) best = use.provenance
+  return best
+}
+
+function rank(resource: DisplayResource): number {
+  return rankOf(sourceProvenance(resource))
 }
 
 /** Display order, stable within each provenance. */
@@ -78,13 +95,14 @@ export function sourceGroups(
 ): SourceGroup[] {
   const groups = new Map<ResourceProvenance, SourceEntry[]>()
   for (const resource of orderSources(sources)) {
-    const entries = groups.get(resource.provenance) ?? []
+    const key = sourceProvenance(resource)
+    const entries = groups.get(key) ?? []
     entries.push({
       resource,
       location: sourceLocation(resource),
       note: sourceNote(resource, nodes),
     })
-    groups.set(resource.provenance, entries)
+    groups.set(key, entries)
   }
   return [...groups].map(([key, entries]) => ({
     key,
