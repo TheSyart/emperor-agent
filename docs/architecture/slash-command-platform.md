@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、Skill 作者和桌面端开发者<br>
-> 最后核验：2026-09-22<br>
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
 > 事实源：`packages/core/src/commands/`、`packages/core/src/api/services/command-application-service.ts`、CoreApi `commands.*`、`desktop/src/renderer/src/composables/useSlashCommands.ts`
 
 Emperor 的斜杠命令由 Core 注册、解析、校验和调度。Renderer 只展示候选、补全参数、打开界面并投影结果；它不能提供 handler、Skill 路径、来源或工具范围。
@@ -102,10 +102,10 @@ metadata:
       effort: high
 ```
 
-`context: fork` 让命令不在当前对话里内联执行，而是作为后台 fork 子代理运行：子代理的提示是渲染后的 Skill 内容加上任务文本，命令立即返回 `skill_forked` 回执和子代理 ID，结果在对话中的子代理卡片里查看，点击可打开子会话。仅在 fork 时生效的字段：
+`context: fork` 让命令不在当前对话里内联执行，而是作为后台 fork 子智能体运行：子智能体的提示是渲染后的 Skill 内容加上任务文本，命令立即返回 `skill_forked` 回执和子智能体 ID，结果在对话中的子智能体卡片里查看，点击可打开子会话。仅在 fork 时生效的字段：
 
-- `allowed_tools`：子代理可用工具的白名单，必须是已注册的工具名，否则命令被拒绝（`skill_fork_tool_scope_invalid`）。
-- `effort`：子代理的推理强度，映射到当前模型路由支持的档位；路由不支持时忽略。
+- `allowed_tools`：子智能体可用工具的白名单，必须是已注册的工具名，否则命令被拒绝（`skill_fork_tool_scope_invalid`）。
+- `effort`：子智能体的推理强度，映射到当前模型路由支持的档位；路由不支持时忽略。
 
 fork 命令不接受附件。`agent` 字段已无对应的 Agent 定义，会被忽略并在 Diagnostics 的 `commandCatalog.warnings` 中提示；内联命令上的 `allowed_tools` / `effort` 同样只产生 warning。
 

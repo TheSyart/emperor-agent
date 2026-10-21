@@ -56,6 +56,17 @@ describe('design docs (DS-06)', () => {
     expect(statusHeaderProblems(HEADER.replace('2026-10-21', '十月'))).toEqual([
       expect.stringContaining('YYYY-MM-DD'),
     ])
+    // REL-06: the date may name the commit the page was checked against.
+    expect(
+      statusHeaderProblems(
+        HEADER.replace('2026-10-21', '2026-10-21（对照 `ce55ee4a`）'),
+      ),
+    ).toEqual([])
+    expect(
+      statusHeaderProblems(
+        HEADER.replace('2026-10-21', '2026-10-21（对照 main）'),
+      ),
+    ).toEqual([expect.stringContaining('YYYY-MM-DD')])
     expect(statusHeaderProblems(HEADER.replace('Active', 'Draft'))).toEqual([
       expect.stringContaining('Active'),
     ])
@@ -67,12 +78,16 @@ describe('design docs (DS-06)', () => {
     expect(checkDesignDocs(REPO)).toEqual([])
   })
 
-  it('passes the public documentation check (test 3)', () => {
-    expect(() =>
-      execFileSync(process.execPath, ['scripts/check_public_docs.mjs'], {
-        cwd: REPO,
-        stdio: 'pipe',
-      }),
-    ).not.toThrow()
-  })
+  it(
+    'passes the public documentation check (test 3)',
+    { timeout: 60_000 },
+    () => {
+      expect(() =>
+        execFileSync(process.execPath, ['scripts/check_public_docs.mjs'], {
+          cwd: REPO,
+          stdio: 'pipe',
+        }),
+      ).not.toThrow()
+    },
+  )
 })

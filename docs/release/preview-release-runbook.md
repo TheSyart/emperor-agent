@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：发布维护者<br>
-> 最后核验：2026-10-21<br>
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
 > 事实源：`.github/workflows/release-preview.yml`、`scripts/ci/require-green-nightly.mjs`、`scripts/preview-*-contract.mjs`、`scripts/packaged-smoke-contract.mjs`、`scripts/publish-preview-release.sh`、`desktop/scripts/after-pack.cjs`、`desktop/scripts/harden-package.cjs`
 
 Preview 是未签名的预览渠道：通过独立 workflow 构建、验证和发布为 GitHub Pre-release，不应被描述为 Stable，也不能混入 Stable 渠道的产物。正式版走 [Stable 发布手册](stable-release-runbook.md)，同样不签名、同一套封签。
@@ -86,7 +86,7 @@ macOS job 的第一步是 `scripts/ci/require-green-nightly.mjs`：最近一次 
 
 Publish job 会重新验证 contract、checksums 和 attestations，先创建 draft，再核对完整资产清单，最后发布 Pre-release。任何核验失败都不应留下部分公开 Release。
 
-## 发布后验收
+## 发布后检查
 
 1. GitHub Release 标记为 Pre-release，标题和正文明确 `UNSIGNED-PREVIEW` 与本轮仅 macOS。
 2. 四个用户安装资产齐全：两个 macOS 架构各 DMG / ZIP；manifest 与 marker 的 `platforms` 必须为 `macos-arm64`、`macos-x64`，混入其他平台或缺架构直接失败。
@@ -102,9 +102,9 @@ Publish job 会重新验证 contract、checksums 和 attestations，先创建 dr
 
 Attestation 证明 GitHub workflow 的来源和完整性，不等于 Apple Developer ID、Apple notarization 或 Windows trusted publisher 签名。
 
-## 首次启动与恢复验收
+## 首次启动与恢复检查
 
-Release 首次启动先验证 `resources/runtime-defaults` manifest，再初始化 Emperor Home；不自动联网、不自动安装 Skill，也不扫描其他 Agent 的目录。正常初始化不显示额外向导。打包验收至少覆盖：
+Release 首次启动先验证 `resources/runtime-defaults` manifest，再初始化 Emperor Home；不自动联网、不自动安装 Skill，也不扫描其他 Agent 的目录。正常初始化不显示额外向导。打包检查至少覆盖：
 
 - 创建 user Skills、session scratch/tool-results 与 `environment/data` 骨架，并在 CoreHost 启动后启用 Skill watcher；
 - Node 本地 TLS fixture 验证显式 CA 优先、平台 CA fallback 与代理变量继承，严禁关闭 TLS 校验；

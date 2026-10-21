@@ -2,7 +2,7 @@
 
 ## 2026-10-20 - 0.2 brand set (UI-S12)
 
-- Tool mode: Codex built-in `image_gen`, one image per call, three candidates per asset, `transparent_background=false`; the user ran the generation from the brief in `private-docs/progress/2026-10-18-v0.2-production/notes/asset-brief-0.2.md`. Raw candidates and the full call log stay outside the repo (`assets/incoming/`, untracked).
+- Tool mode: Codex built-in `image_gen`, one image per call, three candidates per asset, `transparent_background=false`; the user ran the generation from the 0.2 asset brief (a private planning note, not in the repository). Raw candidates and the full call log stay outside the repo (`assets/incoming/`, untracked).
 - References: every call after the mark used the selected mark (candidate 1) as a reference image; the light illustration also used the selected dark illustration, to keep the composition.
 - The tool has no size parameter: every output came back at 1254×1254 (square) or about 1586×992 / 1610×977 (landscape), so all sizes below are set in post-processing.
 
@@ -121,7 +121,11 @@ Constraints: background must be one uniform #00ff00 color with no shadows, gradi
 Avoid: dragons, crowns, literal emperor face, cartoon style, ornate decoration, complex tiny details, purple gradients, stock-logo look.
 ```
 
-## 2026-06-23 - `readme-product-hero.png`
+## 2026-10-21 - `readme-product-hero.png` (REL-06)
+
+- Replaced the generated illustration below with a real screenshot of the 0.2 interface: `desktop/screenshots/dsh-v1/app-chat-bottom-dark.png` (1440×900, dark theme), written by `desktop/tests/visual/dsh-v1.spec.ts` › "app chat renders the raw session log (dark)" from the visual fixtures. Copied unchanged; to refresh it, run the visual suite and copy that file again.
+
+## 2026-06-23 - `readme-product-hero.png` (retired)
 
 - Tool mode: built-in `image_gen`
 - Output: `assets/generated/readme-product-hero.png`

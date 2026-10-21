@@ -2,12 +2,12 @@
 
 > 文档状态：Active<br>
 > 面向读者：开发者、维护者<br>
-> 最后核验：2026-10-19<br>
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
 > 事实源：`packages/core/src/model/metadata/`（`lookup.ts`、`overrides.ts`、`family-rules.ts`、`providers.ts`、`sync.ts`、`manifest.json`）、`scripts/sync-model-metadata.ts`、`metadata/lookup.test.ts`、`metadata/sync.test.ts`
 
-Emperor 随包带一份模型元数据目录：在不联网、不调用厂商接口的情况下，回答某个模型的上下文窗口、输出上限、能力（工具、识图、思考）、思考强度、是否接受温度、美元单价和生命周期。新增模型流程、手动输入、执行器模型选择器和成本计算共用这一份目录与同一套匹配规则。
+Emperor 随包带一份模型元数据目录：在不联网、不调用厂商接口的情况下，回答某个模型的上下文窗口、输出上限、能力（工具、识图、思考）、思考强度、是否接受温度、美元单价和生命周期。新增模型流程、手动输入、子智能体模型选择器和成本计算共用这一份目录与同一套匹配规则。
 
-**当前状态**：目录与 `lookupModelFacts()` 已在 core 中实现并有测试，`ModelFacts` 等类型从 `@emperor/core/api` 导出。新增模型对话框（MOD-04）用它预填上下文、每次输出、能力与思考档位并标注来源，`model.lookupDefaults` 给手动输入的模型 ID 查默认值，`model.refreshMetadata` 用它比对已保存条目（MOD-03）；成本计算尚未接入。保存后的条目把事实写进 `detected` / `metadata`，运行时由 `model/profile.ts` 按「用户覆盖 > detected > 按 ID 推断」使用。
+**当前状态**：目录与 `lookupModelFacts()` 已在 core 中实现并有测试，`ModelFacts` 等类型从 `@emperor/core/api` 导出。新增模型对话框（MOD-04）用它预填上下文、每次输出、能力与思考档位并标注来源，`model.lookupDefaults` 给手动输入的模型 ID 查默认值，`model.refreshMetadata` 用它比对已保存条目（MOD-03）；用量账本（`model/usage-cost.ts`）在条目没写单价时按目录单价计费，Codex 子智能体的费用估算（`harness/delegation/pricing.ts`）也用它。保存后的条目把事实写进 `detected` / `metadata`，运行时由 `model/profile.ts` 按「用户覆盖 > detected > 按 ID 推断」使用。
 
 ## 数据来源与许可
 

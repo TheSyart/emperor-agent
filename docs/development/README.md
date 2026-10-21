@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：贡献者、维护者<br>
-> 最后核验：2026-10-21<br>
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
 > 事实源：根目录与 `desktop/package.json`、`packages/core/package.json`、`Makefile`
 
 这里提供源码开发的最短入口，并维护公共的工程约束、关键目录和禁止提交项；系统边界先读[架构总览](../architecture/overview.md)。
@@ -12,7 +12,7 @@
 - Node.js 22 或更高版本。
 - npm；根 workspace 与 `desktop/` 各有独立 lockfile 和依赖安装。
 - 构建 macOS Helper 需要 Xcode 26 或更高版本及 macOS 26 SDK（包含 SpeechAnalyzer 类型）；运行时通过系统版本检查选择可用能力。Preview 的两种 macOS 架构在 CI 中显式选择 Xcode 26。
-- macOS、Windows 或 Linux 桌面环境。普通安装包用户不需要 Node.js。
+- macOS 桌面环境（项目只支持 macOS）。普通安装包用户不需要 Node.js。
 - 构建桌面安装包需要可编译 Electron 原生依赖的 C/C++ 工具链；`node-pty` 在 CI 的目标平台按 Electron ABI rebuild。发布包只携带运行时 JS、目标原生 binding 和 helper，不携带其测试或构建脚本。
 
 当前主线是 TypeScript / Electron。不要新增 Python runtime、Python CLI、HTTP / WebSocket backend 或 browser-only 产品 fallback。
@@ -70,7 +70,7 @@ npm --prefix desktop run package:verify
 | 权限 / Plan / 问题         | `packages/core/src/harness/sandbox/`、`harness/approval/`、`harness/plan/`、`harness/questions/`                                              |
 | 压缩                       | `packages/core/src/harness/compaction/`                                                                                                       |
 | Goal                       | `packages/core/src/harness/goal/`、`api/services/goal-service.ts`                                                                             |
-| 子代理 / 后台任务          | `packages/core/src/harness/subagent/`、`harness/jobs/`                                                                                        |
+| 子智能体 / 后台任务        | `packages/core/src/harness/subagent/`、`harness/jobs/`                                                                                        |
 | Hooks                      | `packages/core/src/harness/hooks/`、`api/services/hooks-service.ts`                                                                           |
 | 提示词 / 工作区说明        | `packages/core/src/harness/prompt/`、`templates/agent/persona.md`                                                                             |
 | Runtime event 投影         | `packages/core/src/harness/projection/`                                                                                                       |
@@ -116,6 +116,6 @@ Core package 只开放三个受控导入面：`@emperor/core/api`、`@emperor/co
 - 相关测试与 `make check` 通过。
 - 用户可感知变化已进入 [`docs/release/CHANGELOG.md`](../release/CHANGELOG.md) 的 `Unreleased`。
 
-## 外部执行器
+## 外部子智能体
 
-扩展 Claude Code/Codex 适配器、构建 macOS 进程边界 helper 或验证打包后原生会话时，阅读[适配器开发与真实验收](external-agent-adapters.md)。
+扩展 Claude Code/Codex 适配器、构建 macOS 进程边界 helper 或验证打包后原生会话时，阅读[适配器开发与真实验证](external-agent-adapters.md)。

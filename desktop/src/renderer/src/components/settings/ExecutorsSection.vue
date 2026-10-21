@@ -142,7 +142,7 @@ const workspaceOptions = [
 const workspaceDescription = computed(() =>
   workspace.value === 'shared-exclusive'
     ? 'Claude Code、Codex 直接改当前工作区；改完之前，主会话不能同时修改文件'
-    : 'Claude Code、Codex 在独立的 Git 工作树里改，验证后再合并回来',
+    : 'Claude Code、Codex 在独立的 Git 工作树里改，你看过差异后再应用到项目',
 )
 const budgetOptions = computed(() => {
   const current = config.value?.limits.estimatedBudgetUsd ?? 10

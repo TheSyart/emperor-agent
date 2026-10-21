@@ -2,10 +2,12 @@
 
 > 文档状态：Active<br>
 > 面向读者：修改 ToolCatalog 的开发者与发布审核者<br>
-> 最后核验：2026-07-19<br>
-> 事实源：`packages/core/src/environment/tool-catalog.json`、catalog schema、环境安装 adapters、`packages/core/src/environment/sandbox.ts`
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 事实源：`packages/core/src/environment/tool-catalog.json`、`packages/core/src/environment/catalog.ts`（schema 与 allowlist）、`packages/core/src/api/core-api.ts`（`environment.*`）、`packages/core/src/environment/sandbox.ts`
 
-`packages/core/src/environment/tool-catalog.json` 是随应用签名发布的静态执行策略，不是普通展示数据。catalog 决定可探测、下载和执行的程序；任何变更都按供应链与命令执行安全变更审核。
+`packages/core/src/environment/tool-catalog.json` 是随应用发布的静态执行策略，不是普通展示数据。catalog 决定可探测和执行的程序；任何变更都按供应链与命令执行安全变更审核。
+
+当前状态：应用内安装已经退役（`environment.createInstallPlan` / `environment.install` 返回 `OperationRetiredError`），「设置 › 高级 › 诊断」的「环境工具」只读显示探测结果，安装由用户自己完成（例如 `brew install gh`）。catalog 里的 `strategies` 只作为给用户看的安装提示。下文「下载安全」与安装相关的条目在恢复应用内安装之前不适用，但改动 `strategies` 时仍按「来源与许可」核对。产品只发布 macOS，Windows 与 Linux 的条目只在恢复这些平台时适用。
 
 当前命令 sandbox helper 不由 ToolCatalog 下载：macOS `sandbox-exec` 与 Linux `bwrap` 被视为 host-OS capability，Windows 明确 unsupported。它们仍受固定路径、固定 probe argv 与 packaged smoke receipt 审核；不得因为“不在 catalog”就接受 PATH 首项、renderer/model 指定 helper 或静默 unsandboxed fallback。未来若把 bwrap/Landlock/Windows helper 随应用分发，必须先加入 catalog/签名资源清单，固定版本、SHA-256、publisher 与 license，再修改 backend selection。
 

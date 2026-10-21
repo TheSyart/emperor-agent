@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：前端开发者、设计者<br>
-> 最后核验：2026-10-19<br>
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
 > 事实源：`desktop/src/renderer/src/components/ui/`（`useFocusTrap.ts`、`modalStack.ts`、`Modal.vue`、`confirm.ts`、`ConfirmHost.vue`、`toasts.ts`、`ToastStack.vue`、`Popover.vue`）、`components/ui/overlays.test.ts`
 
 Emperor 的浮层分四类：模态弹窗、确认框、轻提示（toast）和锚定面板（popover）。每类只有一个实现，界面不再各写一套。

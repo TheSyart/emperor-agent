@@ -1,18 +1,18 @@
 # Emperor Agent {{tag}} · UNSIGNED-PREVIEW / 未签名预览版
 
 > 文档状态：Active<br>
-> 面向读者：安装 Preview 的用户<br>
-> 最后核验：2026-10-15<br>
-> 事实源：`.github/workflows/release-preview.yml`、Preview electron-builder 配置与发布 contract、`desktop/src/main/computer-use/macos-launcher.ts`、`desktop/src/main/dictation/` 与 macOS Helper 打包脚本
+> 面向读者：安装 Emperor 未签名安装包（Preview 与 Stable）的用户<br>
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 事实源：`.github/workflows/release-preview.yml`、`.github/workflows/release.yml`、两份 electron-builder 发布配置与发布 contract、`docs/release/stable-release-notes.md`、`desktop/src/main/computer-use/macos-launcher.ts`、`desktop/src/main/dictation/` 与 macOS Helper 打包脚本
 
 > **Unsigned Preview / 未签名预览版**  
 > `channel: preview` · `signingStatus: unsigned`
 
-本轮只提供 macOS Apple Silicon（arm64）与 Intel（x64）的 DMG / ZIP；Windows / Linux 暂不更新。下文 Windows 说明供旧 Preview 安装包用户参考。
+只提供 macOS Apple Silicon（arm64）与 Intel（x64）的 DMG / ZIP；Windows 与 Linux 不受支持，下文 Windows 一节只供更早的 Preview 安装包用户参考。正式版（Stable，0.2.0 起）同样不签名、不公证，安装与核验方法与下文相同，首次打开的步骤写在每个正式版 Release 正文的第一段。
 
 这是面向测试用户的公开预览版，不是 Stable。macOS 文件没有 Developer ID 签名且未经 Apple 公证；Windows 安装程序会显示 `Unknown publisher`，并可能触发 Microsoft Defender SmartScreen。只有在你确认下载来源并核对 SHA-256 后才应继续。未签名不等于未封签：应用和各个 Helper 都以 hardened runtime 做了 ad-hoc 封签，Electron 的 Node 运行与调试入口也已关闭，其他程序不能借 Emperor 的身份和已授予的权限运行自己的代码。
 
-This release provides macOS arm64 and x64 DMG / ZIP files only. Windows and Linux packages are not updated; the Windows guidance below applies to earlier previews.
+Only macOS arm64 and x64 DMG / ZIP files are provided. Windows and Linux are not supported; the Windows section below applies to earlier previews only. Stable releases (from 0.2.0) are unsigned and not notarized as well; the same installation and verification steps apply.
 
 This public preview is for testing and is not a Stable release. The macOS files have no Developer ID signature and are not notarized by Apple. The Windows installer has no trusted publisher signature and may trigger Microsoft Defender SmartScreen. Continue only after confirming the download source and verifying its SHA-256 digest. Unsigned does not mean unsealed: the app and its helpers are sealed ad hoc with the hardened runtime, and Electron's Node and debugging entry points are turned off, so other programs cannot run their own code with Emperor's identity and permissions.
 
@@ -31,19 +31,19 @@ Move Emperor Agent to the Applications folder before opening it: launched from t
 
 ## macOS 电脑操作 / Computer use on macOS
 
-电脑操作使用独立的 Emperor Computer Helper。未签名版本没有固定的签名身份，更新使 Helper 的代码身份改变时，之前的系统授权可能失效：请在 **设置 › 电脑操作** 按提示重新授予 **辅助功能** 与 **屏幕录制**（系统开关仍显示开启时，以设置页读到的状态为准）。
+电脑操作使用独立的 Emperor Computer Helper。未签名版本没有固定的签名身份，更新使 Helper 的代码身份改变时，之前的系统授权可能失效：请在「设置 › 电脑操作」按提示重新授予 **辅助功能** 与 **屏幕录制**（系统开关仍显示开启时，以设置页读到的状态为准）。
 
 Computer use runs in the separate Emperor Computer Helper. An unsigned build has no stable signing identity; an update that changes the Helper code identity may invalidate earlier grants. Re-grant **Accessibility** and **Screen Recording** from **Settings › Computer Use** (trust the state shown there even if the system switches still look on).
 
 ## macOS 语音听写 / Dictation on macOS
 
-输入框的听写在这台 Mac 上本机识别，需要「麦克风」与「语音识别」两项权限，第一次听写时 macOS 会询问。未签名版本没有固定的签名身份，安装新版本后，macOS 可能不再认可之前的授权：再次听写时如果重新弹出询问，允许即可；如果系统设置里的开关显示已开启、听写却仍提示没有权限，到 **设置 › 语音** 查看状态，用「打开系统设置」把对应开关关掉再打开。仍然无效时，在终端运行 `tccutil reset Microphone com.emperor.agent.desktop` 与 `tccutil reset SpeechRecognition com.emperor.agent.desktop`，下次听写时重新允许。
+输入框的听写在这台 Mac 上本机识别，需要「麦克风」与「语音识别」两项权限，第一次听写时 macOS 会询问。未签名版本没有固定的签名身份，安装新版本后，macOS 可能不再认可之前的授权：再次听写时如果重新弹出询问，允许即可；如果系统设置里的开关显示已开启、听写却仍提示没有权限，到「设置 › 语音」查看状态，用「打开系统设置」把对应开关关掉再打开。仍然无效时，在终端运行 `tccutil reset Microphone com.emperor.agent.desktop` 与 `tccutil reset SpeechRecognition com.emperor.agent.desktop`，下次听写时重新允许。
 
 Dictation in the composer recognizes speech on this Mac and needs **Microphone** and **Speech Recognition**, which macOS asks for at the first dictation. An unsigned build has no stable signing identity, so after an update macOS may no longer honor the earlier grants: allow again if asked; if the system switches look on but dictation still reports a missing permission, check **Settings › 语音** and use 「打开系统设置」 to turn the switch off and on. If that does not help, run `tccutil reset Microphone com.emperor.agent.desktop` and `tccutil reset SpeechRecognition com.emperor.agent.desktop` in Terminal and allow again at the next dictation.
 
 ## macOS Helper 图标 / Helper icons on macOS
 
-Emperor Computer Helper 包内带有 Computer Use 图标，Emperor Dictation Helper 包内带有 Emperor 图标，供系统授权弹框与 **系统设置 › 隐私与安全性** 使用。更换图标或代码会改变 Helper 的 ad-hoc 签名，之前的授权可能失效；是否重新询问取决于实际系统授权状态。分别在 **设置 › 电脑操作** 与 **设置 › 语音** 核对所需权限，按提示处理。如果隐私列表里的条目仍是空白图标，或者开关显示已开启、设置页却说没有权限，在终端运行 `tccutil reset Accessibility com.emperor.agent.desktop.computer-helper` 与 `tccutil reset ScreenCapture com.emperor.agent.desktop.computer-helper`，再重新允许。
+Emperor Computer Helper 包内带有 Computer Use 图标，Emperor Dictation Helper 包内带有 Emperor 图标，供系统授权弹框与 **系统设置 › 隐私与安全性** 使用。更换图标或代码会改变 Helper 的 ad-hoc 签名，之前的授权可能失效；是否重新询问取决于实际系统授权状态。分别在「设置 › 电脑操作」与「设置 › 语音」核对所需权限，按提示处理。如果隐私列表里的条目仍是空白图标，或者开关显示已开启、设置页却说没有权限，在终端运行 `tccutil reset Accessibility com.emperor.agent.desktop.computer-helper` 与 `tccutil reset ScreenCapture com.emperor.agent.desktop.computer-helper`，再重新允许。
 
 Emperor Computer Helper bundles the Computer Use icon and Emperor Dictation Helper bundles the Emperor icon for permission prompts and **System Settings › Privacy & Security**. Changing an icon or code changes the helper's ad-hoc signature and may invalidate earlier grants; whether macOS asks again depends on the actual permission state. Check **Settings › Computer Use** and **Settings › 语音** separately and follow their prompts. If an entry in the privacy lists still shows a blank icon, or its switch looks on while the settings page reports the permission missing, run `tccutil reset Accessibility com.emperor.agent.desktop.computer-helper` and `tccutil reset ScreenCapture com.emperor.agent.desktop.computer-helper` in Terminal and allow again.
 

@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、发布维护者<br>
-> 最后核验：2026-10-20<br>
-> 事实源：`assets/generated/emperor-mark.svg`、`desktop/src/renderer/src/components/brand/BrandMark.vue`、`desktop/src/renderer/public/favicon.svg`、`desktop/build/icon.png`、`desktop/build/background.tiff`、`desktop/electron-builder.yml`（`dmg`）、`assets/generated/model-setup-hero-{dark,light}.webp`、`assets/generated/PROMPTS.md`
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 事实源：`assets/generated/emperor-mark.svg`、`desktop/src/renderer/src/components/brand/BrandMark.vue`、`desktop/src/renderer/public/favicon.svg`、`desktop/build/icon.png`、`desktop/build/background.tiff`、`desktop/electron-builder.yml`（`dmg`）、`assets/generated/model-setup-hero-{dark,light}.webp`、`assets/generated/readme-product-hero.png`（`desktop/tests/visual/dsh-v1.spec.ts`）、`assets/generated/PROMPTS.md`
 
 Emperor 的标是一枚现代印章：圆角方框里，一条冠线压在左右对称的结构上，中间一个小六边形节点暗示 Agent。它没有可读的字母或汉字，只用一种颜色。0.2 起所有品牌位置都用同一份矢量几何，不再使用位图字标。
 
@@ -42,4 +42,4 @@ Emperor 的标是一枚现代印章：圆角方框里，一条冠线压在左右
 
 - 每张生成图的提示词、选图理由与后期处理写在 `assets/generated/PROMPTS.md`。
 - 生成原图（含绿底与候选）不进仓库；仓库只放处理后的成品。
-- 退役于 2026-10-20：`emperoragent-wordmark.png`、`emperor-agent-logo-mark.png`、`model-setup-modal-hero-v2.png`。`readme-product-hero.png` 仍是旧界面的示意图，0.2 发布前由 REL-06 换成新界面的真实截图。
+- 退役于 2026-10-20：`emperoragent-wordmark.png`、`emperor-agent-logo-mark.png`、`model-setup-modal-hero-v2.png`。`readme-product-hero.png` 自 2026-10-21 起是 0.2 界面的真实截图（视觉测试 `dsh-v1.spec.ts` 的深色对话页），不再是生成的示意图。

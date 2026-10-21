@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：希望扩展 Agent 能力的用户<br>
-> 最后核验：2026-10-20<br>
-> 事实源：`packages/core/src/harness/host/host.ts`（`compose()`）、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/tools/builtin/`（含 `skill-manage.ts`、`mcp-config.ts`、`web-fetch.ts`、`web-search.ts`、`deepseek-search.ts`）、`packages/core/src/harness/workflow/`、`packages/core/src/skills/`、`packages/core/src/plugins/`、`packages/core/src/mcp/`、`desktop/src/renderer/src/components/pages/capabilities/`、`desktop/src/renderer/src/components/pages/explore/`（目录与安装流程）、`desktop/src/renderer/src/components/settings/`（插件 / Skills / MCP / 工具分区组件）
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 事实源：`packages/core/src/harness/host/host.ts`（`compose()`）、`packages/core/src/harness/host/web-tools.ts`、`packages/core/src/harness/tools/builtin/`（含 `skill-manage.ts`、`mcp-config.ts`、`web-fetch.ts`、`web-search.ts`、`deepseek-search.ts`）、`packages/core/src/harness/workflow/`、`packages/core/src/harness/delegation/tools.ts`、`packages/core/src/skills/`、`packages/core/src/plugins/`、`packages/core/src/mcp/`、`desktop/src/renderer/src/components/pages/capabilities/`、`desktop/src/renderer/src/components/pages/explore/`（目录与安装流程）、`desktop/src/renderer/src/components/settings/`（插件 / Skills / MCP / 工具分区组件）
 
 Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资源包；Plugin 是带来源、版本和启用状态的 Skill 分发单元；MCP 把外部 server 暴露的工具接入 Agent。
 
@@ -13,14 +13,14 @@ Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资�
 
 ## Tools
 
-| 分类             | 工具                                                                                                                               |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| 基础工具         | 文件 `read`、`write`、`edit`；搜索 `glob`、`grep`；命令 `bash`，后台命令用 `job_output`、`job_list`、`job_kill` 管理               |
-| 网络             | `web_fetch`；`web_search`（模型使用 DeepSeek 官方 API 时）                                                                         |
-| 任务与规划       | `todo_write`、`ask_user_question`、`exit_plan_mode`；目标 `get_goal`、`create_goal`、`update_goal`；定时 `scheduler`               |
-| 子智能体与工作流 | `subagent`、`subagent_fork`、`send_message`、`interrupt_agent`、`list_agents`（子智能体内另有 `report`）；编排 `workflow`、`ralph` |
-| 技能、记忆与配置 | `skill`、`skill_manage`、`memory_edit`、`mcp_config`                                                                               |
-| MCP              | `mcp_<server>_<tool>`，每个已连接 server 的工具各一个（名字清洗规则见下文「MCP 工具」）                                            |
+| 分类             | 工具                                                                                                                                                                 |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 基础工具         | 文件 `read`、`write`、`edit`；搜索 `glob`、`grep`；命令 `bash`，后台命令用 `job_output`、`job_list`、`job_kill` 管理                                                 |
+| 网络             | `web_fetch`；`web_search`（模型使用 DeepSeek 官方 API 时）                                                                                                           |
+| 任务与规划       | `todo_write`、`ask_user_question`、`exit_plan_mode`；目标 `get_goal`、`create_goal`、`update_goal`；定时 `scheduler`                                                 |
+| 子智能体与工作流 | `subagent`、`subagent_fork`、`send_message`、`interrupt_agent`、`list_agents`、`inspect_agent`、`collect_agent`（子智能体内另有 `report`）；编排 `workflow`、`ralph` |
+| 技能、记忆与配置 | `skill`、`skill_manage`、`memory_edit`、`mcp_config`                                                                                                                 |
+| MCP              | `mcp_<server>_<tool>`，每个已连接 server 的工具各一个（名字清洗规则见下文「MCP 工具」）                                                                              |
 
 能力页的“工具”标签只列 Emperor 内建的工具，按上表的五类分组，每组标题带数量；每行是工具名和一句说明，展开后查看完整说明、参数和 JSON schema，可以按名称和说明搜索。MCP server 的工具在“MCP”标签里按 server 列出，插件带来的工具（包括电脑操作的工具）在插件详情里；页首有这两处的链接。
 
@@ -28,8 +28,8 @@ Tool 是 Agent 可调用的接口；Skill 是按需加载的工作说明和资�
 
 - **文件**：`write` 与 `edit` 受当前权限预设的写入范围约束，超出范围时可以为单次调用请求批准。`read` 不受写入沙箱限制。
 - **搜索**：`grep` 优先使用受管执行环境中的 ripgrep，找不到时使用内置的纯 JS 实现；`glob` 与 `grep` 的超大结果会把完整结果保存到本地。
-- **命令**：`bash` 在 macOS / Linux 的系统沙箱中执行，工作目录固定为当前 workspace；有默认超时，`run_in_background: true` 时立即返回 job id，由 `job_*` 工具读取输出或停止。工具说明要求模型先写一句命令用途（`description`）再写命令，界面因此能在命令生成时就显示它要做什么；删除或移动文件前，模型会被要求先核对解析后的绝对路径，变量写成 `${VAR:?}`，避免空变量把路径变成上级目录。没有沙箱后端的平台只有 `danger-full-access` 才能运行 `bash`。
-- **子智能体**：`subagent` 在独立上下文中完成一个自足的子任务；`subagent_fork` 的子智能体继承当前对话已完成的部分。两者默认在后台运行，完成时通知主 Agent；子智能体最多嵌套 3 层，不能请求提权。
+- **命令**：`bash` 在 macOS 的系统沙箱（Seatbelt）中执行，工作目录固定为当前 workspace；有默认超时，`run_in_background: true` 时立即返回 job id，由 `job_*` 工具读取输出或停止。工具说明要求模型先写一句命令用途（`description`）再写命令，界面因此能在命令生成时就显示它要做什么；删除或移动文件前，模型会被要求先核对解析后的绝对路径，变量写成 `${VAR:?}`，避免空变量把路径变成上级目录。
+- **子智能体**：`subagent` 在独立上下文中完成一个自足的子任务；`subagent_fork` 的子智能体继承当前对话已完成的部分。两者默认在后台运行，完成时通知主 Agent；子智能体最多嵌套 3 层，不能请求提权。在「设置 › 子智能体」打开 Claude Code 或 Codex 后，`subagent` 多一个 `backend` 参数（`internal`、`claude-code`、`codex`），第一次交给它们时先弹确认卡；它们不能继承当前对话（不能 fork），用 `send_message` 继续（`delivery: steer` 可以给正在运行的 Codex 插话，Claude Code 不支持），用 `inspect_agent` 查看、用 `collect_agent` 收取结果。`collect_agent` 的 `apply` 请求把成果应用到项目、`abandon` 请求把卡住的任务标记为已结束，两者都先弹审批卡由你决定。你也可以在子智能体的页面直接给它发消息。详见[子智能体](automation-collaboration.md#子智能体)。
 - **任务预算**：「设置 › 高级 › 任务预算」限制一个任务（你发出的一条消息和它引出的全部工作）能用多少：每轮最多步数（对话 400 步，定时任务与目标每轮 120 步），同时运行的子智能体（8 个，多出的排队等空位），每个任务最多启动的子智能体（64 个，再启动会被拒绝），子智能体结果最多唤醒对话几次（32 次，之后结果留到下一步再读）。达到步数上限时本轮停止，对话里显示「已达到单轮步数上限」，Agent 也会知道为什么停下，可以让它继续。设置保存在 `~/.emperor/settings.json` 的 `taskBudget`；费用上限在「设置 › 模型」。
 - **编排**：只在明确要求工作流或 Ralph 循环时使用。`workflow` 运行模型编写的 JavaScript 编排脚本，脚本里的 `agent()` 会启动真实子智能体（在对话的工具卡片下流式显示）；`ralph` 以同一目标反复启动全新子智能体，每轮只传递一份有界的结构化交接，默认最多 64 轮。默认在前台运行，调用返回时整个运行已结束；`workflow` 也可以后台运行（`run_in_background`），调用立即返回任务编号，运行结束后以通知告诉模型，结果用 `job_output` 读取。脚本在一个受限的独立进程里运行：读不到你的项目文件和 Emperor 数据、不能联网、最多用 512 MB 内存，超过 30 分钟会停止；运行期间环境信息卡的「后台任务」行显示运行数量，展开后可以查看运行记录或单独停止它（会先确认）；停止当前 turn 也会同时取消运行。
 - **记忆**：`memory_edit` 修改用户档案、全局长期记忆或当前项目的私有记忆，不需要审批。
@@ -69,7 +69,7 @@ Skills 文件夹中直接放置的 `<name>.md` 文件，只要 frontmatter 同�
 | 3      | Plugin | 已启用并激活的 Plugin 内的 Skills                            | 只读     |
 | 4      | 内置   | 应用内置的 `runtimeRoot/skills`（目前是 `skill-creator`）    | 只读     |
 
-同名时高优先级覆盖低优先级。每个 Build 项目只看到自己的项目 Skill；Chat 会话和其他项目看不到它。当前生效来源可在“设置 → 高级 → 诊断”的“配置”分组中核对 `skills.<name>` 行。
+同名时高优先级覆盖低优先级。每个 Build 项目只看到自己的项目 Skill；Chat 会话和其他项目看不到它。当前生效来源可在「设置 › 高级 › 诊断」的「配置」分组中核对 `skills.<name>` 行。
 
 ### 名称与校验规则
 
@@ -199,7 +199,7 @@ stdio server 与 Agent 的 Shell 共用同一套进程沙箱（macOS 上是 Seat
 
 第一次启动一个 `npx` / `uvx` server 要把包下载进它自己的新缓存，可能超过连接时限而显示失败；下载会在后台继续，稍后重新连接即可。
 
-沙箱不可用时（例如系统的 `sandbox-exec` 无法运行），你自己的 server 不会悄悄在沙箱外启动：卡片显示「等待确认」，下一次对话开始一步之前会弹出审批卡，写明 server、原因和命令。选「允许本次」后它在沙箱外运行，选择按 server 记住；修改它的命令后会重新询问。插件带来的 server 在这种情况下一律不启动。每次启动的结果记录在「设置 › 诊断 › 进程隔离回执」。
+沙箱不可用时（例如系统的 `sandbox-exec` 无法运行），你自己的 server 不会悄悄在沙箱外启动：卡片显示「等待确认」，下一次对话开始一步之前会弹出审批卡，写明 server、原因和命令。选「允许本次」后它在沙箱外运行，选择按 server 记住；修改它的命令后会重新询问。插件带来的 server 在这种情况下一律不启动。每次启动的结果记录在「设置 › 高级 › 诊断」「运行时」分组的「进程隔离回执」一行。
 
 ### 管理已有 server
 
@@ -247,4 +247,4 @@ Agent 被要求只通过 `mcp_config` 添加 server，不使用 mcporter，也�
 - Agent 的文件、搜索和 Shell 工具读不到 `mcp_config.json`；它只能通过 `mcp_config` 工具查看名称、地址与字段名，看不到字段值。
 - 不要把 API Key 直接写进可提交的项目文件，优先使用 `${ENV_NAME}`。MCP 标签读取配置时保留 `${ENV_NAME}`，把 args、env、headers、URL 中其余字面字符串显示为 `[REDACTED]`；保存原始配置时，未改动的掩码只从同一 server 同一字段回填，没有旧值的掩码会被拒绝。
 
-排查加载问题时，先看能力页“MCP”标签中该 server 卡片的状态、最近错误和最近输出，再检查配置 JSON、执行环境和“设置 → 高级 → 诊断”。
+排查加载问题时，先看能力页“MCP”标签中该 server 卡片的状态、最近错误和最近输出，再检查配置 JSON、执行环境和「设置 › 高级 › 诊断」。

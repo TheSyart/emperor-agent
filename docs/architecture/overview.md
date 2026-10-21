@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、开发者、希望理解产品边界的用户<br>
-> 最后核验：2026-10-20<br>
-> 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/api/core-api.ts`、`packages/core/src/api/operations.ts`、`desktop/src/main/`、`desktop/src/preload/`、`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/workspace/`
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/api/core-api.ts`、`packages/core/src/api/operations.ts`、`desktop/src/main/`、`desktop/src/preload/`、`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/workspace/`、`packages/core/src/harness/delegation/`、`desktop/src/main/logging/`、`desktop/src/main/home-backup.ts`
 
 Emperor Agent 的桌面主产品是本地单用户 Electron 应用。Electron main 进程内创建一个 TypeScript `CoreApi`；`CoreApi` 背后是唯一的内核组合根 `HarnessHost`。Vue renderer 只能通过 preload 暴露的 IPC contract 请求 Core，并通过 runtime events 接收过程状态。源码还提供默认不随桌面安装包开放的 ACP V1 stdio operator preview，它为受信本机 client 创建独立的 `CoreApi`。产品主线没有 Python runtime、HTTP backend 或 WebSocket backend。
 
@@ -38,7 +38,7 @@ flowchart LR
 | Renderer      | 界面、用户输入、纯 runtime projection 与可取消 effect，不持有权威业务状态                          | `desktop/src/renderer/src/`                                   |
 | Preload / IPC | 限定 renderer 可调用的 operation、可订阅事件和少量桌面能力（文件选择、打开文件夹、内置浏览器视图） | `desktop/src/preload/`、`desktop/src/main/core-host.ts`       |
 | CoreApi       | 进程内 API 门面、输入校验、mutation guard、工作台与配置服务                                        | `packages/core/src/api/`                                      |
-| HarnessHost   | 组合 LLM、session log、Agent loop、工具、沙箱、审批、Plan、压缩、Hooks、Goal、子代理               | `packages/core/src/harness/host/`                             |
+| HarnessHost   | 组合 LLM、session log、Agent loop、工具、沙箱、审批、Plan、压缩、Hooks、Goal、子智能体             | `packages/core/src/harness/host/`                             |
 | Agent loop    | turn → step 循环、inbox、工具调度、middleware                                                      | `packages/core/src/harness/agent/`                            |
 | Session log   | 每个 session 一份 append-only `log.jsonl`、崩溃修复、fork                                          | `packages/core/src/session-log/`                              |
 | LLM           | Provider catalog、model route、DeepSeek（Messages / chat-completions）与 pi-ai 适配器、重试策略    | `packages/core/src/llm/`                                      |
@@ -56,7 +56,7 @@ flowchart LR
 3. `Agent` 空闲时启动驱动循环：一个 turn 由若干 step 组成；每个 step 认领 inbox、执行 pre-step middleware（工作区说明、长期记忆、Skill 目录、压缩、Hooks、Goal、Plan）、从 session log 推导模型请求并调用 LLM。
 4. 模型的流式输出逐块写入 log。模型提出工具调用时，`ToolRegistry` 依次执行参数校验、pre-execute middleware（Hooks）、审批、guard、工具体、post-execute middleware（重复提醒、大结果落盘、Hooks）。并发安全的调用可重叠执行，其余调用形成屏障，结果按模型顺序提交。
 5. 需要用户介入的调用（`ask_user_question`、`exit_plan_mode` 审批、一次性提权审批）在工具调用内部阻塞，直到用户在界面回答、取消或 turn 被中止。
-6. 没有工具调用且 inbox 为空时 turn 结束。内核没有最大步数限制。
+6. 没有工具调用且 inbox 为空时 turn 结束；一个 turn 最多 400 步（定时任务与 Goal 轮次 120 步），见[任务树与预算](agent-runtime.md#任务树与预算)。
 7. `SessionProjector` 把每条 log 事件折叠为 renderer runtime event 推给界面；刷新或重启时用同一折叠重放整份 log。
 
 模型可见内容与 log 一一对应：凡是进入模型请求的内容都已写入 log，没有写入 log 的内容不会进入请求。详细执行链路见 [Agent 执行链路](agent-runtime.md)。
@@ -65,7 +65,15 @@ flowchart LR
 
 Scheduler 的 `agent_turn` 任务、Watchlist 检查和 Goal 续跑都通过同一个 `HarnessHost.submit()` / inbox 进入目标 session 的 Agent，不拥有另一套绕过权限的 runtime。每个 session 一个 Agent；同一 session 的 turn 串行，不同 session 可以并行。桌面当前选中的 session 只决定界面显示，不是后台执行所有权。
 
-子代理在进程内运行，是独立的子 session（最大嵌套深度 3）。它们继承父会话的沙箱模式，审批策略固定为 `never`，因此子代理内的提权请求会被自动拒绝。
+子智能体在进程内运行，是独立的子 session（最大嵌套深度 3）。它们继承父会话的沙箱模式，审批策略固定为 `never`，因此子智能体内的提权请求会被自动拒绝。
+
+## Claude Code 与 Codex 子智能体
+
+HarnessHost 还组合 `DelegationService`（`harness/delegation/`）：父 Agent 用同一个 `subagent` 工具选 `backend: claude-code | codex`，任务交给随 Emperor 发布的 Claude Code（Claude Agent SDK）或本机 Codex 的 stdio app-server，在私有 HOME、Seatbelt 边界和隔离工作区里运行。两者默认关闭，第一次使用先在对话里征得同意；要改文件的任务从项目当前状态的快照开始，结束后把成果交回会话，由用户查看差异后应用（三方合并，可撤销）或丢弃。委派状态存在 `stateRoot/delegations/`，不进入 session log 的修复矩阵。桌面端统一以「子智能体」展示本地、Claude Code 与 Codex：`agents.list` 与 `agent_tree_changed` 提供按根会话组织的子智能体树，左侧只列主会话。权限、生命周期、停止与恢复见 [Claude Code 与 Codex 子智能体](external-agent-delegation.md)。
+
+## Electron main 的宿主服务
+
+除 Core 外，main 进程还负责：数据目录锁与单实例（[全局私有存储根](global-state-store.md#目录模型)）；持久日志（`~/Library/Logs/Emperor Agent/`，写入前脱敏）、本地崩溃转储与诊断包（不上传）；备份与恢复（`home-backup.ts`，恢复在下次启动、打开数据之前完成）；凭据库与本地密钥；电脑操作 Helper、听写 Helper 与 Chrome/Edge Native Messaging；用户内置浏览器与下载。这些能力经受信 IPC 通道暴露，见 [IPC 与运行时事件](ipc-and-runtime-events.md#桌面能力-ipc)。
 
 ## 桌面外壳与路由
 
@@ -81,7 +89,7 @@ Renderer 外壳是 `components/shell/AppFrame.vue` 的网格：会话侧栏（�
 | `/scheduler`                                       | 定时任务                                   | 不显示     |
 | `/capabilities/:tab(plugins\|skills\|mcp\|tools)?` | 能力（插件 / Skills / MCP / 工具四个标签） | 不显示     |
 | `/pulls/:owner?/:repo?/:number?`                   | Pull Request                               | 不显示     |
-| `/github/issues/:owner?/:repo?/:number?`           | GitHub 插件的 Issue 标签                   | 不显示     |
+| `/github/issues/:owner?/:repo?/:number?`           | GitHub 插件的「议题」标签                  | 不显示     |
 | `/github/ci/:owner?/:repo?/:runId?`                | GitHub 插件的 CI 标签                      | 不显示     |
 | `/explore`                                         | 转到 `/capabilities#recommended`（推荐）   | —          |
 
@@ -91,15 +99,15 @@ Renderer 外壳是 `components/shell/AppFrame.vue` 的网格：会话侧栏（�
 
 ## 右侧工作台与环境信息卡
 
-右侧工作台（`components/workspace/WorkspacePanel.vue`）提供启动器和四个面板：审查、终端、文件、浏览器，每个面板单独分包。对话组件通过 `workspaceState.ts` 的 `requestWorkspace({ pane, paths?, file?, directory?, turn?, url?, focus? })` 请求打开某个面板或内容，不持有组件引用：`directory` 在文件树中展开一个目录，`turn` 让「审查」显示一轮对话的改动（本轮改动视图）。环境信息卡（`components/conversation/environment/EnvironmentCard.vue`）浮在对话区右上角，输入框上方的变更汇总条显示工作区 Git 改动总计；工作台、环境信息卡和变更汇总条共用 `useWorkspaceSnapshot.ts` 中按引用计数轮询的同一份 `workspace.snapshot`。
+右侧工作台（`components/workspace/WorkspacePanel.vue`）提供四个面板：审查、终端、文件、浏览器，每个面板单独分包；还没选过面板时显示列出四个面板的空状态（`WorkspaceEmpty`），没有启动器首页。对话组件通过 `workspaceState.ts` 的 `requestWorkspace({ pane, paths?, file?, directory?, turn?, url?, focus? })` 请求打开某个面板或内容，不持有组件引用：`directory` 在文件树中展开一个目录，`turn` 让「审查」显示一轮对话的改动（本轮改动视图）。环境信息卡（`components/conversation/environment/EnvironmentCard.vue`）浮在对话区右上角，输入框上方的变更汇总条显示工作区 Git 改动总计；工作台、环境信息卡和变更汇总条共用 `useWorkspaceSnapshot.ts` 中按引用计数轮询的同一份 `workspace.snapshot`。
 
-- `workspace.snapshot` 聚合 Git/worktree/安全操作凭据、当前 Goal、后台任务、子代理和终端的投影。
+- `workspace.snapshot` 聚合 Git/worktree/安全操作凭据、当前 Goal、后台任务、子智能体和终端的投影。
 - 审查使用 Core 内的 Git 分层服务（「比较分支」通过 `git.remote` 取得 `origin` 的网页地址）。环境信息卡是只读汇总（UI-S05）：每节一行，点开去到审查、子智能体列表、输出对话框或资源详情，卡片本身不发出写操作。
-- 文件是只读、有界的项目文件浏览。
+- 文件是只读、有界的文件浏览与预览；任何会话都可用，普通对话里只打开回复、附件和改动卡中的文件。
 - 终端的 PTY 由 Electron main 注入 Core `TerminalService`。它是用户直接操作的系统 Shell，不进入 Agent loop 或 Agent 权限，也不写聊天记录或 session log。
 - 用户内置浏览器由 Electron main 的 `BrowserViewHost`（`desktop/src/main/browser-view.ts`）在独立内存分区中托管 sandboxed `WebContentsView`；地址栏、临时历史与界面链接通过 `browser-view-policy.ts` 和 main 的链接分流校验，只加载不带账号密码的 `http(s)`。网页权限与应用内弹窗被拒绝，弹窗的外部链接交给系统浏览器；下载交给 `UserDownloads`（`user-downloads.ts`）执行文件类型、大小、保存位置和隔离标记检查。偏好经 CoreApi 保存，页面生命周期经受信桌面 IPC 管理。
 - Agent 的内置浏览器独立由 `BrowserSessionManager` 管理 profile 与目标，经 `ComputerUseService` 执行；它不使用用户工作台的内存会话。Chrome/Edge 走扩展与 Native Messaging，macOS 桌面走独立 Helper，三者共享目标租约、generation/revision、确认、取消与释放契约。受控目标的只读预览在对话中显示，任务结束释放，不由工作台面板决定目标寿命。
-- 「Pull Request」整页通过 `pullRequests.*` 调用签名工具目录中的 `gh`，不绑定会话或项目，只读。GitHub 插件启用时页面加上 Issue、CI 两个标签（`github.*`，同样只读）；插件停用时标签消失，Core 拒绝 `github.*`。
+- 「Pull Request」整页通过 `pullRequests.*` 调用签名工具目录中的 `gh`，不绑定会话或项目，只读。GitHub 插件启用时页面加上「议题」「CI」两个标签（`github.*`，同样只读）；插件停用时标签消失，Core 拒绝 `github.*`。
 
 这些入口都不是 renderer 的本机权限旁路：Git 根、路径、revision、确认和浏览器地址由 Core 或 Electron main 校验。Trajectory 的「详情」列（Inspector）是轨迹视图内部的一列，不属于右侧工作台；对话中的 Inspect 跳转到 `/chat/:id/trajectory?call=<callId>` 并打开这一列。轨迹默认隐藏，打开「设置 › 常规 › 开发者 › 显示轨迹」（renderer 偏好 `emperor.ui.prefs.v1` 的 `showTrajectory`）后才有页签和 Inspect；关闭时 trajectory 路由的 `beforeEnter` 把链接转回对话（`components/conversation/trajectoryGate.ts`），轨迹分包不加载。
 

@@ -1,11 +1,11 @@
-# 外部 Agent 调度
+# Claude Code 与 Codex 子智能体
 
 > 文档状态：Active<br>
 > 面向读者：开发者、维护者<br>
-> 最后核验：2026-10-20<br>
-> 事实源：`packages/core/src/harness/delegation/`（含 `consent.ts`）、`packages/core/src/workspace/delegation-*.ts`（含 `delegation-results.ts`）、`packages/core/src/api/services/delegation-service.ts`、`packages/core/src/runtime/agent-view.ts`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/sidebar/agentTree.ts`
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 事实源：`packages/core/src/harness/delegation/`（含 `consent.ts`）、`packages/core/src/workspace/delegation-*.ts`（含 `delegation-results.ts`）、`packages/core/src/api/services/delegation-service.ts`、`packages/core/src/runtime/agent-view.ts`、`packages/core/src/harness/host/host.ts`（`stop`、`close`）、`desktop/src/renderer/src/components/settings/executors/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/sidebar/agentTree.ts`
 
-Emperor 的父 Agent 可以通过原有子智能体工具选择 `internal`、`claude-code` 或 `codex`。未指定 backend 时仍用 internal。两个外部 profile 复用本机 CLI 登录，但默认关闭：它们使用用户自己的订阅额度或 API 计费，需要用户在设置里打开，并在首次派工时于对话中确认（见下文「默认关闭与首次同意」）。设置「子智能体」统一展示本地、Claude Code 与 Codex；外部来源可切换启用状态，通过全局检测读取 CLI 与本地登录可用条件，异常时按需更正可执行文件路径。多份 profile 以来源内选择器切换，不合并或覆盖其他 profile。设置保留既有认证及调度限制；默认模型支持跟随 CLI、候选选择和自定义，修改后仅用于后续派工。已有配置中的开关、路径和有效凭据引用保持不变；旧版空引用按本机登录解析，不自动覆写文件。backend 与内部 provider/model 路由是不同维度。
+Emperor 的父 Agent 可以通过原有子智能体工具选择 `internal`、`claude-code` 或 `codex`。未指定 backend 时仍用 internal。两个外部 profile 复用本机 CLI 登录，但默认关闭：它们使用用户自己的订阅额度或 API 计费，需要用户在设置里打开，并在第一次交出任务时于对话中确认（见下文「默认关闭与首次同意」）。设置「子智能体」统一展示本地、Claude Code 与 Codex；外部来源可切换启用状态，通过全局检测读取 CLI 与本地登录可用条件，异常时按需更正可执行文件路径。多份 profile 以来源内选择器切换，不合并或覆盖其他 profile。设置保留既有认证及调度限制；默认模型支持跟随 CLI、候选选择和自定义，修改后只用于之后的任务。已有配置中的开关、路径和有效凭据引用保持不变；旧版空引用按本机登录解析，不自动覆写文件。backend 与内部 provider/model 路由是不同维度。
 
 ```mermaid
 flowchart TD
@@ -24,27 +24,27 @@ flowchart TD
 
 ## 默认关闭与首次同意
 
-- `defaultExecutorConfig()` 两个外部 profile 均为 `enabled:false`。`ExecutorConfigStore.update`（设置页保存）写入 `touchedAt`。读到没有 `touchedAt`、却有 `enabled:true` 的旧文件（外部执行器分支的默认值，用户从未保存过）时，改为关闭并写入 `upgradeNotice: 'external-default-off'`（修订号不变）；没有配置文件但 `conversations/` 下有 `dlg-*` 记录时同样带上提示。设置页显示一次说明，「知道了」保存上次保存的配置（清除提示、写入 `touchedAt`），不连带保存页面上未保存的修改。
-- 首次向某个外部 profile 派工时，`DelegationService.create` 在探测之后、建立任何记录之前调用 `consent(owner, profile, spec, signal)`。宿主的 `ExecutorConsentBridge`（`delegation/consent.ts`）复用待回答交互：发一个 `question/asked`（带 `consent: { backend, profileId, description }`），投影为 `interaction_type: 'permission'` 的授权卡（不允许 / 本次允许 / 以后都允许，风险标签「使用额度」），回答仍按选项文字走普通问题通道。
-- 「本次允许」在当前根回合内有效，同一回合里并行的派工共用同一张卡；「以后都允许」写入 `delegations/consent.json`，该 profile 以后不再询问，在设置里关闭该执行器即清除；「不允许」、关闭卡片、超时（与执行器提问相同的 15 分钟）或取消都视为不允许，`start` 以 `EXECUTOR_CONSENT_DENIED` 失败。`subagent` 工具与工作流收到该错误后改由本地子智能体执行同一任务，工具结果写明用户没有允许。Scheduler 回合或没有窗口时无法询问，除非已选「以后都允许」，一律不使用外部执行器；`owner.source === 'human'`（用户自己发起）不再询问。
-- 父模型的运行时上下文：没有启用任何外部执行器时不注入任何内容；启用时只有一段简短说明与每个已启用 profile 一行摘要（两个都启用时也在 600 token 以内，测试按保守估算核对）（状态、模型、专长、搜索与生图验证状态、能否 steer），不再附带产品介绍与 runtime JSON，也不再有「无需另外征得用户同意」之类的鼓励语句。
-- 工具描述：`subagent`、`subagent_fork`、`send_message`、`interrupt_agent`、`list_agents` 的描述与参数说明与 main 一致（`delegation/__golden__/local-subagent-tools.json` 与 `tool-descriptions.test.ts` 守护）；外部执行器的说明集中在 `backend` 字段，其余外部参数（`profile_id`、`context`、`workspace`、`base`、`model`、`output_schema`、`delivery`、`expected_run_id`）各自标明只用于外部执行器；原来无作用的 `provider` 参数已移除。
+- `defaultExecutorConfig()` 两个外部 profile 均为 `enabled:false`。`ExecutorConfigStore.update`（设置页保存）写入 `touchedAt`。读到没有 `touchedAt`、却有 `enabled:true` 的旧文件（外部子智能体最初并入时的默认值，用户从未保存过）时，改为关闭并写入 `upgradeNotice: 'external-default-off'`（修订号不变）；没有配置文件但 `conversations/` 下有 `dlg-*` 记录时同样带上提示。设置页显示一次说明，「知道了」像其他改动一样立即保存（清除提示、写入 `touchedAt`）。
+- 第一次把任务交给某个外部 profile 时，`DelegationService.create` 在探测之后、建立任何记录之前调用 `consent(owner, profile, spec, signal)`。宿主的 `ExecutorConsentBridge`（`delegation/consent.ts`）复用待回答交互：发一个 `question/asked`（带 `consent: { backend, profileId, description }`），投影为 `interaction_type: 'permission'` 的授权卡（不允许 / 本次允许 / 以后都允许，风险标签「使用额度」），回答仍按选项文字走普通问题通道。
+- 「本次允许」在当前根回合内有效，同一回合里并行交出的任务共用同一张卡；「以后都允许」写入 `delegations/consent.json`，该 profile 以后不再询问，在设置里关闭该子智能体即清除；「不允许」、关闭卡片、超时（与子智能体提问相同的 15 分钟）或取消都视为不允许，`start` 以 `EXECUTOR_CONSENT_DENIED` 失败。`subagent` 工具与工作流收到该错误后改由本地子智能体执行同一任务，工具结果写明用户没有允许。Scheduler 回合或没有窗口时无法询问，除非已选「以后都允许」，一律不使用外部子智能体；`owner.source === 'human'`（用户自己发起）不再询问。
+- 父模型的运行时上下文：没有启用任何外部子智能体时不注入任何内容；启用时只有一段简短说明与每个已启用 profile 一行摘要（两个都启用时也在 600 token 以内，测试按保守估算核对）（状态、模型、专长、搜索与生图验证状态、能否 steer），不再附带产品介绍与 runtime JSON，也不再有「无需另外征得用户同意」之类的鼓励语句。
+- 工具描述：`subagent`、`subagent_fork`、`send_message`、`interrupt_agent`、`list_agents` 的描述与参数说明与 main 一致（外部委派另有 `inspect_agent` 查看子会话与当前轮次、`collect_agent` 收取结果，`apply` / `abandon` 都要经用户审批）（`delegation/__golden__/local-subagent-tools.json` 与 `tool-descriptions.test.ts` 守护）；外部子智能体的说明集中在 `backend` 字段，其余外部参数（`profile_id`、`context`、`workspace`、`base`、`model`、`output_schema`、`delivery`、`expected_run_id`）各自标明只用于外部子智能体；原来无作用的 `provider` 参数已移除。
 
 ## 版本兼容
 
-兼容性按能力握手判断，不读配置里的精确版本（旧 `expectedVersion` 读取时忽略并清除）。Claude Code 默认运行随 Agent SDK 发布的 `claude`，版本随 Emperor 固定；选择「使用本机安装的 claude」时检测要求 `>= 2.1`，运行时由 SDK `init` 消息核对版本与权限模式。Codex 使用本机 CLI：major.minor 不在已验证协议之列即 `incompatible` 并给出所需范围；同一 minor 时比对 `app-server generate-json-schema` 输出的协议摘要，已知为 `verified`，否则为 `unverified`（可运行、提示可能不兼容、失败结果注明可能的版本原因）。探测结果的 `executableSource`、`requiredVersion`、`compatibility`、`protocolVersion` 供设置页与父 Agent 使用；委派记录保存当时的 `executorVersion`，成果回执的版本取自它。维护流程见 [开发与验证外部执行器](../development/external-agent-adapters.md)。
+兼容性按能力握手判断，不读配置里的精确版本（旧 `expectedVersion` 读取时忽略并清除）。Claude Code 默认运行随 Agent SDK 发布的 `claude`，版本随 Emperor 固定；选择「使用本机安装的 claude」时检测要求 `>= 2.1`，运行时由 SDK `init` 消息核对版本与权限模式。Codex 使用本机 CLI：major.minor 不在已验证协议之列即 `incompatible` 并给出所需范围；同一 minor 时比对 `app-server generate-json-schema` 输出的协议摘要，已知为 `verified`，否则为 `unverified`（可运行、提示可能不兼容、失败结果注明可能的版本原因）。探测结果的 `executableSource`、`requiredVersion`、`compatibility`、`protocolVersion` 供设置页与父 Agent 使用；委派记录保存当时的 `executorVersion`，成果回执的版本取自它。维护流程见 [开发与验证外部子智能体](../development/external-agent-adapters.md)。
 
 ## 专长与原生能力事实
 
-设置页与父智能体使用同一份执行器产品介绍，说明代码库理解、开发、命令与测试、代码审查，以及各自支持的联网和图像工具；介绍依据官方产品文档，不是当前模型或本机工具的可用证明。Claude Code 默认建议代码库理解、功能开发、重构排错、测试补全、文档检索；Codex 默认建议功能开发、代码审查、测试排错、联网调研、图像生成。这些建议不是二者的能力强弱排名，已有自定义专长不被覆盖。
+设置页与父智能体使用同一份 Claude Code / Codex 产品介绍，说明代码库理解、开发、命令与测试、代码审查，以及各自支持的联网和图像工具；介绍依据官方产品文档，不是当前模型或本机工具的可用证明。Claude Code 默认建议代码库理解、功能开发、重构排错、测试补全、文档检索；Codex 默认建议功能开发、代码审查、测试排错、联网调研、图像生成。这些建议不是二者的能力强弱排名，已有自定义专长不被覆盖。
 
-`ExecutorProfile.specialties` 是可选的派工偏好：缺省使用各来源的推荐任务，空数组表示清除，最多六项，每项二十四个 Unicode 字符。设置「子智能体」提供编辑和恢复默认；不改变模型、认证和权限。
+`ExecutorProfile.specialties` 是可选的分工偏好：缺省使用各来源的推荐任务，空数组表示清除，最多六项，每项二十四个 Unicode 字符。设置「子智能体」提供编辑和恢复默认；不改变模型、认证和权限。
 
-`ExecutorFactsStore` 在委派数据目录保存 `runtime-facts.json`，由同一 Core 实例供 `executors.list` 和父 Agent 的执行器上下文读取。CLI readiness 与搜索、生图的验证状态独立；`ExecutorCapabilities` 仍描述会话控制协议能力。模型信息区分配置值和带来源的运行时报告值；第三方网关报告的名称不等于独立确认的模型身份。工具区分宿主开放、运行时公布与实际观察到的调用；缺少清单时保留未知。
+`ExecutorFactsStore` 在委派数据目录保存 `runtime-facts.json`，由同一 Core 实例供 `executors.list` 和父 Agent 的子智能体上下文读取。CLI readiness 与搜索、生图的验证状态独立；`ExecutorCapabilities` 仍描述会话控制协议能力。模型信息区分配置值和带来源的运行时报告值；第三方网关报告的名称不等于独立确认的模型身份。工具区分宿主开放、运行时公布与实际观察到的调用；缺少清单时保留未知。
 
 适配器只归一化公开模型元数据和原生工具结果，不转发推理、密钥或原始协议正文。原生搜索与页面读取须在同一轮取得成功证据；Codex 标明请求的实时搜索模式。原生生图还须产生工作区范围内的有效图片。Claude 当前宿主工具清单开放 WebSearch、WebFetch，不提供原生生图。完成文本、自述、脚本绘图、CLI 版本或凭据文件均不能把原生能力升级为已验证可用。
 
-证据绑定 profile、配置模型、认证摘要和固定适配器工具策略；模型报告变化使先前能力失效。模型、执行器路径、Claude 所用二进制（随包或本机）或账号变化也使旧证据失效，修改专长保留证据。重启后须重新绑定当前认证身份才能恢复匹配的记录，检测不发起模型推理。父 Agent 优先遵从明确来源和已有任务会话，结合专长、模型、工具与证据选择；未知能力可以通过普通授权任务尝试，失败如实交接。
+证据绑定 profile、配置模型、认证摘要和固定适配器工具策略；模型报告变化使先前能力失效。模型、可执行文件路径、Claude 所用二进制（随包或本机）或账号变化也使旧证据失效，修改专长保留证据。重启后须重新绑定当前认证身份才能恢复匹配的记录，检测不发起模型推理。父 Agent 优先遵从明确来源和已有任务会话，结合专长、模型、工具与证据选择；未知能力可以通过普通授权任务尝试，失败如实交接。
 
 ## 模型候选与本机接入
 
@@ -58,31 +58,31 @@ Codex 只导入所选模型、所选提供方的连接/认证字段和显式模�
 
 本地、Claude Code 和 Codex 共用 `subagent/contract.ts` 中的子智能体身份和交付规则：父智能体负责整体协调与用户交付，子智能体只完成当前任务，不假定能看到父级或兄弟会话，不自行绕过权限；汇报覆盖状态、结果、文件、实际执行的验证及未完成事项。指定 JSON schema 或精确输出格式时优先遵守格式，不额外拼接汇报文字。
 
-本地运行时注入共用身份，并使用 `report` 发送重要发现和最终交接；Claude 在原有 `claude_code` 系统预设后追加共用规则，保留厂商预设；Codex 将同一规则放入 developer instructions。外部最终公开回复由宿主转交父级，原生再派工、插件和 MCP 仍禁用。本地保留内部 fork 和权限范围内的再派工；Claude 排队续聊、Codex 排队与 steer 的能力差异保持不变。
+本地运行时注入共用身份，并使用 `report` 发送重要发现和最终交接；Claude 在原有 `claude_code` 系统预设后追加共用规则，保留厂商预设；Codex 将同一规则放入 developer instructions。外部最终公开回复由宿主转交父级，原生再交出任务、插件和 MCP 仍禁用。本地保留内部 fork 和权限范围内的再交出任务；Claude 排队续聊、Codex 排队与 steer 的能力差异保持不变。
 
-首次派工使用 `Task: <创建任务名>` 交接格式；后续轮次（`send_message`）是新的指示，按原文送达，不再加 `Task:` 标题（本地与外部相同）。工具层只准备明确任务与选取的规则、Goal 目标，外部服务层统一包裹一次任务，避免重复标题；运行时工作区基线再由宿主补充。不自动复制私有父会话或推理；完整汇报依赖模型遵守提示，执行状态和成果验证仍由宿主记录，不能仅凭模型自述判定通过。
+第一次交出任务使用 `Task: <创建任务名>` 交接格式；后续轮次（`send_message`）是新的指示，按原文送达，不再加 `Task:` 标题（本地与外部相同）。工具层只准备明确任务与选取的规则、Goal 目标，外部服务层统一包裹一次任务，避免重复标题；运行时工作区基线再由宿主补充。不自动复制私有父会话或推理；完整汇报依赖模型遵守提示，执行状态和成果验证仍由宿主记录，不能仅凭模型自述判定通过。
 
 外部会话使用 `dlg-*`，每一轮使用 `dgr-*`，消息使用 `dgm-*`。task.id 就是 runId；后续轮次创建新任务记录，旧任务不会重新变为运行中。原生 session/thread 和 turn ID 单独记录。每轮结束后关闭 CLI 进程；继续时恢复同一原生会话。Claude 支持排队，Codex 还支持绑定当前 turn 的 steer。两者均不支持复制 Emperor 私有对话来实现外部 fork。
 
-执行态包括 queued、preparing、running、waiting_input、cancelling 与终态。`completed` 仅说明原生执行已结束；成果验收另有 unverified、passed、failed、needs_user。模型摘要不会自动变成测试证据。前台与 collect 结果向父模型明确返回身份、当前 cwd、原生身份、receipt 和验收状态。
+轮次状态（`RunPhase`）有 10 个：未结束的 queued、preparing、running、waiting_input、cancelling，终态 completed、failed、cancelled、interrupted、outcome_unknown；合法迁移见 `fold.ts` 的 `RUN_TRANSITIONS`。`needs_recovery` 不是轮次状态，而是委派的 `availability`（idle / active / needs_recovery / closed）。`completed` 仅说明原生执行已结束；成果验证另有 unverified、passed、failed、needs_user。模型摘要不会自动变成测试证据。前台与 collect 结果向父模型明确返回身份、当前 cwd、原生身份、receipt 和验证状态。
 
 持久 `delegation/projection` 记录父工具调用、当前 run 与 backend 身份，聊天 assembler 将公开文字和工具活动关联回原委派卡片。旧记录可从工具结果中的原生委派元数据建立关联；后续轮次开始后，早期轮次的晚到事件不覆盖当前过程。实时卡片保留有限输出，独立对话通过事件触发的分页读取追上持久日志。
 
 图片引用通过 `references.image` 读取，输入只有会话 ID 和已解析的引用 capability；Core 限定当前普通聊天工作区、Build 项目或该根会话拥有的外部工作区，再由有尺寸上限的 Files 读取器返回栅格图片。renderer 不直接读取任意本地路径。
 
-每个控制动作都重新核验根会话所有权、当前 run 与权限。根 Agent 和所有活动祖先权限取交集；Plan 模式下只允许 `shared-readonly` 的只读委派（审查），其余工作区返回 `PLAN_MODE_UNSUPPORTED`，Plan 模式下未指定工作区时默认只读；进入 Plan 模式不会停止已有的只读委派。祖先收窄权限会停止根任务已有的写入型外部执行并解除 Goal 自动续跑。判断只看未关闭的委派：已关闭的会话不算；父级是已经结束（或重启后尚未载入）的本地子智能体时，按根会话的权限判断，不再一律当作「权限收回」，所以重启后切换权限预设不会无故停止根任务。用户按停止时，进行中的 Goal 先持久化为「已暂停」（不再只解除续跑）；`stopRoot` 照常调用：它还要拦住正在启动的外部任务、扣住晚到的结果，没有外部委派时什么也不做。前台等待和 `collect_agent` 把工具调用的取消信号交给 `wait`，停止后工具调用立即结束（前台等待同时 interrupt 该轮）。关闭外部会话保留原生历史、文件、工作区和凭据。
+每个控制动作都重新核验根会话所有权、当前 run 与权限。根 Agent 和所有活动祖先权限取交集；Plan 模式下只允许 `shared-readonly` 的只读委派（审查），其余工作区返回 `PLAN_MODE_UNSUPPORTED`，Plan 模式下未指定工作区时默认只读；进入 Plan 模式不会停止已有的只读委派。祖先收窄权限（`sandbox/mode` 或 `plan/mode` 变化使 `parentPermissionsRevoked()` 成立）时，宿主解除 Goal 自动续跑（`GoalService.disarm`）并调用 `stopRoot`，根会话所有进行中的外部轮次（包括只读审查）都被中断。判断只看未关闭的委派：已关闭的会话不算；父级是已经结束（或重启后尚未载入）的本地子智能体时，按根会话的权限判断，不再一律当作「权限收回」，所以重启后切换权限预设不会无故停止根任务。用户按停止时，进行中的 Goal 先持久化为「已暂停」（不再只解除续跑）；`stopRoot` 照常调用：它还要拦住正在启动的外部任务、扣住晚到的结果，没有外部委派时什么也不做。前台等待和 `collect_agent` 把工具调用的取消信号交给 `wait`，停止后工具调用立即结束（前台等待同时 interrupt 该轮）。关闭外部会话保留原生历史、文件、工作区和凭据。
 
 ## 统一子智能体入口与公开对话
 
-父任务卡片、环境信息和独立页面使用创建任务的 description 作为名称，来源单独显示为 Emperor、Claude Code 或 Codex；缺失名称时使用对应来源加「子智能体」。继续派工不会把名称改成后续轮次提示。`sub-*` 是内部子会话，`dlg-*` 是稳定外部身份，`dgr-*` 仅表示某一轮。
+父任务卡片、环境信息和独立页面使用创建任务的 description 作为名称，来源单独显示为 Emperor、Claude Code 或 Codex；缺失名称时使用对应来源加「子智能体」。继续安排任务不会把名称改成后续轮次提示。`sub-*` 是内部子会话，`dlg-*` 是稳定外部身份，`dgr-*` 仅表示某一轮。
 
-`agents.list({ rootSessionIds }) => { agents: AgentView[] }` 返回根会话拥有的子智能体，包含实际 `parentAgentId`、名称、来源、状态和当前 run。左侧会话栏只渲染主会话，进入子会话后仍选中 owning root；环境信息从同一根范围树缓存列出各来源的稳定身份，实际父级保留在路径提示和异常说明中。活动项和最近项保持可见，超过五项可显示全部；完成项仍可检查。`agent_tree_changed { rootSessionId, revision }` 只使拓扑或状态失效，文字增量不触发全历史扫描。该可重建索引不替代持久日志，`sessions.children` 保持兼容。内部继续派工的 `send_message` 不会产生新的 started 事件；卡片从结果元数据 `subagentId`（派发中为 `subagent_id` 参数）匹配 owning root 的共享内部 AgentView，取回创建名称、来源和状态，后续提示仍保留在展开内容中。缺失、跨根或外部身份不会被伪装成原生子会话。环境信息在父级缺失、跨根或成环时保留已知路径和父级 ID 并明确标记不可用，不补造主会话祖先；首次树读取失败提供根范围的错误与重试入口。
+`agents.list({ rootSessionIds }) => { agents: AgentView[] }` 返回根会话拥有的子智能体，包含实际 `parentAgentId`、名称、来源、状态和当前 run。左侧会话栏只渲染主会话，进入子会话后仍选中 owning root；环境信息从同一根范围树缓存列出各来源的稳定身份，实际父级保留在路径提示和异常说明中。活动项和最近项保持可见，超过五项可显示全部；完成项仍可检查。`agent_tree_changed { rootSessionId, revision }` 只使拓扑或状态失效，文字增量不触发全历史扫描。该可重建索引不替代持久日志，`sessions.children` 保持兼容。内部继续安排任务的 `send_message` 不会产生新的 started 事件；卡片从结果元数据 `subagentId`（交出中为 `subagent_id` 参数）匹配 owning root 的共享内部 AgentView，取回创建名称、来源和状态，后续提示仍保留在展开内容中。缺失、跨根或外部身份不会被伪装成原生子会话。环境信息在父级缺失、跨根或成环时保留已知路径和父级 ID 并明确标记不可用，不补造主会话祖先；首次树读取失败提供根范围的错误与重试入口。
 
-外部入口固定为 `/chat/:sessionId/agents/:delegationId`，其中 sessionId 是可读的 owning root，delegationId 是 `dlg-*`。内部入口仍为 `/chat/:sessionId`，使用真实 `sub-*`。路由检查内部 lineage 后保留根的 Core 活动上下文；不会将 dlg 或 dgr 作为 Emperor session 激活。父卡片的主要名称链接打开独立页，过程折叠、图片、复制和「任务详情」各自独立操作，任务详情保留当前轮的文件交付、差异、验收和整合。
+外部入口固定为 `/chat/:sessionId/agents/:delegationId`，其中 sessionId 是可读的 owning root，delegationId 是 `dlg-*`。内部入口仍为 `/chat/:sessionId`，使用真实 `sub-*`。路由检查内部 lineage 后保留根的 Core 活动上下文；不会将 dlg 或 dgr 作为 Emperor session 激活。父卡片的主要名称链接打开独立页，过程折叠、图片、复制和「任务详情」各自独立操作，任务详情保留当前轮的文件交付、差异、验证和整合。
 
 独立页只展示公开任务提示、文字、工具、问题及权限状态，按轮次分段并以虚拟列表显示。`delegations.history({ id, sessionId, before?, after?, limit? })` 默认读取最近 200 项，最多 500 项并限制字节；游标不透明，不可同时指定前后方向，也不能跨委派复用。持久条目 ID 用于去重；订阅先于初读，读取串行追赶晚到事件，不从页面导航推断新运行。私有推理和原始 SDK/native 历史不进入此页面；只有接近底部才自动跟随。
 
-「停止子智能体」只停止当前运行；返回父智能体沿实际父级导航。回答问题或继续派工回到根聊天，保留该聊天草稿且不自动发送。详情不提供直接 followup、steer 或轮次干预输入；父 Agent 使用的 Core 控制 API 仍兼容。
+本地子智能体的页面用 `agents.send({ sessionId, text })` 把用户消息放进运行中的子智能体（`SubagentManager.userFollowup`，作为它下一轮的用户输入），子智能体已关闭时返回 `subagent_not_live`。外部委派的独立页底部是同一个 `ChildComposer`：消息经 `delegations.send` 送出，轮次进行中且这个 backend 支持 steer（Codex）时用 `steer` 插话，否则 `queue` 排到这一轮之后；被拒绝时保留草稿并写明原因，主会话归档后输入框关闭。根会话上属于这个委派的提问（投影里带 `external_delegation_id` / `external_run_id`）由 `TakeoverSeat` 在输入框的位置直接回答。「停止子智能体」（`delegations.interrupt`）停止当前轮次，并取消这个委派还在排队的消息；返回父智能体沿实际父级导航。
 
 独立页及父卡片的 `references.resolve` 使用 owning root 和可选 delegationId，将相对图片/文件限定到对应委派 cwd，仍验证根所有权、真实路径、符号链接和图片大小；其他子智能体不能借此读取任意本地文件。
 
@@ -90,12 +90,12 @@ Codex 只导入所选模型、所选提供方的连接/认证字段和显式模�
 
 支持 isolated-worktree、shared-readonly、shared-exclusive（AGT-06 起的默认与基线见下）：
 
-- 写任务默认 `isolated-worktree`，基线默认 `snapshot`：当前工作区的样子，即 HEAD 加上 `git status` 列出的改动与未跟踪文件（遵守 `.gitignore`；`.env*`、符号链接、嵌套仓库与 submodule 有排除记录，后三者使隔离拒绝派工）。快照只为 `git status` 列出的文件建对象：一次 `git hash-object -w --stdin-paths`，经临时 index（`update-index --index-info`）写成提交，引用在 `refs/emperor/delegations/<lease>/base`；不再把整个工作区读两遍写进 Emperor 的 artifact store（`delegation-snapshot.ts`）。改动超过 10,000 个文件时拒绝并提示改用 `committed`。`committed` 是 HEAD 本身，工作区有未提交改动也允许（子任务看不到这些改动）。只读审查（`shared-readonly`）不写任何对象或引用，指纹只用 `git status` 列表加大小与修改时间。原仓库 HEAD/index 不移动。
+- 写任务默认 `isolated-worktree`，基线默认 `snapshot`：当前工作区的样子，即 HEAD 加上 `git status` 列出的改动与未跟踪文件（遵守 `.gitignore`；`.env*`、符号链接、嵌套仓库与 submodule 有排除记录，后三者使隔离工作区建不起来，任务被拒绝）。快照只为 `git status` 列出的文件建对象：一次 `git hash-object -w --stdin-paths`，经临时 index（`update-index --index-info`）写成提交，引用在 `refs/emperor/delegations/<lease>/base`；不再把整个工作区读两遍写进 Emperor 的 artifact store（`delegation-snapshot.ts`）。改动超过 10,000 个文件时拒绝并提示改用 `committed`。`committed` 是 HEAD 本身，工作区有未提交改动也允许（子任务看不到这些改动）。只读审查（`shared-readonly`）不写任何对象或引用，指纹只用 `git status` 列表加大小与修改时间。原仓库 HEAD/index 不移动。
 - 父 Agent 只读、Plan 模式或不在 Git 里时，默认 `shared-readonly`，在原处只读审查（`DelegationToolOptions.parentInGit`）。不在 Git 里的文件夹要写时（`isolated-worktree` 或 `shared-exclusive`），在 `<delegations>/workspaces/<lease>` 建一份副本：私有 Git 目录（`<lease>.git`，带 `info/exclude`：`.git`、`node_modules/`、`.env*` 和位于文件夹内的 Emperor 状态目录）以文件夹为工作树 `git add -A`（只读一遍）、提交为基线，再从对象检出副本（`checkout-index -u`，索引带副本的 stat，之后的 `status` 只看改动）。超过 10,000 个文件拒绝。主会话的写入不再被 `shared-exclusive` 锁住。
 - 准备阶段（`prepare`）的工作区等待带运行的 AbortSignal：停止一个还在等工作区的运行会立即结束等待，`interrupt`、`stopRoot` 和退出不会挂住。
 - 独占写入租约（git 项目里显式的 `shared-exclusive`）仍约束宿主工具、后台任务、验证与 Git 应用。主会话写工具的共享租约等待它时可以随回合停止而中断；等待超过 10 秒（`WORKSPACE_WAIT_NOTICE_MS`），Core 发 `workspace_wait { call_id, delegation_id, run_id, waiting: true }`，界面在那一步下面显示「正在等待子智能体释放工作区 · 停止它」，等待结束（拿到租约或中断）时再发 `waiting: false`（`WorkspaceMutationCoordinator.acquireWriterWithNotice`，阻塞者来自 `DelegationResources.blockers`）。「停止它」调用 `delegations.interrupt`，子任务结束后租约释放，写入继续。
 
-macOS 使用 Seatbelt；Linux 实现使用 bubblewrap PID namespace。每次运行的 CLI 进程是自己进程组（process group）的组长，停止以进程组为单位、时间线固定（`process.ts`）：
+受限执行用 macOS 的 Seatbelt（产品只支持 macOS；代码里的 Linux bubblewrap 实现不在发布范围）。每次运行的 CLI 进程是自己进程组（process group）的组长，停止以进程组为单位、时间线固定（`process.ts`）：
 
 1. 协议 interrupt（Codex `turn/interrupt`、Claude `interrupt()`），最多等 5 秒；
 2. 对进程组发 `SIGTERM`，再等 5 秒；
@@ -103,11 +103,9 @@ macOS 使用 Seatbelt；Linux 实现使用 bubblewrap PID namespace。每次运�
 
 进程组清空即视为已停止（`quiescent`）。根进程自己退出时，组里剩下的进程走同样的 `SIGTERM` → 5 秒 → `SIGKILL`。运行期间不再轮询进程表（原来每 100 毫秒一次 `ps`），也不再要求「证明每个后代都已静止」。`ps` 一律在 `LC_ALL=C` 下调用，`lstart` 不随系统语言变化；进程表里连 Emperor 自己都没有时按读取失败处理，不当作「全部已停止」。只在组还有成员回应信号时才读一次进程表，用来排除僵尸进程。
 
-**取舍**：离开进程组的进程（`setsid`、double fork）不会被找到。原来的「静止证明」用 Seatbelt 随机标记加原生扫描器（`native/darwin/delegation-scan.c`）去找这类进程，证明不了就隔离工作区并占住预算槽位，而重启会清掉 `/private/tmp` 下的标记，于是永远证明不了，任务、槽位和 Goal 都卡住，且没有出口。现在的缓解：受限运行（`read-only` / `workspace-write`）在 Seatbelt 下，逃逸进程同样只能写工作区与运行时目录，读写边界不变；`danger-full-access` 运行没有这层限制。需要排查时可以打开 **设置 › 子智能体 › 高级 › 诊断模式**（配置字段 `diagnosticsMode`，默认关闭，只在打开时写入）：此时每次运行写一对边界标记、受限进程继承随机 Seatbelt 标记，运行结束（以及崩溃后的恢复）时用原生扫描器找出仍带标记、却已不在进程组里的进程并停止，收据记 `escaped` 个数，然后删除标记。扫描器缺失或扫描失败只影响诊断，不会让运行失败。该扫描器使用系统 sandbox 查询接口，系统升级需要重新跑真实探针。
+**取舍**：离开进程组的进程（`setsid`、double fork）不会被找到。原来的「静止证明」用 Seatbelt 随机标记加原生扫描器（`native/darwin/delegation-scan.c`）去找这类进程，证明不了就隔离工作区并占住预算槽位，而重启会清掉 `/private/tmp` 下的标记，于是永远证明不了，任务、槽位和 Goal 都卡住，且没有出口。现在的缓解：受限运行（`read-only` / `workspace-write`）在 Seatbelt 下，逃逸进程同样只能写工作区与运行时目录，读写边界不变；`danger-full-access` 运行没有这层限制。需要排查时可以打开「设置 › 子智能体 › 高级 › 诊断模式」（配置字段 `diagnosticsMode`，默认关闭，只在打开时写入）：此时每次运行写一对边界标记、受限进程继承随机 Seatbelt 标记，运行结束（以及崩溃后的恢复）时用原生扫描器找出仍带标记、却已不在进程组里的进程并停止，收据记 `escaped` 个数，然后删除标记。扫描器缺失或扫描失败只影响诊断，不会让运行失败。该扫描器使用系统 sandbox 查询接口，系统升级需要重新跑真实探针。
 
 崩溃或重启后恢复以前运行的进程（`terminateRecordedProcess`）从不只凭 PID 下手：记录里的开机标记（`kern.bootsessionuuid`，旧系统用 `kern.boottime`）与当前不同，进程必然已不存在，不发任何信号；PID 还活着但出生时间（`ps lstart`）与记录不符，说明 PID 已被复用，不发信号（`OWNER_MISMATCH`）；组长已退出但组里还有成员时，因为进程组还在、组号不会被复用，按同样的时间线停止整个组。旧版本记录的后代 PID 只有出生时间仍一致时才处理，且不再以 PID 为种子去搜索它的子进程。
-
-Windows 没有完整的受限执行和进程组停止：能力声明为 none，停止不会标记为 quiescent。Linux 有实现及协议测试；真实 Linux/Windows 验收需要在对应目标机执行，macOS 证据不能替代。
 
 每个会话有私有 HOME/config/temp。默认从本机 CLI 设置和凭据文件读取窄认证配置，支持显式 CLAUDE_CONFIG_DIR / CODEX_HOME；也可选择模型凭据引用。认证不传到 renderer、日志摘要或公共 receipt。运行环境不继承宿主全部密钥，也不导入本机插件或 hooks。
 
@@ -115,18 +113,18 @@ Windows 没有完整的受限执行和进程组停止：能力声明为 none，�
 
 Claude Code 的认证（AGT-02，`claude-auth.ts`，随第一次 Claude 运行或「设置令牌」按需加载，不在启动路径上）按顺序取第一个有凭据的来源，该来源的凭据变量（`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、`CLAUDE_CODE_OAUTH_TOKEN`）一起使用，其他来源的不混入：
 
-1. Emperor 凭据：设置 › 子智能体 › Claude Code「设置令牌」，`executors.setCredential { profileId, kind: oauth-token | api-key, token }` / `executors.clearCredential`（按 view 校验的写操作）。存在 `<delegations>/credentials.json`（0600），值是 SEC-06/SEC-09 本地密钥（`LocalSecretStore`，与模型 Key、凭据库同一把）的 `el1:` 信封，关联数据绑定 profile 与 kind；明文只留末 4 位。本地密钥变化后解不开时状态为 `unreadable`，继续看后面的来源。订阅令牌作为 `CLAUDE_CODE_OAUTH_TOKEN`、API Key 作为 `ANTHROPIC_API_KEY` 传入。
+1. Emperor 凭据：「设置 › 子智能体」Claude Code 一行或详情页的「设置令牌」，`executors.setCredential { profileId, kind: oauth-token | api-key, token }` / `executors.clearCredential`（按 view 校验的写操作）。存在 `<delegations>/credentials.json`（0600），值是 SEC-06/SEC-09 本地密钥（`LocalSecretStore`，与模型 Key、凭据库同一把）的 `el1:` 信封，关联数据绑定 profile 与 kind；明文只留末 4 位。本地密钥变化后解不开时状态为 `unreadable`，继续看后面的来源。订阅令牌作为 `CLAUDE_CODE_OAUTH_TOKEN`、API Key 作为 `ANTHROPIC_API_KEY` 传入。
 2. `~/.claude/settings.json`（或 `CLAUDE_CONFIG_DIR`）的 `env`。
 3. `.credentials.json` 的 `claudeAiOauth.accessToken`；`expiresAt` 已过则跳过并记为 `expired`，10 分钟内到期时照常使用并标 `expiresSoon`。refresh token 不进入隔离目录（与 Codex 相同的理由：隔离进程刷新会让用户自己的 CLI 失效），所以长任务应改用 `claude setup-token` 的长期令牌。
 4. 宿主进程环境，然后登录 shell（`login-shell.ts`，只取 `CLAUDE_SHELL_KEYS` 白名单：三个凭据变量与 `ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL`；进程内每组变量名只运行一次）。
 
-不读取 macOS 钥匙串（不调用 `security`，不用 safeStorage）。结果写在 `PreparedRuntime.auth`（`ExecutorAuthState`：`source`、`kind`、`last4`、`problem: missing | expired | unreadable`、`expiresAt`、`expiresSoon`）；没有凭据时抛 `ExecutorAuthError`（`AUTH_EXPIRED` 或 `AUTH_REQUIRED`，消息告诉父模型请用户运行 `claude setup-token` 并设置令牌）。`registry.checkSignIn` 把它并入探测：启动时 `probeProfiles` 对已启用的 Claude profile 检查一次，`start` 在征求同意前再检查一次，设置页检测同样如此；没有登录时探测为 `needs_auth` 并带 `auth`，父模型的执行器上下文写 `status=unavailable (not signed in…)`，派工直接以 `AUTH_REQUIRED` / `AUTH_EXPIRED` 失败，不弹同意卡。
+不读取 macOS 钥匙串（不调用 `security`，不用 safeStorage）。结果写在 `PreparedRuntime.auth`（`ExecutorAuthState`：`source`、`kind`、`last4`、`problem: missing | expired | unreadable`、`expiresAt`、`expiresSoon`）；没有凭据时抛 `ExecutorAuthError`（`AUTH_EXPIRED` 或 `AUTH_REQUIRED`，消息告诉父模型请用户运行 `claude setup-token` 并设置令牌）。`registry.checkSignIn` 把它并入探测：启动时 `probeProfiles` 对已启用的 Claude profile 检查一次，`start` 在征求同意前再检查一次，设置页检测同样如此；没有登录时探测为 `needs_auth` 并带 `auth`，父模型的子智能体上下文写 `status=unavailable (not signed in…)`，交给子智能体直接以 `AUTH_REQUIRED` / `AUTH_EXPIRED` 失败，不弹同意卡。
 
 Claude 子进程设置 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`。对 SDK 0.3.281 / CLI 2.1.281 的影响（从随包二进制核对）：Bash 工具、hooks 与 MCP 子进程的环境去掉 `ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_CUSTOM_HEADERS`、`CLAUDE_CODE_OAUTH_TOKEN`、`CLAUDE_CODE_OAUTH_REFRESH_TOKEN` 等凭据变量，以及名字像密钥（`*_TOKEN`、`*_KEY`、`*_SECRET`、`*PASSWORD*` 等）的变量；权限模式固定为 `default`（Emperor 本来就请求 `default`，AGT-01 的 init 检查不受影响）；`--await-claim` 不可用（Emperor 不用）；配置里的 `${VAR}` 展开不再取到凭据。CLI 自身仍用这些变量认证。
 
-Claude 一轮失败时，适配器从 SDK result 的 subtype、`terminal_reason`、`api_error_status` 与 `result`/`errors` 文本得出 `failureCode`（`turn_finished.failureCode`，服务写进运行记录）：`error_max_turns` 或 `max_turns` → `MAX_TURNS`；`prompt_too_long`、`blocking_limit`、`rapid_refill_breaker` 或「prompt is too long」→ `CONTEXT_OVERFLOW`；402 或余额/计费文字 → `BILLING`；401 或认证、API key、OAuth token、`/login` 文字 → `AUTH_EXPIRED`；429、rate limit、usage limit → `RATE_LIMITED`；其余 `EXECUTOR_TURN_FAILED`。失败摘要保留执行器的错误文本（经秘密脱敏），不再是「Claude execution failed」。任务详情按代码显示中文原因与下一步。
+Claude 一轮失败时，适配器从 SDK result 的 subtype、`terminal_reason`、`api_error_status` 与 `result`/`errors` 文本得出 `failureCode`（`turn_finished.failureCode`，服务写进运行记录）：`error_max_turns` 或 `max_turns` → `MAX_TURNS`；`prompt_too_long`、`blocking_limit`、`rapid_refill_breaker` 或「prompt is too long」→ `CONTEXT_OVERFLOW`；402 或余额/计费文字 → `BILLING`；401 或认证、API key、OAuth token、`/login` 文字 → `AUTH_EXPIRED`；429、rate limit、usage limit → `RATE_LIMITED`；其余 `EXECUTOR_TURN_FAILED`。失败摘要保留子智能体的错误文本（经秘密脱敏），不再是「Claude execution failed」。任务详情按代码显示中文原因与下一步。
 
-SDK `maxTurns` 默认 200（`DEFAULT_CLAUDE_MAX_TURNS`），`limits.claudeMaxTurns` 可设 50–1000（设置 › 子智能体 › 高级 › 每次运行最多轮数；等于默认值时不写入文件；改过之后，降级到更早的版本会因严格校验把配置判为无效）。
+SDK `maxTurns` 默认 200（`DEFAULT_CLAUDE_MAX_TURNS`），`limits.claudeMaxTurns` 可设 50–1000（「设置 › 子智能体 › 高级 › 每次运行最多轮数」；等于默认值时不写入文件；改过之后，降级到更早的版本会因严格校验把配置判为无效）。
 
 Codex 的 ChatGPT 登录不复制 refresh token（`codex-auth.ts`）。私有 CODEX_HOME 里的 `auth.json` 是指向用户 `auth.json`（`$CODEX_HOME` 或 `~/.codex`）的符号链接，隔离进程刷新令牌时写回用户的同一份文件，用户自己的 Codex 不会拿着已作废的旧令牌被登出：
 
@@ -139,7 +137,7 @@ Codex 的 ChatGPT 登录不复制 refresh token（`codex-auth.ts`）。私有 CO
 
 Codex 自定义提供方继承 `query_params`（如 Azure 的 `api-version`，键名像密钥的值按秘密脱敏）。提供方 `env_key` 与 `env_http_headers` 指向的变量先从登录 shell 读取（`login-shell.ts`：`$SHELL` 为 zsh/bash 时用它，否则 `/bin/zsh`，`-ilc` 运行一次，3 秒超时，只取所需变量名），再回退到进程环境，因此从 Dock 启动也能读到 `~/.zshrc` 里导出的密钥。`OPENAI_API_KEY` 不从登录 shell 读取，避免把 ChatGPT 订阅登录意外改成 API 计费。
 
-执行器探测与私有运行环境共用应用的有效 PATH，补全 Homebrew、Volta 和用户本地工具目录，避免从 Finder 启动时丢失终端中可用的 CLI 或 Node 解释器。显式可执行文件路径仍按原值执行，错误路径不会被自动替换。预检失败发生在委派身份创建前；通过终端直接运行的 CLI 属于后台任务，不会被补造为受管子智能体记录。
+子智能体探测与私有运行环境共用应用的有效 PATH，补全 Homebrew、Volta 和用户本地工具目录，避免从 Finder 启动时丢失终端中可用的 CLI 或 Node 解释器。显式可执行文件路径仍按原值执行，错误路径不会被自动替换。预检失败发生在委派身份创建前；通过终端直接运行的 CLI 属于后台任务，不会被补造为受管子智能体记录。
 
 ## 崩溃恢复与通知
 
@@ -148,9 +146,13 @@ Codex 自定义提供方继承 `query_params`（如 Azure 的 `api-version`，�
 委派日志（`journal.ts`）在内存中折叠，只有文件被外部改动时才重读；不改变状态的事件不写入、不投影。启动恢复（`reconcile`）只为真实变化追加事件：
 
 - 运行中的轮次：Emperor 已不在，协议必然断开。开机标记不同 → 直接 `interrupted`（`failureCode: SYSTEM_RESTARTED`），不碰旧 PID；同一次开机 → 若进程组还在，按上面的时间线停止，再标 `interrupted`（`APP_RESTARTED`）；停不下来或身份对不上 → `outcome_unknown`。已有的失败原因保留，不再被改写为 `CONNECTION_LOST`。
-- 未派发的 queued 轮次：只给这一个委派写 `dispatch-paused`，等用户继续、恢复或标记为已结束。
-- 已结束的历史委派：不追加任何事件，不再给每个委派写 `dispatch-paused`；也不打开它们的根会话（投影写入根会话日志，不实例化 Agent，SessionStart hook 不触发）。待送达的通知在内存中保持暂停，直到用户在该根会话发消息。停止根会话同样不改写已结束的委派。派工的本地子智能体已经结束（或重启后不在内存里）时，外部任务的完成通知送到根会话，不再因为找不到父级而丢失（`delegationNoticeParent`）。
+- 还没开始的 queued 轮次：只给这一个委派写 `dispatch-paused`，等用户继续、恢复或标记为已结束。
+- 已结束的历史委派：不追加任何事件，不再给每个委派写 `dispatch-paused`；也不打开它们的根会话（投影写入根会话日志，不实例化 Agent，SessionStart hook 不触发）。待送达的通知在内存中保持暂停，直到用户在该根会话发消息。停止根会话不改写已结束委派的轮次，只把它们还在排队的消息记为已取消（`message-delivery: cancelled`）。安排这个任务的本地子智能体已经结束（或重启后不在内存里）时，外部任务的完成通知送到根会话，不再因为找不到父级而丢失（`delegationNoticeParent`）。
+- 上次停不下来、仍是 `outcome_unknown` 且未解决的轮次：再按时间线停止一次；进程组已经不在时记 `quiescent: true`，之后可以 `recover`。
+- 还在 `sending` 的消息记为 `delivery_unknown`，没回答的交互（提问、同意卡）记为 `cancelled`。
 - 启动时删除 `/private/tmp/emperor-boundary-*` 中超过一天、属于当前用户的旧标记。
+
+Emperor 正常退出时，`HarnessHost.close()` 调用 `DelegationService.shutdown()`，对每个根会话执行 `stopRoot`：进行中的轮次先写 `dispatch-paused` 再 `interrupt`（按上面的时间线），已结束的委派扣住待送达的通知、取消排队的消息。Cmd+Q 最多等 10 秒。
 
 `outcome_unknown`（结果待确认）、`needs_recovery` 或因重启暂停的 queued 轮次都有出口「标记为已结束」：主会话环境信息卡、子对话页和任务详情里的按钮，以及父模型的 `collect_agent({ abandon: true })`（必须经用户审批）。它写入 `run-abandoned { by: 'user' | 'model' }`：轮次标记已解决（未结束的轮次变为 interrupted，queued 变为 cancelled），取消排队和送达未知的消息，释放工作区隔离，委派恢复空闲（工作区已不存在时关闭会话）；Goal 把它当作已处置的必需任务。被隔离的进程组在释放前再按时间线停止一次。原有的原生历史 inspection 与 `recover` 仍可用，但不再是唯一出口。
 
@@ -178,9 +180,9 @@ Codex 自定义提供方继承 `query_params`（如 Azure 的 `api-version`，�
 
 `collect_agent({apply:true})` 在一个回合里执行时，回合的改动记录（`turn/files`）也会包含应用的文件：`callMayWriteFiles` 把它当作写操作，先等回合的 before 快照；它不取工作区访问租约（应用自己取写入互斥）。
 
-## 验收与整合（高级 › 验证后再应用）
+## 验证与整合（高级 › 验证后再应用）
 
-下面的回执 → 独立验证 → 整合预览 → 应用链路保留，但默认不出现：**设置 › 子智能体 › 高级 › 验证后再应用**（配置 `verifyBeforeApply`，默认关闭，只在打开时写入）打开时，轮次结束才自动收集回执，成果卡的主操作改为「验证后再应用」（打开任务详情），`delegations.apply` 与 `collect_agent({apply:true})` 以 `VERIFY_BEFORE_APPLY` 拒绝；关闭时任务详情不显示这一段（该轮已经有回执、验收或预览时除外），回执只在调用 `delegations.collect` 时收集。副本工作区的回执以私有 Git 目录里的基线为 base，`originCwd` 是原文件夹。
+下面的回执 → 独立验证 → 整合预览 → 应用链路保留，但默认不出现：「设置 › 子智能体 › 高级 › 验证后再应用」（配置 `verifyBeforeApply`，默认关闭，只在打开时写入）打开时，轮次结束才自动收集回执，成果卡的主操作改为「验证后再应用」（打开任务详情），`delegations.apply` 与 `collect_agent({apply:true})` 以 `VERIFY_BEFORE_APPLY` 拒绝；关闭时任务详情不显示这一段（该轮已经有回执、验证或预览时除外），回执只在调用 `delegations.collect` 时收集。副本工作区的回执以私有 Git 目录里的基线为 base，`originCwd` 是原文件夹。
 
 宿主冻结内容寻址的 base/result 文件、binary patch 与 SHA-256 文件树。单文件上限 16 MiB，整树 128 MiB、10000 文件；拒绝时保留原件。命令验证要求明确授权的 scope 和 criteria digest，执行真实 argv、保存退出码与独立日志；验证前后必须是同一文件树。文件改变、后续原生轮次或审查缺失都会使已有 pass 失效。
 
@@ -188,23 +190,23 @@ Codex 自定义提供方继承 `query_params`（如 Azure 的 `api-version`，�
 
 ## Goal、Scheduler 与默认限额
 
-自动 Goal 轮次在外部任务 outstanding 时等待，用户消息正常优先。Goal 使用稳定 Goal ID 共享配额，revision 仅用于审计/CAS。Goal 下创建的外部任务默认必需：成功完成、进程已停止的文字结果（只读审查，或成果没有改动文件）可直接回收；有文件成果时，成果已应用、撤销或丢弃即视为已处置，否则要先处理成果（打开「验证后再应用」时按回执与当前宿主验收判断，与原来相同）。失败、中断、结果未知、待发消息或已失败的检查仍会阻止完成。用户也可在任务详情填写明确失败处置理由并关闭该会话；这会记录人工处置，仍保留失败验收，模型不能自行把任务改成可选。被「标记为已结束」的轮次视为已处置。
+自动 Goal 轮次在外部任务 outstanding 时等待，用户消息正常优先。Goal 使用稳定 Goal ID 共享配额，revision 仅用于审计/CAS。Goal 下创建的外部任务默认必需：成功完成、进程已停止的文字结果（只读审查，或成果没有改动文件）可直接回收；有文件成果时，成果已应用、撤销或丢弃即视为已处置，否则要先处理成果（打开「验证后再应用」时按回执与当前宿主验证判断，与原来相同）。失败、中断、结果未知、待发消息或已失败的检查仍会阻止完成。用户也可在任务详情填写明确失败处置理由并关闭该会话；这会记录人工处置，仍保留失败验证，模型不能自行把任务改成可选。被「标记为已结束」的轮次视为已处置。
 
-Scheduler 与普通调用使用同一服务、权限与配额。无人工 answerer 的提问明确结束为 needs_user。根 stop 立即解除 Goal 自动续跑并取消全部受管后代；恢复通知不会自动恢复队列推理。
+定时任务与普通调用使用同一服务、权限与配额。无人工 answerer 的提问明确结束为 needs_user。用户按停止（`host.stop()`）时，进行中的 Goal 持久化为「已暂停」，宿主调用 `DelegationService.stopRoot` 并取消待回答的委派交互与同意卡；只有权限收窄或任务费用用尽才解除 Goal 自动续跑。恢复通知不会自动恢复队列推理。
 
-默认 global concurrency=2、profile concurrency=1、queue=16、每任务32轮、深度3、运行30分钟（最多120分钟）、提问15分钟、已知估算预算10美元、单价未知时每任务 200 万 token。未知成本保持 unknown，不按0处理；这些估算不是厂商账单。
+默认 global concurrency=2（设置里 1–4）、profile concurrency=1（最多 2）、queue=16、每任务32轮、深度3、运行30分钟（最多120分钟）、提问15分钟、已知估算预算10美元、单价未知时每任务 200 万 token（`maxUnpricedTokensPerTask`，不在可写配置里）。未知成本保持 unknown，不按0处理；这些估算不是厂商账单。「设置 › 子智能体 › 改代码的位置」写 `defaultWorkspace`（`isolated-worktree` 默认 / `shared-exclusive`）：父会话可写且在 Git 里时，`subagent` 没有显式 `workspace` 就用它。
 
 预算按计费方式计算（AGT-07，`budget.ts`）。任务与 KRN-03 相同：一条用户消息或一个 Goal；同一任务内同一委派的后续轮次和重启都不清零（启动时 `reconcile` 按委派日志里每轮的 `usage` 恢复）。
 
 - 计费方式由 `ExecutorRuntime.prepare` 判断：Claude 只有 `CLAUDE_CODE_OAUTH_TOKEN`（没有 API Key 或 `ANTHROPIC_AUTH_TOKEN`）、Codex 使用 ChatGPT 登录（`codexAuth`）是订阅（`subscription`）；其余（API Key、凭据路由、自定义提供方）是 API 计费。
-- 订阅：执行器报告的费用记为 `nominalUsd`，只显示不计入，界面写「订阅额度，不计费用」；由轮数与运行时长约束。
-- API 计费：费用计入任务的美元上限；Claude 另把剩余额度作为 SDK 的 `maxBudgetUsd`；轮次进行中每次用量更新都检查，越过上限即以 `BUDGET_LIMIT` 结束。执行器没有报告费用时（Codex），用 MOD-01 模型目录单价按 token 估算（`pricing.ts`）；单价未知时 token 计入 `maxUnpricedTokensPerTask`，越过以 `TOKEN_LIMIT` 结束。
+- 订阅：子智能体报告的费用记为 `nominalUsd`，只显示不计入，界面写「订阅额度，不计费用」；由轮数与运行时长约束。
+- API 计费：费用计入任务的美元上限；Claude 另把剩余额度作为 SDK 的 `maxBudgetUsd`；轮次进行中每次用量更新都检查，越过上限即以 `BUDGET_LIMIT` 结束。子智能体没有报告费用时（Codex），用 MOD-01 模型目录单价按 token 估算（`pricing.ts`）；单价未知时 token 计入 `maxUnpricedTokensPerTask`，越过以 `TOKEN_LIMIT` 结束。
 - Codex 的 token 取线程累计值的差：`thread/tokenUsage/updated` 的 `last` 只是最近一次模型请求，`total` 是线程合计，本轮用量 = 最新 `total` − 本轮第一次请求之前的 `total`（第一次的 `total − last`），重复通知不重复计数。
 - 根任务费用上限（KRN-03 `TaskTree`）：已结算轮次的 API 费用经 `taskBudget.charge` 计入根会话当前任务；任务已花完时不再开始新的委派轮次（`BUDGET_LIMIT`）。
 
 Codex 协议的 120 秒空闲计时只约束两轮之间与启动阶段：轮次进行中（`CodexRpc.hold()`）或有待回答的 server request（提问）时暂停，长时间没有输出的命令或几分钟后才回答的问题不会被判空闲。运行时限（`runTimeoutMs`）是长轮次的唯一兜底，到时中断并以 `cancelled` + `RUN_TIMEOUT` 结束。续聊的 `thread/resume` 带 `excludeTurns: true`，不再把整段历史放进一个响应帧；恢复检查改用 `thread/read`（不含轮次）取状态，再按新到旧分页调用 `thread/turns/list`（`itemsView: summary`），单页结果超过 1 MiB 时减半重取，最多取最近 20 轮。
 
-设置 renderer 通过 `executors.list/configure/probe` 读写真实配置。保存携带 `expectedRevision`，完整保留未编辑字段；版本冲突保留草稿且不自动重放。刷新遇到草稿先要求明确丢弃，异步读取和 probe 受页面 generation 与 profile 内容约束。`available` 只说明本机 CLI 与认证配置可读（Claude 另有 `auth` 说明来源），`authVerified=false`；认证诊断即使映射为 incompatible 也按诊断给出恢复帮助。
+设置 renderer 通过 `executors.list/configure/probe` 读写真实配置（`executors/useExecutorSettings.ts`）。没有「保存」按钮：每次改动立即保存，改动排队按顺序叠在上次保存的配置上写入，保存中可以继续改；携带 `expectedRevision`，完整保留未编辑字段；失败时回滚并提示；别处改过（`STALE_REVISION`）时重新读取并提示再改一次，不自动重放。异步读取和 probe 受页面 generation 与 profile 内容约束。`available` 只说明本机 CLI 与认证配置可读（Claude 另有 `auth` 说明来源），`authVerified=false`；认证诊断即使映射为 incompatible 也按诊断给出恢复帮助。
 
 本地子智能体头像由稳定会话身份在 36 个透明角色中固定选择，状态或排序不改变角色。设置页独立预览以 2.4 秒停留和 320 毫秒渐变轮换角色；图片解码且页面可见并聚焦时播放，隐藏页面或窗口失焦时保留进度暂停，重新聚焦后续播；减少动态效果时静止，卸载时释放 RAF 和监听器。
 
