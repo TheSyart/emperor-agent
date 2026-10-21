@@ -55,8 +55,8 @@ export interface PreparedRuntime {
   /**
    * How the run's spend is paid (AGT-07): Claude Code's own sign-in or a
    * ChatGPT login is a subscription; any API key or credential route is
-   * API billing. (A Console sign-in of claude's own reads as subscription
-   * here: its usage is reported, not capped by Emperor's USD limit.)
+   * API billing. (CoreApi turns a Claude Code subscription into API billing
+   * when the last `claude auth status` said `api_key`, a Console sign-in.)
    */
   billing: ExecutorBilling
   /** Claude Code: the API credential Emperor passes, if any (AGT-12). */
@@ -313,21 +313,6 @@ export class ExecutorRuntimeService {
       }
       if (body !== null && body !== current) durableReplaceSync(ours, body)
       else if (body === null && current !== null) rmSync(ours, { force: true })
-      // The installed claude (AGT-12): a folder only the login shell knows
-      // goes on PATH, so the run, the status check and the model list find it.
-      const executable = await locateExecutable(profile.executablePath, {
-        path: environment.PATH,
-        ...(this.options.loginShell
-          ? { loginShell: this.options.loginShell }
-          : {}),
-      })
-      if (
-        executable &&
-        !(environment.PATH ?? '').split(delimiter).includes(dirname(executable))
-      )
-        environment.PATH = [environment.PATH, dirname(executable)]
-          .filter(Boolean)
-          .join(delimiter)
     } else {
       const sourceDirectory =
         ambient.CODEX_HOME || join(this.options.home ?? homedir(), '.codex')
@@ -411,6 +396,23 @@ export class ExecutorRuntimeService {
       }
       if (!codexAuth) removeCodexAuth(isolated)
     }
+    if (claude) {
+      // The installed claude (AGT-12): a folder only the login shell knows
+      // goes on PATH, so the run, the status check and the model list find it.
+      const executable = await locateExecutable(profile.executablePath, {
+        path: environment.PATH,
+        ...(this.options.loginShell
+          ? { loginShell: this.options.loginShell }
+          : {}),
+      })
+      if (
+        executable &&
+        !(environment.PATH ?? '').split(delimiter).includes(dirname(executable))
+      )
+        environment.PATH = [environment.PATH, dirname(executable)]
+          .filter(Boolean)
+          .join(delimiter)
+    }
     const billing: ExecutorBilling =
       profile.backend === 'claude-code'
         ? environment.ANTHROPIC_API_KEY || environment.ANTHROPIC_AUTH_TOKEN
@@ -447,9 +449,9 @@ export class ExecutorRuntimeService {
       credentialSecrets.push(...dev.secrets)
       // Claude Code scrubs *_TOKEN from its Bash (AGT-02), so gh also gets
       // a private hosts.yml in the task's own config folder; it goes away
-      // with the switch.
-      // Claude Code's home is shared by its runs (AGT-12): the same bytes
-      // are written only when they change, and removal tolerates a race.
+      // with the switch. Claude Code's home is shared by its runs (AGT-12):
+      // the same bytes are written only when they change, and removal
+      // tolerates a race.
       const ghHosts = join(environment.XDG_CONFIG_HOME!, 'gh', 'hosts.yml')
       if (dev.env.GH_TOKEN) {
         const body = `github.com:\n    oauth_token: ${dev.env.GH_TOKEN}\n    git_protocol: https\n`
