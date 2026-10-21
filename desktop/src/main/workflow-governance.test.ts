@@ -31,16 +31,23 @@ describe('GitHub Actions governance', () => {
   })
 
   it('typechecks Desktop tests in CI before the Desktop build', () => {
+    // REL-04: the PR job runs scripts/ci/pr-gate.sh, which runs check.sh.
     const workflow = readFileSync(resolve(workflowsRoot, 'ci.yml'), 'utf8')
-    const desktopTests = workflow.indexOf('- name: Desktop tests')
-    const testTypecheck = workflow.indexOf('- name: Desktop test typecheck')
-    const desktopBuild = workflow.indexOf('- name: Desktop build')
+    expect(workflow).toContain('run: scripts/ci/pr-gate.sh\n')
+    const gate = readFileSync(
+      resolve(repoRoot, 'scripts', 'ci', 'pr-gate.sh'),
+      'utf8',
+    )
+    expect(gate).toContain('./scripts/check.sh')
+    const check = readFileSync(resolve(repoRoot, 'scripts', 'check.sh'), 'utf8')
+    const desktopTests = check.indexOf('npm --prefix desktop run test')
+    const testTypecheck = check.indexOf(
+      'npm --prefix desktop run typecheck:test',
+    )
+    const desktopBuild = check.indexOf('npm --prefix desktop run build')
 
     expect(desktopTests).toBeGreaterThan(-1)
     expect(testTypecheck).toBeGreaterThan(desktopTests)
     expect(desktopBuild).toBeGreaterThan(testTypecheck)
-    expect(workflow.slice(testTypecheck, desktopBuild)).toContain(
-      'run: npm run typecheck:test',
-    )
   })
 })

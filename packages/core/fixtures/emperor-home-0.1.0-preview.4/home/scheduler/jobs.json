@@ -1,0 +1,190 @@
+{
+  "version": 1,
+  "jobs": [
+    {
+      "id": "memory-maintenance",
+      "name": "Memory maintenance",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "atMs": null,
+        "everyMs": null,
+        "expr": "17 3 * * *",
+        "tz": "Asia/Shanghai"
+      },
+      "payload": {
+        "kind": "system_event",
+        "message": "memory-maintenance",
+        "target": null,
+        "projectId": null,
+        "deliver": true,
+        "meta": {
+          "system_event": "memory-maintenance"
+        }
+      },
+      "state": {
+        "nextRunAtMs": 1792523820000,
+        "lastRunAtMs": null,
+        "lastStatus": null,
+        "lastError": null,
+        "runHistory": [],
+        "pendingMisfire": null,
+        "activeRun": null
+      },
+      "createdAtMs": 1792516225823,
+      "updatedAtMs": 1792516225823,
+      "deleteAfterRun": false,
+      "misfirePolicy": "skip",
+      "protected": true,
+      "purpose": "Memory maintenance system job"
+    },
+    {
+      "id": "runtime-maintenance",
+      "name": "Runtime event maintenance",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "atMs": null,
+        "everyMs": null,
+        "expr": "37 3 * * *",
+        "tz": "Asia/Shanghai"
+      },
+      "payload": {
+        "kind": "system_event",
+        "message": "runtime-maintenance",
+        "target": null,
+        "projectId": null,
+        "deliver": true,
+        "meta": {
+          "system_event": "runtime-maintenance"
+        }
+      },
+      "state": {
+        "nextRunAtMs": 1792525020000,
+        "lastRunAtMs": null,
+        "lastStatus": null,
+        "lastError": null,
+        "runHistory": [],
+        "pendingMisfire": null,
+        "activeRun": null
+      },
+      "createdAtMs": 1792516225823,
+      "updatedAtMs": 1792516225823,
+      "deleteAfterRun": false,
+      "misfirePolicy": "skip",
+      "protected": true,
+      "purpose": "Runtime event maintenance system job"
+    },
+    {
+      "id": "team-stale-recovery",
+      "name": "Team stale recovery",
+      "enabled": true,
+      "schedule": {
+        "kind": "every",
+        "atMs": null,
+        "everyMs": 3600000,
+        "expr": null,
+        "tz": null
+      },
+      "payload": {
+        "kind": "system_event",
+        "message": "team-stale-recovery",
+        "target": null,
+        "projectId": null,
+        "deliver": true,
+        "meta": {
+          "system_event": "team-stale-recovery"
+        }
+      },
+      "state": {
+        "nextRunAtMs": 1792519825823,
+        "lastRunAtMs": null,
+        "lastStatus": null,
+        "lastError": null,
+        "runHistory": [],
+        "pendingMisfire": null,
+        "activeRun": null
+      },
+      "createdAtMs": 1792516225823,
+      "updatedAtMs": 1792516225823,
+      "deleteAfterRun": false,
+      "misfirePolicy": "skip",
+      "protected": true,
+      "purpose": "Team stale recovery system job"
+    },
+    {
+      "id": "token-ledger-maintenance",
+      "name": "Token ledger maintenance",
+      "enabled": true,
+      "schedule": {
+        "kind": "cron",
+        "atMs": null,
+        "everyMs": null,
+        "expr": "47 3 * * *",
+        "tz": "Asia/Shanghai"
+      },
+      "payload": {
+        "kind": "system_event",
+        "message": "token-ledger-maintenance",
+        "target": null,
+        "projectId": null,
+        "deliver": true,
+        "meta": {
+          "system_event": "token-ledger-maintenance"
+        }
+      },
+      "state": {
+        "nextRunAtMs": 1792525620000,
+        "lastRunAtMs": null,
+        "lastStatus": null,
+        "lastError": null,
+        "runHistory": [],
+        "pendingMisfire": null,
+        "activeRun": null
+      },
+      "createdAtMs": 1792516225823,
+      "updatedAtMs": 1792516225823,
+      "deleteAfterRun": false,
+      "misfirePolicy": "skip",
+      "protected": true,
+      "purpose": "Token ledger maintenance system job"
+    },
+    {
+      "id": "watchlist-check",
+      "name": "Watchlist heartbeat",
+      "enabled": true,
+      "schedule": {
+        "kind": "every",
+        "atMs": null,
+        "everyMs": 21600000,
+        "expr": null,
+        "tz": null
+      },
+      "payload": {
+        "kind": "system_event",
+        "message": "watchlist-check",
+        "target": null,
+        "projectId": null,
+        "deliver": true,
+        "meta": {
+          "system_event": "watchlist-check"
+        }
+      },
+      "state": {
+        "nextRunAtMs": 1792537825823,
+        "lastRunAtMs": null,
+        "lastStatus": null,
+        "lastError": null,
+        "runHistory": [],
+        "pendingMisfire": null,
+        "activeRun": null
+      },
+      "createdAtMs": 1792516225823,
+      "updatedAtMs": 1792516225823,
+      "deleteAfterRun": false,
+      "misfirePolicy": "skip",
+      "protected": true,
+      "purpose": "Watchlist heartbeat system job"
+    }
+  ]
+}

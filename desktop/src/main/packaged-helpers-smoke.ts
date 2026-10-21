@@ -22,6 +22,9 @@ export interface PackagedHelpersSmokeDeps {
   computerHelperStatus(): Promise<{
     connected: boolean
     protocol: number | null
+    /** Why it is offline (the driver's own words), for the failure message. */
+    reason?: string
+    lastErrorCode?: string | null
   }>
   /** The verified installed copy the driver runs (installation is idempotent). */
   installedComputerHelper(): Promise<string>
@@ -43,7 +46,10 @@ export async function verifyPackagedHelpers(
   try {
     const status = await deps.computerHelperStatus()
     handshake = status.connected === true && status.protocol !== null
-    if (!handshake) failed.push('computer-use-handshake')
+    if (!handshake)
+      failed.push(
+        `computer-use-handshake (${status.reason ?? status.lastErrorCode ?? 'not connected'})`,
+      )
     installed = await deps.installedComputerHelper()
     const identity = await deps.identity(installed)
     hardenedCopy = identity.adHoc ? identity.runtime : true

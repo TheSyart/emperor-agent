@@ -388,7 +388,7 @@ async function removeStaleHelperCopies(
  */
 export async function installPackagedMacosHelper(
   source: string,
-  options: Pick<MacosLauncherOptions, 'home' | 'uid'> & {
+  options: Pick<MacosLauncherOptions, 'home' | 'stateRoot' | 'uid'> & {
     /** Integration fixture only; production binds to process.execPath. */
     readonly runningExecutable?: string
     /** Tests only: codesign/ditto/plutil/ps and filesystem access. */

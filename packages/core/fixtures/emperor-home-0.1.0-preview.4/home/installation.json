@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "stateLayoutVersion": 1,
+  "appVersion": "0.1.0-preview.4",
+  "runtimeRevision": "afee2d466f983d3fab4a96e988bc143305b7b0adbe93f0ba3e411caa422e19e9",
+  "initializedAt": "2026-10-14T09:00:09.000Z",
+  "updatedAt": "2026-10-14T09:00:09.000Z",
+  "emperorHomeSource": "default",
+  "migration": "existing"
+}

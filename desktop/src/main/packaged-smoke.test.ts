@@ -33,7 +33,19 @@ function rendererReceipt() {
       devToolsDisabled: true,
       productionMenu: true,
       rendererUrlPinned: true,
+      protocolTraversalRefused: true,
     },
+  }
+}
+
+function windowsReceipt() {
+  return {
+    ok: true as const,
+    opened: true,
+    closed: true,
+    reopened: true,
+    distinctWindow: true,
+    coreAfterReopen: true,
   }
 }
 
@@ -148,7 +160,7 @@ describe('packaged smoke launch guard (SEC-04, MAIN-28)', () => {
         packagedSmokeLaunch(smoke(receipt), {
           stateRoot: path.join(root, 'state'),
         }),
-      ).toEqual({ kind: 'run', receiptPath: receipt })
+      ).toEqual({ kind: 'run', receiptPath: receipt, scenario: 'fresh' })
     } finally {
       fs.rmSync(root, { recursive: true, force: true })
     }
@@ -237,7 +249,67 @@ describe('packaged smoke contract', () => {
         '--emperor-smoke-receipt',
         receiptPath,
       ]),
-    ).toEqual({ receiptPath })
+    ).toEqual({ receiptPath, scenario: 'fresh' })
+    // REL-04: the second launch of the runner, on a 0.1.0-preview.4 home.
+    expect(
+      parsePackagedSmokeArgs([
+        'Emperor Agent',
+        '--emperor-packaged-smoke',
+        '--emperor-smoke-receipt',
+        receiptPath,
+        '--emperor-smoke-scenario',
+        'upgrade',
+      ]),
+    ).toEqual({ receiptPath, scenario: 'upgrade' })
+    expect(() =>
+      parsePackagedSmokeArgs([
+        'Emperor Agent',
+        '--emperor-packaged-smoke',
+        '--emperor-smoke-receipt',
+        receiptPath,
+        '--emperor-smoke-scenario',
+        'real-home',
+      ]),
+    ).toThrow(/scenario/i)
+  })
+
+  it('closes the main window and opens it again, on every platform (REL-04)', async () => {
+    for (const verifyWindows of [
+      undefined,
+      async () => ({ ...windowsReceipt(), distinctWindow: false }),
+      async () => {
+        throw new Error('the reopened main window did not load')
+      },
+    ]) {
+      const fixture = smokeFixture()
+      const { core } = makeCore()
+      await expect(
+        runPackagedSmoke({
+          core,
+          runtimeRoot: fixture.runtimeRoot,
+          stateRoot: fixture.stateRoot,
+          receiptPath: fixture.receiptPath,
+          appVersion: '0.1.0',
+          runtimeRevision: 'a'.repeat(64),
+          commit: 'b'.repeat(40),
+          platform: 'darwin',
+          arch: 'arm64',
+          verifySeatbelt: async () => ({
+            ok: true as const,
+            mode: 'workspace-write' as const,
+            commands: 18,
+            protectedStateDenied: true as const,
+          }),
+          verifyRenderer: async () => rendererReceipt(),
+          verifyHelpers: async () => helpersReceipt(),
+          ...(verifyWindows ? { verifyWindows } : {}),
+        } as Parameters<typeof runPackagedSmoke>[0]),
+      ).rejects.toThrow(/window/i)
+      expect(
+        JSON.parse(fs.readFileSync(fixture.receiptPath, 'utf8')).operations
+          .windows,
+      ).toMatchObject({ ok: false })
+    }
   })
 
   it('runs bootstrap, diagnostics, environment and native search without installing', async () => {
@@ -263,6 +335,7 @@ describe('packaged smoke contract', () => {
       arch: 'arm64',
       verifySeatbelt,
       verifyRenderer: async () => rendererReceipt(),
+      verifyWindows: async () => windowsReceipt(),
       verifyHelpers,
     })
 
@@ -306,6 +379,7 @@ describe('packaged smoke contract', () => {
         protectedStateDenied: true,
       },
       renderer: rendererReceipt(),
+      windows: windowsReceipt(),
       helpers: helpersReceipt(),
     })
     expect(verifyHelpers).toHaveBeenCalledOnce()
@@ -365,6 +439,7 @@ describe('packaged smoke contract', () => {
         platform: 'linux',
         arch: 'x64',
         verifyRenderer: async () => rendererReceipt(),
+        verifyWindows: async () => windowsReceipt(),
       }),
     ).rejects.toThrow(/skills/i)
     expect(
@@ -397,6 +472,7 @@ describe('packaged smoke contract', () => {
           ...receipt,
           security: { ...receipt.security, cspHeader: false },
         }),
+        verifyWindows: async () => windowsReceipt(),
       }),
     ).rejects.toThrow(/renderer sandbox receipt/i)
   })
@@ -425,6 +501,7 @@ describe('packaged smoke contract', () => {
         platform: 'linux',
         arch: 'x64',
         verifyRenderer: async () => rendererReceipt(),
+        verifyWindows: async () => windowsReceipt(),
       }),
     ).rejects.toThrow(/skill-creator/i)
     expect(
@@ -450,6 +527,7 @@ describe('packaged smoke contract', () => {
         platform: 'darwin',
         arch: 'arm64',
         verifyRenderer: async () => rendererReceipt(),
+        verifyWindows: async () => windowsReceipt(),
       }),
     ).rejects.toThrow(/sandbox/i)
   })
@@ -470,6 +548,7 @@ describe('packaged smoke contract', () => {
         platform: 'darwin',
         arch: 'arm64',
         verifyRenderer: async () => rendererReceipt(),
+        verifyWindows: async () => windowsReceipt(),
       }),
     ).rejects.toThrow(/Seatbelt command probe/)
     expect(
@@ -507,6 +586,7 @@ describe('packaged smoke contract', () => {
           arch: 'arm64',
           verifySeatbelt: seatbelt,
           verifyRenderer: async () => rendererReceipt(),
+          verifyWindows: async () => windowsReceipt(),
           ...(verifyHelpers ? { verifyHelpers } : {}),
         }),
       ).rejects.toThrow(/helper/i)
@@ -550,6 +630,7 @@ describe('packaged smoke contract', () => {
         platform: 'darwin',
         arch: 'arm64',
         verifyRenderer: async () => rendererReceipt(),
+        verifyWindows: async () => windowsReceipt(),
       }),
     ).rejects.toThrow(/lifecycle/i)
   })

@@ -1,0 +1,42 @@
+name: weekly-model-metadata
+
+# REL-04 (MOD-01): once a week, compare the bundled models.dev snapshot with
+# what models.dev serves. Stale: refresh it on a bot/model-metadata-<date>
+# branch and open a pull request for review (scripts/ci/weekly-model-metadata.mjs;
+# docs/development/ci.md). Current: nothing happens.
+
+on:
+  schedule:
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-model-metadata
+  cancel-in-progress: false
+
+jobs:
+  model-metadata:
+    name: models.dev snapshot
+    runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Check the snapshot; open a refresh pull request when it is stale
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/weekly-model-metadata.mjs

@@ -1,0 +1,13 @@
+{
+  "version": {
+    "id": "memv_1792516225874_45bd5293_1ddabd",
+    "target": "memory",
+    "relPath": "memory/MEMORY.local.md",
+    "label": "MEMORY.local.md",
+    "reason": "memory_patch:save_global_memory",
+    "createdAt": 1792516225.874,
+    "contentHash": "45bd529303c3c7cd528c283112a07cffe696c2c827f12c95cc51d26b60cebc56",
+    "bytes": 583
+  },
+  "content": "# 长期记忆\n\n仓库初始化版长期记忆模板。此文件应保持通用、可提交，不写入真实用户记忆、会话摘要、任务历史或私密上下文。\n\n本地运行时会优先使用 `memory/MEMORY.local.md`。首次启动时若本地文件不存在，会从此模板复制生成。\n\n## 当前核心目标\n\n- 暂无。\n\n## 未完成任务\n\n- 无。\n\n## 关键事实\n\n- 暂无。\n\n## 长期记忆归档（非紧急参考）\n\n- 暂无。\n\n---\n\n_本文件是仓库默认模板。运行期长期记忆请写入 `memory/MEMORY.local.md`，不要提交到 GitHub。_\n"
+}
