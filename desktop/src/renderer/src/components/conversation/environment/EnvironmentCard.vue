@@ -5,9 +5,10 @@
  * `frameActions.envCardVisible` on an active chat: beside a wide chat by
  * default until closed by hand, beside a narrow one on demand).
  *
- * UI-S05: a read-only summary. Every section is one 32px row; a row opens
- * the place where the work happens (审查, the subagent list, a 输出
- * dialog, a resource) and nothing on the card writes. The Git actions
+ * UI-S05: a read-only summary. Every section is 32px rows; a row opens
+ * the place where the work happens (审查, the subagent list, a task's
+ * output, a resource, the workbench's 来源 view) and nothing on the card
+ * writes. The Git actions
  * (worktree, branches, commit, compare) live in 审查's branch menu.
  *
  * Title: the project name in a Build session, else 环境信息. 「⋯」 holds
@@ -20,8 +21,9 @@
  *   unfinished. Other sessions show one muted line.
  * - 计划: the latest `exit_plan_mode` call (conversation/planSummary.ts):
  *   its title and n/m; click reveals its row.
- * - 子智能体 (EnvironmentAgents), 后台任务 (EnvironmentTasks), 输出 and
- *   来源 (EnvironmentResources).
+ * - 子智能体 (EnvironmentAgents), 后台任务 (EnvironmentTasks) and the 来源
+ *   section (EnvironmentResources, UI-S13: at most three sources and
+ *   「查看全部」; no 输出 row — a turn's files are in its files card).
  * The goal is not repeated here (GoalBar shows it).
  *
  * Layout: absolute inside the view area. From a 1120px conversation column
