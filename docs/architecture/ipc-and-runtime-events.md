@@ -82,7 +82,15 @@ Operation 的名称与参数 schema 定义在 `packages/core/src/api/operations.
   - **任务结束**：宿主在根会话或子智能体变为空闲、后台任务结束、外部运行状态变化、目标变化时，等当前同步工作和微任务跑完（`setTimeout 0`），再看根会话是否空闲、任务树里是否还有运行或排队的子智能体与后台任务、是否还有未结束的外部运行（`hasOutstanding`）、目标是否仍在自动续跑；都没有时通知 `onTaskQuiet` 监听者，记录器结束这个任务。新的用户消息开启一轮时，还没结束的上一个任务立即结束（它的子智能体之后做的事算进新任务）。
   - **快照时机**：Build 项目在 Git 中时，任务里第一次可能写文件的调用（`write`、`edit`、shell、`skill_manage`、`mcp_*`、带 `apply` 的 `collect_agent`，根会话或子智能体发起，turn 进行中或两轮之间都算）先等一次影子快照；任务结束时再拍一次。任务已经结束后（例如你在子智能体页面给它发消息）的写入不计入任何任务。
   - **快照做法**：复制用户 index 为临时 index，执行 `add -A`、`write-tree`、`commit-tree`，不改用户的 index 和文件。未跟踪文件超过 10 MB 的排除，并标为过大。单次快照限时 5 秒，超时这个任务记为未记录。
-  - **记录**：有改动时写 `turn/files` 事件：`turn` 是任务的最后一轮，`task: { firstTurn, lastTurn }`；两次快照留在 `refs/emperor/turns/<会话>/<最后一轮>/{before,after}`。每个会话保留最近 50 份，会话被永久删除（最近删除里永久删除或 30 天到期）时一并删除；普通 `git push` 不会推送这些引用。进程在任务中途退出时，这个任务没有记录。0.2 之前的记录没有 `task`，是一轮一条。
+  - **记录**：有改动时写 `turn/files` 事件：`turn` 是任务的最后一轮，`task: { firstTurn, lastTurn }`；两次快照留在 `refs/emperor/turns/<会话>/<最后一轮>/{before,after}`。每个会话保留最近 50 份，会话被永久删除（最近删除里永久删除或 30 天到期）时一并删除；普通 `git push` 不会推送这些引用。0.2 之前的记录没有 `task`，是一轮一条。
+  - **任务的开始与结束也进日志**（只记日志，不进模型请求，界面不显示）：
+    - 拍完 before 快照时写 `task/started { firstTurn, mode, before? | skipped? }`，Git 项目的 before 快照同时挂在 `refs/emperor/turns/<会话>/<首轮>/before`，记录写好后换成最后一轮的那一对；
+    - 不在 Git 里时，每次计入的文件工具写入另写一条 `task/tool-write { firstTurn, path, created, added, removed }`；
+    - 记录之后（或任务什么也没改时）写 `task/ended { firstTurn, lastTurn }`。
+  - **退出与崩溃**：
+    - 正常退出（`CoreApi.close` → `HarnessHost.close`）时，宿主停下所有 Agent，最多等 2 秒让它们结束当前 turn，再最多等 5 秒让记录器把仍开着的任务按「已结束」记录；超时没写完的留给下次打开。
+    - 崩溃或强制退出后，`SessionLogStore` 打开会话（崩溃修复之后）时通知记录器：有 `task/started` 而没有 `task/ended` 的任务，Git 项目用 `task/started` 里的 before 快照和此刻的项目对比，记在日志里最后一个 `turn/end` 那一轮（崩溃修复补写的中断也算），记录带 `recovered: true`——这段时间在 Emperor 之外的改动也会算进去，卡片和撤销确认框会说明；不在 Git 里的用 `task/tool-write` 重建；快照超时或 Git 出错的任务记为未记录。已经写过记录、只差 `task/ended` 的只补 `task/ended`。
+    - `task/started` 在崩溃修复矩阵的 `EXEMPT_OPENERS` 里：收尾要拍 Git 快照，由记录器在打开会话时完成，不由同步的崩溃修复做。
   - **非 Git 目录**：只统计 Emperor 文件工具的写入（整个任务内按路径累加），`mode` 为 `tools`，不能撤销。
   - **查看与撤销**：`workspace.turnDiff({ sessionId, turn, path })` 返回一个文件在记录的两次快照间（即整个任务）的 diff（上限 2 MiB）。`workspace.revertTurn({ sessionId, turn, paths? })` 一次撤回整个任务：只恢复仍与任务结束时一致的文件，其余记 `changed-since`；快照已清理的记 `missing`。撤销结果写 `turn/files-reverted`，每条记录只能撤销一次。
   - **撤销限制**：同一工作区有 Agent 运行时拒绝撤销；撤销与快照都经 workspace mutation coordinator，与 `git.*` 写操作串行。

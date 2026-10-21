@@ -196,7 +196,7 @@ Emperor Home 根目录及其主要子目录以 `0700` 创建，其他系统用�
 - 首行是 header（`{"type":"session",…}`），其后每行是一个事件或打包的 chunk 行。
 - 写入以 200 ms 为批次按序追加，从不原地改写。每批要么完整写入，要么一点不留：写入失败或只写了一部分时，文件被截回这批开始前的长度，重试不会写出重复的 seq。
 - 有人在等的事件立即写入并 `fdatasync`：`turn/end`（含崩溃修复写入的 `interrupted`）、`question/asked`、`approval/asked`。其余事件只按批写入，不逐批 sync。
-- 退出时主进程先同步调用 `CoreApi.flushAll()`（写完并 sync 所有会话的待写事件），再异步关闭 Core；关闭超过 5 秒仍未完成时照样退出（`quit-coordinator.ts`）。
+- 退出时主进程先同步调用 `CoreApi.flushAll()`（写完并 sync 所有会话的待写事件），再异步关闭 Core；关闭超过 10 秒仍未完成时照样退出（`quit-coordinator.ts`）。关闭 Core 时还开着的任务先被记录（最多等 2 + 5 秒），来不及的在下次打开会话时补上。
 - 写入失败（例如磁盘已满 `ENOSPC`）时会话进入暂停写入：事件留在内存，每 2 秒重试一次，界面提示一次；写入恢复后再提示一次。
 - 打开会话时先修复文件，再做崩溃修复：
   - 最后一行没有换行且不是完整记录（追加到一半断电）：截到最后一个换行，截下的字节另存为 `log.jsonl.tail-<毫秒时间戳>`；
@@ -213,7 +213,7 @@ Emperor Home 根目录及其主要子目录以 `0700` 创建，其他系统用�
   - 后台 job → `job/finished{status:'killed', detail:'interrupted'}`；子智能体 → 父会话 `subagent/settled{stopReason:'interrupted'}`；
   - 中断的 turn → 合成缺失的工具结果、step 与 turn 收尾。
 
-  这些新增的收尾事件带 `repaired: true`。`repair-matrix.test.ts` 读取源码里全部 `SessionEventMap` 声明，新增的开始标记没有收尾步骤（也不在 `EXEMPT_OPENERS` 里）时测试失败。子智能体被销毁时，日志等它的运行真正结束、写完收尾事件后才关闭。
+  这些新增的收尾事件带 `repaired: true`。`repair-matrix.test.ts` 读取源码里全部 `SessionEventMap` 声明，新增的开始标记没有收尾步骤（也不在 `EXEMPT_OPENERS` 里）时测试失败。`task/started` 在 `EXEMPT_OPENERS` 里：收尾要拍 Git 快照，崩溃修复做不了；修复完成后 `SessionLogStore.onOpened` 通知改动记录器，由它补写记录（带 `recovered: true`）和 `task/ended`。子智能体被销毁时，日志等它的运行真正结束、写完收尾事件后才关闭。
 
 - 子智能体是独立的子 session，同样位于 `sessions/<child-id>/log.jsonl`，第一条事件记录父 session 与委派信息。
 
@@ -238,7 +238,7 @@ Core 不会在项目目录下创建 session、memory、附件或 Goal 数据。
 
 项目是 Git 仓库时，Emperor 在它的 `.git` 里写对象和隐藏引用，不碰你的分支、暂存区和工作区：
 
-- `refs/emperor/turns/<会话>/<turn>/`：每个任务前后的项目快照（两个提交，用于「已编辑 N 个文件」与撤销；`<turn>` 是任务的最后一轮，0.2 之前是每一轮），每个会话保留最近 50 份，删除会话时一起删除；应用子智能体成果时另有 `refs/emperor/turns/<会话>/applied/<run>/{before,after}`，供撤销。
+- `refs/emperor/turns/<会话>/<turn>/`：每个任务前后的项目快照（两个提交，用于「已编辑 N 个文件」与撤销；`<turn>` 是任务的最后一轮，0.2 之前是每一轮）。任务进行中它的 before 快照先挂在 `<首轮>/before`，这样崩溃之后还在；记录写好后换成最后一轮的一对。每个会话保留最近 50 份，删除会话时一起删除；应用子智能体成果时另有 `refs/emperor/turns/<会话>/applied/<run>/{before,after}`，供撤销。
 - `refs/emperor/delegations/<lease>/base` 与 `…/runs/<run>`：子智能体任务的起点快照与成果；应用或丢弃成果时删除。
 - 通过「审查」创建的 worktree 在 Git 里登记（目录在 Emperor Home 的 `git/worktrees/`）。只有在你把 Skill 保存或导入到项目 scope 时，Core 才会写入上面 `.emperor/skills/`。在设置里打开项目 Skills 文件夹只是查看：目录还不存在时会提示，不会为此在项目里建目录。如果旧版本留下了 `.emperor/sessions`、`.emperor/memory` 等目录，Diagnostics 只提示“检测到旧私有数据”，不会自动删除或搬移。
 
