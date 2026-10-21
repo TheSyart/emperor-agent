@@ -3484,7 +3484,7 @@ export class CoreApi {
       this.taskBudgetService.update(change, view),
     resume: async (_taskId: string, _opts: Dict = {}): Promise<never> => {
       throw new OperationRetiredError(
-        '子代理任务不再支持从面板恢复；请在对话中让主代理用 send_message 继续该子代理。',
+        '子智能体任务不再支持从面板恢复；请在对话中让主智能体用 send_message 继续它。',
         'use_send_message',
       )
     },
@@ -4199,7 +4199,7 @@ export class CoreApi {
     if (this.host.pending.hasPending(sessionId))
       throw new CoreMutationGuardError(
         409,
-        '请先处理当前 Ask、Permission 或 Plan 审批，再创建新上下文。',
+        '请先处理当前的提问、权限或计划审批，再创建新上下文。',
       )
     if (this.host.queuedPrompts(sessionId).length)
       throw new CoreMutationGuardError(

@@ -154,7 +154,7 @@ const stateLabel = computed(() => {
           @click="actions.inspect(data.callId)"
         >
           <DsInspect :size="12" />
-          Inspect
+          查看
         </button>
       </div>
     </DisclosureRow>

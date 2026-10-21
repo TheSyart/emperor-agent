@@ -12,7 +12,7 @@ function goal(overrides: Partial<RuntimeGoalView> = {}): RuntimeGoalView {
   return {
     id: 'goal_1',
     revision: 3,
-    objective: '完成 Goal 模式升级',
+    objective: '完成目标模式升级',
     phase: 'active',
     maxGoalRounds: 8,
     roundsStarted: 3,
@@ -27,7 +27,7 @@ describe('Goal render model', () => {
     const model = toGoalStatusBarViewModel(goal(), 1_000 + 125_000)
     expect(model).toMatchObject({
       id: 'goal_1',
-      objective: '完成 Goal 模式升级',
+      objective: '完成目标模式升级',
       phaseLabel: '进行中',
       roundLabel: '第 3/8 轮',
       elapsedLabel: '2分5秒',
@@ -70,7 +70,7 @@ describe('Goal render model', () => {
         blockedReason: { code: 'x', message: '需要人工确认' },
       }),
     )
-    expect(text).toContain('完成 Goal 模式升级')
+    expect(text).toContain('完成目标模式升级')
     expect(text).toContain('已阻塞 · 第 3/8 轮')
     expect(text).toContain('需要人工确认')
   })

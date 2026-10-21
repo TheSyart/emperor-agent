@@ -86,7 +86,7 @@ const markdown = computed(
 
 <template>
   <p v-if="!value" class="no-payload">
-    {{ direction === 'input' ? 'No payload captured' : 'No result captured' }}
+    {{ direction === 'input' ? '没有记录载荷' : '没有记录结果' }}
   </p>
   <div
     v-else-if="json !== undefined"

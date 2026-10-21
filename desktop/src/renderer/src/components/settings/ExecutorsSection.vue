@@ -358,7 +358,7 @@ function label(profile: ExecutorProfile) {
   if (probe.status === 'available' && probe.compatibility === 'unverified')
     return '可能不兼容'
   return {
-    available: '执行器就绪',
+    available: '子智能体就绪',
     missing: '未找到 CLI',
     needs_auth: '需要登录配置',
     incompatible: '版本不兼容',
@@ -636,8 +636,8 @@ function rememberConsents(
 }
 function consentText(profile: ExecutorProfile) {
   return consents.value[profile.id] === 'always'
-    ? '已选择「以后都允许」：派工前不再询问。关闭后再打开会恢复询问。'
-    : '首次派工前会在对话中征得你的同意（本次允许 / 以后都允许 / 不允许）。'
+    ? '已选择「以后都允许」：交给子智能体前不再询问。关闭后再打开会恢复询问。'
+    : '第一次交给子智能体前会在对话中征得你的同意（本次允许 / 以后都允许 / 不允许）。'
 }
 /** Acknowledge the upgrade notice by saving the last saved config as is. */
 async function dismissNotice() {
@@ -840,7 +840,9 @@ onBeforeUnmount(() => {
 })
 </script>
 <template>
-  <SettingsSection intro="主会话统一派工；能力状态以当前模型与运行验证为准。">
+  <SettingsSection
+    intro="主会话统一安排子任务；能力状态以当前模型与运行验证为准。"
+  >
     <p v-if="error" class="executor-error message" role="alert">{{ error }}</p>
     <p v-if="loading && !config" class="executor-note" role="status">
       正在读取子智能体配置…
@@ -865,7 +867,7 @@ onBeforeUnmount(() => {
       <span
         >Claude Code 和 Codex
         子智能体现在默认关闭，因为它们会使用你自己的订阅额度或 API
-        计费。升级前它们按旧版默认开启，你没有改过这项设置，所以已关闭；需要时在下面打开，首次派工前会在对话中征得你的同意。</span
+        计费。升级前它们按旧版默认开启，你没有改过这项设置，所以已关闭；需要时在下面打开，第一次交给子智能体前会在对话中征得你的同意。</span
       ><Button
         size="sm"
         variant="secondary"
@@ -1070,7 +1072,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="specialty-block">
             <div class="block-heading">
-              <span>派工专长</span>
+              <span>擅长的任务</span>
               <div class="inline-actions">
                 <Button
                   v-if="editingSpecialties[row.profile.id]"
@@ -1125,7 +1127,7 @@ onBeforeUnmount(() => {
                 {{ specialtyErrors[row.profile.id] }}
               </p>
               <p v-else class="field-hint">
-                专长用于派工偏好，可清空；不会启用额外工具。
+                擅长的任务供主会话分配时参考，可清空；不会启用额外工具。
               </p>
             </div>
           </div>
@@ -1199,7 +1201,7 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <p class="field-hint">
-                沿用本机 CLI 的连接与认证；更换模型后，下次派工生效。
+                沿用本机 CLI 的连接与认证；更换模型后，下次交给它时生效。
               </p>
               <p
                 v-if="catalogs[row.profile.id]?.diagnostic"

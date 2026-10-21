@@ -421,7 +421,7 @@ describe('diagnostics settings model', () => {
       },
     )
     expect(rows.find((row) => row.id === 'subagent-supervisor')).toMatchObject({
-      label: '子代理',
+      label: '子智能体',
       value: '2 active · 2/6 capacity',
       detail: 'per-session limit 3 · session_1: 2',
       tone: 'ok',

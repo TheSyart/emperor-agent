@@ -27,7 +27,7 @@ const turns = [
     turn: 1,
     groups: [
       {
-        title: 'Step 1',
+        title: '第 1 步',
         cells: [
           {
             index: 1,
@@ -55,7 +55,7 @@ const separatedTurns = [
     turn: 1,
     groups: [
       {
-        title: 'Step 1',
+        title: '第 1 步',
         cells: [
           {
             index: 1,
@@ -79,7 +79,7 @@ const separatedTurns = [
     turn: 2,
     groups: [
       {
-        title: 'Step 1',
+        title: '第 1 步',
         cells: [
           {
             index: 3,
@@ -100,7 +100,7 @@ function sequenceModel(count: number): TrajectoryTimelineModel {
       turn: 1,
       groups: [
         {
-          title: 'Step 1',
+          title: '第 1 步',
           cells: Array.from({ length: count }, (_, index) => ({
             index: index + 1,
             kind: 'message' as const,
@@ -159,7 +159,7 @@ describe('timeline projection', () => {
         turn: 1,
         groups: [
           {
-            title: 'Step 1',
+            title: '第 1 步',
             cells: [
               {
                 index: 1,
@@ -235,7 +235,7 @@ describe('timeline projection', () => {
         turn: 1,
         groups: [
           {
-            title: 'Step 1',
+            title: '第 1 步',
             cells: [
               { index: 1, kind: 'message', text: 'before', timeSeconds: 0 },
             ],
@@ -246,7 +246,7 @@ describe('timeline projection', () => {
         turn: null,
         groups: [
           {
-            title: 'Compaction 3',
+            title: '压缩 #3',
             cells: [
               { index: 2, kind: 'compacted', text: 'summary', timeSeconds: 0 },
             ],
@@ -257,7 +257,7 @@ describe('timeline projection', () => {
         turn: 2,
         groups: [
           {
-            title: 'Step 1',
+            title: '第 1 步',
             cells: [
               { index: 3, kind: 'message', text: 'after', timeSeconds: 0 },
             ],
@@ -287,7 +287,7 @@ describe('timeline projection', () => {
           turn: 1,
           groups: [
             {
-              title: 'Step 1',
+              title: '第 1 步',
               cells: [
                 {
                   index: 1,

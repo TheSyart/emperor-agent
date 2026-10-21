@@ -51,13 +51,13 @@ for (const theme of ['dark', 'light'] as const) {
 
 test('folded turns and calls', async ({ page }) => {
   await open(page, 'scenario=rich')
-  await page.getByRole('button', { name: 'Collapse turns' }).click()
+  await page.getByRole('button', { name: '折叠所有轮次' }).click()
   await expect(
     page.locator('[data-collapsed-summary="turn"]').first(),
   ).toBeVisible()
   await shot(page, 'folded-turns')
-  await page.getByRole('button', { name: 'Expand turns' }).click()
-  await page.getByRole('button', { name: 'Collapse calls' }).click()
+  await page.getByRole('button', { name: '展开所有轮次' }).click()
+  await page.getByRole('button', { name: '折叠所有调用' }).click()
   await expect(
     page.locator('[data-collapsed-summary="assistant"]').first(),
   ).toBeVisible()
@@ -66,9 +66,7 @@ test('folded turns and calls', async ({ page }) => {
 
 test('brushed timeline', async ({ page }) => {
   await open(page, 'scenario=rich')
-  const track = page.getByLabel(
-    'Timeline overview; drag horizontally to focus events',
-  )
+  const track = page.getByLabel('时间线概览，左右拖动聚焦事件')
   const box = await track.boundingBox()
   if (box === null) throw new Error('timeline track not laid out')
   await page.mouse.move(box.x + box.width * 0.35, box.y + 10)
@@ -84,20 +82,20 @@ test('brushed timeline', async ({ page }) => {
 
 test('search with match stepping', async ({ page }) => {
   await open(page, 'scenario=rich')
-  await page.getByLabel('Search trajectory').fill('bash')
+  await page.getByLabel('搜索轨迹').fill('bash')
   await expect(page.locator('[data-search-count]')).toContainText('/')
-  await page.getByRole('button', { name: 'Next match' }).click()
+  await page.getByRole('button', { name: '下一个匹配' }).click()
   await shot(page, 'search')
 })
 
 // Inspector tabs per record kind (rich scenario record indexes).
 const INSPECTOR_TABS: readonly [string, string, readonly string[]][] = [
-  ['system', 'select=1', ['System Prompt', 'Tools']],
-  ['system-update', 'row=system:1', ['System Prompt', 'Tools', 'Diff']],
-  ['message', 'select=10', ['Summary', 'Preview', 'Raw']],
-  ['user', 'select=7', ['Summary', 'Preview', 'Raw', 'Source']],
-  ['tool', 'select=11', ['Summary', 'Payload', 'Result', 'Schema', 'Timing']],
-  ['request', 'request=1', ['Summary', 'Options', 'Usage', 'Timing']],
+  ['system', 'select=1', ['系统提示词', '工具']],
+  ['system-update', 'row=system:1', ['系统提示词', '工具', 'Diff']],
+  ['message', 'select=10', ['摘要', '预览', '原始']],
+  ['user', 'select=7', ['摘要', '预览', '原始', '来源']],
+  ['tool', 'select=11', ['摘要', '载荷', '结果', '参数结构', '计时']],
+  ['request', 'request=1', ['摘要', '选项', '用量', '计时']],
 ]
 
 for (const [name, query, tabs] of INSPECTOR_TABS) {
@@ -127,9 +125,9 @@ test('inspector compaction + truncated tool + child session', async ({
   await open(page, 'scenario=rich')
   const inspector = page.getByLabel('事件详情', { exact: true })
   await page.locator('.traj-row[data-kind="compacted"]').last().click()
-  await expect(inspector.getByRole('tab', { name: 'Raw Output' })).toBeVisible()
+  await expect(inspector.getByRole('tab', { name: '原始输出' })).toBeVisible()
   await shot(page, 'inspector-compacted-summary')
-  await inspector.getByRole('tab', { name: 'Raw Output' }).click()
+  await inspector.getByRole('tab', { name: '原始输出' }).click()
   await shot(page, 'inspector-compacted-raw-output')
   await page.locator('.traj-row[data-kind="tool"][data-error]').first().click()
   await expect(inspector.locator('[data-wire-truncated]')).toHaveCount(0)
@@ -165,7 +163,7 @@ test('inspector collapses, keeps the selection and reopens', async ({
   await toggle.click()
   await expect(inspector).toBeVisible()
   await expect(
-    inspector.getByRole('tab', { name: 'Summary', exact: true }),
+    inspector.getByRole('tab', { name: '摘要', exact: true }),
   ).toBeVisible()
 })
 

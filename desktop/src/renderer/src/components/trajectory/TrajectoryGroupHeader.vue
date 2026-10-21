@@ -3,7 +3,7 @@
  * TrajectoryGroupHeader — the Step / Compaction group boundary of the
  * ledger. dsh folds the legacy "Step N · 1.2 s" header row into a 5px
  * request dot sitting on the boundary line of the group's first record;
- * hover reveals `Request #N`, click opens the request inspector (Summary /
+ * hover reveals `请求 #N`, click opens the request inspector (Summary /
  * Options / Usage / Timing). Coincident markers (request-only separators)
  * fan out 8px apart.
  *

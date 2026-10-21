@@ -32,6 +32,7 @@ import {
 } from '../runtime/notifications'
 import type { TaskProjection } from '../runtime/handlers/tasks'
 import {
+  CORE_BRIDGE_UNAVAILABLE_MESSAGE,
   hasCoreBridge,
   invokeCore,
   onCoreEvent,
@@ -271,13 +272,13 @@ export function useRuntime(options: {
     status.value = 'error'
     busy.value = false
     updatePending(
-      '桌面 IPC 不可用',
-      '请在 Electron 桌面窗口中使用；普通浏览器没有 CoreApi bridge。',
+      '无法连接 Emperor 核心',
+      '请在 Emperor 桌面窗口中使用；普通浏览器连不上 Emperor 核心。',
       'error',
     )
     if (showToast && !bridgeUnavailableToastShown) {
       bridgeUnavailableToastShown = true
-      options.showToast('桌面 IPC 不可用，请在 Electron 桌面窗口中使用')
+      options.showToast(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
     }
   }
 
@@ -1317,15 +1318,12 @@ export function useRuntime(options: {
   function handleSchedulerEvent(data: WsEvent) {
     updateSchedulerBootstrap(data)
     if (data.event === 'scheduler_run_start') {
-      updatePending(
-        'Scheduler 正在执行任务',
-        data.job?.name || data.job?.id || '',
-      )
+      updatePending('定时任务正在运行', data.job?.name || data.job?.id || '')
       return
     }
     if (data.event === 'scheduler_run_done') {
       updatePending(
-        'Scheduler 任务已完成',
+        '定时任务已完成',
         data.job?.name || data.job?.id || '',
         'done',
         SCHEDULER_DONE_PENDING_MS,
@@ -1334,7 +1332,7 @@ export function useRuntime(options: {
     }
     if (data.event === 'scheduler_run_error') {
       updatePending(
-        'Scheduler 任务失败',
+        '定时任务失败',
         data.error || data.job?.state?.lastError || '',
         'error',
       )
@@ -1342,7 +1340,7 @@ export function useRuntime(options: {
     }
     if (data.event === 'scheduler_run_cancelled') {
       updatePending(
-        'Scheduler 任务已停止',
+        '定时任务已停止',
         data.job?.name || data.job?.id || data.reason || '',
         'done',
         SCHEDULER_DONE_PENDING_MS,
@@ -1351,7 +1349,7 @@ export function useRuntime(options: {
     }
     if (data.event === 'scheduler_run_skipped') {
       updatePending(
-        'Scheduler 任务已跳过',
+        '定时任务已跳过',
         data.job?.name || data.job?.id || data.reason || '',
         'done',
         SCHEDULER_DONE_PENDING_MS,
@@ -1360,7 +1358,7 @@ export function useRuntime(options: {
     }
     if (data.event === 'scheduler_run_interrupted') {
       updatePending(
-        'Scheduler 任务已中断',
+        '定时任务已中断',
         data.job?.name || data.job?.id || data.reason || '',
         'done',
         SCHEDULER_DONE_PENDING_MS,

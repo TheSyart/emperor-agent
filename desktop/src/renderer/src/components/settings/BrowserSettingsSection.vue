@@ -368,7 +368,7 @@ onBeforeUnmount(() => {
       </SettingsRow>
       <SettingsRow
         title="登录状态"
-        description="Emperor 操作网页时保留登录的 profile"
+        description="Emperor 操作网页时使用的登录档案"
       >
         <Button
           size="sm"

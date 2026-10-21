@@ -66,7 +66,7 @@ export function goalElapsedLabel(
 }
 
 export function renderGoalStatus(goal: RuntimeGoalView | null): string {
-  if (!goal) return '当前会话还没有 Goal。使用 `/goal <objective>` 启动。'
+  if (!goal) return '当前会话还没有目标。使用 `/goal <目标>` 启动。'
   const lines = [
     '## Goal',
     '',
@@ -92,9 +92,9 @@ function actionsForGoal(goal: RuntimeGoalView): GoalCardAction[] {
 function noticeForGoal(goal: RuntimeGoalView): string | null {
   if (goal.phase === 'blocked')
     return goal.blockedReason?.message
-      ? `Goal 已阻塞：${bounded(goal.blockedReason.message, 240)}`
-      : 'Goal 已阻塞，可恢复后继续。'
-  if (goal.phase === 'paused') return 'Goal 已暂停，可恢复后继续。'
+      ? `目标已阻塞：${bounded(goal.blockedReason.message, 240)}`
+      : '目标已阻塞，可恢复后继续。'
+  if (goal.phase === 'paused') return '目标已暂停，可恢复后继续。'
   return null
 }
 

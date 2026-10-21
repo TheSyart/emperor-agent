@@ -474,7 +474,7 @@ describe('Trajectory conversation Definitions', () => {
       requests: current.requests,
     })
     expect(
-      layout[0]?.groups.find((group) => group.title === 'Step 2')?.cells,
+      layout[0]?.groups.find((group) => group.title === '第 2 步')?.cells,
     ).toMatchObject([
       { kind: 'user', previewMarkdown: 'steer here' },
       { kind: 'message', previewMarkdown: 'second' },
@@ -675,8 +675,8 @@ describe('Emperor-specific trajectory mapping', () => {
     ).toEqual([
       [
         'working-directory/change',
-        'Working directory',
-        '/home/git/worktrees/s1/feature\nworktree-enter · from /repo',
+        '工作目录',
+        '/home/git/worktrees/s1/feature\nworktree-enter · 原目录 /repo',
       ],
     ])
   })
@@ -757,16 +757,16 @@ describe('Emperor-specific trajectory mapping', () => {
         node.content[0]?.type === 'text' ? node.content[0].text : '',
       ]),
     ).toEqual([
-      [1, 'plan/mode', 'Plan mode', 'on'],
-      [3, 'goal/change', 'Goal', 'create · active\nship it'],
-      [4, 'instructions/baseline', 'Instructions', 'AGENTS.md'],
+      [1, 'plan/mode', '计划模式', '开'],
+      [3, 'goal/change', '目标', 'create · active\nship it'],
+      [4, 'instructions/baseline', '工作区说明', 'AGENTS.md'],
       [
         10,
         'hook/invoked',
         'Hook · PreToolUse',
-        'claude-code · bash\ndecision: pass · exit 0',
+        'claude-code · bash\n决定：pass · 退出码 0',
       ],
-      [12, 'approval/asked', 'Approval · bash', 'rejected\nnetwork'],
+      [12, 'approval/asked', '审批 · bash', 'rejected\nnetwork'],
     ])
     const layout = deriveTrajectoryLayout({
       nodes: current.eventNodes,
@@ -782,16 +782,16 @@ describe('Emperor-specific trajectory mapping', () => {
       ]),
     ).toEqual([
       [
-        'Message',
-        ['context:Plan mode', 'context:Goal', 'context:Instructions', 'user:'],
+        '消息',
+        ['context:计划模式', 'context:目标', 'context:工作区说明', 'user:'],
       ],
       [
-        'Step 1',
+        '第 1 步',
         [
           'message:Tool call only',
           'tool:bash',
           'context:Hook · PreToolUse',
-          'context:Approval · bash',
+          'context:审批 · bash',
         ],
       ],
     ])

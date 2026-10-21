@@ -191,7 +191,7 @@ const placeholder = computed(() =>
   props.busy
     ? '输入消息，按 Enter 加入队列'
     : goalCaptureStarting.value
-      ? '正在启动 Goal...'
+      ? '正在启动目标...'
       : goalCaptureActive.value
         ? '描述要持续完成的目标'
         : props.sendBlockedReason ||
@@ -447,10 +447,10 @@ function addModel(): void {
         <IconButton
           v-else
           type="submit"
-          :label="goalCaptureStarting ? '正在启动 Goal' : '发送'"
+          :label="goalCaptureStarting ? '正在启动目标' : '发送'"
           :tooltip="
             goalCaptureStarting
-              ? '正在启动 Goal'
+              ? '正在启动目标'
               : props.sendBlockedReason || '发送'
           "
           size="md"
@@ -484,7 +484,7 @@ function addModel(): void {
         @select="emit('activate-plan')"
       >
         <template #icon><DsPlan :size="16" /></template>
-        Plan 模式
+        计划模式
       </MenuItem>
       <MenuItem
         :disabled="props.busy || props.lifecycleMode === 'goal'"
@@ -492,7 +492,7 @@ function addModel(): void {
         @select="emit('activate-goal')"
       >
         <template #icon><DsGoal :size="16" /></template>
-        Goal 模式
+        目标模式
       </MenuItem>
     </Menu>
   </div>

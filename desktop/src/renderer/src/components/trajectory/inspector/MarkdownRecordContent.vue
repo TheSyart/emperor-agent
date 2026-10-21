@@ -52,8 +52,8 @@ const rawSource = computed(() =>
 )
 const emptyLabel = computed(() =>
   isTrajectoryToolCallOnly(cell.value)
-    ? 'Tool call only'
-    : cell.value.text || 'No content',
+    ? '只有工具调用'
+    : cell.value.text || '没有内容',
 )
 </script>
 
@@ -90,7 +90,7 @@ const emptyLabel = computed(() =>
         :aria-expanded="thinkingExpanded"
         @click="thinkingExpanded = !thinkingExpanded"
       >
-        Thinking
+        思考
         <DsChevronRight :size="12" class="chevron" />
       </button>
       <InspectorMarkdown
@@ -110,7 +110,7 @@ const emptyLabel = computed(() =>
         <button
           type="button"
           class="tool-call"
-          title="Open tool call summary"
+          title="打开工具调用摘要"
           @click="call.callId !== undefined && $emit('open-call', call.callId)"
         >
           <svg
@@ -130,7 +130,7 @@ const emptyLabel = computed(() =>
             />
           </svg>
           <span class="tool-text">
-            <span class="tool-name">{{ call.toolName ?? 'tool-call' }}</span>
+            <span class="tool-name">{{ call.toolName ?? '工具调用' }}</span>
             <span v-if="call.content !== ''" class="tool-args">{{
               call.content
             }}</span>

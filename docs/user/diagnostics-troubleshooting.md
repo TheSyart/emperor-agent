@@ -9,7 +9,7 @@
 
 概览下方是五个默认折叠的分组，标题下写着项数；只有含需要关注项目的分组，标题旁才显示「n 项需要关注」或「n 项异常」。展开后，正常的项目只显示值（鼠标停在名称上可以看到详情），需要关注的项目用颜色标出，并在名称下写明原因：
 
-- **运行时**：定时任务存储、运行事件、工作区范围、命令沙箱、进程托管、进程隔离回执（最近启动的 MCP server、插件 Hook 与安装命令是已隔离、被拒绝还是经你同意在沙箱外运行，附策略哈希）、子代理、提示词缓存和运行中任务；Core 没有返回数据的项不显示，标题下注明“另有 n 项未返回数据”；
+- **运行时**：定时任务存储、运行事件、工作区范围、命令沙箱、进程托管、进程隔离回执（最近启动的 MCP server、插件 Hook 与安装命令是已隔离、被拒绝还是经你同意在沙箱外运行，附策略哈希）、子智能体、提示词缓存和运行中任务；Core 没有返回数据的项不显示，标题下注明“另有 n 项未返回数据”；
 - **环境工具**：基础工具、当前项目（包括可选的 GitHub CLI `gh`）、Skill 依赖和大型依赖的探测结果，已就绪的工具显示检测到的版本，只读显示，不在应用内安装；
 - **桌面**：桌宠与 Node.js 运行时、桌面渲染层、桌宠模块等依赖；
 - **存储路径**：运行根目录（通常也是内置技能、模板等只读资源所在的目录，这时只占一行）、Emperor Home、当前项目、会话、附件、模型配置、MCP 配置和日志的位置，每项直接显示路径（Emperor Home、当前项目与日志目录可以在文件管理器中打开），以及旧数据提示；用户主目录显示为 `~`；
@@ -63,11 +63,11 @@ Emperor 把运行日志写在本机，不上传：
 | 启动报 `installation_lock_busy`                   | 另一个 Emperor 实例正在初始化；残留的锁会在持有进程退出或心跳过期后自动接管，稍后重开即可                                                                                                                                                                                                                                                                            |
 | 模型能回复但文件写入或命令被拒绝                  | 当前权限预设、是否拒绝了提权请求、写入路径是否在 workspace 内                                                                                                                                                                                                                                                                                                        |
 | Windows 等平台上 `bash` 全部失败                  | 该平台没有沙箱后端，需要切换到 `danger-full-access`                                                                                                                                                                                                                                                                                                                  |
-| 子代理请求提权总被拒绝                            | 预期行为：子代理的审批策略固定为 `never`                                                                                                                                                                                                                                                                                                                             |
+| 子智能体请求提权总被拒绝                          | 预期行为：子智能体的审批策略固定为 `never`                                                                                                                                                                                                                                                                                                                           |
 | Build 读到错误项目                                | 当前 session 的项目路径、是否切错会话                                                                                                                                                                                                                                                                                                                                |
 | 工具结果被截断                                    | 完整文本在 `stateRoot/spill/` 下，工具结果里给出了路径；不属于任何会话、30 天没有变化的会被自动清理                                                                                                                                                                                                                                                                  |
 | `desktop_observe` 返回 `truncated`                | 桌面辅助功能树可能超过默认深度 8；对同一目标用 `maxDepth: 16` 再观察，或按控件角色、名称缩小范围。这与工具文本溢出到 `spill/` 不同；达到深度上限后，不应把未显示的控件当作不存在。                                                                                                                                                                                   |
-| Goal 不再自动续跑                                 | 应用重启后 Goal 处于 disarmed，使用 `/goal resume`；或 Goal 已 `blocked` / `complete`                                                                                                                                                                                                                                                                                |
+| 目标不再自动续跑                                  | 应用重启后目标处于 disarmed，使用 `/goal resume`；或目标已 `blocked` / `complete`                                                                                                                                                                                                                                                                                    |
 | MCP 没有工具                                      | 能力页“MCP”标签中该 server 卡片的状态和最近错误（含错误码），再查 `mcp_config.json`、命令/URL 和环境变量。`mcp_sandbox_refused` / `mcp_sandbox_consent_required` 表示进程沙箱不可用（插件的 server 不启动，你的 server 等你在下一次对话中确认）；`npx` / `uvx` server 第一次启动可能因下载超时，稍后重新连接；server 要读写 workspace 以外的目录时把目录写进它的参数 |
 | 定时任务没执行                                    | 定时任务页中任务是否已开启、下次运行时间，任务对话框中的运行历史和最近错误，目标会话是否有待回答的交互                                                                                                                                                                                                                                                               |
 | Pull Request 页或「审查」的 PR 一行不可用         | 诊断 → 环境工具中 `gh` 的状态与版本，以及是否已 `gh auth login`，见下文 [GitHub CLI（gh）](#github-cligh)                                                                                                                                                                                                                                                            |
@@ -108,7 +108,7 @@ Diagnostics payload 中与内核相关的字段：
 
 - `kernel`：打开诊断页时正在看的会话（`activeSessionId`）、正在运行的会话、当前模型 route、该会话可用的工具名单（含其项目的 MCP 工具）、各项目 MCP 实例（`projectMcp`），以及 `archivedLegacySessions`。
 - `workspacePolicy`：该会话的 workspace 根和沙箱模式。
-- `subagents`：子代理记录。
+- `subagents`：子智能体记录。
 - `mcp`：每个 server 的连接状态、generation 与工具数。
 - `optionalCapabilities`：可选能力登记（当前包括 `watchlist` 和 `computer_use`）。
 
@@ -134,12 +134,12 @@ MCP 的 args、env、headers 和 URL 在有效配置里统一显示为 `[REDACTE
 
 `/new` 会创建一个新会话并切换过去，旧会话保留；若只想减少上下文占用，使用 `/compact`。转换中断时检查 `stateRoot/control/session-transitions.json`，不要手工伪造 `applied` 状态。
 
-## 后台任务与子代理
+## 后台任务与子智能体
 
-CoreApi 的 `tasks.*` 把后台 job（`bash` 的后台命令）、子代理会话和工作流运行（`workflow` / `ralph`）汇总在一起。界面中：
+CoreApi 的 `tasks.*` 把后台 job（`bash` 的后台命令）、子智能体会话和工作流运行（`workflow` / `ralph`）汇总在一起。界面中：
 
-- 环境信息卡的「子智能体」一行点开后列出本会话委派的子代理，点击打开子会话；子代理仍在运行时，可以在子会话里点「停止」。
-- 「后台任务」行显示后台命令和工作流运行的数量；点击展开后，每个任务有「输出」（只读查看命令输出或工作流记录）和运行中才有的「停止」。停止工作流前会先确认，它正在运行的子代理会一起停止。
+- 环境信息卡的「子智能体」一行点开后列出本会话委派的子智能体，点击打开子会话；子智能体仍在运行时，可以在子会话里点「停止」。
+- 「后台任务」行显示后台命令和工作流运行的数量；点击展开后，每个任务有「输出」（只读查看命令输出或工作流记录）和运行中才有的「停止」。停止工作流前会先确认，它正在运行的子智能体会一起停止。
 - 工作流在前台运行，停止当前 turn 会同时取消它；应用在运行中退出后，该运行记为已中断。
 - 后台命令由 Agent 通过 `job_output`、`job_list`、`job_kill` 读取和停止，你也可以在「后台任务」中查看输出或停止它，Agent 下一步会知道是你停止的；后台命令只存在于当前进程，应用退出时会被终止。子智能体启动的后台命令在它被停止或会话停止时一起终止。
 - 永久删除会话（「最近删除」里的「永久删除」或 30 天到期）时，它的子智能体会话和保存的大结果（`spill`，包括过长的命令输出）一起删除。
@@ -152,7 +152,7 @@ CoreApi 的 `tasks.*` 把后台 job（`bash` 的后台命令）、子代理会�
 - 30 天没有变化、且不属于任何会话的溢出文件（例如旧版本留下的命令输出 `shell-*.log`）；
 - 「最近删除」里已超过 30 天的会话；
 - 记忆版本索引之外的快照文件；
-- 会话已删除的外部执行器（Claude Code、Codex）委派留下的隔离目录，以及临时文件。
+- 会话已删除的Claude Code / Codex 子智能体（Claude Code、Codex）委派留下的隔离目录，以及临时文件。
 
 对话、附件与设置不会被清理。完成后页面写明释放了多少空间、各删除了几项，并重新统计占用。每次启动后 Emperor 也会在后台自动清理一次，不影响启动。
 
@@ -202,12 +202,12 @@ CoreApi 的 `tasks.*` 把后台 job（`bash` 的后台命令）、子代理会�
 
 ## Time Machine 与凭据文件
 
-- Agent 浏览器的 profile 文件夹（`~/.emperor/browser/profiles/<profile-id>/`，网站数据、缓存与登录状态）由 Emperor 自动排除出 Time Machine（`tmutil addexclusion`）。
+- Agent 浏览器的登录档案文件夹（`~/.emperor/browser/profiles/<profile-id>/`，网站数据、缓存与登录状态）由 Emperor 自动排除出 Time Machine（`tmutil addexclusion`）。
 - 建议再手动排除可以重新生成、体积大的目录：`~/.emperor/browser/profiles`（整个文件夹）、`~/.emperor/browser/downloads`、`~/.emperor/environment/downloads`、`~/.emperor/spill`、`~/.emperor/logs`（使用 `EMPEROR_CONFIG_DIR` 时）。在「系统设置 › 通用 › 时间机器 › 选项」里添加，或执行 `tmutil addexclusion <路径>`。
 - 不要排除整个 `~/.emperor`：会话、记忆和配置都在里面。需要单独、可携带的副本时用上面的「导出备份」。
 - 凭据文件的保护方式：凭据库 `computer-use/vault.json` 的每个字段、模型 Key 和 MCP 令牌都用 Emperor 本地密钥加密（AES-256-GCM），可以再加主密码；本地密钥 `computer-use/secrets/local.key` 只属于当前用户（0600，目录 0700），不使用钥匙串，Agent 的 Shell 与文件工具也读不到 `computer-use/`。Time Machine 备份里同时有本地密钥和凭据库，因此要像保护这台 Mac 一样保护备份磁盘（建议开启 Time Machine 的备份加密）。
 
-- 子代理结束后不能从界面恢复，需要在对话中让主 Agent 用 `send_message` 继续。
+- 子智能体结束后不能从界面恢复，需要在对话中让主 Agent 用 `send_message` 继续。
 
 ## 资源详情
 

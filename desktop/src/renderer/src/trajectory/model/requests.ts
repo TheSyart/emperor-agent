@@ -12,6 +12,7 @@ import type {
   TrajectoryRequestNotice,
   TrajectoryRequestView,
 } from './contract'
+import { trajectoryStepTitle } from './record'
 
 /** Disjoint provider token buckets for one request or a session prefix. */
 export interface TrajectoryUsage {
@@ -26,7 +27,7 @@ export interface TrajectoryUsage {
 interface TrajectoryRequestNumberBase {
   /** Request anchor event sequence. */
   seq?: number
-  /** Ledger group the request belongs to (`Step N` / `Compaction N`). */
+  /** Ledger group the request belongs to (`第 N 步` / `压缩 #N`). */
   group: string
   /** 1-based session-global request number. */
   number: number
@@ -174,7 +175,7 @@ export function deriveTrajectoryRequestNumbers(
         seq: request.startSeq,
         turn: request.turn,
         step: 0,
-        group: `Compaction ${request.startSeq}`,
+        group: `压缩 #${request.startSeq}`,
         number: index + 1,
         purpose: 'compaction',
         status: request.status,
@@ -214,7 +215,7 @@ export function deriveTrajectoryRequestNumbers(
       seq: entry.seq,
       turn,
       step,
-      group: `Step ${step}`,
+      group: trajectoryStepTitle(step),
       number: index + 1,
       ...(request === undefined
         ? {}

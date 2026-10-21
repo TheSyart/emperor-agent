@@ -159,7 +159,7 @@ it('retains the retry-check form for a previous failed text check', async () => 
     preview: null,
   })
   const dom = await mount()
-  expect(dom.textContent).toContain('验收失败')
+  expect(dom.textContent).toContain('验证失败')
   expect(dom.textContent).toContain('独立验证当前成果')
   expect(dom.textContent).not.toContain('生成整合预览')
 })
@@ -249,7 +249,7 @@ it('shows passed host evidence and preserves a conflicting integration preview w
     verificationRecoveryIds: [],
   })
   const dom = await mount()
-  expect(dom.textContent).toContain('验收通过')
+  expect(dom.textContent).toContain('验证通过')
   expect(dom.textContent).toContain('/retained/integration')
   expect(dom.textContent).toContain('/original/project')
   expect(dom.textContent).toContain('merged-tree')
@@ -284,7 +284,7 @@ it('offers configuration on real authentication failure without retrying through
   api.getDelegation.mockResolvedValue(failed)
   const dom = await mount(),
     button = [...dom.querySelectorAll<HTMLButtonElement>('button')].find(
-      (item) => item.textContent?.includes('打开执行器设置'),
+      (item) => item.textContent?.includes('打开子智能体设置'),
     )
   expect(button).toBeTruthy()
   button!.click()
@@ -363,7 +363,7 @@ async function failedWith(code: string) {
   const note = body.querySelector<HTMLElement>('[data-failure-code]')!
   const configureButton = [
     ...body.querySelectorAll<HTMLButtonElement>('button'),
-  ].find((b) => b.textContent?.includes('打开执行器设置'))
+  ].find((b) => b.textContent?.includes('打开子智能体设置'))
   return { note, configureButton }
 }
 it('6 · AUTH_EXPIRED says the sign-in expired and how to sign in again', async () => {

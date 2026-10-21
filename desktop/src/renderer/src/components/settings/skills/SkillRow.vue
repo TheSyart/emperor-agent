@@ -22,9 +22,11 @@ const props = defineProps<{ skill: SkillInfo }>()
 const emit = defineEmits<{ select: [] }>()
 
 const warnings = computed(() => props.skill.warnings ?? [])
+// Core reports `active` or `invalid` (frontmatter or folder errors).
+const STATUS_LABELS: Record<string, string> = { invalid: '无效' }
 const status = computed(() =>
   props.skill.status && props.skill.status !== 'active'
-    ? props.skill.status
+    ? (STATUS_LABELS[props.skill.status] ?? props.skill.status)
     : '',
 )
 </script>
@@ -44,7 +46,7 @@ const status = computed(() =>
             {{ skillSourceLabel(skill) }}
           </Badge>
           <Badge v-if="isSkillReadOnly(skill)">只读</Badge>
-          <Badge v-if="status" tone="warn" mono>{{ status }}</Badge>
+          <Badge v-if="status" tone="warn">{{ status }}</Badge>
           <span
             v-if="warnings.length"
             class="warnings"

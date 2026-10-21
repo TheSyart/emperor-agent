@@ -149,7 +149,7 @@ describe('Composer lifecycle transitions', () => {
     const result = await ctx.controller.activatePlan()
 
     expect(result.ok).toBe(false)
-    expect(result.error).toContain('Goal 已取消，但 Plan 开启失败')
+    expect(result.error).toContain('目标已取消，但计划开启失败')
     expect(ctx.cancelGoal).toHaveBeenCalledOnce()
   })
 

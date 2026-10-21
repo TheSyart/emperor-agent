@@ -75,16 +75,14 @@ onBeforeUnmount(() => clearTimeout(timer))
 </script>
 
 <template>
-  <div class="traj-toolbar" role="toolbar" aria-label="Trajectory toolbar">
+  <div class="traj-toolbar" role="toolbar" aria-label="轨迹工具栏">
     <div class="actions">
       <button
         type="button"
         class="action"
-        aria-label="Use actual duration"
+        aria-label="按实际时长"
         :aria-pressed="actualDuration"
-        :title="
-          actualDuration ? 'Use equal-width operations' : 'Use actual duration'
-        "
+        :title="actualDuration ? '改为等宽显示' : '按实际时长'"
         @click="emit('update:actualDuration', !actualDuration)"
       >
         <svg
@@ -96,42 +94,42 @@ onBeforeUnmount(() => clearTimeout(timer))
           <circle cx="8" cy="8" r="5.25" />
           <path d="M8 4.75V8l2.25 1.5" />
         </svg>
-        Duration
+        时长
       </button>
       <button
         type="button"
         class="action"
         data-fold="turns"
-        :aria-label="allTurnsCollapsed ? 'Expand turns' : 'Collapse turns'"
+        :aria-label="allTurnsCollapsed ? '展开所有轮次' : '折叠所有轮次'"
         :aria-pressed="allTurnsCollapsed"
-        :title="allTurnsCollapsed ? 'Expand turns' : 'Collapse turns'"
+        :title="allTurnsCollapsed ? '展开所有轮次' : '折叠所有轮次'"
         @click="emit('toggle-turns')"
       >
         <span class="action-icon" aria-hidden="true">{{
           allTurnsCollapsed ? '⊞' : '⊟'
         }}</span>
-        Turns
+        轮次
       </button>
       <button
         type="button"
         class="action"
         data-fold="calls"
-        :aria-label="allAssistantsCollapsed ? 'Expand calls' : 'Collapse calls'"
+        :aria-label="allAssistantsCollapsed ? '展开所有调用' : '折叠所有调用'"
         :aria-pressed="allAssistantsCollapsed"
-        :title="allAssistantsCollapsed ? 'Expand calls' : 'Collapse calls'"
+        :title="allAssistantsCollapsed ? '展开所有调用' : '折叠所有调用'"
         @click="emit('toggle-calls')"
       >
         <span class="action-icon" aria-hidden="true">{{
           allAssistantsCollapsed ? '⊞' : '⊟'
         }}</span>
-        Calls
+        调用
       </button>
     </div>
     <SearchField
       class="search"
       size="sm"
-      placeholder="Search"
-      aria-label="Search trajectory"
+      placeholder="搜索"
+      aria-label="搜索轨迹"
       :model-value="draft"
       @update:model-value="onDraft"
       @clear="flush"
@@ -145,7 +143,7 @@ onBeforeUnmount(() => clearTimeout(timer))
         }}</span>
         <IconButton
           size="xs"
-          label="Previous match"
+          label="上一个匹配"
           :disabled="matchCount === 0"
           @click="emit('step', -1)"
         >
@@ -153,7 +151,7 @@ onBeforeUnmount(() => clearTimeout(timer))
         </IconButton>
         <IconButton
           size="xs"
-          label="Next match"
+          label="下一个匹配"
           :disabled="matchCount === 0"
           @click="emit('step', 1)"
         >

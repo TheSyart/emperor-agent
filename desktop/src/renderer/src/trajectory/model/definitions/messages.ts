@@ -127,10 +127,12 @@ function hookFacts(
   const lines = [
     `${invoked.dialect}${invoked.matcher === undefined ? '' : ` · ${invoked.matcher}`}`,
     result === undefined
-      ? 'running'
+      ? '运行中'
       : [
-          `decision: ${result.decision}`,
-          result.exitCode === undefined ? undefined : `exit ${result.exitCode}`,
+          `决定：${result.decision}`,
+          result.exitCode === undefined
+            ? undefined
+            : `退出码 ${result.exitCode}`,
         ]
           .filter((part) => part !== undefined)
           .join(' · '),
@@ -152,17 +154,17 @@ function inboxFacts(
   const inserted = data.inserted.length
   const removed = data.removedCount ?? 0
   const parts = [
-    inserted > 0 ? `queued ${inserted}` : undefined,
+    inserted > 0 ? `排队 ${inserted}` : undefined,
     removed > 0
-      ? `${data.outcome === 'canceled' ? 'discarded' : 'admitted'} ${removed}`
+      ? `${data.outcome === 'canceled' ? '丢弃' : '接收'} ${removed}`
       : undefined,
   ].filter((part): part is string => part !== undefined)
   const previews = data.inserted
     .map((message) => contentText(message.content).trim())
     .filter((text) => text !== '')
   return {
-    label: `Inbox · ${data.target}`,
-    text: [parts.join(' · ') || 'no change', ...previews].join('\n'),
+    label: `收件箱 · ${data.target}`,
+    text: [parts.join(' · ') || '无变化', ...previews].join('\n'),
   }
 }
 
@@ -173,16 +175,16 @@ function eventFacts(
   if (isEvent(event, 'goal/change')) {
     const data = event.data
     if (data.operation === 'clear')
-      return { label: 'Goal', text: `clear · ${data.cleared.id}` }
+      return { label: '目标', text: `清除 · ${data.cleared.id}` }
     const goal = data.goal
     return {
-      label: 'Goal',
+      label: '目标',
       text: [
         `${data.operation} · ${goal.phase}`,
         goal.objective,
         goal.blockedReason === undefined
           ? undefined
-          : `blocked: ${goal.blockedReason.message}`,
+          : `受阻：${goal.blockedReason.message}`,
       ]
         .filter((line): line is string => line !== undefined && line !== '')
         .join('\n'),
@@ -190,7 +192,7 @@ function eventFacts(
     }
   }
   if (isEvent(event, 'goal/round'))
-    return { label: 'Goal round', text: `round ${event.data.round}` }
+    return { label: '目标轮次', text: `第 ${event.data.round} 轮` }
   if (isEvent(event, 'hook/invoked'))
     return hookFacts(
       event.data,
@@ -202,9 +204,9 @@ function eventFacts(
     const outcome =
       settled !== undefined && isEvent(settled, 'approval/decided')
         ? settled.data.outcome
-        : 'pending'
+        : '待定'
     return {
-      label: `Approval · ${event.data.toolName}`,
+      label: `审批 · ${event.data.toolName}`,
       text: [outcome, event.data.reason]
         .filter((line): line is string => line !== undefined && line !== '')
         .join('\n'),
@@ -213,28 +215,28 @@ function eventFacts(
   }
   if (isEvent(event, 'approval/policy'))
     return {
-      label: 'Approval policy',
+      label: '审批策略',
       text: `${event.data.policy}${event.data.source === undefined ? '' : ` · ${event.data.source}`}`,
     }
   if (isEvent(event, 'permission/preset'))
-    return { label: 'Permission preset', text: event.data.preset }
+    return { label: '权限预设', text: event.data.preset }
   if (isEvent(event, 'plan/mode'))
-    return { label: 'Plan mode', text: event.data.active ? 'on' : 'off' }
+    return { label: '计划模式', text: event.data.active ? '开' : '关' }
   if (isEvent(event, 'sandbox/mode'))
     return {
-      label: 'Sandbox mode',
+      label: '沙箱模式',
       text: `${event.data.mode}${event.data.source === undefined ? '' : ` · ${event.data.source}`}`,
     }
   if (isEvent(event, 'working-directory/change'))
     return {
-      label: 'Working directory',
-      text: `${event.data.to}\n${event.data.reason} · from ${event.data.from}`,
+      label: '工作目录',
+      text: `${event.data.to}\n${event.data.reason} · 原目录 ${event.data.from}`,
     }
   if (isEvent(event, 'agent/inbox/spliced')) return inboxFacts(event.data)
   if (isEvent(event, 'instructions/baseline'))
-    return { label: 'Instructions', text: event.data.files.join('\n') }
+    return { label: '工作区说明', text: event.data.files.join('\n') }
   if (isEvent(event, 'memory/baseline'))
-    return { label: 'Memory', text: `digest ${event.data.digest}` }
+    return { label: '记忆', text: `摘要 ${event.data.digest}` }
   return undefined
 }
 

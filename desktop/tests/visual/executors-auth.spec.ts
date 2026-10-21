@@ -66,7 +66,7 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(claude.locator('[data-claude-auth-source]')).toHaveText(
       '已设置 · 末 4 位 a1b2（订阅账号）',
     )
-    await expect(claude.locator('.readiness')).toHaveText('执行器就绪')
+    await expect(claude.locator('.readiness')).toHaveText('子智能体就绪')
     expect(await page.content()).not.toContain(
       'sk-ant-oat01-visual-fixture-token',
     )

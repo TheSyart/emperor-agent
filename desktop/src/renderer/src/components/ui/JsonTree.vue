@@ -52,7 +52,7 @@ const brackets = computed(() =>
         :style="{ left: `calc(${depth} * var(--space-3))` }"
         :data-open="open || undefined"
         :aria-expanded="open"
-        :aria-label="open ? 'Collapse JSON node' : 'Expand JSON node'"
+        :aria-label="open ? '折叠 JSON 节点' : '展开 JSON 节点'"
         @click="open = !open"
       />
       <span v-if="name !== undefined" class="label">{{ name }}:</span>

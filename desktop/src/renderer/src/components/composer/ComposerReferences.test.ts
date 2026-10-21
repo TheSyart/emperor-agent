@@ -307,7 +307,7 @@ describe('rich composer references', () => {
     await nextTick()
     expect(onStartGoal).not.toHaveBeenCalled()
     expect(onError).toHaveBeenCalledWith(
-      'Goal Outcome 暂仅支持纯文字；请先移除附件或 Skill 引用。',
+      '目标描述暂仅支持纯文字；请先移除附件或 Skill 引用。',
     )
   })
 })

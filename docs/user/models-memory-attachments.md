@@ -125,7 +125,7 @@ Composer 一次最多保留 5 个待发送附件：
 
 ## 备份与迁移
 
-备份时先完全退出应用，再复制整个 Emperor Home。只复制 `memory/` 会遗漏会话、Scheduler、MCP、用户 Skills、受管工具环境和模型配置；模型 Key 和 MCP 令牌用 `computer-use/secrets/local.key` 加密，单独复制 `model_config.json` 或 `mcp_config.json` 时这些值无法解开，需要重新填写。
+备份时先完全退出应用，再复制整个 Emperor Home。只复制 `memory/` 会遗漏会话、定时任务、MCP、用户 Skills、受管工具环境和模型配置；模型 Key 和 MCP 令牌用 `computer-use/secrets/local.key` 加密，单独复制 `model_config.json` 或 `mcp_config.json` 时这些值无法解开，需要重新填写。
 
 首次启动当前版本时，旧版本的 `sessions/` 目录会整体移到 `sessions.legacy-<时间戳>/` 保留，新版本从空的会话列表开始；旧会话不会被删除，但也不会在界面中显示。不要在应用运行时手工修改 `log.jsonl`。
 

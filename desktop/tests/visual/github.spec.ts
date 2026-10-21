@@ -75,7 +75,7 @@ for (const theme of ['dark', 'light'] as const) {
       page.getByRole('heading', { name: 'GitHub', level: 1 }),
     ).toBeVisible()
     await expect(
-      page.getByRole('tab', { name: 'Issue', selected: true }),
+      page.getByRole('tab', { name: '议题', selected: true }),
     ).toBeVisible()
     await expect(issues(page)).toHaveCount(3)
     // The markup title is text: no element, no script.
@@ -179,7 +179,7 @@ test('CI takes another repository and rejects a bad name', async ({ page }) => {
   await page.getByRole('button', { name: /当前项目/ }).click()
   await expect(runs(page)).toHaveCount(4)
   // The last repository is kept when coming back through the tabs.
-  await page.getByRole('tab', { name: 'Issue' }).click()
+  await page.getByRole('tab', { name: '议题' }).click()
   await page.getByRole('tab', { name: 'CI' }).click()
   await expect(field).toHaveValue('emperor-agent/visual-build-project')
 })

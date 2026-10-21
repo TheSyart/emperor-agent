@@ -20,6 +20,7 @@
  *   is ready (WorkspacePanel sends one when the user shows this pane).
  */
 import { confirmTerminalClose } from './terminalClose'
+import { terminalExitLine } from './terminalExit'
 import EmptyState from '../ui/EmptyState.vue'
 import IconButton from '../ui/IconButton.vue'
 import type { TabItem } from '../ui/blockTypes'
@@ -276,9 +277,7 @@ async function activate(
     initializing = false
     for (const event of buffered) applyTerminalEvent(event)
     if (replay.terminal.exited)
-      terminal.writeln(
-        `\r\n[process exited: ${replay.terminal.exitCode ?? 'signal'}]`,
-      )
+      terminal.writeln(terminalExitLine(replay.terminal.exitCode))
     if (focus || focusPending) {
       focusPending = false
       terminal.focus()
@@ -352,7 +351,7 @@ function applyTerminalEvent(event: TerminalEvent): void {
         ? { ...item, exited: true, exitCode: event.exitCode }
         : item,
     )
-    terminal?.writeln(`\r\n[process exited: ${event.exitCode ?? 'signal'}]`)
+    terminal?.writeln(terminalExitLine(event.exitCode))
   }
 }
 

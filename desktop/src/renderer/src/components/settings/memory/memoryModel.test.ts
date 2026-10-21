@@ -98,7 +98,7 @@ describe('memory model', () => {
     expect(groups[2]!.items[0]!.value).toBe(
       'seq 9 · active · 暂无 compaction id',
     )
-    expect(groups[4]!.items[1]!.value).toBe('暂无 · Scheduler 未安排')
+    expect(groups[4]!.items[1]!.value).toBe('暂无 · 定时任务未安排')
     expect(contextGroups(null)).toEqual([])
   })
 
