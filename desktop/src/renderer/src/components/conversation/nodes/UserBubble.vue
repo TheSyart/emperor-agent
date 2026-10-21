@@ -3,7 +3,9 @@
  * UserBubble — right-aligned user bubble (UI-S03): --bubble-user fill,
  * r-xl, 10/16 padding, 15/26 text, at most 80% of the column, no border.
  * Attachments render above the bubble (image thumbnails / file Tags); copy +
- * edit-resend actions and the send time sit below, revealed on hover.
+ * edit-resend actions and the send time sit below, revealed on hover. A
+ * small line names a message inserted into a running turn (运行中插入) or
+ * sent by the scheduler (定时任务); any other delivery shows nothing.
  *
  * Skill / plugin chips show as in the composer (ReferencedText); copying
  * gives their `/name` text and editing puts them back as chips.
@@ -63,10 +65,12 @@ const images = computed(() => [
 ])
 const files = computed(() => attachments.value.filter((a) => !a.image))
 
+// Only a delivery the reader cares about gets a line (UI-S13); the raw
+// source value (`chat`) never shows.
 const sourceLabel = computed(() => {
   if (props.node.data.steering) return '运行中插入'
   if (props.node.data.source === 'scheduler') return '定时任务'
-  return props.node.data.source ?? ''
+  return ''
 })
 function enlarge(id: string): void {
   const group = images.value.map((id) =>
