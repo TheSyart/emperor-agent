@@ -2,7 +2,8 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, relative, resolve, sep } from 'node:path'
-import { checkDesignDocs } from './lib/design-docs.mjs'
+import { checkDesignDocs, statusHeaderProblems } from './lib/design-docs.mjs'
+import { checkDocReferences } from './lib/doc-references.mjs'
 
 const root = process.cwd()
 const allowedRootDocuments = new Set([
@@ -60,8 +61,14 @@ for (const path of publicMarkdown) {
   const absolute = resolve(root, path)
   if (!existsSync(absolute)) continue
   const source = readFileSync(absolute, 'utf8')
-  for (const match of source.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/g)) {
-    const rawTarget = match[1].trim()
+  const targets = [
+    ...[...source.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/g)].map((m) => m[1]),
+    ...[...source.matchAll(/<(?:img|a)\b[^>]*?\b(?:src|href)="([^"]+)"/g)].map(
+      (m) => m[1],
+    ),
+  ]
+  for (const rawTarget_ of targets) {
+    const rawTarget = rawTarget_.trim()
     const target = linkTarget(rawTarget)
     if (!target || isExternal(target) || target.startsWith('#')) continue
 
@@ -95,12 +102,41 @@ for (const path of publicMarkdown) {
 // docs/design/: the four-line status header and an entry in both indexes.
 const designProblems = checkDesignDocs(root)
 
+// Every other public page opens with the status header too, except the
+// changelog and the Release body template (its first paragraph must be the
+// unsigned notice; its status lives in an HTML comment).
+const WITHOUT_HEADER = new Set([
+  'docs/release/CHANGELOG.md',
+  'docs/release/stable-release-notes.md',
+])
+const headerProblems = [
+  '.github/SECURITY.md',
+  ...trackedDocs.filter(
+    (path) =>
+      path.endsWith('.md') &&
+      isPublicDocPath(path) &&
+      !path.startsWith('docs/design/') &&
+      !WITHOUT_HEADER.has(path),
+  ),
+].flatMap((path) =>
+  existsSync(resolve(root, path))
+    ? statusHeaderProblems(readFileSync(resolve(root, path), 'utf8')).map(
+        (problem) => `${path}: ${problem}`,
+      )
+    : [],
+)
+
+// REL-06: settings paths, Core operations, private material, 最后核验.
+const references = checkDocReferences(root)
+
 if (
   unexpectedRootDocuments.length ||
   unexpected.length ||
   brokenLinks.length ||
   privateLinks.length ||
-  designProblems.length
+  designProblems.length ||
+  headerProblems.length ||
+  Object.values(references).some((list) => list.length)
 ) {
   if (unexpectedRootDocuments.length) {
     console.error('Tracked Markdown/JSON files outside the root allowlist:')
@@ -124,11 +160,26 @@ if (
     )
     for (const item of designProblems) console.error(`  - ${item}`)
   }
+  if (headerProblems.length) {
+    console.error('Public documents without the status header:')
+    for (const item of headerProblems) console.error(`  - ${item}`)
+  }
+  const referenceTitles = {
+    settings: 'Settings paths that do not match the settings modal:',
+    operations: 'Core operations that are not in CORE_OPERATION_REGISTRY:',
+    private: 'References to private development material:',
+    verified: 'Pages whose 最后核验 does not cover their text:',
+  }
+  for (const [rule, items] of Object.entries(references)) {
+    if (!items.length) continue
+    console.error(referenceTitles[rule])
+    for (const item of items) console.error(`  - ${item}`)
+  }
   process.exit(1)
 }
 
 console.log(
-  `Public documentation boundary verified: ${trackedDocs.length} tracked files, ${publicMarkdown.length} Markdown entry points.`,
+  `Public documentation boundary verified: ${trackedDocs.length} tracked files, ${publicMarkdown.length} Markdown entry points; settings paths, Core operations, private references and 最后核验 dates checked.`,
 )
 
 function isPublicDocPath(path) {

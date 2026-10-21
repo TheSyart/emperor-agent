@@ -13,8 +13,9 @@ const HEADER = [
   { key: '面向读者', check: (value) => value.length > 0, hint: '读者' },
   {
     key: '最后核验',
-    check: (value) => /^\d{4}-\d{2}-\d{2}$/.test(value),
-    hint: 'YYYY-MM-DD',
+    check: (value) =>
+      /^\d{4}-\d{2}-\d{2}(?:（对照 `[0-9a-f]{7,40}`）)?$/.test(value),
+    hint: 'YYYY-MM-DD，可加（对照 `提交`）',
   },
   {
     key: '事实源',
@@ -26,7 +27,8 @@ const HEADER = [
 /**
  * Problems with a page's status header: after the `# title` line and one
  * blank line come four quoted lines, `> 文档状态：…<br>`, `> 面向读者：…<br>`,
- * `> 最后核验：YYYY-MM-DD<br>` and `> 事实源：…`.
+ * `> 最后核验：YYYY-MM-DD<br>` (optionally `YYYY-MM-DD（对照 `commit`）`, the
+ * commit the page was checked against) and `> 事实源：…`.
  */
 export function statusHeaderProblems(source) {
   const lines = source.split(/\r?\n/)
