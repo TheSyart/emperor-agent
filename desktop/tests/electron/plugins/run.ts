@@ -854,7 +854,7 @@ async function loggedOut(page: Page, model: FakeModel): Promise<void> {
       await sidebar(page, 'Pull Request')
       await page
         .locator('[data-github-tabs]')
-        .getByRole('tab', { name: 'Issue' })
+        .getByRole('tab', { name: '议题' })
         .click()
       await page.getByText('GitHub CLI 尚未登录').waitFor({ timeout: 20_000 })
       await page.screenshot({
