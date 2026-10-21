@@ -321,7 +321,7 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(page.locator('[data-turn-files="3"]')).toHaveText(
       '本轮改动未记录：项目快照超过 5 秒',
     )
-    // The card sits after the turn's footer, before the next prompt.
+    // UI-S13: the card sits before the turn's footer, the turn's last row.
     const order = await page
       .locator('[data-chat-flow-kind]')
       .evaluateAll((rows) =>
@@ -330,8 +330,8 @@ for (const theme of ['light', 'dark'] as const) {
     expect(order.slice(0, 5)).toEqual([
       'user',
       'assistant',
-      'turnTail',
       'turnFiles',
+      'turnTail',
       'user',
     ])
     await shot(page, `chat-turn-files-${theme}`)
