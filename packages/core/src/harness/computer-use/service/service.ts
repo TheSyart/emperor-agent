@@ -659,11 +659,13 @@ export class ComputerUseService {
     return allowed
   }
 
-  async capabilities(): Promise<DriverCapability[]> {
+  async capabilities(
+    options: { readonly connect?: boolean } = {},
+  ): Promise<DriverCapability[]> {
     const port = this.deps.port
     if (port === null) return []
     const settings = this.deps.settings()
-    const live = await port.capabilities()
+    const live = await port.capabilities(options)
     return live.map((capability) => {
       const enabled =
         settings.enabled && settings.drivers?.[capability.driver] !== false
@@ -3217,11 +3219,15 @@ export class ComputerUseService {
     }
   }
 
+  /**
+   * Settings, the plugin page and every switch read this: it never asks the
+   * host to start a helper (a launch can take seconds, or never connect).
+   */
   async status(): Promise<ComputerUseStatusView> {
     const view = this.statusView()
     let drivers: DriverCapability[] = []
     try {
-      drivers = await this.capabilities()
+      drivers = await this.capabilities({ connect: false })
     } catch {
       drivers = []
     }

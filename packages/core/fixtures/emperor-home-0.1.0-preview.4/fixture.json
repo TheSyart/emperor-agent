@@ -32,5 +32,30 @@
       "displayName": "DeepSeek（夹具）"
     },
     "memoryLine": "- 升级测试夹具：验证 0.1.0-preview.4 的数据升级后仍可读。"
+  },
+  "modes": {
+    "environment/registry.v1.json": "600",
+    "installation.json": "600",
+    "memory/MEMORY.local.md": "644",
+    "memory/patch-ledger.jsonl": "644",
+    "memory/profile/USER.local.md": "644",
+    "memory/versions/index.json": "644",
+    "memory/versions/snapshots/memv_1792516225874_45bd5293_1ddabd.json": "644",
+    "memory/watchlist.md": "644",
+    "migrations/skill-plugin-semantics.v1.json": "600",
+    "migrations/state-root-migration.json": "644",
+    "model_config.json": "600",
+    "onboarding.json": "644",
+    "plugins/installed_plugins.json": "600",
+    "plugins/known_marketplaces.json": "600",
+    "scheduler/jobs.json": "600",
+    "sessions/.harness-kernel-v1": "644",
+    "sessions/957ac61612e3492e/log.jsonl": "600",
+    "sessions/957ac61612e3492e/meta.jsonl": "600",
+    "sessions/f666ea3e5d514196/log.jsonl": "600",
+    "sessions/f666ea3e5d514196/meta.jsonl": "600",
+    "sessions/index.json": "600",
+    "settings.json": "600",
+    "tokens/tokens.jsonl": "644"
   }
 }

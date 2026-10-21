@@ -189,7 +189,7 @@ CoreApi 的 `tasks.*` 把后台 job（`bash` 的后台命令）、子智能体�
 
 ## 用较旧的 Emperor 打开数据
 
-每个持久文件都写明它的版本（`version` 或 `schemaVersion`）。较旧的 Emperor 读到更新版本写入的文件时：
+Emperor 自己的每个持久文件都写明它的版本（`version` 或 `schemaVersion`）；你自己的 `mcp_config.json` 和 `hooks.json` 不带 Emperor 的版本号，Emperor 也不会为此改写它们。较旧的 Emperor 读到更新版本写入的文件时：
 
 - 照常读取它能理解的内容，但不会改写这个文件，也不会把它当作损坏文件移走；
 - 修改这类文件的操作会失败，并提示「这个文件来自更新版本的 Emperor，当前版本只读」；

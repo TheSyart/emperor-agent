@@ -78,7 +78,10 @@ import { followPluginList } from './composables/pluginListSync'
 import { activeGoalForSession, hasProjectedGoal } from './runtime/selectors'
 import { normalizeGoal } from './runtime/handlers/goals'
 import { isTerminalGoal, type GoalCardAction } from './runtime/goalRender'
-import { shouldFollowActiveSession } from './runtime/routeFollow'
+import {
+  isStaleDraftRoute,
+  shouldFollowActiveSession,
+} from './runtime/routeFollow'
 import {
   notificationFromNotice,
   type RuntimeNotice,
@@ -580,7 +583,12 @@ async function syncRouteSession(): Promise<void> {
     return
   }
   const target = routeSessionId.value
-  if (!target) {
+  const staleDraft = isStaleDraftRoute({
+    routeSessionId: target,
+    routeSessionKnown: Boolean(target && sessionStore.getSession(target)),
+    routeSessionIsDraft: sessionStore.isDraftSessionId(target),
+  })
+  if (!target || staleDraft) {
     routeOwner.cancel()
     const active = sessionStore.activeId.value
     if (active)

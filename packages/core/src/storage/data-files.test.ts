@@ -1,6 +1,8 @@
 // REL-03 card test 1: every persistent file of the inventory carries a
 // version — written by the stores themselves on a new home, and stamped by
-// migration 0-1 on a home an older Emperor left behind.
+// migration 0-1 on a home an older Emperor left behind. FIX-08 (PL-10): the
+// user's own mcp_config.json and hooks.json are not in the inventory and
+// never carry an Emperor version.
 import {
   existsSync,
   mkdirSync,
@@ -21,7 +23,7 @@ import {
   SITE_PERMISSION_KINDS,
   SitePermissionStore,
 } from '../harness/computer-use/site-permissions'
-import { DATA_FILES, inspectDataFiles } from './data-files'
+import { DATA_FILES, USER_OWNED_FILES, inspectDataFiles } from './data-files'
 
 const VIEW = { sessionId: null }
 const apis: CoreApi[] = []
@@ -32,6 +34,12 @@ afterEach(async () => {
 /** The inventory files Core writes (vault and browser files are main's). */
 const CORE_FILES = DATA_FILES.filter((file) => file.owner === 'core')
 
+function byPathOf(home: string) {
+  return Object.fromEntries(
+    inspectDataFiles(home).map((state) => [state.path, state]),
+  )
+}
+
 describe('the data file inventory', () => {
   it('names every file of the card, each with its version key', () => {
     expect(DATA_FILES.map((file) => file.path)).toEqual(
@@ -39,8 +47,6 @@ describe('the data file inventory', () => {
         'installation.json',
         'settings.json',
         'model_config.json',
-        'mcp_config.json',
-        'hooks.json',
         'scheduler/jobs.json',
         'computer-use/vault.json',
         'sessions/index.json',
@@ -54,6 +60,13 @@ describe('the data file inventory', () => {
         'delegations/consent.json',
       ]),
     )
+    // The user's own files: Emperor neither versions nor migrates them.
+    expect([...USER_OWNED_FILES].sort()).toEqual([
+      'hooks.json',
+      'mcp_config.json',
+    ])
+    for (const path of USER_OWNED_FILES)
+      expect(DATA_FILES.map((file) => file.path)).not.toContain(path)
     for (const file of DATA_FILES) {
       expect(['version', 'schemaVersion']).toContain(file.key)
       expect(file.supported).toBeGreaterThanOrEqual(1)
@@ -135,6 +148,16 @@ describe('the data file inventory', () => {
       } as never,
     ])
 
+    // The user's files are saved as the user wrote them, without a version.
+    expect(
+      JSON.parse(readFileSync(join(stateRoot, 'mcp_config.json'), 'utf8')),
+    ).not.toHaveProperty('version')
+    expect(
+      JSON.parse(readFileSync(join(stateRoot, 'hooks.json'), 'utf8')),
+    ).toEqual({
+      hooks: { Stop: [{ hooks: [{ type: 'command', command: 'true' }] }] },
+    })
+
     const states = inspectDataFiles(stateRoot)
     for (const file of CORE_FILES) {
       const path = join(stateRoot, file.path)
@@ -163,18 +186,20 @@ describe('the data file inventory', () => {
         .filter((state) => state.state === 'unversioned')
         .map((state) => state.path)
         .sort(),
-    ).toEqual(['hooks.json', 'mcp_config.json', 'settings.json'])
+    ).toEqual(['settings.json'])
 
     runDataMigrations({ home })
 
     const states = inspectDataFiles(home)
     expect(states.filter((state) => state.state !== 'ok')).toEqual([])
     expect(states.map((state) => state.path).sort()).toEqual([
-      'hooks.json',
-      'mcp_config.json',
       'scheduler/jobs.json',
       'settings.json',
     ])
+    expect(readFileSync(join(home, 'mcp_config.json'), 'utf8')).toBe(
+      '{"servers": {}}',
+    )
+    expect(readFileSync(join(home, 'hooks.json'), 'utf8')).toBe('{"Stop": []}')
   })
 
   it('tells a newer, an unreadable and an unversioned file apart', () => {
@@ -182,19 +207,22 @@ describe('the data file inventory', () => {
     writeFileSync(join(home, 'settings.json'), '{"version": 4}')
     writeFileSync(join(home, 'model_config.json'), '{"schemaVersion": 2,')
     writeFileSync(join(home, 'mcp_config.json'), '{"servers": {}}')
-    const byPath = Object.fromEntries(
-      inspectDataFiles(home).map((state) => [state.path, state]),
-    )
+    const byPath = byPathOf(home)
     expect(byPath['settings.json']).toMatchObject({
       state: 'newer',
       version: 4,
       supported: 1,
     })
     expect(byPath['model_config.json']).toMatchObject({ state: 'unreadable' })
-    expect(byPath['mcp_config.json']).toMatchObject({
+    mkdirSync(join(home, 'scheduler'))
+    writeFileSync(join(home, 'scheduler', 'jobs.json'), '{"jobs": []}')
+    expect(byPathOf(home)['scheduler/jobs.json']).toMatchObject({
       state: 'unversioned',
       version: null,
     })
-    expect(byPath['hooks.json']).toBeUndefined()
+    // The user's own files are never reported, whatever they say.
+    writeFileSync(join(home, 'hooks.json'), '{"version": 7, "hooks": {}}')
+    expect(byPathOf(home)['mcp_config.json']).toBeUndefined()
+    expect(byPathOf(home)['hooks.json']).toBeUndefined()
   })
 })

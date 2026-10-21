@@ -328,6 +328,71 @@ describe('EnvironmentProbe', () => {
     expect(runner.requests.length).toBeGreaterThan(projectCalls)
   })
 
+  // FIX-08: the execution environment (managed bin on PATH, no Skills) and
+  // the Git / gh runtime check (process PATH, every Skill) asked one after
+  // the other for every Git command; a one-entry cache made each of them
+  // probe the whole catalog again (about 400 `--version` runs per 审查
+  // refresh).
+  it('keeps a result per question: two callers taking turns probe once each', async () => {
+    const root = project()
+    const { probe, runner } = createProbe()
+    const skill: SkillEnvironmentRequirement = {
+      skillName: 'needs-gh',
+      skillStatus: 'active',
+      requirements: { bins: ['gh'], runtimes: [], env: [] },
+    }
+    const environment = () =>
+      probe.getStatus({
+        projectRoot: root,
+        envOverride: { PATH: '/managed/bin:/fake', HOME: '/Users/tester' },
+      })
+    const runtime = () =>
+      probe.getStatus({ projectRoot: root, skillRequirements: [skill] })
+
+    const a = await environment()
+    const b = await runtime()
+    expect(a.cacheKey).not.toBe(b.cacheKey)
+    const probed = runner.requests.length
+    for (let turn = 0; turn < 5; turn += 1) {
+      expect((await environment()).cacheKey).toBe(a.cacheKey)
+      expect((await runtime()).cacheKey).toBe(b.cacheKey)
+    }
+    expect(runner.requests).toHaveLength(probed)
+
+    // invalidate() still forgets every answer.
+    probe.invalidate()
+    await environment()
+    expect(runner.requests.length).toBeGreaterThan(probed)
+  })
+
+  it('runs one probe for callers asking the same question at once', async () => {
+    const root = project()
+    const { probe, runner } = createProbe()
+    await probe.getStatus({ projectRoot: project() })
+    const perProbe = runner.requests.length
+    runner.requests.length = 0
+
+    const answers = await Promise.all(
+      [1, 2, 3, 4].map(() => probe.getStatus({ projectRoot: root })),
+    )
+    expect(new Set(answers.map((answer) => answer.cacheKey)).size).toBe(1)
+    expect(runner.requests).toHaveLength(perProbe)
+    // Each caller gets its own copy.
+    answers[0]!.tools.length = 0
+    expect(answers[1]!.tools.length).toBeGreaterThan(0)
+  })
+
+  it('remembers a bounded number of answers', async () => {
+    const { probe, runner } = createProbe()
+    const first = project()
+    await probe.getStatus({ projectRoot: first })
+    for (let index = 0; index < 40; index += 1)
+      await probe.getStatus({ projectRoot: project() })
+    const before = runner.requests.length
+    await probe.getStatus({ projectRoot: first })
+    expect(runner.requests.length).toBeGreaterThan(before)
+  })
+
   it('invalidates naturally when the effective process PATH changes', async () => {
     const root = project()
     const runner = new FakeRunner()

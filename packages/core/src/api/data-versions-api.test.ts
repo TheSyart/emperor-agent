@@ -161,8 +161,6 @@ describe('the other stores and a file from a newer Emperor', () => {
     apis.splice(0)
 
     bump(home, 'model_config.json', 'schemaVersion', 3)
-    bump(home, 'mcp_config.json', 'version', 2)
-    bump(home, 'hooks.json', 'version', 2)
     bump(home, 'scheduler/jobs.json', 'version', 2)
     bump(home, 'plugins/installed_plugins.json', 'schemaVersion', 2)
     bump(home, 'delegations/consent.json', 'schemaVersion', 2)
@@ -178,8 +176,6 @@ describe('the other stores and a file from a newer Emperor', () => {
     )
     const files = [
       'model_config.json',
-      'mcp_config.json',
-      'hooks.json',
       'scheduler/jobs.json',
       'plugins/installed_plugins.json',
       'delegations/consent.json',
@@ -215,12 +211,6 @@ describe('the other stores and a file from a newer Emperor', () => {
         VIEW,
       ),
     ).rejects.toMatchObject({ code: 'data_file_newer' })
-    await expect(
-      api.mcp.saveConfig({ servers: {} }, VIEW),
-    ).rejects.toMatchObject({ code: 'data_file_newer' })
-    await expect(
-      api.hooks.saveConfig({ hooks: {} }, VIEW),
-    ).rejects.toMatchObject({ code: 'data_file_newer' })
     expect(() =>
       api.scheduler.createJob(
         {
@@ -252,6 +242,43 @@ describe('the other stores and a file from a newer Emperor', () => {
         .map((file) => file.path)
         .sort(),
     ).toEqual([...files].sort())
+  })
+})
+
+// FIX-08 (PL-10): mcp_config.json and hooks.json are the user's own files.
+// Emperor never writes a version into them and reads none out of them: a
+// `version` key there is the user's, and never makes the file read-only.
+describe("the user's mcp_config.json and hooks.json", () => {
+  it("carry no Emperor version and stay the user's to save", async () => {
+    const root = tmp('emperor-fix08-user-files-')
+    const home = join(root, 'home')
+    const first = await open(home)
+    await first.mcp.saveConfig(
+      { servers: { fs: { command: 'npx', enabled: false } } },
+      VIEW,
+    )
+    await first.hooks.saveConfig('{"hooks":{}}', VIEW)
+    expect(json(join(home, 'mcp_config.json'))).not.toHaveProperty('version')
+    expect(readFileSync(join(home, 'hooks.json'), 'utf8')).toBe(
+      '{"hooks":{}}\n',
+    )
+    await first.close()
+    apis.splice(0)
+
+    // Whatever `version` the user wrote there means nothing to Emperor.
+    bump(home, 'mcp_config.json', 'version', 2)
+    bump(home, 'hooks.json', 'version', 2)
+    const api = await open(home)
+    await api.mcp.saveConfig({ servers: {} }, VIEW)
+    await api.hooks.saveConfig('{"hooks":{}}', VIEW)
+    expect(readFileSync(join(home, 'hooks.json'), 'utf8')).toBe(
+      '{"hooks":{}}\n',
+    )
+    const report = await api.storage.versions()
+    expect(report.files.map((file) => file.path)).not.toContain(
+      'mcp_config.json',
+    )
+    expect(report.files.map((file) => file.path)).not.toContain('hooks.json')
   })
 })
 

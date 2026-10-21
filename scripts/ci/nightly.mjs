@@ -7,7 +7,10 @@
 //   node scripts/ci/nightly.mjs --skip visual
 //
 // Every step runs even when an earlier one failed; the exit code is 1 when
-// any failed. <report>/summary.json and report.md list each step (status,
+// any failed. Only a step with a `retry` command runs again once when it
+// fails (visual:perf, the wall-clock frame budgets: FIX-08); the summary
+// marks it `retried` and report.md says "passed on retry", so a flaky
+// timing stays visible without blocking a release. Nothing else retries. <report>/summary.json and report.md list each step (status,
 // exit code, time, the end of its log); logs/<id>.log holds the full output.
 // scripts/ci/open-failure-issue.mjs turns a failed summary into an issue.
 // Steps that call a real model or real external executors are listed as
@@ -57,6 +60,16 @@ function desktopScripts() {
 /** The nightly's steps. `hook` names a desktop npm script run once it exists. */
 export function nightlyPlan() {
   const scripts = desktopScripts()
+  const playwright = [
+    'npx',
+    'playwright',
+    'test',
+    '-c',
+    process.env.EMPEROR_NIGHTLY_PLAYWRIGHT_CONFIG || 'playwright.config.ts',
+  ]
+  // The frame-rate and frame-time budgets (@perf) measure wall-clock time:
+  // they run alone on one worker after the rest of the visual suite.
+  const perf = [...playwright, '--grep', '@perf', '--workers=1']
   const baselines = scripts['visual:baselines']
     ? { command: ['npm', 'run', 'visual:baselines'] }
     : {
@@ -74,15 +87,19 @@ export function nightlyPlan() {
       title: 'Visual suite (Playwright, renderer with the visual bridge)',
       // A local run beside other checkouts can point at its own config
       // (another renderer port) with EMPEROR_NIGHTLY_PLAYWRIGHT_CONFIG.
-      command: [
-        'npx',
-        'playwright',
-        'test',
-        '-c',
-        process.env.EMPEROR_NIGHTLY_PLAYWRIGHT_CONFIG || 'playwright.config.ts',
-      ],
+      command: [...playwright, '--grep-invert', '@perf'],
       cwd: 'desktop',
       timeoutMs: 60 * MINUTE,
+    },
+    {
+      id: 'visual:perf',
+      title:
+        'Visual timing budgets (@perf: streaming fps and frame time), one worker, one retry',
+      command: perf,
+      // Only what failed, once, still alone (Playwright's .last-run.json).
+      retry: [...perf, '--last-failed'],
+      cwd: 'desktop',
+      timeoutMs: 30 * MINUTE,
     },
     {
       id: 'visual-baselines',
@@ -178,15 +195,35 @@ function tail(text, max = 4000) {
   return text.length <= max ? text : text.slice(text.length - max)
 }
 
-function runStep(step, logPath) {
+/**
+ * Runs the step; one that fails and names a `retry` command runs that once
+ * (its output appended to the same log).
+ */
+async function runStep(step, logPath) {
+  const first = await runCommand(step, step.command, logPath, false)
+  if (first.exitCode === 0 || !step.retry) return first
+  const retry = await runCommand(step, step.retry, logPath, true)
+  return {
+    ...retry,
+    ms: first.ms + retry.ms,
+    retried: true,
+    firstExitCode: first.exitCode,
+  }
+}
+
+function runCommand(step, commandLine, logPath, append) {
   return new Promise((done) => {
     const started = Date.now()
-    const log = createWriteStream(logPath)
+    const log = createWriteStream(logPath, { flags: append ? 'a' : 'w' })
+    if (append)
+      log.write(
+        `\nnightly: retrying once (only this step retries): ${commandLine.join(' ')}\n`,
+      )
     const env = { ...process.env, FORCE_COLOR: '0' }
     // Electron must run as Electron (desktop-electron-e2e: the inherited
     // ELECTRON_RUN_AS_NODE of a Claude Code or Electron shell breaks it).
     delete env.ELECTRON_RUN_AS_NODE
-    const [command, ...args] = step.command
+    const [command, ...args] = commandLine
     const child = spawn(command, args, {
       cwd: step.cwd ? join(repoRoot, step.cwd) : repoRoot,
       env,
@@ -237,11 +274,14 @@ function markdown(summary) {
     const seconds =
       step.ms === undefined ? '—' : `${Math.round(step.ms / 1000)} s`
     const exit = step.exitCode === undefined ? '—' : String(step.exitCode)
+    const log = 'logs/' + step.id.replace(/[^\w.-]/g, '_') + '.log'
     const note =
       step.reason ??
       (step.status === 'failed'
-        ? 'see logs/' + step.id.replace(/[^\w.-]/g, '_') + '.log'
-        : '')
+        ? `${step.retried ? 'failed again on retry; ' : ''}see ${log}`
+        : step.retried
+          ? `passed on retry (first exit ${step.firstExitCode}); see ${log}`
+          : '')
     return `| ${step.id} | ${step.status} | ${exit} | ${note} | ${seconds} |`
   })
   return [
@@ -330,6 +370,9 @@ async function main(argv) {
       status: result.exitCode === 0 ? 'passed' : 'failed',
       exitCode: result.exitCode,
       ms: result.ms,
+      ...(result.retried
+        ? { retried: true, firstExitCode: result.firstExitCode }
+        : {}),
       ...(result.exitCode === 0 ? {} : { logTail: result.logTail }),
     })
     writeFileSync(

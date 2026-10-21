@@ -44,8 +44,8 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
   model_config.json        # schemaVersion 2；多个模型、单 active；apiKey 以本地密钥加密（el1:…）；单条坏条目只跳过该条（MOD-03）
   model_config.json.pre-seal-<ts>  # 第一次加密前的原文件（含明文 Key，0600，用户可删）
   model_tests.json         # 每条模型最近一次连接测试（设置 › 模型 的连接状态；运行状态，不是配置）
-  mcp_config.json          # version 1；headers / env 中 key、token、secret 等值以本地密钥加密
-  hooks.json               # Claude Code hooks.json 格式的 command hooks（可选；保存时第一个键写 "version": 1）
+  mcp_config.json          # 用户自己的文件，不带 Emperor 的版本号；headers / env 中 key、token、secret 等值以本地密钥加密
+  hooks.json               # 用户自己的文件：Claude Code hooks.json 格式的 command hooks（可选；按用户写的原文保存）
   onboarding.json
   AGENTS.md                # 可选的全局工作区说明，用户手写
   workspace/               # Chat 会话的工作目录
@@ -260,12 +260,12 @@ Release 在创建 Core 前由 `bootstrapEmperorHome()` 执行默认根迁移：
 
 ## 数据版本与只读降级（REL-03）
 
-每个持久文件写明自己的版本。版本键沿用各文件的历史：0.2 之前没有版本的文件写 `version`（由迁移 0-1 或下一次保存补上），已有 `schemaVersion` 的继续用它（旧版本已经在检查这个键），会话索引是数组，每条记录带 `version`。清单在 `storage/data-files.ts`（`DATA_FILES`）：
+Emperor 自己的每个持久文件写明自己的版本。版本键沿用各文件的历史：0.2 之前没有版本的文件写 `version`（由迁移 0-1 或下一次保存补上），已有 `schemaVersion` 的继续用它（旧版本已经在检查这个键），会话索引是数组，每条记录带 `version`。清单在 `storage/data-files.ts`（`DATA_FILES`）：
 
 | 文件                                                                                | 版本键          | 当前版本 | 写入方 |
 | ----------------------------------------------------------------------------------- | --------------- | -------- | ------ |
 | `installation.json`                                                                 | `schemaVersion` | 1        | Core   |
-| `settings.json`、`mcp_config.json`、`hooks.json`、`scheduler/jobs.json`             | `version`       | 1        | Core   |
+| `settings.json`、`scheduler/jobs.json`                                              | `version`       | 1        | Core   |
 | `model_config.json`                                                                 | `schemaVersion` | 2        | Core   |
 | `sessions/index.json`                                                               | 每条 `version`  | 1        | Core   |
 | `plugins/installed_plugins.json`、`plugins/known_marketplaces.json`                 | `schemaVersion` | 1        | Core   |
@@ -274,11 +274,13 @@ Release 在创建 Core 前由 `bootstrapEmperorHome()` 执行默认根迁移：
 | `computer-use/vault.json`                                                           | `version`       | 3        | main   |
 | `browser/user-downloads.json`、`browser/downloads/.index.json`                      | `version`       | 1        | main   |
 
+用户自己的 `mcp_config.json` 与 `hooks.json`（`USER_OWNED_FILES`）不在清单里：Emperor 只在用户保存时按用户写的内容写它们，不写入版本号，也不读取其中的 `version`（那是用户自己的键，不会让文件变成只读），任何迁移都不碰它们（插件契约 PL-10：插件的 MCP server 与 Hook 不写入这两个文件；FIX-08）。
+
 持久化内核（`store/persistence`）的 snapshot codec 声明 `versionKey`。读到的版本高于本构建写入的版本时：
 
 - 按本构建的版本尽量解码（解不出来时用默认值），回执是 `newer_version_read_only`；**不隔离**（不改名为 `*.corrupt-*`），也不重写；
 - 之后对这个文件的任何写入都抛 `DataFileNewerError`（code `data_file_newer`，消息「这个文件来自更新版本的 Emperor，当前版本只读：<文件名>」，经 IPC 原样到达界面）。写前检查按文件的 size + mtime 缓存，同一文件重复写入时只 `stat` 一次；
-- 不走 snapshot 的写入方（插件服务写 `settings.json`、Hooks 服务、子智能体授权、main 的两个下载记录）各自先检查版本；会话索引更新版时只在内存中维护（目录本来就从各会话的 `meta.jsonl` 重建）；定时任务文件更新版时定时任务服务启动失败并写明原因，不会运行任务；委派授权更新版时不记住「以后都允许」；`delegations/config.json` 版本未知时本来就拒绝读写。
+- 不走 snapshot 的写入方（插件服务写 `settings.json`、子智能体授权、main 的两个下载记录）各自先检查版本；会话索引更新版时只在内存中维护（目录本来就从各会话的 `meta.jsonl` 重建）；定时任务文件更新版时定时任务服务启动失败并写明原因，不会运行任务；委派授权更新版时不记住「以后都允许」；`delegations/config.json` 版本未知时本来就拒绝读写。
 
 `installation.json` 记录 `lastRunVersion`（本次运行的版本）与 `previousRunVersion`（上一次）；只有正式版本号（`x.y.z[-pre]`，不含 `0.0.0-*`、`development`）才记录。本次版本低于上一次时为降级：CoreApi `storage.versions` 返回 `downgradedFrom`，界面启动时显示提示。`installation.json` 的 `schemaVersion` 更高时不重写它。`storage.versions` 同时返回数据版本、清单中每个存在的文件的状态（`ok` / `newer` / `unversioned` / `unreadable`）和最近一次恢复。
 
@@ -290,7 +292,7 @@ Release 在创建 Core 前由 `bootstrapEmperorHome()` 执行默认根迁移：
 2. 运行，成功后 `dataVersion` 前进，`migrations/log.jsonl` 写一行 `status: "applied"`；
 3. 失败时把复制的文件放回、删除这一步新建的文件，日志写 `rolled_back`，数据版本不变，下次启动再试。
 
-步骤必须可以重复执行：旧版本运行后会去掉 `dataVersion`，再次升级时步骤会再跑一遍。迁移 `0-1` 给旧版本留下的 `settings.json`、`mcp_config.json`、`hooks.json` 补上 `"version": 1`。版本更高的数据版本不做任何迁移。
+步骤必须可以重复执行：旧版本运行后会去掉 `dataVersion`，再次升级时步骤会再跑一遍。迁移 `0-1` 给旧版本留下的 `settings.json` 补上 `"version": 1`；用户的 `mcp_config.json`、`hooks.json` 不列入任何步骤，迁移前后逐字节不变。版本更高的数据版本不做任何迁移。
 
 ## 备份与恢复（REL-03）
 
