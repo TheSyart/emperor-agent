@@ -974,7 +974,16 @@ export class CoreApi {
       workspaces: externalWorkspaces,
       results: delegationResults,
       mutations: this.workspaceMutations,
-      runtime: (profile, id) => executorRuntime.prepare(profile, id),
+      // Claude Code's own Console sign-in is API billing too (AGT-07): the
+      // last claude auth status says which sign-in it is (AGT-12).
+      runtime: async (profile, id) => {
+        const prepared = await executorRuntime.prepare(profile, id)
+        return profile.backend === 'claude-code' &&
+          prepared.billing === 'subscription' &&
+          this.executorFacts.probe(profile)?.auth?.method === 'api_key'
+          ? { ...prepared, billing: 'api' as const }
+          : prepared
+      },
       // AGT-07: API-billed runs priced from the bundled catalog, and their
       // settled cost counted in the root task's budget.
       estimateUsd: estimateExecutorUsd,
