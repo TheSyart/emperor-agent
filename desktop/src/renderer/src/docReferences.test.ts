@@ -136,7 +136,7 @@ describe('Core operations in the docs (test 3)', () => {
     const doc = [
       '`agents.send({ sessionId, text })` 给子智能体发消息。',
       '`executors.list/probe/models/configure`',
-      '配置在 `config.json` 与 `hooks.json`，旧会话在 `sessions.legacy-<时间戳>/`。',
+      '配置在 `config.json` 与 `hooks.json`，旧会话在 `sessions.legacy-<时间戳>/`，发布在 `github.com`。',
       '`delegations.*` 都要求根会话。',
       '旧的 `skills.package` 已从注册表移除。',
     ].join('\n')

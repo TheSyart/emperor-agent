@@ -153,6 +153,7 @@ export function diagnosticRows(
       rows: [
         desktopPetRow(diagnostics.desktopPet),
         computerUseRow(diagnostics.computerUse),
+        ...updateRows(diagnostics.updates),
       ],
     },
     {
@@ -1453,6 +1454,70 @@ function computerUseRow(
     ]),
     tone: drivers.length === 0 ? 'warn' : 'ok',
   }
+}
+
+/**
+ * 检查更新 (REL-02): the switch, a test feed in effect (always a warning:
+ * it is for testing only), and the running Electron against the newest one
+ * an Emperor release records — more than 2 majors behind is a reminder.
+ * The reference comes with the update check; nothing else goes online.
+ */
+function updateRows(
+  updates: DiagnosticsPayload['updates'] | undefined,
+): DiagnosticRow[] {
+  if (!updates) return []
+  const rows: DiagnosticRow[] = []
+  const check: DiagnosticRow = !updates.automatic
+    ? {
+        id: 'update-check',
+        label: '检查更新',
+        value:
+          updates.disabledReason === 'development' ? '开发版不检查' : '不检查',
+        detail: '',
+        tone: 'muted',
+      }
+    : !updates.enabled
+      ? {
+          id: 'update-check',
+          label: '检查更新',
+          value: '已关闭',
+          detail: '在 设置 › 常规 › 更新 打开',
+          tone: 'muted',
+        }
+      : {
+          id: 'update-check',
+          label: '检查更新',
+          value: '已开启',
+          detail: updates.lastError
+            ? `上次检查没有成功：${updates.lastError.message}，稍后自动重试`
+            : updates.available
+              ? `Emperor ${updates.available} 可用`
+              : '',
+          tone: updates.lastError ? 'muted' : 'ok',
+        }
+  rows.push(check)
+  if (updates.feedOverride)
+    rows.push({
+      id: 'update-feed',
+      label: '测试更新源',
+      value: '已生效',
+      detail: `${updates.feedOverride}：由环境变量 EMPEROR_UPDATE_FEED_URL 指定，只用于测试；从这里下载的安装包不核验 GitHub 来源证明`,
+      tone: 'warn',
+    })
+  const electron = updates.electron
+  if (electron?.current)
+    rows.push({
+      id: 'electron',
+      label: 'Electron 版本',
+      value: electron.current,
+      detail: electron.outdated
+        ? `比最新发布的 Emperor 内置的 Electron ${electron.latest} 落后 ${electron.behind} 个主版本，内置浏览器可能缺少安全修复；请更新 Emperor`
+        : electron.latest
+          ? `最新发布的 Emperor 内置 ${electron.latest}`
+          : '检查更新后才能和最新发布的 Emperor 比较',
+      tone: electron.outdated ? 'warn' : 'ok',
+    })
+  return rows
 }
 
 function dependencyRows(

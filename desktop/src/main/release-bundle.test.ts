@@ -95,6 +95,15 @@ describe('Stable release bundle assembler (REL-05)', () => {
     expect(notes.split('\n\n')[0]).toContain('未签名')
     expect(notes).toContain(STABLE_VERSION)
     expect(notes).not.toContain('{{')
+    // REL-02: the notes record the bundled Electron for the update check's
+    // reminder (desktop/package-lock.json), as their one HTML comment.
+    const lock = JSON.parse(
+      readFileSync(join(repoRoot, 'desktop', 'package-lock.json'), 'utf8'),
+    ) as { packages: Record<string, { version?: string }> }
+    const electron = lock.packages['node_modules/electron']!.version
+    expect(notes.trim().split('\n').at(-1)).toBe(
+      `<!-- emperor-release electron=${electron} -->`,
+    )
   })
 
   it('4. lists every artifact with its own SHA-256 in ARTIFACT-SHA256SUMS.txt', () => {

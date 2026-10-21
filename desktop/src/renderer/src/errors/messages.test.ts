@@ -34,7 +34,11 @@ const CODE_UNIONS: Record<string, string> = {
   ModelProviderErrorKind: 'model_provider_',
 }
 /** Constructors whose first argument is the code. */
-const CODE_FIRST = new Set(['WorkspaceOperationError', 'GoalServiceError'])
+const CODE_FIRST = new Set([
+  'WorkspaceOperationError',
+  'GoalServiceError',
+  'UpdateError',
+])
 
 function publicCoreErrorCodes(): Set<string> {
   const files = sources(CORE).map((path) =>

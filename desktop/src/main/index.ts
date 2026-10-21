@@ -83,6 +83,8 @@ import { defaultSessionPermission } from './renderer-permissions'
 import { hardenSession } from './computer-use/session-hardening'
 import { registerOpenPathIpc } from './open-path-ipc'
 import { registerAppVersionIpc } from './app-version-ipc'
+import { createQuarantine } from './quarantine'
+import { updateHostOptions } from './update-host'
 import { registerRemoteImageIpc } from './remote-image-ipc'
 import {
   createScreenshotCapture,
@@ -1704,6 +1706,22 @@ async function startup(): Promise<void> {
         terminalEventSink: terminalEventBridge.sink(),
         webFetchClient,
         logDirectory: logLocation.dir,
+        // REL-02 检查更新: Core checks and downloads; main gives the net,
+        // Finder, Downloads and whether checks may run here.
+        updates: updateHostOptions({
+          env: process.env,
+          isPackaged: app.isPackaged,
+          packagedSmoke: Boolean(packagedSmoke),
+          arch: process.arch,
+          electronVersion: process.versions.electron ?? '',
+          downloadsDir: app.getPath('downloads'),
+          tempDir: app.getPath('temp'),
+          reveal: (target) => shell.showItemInFolder(target),
+          markQuarantine: createQuarantine(),
+          request: (options) =>
+            net.request(options) as unknown as ElectronRequestLike,
+          log: (line) => console.info(line),
+        }),
         ...(coreSecretSealer ? { secretSealer: coreSecretSealer } : {}),
         // Dev-build e2e only: external executors look for sign-ins in this
         // folder instead of ~/.claude and never run the login shell (AGT-02).

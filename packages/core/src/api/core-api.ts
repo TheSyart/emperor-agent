@@ -108,6 +108,11 @@ import type {
   WebToolPreferences,
 } from '../config/local-config'
 import { CoreDesktopPetService } from './services/desktop-pet-service'
+import { loadLocalConfig, saveLocalConfig } from '../config/local-config'
+import { CoreUpdateService } from '../updates/service'
+import { createGhAttestation } from '../updates/attestation'
+import type { UpdateHostOptions, UpdateStatus } from '../updates/types'
+import { ghProcessEnvironment } from '../workspace/git-pull-requests'
 import { CoreEnvironmentService } from './services/environment-service'
 import { CoreHooksService } from './services/hooks-service'
 import { CoreMemoryService } from './services/memory-service'
@@ -276,6 +281,11 @@ export interface CoreApiCreateOptions extends HarnessHostOptions {
   /** Where the host writes its logs (REL-01); diagnostics show it. */
   logDirectory?: string | null
   /**
+   * 检查更新 (REL-02): the desktop host's network, Finder, Downloads folder
+   * and whether checks may run. Omitted: Core never checks.
+   */
+  updates?: UpdateHostOptions | null
+  /**
    * Test hook: the home, environment and login shell external executors
    * read sign-ins from (defaults: the user's own).
    */
@@ -415,6 +425,8 @@ export class CoreApi {
   private retentionAtStartup: Promise<void> | null = null
   /** The release running (REL-03 `storage.versions`). */
   private readonly appVersion: string
+  /** 检查更新 and the update download (REL-02). */
+  readonly updateService: CoreUpdateService
   readonly workspaceApplicationService: CoreWorkspaceApplicationService
   readonly commandApplicationService: CoreCommandApplicationService
   readonly sessionTransitionService: SessionTransitionService
@@ -672,6 +684,35 @@ export class CoreApi {
       projectRootFor: (sessionId) => host.projectRootForSession(sessionId),
     })
     this.appVersion = opts.appVersion ?? '0.0.0-dev'
+    // 检查更新 (REL-02): the switch is settings.json `updates.check`; gh
+    // checks the download's attestation when it can (2 minutes at most).
+    const runGhAttestation = createGhCommandRunner(
+      new NodeEnvironmentProcessRunner(),
+      { timeoutMs: 120_000, maxOutputBytes: 1024 * 1024 },
+    )
+    this.updateService = new CoreUpdateService({
+      appVersion: this.appVersion,
+      host: opts.updates ?? null,
+      settings: {
+        load: async () =>
+          (await loadLocalConfig(this.paths.stateRoot)).updates.check,
+        save: async (enabled) => {
+          const config = await loadLocalConfig(this.paths.stateRoot)
+          await saveLocalConfig(this.paths.stateRoot, {
+            ...config,
+            updates: { check: enabled },
+          })
+        },
+      },
+      emit: (event) => host.emitHost(event),
+      attestation: createGhAttestation({
+        cwd: this.paths.stateRoot,
+        resolveRuntime: () => this.resolveGhRuntime(this.paths.stateRoot),
+        run: runGhAttestation,
+        environment: ghProcessEnvironment,
+      }),
+      log: (message, detail) => logger.info(message, detail),
+    })
     this.environmentService = new CoreEnvironmentService({
       stateRoot: this.paths.stateRoot,
       catalog: kept.environmentCatalog,
@@ -1443,6 +1484,7 @@ export class CoreApi {
       desktopPetPayload: () => this.desktopPet.get(),
       computerUse: async () =>
         computerUseDiagnostics(await this.computerUse.status()),
+      updates: () => this.updateService.diagnostics(),
       environmentSummary: () => this.environmentService.diagnosticsSummary(),
       externalToolConfig: (view) => {
         const projectPath = this.viewProjectRoot(view)
@@ -1497,6 +1539,7 @@ export class CoreApi {
           }),
         )
       api.startRetention()
+      await api.updateService.start()
       return api
     } catch (error) {
       if (api) await api.close().catch(() => {})
@@ -1549,6 +1592,7 @@ export class CoreApi {
           this.retentionAtStartup,
           new Promise<void>((done) => setTimeout(done, 2000).unref()),
         ])
+      this.updateService.close()
       this.flushAll()
       await this.executors.close()
       this.terminalService.closeAll()
@@ -3537,6 +3581,21 @@ export class CoreApi {
       const { dataVersionsReport } = await import('../storage/data-files')
       return dataVersionsReport(this.paths.stateRoot, this.appVersion)
     },
+  }
+
+  /**
+   * 设置 › 常规 › 更新 (REL-02): the switch, 立即检查, and downloading and
+   * verifying a newer release's DMG. Nothing is installed.
+   */
+  readonly updates = {
+    status: (): UpdateStatus => this.updateService.status(),
+    setEnabled: (enabled: boolean): Promise<UpdateStatus> =>
+      this.updateService.setEnabled(enabled),
+    check: (): Promise<UpdateStatus> => this.updateService.check(),
+    download: (): Promise<UpdateStatus> => this.updateService.download(),
+    cancelDownload: (): Promise<UpdateStatus> =>
+      this.updateService.cancelDownload(),
+    reveal: (): Promise<UpdateStatus> => this.updateService.reveal(),
   }
 
   readonly tools = {

@@ -1090,3 +1090,117 @@ describe('the log folder in 存储路径 (REL-01)', () => {
     ).toBe(false)
   })
 })
+
+describe('update rows (REL-02)', () => {
+  const updates = (patch: Record<string, unknown> = {}) => ({
+    enabled: true,
+    automatic: true,
+    disabledReason: null,
+    channel: 'stable',
+    lastCheckedAt: null,
+    lastError: null,
+    available: null,
+    electron: {
+      current: '42.2.0',
+      latest: null,
+      behind: null,
+      outdated: false,
+    },
+    feedOverride: null,
+    ...patch,
+  })
+  const desktop = (value: Record<string, unknown> | null) =>
+    diagnosticSections({ updates: value } as never).find(
+      (section) => section.id === 'desktop',
+    )!
+  const row = (value: Record<string, unknown> | null, id: string) =>
+    desktop(value).rows.find((item) => item.id === id)
+
+  it('reminds when Electron is more than 2 majors behind the newest release', () => {
+    const outdated = updates({
+      electron: {
+        current: '42.2.0',
+        latest: '45.0.1',
+        behind: 3,
+        outdated: true,
+      },
+    })
+    expect(row(outdated, 'electron')).toMatchObject({
+      label: 'Electron 版本',
+      value: '42.2.0',
+      tone: 'warn',
+      detail: expect.stringContaining('落后 3 个主版本'),
+    })
+    const summary = diagnosticSummary(
+      diagnosticSections({ updates: outdated } as never),
+      [],
+    )
+    expect(summary.issues.map((issue) => issue.id)).toContain('electron')
+    expect(
+      row(
+        updates({
+          electron: {
+            current: '42.2.0',
+            latest: '44.0.0',
+            behind: 2,
+            outdated: false,
+          },
+        }),
+        'electron',
+      ),
+    ).toMatchObject({ tone: 'ok', detail: '最新发布的 Emperor 内置 44.0.0' })
+    expect(row(updates(), 'electron')).toMatchObject({
+      tone: 'ok',
+      detail: '检查更新后才能和最新发布的 Emperor 比较',
+    })
+  })
+
+  it('shows the switch and a test feed in effect', () => {
+    expect(row(updates({ enabled: false }), 'update-check')).toMatchObject({
+      label: '检查更新',
+      value: '已关闭',
+      tone: 'muted',
+    })
+    expect(
+      row(
+        updates({ automatic: false, disabledReason: 'development' }),
+        'update-check',
+      ),
+    ).toMatchObject({ value: '开发版不检查' })
+    expect(
+      row(
+        updates({
+          lastError: {
+            code: 'update_network_failed',
+            message: '连接 GitHub 失败：timeout',
+          },
+        }),
+        'update-check',
+      ),
+    ).toMatchObject({
+      value: '已开启',
+      tone: 'muted',
+      detail: expect.stringContaining('稍后自动重试'),
+    })
+    const feed = row(
+      updates({ feedOverride: 'http://127.0.0.1:8765/releases' }),
+      'update-feed',
+    )
+    expect(feed).toMatchObject({
+      label: '测试更新源',
+      value: '已生效',
+      tone: 'warn',
+    })
+    expect(feed?.detail).toContain('http://127.0.0.1:8765/releases')
+    expect(feed?.detail).toContain('EMPEROR_UPDATE_FEED_URL')
+    expect(row(updates(), 'update-feed')).toBeUndefined()
+  })
+
+  it('an older Core without the block shows nothing about updates', () => {
+    const section = desktop(null)
+    expect(section.rows.some((item) => item.id.startsWith('update'))).toBe(
+      false,
+    )
+    expect(section.rows.some((item) => item.id === 'electron')).toBe(false)
+  })
+})

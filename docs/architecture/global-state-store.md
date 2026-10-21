@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
-> 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/single-instance.ts`、`desktop/src/main/logging/log-location.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/user-downloads.ts`、`packages/core/src/workspace/turn-snapshots.ts`、`packages/core/src/workspace/delegation-workspaces.ts`、`packages/core/src/harness/delegation/`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store
+> 最后核验：2026-10-21（对照 `8f954763`）<br>
+> 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/single-instance.ts`、`desktop/src/main/logging/log-location.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/user-downloads.ts`、`packages/core/src/workspace/turn-snapshots.ts`、`packages/core/src/workspace/delegation-workspaces.ts`、`packages/core/src/harness/delegation/`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store、`packages/core/src/updates/service.ts`
 
 ## 两个根的区分
 
@@ -40,7 +40,7 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
 ```text
 ~/.emperor/
   installation.json        # layout/app/runtime revision、首次启动与迁移状态；lastRunVersion / previousRunVersion（降级提示）与 dataVersion（数据迁移）
-  settings.json            # 用户通用配置（version 1）
+  settings.json            # 用户通用配置（version 1）；updates.check 是「检查更新」开关（默认开）
   model_config.json        # schemaVersion 2；多个模型、单 active；apiKey 以本地密钥加密（el1:…）；单条坏条目只跳过该条（MOD-03）
   model_config.json.pre-seal-<ts>  # 第一次加密前的原文件（含明文 Key，0600，用户可删）
   model_tests.json         # 每条模型最近一次连接测试（「设置 › 模型」卡片的连接状态；运行状态，不是配置，没有版本号）
@@ -255,8 +255,9 @@ Agent 按你的要求修改项目文件时，write / edit 工具先在 Emperor H
 | `~/Library/Logs/Emperor Agent/`                                            | `main.log`、`core.log`（各 5 MB × 5 份轮转）与 `Crashpad/` 崩溃转储；设置 `EMPEROR_CONFIG_DIR` 时改在该目录的 `logs/` 下                                                                                                                 |
 | Emperor Home 同级的 `.<目录名>.emperor-writer.sqlite` 与 `.owner.json`     | 数据目录锁（上文「目录模型」）                                                                                                                                                                                                           |
 | 项目的 `.git`                                                              | 隐藏引用与对象（上文「项目源码目录」）                                                                                                                                                                                                   |
-| 系统临时目录                                                               | Skill 导入时的解压暂存、备份与诊断包的整理目录、截图暂存，完成后删除；Emperor Home 路径过长时的 Computer Use socket（`$TMPDIR/emperor-<uid>/`）                                                                                          |
+| 系统临时目录                                                               | Skill 导入时的解压暂存、备份与诊断包的整理目录、截图暂存，完成后删除；下载更新时的 `emperor-update-*`（DMG 在这里核对，无论成败都删除）；Emperor Home 路径过长时的 Computer Use socket（`$TMPDIR/emperor-<uid>/`）                       |
 | 你选择的位置                                                               | 「导出备份」的 `.emperor-backup.zip`、导出的诊断包和凭据备份；你自己在内置浏览器里的下载（默认系统下载文件夹）                                                                                                                           |
+| 「下载」文件夹                                                             | 用户点「下载」并通过校验的更新 DMG（`Emperor-Agent-<版本>-macos-<arch>.dmg`，同名时加 ` (1)`，带 `com.apple.quarantine`）；Emperor 不再管理它                                                                                            |
 
 启动锁记录持有者的进程号和心跳时间。如果上次启动被强杀或断电导致锁残留，下次启动发现持有进程已退出或心跳过期，会自动接管并记录警告；只有持有者仍在运行且心跳新鲜时，才会报 `installation_lock_busy`。
 

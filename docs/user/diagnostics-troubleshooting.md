@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：遇到启动、模型、会话、工具或打包问题的用户和开发者<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 最后核验：2026-10-21（对照 `8f954763`）<br>
 > 事实源：`packages/core/src/api/services/diagnostics-service.ts`、`desktop/src/main/logging/`、`desktop/src/main/diagnostics-bundle.ts`、`desktop/src/main/home-backup.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/migrations/`、`desktop/src/main/recovery.ts`、`packages/core/src/session-log/`、`packages/core/src/environment/tool-catalog.json`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/renderer/src/components/settings/DiagnosticsSection.vue` 与 `diagnostics/`、`desktop/src/renderer/src/components/pages/pulls/`、当前构建与运行脚本
 
 先进入「设置 › 高级 › 诊断」。页面顶部是一张概览卡：一句结论（一切正常时是「运行正常」，否则是「n 项需要关注」「n 项异常」加「其余都正常」），下面只列需要关注的项目（异常在前），点一项会展开它所在的分组并滚到那里。读取诊断或探测环境失败时，概览上方出现一张提醒卡写明原因。右上角「导出诊断包」生成一个 zip（见下文[日志与诊断包](#日志与诊断包)），「复制报告」把整页复制成纯文本，便于反馈问题；刷新会重新读取诊断并重新探测环境。
@@ -213,6 +213,16 @@ Emperor 自己的主要持久文件（设置、模型配置、定时任务、凭
 网页卡片先显示消息或工具已提供的信息；只有点详情后才联网。离线、超时、限流、网站拒绝或 GitHub 插件停用会显示原因，原链接保留，恢复后可手动重试。详情不使用浏览器登录 Cookie，浏览器里能看见的私密页面不一定可预览。预览图加载失败时仍可查看文字与地址。
 
 文件标为不存在时，检查完整路径和当前 Build 项目；外部文件只在 Finder 中显示，已删除附件无法恢复。「输出内容」和「来源」只覆盖已加载历史，继续加载较早消息后会补齐。电脑操作截图在来源中标为观察记录。
+
+## 更新与 Electron 版本
+
+「设置 › 高级 › 诊断 › 桌面」有三行与更新有关：
+
+- **检查更新**：已开启 / 已关闭 / 开发版不检查；上次检查没连上 GitHub 时写明原因并说明稍后自动重试（不算异常）。
+- **测试更新源**：只在设置了环境变量 `EMPEROR_UPDATE_FEED_URL` 时出现，标为需要关注，写明地址。正常使用时不应看到这一行；看到了就检查启动 Emperor 的环境（例如 `launchctl getenv EMPEROR_UPDATE_FEED_URL`），去掉它后重启。
+- **Electron 版本**：内置浏览器内核的版本，与最新发布内置的版本比较；落后 2 个以上主版本时标为需要关注，更新 Emperor 即可。
+
+下载更新失败时，「设置 › 常规」最上方写明原因：SHA-256 与 `SHA256SUMS.txt` 不符或 GitHub 来源证明核验失败时，下载的文件已经删除，可以「重新下载」；反复失败说明下载的内容被改动过，请到 [GitHub Releases](https://github.com/TheSyart/emperor-agent/releases) 手动下载并用 `shasum -a 256 -c SHA256SUMS.txt` 核对。完整说明见[更新](getting-started.md#6-更新)。
 
 ## GitHub CLI（gh）
 

@@ -21,6 +21,8 @@ import {
   type OptionalCapabilityPortfolioEntry,
 } from '../../capabilities/portfolio'
 
+import type { UpdateDiagnostics } from '../../updates/types'
+
 type Dict = Record<string, unknown>
 
 /** Event-store statistics (kept for payload compatibility; optional source). */
@@ -96,6 +98,8 @@ export interface CoreDiagnosticsServiceDeps {
   externalToolConfig?: (view: DiagnosticsView) => Dict
   /** Computer use summary (switch, drivers, targets); no grants or URLs. */
   computerUse?: () => Promise<Dict>
+  /** 检查更新 (REL-02): the switch, the test feed, Electron's age. */
+  updates?: () => UpdateDiagnostics
 }
 
 export interface CoreDiagnosticsPayload {
@@ -124,6 +128,7 @@ export interface CoreDiagnosticsPayload {
   optionalCapabilities: OptionalCapabilityPortfolioEntry[]
   externalToolConfig: Dict
   computerUse: Dict
+  updates: UpdateDiagnostics | null
 }
 
 export class CoreDiagnosticsService {
@@ -169,6 +174,7 @@ export class CoreDiagnosticsService {
       optionalCapabilities: optionalCapabilityPortfolio(),
       externalToolConfig: this.deps.externalToolConfig?.(view) ?? {},
       computerUse: await this.computerUsePayload(),
+      updates: this.deps.updates?.() ?? null,
     }
   }
 

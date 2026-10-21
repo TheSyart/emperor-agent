@@ -2209,6 +2209,17 @@ export const CORE_OPERATION_REGISTRY = {
     api.storage.clean(viewOf(ctx, 'storage.clean')),
   ),
   'storage.versions': operation(z.tuple([]), (api) => api.storage.versions()),
+  // 设置 › 常规 › 更新 (REL-02).
+  'updates.status': operation(z.tuple([]), (api) => api.updates.status()),
+  'updates.setEnabled': operation(z.tuple([z.boolean()]), (api, [enabled]) =>
+    api.updates.setEnabled(enabled),
+  ),
+  'updates.check': operation(z.tuple([]), (api) => api.updates.check()),
+  'updates.download': operation(z.tuple([]), (api) => api.updates.download()),
+  'updates.cancelDownload': operation(z.tuple([]), (api) =>
+    api.updates.cancelDownload(),
+  ),
+  'updates.reveal': operation(z.tuple([]), (api) => api.updates.reveal()),
   'tasks.budget': operation(z.tuple([]), (api) => api.tasks.budget()),
   'tasks.setBudget': operation(
     z.tuple([

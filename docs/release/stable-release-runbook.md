@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：发布维护者<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 最后核验：2026-10-21（对照 `8f954763`）<br>
 > 事实源：`.github/workflows/release.yml`、`desktop/electron-builder.release.cjs`、`desktop/scripts/after-pack.cjs`、`desktop/scripts/harden-package.cjs`、`desktop/scripts/verify-unsigned-app.cjs`、`scripts/build_desktop_release.sh`、`scripts/verify-macos-release.sh`、`scripts/assemble-release-bundle.mjs`、`scripts/release-contract.mjs`、`scripts/generate-release-sbom.sh`、`scripts/publish-release.sh`、`scripts/release-dry-run.mjs`、`scripts/ci/check-unsigned-release.mjs`、`docs/release/stable-release-notes.md`
 
 Stable 是 0.2.0 起的正式发布渠道，只发 macOS（Apple 芯片 arm64 与 Intel x64）。它和 Preview 一样不签名、不公证，见[发布包不签名](preview-release-runbook.md#发布包不签名)；区别只在版本号没有 `-preview.<n>` 后缀、文件名不带 `UNSIGNED-PREVIEW`、由维护者手动触发，以及公开为正式 Release 而不是 Pre-release。
@@ -79,6 +79,7 @@ flowchart LR
 - [ ] 两个架构各下载至少一个安装包，用 `SHA256SUMS.txt` 复核，并通过 `gh attestation verify <file> --repo TheSyart/emperor-agent`。
 - [ ] 在一台没装过 Emperor 的 Mac 上按正文第一段的步骤打开；`codesign -dv --verbose=4` 显示 `Signature=adhoc`，`flags` 含 `runtime`。
 - [ ] 按正文重新授权后，电脑操作与听写可用。
+- [ ] 正文最后一行是 `<!-- emperor-release electron=<desktop/package-lock.json 的 Electron> -->`（应用内的检查更新读它判断 Electron 是否过旧，不要删）；装着上一版的 Mac 在「设置 › 常规 › 更新」点「立即检查」看到「Emperor <version> 可用」，下载后通过 SHA-256 与来源证明核对（REL-02）。
 
 ## 失败处理
 

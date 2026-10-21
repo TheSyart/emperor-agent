@@ -202,8 +202,9 @@ export const REMOVED_OPERATIONS = new Set([
 ])
 const REMOVED_WORDS = /删除|移除|退役|不再|已无|不存在|取消了|去掉/
 
+// File extensions and top-level domains: `config.json`, `github.com`.
 const FILE_SUFFIX =
-  /^(?:json|jsonl|md|ts|tsx|js|mjs|cjs|vue|yml|yaml|sh|txt|lock|zip|log|plist|sb|el1|key|png|svg|webp|html|sqlite|toml|local|v\d+|d)$/i
+  /^(?:json|jsonl|md|ts|tsx|js|mjs|cjs|vue|yml|yaml|sh|txt|lock|zip|log|plist|sb|el1|key|png|svg|webp|html|sqlite|toml|local|v\d+|d|com|org|net|io|dev)$/i
 
 /**
  * Operation-like names in the code spans of a Markdown text: `ns.method`

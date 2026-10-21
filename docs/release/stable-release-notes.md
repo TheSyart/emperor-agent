@@ -1,6 +1,7 @@
 <!--
 Stable GitHub Release 正文模板（REL-05）。
-scripts/assemble-release-bundle.mjs 在聚合时删掉这段注释、替换 {{tag}} 与 {{version}}，写成 RELEASE-NOTES.md；
+scripts/assemble-release-bundle.mjs 在聚合时删掉这段注释、替换 {{tag}}、{{version}} 与 {{electron}}（desktop/package-lock.json 里的 Electron），写成 RELEASE-NOTES.md；
+最后一行的 emperor-release 注释给应用内的检查更新读取（REL-02：诊断页据此提醒 Electron 过旧），不要删改；
 scripts/publish-release.sh 用它作 Release 正文（gh release create --notes-file）。
 第一段必须写明安装包未签名并给出首次打开的步骤：scripts/release-contract.mjs 检查，缺一项发布就失败。
 最后核验：2026-10-21 · 事实源：.github/workflows/release.yml、desktop/electron-builder.release.cjs、scripts/release-contract.mjs
@@ -36,3 +37,5 @@ The Emperor Agent {{version}} packages are unsigned: they have no Apple Develope
 ## 这个版本的变化
 
 见 [CHANGELOG](https://github.com/TheSyart/emperor-agent/blob/{{tag}}/docs/release/CHANGELOG.md)。
+
+<!-- emperor-release electron={{electron}} -->

@@ -52,6 +52,7 @@ describe('local config', () => {
         maxTotalAgents: 64,
         maxNoticeWakes: 32,
       },
+      updates: { check: true },
     })
 
     const loaded = await loadLocalConfig(dir)
@@ -230,6 +231,7 @@ describe('local config', () => {
       'prompt',
       'sessions',
       'taskBudget',
+      'updates',
       'webTools',
       'webui',
     ])
@@ -261,6 +263,7 @@ describe('local config', () => {
       'prompt',
       'sessions',
       'taskBudget',
+      'updates',
       'webTools',
       'webui',
     ])
@@ -279,6 +282,7 @@ describe('local config', () => {
       'prompt',
       'sessions',
       'taskBudget',
+      'updates',
       'version',
       'webTools',
       'webui',
@@ -349,6 +353,25 @@ describe('local config', () => {
     expect(JSON.parse(await readFile(path, 'utf8')).taskBudget).toEqual(
       defaults,
     )
+  })
+
+  it('REL-02 keeps the update check switch, default on', async () => {
+    const path = localConfigPath(dir)
+    expect((await loadLocalConfig(dir)).updates).toEqual({ check: true })
+    await writeFile(path, JSON.stringify({ updates: { check: 'no' } }), 'utf8')
+    expect((await loadLocalConfig(dir)).updates).toEqual({ check: true })
+    const loaded = await loadLocalConfig(dir)
+    await saveLocalConfig(dir, { ...loaded, updates: { check: false } })
+    expect(JSON.parse(await readFile(path, 'utf8')).updates).toEqual({
+      check: false,
+    })
+    // Another setting saved later keeps it.
+    const again = await loadLocalConfig(dir)
+    await saveLocalConfig(dir, {
+      ...again,
+      sessions: { defaultPermission: 'read-only' },
+    })
+    expect((await loadLocalConfig(dir)).updates).toEqual({ check: false })
   })
 
   it('keeps the new-session permission, defaulting to workspace-write', async () => {
