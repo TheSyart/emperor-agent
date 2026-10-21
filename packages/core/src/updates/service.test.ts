@@ -741,6 +741,24 @@ describe('REL-02 download', () => {
   })
 })
 
+describe('REL-02 a newer release after a download', () => {
+  it('offers the newer one; the verified file stays in Downloads', async () => {
+    const feed = await github([{ tag: 'v0.2.1' }])
+    const h = await harness({ feed: feed.url })
+    await h.service.start()
+    await h.service.check()
+    await h.service.download()
+    const ready = await waitFor(h.service, (s) => s.download.phase === 'ready')
+    const file = (ready.download as { path: string }).path
+    feed.releases = [{ tag: 'v0.2.2' }, { tag: 'v0.2.1' }]
+    const next = await h.service.check()
+    expect(next.available?.version).toBe('0.2.2')
+    expect(next.download).toEqual({ phase: 'idle' })
+    expect((await stat(file)).isFile()).toBe(true)
+    h.service.close()
+  })
+})
+
 describe('REL-02 diagnostics', () => {
   it('reports the switch, the test feed and an Electron more than 2 majors behind', async () => {
     const feed = await github([

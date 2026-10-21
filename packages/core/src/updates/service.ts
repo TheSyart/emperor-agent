@@ -403,14 +403,14 @@ export class CoreUpdateService {
   }
 
   private offer(update: SelectedUpdate | null): void {
-    const previous = this.available
     this.available = update
+    // A different release on offer replaces a finished or failed download
+    // of another one (a verified file stays in Downloads); one still
+    // running finishes first. With nothing on offer, a failure is dropped.
+    const state = this.downloadState
     if (
-      previous &&
-      previous.version !== update?.version &&
-      this.downloadState.phase !== 'downloading' &&
-      this.downloadState.phase !== 'verifying' &&
-      this.downloadState.phase !== 'ready'
+      (state.phase === 'ready' || state.phase === 'failed') &&
+      (update ? state.version !== update.version : state.phase === 'failed')
     )
       this.downloadState = { phase: 'idle' }
     if (update && !this.announced.has(update.version)) {
