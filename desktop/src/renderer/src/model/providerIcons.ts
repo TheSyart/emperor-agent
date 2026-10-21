@@ -1,4 +1,7 @@
 const PROVIDER_ICON_ASSETS: Readonly<Record<string, string>> = {
+  codex: new URL('../assets/provider-logos/codex.svg', import.meta.url).href,
+  claude_code: new URL('../assets/provider-logos/claude.svg', import.meta.url)
+    .href,
   openai: new URL('../assets/provider-logos/openai.svg', import.meta.url).href,
   anthropic: new URL('../assets/provider-logos/anthropic.svg', import.meta.url)
     .href,
@@ -60,20 +63,18 @@ const PROVIDER_ICON_ASSETS: Readonly<Record<string, string>> = {
 
 /**
  * Providers without an upstream logo draw a generic glyph instead of the
- * initial: a server for self-hosted model servers, a plug for Custom, and a
- * neutral agent glyph for Claude Code and Codex, which are named in text
- * only — their logos need their makers' permission (AGT-12).
+ * initial: a server for self-hosted model servers, a plug for Custom.
  */
-export type ProviderIconGlyph = 'server' | 'custom' | 'agent'
+export type ProviderIconGlyph = 'server' | 'custom'
 
 const PROVIDER_ICON_GLYPHS: Readonly<Record<string, ProviderIconGlyph>> = {
   ovms: 'server',
   custom: 'custom',
-  claude_code: 'agent',
-  codex: 'agent',
 }
 
 const MONOCHROME_PROVIDER_ICONS = new Set([
+  'codex',
+  'claude_code',
   'anthropic',
   'groq',
   'lm_studio',
