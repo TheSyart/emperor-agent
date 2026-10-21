@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import type { Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -42,7 +42,7 @@ async function noHorizontalOverflow(page: Page) {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`general section on the settings primitives (${theme})`, async ({
+  test(`general section on the settings primitives (${theme}) @baseline`, async ({
     page,
   }) => {
     const dialog = await openSettings(page, 'general', { theme })
@@ -64,6 +64,7 @@ for (const theme of ['dark', 'light'] as const) {
       path: resolve(screenshotDir, `general-${theme}.png`),
       animations: 'disabled',
     })
+    await expectBaseline(page, 'settings', `general-${theme}`)
   })
 }
 

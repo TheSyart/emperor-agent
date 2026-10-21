@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test'
+import type { Page } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -84,7 +85,7 @@ for (const theme of ['light', 'dark'] as const) {
     await shot(page, `process-live-${theme}`)
   })
 
-  test(`2 · 3 · the finished turn folds to one line and expands on click (${theme})`, async ({
+  test(`2 · 3 · the finished turn folds to one line and expands on click (${theme}) @baseline`, async ({
     page,
   }) => {
     await open(page, 'showcase', { theme, height: 2400 })
@@ -93,6 +94,7 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(header(page)).toHaveText(/^已处理 11 步 · 用时 .+秒/)
     await expect(header(page)).toHaveAttribute('aria-expanded', 'false')
     await shot(page, `process-folded-${theme}`)
+    await expectBaseline(page, 'conversation', `process-folded-${theme}`)
     await header(page).click()
     await expect(body(page)).toBeVisible()
     await expect(body(page).locator('[data-process-step]')).toHaveCount(11)
@@ -200,7 +202,7 @@ test('8 · the user bubble: bubble fill, r-xl, 10/16, 15/26, at most 80% wide', 
 })
 
 for (const theme of ['light', 'dark'] as const)
-  test(`9 · reply typography: 15/26 prose, 12px paragraphs, md-h1 20px (${theme})`, async ({
+  test(`9 · reply typography: 15/26 prose, 12px paragraphs, md-h1 20px (${theme}) @baseline`, async ({
     page,
   }) => {
     await open(page, 'typography', { theme, height: 1200 })
@@ -247,6 +249,7 @@ for (const theme of ['light', 'dark'] as const)
     expect(color).toBe(linkColor)
     expect(icon).toBe('12px')
     await shot(page, `reply-typography-${theme}`)
+    await expectBaseline(page, 'conversation', `reply-typography-${theme}`)
   })
 
 test('10 · expanding a group in the middle of 500 turns keeps the scroll position', async ({

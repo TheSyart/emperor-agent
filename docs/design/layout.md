@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-20<br>
-> 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/`（`SidebarRoot.vue`、`SidebarTopRow.vue`、`SidebarBrandRow.vue`、`SidebarNav.vue`、`SessionRow.vue`、`SidebarProjectRow.vue`、`SidebarSectionHeader.vue`、`SidebarSearchResults.vue`、`useContentSearch.ts`、`SidebarFooter.vue`、`SidebarRail.vue`、`sidebarNav.ts`）、`desktop/src/renderer/src/runtime/sidebarModel.ts`、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）；测试 `SidebarRoot.integration.test.ts`、`SessionRow.test.ts`、`sidebarDayGroups.test.ts`、`desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/settings-groups.spec.ts`
+> 最后核验：2026-10-21<br>
+> 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/`（`SidebarRoot.vue`、`SidebarTopRow.vue`、`SidebarBrandRow.vue`、`SidebarNav.vue`、`SessionRow.vue`、`SidebarProjectRow.vue`、`SidebarSectionHeader.vue`、`SidebarSearchResults.vue`、`useContentSearch.ts`、`SidebarFooter.vue`、`SidebarRail.vue`、`sidebarNav.ts`）、`desktop/src/renderer/src/runtime/sidebarModel.ts`、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）、`components/conversation/`（`ConversationView.vue`、`ChatTimeline.vue`、`environment/EnvironmentCard.vue`）、`components/composer/ComposerCard.vue`、`components/pages/PageShell.vue`、`components/ui/`（`Modal.vue`、`PaneHeader.vue`）、`components/workspace/WorkspacePanel.vue`；测试 `SidebarRoot.integration.test.ts`、`SessionRow.test.ts`、`sidebarDayGroups.test.ts`、`desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/settings-groups.spec.ts`
 
 主窗口用系统标题栏，下面是平铺的几栏：侧栏、中栏（对话、轨迹或整页）、右侧工作台。侧栏画在 `--surface-canvas` 上，中栏与工作台在 `--surface-base` 上，栏与栏之间只有一条 0.5px 发丝线（`--border-l1`）。布局与入口位置是 Emperor 自己的；质感参考了 Codex（颜色、字体、间距、圆角、阴影），布局不照搬（2026-10-20 决定）。
 
@@ -34,10 +34,10 @@
 
 节奏：
 
-- 所有行 32 高、圆角 8（`--radius-row`）；分组标题 28 高，12/500 三级文字，吸顶；标题右侧的 `+`、`⋯` 只在悬停、焦点在标题内或菜单打开时出现。
+- 所有行 32 高、圆角 8（`--radius-row`）；分组标题 28 高，13/20、500、三级文字，吸顶；标题右侧的 `+`、`⋯` 只在悬停、焦点在标题内或菜单打开时出现。
 - 区块之间靠 12px 留白分开，不画分隔线。
 - 项目行：文件夹图标、名称、会话数（说明文字色、等宽数字，悬停时换成「新建该项目会话」）。项目内的会话缩进一级，左侧一条引导线落在文件夹图标中线上。
-- 会话行（`SessionRow`）：16px 状态槽——运行中金色呼吸点（Dot `running`），等待回答或审批 `--attention` 点，有新进展 `ok` 点；标题 13；右侧紧凑相对时间（`sidebarRelativeTime`：刚刚 / N 分钟 / N 小时（今天）/ 昨天 / N 天（一周内）/ 9月10日（今年）/ 2025/12/31（更早），说明文字色、等宽数字、不加中英文间距），悬停时换成「⋯」。选中 `--surface-selected`、标题 500。行带 `data-session-id`。
+- 会话行（`SessionRow`）：16px 状态槽——运行中金色呼吸点（Dot `running`），等待回答或审批 `--attention` 点，有新进展 `ok` 点；标题 14/20；右侧紧凑相对时间（`sidebarRelativeTime`：刚刚 / N 分钟 / N 小时（今天）/ 昨天 / N 天（一周内）/ 9月10日（今年）/ 2025/12/31（更早），说明文字色、等宽数字、不加中英文间距），悬停时换成「⋯」。选中 `--surface-selected`、标题 500。行带 `data-session-id`。
 - 对话按 `updated_at` 分「今天 / 昨天 / 7 天内 / 30 天内 / 更早」；手动排序时不分组。
 - 焦点在会话行上时，↑ / ↓ 把焦点移到相邻的行并打开那个会话。
 
@@ -47,10 +47,37 @@
 - 先列「会话」：标题、项目名、路径即时匹配（`searchSidebarSessions`，不含已归档）；停顿 250ms 后列「内容」：Core `sessions.search` 找到的、聊天内容里提到这段文字的会话（只搜用户消息和模型回答），每条带命中的句子（`useContentSearch`，旧查询的结果丢弃）。
 - ↑ / ↓ 选择、回车打开；Esc 先清空，再关闭。
 
+## 内容宽度
+
+内容列都在组件里设置宽度上限、在栏里居中；L1 的 `--content-chat` / `--content-page` / `--content-form` 目前没有组件使用。
+
+| 内容                       | 宽度                                                                                                                                                      | 实现                                               |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| 对话的消息列               | 最宽 748（`--chat-content-width`），列外左右留 32、底部留 56                                                                                              | `ConversationView`、`ChatTimeline`                 |
+| 输入框卡片                 | 最宽 780（`--composer-card-max` = 748 + 32），比消息列宽 32；队列、改动、待办、目标几条 dock 在卡片内缩                                                   | `ComposerCard`、`QueueDock`、`TodoDock`、`GoalBar` |
+| 接管卡（审批、提问、计划） | 与消息列同宽 748；收起后的一行 780                                                                                                                        | `ApprovalPanel`、`PlanReviewPanel`、`TakeoverSeat` |
+| 用户气泡                   | 最宽为消息列的 80%                                                                                                                                        | `UserBubble`                                       |
+| 整页                       | 880 加左右各 24 的内边距，居中；Pull Request 的列表与详情占满宽度，标题行仍在 880 列里；PR 详情最宽 960                                                   | `PageShell`、`PullRequestDetail`                   |
+| 设置面板的选项区           | 最宽 720                                                                                                                                                  | `SettingsModal`                                    |
+| 对话框                     | 默认 380；按内容取 400–880（确认框 400，导入与密钥类 440–480，导出与诊断 520，MCP 与 Skill 导入 560，定时任务 600，添加模型 760），窄窗口里不超过可用宽度 | `Modal` 的 `width`                                 |
+
+## 环境信息卡
+
+- 宽 `min(340px, 42cqi)`（`--env-card-width`，按对话栏宽度计算），贴在对话栏右上角（距顶 12、距右 16），圆角 `--r-lg`。
+- 对话栏宽度 ≥ 1120 时，卡片默认显示在对话旁边；更窄时默认收起，用会话头的按钮打开。用户在宽栏里关掉、或在窄栏里打开，都记为手动选择（`frameState.ts`）。
+- 卡片打开时，消息区与输入框右侧让出卡片宽度加 16，内容不被遮住；电脑操作预览同样在 ≥ 1120 时放在旁边，更窄时折成一个计数标签。
+
+## 顶栏对齐
+
+- 会话头第一行 46（`--shell-bar-h`），工作台顶栏是 48 的 `PaneHeader`，向上收 2px（`margin-top: calc(var(--shell-bar-h) - var(--pane-header-h))`），两条底边落在同一条线上。
+- 侧栏顶行 36、品牌行 40；整页没有固定高度的顶栏，标题行高 28、上方留 32。
+- 设置面板的顶栏 54；面板窄于 640 时高度随内容。
+
 ## 收起与断点
 
 - 收起后侧栏列宽 56，渲染窄轨（`SidebarRail`）：品牌标（悬停换成展开图标）、后退 / 前进、新对话、搜索、通知、页面入口，底部设置与明暗切换；按钮 36、图标 20、提示在右侧。点品牌标或 ⌘B 展开。
 - 视口宽度小于 1024px 时侧栏自动收起为窄轨。
+- 断点主要是容器查询，按所在栏或卡片的宽度变化，不按窗口宽度：设置面板与整页窄于 640 时导航折成顶部一行、边距收紧；轨迹窄于 640 时检查器盖在列表上；PR 详情窄于 560 时标题行堆叠；对话栏窄于 560 时隐藏轮次刻度条；设置行、表单与用量卡片在 520 / 480 / 440 处减列。按窗口宽度的媒体查询只有几处：输入框面板（820）、首启弹窗（760）、提问与计划卡（720）、看图器（600）。Pull Request 页窄于 720 时只显示列表或详情之一。
 - 空间不够时，工作台先缩到 360，再自动关闭；只改渲染宽度，不改用户保存的宽度（`columns.ts` 的让位链）。
 - 列宽变化不做过渡动画：拖动时宽度逐帧跟随，收起和展开立即生效。
 

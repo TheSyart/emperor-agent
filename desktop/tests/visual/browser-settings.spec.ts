@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, expectBaseline, test } from './baseline'
 import type { Locator, Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -63,7 +63,7 @@ function groupTitles(dialog: Locator) {
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`browser settings main page (${theme})`, async ({ page }) => {
+  test(`browser settings main page (${theme}) @baseline`, async ({ page }) => {
     const dialog = await openBrowser(page, { theme })
     await expect(dialog.getByTestId('browser-agent-card')).toContainText(
       '让 Emperor 控制内置浏览器',
@@ -96,6 +96,7 @@ for (const theme of ['dark', 'light'] as const) {
     ).toBeVisible()
     await noHorizontalOverflow(page)
     await shot(page, `browser-${theme}`)
+    await expectBaseline(page, 'settings', `browser-${theme}`)
 
     await dialog.locator('#browser-local-target').click()
     await page.getByRole('menuitem', { name: /^系统默认浏览器/ }).click()
