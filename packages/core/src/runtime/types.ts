@@ -10,6 +10,10 @@
  */
 
 import type { UpdateStatus } from '../updates/types'
+import type {
+  ClaudeSignInView,
+  ExecutorProbe,
+} from '../harness/delegation/types'
 
 export type RuntimeEventPayload = Record<string, unknown>
 
@@ -328,6 +332,15 @@ export type RuntimeEvent = RuntimeEventEnvelope &
         version: string
         tag: string
         notesUrl: string
+      }
+    | {
+        /**
+         * 登录 Claude Code (FIX-11) started, ended or was cancelled; after a
+         * sign-in, the new probe (what `claude auth status` now says).
+         */
+        event: 'executor_sign_in'
+        signIn: ClaudeSignInView
+        probe?: ExecutorProbe
       }
     | {
         /** 设置 › 高级 › 网络工具 changed: the Agent's tool list did too. */

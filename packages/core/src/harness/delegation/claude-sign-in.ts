@@ -1,5 +1,4 @@
-import { execFile } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import {
   chmodSync,
   cpSync,
@@ -8,8 +7,6 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
-  statSync,
-  writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
 import { assertNotNewerSync, durableReplaceSync } from '../../store/persistence'
@@ -29,7 +26,8 @@ import {
  * pass on Claude.ai credentials. So:
  *
  * - every Claude Code process Emperor starts — a run, `claude auth status`,
- *   `claude auth login` in macOS Terminal, `claude auth logout` — uses one
+ *   `claude auth login` (FIX-11: started by Core, finished in the browser),
+ *   `claude auth logout` — uses one
  *   dedicated CLAUDE_CONFIG_DIR and HOME under Emperor Home
  *   ({@link claudeDirectories}); claude keeps its login there (the Keychain
  *   entry it keys to that folder, or `.credentials.json` in it), and
@@ -433,9 +431,24 @@ export async function signOutClaude(input: {
     )
 }
 
-// ── 登录 Claude Code: macOS Terminal ──────────────────────────────────
+// ── 登录 Claude Code: claude's own `auth login`, started by Core ────────
+
+/**
+ * How long a sign-in may wait for the browser before Emperor stops it
+ * (claude waits for the browser's callback, or for a code it never gets).
+ */
+export const CLAUDE_SIGN_IN_TIMEOUT_MS = 10 * 60_000
+/** After SIGTERM to the sign-in's process group, how long until SIGKILL. */
+const SIGN_IN_GRACE_MS = 3_000
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
+/** What a shell may export that claude would sign in with instead. */
+const SIGN_IN_UNSET = [
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+] as const
+/** The folders that make the login the one every run finds again. */
 const SIGN_IN_ENVIRONMENT = [
   'CLAUDE_CONFIG_DIR',
   'HOME',
@@ -443,96 +456,206 @@ const SIGN_IN_ENVIRONMENT = [
   'XDG_CACHE_HOME',
 ] as const
 
+const signInArgs = (console: boolean) =>
+  console ? ['auth', 'login', '--console'] : ['auth', 'login']
+
 /**
- * The script Terminal runs: the run's folders, then the installed claude's
- * own `auth login` (`--console` for API billing). Credentials the user's
- * shell exports are unset so the login is the one that gets saved; the
- * script deletes itself when claude is done.
+ * The run's environment for `claude auth login`: the same folders (and
+ * PATH, locale, proxy), without any credential claude would sign in with
+ * instead, and without the run's endpoint and model — signing in is with
+ * Anthropic, whatever a run talks to.
  */
-export function claudeSignInScript(input: {
+export function claudeSignInEnvironment(
+  environment: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(environment).filter(
+      ([key]) =>
+        !key.startsWith('ANTHROPIC_') &&
+        !key.startsWith('CLAUDE_CODE_OAUTH_') &&
+        !key.startsWith('EMPEROR_'),
+    ),
+  )
+}
+
+/**
+ * 备用 for a sign-in that did not finish: the same login as one line the
+ * user pastes into their own Terminal — the dedicated folders, no
+ * credential variables, the installed claude's `auth login`.
+ */
+export function claudeSignInCommand(input: {
   executable: string
   environment: Record<string, string>
   console: boolean
 }): string {
   return [
-    '#!/bin/bash',
-    '# Emperor: sign in to Claude Code once, with Claude Code’s own login.',
-    '# Claude Code keeps the login in the folder below; Emperor never reads it.',
+    'env',
+    ...SIGN_IN_UNSET.flatMap((key) => ['-u', key]),
     ...SIGN_IN_ENVIRONMENT.filter((key) => input.environment[key]).map(
-      (key) => `export ${key}=${shellQuote(input.environment[key]!)}`,
+      (key) => `${key}=${shellQuote(input.environment[key]!)}`,
     ),
-    'unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN',
-    'cd "$HOME" || exit 1',
-    `${shellQuote(input.executable)} auth login${input.console ? ' --console' : ''}`,
-    'status=$?',
-    'rm -f -- "$0"',
-    'echo',
-    'if [ "$status" -eq 0 ]; then',
-    '  echo "登录完成。可以关闭这个窗口，回到 Emperor。"',
-    'else',
-    '  echo "登录没有完成。可以关闭这个窗口，回到 Emperor 再试一次。"',
-    'fi',
-    'exit "$status"',
-    '',
-  ].join('\n')
+    shellQuote(input.executable),
+    ...signInArgs(input.console),
+  ].join(' ')
 }
 
-/** macOS Terminal through open(1): no AppleScript, no Emperor terminal pane. */
-export function terminalOpener(
-  run: typeof execFile = execFile,
-): (script: string) => Promise<void> {
-  return (script) =>
-    new Promise<void>((resolve, reject) => {
-      run(
-        '/usr/bin/open',
-        ['-a', 'Terminal', script],
-        { timeout: 15_000 },
-        (error) =>
-          error
-            ? reject(
-                new DelegationError(
-                  'TERMINAL_UNAVAILABLE',
-                  'macOS Terminal could not be opened',
-                ),
-              )
-            : resolve(),
-      )
-    })
+/** How a `claude auth login` ended. */
+export interface ClaudeLoginOutcome {
+  /**
+   * `exit`: claude ended by itself (`exitCode` says how); `timeout` and
+   * `cancelled`: Emperor stopped it; `start`: it could not be started.
+   */
+  ended: 'exit' | 'timeout' | 'cancelled' | 'start'
+  exitCode: number | null
 }
 
-const STALE_SCRIPT_MS = 10 * 60_000
+/** A running `claude auth login`. */
+export interface ClaudeLogin {
+  /** False when claude could not be started (`done` has already settled). */
+  readonly started: boolean
+  readonly done: Promise<ClaudeLoginOutcome>
+  /** Stops claude and everything it started (its process group). */
+  cancel(): Promise<ClaudeLoginOutcome>
+}
 
-/** Writes the sign-in script and opens it in Terminal; returns its path. */
-export async function openClaudeSignIn(input: {
-  root: string
+/**
+ * 登录 Claude Code (FIX-11): the installed claude's own `auth login`
+ * (`--console` for API billing), started by Core instead of in macOS
+ * Terminal — a shell's startup (oh-my-zsh asking to update) could swallow
+ * what Terminal typed. claude opens the browser and the sign-in calls back
+ * to claude itself on localhost: Emperor never sees a link, a code or a
+ * token. So:
+ *
+ * - the run's folders, no credential variables ({@link claudeSignInEnvironment});
+ * - not in the sandbox (as in Terminal): it opens the browser and listens
+ *   on localhost;
+ * - its own process group, so 取消 and the time limit stop all of it;
+ * - stdin is a pipe that is never written or closed while it runs (claude
+ *   waits on it for a code only if the browser did not open);
+ * - stdout and stderr are drained and dropped, never read, logged or shown.
+ *
+ * Resolves once claude is running, or could not start.
+ */
+export async function startClaudeLogin(input: {
   executable: string
+  /** The run's environment (a profile probe's). */
   environment: Record<string, string>
+  cwd: string
   console: boolean
-  open?: (script: string) => Promise<void>
-}): Promise<string> {
-  const dirs = prepareClaudeDirectories(input.root)
-  const folder = join(dirs.root, 'sign-in')
-  mkdirSync(folder, { recursive: true, mode: 0o700 })
-  // Scripts left behind by a window closed before claude finished.
-  for (const name of readdirSync(folder))
-    try {
-      const path = join(folder, name)
-      if (
-        name.endsWith('.command') &&
-        Date.now() - statSync(path).mtimeMs > STALE_SCRIPT_MS
-      )
-        rmSync(path, { force: true })
-    } catch {
-      /* Already gone. */
-    }
-  const script = join(
-    folder,
-    `claude-sign-in-${randomUUID().slice(0, 8)}.command`,
+  timeoutMs?: number
+  graceMs?: number
+  /** Test hook. */
+  spawn?: typeof spawn
+}): Promise<ClaudeLogin> {
+  const child = (input.spawn ?? spawn)(
+    input.executable,
+    signInArgs(input.console),
+    {
+      cwd: input.cwd,
+      env: claudeSignInEnvironment(input.environment),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: false,
+      detached: true,
+      windowsHide: true,
+    },
   )
-  writeFileSync(script, claudeSignInScript(input), { mode: 0o700, flag: 'wx' })
-  chmodSync(script, 0o700)
-  await (input.open ?? terminalOpener())(script)
-  return script
+  const ignore = () => undefined
+  child.stdin?.on('error', ignore)
+  for (const stream of [child.stdout, child.stderr]) {
+    stream?.on('error', ignore)
+    stream?.resume()
+  }
+  const grace = input.graceMs ?? SIGN_IN_GRACE_MS
+  let stopping: 'timeout' | 'cancelled' | undefined,
+    finished = false,
+    killTimer: ReturnType<typeof setTimeout> | undefined
+  let settle!: (outcome: ClaudeLoginOutcome) => void
+  const done = new Promise<ClaudeLoginOutcome>((resolve) => {
+    settle = resolve
+  })
+  const live = () =>
+    !finished && child.exitCode === null && child.signalCode === null
+  /** While claude is unreaped its pid, and so its group id, is ours. */
+  const signalGroup = (kind: NodeJS.Signals) => {
+    if (!child.pid) return
+    try {
+      process.kill(-child.pid, kind)
+    } catch {
+      /* The group is gone. */
+    }
+  }
+  const stop = (why: 'timeout' | 'cancelled') => {
+    if (stopping || !live()) return
+    stopping = why
+    signalGroup('SIGTERM')
+    killTimer = setTimeout(() => {
+      if (live()) signalGroup('SIGKILL')
+    }, grace)
+    killTimer.unref?.()
+  }
+  const timer = setTimeout(
+    () => stop('timeout'),
+    input.timeoutMs ?? CLAUDE_SIGN_IN_TIMEOUT_MS,
+  )
+  timer.unref?.()
+  const finish = (outcome: ClaudeLoginOutcome) => {
+    if (finished) return
+    finished = true
+    clearTimeout(timer)
+    if (killTimer) clearTimeout(killTimer)
+    // Stopped: whatever claude started goes with it. The group id stays
+    // reserved while any member lives, so this reaches only its own.
+    if (stopping) signalGroup('SIGKILL')
+    child.stdin?.destroy()
+    child.stdout?.destroy()
+    child.stderr?.destroy()
+    settle(outcome)
+  }
+  let spawned = false,
+    began!: (value: boolean) => void
+  const started = new Promise<boolean>((resolve) => {
+    began = resolve
+  })
+  child.once('spawn', () => {
+    spawned = true
+    began(true)
+  })
+  const notStarted = () => {
+    finish({ ended: 'start', exitCode: null })
+    began(false)
+  }
+  child.on('error', () => {
+    // Only a failure to start ends it here; claude's own exit says the rest.
+    if (!spawned) notStarted()
+  })
+  child.once('exit', (code) => {
+    if (!spawned) return notStarted()
+    finish({ ended: stopping ?? 'exit', exitCode: code })
+  })
+  return {
+    started: await started,
+    done,
+    cancel: () => {
+      stop('cancelled')
+      return done
+    },
+  }
+}
+
+/**
+ * Earlier 0.2 builds wrote 登录 Claude Code scripts for Terminal into
+ * `<delegations>/claude-code/sign-in/`; ones a shell never ran stayed
+ * there. Removed at start, then the folder (FIX-11).
+ */
+export function removeSignInScripts(root: string): void {
+  const folder = join(claudeDirectories(root).root, 'sign-in')
+  try {
+    for (const name of readdirSync(folder))
+      if (name.endsWith('.command')) rmSync(join(folder, name), { force: true })
+    rmSync(folder, { recursive: true, force: true })
+  } catch {
+    /* Nothing left behind. */
+  }
 }
 
 // ── 使用 API Key: the one credential Emperor keeps ─────────────────────

@@ -102,6 +102,7 @@ export type {
   ExecutorProfile,
   ExecutorProbe,
   ExecutorAuthState,
+  ClaudeSignInView,
   ExecutorCapabilities,
   ExecutorRuntimeFacts,
   NativeCapabilityStatus,
