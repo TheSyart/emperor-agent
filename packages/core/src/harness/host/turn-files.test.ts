@@ -633,6 +633,41 @@ describe('one record per task (UI-S15)', () => {
   )
 
   it(
+    '1 · a goal’s rounds go on as one task, recorded once the goal stops',
+    async () => {
+      const { host, sessionId } = await setup([
+        { tools: [write('round-1.txt')] },
+        { text: 'round 1 done' },
+        { tools: [write('round-2.txt')] },
+        { text: 'round 2 done' },
+      ])
+      const agent = host.agentFor(sessionId)
+      host.goals.create(agent, {
+        objective: 'write two files',
+        maxGoalRounds: 2,
+      })
+      await waitFor(
+        () =>
+          events(host, sessionId).filter((event) => event.type === 'goal/round')
+            .length === 2,
+        30_000,
+      )
+      await waitFor(() => records(host, sessionId).length === 1, 30_000)
+      await pause(200)
+      expect(records(host, sessionId)).toHaveLength(1)
+      expect(records(host, sessionId)[0]).toMatchObject({
+        turn: 2,
+        task: { firstTurn: 1, lastTurn: 2 },
+      })
+      expect(paths(records(host, sessionId)[0])).toEqual([
+        'added round-1.txt',
+        'added round-2.txt',
+      ])
+    },
+    SLOW,
+  )
+
+  it(
     '5 · 撤销 puts the whole task back and skips a file changed since',
     async () => {
       const job = gate()
