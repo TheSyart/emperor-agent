@@ -72,11 +72,9 @@ const TURNDOWN_ASAR_ENTRIES = new Set([
   '/node_modules/@mixmark-io/domino/lib',
 ])
 
-function isAllowedNodeModuleEntry(
-  entry,
-  platform = process.platform,
-  arch = process.arch,
-) {
+// The target is no longer needed here (no per-architecture binary ships
+// since AGT-12); callers still pass it.
+function isAllowedNodeModuleEntry(entry, _platform, _arch) {
   // The Claude Agent SDK's JavaScript only (AGT-12): it drives the user's
   // installed claude. No Claude Code binary — no platform package, packed
   // or nested — and nothing else from @anthropic-ai is allowed in.
