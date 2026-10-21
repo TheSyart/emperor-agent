@@ -2039,6 +2039,14 @@ export const CORE_OPERATION_REGISTRY = {
     ]),
     (api, [input]) => api.agents.list(input),
   ),
+  'agents.send': operation(
+    z.tuple([
+      z
+        .object({ sessionId: idSchema, text: z.string().min(1).max(32768) })
+        .strict(),
+    ]),
+    (api, [input]) => api.agents.send(input),
+  ),
   'sessions.children': operation(z.tuple([sessionRefSchema]), (api, [input]) =>
     api.sessions.children(input),
   ),

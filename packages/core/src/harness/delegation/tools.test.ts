@@ -573,3 +573,65 @@ it('8 · outside Git a task defaults to a read-only review even when the parent 
     )
   }
 })
+it('改代码的位置 (AGT-10): a writing task works where the settings say unless the model chose', async () => {
+  const h = createTestHarness()
+  const record = { ...fixtureDelegationRecord(), currentRunId: 'dgr-1' }
+  const start = vi.fn(async () => record)
+  const service = {
+    start,
+    inspect: vi.fn(),
+    list: vi.fn(() => []),
+    send: vi.fn(),
+    interrupt: vi.fn(),
+    wait: vi.fn(),
+  } as unknown as DelegationToolService
+  let readOnly = false
+  const tools = createDelegationTools({
+    internalManager: {} as SubagentManager,
+    delegations: () => service,
+    ownerResolver: () => record.owner,
+    canControl: () => true,
+    parentReadOnly: () => readOnly,
+    parentInGit: () => true,
+    defaultWorkspace: () => 'shared-exclusive',
+  })
+  const subagent = tools.find((t) => t.name === 'subagent')!
+  const run = (args: Record<string, unknown>, n: number) =>
+    subagent.execute(
+      subagent.parse({
+        backend: 'codex',
+        description: 'd',
+        prompt: 'p',
+        ...args,
+      }),
+      {
+        agent: h.agent('root-' + n),
+        callId: 'call-' + n,
+        signal: new AbortController().signal,
+      } as never,
+    )
+  await run({}, 1)
+  expect(start).toHaveBeenLastCalledWith(
+    expect.anything(),
+    expect.objectContaining({
+      workspace: 'shared-exclusive',
+      base: 'snapshot',
+    }),
+  )
+  // The model's own choice wins.
+  await run({ workspace: 'isolated-worktree' }, 2)
+  expect(start).toHaveBeenLastCalledWith(
+    expect.anything(),
+    expect.objectContaining({ workspace: 'isolated-worktree' }),
+  )
+  // A read-only parent still only reviews.
+  readOnly = true
+  await run({}, 3)
+  expect(start).toHaveBeenLastCalledWith(
+    expect.anything(),
+    expect.objectContaining({
+      workspace: 'shared-readonly',
+      base: 'committed',
+    }),
+  )
+})

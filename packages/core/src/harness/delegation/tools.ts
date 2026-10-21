@@ -132,6 +132,8 @@ export interface DelegationToolOptions {
   parentReadOnly?: (agent: Agent) => boolean
   /** The parent works in a Git project (absent: assumed). Outside Git a task defaults to a review (AGT-06). */
   parentInGit?: (agent: Agent) => boolean
+  /** Where a writing task works when the model does not say (设置 › 子智能体, AGT-10). */
+  defaultWorkspace?: () => 'isolated-worktree' | 'shared-exclusive'
   /** Ask the user (collect_agent abandon, apply); absent: the request fails closed. */
   approve?: (request: {
     agent: Agent
@@ -281,7 +283,7 @@ export function createDelegationTools(
             (options.parentReadOnly?.(agent) ||
             options.parentInGit?.(agent) === false
               ? 'shared-readonly'
-              : 'isolated-worktree'),
+              : (options.defaultWorkspace?.() ?? 'isolated-worktree')),
           base =
             args.base ??
             (workspace === 'shared-readonly' ? 'committed' : 'snapshot')

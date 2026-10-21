@@ -30,6 +30,7 @@ import {
 } from '../../config/model-config'
 import { createLlmClient } from '../../llm'
 import { assertRequestInvariant } from '../agent/invariant'
+import type { LlmCallConfig } from '../../llm/call-config'
 import type { LlmClient } from '../../llm/client'
 import {
   createUserMessage,
@@ -228,6 +229,10 @@ export interface HostExtensions {
   readonly pluginSkills?: (projectRoot: string | null) => readonly string[]
   /** Where a Build session's managed worktree is (KRN-11). */
   readonly worktrees?: (sessionId: string, projectRoot: string) => string
+  /** The model entry local subagents use; undefined follows the conversation (AGT-10). */
+  readonly localSubagentModel?: () => string | undefined
+  /** Where a writing external task works when the model does not say (AGT-10). */
+  readonly defaultWorkspace?: () => 'isolated-worktree' | 'shared-exclusive'
 }
 
 /** Plugin hook sets, applied by the plugin activation controller. */
@@ -399,6 +404,9 @@ export class HarnessHost {
   private readonly agents = new Map<string, Agent>()
   /** Uninstalls of the extensions CoreApi registered (turn file records). */
   private readonly extensionTeardown: Array<() => void> = []
+  private localSubagentModel: () => string | undefined = () => undefined
+  private defaultWorkspace: () => 'isolated-worktree' | 'shared-exclusive' =
+    () => 'isolated-worktree'
   private worktreeResolver: (sessionId: string, projectRoot: string) => string =
     (_sessionId, projectRoot) => projectRoot
   /** Each root session's task tree: its subagents, their jobs, its budget (KRN-03). */
@@ -498,6 +506,8 @@ export class HarnessHost {
           this.taskTreeOf(parent).waiting(parent, delta),
         takeWake: (parent) => this.taskTreeOf(parent).takeWake(parent),
       },
+      // 设置 › 子智能体 › 本地子智能体 › 使用的模型 (AGT-10).
+      childCallConfig: () => this.childCallConfig(),
     })
     this.workflows = new WorkflowEngine([
       createRoutingChildProvider({
@@ -822,6 +832,8 @@ export class HarnessHost {
               '.git',
             ),
           ),
+        // 设置 › 子智能体 › 改代码的位置 (AGT-10).
+        defaultWorkspace: () => this.defaultWorkspace(),
         // Plan mode explores read-only: external children default to review.
         parentReadOnly: (agent) =>
           this.sandbox.resolve({ session: agent.session }).mode ===
@@ -999,6 +1011,28 @@ export class HarnessHost {
     if (extensions.pluginSkills)
       this.kept.skillLoaders.setPluginSkillsResolver(extensions.pluginSkills)
     if (extensions.worktrees) this.worktreeResolver = extensions.worktrees
+    if (extensions.localSubagentModel)
+      this.localSubagentModel = extensions.localSubagentModel
+    if (extensions.defaultWorkspace)
+      this.defaultWorkspace = extensions.defaultWorkspace
+  }
+
+  /**
+   * The request config of a local subagent: the model chosen in 设置 ›
+   * 子智能体 while it is still configured, else the conversation's (AGT-10).
+   */
+  private childCallConfig(): (() => LlmCallConfig) | undefined {
+    const id = this.localSubagentModel()
+    if (id === undefined) return undefined
+    if (!this.llm.listRoutes().some((route) => route.id === id))
+      return undefined
+    const config = this.llm.defaultCallConfig(id)
+    return () => config
+  }
+
+  /** The user writes to a live local subagent from its page (AGT-10). */
+  messageSubagent(childId: string, text: string): string {
+    return this.subagents.userFollowup(childId, text)
   }
 
   /** Plugin hook sets (the plugin activation controller's port). */

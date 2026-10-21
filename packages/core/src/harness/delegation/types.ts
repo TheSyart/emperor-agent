@@ -130,6 +130,16 @@ export interface ExecutorConfig {
     toolchains: boolean
     github: boolean
   }
+  /**
+   * The model entry local subagents use (设置 › 子智能体 › 本地子智能体,
+   * AGT-10); absent follows the conversation's model.
+   */
+  localSubagentModel?: string
+  /**
+   * Where a writing external task works when the model does not say
+   * (设置 › 子智能体 › 改代码的位置, AGT-10); absent is an isolated worktree.
+   */
+  defaultWorkspace?: 'isolated-worktree' | 'shared-exclusive'
 }
 export interface ExecutorProbe {
   status:

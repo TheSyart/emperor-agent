@@ -83,6 +83,7 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   SESSION_LOG_UNRECOVERABLE: '子智能体的会话记录已损坏，无法恢复。',
   EXTERNAL_OPERATION_FAILED: '子智能体的操作没有成功，请刷新任务详情并检查保留的日志。',
   subagent_worktree_unavailable: '无法为子智能体创建隔离 worktree。',
+  subagent_not_live: '这个子智能体已经结束，不能再发消息。',
 
   // 工作区与文件
   workspace_project_required: '当前会话没有绑定项目。',
