@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用自动化能力的用户<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 最后核验：2026-10-22（对照 `84245509`）<br>
 > 事实源：`packages/core/src/scheduler/`、`packages/core/src/harness/host/scheduler.ts`、`packages/core/src/harness/hooks/`、`packages/core/src/api/services/hooks-service.ts`、`packages/core/src/watchlist/`、DesktopPet service、`packages/core/src/harness/delegation/`、`packages/core/src/runtime/agent-view.ts`、`desktop/src/renderer/src/components/pages/scheduler/`、`desktop/src/renderer/src/components/settings/`（高级 › Hooks、记忆、常规 › 外观 › 桌宠、子智能体）、`desktop/src/renderer/src/components/conversation/nodes/DelegationResultCard.vue`
 
 本页介绍定时任务、Hooks、Watchlist、桌宠和子智能体。它们都通过与普通对话相同的内核运行，不获得额外权限。
@@ -108,26 +108,42 @@ Watchlist 由 `memory/watchlist.md` 定义，在「设置 › 记忆」右上角
 
 - **可用的子智能体**：
   - 「本地子智能体」右侧选它用哪个模型：默认「跟随对话」，也可以固定为「设置 › 模型」里的某一条（例如让子任务用便宜一些的模型）。那条模型删除后暂时按对话的模型运行，行内写明「（已删除）」。
-  - Claude Code、Codex 每行有状态（「子智能体就绪」「已关闭」「需要登录令牌」「令牌已过期」「可能不兼容」「版本不兼容」「未找到命令行程序」等）和一句说明，右侧是启用开关和进入详情页的箭头。打开并就绪后，行内可以选默认模型；Claude Code 打开了但缺少可用的登录时，这个位置换成「设置令牌」。
+  - Claude Code、Codex 每行有状态（「子智能体就绪」「已关闭」「未登录」「未安装」「可能不兼容」「版本不兼容」「未找到命令行程序」等）和一句说明，右侧是启用开关和进入详情页的箭头。两者都只用文字名称和中性图标标出。打开并就绪后，行内可以选默认模型；Claude Code 打开了但还没有登录时，这个位置换成「登录 Claude Code」；没有安装时，这一行写出官方安装命令。
 - **子任务**：「同时运行」（Claude Code 和 Codex 合计 1–4 个，默认 2 个，超过后排队）、「改代码的位置」（见下面「工作区与成果」）、「单个任务的费用上限」（$1 / $2 / $5 / $10，默认 $10），以及「高级」。
-- **高级**：「运行」组有每次运行最多轮数、单次运行时长上限；「开发环境」组；「Claude Code」组的「使用本机安装的 claude」；「排查」组的「验证后再应用」「诊断模式」。各项见下文。
-- **详情页**（Claude Code、Codex 各一页）：状态（找不到程序时有「安装说明」和「更正路径」）、登录（只有 Claude Code）、默认模型（「刷新模型」重新读取列表；下拉里还有「跟随本机 CLI」和「新增自定义模型…」）、擅长的任务（「编辑专长」或「恢复默认」，主会话据此决定交给谁）和能力与运行情况。
+- **高级**：「运行」组有每次运行最多轮数、单次运行时长上限；「开发环境」组；「排查」组的「验证后再应用」「诊断模式」。各项见下文。
+- **详情页**（Claude Code、Codex 各一页）：状态（找不到程序时有安装命令或「安装说明」，以及「更正路径」）、登录（只有 Claude Code）、默认模型（「刷新模型」重新读取列表；下拉里还有「跟随本机 CLI」和「新增自定义模型…」）、擅长的任务（「编辑专长」或「恢复默认」，主会话据此决定交给谁）和能力与运行情况。
 
-### 登录与令牌
+### 登录
 
-**Claude Code**：需要令牌时，点设置页那一行的「设置令牌」，或在详情页的「登录」里设置。
+**安装 Claude Code**：Emperor 运行你在这台 Mac 上安装的、未经修改的 Claude Code（`claude` 命令），应用本身不附带 Claude Code。它会在 `PATH`、常见的安装位置（`~/.local/bin`、`/opt/homebrew/bin`、`/usr/local/bin` 等）和登录 shell 的 `PATH` 里找 `claude`。还没安装时，设置页那一行显示「未安装」和官方安装命令：在终端运行
 
-- 订阅账号（Pro、Max 等）：在终端运行 `claude setup-token`，按提示在浏览器里登录，把它打印出的长期令牌（以 `sk-ant-oat` 开头）粘贴进来。
-- API Key：选「API Key」，粘贴 `ANTHROPIC_API_KEY`（以 `sk-ant-api` 开头，在 Anthropic Console 创建）。贴错类型时对话框会提示。
-- 令牌只保存在这台 Mac 上，用 Emperor 自己的本地密钥加密（与模型 Key、密码管理器用同一把），保存后立即生效；页面只显示「已设置 · 末 4 位」，不会再显示令牌本身。「更换令牌」「移除令牌」在详情页的「登录」里。
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+```
 
-Emperor 按这个顺序找 Claude Code 的登录，用第一个找到的，不把几处的密钥混在一起：① 你在 Emperor 里设置的令牌；② `~/.claude/settings.json` 里 `env` 的 `CLAUDE_CODE_OAUTH_TOKEN` 或 `ANTHROPIC_API_KEY`；③ `~/.claude/.credentials.json`（只用其中的访问令牌）；④ 启动 Emperor 时的环境变量，以及登录 shell（例如 `~/.zshrc`）里导出的这几个变量——从程序坞或访达启动时，Emperor 会在需要时运行一次登录 shell 读取它们，最多等 3 秒。Emperor 不读取 macOS 钥匙串，所以在终端里用 `/login` 登录、只存在钥匙串里的账号，需要按上面的方法设置令牌。详情页的「登录」写明当前用的是哪一处。
+装好后点「重新检测」（也可以用 Homebrew：`brew install --cask claude-code`）。需要 2.1.79 或更高版本；更旧的显示「版本不兼容」，在终端运行 `claude update` 升级。装在别处时，在详情页点「更正路径」填写它的完整路径。
 
-`.credentials.json` 里的访问令牌有效期很短：过期后显示「令牌已过期」，过期前 10 分钟显示「令牌即将过期」（长任务可能中途失败）；改用 `claude setup-token` 的长期令牌可以避免。没有任何可用登录时，设置页显示「需要登录令牌」（详情页写「尚未登录」），主会话也会被告知它不可用，不会再把任务交给它。
+**登录 Claude Code**：Claude Code 用它自己的登录，第一次使用前登录一次：
+
+1. 在「设置 › 子智能体」Claude Code 那一行，或详情页的「登录」里，点「登录 Claude Code」。
+2. Emperor 打开 macOS 的「终端」，在新窗口里运行 `claude auth login`。按窗口里的提示在浏览器里登录你的 Claude 账号（Pro、Max、Team 或 Enterprise）。窗口显示「登录完成」后可以关掉。
+3. 回到 Emperor，设置页自动重新检测（也可以点「重新检测」），显示「已登录 Claude 账号 · 你的邮箱」。
+
+用 Anthropic Console 账号按用量计费时，点详情页的「用 Console 账号登录（按用量计费）」，同样在「终端」里完成（`claude auth login --console`）。「退出登录」运行 `claude auth logout`。
+
+这份登录由 Claude Code 自己保存：放在 macOS 钥匙串里，钥匙串不可用时放在它目录里的文件中。Emperor 为它准备了一个专用目录（`~/.emperor/delegations/claude-code/`），每个子任务、每次检测和每次登录都用这个目录，所以登录一次之后一直有效；它和你平时在终端里用的 `claude` 的登录互不影响。**Emperor 不读取、不保存、也不转交你的 Claude 登录**：它只运行 `claude auth status`，问 Claude Code 是否已登录、用的是哪种方式和哪个账号，再把这些显示出来；Emperor 自己的工具也读不到那份登录文件。
+
+**使用 API Key**：也可以不登录 Claude 账号，改用你在 Anthropic Console 创建的 API Key（按用量计费）：在详情页的「登录」里点「使用 API Key」，粘贴 `ANTHROPIC_API_KEY`（以 `sk-ant-api` 开头）。它只保存在这台 Mac 上，用 Emperor 的本地密钥加密（与模型 Key、密码管理器用同一把），保存后立即生效，页面只显示「末 4 位」；「更换 API Key」「移除」在同一处。Claude 账号的登录令牌（以 `sk-ant-oat` 开头）不能填在这里。
+
+**第三方端点**：如果你的 `~/.claude/settings.json` 在 `env` 里配置了兼容 Anthropic 接口的第三方端点（`ANTHROPIC_BASE_URL`，加上它的 `ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_API_KEY`，例如 DeepSeek 的 Anthropic 兼容接口），Claude Code 子任务照样使用它，详情页写「使用第三方端点 …」。启动 Emperor 时的环境变量、登录 shell（例如 `~/.zshrc`）里导出的 `ANTHROPIC_API_KEY` 也照样交给它；从程序坞或访达启动时，Emperor 会在需要时运行一次登录 shell 读取这几个变量，最多等 3 秒。
+
+**哪一个生效**：API Key 和第三方端点的令牌优先于 Claude Code 自己的登录（这是 Claude Code 自己的规则）。Emperor 依次取 ① 你在 Emperor 里设置的 API Key；② `~/.claude/settings.json` 的 `env`；③ 启动 Emperor 时的环境变量；④ 登录 shell 里导出的变量，用第一个找到的；都没有时用 Claude Code 自己的登录。详情页的「登录」按 `claude auth status` 写明实际在用哪一个，并说明要改用 Claude 账号需要去掉哪一处。没有任何登录时，设置页显示「未登录」（详情页写「尚未登录」），主会话也会被告知它不可用，不会把任务交给它。
+
+**从旧版本升级**：以前粘贴进 Emperor 的 Claude 令牌会在升级后第一次启动时删除，「设置 › 子智能体」顶部提示一次「Claude Code 现在用它自己的登录」，点「登录 Claude Code」登录一次即可（「知道了」关掉提示）。之前的子任务仍然可以继续对话。
 
 **Codex**：在终端运行 `codex login` 登录，然后在设置页点「重新检测」。Codex 子智能体与你自己的 Codex 共用 `~/.codex/auth.json` 这一份登录，不复制令牌：子任务刷新登录后你自己的 Codex 也拿到新令牌，不会被登出。同一时间只有一个 Codex 子任务在运行，另一个排队等待。使用 API Key 的 Codex 只把密钥作为环境变量传给子任务。Emperor 从程序坞或访达启动时，也会读取你在 `~/.zshrc` 里导出的自定义提供方密钥（例如 Azure 的 `AZURE_OPENAI_API_KEY`），Azure 的 `api-version` 等查询参数也会保留。
 
-Claude Code 子任务里执行的命令（Bash）拿不到它自己的登录令牌或 API Key，任务里的提示注入无法用 `printenv` 读走这些凭据。
+Claude Code 子任务里执行的命令（Bash）拿不到 Emperor 交给它的 API Key 或端点令牌，任务里的提示注入无法用 `printenv` 读走这些凭据。
 
 ### 工作区与成果
 
@@ -157,13 +173,13 @@ Claude Code 子任务里执行的命令（Bash）拿不到它自己的登录令�
 
 ### 费用与额度
 
-用订阅登录（Claude 订阅、ChatGPT 账号）的子任务只占用你的订阅额度，任务详情写「订阅额度，不计费用」，不会因为子智能体报告的名义费用被拦下，只受每次运行的轮数和运行时长限制。用 API Key 的子任务按估算费用计入「单个任务的费用上限」（默认 10 美元）：Claude Code 把剩余额度交给它自己控制，超出时子任务停止并写明「已达到单任务费用上限」；Codex 按模型目录的单价估算，模型没有公开单价时改按 token 计，一个任务最多 200 万 token（「已达到单任务 token 上限」）。同一个任务里继续安排任务、或重启 Emperor 之后，已用的额度都不会清零；你发出下一条消息时开始新的任务。子任务用掉的 API 费用也计入主对话的「每个任务的费用上限」。
+用订阅登录（Claude 账号、ChatGPT 账号）的子任务只占用你的订阅额度，任务详情写「订阅额度，不计费用」，不会因为子智能体报告的名义费用被拦下，只受每次运行的轮数和运行时长限制。用 API Key（包括 Console 账号登录）的子任务按估算费用计入「单个任务的费用上限」（默认 10 美元）：Claude Code 把剩余额度交给它自己控制，超出时子任务停止并写明「已达到单任务费用上限」；Codex 按模型目录的单价估算，模型没有公开单价时改按 token 计，一个任务最多 200 万 token（「已达到单任务 token 上限」）。同一个任务里继续安排任务、或重启 Emperor 之后，已用的额度都不会清零；你发出下一条消息时开始新的任务。子任务用掉的 API 费用也计入主对话的「每个任务的费用上限」。
 
 ### 运行规则
 
 - **谁能安排**：主会话的 Agent 和工作流都可以把任务交给已启用的 Claude Code / Codex。目标在等这些任务结束时不会为了等待反复调用模型，你的消息优先。定时任务和主会话共用同样的并发与权限边界；定时任务里子任务提问时没有人回答，问题会退回给主会话的 Agent，说明需要你来回答。停止主会话后，晚到的子任务通知不会让它自己重新开始。
 - **每次运行最多轮数**：Claude Code 一次运行默认最多调用模型 200 轮，可在「设置 › 子智能体 › 高级 › 每次运行最多轮数」改为 50–1000。用完时这次运行结束，主会话可以发消息让它接着做。
 - **长时间等待**：Codex 子智能体向你提问后，过几分钟再回答也不会超时；长时间没有输出的命令（例如构建）也不会被中途停止。只有超过「设置 › 子智能体 › 高级 › 单次运行时长上限」（默认 30 分钟，可选 10、30、60、120 分钟）时才会停止，结果里写明原因是超时。多轮对话、输出很长的 Codex 子智能体也可以继续安排任务。
-- **开发环境**：子智能体在自己隔离的主目录里运行，读不到你的 `~/.gitconfig`、SSH 密钥、nvm 等工具链和 gh 登录。「设置 › 子智能体 › 高级 › 开发环境」逐项决定带上哪些：「Git 身份」（提交时用你 git 配置里的姓名和邮箱）和「网络代理」默认打开；「SSH 代理」（经你的 SSH agent 访问远端仓库，不复制密钥）、「开发工具链」（nvm 的默认 node、volta、rustup / cargo、pyenv）和「允许子智能体使用 GitHub 登录」（把 `gh auth token` 的令牌交给子任务，并在它私有的 gh 配置里写一份，Claude Code 的 Bash 也能用 gh）默认关闭，按需打开。从程序坞启动 Emperor 时，这些变量从你的登录 shell 读取。仓库里的 `CLAUDE.md`、`AGENTS.md` 会作为说明交给 Claude Code，`AGENTS.md` 的摘要会附在 Codex 的任务简报里；仓库的 `.claude/settings.json` 不会被加载（其中的权限放行规则可能绕过 Emperor 的审批）。
-- **失败原因**：Claude Code 子任务失败时，任务详情写明原因和下一步：「登录令牌已失效或过期」（401，重新设置令牌）、「被限流了」（429 或订阅额度用尽，稍后再试）、「账户余额或计费状态不允许继续调用」（检查 Anthropic Console 的余额与付款方式）、「达到了这次运行的最多轮数」、「对话超出了模型的上下文长度」（把任务拆小或新开子智能体），其他情况为「子智能体这一轮执行失败」并附子智能体报告。
-- **版本**：Claude Code 默认使用随 Emperor 发布的版本，本机 claude 自动更新不会影响它；在「设置 › 子智能体 › 高级」打开「使用本机安装的 claude」后改用本机版本，需要 2.1 或更高。Codex 使用本机安装的 CLI，需要与 Emperor 验证过的版本同属一个次版本（目前是 0.153.x）；同一次版本但协议有变化时显示「可能不兼容」，仍然可以运行，失败时结果里会注明可能是版本原因；其他版本显示「版本不兼容」和需要的版本范围。
+- **开发环境**：子智能体在自己隔离的主目录里运行（Claude Code 用 Emperor 为它准备的专用目录），读不到你的 `~/.gitconfig`、SSH 密钥、nvm 等工具链和 gh 登录。「设置 › 子智能体 › 高级 › 开发环境」逐项决定带上哪些：「Git 身份」（提交时用你 git 配置里的姓名和邮箱）和「网络代理」默认打开；「SSH 代理」（经你的 SSH agent 访问远端仓库，不复制密钥）、「开发工具链」（nvm 的默认 node、volta、rustup / cargo、pyenv）和「允许子智能体使用 GitHub 登录」（把 `gh auth token` 的令牌交给子任务，并在它私有的 gh 配置里写一份，Claude Code 的 Bash 也能用 gh）默认关闭，按需打开。从程序坞启动 Emperor 时，这些变量从你的登录 shell 读取。仓库里的 `CLAUDE.md`、`AGENTS.md` 会作为说明交给 Claude Code，`AGENTS.md` 的摘要会附在 Codex 的任务简报里；仓库的 `.claude/settings.json` 不会被加载（其中的权限放行规则可能绕过 Emperor 的审批）。
+- **失败原因**：Claude Code 子任务失败时，任务详情写明原因和下一步：「Claude Code 的登录已失效或过期」（401，点「登录 Claude Code」重新登录，或换一个新的 API Key）、「被限流了」（429 或订阅额度用尽，稍后再试）、「账户余额或计费状态不允许继续调用」（检查 Anthropic Console 的余额与付款方式）、「达到了这次运行的最多轮数」、「对话超出了模型的上下文长度」（把任务拆小或新开子智能体），其他情况为「子智能体这一轮执行失败」并附子智能体报告。
+- **版本**：Claude Code 使用你本机安装的 `claude`，需要 2.1.79 或更高（它支持 `claude auth status` 与 `claude auth login --console`）；用官方命令安装的 Claude Code 会自己在后台更新，Homebrew 安装的用 `brew upgrade claude-code` 升级。Codex 使用本机安装的 CLI，需要与 Emperor 验证过的版本同属一个次版本（目前是 0.153.x）；同一次版本但协议有变化时显示「可能不兼容」，仍然可以运行，失败时结果里会注明可能是版本原因；其他版本显示「版本不兼容」和需要的版本范围。

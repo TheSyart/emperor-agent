@@ -286,7 +286,7 @@ Build 项目目录不会承载私有会话、记忆或附件数据。
 - Headless ACP 是源码级、本机 stdio operator preview，不随当前桌面安装包提供服务端入口；它不能回答问题或审批。
 - Python runtime、Python CLI 和 HTTP/WS backend 已退役，不是备用执行路径。
 - 网页读取（`web_fetch`）默认开启，只读公开网页，不带登录状态；网页搜索（`web_search`）只在模型使用 DeepSeek 官方 API 时提供，见[Tools、Skills 与 MCP](docs/user/tools-skills-mcp.md#tools)。
-- Claude Code / Codex 子智能体需要本机已安装的 Codex CLI（Claude Code 随 Emperor 提供），使用你自己的订阅额度或 API 计费；Emperor 不读取 macOS 钥匙串里的 Claude 登录，需要用 `claude setup-token` 的令牌。
+- Claude Code / Codex 子智能体需要本机已安装的 Claude Code / Codex CLI（Emperor 不附带它们），使用你自己的订阅额度或 API 计费。Claude Code 用它自己的登录：在「设置 › 子智能体」点「登录 Claude Code」，在「终端」里登录一次；Emperor 不读取、不保存你的 Claude 登录。
 - Watchlist 仍属于受控后台维护基础设施，不提供外部消息平台连接器。
 - 电脑操作仍属实验能力，不能保证所有应用后台操作；Edge、部分系统权限和真实应用场景仍需在目标环境里验证。
 - 每次更新都会改变应用和 Helper 的代码身份，旧授权开关即使仍开着也可能无效；按设置页提示重新授权并重启 Helper。

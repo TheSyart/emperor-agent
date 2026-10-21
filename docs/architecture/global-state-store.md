@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-10-21（对照 `8f954763`）<br>
+> 最后核验：2026-10-22（对照 `84245509`）<br>
 > 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/single-instance.ts`、`desktop/src/main/logging/log-location.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/user-downloads.ts`、`packages/core/src/workspace/turn-snapshots.ts`、`packages/core/src/workspace/delegation-workspaces.ts`、`packages/core/src/harness/delegation/`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store、`packages/core/src/updates/service.ts`
 
 ## 两个根的区分
@@ -151,12 +151,16 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
   delegations/               # Claude Code / Codex 子智能体（见文末「外部委派状态」）
     config.json              # 子智能体设置（schemaVersion 1）
     consent.json             # 「以后都允许」
-    credentials.json         # 在设置里粘贴的 Claude Code 令牌（本地密钥加密，0600）
+    credentials.json         # 「使用 API Key」保存的 Claude Code API Key（本地密钥加密，0600）；升级时删除旧版本保存的 Claude 令牌，并在这里记一次提示
+    claude-code/             # Claude Code 的专用目录（AGT-12，0700，跨运行持久；Emperor 不读其中的登录）
+      config/                # 每次运行、claude auth status、登录与退出登录共用的 CLAUDE_CONFIG_DIR：Claude Code 自己的设置、会话记录（projects/）与登录（钥匙串条目以此目录为键，钥匙串不可用时为 .credentials.json）；settings.json 由 Emperor 写，只含模型设置
+      home/                  # 它们共用的 HOME（与 XDG_CONFIG_HOME、XDG_CACHE_HOME）
+      sign-in/               # 「登录 Claude Code」交给「终端」的 .command 脚本，运行完删除自己，遗留的 10 分钟后删除
     runtime-facts.json       # 能力验证事实
     model-catalog-cache.json # Claude Code / Codex 的模型候选缓存
     conversations/<dlg-id>/  # journal.jsonl、snapshot.json、runs/
     workspaces/<lease>/      # 成果所在的隔离 worktree 或文件夹副本（副本另有 <lease>.git）
-    runtime/<profile>/<dlg-id>/  # 每个委派私有的 HOME、CLAUDE_CONFIG_DIR、CODEX_HOME、临时目录
+    runtime/<profile>/<dlg-id>/  # 每个委派私有的临时目录；Codex 另有私有 HOME、CODEX_HOME（旧版本的 Claude 委派在这里还有 HOME、CLAUDE_CONFIG_DIR，会话记录在下一次准备时复制到 claude-code/config）
     leases/、receipts/、baselines/、patches/、artifacts/、acceptance/、integrations/、processes/、inspections/
   run/                       # 本机 Helper 和浏览器 bridge socket
   native-helpers/<cdhash>/   # 签名 Helper 的独立安装版本（macOS）
@@ -178,7 +182,7 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
 - 「最近删除」里超过 30 天的会话经会话服务永久删除（连同子会话、spill 与 turn 快照）。
 - `spill/` 下不属于任何会话的内容：散文件（旧版本的 `shell-*.log`、没有会话的落盘结果；现在命令输出也写进会话自己的目录）与 `session-<hash>/` 目录（其会话既不在 `sessions/`，也不在 `sessions/.trash/`，子会话也算），其中所有文件 30 天没有变化时删除。会话自己的 spill 目录在会话永久删除时删除（KRN-03）。
 - `memory/versions/snapshots/` 里索引不再列出的快照，以及原子写留下的临时文件（超过一小时）。
-- `delegations/runtime/<profile>/<delegation-id>/`（外部子智能体的隔离 HOME、`CODEX_HOME` 等）：委派空闲或已关闭、且所属会话已不存在时删除；没有任何委派记录的目录 30 天后删除；旧版本每次检查新建的 `dlg-probe-*`（各含一份令牌副本）与 `indexes/`、`snapshot-temp/`、`artifact-temp/` 的临时内容一天后删除。删除从不跟随符号链接（`CODEX_HOME/auth.json` 是指向用户文件的链接，只删链接）。成果 worktree 与用户仓库里的 `refs/emperor/delegations/*` 由委派流程自己清理（AGT-06）。
+- `delegations/runtime/<profile>/<delegation-id>/`（外部子智能体的临时目录、Codex 的隔离 HOME 与 `CODEX_HOME` 等）：委派空闲或已关闭、且所属会话已不存在时删除；没有任何委派记录的目录 30 天后删除；旧版本每次检查新建的 `dlg-probe-*`（各含一份令牌副本）与 `indexes/`、`snapshot-temp/`、`artifact-temp/` 的临时内容一天后删除。删除从不跟随符号链接（`CODEX_HOME/auth.json` 是指向用户文件的链接，只删链接）。成果 worktree 与用户仓库里的 `refs/emperor/delegations/*` 由委派流程自己清理（AGT-06）。
 
 `storage.usage` 遍历一次 Emperor Home，按会话、附件（`memory/attachments`、`memory/media`）、溢出文件、记忆版本、用量账本、委派与其他汇总磁盘占用（按块计算，硬链接只算一次，不跟随链接，与 `du` 的口径一致）。
 
@@ -337,7 +341,7 @@ Emperor 自己的持久文件写明自己的版本（`model_tests.json` 这类�
 
 备份按部分组织：设置与配置（`settings.json`、`model_config.json`、`mcp_config.json`、`hooks.json`、`onboarding.json`、`delegations/config.json`、`delegations/consent.json`）、记忆（`memory/`，附件与媒体除外）、Skills / 插件 / 智能体（`skills/` 除 `.staging`、`agents/`（当前版本不再写入，存在时一并备份）、`plugins/` 除 `staging`）、项目与定时任务（`projects/`、`scheduler/` 除锁），可选的会话（`sessions/` 除 `.scratch`、`memory/attachments`、`memory/media`、`tokens/`）。任何深度的锁文件、临时文件、`*.corrupt-*`、符号链接和特殊文件都不复制。备份从不包含 `installation.json`、`computer-use/`（凭据库与本地密钥）、`browser/`、`environment/`、`logs/`、`run/`、`spill/`、`write-staging/`、`git/`、委派的运行目录和 `migrations/`。
 
-导出：有备份口令时先由凭据库导出 SEC-09 的口令封装文件（条目与本地密钥，AES-256-GCM，scrypt 派生），作为 `credentials.emperor-vault`，同时带上 `delegations/credentials.json`（AGT-02 用本地密钥封装的 Claude Code 令牌）；没有口令时这三者都不在备份里。Core 把备份范围复制到 main 的私有临时目录（0700，文件 0600），复制件里的明文模型 Key 与 MCP 密钥用本地密钥封装（无法封装时去掉），写 `emperor-backup.json`（format `emperor-backup`、version 1、createdAt、appVersion、dataVersion、categories、credentials、files、bytes），main 用 `ditto -c -k --keepParent` 打包为 `.emperor-backup.zip`（先写 `<文件>.partial-<随机>`，0600，再改名），然后删除临时目录。
+导出：有备份口令时先由凭据库导出 SEC-09 的口令封装文件（条目与本地密钥，AES-256-GCM，scrypt 派生），作为 `credentials.emperor-vault`，同时带上 `delegations/credentials.json`（用本地密钥封装的 Claude Code API Key；`delegations/claude-code/` 里 Claude Code 自己的登录与会话从不进备份）；没有口令时这三者都不在备份里。Core 把备份范围复制到 main 的私有临时目录（0700，文件 0600），复制件里的明文模型 Key 与 MCP 密钥用本地密钥封装（无法封装时去掉），写 `emperor-backup.json`（format `emperor-backup`、version 1、createdAt、appVersion、dataVersion、categories、credentials、files、bytes），main 用 `ditto -c -k --keepParent` 打包为 `.emperor-backup.zip`（先写 `<文件>.partial-<随机>`，0600，再改名），然后删除临时目录。
 
 恢复：main 用 `ditto -x -k` 解压到 `<home>/migrations/.restore-<id>/`，Core 校验 manifest（格式更新的备份拒绝）和每一个路径（只允许 manifest 声明的部分里的普通文件与目录，符号链接与范围外路径一律拒绝）。用户确认后，有口令时 main 先导入凭据库（全部字段打开后才改动本地状态；口令错误时什么都不变）；然后 Core 把解压目录改名为 `migrations/restore-pending/`（同一磁盘，原子），去掉 `credentials.emperor-vault`，没有导入凭据库时也去掉 `delegations/credentials.json`，最后写标记 `restore.json`；main 重新启动。下次启动在取得数据目录锁之后、bootstrap 之前（`applyPendingHomeRestore`）：
 
