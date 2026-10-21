@@ -153,7 +153,7 @@ const visible = computed(
 
 <style scoped>
 .update-notice {
-  margin-bottom: var(--space-5);
+  min-width: 0;
 }
 
 .progress {
@@ -179,6 +179,7 @@ const visible = computed(
 .steps {
   margin: var(--space-2) 0 0;
   padding-left: var(--space-5);
+  list-style: decimal;
 }
 
 .steps li + li {

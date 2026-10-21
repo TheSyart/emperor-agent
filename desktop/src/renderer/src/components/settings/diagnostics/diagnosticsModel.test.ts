@@ -1188,10 +1188,10 @@ describe('update rows (REL-02)', () => {
     )
     expect(feed).toMatchObject({
       label: '测试更新源',
-      value: 'http://127.0.0.1:8765/releases',
+      value: '已生效',
       tone: 'warn',
-      mono: true,
     })
+    expect(feed?.detail).toContain('http://127.0.0.1:8765/releases')
     expect(feed?.detail).toContain('EMPEROR_UPDATE_FEED_URL')
     expect(row(updates(), 'update-feed')).toBeUndefined()
   })

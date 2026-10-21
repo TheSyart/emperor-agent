@@ -1500,11 +1500,9 @@ function updateRows(
     rows.push({
       id: 'update-feed',
       label: '测试更新源',
-      value: updates.feedOverride,
-      detail:
-        '由环境变量 EMPEROR_UPDATE_FEED_URL 指定，只用于测试；从这里下载的安装包不核验 GitHub 来源证明',
+      value: '已生效',
+      detail: `${updates.feedOverride}：由环境变量 EMPEROR_UPDATE_FEED_URL 指定，只用于测试；从这里下载的安装包不核验 GitHub 来源证明`,
       tone: 'warn',
-      mono: true,
     })
   const electron = updates.electron
   if (electron?.current)
