@@ -26,6 +26,7 @@ import {
   skillIdOf,
 } from '../../commands'
 import type { SlashPaletteItem } from '../../commands'
+import { reasoningLabel } from './composerModelControl'
 import { actionIcons, toolIcon, type IconComponent } from '../../icons'
 import type { PluginSummary, RuntimeGoalView } from '../../types'
 import type {
@@ -117,9 +118,12 @@ export function useComposerPalette(
           items: argumentCompletions.value.map((item, index) => ({
             id: `completion:${command.commandId}:${index}`,
             action: 'insert_command' as const,
-            label: item.label,
+            label:
+              item.kind === 'reasoning_effort'
+                ? reasoningLabel(item.value)
+                : item.label,
             description: item.description || command.description,
-            meta: item.kind || '参数',
+            meta: COMPLETION_KIND_LABELS[item.kind ?? ''] ?? '参数',
             completion: `${command.name} ${item.value}`,
             icon: commandIcon(command.name),
             tone: 'slate' as const,
@@ -316,6 +320,13 @@ export function useComposerPalette(
   }
 }
 
+/** What an argument completion is, in the grey column (`/model` → 模型). */
+const COMPLETION_KIND_LABELS: Record<string, string> = {
+  model: '模型',
+  reasoning_effort: '思考强度',
+  permission_preset: '执行权限',
+}
+
 function paletteItemFromSlash(item: SlashPaletteItem): CapabilityPickerItem {
   return {
     id: item.id,
@@ -327,7 +338,7 @@ function paletteItemFromSlash(item: SlashPaletteItem): CapabilityPickerItem {
           : 'insert_command',
     label: item.title,
     description: item.description,
-    meta: item.kind === 'skill' ? item.sourceLabel : undefined,
+    meta: item.kind === 'skill' ? item.sourceLabel : item.name,
     completion: item.completion,
     icon: item.kind === 'skill' ? toolIcon('skill') : commandIcon(item.name),
     tone: 'slate',

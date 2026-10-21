@@ -56,9 +56,9 @@ markdown.validateLink = (url) => validateLink(url) || url.startsWith('file://')
 const TYPE_LABEL: Record<GitHubResource['type'], string> = {
   repository: '仓库',
   pull_request: 'Pull Request',
-  issue: 'Issue',
-  commit: 'Commit',
-  release: 'Release',
+  issue: '议题',
+  commit: '提交',
+  release: '发布',
   run: 'CI',
   page: '网页',
 }

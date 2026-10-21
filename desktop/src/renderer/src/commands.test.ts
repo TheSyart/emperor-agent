@@ -47,7 +47,7 @@ describe('Core-owned slash palette projection', () => {
       {
         commandId: 'builtin.model',
         name: '/model',
-        title: 'Model',
+        title: '模型',
         kind: 'command',
       },
       {
@@ -60,7 +60,7 @@ describe('Core-owned slash palette projection', () => {
     ])
   })
 
-  it('keeps product order and exposes only Commands and Skills groups', () => {
+  it('keeps product order and exposes only the 命令 and Skills groups', () => {
     const items = buildSlashPaletteItems([
       command('continue'),
       command('stop'),
@@ -105,7 +105,7 @@ describe('Core-owned slash palette projection', () => {
       ),
     ).toEqual([
       {
-        label: 'Commands',
+        label: '命令',
         names: [
           '/new',
           '/compact',
@@ -166,5 +166,49 @@ describe('Core-owned slash palette projection', () => {
     expect(rankSlashPaletteItems(items, 'Emperor')[0]?.name).toBe(
       '/permissions',
     )
+  })
+
+  it('FIX-09 · 1 · 2 · built-in titles are Chinese and a skill says where it comes from in Chinese', () => {
+    const names = [
+      'new',
+      'compact',
+      'model',
+      'reasoning',
+      'permissions',
+      'plan',
+      'goal',
+      'stop',
+      'continue',
+    ]
+    const items = buildSlashPaletteItems(names.map((name) => command(name)))
+    expect(items.map((item) => item.title)).toEqual([
+      '新对话',
+      '压缩上下文',
+      '模型',
+      '思考强度',
+      '执行权限',
+      '计划模式',
+      '目标',
+      '停止',
+      '继续',
+    ])
+    const skills = buildSlashPaletteItems(
+      (
+        [
+          ['project_skill', 'agent_prompt'],
+          ['user_skill', 'agent_prompt'],
+          ['plugin', 'agent_prompt'],
+          ['builtin_skill', 'agent_prompt'],
+        ] as const
+      ).map(([source, kind], index) =>
+        command(`s${index}`, { id: `skill.${index}`, source, kind }),
+      ),
+    )
+    expect(skills.map((item) => [item.tags, item.sourceLabel])).toEqual([
+      ['项目 Skill', '项目'],
+      ['个人 Skill', '个人'],
+      ['插件 Skill', '插件'],
+      ['内置 Skill', '内置'],
+    ])
   })
 })
