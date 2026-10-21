@@ -1,10 +1,46 @@
 // @vitest-environment jsdom
-import { createApp, h, nextTick, ref, type App } from 'vue'
+import {
+  createApp,
+  defineComponent,
+  h,
+  nextTick,
+  ref,
+  watch,
+  type App,
+  type PropType,
+} from 'vue'
 import { provideDelegationLinks } from './delegationLinks'
 import ConversationMarkdown from './parts/ConversationMarkdown.vue'
 import { afterEach, expect, it, vi } from 'vitest'
-import ExternalAgentStream from './tools/ExternalAgentStream.vue'
-import { createExpansionStore, provideChatContext } from './chatContext'
+
+interface RunOutput {
+  delegationId: string
+  runId: string
+  phase: string
+  text: string
+}
+
+/**
+ * A run's output as the run page shows it (ExternalAgentConversation):
+ * links scoped to the root and the delegation, refreshed per run and phase.
+ */
+const RunOutputHarness = defineComponent({
+  props: {
+    rootSessionId: { type: String, required: true },
+    run: { type: Object as PropType<RunOutput>, required: true },
+  },
+  setup(props) {
+    const { click, links } = provideDelegationLinks(() => ({
+      sessionId: props.rootSessionId,
+      delegationId: props.run.delegationId,
+    }))
+    watch([() => props.run.runId, () => props.run.phase], () => links.refresh())
+    return () =>
+      h('div', { onClickCapture: click }, [
+        h(ConversationMarkdown, { text: props.run.text }),
+      ])
+  },
+})
 const core = vi.hoisted(() => vi.fn())
 vi.mock('../../api/backend', () => ({
   invokeCore: core,
@@ -21,7 +57,7 @@ afterEach(() => {
   root?.remove()
   vi.clearAllMocks()
 })
-it('scopes inline images beneath an internal parent to the owning root and delegation cwd', async () => {
+it('scopes inline images of a run to the owning root and the delegation', async () => {
   core.mockImplementation(async (key: string) =>
     key === 'references.resolve'
       ? {
@@ -40,33 +76,16 @@ it('scopes inline images beneath an internal parent to the owning root and deleg
   root = document.createElement('div')
   document.body.append(root)
   app = createApp({
-    setup() {
-      const expansion = createExpansionStore()
-      expansion.set('external:call', true)
-      provideChatContext({
-        sessionId: () => 'sub-parent',
-        rootSessionId: () => '78abd5498fc6469f',
-        expansion,
-        actions: {
-          inspect: () => {},
-          openSubagent: () => {},
-          editMessage: () => {},
+    render: () =>
+      h(RunOutputHarness, {
+        rootSessionId: '78abd5498fc6469f',
+        run: {
+          delegationId: 'dlg-sun',
+          runId: 'dgr-sun',
+          phase: 'completed',
+          text: '![太阳](sun.png)',
         },
-      })
-      return () =>
-        h(ExternalAgentStream, {
-          callId: 'call',
-          run: {
-            delegationId: 'dlg-sun',
-            runId: 'dgr-sun',
-            backend: 'codex',
-            title: '画太阳',
-            phase: 'completed',
-            text: '![太阳](sun.png)',
-            activity: [],
-          },
-        })
-    },
+      }),
   })
   app.mount(root)
   await settle()
@@ -85,18 +104,14 @@ it('scopes inline images beneath an internal parent to the owning root and deleg
   expect(root.querySelector('img.md-image-preview')?.getAttribute('src')).toBe(
     'data:image/png;base64,AQ==',
   )
-  expect(root.textContent).toContain('画太阳')
-  expect(root.textContent).toContain('Codex')
 })
 it('retries an early missing inline image when the same run settles', async () => {
   const { reactive } = await import('vue')
   const run = reactive({
     delegationId: 'dlg-late-image',
     runId: 'dgr-late-image',
-    backend: 'codex' as const,
     phase: 'outcome_unknown',
     text: '![稍后生成](sun.png)',
-    activity: [],
   })
   let available = false
   core.mockImplementation(async (key: string) =>
@@ -117,20 +132,7 @@ it('retries an early missing inline image when the same run settles', async () =
   root = document.createElement('div')
   document.body.append(root)
   app = createApp({
-    setup() {
-      const expansion = createExpansionStore()
-      expansion.set('external:late-call', true)
-      provideChatContext({
-        sessionId: () => 'root',
-        expansion,
-        actions: {
-          inspect: () => {},
-          openSubagent: () => {},
-          editMessage: () => {},
-        },
-      })
-      return () => h(ExternalAgentStream, { callId: 'late-call', run })
-    },
+    render: () => h(RunOutputHarness, { rootSessionId: 'root', run }),
   })
   app.mount(root)
   await settle()

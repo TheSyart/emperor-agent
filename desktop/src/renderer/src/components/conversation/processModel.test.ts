@@ -22,7 +22,10 @@ import {
   processLiveStep,
   processSummary,
   preparingToolData,
+  rowIndexOf,
+  rowNodeKey,
   timelineRowsOf,
+  type AgentsRow,
   type ProcessRow,
   type TimelineRow,
 } from './processModel'
@@ -33,6 +36,13 @@ function snapshotOf(events: Parameters<typeof replay>[0]): ChatSnapshot {
 }
 
 function describeRow(row: TimelineRow, nodes: ChatSnapshot['nodes']): string {
+  if (row.kind === 'agents')
+    return `agents: ${row.members
+      .map((key) => {
+        const node = nodes.get(key) as ChatNode
+        return node.kind === 'tool' ? `tool:${node.data.name}` : node.kind
+      })
+      .join(' ')}`
   if (row.kind === 'node') {
     const node = nodes.get(row.id) as ChatNode
     const label =
@@ -76,7 +86,9 @@ describe('process rows (DSH-22)', () => {
     const snapshot = snapshotOf(scenario.sessions[0]!.events)
     expect(describeRows(snapshot)).toEqual([
       'user',
-      'process[done] steps=11: assistant tool:grep tool:read assistant tool:edit assistant tool:write tool:todo_write tool:bash tool:bash tool:glob assistant tool:web_search tool:subagent',
+      // UI-S14: the subagent leaves the process for a row of its own.
+      'process[done] steps=10: assistant tool:grep tool:read assistant tool:edit assistant tool:write tool:todo_write tool:bash tool:bash tool:glob assistant tool:web_search',
+      'agents: tool:subagent',
       'assistant(closing)',
       'turnTail',
     ])
@@ -88,7 +100,7 @@ describe('process rows (DSH-22)', () => {
     const duration = tail?.kind === 'turnTail' ? tail.data.durationMs : 0
     expect(process!.endedAt! - process!.startedAt!).toBe(duration)
     expect(processSummary(process!)).toBe(
-      `已处理 11 步 · 用时 ${formatRunDuration(duration ?? 0)}`,
+      `已处理 10 步 · 用时 ${formatRunDuration(duration ?? 0)}`,
     )
   })
 
@@ -101,9 +113,9 @@ describe('process rows (DSH-22)', () => {
         member.kind === 'node' &&
         snapshot.nodes.get(member.key)?.kind === 'tool',
     )
-    // 10 tool calls + the first step's thinking.
-    expect(tools).toHaveLength(10)
-    expect(process!.steps).toBe(11)
+    // 9 tool calls + the first step's thinking (the subagent has its own row).
+    expect(tools).toHaveLength(9)
+    expect(process!.steps).toBe(10)
   })
 
   it('lists context and hooks only with 显示系统步骤', () => {
@@ -112,7 +124,7 @@ describe('process rows (DSH-22)', () => {
     expect(describeRows(snapshot).join('\n')).not.toContain('context')
     const [shown] = processRows(snapshot, true)
     expect(snapshot.nodes.get(shown!.members[0]!.key)?.kind).toBe('context')
-    expect(shown!.steps).toBe(12)
+    expect(shown!.steps).toBe(11)
 
     const notices = snapshotOf(
       noticesScenario(1_800_000_000_000).sessions[0]!.events,
@@ -265,7 +277,8 @@ describe('process rows (DSH-22)', () => {
     const [process] = processRows(answering)
     expect(process!.live).toBe(false)
     expect(process!.endedAt).not.toBeNull()
-    expect(processSummary(process!)).toMatch(/^已处理 11 步 · 用时 /)
+    // The subagent has its own row (UI-S14): the process ends where it starts.
+    expect(processSummary(process!)).toMatch(/^已处理 10 步 · 用时 /)
   })
 
   it('reuses the previous rows when nothing structural changed', () => {
@@ -286,14 +299,16 @@ describe('process rows (DSH-22)', () => {
     const snapshot = snapshotOf(loadKernelLog().root.events)
     expect(describeRows(snapshot)).toEqual([
       'user',
-      'process[done] steps=6: retry assistant tool:bash tool:bash tool:ask_user_question tool:subagent',
+      'process[done] steps=5: retry assistant tool:bash tool:bash tool:ask_user_question',
+      'agents: tool:subagent',
       'assistant(closing)',
       'turnTail',
       'compaction',
     ])
     expect(describeRows(snapshot, { showSystemSteps: true })).toEqual([
       'user',
-      'process[done] steps=8: context context retry assistant tool:bash tool:bash tool:ask_user_question tool:subagent',
+      'process[done] steps=7: context context retry assistant tool:bash tool:bash tool:ask_user_question',
+      'agents: tool:subagent',
       'assistant(closing)',
       'turnTail',
       'compaction',
@@ -424,6 +439,163 @@ describe('preparing tool calls (DSH-23)', () => {
     expect(partialJsonObject('{"done":true}')).toEqual({ done: true })
     expect(partialJsonObject('')).toBeNull()
     expect(partialJsonObject('[1,2')).toBeNull()
+  })
+})
+
+// UI-S14: the subagents a step sends out leave the process for a row of
+// their own, one row per step (a group when it sent out two or more).
+describe('subagent rows in the flow (UI-S14 · 1 · 3)', () => {
+  /** Step 2 sends out `ids` (background) after `narration`; step 3 answers. */
+  function dispatchLog(
+    ids: readonly string[],
+    options: { narration?: string; open?: boolean; mixed?: boolean } = {},
+  ): LogBuilder {
+    const log = new LogBuilder()
+    log.user('u1', '写三章')
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.message(1, 1, [
+      { type: 'reasoning', text: '先读设定' },
+      { type: 'text', text: '先读一下设定。' },
+      { type: 'tool-call', id: 'r', name: 'read', arguments: '{}' },
+    ])
+    log.call(1, 1, 'r', 'read', { file_path: 'bible.md' })
+    log.result(1, 1, 'r', 'ok')
+    log.add('step/end', { turn: 1, step: 1 })
+    log.add('step/start', { turn: 1, step: 2 })
+    log.message(1, 2, [
+      ...(options.narration === undefined
+        ? []
+        : [{ type: 'text', text: options.narration }]),
+      ...ids.map((id) => ({
+        type: 'tool-call',
+        id: `call-${id}`,
+        name: 'subagent',
+        arguments: '{}',
+      })),
+      ...(options.mixed
+        ? [{ type: 'tool-call', id: 'g', name: 'grep', arguments: '{}' }]
+        : []),
+    ])
+    for (const id of ids) {
+      log.call(1, 2, `call-${id}`, 'subagent', {
+        description: `写 ${id}`,
+        prompt: 'p',
+        run_in_background: true,
+      })
+      log.add('subagent/started', {
+        subagentId: id,
+        description: `写 ${id}`,
+        mode: 'spawn',
+        background: true,
+        callId: `call-${id}`,
+      })
+      log.result(1, 2, `call-${id}`, `started subagent ${id}`, {
+        meta: { kind: 'continuable', subagentId: id },
+      })
+    }
+    if (options.mixed) {
+      log.call(1, 2, 'g', 'grep', { pattern: 'x' })
+      log.result(1, 2, 'g', 'none')
+    }
+    log.add('step/end', { turn: 1, step: 2 })
+    log.add('step/start', { turn: 1, step: 3 })
+    if (options.open) {
+      log.message(1, 3, [
+        { type: 'tool-call', id: 'r2', name: 'read', arguments: '{}' },
+      ])
+      log.call(1, 3, 'r2', 'read', { file_path: 'ch1.md' })
+      return log
+    }
+    log.message(1, 3, [{ type: 'text', text: '三章都在写。' }])
+    log.add('step/end', { turn: 1, step: 3 })
+    log.add('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    return log
+  }
+
+  it('gives the subagents of one step one row after the process', () => {
+    const snapshot = snapshotOf(dispatchLog(['sub-a', 'sub-b', 'sub-c']).events)
+    expect(describeRows(snapshot)).toEqual([
+      'user',
+      'process[done] steps=2: assistant tool:read',
+      'agents: tool:subagent tool:subagent tool:subagent',
+      'assistant(closing)',
+      'turnTail',
+    ])
+  })
+
+  it('shows the words of a step that only sends out subagents above them', () => {
+    const snapshot = snapshotOf(
+      dispatchLog(['sub-a', 'sub-b'], {
+        narration: '我把设定交给两个执笔者。',
+      }).events,
+    )
+    expect(describeRows(snapshot)).toEqual([
+      'user',
+      'process[done] steps=2: assistant tool:read',
+      'assistant',
+      'agents: tool:subagent tool:subagent',
+      'assistant(closing)',
+      'turnTail',
+    ])
+  })
+
+  it('keeps the words in the process when the step also used other tools', () => {
+    const snapshot = snapshotOf(
+      dispatchLog(['sub-a'], {
+        narration: '交给子智能体，再搜一下。',
+        mixed: true,
+      }).events,
+    )
+    expect(describeRows(snapshot)).toEqual([
+      'user',
+      'process[done] steps=2: assistant tool:read assistant',
+      'agents: tool:subagent',
+      'process[done] steps=1: tool:grep',
+      'assistant(closing)',
+      'turnTail',
+    ])
+  })
+
+  it('a single subagent is a row of one; another step starts another row', () => {
+    const log = dispatchLog(['sub-a'], { open: true })
+    const snapshot = snapshotOf(log.events)
+    expect(describeRows(snapshot)).toEqual([
+      'user',
+      'process[done] steps=2: assistant tool:read',
+      'agents: tool:subagent',
+      'process[live] steps=1: tool:read',
+    ])
+    // Step 3 sends out two more while its read still runs.
+    for (const id of ['sub-b', 'sub-c']) {
+      log.call(1, 3, `call-${id}`, 'subagent', { description: id })
+      log.add('subagent/started', {
+        subagentId: id,
+        description: id,
+        mode: 'spawn',
+        background: true,
+        callId: `call-${id}`,
+      })
+    }
+    expect(describeRows(snapshotOf(log.events))).toEqual([
+      'user',
+      'process[done] steps=2: assistant tool:read',
+      'agents: tool:subagent',
+      'process[done] steps=1: tool:read',
+      'agents: tool:subagent tool:subagent',
+    ])
+  })
+
+  it('names the row by its first call and maps its calls for reveal', () => {
+    const snapshot = snapshotOf(dispatchLog(['sub-a', 'sub-b']).events)
+    const rows = timelineRowsOf(snapshot, { showSystemSteps: false })
+    const agents = rows.find((row): row is AgentsRow => row.kind === 'agents')!
+    expect(agents.id).toBe(`agents:${agents.members[0]}`)
+    expect(agents.turn).toBe(1)
+    const index = rowIndexOf(rows)
+    for (const key of agents.members)
+      expect(index.get(key)).toBe(rows.indexOf(agents))
+    expect(rowNodeKey(agents)).toBe(agents.members[0])
   })
 })
 

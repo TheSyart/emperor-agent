@@ -35,6 +35,15 @@ export interface ChatContext {
   readonly rootSessionId?: () => string
   /** The turn under the pointer (its turn tail shows copy and 用时). */
   readonly hoverTurn?: () => number | null
+  /**
+   * Subagent rows (UI-S14): each reports when it is on screen (the status
+   * bar shows only while none at work is), and one may be lit up after
+   * 「回到列表 ↑」.
+   */
+  readonly agentRows?: {
+    observe(element: Element, id: string): () => void
+    highlighted(): string | null
+  }
 }
 
 const CHAT_CONTEXT: InjectionKey<ChatContext> = Symbol('chat-context')
