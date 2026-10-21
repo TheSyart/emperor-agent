@@ -281,7 +281,7 @@ describe('the composer bottom bar', () => {
     props.lifecycleMode = 'plan'
     await settle()
     const capsule = barButton(root, '退出计划')
-    expect(capsule.textContent?.trim()).toBe('Plan')
+    expect(capsule.textContent?.trim()).toBe('计划')
     capsule.click()
     expect(props.onDismissLifecycle).toHaveBeenCalledOnce()
   })

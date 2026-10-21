@@ -33,49 +33,33 @@ export const PERMISSION_PRESET_VALUES = [
 ] as const
 
 const specs: BuiltinSpec[] = [
-  action(
-    'new',
-    'Commands',
-    'Start a blank chat in this workspace',
-    'after_turn',
-  ),
-  action(
-    'compact',
-    'Commands',
-    'Free up context while keeping a summary',
-    'after_turn',
-  ),
-  ui('model', 'Commands', 'Choose the model for this chat', 'model', {
+  action('new', '命令', '在这个工作区开一个新对话', 'after_turn'),
+  action('compact', '命令', '压缩上下文，保留一份摘要', 'after_turn'),
+  ui('model', '命令', '选择这个对话用的模型', 'model', {
     argumentHint: '[model-id]',
     args: [idArg('model-id')],
   }),
-  ui(
-    'reasoning',
-    'Commands',
-    'Choose how deeply the model thinks',
-    'reasoning',
-    {
-      argumentHint: '[level]',
-      args: [stringArg('level')],
-    },
-  ),
-  ui('permissions', 'Commands', 'Choose what Emperor may do', 'permissions', {
+  ui('reasoning', '命令', '选择模型思考的深度', 'reasoning', {
+    argumentHint: '[level]',
+    args: [stringArg('level')],
+  }),
+  ui('permissions', '命令', '选择 Emperor 能做什么', 'permissions', {
     hiddenAliases: ['permission'],
     argumentHint: `[${PERMISSION_PRESET_VALUES.join('|')}]`,
     args: [enumArg('preset', [...PERMISSION_PRESET_VALUES, 'status'])],
   }),
-  action('plan', 'Commands', 'Plan before making changes', 'immediate', {
+  action('plan', '命令', '先做计划，再动手改', 'immediate', {
     argumentHint: '[off|message]',
     args: [stringArg('off-or-message', true)],
   }),
-  action('goal', 'Commands', 'Keep working toward an outcome', 'immediate', {
+  action('goal', '命令', '朝一个目标持续工作', 'immediate', {
     argumentHint: '[<objective>|clear|edit <objective>|pause|resume]',
     args: [stringArg('objective-or-action', true)],
   }),
-  action('stop', 'Commands', 'Stop the current task', 'immediate', {
+  action('stop', '命令', '停止当前任务', 'immediate', {
     sources: READ_SAFE,
   }),
-  action('continue', 'Commands', 'Resume the paused task', 'after_turn'),
+  action('continue', '命令', '继续已暂停的任务', 'after_turn'),
 ]
 
 export function builtinCommandDescriptors(): CommandDescriptor[] {

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：第一次安装和配置 Emperor Agent 的用户<br>
-> 最后核验：2026-10-21（对照 `8f954763`）<br>
+> 最后核验：2026-10-21（对照 `79d2b7e6`）<br>
 > 事实源：`docs/release/stable-release-notes.md`、`desktop/electron-builder.release.cjs`、`desktop/src/renderer/src/components/settings/model/`（添加模型对话框）、`desktop/src/renderer/src/components/composer/ModelPicker.vue`、`desktop/src/renderer/src/components/sidebar/`（新对话与项目会话入口）、`desktop/src/main/recovery.ts`、`desktop/src/renderer/src/components/settings/updates/`、`packages/core/src/updates/`（检查更新）
 
 ## 1. 安装
@@ -49,7 +49,7 @@
 完成下面四项即可确认基础链路可用：
 
 - 在 Chat 发送一个不需要工具的问题并收到模型回复。
-- 在 Composer 输入 `/`，确认菜单只显示核心 `Commands` 和当前可用 `Skills`。
+- 在输入框输入 `/`，确认菜单只有「命令」和当前可用的「Skills」两组。
 - 输入 `/model`，确认可以选择要使用的模型；已安装 Skill 应以自己的 token 出现，例如 `/agent-reach`。
 - 创建 Build 后让 Agent 读取一个项目文件，确认路径属于刚才选择的 workspace。
 

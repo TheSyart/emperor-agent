@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * PlanChip — dsh PlanModeControl: while the composer lifecycle is Plan (amber)
- * or Goal capture (gold), a capsule "Plan ×" / "Goal ×" whose click exits the
+ * or Goal capture (gold), a capsule 「计划 ×」/「目标 ×」 whose click exits the
  * mode (the existing dismissLifecycle flow). Renders nothing otherwise.
  */
 import { computed } from 'vue'
@@ -11,7 +11,7 @@ import { DsClose, DsGoal, DsPlan } from '../icons/ds'
 const props = defineProps<{ mode: ComposerLifecycleMode; busy?: boolean }>()
 const emit = defineEmits<{ dismiss: [] }>()
 
-const label = computed(() => (props.mode === 'goal' ? 'Goal' : 'Plan'))
+const label = computed(() => (props.mode === 'goal' ? '目标' : '计划'))
 const dismissLabel = computed(() =>
   props.mode === 'goal' ? '取消目标' : '退出计划',
 )

@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用普通会话或项目会话的用户<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 最后核验：2026-10-21（对照 `79d2b7e6`）<br>
 > 事实源：`packages/core/src/sessions/store.ts`、`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/prompt/agent-instructions.ts`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/sidebar/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/composer/`、`desktop/src/renderer/src/components/trajectory/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/pages/pulls/`、`desktop/src/renderer/src/components/pages/github/`、`desktop/src/main/browser-view.ts`
 
 Chat（普通对话）和 Build（项目工作）是会话类型。它们决定 Agent 的工作目录和能看到哪些长期上下文，不决定权限。
@@ -105,7 +105,7 @@ Build 绑定一个本地文件夹。Agent 在该目录内读取文件、按当�
 输入框在对话面板底部，上方依次是变更汇总条、待办、目标条和「待发送」的消息（各自只在有内容时出现），下方一排控件：
 
 - **+**：「上传图片或文件」；「插入 Skill 或插件」列出 Skill 和可用的插件，选中后在光标处变成芯片（见[在消息里引用技能和插件](#在消息里引用技能和插件)）；「截图」（macOS）：Emperor 窗口暂时让开，用系统截图框选一块区域（按空格改为点选窗口，按 Esc 取消），截下的图片作为附件放进输入框。截图要用到「录屏与系统录音」权限；被拒绝时会提示到「系统设置 › 隐私与安全性 › 录屏与系统录音」允许 Emperor Agent。菜单最后是「计划模式」和「目标模式」（见 [计划与目标](plan-goal.md)）。
-- **权限**：盾牌图标和当前预设的简称；点开选只读、工作区可写或完全访问。计划或目标开着时，旁边多一个「Plan ×」或「Goal ×」胶囊（悬停写「退出计划」或「取消目标」），点它退出。
+- **权限**：盾牌图标和当前预设的简称；点开选只读、工作区可写或完全访问。计划或目标开着时，旁边多一个「计划 ×」或「目标 ×」胶囊（悬停写「退出计划」或「取消目标」），点它退出。
 - **模型**：当前模型和思考强度；菜单分「模型」「思考强度」两层，模型列表底部是「添加模型…」。
 - **上下文**：一个小圆环，点开显示这个对话已用的上下文、窗口大小和百分比。
 - **发送**：输入框为空时这里是麦克风（[语音听写](#语音听写)，不支持听写的环境仍是发送键）；输入内容或放入附件后换成发送键。Agent 运行中是停止键；这时输入了内容，旁边多一个「加入队列」。
@@ -243,7 +243,7 @@ Build 绑定一个本地文件夹。Agent 在该目录内读取文件、按当�
 
 ## 斜杠命令
 
-Composer 输入 `/` 后显示 Core 返回的命令和 active Skill，分为 `Commands` 与 `Skills`：
+输入框里输入 `/` 后显示 Core 返回的命令和可用的 Skill，分为「命令」与「Skills」两组。命令每行是中文名称（例如「计划模式」）和说明，右侧灰字是要输入的命令（`/plan`）；Skill 右侧写它来自哪里（项目 Skill、个人 Skill、插件 Skill、内置 Skill）。选中带参数的命令后，列表换成它的参数，例如 `/reasoning` 列出「高」「超高」等思考强度：
 
 - `/new`：在同一工作区创建新会话；旧会话保留在侧栏。新会话继承 Chat/Build 类型、项目、活动 worktree 和当前权限预设，不继承对话、计划模式、目标或排队消息。
 - `/compact`：在当前会话中压缩历史并保留摘要。

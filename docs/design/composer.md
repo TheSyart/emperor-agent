@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-20<br>
+> 最后核验：2026-10-21（对照 `79d2b7e6`）<br>
 > 事实源：`desktop/src/renderer/src/components/composer/`（`ComposerCard.vue`、`PermissionChip.vue`、`PlanChip.vue`、`ModelPicker.vue`、`ContextMeter.vue`、`ChangesPill.vue`、`TodoDock.vue`、`GoalBar.vue`、`QueueDock.vue`）、`components/chat/composerController.ts`、`composerPalette.ts`、`composerModelControl.ts`、`components/conversation/HeroProfilePrompt.vue`、`theme/components.css`（`--composer-*`）、`desktop/src/main/screenshot-ipc.ts`；测试 `ComposerBottomBar.test.ts`、`QueueDock.test.ts`、`composerArchitecture.test.ts`、`desktop/tests/visual/composer.spec.ts`
 
 输入框在对话面板底部：上面是按需出现的几条 dock，下面一张卡片，卡片里是富文本编辑器和一排控件。布局沿用 Emperor 自己的结构；0.2 只提升卡片的质感（参考 Codex 的视觉品质，不照搬它的布局）。
@@ -21,7 +21,7 @@
 | ---- | ------------------- | -------------------------------------------------------------------------------------------------------- |
 | 左   | `+`（28px 圆形）    | 菜单：上传图片或文件、插入 Skill 或插件、截图（只在 macOS 桌面应用里出现）、分隔线、Plan 模式、Goal 模式 |
 | 左   | 权限芯片            | 盾牌图标 + 预设简称；菜单只有三个预设                                                                    |
-| 左   | Plan / Goal 胶囊    | Plan 或 Goal 开着时出现，「Plan ×」「Goal ×」，点击退出                                                  |
+| 左   | 计划 / 目标胶囊     | 计划或目标开着时出现，「计划 ×」「目标 ×」，点击退出                                                     |
 | 右   | 模型芯片            | 供应商 logo + 模型名 + 思考强度；两层菜单，模型列表底部是「添加模型…」                                   |
 | 右   | 上下文环            | 已知上下文窗口时出现，点开是上下文用量面板                                                               |
 | 右   | 发送位（32px 圆形） | 空草稿：麦克风（有听写时）；有草稿：金色发送键；运行中：停止键，有草稿时旁边多一个「加入队列」           |
