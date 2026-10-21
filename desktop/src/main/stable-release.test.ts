@@ -456,6 +456,39 @@ describe('unsigned Stable release: notes and publication', () => {
     expect(notes).not.toMatch(/disable\s+Gatekeeper/i)
   })
 
+  it('REL-02 ends the notes with the bundled Electron for the update check', async () => {
+    const contract = (await releaseContract()) as unknown as {
+      renderReleaseNotes: (
+        template: string,
+        values: { tag: string; version: string; electron?: string },
+      ) => string
+      notesProblems: (notes: string, values: { version: string }) => string[]
+    }
+    const template = readText('docs', 'release', 'stable-release-notes.md')
+    const notes = contract.renderReleaseNotes(template, {
+      tag: 'v0.2.0',
+      version: '0.2.0',
+      electron: '42.4.1',
+    })
+    expect(notes.trim().split('\n').at(-1)).toBe(
+      '<!-- emperor-release electron=42.4.1 -->',
+    )
+    expect(contract.notesProblems(notes, { version: '0.2.0' })).toEqual([])
+    // Only that one comment: anything else is template text left behind.
+    expect(
+      contract.notesProblems(`${notes}<!-- note to self -->\n`, {
+        version: '0.2.0',
+      }),
+    ).toContain('the release notes still hold template text')
+    expect(() =>
+      contract.renderReleaseNotes(template, {
+        tag: 'v0.2.0',
+        version: '0.2.0',
+        electron: '42.4',
+      }),
+    ).toThrow(/Electron version/)
+  })
+
   it('publishes draft first with the rendered notes and rolls back, or only plans it', () => {
     const publisher = readText('scripts', 'publish-release.sh')
 

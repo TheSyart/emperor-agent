@@ -79,6 +79,7 @@ flowchart LR
 - [ ] 两个架构各下载至少一个安装包，用 `SHA256SUMS.txt` 复核，并通过 `gh attestation verify <file> --repo TheSyart/emperor-agent`。
 - [ ] 在一台没装过 Emperor 的 Mac 上按正文第一段的步骤打开；`codesign -dv --verbose=4` 显示 `Signature=adhoc`，`flags` 含 `runtime`。
 - [ ] 按正文重新授权后，电脑操作与听写可用。
+- [ ] 正文最后一行是 `<!-- emperor-release electron=<desktop/package-lock.json 的 Electron> -->`（应用内的检查更新读它判断 Electron 是否过旧，不要删）；装着上一版的 Mac 在「设置 › 常规 › 更新」点「立即检查」看到「Emperor <version> 可用」，下载后通过 SHA-256 与来源证明核对（REL-02）。
 
 ## 失败处理
 

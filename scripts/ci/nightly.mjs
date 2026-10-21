@@ -42,6 +42,7 @@ const E2E_MODES = [
   'settings',
   'renderer-security',
   'diagnostics',
+  'updates',
 ]
 
 const REAL_MODEL =

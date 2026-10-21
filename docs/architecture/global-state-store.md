@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
 > 最后核验：2026-10-21<br>
-> 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store
+> 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/updates/service.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store
 
 ## 两个根的区分
 
@@ -40,7 +40,7 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
 ```text
 ~/.emperor/
   installation.json        # layout/app/runtime revision、首次启动与迁移状态；lastRunVersion / previousRunVersion（降级提示）与 dataVersion（数据迁移）
-  settings.json            # 用户通用配置（version 1）
+  settings.json            # 用户通用配置（version 1）；updates.check 是「检查更新」开关（默认开）
   model_config.json        # schemaVersion 2；多个模型、单 active；apiKey 以本地密钥加密（el1:…）；单条坏条目只跳过该条（MOD-03）
   model_config.json.pre-seal-<ts>  # 第一次加密前的原文件（含明文 Key，0600，用户可删）
   model_tests.json         # 每条模型最近一次连接测试（设置 › 模型 的连接状态；运行状态，不是配置）
@@ -220,7 +220,8 @@ Agent 按你的要求修改项目文件时，write / edit 工具先在 Emperor H
 | Electron `userData`（macOS 为 `~/Library/Application Support/<应用名>`）   | Chromium 的缓存、Cookies、Local Storage；界面主题、三栏布局和应用内通知列表等浏览器侧偏好。不含会话、记忆等业务数据。用户操作的工作台浏览器使用不落盘的内存分区；Agent 持久 profile 的网站数据另存于 Emperor Home 的 `browser/profiles/` |
 | Chrome / Edge 用户级 `NativeMessagingHosts/com.emperor.agent.browser.json` | 启用外部浏览器连接时登记当前 host 路径，并为每个已配对扩展 ID 写入一条精确的 `allowed_origins`；仅在已使用的浏览器用户配置目录中登记。撤销最后一个配对后移除对应 manifest。                                                              |
 | `$HOME/.emperor.bootstrap.lock`                                            | 初始化 Emperor Home 期间的启动锁，完成后删除。必须放在 Emperor Home 外，因为旧版 Home 会在此期间被整体改名                                                                                                                               |
-| 系统临时目录                                                               | Skill 导入时的解压暂存，完成后删除                                                                                                                                                                                                       |
+| 系统临时目录                                                               | Skill 导入时的解压暂存，完成后删除；下载更新时的 `emperor-update-*`（DMG 在这里核对，无论成败都删除）                                                                                                                                    |
+| 「下载」文件夹                                                             | 用户点「下载」并通过校验的更新 DMG（`Emperor-Agent-<版本>-macos-<arch>.dmg`，同名时加 ` (1)`，带 `com.apple.quarantine`）；Emperor 不再管理它                                                                                            |
 
 启动锁记录持有者的进程号和心跳时间。如果上次启动被强杀或断电导致锁残留，下次启动发现持有进程已退出或心跳过期，会自动接管并记录警告；只有持有者仍在运行且心跳新鲜时，才会报 `installation_lock_busy`。
 

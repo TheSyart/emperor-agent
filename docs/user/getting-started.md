@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：第一次安装和配置 Emperor Agent 的用户<br>
-> 最后核验：2026-10-19<br>
-> 事实源：GitHub Releases、模型设置页、`desktop/src/renderer/src/components/sidebar/`（新对话与项目会话入口）
+> 最后核验：2026-10-21<br>
+> 事实源：GitHub Releases、模型设置页、`desktop/src/renderer/src/components/sidebar/`（新对话与项目会话入口）、`desktop/src/renderer/src/components/settings/updates/`、`packages/core/src/updates/`（检查更新）
 
 ## 1. 安装
 
@@ -62,6 +62,29 @@
 
 - 调用已配置的模型 Provider；
 - 使用远程 MCP，或调用会联网的 Skill；
-- 运行会主动联网的本地命令、Hook 或 MCP server。
+- 运行会主动联网的本地命令、Hook 或 MCP server；
+- 检查更新：向 GitHub 请求发布列表，可以关闭，见下面的[更新](#6-更新)。
 
 不要把“本地运行”理解为完全离线。具体数据位置见 [模型、记忆与附件](models-memory-attachments.md)。
+
+## 6. 更新
+
+Emperor 的安装包没有签名，不能像签名应用那样自动替换自己。它会告诉你有新版本、替你下载并核对安装包，替换旧版本由你来做。
+
+**检查**：启动 30 秒后和之后每 24 小时，Emperor 向 GitHub 请求一次发布列表，只比较同一渠道里更高的版本：Preview 版会看到更新的 Preview 和 Stable，Stable 版只看 Stable。请求里只有版本号这样的固定信息（`Emperor-Agent/0.2.0`），不带账号、令牌或设备标识。连不上 GitHub 时不会弹出任何提示，稍后自动重试，每 24 小时最多重试 3 次。不想联网检查时，在「设置 › 常规 › 更新」关闭「检查更新」，之后 Emperor 不会为更新发出任何请求；打开时同一处有「立即检查」，下面一行写着当前版本和上次检查的结果。
+
+**有新版本时**：「设置 › 常规」最上方和侧栏的通知里都会出现「Emperor 0.2.1 可用」，旁边是「查看更新说明」（打开 GitHub 上的发布页）和「下载」。
+
+**下载与核对**：点「下载」后，Emperor 下载这台 Mac 架构的 DMG，显示进度，可以取消。下载完先用同一个发布里的 `SHA256SUMS.txt` 核对 SHA-256，不符就拒绝并删除下载的文件；再在装有并登录了 GitHub CLI（`gh`）时运行 `gh attestation verify`，核对它确实出自本仓库的发布流程。没有 gh 或 gh 没有登录时只核对 SHA-256，页面会写明「没有核验 GitHub 来源证明」；在终端运行 `gh auth login` 后重新下载即可核验。gh 使用你自己的登录，Emperor 不传任何令牌。
+
+**替换旧版本**：通过核对后，DMG 放进「下载」文件夹（已有同名文件时另存为 `… (1).dmg`，不会覆盖），并在访达中选中它。然后：
+
+1. 退出 Emperor，打开 DMG，把 Emperor Agent 拖进「应用程序」文件夹，替换旧版本。
+2. 第一次打开时 macOS 会拦下它：到「系统设置 › 隐私与安全性」，在安全性一栏点「仍要打开」。
+3. 重新授权：新版本的代码身份变了，电脑操作要在「设置 › 电脑操作」重新允许「辅助功能」和「屏幕录制」，听写要在「设置 › 语音」重新允许「麦克风」和「语音识别」。
+
+Emperor 不会打开或运行下载的 DMG。会话、记忆和设置都在 `~/.emperor`，替换应用不影响它们。
+
+**内置浏览器的版本**：「设置 › 高级 › 诊断 › 桌面」的「Electron 版本」写着内置浏览器内核的版本。检查更新时 Emperor 会顺带读到最新发布内置的 Electron 版本（来自同一份发布列表，不额外联网）；落后 2 个以上主版本时这一行变成提醒：内置浏览器可能缺少安全修复，请更新 Emperor。
+
+**测试更新源**：开发和验收时可以用环境变量 `EMPEROR_UPDATE_FEED_URL` 让 Emperor 改读本机的测试发布源（只能是 `127.0.0.1` 或 `localhost`，`scripts/test-update-feed.mjs` 可以提供一个）。生效时「设置 › 常规 › 更新」和诊断页都会写明「正在使用测试更新源」，从它下载的安装包不核验 GitHub 来源证明。正常使用时不要设置它。

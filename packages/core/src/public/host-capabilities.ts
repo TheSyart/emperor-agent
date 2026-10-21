@@ -143,3 +143,12 @@ export type {
 export { redactLogText } from '../util/redaction'
 export { setCoreLogSink } from '../util/log'
 export type { LogLevel, LogLine, LogSink } from '../util/log'
+// REL-02 检查更新: the desktop host checks the test-feed variable and
+// hands Core its transport, Finder and Downloads folder.
+export { feedOverrideUrl, GITHUB_RELEASE_HOSTS } from '../updates/http'
+export type {
+  UpdateHostOptions,
+  UpdateTransport,
+  UpdateTransportRequest,
+  UpdateTransportResponse,
+} from '../updates/types'

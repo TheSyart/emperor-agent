@@ -154,6 +154,30 @@ export function normalizeSessionPreferences(
 }
 
 /**
+ * 设置 › 常规 › 更新 › 检查更新 (REL-02): look for a newer Emperor on
+ * GitHub 30 s after start and every 24 hours. Default on; off makes no
+ * request at all.
+ */
+export interface UpdatePreferences {
+  check: boolean
+}
+
+export function defaultUpdatePreferences(): UpdatePreferences {
+  return { check: true }
+}
+
+/** Anything but `false` keeps the default (on). */
+export function normalizeUpdatePreferences(value: unknown): UpdatePreferences {
+  const data = objectOrEmpty(value)
+  return {
+    check:
+      typeof data.check === 'boolean'
+        ? data.check
+        : defaultUpdatePreferences().check,
+  }
+}
+
+/**
  * `settings.json` preferences. Retired keys from the old kernel
  * (`permissions.rules`, `workspace.fileCheckpoints` / `workspace.gitRewind`,
  * `memory.hybridMemory`, `codeIntelligence`) are ignored when reading so old
@@ -167,20 +191,22 @@ export interface LocalConfig {
   webTools: WebToolPreferences
   sessions: SessionPreferences
   taskBudget: TaskBudgetSettings
+  updates: UpdatePreferences
 }
 
 /**
- * What a save takes: a missing `browser`, `webTools`, `sessions` or
- * `taskBudget` writes its defaults.
+ * What a save takes: a missing `browser`, `webTools`, `sessions`,
+ * `taskBudget` or `updates` writes its defaults.
  */
 export type LocalConfigInput = Omit<
   LocalConfig,
-  'browser' | 'webTools' | 'sessions' | 'taskBudget'
+  'browser' | 'webTools' | 'sessions' | 'taskBudget' | 'updates'
 > & {
   browser?: BrowserPreferences
   webTools?: WebToolPreferences
   sessions?: SessionPreferences
   taskBudget?: TaskBudgetSettings
+  updates?: UpdatePreferences
 }
 
 export function defaultWebToolPreferences(): WebToolPreferences {
@@ -255,6 +281,7 @@ function defaultLocalConfig(): LocalConfig {
     webTools: defaultWebToolPreferences(),
     sessions: defaultSessionPreferences(),
     taskBudget: defaultTaskBudgetSettings(),
+    updates: defaultUpdatePreferences(),
   }
 }
 
@@ -303,6 +330,7 @@ export function parseLocalConfig(
     webTools: normalizeWebToolPreferences(data.webTools),
     sessions: normalizeSessionPreferences(data.sessions),
     taskBudget: normalizeTaskBudgetSettings(data.taskBudget),
+    updates: normalizeUpdatePreferences(data.updates),
   }
 }
 
@@ -386,6 +414,7 @@ export async function saveLocalConfig(
     webTools: normalizeWebToolPreferences(config.webTools),
     sessions: normalizeSessionPreferences(config.sessions),
     taskBudget: normalizeTaskBudgetSettings(config.taskBudget),
+    updates: normalizeUpdatePreferences(config.updates),
   }
   const shared = await sharedSettings(path, opts.persistenceAdapter)
   await localConfigSnapshot(path, opts.persistenceAdapter).write({

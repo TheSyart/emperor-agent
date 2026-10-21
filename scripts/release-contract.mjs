@@ -72,12 +72,35 @@ export function sbomName(tag) {
   return `emperor-agent-${tag}.cdx.json`
 }
 
-/** The notes body: the template's leading comment dropped, values filled in. */
-export function renderReleaseNotes(template, { tag, version }) {
-  const body = String(template)
-    .replace(/^\s*<!--[\s\S]*?-->\s*/, '')
-    .replaceAll('{{tag}}', tag)
-    .replaceAll('{{version}}', version)
+/**
+ * REL-02: the last line of the notes records the Electron the release
+ * bundles. The update check reads it from the release list it already
+ * fetches, so 诊断 can say when the running Electron is far behind.
+ */
+export const ELECTRON_MARKER =
+  /^<!-- emperor-release electron=\d+\.\d+\.\d+ -->$/m
+
+/** The Electron desktop/package-lock.json installs (what the package bundles). */
+export function bundledElectronVersion(root) {
+  const lock = JSON.parse(
+    readFileSync(join(root, 'desktop', 'package-lock.json'), 'utf8'),
+  )
+  return lock.packages?.['node_modules/electron']?.version ?? ''
+}
+
+/**
+ * The notes body: the template's leading comment dropped, values filled in.
+ * Without `electron` the Electron marker line is left out.
+ */
+export function renderReleaseNotes(template, { tag, version, electron }) {
+  if (electron !== undefined && !/^\d+\.\d+\.\d+$/.test(electron))
+    throw new Error(`not an Electron version: ${electron}`)
+  let body = String(template).replace(/^\s*<!--[\s\S]*?-->\s*/, '')
+  body =
+    electron === undefined
+      ? body.replace(/^.*\{\{electron\}\}.*\n?/m, '')
+      : body.replaceAll('{{electron}}', electron)
+  body = body.replaceAll('{{tag}}', tag).replaceAll('{{version}}', version)
   if (/\{\{[^}]*\}\}/.test(body))
     throw new Error('release notes template has an unknown placeholder')
   return `${body.trim()}\n`
@@ -111,7 +134,7 @@ export function notesProblems(notes, { version }) {
       problems.push(
         'the release notes tell users to turn off protection for the whole Mac',
       )
-  if (/\{\{|<!--/.test(notes))
+  if (/\{\{|<!--/.test(notes.replace(ELECTRON_MARKER, '')))
     problems.push('the release notes still hold template text')
   return problems
 }

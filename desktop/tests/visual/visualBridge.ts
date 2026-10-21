@@ -1707,6 +1707,111 @@ export async function installVisualCoreBridge(
         delegations: 9_437_184,
         other: 412_090_368,
       }
+      // REL-02 `updates.*`: `?visualUpdate=` available | downloading |
+      // verifying | ready | ready-verified | failed | off | test-feed |
+      // outdated (诊断: Electron 3 majors behind the newest release);
+      // none: up to date. 下载 / 取消 / 在访达中显示 are recorded.
+      const visualUpdateMode = visualParams.get('visualUpdate') ?? ''
+      const visualUpdateRelease = {
+        version: '0.2.1',
+        tag: 'v0.2.1',
+        channel: 'stable',
+        name: 'Emperor Agent v0.2.1',
+        publishedAt: '2026-06-25T08:00:00Z',
+        notesUrl:
+          'https://github.com/TheSyart/emperor-agent/releases/tag/v0.2.1',
+        asset: {
+          name: 'Emperor-Agent-0.2.1-macos-arm64.dmg',
+          size: 231_467_959,
+        },
+      }
+      function visualUpdateDownload(mode: string): Record<string, unknown> {
+        const base = {
+          version: '0.2.1',
+          fileName: 'Emperor-Agent-0.2.1-macos-arm64.dmg',
+        }
+        if (mode === 'downloading')
+          return {
+            phase: 'downloading',
+            ...base,
+            receivedBytes: 96_468_992,
+            totalBytes: 231_467_959,
+          }
+        if (mode === 'verifying')
+          return { phase: 'verifying', ...base, step: 'attestation' }
+        if (mode === 'ready' || mode === 'ready-verified')
+          return {
+            phase: 'ready',
+            ...base,
+            path: '/Users/visual/Downloads/Emperor-Agent-0.2.1-macos-arm64.dmg',
+            attestation:
+              mode === 'ready-verified'
+                ? { status: 'verified' }
+                : { status: 'unavailable', reason: 'gh_missing' },
+          }
+        if (mode === 'failed')
+          return {
+            phase: 'failed',
+            ...base,
+            code: 'update_checksum_mismatch',
+            message:
+              '安装包的 SHA-256 与 SHA256SUMS.txt 不符，已拒绝并删除下载的文件。',
+          }
+        return { phase: 'idle' }
+      }
+      const visualUpdate: Record<string, unknown> = {
+        supported: true,
+        automatic: true,
+        disabledReason: null,
+        enabled: visualUpdateMode !== 'off',
+        currentVersion: '0.2.0',
+        channel: 'stable',
+        checking: false,
+        lastCheckedAt: Date.parse('2026-06-26T11:40:00.000Z'),
+        lastError: null,
+        available: [
+          'available',
+          'downloading',
+          'verifying',
+          'ready',
+          'ready-verified',
+          'failed',
+        ].includes(visualUpdateMode)
+          ? visualUpdateRelease
+          : null,
+        download: visualUpdateDownload(visualUpdateMode),
+        electron: {
+          current: '42.2.0',
+          latest: visualUpdateMode === 'outdated' ? '45.0.1' : '42.2.0',
+          behind: visualUpdateMode === 'outdated' ? 3 : 0,
+          outdated: visualUpdateMode === 'outdated',
+        },
+        feedOverride:
+          visualUpdateMode === 'test-feed' || visualUpdateMode === 'outdated'
+            ? 'http://127.0.0.1:8765/repos/TheSyart/emperor-agent/releases'
+            : null,
+      }
+      function visualUpdateRecord(kind: string): void {
+        ;((
+          window as unknown as Record<string, string[] | undefined>
+        ).__visualUpdateCalls ??= []).push(kind)
+      }
+      function visualUpdateStatus(): Record<string, unknown> {
+        return JSON.parse(JSON.stringify(visualUpdate))
+      }
+      function visualUpdateDiagnostics(): Record<string, unknown> {
+        return {
+          enabled: visualUpdate.enabled,
+          automatic: true,
+          disabledReason: null,
+          channel: 'stable',
+          lastCheckedAt: visualUpdate.lastCheckedAt,
+          lastError: null,
+          available: null,
+          electron: visualUpdate.electron,
+          feedOverride: visualUpdate.feedOverride,
+        }
+      }
       // REL-03 `storage.versions`: `?visualDataVersions=newer` has two files
       // a newer Emperor wrote; `=downgrade` also ran 0.3.0 last time.
       function visualDataVersions() {
@@ -5352,6 +5457,27 @@ export async function installVisualCoreBridge(
             // 设置 › 高级 › 任务预算 (KRN-03): the defaults, saved in memory.
             case 'storage.usage':
               return visualStorageUsage()
+            case 'updates.status':
+              return visualUpdateStatus()
+            case 'updates.setEnabled':
+              visualUpdate.enabled = Boolean(args[0])
+              if (!visualUpdate.enabled) visualUpdate.available = null
+              visualUpdateRecord(`switch:${visualUpdate.enabled}`)
+              return visualUpdateStatus()
+            case 'updates.check':
+              visualUpdateRecord('check')
+              return visualUpdateStatus()
+            case 'updates.download':
+              visualUpdateRecord('download')
+              visualUpdate.download = visualUpdateDownload('downloading')
+              return visualUpdateStatus()
+            case 'updates.cancelDownload':
+              visualUpdateRecord('cancel')
+              visualUpdate.download = { phase: 'idle' }
+              return visualUpdateStatus()
+            case 'updates.reveal':
+              visualUpdateRecord('reveal')
+              return visualUpdateStatus()
             case 'storage.versions':
               return visualDataVersions()
             case 'storage.clean': {
@@ -6513,7 +6639,9 @@ export async function installVisualCoreBridge(
               boot.desktopPet.enabled = Boolean(args[0])
               return { ...boot.desktopPet }
             case 'diagnostics.get':
-              return boot.diagnostics
+              return visualUpdateMode
+                ? { ...boot.diagnostics, updates: visualUpdateDiagnostics() }
+                : boot.diagnostics
             case 'environment.getStatus':
               if (
                 localStorage.getItem('visual-environment-outcome') ===

@@ -3,7 +3,9 @@
  * Notification list under the sidebar bell (async chunk). Rows show the
  * source glyph, title, detail and relative time; clicking one marks it read
  * and navigates: a session → its conversation, a git receipt → that
- * session with the workspace 「审查」 pane, a scheduler run → /scheduler.
+ * session with the workspace 「审查」 pane, a scheduler run → /scheduler,
+ * a newer Emperor → 设置 › 常规. An update row also carries 查看更新说明
+ * and 下载 (REL-02; 下载 opens 设置 › 常规, where the progress shows).
  * The shell is ui/Popover: anchored under the bell, dismissed on outside
  * click / focus and Escape (focus goes back to the bell).
  */
@@ -11,6 +13,7 @@ import Button from '../ui/Button.vue'
 import Popover from '../ui/Popover.vue'
 import {
   CircleAlert,
+  CircleArrowUp,
   CircleCheck,
   Clock,
   GitCommitHorizontal,
@@ -32,11 +35,16 @@ import {
   type AppNotification,
 } from '../../runtime/notifications'
 import { requestWorkspace } from '../workspace/workspaceState'
+import { openLink } from '../../api/backend'
+import { useSettingsRoute } from '../settings/useSettingsRoute'
+import { useUpdateStatus } from '../settings/updates/useUpdateStatus'
 
 defineProps<{ anchor: HTMLElement | null }>()
 const open = defineModel<boolean>('open', { default: false })
 
 const router = useRouter()
+const settingsRoute = useSettingsRoute()
+const updates = useUpdateStatus()
 const { items, unreadCount, markRead, markAllRead, clear } = useNotifications()
 const popover = ref<InstanceType<typeof Popover> | null>(null)
 const now = ref(Date.now())
@@ -57,6 +65,7 @@ function glyph(item: AppNotification): Component {
   if (item.kind === 'scheduler') return Clock
   if (item.kind === 'git') return GitCommitHorizontal
   if (item.kind === 'pending') return MessageCircleQuestion
+  if (item.kind === 'update') return CircleArrowUp
   return item.tone === 'error' ? CircleAlert : CircleCheck
 }
 
@@ -64,12 +73,42 @@ async function openItem(item: AppNotification): Promise<void> {
   markRead([item.key])
   close()
   const target = item.target
+  if (target.type === 'settings') {
+    await settingsRoute.openSettings('general')
+    return
+  }
   if (target.type === 'scheduler') {
     await router.push({ name: 'scheduler' }).catch(() => undefined)
     return
   }
   await router.push(sessionLocation(target.sessionId)).catch(() => undefined)
   if (target.type === 'review') requestWorkspace({ pane: 'review' })
+}
+
+/** The version an update notification names (`update:<version>`). */
+function updateVersion(item: AppNotification): string {
+  return item.key.startsWith('update:') ? item.key.slice('update:'.length) : ''
+}
+
+async function openUpdateNotes(item: AppNotification): Promise<void> {
+  markRead([item.key])
+  close()
+  await updates.load()
+  if (updates.status.value?.available) {
+    await updates.openNotes()
+    return
+  }
+  await openLink(
+    `https://github.com/TheSyart/emperor-agent/releases/tag/v${encodeURIComponent(updateVersion(item))}`,
+  ).catch(() => undefined)
+}
+
+async function downloadUpdate(item: AppNotification): Promise<void> {
+  markRead([item.key])
+  close()
+  await updates.load()
+  await settingsRoute.openSettings('general')
+  await updates.download()
 }
 
 /** Keep keyboard focus inside the panel after a header action disables itself. */
@@ -136,6 +175,16 @@ onBeforeUnmount(() => {
             <span v-if="!item.read" class="unread" aria-hidden="true" />
           </span>
         </button>
+        <div
+          v-if="item.kind === 'update'"
+          class="row-actions"
+          data-update-actions
+        >
+          <Button size="sm" @click="openUpdateNotes(item)">查看更新说明</Button>
+          <Button size="sm" variant="secondary" @click="downloadUpdate(item)"
+            >下载</Button
+          >
+        </div>
       </li>
     </ul>
     <div v-else class="empty">暂无通知</div>
@@ -273,6 +322,12 @@ onBeforeUnmount(() => {
   height: var(--space-1-5);
   border-radius: var(--radius-pill);
   background: rgb(var(--error));
+}
+
+.row-actions {
+  display: flex;
+  gap: var(--space-1);
+  padding: 0 var(--space-2-5) var(--space-2) calc(var(--space-2-5) * 2 + 16px);
 }
 
 .empty {
