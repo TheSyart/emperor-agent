@@ -72,6 +72,7 @@ Active 文档使用下面的四行状态头：
 | 本地密钥与秘密迁移                   | `desktop/src/main/local-secret-store.ts`、`computer-use/credential-vault.ts`、`desktop/src/main/computer-use/nm-bridge-store.ts`        | README、SECURITY、电脑操作手册、存储架构、IPC 文档、Preview 安全说明、Changelog                    |
 | 电脑操作驱动、授权、凭据或浏览器配对 | `harness/computer-use/`、`desktop/src/main/computer-use/`、`desktop/extension/`、`desktop/native/`、电脑操作设置页                      | README、电脑操作手册、诊断、权限架构、IPC 文档、存储架构、Changelog                                |
 | ToolCatalog 工具或 Pull Request 查询 | `environment/tool-catalog.json`、`environment/catalog.ts`、`workspace/pull-request-browser.ts`、`components/pages/pulls/`               | Chat/Build、诊断、IPC 文档、[ToolCatalog 发布审核](release/tool-catalog-review.md)                 |
+| CI 门禁                              | `.github/workflows/ci.yml`、`nightly.yml`、`weekly-model-metadata.yml`、`scripts/ci/`、`desktop/scripts/run-packaged-smoke.cjs`         | [CI 门禁](development/ci.md)、开发指南、Preview/Stable 手册                                        |
 | Release workflow                     | `.github/workflows/release*.yml` 与发布脚本                                                                                             | Preview/Stable 手册、安全说明、README                                                              |
 | 安全边界                             | IPC trust、沙箱与审批、network/store policy                                                                                             | SECURITY、用户安全说明、架构文档                                                                   |
 

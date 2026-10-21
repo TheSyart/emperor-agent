@@ -15,6 +15,11 @@ jobs:
   macos-preview:
     name: UNSIGNED-PREVIEW macOS (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      # Reads the nightly's last run and its failure issue (REL-04).
+      actions: read
+      issues: read
     strategy:
       fail-fast: false
       matrix:
@@ -24,12 +29,18 @@ jobs:
           - runner: macos-15-intel
             arch: x64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 1
+      # A red nightly blocks the release, never a pull request (REL-04).
+      - name: Require a green nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EMPEROR_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node scripts/ci/require-green-nightly.mjs
       - name: Select Xcode with the macOS 26 SDK
-        run: sudo xcode-select -s /Applications/Xcode_26.0.1.app/Contents/Developer
-      - uses: actions/setup-node@v4
+        run: scripts/ci/select-xcode.sh
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
           cache: npm
@@ -37,7 +48,7 @@ jobs:
             package-lock.json
             desktop/package-lock.json
       # node-gyp used by the node-pty Electron rebuild still imports distutils.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.11'
       - name: Validate Preview tag
@@ -60,7 +71,7 @@ jobs:
           npm --prefix desktop run package:smoke
           node scripts/preview-release-contract.mjs candidate desktop/dist "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID" macos "${{ matrix.arch }}"
       - name: Upload unsigned macOS candidate
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: UNSIGNED-PREVIEW-macos-${{ matrix.arch }}-candidate
           path: |
@@ -83,10 +94,10 @@ jobs:
       attestations: write
       artifact-metadata: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
           cache: npm
@@ -98,7 +109,7 @@ jobs:
           npm ci
           npm --prefix desktop ci
       - name: Download Preview candidates
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: UNSIGNED-PREVIEW-*-candidate
           path: preview-inputs
@@ -143,11 +154,11 @@ jobs:
           node scripts/preview-publication-contract.mjs \
             preview-bundle "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ID"
       - name: Attest Preview build provenance
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: preview-bundle/SHA256SUMS.txt
       - name: Attest Preview artifact SBOM
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: preview-bundle/ARTIFACT-SHA256SUMS.txt
           sbom-path: preview-bundle/emperor-agent-${{ github.ref_name }}.cdx.json
@@ -171,7 +182,7 @@ jobs:
               --predicate-type 'https://cyclonedx.org/bom'
           done <preview-bundle/ARTIFACT-SHA256SUMS.txt
       - name: Upload attested Preview bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: UNSIGNED-PREVIEW-release-bundle
           path: preview-bundle
@@ -188,16 +199,16 @@ jobs:
     env:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - name: Fetch default branch
         run: git fetch origin "$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       - name: Download attested Preview bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: UNSIGNED-PREVIEW-release-bundle
           path: preview-bundle

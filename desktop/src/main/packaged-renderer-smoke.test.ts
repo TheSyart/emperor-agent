@@ -4,6 +4,8 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import {
   createPackagedSmokeAttachment,
+  PROTOCOL_TRAVERSAL_PROBES,
+  rendererProbeSource,
   verifyPackagedRenderer,
   type PackagedSmokeWindowLike,
 } from './packaged-renderer-smoke'
@@ -23,6 +25,18 @@ const PROBE = {
   evalBlocked: true,
   microphoneDenied: true,
   href: 'app://bundle/index.html',
+  // REL-04: every traversal request refused (attachments, media and pet with
+  // an error status; the bundle's SPA fallback without the file).
+  traversal: PROTOCOL_TRAVERSAL_PROBES.map((probe) => ({
+    url: probe.url,
+    status: probe.mustFail ? 404 : 200,
+    leaked: false,
+  })),
+}
+
+const TRAVERSAL = {
+  canary: 'emperor-traversal-canary-0123456789abcdef',
+  hostSecret: 'root:*:0:0:System Administrator:/var/root:/bin/sh',
 }
 
 function fakeWindow(
@@ -63,6 +77,7 @@ describe('packaged renderer smoke', () => {
       rendererUrl: 'app://bundle/index.html',
       attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
       attachmentContent: 'emperor-renderer-smoke',
+      traversal: TRAVERSAL,
       chromiumSandboxDisabledForTest: false,
       webPreferences: {
         sandbox: true,
@@ -96,6 +111,7 @@ describe('packaged renderer smoke', () => {
         devToolsDisabled: true,
         productionMenu: true,
         rendererUrlPinned: true,
+        protocolTraversalRefused: true,
       },
     })
     expect(win.webContents.openDevTools).toHaveBeenCalled()
@@ -115,6 +131,7 @@ describe('packaged renderer smoke', () => {
           rendererUrl,
           attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
           attachmentContent: 'emperor-renderer-smoke',
+          traversal: TRAVERSAL,
           chromiumSandboxDisabledForTest: false,
           webPreferences: {
             sandbox: true,
@@ -148,6 +165,7 @@ describe('packaged renderer smoke', () => {
           rendererUrl: 'app://bundle/index.html',
           attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
           attachmentContent: 'emperor-renderer-smoke',
+          traversal: TRAVERSAL,
           chromiumSandboxDisabledForTest: false,
           webPreferences: {
             sandbox: true,
@@ -179,6 +197,7 @@ describe('packaged renderer smoke', () => {
         rendererUrl: 'app://bundle/index.html',
         attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
         attachmentContent: 'emperor-renderer-smoke',
+        traversal: TRAVERSAL,
         chromiumSandboxDisabledForTest: true,
         webPreferences: {
           sandbox: true,
@@ -203,6 +222,7 @@ describe('packaged renderer smoke', () => {
         rendererUrl: 'app://bundle/index.html',
         attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
         attachmentContent: 'emperor-renderer-smoke',
+        traversal: TRAVERSAL,
         chromiumSandboxDisabledForTest: false,
         webPreferences: {
           sandbox: true,
@@ -213,6 +233,77 @@ describe('packaged renderer smoke', () => {
       }),
     ).rejects.toThrow(/deep-link-render/)
     expect(destroy).toHaveBeenCalledOnce()
+  })
+
+  it('8. asks for app://attachments/../../etc/passwd and the other traversal paths (REL-04)', () => {
+    const urls = PROTOCOL_TRAVERSAL_PROBES.map((probe) => probe.url)
+    expect(urls).toContain('app://attachments/../../etc/passwd')
+    for (const host of ['attachments', 'media', 'bundle', 'pet', 'pet-assets'])
+      expect(
+        urls.some((url) => url.startsWith(`app://${host}/`)),
+        host,
+      ).toBe(true)
+    // Encoded dot segments too, which the URL parser does not fold away.
+    expect(urls.some((url) => /%2e%2e/i.test(url))).toBe(true)
+    expect(urls.some((url) => /\.\.%2f/i.test(url))).toBe(true)
+    const source = rendererProbeSource(
+      'app://attachments/att_2099-01_abcdef12/raw',
+      'emperor-renderer-smoke',
+      TRAVERSAL,
+    )
+    for (const url of urls) expect(source).toContain(JSON.stringify(url))
+    expect(source).toContain(JSON.stringify(TRAVERSAL.canary))
+    expect(source).toContain(JSON.stringify(TRAVERSAL.hostSecret))
+  })
+
+  it.each([
+    [
+      'a request that returned a host file',
+      (url: string) => ({ url, status: 200, leaked: url.includes('etc') }),
+    ],
+    [
+      'an attachment traversal answered 200',
+      (url: string) => ({ url, status: 200, leaked: false }),
+    ],
+    ['a traversal request that was never made', () => null],
+  ])('8. fails closed on %s', async (_name, outcome) => {
+    const traversal = PROTOCOL_TRAVERSAL_PROBES.map((probe) =>
+      outcome(probe.url),
+    ).filter(Boolean)
+    const { win, destroy } = fakeWindow({ probe: { ...PROBE, traversal } })
+    await expect(
+      verifyPackagedRenderer({
+        createWindow: () => win,
+        rendererUrl: 'app://bundle/index.html',
+        attachmentUrl: 'app://attachments/att_2099-01_abcdef12/raw',
+        attachmentContent: 'emperor-renderer-smoke',
+        traversal: TRAVERSAL,
+        chromiumSandboxDisabledForTest: false,
+        webPreferences: {
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+        },
+        security: security(),
+      }),
+    ).rejects.toThrow(/protocol-traversal/)
+    expect(destroy).toHaveBeenCalledOnce()
+  })
+
+  it('plants a traversal canary next to the attachments, outside every app:// root', async () => {
+    const stateRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'emperor-renderer-smoke-'),
+    )
+    const fixture = await createPackagedSmokeAttachment(stateRoot)
+    expect(fixture.traversalCanary).toMatch(
+      /^emperor-traversal-canary-[a-f0-9]{16}$/,
+    )
+    expect(
+      fs.readFileSync(
+        path.join(stateRoot, 'smoke-traversal-canary.txt'),
+        'utf8',
+      ),
+    ).toBe(fixture.traversalCanary)
   })
 
   it('creates a contained attachment fixture without exposing its host path', async () => {

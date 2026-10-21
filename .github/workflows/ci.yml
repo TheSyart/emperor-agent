@@ -1,25 +1,41 @@
 name: ci
 
+# REL-04 (MAIN-29): macOS only (Emperor does not support Windows or Linux).
+# Each job runs one script, so every gate can be rerun locally the same way
+# (docs/development/ci.md):
+#   scripts/ci/pr-gate.sh               make check, package:verify, unsealed probes
+#   scripts/ci/pr-gate.sh --build-only  the same package on Intel
+# The nightly (nightly.yml) never runs here and never blocks a pull request.
+
 on:
-  push:
   pull_request:
+  push:
+    branches: [main, 'release/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Unsigned builds: electron-builder must not look for a signing identity.
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
 jobs:
-  ts-desktop:
-    name: ts-desktop (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    # Windows is not a supported platform: its job still runs and reports
-    # (POSIX file modes and paths fail there), but does not fail the run.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+  macos-pr-gate:
+    name: macOS PR gate (arm64)
+    runs-on: macos-15
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 2
-      - uses: actions/setup-node@v4
+      - name: Select Xcode with the macOS 26 SDK
+        run: scripts/ci/select-xcode.sh
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
           cache: npm
@@ -28,50 +44,60 @@ jobs:
             desktop/package-lock.json
       # node-gyp (the node-pty rebuild while packaging) still imports
       # distutils, which Python 3.12 removed.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.11'
-      - name: Install core dependencies
-        run: npm ci
-      - name: Install desktop dependencies
-        working-directory: desktop
-        run: npm ci
-      - name: Whitespace / conflict markers
-        shell: bash
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm --prefix desktop ci
+      - name: Whitespace and conflict markers in the pushed commit
         run: |
           if git rev-parse HEAD~1 >/dev/null 2>&1; then
             git diff --check HEAD~1 HEAD
-          else
-            git diff --check
           fi
-      - name: Core tests
-        run: npm test --workspace @emperor/core
-      - name: Core typecheck
-        run: npm run typecheck --workspace @emperor/core
-      - name: Core lint
-        run: npm run lint --workspace @emperor/core
-      - name: Desktop tests
-        working-directory: desktop
-        run: npm run test
-      - name: Browser extension tests
-        shell: bash
-        run: node --test desktop/extension/tests/*.test.js
-      - name: macOS helper Swift tests
-        if: runner.os == 'macOS'
-        working-directory: desktop/native/macos
-        run: swift test
-      - name: Desktop test typecheck
-        working-directory: desktop
-        run: npm run typecheck:test
-      - name: Desktop typecheck
-        working-directory: desktop
-        run: npm run typecheck
-      - name: Desktop lint
-        working-directory: desktop
-        run: npm run lint
-      - name: Desktop build
-        working-directory: desktop
-        run: npm run build
-      - name: Package dry run
-        working-directory: desktop
-        run: npm run package:verify
+      - name: make check, package:verify and the unsealed probes
+        run: scripts/ci/pr-gate.sh
+      - name: Upload the packaged smoke receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: packaged-smoke-macos-arm64
+          path: desktop/dist/packaged-smoke/*.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  macos-x64-build:
+    name: macOS x64 build
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 1
+      - name: Select Xcode with the macOS 26 SDK
+        run: scripts/ci/select-xcode.sh
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm --prefix desktop ci
+      - name: Build, package:verify and the unsealed probes
+        run: scripts/ci/pr-gate.sh --build-only
+      - name: Upload the packaged smoke receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: packaged-smoke-macos-x64
+          path: desktop/dist/packaged-smoke/*.json
+          if-no-files-found: ignore
+          retention-days: 7

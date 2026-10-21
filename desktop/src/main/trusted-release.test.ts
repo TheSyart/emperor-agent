@@ -270,7 +270,9 @@ describe('trusted release configuration', () => {
     expect(workflow).toContain('artifact-metadata: write')
     expect(workflow).toContain('@cyclonedx/cyclonedx-npm@6.0.0')
     expect(workflow).toContain('scripts/merge-cyclonedx-sboms.mjs')
-    expect(workflow.match(/actions\/attest@v4/g)?.length).toBe(2)
+    expect(workflow.match(/actions\/attest@[0-9a-f]{40} # v4\./g)?.length).toBe(
+      2,
+    )
     expect(workflow).toContain('subject-checksums:')
     expect(workflow).toContain('sbom-path:')
     expect(workflow).toContain('gh attestation verify')

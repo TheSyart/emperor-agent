@@ -1,4 +1,5 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
@@ -7,6 +8,94 @@ const ATTACHMENT_MONTH = '2099-01'
 const PRODUCTION_RENDERER_URL = 'app://bundle/index.html'
 const PRODUCTION_ORIGIN = 'app://bundle/'
 const DEEP_LINK_RENDERER_URL = 'app://bundle/chat/packaged-smoke'
+/** Next to `memory/`, outside every root app:// serves (REL-04). */
+const TRAVERSAL_CANARY_FILE = 'smoke-traversal-canary.txt'
+
+/**
+ * REL-04 (card test 8): requests from the main window that try to climb out
+ * of an app:// root, plain and with encoded dot segments and slashes. Hosts
+ * that serve files must answer with an error (`mustFail`); the bundle falls
+ * back to index.html for an unknown route, so it may answer 200 but never
+ * with the file. None may return the canary planted in the Emperor Home or
+ * the host's /etc/passwd.
+ */
+export const PROTOCOL_TRAVERSAL_PROBES: ReadonlyArray<{
+  url: string
+  mustFail: boolean
+}> = [
+  { url: 'app://attachments/../../etc/passwd', mustFail: true },
+  {
+    url: 'app://attachments/..%2F..%2F..%2F..%2F..%2F..%2F..%2F..%2Fetc%2Fpasswd/raw',
+    mustFail: true,
+  },
+  {
+    url: `app://attachments/%2e%2e/%2e%2e/%2e%2e/${TRAVERSAL_CANARY_FILE}`,
+    mustFail: true,
+  },
+  {
+    url: `app://attachments/att_${ATTACHMENT_MONTH}_00000000/..%2F..%2F..%2F..%2F${TRAVERSAL_CANARY_FILE}`,
+    mustFail: true,
+  },
+  { url: `app://media/../../../${TRAVERSAL_CANARY_FILE}`, mustFail: true },
+  {
+    url: 'app://media/..%2F..%2F..%2F..%2F..%2F..%2Fetc%2Fpasswd/raw',
+    mustFail: true,
+  },
+  {
+    url: 'app://bundle/..%2F..%2F..%2F..%2F..%2F..%2F..%2F..%2F..%2F..%2Fetc%2Fpasswd',
+    mustFail: false,
+  },
+  {
+    url: 'app://bundle/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd',
+    mustFail: false,
+  },
+  {
+    url: 'app://pet/..%2F..%2F..%2F..%2F..%2F..%2F..%2F..%2Fetc%2Fpasswd',
+    mustFail: true,
+  },
+  {
+    url: 'app://pet-assets/..%2F..%2F..%2F..%2F..%2F..%2F..%2F..%2Fetc%2Fpasswd',
+    mustFail: true,
+  },
+]
+
+/** What a leaked file would contain: the planted canary, and /etc/passwd's root line. */
+export interface ProtocolTraversalMarkers {
+  canary: string
+  hostSecret: string | null
+}
+
+/** The root line of /etc/passwd, which no app:// response may contain. */
+export function traversalHostSecret(path = '/etc/passwd'): string | null {
+  try {
+    return (
+      readFileSync(path, 'utf8')
+        .split('\n')
+        .find((line) => line.startsWith('root:')) ?? null
+    )
+  } catch {
+    return null
+  }
+}
+
+/** Why the reported traversal requests are not all refused (empty: refused). */
+export function traversalProblems(reported: unknown): string[] {
+  const list = Array.isArray(reported) ? reported.map(asRecord) : []
+  const problems: string[] = []
+  for (const probe of PROTOCOL_TRAVERSAL_PROBES) {
+    const result = list.find((item) => item.url === probe.url)
+    if (!result) problems.push(`${probe.url} was not requested`)
+    else if (result.leaked === true)
+      problems.push(`${probe.url} returned a file outside its root`)
+    else if (
+      probe.mustFail &&
+      Number(result.status) >= 200 &&
+      Number(result.status) < 300
+    )
+      problems.push(`${probe.url} answered ${String(result.status)}`)
+  }
+  return problems
+}
 
 export interface PackagedSmokeWindowLike {
   loadURL(url: string): Promise<unknown>
@@ -38,6 +127,11 @@ export interface PackagedRendererSecurity {
    * says (the runner sets it to a local server that must see no request).
    */
   rendererUrlPinned: boolean
+  /**
+   * REL-04: every PROTOCOL_TRAVERSAL_PROBES request from the main window was
+   * refused (an error status, or the bundle's index.html, never the file).
+   */
+  protocolTraversalRefused: boolean
 }
 
 const DEVELOPMENT_MENU_ROLES = ['reload', 'forcereload', 'toggledevtools']
@@ -64,6 +158,8 @@ export async function createPackagedSmokeAttachment(
   url: string
   path: string
   content: string
+  /** Planted next to memory/; no app:// request may return it (REL-04). */
+  traversalCanary: string
 }> {
   const hash8 = createHash('sha256')
     .update(ATTACHMENT_CONTENT)
@@ -78,10 +174,20 @@ export async function createPackagedSmokeAttachment(
   const path = join(dir, `${hash8}-renderer-smoke.png`)
   await mkdir(dir, { recursive: true })
   await writeFile(path, ATTACHMENT_CONTENT, { encoding: 'utf8', mode: 0o600 })
+  const traversalCanary = `emperor-traversal-canary-${randomBytes(8).toString('hex')}`
+  await writeFile(
+    join(resolve(stateRoot), TRAVERSAL_CANARY_FILE),
+    traversalCanary,
+    {
+      encoding: 'utf8',
+      mode: 0o600,
+    },
+  )
   return {
     url: `app://attachments/att_${ATTACHMENT_MONTH}_${hash8}/raw`,
     path,
     content: ATTACHMENT_CONTENT,
+    traversalCanary,
   }
 }
 
@@ -91,6 +197,8 @@ export async function verifyPackagedRenderer(opts: {
   rendererUrl: string
   attachmentUrl: string
   attachmentContent: string
+  /** REL-04: what a request that escaped its app:// root would return. */
+  traversal: ProtocolTraversalMarkers
   chromiumSandboxDisabledForTest: boolean
   webPreferences: {
     sandbox?: unknown
@@ -114,16 +222,25 @@ export async function verifyPackagedRenderer(opts: {
     const probe = asRecord(
       await withTimeout(
         win.webContents.executeJavaScript(
-          rendererProbeSource(opts.attachmentUrl, opts.attachmentContent),
+          rendererProbeSource(
+            opts.attachmentUrl,
+            opts.attachmentContent,
+            opts.traversal,
+          ),
         ),
         timeoutMs,
       ),
     )
+    const traversal = traversalProblems(probe.traversal)
     await withTimeout(win.loadURL(DEEP_LINK_RENDERER_URL), timeoutMs)
     const deepProbe = asRecord(
       await withTimeout(
         win.webContents.executeJavaScript(
-          rendererProbeSource(opts.attachmentUrl, opts.attachmentContent),
+          rendererProbeSource(
+            opts.attachmentUrl,
+            opts.attachmentContent,
+            opts.traversal,
+          ),
         ),
         timeoutMs,
       ),
@@ -148,6 +265,7 @@ export async function verifyPackagedRenderer(opts: {
         opts.rendererUrl === PRODUCTION_RENDERER_URL &&
         typeof probe.href === 'string' &&
         probe.href.startsWith(PRODUCTION_ORIGIN),
+      protocolTraversalRefused: traversal.length === 0,
     }
     const preferences = opts.webPreferences
     const receipt: PackagedRendererSmokeReceipt = {
@@ -190,6 +308,8 @@ export async function verifyPackagedRenderer(opts: {
       !security.devToolsDisabled && 'devtools',
       !security.productionMenu && 'menu',
       !security.rendererUrlPinned && 'renderer-url',
+      !security.protocolTraversalRefused &&
+        `protocol-traversal (${traversal.join('; ')})`,
     ].filter(Boolean)
     if (failed.length)
       throw new Error(
@@ -205,9 +325,15 @@ export async function verifyPackagedRenderer(opts: {
 export function rendererProbeSource(
   attachmentUrl: string,
   attachmentContent: string,
+  traversal: ProtocolTraversalMarkers,
 ): string {
   const url = JSON.stringify(attachmentUrl)
   const content = JSON.stringify(attachmentContent)
+  const traversalUrls = JSON.stringify(
+    PROTOCOL_TRAVERSAL_PROBES.map((probe) => probe.url),
+  )
+  const canary = JSON.stringify(traversal.canary)
+  const hostSecret = JSON.stringify(traversal.hostSecret)
   return `(async () => {
     const nodeGlobalsAbsent =
       typeof globalThis.process === 'undefined' &&
@@ -271,6 +397,22 @@ export function rendererProbeSource(
         .catch((error) => Boolean(error) && error.name === 'NotAllowedError'),
       new Promise((resolve) => setTimeout(() => resolve(false), 3000)),
     ])
+    // REL-04: requests that try to leave their app:// root.
+    const traversal = []
+    for (const target of ${traversalUrls}) {
+      let status = 0
+      let leaked = false
+      try {
+        const answer = await fetch(target, { cache: 'no-store' })
+        status = answer.status
+        const text = await answer.text()
+        const secret = ${hostSecret}
+        leaked =
+          answer.ok &&
+          (text.includes(${canary}) || (secret !== null && text.includes(secret)))
+      } catch {}
+      traversal.push({ url: target, status, leaked })
+    }
     return {
       nodeGlobalsAbsent,
       bridgeExposed,
@@ -283,6 +425,7 @@ export function rendererProbeSource(
       cspMeta,
       evalBlocked,
       microphoneDenied,
+      traversal,
       href: location.href,
     }
   })()`

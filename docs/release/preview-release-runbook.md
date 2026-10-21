@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：发布维护者<br>
-> 最后核验：2026-10-19<br>
-> 事实源：`.github/workflows/release-preview.yml`、`scripts/preview-*-contract.mjs`、`scripts/packaged-smoke-contract.mjs`、`scripts/publish-preview-release.sh`、`desktop/scripts/after-pack.cjs`、`desktop/scripts/harden-package.cjs`
+> 最后核验：2026-10-21<br>
+> 事实源：`.github/workflows/release-preview.yml`、`scripts/ci/require-green-nightly.mjs`、`scripts/preview-*-contract.mjs`、`scripts/packaged-smoke-contract.mjs`、`scripts/publish-preview-release.sh`、`desktop/scripts/after-pack.cjs`、`desktop/scripts/harden-package.cjs`
 
 当前公开安装包使用未签名 Preview 渠道。它通过独立 workflow 构建、验证和发布为 GitHub Pre-release，不应被描述为 Stable，也不能混入受信签名渠道的产物。
 
@@ -67,7 +67,9 @@ macOS job 在安装依赖和运行质量门禁前显式选择 Xcode 26，确保�
 - macOS arm64：unsigned DMG 与 ZIP。
 - macOS x64：unsigned DMG 与 ZIP。
 
-本轮不构建、聚合或发布 Windows / Linux 包；保留旧 Release。常规 CI 的 Windows job 当前已标为不支持，不能把它的失败视为已通过。
+本轮不构建、聚合或发布 Windows / Linux 包；保留旧 Release。常规 CI 也只跑 macOS（[CI 门禁](../development/ci.md)）。
+
+macOS job 的第一步是 `scripts/ci/require-green-nightly.mjs`：最近一次 nightly 失败、超过 72 小时没有运行，或还有未关闭的 `nightly-failure` issue 时，发布在构建之前失败。先修好并完整运行一次 nightly，再重新推送 tag 或重新运行这个 workflow。
 
 每个平台先运行质量门禁、打包 smoke 并生成 candidate receipt。Aggregate job 下载两个 macOS candidate，按 publication contract 检查 tag、commit、workflow run、平台矩阵、marker 与文件清单；缺少或混入意外资产时直接失败。
 

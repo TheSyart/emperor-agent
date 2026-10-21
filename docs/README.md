@@ -54,6 +54,7 @@
 - [全局私有存储根](architecture/global-state-store.md)
 - [可选能力生命周期](architecture/optional-capabilities.md)
 - [开发指南](development/README.md)
+- [CI 门禁](development/ci.md)
 - [扩展 Emperor Agent](development/extending-emperor.md)
 - [对话资源展示契约](development/conversation-resources.md)
 - [Headless ACP operator preview](development/headless-acp.md)

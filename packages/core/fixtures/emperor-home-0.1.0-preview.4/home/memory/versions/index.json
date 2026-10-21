@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": 1792516225.874,
+  "versions": [
+    {
+      "id": "memv_1792516225874_45bd5293_1ddabd",
+      "target": "memory",
+      "relPath": "memory/MEMORY.local.md",
+      "label": "MEMORY.local.md",
+      "reason": "memory_patch:save_global_memory",
+      "createdAt": 1792516225.874,
+      "contentHash": "45bd529303c3c7cd528c283112a07cffe696c2c827f12c95cc51d26b60cebc56",
+      "bytes": 583
+    }
+  ]
+}

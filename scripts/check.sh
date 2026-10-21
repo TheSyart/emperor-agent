@@ -21,6 +21,11 @@ done < <(git ls-files '*.sh')
 echo "== public documentation boundaries =="
 node scripts/check_public_docs.mjs
 
+# REL-04: every uses: pinned to a commit; the gates call their scripts, on macOS.
+echo "== GitHub Actions pins and workflow lint =="
+node scripts/ci/check-action-pins.mjs
+node scripts/ci/check-workflows.mjs
+
 echo "== core vitest =="
 npm test --workspace @emperor/core
 
