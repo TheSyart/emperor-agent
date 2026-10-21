@@ -2,10 +2,10 @@
 
 > 文档状态：Active<br>
 > 面向读者：需要控制权限、审阅方案或持续推进任务的用户<br>
-> 最后核验：2026-10-20<br>
-> 事实源：`packages/core/src/harness/approval/presets.ts`、`packages/core/src/harness/sandbox/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/goal/`、`packages/core/src/commands/builtins.ts`
+> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 事实源：`packages/core/src/harness/approval/presets.ts`、`packages/core/src/api/services/session-defaults-service.ts`、`desktop/src/renderer/src/components/conversation/takeover/PlanReviewPanel.vue`、`desktop/src/renderer/src/composables/composerLifecycle.ts`、`packages/core/src/harness/sandbox/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/goal/`、`packages/core/src/commands/builtins.ts`
 
-权限预设决定 Agent 能写哪里；计划（规划模式）决定 Agent 先提方案还是直接动手；目标（目标）让 Agent 在你不再输入时继续推进同一个目标。三者可以组合使用。
+权限预设决定 Agent 能写哪里；计划模式决定 Agent 先提方案还是直接动手；目标让 Agent 在你不再输入时继续推进同一件事。三者可以组合使用。
 
 ## 权限预设
 
@@ -16,10 +16,10 @@
 | `/permissions danger-full-access`       | 不限制                        | 不弹出审批；需要审批的请求被自动拒绝 |
 | `/permissions` 或 `/permissions status` | —                             | 打开权限面板查看当前预设             |
 
-- 新会话总是从 `workspace-write` 开始；预设只属于当前会话，不会保存为全局规则。
+- 新会话从「设置 › 常规 › 会话 › 新会话的权限」选定的预设开始，默认 `workspace-write`（工作区可写）；选「完全访问」时先确认一次。会话里用 `/permissions` 或输入框的盾牌切换的预设只属于这个会话。
 - 批准只对那一次工具调用有效，下一次仍会询问。
 - 沙箱主要限制文件写入，网络访问不受限制。读取有一张固定的例外表（任何预设下都生效）：Emperor Home 的 `computer-use/`、`browser/` 与 `model_config.json`、`mcp_config.json`、`settings.json`、`hooks.json`（含它们的备份）Agent 既不能读也不能改，提权也不行；`~/.ssh`、`~/.aws`、`~/.config/gcloud`、`~/.docker/config.json`、`~/.netrc`、`~/.codex/auth.json`、`~/.claude/.credentials.json` 不能写，读取要你批准一次提权（审批卡写明文件和理由），`danger-full-access` 下可以直接读。因此在默认预设下，经 SSH 的 `git push` / `pull`、`aws`、`gcloud` 等命令需要批准一次，或在你自己的终端里执行。
-- Shell 命令在 macOS 上使用 Seatbelt、在 Linux 上使用 bubblewrap 执行。其他平台没有沙箱后端，`read-only` 和 `workspace-write` 下的 Shell 命令会直接失败，需要时切换到 `danger-full-access`。
+- Shell 命令由 macOS 的 Seatbelt 沙箱执行。
 - 记忆编辑、MCP 工具、Skill 加载和定时任务工具不受沙箱限制，也不需要审批。
 - Agent 用 `skill_manage` 新建、修改、删除或导入 Skill，或用 `mcp_config` 添加、删除、启停 MCP server 时，写入同样跟随当前预设：`danger-full-access` 下直接执行，其他预设每次写入都会请求你批准。
 - 子智能体继承当前会话的沙箱模式，但不能请求提权。
@@ -34,11 +34,12 @@
 
 - `/plan` 进入计划模式；`/plan <消息>` 进入的同时把消息发给 Agent；`/plan off` 退出。
 - 计划模式下 Agent 会先只读探索、在必要时向你提问，然后提交一份以标题开头的完整计划。
-- 计划出现在底部审阅面板，有两个选择：
-  - **Approve**：退出计划模式，Agent 从下一步开始执行计划；
-  - **Keep planning**：留在计划模式，你写下的意见会交给 Agent 修改计划后重新提交。
-- 取消审阅时仍停留在计划模式，本轮随即结束，等你输入自己的意见；审阅不可用时同样停留在计划模式。
-- 计划模式通过提示词约束 Agent，工具列表不变；实际能否写入仍由当前权限预设决定。想确保规划阶段不会改动文件，可以同时切换到 `read-only`。
+- 计划出现在底部审阅面板，有两个按钮：
+  - 「批准并执行」：退出计划模式，Agent 从下一步开始执行计划；
+  - 「继续规划」：留在计划模式，你在「计划调整意见」里写下的意见会交给 Agent，修改后重新提交。
+- 点面板右上角的 ×（「忽略」）时仍停留在计划模式，本轮随即结束，等你输入自己的意见；审阅不可用时同样停留在计划模式。
+- 计划模式主要通过提示词约束 Agent，实际能否写入仍由当前权限预设决定；想确保规划阶段不会改动文件，可以同时切换到 `read-only`。少数地方另有硬限制：计划模式下 Claude Code / Codex 子智能体只能做只读审查，工作流里的子智能体也是只读的。
+- 目标进行中从输入框切到计划模式，会先取消这个目标（提示「目标已取消，已切换到计划。」）。
 - Agent 运行中切换计划模式时，切换会在下一个步骤边界生效。
 
 ## Agent 提问
