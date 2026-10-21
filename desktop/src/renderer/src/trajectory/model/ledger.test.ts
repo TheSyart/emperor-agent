@@ -245,10 +245,10 @@ describe('trajectory ledger', () => {
     expect(trajectoryToolCallTextParts('message', 'x')).toBeUndefined()
     expect(
       trajectoryMessageSourceLabel({ kind: 'context', producer: 'memory' }),
-    ).toBe('Context · memory')
+    ).toBe('上下文 · memory')
     expect(
       trajectoryMessageSourceLabel({ kind: 'event', type: 'goal/change' }),
-    ).toBe('Event · goal/change')
+    ).toBe('事件 · goal/change')
     expect(trajectoryMessageSourceLabel({ kind: 'user' })).toBe('用户')
     expect(trajectoryMessageSourceLabel(null)).toBe('未知')
     expect(

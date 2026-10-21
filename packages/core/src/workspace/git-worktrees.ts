@@ -184,7 +184,7 @@ export class WorkspaceBindingStore {
     } catch (error) {
       throw new WorkspaceOperationError(
         'git_worktree_lease_corrupt',
-        'Session worktree lease 损坏；为避免切换到错误目录，Git 工作区已停止。',
+        '会话的 worktree 租约损坏；为避免切换到错误目录，Git 工作区已停止。',
         { cause: error },
       )
     }
@@ -405,7 +405,7 @@ export class GitWorktreeManager {
     if (this.subagentLeases.get(taskId))
       throw new WorkspaceOperationError(
         'subagent_worktree_unavailable',
-        '该子代理已经持有隔离 worktree。',
+        '这个子智能体已经有自己的隔离 worktree。',
       )
     mkdirSync(this.subagentWorktreeRoot, { recursive: true, mode: 0o700 })
     const path = canonical(resolve(this.subagentWorktreeRoot, taskId))
@@ -413,7 +413,7 @@ export class GitWorktreeManager {
     if (existsSync(path))
       throw new WorkspaceOperationError(
         'subagent_worktree_unavailable',
-        '子代理隔离目录已经存在。',
+        '子智能体的隔离目录已经存在。',
       )
     const identity = await this.options.resolver.resolve(input.sourceRoot)
     await this.options.execute(identity.worktreeRoot, [
@@ -571,7 +571,7 @@ class SubagentWorktreeLeaseStore {
     } catch (error) {
       throw new WorkspaceOperationError(
         'git_worktree_lease_corrupt',
-        '子代理 worktree lease 损坏；为避免误删目录，自动创建与清理已停止。',
+        '子智能体的 worktree 租约损坏；为避免误删目录，已停止自动创建与清理。',
         { cause: error },
       )
     }
@@ -689,7 +689,7 @@ function validateTaskId(value: string): string {
   if (!/^[A-Za-z0-9_-]{1,160}$/.test(value))
     throw new WorkspaceOperationError(
       'subagent_worktree_unavailable',
-      '子代理任务标识不合法。',
+      '子智能体任务的标识不合法。',
     )
   return value
 }
@@ -698,7 +698,7 @@ function assertSubagentOwnedPath(root: string, path: string): void {
   if (!isWithin(canonical(root), canonical(path)))
     throw new WorkspaceOperationError(
       'git_worktree_not_owned',
-      '只能清理 Emperor 创建且 lease 可验证的子代理 worktree。',
+      '只能清理 Emperor 创建、且租约可以验证的子智能体 worktree。',
     )
 }
 

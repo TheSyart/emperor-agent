@@ -22,9 +22,7 @@ describe('runInitialStartup', () => {
       },
       bootstrap: {
         boot: ref(null),
-        error: ref(
-          '无法连接 Emperor 核心：请在 Emperor 桌面窗口中打开。',
-        ),
+        error: ref('无法连接 Emperor 核心：请在 Emperor 桌面窗口中打开。'),
         loadBootstrap,
       },
       switchSession,

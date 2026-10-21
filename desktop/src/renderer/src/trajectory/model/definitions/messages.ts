@@ -130,7 +130,9 @@ function hookFacts(
       ? '运行中'
       : [
           `决定：${result.decision}`,
-          result.exitCode === undefined ? undefined : `退出码 ${result.exitCode}`,
+          result.exitCode === undefined
+            ? undefined
+            : `退出码 ${result.exitCode}`,
         ]
           .filter((part) => part !== undefined)
           .join(' · '),

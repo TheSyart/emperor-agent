@@ -23,6 +23,7 @@ import {
   FOCUS_CALL_LOAD_LIMIT,
   focusCallStep,
 } from '../../conversation/focusCallRetry'
+import { isUntranslated } from '../../copyAudit'
 import { ledgerKeyAction } from './tableKeyboard'
 import { acquireTrajectory, type TrajectoryController } from './useTrajectory'
 import {
@@ -140,6 +141,29 @@ describe('TrajectoryTable over the kernel log', () => {
     expect(root.textContent).toContain('轮次之间')
     // Request boundary markers (4 steps + 1 compaction).
     expect(root.querySelectorAll('.traj-request-marker').length).toBe(5)
+  })
+
+  it('6 · the toolbar speaks Chinese in every state (UI-S10)', async () => {
+    const { root } = await mountScenario()
+    const toolbar = root.querySelector<HTMLElement>('.traj-toolbar')!
+    const strings = () =>
+      [toolbar, ...toolbar.querySelectorAll<HTMLElement>('*')].flatMap(
+        (node) => [
+          node.getAttribute('aria-label') ?? '',
+          node.getAttribute('title') ?? '',
+          node.getAttribute('placeholder') ?? '',
+          node.children.length === 0 ? (node.textContent ?? '') : '',
+        ],
+      )
+    const before = strings()
+    root.querySelector<HTMLElement>('[data-fold="turns"]')!.click()
+    root.querySelector<HTMLElement>('[data-fold="calls"]')!.click()
+    await nextTick()
+    const after = strings()
+    expect([...before, ...after].filter(isUntranslated)).toEqual([])
+    expect(before).toContain('折叠所有轮次')
+    expect(after).toContain('展开所有轮次')
+    expect(after).toContain('展开所有调用')
   })
 
   it('folds turns and assistant tool calls from the toolbar and summary rows', async () => {

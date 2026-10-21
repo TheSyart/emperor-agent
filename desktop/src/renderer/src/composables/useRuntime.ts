@@ -1318,10 +1318,7 @@ export function useRuntime(options: {
   function handleSchedulerEvent(data: WsEvent) {
     updateSchedulerBootstrap(data)
     if (data.event === 'scheduler_run_start') {
-      updatePending(
-        '定时任务正在运行',
-        data.job?.name || data.job?.id || '',
-      )
+      updatePending('定时任务正在运行', data.job?.name || data.job?.id || '')
       return
     }
     if (data.event === 'scheduler_run_done') {

@@ -201,7 +201,9 @@ it('renders canonical title, public readonly output and actual ancestry; return 
     name: 'chat',
     params: { sessionId: 'sub-parent' },
   })
-  buttons.find((b) => b.textContent?.includes('返回主会话继续安排任务'))!.click()
+  buttons
+    .find((b) => b.textContent?.includes('返回主会话继续安排任务'))!
+    .click()
   await settle()
   expect(bridge.push).toHaveBeenLastCalledWith({
     name: 'chat',

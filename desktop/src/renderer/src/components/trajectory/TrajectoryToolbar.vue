@@ -82,9 +82,7 @@ onBeforeUnmount(() => clearTimeout(timer))
         class="action"
         aria-label="按实际时长"
         :aria-pressed="actualDuration"
-        :title="
-          actualDuration ? 'Use equal-width operations' : '按实际时长'
-        "
+        :title="actualDuration ? '改为等宽显示' : '按实际时长'"
         @click="emit('update:actualDuration', !actualDuration)"
       >
         <svg
@@ -102,9 +100,9 @@ onBeforeUnmount(() => clearTimeout(timer))
         type="button"
         class="action"
         data-fold="turns"
-        :aria-label="allTurnsCollapsed ? 'Expand turns' : 'Collapse turns'"
+        :aria-label="allTurnsCollapsed ? '展开所有轮次' : '折叠所有轮次'"
         :aria-pressed="allTurnsCollapsed"
-        :title="allTurnsCollapsed ? 'Expand turns' : 'Collapse turns'"
+        :title="allTurnsCollapsed ? '展开所有轮次' : '折叠所有轮次'"
         @click="emit('toggle-turns')"
       >
         <span class="action-icon" aria-hidden="true">{{
@@ -116,9 +114,9 @@ onBeforeUnmount(() => clearTimeout(timer))
         type="button"
         class="action"
         data-fold="calls"
-        :aria-label="allAssistantsCollapsed ? 'Expand calls' : 'Collapse calls'"
+        :aria-label="allAssistantsCollapsed ? '展开所有调用' : '折叠所有调用'"
         :aria-pressed="allAssistantsCollapsed"
-        :title="allAssistantsCollapsed ? 'Expand calls' : 'Collapse calls'"
+        :title="allAssistantsCollapsed ? '展开所有调用' : '折叠所有调用'"
         @click="emit('toggle-calls')"
       >
         <span class="action-icon" aria-hidden="true">{{

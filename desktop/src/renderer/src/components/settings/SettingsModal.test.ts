@@ -40,6 +40,11 @@ vi.mock('./AdvancedSection.vue', async () => {
   }
 })
 
+// Sections are async chunks: on a cold transform cache (CI) the first one
+// can take seconds to load, more than vi.waitFor's default second.
+const SECTION_LOAD = { timeout: 10_000 }
+vi.setConfig({ testTimeout: 20_000 })
+
 async function flushPromises(): Promise<void> {
   for (let i = 0; i < 5; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -120,8 +125,9 @@ afterEach(() => {
 
 /** Type into the open 长期记忆 editor. */
 async function editMemory(text: string): Promise<void> {
-  await vi.waitFor(() =>
-    expect(modal()?.querySelector('textarea')).not.toBeNull(),
+  await vi.waitFor(
+    () => expect(modal()?.querySelector('textarea')).not.toBeNull(),
+    SECTION_LOAD,
   )
   const textarea = modal()!.querySelector('textarea')!
   textarea.value = text
@@ -154,8 +160,12 @@ describe('SettingsModal', () => {
     expect(
       dialog?.querySelector('.nav-cell.active')?.getAttribute('data-section'),
     ).toBe('general')
-    await vi.waitFor(() =>
-      expect(dialog?.querySelector('[data-group="appearance"]')).not.toBeNull(),
+    await vi.waitFor(
+      () =>
+        expect(
+          dialog?.querySelector('[data-group="appearance"]'),
+        ).not.toBeNull(),
+      SECTION_LOAD,
     )
     expect(document.activeElement).toBe(dialog)
   })
@@ -373,12 +383,14 @@ describe('SettingsModal', () => {
   it('renders section header actions in the shell header and drops them on switch', async () => {
     const { router } = await mount('/chat/s1?settings=tokens')
     const header = () => modal()?.querySelector('.settings-header')
-    await vi.waitFor(() =>
-      expect(
-        [...(header()?.querySelectorAll('[data-action="refresh"]') ?? [])].map(
-          (button) => button.getAttribute('aria-label'),
-        ),
-      ).toEqual(['刷新 Token 统计']),
+    await vi.waitFor(
+      () =>
+        expect(
+          [
+            ...(header()?.querySelectorAll('[data-action="refresh"]') ?? []),
+          ].map((button) => button.getAttribute('aria-label')),
+        ).toEqual(['刷新 Token 统计']),
+      SECTION_LOAD,
     )
 
     await router.replace('/chat/s1?settings=general')

@@ -157,7 +157,7 @@ export class GitPullRequestService {
     if (!context.upstream || context.ahead > 0)
       throw new WorkspaceOperationError(
         'git_pr_push_required',
-        '本地分支尚未完整推送，请先显式 Push。',
+        '本地分支还没有完整推送，请先推送。',
       )
     const title = boundedText(input.title, 256, 'PR 标题')
     const body = boundedText(input.body, 64 * 1024, 'PR 正文', true)

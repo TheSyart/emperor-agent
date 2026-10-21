@@ -67,10 +67,7 @@ export class GoalService {
     const sessionId = this.sessionId(input.sessionId, 'goals.start')
     const objective = String(input.objective ?? '').trim()
     if (!objective)
-      throw new GoalServiceError(
-        'goal_objective_invalid',
-        'Goal 目标不能为空。',
-      )
+      throw new GoalServiceError('goal_objective_invalid', '目标不能为空。')
     let target = sessionId
     if (this.deps.materializeSession) {
       const materialized = await this.deps.materializeSession({
@@ -101,7 +98,7 @@ export class GoalService {
 
   async replace(_input: unknown): Promise<never> {
     throw new OperationRetiredError(
-      'Goal 替换已下线：请先取消当前 Goal，再启动新的 Goal。',
+      '不能直接替换目标：请先取消当前目标，再启动新的目标。',
     )
   }
 
@@ -184,5 +181,5 @@ export class GoalService {
 }
 
 function notFound(): GoalServiceError {
-  return new GoalServiceError('goal_not_found', '当前会话中不存在该 Goal。')
+  return new GoalServiceError('goal_not_found', '当前会话中没有这个目标。')
 }

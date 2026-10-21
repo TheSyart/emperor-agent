@@ -140,7 +140,7 @@ export function useComposerModelControl(
 }
 
 /** Under High in a DeepSeek model's effort list. */
-export const DEEPSEEK_HIGH_NOTE = 'Medium 也按 High 发送'
+export const DEEPSEEK_HIGH_NOTE = '选「中」时也按「高」发送'
 
 export function normalizeReasoningValue(value?: string | null): string {
   return String(value || '')

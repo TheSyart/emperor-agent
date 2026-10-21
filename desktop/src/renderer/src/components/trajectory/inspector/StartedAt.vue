@@ -24,7 +24,7 @@ const unix = ref(false)
         "
         type="button"
         class="toggle"
-        :title="unix ? 'Show local time' : 'Show Unix timestamp'"
+        :title="unix ? '显示本地时间' : '显示 Unix 时间戳'"
         @click="unix = !unix"
       >
         {{ unix ? (timestamp / 1000).toFixed(3) : formatStartedAt(timestamp) }}

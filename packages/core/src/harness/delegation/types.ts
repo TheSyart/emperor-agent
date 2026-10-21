@@ -496,11 +496,11 @@ export class DelegationError extends Error {
         'refresh_delegation',
       ],
       ACCEPTANCE_REQUIRED: [
-        '成果或预览尚未通过当前验收，请重新验证。',
+        '成果或预览还没有通过当前的验证，请重新验证。',
         'validate_current_artifacts',
       ],
       REQUIRED_DELEGATION_UNVERIFIED: [
-        'Goal 仍有未验收的必需外部任务。',
+        '目标还有必需的子任务没有通过验证。',
         'validate_current_artifacts',
       ],
       PERMISSION_DENIED: [
@@ -512,11 +512,11 @@ export class DelegationError extends Error {
         'review_task_permission',
       ],
       PLAN_MODE_UNSUPPORTED: [
-        'Plan 模式下子智能体只能做只读审查；需要修改文件时请先完成计划确认。',
+        '计划模式下子智能体只能做只读审查；需要修改文件时请先确认计划。',
         'review_task_permission',
       ],
       OUTCOME_UNKNOWN: [
-        '尚未证明执行器停止，请检查保留成果与原生历史。',
+        '还不能确认子智能体已经停止，请检查保留的成果与原生历史。',
         'inspect_retained_results',
       ],
       DELIVERY_UNKNOWN: [
@@ -524,19 +524,19 @@ export class DelegationError extends Error {
         'inspect_retained_results',
       ],
       AUTH_REQUIRED: [
-        '执行器没有可用的登录，请在 设置 › 子智能体 设置令牌。',
+        '子智能体没有可用的登录，请在「设置 › 子智能体」设置令牌。',
         'configure_executor',
       ],
       AUTH_EXPIRED: [
-        '执行器的登录令牌已过期，请在 设置 › 子智能体 重新设置令牌。',
+        '子智能体的登录令牌已过期，请在「设置 › 子智能体」重新设置令牌。',
         'configure_executor',
       ],
       EXECUTOR_MISSING: [
-        '找不到执行器 CLI，请检查安装与可执行文件路径。',
+        '找不到 Claude Code / Codex 的命令行程序，请检查安装与可执行文件路径。',
         'configure_executor',
       ],
       EXECUTOR_DISABLED: [
-        '请先在执行器设置中启用对应 profile。',
+        '请先在「设置 › 子智能体」里启用它。',
         'configure_executor',
       ],
       EXECUTOR_INCOMPATIBLE: [
@@ -544,12 +544,12 @@ export class DelegationError extends Error {
         'configure_executor',
       ],
       CONTAINMENT_UNAVAILABLE: [
-        '操作系统执行边界不可用，请检查执行器诊断。',
+        '操作系统的执行边界不可用，请在「设置 › 子智能体」查看诊断。',
         'configure_executor',
       ],
     }
     const [message, action] = guidance[code] ?? [
-      '外部执行器操作未成功，请刷新任务详情并检查保留的日志。',
+      '子智能体的操作没有成功，请刷新任务详情并检查保留的日志。',
       'inspect_retained_results',
     ]
     return { code, message, action }

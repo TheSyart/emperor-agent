@@ -213,10 +213,7 @@ export function useComposerController(
     }
     if (!props.busy && goalCaptureActive.value) {
       if (drafts.value.length > 0 || normalized.references.length > 0) {
-        emit(
-          'error',
-          '目标描述暂仅支持纯文字；请先移除附件或 Skill 引用。',
-        )
+        emit('error', '目标描述暂仅支持纯文字；请先移除附件或 Skill 引用。')
         return
       }
       if (!content) return

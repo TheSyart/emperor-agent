@@ -463,7 +463,7 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
         aria-live="polite"
       >
         <span v-if="openState === 'error'" class="error-text">{{
-          controller.windowState.value.error ?? 'Failed to load trajectory'
+          controller.windowState.value.error ?? '轨迹加载失败'
         }}</span>
         <template v-else> <Spinner size="sm" />正在加载轨迹… </template>
       </div>
@@ -475,9 +475,7 @@ defineExpose({ scrollToBottom: pinToBottom, scrollToRow })
           @click.stop="loadOlder"
         >
           <Spinner v-if="loadingOlder" size="sm" />
-          {{
-            loadingOlder ? 'Loading earlier history…' : 'Load earlier history'
-          }}
+          {{ loadingOlder ? '正在加载更早的记录…' : '加载更早的记录' }}
         </button>
       </div>
       <EmptyState

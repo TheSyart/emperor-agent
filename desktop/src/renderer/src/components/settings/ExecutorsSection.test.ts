@@ -150,7 +150,9 @@ it('renders exactly local and two vendor rows, minimal controls and truthful loc
   expect(root.querySelectorAll('[data-executor-profile]')).toHaveLength(1)
   expect(root.querySelectorAll('input')).toHaveLength(0)
   expect(root.textContent).toContain('本机登录配置可读')
-  expect(root.textContent).not.toMatch(/已登录|可直接交给子智能体|调度配额|认证方式/)
+  expect(root.textContent).not.toMatch(
+    /已登录|可直接交给子智能体|调度配额|认证方式/,
+  )
 })
 it('edits, clears and restores independent specialty defaults without changing hidden model configuration', async () => {
   await mount()

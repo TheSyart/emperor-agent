@@ -64,6 +64,10 @@ const pushHint = computed(() => {
   if (!current?.upstream) return '推送并设为上游分支'
   return current.ahead ? `推送 ${current.ahead} 个提交` : '与上游一致'
 })
+// The git command behind each action, as its tooltip (writing.md).
+const pushCommand = computed(() =>
+  status.value?.upstream ? 'git push' : 'git push --set-upstream',
+)
 const compareHint = computed(() => {
   const link = compare.value
   return link.url === null ? link.reason : '在浏览器打开比较页'
@@ -153,6 +157,7 @@ async function create(): Promise<void> {
     <MenuItem variant="separator" />
     <MenuItem
       data-action="fetch"
+      title="git fetch"
       :disabled="!status || writing || loading"
       description="获取远端的最新引用"
       @select="review.fetchRemote"
@@ -162,6 +167,7 @@ async function create(): Promise<void> {
     </MenuItem>
     <MenuItem
       data-action="pull"
+      title="git pull --ff-only"
       :disabled="writesDisabled"
       :description="pullHint"
       @select="review.pull"
@@ -171,6 +177,7 @@ async function create(): Promise<void> {
     </MenuItem>
     <MenuItem
       data-action="push"
+      :title="pushCommand"
       :disabled="writesDisabled"
       :description="pushHint"
       @select="review.push"

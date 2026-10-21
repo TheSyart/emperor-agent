@@ -162,7 +162,7 @@ const factRows = computed((): InspectorRow[] => {
   if (value.workflow !== undefined) {
     const run = value.workflow
     rows.push({
-      label: run.tool === 'ralph' ? 'Ralph' : 'Workflow',
+      label: run.tool === 'ralph' ? 'Ralph 循环' : '工作流',
       value: run.name,
     })
     rows.push({
@@ -384,7 +384,7 @@ function openCall(callId: string): void {
             </div>
             <div v-if="hasHierarchy">
               <dt>
-                {{ requestTarget !== undefined ? '来源' : 'Hierarchy' }}
+                {{ requestTarget !== undefined ? '来源' : '层级' }}
               </dt>
               <dd class="links">
                 <button

@@ -840,7 +840,9 @@ onBeforeUnmount(() => {
 })
 </script>
 <template>
-  <SettingsSection intro="主会话统一安排子任务；能力状态以当前模型与运行验证为准。">
+  <SettingsSection
+    intro="主会话统一安排子任务；能力状态以当前模型与运行验证为准。"
+  >
     <p v-if="error" class="executor-error message" role="alert">{{ error }}</p>
     <p v-if="loading && !config" class="executor-note" role="status">
       正在读取子智能体配置…

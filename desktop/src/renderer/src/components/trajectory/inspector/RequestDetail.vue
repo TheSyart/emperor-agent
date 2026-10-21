@@ -41,8 +41,7 @@ const summaryRows = computed((): InspectorRow[] => {
       ...(inspection.state === 'error' ? { tone: 'error' as const } : {}),
     },
   ]
-  if (inspection.compaction)
-    rows.push({ label: '用途', value: 'Compaction' })
+  if (inspection.compaction) rows.push({ label: '用途', value: 'Compaction' })
   const provider = info.value?.provider ?? info.value?.requestConfig?.provider
   const model = info.value?.model ?? info.value?.requestConfig?.model
   if (provider !== undefined) rows.push({ label: '提供方', value: provider })
@@ -89,9 +88,7 @@ const cumulativeUsage = computed(() =>
               data-link="result"
               @click="c.openRecordSummary(inspection.result)"
             >
-              <span>{{
-                inspection.compaction ? 'Compacted' : 'Assistant Message'
-              }}</span>
+              <span>{{ inspection.compaction ? '已压缩' : '助手消息' }}</span>
               <DsChevronRight :size="12" class="nav-icon" />
             </button>
           </dd>
@@ -105,9 +102,7 @@ const cumulativeUsage = computed(() =>
         <JsonTree :value="inspection.options" />
       </OverviewSection>
       <OverviewSection label="用量" @open="c.activateTab('usage')">
-        <p v-if="requestUsage.length === 0" class="no-payload">
-          未报告用量
-        </p>
+        <p v-if="requestUsage.length === 0" class="no-payload">未报告用量</p>
         <InspectorRows v-else :rows="requestUsage" dense />
       </OverviewSection>
       <OverviewSection label="计时" @open="c.activateTab('timing')">
@@ -129,16 +124,12 @@ const cumulativeUsage = computed(() =>
     <div v-else-if="tab === 'usage'" class="usage" data-inspector-usage>
       <section class="usage-group">
         <h4 class="usage-heading">本次请求</h4>
-        <p v-if="requestUsage.length === 0" class="no-payload">
-          未报告用量
-        </p>
+        <p v-if="requestUsage.length === 0" class="no-payload">未报告用量</p>
         <InspectorRows v-else :rows="requestUsage" dense />
       </section>
       <section class="usage-group">
         <h4 class="usage-heading">会话累计</h4>
-        <p v-if="cumulativeUsage.length === 0" class="no-payload">
-          未报告用量
-        </p>
+        <p v-if="cumulativeUsage.length === 0" class="no-payload">未报告用量</p>
         <InspectorRows v-else :rows="cumulativeUsage" dense />
       </section>
     </div>

@@ -96,8 +96,7 @@ describe('trajectory request numbering', () => {
     ])
     expect(numbers[2]?.status).toBeUndefined()
     expect(
-      indexTrajectoryRequestNumbers(numbers).get('null\u0000压缩 #5')
-        ?.number,
+      indexTrajectoryRequestNumbers(numbers).get('null\u0000压缩 #5')?.number,
     ).toBe(2)
   })
 

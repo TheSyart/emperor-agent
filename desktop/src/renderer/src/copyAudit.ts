@@ -34,6 +34,9 @@ const VISIBLE_ATTRIBUTES = new Set([
   'cancel-label',
 ])
 
+const kebab = (name: string) =>
+  name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)
+
 /** Object keys whose string value is shown to the user. */
 const VISIBLE_KEYS = new Set([
   'label',
@@ -59,7 +62,11 @@ const CODE_ELEMENTS = new Set(['code', 'pre', 'kbd', 'samp'])
 const CODE_FLAGS = new Set(['monospace', 'mono'])
 
 /** Product names written as several English words. */
-const ALLOWED_PHRASES = ['Emperor Computer Helper', 'Pull Requests', 'Pull Request']
+const ALLOWED_PHRASES = [
+  'Emperor Computer Helper',
+  'Pull Requests',
+  'Pull Request',
+]
 
 /**
  * Words that stay as they are: product and brand names, protocol and file
@@ -158,6 +165,8 @@ const ALLOWED_WORDS = new Set([
   'Bearer',
   'TTFT',
   'Logo',
+  'Ralph',
+  'Unix',
   'logo',
 ])
 
@@ -170,17 +179,24 @@ export type CopyFinding = {
 
 const CJK = /[\u3400-\u9fff\u3000-\u303f\uff00-\uffef]/
 
+/** A whole command line (`git pull --ff-only`, `gh auth login`): code. */
+const COMMAND_LINE =
+  /^(?:git (?:fetch|pull|push|status|commit|checkout|switch|branch|merge|rebase|log|diff|clone|config|add|reset|worktree|remote|restore|init)|gh (?:auth|pr|repo|issue|run|api|release))(?: [\w./@=:-]+)*$/
+
 /** Is this visible string untranslated English (beyond allowed words)? */
 export function isUntranslated(text: string): boolean {
   const value = text.replace(/\s+/g, ' ').trim()
-  if (!value || CJK.test(value)) return false
+  if (!value || CJK.test(value) || COMMAND_LINE.test(value)) return false
   let rest = value
   for (const phrase of ALLOWED_PHRASES) rest = rest.split(phrase).join(' ')
   rest = rest
     // URLs, paths, file names, flags, env vars, templates, numbers.
     .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, ' ')
     .replace(/(?:^|\s)[~./][\w./@~-]*/g, ' ')
-    .replace(/[\w.-]+\.(?:md|json|toml|ya?ml|ts|js|py|zip|app|plist|txt|sh|log|jsonl|dmg|skill)\b/gi, ' ')
+    .replace(
+      /[\w.-]+\.(?:md|json|toml|ya?ml|ts|js|py|zip|app|plist|txt|sh|log|jsonl|dmg|skill)\b/gi,
+      ' ',
+    )
     .replace(/(?:^|\s)--?[\w-]+/g, ' ')
     .replace(/\b[A-Z][A-Z0-9_]{2,}\b/g, ' ')
     .replace(/\{\{[\s\S]*?\}\}|\$\{[\s\S]*?\}/g, ' ')
@@ -207,7 +223,51 @@ function classify(
   if (!value) return
   if (checkBanned && bannedTermsIn(value).length)
     out.push({ file, where, text: value, kind: 'banned' })
-  if (isUntranslated(value)) out.push({ file, where, text: value, kind: 'english' })
+  if (isUntranslated(value))
+    out.push({ file, where, text: value, kind: 'english' })
+}
+
+/**
+ * The strings an expression can display: itself, both branches of `?:`,
+ * both sides of `||` / `??` / `+`, the fixed text of a template literal.
+ * Comparison operands and call arguments (`state === 'running'`) are not.
+ */
+function shownStrings(node: ts.Expression): string[] {
+  if (ts.isParenthesizedExpression(node)) return shownStrings(node.expression)
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+    return [node.text]
+  if (ts.isTemplateExpression(node))
+    return [
+      [node.head, ...node.templateSpans.map((span) => span.literal)]
+        .map((part) => part.text)
+        .join(' '),
+    ]
+  if (ts.isConditionalExpression(node))
+    return [...shownStrings(node.whenTrue), ...shownStrings(node.whenFalse)]
+  if (
+    ts.isBinaryExpression(node) &&
+    [
+      ts.SyntaxKind.BarBarToken,
+      ts.SyntaxKind.QuestionQuestionToken,
+      ts.SyntaxKind.PlusToken,
+    ].includes(node.operatorToken.kind)
+  )
+    return [...shownStrings(node.left), ...shownStrings(node.right)]
+  return []
+}
+
+/** The shown strings of a template expression (`:title="…"`, `{{ … }}`). */
+function shownInExpression(expression: string): string[] {
+  const sf = ts.createSourceFile(
+    'x.ts',
+    `(${expression})`,
+    ts.ScriptTarget.Latest,
+    true,
+  )
+  const statement = sf.statements[0]
+  return statement && ts.isExpressionStatement(statement)
+    ? shownStrings(statement.expression)
+    : []
 }
 
 /** Template text and visible attributes of one component. */
@@ -219,17 +279,23 @@ export function auditVue(file: string, source: string): CopyFinding[] {
     type Node = {
       type: number
       tag?: string
-      content?: string
+      content?: string | { content: string }
       props?: Array<{
         type: number
         name: string
         value?: { content: string }
+        arg?: { content: string }
+        exp?: { content: string }
       }>
       children?: Node[]
     }
     const visit = (node: Node, inCode: boolean): void => {
-      if (node.type === 2 && !inCode && node.content)
+      if (node.type === 2 && !inCode && typeof node.content === 'string')
         classify(file, 'text', node.content, out)
+      // {{ … }}: the strings the expression shows.
+      if (node.type === 5 && !inCode && typeof node.content === 'object')
+        for (const text of shownInExpression(node.content.content))
+          classify(file, 'text', text, out)
       const code =
         inCode ||
         (node.type === 1 &&
@@ -246,6 +312,17 @@ export function auditVue(file: string, source: string): CopyFinding[] {
             !(code && prop.name === 'placeholder')
           )
             classify(file, prop.name, prop.value.content, out)
+          // :title="…" and other bound visible attributes.
+          else if (
+            prop.type === 7 &&
+            prop.name === 'bind' &&
+            prop.arg &&
+            VISIBLE_ATTRIBUTES.has(kebab(prop.arg.content)) &&
+            prop.exp &&
+            !(code && prop.arg.content === 'placeholder')
+          )
+            for (const text of shownInExpression(prop.exp.content))
+              classify(file, `:${prop.arg.content}`, text, out)
       for (const child of node.children ?? []) visit(child, code)
     }
     visit(ast as unknown as Node, false)
@@ -259,17 +336,6 @@ export function auditVue(file: string, source: string): CopyFinding[] {
 export function auditScript(file: string, source: string): CopyFinding[] {
   const out: CopyFinding[] = []
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
-  // A template literal counts by its fixed text (`Request #${n}` → `Request # `).
-  const literal = (node: ts.Node | undefined): string | null => {
-    if (!node) return null
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
-      return node.text
-    if (ts.isTemplateExpression(node))
-      return [node.head, ...node.templateSpans.map((span) => span.literal)]
-        .map((part) => part.text)
-        .join(' ')
-    return null
-  }
   const visit = (node: ts.Node, fn: string | null): void => {
     // Retired terms are Chinese: every string literal can be checked.
     if (
@@ -278,14 +344,17 @@ export function auditScript(file: string, source: string): CopyFinding[] {
     )
       out.push({ file, where: 'string', text: node.text, kind: 'banned' })
     if (ts.isTemplateExpression(node))
-      for (const part of [node.head, ...node.templateSpans.map((span) => span.literal)])
+      for (const part of [
+        node.head,
+        ...node.templateSpans.map((span) => span.literal),
+      ])
         if (bannedTermsIn(part.text).length)
           out.push({ file, where: 'template', text: part.text, kind: 'banned' })
     if (ts.isPropertyAssignment(node)) {
       const key = node.name.getText(sf).replace(/['"]/g, '')
-      const value = literal(node.initializer)
-      if (value !== null && VISIBLE_KEYS.has(key))
-        classify(file, key, value, out, false)
+      if (VISIBLE_KEYS.has(key))
+        for (const value of shownStrings(node.initializer))
+          classify(file, key, value, out, false)
     }
     let inner = fn
     if (
@@ -297,13 +366,29 @@ export function auditScript(file: string, source: string): CopyFinding[] {
       ts.isVariableDeclaration(node) &&
       node.initializer &&
       (ts.isArrowFunction(node.initializer) ||
-        ts.isFunctionExpression(node.initializer))
+        ts.isFunctionExpression(node.initializer) ||
+        // const stateLabel = computed(() => …)
+        (ts.isCallExpression(node.initializer) &&
+          node.initializer.expression.getText(sf) === 'computed'))
     )
       inner = node.name.getText(sf)
-    if (ts.isReturnStatement(node) && inner && VISIBLE_FUNCTION.test(inner)) {
-      const value = literal(node.expression)
-      if (value !== null) classify(file, `${inner}()`, value, out, false)
-    }
+    // An arrow function's expression body is what it returns.
+    if (
+      ts.isArrowFunction(node) &&
+      !ts.isBlock(node.body) &&
+      inner &&
+      VISIBLE_FUNCTION.test(inner)
+    )
+      for (const value of shownStrings(node.body))
+        classify(file, `${inner}()`, value, out, false)
+    if (
+      ts.isReturnStatement(node) &&
+      node.expression &&
+      inner &&
+      VISIBLE_FUNCTION.test(inner)
+    )
+      for (const value of shownStrings(node.expression))
+        classify(file, `${inner}()`, value, out, false)
     ts.forEachChild(node, (child) => visit(child, inner))
   }
   visit(sf, null)

@@ -77,7 +77,7 @@ const listText = computed(() => {
 const state = computed(() => trajectoryRecordState(cell.value))
 const ariaLabel = computed(() =>
   summary.value !== undefined
-    ? `Collapsed ${props.record.collapsedSummaryKind} summary, ${summary.value}`
+    ? `已折叠的${props.record.collapsedSummaryKind === 'turn' ? '轮次' : '调用'}摘要：${summary.value}`
     : `${TRAJECTORY_KIND_LABEL[cell.value.kind]}, ${listText.value || 'no content'}`,
 )
 

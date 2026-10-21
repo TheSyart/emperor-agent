@@ -451,7 +451,9 @@ function costText(usage: {
         }}
       </p>
       <p class="external-note">
-        请返回主会话回答问题或继续安排任务。<Button size="sm" @click="returnRoot"
+        请返回主会话回答问题或继续安排任务。<Button
+          size="sm"
+          @click="returnRoot"
           >返回主会话</Button
         >
       </p>
@@ -529,7 +531,9 @@ function costText(usage: {
               :key="index"
             >
               {{
-                evidence.source === 'host-verified' ? '宿主验证' : '子智能体自报'
+                evidence.source === 'host-verified'
+                  ? '宿主验证'
+                  : '子智能体自报'
               }}
               · 退出码 {{ evidence.exitCode ?? '未知' }} ·
               {{ evidence.argv.join(' ') }}

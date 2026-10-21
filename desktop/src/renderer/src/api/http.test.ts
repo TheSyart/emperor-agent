@@ -38,7 +38,9 @@ describe('core IPC wrapper (W4: fake REST route table removed)', () => {
     g.window = {}
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
 
-    await expect(core('memory.tokens')).rejects.toThrow(CORE_BRIDGE_UNAVAILABLE_MESSAGE)
+    await expect(core('memory.tokens')).rejects.toThrow(
+      CORE_BRIDGE_UNAVAILABLE_MESSAGE,
+    )
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 })

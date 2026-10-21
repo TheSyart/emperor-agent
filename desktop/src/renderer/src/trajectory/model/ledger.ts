@@ -405,12 +405,12 @@ export function trajectoryMessageSourceLabel(source: unknown): string {
   if (kind === 'context') {
     const producer = properties.producer
     return typeof producer === 'string' && producer !== ''
-      ? `Context · ${producer}`
-      : 'Context'
+      ? `上下文 · ${producer}`
+      : '上下文'
   }
   if (kind === 'event') {
     const type = properties.type
-    return typeof type === 'string' && type !== '' ? `Event · ${type}` : 'Event'
+    return typeof type === 'string' && type !== '' ? `事件 · ${type}` : '事件'
   }
   if (typeof kind !== 'string' || kind === '') return '未知'
   return `${kind[0]?.toUpperCase() ?? ''}${kind.slice(1)}`
