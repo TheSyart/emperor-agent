@@ -81,20 +81,29 @@ function gitProject(root: string): string {
   return project
 }
 
-async function setup(
+interface SetupOptions {
+  git?: boolean
+  budgetMs?: number
+  busy?: () => boolean
+  others?: () => boolean
+  /** Answers instead of the scripted replies (e.g. by session). */
+  adapter?: LlmAdapter
+  /**
+   * How the recorder is wired: through `host.extend` (default; the host
+   * closes open tasks when it closes) or only `install`ed, which leaves an
+   * open task behind at close the way a crash does.
+   */
+  wiring?: 'extend' | 'install'
+}
+
+/** A host over `root` (an Emperor Home and its sessions), with a recorder. */
+async function startHost(
+  root: string,
+  project: string,
   replies: ScriptedReply[],
-  options: {
-    git?: boolean
-    budgetMs?: number
-    busy?: () => boolean
-    others?: () => boolean
-    /** Answers instead of the scripted replies (e.g. by session). */
-    adapter?: LlmAdapter
-  } = {},
+  options: SetupOptions,
+  existing?: string,
 ) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'emperor-turn-files-')))
-  const project = options.git === false ? join(root, 'plain') : gitProject(root)
-  mkdirSync(project, { recursive: true })
   const adapter = new ScriptedAdapter(replies)
   const llm = new LlmClient({
     adapterFor: () => options.adapter ?? adapter,
@@ -111,10 +120,12 @@ async function setup(
     defaultPreset: 'danger-full-access',
   })
   hosts.push(host)
-  const entry = host.kept.sessionStore.create('t', {
-    mode: 'build',
-    project: { project_path: project },
-  })
+  const sessionId =
+    existing ??
+    host.kept.sessionStore.create('t', {
+      mode: 'build',
+      project: { project_path: project },
+    }).id
   const runner = new HardenedGitRunner({
     resolveRuntime: async () => ({
       executable: 'git',
@@ -144,18 +155,27 @@ async function setup(
       exec: (cwd, args, execOptions) => runner.execute(cwd, args, execOptions),
       tempDir: join(root, 'home', 'git', 'turns'),
     }),
-    projectRoot: (sessionId) => (sessionId === entry.id ? project : null),
-    workspaceRoot: (sessionId) => host.sessionWorkspaceRoot(sessionId),
+    projectRoot: (id) => (id === sessionId ? project : null),
+    workspaceRoot: (id) => host.sessionWorkspaceRoot(id),
     rootOf: (agent) => host.rootOf(agent),
-    sessionLog: (sessionId) => host.sessionLog(sessionId),
+    sessionLog: (id) => host.sessionLog(id),
     workspaceBusy: options.busy ?? (() => false),
     ...(options.others === undefined ? {} : { othersRunning: options.others }),
     runExclusive: (workspace, owner, action) =>
       coordinator.runExclusive(workspace, owner, action),
     ...(options.budgetMs === undefined ? {} : { budgetMs: options.budgetMs }),
   })
-  recorder.install(host)
-  return { host, adapter, recorder, project, coordinator, sessionId: entry.id }
+  if (options.wiring === 'install') recorder.install(host)
+  else host.extend({ turnFiles: recorder })
+  return { host, adapter, recorder, coordinator, sessionId }
+}
+
+async function setup(replies: ScriptedReply[], options: SetupOptions = {}) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'emperor-turn-files-')))
+  const project = options.git === false ? join(root, 'plain') : gitProject(root)
+  mkdirSync(project, { recursive: true })
+  const started = await startHost(root, project, replies, options)
+  return { ...started, root, project }
 }
 
 function records(host: HarnessHost, sessionId: string): TurnFilesRecord[] {
@@ -735,6 +755,314 @@ describe('one record per task (UI-S15)', () => {
         ],
         totals: { files: 2, additions: 3, deletions: 0 },
       })
+    },
+    SLOW,
+  )
+})
+
+/** The event types of a session's log, from a fresh read of its file. */
+function logged(host: HarnessHost, sessionId: string, type: string) {
+  return (host.sessionLog(sessionId)?.events ?? []).filter(
+    (event) => event.type === type,
+  )
+}
+
+describe('a task cut short by quitting or a crash (UI-S15)', () => {
+  it(
+    'logs where the task began, with its snapshot held under a ref, at its first write',
+    async () => {
+      const job = gate()
+      const { host, project, sessionId } = await setup([
+        {
+          tools: [
+            write('a.txt', 'a\n'),
+            backgroundJob(after(job, "printf 'j\\n' > job.txt")),
+          ],
+        },
+        { text: 'started' },
+        { text: 'done' },
+      ])
+      await host.submit({ sessionId, content: 'go' })
+      const [started] = logged(host, sessionId, 'task/started')
+      expect(started?.data).toMatchObject({
+        firstTurn: 1,
+        mode: 'git',
+        before: { commit: expect.stringMatching(/^[0-9a-f]{40}$/) },
+      })
+      expect(
+        git(project, 'for-each-ref', '--format=%(refname)', 'refs/emperor/'),
+      ).toBe(`refs/emperor/turns/${sessionId}/1/before`)
+      job.open()
+      await waitFor(() => records(host, sessionId).length === 1, 30_000)
+      await waitFor(() => logged(host, sessionId, 'task/ended').length === 1)
+      expect(logged(host, sessionId, 'task/ended')[0]?.data).toEqual({
+        firstTurn: 1,
+        lastTurn: 2,
+      })
+      // The held ref gave way to the record's pair.
+      expect(
+        git(project, 'for-each-ref', '--format=%(refname)', 'refs/emperor/'),
+      ).toBe(
+        [
+          `refs/emperor/turns/${sessionId}/2/after`,
+          `refs/emperor/turns/${sessionId}/2/before`,
+        ].join('\n'),
+      )
+    },
+    SLOW,
+  )
+
+  it(
+    'quitting mid-task records it as if it had gone quiet',
+    async () => {
+      const job = gate()
+      const { host, root, project, sessionId } = await setup([
+        {
+          tools: [
+            write('a.txt', 'a\n'),
+            backgroundJob(after(job, "printf 'j\\n' > job.txt")),
+          ],
+        },
+        { text: 'started the job' },
+      ])
+      await host.submit({ sessionId, content: 'write a and start the job' })
+      expect(records(host, sessionId)).toEqual([])
+      // Quit while the job still runs (it is stopped with the host).
+      await host.close()
+      const reopened = await startHost(root, project, [], {}, sessionId)
+      const reopenedLog = reopened.host.sessionLog(sessionId)!
+      await pause(300)
+      const recorded = reopenedLog.events.filter(
+        (event) => event.type === 'turn/files',
+      )
+      expect(recorded.map((event) => event.data)).toMatchObject([
+        { turn: 1, task: { firstTurn: 1, lastTurn: 1 }, mode: 'git' },
+      ])
+      expect(recorded[0]?.data).not.toHaveProperty('recovered')
+      expect(paths(recorded[0]?.data as TurnFilesRecord)).toEqual([
+        'added a.txt',
+      ])
+      expect(
+        reopenedLog.events.filter((event) => event.type === 'task/ended'),
+      ).toHaveLength(1)
+      // Undo still works after the restart.
+      const result = await reopened.recorder.revert({ sessionId, turn: 1 })
+      expect(result.reverted).toEqual(['a.txt'])
+      expect(existsSync(join(project, 'a.txt'))).toBe(false)
+    },
+    SLOW,
+  )
+
+  it(
+    'a crash mid-task gets its record when the session is next opened, outside changes included',
+    async () => {
+      const job = gate()
+      const first = await setup(
+        [
+          {
+            tools: [
+              write('a.txt', 'a\n'),
+              backgroundJob(after(job, "printf 'j\\n' > job.txt")),
+            ],
+          },
+          { text: 'started the job' },
+        ],
+        { wiring: 'install' },
+      )
+      await first.host.submit({ sessionId: first.sessionId, content: 'go' })
+      // A crash: nothing closes the task; the log keeps task/started alone.
+      await first.host.close()
+      // Meanwhile the user changes the project outside Emperor.
+      writeFileSync(join(first.project, 'outside.txt'), 'by hand\n')
+      const reopened = await startHost(
+        first.root,
+        first.project,
+        [],
+        {},
+        first.sessionId,
+      )
+      const log = () => reopened.host.sessionLog(first.sessionId)!.events
+      expect(log().some((event) => event.type === 'task/started')).toBe(true)
+      await waitFor(
+        () => log().some((event) => event.type === 'task/ended'),
+        30_000,
+      )
+      const recorded = log()
+        .filter((event) => event.type === 'turn/files')
+        .map((event) => event.data as TurnFilesRecord)
+      expect(recorded).toHaveLength(1)
+      expect(recorded[0]).toMatchObject({
+        turn: 1,
+        task: { firstTurn: 1, lastTurn: 1 },
+        mode: 'git',
+        status: 'recorded',
+        recovered: true,
+      })
+      expect(paths(recorded[0])).toEqual(['added a.txt', 'added outside.txt'])
+      const undone = await reopened.recorder.revert({
+        sessionId: first.sessionId,
+        turn: 1,
+      })
+      expect(undone.reverted).toEqual(['a.txt', 'outside.txt'])
+      // Opening it again records nothing more.
+      reopened.host.sessions.close(first.sessionId)
+      const again = await startHost(
+        first.root,
+        first.project,
+        [],
+        {},
+        first.sessionId,
+      )
+      await pause(300)
+      const events = again.host.sessionLog(first.sessionId)!.events
+      expect(
+        events.filter((event) => event.type === 'turn/files'),
+      ).toHaveLength(1)
+      expect(
+        events.filter((event) => event.type === 'task/ended'),
+      ).toHaveLength(1)
+    },
+    SLOW,
+  )
+
+  it(
+    'a crash in the middle of a turn: crash repair closes the turn, the task is recorded under it',
+    async () => {
+      const first = await setup(
+        [{ tools: [write('a.txt', 'a\n')] }, { hang: true }],
+        { wiring: 'install' },
+      )
+      void first.host
+        .submit({ sessionId: first.sessionId, content: 'go' })
+        .catch(() => undefined)
+      await waitFor(
+        () =>
+          logged(first.host, first.sessionId, 'task/started').length === 1 &&
+          existsSync(join(first.project, 'a.txt')),
+        30_000,
+      )
+      // The process dies: the log on disk stops here, the turn still open.
+      first.host.sessions.close(first.sessionId)
+      await first.host.close()
+      const reopened = await startHost(
+        first.root,
+        first.project,
+        [],
+        {},
+        first.sessionId,
+      )
+      const log = () => reopened.host.sessionLog(first.sessionId)!.events
+      await waitFor(
+        () => log().some((event) => event.type === 'task/ended'),
+        30_000,
+      )
+      const turnEnd = log().find((event) => event.type === 'turn/end')
+      expect(turnEnd?.data).toMatchObject({
+        turn: 1,
+        reason: { kind: 'interrupted' },
+      })
+      const recorded = log().filter((event) => event.type === 'turn/files')
+      expect(recorded.map((event) => event.data)).toMatchObject([
+        { turn: 1, task: { firstTurn: 1, lastTurn: 1 }, recovered: true },
+      ])
+      expect(recorded[0]!.seq).toBeGreaterThan(turnEnd!.seq)
+    },
+    SLOW,
+  )
+
+  it(
+    'outside Git, the file tools written before a crash are rebuilt from the log',
+    async () => {
+      const job = gate()
+      const first = await setup(
+        [
+          {
+            tools: [
+              write('a.txt', 'a\n'),
+              write('b.txt', 'b\nb\n'),
+              backgroundJob(after(job, 'true')),
+            ],
+          },
+          { text: 'started' },
+        ],
+        { git: false, wiring: 'install' },
+      )
+      await first.host.submit({ sessionId: first.sessionId, content: 'go' })
+      expect(
+        logged(first.host, first.sessionId, 'task/tool-write').map(
+          (event) => event.data,
+        ),
+      ).toEqual([
+        { firstTurn: 1, path: 'a.txt', created: true, added: 1, removed: 0 },
+        { firstTurn: 1, path: 'b.txt', created: true, added: 2, removed: 0 },
+      ])
+      await first.host.close()
+      const reopened = await startHost(
+        first.root,
+        first.project,
+        [],
+        { git: false },
+        first.sessionId,
+      )
+      const log = () => reopened.host.sessionLog(first.sessionId)!.events
+      await waitFor(
+        () => log().some((event) => event.type === 'task/ended'),
+        30_000,
+      )
+      expect(
+        log()
+          .filter((event) => event.type === 'turn/files')
+          .map((event) => event.data),
+      ).toEqual([
+        {
+          turn: 1,
+          task: { firstTurn: 1, lastTurn: 1 },
+          mode: 'tools',
+          status: 'recorded',
+          files: [
+            { path: 'a.txt', status: 'added', additions: 1, deletions: 0 },
+            { path: 'b.txt', status: 'added', additions: 2, deletions: 0 },
+          ],
+          totals: { files: 2, additions: 3, deletions: 0 },
+        },
+      ])
+    },
+    SLOW,
+  )
+
+  it(
+    'an older log without the event opens as before',
+    async () => {
+      const first = await setup([{ text: 'just talking' }], {
+        wiring: 'install',
+      })
+      await first.host.submit({ sessionId: first.sessionId, content: 'hi' })
+      const log = first.host.sessionLog(first.sessionId)!
+      // A record from before UI-S15: one turn, no task, no task/started.
+      ;(log.append as (type: string, data: unknown) => void).call(
+        log,
+        'turn/files',
+        {
+          turn: 7,
+          mode: 'git',
+          status: 'recorded',
+          files: [{ path: 'x', status: 'added', additions: 1, deletions: 0 }],
+          totals: { files: 1, additions: 1, deletions: 0 },
+        },
+      )
+      await first.host.close()
+      const reopened = await startHost(
+        first.root,
+        first.project,
+        [],
+        {},
+        first.sessionId,
+      )
+      const before = reopened.host.sessionLog(first.sessionId)!.events.length
+      await pause(300)
+      const events = reopened.host.sessionLog(first.sessionId)!.events
+      expect(events).toHaveLength(before)
+      expect(events.some((event) => event.type === 'task/started')).toBe(false)
     },
     SLOW,
   )

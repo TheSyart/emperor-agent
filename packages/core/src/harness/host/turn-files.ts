@@ -25,11 +25,20 @@
  * project during the task is counted too; a subagent the user writes to
  * after its task ended counts in no task.
  *
+ * A task that wrote logs `task/started` with its before snapshot (held
+ * under `refs/emperor/turns/<session>/<first turn>/before`) or, outside
+ * Git, one `task/tool-write` per counted write; `task/ended` follows its
+ * record. A task still open when Emperor quits is recorded then, as if it
+ * had gone quiet; one a crash cut short is recorded when its session is
+ * next opened, against the project as it is then (`recovered`: changes
+ * made outside Emperor in between count too).
+ *
  * Undo (`revert`) restores the chosen files that still match the task's
  * end and records `turn/files-reverted`; it refuses while an agent runs in
  * the workspace and runs in the workspace's mutation queue.
  */
 
+import { logger } from '../../util/log'
 import { WorkspaceOperationError } from '../../workspace/common'
 import {
   TURN_SNAPSHOT_BUDGET_MS,
@@ -43,7 +52,7 @@ import {
 } from '../../workspace/turn-snapshots'
 import type { UserMessage } from '../../llm/types'
 import type { Session } from '../../session-log/session'
-import type { SessionEvent } from '../../session-log/types'
+import type { SessionEvent, SessionEventMap } from '../../session-log/types'
 import type { Agent } from '../agent/agent'
 import type {
   PreExecuteMiddleware,
@@ -78,6 +87,34 @@ export interface TurnFilesRecord {
   concurrent?: true
   /** The snapshot commits (Git mode, recorded). */
   snapshot?: { before: string; after: string }
+  /**
+   * Recorded when the session was next opened, after a crash cut the task
+   * short: compared with the project then, so changes made outside Emperor
+   * in between are in the list.
+   */
+  recovered?: true
+}
+
+/** A task that wrote began (UI-S15): what its record is built from. */
+export interface TaskStarted {
+  /** The turn that opened the task. */
+  firstTurn: number
+  mode: 'git' | 'tools'
+  /** Git: the before snapshot (held under `<first turn>/before`). */
+  before?: TurnSnapshot
+  /** Git: no snapshot could be taken; the record says why. */
+  skipped?: 'timeout' | 'git-error'
+}
+
+/** One write a file tool reported, outside Git (rebuilds the tally). */
+export interface TaskToolWrite {
+  firstTurn: number
+  /** Relative to the workspace, POSIX separators. */
+  path: string
+  /** The write created the file. */
+  created: boolean
+  added: number
+  removed: number
 }
 
 export interface TurnFilesReverted {
@@ -90,6 +127,12 @@ declare module '../../session-log/types' {
   interface SessionEventMap {
     'turn/files': TurnFilesRecord
     'turn/files-reverted': TurnFilesReverted
+    /** Log-only: a task took its before snapshot (closed by `task/ended`). */
+    'task/started': TaskStarted
+    /** Log-only: a file tool's write counted in a task outside Git. */
+    'task/tool-write': TaskToolWrite
+    /** Log-only: a task's record is written (or it changed nothing). */
+    'task/ended': { firstTurn: number; lastTurn: number }
   }
 }
 
@@ -187,6 +230,8 @@ export class TurnFileRecorder {
     ): () => void
     /** Called when nothing of a root's task runs or can wake it. */
     onTaskQuiet(listener: (rootSessionId: string) => void): () => void
+    /** Called when a stored session log is opened (after crash repair). */
+    onSessionOpened?(listener: (session: Session) => void): () => void
   }): () => void {
     const before: PreExecuteMiddleware = async (call) => {
       if (call.agent !== undefined && callMayWriteFiles(call))
@@ -213,9 +258,13 @@ export class TurnFileRecorder {
       }
     })
     const unquiet = host.onTaskQuiet((sessionId) => this.endTask(sessionId))
+    const unopened = host.onSessionOpened?.((session) =>
+      this.recoverOpenTasks(session),
+    )
     return () => {
       untap()
       unquiet()
+      unopened?.()
       remove(host.tools.preExecute, before)
       remove(host.tools.observers, observe)
     }
@@ -238,10 +287,11 @@ export class TurnFileRecorder {
       await current.setup
       return
     }
+    const firstTurn = task.firstTurn
     const recording: Recording = {
       files: new Map(),
       concurrent: false,
-      setup: this.queued(root.id, () => this.setup(root.id)),
+      setup: this.queued(root.id, () => this.setup(root.id, firstTurn)),
     }
     void recording.setup.then((ready) => {
       recording.ready = ready
@@ -297,21 +347,140 @@ export class TurnFileRecorder {
     this.end(sessionId, task, Math.max(task.firstTurn, last?.data.turn ?? 0))
   }
 
-  /** Record a task that wrote, under its last turn. */
-  private end(sessionId: string, task: TaskState, lastTurn: number): void {
+  /** Record a task that wrote, under its last turn, and close it. */
+  private end(
+    sessionId: string,
+    task: TaskState,
+    lastTurn: number,
+  ): Promise<void> {
     const recording = task.recording
-    if (recording === undefined) return
+    if (recording === undefined) return Promise.resolve()
     this.noteOthers(sessionId, recording)
-    void this.queued(sessionId, async () => {
-      const record = await this.record(
-        sessionId,
-        { firstTurn: task.firstTurn, lastTurn },
-        recording,
-      )
+    const range = { firstTurn: task.firstTurn, lastTurn }
+    return this.queued(sessionId, async () => {
+      const record = await this.record(sessionId, range, recording)
       const session = this.options.sessionLog(sessionId)
-      if (record !== null && session !== undefined)
-        append(session, 'turn/files', record)
+      if (session === undefined) return
+      if (record !== null) append(session, 'turn/files', record)
+      append(session, 'task/ended', range)
+    }).catch((error: unknown) => {
+      logger.warn('turn files: a task could not be recorded', {
+        session: sessionId,
+        error: String(error),
+      })
     })
+  }
+
+  /**
+   * Emperor is quitting (UI-S15): record every task that wrote as if it had
+   * gone quiet. A root still inside a turn (its agent did not stop in
+   * time) is left to the next opening, after crash repair ends the turn.
+   */
+  async closeAll(): Promise<void> {
+    const ending: Promise<void>[] = []
+    for (const [sessionId, task] of [...this.tasks]) {
+      if (task.recording === undefined) continue
+      const session = this.options.sessionLog(sessionId)
+      if (session === undefined || session.hasOpenTurn()) continue
+      this.tasks.delete(sessionId)
+      const last = session.lastOf('turn/end')?.data.turn ?? 0
+      ending.push(this.end(sessionId, task, Math.max(task.firstTurn, last)))
+    }
+    await Promise.all(ending)
+  }
+
+  /**
+   * A stored session was opened (after crash repair): a task Emperor left
+   * open when it stopped is recorded now, under the last turn the log has,
+   * against the project as it is now.
+   */
+  private recoverOpenTasks(session: Session): void {
+    if (session.header.origin === 'subagent') return
+    const sessionId = session.header.id
+    const events = session.events
+    const open = new Map<number, TaskStarted>()
+    const writes = new Map<number, TaskToolWrite[]>()
+    for (
+      let index = session.header.seedLength ?? 0;
+      index < events.length;
+      index++
+    ) {
+      const event = events[index]!
+      if (event.type === 'task/started')
+        open.set(event.data.firstTurn, event.data)
+      else if (event.type === 'task/ended') open.delete(event.data.firstTurn)
+      else if (event.type === 'task/tool-write')
+        writes.set(event.data.firstTurn, [
+          ...(writes.get(event.data.firstTurn) ?? []),
+          event.data,
+        ])
+    }
+    if (open.size === 0) return
+    const live = this.tasks.get(sessionId)
+    const last = session.lastOf('turn/end')?.data.turn ?? 0
+    for (const started of open.values()) {
+      if (live?.firstTurn === started.firstTurn) continue
+      const range = {
+        firstTurn: started.firstTurn,
+        lastTurn: Math.max(started.firstTurn, last),
+      }
+      void this.queued(sessionId, () =>
+        this.recover(sessionId, started, range, writes.get(range.firstTurn)),
+      ).catch((error: unknown) => {
+        logger.warn('turn files: an interrupted task could not be recorded', {
+          session: sessionId,
+          error: String(error),
+        })
+      })
+    }
+  }
+
+  private async recover(
+    sessionId: string,
+    started: TaskStarted,
+    range: { firstTurn: number; lastTurn: number },
+    writes: readonly TaskToolWrite[] = [],
+  ): Promise<void> {
+    const session = this.options.sessionLog(sessionId)
+    if (session === undefined) return
+    // Recorded already, the process stopping before task/ended.
+    const recorded = session.events.some(
+      (event) =>
+        event.type === 'turn/files' &&
+        event.data.task?.firstTurn === range.firstTurn,
+    )
+    let record: TurnFilesRecord | null = null
+    if (!recorded) {
+      if (started.mode === 'tools') {
+        const files = new Map<string, TurnFileEntry>()
+        for (const write of writes) tally(files, write)
+        record = toolsRecord(range, files)
+      } else if (started.skipped !== undefined)
+        record = skipped(range, started.skipped)
+      else if (started.before !== undefined)
+        record = await this.recordNow(sessionId, range, started.before)
+    }
+    if (record !== null) append(session, 'turn/files', record)
+    append(session, 'task/ended', range)
+  }
+
+  /** A task's record against the project as it is now (after a crash). */
+  private async recordNow(
+    sessionId: string,
+    range: { firstTurn: number; lastTurn: number },
+    before: TurnSnapshot,
+  ): Promise<TurnFilesRecord | null> {
+    const projectRoot = this.options.projectRoot(sessionId)
+    if (projectRoot === null) return null
+    let place: TurnRepository | null
+    try {
+      place = await this.options.snapshots.locate(projectRoot)
+    } catch {
+      place = null
+    }
+    if (place === null) return null
+    const record = await this.gitRecord(sessionId, range, place, before)
+    return record === null ? null : { ...record, recovered: true }
   }
 
   /** A session of its own (not a subagent's child session). */
@@ -448,7 +617,36 @@ export class TurnFileRecorder {
     }
   }
 
-  private async setup(sessionId: string): Promise<Setup> {
+  /** The task's before state, logged as `task/started` (UI-S15). */
+  private async setup(sessionId: string, firstTurn: number): Promise<Setup> {
+    const setup = await this.takeBefore(sessionId)
+    if (setup.mode === 'git' && 'place' in setup) {
+      try {
+        await this.options.snapshots.hold(
+          setup.place,
+          sessionId,
+          firstTurn,
+          setup.before,
+        )
+      } catch {
+        // The commit stays usable for a while unreferenced.
+      }
+    }
+    const session = this.options.sessionLog(sessionId)
+    if (session !== undefined)
+      append(session, 'task/started', {
+        firstTurn,
+        mode: setup.mode,
+        ...(setup.mode !== 'git'
+          ? {}
+          : 'skipped' in setup
+            ? { skipped: setup.skipped }
+            : { before: setup.before }),
+      })
+    return setup
+  }
+
+  private async takeBefore(sessionId: string): Promise<Setup> {
     const projectRoot = this.options.projectRoot(sessionId)
     if (projectRoot === null)
       return { mode: 'tools', root: this.options.workspaceRoot(sessionId) }
@@ -480,8 +678,9 @@ export class TurnFileRecorder {
 
   private countToolWrite(agent: Agent, meta: unknown): void {
     const root = this.options.rootOf(agent)
-    const state = this.tasks.get(root.id)?.recording
-    if (state?.ready?.mode !== 'tools') return
+    const task = this.tasks.get(root.id)
+    const state = task?.recording
+    if (task === undefined || state?.ready?.mode !== 'tools') return
     if (meta === null || typeof meta !== 'object') return
     const info = meta as {
       path?: unknown
@@ -492,16 +691,17 @@ export class TurnFileRecorder {
     if (typeof info.path !== 'string' || !isAbsolute(info.path)) return
     const path = relative(state.ready.root, info.path)
     if (!path || path.startsWith('..') || isAbsolute(path)) return
-    const key = path.split(sep).join('/')
-    const entry = state.files.get(key) ?? {
-      path: key,
-      status: info.operation === 'create' ? 'added' : 'modified',
-      additions: 0,
-      deletions: 0,
+    const write: TaskToolWrite = {
+      firstTurn: task.firstTurn,
+      path: path.split(sep).join('/'),
+      created: info.operation === 'create',
+      added: count(info.added),
+      removed: count(info.removed),
     }
-    entry.additions = (entry.additions ?? 0) + count(info.added)
-    entry.deletions = (entry.deletions ?? 0) + count(info.removed)
-    state.files.set(key, entry)
+    tally(state.files, write)
+    // Durable, so a crash does not lose the tally (UI-S15).
+    const session = this.options.sessionLog(root.id)
+    if (session !== undefined) append(session, 'task/tool-write', write)
   }
 
   private async record(
@@ -510,46 +710,55 @@ export class TurnFileRecorder {
     state: Recording,
   ): Promise<TurnFilesRecord | null> {
     const setup = await state.setup
-    if (setup.mode === 'tools') {
-      if (state.files.size === 0) return null
-      return listed(task, 'tools', {
-        files: [...state.files.values()].sort(byPath),
-        totals: totalsOf([...state.files.values()]),
-        truncated: state.files.size > LIST_LIMIT,
-      })
-    }
+    if (setup.mode === 'tools') return toolsRecord(task, state.files)
     if ('skipped' in setup) return skipped(task, setup.skipped)
-    const projectRoot = setup.place.projectRoot
+    return this.gitRecord(sessionId, task, setup.place, setup.before, {
+      concurrent: state.concurrent,
+    })
+  }
+
+  /**
+   * The task's files between its before snapshot and the project now; the
+   * pair is kept under its last turn and the held before ref let go.
+   */
+  private async gitRecord(
+    sessionId: string,
+    task: { firstTurn: number; lastTurn: number },
+    place: TurnRepository,
+    before: TurnSnapshot,
+    extra: { concurrent?: boolean } = {},
+  ): Promise<TurnFilesRecord | null> {
     let after: TurnSnapshot
     let changes: TurnChanges
     try {
-      after = await this.options.runExclusive(projectRoot, 'agent', () =>
+      after = await this.options.runExclusive(place.projectRoot, 'agent', () =>
         this.options.snapshots.snapshot(
-          setup.place,
+          place,
           'after',
           this.now() + this.budgetMs,
         ),
       )
-      changes = await this.options.snapshots.changes(
-        setup.place,
-        setup.before,
-        after,
-      )
+      changes = await this.options.snapshots.changes(place, before, after)
     } catch (error) {
+      await this.letGo(place, sessionId, task.firstTurn)
       return skipped(
         task,
         error instanceof TurnSnapshotTimeout ? 'timeout' : 'git-error',
       )
     }
-    if (changes.totals.files === 0) return null
+    if (changes.totals.files === 0) {
+      await this.letGo(place, sessionId, task.firstTurn)
+      return null
+    }
     let kept = true
     try {
       await this.options.snapshots.keep(
-        setup.place,
+        place,
         sessionId,
         task.lastTurn,
-        setup.before,
+        before,
         after,
+        task.firstTurn,
       )
     } catch {
       // Listed, but without snapshots it cannot be reviewed or undone.
@@ -557,10 +766,23 @@ export class TurnFileRecorder {
     }
     return {
       ...listed(task, 'git', changes),
-      ...(state.concurrent ? { concurrent: true as const } : {}),
+      ...(extra.concurrent === true ? { concurrent: true as const } : {}),
       ...(kept
-        ? { snapshot: { before: setup.before.commit, after: after.commit } }
+        ? { snapshot: { before: before.commit, after: after.commit } }
         : {}),
+    }
+  }
+
+  /** Release a held before snapshot the record does not keep. */
+  private async letGo(
+    place: TurnRepository,
+    sessionId: string,
+    firstTurn: number,
+  ): Promise<void> {
+    try {
+      await this.options.snapshots.release(place, sessionId, firstTurn)
+    } catch {
+      // Dropped with the session's refs later.
     }
   }
 
@@ -639,6 +861,33 @@ function steeringIds(
   return steering
 }
 
+/** Count one file-tool write in a task's tally (outside Git). */
+function tally(files: Map<string, TurnFileEntry>, write: TaskToolWrite): void {
+  const entry = files.get(write.path) ?? {
+    path: write.path,
+    status: write.created ? 'added' : 'modified',
+    additions: 0,
+    deletions: 0,
+  }
+  entry.additions = (entry.additions ?? 0) + write.added
+  entry.deletions = (entry.deletions ?? 0) + write.removed
+  files.set(write.path, entry)
+}
+
+/** A task's record outside Git, from its tally; null when nothing was written. */
+function toolsRecord(
+  task: { firstTurn: number; lastTurn: number },
+  files: ReadonlyMap<string, TurnFileEntry>,
+): TurnFilesRecord | null {
+  if (files.size === 0) return null
+  const entries = [...files.values()].sort(byPath)
+  return listed(task, 'tools', {
+    files: entries,
+    totals: totalsOf(entries),
+    truncated: files.size > LIST_LIMIT,
+  })
+}
+
 function listed(
   task: { firstTurn: number; lastTurn: number },
   mode: 'git' | 'tools',
@@ -692,11 +941,14 @@ function remove<T>(list: T[], item: T): void {
 }
 
 /** Append, retrying once the current (non-reentrant) append has settled. */
-function append<K extends 'turn/files' | 'turn/files-reverted'>(
-  session: Session,
-  type: K,
-  data: K extends 'turn/files' ? TurnFilesRecord : TurnFilesReverted,
-): void {
+function append<
+  K extends
+    | 'turn/files'
+    | 'turn/files-reverted'
+    | 'task/started'
+    | 'task/tool-write'
+    | 'task/ended',
+>(session: Session, type: K, data: SessionEventMap[K]): void {
   const write = session.append as (type: string, data: unknown) => void
   try {
     write.call(session, type, data)
