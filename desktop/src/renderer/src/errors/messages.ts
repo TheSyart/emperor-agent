@@ -214,6 +214,23 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // 备份
   home_backup_invalid: '备份文件不正确或已损坏。',
 
+  // 检查更新（REL-02）
+  update_unsupported: '这个版本不检查更新。',
+  update_check_disabled: '检查更新已关闭，可在「设置 › 常规 › 更新」打开。',
+  update_feed_invalid: '测试更新源只能指向本机，已忽略。',
+  update_network_failed: '连接 GitHub 失败，稍后会自动重试。',
+  update_blocked_url: '更新地址不在 GitHub 的发布地址范围内，已拒绝。',
+  update_bad_response: 'GitHub 返回的版本列表无法识别。',
+  update_too_large: '下载的内容比发布时声明的大，已停止并删除。',
+  update_not_available: '现在没有可下载的新版本。',
+  update_checksum_missing:
+    'SHA256SUMS.txt 里没有这个安装包的校验值，已停止下载。',
+  update_checksum_mismatch:
+    '安装包的 SHA-256 与 SHA256SUMS.txt 不符，已拒绝并删除下载的文件。',
+  update_attestation_failed:
+    'GitHub 来源证明核验失败，已拒绝并删除下载的文件。',
+  update_download_missing: '下载的安装包已不在原来的位置，请重新下载。',
+
   // 开发环境配置
   catalog_invalid: '内置环境工具目录校验失败，当前版本无法安全配置环境。',
   unsupported_platform: '当前操作系统不在环境配置的支持范围内。',

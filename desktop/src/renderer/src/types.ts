@@ -25,6 +25,7 @@ import type {
 import type {
   RuntimeEvent as CoreRuntimeEvent,
   RuntimeGoalView as CoreRuntimeGoalView,
+  UpdateDiagnostics,
 } from '@emperor/core/runtime-contract'
 
 /** What a builtin tool is for (Core's `category`; 能力 › 工具 groups by it). */
@@ -1043,6 +1044,8 @@ export interface DiagnosticsPayload {
   environment?: DiagnosticsEnvironmentSummary
   dependencies?: DiagnosticsDependencyPayload
   computerUse?: ComputerUseDiagnosticsPayload
+  /** 检查更新 (REL-02): the switch, a test feed, Electron's age. */
+  updates?: UpdateDiagnostics | null
 }
 
 /** Core diagnostics summary of computer use (no URLs, no grants). */

@@ -14,6 +14,9 @@
  *   最近删除 (FIX-01: deleted sessions kept 30 days, restore or delete for
  *   good after a confirmation). A list that failed to load says so with
  *   重试 instead of looking empty.
+ * - 更新 (REL-02, updates/UpdateGroup): 检查更新 and 当前版本; while a newer
+ *   release is offered or downloading, updates/UpdateNotice opens the page
+ *   (「Emperor 0.2.1 可用 · 查看更新说明 · 下载」).
  * The runtime facts this page used to open with (service state, current
  * model, bound projects) are in 高级 › 诊断 › 运行时.
  */
@@ -32,6 +35,8 @@ import { composerModeOptions } from '../chat/composerControls'
 import Button from '../ui/Button.vue'
 import { confirm } from '../ui/confirm'
 import { useSettingsPages } from './settingsHeader'
+import UpdateGroup from './updates/UpdateGroup.vue'
+import UpdateNotice from './updates/UpdateNotice.vue'
 import {
   EmptyState,
   Notice,
@@ -381,6 +386,7 @@ onMounted(() => void loadPermission())
     </template>
 
     <template v-else>
+      <UpdateNotice />
       <SettingsGroup title="外观" data-group="appearance">
         <SettingsRow title="主题" description="跟随系统时随 macOS 自动切换">
           <Segmented
@@ -509,6 +515,8 @@ onMounted(() => void loadPermission())
           @click="openPage('archived')"
         />
       </SettingsGroup>
+
+      <UpdateGroup />
     </template>
   </SettingsSection>
 </template>

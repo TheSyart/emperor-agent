@@ -387,3 +387,77 @@ describe('notificationRelativeTime', () => {
     )
   })
 })
+
+describe('REL-02 update notices', () => {
+  it('1 · update_available becomes 「Emperor 0.2.1 可用 · 查看更新说明 · 下载」 pointing at 设置 › 常规', () => {
+    const notice = runtimeNoticeFromEvent(
+      {
+        event: 'update_available',
+        version: '0.2.1',
+        tag: 'v0.2.1',
+        notesUrl:
+          'https://github.com/TheSyart/emperor-agent/releases/tag/v0.2.1',
+        seq: 0,
+        ts: 5000,
+      } as WsEvent,
+      '',
+      9000,
+    )
+    expect(notice).toEqual({
+      kind: 'update',
+      key: 'update:0.2.1',
+      version: '0.2.1',
+      at: 5000,
+    })
+    const item = notificationFromNotice(notice!, context)
+    expect(item).toEqual({
+      key: 'update:0.2.1',
+      kind: 'update',
+      tone: 'info',
+      title: 'Emperor 0.2.1 可用',
+      detail: '查看更新说明 · 下载',
+      createdAt: 5000,
+      target: { type: 'settings' },
+    })
+    // Seen on any page, it stays unread until opened.
+    expect(
+      notificationFromNotice(notice!, { ...context, viewedSessionId: '' }),
+    ).toMatchObject({ kind: 'update' })
+  })
+
+  it('2 · update_status alone, or an announcement without a version, is no notice', () => {
+    expect(
+      runtimeNoticeFromEvent(
+        { event: 'update_status', status: {} } as unknown as WsEvent,
+        '',
+        1,
+      ),
+    ).toBeNull()
+    expect(
+      runtimeNoticeFromEvent(
+        { event: 'update_available', version: '' } as unknown as WsEvent,
+        '',
+        1,
+      ),
+    ).toBeNull()
+  })
+
+  it('keeps an update notice across a restart and ties it to no session', () => {
+    const state = normalizeNotificationsState({
+      items: [
+        {
+          key: 'update:0.2.1',
+          kind: 'update',
+          tone: 'info',
+          title: 'Emperor 0.2.1 可用',
+          detail: '查看更新说明 · 下载',
+          createdAt: 1,
+          read: false,
+          target: { type: 'settings' },
+        },
+      ],
+    })
+    expect(state.items).toHaveLength(1)
+    expect(state.items[0]!.target).toEqual({ type: 'settings' })
+  })
+})
