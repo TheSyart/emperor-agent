@@ -34,7 +34,8 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   model_provider_auth: '模型认证失败：API Key 无效或没有权限。',
   model_provider_rate_limit: '模型服务触发限流，请稍后重试。',
   model_provider_transient: '模型服务暂时不可用或网络超时，请稍后重试。',
-  model_provider_permanent: '模型请求失败，请检查模型 ID、API 地址和提供方配置。',
+  model_provider_permanent:
+    '模型请求失败，请检查模型 ID、API 地址和提供方配置。',
   model_provider_unknown: '模型调用失败，请检查模型配置或稍后重试。',
   SESSION_REQUIRED: '请先打开一个会话再试。',
   invalid_session: '会话不存在或已被删除。',
@@ -78,10 +79,12 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   EXECUTOR_MISSING: '找不到 Claude Code / Codex 的命令行程序。',
   EXECUTOR_DISABLED: '请先在「设置 › 子智能体」里启用它。',
   EXECUTOR_INCOMPATIBLE: '命令行程序的版本不在支持范围内。',
-  CONTAINMENT_UNAVAILABLE: '操作系统的执行边界不可用，请在「设置 › 子智能体」查看诊断。',
+  CONTAINMENT_UNAVAILABLE:
+    '操作系统的执行边界不可用，请在「设置 › 子智能体」查看诊断。',
   PROTOCOL_FRAMING: '子智能体返回了无法识别的数据。',
   SESSION_LOG_UNRECOVERABLE: '子智能体的会话记录已损坏，无法恢复。',
-  EXTERNAL_OPERATION_FAILED: '子智能体的操作没有成功，请刷新任务详情并检查保留的日志。',
+  EXTERNAL_OPERATION_FAILED:
+    '子智能体的操作没有成功，请刷新任务详情并检查保留的日志。',
   subagent_worktree_unavailable: '无法为子智能体创建隔离 worktree。',
 
   // 工作区与文件
@@ -115,15 +118,18 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   git_env_not_allowed: 'Git 命令不接受这个环境变量。',
   git_network_not_authorized: '这个 Git 操作需要联网，请先允许。',
   git_output_too_large: 'Git 输出超过安全读取上限，请在终端里处理。',
-  git_repository_wide_operation: '当前项目是仓库的子目录，不能执行整个仓库范围的操作。',
-  git_staged_outside_project: '仓库中有当前项目之外的暂存改动，请先在终端里处理。',
+  git_repository_wide_operation:
+    '当前项目是仓库的子目录，不能执行整个仓库范围的操作。',
+  git_staged_outside_project:
+    '仓库中有当前项目之外的暂存改动，请先在终端里处理。',
   git_status_stale: '仓库状态已变化，请刷新后重试。',
   git_status_too_large: 'Git 状态超过安全读取上限。',
   git_status_truncated: 'Git 状态超过安全读取上限，不能操作 Pull Request。',
   git_transient_state: '仓库正处于未完成的 Git 操作中（例如合并或变基）。',
   git_worktree_already_active: '当前会话已经在临时 worktree 中。',
   git_worktree_has_changes: '临时 worktree 还有未处理的改动，不能删除。',
-  git_worktree_lease_corrupt: 'worktree 租约已损坏，已停止自动操作以免误删目录。',
+  git_worktree_lease_corrupt:
+    'worktree 租约已损坏，已停止自动操作以免误删目录。',
   git_worktree_not_owned: '只能处理 Emperor 创建的 worktree。',
   git_worktree_path_invalid: '临时 worktree 路径不可用。',
   git_worktree_unavailable: '当前不能管理 worktree。',
@@ -139,8 +145,10 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   pull_request_argument_invalid: 'Pull Request 参数不合法。',
   pull_request_not_found: '找不到这个 Pull Request。',
   pull_request_forbidden: '当前账户没有读取这个仓库的权限。',
-  pull_request_gh_missing: '当前环境中没有可用的 GitHub CLI（gh），请在诊断中安装。',
-  pull_request_gh_unauthenticated: 'GitHub CLI 还没有登录，请在终端运行 gh auth login。',
+  pull_request_gh_missing:
+    '当前环境中没有可用的 GitHub CLI（gh），请在诊断中安装。',
+  pull_request_gh_unauthenticated:
+    'GitHub CLI 还没有登录，请在终端运行 gh auth login。',
   pull_request_gh_failed: 'GitHub CLI 命令失败',
   pull_request_invalid_response: 'GitHub CLI 返回了无效数据。',
   pull_request_output_too_large: 'GitHub CLI 返回的数据超过安全读取上限。',
