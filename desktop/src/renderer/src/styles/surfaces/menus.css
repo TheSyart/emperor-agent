@@ -145,7 +145,16 @@
   white-space: nowrap;
 }
 
+/*
+ * The / palette's grey column (`/plan`, `项目 Skill`) has one width on every
+ * row, so the labels and descriptions line up whatever it holds.
+ */
+.composer-palette[data-mode='slash'] .composer-palette-item {
+  grid-template-columns: 20px minmax(112px, 0.34fr) minmax(0, 1fr) 92px;
+}
+
 .composer-palette[data-mode='slash'] .composer-palette-item b {
+  justify-self: end;
   max-width: 92px;
   border: 0;
   padding: 0;
