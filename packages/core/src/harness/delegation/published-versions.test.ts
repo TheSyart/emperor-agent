@@ -8,7 +8,7 @@
  */
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { nodeUpdateTransport } from '../../updates/http'
@@ -200,9 +200,35 @@ describe('published versions', () => {
     expect(snapshot.packages).toEqual({})
   })
 
+  it('a cache entry of the wrong shape is dropped, the rest kept', () => {
+    const root = dir()
+    writeFileSync(
+      join(root, 'executor-versions.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        checkedAt: 5,
+        packages: {
+          '@openai/codex': { latest: '0.163.0', versions: 'nope' },
+          '@anthropic-ai/claude-code': {
+            latest: '2.1.308',
+            versions: ['2.1.308', 7, '2.1.308-beta'],
+          },
+        },
+        dismissed: { 'codex-default': 3 },
+      }),
+    )
+    const versions = new PublishedVersionStore({
+      root,
+      fetch: async () => ({ latest: null, versions: [] }),
+    })
+    expect(versions.read().packages).toEqual({
+      '@anthropic-ai/claude-code': { latest: '2.1.308', versions: ['2.1.308'] },
+    })
+    expect(versions.dismissed()).toEqual({})
+  })
+
   it('a damaged cache file is ignored', async () => {
     const root = dir()
-    const { writeFileSync } = await import('node:fs')
     writeFileSync(join(root, 'executor-versions.json'), '{not json')
     const r = await registry()
     const versions = store(root, r.url)

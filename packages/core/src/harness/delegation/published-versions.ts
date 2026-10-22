@@ -169,6 +169,23 @@ export function registryFetcher(options: {
   }
 }
 
+/** Only well-formed entries of a cache read from disk. */
+function cachedPackages(value: unknown): Record<string, PublishedPackage> {
+  const out: Record<string, PublishedPackage> = {}
+  for (const [name, entry] of Object.entries(value as object)) {
+    const { latest, versions } = (entry ?? {}) as Partial<PublishedPackage>
+    if (!Array.isArray(versions)) continue
+    out[name] = {
+      latest:
+        typeof latest === 'string' && RELEASE.test(latest) ? latest : null,
+      versions: versions.filter(
+        (v): v is string => typeof v === 'string' && RELEASE.test(v),
+      ),
+    }
+  }
+  return out
+}
+
 export interface PublishedSnapshot {
   /** The last check that reached the registry. */
   checkedAt: number | null
@@ -211,10 +228,12 @@ export class PublishedVersionStore {
           this.data = {
             schemaVersion: 1,
             checkedAt: typeof raw.checkedAt === 'number' ? raw.checkedAt : null,
-            packages: raw.packages,
-            ...(raw.dismissed && typeof raw.dismissed === 'object'
-              ? { dismissed: raw.dismissed }
-              : {}),
+            packages: cachedPackages(raw.packages),
+            dismissed: Object.fromEntries(
+              Object.entries(raw.dismissed ?? {}).filter(
+                ([, v]) => typeof v === 'string',
+              ),
+            ),
           }
       }
     } catch {
