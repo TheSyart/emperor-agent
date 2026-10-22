@@ -306,6 +306,19 @@ describe('最后核验 (test 6)', () => {
     expect(
       lib.verificationProblems(repo, ['docs/page.md'], '2026-10-21'),
     ).toEqual([expect.stringContaining('晚于今天')])
+    // A page checked in a time zone already a day ahead (CST in the
+    // morning, while a UTC runner is still on the day before) is not in
+    // the future; two days ahead is.
+    write('2026-10-22', '| a | b |\n| - | - |\n| 1 | 3 |')
+    expect(
+      lib
+        .verificationProblems(repo, ['docs/page.md'], '2026-10-21')
+        .filter((problem) => problem.includes('晚于今天')),
+    ).toEqual([])
+    write('2026-10-23', '| a | b |\n| - | - |\n| 1 | 3 |')
+    expect(
+      lib.verificationProblems(repo, ['docs/page.md'], '2026-10-21'),
+    ).toEqual([expect.stringContaining('晚于今天')])
     write(
       '2026-10-21（对照 `0123456789abcdef`）',
       '| a | b |\n| - | - |\n| 1 | 3 |',

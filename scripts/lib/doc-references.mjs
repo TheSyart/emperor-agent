@@ -373,6 +373,13 @@ export function localDate(now = new Date()) {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
 }
 
+/** The calendar day after a YYYY-MM-DD date. */
+function nextDay(date) {
+  const day = new Date(`${date}T00:00:00Z`)
+  day.setUTCDate(day.getUTCDate() + 1)
+  return day.toISOString().slice(0, 10)
+}
+
 /**
  * Problems with the 最后核验 lines of the given files: a date in the future,
  * a commit that does not exist, or text changed after the date. Without
@@ -384,7 +391,9 @@ export function verificationProblems(root, files, today = localDate()) {
   for (const path of files) {
     const verified = verificationOf(readFileSync(join(root, path), 'utf8'))
     if (!verified) continue
-    if (verified.date > today) {
+    // A date one day ahead is a later time zone's today (a page checked in
+    // Beijing in the morning, a UTC runner still on the day before).
+    if (verified.date > nextDay(today)) {
       problems.push(`${path}: 最后核验 ${verified.date} 晚于今天 ${today}`)
       continue
     }
