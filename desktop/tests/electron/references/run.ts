@@ -18,6 +18,9 @@
  *   file line navigation and SVGs, output/source lists, GitHub routes, and
  *   ordinary Chat attachments. Only Finder's final native launch is recorded.
  *   These added checks use the local scripted model, not a paid real model.
+ *   FIX-14: first, in a fresh Emperor Home of its own (no session at all),
+ *   the start page offers the slash commands and Skills, /plan runs as the
+ *   command, and a Build draft lists its project's Skills.
  * Prints `E2E-RESULT {json}` lines like the other Electron suites.
  *
  *   node scripts/e2e-cu.mjs --mode=references        (after `npm run build`)
@@ -1990,6 +1993,160 @@ async function conversationResources(
 }
 
 /** A real model, once: its reply links the files it names. */
+// ---------------------------------------------------------------------------
+// FIX-14: the start page of a fresh install, with no session at all. Its own
+// Emperor Home and window, before the main flow creates any session: the
+// slash commands and Skills are there, /plan runs as a command, and a Build
+// draft lists its project's Skills.
+
+const PERSONAL_SKILL = '记录这次 e2e 的笔记'
+const PROJECT_SKILL = '部署这个 e2e 项目'
+
+function writeSkill(dir: string, name: string, description: string): void {
+  mkdirSync(join(dir, name), { recursive: true })
+  writeFileSync(
+    join(dir, name, 'SKILL.md'),
+    `---\nname: ${name}\ndescription: ${description}\n---\n\n${description}。\n`,
+  )
+}
+
+/**
+ * + › 插入 Skill 或插件: the text of each Skill and plugin it offers (a
+ * screenshot of the open list goes to `shot`).
+ */
+async function insertableSkills(page: Page, shot: string): Promise<string[]> {
+  await page.getByRole('button', { name: '添加附件与能力' }).click()
+  await page.getByRole('menuitem', { name: '插入 Skill 或插件' }).click()
+  const picker = page.locator('.capability-picker')
+  await picker.waitFor({ timeout: 10_000 })
+  const items = await picker.locator('.capability-picker-item').allInnerTexts()
+  await page.screenshot({ path: join(shots, shot) })
+  // Focusing the input closes the list.
+  await page.getByLabel('消息输入框').first().click()
+  await picker.waitFor({ state: 'hidden' })
+  return items.map((item) => item.replace(/\s+/g, ' ').trim())
+}
+
+const offers = (items: string[], description: string): boolean =>
+  items.some((item) => item.includes(description))
+
+async function startPageWithoutSessions(model: FakeModel): Promise<void> {
+  const home = realpathSync(
+    mkdtempSync(join(tmpdir(), 'emperor-e2e-start-home-')),
+  )
+  const project = realpathSync(
+    mkdtempSync(join(tmpdir(), 'emperor-e2e-start-project-')),
+  )
+  let app: ElectronApplication | null = null
+  try {
+    prepareHome(home, model)
+    writeSkill(join(home, 'skills'), 'e2e-notes', PERSONAL_SKILL)
+    writeSkill(join(project, '.emperor', 'skills'), 'e2e-deploy', PROJECT_SKILL)
+    const launched = await launch(home)
+    app = launched.app
+    const page = launched.page
+    await check(
+      page,
+      'FIX-14 · with no session at all, + lists the personal Skill on the start page',
+      async () => {
+        await page.getByLabel('消息输入框').first().waitFor({ timeout: 30_000 })
+        await until(
+          async () => /\/chat\/draft:/.test(page.url()),
+          10_000,
+          'the start page (a draft)',
+        )
+        const sessions = await core<unknown[]>(page, 'sessions.list', {
+          includeArchived: true,
+        })
+        if (sessions.length) throw new Error(`${sessions.length} sessions`)
+        let skills: string[] = []
+        await until(
+          async () =>
+            offers(
+              (skills = await insertableSkills(page, 'fix14-start-skills.png')),
+              PERSONAL_SKILL,
+            ),
+          15_000,
+          'the personal Skill in + › 插入 Skill 或插件',
+        )
+        return { skills }
+      },
+    )
+    await check(
+      page,
+      'FIX-14 · /plan typed on the start page with no session runs as the command',
+      async () => {
+        const served = model.served.length
+        const box = page.getByLabel('消息输入框').first()
+        await box.click()
+        await box.fill('/plan')
+        await box.press('Enter')
+        await until(
+          async () => /\/chat\/(?!draft:)[^/?#]+/.test(page.url()),
+          15_000,
+          'the session the command created',
+        )
+        const sessionId = await sessionIdOf(page)
+        await until(
+          async () =>
+            (await core<{ plan?: boolean }>(page, 'control.get', sessionId))
+              .plan === true,
+          10_000,
+          'plan mode on in the new session',
+        )
+        await page
+          .getByRole('button', { name: '退出计划' })
+          .waitFor({ timeout: 10_000 })
+        if (await page.locator('.user-bubble', { hasText: '/plan' }).count())
+          throw new Error('/plan was sent as a message')
+        if (model.served.length !== served)
+          throw new Error('the model was asked')
+        await page.screenshot({ path: join(shots, 'fix14-start-plan.png') })
+        return { session: '<new>', plan: true, modelRequests: 0 }
+      },
+    )
+    await check(
+      page,
+      'FIX-14 · a Build draft lists its project’s Skills',
+      async () => {
+        await app!.evaluate(({ dialog }, dir) => {
+          dialog.showOpenDialog = (async () => ({
+            canceled: false,
+            filePaths: [dir],
+          })) as typeof dialog.showOpenDialog
+        }, project)
+        await page.getByRole('button', { name: '项目操作' }).click()
+        await page.getByRole('menuitem', { name: '使用现有文件夹' }).click()
+        await until(
+          async () => /\/chat\/draft:/.test(page.url()),
+          10_000,
+          'the Build draft',
+        )
+        let skills: string[] = []
+        await until(
+          async () =>
+            offers(
+              (skills = await insertableSkills(
+                page,
+                'fix14-build-draft-skills.png',
+              )),
+              PROJECT_SKILL,
+            ),
+          15_000,
+          'the project Skill in + › 插入 Skill 或插件',
+        )
+        if (!offers(skills, PERSONAL_SKILL))
+          throw new Error(`no personal Skill: ${skills.join(' / ')}`)
+        return { skills }
+      },
+    )
+  } finally {
+    await app?.close().catch(() => undefined)
+    rmSync(home, { recursive: true, force: true })
+    rmSync(project, { recursive: true, force: true })
+  }
+}
+
 async function realModel(page: Page): Promise<void> {
   await check(page, 'a real reply links the files it names', async () => {
     await send(
@@ -2233,6 +2390,7 @@ async function main(): Promise<void> {
   const project = prepareProject()
   let app: ElectronApplication | null = null
   try {
+    if (model !== null) await startPageWithoutSessions(model)
     prepareHome(home, model)
     const launched = await launch(home)
     app = launched.app

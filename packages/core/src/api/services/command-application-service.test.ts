@@ -37,6 +37,7 @@ function setup(overrides: Partial<CommandApplicationServiceDeps> = {}) {
     },
     getSession: vi.fn((id: string) => (id === 'missing' ? null : { id })),
     skillsForSession: vi.fn(() => []),
+    skillsForDraft: vi.fn(() => []),
     sessionBusy: vi.fn(() => false),
     compact: vi.fn(async () => ({ compacted: true, shadowedTokenCount: 42 })),
     stop: vi.fn(() => true),

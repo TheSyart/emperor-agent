@@ -207,7 +207,11 @@ export class CoreSkillService {
 
   /** Effective Skills of a session plus invalid Skills with reasons. */
   list(opts: SkillSessionScope = {}): SkillListPayload {
-    const projectRoot = this.projectRoot(opts.sessionId)
+    return this.listForProject(this.projectRoot(opts.sessionId))
+  }
+
+  /** The same, seen from a project root (null: none) — a start-page draft's. */
+  listForProject(projectRoot: string | null): SkillListPayload {
     const scan = this.library.list(projectRoot)
     return {
       skills: scan.skills.map((skill) => this.describe(skill, projectRoot)),

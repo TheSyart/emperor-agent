@@ -1717,8 +1717,10 @@ export class HarnessHost {
     )
   }
 
-  /** Project root whose Skills a session sees (Build sessions only). */
-  projectRootFor(entry: SessionEntry | null | undefined): string | null {
+  /** Project root whose Skills a session (or a draft's session to be) sees: Build only. */
+  projectRootFor(
+    entry: Pick<SessionEntry, 'mode' | 'project_path'> | null | undefined,
+  ): string | null {
     return entry?.mode === 'build' && entry.project_path
       ? resolve(entry.project_path)
       : null

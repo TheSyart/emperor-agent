@@ -394,3 +394,66 @@ describe('the + menu', () => {
     expect(props.onError).toHaveBeenCalledWith('没有屏幕录制权限')
   })
 })
+
+// FIX-14 F1: on 「没有找到这个会话」 there is no session to send to. The card
+// stays where it is, with the way out as its placeholder; nothing in it can
+// act on the session behind the page.
+describe('the composer with no session to act on (F1)', () => {
+  const reason = '没有找到这个会话，请从侧栏打开其他会话'
+
+  it('disables the editor and every control, and shows no other session’s state', async () => {
+    const { root, props } = mount({
+      unavailableReason: reason,
+      lifecycleMode: 'plan',
+      control: { ...control, plan: true },
+    })
+    await settle()
+    expect(focusable(root)).toEqual([])
+    const buttons = [
+      ...bottomBar(root).querySelectorAll<HTMLButtonElement>('button'),
+    ]
+    // +, 执行权限, 模型与思考 and the microphone are there, all off.
+    expect(buttons).toHaveLength(4)
+    expect(buttons.every((button) => button.disabled)).toBe(true)
+    // The plan capsule and the context ring describe the session behind.
+    expect(root.querySelector('.plan-chip')).toBeNull()
+    expect(root.querySelector('[aria-label^="上下文"]')).toBeNull()
+
+    const input = root.querySelector<HTMLElement>('.composer-editor-input')!
+    expect(input.getAttribute('contenteditable')).toBe('false')
+    expect(input.getAttribute('aria-disabled')).toBe('true')
+    expect(
+      root
+        .querySelector('.composer-editor-empty')
+        ?.getAttribute('data-placeholder'),
+    ).toBe(reason)
+
+    barButton(root, '添加附件与能力').click()
+    await settle()
+    expect(
+      document.querySelector('[role="menu"][aria-label="添加"]'),
+    ).toBeNull()
+    root
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { cancelable: true }))
+    await settle()
+    expect(props.onSend).not.toHaveBeenCalled()
+    expect(props.onActivatePlan).not.toHaveBeenCalled()
+    expect(props.onDismissLifecycle).not.toHaveBeenCalled()
+  })
+
+  it('sends nothing even with a draft left in it', async () => {
+    const { root, props } = mount()
+    await settle()
+    typeInto(composerView(root), '发到哪里')
+    await settle()
+    props.unavailableReason = reason
+    await settle()
+    expect(barButton(root, '发送').disabled).toBe(true)
+    root
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { cancelable: true }))
+    await settle()
+    expect(props.onSend).not.toHaveBeenCalled()
+  })
+})

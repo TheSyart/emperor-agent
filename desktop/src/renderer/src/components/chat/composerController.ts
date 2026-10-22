@@ -57,6 +57,11 @@ export interface ComposerControllerProps {
   providerOptions: ProviderOption[]
   supportsVision?: boolean
   sendBlockedReason?: string | null
+  /**
+   * No session to act on here (「没有找到这个会话」, F1): nothing can be
+   * typed, sent or switched, and this is the placeholder.
+   */
+  unavailableReason?: string | null
   goal?: RuntimeGoalView | null
   planPaused?: boolean
   goalCaptureStatus?: GoalCaptureStatus
@@ -150,6 +155,7 @@ export function useComposerController(
   )
   const sendDisabled = computed(
     () =>
+      Boolean(props.unavailableReason) ||
       goalCaptureStarting.value ||
       props.interactionBlocked ||
       uploading.value.size > 0 ||
@@ -192,7 +198,7 @@ export function useComposerController(
   }
 
   function submit(delivery?: 'queue' | 'interject'): void {
-    if (goalCaptureStarting.value) return
+    if (props.unavailableReason || goalCaptureStarting.value) return
     if (props.sendBlockedReason) {
       emit('error', props.sendBlockedReason)
       return

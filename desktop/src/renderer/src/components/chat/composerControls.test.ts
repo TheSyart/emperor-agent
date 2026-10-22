@@ -20,13 +20,13 @@ describe('composer control model', () => {
     expect(source).not.toContain("submit('interject')")
     expect(source).toContain("emit('stop')")
     // The editor stays writable while a turn runs (only blocked by a
-    // starting goal or a pending answer).
+    // starting goal or a pending answer, or with no session here, F1).
     const editor = source.match(/<ComposerEditor[\s\S]*?\/>/)?.[0] || ''
     expect(editor).toContain(
-      ':disabled="goalCaptureStarting || props.interactionBlocked"',
+      'unavailable || goalCaptureStarting || props.interactionBlocked',
     )
     expect(editor).not.toContain('props.busy')
-    expect(source).toContain(':disabled="goalCaptureStarting"')
+    expect(source).toContain(':disabled="unavailable || goalCaptureStarting"')
     expect(source).not.toContain('等待当前任务结束后再添加')
     const queue = readFileSync(
       fileURLToPath(new URL('../composer/QueueDock.vue', import.meta.url)),

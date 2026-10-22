@@ -1402,6 +1402,102 @@ describe('CoreApi commands', () => {
   })
 })
 
+// FIX-14: the start page is a draft (`draft:<uuid>`) Core has no session for.
+// Its slash commands and Skills come from the draft's own mode and project,
+// never from whichever real session happens to exist.
+describe('CoreApi commands on a start-page draft (FIX-14)', () => {
+  function skillAt(dir: string, name: string): void {
+    mkdirSync(join(dir, name), { recursive: true })
+    writeFileSync(
+      join(dir, name, 'SKILL.md'),
+      `---\nname: ${name}\ndescription: The ${name} skill\n---\n`,
+    )
+  }
+
+  async function draftFixture() {
+    const root = tmp('emperor-core-api-draft-commands-')
+    const stateRoot = join(root, 'home')
+    const projectA = join(root, 'project-a')
+    const projectB = join(root, 'project-b')
+    skillAt(join(stateRoot, 'skills'), 'reviewer')
+    skillAt(join(projectA, '.emperor', 'skills'), 'deploy')
+    skillAt(join(projectB, '.emperor', 'skills'), 'release')
+    const fixture = await setup({ root, stateRoot })
+    return { ...fixture, projectA, projectB }
+  }
+
+  const ids = (commands: Array<{ id: string }>) =>
+    commands.map((command) => command.id)
+
+  it('1 · lists the builtins and personal Skills with no session at all', async () => {
+    const { api } = await draftFixture()
+    expect(api.host.kept.sessionStore.list()).toEqual([])
+    const commands = await api.commands.list({
+      sessionId: 'draft:fresh',
+      draftSession: { mode: 'chat', project: null },
+      invocationSource: 'desktop',
+    })
+    expect(ids(commands)).toEqual(
+      expect.arrayContaining([
+        'builtin.new',
+        'builtin.plan',
+        'builtin.permissions',
+        'builtin.goal',
+        'skill.user.reviewer',
+      ]),
+    )
+    expect(commands.every((command) => command.available)).toBe(true)
+    // Listing never creates the session.
+    expect(api.host.kept.sessionStore.list()).toEqual([])
+  })
+
+  it('2 · lists the Skills of a Build draft’s project, not another project’s', async () => {
+    const { api, projectA, projectB } = await draftFixture()
+    // A real Build session on project A exists; the drafts must not see it.
+    api.sessions.create({ title: 'A', mode: 'build', project_path: projectA })
+    const draftOn = (mode: string, path: string) =>
+      api.commands.list({
+        sessionId: 'draft:next',
+        draftSession: {
+          mode,
+          project: {
+            project_id: path,
+            project_path: path,
+            project_name: 'P',
+          },
+        },
+        invocationSource: 'desktop',
+      })
+    const onA = ids(await draftOn('build', projectA))
+    expect(onA).toEqual(
+      expect.arrayContaining(['skill.project.deploy', 'skill.user.reviewer']),
+    )
+    expect(onA).not.toContain('skill.project.release')
+    const onB = ids(await draftOn('build', projectB))
+    expect(onB).toEqual(
+      expect.arrayContaining(['skill.project.release', 'skill.user.reviewer']),
+    )
+    expect(onB).not.toContain('skill.project.deploy')
+    // A Chat draft has no project Skills, whatever path it carries.
+    const chat = ids(await draftOn('chat', projectA))
+    expect(chat).toContain('skill.user.reviewer')
+    expect(chat).not.toContain('skill.project.deploy')
+  })
+
+  it('3 · completes command arguments on a draft', async () => {
+    const { api } = await draftFixture()
+    const completions = await api.commands.complete({
+      sessionId: 'draft:fresh',
+      draftSession: { mode: 'chat', project: null },
+      commandId: 'builtin.permissions',
+      rawArgs: 'read',
+      cursor: 4,
+      invocationSource: 'desktop',
+    })
+    expect(completions.map((item) => item.value)).toContain('read-only')
+  })
+})
+
 describe('CoreApi sessions and kept services', () => {
   it('moves a deleted session to the trash, and undo brings it back byte for byte (FIX-01 1)', async () => {
     const { api } = await setup({ replies: [{ text: 'hello' }] })

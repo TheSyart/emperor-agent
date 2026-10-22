@@ -187,17 +187,22 @@ function anchorElement(instance: unknown): HTMLElement | null {
   return el instanceof HTMLElement ? el : null
 }
 
+/** No session here (F1): every control is off, and nothing shows another session's state. */
+const unavailable = computed(() => Boolean(props.unavailableReason))
+
 const placeholder = computed(() =>
-  props.busy
-    ? '输入消息，按 Enter 加入队列'
-    : goalCaptureStarting.value
-      ? '正在启动目标...'
-      : goalCaptureActive.value
-        ? '描述要持续完成的目标'
-        : props.sendBlockedReason ||
-          (props.hero
-            ? '有什么需要推进的？/ 调用技能，@ 引用插件，可拖入图片或文档'
-            : '继续对话，/ 调用技能，@ 引用插件'),
+  props.unavailableReason
+    ? props.unavailableReason
+    : props.busy
+      ? '输入消息，按 Enter 加入队列'
+      : goalCaptureStarting.value
+        ? '正在启动目标...'
+        : goalCaptureActive.value
+          ? '描述要持续完成的目标'
+          : props.sendBlockedReason ||
+            (props.hero
+              ? '有什么需要推进的？/ 调用技能，@ 引用插件，可拖入图片或文档'
+              : '继续对话，/ 调用技能，@ 引用插件'),
 )
 
 function focusCard(event: MouseEvent): void {
@@ -227,10 +232,16 @@ function addModel(): void {
     ref="shell"
     class="composer-root"
     :data-hero="hero || undefined"
-    @dragenter="onDragEnter"
-    @dragover="onDragOver"
-    @dragleave="onDragLeave"
-    @drop="onDrop"
+    v-on="
+      unavailable
+        ? {}
+        : {
+            dragenter: onDragEnter,
+            dragover: onDragOver,
+            dragleave: onDragLeave,
+            drop: onDrop,
+          }
+    "
   >
     <form
       class="card"
@@ -336,7 +347,9 @@ function addModel(): void {
         ref="editor"
         class="rich-input"
         :placeholder="placeholder"
-        :disabled="goalCaptureStarting || props.interactionBlocked"
+        :disabled="
+          unavailable || goalCaptureStarting || props.interactionBlocked
+        "
         :hero="hero"
         :catalog="catalog"
         :keydown="editorKeydown"
@@ -374,7 +387,7 @@ function addModel(): void {
           shape="circle"
           :active="addOpen"
           :aria-expanded="addOpen"
-          :disabled="goalCaptureStarting"
+          :disabled="unavailable || goalCaptureStarting"
           @click="addOpen = !addOpen"
         >
           <DsPlus :size="16" />
@@ -382,13 +395,13 @@ function addModel(): void {
         <PermissionChip
           :options="modeOptions"
           :current="currentMode"
-          :disabled="props.busy"
+          :disabled="unavailable || props.busy"
           :after-plan="planEnabled"
           :title="modeTitle"
           @select="selectMode"
         />
         <PlanChip
-          :mode="props.lifecycleMode ?? null"
+          :mode="unavailable ? null : (props.lifecycleMode ?? null)"
           :busy="props.busy || goalCaptureStarting"
           @dismiss="emit('dismiss-lifecycle')"
         />
@@ -402,24 +415,24 @@ function addModel(): void {
           :reasoning-value="currentReasoningValue"
           :reasoning-options="reasoningOptions"
           :provider-options="props.providerOptions"
-          :disabled="props.busy"
+          :disabled="unavailable || props.busy"
           :title="modelTitle"
           @select-model="selectModel"
           @select-reasoning="selectReasoning"
           @add-model="addModel"
         />
         <ContextMeter
-          v-if="props.contextMax > 0"
+          v-if="props.contextMax > 0 && !unavailable"
           :used="props.contextUsed"
           :max="props.contextMax"
         />
         <DictationButton
           v-if="micInSendSlot"
           :shortcut="dictationShortcut"
-          :disabled="props.interactionBlocked"
+          :disabled="unavailable || props.interactionBlocked"
           @start="dictation.toggle()"
         />
-        <template v-else-if="props.busy">
+        <template v-else-if="props.busy && !unavailable">
           <IconButton
             v-if="hasDraft"
             :label="
