@@ -471,6 +471,13 @@ export class ExecutorRuntimeService {
         }
       } else rmSync(ghHosts, { force: true })
     }
+    // Claude Code: Emperor's `security` before anything else on PATH, so its
+    // keychain calls never raise macOS's 「找不到钥匙串」 under the dedicated
+    // HOME (FIX-19, claude-keychain.ts).
+    if (claudeDirs)
+      environment.PATH = [claudeDirs.bin, environment.PATH]
+        .filter(Boolean)
+        .join(delimiter)
     const secretValues = [
       ...credentialSecrets,
       ...Object.entries(environment)

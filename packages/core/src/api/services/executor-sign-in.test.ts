@@ -328,14 +328,19 @@ it('FIX-11 · 3 · a failed or timed-out sign-in says why and offers the same si
   )
   const failed = await ended('failed')
   expect(failed.signIn).toMatchObject({ reason: 'exit', exitCode: 3 })
-  expect(failed.signIn.command).toBe(
-    'env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN ' +
-      `CLAUDE_CONFIG_DIR='${config}' ` +
-      `HOME='${join(core.paths.delegationsRoot, 'claude-code', 'home')}' ` +
-      `XDG_CONFIG_HOME='${join(core.paths.delegationsRoot, 'claude-code', 'home', '.config')}' ` +
-      `XDG_CACHE_HOME='${join(core.paths.delegationsRoot, 'claude-code', 'home', '.cache')}' ` +
-      `'${executable}' auth login`,
-  )
+  const command = failed.signIn.command as string
+  expect(
+    command.startsWith(
+      'env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN ' +
+        `CLAUDE_CONFIG_DIR='${config}' ` +
+        `HOME='${join(core.paths.delegationsRoot, 'claude-code', 'home')}' ` +
+        `XDG_CONFIG_HOME='${join(core.paths.delegationsRoot, 'claude-code', 'home', '.config')}' ` +
+        `XDG_CACHE_HOME='${join(core.paths.delegationsRoot, 'claude-code', 'home', '.cache')}' ` +
+        // FIX-19: Emperor's security first on the PATH claude gets.
+        `PATH='${join(core.paths.delegationsRoot, 'claude-code', 'bin')}:`,
+    ),
+  ).toBe(true)
+  expect(command.endsWith(`' '${executable}' auth login`)).toBe(true)
   expect(core.executors.list()).toMatchObject({ signIn: null })
 
   // claude ended without an error but is still not signed in.
