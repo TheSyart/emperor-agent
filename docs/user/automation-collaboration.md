@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用自动化能力的用户<br>
-> 最后核验：2026-10-22（对照 `a7597a58`）<br>
+> 最后核验：2026-10-23（对照 `cd4d8656`）<br>
 > 事实源：`packages/core/src/scheduler/`、`packages/core/src/harness/host/scheduler.ts`、`packages/core/src/harness/hooks/`、`packages/core/src/api/services/hooks-service.ts`、`packages/core/src/watchlist/`、DesktopPet service、`packages/core/src/harness/delegation/`、`packages/core/src/runtime/agent-view.ts`、`desktop/src/renderer/src/components/pages/scheduler/`、`desktop/src/renderer/src/components/settings/`（高级 › Hooks、记忆、常规 › 外观 › 桌宠、子智能体）、`desktop/src/renderer/src/components/conversation/nodes/DelegationResultCard.vue`
 
 本页介绍定时任务、Hooks、Watchlist、桌宠和子智能体。它们都通过与普通对话相同的内核运行，不获得额外权限。
@@ -146,7 +146,7 @@ curl -fsSL https://claude.ai/install.sh | bash
 
 用 Anthropic Console 账号按用量计费时，点详情页的「用 Console 账号登录（按用量计费）」，同样在浏览器里完成（`claude auth login --console`）。「退出登录」运行 `claude auth logout`。
 
-这份登录由 Claude Code 自己保存：放在 macOS 钥匙串里，钥匙串不可用时放在它目录里的文件中。Emperor 为它准备了一个专用目录（`~/.emperor/delegations/claude-code/`），每个子任务、每次检测和每次登录都用这个目录，所以登录一次之后一直有效；它和你平时在终端里用的 `claude` 的登录互不影响。**Emperor 不读取、不保存、也不转交你的 Claude 登录**：登录时浏览器直接把结果交回 Claude Code，Emperor 不读 Claude Code 打印的登录链接或代码；之后它只运行 `claude auth status`，问 Claude Code 是否已登录、用的是哪种方式和哪个账号，再把这些显示出来；Emperor 自己的工具也读不到那份登录文件。
+这份登录由 Claude Code 自己保存在专用目录里的文件中，和 Codex 一样不放进 macOS 钥匙串。原因是 Emperor 运行它时用的是专用的主目录，那里没有你的登录钥匙串；Emperor 替它回答「钥匙串不可用」，所以不会弹出「找不到钥匙串」的系统提示。如果以前遇到这个提示时点过「还原」，子智能体页可能显示未登录，重新登录一次即可。Emperor 为它准备了一个专用目录（`~/.emperor/delegations/claude-code/`），每个子任务、每次检测和每次登录都用这个目录，所以登录一次之后一直有效；它和你平时在终端里用的 `claude` 的登录互不影响。**Emperor 不读取、不保存、也不转交你的 Claude 登录**：登录时浏览器直接把结果交回 Claude Code，Emperor 不读 Claude Code 打印的登录链接或代码；之后它只运行 `claude auth status`，问 Claude Code 是否已登录、用的是哪种方式和哪个账号，再把这些显示出来；Emperor 自己的工具也读不到那份登录文件。
 
 **使用 API Key**：也可以不登录 Claude 账号，改用你在 Anthropic Console 创建的 API Key（按用量计费）：在详情页的「登录」里点「使用 API Key」，粘贴 `ANTHROPIC_API_KEY`（以 `sk-ant-api` 开头）。它只保存在这台 Mac 上，用 Emperor 的本地密钥加密（与模型 Key、密码管理器用同一把），保存后立即生效，页面只显示「末 4 位」；「更换 API Key」「移除」在同一处。Claude 账号的登录令牌（以 `sk-ant-oat` 开头）不能填在这里。
 
