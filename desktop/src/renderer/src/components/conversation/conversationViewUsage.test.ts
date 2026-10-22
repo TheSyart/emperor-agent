@@ -81,10 +81,12 @@ describe('ConversationView composer seat integration', () => {
     expect(source).toContain('@start-goal="startGoalWithLifecycle"')
   })
 
-  it('opens the profile interview returned by activating the first usable model', () => {
-    expect(source).toContain('payload.profileOnboarding?.started')
-    expect(source).toContain('ctx.openProfileInterviewSession')
-    expect(source).toContain('payload.profileOnboarding.state.sessionId')
+  it('applies a model switch to the bootstrap state and starts no interview (UI-S17)', () => {
+    expect(source).toContain(
+      'applyModelConfig(ctx.boot.value, await activateModelEntry(entryId))',
+    )
+    expect(source).not.toContain('openProfileInterviewSession')
+    expect(source).not.toContain('profileOnboarding?.started')
   })
 
   it('routes file references to the right workspace', () => {

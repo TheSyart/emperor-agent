@@ -51,7 +51,6 @@
       "components/conversation/takeover/TakeoverSeat.vue": 1,
       "components/conversation/tools/ComputerUseView.vue": 5,
       "components/conversation/TurnScrubber.vue": 1,
-      "components/onboarding/ModelSetupRequiredDialog.vue": 3,
       "components/pages/github/GitHubIssuesPage.vue": 1,
       "components/pages/github/GitHubRunsPage.vue": 1,
       "components/pages/pulls/PullRequestDetail.vue": 3,

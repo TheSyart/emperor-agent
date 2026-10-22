@@ -138,7 +138,7 @@ async function mount(config: ModelConfigPayload) {
   app = createApp(() => h(ModelSection))
   app.provide(APP_CONTEXT_KEY, {
     boot,
-    openProfileInterviewSession: vi.fn(async () => {}),
+    openModelSetup: vi.fn(),
     showToast: vi.fn(),
   } as never)
   app.mount(container)

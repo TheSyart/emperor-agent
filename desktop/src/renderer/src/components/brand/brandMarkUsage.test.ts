@@ -57,7 +57,7 @@ describe('brand mark usage', () => {
       'components/sidebar/SidebarBrandRow.vue',
       'components/sidebar/SidebarRail.vue',
       'components/conversation/EmptyHero.vue',
-      'components/onboarding/ModelSetupRequiredDialog.vue',
+      'components/onboarding/FirstRunOnboarding.vue',
     ]
 
     for (const file of files) {
@@ -69,13 +69,11 @@ describe('brand mark usage', () => {
     }
   })
 
-  it('gives the first-run dialog one illustration per theme', () => {
-    const setupDialog = readRenderer(
-      'components/onboarding/ModelSetupRequiredDialog.vue',
-    )
+  it('gives the first-run guide one illustration per theme', () => {
+    const guide = readRenderer('components/onboarding/FirstRunOnboarding.vue')
 
-    expect(setupDialog).toContain('model-setup-hero-dark.webp')
-    expect(setupDialog).toContain('model-setup-hero-light.webp')
-    expect(setupDialog).toContain('useTheme')
+    expect(guide).toContain('model-setup-hero-dark.webp')
+    expect(guide).toContain('model-setup-hero-light.webp')
+    expect(guide).toContain('useTheme')
   })
 })
