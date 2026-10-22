@@ -20,6 +20,7 @@
     "headless:acp": "npm run build:acp && node dist/bin/emperor-agent-acp.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:serial": "vitest run --config vitest.serial.config.ts",
     "lint": "eslint src --max-warnings=0",
     "pretest": "node ../../scripts/build-delegation-scanner.mjs"
   },

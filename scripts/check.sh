@@ -31,6 +31,9 @@ node scripts/ci/check-unsigned-release.mjs
 echo "== core vitest =="
 npm test --workspace @emperor/core
 
+echo "== core wall-clock budgets (serial) =="
+npm run test:serial --workspace @emperor/core
+
 echo "== core typecheck =="
 npm run typecheck --workspace @emperor/core
 

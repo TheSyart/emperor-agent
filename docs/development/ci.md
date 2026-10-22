@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：贡献者、发布维护者<br>
 > 最后核验：2026-10-23<br>
-> 事实源：`.github/workflows/ci.yml`、`nightly.yml`、`weekly-model-metadata.yml`、`release-preview.yml`、`release.yml`、`scripts/ci/`（含 `check-unsigned-release.mjs`）、`scripts/session-log-kill9.mjs`、`desktop/scripts/run-packaged-smoke.cjs`
+> 事实源：`.github/workflows/ci.yml`、`nightly.yml`、`weekly-model-metadata.yml`、`release-preview.yml`、`release.yml`、`scripts/check.sh`、`packages/core/vitest.config.ts`、`packages/core/vitest.serial.config.ts`、`packages/core/package.json`、`package.json`、`scripts/ci/`（含 `check-unsigned-release.mjs`）、`scripts/session-log-kill9.mjs`、`desktop/scripts/run-packaged-smoke.cjs`
 
 CI 只跑 macOS（项目不支持 Windows 和 Linux）。各项检查都由仓库内脚本执行，本机可以用相同命令重跑；GitHub 只负责按时间或事件把它们排上 runner。
 
@@ -23,6 +23,8 @@ CI 只跑 macOS（项目不支持 Windows 和 Linux）。各项检查都由仓�
 - 每个 `uses:` 都必须写成 40 位提交哈希，版本号写在旁边的注释里，例如 `actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0`。升级一个 action 时，先 `git ls-remote https://github.com/actions/checkout refs/tags/v4.4.0` 查到提交，再同时改哈希和注释。
 - 工作流 lint 检查上表的对应关系：PR gate 在 arm64 和 Intel 上调用 `pr-gate.sh`；nightly 只按计划运行，从不在 pull request 或 push 上运行，并在失败时开 issue；weekly 是每周一次并有开 PR 所需的权限；两个发布 workflow 都先检查 nightly；`release.yml` 在 arm64 和 Intel 上用 `scripts/build_desktop_release.sh` 构建、用 `scripts/verify-macos-release.sh` 核验 Stable 候选；除只检查 tag、汇总、证明和发布的 job（`release-preview.yml` 的 aggregate / publish，`release.yml` 的 release-policy / release-aggregate / publish-release）外，所有 job 都跑在 macOS 上；workflow 里引用的 `scripts/ci/*` 都存在。
 - 未签名检查：发布 workflow（`release*.yml`）除 GitHub token 外不引用任何 secret；所有 workflow、两份 electron-builder 发布配置和发布脚本里都没有签名变量（`CSC_LINK`、`APPLE_TEAM_ID` 等）、公证（`notarytool`、`stapler`）、钥匙串导入（`security import`）或 ad-hoc `-` 以外的 `codesign --sign`；`release.yml` 与 `release-preview.yml` 在整个 workflow 上关闭 `CSC_IDENTITY_AUTO_DISCOVERY`。`scripts/ci/fixtures/signed-release/` 是一份签名发布的反例，测试确认检查会拒绝它。
+
+Core 的 HTML 转换测试含 5 秒的大页面转换与 2 秒的深层嵌套计时上限，因此在并行单测结束后，由 `npm run test:serial --workspace @emperor/core` 用独立的单 worker 执行。`make check` 和根目录 `npm test` 均包含这一步；四个原有测试、断言与时限保持不变。单独重跑这组测试也使用该命令，避免与其他进程密集型测试争用 CPU。
 
 ## PR gate
 
