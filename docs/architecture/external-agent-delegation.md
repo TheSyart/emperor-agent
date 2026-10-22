@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：开发者、维护者<br>
-> 最后核验：2026-10-22（对照 `eb604e6d`）<br>
+> 最后核验：2026-10-22（对照 `681628a0`）<br>
 > 事实源：`packages/core/src/harness/delegation/`（含 `consent.ts`）、`packages/core/src/workspace/delegation-*.ts`（含 `delegation-results.ts`）、`packages/core/src/environment/probe.ts`（检查结论的缓存）、`packages/core/src/api/services/delegation-service.ts`、`packages/core/src/runtime/agent-view.ts`、`packages/core/src/harness/host/host.ts`（`stop`、`close`）、`desktop/src/renderer/src/components/settings/executors/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/sidebar/agentTree.ts`
 
 Emperor 的父 Agent 可以通过原有子智能体工具选择 `internal`、`claude-code` 或 `codex`。未指定 backend 时仍用 internal。两个外部 profile 复用本机 CLI 登录，但默认关闭：它们使用用户自己的订阅额度或 API 计费，需要用户在设置里打开，并在第一次交出任务时于对话中确认（见下文「默认关闭与首次同意」）。设置「子智能体」统一展示本地、Claude Code 与 Codex；外部来源可切换启用状态，通过全局检测读取 CLI 与本地登录可用条件，异常时按需更正可执行文件路径。多份 profile 以来源内选择器切换，不合并或覆盖其他 profile。设置保留既有认证及调度限制；默认模型支持跟随 CLI、候选选择和自定义，修改后只用于之后的任务。已有配置中的开关、路径和有效凭据引用保持不变；旧版空引用按本机登录解析，不自动覆写文件。backend 与内部 provider/model 路由是不同维度。
@@ -32,7 +32,23 @@ flowchart TD
 
 ## 版本兼容
 
-兼容性按能力握手判断，不读配置里的精确版本（旧 `expectedVersion` 与 `executableSource` 读取时忽略并清除）。Claude Code 运行用户本机安装的、未经修改的 `claude`（AGT-12：安装包不再附带 Claude Code；`executable.ts` 依次在 `PATH`、常见安装位置与登录 shell 的 `PATH` 里找，`registry.locate`），检测要求 `>= 2.1.79`（`claude auth status` 自 2.1.41、`claude auth login --console` 自 2.1.79），运行时由 SDK `init` 消息再核对版本与权限模式；找不到时探测为 `missing`（`claude is not installed`），设置页给出官方安装命令。Codex 使用本机 CLI：major.minor 不在已验证协议之列即 `incompatible` 并给出所需范围；同一 minor 时比对 `app-server generate-json-schema` 输出的协议摘要，已知为 `verified`，否则为 `unverified`（可运行、提示可能不兼容、失败结果注明可能的版本原因）。探测结果的 `requiredVersion`、`compatibility`、`protocolVersion` 供设置页与父 Agent 使用；委派记录保存当时的 `executorVersion`，成果回执的版本取自它。维护流程见 [开发与验证外部子智能体](../development/external-agent-adapters.md)。
+兼容性按能力握手判断，不读配置里的精确版本（旧 `expectedVersion` 与 `executableSource` 读取时忽略并清除）。Claude Code 运行用户本机安装的、未经修改的 `claude`（AGT-12：安装包不再附带 Claude Code；`executable.ts` 依次在 `PATH`、常见安装位置与登录 shell 的 `PATH` 里找，`registry.locate`），检测要求 `>= 2.1.79`（`claude auth status` 自 2.1.41、`claude auth login --console` 自 2.1.79），运行时由 SDK `init` 消息再核对版本与权限模式；找不到时探测为 `missing`（`claude is not installed`），设置页给出官方安装命令。Codex 使用本机 CLI：已验证的协议是 0.153.4（AGT-01）与 0.163.0（AGT-13），所需范围写作 `0.153.x / 0.163.x`；major.minor 不在其中即 `incompatible` 并给出所需范围；同一 minor 时比对 `app-server generate-json-schema` 输出的协议摘要（只与同一 minor 的协议比，0.163 的 CLI 不会被当成 0.153），已知为 `verified`，否则为 `unverified`（可运行、提示可能不兼容、失败结果注明可能的版本原因）。探测结果的 `requiredVersion`、`compatibility`、`protocolVersion` 供设置页与父 Agent 使用；委派记录保存当时的 `executorVersion`，成果回执的版本取自它。维护流程见 [开发与验证外部子智能体](../development/external-agent-adapters.md)。
+
+### Codex 0.163 与 0.153 的差异（AGT-13）
+
+对照两版官方包生成的完整 schema（`codex app-server generate-json-schema`，私有 CODEX_HOME，不登录），适配器发送和读取的部分在 0.163 只有增加，没有改名或删除：
+
+- 握手：`initialize` 的参数与回复不变；真实 app-server 回复的 user agent 是 `emperor-agent/0.163.0 (Mac OS …) unknown (emperor-agent; 0.1.0)`，取第一个版本号。`InitializeCapabilities` 多了可选的 `explicitGatewayOauth`。
+- `thread/start`、`thread/resume`、`thread/read`、`thread/turns/list`、`turn/start`、`turn/steer`、`turn/interrupt`：适配器发送的参数在两版都合法，读取的回复字段不变。新增的都是可选项（`turn/start` 的 `parentTurnId`、`rootTurnId`、`disabledPluginIds`，回复里的 `disabledPluginIds`、`Turn.rootTurnId`、`Thread.environments`），适配器不发也不读。`thread/rollback` 被移除，Emperor 不用它。
+- server request 的种类不变，命令、文件、权限审批与提问的回复格式不变（`PermissionsRequestApprovalParams.cwd` 换了类型，适配器不读）。
+- `model/list`：每行仍有 `model`、`displayName`、`isDefault`、`hidden`，FIX-16 读的字段两版一致；新增 `availableAccessPrograms`。
+- 通知只有新增（`thread/readState/changed`、`thread/attachment/updated`、`thread/prediction/updated`、`account/gatewayOAuth/changed`），适配器忽略。
+- `MessagePhase` 新增 `partial_answer`：一轮的回答可以分成几条，中间穿插工具。适配器把这一轮的 `partial_answer` 消息和最后一条消息依次拼成结果（`codexAnswerText`，最长 8192 字，先保最后一条），不含 `commentary`；要求结构化输出的轮次仍只解析最后一条。0.153 没有这个阶段，结果和以前一样。
+- `Turn.error` 的说明从「只在失败时」改为「失败或被中断的轮次」：被中断的轮次可能带原因，适配器照旧报 `interrupted` 并附上 `error`，不当作失败。
+- feature：适配器原有的开关在 0.163 都还在并生效。0.163 默认新打开了 15 个 feature，Emperor 启动的每个 app-server（任务与模型列表都用 `codexAppServerArgs()`，开关同时放进 `thread/start` 的 `config`）关掉其中 10 个：`daemon_auto_start`（共享 daemon 可能比这次运行和 Emperor 活得久）、`worktrees`（工作区和租约归 Emperor）、`realtime_conversation`、`in_app_voice`、`browser_annotation_api`（无界面的委派用不到）、`ultrafast_mode`（速度档位，Emperor 不选档位）、`cli_daybreak`（Daybreak，按线程换用自己模型的模式）、`unified_exec_tty`（伪终端里的命令有自己的会话，会离开 Emperor 停止的进程组）、`write_stdin_approval`（新的审批路径）、`instant_interrupt`（开发中，改变中断结束一轮的方式）。保留 5 个：`api_key_model_discovery`、`api_key_cyber_access_programs`（API Key 账号的模型目录与元数据）、`code_mode_interrupt`（中断能停下正在运行的 code mode 单元，进程仍在组里）、`guardian_reuse_parent_compaction`（审批审核者的上下文；Emperor 从不请求审批，审核者不运行）、`system_proxy_fallback`（Codex 自己连提供方时可回退到 macOS 系统代理，不放宽命令的网络）。0.153.4 不认识其中 8 个键，静默忽略（没有警告、没有错误），所以两版用同一组参数；0.163 遇到不认识的键会发 `configWarning`，而它认识全部开关。关掉之后仍开着的 feature（0.153.4 31 个、0.163.0 33 个）按协议固定在 contract 测试里：由 `protocol/codex-<version>/features.json` 记录的默认值算出，并与真实二进制在同样参数下报告的一致。离线检查里 app-server 只有它自己的进程，关闭后进程组为空，私有目录下没有留下 socket。
+- 未登录时的内置模型目录，默认模型从 `gpt-6-astra` 变为 `gpt-6.1-sol`。
+
+两份协议对同样 21 个文件计算摘要：AGT-13 起加入 `v1/InitializeResponse.json`（握手读的 user agent）与 `v2/ModelListResponse.json`（FIX-16 读的 `isDefault`），0.153.4 的摘要按同一清单重算，原来 19 个文件与官方 0.153.4 重新生成的逐字节一致。适配器的 contract 测试对两份协议逐一校验它发出的每个请求和回复、读取的每个字段；`scripts/codex-protocol-handshake.mjs` 在 Seatbelt 断网、不登录的条件下，用真实的 0.163.0 与 0.153.4 跑通探测与摘要、握手、`thread/start`、一轮里的 steer 与 interrupt、关闭后无残留、恢复与历史、`config/read` 与 `model/list`。需要登录的部分（模型回答、工具、用量、ChatGPT 登录下的模型列表与 `gpt-6.1-sol` 是否可用、刷新令牌时 `auth.json` 的写法）还没有用 0.163 在真机上运行验证。
 
 ## 专长与原生能力事实
 
@@ -58,7 +74,7 @@ Codex 的 `model/list` 带 `includeHidden: true`：隐藏的模型仍能运行�
 
 ### 没有指定模型的 Codex 运行（FIX-16）
 
-起因：Codex 桌面版会把 `~/.codex/config.toml` 的 `model` 改成新的模型（例如 `gpt-6.1-sol`），而 Emperor 验证过的 CLI（0.153.x）用 ChatGPT 登录时服务端不提供这个模型，每一轮立刻以 400 `invalid_request_error`「The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.」结束。升级 CLI 不是办法（`codexProtocolsFor` 要求主次版本一致）。规则（`adapters/codex.ts`、`service.ts`）：
+起因：Codex 桌面版会把 `~/.codex/config.toml` 的 `model` 改成新的模型（例如 `gpt-6.1-sol`），而 Emperor 验证过的 CLI（0.153.x）用 ChatGPT 登录时服务端不提供这个模型，每一轮立刻以 400 `invalid_request_error`「The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.」结束。当时升级 CLI 不是办法（`codexProtocolsFor` 要求主次版本一致）；AGT-13 起 0.163.x 也已验证（上文「Codex 0.163 与 0.153 的差异」），下面的规则对两版相同。规则（`adapters/codex.ts`、`service.ts`）：
 
 - **Emperor 指定了模型**（`spec.model` 或 profile 的 `defaultModel`）：照用，`thread/start` 带上它，不查列表、不切换、不重试，列表里没有也一样。
 - **没有指定、ChatGPT 登录**（`ExecutorOpenInput.codexAuth`）：第一轮 `turn/start` 之前，适配器在这次运行自己的 Codex 进程里取 `thread/start` 回报的模型（Codex 自己的默认）和 `model/list`（含隐藏模型，最多 8 页，8 秒为限）。默认模型不在列表里时，`turn/start` 带 `model: <列表默认或第一个>`（Codex 协议：作用于这一轮及之后），`runtime_metadata` 的 `model` 写实际模型，并带 `modelChoice { configured, used, reason: 'default-unavailable' }`；服务立即写进运行记录 `DelegationRunRecord.modelChoice`。列表是这次进程现取的，属于同一登录和配置，不用缓存键、没有过期问题，也不需要另起一个进程去抢 `<auth.json>.lock`。
@@ -141,7 +157,7 @@ SDK `maxTurns` 默认 200（`DEFAULT_CLAUDE_MAX_TURNS`），`limits.claudeMaxTur
 
 Codex 的 ChatGPT 登录不复制 refresh token（`codex-auth.ts`）。私有 CODEX_HOME 里的 `auth.json` 是指向用户 `auth.json`（`$CODEX_HOME` 或 `~/.codex`）的符号链接，隔离进程刷新令牌时写回用户的同一份文件，用户自己的 Codex 不会拿着已作废的旧令牌被登出：
 
-- Codex 0.153 原地写 `auth.json` 并跟随链接（用假 CODEX_HOME 与 `codex login --with-api-key` 在断网沙箱中验证过）。Seatbelt 为此只放行这一个文件的 `literal` 写入（`SandboxExecutionPolicy.writableFiles`，取真实路径），不放行 `~/.codex` 目录，进程不能在旁边新建、改名或删除文件。
+- Codex 0.153 原地写 `auth.json` 并跟随链接（用假 CODEX_HOME 与 `codex login --with-api-key` 在断网沙箱中验证过）。0.163 的写法没有验证（AGT-13 不登录）；若它改为写临时文件再改名，由下一条处理。Seatbelt 为此只放行这一个文件的 `literal` 写入（`SandboxExecutionPolicy.writableFiles`，取真实路径），不放行 `~/.codex` 目录，进程不能在旁边新建、改名或删除文件。
 - 若将来的 Codex 改为「写临时文件再改名」覆盖链接，宿主每 2 秒和进程结束时检查：隔离副本与用户文件同一账号、refresh token 不同、且用户文件自进程启动以来未变时，在锁内把副本写回用户文件，再恢复链接；用户文件在此期间被用户自己的 Codex 改过时以用户的为准，丢弃副本；用户已登出时不恢复登录。
 - 每个隔离 Codex 进程（任务、恢复检查、模型列表）在整个生命周期持有 `<用户 auth.json>.lock`，同一时刻只有一个隔离进程可能刷新令牌；任务排队等待且可取消，模型列表不等待（锁被占用时保留缓存候选）。持有者进程不存在或锁超过 3 小时即视为失效。用户自己终端里的 Codex 不认这把锁，与同时开两个终端相同。
 - 旧版本留在私有目录里的令牌副本在下一次启动 Codex 进程前于锁内处理：比用户文件更新（`last_refresh` 更晚、同一账号）则写回，否则丢弃，然后改为链接。
@@ -225,4 +241,4 @@ Codex 协议的 120 秒空闲计时只约束两轮之间与启动阶段：轮次
 
 运行证据保存 CLI 版本、适配器／工具策略版本、权限模式及不可逆的认证身份摘要。并发轮次分别绑定账号和模型；不能把一个轮次的工具结果归给另一个模型。搜索完成事件或不明文本不证明页面读取成功：仅结构化成功结果计入证据。桌面交付图像需通过工作区范围校验和原生图片解码，脚本绘图或模型声称成功不作为原生生图依据。
 
-固定 Codex CLI 的 standalone 搜索会将 `web.run.open` 表示为 `action.other` 与含 `turnNviewM`、正整数 `Total lines` 的结构化页面结果；适配器严格匹配该格式，未知 `other` 不回退成成功搜索。原生生图默认落在委派私有 `codex/generated_images`，由 Core 按所属根会话和委派授权图片读取，保持真实路径、大小与解码校验，不开放整个 CLI 配置目录。Claude 初始化的配置别名不会覆盖更可信的响应模型报告；真正响应模型变更仍使旧证据失效。
+Codex CLI 0.153.4 的 standalone 搜索（0.163 尚未用真实搜索复核）会将 `web.run.open` 表示为 `action.other` 与含 `turnNviewM`、正整数 `Total lines` 的结构化页面结果；适配器严格匹配该格式，未知 `other` 不回退成成功搜索。原生生图默认落在委派私有 `codex/generated_images`，由 Core 按所属根会话和委派授权图片读取，保持真实路径、大小与解码校验，不开放整个 CLI 配置目录。Claude 初始化的配置别名不会覆盖更可信的响应模型报告；真正响应模型变更仍使旧证据失效。

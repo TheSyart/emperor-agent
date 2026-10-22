@@ -14,11 +14,8 @@ import type { ExecutorRuntimeService } from './runtime'
 import { claudeModelSettings } from './local-model-config'
 import { findExecutable } from './executable'
 import { executorGrants } from './environment'
-import {
-  CODEX_FILE_CREDENTIALS,
-  acquireCodexAuth,
-  type CodexAuthLease,
-} from './codex-auth'
+import { acquireCodexAuth, type CodexAuthLease } from './codex-auth'
+import { codexAppServerArgs } from './adapters/codex'
 import { codexModelRows, type OfferedModel } from './model-choice'
 /**
  * A model the CLI lists for this login. Codex also says which is its
@@ -62,22 +59,9 @@ export async function readNativeModels(
       }
       handle = processes.spawn({
         executable: profile.executablePath,
-        args: [
-          'app-server',
-          '--listen',
-          'stdio://',
-          '-c',
-          'mcp_servers={}',
-          '-c',
-          'features.hooks=false',
-          '-c',
-          'features.plugins=false',
-          '-c',
-          'features.apps=false',
-          '-c',
-          'features.memories=false',
-          ...CODEX_FILE_CREDENTIALS,
-        ],
+        // The same features as a run (AGT-13): no daemon, worktrees,
+        // plugins or hooks from a process started only to list models.
+        args: codexAppServerArgs(),
         cwd: runtime.runtimeRoot,
         env: runtime.environment,
         policy,
