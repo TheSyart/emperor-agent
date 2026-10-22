@@ -74,6 +74,7 @@ describe('the nightly plan (REL-04 test 3)', () => {
         'playwright.config.ts',
         '--grep-invert',
         '@perf',
+        '--output=test-results-visual',
       ],
       cwd: 'desktop',
     })

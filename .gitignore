@@ -49,6 +49,7 @@ coverage/
 /desktop/build/runtime-defaults-manifest.json*
 /desktop/screenshots/
 /desktop/test-results/
+/desktop/test-results-visual/
 /desktop/.uiplan-progress.json
 
 # Logs / local automation state

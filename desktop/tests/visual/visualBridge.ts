@@ -6025,7 +6025,9 @@ export async function installVisualCoreBridge(
                 chunks: [
                   {
                     seq: 1,
-                    data: `\u001b[32mvisual@emperor\u001b[0m ${projectDir}\r\n$ git status --short\r\n M README.md\r\n`,
+                    // Display a portable mock prompt; host checkout paths
+                    // have different lengths and wrap differently in CI.
+                    data: '\u001b[32mvisual@emperor\u001b[0m ~/visual-build-project\r\n$ git status --short\r\n M README.md\r\n',
                   },
                 ],
                 latestSeq: 1,

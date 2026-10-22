@@ -88,7 +88,12 @@ export function nightlyPlan() {
       title: 'Visual suite (Playwright, renderer with the visual bridge)',
       // A local run beside other checkouts can point at its own config
       // (another renderer port) with EMPEROR_NIGHTLY_PLAYWRIGHT_CONFIG.
-      command: [...playwright, '--grep-invert', '@perf'],
+      command: [
+        ...playwright,
+        '--grep-invert',
+        '@perf',
+        '--output=test-results-visual',
+      ],
       cwd: 'desktop',
       timeoutMs: 60 * MINUTE,
     },

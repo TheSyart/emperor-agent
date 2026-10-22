@@ -48,7 +48,9 @@ scripts/ci/pr-gate.sh --app "desktop/dist/mac-arm64/Emperor Agent.app"
 
 像素基线固定使用 macOS 26，临时 runner 的首选语言为 `zh-Hans`。只有带 `@baseline` 的测试使用固定的 Noto Sans SC 5.3.1 字体夹具（`desktop/tests/visual/fonts/noto-sans-sc`，OFL-1.1，完整许可与逐文件 SHA-256 一并保存）；Playwright 从本机路由提供这些字体，验收不请求外部字库。产品字体配置、未打标的视觉测试与真实 Electron 验收沿用系统字体。原生字体的可选文档字库与保留 UI 字库可能有相同 PostScript 名称、不同文件与版本，不能用机器各自的字库作跨机器像素基准。像素容差保持不变，字体夹具变更须显式更新并复核基线。
 
-PR 与发布的 arm64 / Intel 兼容构建仍在 macOS 15 上运行。失败时 workflow 保存 `nightly-visual-debug`（像素差异、实际字体映射与 Electron 验收截图）。`runtime-context-*` 记录系统版本、SIP、普通／hardened runtime 两个独立控制程序的注入结果；Nightly 同时记录原生字体来源与版本。
+终端模拟输出使用固定的项目路径标签，避免本机与 CI 的 checkout 路径长度改变终端折行；夹具文件和 API 引用仍指向各自的真实工作目录。
+
+PR 与发布的 arm64 / Intel 兼容构建仍在 macOS 15 上运行。失败时 workflow 保存 `nightly-visual-debug`（像素差异、实际字体映射与 Electron 验收截图）。完整视觉套件把失败 Trace 写到独立的 `desktop/test-results-visual/`，后续像素检查不会覆盖它。`runtime-context-*` 记录系统版本、SIP、普通／hardened runtime 两个独立控制程序的注入结果；Nightly 同时记录原生字体来源与版本。
 
 `package:probe` 只有在系统明确关闭 SIP、且独立加固控制程序同样被注入时，才把动态库注入检查报告为 **UNVERIFIED**，退出码为 77；Nightly 对该步骤记录 `skipped` 和原因，不能把它当作验证成功。其余探测发现缺口、控制程序无法执行，或系统报告启用保护却仍能注入时，仍退出 1 并阻断。发布者必须把真实发布候选的两个架构下载到 SIP 开启的 Mac 上重跑 `node desktop/scripts/probe-packaged-hardening.cjs --app "<候选应用>.app"`，保留实际通过回执。Intel 包可在 Intel Mac 或已安装 Rosetta 的 Apple 芯片 Mac 上验证；注入库按目标架构编译，无法启动目标不会被算作通过。
 

@@ -474,6 +474,12 @@ for (const theme of ['dark', 'light'] as const) {
 
   test(`turn scrubber (${theme})`, async ({ page }) => {
     await open(page, '/chat/build-ui', { theme, envCard: 'closed' })
+    // Hover coordinates depend on the lazy composer/avatars completing
+    // their initial layout, not only on the conversation becoming active.
+    await page.waitForLoadState('networkidle')
+    await page.evaluate(async () => {
+      await document.fonts.ready
+    })
     const scrubber = page.locator('.turn-scrubber')
     await expect(scrubber).toBeVisible()
     const ticks = scrubber.locator('.tick')
