@@ -651,8 +651,9 @@ describe('FIX-11 · 登录 Claude Code: Core runs claude auth login itself', () 
 
   it('3 · the fallback is the same sign-in on one line for the user’s own Terminal, safely quoted', async () => {
     const s = setup()
+    const probed = (await s.runtime.probe(claude())).environment
     const environment = {
-      ...(await s.runtime.probe(claude())).environment,
+      ...probed,
       CLAUDE_CONFIG_DIR: "/Users/a b/it's/config",
     }
     const command = claudeSignInCommand({
@@ -666,6 +667,8 @@ describe('FIX-11 · 登录 Claude Code: Core runs claude auth login itself', () 
         `HOME='${s.dirs.home}' ` +
         `XDG_CONFIG_HOME='${join(s.dirs.home, '.config')}' ` +
         `XDG_CACHE_HOME='${join(s.dirs.home, '.cache')}' ` +
+        // FIX-19: with Emperor's security first, as every claude process.
+        `PATH='${probed.PATH}' ` +
         `'${s.executable}' auth login`,
     )
     expect(command).not.toContain('\n')
@@ -789,5 +792,69 @@ describe('a newer Emperor’s key file (REL-03 × AGT-02)', () => {
       /更新版本的 Emperor|data_file_newer/,
     )
     expect(readFileSync(file, 'utf8')).toBe(newer)
+  })
+})
+
+describe('FIX-19 · Claude Code’s keychain calls stay away from macOS under the dedicated HOME', () => {
+  it('every Claude Code process finds Emperor’s security first on PATH', async () => {
+    const s = setup()
+    expect(s.dirs.bin).toBe(join(s.root, 'claude-code', 'bin'))
+    const task = await s.runtime.prepare(claude(), 'dlg-keychain')
+    const probe = await s.runtime.probe(claude())
+    const signIn = claudeSignInEnvironment(probe.environment)
+    for (const environment of [task.environment, probe.environment, signIn]) {
+      expect(environment.PATH!.split(':')[0]).toBe(s.dirs.bin)
+      const found = await run('/bin/sh', ['-c', 'command -v security'], {
+        env: environment,
+      })
+      expect(found.stdout.trim()).toBe(join(s.dirs.bin, 'security'))
+    }
+    expect(statSync(join(s.dirs.bin, 'security')).mode & 0o777).toBe(0o755)
+    expect(statSync(s.dirs.bin).mode & 0o777).toBe(0o700)
+    // A task cannot rewrite it: the folder is not one Seatbelt lets it write.
+    expect(task.stateRoots).not.toContain(s.dirs.bin)
+
+    // The status check runs with that PATH.
+    await checkClaudeSignIn({
+      executable: s.executable,
+      runtime: probe,
+      processes: s.processes,
+    }).catch(() => undefined)
+    const status = fakeClaudeCalls(s.dirs.config).at(-1)!
+    expect(status.env.PATH?.split(':')[0]).toBe(s.dirs.bin)
+
+    // So does the fallback line for the user's own Terminal.
+    expect(
+      claudeSignInCommand({
+        executable: s.executable,
+        environment: probe.environment,
+        console: false,
+      }),
+    ).toContain(`PATH='${probe.environment.PATH}'`)
+  })
+
+  it('stays first when the development environment adds toolchains', async () => {
+    const f = delegationTestDirectory()
+    cleanups.push(f.cleanup)
+    const home = join(f.root, 'user-home')
+    mkdirSync(join(home, '.cargo', 'bin'), { recursive: true })
+    const root = join(f.root, 'delegations')
+    const runtime = new ExecutorRuntimeService({
+      root,
+      home,
+      environment: { PATH: '/usr/bin:/bin' },
+      developmentEnvironment: () => ({
+        gitIdentity: false,
+        proxy: false,
+        sshAgent: false,
+        toolchains: true,
+        github: false,
+      }),
+      loginShell: { read: async () => ({}) },
+    })
+    const prepared = await runtime.prepare(claude(), 'dlg-toolchains')
+    const path = prepared.environment.PATH!.split(':')
+    expect(path[0]).toBe(claudeDirectories(root).bin)
+    expect(path[1]).toBe(join(home, '.cargo', 'bin'))
   })
 })
