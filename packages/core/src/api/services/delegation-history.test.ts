@@ -15,6 +15,11 @@ import {
   fixtureDelegationRun,
 } from '../../harness/delegation/testing'
 import type { DelegationState } from '../../harness/delegation/fold'
+
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 it('pages durable public entries across repeated sequences, bounds bytes and validates cursors', () => {
   const root = mkdtempSync(join(tmpdir(), 'history-'))
   try {
@@ -244,10 +249,12 @@ it('retains accepted same-run steer instructions at durable output positions acr
     const record = await f.service.start(f.owner, spec)
     const runId = record.currentRunId!
     const history = new DelegationHistory(f.root)
-    await vi.waitFor(() =>
-      expect(
-        history.read(f.service.inspect(record.id)).entries.at(-1)?.text,
-      ).toBe('before correction'),
+    await vi.waitFor(
+      () =>
+        expect(
+          history.read(f.service.inspect(record.id)).entries.at(-1)?.text,
+        ).toBe('before correction'),
+      LOADED,
     )
     const first = history.read(f.service.inspect(record.id))
     let atNotification: ReturnType<DelegationHistory['read']> | undefined

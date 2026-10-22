@@ -23,6 +23,10 @@ import { computerUseStateDir } from './install'
 import { FakeComputerUsePort } from './testing/fake-port'
 import { GUI_TOOL_CATALOG, isGuiToolName } from './tools/catalog'
 
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 /** The renderer shows no session (KRN-01 view scope). */
 const VIEW = { sessionId: null }
 
@@ -805,11 +809,13 @@ describe('computer use restorable tabs', () => {
     })
     // The task ended: both tabs are released, their pages kept.
     const firstService = first.api.host.computerUse!.service
-    await vi.waitFor(() =>
-      expect(firstService.listTabs(id).map((tab) => tab.state)).toEqual([
-        'released',
-        'released',
-      ]),
+    await vi.waitFor(
+      () =>
+        expect(firstService.listTabs(id).map((tab) => tab.state)).toEqual([
+          'released',
+          'released',
+        ]),
+      LOADED,
     )
     const oldTargetId = firstService
       .listTabs(id)
@@ -867,7 +873,10 @@ describe('computer use restorable tabs', () => {
       sessionId: id,
     })
     const secondService = second.api.host.computerUse!.service
-    await vi.waitFor(() => expect(secondService.listTabs(id)).toHaveLength(1))
+    await vi.waitFor(
+      () => expect(secondService.listTabs(id)).toHaveLength(1),
+      LOADED,
+    )
     expect(secondService.listTabs(id)[0]!.targetId).not.toBe(oldTargetId)
   })
 })

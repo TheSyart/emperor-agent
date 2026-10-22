@@ -5,6 +5,10 @@ import { afterAll, describe, expect, it, vi } from 'vitest'
 import type { DictationEvent } from '../../shared/ipc-contract'
 import { DictationService } from './dictation-service'
 
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 // A stand-in helper on real pipes: the same JSON lines as the Swift one.
 // The partial result is written in two pieces to exercise line framing.
 const FAKE_HELPER = String.raw`
@@ -89,10 +93,10 @@ describe('dictation helper process', () => {
       const { events, listener } = recorder()
       const result = await service.start({ locale: 'zh-CN' }, listener)
       expect(result.ok).toBe(true)
-      await vi.waitFor(() => expect(events).toHaveLength(2))
+      await vi.waitFor(() => expect(events).toHaveLength(2), LOADED)
       expect(events[1]).toMatchObject({ type: 'partial', text: '你好' })
       service.stop((result as { session: string }).session)
-      await vi.waitFor(() => expect(events).toHaveLength(4))
+      await vi.waitFor(() => expect(events).toHaveLength(4), LOADED)
       expect(events.map((event) => event.type)).toEqual([
         'started',
         'partial',
@@ -113,7 +117,7 @@ describe('dictation helper process', () => {
     try {
       const { events, listener } = recorder()
       expect((await service.start({ locale: 'xx-XX' }, listener)).ok).toBe(true)
-      await vi.waitFor(() => expect(events).toHaveLength(2))
+      await vi.waitFor(() => expect(events).toHaveLength(2), LOADED)
       expect(events).toMatchObject([
         { type: 'error', code: 'helper_exited', seq: 1 },
         { type: 'ended', reason: 'error', seq: 2 },

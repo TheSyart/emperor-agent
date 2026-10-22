@@ -20,6 +20,10 @@ import {
 } from '../harness/testing'
 import { EmperorAcpAdapter } from './adapter'
 
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 const TEMPLATES_DIR = join(__dirname, '..', '..', '..', '..', 'templates')
 
 describe('Emperor ACP real Core E2E', () => {
@@ -191,7 +195,7 @@ describe('Emperor ACP real Core E2E', () => {
       })
       await vi.waitFor(() => {
         expect(api.host.queuedPrompts(created.sessionId)).toHaveLength(1)
-      })
+      }, LOADED)
       await connection.agent.notify(methods.agent.session.cancel, {
         sessionId: created.sessionId,
       })
@@ -249,14 +253,14 @@ describe('Emperor ACP real Core E2E', () => {
       })
       await vi.waitFor(() => {
         expect(scripted.requests).toHaveLength(1)
-      })
+      }, LOADED)
       const prompt = connection.agent.request(methods.agent.session.prompt, {
         sessionId: created.sessionId,
         prompt: [{ type: 'text', text: 'acp prompt' }],
       })
       await vi.waitFor(() => {
         expect(api.host.queuedPrompts(created.sessionId)).toHaveLength(1)
-      })
+      }, LOADED)
       fail()
       await expect(prompt).resolves.toMatchObject({
         stopReason: 'refusal',

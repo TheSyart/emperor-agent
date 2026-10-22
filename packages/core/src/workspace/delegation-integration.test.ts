@@ -9,6 +9,11 @@ import {
 } from '../harness/delegation/acceptance'
 import { DelegationIntegration } from './delegation-integration'
 import { fixtureGit } from './delegation-test-fixture'
+
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 async function fixture(
   beforeInstall?: (index: number, path: string) => void,
   canApply = () => true,
@@ -420,7 +425,7 @@ it('refuses an acceptance that became stale while apply waited for its target le
     preview.revision,
     { source: 'host-plan', taskScopeId: 'task', previewDigest: preview.digest },
   )
-  await vi.waitFor(() => expect(queued).toBe(true))
+  await vi.waitFor(() => expect(queued).toBe(true), LOADED)
   writeFileSync(join(f.lease.cwd, 'src/a.txt'), 'new unverified correction')
   held.release()
   try {

@@ -18,6 +18,10 @@ import {
 } from '../../harness/delegation/results-test-fixture'
 import { workspaceMutationDomain } from '../../workspace/mutation-coordinator'
 
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 const VIEW = { sessionId: null }
 const cleanups: (() => void | Promise<void>)[] = []
 afterEach(async () => {
@@ -124,7 +128,7 @@ it('4 · 5 · a finished run shows its result in the conversation; 查看差异,
     'src/a.txt': 'one\ntwo\nthree\nfour\n',
     'src/new.ts': 'export {}\n',
   })
-  await vi.waitFor(() => expect(f.results().length).toBeGreaterThan(0))
+  await vi.waitFor(() => expect(f.results().length).toBeGreaterThan(0), LOADED)
   expect(f.results().at(-1)).toMatchObject({
     delegation_id: record.id,
     run_id: run.id,
@@ -147,8 +151,13 @@ it('4 · 5 · a finished run shows its result in the conversation; 查看差异,
   expect(readFileSync(join(f.repo, 'src', 'new.ts'), 'utf8')).toBe(
     'export {}\n',
   )
-  await vi.waitFor(() =>
-    expect(f.results().at(-1)).toMatchObject({ state: 'applied', by: 'user' }),
+  await vi.waitFor(
+    () =>
+      expect(f.results().at(-1)).toMatchObject({
+        state: 'applied',
+        by: 'user',
+      }),
+    LOADED,
   )
   // After applying, 查看差异 shows what the apply changed in the project.
   expect(
@@ -166,8 +175,9 @@ it('4 · 5 · a finished run shows its result in the conversation; 查看差异,
   })
   expect(undone.state).toBe('reverted')
   expect(existsSync(join(f.repo, 'src', 'new.ts'))).toBe(false)
-  await vi.waitFor(() =>
-    expect(f.results().at(-1)).toMatchObject({ state: 'reverted' }),
+  await vi.waitFor(
+    () => expect(f.results().at(-1)).toMatchObject({ state: 'reverted' }),
+    LOADED,
   )
 }, 60_000)
 
@@ -225,16 +235,18 @@ it('9 · a main-session write that waits for a child holding the workspace is an
     arguments: { file_path: 'src/a.txt' },
     signal: new AbortController().signal,
   })
-  await vi.waitFor(() =>
-    expect(f.events).toContainEqual(
-      expect.objectContaining({
-        event: 'workspace_wait',
-        session_id: f.root,
-        call_id: 'call-write',
-        delegation_id: record.id,
-        waiting: true,
-      }),
-    ),
+  await vi.waitFor(
+    () =>
+      expect(f.events).toContainEqual(
+        expect.objectContaining({
+          event: 'workspace_wait',
+          session_id: f.root,
+          call_id: 'call-write',
+          delegation_id: record.id,
+          waiting: true,
+        }),
+      ),
+    LOADED,
   )
   held.release()
   ;(await waiting)?.release()

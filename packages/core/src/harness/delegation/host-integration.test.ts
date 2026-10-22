@@ -12,6 +12,10 @@ import {
 import { WorkspaceMutationCoordinator } from '../../workspace/mutation-coordinator'
 import type { DelegationStart } from './types'
 
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 it('scheduler and ordinary children share global quota; stable Goal identity retains required children across revisions', async () => {
   const f = delegationTestDirectory(),
     config = defaultExecutorConfig(),
@@ -107,7 +111,7 @@ it('scheduler and ordinary children share global quota; stable Goal identity ret
         { ...owner, source: 'scheduler' },
         { ...spec, clientRequestId: '3' },
       )
-    await vi.waitFor(() => expect(started).toHaveLength(2))
+    await vi.waitFor(() => expect(started).toHaveLength(2), LOADED)
     expect(service.hasOutstanding('root')).toBe(true)
     expect(
       service
@@ -117,7 +121,7 @@ it('scheduler and ordinary children share global quota; stable Goal identity ret
     ).toEqual([a.id, b.id, c.id].sort())
     expect(service.budget.usage('goal:g').runs).toBe(2)
     releases[1]!()
-    await vi.waitFor(() => expect(started).toHaveLength(3))
+    await vi.waitFor(() => expect(started).toHaveLength(3), LOADED)
     releases.forEach((release) => release())
     await Promise.all(
       [a, b, c].map((record) => service.wait(record.id, record.currentRunId!)),

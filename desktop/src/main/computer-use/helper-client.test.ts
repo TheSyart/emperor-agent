@@ -14,6 +14,10 @@ import {
 } from '../../../../packages/core/src/harness/computer-use/protocol/framing'
 import { HelperClient } from './helper-client'
 
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 const hello = {
   type: 'hello',
   protocol: 1,
@@ -124,7 +128,7 @@ describe('HelperClient', () => {
     })
     try {
       expect((await helper.client.ready).platform).toBe('macos')
-      await vi.waitFor(() => expect(received[0]?.type).toBe('welcome'))
+      await vi.waitFor(() => expect(received[0]?.type).toBe('welcome'), LOADED)
       expect(Object.keys(received[0]!).sort()).toEqual([
         'proof',
         'protocol',
@@ -265,15 +269,20 @@ describe('HelperClient', () => {
         { targetId: 'target' },
         { signal: controller.signal },
       )
-      await vi.waitFor(() => expect(received).toContain('target.release'))
+      await vi.waitFor(
+        () => expect(received).toContain('target.release'),
+        LOADED,
+      )
       controller.abort()
       await expect(request).rejects.toMatchObject({ code: 'OUTCOME_UNKNOWN' })
-      await vi.waitFor(() =>
-        expect(received).toEqual([
-          'target.release',
-          'cancel',
-          'input.releaseAll',
-        ]),
+      await vi.waitFor(
+        () =>
+          expect(received).toEqual([
+            'target.release',
+            'cancel',
+            'input.releaseAll',
+          ]),
+        LOADED,
       )
     } finally {
       await helper.close()
@@ -307,13 +316,18 @@ describe('HelperClient', () => {
           { deadlineMs: 20 },
         ),
       ).rejects.toMatchObject({ code: 'OUTCOME_UNKNOWN' })
-      await vi.waitFor(() => expect(received).toContain('input.releaseAll'))
+      await vi.waitFor(
+        () => expect(received).toContain('input.releaseAll'),
+        LOADED,
+      )
       const pending = helper.client.request('target.release', { targetId: 'b' })
       void pending.catch(() => undefined)
-      await vi.waitFor(() =>
-        expect(
-          received.filter((method) => method === 'target.release'),
-        ).toHaveLength(2),
+      await vi.waitFor(
+        () =>
+          expect(
+            received.filter((method) => method === 'target.release'),
+          ).toHaveLength(2),
+        LOADED,
       )
       helper.socket.destroy()
       await expect(pending).rejects.toMatchObject({ code: 'OUTCOME_UNKNOWN' })
@@ -390,7 +404,7 @@ describe('HelperClient', () => {
         code: 'DRIVER_UNAVAILABLE',
         message: 'Helper heartbeat lost',
       })
-      await vi.waitFor(() => expect(pings).toEqual([1, 2, 3]))
+      await vi.waitFor(() => expect(pings).toEqual([1, 2, 3]), LOADED)
     } finally {
       await helper.close()
     }

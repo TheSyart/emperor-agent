@@ -7,6 +7,11 @@ import {
   criteriaDigest,
   type AcceptanceCriteria,
 } from './acceptance'
+
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 async function fixture() {
   const f = await receiptFixture()
   writeFileSync(join(f.lease.cwd, 'result.txt'), 'verified artifact')
@@ -365,7 +370,10 @@ it('rechecks narrowed permission after waiting for the verification workspace le
     taskScopeId: 'task',
     criteriaDigest: criteriaDigest(criteria),
   })
-  await vi.waitFor(() => expect(acceptance.isActive(f.run.id)).toBe(true))
+  await vi.waitFor(
+    () => expect(acceptance.isActive(f.run.id)).toBe(true),
+    LOADED,
+  )
   permission = 'read-only'
   held.release()
   try {
