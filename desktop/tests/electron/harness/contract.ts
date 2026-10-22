@@ -17,7 +17,9 @@ import type { E2eResult } from './main'
 export async function runContract(
   report: (result: E2eResult) => void,
 ): Promise<void> {
-  const site = await startFixtureSite()
+  // A click can return before a server commits the next document. Keep the
+  // navigation contract independent of a fast local response or a quiet CI host.
+  const site = await startFixtureSite({ responseDelayMs: { '/done': 300 } })
   const driver = new EmbeddedBrowserDriver({
     electron: electronBrowserFactory(),
     images: nativeImageCodec,

@@ -86,6 +86,25 @@ test(
   },
 )
 
+test(
+  'a baseline shows newly mounted entry content at full opacity immediately',
+  { tag: BASELINE_TAG },
+  async ({ page }) => {
+    await openRunningTurn(page)
+    await page.evaluate(() => {
+      const entry = document.createElement('div')
+      entry.className = 'ds-fade-in'
+      entry.dataset.testid = 'baseline-entry'
+      entry.style.animationDuration = '5s'
+      entry.textContent = '新打开的任务详情'
+      document.body.append(entry)
+    })
+    await expect(page.getByTestId('baseline-entry')).toHaveCSS('opacity', '1', {
+      timeout: 200,
+    })
+  },
+)
+
 // UI-S16: with 「显示滚动条」 on Automatic and a mouse attached (or set to
 // Always), Chromium on a Mac lays out classic scrollbars: a box with
 // `scrollbar-gutter: stable` (the sidebar list, a page) keeps a 15px gutter,
@@ -128,6 +147,14 @@ test('an untagged test keeps the real clock', async ({ page }) => {
   expect(
     await page.evaluate(() => document.documentElement.dataset.baselineFonts),
   ).toBeUndefined()
+  const entryMotion = await page.evaluate(() => {
+    const entry = document.createElement('div')
+    entry.className = 'ds-fade-in'
+    entry.textContent = '正常动效'
+    document.body.append(entry)
+    return getComputedStyle(entry).animationName
+  })
+  expect(entryMotion).toBe('ds-fade-in')
 })
 
 test(

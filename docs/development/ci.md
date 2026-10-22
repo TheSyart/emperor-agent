@@ -50,6 +50,8 @@ scripts/ci/pr-gate.sh --app "desktop/dist/mac-arm64/Emperor Agent.app"
 
 终端模拟输出使用固定的项目路径标签，避免本机与 CI 的 checkout 路径长度改变终端折行；夹具文件和 API 引用仍指向各自的真实工作目录。
 
+带 `@baseline` 的页面在应用挂载前关闭 CSS 动画与过渡，新打开的弹窗也直接处于静止状态；不能只依靠截图时结束动画，否则合成器可能保留中间透明度。未打标测试继续检查真实动效。Electron 的浏览器契约夹具为表单提交页保留响应延迟，点击后等待导航条件，再检查代次变化和旧引用失效，不假定点击返回时页面已经提交。
+
 PR 与发布的 arm64 / Intel 兼容构建仍在 macOS 15 上运行。失败时 workflow 保存 `nightly-visual-debug`（像素差异、实际字体映射与 Electron 验收截图）。完整视觉套件把失败 Trace 写到独立的 `desktop/test-results-visual/`，后续像素检查不会覆盖它。`runtime-context-*` 记录系统版本、SIP、普通／hardened runtime 两个独立控制程序的注入结果；Nightly 同时记录原生字体来源与版本。
 
 `package:probe` 只有在系统明确关闭 SIP、且独立加固控制程序同样被注入时，才把动态库注入检查报告为 **UNVERIFIED**，退出码为 77；Nightly 对该步骤记录 `skipped` 和原因，不能把它当作验证成功。其余探测发现缺口、控制程序无法执行，或系统报告启用保护却仍能注入时，仍退出 1 并阻断。发布者必须把真实发布候选的两个架构下载到 SIP 开启的 Mac 上重跑 `node desktop/scripts/probe-packaged-hardening.cjs --app "<候选应用>.app"`，保留实际通过回执。Intel 包可在 Intel Mac 或已安装 Rosetta 的 Apple 芯片 Mac 上验证；注入库按目标架构编译，无法启动目标不会被算作通过。

@@ -91,7 +91,11 @@ async function settle() {
   await nextTick()
   // A real click happens after listeners attach. Vue capture/bubble timestamp
   // guards reject synthetic clicks in the same millisecond as mounting.
-  await new Promise((resolve) => setTimeout(resolve, 1))
+  const attachedBy = Date.now()
+  await vi.waitFor(() => expect(Date.now()).toBeGreaterThan(attachedBy), {
+    interval: 1,
+    timeout: 1_000,
+  })
 }
 async function mount(context?: Record<string, unknown>) {
   root = document.createElement('div')
@@ -600,26 +604,46 @@ it.each([
     ),
   ).toBe(code === 'INTERNAL_ERROR')
 })
-it('can retry a transient read error and restore a valid timeline', async () => {
-  const original = bridge.invokeCore.getMockImplementation()!
-  let failed = true
-  bridge.invokeCore.mockImplementation(
-    (key: string, input: Record<string, unknown>) => {
-      if (key === 'delegations.get' && failed)
-        return Promise.reject(new Error('temporary'))
-      return original(key, input)
-    },
-  )
-  const dom = await mount()
-  expect(dom.textContent).toContain('暂时无法读取')
-  failed = false
-  ;[...dom.querySelectorAll<HTMLButtonElement>('button')]
-    .find((b) => b.textContent?.includes('重试'))!
-    .click()
-  await settle()
-  expect(dom.textContent).toContain('公开结果')
-  expect(dom.textContent).not.toContain('暂时无法读取')
-})
+it.each([false, true])(
+  'can retry a transient read error and restore a valid timeline (clock held: %s)',
+  async (holdClock) => {
+    const original = bridge.invokeCore.getMockImplementation()!
+    let failed = true
+    bridge.invokeCore.mockImplementation(
+      (key: string, input: Record<string, unknown>) => {
+        if (key === 'delegations.get' && failed)
+          return Promise.reject(new Error('temporary'))
+        return original(key, input)
+      },
+    )
+    const clock = holdClock
+      ? vi.spyOn(Date, 'now').mockReturnValue(Date.now())
+      : null
+    const release = clock ? setTimeout(() => clock.mockRestore(), 100) : null
+    try {
+      const dom = await mount()
+      expect(dom.textContent).toContain('暂时无法读取')
+      const reads = bridge.invokeCore.mock.calls.filter(
+        ([key]) => key === 'delegations.get',
+      ).length
+      failed = false
+      ;[...dom.querySelectorAll<HTMLButtonElement>('button')]
+        .find((b) => b.textContent?.includes('重试'))!
+        .click()
+      await settle()
+      expect(
+        bridge.invokeCore.mock.calls.filter(
+          ([key]) => key === 'delegations.get',
+        ).length,
+      ).toBeGreaterThan(reads)
+      expect(dom.textContent).toContain('公开结果')
+      expect(dom.textContent).not.toContain('暂时无法读取')
+    } finally {
+      if (release) clearTimeout(release)
+      clock?.mockRestore()
+    }
+  },
+)
 it.each(['missing', 'foreign', 'conflicting', 'self-cycle', 'cycle'])(
   'keeps actual %s parent evidence without inventing a root path or navigating it',
   async (kind) => {

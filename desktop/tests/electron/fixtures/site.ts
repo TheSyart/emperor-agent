@@ -193,7 +193,9 @@ function listen(server: Server, host: string): Promise<number> {
   )
 }
 
-export async function startFixtureSite(): Promise<FixtureSite> {
+export async function startFixtureSite(
+  options: { responseDelayMs?: Readonly<Record<string, number>> } = {},
+): Promise<FixtureSite> {
   let routes: Record<string, string> = {}
   const submissions: Array<{ path: string; fields: Record<string, string> }> =
     []
@@ -256,7 +258,9 @@ export async function startFixtureSite(): Promise<FixtureSite> {
     }
     response.setHeader('content-type', 'text/html; charset=utf-8')
     response.setHeader('cache-control', 'no-store')
-    response.end(body)
+    const delay = options.responseDelayMs?.[path] ?? 0
+    if (delay > 0) setTimeout(() => response.end(body), delay)
+    else response.end(body)
   })
   const other = createServer(handler.listeners('request')[0] as never)
   const port = await listen(handler, '127.0.0.1')

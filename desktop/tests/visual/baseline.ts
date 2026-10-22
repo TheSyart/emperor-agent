@@ -21,8 +21,9 @@
 //     holds the app's start-up back by ten seconds);
 //   - the zone is Asia/Shanghai and the locale zh-CN;
 //   - Math.random is a seeded generator, restarted on every document;
-//   - CSS animations and transitions are stopped and the caret hidden when
-//     the screenshot is taken (toHaveScreenshot's own options).
+//   - CSS animations and transitions are disabled before the app mounts, so
+//     entry motion never reaches the compositor. Screenshot options still
+//     stop other animations and hide the caret when capturing the page.
 // Untagged tests keep the real clock and the browser defaults.
 //
 // Every test that imports `test` from here (tagged or not) lays out like
@@ -100,8 +101,22 @@ function overlayScrollbars(): void {
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
 }
 
+/** A baseline is the resting UI, including content mounted after page load. */
+function disableBaselineMotion(): void {
+  const sheet = new CSSStyleSheet()
+  sheet.replaceSync(
+    '*, ::before, ::after { animation: none !important; transition: none !important; }',
+  )
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
+}
+
 export const test = base.extend<
-  { baselineStability: void; baselineFonts: void; overlayScrollbars: void },
+  {
+    baselineStability: void
+    baselineFonts: void
+    baselineMotion: void
+    overlayScrollbars: void
+  },
   { warmRenderer: void }
 >({
   // The dev server transforms the renderer on its first request, which can
@@ -155,6 +170,13 @@ export const test = base.extend<
   baselineFonts: [
     async ({ context }, use, info) => {
       if (isBaseline(info)) await installBaselineFonts(context)
+      await use()
+    },
+    { auto: true },
+  ],
+  baselineMotion: [
+    async ({ context }, use, info) => {
+      if (isBaseline(info)) await context.addInitScript(disableBaselineMotion)
       await use()
     },
     { auto: true },

@@ -385,6 +385,19 @@ export const DRIVER_CONTRACT_CASES: readonly ContractCase[] = [
           kind: 'click',
           ref: refOf(before, 'Submit'),
         })
+        // Dispatching a click does not promise that the server has committed
+        // the next document. Wait for the navigation contract, not a fixed
+        // post-click delay, before inspecting its generation and old refs.
+        const navigation = await env.driver.wait(
+          {
+            targetId: target.targetId,
+            generation: beforeGeneration,
+            condition: { kind: 'navigation', urlMatches: env.url('/done') },
+            timeoutMs: 5_000,
+          },
+          signal(),
+        )
+        check(navigation.satisfied, `navigation committed (${navigation.url})`)
         const after = env.driver.snapshot(target.targetId)!
         check(after.generation > beforeGeneration, 'generation bumped')
         check(after.url === env.url('/done'), `landed on /done (${after.url})`)
