@@ -172,8 +172,8 @@ describe('EnvironmentCard (UI-S05: a read-only summary)', () => {
       resolve(__dirname, 'EnvironmentCard.vue'),
       'utf8',
     )
-    expect(source).toContain(
-      'max-height: calc(\n    100% - var(--space-3) -\n      max(var(--space-4), var(--env-card-reserve, 0px))\n  );',
+    expect(source.replace(/\s+/g, ' ')).toContain(
+      'max-height: calc( 100% - var(--space-3) - max(var(--space-4), var(--env-card-reserve, 0px)) );',
     )
     expect(source).not.toContain('ResizeObserver')
     previewLayout.reservedHeight = 208

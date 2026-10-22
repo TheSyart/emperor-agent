@@ -10,16 +10,21 @@
  * centered with the headline (and, once, the profile-interview offer under
  * the composer, UI-S04), under a slim header that keeps the two toggles.
  *
- * The environment card floats at the top right of the view area. From a
- * 1120px conversation column (container query) the chat body and the
- * composer stack pad their inline end by the card width so nothing sits
- * under it; narrower, it shows only once opened from the header and still
- * reserves its space.
+ * One region, one scrollbar (UI-S16): the chat's scroller spans the whole
+ * view area, so its scrollbar is at the far right, and the environment card
+ * floats over it at the top right (340 wide, the region less 32 when
+ * narrower), stopping above the composer stack. The 748 column and the
+ * composer stack stay centred in the region. Where the centred column would
+ * run under the card they move left just clear of it, 16 short of the card
+ * and at least 32 from the left: possible from a 1152px region
+ * (FLOAT_BESIDE_MIN; container query, `--chat-shift`). Narrower they stay
+ * centred and the card floats over the chat with a deeper shadow
+ * (`data-env-overlay`); it shows there only once opened from the header.
  *
  * The computer-use preview (read-only pictures of the windows and tabs the
  * Agent controls) sits at the bottom right of the view area, below the
- * environment card; from 1120px the chat body pads for it as well,
- * narrower it folds into a chip.
+ * environment card, and the column clears it the same way; narrower than
+ * 1152px it folds into a chip.
  *
  * A tool row's Inspect opens the trajectory inspector column and routes to
  * `/chat/:id/trajectory?call=<id>`; the trajectory selects that call (paging
@@ -355,17 +360,21 @@ const envCardShown = computed(
     phase.value !== 'hero',
 )
 /**
- * Column width from which the card sits beside the chat and shows by
- * default (the `@container conversation (min-width: 1120px)` rule below).
+ * Region width from which the column and the composer can move clear of a
+ * floating card: 748 + 340 + 2 × 32 (the `@container conversation
+ * (min-width: 1152px)` rule below; ComputerUsePreviewStack's BESIDE_MIN).
+ * From there the card shows by default; narrower it floats over the chat.
  */
-const ENV_CARD_INLINE_MIN = 1120
+const FLOAT_BESIDE_MIN = 1152
 const rootElement = ref<HTMLElement | null>(null)
 let widthObserver: ResizeObserver | null = null
 function reportWidth(): void {
-  const width = rootElement.value?.clientWidth ?? 0
-  if (width > 0)
-    frameActions.setEnvCardWide(frame, width >= ENV_CARD_INLINE_MIN)
+  // Fractional, like the container query (hairlines make half pixels).
+  const width = rootElement.value?.getBoundingClientRect().width ?? 0
+  if (width > 0) frameActions.setEnvCardWide(frame, width >= FLOAT_BESIDE_MIN)
 }
+/** The card is open where the chat cannot move clear of it. */
+const envCardOverlay = computed(() => envCardShown.value && !frame.envCardWide)
 onMounted(() => {
   reportWidth()
   if (typeof ResizeObserver === 'undefined' || !rootElement.value) return
@@ -1106,6 +1115,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
     :data-phase="phase"
     :data-tab="tab"
     :data-env-card="envCardShown || undefined"
+    :data-env-overlay="envCardOverlay || undefined"
     :data-cu-preview="cuPreviewShown || undefined"
     aria-label="对话"
   >
@@ -1159,7 +1169,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         />
       </div>
 
-      <!-- Environment card seat (Chat tab): positioned by the card itself. -->
+      <!-- Environment card seat (Chat tab): floats at the top right. -->
       <EnvironmentCard
         v-if="envCardShown"
         :key="viewingId"
@@ -1302,7 +1312,8 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   container: conversation / inline-size;
   position: relative;
   --chat-content-width: 748px;
-  --env-card-width: min(340px, 42cqi);
+  /* The floating cards (environment card, computer-use preview). */
+  --env-card-width: min(340px, 100cqi - 2 * var(--space-4));
   --composer-card-max: calc(var(--chat-content-width) + var(--space-8));
   --composer-clearance: var(--space-4);
   --dock-inset: var(--space-2);
@@ -1327,14 +1338,25 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   min-height: 0;
 }
 
-/* Every opened card reserves space, including a narrow manual toggle. */
-.conversation-root[data-env-card] .chat-body-slot,
-.conversation-root[data-env-card] .composer-seat {
-  padding-inline-end: calc(var(--env-card-width) + var(--space-4));
-}
-@container conversation (min-width: 1120px) {
-  .conversation-root[data-cu-preview] .chat-body-slot {
-    padding-inline-end: calc(var(--env-card-width) + var(--space-4));
+/*
+ * UI-S16: no column is reserved for a floating card. `--chat-shift` moves the
+ * column (ChatTimeline's scroller) and the composer stack left of centre just
+ * far enough that the column ends 16 short of the card: half the column, the
+ * card and 16 + 16 of insets, less half the region. Only from 1152px
+ * (FLOAT_BESIDE_MIN), where 32 stay on the left; narrower the card floats
+ * over the centred chat. Both pad their inline end by twice the shift, so
+ * what is centred inside them moves by it without changing width.
+ */
+@container conversation (min-width: 1152px) {
+  .conversation-root[data-env-card] .chat-body-slot,
+  .conversation-root[data-env-card] .composer-seat,
+  .conversation-root[data-cu-preview] .chat-body-slot,
+  .conversation-root[data-cu-preview] .composer-seat {
+    --chat-shift: max(
+      0px,
+      var(--chat-content-width) / 2 + var(--env-card-width) + var(--space-8) -
+        50cqi
+    );
   }
 }
 
@@ -1376,6 +1398,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
   flex-direction: column;
   margin-top: calc(0px - var(--space-8) - var(--space-1));
   padding-top: calc(var(--space-8) + var(--space-1));
+  padding-inline-end: calc(2 * var(--chat-shift, 0px));
   background: linear-gradient(
     180deg,
     rgb(var(--surface-base) / 0) 0,

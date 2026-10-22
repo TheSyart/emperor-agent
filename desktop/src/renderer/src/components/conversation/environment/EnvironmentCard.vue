@@ -3,7 +3,7 @@
  * EnvironmentCard — 环境信息, the chat-tab card floating at the top right of
  * the conversation (async chunk; ConversationView seats it while
  * `frameActions.envCardVisible` on an active chat: beside a wide chat by
- * default until closed by hand, beside a narrow one on demand).
+ * default until closed by hand, over a narrow one on demand).
  *
  * UI-S05: a read-only summary. Every section is 32px rows; a row opens
  * the place where the work happens (审查, the subagent list, a task's
@@ -26,9 +26,12 @@
  *   「查看全部」; no 输出 row — a turn's files are in its files card).
  * The goal is not repeated here (GoalBar shows it).
  *
- * Layout: absolute inside the view area. From a 1120px conversation column
- * the chat and the composer make room for it (ConversationView pads them);
- * narrower, opening the card also reserves chat and composer space.
+ * Layout (UI-S16): absolute at the top right of the view area, over the
+ * chat's scroller. ConversationView moves the chat clear of it from a 1152px
+ * region; narrower it floats over the chat with the deeper dialog shadow
+ * (`data-env-overlay`). Its height stops 16 above the bottom of the view
+ * area, where the composer stack starts, or above the computer-use preview
+ * (`previewLayout.reservedHeight`); the rows scroll inside.
  *
  * Props: sessionId, snapshot (the viewed chat window), build (a Build session
  * bound to a project), agentBusy (a turn runs in it), child (a subagent view),
@@ -52,7 +55,6 @@ import {
   onDeactivated,
   onMounted,
   ref,
-  watch,
 } from 'vue'
 import { openPath } from '../../../api/backend'
 import { useAppContext } from '../../../composables/useAppContext'
@@ -79,9 +81,6 @@ import EnvironmentResources from './EnvironmentResources.vue'
 import EnvironmentRow from './EnvironmentRow.vue'
 import EnvironmentTasks from './EnvironmentTasks.vue'
 
-/** Gap (px) kept under a card that runs down beside the padded composer. */
-const INLINE_BOTTOM_GAP = 16
-
 const props = withDefaults(
   defineProps<{
     sessionId: string
@@ -106,20 +105,11 @@ const emit = defineEmits<{
 
 const ctx = useAppContext()
 
-// ── placement: always beside the chat ────────────────────────
-const root = ref<HTMLElement | null>(null)
-let resizeObserver: ResizeObserver | null = null
 /**
  * ConversationView is kept alive: a cached (deactivated) card must neither
  * answer Escape on another page nor keep polling.
  */
 const activated = ref(true)
-/**
- * Beside the chat the composer stack is padded away from the card, so the
- * card may run down to the column bottom (px; null = the CSS cap above the
- * composer seat before the first measurement).
- */
-const inlineMaxHeight = ref<number | null>(null)
 
 /**
  * Escape closes the open 「⋯」 menu first (focus may still sit on its
@@ -139,45 +129,12 @@ onDeactivated(() => {
   activated.value = false
 })
 
-let measureHost: (() => void) | null = null
-
 onMounted(() => {
   document.addEventListener('keydown', onKeydown)
-  // External viewers own a bounded body above their full-width readonly footer.
-  // Native/root conversations retain their original composer/preview reservation.
-  const childSeat = root.value?.closest<HTMLElement>('.child-view-area')
-  const host =
-    childSeat ?? root.value?.closest<HTMLElement>('.conversation-root')
-  if (!host || typeof ResizeObserver === 'undefined') return
-  const measure = () => {
-    const card = root.value
-    if (!card) {
-      inlineMaxHeight.value = null
-      return
-    }
-    // The computer-use preview below keeps the column bottom for itself.
-    const available =
-      host.getBoundingClientRect().bottom -
-      card.getBoundingClientRect().top -
-      (childSeat
-        ? INLINE_BOTTOM_GAP
-        : Math.max(INLINE_BOTTOM_GAP, previewLayout.reservedHeight))
-    inlineMaxHeight.value = Math.max(0, Math.round(available))
-  }
-  measureHost = measure
-  measure()
-  resizeObserver = new ResizeObserver(measure)
-  resizeObserver.observe(host)
 })
-
-watch(
-  () => previewLayout.reservedHeight,
-  () => measureHost?.(),
-)
 
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown)
-  resizeObserver?.disconnect()
 })
 
 // ── git (Build sessions) ────────────────────────────────────────────────
@@ -273,14 +230,9 @@ async function revealProject(): Promise<void> {
 
 <template>
   <aside
-    ref="root"
     class="environment-card"
     :data-session-id="sessionId"
-    :style="
-      inlineMaxHeight === null
-        ? undefined
-        : { maxHeight: `${inlineMaxHeight}px` }
-    "
+    :style="{ '--env-card-reserve': `${previewLayout.reservedHeight}px` }"
     aria-label="环境信息"
   >
     <header class="card-head">
@@ -405,12 +357,21 @@ async function revealProject(): Promise<void> {
   display: flex;
   flex-direction: column;
   width: min(var(--env-card-width, 340px), 100% - 2 * var(--space-4));
-  max-height: calc(100% - var(--space-3) - var(--space-8) - var(--space-6));
+  /* 16 above the composer stack (the view area's bottom) or above the
+     computer-use preview's reserve. */
+  max-height: calc(
+    100% - var(--space-3) - max(var(--space-4), var(--env-card-reserve, 0px))
+  );
   overflow: hidden;
   border-radius: var(--r-lg);
   background: rgb(var(--env-card-fill));
   box-shadow: var(--env-card-edge);
   color: rgb(var(--text-1));
+}
+
+/* Over the chat (no room beside it): the dialog shadow lifts it clear. */
+.conversation-root[data-env-overlay] .environment-card {
+  box-shadow: var(--elev-3);
 }
 
 .card-head {
