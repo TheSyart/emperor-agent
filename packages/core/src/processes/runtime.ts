@@ -1173,13 +1173,27 @@ function defaultKillProcessTree(pid: number, platform: NodeJS.Platform): void {
     return
   }
   const bootMarker = systemBootMarker()
+  // Walk the tree while it is whole: a descendant that left the process
+  // group is found only through its parent.
   const descendants = collectDescendantPids(pid, platform).map(
     (descendantPid) => ({
       pid: descendantPid,
       identity: stableProcessStartIdentity(descendantPid, bootMarker),
     }),
   )
-  for (const descendant of descendants.reverse()) {
+  // The group goes first, in one signal, then the descendants that left it,
+  // parents before children. A shell must never see its child die while it
+  // still runs: a stopped `sleep 20; echo late > file` would write the file.
+  try {
+    process.kill(-pid, 'SIGKILL')
+  } catch {
+    try {
+      process.kill(pid, 'SIGKILL')
+    } catch {
+      // The child may already have completed.
+    }
+  }
+  for (const descendant of descendants) {
     const current = stableProcessStartIdentity(descendant.pid, bootMarker)
     if (
       !descendant.identity ||
@@ -1195,15 +1209,6 @@ function defaultKillProcessTree(pid: number, platform: NodeJS.Platform): void {
       } catch {
         // It may have exited after identity verification.
       }
-    }
-  }
-  try {
-    process.kill(-pid, 'SIGKILL')
-  } catch {
-    try {
-      process.kill(pid, 'SIGKILL')
-    } catch {
-      // The child may already have completed.
     }
   }
 }
