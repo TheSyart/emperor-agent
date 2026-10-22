@@ -672,32 +672,39 @@ async function settings(page: Page, home: string): Promise<void> {
       await dialog.getByTestId('open-import').click()
       const importer = page.getByRole('dialog', { name: '从浏览器导入' })
       await importer.waitFor()
-      const empty = importer.locator('.import-empty')
+      const empty = importer.getByText('没有可导入的浏览器', { exact: true })
       const toggles = importer.locator('.import-toggle')
-      await until(
-        async () => (await empty.isVisible()) || (await toggles.count()) === 2,
-        10_000,
-        'the import sources',
-      )
-      const detail = {
-        browsers: !(await empty.isVisible()),
-        toggles: (await toggles.allInnerTexts()).map((text) => text.trim()),
-        running: await importer.getByTestId('import-running').isVisible(),
+      try {
+        await until(
+          async () =>
+            (await empty.isVisible()) || (await toggles.count()) === 2,
+          10_000,
+          'the import sources',
+        )
+        const detail = {
+          browsers: !(await empty.isVisible()),
+          toggles: (await toggles.allInnerTexts()).map((text) => text.trim()),
+          running: await importer.getByTestId('import-running').isVisible(),
+        }
+        if (
+          detail.browsers &&
+          JSON.stringify(detail.toggles) !==
+            JSON.stringify(['已保存的密码', 'Cookie（登录状态）'])
+        )
+          throw new Error(`toggles ${JSON.stringify(detail.toggles)}`)
+        // The panel fades in; shoot it once the fade is over.
+        await importer.evaluate((element) =>
+          Promise.all(element.getAnimations().map((motion) => motion.finished)),
+        )
+        await page.screenshot({ path: join(shots, 'import-dialog.png') })
+        return detail
+      } finally {
+        // A failed assertion must not leave a nested modal over the next case.
+        if (await importer.isVisible()) {
+          await importer.getByRole('button', { name: '取消' }).click()
+          await importer.waitFor({ state: 'hidden' })
+        }
       }
-      if (
-        detail.browsers &&
-        JSON.stringify(detail.toggles) !==
-          JSON.stringify(['已保存的密码', 'Cookie（登录状态）'])
-      )
-        throw new Error(`toggles ${JSON.stringify(detail.toggles)}`)
-      // The panel fades in; shoot it once the fade is over.
-      await importer.evaluate((element) =>
-        Promise.all(element.getAnimations().map((motion) => motion.finished)),
-      )
-      await page.screenshot({ path: join(shots, 'import-dialog.png') })
-      await importer.getByRole('button', { name: '取消' }).click()
-      await importer.waitFor({ state: 'hidden' })
-      return detail
     },
   )
 

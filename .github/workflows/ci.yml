@@ -56,6 +56,14 @@ jobs:
           if git rev-parse HEAD~1 >/dev/null 2>&1; then
             git diff --check HEAD~1 HEAD
           fi
+      - name: Record OS runtime enforcement controls
+        run: node scripts/ci/macos-runtime-context.mjs >runtime-context.json
+      - name: Upload runtime context
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: runtime-context-arm64
+          path: runtime-context.json
+          retention-days: 7
       - name: make check, package:verify and the unsealed probes
         run: scripts/ci/pr-gate.sh
       - name: Upload the packaged smoke receipt
@@ -91,6 +99,14 @@ jobs:
         run: |
           npm ci
           npm --prefix desktop ci
+      - name: Record OS runtime enforcement controls
+        run: node scripts/ci/macos-runtime-context.mjs >runtime-context.json
+      - name: Upload runtime context
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: runtime-context-x64
+          path: runtime-context.json
+          retention-days: 7
       - name: Build, package:verify and the unsealed probes
         run: scripts/ci/pr-gate.sh --build-only
       - name: Upload the packaged smoke receipt
