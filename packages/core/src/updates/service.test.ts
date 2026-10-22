@@ -625,9 +625,10 @@ describe('REL-02 download', () => {
     const cancelled = await h.service.cancelDownload()
     release()
     expect(cancelled.download.phase).toBe('idle')
-    await new Promise((r) => setTimeout(r, 50))
+    // Cancellation returns immediately; staging cleanup finishes asynchronously.
+    // Observe completion instead of assuming an overloaded CI worker finishes in 50 ms.
+    await expect.poll(() => readdir(h.temp), { timeout: 5_000 }).toEqual([])
     expect(h.service.status().download.phase).toBe('idle')
-    expect(await readdir(h.temp)).toEqual([])
     expect(await readdir(h.downloads)).toEqual([])
     h.service.close()
   })
