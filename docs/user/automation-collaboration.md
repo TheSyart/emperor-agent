@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用自动化能力的用户<br>
-> 最后核验：2026-10-22（对照 `2b418ddd`）<br>
+> 最后核验：2026-10-22（对照 `eb604e6d`）<br>
 > 事实源：`packages/core/src/scheduler/`、`packages/core/src/harness/host/scheduler.ts`、`packages/core/src/harness/hooks/`、`packages/core/src/api/services/hooks-service.ts`、`packages/core/src/watchlist/`、DesktopPet service、`packages/core/src/harness/delegation/`、`packages/core/src/runtime/agent-view.ts`、`desktop/src/renderer/src/components/pages/scheduler/`、`desktop/src/renderer/src/components/settings/`（高级 › Hooks、记忆、常规 › 外观 › 桌宠、子智能体）、`desktop/src/renderer/src/components/conversation/nodes/DelegationResultCard.vue`
 
 本页介绍定时任务、Hooks、Watchlist、桌宠和子智能体。它们都通过与普通对话相同的内核运行，不获得额外权限。
@@ -112,7 +112,7 @@ Watchlist 由 `memory/watchlist.md` 定义，在「设置 › 记忆」右上角
 - **子任务**：「同时运行」（Claude Code 和 Codex 合计 1–4 个，默认 2 个，超过后排队）、「改代码的位置」（见下面「工作区与成果」）、「单个任务的费用上限」（$1 / $2 / $5 / $10，默认 $10），以及「高级」。
 - **高级**：「运行」组有每次运行最多轮数、单次运行时长上限；「开发环境」组；「排查」组的「验证后再应用」「诊断模式」。各项见下文。
 - **详情页**（Claude Code、Codex 各一页）：状态（找不到程序时有安装命令或「安装说明」，以及「更正路径」）、登录（只有 Claude Code）、默认模型（「刷新模型」重新读取列表；下拉里还有「跟随本机 CLI」和「新增自定义模型…」）、擅长的任务（「编辑专长」或「恢复默认」，主会话据此决定交给谁）和能力与运行情况。
-- **Codex 的模型**：在这里选了模型，交给 Codex 的任务就用它，即使它不在列表里。选「跟随本机 CLI」时用 Codex 自己的默认模型（`~/.codex/config.toml` 里的 `model`，Codex 桌面版也会改它）。Codex 用 ChatGPT 账号登录、而这个默认模型不在这个账号可用的模型里时（例如 Codex 桌面版换上了更新的模型，命令行版本还用不了），「默认模型」下面写一行「你的 Codex 默认模型 … 这个账号用不了，交给 Codex 的任务会改用 …；也可以在上面选一个模型。」，交给 Codex 的任务改用账号列表里的默认模型，任务详情写明「你的 Codex 默认模型 … 这个账号用不了，本次改用 …。」。Emperor 不修改你的 `~/.codex`。读不到账号的模型列表时不会擅自换模型；如果这一轮因为模型不可用被拒绝，Emperor 重新读一次列表，换一个可用的模型在同一个对话里重跑一次，并在任务详情里写明。
+- **Codex 的模型**：在这里选了模型，交给 Codex 的任务就用它，即使它不在列表里。选「跟随本机 CLI」时用 Codex 自己的默认模型（`~/.codex/config.toml` 里的 `model`，Codex 桌面版也会改它）。Codex 用 ChatGPT 账号登录、而这个默认模型不在这个账号可用的模型里时（例如 Codex 桌面版换上了更新的模型，命令行版本还用不了），「默认模型」下面写一行「你的 Codex 默认模型 … 这个账号用不了，交给 Codex 的任务会改用 …；也可以在上面选一个模型。」，交给 Codex 的任务改用账号列表里的默认模型（「能力与运行」的「使用的模型」写「…（代替 …）」），任务详情写明「你的 Codex 默认模型 … 这个账号用不了，本次改用 …。」。Emperor 不修改你的 `~/.codex`。读不到账号的模型列表时不会擅自换模型；如果这一轮因为模型不可用被拒绝，Emperor 重新读一次列表，换一个可用的模型在同一个对话里重跑一次，并在任务详情里写明。
 
 ### 登录
 

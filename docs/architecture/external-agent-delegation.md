@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：开发者、维护者<br>
-> 最后核验：2026-10-22（对照 `2b418ddd`）<br>
+> 最后核验：2026-10-22（对照 `eb604e6d`）<br>
 > 事实源：`packages/core/src/harness/delegation/`（含 `consent.ts`）、`packages/core/src/workspace/delegation-*.ts`（含 `delegation-results.ts`）、`packages/core/src/environment/probe.ts`（检查结论的缓存）、`packages/core/src/api/services/delegation-service.ts`、`packages/core/src/runtime/agent-view.ts`、`packages/core/src/harness/host/host.ts`（`stop`、`close`）、`desktop/src/renderer/src/components/settings/executors/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/sidebar/agentTree.ts`
 
 Emperor 的父 Agent 可以通过原有子智能体工具选择 `internal`、`claude-code` 或 `codex`。未指定 backend 时仍用 internal。两个外部 profile 复用本机 CLI 登录，但默认关闭：它们使用用户自己的订阅额度或 API 计费，需要用户在设置里打开，并在第一次交出任务时于对话中确认（见下文「默认关闭与首次同意」）。设置「子智能体」统一展示本地、Claude Code 与 Codex；外部来源可切换启用状态，通过全局检测读取 CLI 与本地登录可用条件，异常时按需更正可执行文件路径。多份 profile 以来源内选择器切换，不合并或覆盖其他 profile。设置保留既有认证及调度限制；默认模型支持跟随 CLI、候选选择和自定义，修改后只用于之后的任务。已有配置中的开关、路径和有效凭据引用保持不变；旧版空引用按本机登录解析，不自动覆写文件。backend 与内部 provider/model 路由是不同维度。
@@ -64,7 +64,7 @@ Codex 的 `model/list` 带 `includeHidden: true`：隐藏的模型仍能运行�
 - **没有指定、ChatGPT 登录**（`ExecutorOpenInput.codexAuth`）：第一轮 `turn/start` 之前，适配器在这次运行自己的 Codex 进程里取 `thread/start` 回报的模型（Codex 自己的默认）和 `model/list`（含隐藏模型，最多 8 页，8 秒为限）。默认模型不在列表里时，`turn/start` 带 `model: <列表默认或第一个>`（Codex 协议：作用于这一轮及之后），`runtime_metadata` 的 `model` 写实际模型，并带 `modelChoice { configured, used, reason: 'default-unavailable' }`；服务立即写进运行记录 `DelegationRunRecord.modelChoice`。列表是这次进程现取的，属于同一登录和配置，不用缓存键、没有过期问题，也不需要另起一个进程去抢 `<auth.json>.lock`。
 - **没有列表**（`model/list` 出错、超时或为空）：不猜，照 Codex 自己的默认运行。
 - **被拒绝后重试一次**：一轮以 `EXECUTOR_MODEL_UNSUPPORTED` 失败、且没有任何一方选过模型（无 `spec.model`、无 `defaultModel`、没有切换过、还没重试过）时，服务调用 `ExecutorSession.retryOnSupportedModel(turn, refused)`：适配器再取一次 `model/list`，排除被拒的模型，在同一线程里用选中的模型再发一次同样的 `turn/start`；服务把新 turn 用 `provider-bound` 绑到这次运行（会话 ID 不变），清空已累积的文字，继续读事件；`modelChoice.reason = 'retried'`。被拒的那一轮留在运行记录（`runs/<run>.jsonl`）里。取不到可用模型时不重试，失败照常结算。API Key 与其他提供方只走这一条：Codex 的列表不决定它们能用哪些模型。
-- 从不写用户的 `~/.codex`；切换只对这一次运行生效。父 Agent 的结算通知和 `collect_agent` 的结果多一句 `Model: Codex's own default model X is not available to this login; this run used Y.`（重试时写 `was refused … retried on Y`）；任务详情写「你的 Codex 默认模型 X 这个账号用不了，本次改用 Y。」（重试：「…第一次运行被拒绝，已改用 Y 重新运行。」）；「设置 › 子智能体 › Codex」的「默认模型」下，在跟随本机 CLI 时提示一行（`defaultUnavailable`），选了模型就不再显示。
+- 从不写用户的 `~/.codex`；切换只对这一次运行生效。父 Agent 的结算通知和 `collect_agent` 的结果多一句 `Model: Codex's own default model X is not available to this login; this run used Y.`（重试时写 `was refused … retried on Y`）；任务详情写「你的 Codex 默认模型 X 这个账号用不了，本次改用 Y。」（重试：「…第一次运行被拒绝，已改用 Y 重新运行。」）；「设置 › 子智能体 › Codex」的「默认模型」下，在跟随本机 CLI 时提示一行（`defaultUnavailable`），「能力与运行」的「使用的模型」写「<替代模型>（代替 <默认模型>）」，选了模型就不再显示。
 
 ## 身份、生命周期与控制
 

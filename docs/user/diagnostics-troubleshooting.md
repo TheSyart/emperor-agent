@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：遇到启动、模型、会话、工具或打包问题的用户和开发者<br>
-> 最后核验：2026-10-22（对照 `2b418ddd`）<br>
+> 最后核验：2026-10-22（对照 `eb604e6d`）<br>
 > 事实源：`packages/core/src/api/services/diagnostics-service.ts`、`desktop/src/main/logging/`、`desktop/src/main/diagnostics-bundle.ts`、`desktop/src/main/home-backup.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/migrations/`、`desktop/src/main/recovery.ts`、`packages/core/src/session-log/`、`packages/core/src/environment/tool-catalog.json`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/renderer/src/components/settings/DiagnosticsSection.vue` 与 `diagnostics/`、`desktop/src/renderer/src/components/pages/pulls/`、当前构建与运行脚本
 
 先进入「设置 › 高级 › 诊断」。页面顶部是一张概览卡：一句结论（一切正常时是「运行正常」，否则是「n 项需要关注」「n 项异常」加「其余都正常」），下面只列需要关注的项目（异常在前），点一项会展开它所在的分组并滚到那里。读取诊断或探测环境失败时，概览上方出现一张提醒卡写明原因。右上角「导出诊断包」生成一个 zip（见下文[日志与诊断包](#日志与诊断包)），「复制报告」把整页复制成纯文本，便于反馈问题；刷新会重新读取诊断并重新探测环境。
