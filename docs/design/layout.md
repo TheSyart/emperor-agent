@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-22（对照 `1a5cef69`）<br>
-> 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/`（`SidebarRoot.vue`、`SidebarTopRow.vue`、`SidebarBrandRow.vue`、`SidebarNav.vue`、`SessionRow.vue`、`SidebarProjectRow.vue`、`SidebarSectionHeader.vue`、`SidebarSearchResults.vue`、`useContentSearch.ts`、`SidebarFooter.vue`、`SidebarRail.vue`、`sidebarNav.ts`）、`desktop/src/renderer/src/runtime/sidebarModel.ts`、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）、`components/conversation/`（`ConversationView.vue`、`ChatTimeline.vue`、`environment/EnvironmentCard.vue`、`environment/EnvironmentRow.vue`）、`components/composer/ComposerCard.vue`、`components/pages/PageShell.vue`、`components/ui/`（`Modal.vue`、`PaneHeader.vue`）、`components/workspace/WorkspacePanel.vue`、`components/workspace/SourcesView.vue`；测试 `SidebarRoot.integration.test.ts`、`SessionRow.test.ts`、`sidebarDayGroups.test.ts`、`desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/settings-groups.spec.ts`
+> 最后核验：2026-10-22（对照 `94d6a737`）<br>
+> 事实源：`desktop/src/renderer/src/components/shell/`（`AppFrame.vue`、`columns.ts`、`frameState.ts`）、`desktop/src/renderer/src/components/sidebar/`（`SidebarRoot.vue`、`SidebarTopRow.vue`、`SidebarBrandRow.vue`、`SidebarNav.vue`、`SessionRow.vue`、`SidebarProjectRow.vue`、`SidebarSectionHeader.vue`、`SidebarSearchResults.vue`、`useContentSearch.ts`、`SidebarFooter.vue`、`SidebarRail.vue`、`sidebarNav.ts`）、`desktop/src/renderer/src/runtime/sidebarModel.ts`、`desktop/src/renderer/src/theme/components.css`、`desktop/src/renderer/src/components/settings/`（`SettingsModal.vue`、`SettingsNav.vue`、`settingsSections.ts`、`ui/`）、`components/conversation/`（`ConversationView.vue`、`ChatTimeline.vue`、`environment/EnvironmentCard.vue`、`environment/EnvironmentRow.vue`、`computer-use/ComputerUsePreviewStack.vue`）、`components/composer/ComposerCard.vue`、`components/pages/PageShell.vue`、`components/ui/`（`Modal.vue`、`PaneHeader.vue`）、`components/workspace/WorkspacePanel.vue`、`components/workspace/SourcesView.vue`；测试 `SidebarRoot.integration.test.ts`、`SessionRow.test.ts`、`sidebarDayGroups.test.ts`、`desktop/tests/visual/sidebar.spec.ts`、`desktop/tests/visual/settings-groups.spec.ts`、`desktop/tests/visual/environment.spec.ts`
 
 主窗口用系统标题栏，下面是平铺的几栏：侧栏、中栏（对话、轨迹或整页）、右侧工作台。侧栏画在 `--surface-canvas` 上，中栏与工作台在 `--surface-base` 上，栏与栏之间只有一条 0.5px 发丝线（`--border-l1`）。布局与入口位置是 Emperor 自己的；质感参考了 Codex（颜色、字体、间距、圆角、阴影），布局不照搬（2026-10-20 决定）。
 
@@ -63,9 +63,10 @@
 
 ## 环境信息卡
 
-- 宽 `min(340px, 42cqi)`（`--env-card-width`，按对话栏宽度计算），贴在对话栏右上角（距顶 12、距右 16），圆角 `--r-lg`。
-- 对话栏宽度 ≥ 1120 时，卡片默认显示在对话旁边；更窄时默认收起，用会话头的按钮打开。用户在宽栏里关掉、或在窄栏里打开，都记为手动选择（`frameState.ts`）。
-- 卡片打开时，消息区与输入框右侧让出卡片宽度加 16，内容不被遮住；电脑操作预览同样在 ≥ 1120 时放在旁边，更窄时折成一个计数标签。
+- 对话区和卡片是同一个区域（UI-S16）：消息区的滚动容器铺满对话栏，滚动条在最右边（卡片下面）；卡片浮在对话栏右上角（距顶 12、距右 16），不随对话滚动，不占一列。宽 340（`--env-card-width` = `min(340px, 100cqi − 32px)`，对话栏放不下时为栏宽减 32），圆角 `--r-lg`。最大高度到输入框一组（改动药丸、各条 dock、输入框）上方 16 为止，有电脑操作预览时到预览上方 12 为止；内容多时卡片内部滚动，永远不盖输入框。
+- 消息列（748）和输入框在整个对话栏里居中。居中会撞上卡片（列的右边缘离卡片不到 16）时，二者一起左移到刚好让开，左边至少留 32：对话栏 ≥ 1152（748 + 340 + 2 × 32）时可以做到，左移量 = 列宽 / 2 + 卡片宽 + 32 − 栏宽 / 2（小于 0 时不移）。实现是纯 CSS：`@container conversation (min-width: 1152px)` 里算出 `--chat-shift`，滚动容器和输入框座位的右内边距各加两倍左移量，列宽不变，「回到底部」、子智能体状态条、改动药丸、待办、目标、队列和接管卡都跟着走；左侧的轮次刻度不动。
+- 对话栏窄于 1152 时，正文与输入框保持居中，卡片浮在对话上面，阴影换成 `--elev-3`（`.conversation-root[data-env-overlay]`）。右侧工作台打开时按变窄后的对话栏计算。
+- 对话栏 ≥ 1152 时卡片默认显示；更窄时默认收起，用会话头的按钮打开。用户在宽栏里关掉、或在窄栏里打开，都记为手动选择（`frameState.ts`）。电脑操作预览在右下角，同样从 1152 起放在旁边（正文同样让开它），更窄时折成一个计数标签。
 - 每一项是一行 32 的 `EnvironmentRow`，分节之间 12、不画线。一行放不下时（UI-S14）：「子智能体」「后台任务」这类行名保持完整，值截断成省略号、指针停留时显示全部；分支名、计划标题和来源名是数据，截断的是它们，值保持完整。子智能体一行的值在有运行或等待回答的子智能体时不计已完成的。「来源」是一个小节（UI-S13）：12/18 的小标题「来源」和右侧的总数，下面最多 3 行（你提供的 → 已查看 → 搜索命中，名字放不下时截断），超过 3 个时多一行「查看全部 N 个 ›」；没有「输出」一行。
 
 ## 顶栏对齐
@@ -78,7 +79,7 @@
 
 - 收起后侧栏列宽 56，渲染窄轨（`SidebarRail`）：品牌标（悬停换成展开图标）、后退 / 前进、新对话、搜索、通知、页面入口，底部设置与明暗切换；按钮 36、图标 20、提示在右侧。点品牌标或 ⌘B 展开。
 - 视口宽度小于 1024px 时侧栏自动收起为窄轨。
-- 断点主要是容器查询，按所在栏或卡片的宽度变化，不按窗口宽度：设置面板与整页窄于 640 时导航折成顶部一行、边距收紧；轨迹窄于 640 时检查器盖在列表上；PR 详情窄于 560 时标题行堆叠；对话栏窄于 560 时隐藏轮次刻度条；设置行、表单与用量卡片在 520 / 480 / 440 处减列。按窗口宽度的媒体查询只有几处：输入框面板（820）、首启弹窗（760）、提问与计划卡（720）、看图器（600）。Pull Request 页窄于 720 时只显示列表或详情之一。
+- 断点主要是容器查询，按所在栏或卡片的宽度变化，不按窗口宽度：设置面板与整页窄于 640 时导航折成顶部一行、边距收紧；轨迹窄于 640 时检查器盖在列表上；PR 详情窄于 560 时标题行堆叠；对话栏窄于 560 时隐藏轮次刻度条；对话栏从 1152 起消息列给环境信息卡和电脑操作预览让位，更窄时卡片盖在对话上（见[环境信息卡](#环境信息卡)）；设置行、表单与用量卡片在 520 / 480 / 440 处减列。按窗口宽度的媒体查询只有几处：输入框面板（820）、首启弹窗（760）、提问与计划卡（720）、看图器（600）。Pull Request 页窄于 720 时只显示列表或详情之一。
 - 空间不够时，工作台先缩到 360，再自动关闭；只改渲染宽度，不改用户保存的宽度（`columns.ts` 的让位链）。
 - 列宽变化不做过渡动画：拖动时宽度逐帧跟随，收起和展开立即生效。
 

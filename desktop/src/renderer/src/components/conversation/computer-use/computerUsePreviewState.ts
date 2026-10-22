@@ -3,7 +3,7 @@
  * - which targets it currently shows (tool rows offer 「查看画面」 only for
  *   those),
  * - requests to bring one to the front and enlarge it (from a tool row),
- * - the height it takes at the bottom of the right column, so the
+ * - the span it takes above the bottom of the view area, so the
  *   environment card above it stops short.
  */
 import { reactive, shallowRef } from 'vue'
@@ -18,7 +18,7 @@ const focusRequest = shallowRef<PreviewFocusRequest | null>(null)
 const shown = shallowRef<ReadonlySet<string>>(new Set())
 
 export const previewLayout = reactive({
-  /** px taken at the bottom of the right column while beside the chat. */
+  /** px from the preview's top (plus a gap) to the view area's bottom. */
   reservedHeight: 0,
 })
 
