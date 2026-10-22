@@ -222,7 +222,7 @@ function launchServicesLeftovers(needles) {
   const dump = spawnSync(LSREGISTER, ['-dump'], {
     encoding: 'utf8',
     maxBuffer: 512 * 1024 * 1024,
-    timeout: 10_000,
+    timeout: 60_000,
   })
   if (dump.error || dump.status !== 0)
     throw new Error(

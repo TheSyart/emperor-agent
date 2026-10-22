@@ -58,7 +58,10 @@ export async function verifyPackagedHelpers(
     failed.push(`computer-use-handshake (${(error as Error).message})`)
   } finally {
     await deps.release().catch(() => undefined)
-    if (installed) await deps.forget(installed).catch(() => undefined)
+    if (installed)
+      await deps.forget(installed).catch((error: Error) => {
+        failed.push(`computer-use-unregister (${error.message})`)
+      })
   }
   let available = false
   try {

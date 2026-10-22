@@ -24,6 +24,17 @@ function deps(overrides: Partial<PackagedHelpersSmokeDeps> = {}) {
 }
 
 describe('packaged helper handshakes (SEC-04 test 9)', () => {
+  it('reports an unregister failure instead of hiding it behind a later leftover', async () => {
+    const d = deps({
+      forget: vi.fn(async () => {
+        throw new Error('lsregister timed out')
+      }),
+    })
+    await expect(verifyPackagedHelpers(d)).rejects.toThrow(
+      'computer-use-unregister (lsregister timed out)',
+    )
+  })
+
   it('reaches both helpers under the hardened runtime and cleans up', async () => {
     const d = deps()
     await expect(verifyPackagedHelpers(d)).resolves.toEqual({

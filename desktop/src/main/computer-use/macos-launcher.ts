@@ -566,7 +566,9 @@ export async function forgetHelperCopy(
   path: string,
   system: MacosHelperInstallSystem = nodeInstallSystem,
 ): Promise<void> {
-  await system.execFile(LSREGISTER, ['-u', path], { timeout: 5_000 })
+  // A fresh runner may still be seeding lsd's database. Surface a failed
+  // command to the smoke, but allow that system work to finish first.
+  await system.execFile(LSREGISTER, ['-u', path], { timeout: 60_000 })
 }
 
 /**
