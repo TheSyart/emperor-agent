@@ -62,7 +62,6 @@ const { CoreApi } = await import(pathToFileURL(bundle).href),
     root: process.cwd(),
     stateRoot: state,
     initializeMcp: false,
-    enableFirstRunOnboarding: false,
     eventSink: () => {},
   }),
   receipt = {

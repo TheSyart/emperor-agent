@@ -61,7 +61,6 @@ import {
   type ProviderOption,
   type ProviderSpec,
 } from '../../llm/catalog'
-import type { ProfileOnboardingActionResult } from '../../sessions/onboarding'
 import type { SecretSealer } from '../../security/secret-sealer'
 import {
   ModelDiscovery,
@@ -79,8 +78,6 @@ export interface CoreModelServiceDeps {
   /** Test hook: build the one-shot client used by `test()`. */
   createLlm?: (images: ImageResolver) => LlmClient
   refreshModelConfig?: () => void | Promise<void>
-  afterConfigSaved?: () =>
-    ProfileOnboardingActionResult | Promise<ProfileOnboardingActionResult>
   /** Test hook: model lists and connection checks (transport, cache). */
   discovery?: ModelDiscovery
   /** Seals API keys in `model_config.json` (SEC-06); absent: left as written. */
@@ -219,9 +216,11 @@ export interface ModelConfigPayload {
   rejectedEntries: RejectedModelEntryPayload[]
 }
 
-export interface ModelConfigSavePayload extends ModelConfigPayload {
-  profileOnboarding?: ProfileOnboardingActionResult
-}
+/**
+ * What a model write returns: the new config. The first usable model no
+ * longer starts the profile interview (UI-S17); the hero offers it.
+ */
+export type ModelConfigSavePayload = ModelConfigPayload
 
 export type { DiscoveredModel, ProbeResult } from '../../model/discovery'
 
@@ -284,7 +283,6 @@ export class CoreModelService {
   readonly root: string
   private readonly deps: CoreModelServiceDeps
   private readonly discovery: ModelDiscovery
-  private profileOnboardingRequested = false
 
   constructor(root: string, deps: CoreModelServiceDeps) {
     this.root = resolve(root)
@@ -343,8 +341,6 @@ export class CoreModelService {
   async saveEntries(
     input: ModelEntriesSaveInput,
   ): Promise<ModelConfigSavePayload & { savedEntryIds: string[] }> {
-    const before = await loadModelConfig(this.root, this.store)
-    const wasUsable = modelAvailability(before).usable
     input.entries.forEach((draft, index) => {
       if (!draft.reasoningEffort) return
       const profile = resolveModelProfile({
@@ -364,7 +360,7 @@ export class CoreModelService {
       input,
       this.store,
     )
-    return { ...(await this.afterModelMutation(wasUsable)), savedEntryIds }
+    return { ...(await this.afterModelMutation()), savedEntryIds }
   }
 
   /**
@@ -377,16 +373,12 @@ export class CoreModelService {
     apiKey?: string | null
     apiBase?: string | null
   }): Promise<ModelConfigSavePayload & { updated: number }> {
-    const before = await loadModelConfig(this.root, this.store)
     const { updated } = await updateModelConnection(
       this.root,
       input,
       this.store,
     )
-    return {
-      ...(await this.afterModelMutation(modelAvailability(before).usable)),
-      updated,
-    }
+    return { ...(await this.afterModelMutation()), updated }
   }
 
   /** Drop a rejected entry from the file (Settings › 模型 › 删除). */
@@ -463,7 +455,6 @@ export class CoreModelService {
 
   async saveEntry(input: ModelEntrySaveInput): Promise<ModelConfigSavePayload> {
     const before = await loadModelConfig(this.root, this.store)
-    const wasUsable = modelAvailability(before).usable
     const { credentialsFrom, sampling, lockFields, ...fields } = input
     const update: ModelEntryUpdate = normalizeEntrySecret(fields)
     const existing = update.entryId
@@ -503,7 +494,7 @@ export class CoreModelService {
         `模型 ${prospectiveEntry.modelId} 不支持思考强度 ${prospectiveEntry.reasoningEffort}`,
       )
     await saveModelEntry(this.root, update, this.store)
-    return this.afterModelMutation(wasUsable)
+    return this.afterModelMutation()
   }
 
   resolveProfile(input: ModelProfilePreviewInput): ResolvedModelProfile {
@@ -527,15 +518,13 @@ export class CoreModelService {
   }
 
   async deleteEntry(entryId: string): Promise<ModelConfigSavePayload> {
-    const before = await loadModelConfig(this.root, this.store)
     await deleteModelEntry(this.root, requiredId(entryId), this.store)
-    return this.afterModelMutation(modelAvailability(before).usable)
+    return this.afterModelMutation()
   }
 
   async activate(entryId: string): Promise<ModelConfigSavePayload> {
-    const before = await loadModelConfig(this.root, this.store)
     await activateModelEntry(this.root, requiredId(entryId), this.store)
-    return this.afterModelMutation(modelAvailability(before).usable)
+    return this.afterModelMutation()
   }
 
   async setReasoningEffort(
@@ -862,8 +851,6 @@ export class CoreModelService {
   async replaceEntry(
     input: ModelEntryReplaceInput,
   ): Promise<ModelConfigSavePayload & { replacedEntryId: string }> {
-    const before = await loadModelConfig(this.root, this.store)
-    const wasUsable = modelAvailability(before).usable
     const replacedEntryId = await withModelConfigLock(this.root, async () => {
       const config = await loadModelConfig(this.root, this.store)
       const old = config.raw.models.find(
@@ -901,26 +888,12 @@ export class CoreModelService {
       )
       return next.entryId
     })
-    return { ...(await this.afterModelMutation(wasUsable)), replacedEntryId }
+    return { ...(await this.afterModelMutation()), replacedEntryId }
   }
 
-  private async afterModelMutation(
-    wasUsable: boolean,
-  ): Promise<ModelConfigSavePayload> {
+  private async afterModelMutation(): Promise<ModelConfigSavePayload> {
     await this.deps.refreshModelConfig?.()
-    const payload = await this.getConfig()
-    if (
-      !wasUsable &&
-      payload.availability.usable &&
-      !this.profileOnboardingRequested
-    ) {
-      const profileOnboarding = await this.deps.afterConfigSaved?.()
-      if (profileOnboarding) {
-        this.profileOnboardingRequested = true
-        return { ...payload, profileOnboarding }
-      }
-    }
-    return payload
+    return this.getConfig()
   }
 }
 

@@ -1915,6 +1915,48 @@ describe('CoreApi sessions and kept services', () => {
     })
   })
 
+  it('leaves the profile interview to the user when the first model is saved (UI-S17)', async () => {
+    const { api, events } = await setup()
+    const saved = await api.model.saveEntry(
+      validModelEntry('first') as never,
+      VIEW,
+    )
+    expect(saved.availability.usable).toBe(true)
+    expect(saved).not.toHaveProperty('profileOnboarding')
+    expect(api.onboarding.getProfileStatus()).toMatchObject({
+      status: 'pending',
+      attemptCount: 0,
+    })
+    expect(
+      events.some((e) => e.event === 'profile_onboarding_status_changed'),
+    ).toBe(false)
+  })
+
+  it('reports the profile 称呼 and pushes it whenever the profile changes (UI-S17)', async () => {
+    const { api, events } = await setup()
+    const latest = () =>
+      events
+        .filter((e) => e.event === 'profile_onboarding_status_changed')
+        .at(-1)?.profile_onboarding
+    expect(api.onboarding.getProfileStatus().addressName).toBeNull()
+
+    // 设置 › 记忆 › 用户档案
+    const seeded = api.config.get().content
+    expect(seeded).toContain('- **称呼**：未设置')
+    await api.config.save(seeded.replace('未设置', '小周'), VIEW)
+    expect(api.onboarding.getProfileStatus()).toMatchObject({
+      status: 'completed',
+      addressName: '小周',
+    })
+    expect(latest()).toMatchObject({ addressName: '小周' })
+
+    // The agent's memory_edit (target user) writes through the shared store.
+    const memory = api.host.kept.sharedMemory
+    memory.writeUser(memory.readUser().replace('小周', '阿周'))
+    expect(api.onboarding.getProfileStatus().addressName).toBe('阿周')
+    expect(latest()).toMatchObject({ status: 'completed', addressName: '阿周' })
+  })
+
   it('rejects project workspace APIs for non-Build sessions', async () => {
     const { api } = await setup()
     const id = session(api)
