@@ -2010,13 +2010,17 @@ function writeSkill(dir: string, name: string, description: string): void {
   )
 }
 
-/** + › 插入 Skill 或插件: the text of each Skill and plugin it offers. */
-async function insertableSkills(page: Page): Promise<string[]> {
+/**
+ * + › 插入 Skill 或插件: the text of each Skill and plugin it offers (a
+ * screenshot of the open list goes to `shot`).
+ */
+async function insertableSkills(page: Page, shot: string): Promise<string[]> {
   await page.getByRole('button', { name: '添加附件与能力' }).click()
   await page.getByRole('menuitem', { name: '插入 Skill 或插件' }).click()
   const picker = page.locator('.capability-picker')
   await picker.waitFor({ timeout: 10_000 })
   const items = await picker.locator('.capability-picker-item').allInnerTexts()
+  await page.screenshot({ path: join(shots, shot) })
   // Focusing the input closes the list.
   await page.getByLabel('消息输入框').first().click()
   await picker.waitFor({ state: 'hidden' })
@@ -2058,11 +2062,13 @@ async function startPageWithoutSessions(model: FakeModel): Promise<void> {
         let skills: string[] = []
         await until(
           async () =>
-            offers((skills = await insertableSkills(page)), PERSONAL_SKILL),
+            offers(
+              (skills = await insertableSkills(page, 'fix14-start-skills.png')),
+              PERSONAL_SKILL,
+            ),
           15_000,
           'the personal Skill in + › 插入 Skill 或插件',
         )
-        await page.screenshot({ path: join(shots, 'fix14-start-skills.png') })
         return { skills }
       },
     )
@@ -2119,15 +2125,18 @@ async function startPageWithoutSessions(model: FakeModel): Promise<void> {
         let skills: string[] = []
         await until(
           async () =>
-            offers((skills = await insertableSkills(page)), PROJECT_SKILL),
+            offers(
+              (skills = await insertableSkills(
+                page,
+                'fix14-build-draft-skills.png',
+              )),
+              PROJECT_SKILL,
+            ),
           15_000,
           'the project Skill in + › 插入 Skill 或插件',
         )
         if (!offers(skills, PERSONAL_SKILL))
           throw new Error(`no personal Skill: ${skills.join(' / ')}`)
-        await page.screenshot({
-          path: join(shots, 'fix14-build-draft-skills.png'),
-        })
         return { skills }
       },
     )
