@@ -280,7 +280,13 @@ for (const theme of ['dark', 'light'] as const) {
     // UI-S05: each section is one summary row.
     const agents = envCard.locator('[data-row="agents"]')
     await expect(agents).toContainText('子智能体')
-    await expect(agents).toContainText('1 运行 · 3 完成 · 1 失败')
+    // 完成 is left out while one runs (UI-S14).
+    await expect(agents).toContainText('1 运行 · 1 失败')
+    await expect(agents).not.toContainText('完成')
+    // A plan's title is data: it shrinks, the value stays whole.
+    await expect(
+      envCard.locator('[data-row="plan"] .label[data-shrink]'),
+    ).toHaveCount(1)
     await expect(agents).toHaveAttribute('aria-expanded', 'false')
     await expect(agents.locator('[data-agent-face]')).toHaveCount(3)
     await expect(envCard.locator('.agent-row')).toHaveCount(0)
@@ -376,6 +382,10 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(pill).toContainText('3 个文件已更改')
     await expect(pill).toContainText('+18')
     await expect(pill).toContainText('−4')
+    // This fixture has a running subagent with no loaded row: the status
+    // bar joins the docks after its 300ms delay (UI-S14) and moves the pill
+    // up. Hover once the docks have settled.
+    await expect(page.locator('[data-subagent-dock]')).toBeVisible()
     const pillBox = (await pill.boundingBox())!
     const todoBox = (await page.locator('.todo-dock').boundingBox())!
     expect(pillBox.y + pillBox.height).toBeLessThanOrEqual(todoBox.y)

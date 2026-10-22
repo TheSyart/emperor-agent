@@ -124,6 +124,9 @@ export interface ToolSubagentView {
   readonly stopReason?: SubagentStopReason
   /** Final text the child returned. */
   readonly text?: string
+  /** `subagent/started` / `subagent/settled` times (the row's 用时). */
+  readonly startedAt?: number
+  readonly settledAt?: number
 }
 
 /** One approval request raised by a tool call (sandbox escalation...). */
@@ -204,6 +207,11 @@ export interface ToolExternalAgentView {
     detail?: string
   }[]
   readonly truncated?: boolean
+  /** The run's start and end (`task.started_at` / `finished_at`). */
+  readonly startedAt?: number
+  readonly finishedAt?: number
+  /** The run's summary: its closing text, or why it failed. */
+  readonly detail?: string
 }
 export interface ToolChatData {
   readonly callId: string

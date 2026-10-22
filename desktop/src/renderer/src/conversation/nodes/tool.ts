@@ -142,6 +142,15 @@ function applyMatch(state: ToolState, match: ConversationMatch): ToolState {
         }
       }
     }
+    const time = (value: unknown, fallback: number | undefined) =>
+      typeof value === 'number' && Number.isFinite(value) ? value : fallback
+    const startedAt = time(p.task?.started_at, previous?.startedAt)
+    const finishedAt = time(p.task?.finished_at, previous?.finishedAt)
+    const summary = p.task?.detail
+    const detail =
+      typeof summary === 'string' && summary.trim() !== ''
+        ? summary.slice(0, 2000)
+        : previous?.detail
     return {
       ...state,
       externalAgent: {
@@ -155,6 +164,9 @@ function applyMatch(state: ToolState, match: ConversationMatch): ToolState {
         ...(previous?.truncated || text.length > 16000 || activity.length > 12
           ? { truncated: true }
           : {}),
+        ...(startedAt === undefined ? {} : { startedAt }),
+        ...(finishedAt === undefined ? {} : { finishedAt }),
+        ...(detail === undefined ? {} : { detail }),
       },
     }
   }
@@ -217,6 +229,7 @@ function applyMatch(state: ToolState, match: ConversationMatch): ToolState {
         mode: data.mode,
         background: data.background,
         status: 'running',
+        startedAt: event.time,
       },
     }
   }
@@ -230,6 +243,7 @@ function applyMatch(state: ToolState, match: ConversationMatch): ToolState {
         status: 'settled',
         stopReason: event.data.stopReason,
         ...(event.data.text === undefined ? {} : { text: event.data.text }),
+        settledAt: event.time,
       },
     }
   }

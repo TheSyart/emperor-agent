@@ -27,12 +27,29 @@ describe('agentSummary (UI-S05 子智能体 row)', () => {
     expect(
       agentSummary([
         agent('a', 'completed'),
-        agent('b', 'running'),
-        agent('c', 'failed'),
+        agent('b', 'failed'),
+        agent('c', 'interrupted'),
         agent('d', 'completed'),
         agent('e', 'completed'),
       ]),
-    ).toBe('1 运行 · 3 完成 · 1 失败')
+    ).toBe('3 完成 · 1 失败 · 1 中断')
+  })
+
+  it('leaves 完成 out while any subagent runs or waits (UI-S14)', () => {
+    const done = [agent('a', 'completed'), agent('b', 'completed')]
+    expect(
+      agentSummary([
+        ...done,
+        agent('c', 'running'),
+        agent('d', 'failed'),
+        agent('e', 'unknown'),
+      ]),
+    ).toBe('1 运行 · 1 失败 · 1 待确认')
+    expect(agentSummary([...done, agent('c', 'waiting')])).toBe('1 等待')
+    // Once none is active the finished ones count again.
+    expect(agentSummary([...done, agent('d', 'failed')])).toBe(
+      '2 完成 · 1 失败',
+    )
   })
 
   it('names every phase briefly', () => {

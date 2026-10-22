@@ -67,7 +67,9 @@ it('summarises the agents on one row and lists them only when asked', async () =
   await nextTick()
   const row = el.querySelector<HTMLButtonElement>('[data-row="agents"]')!
   expect(row.textContent).toContain('子智能体')
-  expect(row.textContent).toContain('1 运行 · 2 完成 · 1 失败')
+  // 完成 is left out while one runs (UI-S14).
+  expect(row.textContent).toContain('1 运行 · 1 失败')
+  expect(row.textContent).not.toContain('完成')
   expect(row.getAttribute('aria-expanded')).toBe('false')
   expect(row.querySelectorAll('[data-agent-face]')).toHaveLength(3)
   expect(el.querySelectorAll('[data-agent-id]')).toHaveLength(0)

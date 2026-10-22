@@ -347,6 +347,7 @@ async function revealProject(): Promise<void> {
           v-if="plan"
           data-row="plan"
           :label="plan.title"
+          shrink-label
           :title="plan.title"
           :value="planValue(plan)"
           :status="plan.status === 'executing' ? 'running' : undefined"

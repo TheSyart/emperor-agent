@@ -199,15 +199,16 @@ describe('process groups (UI-S03)', () => {
     await settle()
     const [group] = groups(root)
     expect(groups(root)).toHaveLength(1)
-    expect(text(header(group!))).toMatch(/^已处理 11 步 · 用时 /u)
+    // The subagent is a row of its own after the group (UI-S14).
+    expect(text(header(group!))).toMatch(/^已处理 10 步 · 用时 /u)
     expect(header(group!).getAttribute('aria-expanded')).toBe('false')
     header(group!).click()
     await settle()
     expect(header(group!).getAttribute('aria-expanded')).toBe('true')
     expect(
       group!.querySelectorAll('[data-process-body] [data-process-step]'),
-    ).toHaveLength(11)
-    expect(group!.querySelectorAll('.tool-row')).toHaveLength(10)
+    ).toHaveLength(10)
+    expect(group!.querySelectorAll('.tool-row')).toHaveLength(9)
     header(group!).click()
     await settle()
     expect(group!.querySelector('[data-process-body]')).toBeNull()

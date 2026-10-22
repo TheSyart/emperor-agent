@@ -3,7 +3,7 @@
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
 > 最后核验：2026-10-22（对照 `1a5cef69`）<br>
-> 事实源：`desktop/src/renderer/src/components/conversation/`（`processModel.ts`、`ChatTimeline.vue`、`nodes/ProcessGroup.vue`、`nodes/ToolCallRow.vue`、`nodes/UserBubble.vue`、`parts/ConversationMarkdown.vue`、`parts/MarkdownHtml.vue`、`nodes/TurnTail.vue`）、`conversation/nodes/turnFiles.ts`、`nodes/TurnFilesCard.vue`、`packages/core/src/harness/host/turn-opener.ts`、`composables/markdownBlocks.ts`、`composables/useStreamingText.ts`、`components/ui/DisclosureRow.vue`、`components/ui/IoBlock.vue`、`components/motion/CollapseTransition.vue`、`conversation/events.ts`；`components/conversation/trajectoryGate.ts`；测试 `processModel.test.ts`、`processGroup.test.ts`、`TurnFilesCard.test.ts`、`CollapseTransition.test.ts`、`trajectoryGate.test.ts`、`markdownBlocks.test.ts`、`desktop/tests/visual/process.spec.ts`、`desktop/tests/visual/streaming.spec.ts`、`desktop/tests/visual/trajectory-gate.spec.ts`、`desktop/tests/visual/chat-gallery.spec.ts`
+> 事实源：`desktop/src/renderer/src/components/conversation/`（`processModel.ts`、`ChatTimeline.vue`、`nodes/ProcessGroup.vue`、`nodes/ToolCallRow.vue`、`nodes/UserBubble.vue`、`parts/ConversationMarkdown.vue`、`parts/MarkdownHtml.vue`、`nodes/TurnTail.vue`、`nodes/SubagentGroup.vue`、`nodes/SubagentRow.vue`、`nodes/ToolCallTree.vue`、`subagentRows.ts`、`useSubagentDock.ts`）、`components/composer/SubagentDock.vue`、`conversation/nodes/turnFiles.ts`、`nodes/TurnFilesCard.vue`、`packages/core/src/harness/host/turn-opener.ts`、`composables/markdownBlocks.ts`、`composables/useStreamingText.ts`、`components/ui/DisclosureRow.vue`、`components/ui/IoBlock.vue`、`components/motion/CollapseTransition.vue`、`conversation/events.ts`；`components/conversation/trajectoryGate.ts`；测试 `processModel.test.ts`、`processGroup.test.ts`、`subagentRows.test.ts`、`ChatTimeline.test.ts`、`composer/SubagentDock.test.ts`、`TurnFilesCard.test.ts`、`CollapseTransition.test.ts`、`trajectoryGate.test.ts`、`markdownBlocks.test.ts`、`desktop/tests/visual/process.spec.ts`、`desktop/tests/visual/streaming.spec.ts`、`desktop/tests/visual/trajectory-gate.spec.ts`、`desktop/tests/visual/subagents.spec.ts`、`desktop/tests/visual/chat-gallery.spec.ts`
 
 对话面板里从上到下是一条会话流：你的消息、Agent 处理这一轮的过程、回答、轮末操作；一个任务结束时，它最后一轮的轮末之前多一张改动卡。默认只显示结论，过程收成一行，细节按需展开。
 
@@ -11,7 +11,7 @@
 
 一轮里从提示之后到最终回答之前的步骤组成一个「过程组」，在虚拟列表里是一行：
 
-- **成员**：思考、工具调用（含交给子智能体、工作流）、重试、切换备用模型、上下文压缩；打开「设置 › 常规 › 开发者 › 显示系统步骤」后还有上下文注入（ContextRow）与 Hook（HookRow）。没打开时这两种行在任何地方都不显示。
+- **成员**：思考、工具调用（含工作流）、重试、切换备用模型、上下文压缩；交给子智能体的调用不在组里，见[子智能体](#子智能体)；打开「设置 › 常规 › 开发者 › 显示系统步骤」后还有上下文注入（ContextRow）与 Hook（HookRow）。没打开时这两种行在任何地方都不显示。
 - **边界**：用户消息（包括运行中插入的消息）、目标变更、错误与输出上限等提示、改动卡和轮末都不进过程组；它们把一轮的过程切成前后两组。
 - **回答**：最后一次工具调用之后、带正文（文字、图片）的模型步骤是回答，排在过程组之后。回答的思考块留在过程组里，正文在组外。
 - **没有工具调用的一轮**不建过程组，思考仍是单独一行可折叠的「思考」。例外是运行中：还没有回答的思考也显示为运行中的过程行。
@@ -43,6 +43,25 @@
 - 展开后的内容与思考的正文一样左缩进 22px；工具的输入输出块用 `IoBlock`（`--surface-raised`、`--r-md`、无边框，IN / OUT 两段，过长时「展开全部」）。
 - **三个阶段**（准备中 → 运行中 → 结果）：模型还在写工具参数时，这一行已经出现，显示已经解析出的参数（文件名、命令、关键词）和「准备中」，不能展开；参数写完、调用开始后换成运行中的工具行。草稿只保留前 4096 个字符（`TOOL_DRAFT_LIMIT`），模型消息落地后丢弃。
 - 参数在传输中被截断时，展开后提示「参数过长，已截断显示」；只有打开了「设置 › 常规 › 开发者 › 显示轨迹」，才接着写「在轨迹中查看完整内容」。
+
+## 子智能体
+
+每个子智能体（本地、Claude Code、Codex）在对话里只占一行（UI-S14，设计稿第 1 项）。
+
+- **离开过程组**：开始一个子智能体的调用（`subagent`、`subagent_fork`）不进过程组，单独成为虚拟列表里的一行 `agents:<第一个调用的 key>`；同一步里相邻的几个合成这一行（2 个及以上是一组）。它把过程组切成前后两段。那一步如果只派出子智能体、没调用别的工具，它的叙述文字作为正文显示在这一行上面（思考仍留在过程组里）；混着别的工具时文字留在过程组里。过程组的步数不含它们。
+- **一行**：28px 左右，内边距 4/8、`--radius-row` 圆角，悬停 `--surface-hover`。从左到右：头像（本地 sprite，单独一行 24、组内 20；Claude Code / Codex 用 `Avatar kind=logo` 的标志 20 / 16）、名字（单独一行 14/22、组内 13/20，500）、来源（12，`--text-3`）、状态与用时（12，等宽数字）、悬停出现的 ↗（`--text-4`）。状态：运行中的类（启动中、等待调度、正在准备、运行中、正在停止；在后台运行的也写「运行中」）带中性小转圈，写「运行中 · 49 秒」；结束的写「已完成 · 用时 1 分 12 秒」；失败类（失败、输出超限、已拒绝、达到费用上限）`--error`；「等待回答」「结果待确认」`--attention`，不写时间；已取消、已中止、已中断 `--text-4`。用时按 `formatRunDuration`。
+- **点击**：名字是链接（`[data-agent-entry]`），用伪元素铺满整行，所以点整行都打开：本地 `/chat/<子会话>`（ChatTimeline 的 `open-subagent`），Claude Code / Codex 是它的任务页；按住修饰键交给浏览器。Claude Code / Codex 的「任务详情」在名字后面，悬停或键盘焦点进入这一行时出现，叠在链接之上。审批、电脑操作授权和等待工作区仍是这一行下面缩进的子行。子智能体的实时输出不在主会话里显示。
+- **摘要**：单独一行的子智能体结束后加一行 12/18 `--text-3` 单行省略的灰字：完成的是报告开头（本地取结束时的最后回复，Claude Code / Codex 取运行摘要），失败的是原因（Claude Code / Codex 的运行摘要，本地前台运行的诊断信息）；没有记录的不写。组内的行（和状态条）不加这一行，摘要作为悬停提示。
+- **状态的来源**：环境信息卡读的 Agent 列表（`agents.list`）有这个子智能体时以它的阶段为准（工具调用里更细的说法在两边一致时保留，例如「等待调度」「输出超限」），列表还没有它时用会话记录里的调用；所以对话、状态条和信息卡的数量一致。用时取会话记录里的开始与结束（`subagent/started` / `subagent/settled`，外部运行的 `started_at` / `finished_at`），与状态不符时取列表的时间。
+- **一组**：组头 14/22 一行，左边最多三个叠放的头像（运行中的在前），「派出 N 个子智能体」（全部结束后「N 个子智能体」，500，`--text-1`），各状态数量（13，`--text-3`，顺序 运行中 / 等待回答 / 完成 / 失败 / 中断 / 结果待确认，结束后加「用时」，从最早开始到最晚结束），右侧箭头。组内各行缩进在一条 0.5px 竖线右边。有运行中的时候展开，全部结束后自动收起；展开状态记在会话视图的展开记录里，读者点过组头之后按读者的选择。组头是 `role=button`，Enter / 空格切换；结束的一组切换时留在原位。
+
+### 输入框上方的状态条
+
+- **出现条件**：查看的会话（不是子会话）有子智能体在运行或等待回答，而且对话里它们那一组都不在屏幕上（每一组用 IntersectionObserver 报告是否可见，被虚拟列表回收的行算不可见）。条件成立 300ms 后出现，不成立立即消失。列出的是还有子智能体在运行的那几组的全部行（运行中的在前），以及派出它的调用不在已加载记录里的、正在运行的直接子智能体。
+- **位置与样式**：在输入框上方的 dock 里，待办条之上，宽度与待办条相同；`--tip-fill` 底、`--radius-card`、0.5px 细线。一行：叠放头像、「N 个子智能体运行中」（没有运行中、只有等待回答时写「N 个子智能体等待回答」）、其他状态的数量、「回到列表 ↑」、箭头。
+- **展开**：点这一行向上展开列表，最高 196px（约七行）后滚动；行与对话里组内的行相同，点一行打开子智能体；Esc 收起。
+- **回到列表**：滚到最近一个仍在运行的那一组（顶部留 16px），这一组底色短暂换成 `--surface-selected`（1.6 秒，320ms 淡出；减少动态效果时不淡出）；它回到屏幕上，状态条随即让开。没有可回去的组时不显示这个入口。
+- 状态条单独打包，第一次出现时才加载，不进入启动包。
 
 ## 轨迹门控
 
@@ -84,5 +103,5 @@
 
 - `processModel.ts` 是纯函数：输入快照的节点顺序、节点和 Turn/Step 时间线，输出虚拟列表的行；行不变时保持同一个对象，整张表不变时返回上一次的数组，流式输出时只有被改动的那一行重新渲染。
 - 流式回答的节奏：输出中正文每 80ms 最多渲染一次（`useStreamingText`），输出结束立即渲染全文。正文按顶层块写入（`MarkdownHtml` + `composables/markdownBlocks.ts`）：后面已经开始了新块的块算「已闭合」，只渲染、净化一次并保留 DOM 节点，输出中可以选中其中的文字；最后一块和它之后的内容（未闭合的代码围栏、还在增长的列表）整体重渲染。拼起来的 HTML 与整篇渲染完全一致；带引用式链接定义的文档整篇渲染。
-- 过程组的 id 是 `process:<turn>:<序号>`；时间轴的「当前可见行」把它换算成组里的第一步。
+- 过程组的 id 是 `process:<turn>:<序号>`，子智能体行的 id 是 `agents:<第一个调用的 key>`；时间轴的「当前可见行」把它们换算成组里的第一步或第一个调用。
 - 准备中的调用从当前步骤的模型节点里读取（即使那个节点只有工具调用、本身不显示），排在已开始的调用之后。

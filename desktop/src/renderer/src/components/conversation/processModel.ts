@@ -8,6 +8,9 @@
 // form a live row, and calls the model is still writing (no `tool/call` yet)
 // join it as preparing members. A step is one row of the expanded list: a
 // thinking block, a tool call, a system or notice row; narration is not.
+// The subagents a step sends out leave the process for an `agents` row of
+// their own (UI-S14): one row per step, a group when it sent out two or
+// more; a step that only sends out subagents shows its words above them.
 // The first process row of a turn a subagent's or background job's result
 // woke says so (UI-S15: such a turn continues the task, see `turnOpener`).
 import {
@@ -25,6 +28,7 @@ import type {
   ToolChatData,
 } from '../../conversation/types'
 import { formatRunDuration } from './chatFormat'
+import { isDelegationCall } from './subagentRows'
 import { toolView } from './tools/registry'
 import {
   argsOf,
@@ -82,7 +86,20 @@ export interface NodeRow {
   readonly closing?: true
 }
 
-export type TimelineRow = NodeRow | ProcessRow
+/**
+ * The subagents one step sent out, next to each other (UI-S14): a single
+ * subagent row, or a group of them.
+ */
+export interface AgentsRow {
+  readonly kind: 'agents'
+  /** `agents:<first call key>`. */
+  readonly id: string
+  readonly turn: number
+  /** Tool node keys of the starting calls, in call order. */
+  readonly members: readonly string[]
+}
+
+export type TimelineRow = NodeRow | ProcessRow | AgentsRow
 
 export interface TimelineRowsInput {
   readonly order: readonly string[]
@@ -344,7 +361,23 @@ export function timelineRows(
         )
       } else grouped.push(member)
     })
-    emitGroup(turn, grouped, open && answers.length === 0)
+    const segments = liftSubagents(grouped, nodes)
+    segments.forEach((segment, index) => {
+      if (segment.kind === 'process')
+        emitGroup(
+          turn,
+          segment.members,
+          open && answers.length === 0 && index === segments.length - 1,
+        )
+      else if (segment.kind === 'agents')
+        rows.push({
+          kind: 'agents',
+          id: `agents:${segment.members[0]}`,
+          turn,
+          members: segment.members,
+        })
+      else rows.push(segment.row)
+    })
     rows.push(...answers)
     run = []
   }
@@ -367,6 +400,102 @@ export function timelineRows(
   if (preparing.length > 0) flush(true, true)
 
   return stabilize(finish(rows, input), previous)
+}
+
+type Segment =
+  | { readonly kind: 'process'; readonly members: ProcessMember[] }
+  | { readonly kind: 'agents'; readonly members: string[] }
+  | { readonly kind: 'words'; readonly row: NodeRow }
+
+function delegationAt(
+  member: ProcessMember | undefined,
+  nodes: ReadonlyMap<string, ChatNode>,
+): { step: string } | null {
+  if (member?.kind !== 'node') return null
+  const node = nodes.get(member.key)
+  return node?.kind === 'tool' && isDelegationCall(node.data)
+    ? { step: `${node.data.turn}:${node.data.step}` }
+    : null
+}
+
+/**
+ * A step whose words lead straight into the subagents it sends out, and
+ * that called nothing else: its words stand above them (UI-S14).
+ */
+function dispatchWords(
+  members: readonly ProcessMember[],
+  index: number,
+  nodes: ReadonlyMap<string, ChatNode>,
+): AssistantChatNode | null {
+  const member = members[index]
+  if (member?.kind !== 'node' || member.reasoningOnly) return null
+  const node = nodes.get(member.key)
+  if (node?.kind !== 'assistant' || !hasAnswer(node)) return null
+  const calls = node.data.blocks.filter((block) => block.kind === 'tool-call')
+  if (
+    calls.length === 0 ||
+    !calls.every((block) => isDelegationCall({ name: block.name }))
+  )
+    return null
+  const next = delegationAt(members[index + 1], nodes)
+  return next?.step === `${node.data.turn}:${node.data.step}` ? node : null
+}
+
+/**
+ * Split a process run at the subagents it sent out: adjacent starting calls
+ * of one step become one `agents` segment, the steps around them stay
+ * process segments (UI-S14).
+ */
+function liftSubagents(
+  members: ProcessMember[],
+  nodes: ReadonlyMap<string, ChatNode>,
+): Segment[] {
+  // Most runs start no subagent: one pass, nothing to split.
+  if (!members.some((member) => delegationAt(member, nodes) !== null))
+    return [{ kind: 'process', members }]
+  const segments: Segment[] = []
+  let chunk: ProcessMember[] = []
+  let agents: { step: string; members: string[] } | null = null
+  const closeChunk = (): void => {
+    if (chunk.length > 0) segments.push({ kind: 'process', members: chunk })
+    chunk = []
+  }
+  const closeAgents = (): void => {
+    if (agents !== null)
+      segments.push({ kind: 'agents', members: agents.members })
+    agents = null
+  }
+  members.forEach((member, index) => {
+    const delegation = delegationAt(member, nodes)
+    if (delegation !== null && member.kind === 'node') {
+      if (agents?.step === delegation.step) agents.members.push(member.key)
+      else {
+        closeAgents()
+        closeChunk()
+        agents = { step: delegation.step, members: [member.key] }
+      }
+      return
+    }
+    closeAgents()
+    const words = dispatchWords(members, index, nodes)
+    if (words !== null) {
+      const thinking = reasoningSteps(words) > 0
+      if (thinking)
+        chunk.push({ kind: 'node', key: words.key, reasoningOnly: true })
+      closeChunk()
+      segments.push({
+        kind: 'words',
+        row: thinking
+          ? { kind: 'node', id: words.key, answerOnly: true }
+          : { kind: 'node', id: words.key },
+      })
+      return
+    }
+    chunk.push(member)
+  })
+  closeAgents()
+  closeChunk()
+  return segments
 }
 
 /** Durations and the closing flag, which need the rows around each row. */
@@ -392,7 +521,7 @@ function finish(rows: TimelineRow[], input: TimelineRowsInput): TimelineRow[] {
         nodes.get(next.id)?.kind === 'turnTail'
       return closing ? { ...row, closing: true } : row
     }
-    if (row.live) return row
+    if (row.kind === 'agents' || row.live) return row
     const location = input.timeline.turns.get(row.turn)
     let endedAt: number | null = null
     if (
@@ -403,7 +532,13 @@ function finish(rows: TimelineRow[], input: TimelineRowsInput): TimelineRow[] {
       endedAt = location.end.time
     else {
       const next = rows[index + 1]
-      const node = next?.kind === 'node' ? nodes.get(next.id) : undefined
+      const key =
+        next?.kind === 'node'
+          ? next.id
+          : next?.kind === 'agents'
+            ? next.members[0]
+            : undefined
+      const node = key === undefined ? undefined : nodes.get(key)
       if (node !== undefined && node.turn === row.turn) endedAt = nodeTime(node)
     }
     return endedAt === null ? row : { ...row, endedAt }
@@ -437,13 +572,18 @@ export function rowIndexOf(rows: readonly TimelineRow[]): Map<string, number> {
       for (const member of row.members)
         if (member.kind === 'node' && !index.has(member.key))
           index.set(member.key, position)
+    if (row.kind === 'agents')
+      for (const key of row.members)
+        if (!index.has(key)) index.set(key, position)
   })
   return index
 }
 
 /** The chat node a row stands for in `order` (the scrubber's first-visible). */
 export function rowNodeKey(row: TimelineRow): string {
-  return row.kind === 'node' ? row.id : (row.members[0]?.key ?? row.id)
+  if (row.kind === 'node') return row.id
+  if (row.kind === 'agents') return row.members[0] ?? row.id
+  return row.members[0]?.key ?? row.id
 }
 
 /**

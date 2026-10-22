@@ -33,6 +33,10 @@
  * ancestors — render the same timeline (live through the watch set), the
  * lineage breadcrumb in the header and a read-only composer with a stop
  * button while the child runs.
+ *
+ * The subagent status bar (UI-S14, SubagentDock, loaded on first use) sits
+ * above the todo dock while the conversation's subagents are at work and
+ * none of their rows is on screen (useSubagentDock).
  */
 import {
   computed,
@@ -84,6 +88,8 @@ import { useAgentTree } from '../sidebar/agentTree'
 import { requestWorkspace } from '../workspace/workspaceState'
 import { useSettingsRoute } from '../settings/useSettingsRoute'
 import ChatTimeline from './ChatTimeline.vue'
+import type { SubagentRowView } from './subagentRows'
+import { useSubagentDock } from './useSubagentDock'
 import ConversationHeader from './ConversationHeader.vue'
 import EmptyHero from './EmptyHero.vue'
 import HeroProfilePrompt from './HeroProfilePrompt.vue'
@@ -135,6 +141,9 @@ const ComputerUsePreviewStack = defineAsyncComponent(
   () => import('./computer-use/ComputerUsePreviewStack.vue'),
 )
 const TurnScrubber = defineAsyncComponent(() => import('./TurnScrubber.vue'))
+const SubagentDock = defineAsyncComponent(
+  () => import('../composer/SubagentDock.vue'),
+)
 /** Fewest turns that earn the scrubber. */
 const SCRUBBER_MIN_TURNS = 3
 
@@ -158,6 +167,7 @@ const composer = ref<{
 const timeline = ref<{
   scrollToKey: (key: string) => boolean
   revealCall: (callId: string) => boolean
+  revealAgents: (id: string) => boolean
 } | null>(null)
 
 // ── session identity / lineage ────────────────────────────────────────────
@@ -753,6 +763,27 @@ function openSubagent(childId: string): void {
   if (childId) navigate(childId)
 }
 
+// ── subagent status bar (UI-S14) ──────────────────────────────────────────
+const subagentDock = useSubagentDock({
+  snapshot: () => snapshot.value,
+  sessionId: () => viewingId.value,
+  rootSessionId: () => owningRootId.value,
+  enabled: () => !child.value && phase.value === 'active',
+})
+
+/** A status-bar row: the child's conversation, or the run's page. */
+function openAgentRow(row: SubagentRowView): void {
+  if (row.agentId === undefined) return
+  if (row.backend === 'internal') openSubagent(row.agentId)
+  else
+    void router
+      .push({
+        name: 'external-agent',
+        params: { sessionId: owningRootId.value, delegationId: row.agentId },
+      })
+      .catch(() => undefined)
+}
+
 function editMessage(text: string): void {
   if (child.value) return
   composer.value?.setDraft(text)
@@ -1079,6 +1110,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           @open-subagent="openSubagent"
           @edit-message="editMessage"
           @first-visible="firstVisibleKey = $event"
+          @agents="subagentDock.report"
         />
         <TurnScrubber
           v-if="ticks.length >= SCRUBBER_MIN_TURNS"
@@ -1150,6 +1182,14 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           v-if="!takeoverOpen && viewingId"
           :session-id="viewingId"
           :build="buildSession"
+        />
+        <SubagentDock
+          v-if="!takeoverOpen && subagentDock.shown.value"
+          :rows="subagentDock.state.value.rows"
+          :target="subagentDock.state.value.target"
+          :root-session-id="owningRootId"
+          @open="openAgentRow"
+          @reveal="timeline?.revealAgents($event)"
         />
         <TodoDock v-if="!takeoverOpen" :todos="latestTodos" />
         <GoalBar

@@ -2,35 +2,52 @@
 /**
  * ToolCallTree — one root tool call plus its nested activity (dsh
  * ToolCallTree): the row, then an indented, left-ruled sub list for the
- * workflow run panel, the delegated child's status line (never its
- * transcript — "打开子会话" opens the child session) and approval
- * escalations raised by the call.
+ * workflow run panel and the approval escalations raised by the call.
  *
- * Props: node (tool).
+ * A call that starts or continues a subagent (local, Claude Code, Codex)
+ * is that subagent's one row (UI-S14, SubagentRow): face, name, source,
+ * status and time, its whole width opening the child — 「/chat/<child>」
+ * for a local one, the run page for Claude Code / Codex, with 任务详情
+ * beside it. Its approvals, grants and workspace waits stay indented
+ * under it; the child's transcript is never inlined.
+ *
+ * Props: node (tool), agentVariant ('single' in the flow, 'grouped'),
+ * step (a step of a process group; false for a subagent row of its own).
  */
 import { computed, defineAsyncComponent, inject, ref } from 'vue'
 import { routerKey } from 'vue-router'
-import { agentSourceLabel } from '@emperor/core/runtime-contract'
 import type { ToolChatNode, ToolGrantView } from '../../../conversation/types'
 import { DsShieldAlert } from '../../icons/ds'
 import { useChatContext } from '../chatContext'
-import { subagentStatusLabel, toolView } from '../tools/registry'
-import { lastLine, nativeAgentTarget } from '../tools/toolModel'
+import {
+  isDelegationCall,
+  subagentAgentId,
+  subagentHref,
+  subagentRowOf,
+} from '../subagentRows'
+import { nativeAgentTarget } from '../tools/toolModel'
 import { useAgentTree } from '../../sidebar/agentTree'
-import Avatar from '../../ui/Avatar.vue'
+import SubagentRow from './SubagentRow.vue'
 import ToolCallRow from './ToolCallRow.vue'
 import WorkflowRunPanel from './WorkflowRunPanel.vue'
-import ExternalAgentStream from '../tools/ExternalAgentStream.vue'
 import WorkspaceWaitLine from './WorkspaceWaitLine.vue'
 import { workspaceWaitFor } from './workspaceWaits'
 
-const props = defineProps<{ node: ToolChatNode }>()
+const props = withDefaults(
+  defineProps<{
+    node: ToolChatNode
+    agentVariant?: 'single' | 'grouped'
+    step?: boolean
+  }>(),
+  { agentVariant: 'grouped', step: true },
+)
 const chat = useChatContext()
 const { actions } = chat
 const router = inject(routerKey, undefined)
 const data = computed(() => props.node.data)
 const owner = computed(() => chat.rootSessionId?.() ?? chat.sessionId())
 const agentTree = useAgentTree()
+/** A continued local child (send_message) the root's agent list knows. */
 const nativeAgent = computed(() => {
   const id = nativeAgentTarget(data.value)
   const agent = id ? agentTree.trees[owner.value]?.byId[id] : undefined
@@ -40,63 +57,46 @@ const nativeAgent = computed(() => {
     ? agent
     : undefined
 })
-const nativeId = computed(
-  () => data.value.subagent?.subagentId ?? nativeAgent.value?.id,
+/** The agent list's view of this call's subagent (the card's source). */
+const listed = computed(() => {
+  const id = subagentAgentId(data.value)
+  const agent = id ? agentTree.trees[owner.value]?.byId[id] : undefined
+  return agent?.rootSessionId === owner.value ? agent : undefined
+})
+const isAgent = computed(
+  () =>
+    isDelegationCall(data.value) ||
+    data.value.externalAgent !== undefined ||
+    nativeAgent.value !== undefined,
 )
+const row = computed(() => subagentRowOf(data.value, listed.value))
+const href = computed(() => subagentHref(row.value, owner.value))
 const detailsRun = ref<{ runId: string; delegationId: string } | null>(null)
 const ExternalAgentDetails = defineAsyncComponent(
   () => import('../environment/ExternalAgentDetails.vue'),
 )
-const entryBackend = computed(
-  () => data.value.externalAgent?.backend ?? 'internal',
-)
-const entryTitle = computed(() =>
-  toolView(data.value.name, data.value, nativeAgent.value).title(data.value),
-)
-const entryHref = computed(() =>
-  data.value.externalAgent
-    ? `/chat/${encodeURIComponent(owner.value)}/agents/${encodeURIComponent(data.value.externalAgent.delegationId)}`
-    : `/chat/${encodeURIComponent(nativeId.value ?? '')}`,
-)
+
 function openAgent(event: MouseEvent) {
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-  if (data.value.externalAgent) {
+  const id = row.value.agentId
+  if (id === undefined) return
+  if (row.value.backend !== 'internal') {
     if (!router) return
     event.preventDefault()
     void router.push({
       name: 'external-agent',
-      params: {
-        sessionId: owner.value,
-        delegationId: data.value.externalAgent.delegationId,
-      },
+      params: { sessionId: owner.value, delegationId: id },
     })
-  } else if (nativeId.value) {
+  } else {
     event.preventDefault()
-    actions.openSubagent(nativeId.value)
+    actions.openSubagent(id)
   }
 }
 
-const subagentStatus = computed(() => {
-  const sub = data.value.subagent
-  if (sub === undefined || sub.status === 'running') return 'running'
-  switch (sub.stopReason) {
-    case 'completed':
-    case undefined:
-      return 'completed'
-    case 'error':
-    case 'refusal':
-      return 'failed'
-    default:
-      return 'cancelled'
-  }
-})
-const subagentLine = computed(() => {
-  const sub = data.value.subagent
-  if (sub === undefined) return ''
-  if (sub.text !== undefined && sub.text.trim() !== '')
-    return lastLine(sub.text).replace(/[`*_#>]/gu, '')
-  return sub.status === 'running' ? '正在处理…' : ''
-})
+function openDetails() {
+  const run = row.value.run
+  if (run) detailsRun.value = { ...run }
+}
 
 const APPROVAL_LABEL: Record<string, string> = {
   'allowed-once': '已允许',
@@ -126,54 +126,30 @@ const hasChildren = computed(
   () =>
     wait.value !== undefined ||
     data.value.workflow !== undefined ||
-    data.value.subagent !== undefined ||
-    data.value.externalAgent !== undefined ||
     data.value.approvals.length > 0 ||
     (data.value.grants?.length ?? 0) > 0,
 )
 </script>
 
 <template>
-  <div class="tool-call" data-process-step :data-chat-call-id="data.callId">
-    <div v-if="data.externalAgent || nativeId" class="agent-entry-row">
-      <a
-        data-agent-entry
-        class="agent-entry"
-        :href="entryHref"
-        @click="openAgent"
-      >
-        <Avatar
-          kind="sprite"
-          v-if="nativeId && !data.externalAgent"
-          :id="nativeId"
-          :size="24"
-        />
-        {{ entryTitle }}
-        <span>{{ agentSourceLabel(entryBackend) }} · 子智能体 ↗</span>
-      </a>
-      <button
-        v-if="data.externalAgent"
-        type="button"
-        class="open-link"
-        data-agent-details
-        @click="
-          detailsRun = {
-            runId: data.externalAgent.runId,
-            delegationId: data.externalAgent.delegationId,
-          }
-        "
-      >
-        任务详情
-      </button>
-    </div>
-    <ToolCallRow :data="data" :agent="nativeAgent" />
+  <div
+    class="tool-call"
+    :data-process-step="step ? '' : undefined"
+    :data-chat-call-id="data.callId"
+    :data-agent="isAgent || undefined"
+  >
+    <SubagentRow
+      v-if="isAgent"
+      :row="row"
+      :href="href"
+      :variant="agentVariant"
+      :details="Boolean(data.externalAgent)"
+      @open="openAgent"
+      @details="openDetails"
+    />
+    <ToolCallRow v-else :data="data" :agent="nativeAgent" />
     <div v-if="hasChildren" class="subcalls" data-subcalls>
       <WorkspaceWaitLine v-if="wait" :wait="wait" />
-      <ExternalAgentStream
-        v-if="data.externalAgent"
-        :run="data.externalAgent"
-        :call-id="data.callId"
-      />
       <div
         v-for="approval in data.approvals"
         :key="approval.id"
@@ -213,25 +189,6 @@ const hasChildren = computed(
         <span class="sub-text">{{ grant.target }}</span>
         <span class="sub-status">{{ grantStatus(grant) }}</span>
       </div>
-      <div
-        v-if="data.subagent"
-        class="sub-line"
-        data-subagent-line
-        :data-status="data.subagent.status"
-      >
-        <span class="sub-leading agent-leading"
-          ><Avatar
-            kind="sprite"
-            :id="data.subagent.subagentId"
-            :status="subagentStatus"
-            :size="24"
-        /></span>
-        <span class="sub-title">{{ subagentStatusLabel(data) }}</span>
-        <template v-if="subagentLine">
-          <span class="sep" aria-hidden="true">·</span>
-          <span class="sub-text">{{ subagentLine }}</span>
-        </template>
-      </div>
       <WorkflowRunPanel
         v-if="data.workflow"
         :run="data.workflow"
@@ -255,28 +212,6 @@ const hasChildren = computed(
 </template>
 
 <style scoped>
-.agent-entry-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.agent-entry {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-width: 0;
-  color: rgb(var(--text-1));
-  font-size: var(--fs-s);
-  text-decoration: none;
-}
-.agent-entry:hover {
-  text-decoration: underline;
-}
-.agent-entry > span:not(.ds-avatar) {
-  color: rgb(var(--text-3));
-  font-size: var(--fs-xs);
-  margin-left: var(--space-2);
-}
 .tool-call {
   display: flex;
   flex-direction: column;
@@ -291,6 +226,11 @@ const hasChildren = computed(
   margin: 0 0 var(--space-0-5) calc(var(--space-4) + var(--space-1-5));
   padding-left: var(--space-2);
   border-left: 1px solid var(--stroke-2);
+}
+
+/* Under a subagent row: indented to its name. */
+[data-agent] > .subcalls {
+  margin-left: calc(var(--space-2) + var(--space-2-5));
 }
 
 .sub-line {
@@ -310,10 +250,6 @@ const hasChildren = computed(
   height: var(--space-4);
   margin-right: var(--space-1-5);
   color: rgb(var(--text-3));
-}
-.agent-leading {
-  width: 24px;
-  height: 24px;
 }
 
 [data-outcome='pending'] .sub-leading {
@@ -345,24 +281,5 @@ const hasChildren = computed(
   margin-left: var(--space-2);
   font-size: var(--fs-xs);
   color: rgb(var(--text-2));
-}
-
-.open-link {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: var(--space-0-5);
-  margin-left: auto;
-  padding: 0 0 0 var(--space-2);
-  border: none;
-  background: none;
-  font-size: var(--fs-xs);
-  line-height: var(--lh-xs);
-  color: rgb(var(--text-link));
-  cursor: pointer;
-}
-
-.open-link:hover {
-  text-decoration: underline;
 }
 </style>

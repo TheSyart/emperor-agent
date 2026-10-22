@@ -149,6 +149,7 @@ function select(resource: DisplayResource): void {
       data-source-item
       :label="item.label"
       :title="item.label"
+      shrink-label
       :value="PROVENANCE_LABEL[sourceProvenance(item)]"
       @click="select(item)"
     >

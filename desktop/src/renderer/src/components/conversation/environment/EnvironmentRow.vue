@@ -4,6 +4,12 @@
  * stack of faces), the label, an optional meta slot and the value, and a
  * caret when the row opens a list in place (`expanded`) or a menu (`menu`,
  * with `expanded` as the menu's open state). 32px, no rule between rows.
+ *
+ * Which part gives way when the row is too narrow (UI-S14): a plain label
+ * (「子智能体」「后台任务」) stays whole and the value ends in an ellipsis
+ * (its full text in the tooltip). A mono label (the branch) and a label
+ * that is data (`shrinkLabel`: a plan's title, a file name) shrink instead,
+ * and the value stays whole.
  */
 import { ChevronDown } from 'lucide-vue-next'
 
@@ -18,6 +24,8 @@ withDefaults(
     expanded?: boolean
     menu?: boolean
     mono?: boolean
+    /** The label is data that can be long: it shrinks, not the value. */
+    shrinkLabel?: boolean
   }>(),
   { expanded: undefined },
 )
@@ -31,11 +39,18 @@ withDefaults(
     :aria-haspopup="menu ? 'menu' : undefined"
   >
     <span class="lead"><slot name="lead" /></span>
-    <span class="label" :class="{ mono }"
+    <span
+      class="label"
+      :class="{ mono }"
+      :data-shrink="mono || shrinkLabel || undefined"
       ><slot name="label">{{ label }}</slot></span
     >
     <slot name="meta" />
-    <span v-if="value || $slots.value" class="value" :data-status="status"
+    <span
+      v-if="value || $slots.value"
+      class="value"
+      :data-status="status"
+      :title="!(mono || shrinkLabel) && value ? value : undefined"
       ><slot name="value">{{ value }}</slot></span
     >
     <ChevronDown
@@ -84,22 +99,37 @@ withDefaults(
   color: rgb(var(--text-3));
 }
 
+/* A plain label is whole: it takes the free space but never shrinks. */
 .label {
+  flex: 1 0 auto;
+  white-space: nowrap;
+}
+
+/* The branch, a plan's title, a file name: these shrink. */
+.label[data-shrink] {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .label.mono {
   font: var(--font-code-small);
 }
 
+/* Beside a plain label the value gives way, ending in an ellipsis. */
 .value {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
   color: rgb(var(--text-3));
   font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.label[data-shrink] ~ .value {
+  flex: none;
 }
 
 .value[data-status='running'] {

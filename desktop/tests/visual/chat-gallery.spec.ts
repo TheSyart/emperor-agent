@@ -81,9 +81,8 @@ for (const theme of ['light', 'dark'] as const) {
   })
 }
 
-test('tools expanded: read, write, todo, glob, web, subagent', async ({
-  page,
-}) => {
+// The subagent is a row of its own (UI-S14), opened on its own page.
+test('tools expanded: read, write, todo, glob, web', async ({ page }) => {
   await open(page, 'showcase', 'light', { width: 1000, height: 2600 }, EXPANDED)
   await toTop(page)
   for (const id of [
@@ -92,7 +91,6 @@ test('tools expanded: read, write, todo, glob, web, subagent', async ({
     'call_todo',
     'call_glob',
     'call_web',
-    'call_sub',
   ])
     await expand(page, id)
   await toTop(page)
@@ -148,14 +146,99 @@ test('workflow panel (light)', async ({ page }) => {
 
 test('subagent row and child session (kernel log)', async ({ page }) => {
   await open(page, 'kernel', 'light', { width: 1000, height: 900 }, EXPANDED)
-  await expect(page.locator('[data-subagent-line]')).toBeVisible()
+  // UI-S14: one row — face, name, source, status, the report's opening.
+  const row = page.locator('[data-subagent-row]')
+  await expect(row).toHaveCount(1)
+  await expect(row.locator('[data-agent-summary]')).toHaveText('child found x')
   await shot(page, 'chat-subagent-light')
-  // The entry above the tool row opens the child (UI-S03).
+  // The row opens the child.
   await page.locator('[data-agent-entry]').first().click()
   await expect(page.locator('.crumbs')).toBeVisible()
   await expect(page.getByText('child found x').first()).toBeVisible()
   await shot(page, 'chat-subagent-child-light')
 })
+
+// UI-S14: one row per subagent; the ones a step sent out form a group,
+// open while any runs and folded once all have ended.
+for (const theme of ['light', 'dark'] as const) {
+  test(`subagent group while running (${theme}) @baseline`, async ({
+    page,
+  }) => {
+    await open(page, 'subagents', theme, { width: 1000, height: 1000 })
+    const head = page.locator('[data-subagent-group-head]')
+    await expect(head).toContainText('派出 11 个子智能体')
+    await expect(head).toContainText('8 运行中 · 2 失败 · 1 结果待确认')
+    await expect(head).toHaveAttribute('aria-expanded', 'true')
+    const rows = page.locator('[data-subagent-group] [data-subagent-row]')
+    await expect(rows).toHaveCount(11)
+    await expect(rows.locator('[data-agent-logo="codex"]')).toHaveCount(2)
+    await expect(rows.locator('[data-agent-logo="claude-code"]')).toHaveCount(1)
+    await expect(
+      page.locator('[data-subagent-row][data-state="failed"]').first(),
+    ).toContainText('失败 · 用时 14 秒')
+    await toTop(page)
+    await shot(page, `chat-subagents-running-${theme}`)
+    await expectBaseline(page, 'conversation', `subagent-group-${theme}`)
+  })
+
+  test(`subagent group after all have ended (${theme})`, async ({ page }) => {
+    await open(page, 'subagents-done', theme, { width: 1000, height: 900 })
+    const head = page.locator('[data-subagent-group-head]')
+    await expect(head).toContainText('11 个子智能体')
+    await expect(head).not.toContainText('派出')
+    await expect(head).toContainText('9 完成 · 2 失败 · 用时 6 分 12 秒')
+    await expect(head).toHaveAttribute('aria-expanded', 'false')
+    await expect(page.locator('[data-subagent-row]')).toHaveCount(0)
+    await toTop(page)
+    await shot(page, `chat-subagents-done-${theme}`)
+    await head.click()
+    await expect(page.locator('[data-subagent-row]')).toHaveCount(11)
+    // In a group the report's opening is the row's tooltip (the design).
+    await expect(
+      page.locator('[data-subagent-row] [data-agent-summary]'),
+    ).toHaveCount(0)
+    await expect(page.locator('[data-subagent-row]').first()).toHaveAttribute(
+      'title',
+      /已写完/,
+    )
+    await page.waitForTimeout(300)
+    await toTop(page)
+    await shot(page, `chat-subagents-done-open-${theme}`)
+  })
+
+  test(`single subagent rows (${theme})`, async ({ page }) => {
+    await open(page, 'subagent-rows', theme, { width: 1000, height: 1300 })
+    const rows = page.locator('[data-subagent-row]')
+    await expect(rows).toHaveCount(5)
+    await expect(rows.nth(0)).toContainText('已完成 · 用时 1 分')
+    await expect(rows.nth(0).locator('[data-agent-summary]')).toContainText(
+      '报告已交回',
+    )
+    await expect(rows.nth(1)).toContainText('失败 · 用时 14 秒')
+    await expect(rows.nth(1).locator('[data-agent-summary]')).toHaveText(
+      '模型 gpt-6.1-sol 被这个 ChatGPT 账号拒绝（400）',
+    )
+    await expect(rows.nth(2)).toContainText('Claude Code')
+    await expect(rows.nth(2).locator('[data-agent-summary]')).toHaveText(
+      '没有参数校验；PI 精度只有两位，建议用 Math.PI。',
+    )
+    await expect(rows.nth(3).locator('[data-agent-status]')).toHaveText(
+      '等待回答',
+    )
+    // Running in the background reads 运行中, as in the design.
+    await expect(rows.nth(4).locator('[data-agent-status]')).toHaveText(
+      /^运行中 · \d+ 秒$/,
+    )
+    await expect(rows.nth(4).locator('[data-agent-summary]')).toHaveCount(0)
+    await toTop(page)
+    // Hover: ↗ and 任务详情 show on the row under the pointer.
+    await rows.nth(2).hover()
+    await page.screenshot({
+      path: resolve(screenshotDir, `chat-subagent-rows-${theme}.png`),
+      animations: 'disabled',
+    })
+  })
+}
 
 test('interactions: question, MCP, plan (light)', async ({ page }) => {
   await open(
@@ -380,7 +463,8 @@ for (const theme of ['light', 'dark'] as const) {
         .nth(1)
         .locator('[data-process-continued]'),
     ).toHaveCount(1)
-    // The card after the woken turn's answer, the footer last.
+    // The card after the woken turn's answer, the footer last; the three
+    // writers are a group of their own after the first process line (UI-S14).
     const order = await page
       .locator('[data-chat-flow-kind]')
       .evaluateAll((rows) =>
@@ -389,6 +473,7 @@ for (const theme of ['light', 'dark'] as const) {
     expect(order).toEqual([
       'user',
       'process',
+      'agents',
       'assistant',
       'turnTail',
       'process',

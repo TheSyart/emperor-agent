@@ -13,15 +13,23 @@
  * only when there is none (waiting for the first token, the answer
  * streaming).
  *
+ * The subagents a step sent out are a row of their own (SubagentGroup,
+ * UI-S14); the timeline watches which of those rows are on screen and
+ * reports them with the rows (the status bar above the composer shows only
+ * while no group at work is in view).
+ *
  * Props: sessionId; store? (injected ConversationStore — tests/gallery).
  * Emits: inspect(callId), open-subagent(sessionId), edit-message(text),
  * first-visible(key | null) — the topmost visible row, reported once per
- * frame while the reader scrolls (the turn scrubber's active tick).
+ * frame while the reader scrolls (the turn scrubber's active tick);
+ * agents({ groups, visible }) — the subagent rows of the loaded window
+ * (`agents:<call key>` and their calls) and the ids of those on screen.
  * Exposes: scrollToBottom(), scrollToKey(key) — reveal a row near the top
  * (the list is virtualized, so rows off screen are reachable only here; a
  * step inside a folded process group opens the group first), revealCall(id)
  * — the same for a tool call's row, opened (a trajectory link while the
- * trajectory is off, UI-S09).
+ * trajectory is off, UI-S09), revealAgents(id) — scroll to a subagent row
+ * and light it up for a moment (「回到列表 ↑」).
  */
 import Button from '../ui/Button.vue'
 import Spinner from '../ui/Spinner.vue'
@@ -32,6 +40,7 @@ import {
   onBeforeUnmount,
   onMounted,
   ref,
+  shallowReactive,
   shallowRef,
   watch,
   type EffectScope,
@@ -52,6 +61,7 @@ import { createExpansionStore, provideChatContext } from './chatContext'
 import TurnStatus from './TurnStatus.vue'
 import ConversationLoading from './ConversationLoading.vue'
 import ProcessGroup from './nodes/ProcessGroup.vue'
+import SubagentGroup from './nodes/SubagentGroup.vue'
 import {
   processExpansionKey,
   rowIndexOf,
@@ -59,6 +69,7 @@ import {
   timelineRowsOf,
   type TimelineRow,
 } from './processModel'
+import type { TimelineAgents } from './subagentRows'
 import { isAtBottom, turnStatusLabel } from './timelineModel'
 
 const props = withDefaults(
@@ -74,11 +85,47 @@ const emit = defineEmits<{
   'open-subagent': [sessionId: string]
   'edit-message': [text: string]
   'first-visible': [key: string | null]
+  agents: [state: TimelineAgents]
 }>()
 
 const expansion = createExpansionStore()
 /** The turn under the pointer (turn tails show their actions). */
 const hoverTurn = ref<number | null>(null)
+
+// ── subagent rows on screen (UI-S14) ────────────────────────────────────
+const visibleAgents = shallowReactive(new Set<string>())
+const agentTargets = new Map<Element, string>()
+let agentObserver: IntersectionObserver | null = null
+/** The subagent row lit up after 「回到列表 ↑」. */
+const highlightedAgents = ref<string | null>(null)
+let highlightTimer: ReturnType<typeof setTimeout> | undefined
+
+function agentsObserver(): IntersectionObserver | null {
+  if (agentObserver !== null || typeof IntersectionObserver === 'undefined')
+    return agentObserver
+  // The viewport root still clips by the scroller (and a recycled view
+  // parked off screen reads as hidden).
+  agentObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      const id = agentTargets.get(entry.target)
+      if (id === undefined) continue
+      if (entry.isIntersecting) visibleAgents.add(id)
+      else visibleAgents.delete(id)
+    }
+  })
+  return agentObserver
+}
+
+function observeAgents(element: Element, id: string): () => void {
+  agentTargets.set(element, id)
+  agentsObserver()?.observe(element)
+  return () => {
+    agentObserver?.unobserve(element)
+    agentTargets.delete(element)
+    if (![...agentTargets.values()].includes(id)) visibleAgents.delete(id)
+  }
+}
+
 provideChatContext({
   actions: {
     inspect: (callId) => emit('inspect', callId),
@@ -90,6 +137,10 @@ provideChatContext({
   sessionId: () => props.sessionId,
   rootSessionId: () => props.rootSessionId ?? props.sessionId,
   hoverTurn: () => hoverTurn.value,
+  agentRows: {
+    observe: observeAgents,
+    highlighted: () => highlightedAgents.value,
+  },
 })
 const { preferences } = useUiPreferences()
 
@@ -141,6 +192,16 @@ const items = computed(() =>
     }
     return item
   }),
+)
+const agentGroups = computed(() =>
+  rows.value.flatMap((row) =>
+    row.kind === 'agents' ? [{ id: row.id, members: [...row.members] }] : [],
+  ),
+)
+watch(
+  [agentGroups, () => [...visibleAgents]],
+  ([groups, visible]) => emit('agents', { groups, visible }),
+  { immediate: true },
 )
 const running = computed(() => handle.value?.running.value === true)
 const liveProcess = computed(() =>
@@ -310,11 +371,15 @@ function reportFirstVisible(): void {
   })
 }
 
-/** Open the folded process group holding node `key` (no-op otherwise). */
+/** Open the folded group (process, subagents) holding node `key`. */
 function openGroupOf(key: string): void {
   const index = rowIndex.value.get(key)
   const row = index === undefined ? undefined : rows.value[index]
-  if (row?.kind !== 'process' || row.id === key) return
+  if (row === undefined || row.kind === 'node' || row.id === key) return
+  if (row.kind === 'agents') {
+    expansion.set(row.id, true)
+    return
+  }
   const { key: expansionKey } = processExpansionKey(
     row,
     preferences.value.processDisplay,
@@ -361,6 +426,21 @@ function revealCall(callId: string): boolean {
   return scrollToKey(key)
 }
 
+/**
+ * Scroll to the subagent row `id` and light it up for a moment (the status
+ * bar's 「回到列表 ↑」). False when the row is not in the loaded window.
+ */
+function revealAgents(id: string): boolean {
+  if (rows.value[rowIndex.value.get(id) ?? -1]?.kind !== 'agents') return false
+  if (!scrollToKey(id)) return false
+  highlightedAgents.value = id
+  clearTimeout(highlightTimer)
+  highlightTimer = setTimeout(() => {
+    highlightedAgents.value = null
+  }, 1600)
+  return true
+}
+
 function onContentResize(): void {
   if (anchor !== null) restoreAnchor()
   else if (following.value) pinToBottom()
@@ -373,7 +453,11 @@ onMounted(() => {
   }
   pinToBottom()
 })
-onBeforeUnmount(() => resizeObserver?.disconnect())
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  agentObserver?.disconnect()
+  clearTimeout(highlightTimer)
+})
 
 // New flow content: follow while pinned; the reader's own message re-pins.
 let lastKey: string | undefined
@@ -413,6 +497,7 @@ watch(
     lastKey = undefined
     lastVisibleKey = undefined
     hoverTurn.value = null
+    highlightedAgents.value = null
     void nextTick(pinToBottom)
   },
 )
@@ -428,7 +513,7 @@ function onPointerOver(event: Event): void {
   hoverTurn.value = turn === undefined || turn === '' ? null : Number(turn)
 }
 
-defineExpose({ scrollToBottom, scrollToKey, revealCall })
+defineExpose({ scrollToBottom, scrollToKey, revealCall, revealAgents })
 </script>
 
 <template>
@@ -479,6 +564,11 @@ defineExpose({ scrollToBottom, scrollToKey, revealCall })
               <template v-if="handle">
                 <ProcessGroup
                   v-if="item.row.kind === 'process'"
+                  :handle="handle"
+                  :row="item.row"
+                />
+                <SubagentGroup
+                  v-else-if="item.row.kind === 'agents'"
                   :handle="handle"
                   :row="item.row"
                 />
