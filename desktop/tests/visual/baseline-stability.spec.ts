@@ -86,6 +86,37 @@ test(
   },
 )
 
+// UI-S16: with 「显示滚动条」 on Automatic and a mouse attached (or set to
+// Always), Chromium on a Mac lays out classic scrollbars: a box with
+// `scrollbar-gutter: stable` (the sidebar list, a page) keeps a 15px gutter,
+// and every screen with one drifts from its baseline. The suite lays out
+// like overlay scrollbars on any machine.
+test(
+  'a baseline leaves no scrollbar gutter, whatever the system setting',
+  { tag: BASELINE_TAG },
+  async ({ page }) => {
+    await openRunningTurn(page)
+    const gutters = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('*')]
+        .filter((el) =>
+          getComputedStyle(el).scrollbarGutter.startsWith('stable'),
+        )
+        .map((el) => {
+          const style = getComputedStyle(el)
+          return (
+            el.offsetWidth -
+            el.clientWidth -
+            Number.parseFloat(style.borderLeftWidth) -
+            Number.parseFloat(style.borderRightWidth)
+          )
+        }),
+    )
+    // The sidebar's session list at least.
+    expect(gutters.length).toBeGreaterThan(0)
+    for (const gutter of gutters) expect(Math.abs(gutter)).toBeLessThan(1)
+  },
+)
+
 test('an untagged test keeps the real clock', async ({ page }) => {
   await openRunningTurn(page)
   const now = await page.evaluate(() => Date.now())
