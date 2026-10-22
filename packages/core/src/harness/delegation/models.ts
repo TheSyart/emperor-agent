@@ -10,6 +10,7 @@ import {
   type PreparedExecutor,
 } from './native-models'
 import type { ExecutorRuntimeService } from './runtime'
+import { replacementModel } from './model-choice'
 import type {
   ExecutorProfile,
   ExecutorModelCatalog,
@@ -112,7 +113,8 @@ export class ExecutorModelCatalogService {
       provider: string | null = null,
       configuredModel: string | null = profile.defaultModel ?? null,
       diagnostic: string | null = null,
-      checkedAt: number | null = null
+      checkedAt: number | null = null,
+      defaultUnavailable: ExecutorModelCatalog['defaultUnavailable'] = null
     try {
       runtime = await this.options.runtime.prepare(
         profile,
@@ -235,7 +237,16 @@ export class ExecutorModelCatalogService {
           this.controllers.delete(controller)
         }
       }
-      for (const row of discovered) add(row.id, source, row.name)
+      // The picker offers what Codex's own picker shows (FIX-16).
+      for (const row of discovered)
+        if (!row.hidden) add(row.id, source, row.name)
+      // Codex's own default (its config.toml, as the run inherits it) is
+      // not in the list this login offers: say so, and what a run that
+      // follows the CLI uses instead (FIX-16).
+      const own =
+        profile.backend === 'codex' ? env.EMPEROR_EXECUTOR_MODEL : undefined
+      const replacement = own ? replacementModel(discovered, own) : undefined
+      if (own && replacement) defaultUnavailable = { model: own, replacement }
       const claudeSettings =
         profile.backend === 'claude-code'
           ? JSON.parse(
@@ -250,7 +261,7 @@ export class ExecutorModelCatalogService {
       const restricted =
         Array.isArray(claudeSettings.availableModels) ||
         claudeSettings.modelPicker?.replaceBuiltInOptions === true
-      if (!discovered.length && native && !restricted)
+      if (!discovered.some((row) => !row.hidden) && native && !restricted)
         for (const id of profile.backend === 'codex'
           ? ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-5.6-sol']
           : ['sonnet', 'opus', 'haiku'])
@@ -275,6 +286,7 @@ export class ExecutorModelCatalogService {
       provider,
       checkedAt,
       diagnostic,
+      defaultUnavailable,
     }
   }
 }

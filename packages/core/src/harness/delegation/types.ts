@@ -665,4 +665,9 @@ export interface ExecutorModelCatalog {
   provider: string | null
   checkedAt: number | null
   diagnostic: string | null
+  /**
+   * FIX-16: Codex's own default model (its config.toml) is not in the list
+   * this login offers; a run that follows the CLI uses `replacement`.
+   */
+  defaultUnavailable?: { model: string; replacement: string } | null
 }
