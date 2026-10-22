@@ -1478,6 +1478,12 @@ export interface SessionInfo {
   transitioned_at?: string | null
   version: number
   draft?: boolean
+  /**
+   * A draft's own plan mode and permission preset (FIX-13); unset, the
+   * global defaults (`control.get(null)`). They go with its first message.
+   */
+  plan?: boolean
+  preset?: PermissionPreset
 }
 
 export interface SessionControlPending {

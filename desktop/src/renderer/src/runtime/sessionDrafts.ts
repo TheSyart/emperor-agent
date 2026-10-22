@@ -48,6 +48,28 @@ export function createDraftSession(
     control_pending: null,
     version: 1,
     draft: true,
+    plan: false,
+  }
+}
+
+/**
+ * What Core needs to create a draft's session (`draftSession`): its mode,
+ * project and own settings (FIX-13). A goal takes the preset, never plan
+ * mode (`plan` false); unset settings stay the defaults.
+ */
+export function draftSessionOf(
+  draft: SessionInfo | null | undefined,
+  plan = true,
+) {
+  return {
+    mode: draft?.mode === 'build' ? ('build' as const) : ('chat' as const),
+    project: {
+      project_id: draft?.project_id ?? null,
+      project_path: draft?.project_path ?? null,
+      project_name: draft?.project_name ?? null,
+    },
+    ...(plan && draft?.plan ? { plan: true } : {}),
+    ...(draft?.preset ? { preset: draft.preset } : {}),
   }
 }
 
@@ -71,7 +93,14 @@ export function promoteDraftSession(
   )
   if (index < 0) return [incoming, ...sessions]
   const next = sessions.slice()
-  next[index] = { ...sessions[index], ...incoming, draft: undefined }
+  // The draft's own settings now live in Core, with the session.
+  next[index] = {
+    ...sessions[index],
+    ...incoming,
+    draft: undefined,
+    plan: undefined,
+    preset: undefined,
+  }
   return dedupeSessions(next)
 }
 

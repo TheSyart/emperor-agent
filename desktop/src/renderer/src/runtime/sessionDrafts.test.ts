@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { SessionInfo } from '../types'
 
 const NOW = '2026-01-01T00:00:00+0800'
 
@@ -114,5 +115,52 @@ describe('session draft helpers', () => {
 
     expect(next[0].title).toBe('界面重塑')
     expect(next[0].title_status).toBe('generated')
+  })
+
+  // FIX-13: the start page's plan mode and preset belong to its draft.
+  it('1 · a draft starts in the defaults and carries only what was changed', async () => {
+    const { createDraftSession, draftSessionOf } =
+      await import('./sessionDrafts')
+    const draft = createDraftSession({
+      mode: 'build',
+      projectId: 'p',
+      projectPath: '/p',
+      projectName: 'P',
+    })
+    expect(draft.plan).toBe(false)
+    expect(draft.preset).toBeUndefined()
+    const project = { project_id: 'p', project_path: '/p', project_name: 'P' }
+    expect(draftSessionOf(draft)).toEqual({ mode: 'build', project })
+    const own: SessionInfo = { ...draft, plan: true, preset: 'read-only' }
+    expect(draftSessionOf(own)).toEqual({
+      mode: 'build',
+      project,
+      plan: true,
+      preset: 'read-only',
+    })
+    // A goal takes the preset, never plan mode.
+    expect(draftSessionOf(own, false)).toEqual({
+      mode: 'build',
+      project,
+      preset: 'read-only',
+    })
+  })
+
+  it('1 · a promoted draft drops its own settings: they now live in Core', async () => {
+    const { createDraftSession, promoteDraftSession } =
+      await import('./sessionDrafts')
+    const draft: SessionInfo = {
+      ...createDraftSession(),
+      plan: true,
+      preset: 'read-only',
+    }
+    const [row] = promoteDraftSession(
+      [draft],
+      draft.id,
+      session({ id: 'real-1', title: '新会话' }),
+    )
+    expect(row).toMatchObject({ id: 'real-1' })
+    expect(row.plan).toBeUndefined()
+    expect(row.preset).toBeUndefined()
   })
 })

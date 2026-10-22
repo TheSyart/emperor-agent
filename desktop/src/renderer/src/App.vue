@@ -51,7 +51,6 @@ import { activeConfirm } from './components/ui/confirm'
 import { isConversationRoute, sessionLocation } from './router'
 import { shouldShowModelSetupPrompt } from './components/onboarding/modelSetupDialogModel'
 import { runInitialStartup } from './appStartup'
-import { showDataNotices } from './appDataNotices'
 import { buildSlashPaletteItems } from './commands'
 import { createCommandCatalogLoader } from './commandCatalog'
 import {
@@ -82,6 +81,7 @@ import {
   isStaleDraftRoute,
   shouldFollowActiveSession,
 } from './runtime/routeFollow'
+import { draftSessionOf } from './runtime/sessionDrafts'
 import {
   notificationFromNotice,
   type RuntimeNotice,
@@ -263,7 +263,16 @@ async function runGoalAction(
 async function onSessionActivate(id: string) {
   await sessionStore.activate(id)
   switchSession(id)
-  if (sessionStore.isDraftSessionId(id)) return
+  // The start page shows its draft's own plan mode and preset, never the
+  // previous chat's plan or goal (FIX-13).
+  if (sessionStore.isDraftSessionId(id)) {
+    const { showDraftControls } = await import('./runtime/draftControls')
+    return showDraftControls(
+      boot,
+      () => (sessionId.value === id ? sessionStore.getSession(id) : undefined),
+      () => core('control.get', null),
+    )
+  }
   await bootstrap.loadBootstrap(false, sessionStore.backendSessionId())
   restoreRuntimeState()
 }
@@ -329,11 +338,14 @@ onMounted(async () => {
   })
   startupDone.value = true
   // REL-03: an older Emperor than last time, or a restore just applied.
-  void showDataNotices({
-    load: () => core('storage.versions'),
-    toast: pushToast,
-    openStorage: () => void settingsRoute.openSettings('advanced', 'storage'),
-  })
+  // Loaded after start-up, outside the first-load budget.
+  void import('./appDataNotices').then(({ showDataNotices }) =>
+    showDataNotices({
+      load: () => core('storage.versions'),
+      toast: pushToast,
+      openStorage: () => void settingsRoute.openSettings('advanced', 'storage'),
+    }),
+  )
   await loadCommands()
 })
 
@@ -400,17 +412,12 @@ async function resolveCommandSessionId(): Promise<string> {
   if (current) return current
   const draftId = sessionId.value
   const draft = sessionStore.getSession(draftId)
+  const { mode, project, ...settings } = draftSessionOf(draft)
   const created = await core('sessions.create', {
     title: draft?.title || '新会话',
-    mode: draft?.mode || 'chat',
-    project:
-      draft?.mode === 'build'
-        ? {
-            project_id: draft.project_id ?? null,
-            project_path: draft.project_path ?? null,
-            project_name: draft.project_name ?? null,
-          }
-        : null,
+    mode,
+    project: mode === 'build' ? project : null,
+    ...settings,
   })
   // Same promotion path as a first message: swap the draft row in place so the
   // route watcher follows to the real session instead of losing the draft id.
@@ -509,6 +516,9 @@ const {
   commandDescriptors,
   resolveSessionId: resolveCommandSessionId,
   controlSessionId: () => sessionStore.backendSessionId() || null,
+  draftId: () =>
+    sessionStore.backendSessionId() ? null : sessionStore.activeId.value,
+  updateDraft: sessionStore.updateDraft,
   sendMessage,
   ensureCommands: (timeoutMs) =>
     commandDescriptors.value.length

@@ -6,19 +6,13 @@
  * user switched to while the request was in flight.
  */
 import type { GoalOperationResult, SessionInfo } from '../types'
+import { draftSessionOf } from '../runtime/sessionDrafts'
 
 export interface GoalStartRequest {
   objective: string
   sessionId: string
   clientDraftId?: string
-  draftSession?: {
-    mode: 'chat' | 'build'
-    project: {
-      project_id: string | null
-      project_path: string | null
-      project_name: string | null
-    }
-  }
+  draftSession?: ReturnType<typeof draftSessionOf>
 }
 
 export function createGoalStarter(deps: {
@@ -31,21 +25,12 @@ export function createGoalStarter(deps: {
   return async (objective) => {
     const owner = deps.currentSessionId()
     const draft = deps.draftFor(owner)
+    // A goal takes the draft's preset, never its plan mode (FIX-13).
     const result = await deps.start({
       objective,
       sessionId: owner,
       ...(draft
-        ? {
-            clientDraftId: owner,
-            draftSession: {
-              mode: draft.mode === 'build' ? 'build' : 'chat',
-              project: {
-                project_id: draft.project_id ?? null,
-                project_path: draft.project_path ?? null,
-                project_name: draft.project_name ?? null,
-              },
-            },
-          }
+        ? { clientDraftId: owner, draftSession: draftSessionOf(draft, false) }
         : {}),
     })
     deps.apply(result.sessionId || owner, result)

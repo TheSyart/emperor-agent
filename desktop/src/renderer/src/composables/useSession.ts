@@ -224,6 +224,15 @@ export function useSession() {
     }
   }
 
+  /** A draft's own plan mode or preset (FIX-13): local until it is sent. */
+  function updateDraft(
+    id: string,
+    patch: Pick<SessionInfo, 'plan'> | Pick<SessionInfo, 'preset'>,
+  ) {
+    const hit = sessions.value.find((s) => s.id === id && s.draft)
+    if (hit) Object.assign(hit, patch)
+  }
+
   /** Promote a draft locally (slash commands create the session themselves). */
   function promoteDraft(draftId: string, session: SessionInfo) {
     sessions.value = promoteDraftSession(sessions.value, draftId, session)
@@ -282,6 +291,7 @@ export function useSession() {
     archive,
     activate,
     applySessionCreatedEvent,
+    updateDraft,
     promoteDraft,
     applySessionTitleUpdatedEvent,
     applySessionControlPending,

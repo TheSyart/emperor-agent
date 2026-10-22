@@ -38,7 +38,7 @@ import {
   onCoreEvent,
   setViewingSession,
 } from '../api/backend'
-import { isDraftSessionId } from '../runtime/sessionDrafts'
+import { draftSessionOf, isDraftSessionId } from '../runtime/sessionDrafts'
 import { core } from '../api/http'
 import { ActionEffectStore } from '../runtime/actionEffect'
 import {
@@ -473,17 +473,9 @@ export function useRuntime(options: {
   }
 
   function draftSubmitPayload(draftId: string): Record<string, unknown> {
-    const draft = options.resolveDraftSession?.(draftId)
     return {
       clientDraftId: draftId,
-      draftSession: {
-        mode: draft?.mode === 'build' ? 'build' : 'chat',
-        project: {
-          project_id: draft?.project_id ?? null,
-          project_path: draft?.project_path ?? null,
-          project_name: draft?.project_name ?? null,
-        },
-      },
+      draftSession: draftSessionOf(options.resolveDraftSession?.(draftId)),
     }
   }
 

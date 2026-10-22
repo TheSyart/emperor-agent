@@ -1962,6 +1962,83 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
   })
 })
 
+// FIX-13: a draft's first message carries the draft's own settings.
+describe('a draft while Core creates its session (FIX-13)', () => {
+  function draftRow(id: string, extra: Record<string, unknown> = {}) {
+    return {
+      id,
+      title: '新会话',
+      created_at: '',
+      updated_at: '',
+      preview: '',
+      mode: 'chat' as const,
+      project_id: null,
+      project_path: null,
+      project_name: null,
+      message_count: 0,
+      title_status: 'draft',
+      control_pending: null,
+      version: 1,
+      draft: true,
+      ...extra,
+    }
+  }
+
+  function setup(
+    draftId: string,
+    extra: Record<string, unknown> = {},
+    submit: (args: unknown[]) => Promise<unknown> = () => new Promise(() => {}),
+  ) {
+    let listener: ((event: unknown) => void) | null = null
+    const calls: unknown[][] = []
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        calls.push(args)
+        if (args[0] === 'chat.submit') return await submit(args)
+        if (args[0] === 'chat.stopRuntime') return { cancelled: 1, active: [] }
+        return { ok: true }
+      },
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => undefined
+      },
+    })
+    const options = testOptions()
+    const runtime = useRuntime({
+      ...options,
+      resolveDraftSession: (id: string) =>
+        id === draftId ? draftRow(id, extra) : undefined,
+    })
+    runtime.connectSocket()
+    runtime.switchSession(draftId)
+    const created = (sessionId: string) =>
+      emitCoreEvent(listener, {
+        event: 'session_created',
+        seq: 1,
+        session_id: sessionId,
+        session: { id: sessionId, title: '新会话' },
+        client_draft_id: draftId,
+      })
+    const submits = () =>
+      calls
+        .filter((call) => call[0] === 'chat.submit')
+        .map((call) => call[1] as Record<string, unknown>)
+    const stops = () => calls.filter((call) => call[0] === 'chat.stopRuntime')
+    return { runtime, options, calls, created, submits, stops }
+  }
+
+  it("2 · the first message carries the draft's plan mode and preset", async () => {
+    const f = setup('draft:own', { plan: true, preset: 'read-only' })
+    void f.runtime.sendMessage('先出计划')
+    await flushPromises()
+    expect(f.submits()[0]).toMatchObject({
+      sessionId: 'draft:own',
+      clientDraftId: 'draft:own',
+      draftSession: { mode: 'chat', plan: true, preset: 'read-only' },
+    })
+  })
+})
+
 async function flushPromises(count = 5): Promise<void> {
   for (let i = 0; i < count; i += 1) await Promise.resolve()
 }
