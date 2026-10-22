@@ -140,12 +140,12 @@ it('checks npm, upgrades Claude Code with its own npm and shows the new version'
   expect(readFileSync(join(root, 'npm-calls'), 'utf8').trim()).toBe(
     'install -g @anthropic-ai/claude-code@2.1.308',
   )
-  // 稍后 has nothing left to hide; a wrong target is refused.
+  // Only the version offered: another release is refused.
   await expect(
     invokeCoreOperation(
       core,
       'executors.upgrade',
-      [{ profileId: 'codex-default', target: '0.163.0' }],
+      [{ profileId: 'codex-default', target: '0.160.0' }],
       VIEW,
     ),
   ).rejects.toMatchObject({ code: 'EXECUTOR_UPGRADE_UNAVAILABLE' })
@@ -157,6 +157,45 @@ it('checks npm, upgrades Claude Code with its own npm and shows the new version'
       VIEW,
     ),
   ).rejects.toThrow()
+})
+
+it('Codex 0.153.4 is offered 0.163.0, the highest release Emperor verified, and upgrades to it', async () => {
+  const { api: core, events } = await api(await registry())
+  await enable(core)
+  await invokeCoreOperation(core, 'executors.probe', [
+    { profileId: 'codex-default' },
+  ])
+  const versions = (await invokeCoreOperation(core, 'executors.versions', [
+    { refresh: true },
+  ])) as ExecutorVersionsView
+  expect(
+    versions.executors.find((e) => e.profileId === 'codex-default'),
+  ).toMatchObject({
+    installed: '0.153.4',
+    latest: '0.163.0',
+    verified: ['0.153', '0.163'],
+    target: '0.163.0',
+    unverified: null,
+    upgrade: {
+      oneClick: true,
+      command: 'npm install -g @openai/codex@0.163.0',
+    },
+  })
+  await invokeCoreOperation(
+    core,
+    'executors.upgrade',
+    [{ profileId: 'codex-default', target: '0.163.0' }],
+    VIEW,
+  )
+  let done: ExecutorUpgradeView | undefined
+  await waitFor(() => {
+    done = events
+      .filter((e) => e.event === 'executor_upgrade' && e.upgrade)
+      .map((e) => e.upgrade as ExecutorUpgradeView)
+      .find((u) => u.state !== 'waiting' && u.state !== 'running')
+    return !!done
+  }, 15_000)
+  expect(done).toMatchObject({ state: 'succeeded', installed: '0.163.0' })
 })
 
 it('offline: the versions stay unknown and nothing breaks', async () => {

@@ -58,7 +58,6 @@ import { provideDirtyGuard } from '../ui/useDirtyGuard'
 import { useFocusTrap } from '../ui/useFocusTrap'
 import SettingsHeaderBar from './SettingsHeaderBar.vue'
 import SettingsNav from './SettingsNav.vue'
-import { useExecutorUpgrades } from './executors/executorUpgrades'
 import { provideSettingsHeader } from './settingsHeader'
 import {
   SETTINGS_SECTIONS,
@@ -92,11 +91,27 @@ const settings = useSettingsRoute()
 const { open, section } = settings
 // The dot on 子智能体: a new Claude Code or Codex version, or a failed
 // upgrade (AGT-13). Read when the settings open; 子智能体 asks npm itself.
-const upgrades = useExecutorUpgrades()
+// Loaded, not imported: it is shared with that section's chunk.
+const executorsMarked = ref(false)
+let markFollowed = false
 watch(
   open,
   (isOpen) => {
-    if (isOpen) void upgrades.load()
+    if (!isOpen) return
+    void import('./executors/executorUpgrades').then((module) => {
+      const upgrades = module.useExecutorUpgrades()
+      if (!markFollowed) {
+        markFollowed = true
+        watch(
+          upgrades.attention,
+          (marked) => {
+            executorsMarked.value = marked
+          },
+          { immediate: true },
+        )
+      }
+      return upgrades.load()
+    })
   },
   { immediate: true },
 )
@@ -180,7 +195,7 @@ watch(
           <SettingsNav
             :active="section"
             :title-id="titleId"
-            :marks="{ executors: upgrades.attention.value }"
+            :marks="{ executors: executorsMarked }"
             @select="select"
           />
           <div class="settings-content">
