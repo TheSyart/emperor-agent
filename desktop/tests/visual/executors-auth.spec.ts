@@ -28,10 +28,11 @@ async function open(
   mode: string,
   theme: 'dark' | 'light',
   size = { width: 1280, height: 860 },
+  extra = '',
 ) {
   await page.setViewportSize(size)
   await page.goto(
-    `/chat/build-ui?settings=executors&visualTheme=${theme}&visualExecutors=${mode}`,
+    `/chat/build-ui?settings=executors&visualTheme=${theme}&visualExecutors=${mode}${extra}`,
   )
   const dialog = page.getByRole('dialog', { name: '设置' })
   await expect(dialog).toBeVisible()
@@ -297,5 +298,29 @@ for (const theme of ['dark', 'light'] as const) {
       detailPage.locator('[data-claude-install-command]'),
     ).toHaveText('curl -fsSL https://claude.ai/install.sh | bash')
     await shot(page, `detail-claude-missing-${theme}`)
+  })
+
+  // FIX-16: Codex's own default model is not offered to its ChatGPT login;
+  // the line under the model picker says so and what tasks use instead.
+  test(`Codex 详情: its own default model is not offered to this login (${theme})`, async ({
+    page,
+  }) => {
+    const { dialog } = await open(
+      page,
+      'signed-in',
+      theme,
+      undefined,
+      '&visualCodexDefault=unavailable',
+    )
+    const detailPage = await detail(dialog, 'codex')
+    const line = detailPage.locator('[data-default-model-unavailable]')
+    await expect(line).toHaveText(
+      '你的 Codex 默认模型 gpt-6.1-sol 这个账号用不了，交给 Codex 的任务会改用 gpt-5.6-sol；也可以在上面选一个模型。',
+    )
+    await expect(detailPage.locator('[data-run-fact="configured"]')).toHaveText(
+      'gpt-5.6-sol（代替 gpt-6.1-sol）',
+    )
+    await line.scrollIntoViewIfNeeded()
+    await shot(page, `detail-codex-default-unavailable-${theme}`)
   })
 }

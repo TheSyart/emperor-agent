@@ -29,9 +29,16 @@ import {
   CODEX_FILE_CREDENTIALS,
   type CodexAuthLease,
 } from '../codex-auth'
+import {
+  codexModelRows,
+  replacementModel,
+  type OfferedModel,
+} from '../model-choice'
 /** History pages stay well under the 4 MiB protocol frame limit. */
 const HISTORY_PAGE_BYTES = 1024 * 1024
 const HISTORY_TURNS = 20
+/** How long a run waits for Codex to list the login's models (FIX-16). */
+const MODEL_LIST_TIMEOUT_MS = 8000
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -431,11 +438,18 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
       providerTurnId: string | undefined,
       closed = false,
       summary = '',
-      startFailure: DelegationError | undefined
+      startFailure: DelegationError | undefined,
+      /** The model the thread reports: Codex's own default, or Emperor's. */
+      threadModel: string | undefined,
+      /** The model a turn asks for instead (FIX-16). */
+      turnModel: string | undefined
     let closePromise: Promise<{ quiescent: boolean }> | undefined
     // One session is one run: its tokens count from the thread totals.
     const meter = createCodexUsageMeter()
-    let runtimeMetadata: ExecutorEventPayload = {
+    let runtimeMetadata: Extract<
+      ExecutorEventPayload,
+      { type: 'runtime_metadata' }
+    > = {
       type: 'runtime_metadata',
       source: 'thread-configuration',
       searchMode: 'live',
@@ -769,6 +783,7 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
           'Codex resumed a different thread',
         )
       providerSessionId = thread.id
+      threadModel = string(response.model)
       runtimeMetadata = {
         type: 'runtime_metadata',
         source: 'thread-configuration',
@@ -796,6 +811,81 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
           input.secretValues ?? [],
         ).slice(0, 4096),
       )
+    }
+    /**
+     * The models this login offers (`model/list`, hidden ones too: they
+     * still run), from this run's own Codex process. Undefined when Codex
+     * cannot say within {@link MODEL_LIST_TIMEOUT_MS} (FIX-16).
+     */
+    const offeredModels = async (): Promise<OfferedModel[] | undefined> => {
+      const controller = new AbortController()
+      const stop = () => controller.abort()
+      input.signal.addEventListener('abort', stop, { once: true })
+      const timer = setTimeout(stop, MODEL_LIST_TIMEOUT_MS)
+      timer.unref()
+      try {
+        const rows: OfferedModel[] = [],
+          cursors = new Set<string>()
+        let cursor: string | undefined
+        for (let page = 0; page < 8; page++) {
+          const result = await rpc!.request(
+            'model/list',
+            { limit: 100, includeHidden: true, ...(cursor ? { cursor } : {}) },
+            controller.signal,
+          )
+          rows.push(...codexModelRows(result.data))
+          const next = string(result.nextCursor)
+          if (!next || cursors.has(next)) break
+          cursors.add(next)
+          cursor = next
+        }
+        return rows.length ? rows : undefined
+      } catch (error) {
+        if (input.signal.aborted) throw error
+        return undefined
+      } finally {
+        clearTimeout(timer)
+        input.signal.removeEventListener('abort', stop)
+      }
+    }
+    /** `turn/start` for the active turn, then its buffered notifications. */
+    const startTurn = async (turn: ExecutorTurnInput): Promise<string> => {
+      const response = await rpc!.request(
+        'turn/start',
+        {
+          threadId: providerSessionId,
+          clientUserMessageId: turn.messageId,
+          input: [{ type: 'text', text: turn.text, text_elements: [] }],
+          cwd: input.cwd,
+          approvalPolicy: 'never',
+          sandboxPolicy: {
+            type: 'externalSandbox',
+            networkAccess: 'enabled',
+          },
+          ...(turnModel ? { model: turnModel } : {}),
+          ...(turn.outputSchema ? { outputSchema: turn.outputSchema } : {}),
+        },
+        input.signal,
+      )
+      const turnId = string(record(response.turn).id)
+      if (!turnId)
+        throw new DelegationError(
+          'PROTOCOL_INVALID',
+          'Codex accepted turn has no id',
+        )
+      if (providerTurnId && providerTurnId !== turnId)
+        throw new DelegationError(
+          'PROTOCOL_INVALID',
+          'Codex response and notification disagree on turn identity',
+        )
+      providerTurnId = turnId
+      emit({ type: 'turn_started', turnId })
+      emit(runtimeMetadata)
+      for (const [method, params] of earlyNotifications.splice(0))
+        notification(method, params)
+      for (const [id, method, params] of earlyRequests.splice(0))
+        await serverRequest(id, method, params)
+      return turnId
     }
     return {
       providerSessionId,
@@ -904,41 +994,56 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
         // A running turn may be silent for long (a build, a question): only
         // the delegation's run limit bounds it, not the idle timer.
         releaseTurn = rpc!.hold?.()
-        const response = await rpc!.request(
-          'turn/start',
-          {
-            threadId: providerSessionId,
-            clientUserMessageId: turn.messageId,
-            input: [{ type: 'text', text: turn.text, text_elements: [] }],
-            cwd: input.cwd,
-            approvalPolicy: 'never',
-            sandboxPolicy: {
-              type: 'externalSandbox',
-              networkAccess: 'enabled',
-            },
-            ...(turn.outputSchema ? { outputSchema: turn.outputSchema } : {}),
-          },
-          input.signal,
+        // Nobody in Emperor chose a model and Codex's own default is not in
+        // the list its ChatGPT login offers (FIX-16): the turn asks for the
+        // list's default instead. Only that login's list is the account's
+        // own; with an API key or another provider a model the list leaves
+        // out may still run, so only a refusal changes it (the retry
+        // below). The user's ~/.codex is never written.
+        if (input.codexAuth && !input.profile.defaultModel && threadModel) {
+          const pick = replacementModel(
+            (await offeredModels()) ?? [],
+            threadModel,
+          )
+          if (pick) {
+            turnModel = pick
+            runtimeMetadata = {
+              ...runtimeMetadata,
+              model: pick,
+              modelChoice: {
+                configured: threadModel,
+                used: pick,
+                reason: 'default-unavailable',
+              },
+            }
+          }
+        }
+        return { providerTurnId: await startTurn(turn) }
+      },
+      retryOnSupportedModel: async (turn, refused) => {
+        if (closed || startFailure || active?.runId !== turn.runId)
+          return undefined
+        const current = turnModel ?? threadModel,
+          configured = refused ?? current
+        const pick = replacementModel(
+          (await offeredModels()) ?? [],
+          undefined,
+          [refused, current],
         )
-        const turnId = string(record(response.turn).id)
-        if (!turnId)
-          throw new DelegationError(
-            'PROTOCOL_INVALID',
-            'Codex accepted turn has no id',
-          )
-        if (providerTurnId && providerTurnId !== turnId)
-          throw new DelegationError(
-            'PROTOCOL_INVALID',
-            'Codex response and notification disagree on turn identity',
-          )
-        providerTurnId = turnId
-        emit({ type: 'turn_started', turnId })
-        emit(runtimeMetadata)
-        for (const [method, params] of earlyNotifications.splice(0))
-          notification(method, params)
-        for (const [id, method, params] of earlyRequests.splice(0))
-          await serverRequest(id, method, params)
-        return { providerTurnId: turnId }
+        if (!pick || closed) return undefined
+        turnModel = pick
+        runtimeMetadata = {
+          ...runtimeMetadata,
+          model: pick,
+          ...(configured
+            ? { modelChoice: { configured, used: pick, reason: 'retried' } }
+            : {}),
+        }
+        // The same turn again, in the same thread, on the chosen model.
+        providerTurnId = undefined
+        summary = ''
+        releaseTurn = rpc!.hold?.()
+        return { providerTurnId: await startTurn(turn), model: pick }
       },
       steer: async (turn) => {
         if (closed || !active || providerTurnId !== turn.providerTurnId)

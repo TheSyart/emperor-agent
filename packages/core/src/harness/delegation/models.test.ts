@@ -312,3 +312,117 @@ it('never waits behind a running Codex task to list models, and never starts a s
   expect(spawn).not.toHaveBeenCalled()
   await running.release()
 })
+
+/** A ChatGPT login: the one whose model list is the account's own. */
+function chatGptLogin(home: string) {
+  writeFileSync(
+    join(home, '.codex', 'auth.json'),
+    JSON.stringify({
+      auth_mode: 'chatgpt',
+      tokens: { access_token: 'a', refresh_token: 'r', account_id: 'x' },
+    }),
+  )
+}
+
+it('FIX-16 · 6 · the catalog says when Codex’s own default is not in the list this login offers, and what a run uses instead', async () => {
+  const f = fixture()
+  chatGptLogin(f.home)
+  writeFileSync(join(f.home, '.codex', 'config.toml'), 'model="gpt-6.1-sol"\n')
+  const offered = [
+    { id: 'gpt-6-astra' },
+    { id: 'gpt-5.6-sol', isDefault: true },
+    { id: 'gpt-5.6-terra' },
+    { id: 'gpt-5.5-legacy', hidden: true },
+  ]
+  const service = new ExecutorModelCatalogService({
+    ...f,
+    readNative: async () => offered,
+  })
+  const value = await service.list(f.profile, true)
+  expect(value.defaultUnavailable).toEqual({
+    model: 'gpt-6.1-sol',
+    replacement: 'gpt-5.6-sol',
+  })
+  // A model hidden from the picker is not offered there.
+  expect(value.models.map((m) => m.id)).not.toContain('gpt-5.5-legacy')
+  // From the cache too, after a restart.
+  const again = new ExecutorModelCatalogService({
+    ...f,
+    readNative: async () => {
+      throw Error('not asked')
+    },
+  })
+  expect((await again.list(f.profile)).defaultUnavailable).toEqual({
+    model: 'gpt-6.1-sol',
+    replacement: 'gpt-5.6-sol',
+  })
+  // The user's own configuration file is only read.
+  expect(readFileSync(join(f.home, '.codex', 'config.toml'), 'utf8')).toBe(
+    'model="gpt-6.1-sol"\n',
+  )
+})
+
+it('FIX-16 · 6 · no hint for a default the list offers (hidden included), without a list, or with an API key', async () => {
+  const f = fixture()
+  chatGptLogin(f.home)
+  writeFileSync(
+    join(f.home, '.codex', 'config.toml'),
+    'model="gpt-5.5-legacy"\n',
+  )
+  const offered = new ExecutorModelCatalogService({
+    ...f,
+    readNative: async () => [
+      { id: 'gpt-5.6-sol', isDefault: true },
+      { id: 'gpt-5.5-legacy', hidden: true },
+    ],
+  })
+  expect((await offered.list(f.profile, true)).defaultUnavailable).toBeNull()
+  const g = fixture()
+  chatGptLogin(g.home)
+  writeFileSync(join(g.home, '.codex', 'config.toml'), 'model="gpt-6.1-sol"\n')
+  const unknown = new ExecutorModelCatalogService({
+    ...g,
+    readNative: async () => {
+      throw Error('offline')
+    },
+  })
+  const value = await unknown.list(g.profile, true)
+  expect(value.models.some((m) => m.source === 'builtin')).toBe(true)
+  expect(value.defaultUnavailable).toBeNull()
+  // An API key's models are not decided by Codex's list.
+  const k = fixture()
+  writeFileSync(join(k.home, '.codex', 'config.toml'), 'model="gpt-4.1"\n')
+  const apiKey = new ExecutorModelCatalogService({
+    ...k,
+    readNative: async () => [{ id: 'gpt-5.6-sol', isDefault: true }],
+  })
+  expect((await apiKey.list(k.profile, true)).defaultUnavailable).toBeNull()
+})
+
+it('FIX-16 · the model list asks Codex for hidden models too and keeps its default and hidden flags', async () => {
+  const f = fixture()
+  const runtime = await f.runtime.prepare(f.profile, 'dlg-models-flags')
+  const { fakeCodexProcesses, fakeCodexRequests } = await import('./testing')
+  const rows = await readNativeModels(
+    f.profile,
+    runtime,
+    fakeCodexProcesses({
+      defaultModel: 'gpt-6.1-sol',
+      models: [
+        { id: 'gpt-6-astra' },
+        { id: 'gpt-5.6-sol', isDefault: true },
+        { id: 'gpt-5.5-legacy', hidden: true },
+      ],
+    }),
+    new AbortController().signal,
+  )
+  expect(rows).toEqual([
+    { id: 'gpt-6-astra', name: 'gpt-6-astra' },
+    { id: 'gpt-5.6-sol', name: 'gpt-5.6-sol', isDefault: true },
+    { id: 'gpt-5.5-legacy', name: 'gpt-5.5-legacy', hidden: true },
+  ])
+  expect(
+    fakeCodexRequests(runtime.tempRoot).find((r) => r.method === 'model/list')
+      ?.includeHidden,
+  ).toBe(true)
+})

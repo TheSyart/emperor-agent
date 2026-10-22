@@ -12,6 +12,8 @@ import { fixture, spec } from './service-test-fixture'
 import { settlementNotice } from './notices'
 import { WorkspaceOperationError } from '../../workspace/common'
 import { setCoreLogSink, type LogLine } from '../../util/log'
+import { codexModelRejection } from './testing'
+import type { NormalizedExecutorEvent } from './types'
 
 const lines: LogLine[] = []
 afterEach(() => {
@@ -228,3 +230,109 @@ it.each([
     }
   },
 )
+
+// FIX-16: a failed turn the executor reported says why. An empty text used
+// to hide its error (every Codex run of the user's ended with `text: ""`
+// and a 400 about the model); now the readable reason opens the summary.
+
+const REASON =
+  'Codex 不支持模型 gpt-6.1-sol（ChatGPT 账号登录）。请在「设置 › 子智能体 › Codex › 默认模型」里换一个可用的模型。'
+
+function scripted(
+  events: (base: {
+    delegationId: string
+    runId: string
+    generation: number
+  }) => NormalizedExecutorEvent[],
+) {
+  return fixture(async function* (turn, open) {
+    yield* events({
+      delegationId: open.delegationId,
+      runId: turn.runId,
+      generation: open.generation,
+    })
+  })
+}
+
+async function settle(f: ReturnType<typeof fixture>) {
+  try {
+    const { record, run, state } = await failedRun(f)
+    return {
+      record,
+      run,
+      notice: Object.values(state.outbox).find((n) => n.runId === run.id),
+    }
+  } finally {
+    await f.service.shutdown()
+    f.cleanup()
+  }
+}
+
+it('FIX-16 · 1 · 7 · an empty text no longer hides the error: the summary and the parent’s notice carry its readable reason', async () => {
+  const f = scripted((base) => [
+    {
+      type: 'turn_finished',
+      status: 'failed',
+      text: '  ',
+      error:
+        '{"type":"error","status":500,"error":{"type":"server_error","message":"The server had an error"}}',
+      ...base,
+    },
+  ])
+  const { run, notice, record } = await settle(f)
+  const reason =
+    'Codex 这一轮失败：服务暂时出错（HTTP 500，server_error）：The server had an error'
+  expect(run).toMatchObject({
+    phase: 'failed',
+    failureCode: 'EXECUTOR_TURN_FAILED',
+    summary: reason,
+  })
+  expect(notice?.text).toContain('execution=failed (EXECUTOR_TURN_FAILED)')
+  expect(notice?.text).toContain(reason)
+  expect(settlementNotice(record, run).text).toBe(notice?.text)
+})
+
+it('FIX-16 · 2 · 7 · the user’s 400 is EXECUTOR_MODEL_UNSUPPORTED, naming the model and where to change it', async () => {
+  const f = scripted((base) => [
+    {
+      type: 'runtime_metadata',
+      source: 'thread-configuration',
+      model: 'gpt-6.1-sol',
+      provider: 'openai',
+      ...base,
+    },
+    {
+      type: 'turn_finished',
+      status: 'failed',
+      text: '',
+      error: codexModelRejection('gpt-6.1-sol'),
+      ...base,
+    },
+  ])
+  const { run, notice } = await settle(f)
+  expect(run).toMatchObject({
+    phase: 'failed',
+    failureCode: 'EXECUTOR_MODEL_UNSUPPORTED',
+    summary: REASON,
+  })
+  expect(notice?.text).toContain(
+    'execution=failed (EXECUTOR_MODEL_UNSUPPORTED)',
+  )
+  expect(notice?.text).toContain(REASON)
+})
+
+it('FIX-16 · 1 · what the subagent wrote before failing follows the reason', async () => {
+  const f = scripted((base) => [
+    {
+      type: 'turn_finished',
+      status: 'failed',
+      text: 'Read the files; started the review.',
+      error: 'stream disconnected before completion',
+      ...base,
+    },
+  ])
+  const { run } = await settle(f)
+  expect(run.summary).toBe(
+    'Codex 这一轮失败：stream disconnected before completion\n\nRead the files; started the review.',
+  )
+})

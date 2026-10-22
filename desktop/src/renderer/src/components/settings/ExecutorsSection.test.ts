@@ -1429,3 +1429,77 @@ it('8 · no copy in the app, Core or the manuals asks for a Claude token or offe
     walk(join(repo, dir))
   expect(offenders).toEqual([])
 })
+
+it('FIX-16 · 6 · the Codex 详情 page says when Codex’s own default model is not offered to this login', async () => {
+  const followsCli = payload()
+  delete followsCli.config.profiles[1].defaultModel
+  listExecutors.mockResolvedValue(followsCli)
+  listExecutorModels.mockImplementation(async ({ profileId }) => ({
+    profileId,
+    models: [
+      { id: 'gpt-6.1-sol', name: 'gpt-6.1-sol', source: 'configuration' },
+      { id: 'gpt-5.6-sol', name: 'gpt-5.6-sol', source: 'cli' },
+    ],
+    configuredModel: 'gpt-6.1-sol',
+    provider: 'openai',
+    checkedAt: 1000,
+    diagnostic: null,
+    defaultUnavailable:
+      profileId === 'profile-1'
+        ? { model: 'gpt-6.1-sol', replacement: 'gpt-5.6-sol' }
+        : null,
+  }))
+  await mount()
+  const page = await openDetail('codex')
+  expect(
+    page
+      .querySelector<HTMLElement>('[data-default-model-unavailable]')
+      ?.textContent?.trim(),
+  ).toBe(
+    '你的 Codex 默认模型 gpt-6.1-sol 这个账号用不了，交给 Codex 的任务会改用 gpt-5.6-sol；也可以在上面选一个模型。',
+  )
+  // 能力与运行 › 使用的模型 says what tasks really run on.
+  expect(page.querySelector('[data-run-fact="configured"]')!.textContent).toBe(
+    'gpt-5.6-sol（代替 gpt-6.1-sol）',
+  )
+  // A model chosen here is used as is: Codex's own default no longer matters.
+  await choose(
+    page.querySelector<HTMLElement>('[data-default-model]')!,
+    'gpt-5.6-sol',
+  )
+  expect(lastSaved().config.profiles[1].defaultModel).toBe('gpt-5.6-sol')
+  expect(page.querySelector('[data-default-model-unavailable]')).toBeNull()
+  expect(page.querySelector('[data-run-fact="configured"]')!.textContent).toBe(
+    'gpt-5.6-sol',
+  )
+})
+
+it('FIX-16 · 6 · no such line when Codex’s default is offered, or for Claude Code', async () => {
+  const followsCli = payload()
+  for (const profile of followsCli.config.profiles) delete profile.defaultModel
+  listExecutors.mockResolvedValue(followsCli)
+  await mount()
+  expect(
+    (await openDetail('codex')).querySelector(
+      '[data-default-model-unavailable]',
+    ),
+  ).toBeNull()
+  // Core sets it only for Codex: Claude Code's page has no such line.
+  listExecutorModels.mockImplementation(async ({ profileId }) => ({
+    profileId,
+    models: [],
+    configuredModel: null,
+    provider: 'anthropic',
+    checkedAt: 1000,
+    diagnostic: null,
+    defaultUnavailable: null,
+  }))
+  app?.unmount()
+  root?.remove()
+  await mount()
+  expect(
+    (await openDetail('claude-code')).querySelector(
+      '[data-default-model-unavailable]',
+    ),
+  ).toBeNull()
+})

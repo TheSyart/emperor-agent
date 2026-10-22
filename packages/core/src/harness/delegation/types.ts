@@ -395,6 +395,19 @@ export interface DelegationRunRecord {
   failureCode?: string
   summary?: string
   usage?: ExecutorRunUsage
+  /** The model the run used instead of Codex's own default (FIX-16). */
+  modelChoice?: ExecutorModelChoice
+}
+/**
+ * FIX-16: nobody in Emperor chose a model and Codex's own default
+ * (`configured`, from its config.toml) is not offered to this login, so the
+ * run used `used` instead — chosen before the turn (`default-unavailable`)
+ * or after the provider refused the default (`retried`).
+ */
+export interface ExecutorModelChoice {
+  configured: string
+  used: string
+  reason: 'default-unavailable' | 'retried'
 }
 export interface ExecutorOpenInput {
   onProcessStarted?: (
@@ -465,6 +478,8 @@ export type ExecutorEventPayload =
       provider?: string
       advertisedTools?: string[]
       searchMode?: 'live' | 'cached' | 'unknown'
+      /** The executor used another model than its own default (FIX-16). */
+      modelChoice?: ExecutorModelChoice
     }
   | { type: 'session_bound'; sessionId: string }
   | { type: 'turn_started'; turnId: string }
@@ -518,6 +533,16 @@ export interface ExecutorSession {
   answer(input: ExecutorInteractionAnswer): Promise<void>
   interrupt(providerTurnId: string): Promise<void>
   close(): Promise<{ quiescent: boolean }>
+  /**
+   * FIX-16: the provider refused the model nobody in Emperor chose (Codex's
+   * own default). Ask the executor again which models this login offers
+   * and start the same turn once more on one of them, in the same
+   * conversation. Undefined when no other model is known.
+   */
+  retryOnSupportedModel?(
+    input: ExecutorTurnInput,
+    refused: string | undefined,
+  ): Promise<{ providerTurnId: string; model: string } | undefined>
 }
 export interface ExecutorAdapter {
   inspect?(input: ExecutorOpenInput): Promise<NativeSessionInspection>
@@ -640,4 +665,9 @@ export interface ExecutorModelCatalog {
   provider: string | null
   checkedAt: number | null
   diagnostic: string | null
+  /**
+   * FIX-16: Codex's own default model (its config.toml) is not in the list
+   * this login offers; a run that follows the CLI uses `replacement`.
+   */
+  defaultUnavailable?: { model: string; replacement: string } | null
 }

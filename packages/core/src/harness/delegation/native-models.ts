@@ -19,10 +19,12 @@ import {
   acquireCodexAuth,
   type CodexAuthLease,
 } from './codex-auth'
-export interface NativeModel {
-  id: string
-  name?: string
-}
+import { codexModelRows, type OfferedModel } from './model-choice'
+/**
+ * A model the CLI lists for this login. Codex also says which is its
+ * default and which its picker hides (FIX-16).
+ */
+export type NativeModel = OfferedModel
 export type PreparedExecutor = Awaited<
   ReturnType<ExecutorRuntimeService['prepare']>
 >
@@ -118,23 +120,14 @@ export async function readNativeModels(
         cursors = new Set<string>()
       let cursor: string | undefined
       for (let page = 0; page < 8; page++) {
+        // Hidden models too: one the picker leaves out still runs, and a
+        // default that is only hidden is still offered (FIX-16).
         const result = await rpc.request(
           'model/list',
-          { limit: 100, includeHidden: false, ...(cursor ? { cursor } : {}) },
+          { limit: 100, includeHidden: true, ...(cursor ? { cursor } : {}) },
           signal,
         )
-        if (Array.isArray(result.data))
-          for (const raw of result.data) {
-            const row = raw as Record<string, unknown>,
-              id = row.model ?? row.id
-            if (typeof id === 'string')
-              models.push({
-                id,
-                ...(typeof row.displayName === 'string'
-                  ? { name: row.displayName }
-                  : {}),
-              })
-          }
+        models.push(...codexModelRows(result.data))
         if (typeof result.nextCursor !== 'string' || !result.nextCursor) break
         if (cursors.has(result.nextCursor)) throw Error('repeated model cursor')
         cursor = result.nextCursor

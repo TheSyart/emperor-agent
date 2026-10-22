@@ -128,6 +128,23 @@ function modelError(target: ExecutorProfile): string {
     return '最多保存 64 个自定义模型'
   return ''
 }
+/**
+ * Codex's own default model is not offered to this login (FIX-16): a task
+ * that follows the CLI runs on the list's model instead. A model chosen
+ * here is used as is, so the line goes away.
+ */
+const defaultGap = computed(() => {
+  const target = profile.value
+  return target && !target.defaultModel
+    ? (catalogs.value[target.id]?.defaultUnavailable ?? null)
+    : null
+})
+const defaultUnavailable = computed(() => {
+  const gap = defaultGap.value
+  return gap
+    ? `你的 ${name.value} 默认模型 ${gap.model} 这个账号用不了，交给 ${name.value} 的任务会改用 ${gap.replacement}；也可以在上面选一个模型。`
+    : ''
+})
 function addModel(target: ExecutorProfile) {
   if (modelError(target)) return
   const id = modelText.value.trim()
@@ -187,8 +204,12 @@ const runFacts = computed(() => {
     {
       key: 'configured',
       term: '使用的模型',
+      // What tasks really run on (FIX-16): Codex's own default may give way.
       value:
         target.defaultModel ??
+        (defaultGap.value
+          ? `${defaultGap.value.replacement}（代替 ${defaultGap.value.model}）`
+          : null) ??
         catalog?.configuredModel ??
         runtime?.configuredModel ??
         '跟随本机 CLI',
@@ -462,6 +483,11 @@ const runFacts = computed(() => {
             @update:model-value="selectModel(profile, $event)"
           />
         </SettingsRow>
+        <SettingsRow
+          v-if="defaultUnavailable"
+          data-default-model-unavailable
+          :description="defaultUnavailable"
+        />
         <SettingsRow v-if="addingModel" title="自定义模型 ID" layout="stacked">
           <div class="editor">
             <TextField

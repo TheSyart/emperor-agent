@@ -14,6 +14,8 @@ import {
   type ExecutorProfile,
   type ExecutorAdapter,
   type ExecutorSession,
+  type ExecutorModelChoice,
+  type ExecutorTurnInput,
   type NormalizedExecutorEvent,
   type ExecutorProbe,
   type ExecutorBilling,
@@ -67,6 +69,7 @@ import type { CodexAuthLink } from './codex-auth'
 import { executorGrants } from './environment'
 import {
   describeRunFailure,
+  describeTurnError,
   sanitizeFailureMessage,
   type RunStage,
 } from './failure'
@@ -1525,7 +1528,11 @@ export class DelegationService {
       protocolNote: string | undefined,
       /** How far the run got: a failure says where (FIX-15). */
       stage: RunStage = 'budget',
-      secrets: readonly string[] = []
+      secrets: readonly string[] = [],
+      /** The model the run used instead of Codex's default (FIX-16). */
+      modelChoice: ExecutorModelChoice | undefined,
+      /** A refused model was already retried once (FIX-16). */
+      retried = false
     let structured: unknown
     try {
       if (e.stop) controller.abort()
@@ -1747,12 +1754,13 @@ export class DelegationService {
         throw new DelegationError('ABORTED', 'cancelled before submit')
       sent = true
       stage = 'submit'
-      const provider = await session.submit({
+      const turn: ExecutorTurnInput = {
         runId: activeRunId,
         messageId,
         text: dispatchText,
         outputSchema: spec.outputSchema,
-      })
+      }
+      const provider = await session.submit(turn)
       accepted = true
       await this.serial(e, async () => {
         await this.append(e, {
@@ -1840,6 +1848,12 @@ export class DelegationService {
         if (event.type === 'runtime_metadata') {
           if (event.model) model = event.model
           if (event.provider) modelProvider = event.provider
+          // Codex's own default is not offered to this login (FIX-16): the
+          // run says which model it used instead, for 任务详情.
+          if (event.modelChoice) {
+            modelChoice = event.modelChoice
+            await this.change(e, activeRunId, { modelChoice })
+          }
         }
         if (event.type === 'usage') {
           const { type: _type, ...reported } = event as typeof event & {
@@ -1916,11 +1930,66 @@ export class DelegationService {
           void this.handleQuestion(question, controller.signal)
         }
         if (event.type === 'turn_finished') {
+          // An empty text is no text: it must not hide the error (FIX-16).
+          const text = event.text?.trim() ? event.text : undefined
+          const failure =
+            event.status === 'failed'
+              ? describeTurnError(event.error, record.backend, {
+                  ...(model ? { model } : {}),
+                  secrets,
+                })
+              : undefined
+          // The provider refused the model nobody in Emperor chose (Codex's
+          // own default): once, the executor lists what this login offers
+          // and runs the same turn again on one of those models (FIX-16).
+          if (
+            failure?.failureCode === 'EXECUTOR_MODEL_UNSUPPORTED' &&
+            !spec.model &&
+            !profile.defaultModel &&
+            !modelChoice &&
+            !retried &&
+            session.retryOnSupportedModel &&
+            !e.stop &&
+            !controller.signal.aborted
+          ) {
+            retried = true
+            const again = await session
+              .retryOnSupportedModel(turn, failure.model ?? model)
+              .catch(() => undefined)
+            if (again && !e.stop && !controller.signal.aborted) {
+              await this.serial(e, () =>
+                this.append(e, {
+                  type: 'provider-bound',
+                  runId: activeRunId,
+                  sessionId: session!.providerSessionId,
+                  turnId: again.providerTurnId,
+                  generation: run.generation,
+                }),
+              )
+              model = again.model
+              summary = ''
+              continue
+            }
+          }
           status = event.status
           structured = event.structured
-          if (event.status === 'failed')
+          if (event.status === 'failed') {
             failureCode = event.failureCode ?? 'EXECUTOR_TURN_FAILED'
-          summary = boundText(event.text ?? event.error ?? summary, 8192)
+            // An adapter's generic code gives way to a precise one.
+            if (failureCode === 'EXECUTOR_TURN_FAILED' && failure?.failureCode)
+              failureCode = failure.failureCode
+          }
+          // A failed turn opens with why it failed, then what the subagent
+          // wrote; the summary, its row, 任务详情, the parent's notice and
+          // collect_agent all show it (FIX-16).
+          summary = boundText(
+            failure
+              ? text
+                ? failure.reason + '\n\n' + text
+                : failure.reason
+              : (text ?? event.error ?? summary),
+            8192,
+          )
           break
         }
       }

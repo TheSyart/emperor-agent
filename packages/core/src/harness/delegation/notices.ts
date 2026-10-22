@@ -22,7 +22,7 @@ export function settlementNotice(
   // A failure names its code; the summary says why (FIX-15).
   const failure =
     run.failureCode && run.phase !== 'completed' ? ` (${run.failureCode})` : ''
-  const text = `External ${record.backend} delegation ${record.id}, run ${run.id}: execution=${run.phase}${failure}${ended}; artifact acceptance=${run.acceptance}.${resultLine(run)}\n${run.summary || 'No closing summary.'}`
+  const text = `External ${record.backend} delegation ${record.id}, run ${run.id}: execution=${run.phase}${failure}${ended}; artifact acceptance=${run.acceptance}.${resultLine(run)}${modelChoiceLine(run)}\n${run.summary || 'No closing summary.'}`
   const bytes = Buffer.from(text),
     bounded =
       bytes.length <= 8192
@@ -92,6 +92,17 @@ export class DelegationNoticeOutbox {
  * What the run left in its isolated workspace (AGT-06), for the parent:
  * nothing reaches the project until it is applied.
  */
+/**
+ * The model a run used instead of Codex's own default (FIX-16), so the
+ * parent can tell the user; empty when the run used the configured one.
+ */
+export function modelChoiceLine(run: DelegationRunRecord): string {
+  const choice = run.modelChoice
+  if (!choice) return ''
+  return choice.reason === 'retried'
+    ? ` Model: Codex's own default model ${choice.configured} was refused for this login; the run was retried on ${choice.used}.`
+    : ` Model: Codex's own default model ${choice.configured} is not available to this login; this run used ${choice.used}.`
+}
 export function resultLine(run: DelegationRunRecord): string {
   const result = run.result
   if (!result || result.totals.files === 0) return ''

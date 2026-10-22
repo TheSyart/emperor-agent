@@ -60,6 +60,7 @@ export type DelegationEvent =
           | 'receiptId'
           | 'usage'
           | 'structured'
+          | 'modelChoice'
         >
       >
     }
