@@ -232,6 +232,10 @@ export async function installVisualCoreBridge(
       // state (`notice`: signed out, right after the upgrade that deleted a
       // saved token).
       const visualExecutorsMode = visualParams.get('visualExecutors')
+      // FIX-16: `?visualCodexDefault=unavailable` — Codex's own default model
+      // is not in the list its ChatGPT login offers.
+      const visualCodexDefaultUnavailable =
+        visualParams.get('visualCodexDefault') === 'unavailable'
       const visualExecutorProfiles = [
         {
           id: 'claude-default',
@@ -8207,6 +8211,31 @@ export async function installVisualCoreBridge(
             case 'executors.models': {
               if (!visualExecutorsMode) return {}
               const input = (args[0] || {}) as { profileId?: string }
+              if (
+                visualCodexDefaultUnavailable &&
+                input.profileId === 'codex-default'
+              )
+                return {
+                  profileId: input.profileId,
+                  models: [
+                    {
+                      id: 'gpt-6.1-sol',
+                      name: 'gpt-6.1-sol',
+                      source: 'configuration',
+                    },
+                    ...['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'].map(
+                      (id) => ({ id, name: id, source: 'cli' }),
+                    ),
+                  ],
+                  configuredModel: 'gpt-6.1-sol',
+                  provider: 'openai',
+                  checkedAt: Date.now(),
+                  diagnostic: null,
+                  defaultUnavailable: {
+                    model: 'gpt-6.1-sol',
+                    replacement: 'gpt-5.6-sol',
+                  },
+                }
               return {
                 profileId: input.profileId,
                 models: [],
