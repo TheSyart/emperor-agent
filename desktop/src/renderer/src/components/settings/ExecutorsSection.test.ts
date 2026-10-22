@@ -1458,6 +1458,10 @@ it('FIX-16 · 6 · the Codex 详情 page says when Codex’s own default model i
   ).toBe(
     '你的 Codex 默认模型 gpt-6.1-sol 这个账号用不了，交给 Codex 的任务会改用 gpt-5.6-sol；也可以在上面选一个模型。',
   )
+  // 能力与运行 › 使用的模型 says what tasks really run on.
+  expect(page.querySelector('[data-run-fact="configured"]')!.textContent).toBe(
+    'gpt-5.6-sol（代替 gpt-6.1-sol）',
+  )
   // A model chosen here is used as is: Codex's own default no longer matters.
   await choose(
     page.querySelector<HTMLElement>('[data-default-model]')!,
@@ -1465,6 +1469,9 @@ it('FIX-16 · 6 · the Codex 详情 page says when Codex’s own default model i
   )
   expect(lastSaved().config.profiles[1].defaultModel).toBe('gpt-5.6-sol')
   expect(page.querySelector('[data-default-model-unavailable]')).toBeNull()
+  expect(page.querySelector('[data-run-fact="configured"]')!.textContent).toBe(
+    'gpt-5.6-sol',
+  )
 })
 
 it('FIX-16 · 6 · no such line when Codex’s default is offered, or for Claude Code', async () => {

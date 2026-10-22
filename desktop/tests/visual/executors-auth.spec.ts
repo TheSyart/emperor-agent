@@ -317,6 +317,9 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(line).toHaveText(
       '你的 Codex 默认模型 gpt-6.1-sol 这个账号用不了，交给 Codex 的任务会改用 gpt-5.6-sol；也可以在上面选一个模型。',
     )
+    await expect(detailPage.locator('[data-run-fact="configured"]')).toHaveText(
+      'gpt-5.6-sol（代替 gpt-6.1-sol）',
+    )
     await line.scrollIntoViewIfNeeded()
     await shot(page, `detail-codex-default-unavailable-${theme}`)
   })
