@@ -127,73 +127,94 @@ describe('external browser attachment', () => {
     driver.dispose()
   })
 
-  it('ends an element wait when its budget expires during observation', async () => {
-    const { bridge, emit, request } = fixture()
-    const originalRequest = request.getMockImplementation()!
-    request.mockImplementation(async (profileId, method, ...args) => {
-      if (method !== 'target.observe')
-        return originalRequest(profileId, method, ...args)
-      const signal = args[2]
-      if (!signal) throw new Error('missing observation signal')
-      return await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          signal.removeEventListener('abort', onAbort)
-          resolve({
+  it.each(['timeout', 'clock-held', 'caller-abort'] as const)(
+    'ends an element wait during observation: %s',
+    async (mode) => {
+      const { bridge, emit, request } = fixture()
+      const originalRequest = request.getMockImplementation()!
+      request.mockImplementation(async (profileId, method, ...args) => {
+        if (method !== 'target.observe')
+          return originalRequest(profileId, method, ...args)
+        const signal = args[2]
+        if (!signal) throw new Error('missing observation signal')
+        return await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            signal.removeEventListener('abort', onAbort)
+            resolve({
+              targetId,
+              generation: 1,
+              revision: 1,
+              origin: 'https://example.com',
+              viewport: { width: 800, height: 600, scale: 1 },
+              elements: [
+                {
+                  ref: 'r1.1',
+                  role: 'button',
+                  name: 'Ready',
+                  actions: ['click'],
+                },
+              ],
+              truncated: false,
+              redactions: 0,
+            })
+          }, 400)
+          const onAbort = () => {
+            clearTimeout(timer)
+            reject(new Error('cancelled'))
+          }
+          signal.addEventListener('abort', onAbort, { once: true })
+        })
+      })
+      const driver = new ExternalBrowserDriver(bridge)
+      emit({
+        type: 'target-attached',
+        pairingId,
+        targetId,
+        tabId: 7,
+        windowId: 2,
+        origin: 'https://example.com',
+        generation: 1,
+      })
+      await driver.claimAttachedTarget(
+        targetId,
+        'owner-1',
+        new AbortController().signal,
+      )
+
+      const clock =
+        mode === 'clock-held'
+          ? vi.spyOn(Date, 'now').mockReturnValue(Date.now())
+          : null
+      const caller = new AbortController()
+      const cancel =
+        mode === 'caller-abort' ? setTimeout(() => caller.abort(), 20) : null
+      try {
+        const waiting = driver.wait(
+          {
             targetId,
             generation: 1,
-            revision: 1,
-            origin: 'https://example.com',
-            viewport: { width: 800, height: 600, scale: 1 },
-            elements: [
-              {
-                ref: 'r1.1',
-                role: 'button',
-                name: 'Ready',
-                actions: ['click'],
-              },
-            ],
-            truncated: false,
-            redactions: 0,
+            condition: { kind: 'element', name: 'Ready', state: 'present' },
+            timeoutMs: 100,
+          },
+          caller.signal,
+        )
+        if (mode === 'caller-abort') {
+          await expect(waiting).rejects.toMatchObject({
+            code: 'TIMEOUT_NO_EFFECT',
           })
-        }, 400)
-        const onAbort = () => {
-          clearTimeout(timer)
-          reject(new Error('cancelled'))
+        } else {
+          const result = await waiting
+          expect(result.satisfied).toBe(false)
+          expect(result.revision).toBe(0)
         }
-        signal.addEventListener('abort', onAbort, { once: true })
-      })
-    })
-    const driver = new ExternalBrowserDriver(bridge)
-    emit({
-      type: 'target-attached',
-      pairingId,
-      targetId,
-      tabId: 7,
-      windowId: 2,
-      origin: 'https://example.com',
-      generation: 1,
-    })
-    await driver.claimAttachedTarget(
-      targetId,
-      'owner-1',
-      new AbortController().signal,
-    )
-
-    const result = await driver.wait(
-      {
-        targetId,
-        generation: 1,
-        condition: { kind: 'element', name: 'Ready', state: 'present' },
-        timeoutMs: 100,
-      },
-      new AbortController().signal,
-    )
-
-    expect(result.satisfied).toBe(false)
-    expect(result.revision).toBe(0)
-    expect(driver.snapshot(targetId)).toMatchObject({ revision: 0 })
-    driver.dispose()
-  })
+        expect(driver.snapshot(targetId)).toMatchObject({ revision: 0 })
+      } finally {
+        if (cancel) clearTimeout(cancel)
+        clock?.mockRestore()
+        driver.dispose()
+      }
+    },
+  )
 
   it.each([
     { width: -1, height: 600, scale: 1 },

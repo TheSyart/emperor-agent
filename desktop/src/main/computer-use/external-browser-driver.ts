@@ -1226,7 +1226,9 @@ export class ExternalBrowserDriver implements BrowserDriver {
       } catch (error) {
         if (signal.aborted)
           throw new UiError('TIMEOUT_NO_EFFECT', 'wait cancelled')
-        if (Date.now() >= deadline) return timedOut()
+        // Our budget timer may fire before the wall clock reads the deadline
+        // (timer precision or a clock adjustment). Its abort is a timeout too.
+        if (attempt.signal.aborted || Date.now() >= deadline) return timedOut()
         throw error
       } finally {
         clearTimeout(timer)
