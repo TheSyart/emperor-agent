@@ -16,10 +16,7 @@ const session = (sessionId: string): CommandCatalogOwner => ({ sessionId })
 function buildDraft(id: string, path: string): CommandCatalogOwner {
   return {
     sessionId: id,
-    draftSession: {
-      mode: 'build',
-      project: { project_id: path, project_path: path, project_name: 'app' },
-    },
+    draftSession: { mode: 'build', project: { project_path: path } },
   }
 }
 
@@ -185,14 +182,7 @@ describe('the owner of the composer’s catalog (FIX-14)', () => {
   it('names a draft by its id with the mode and project its session will get', () => {
     expect(commandCatalogOwner('draft:1', row)).toEqual({
       sessionId: 'draft:1',
-      draftSession: {
-        mode: 'build',
-        project: {
-          project_id: 'p1',
-          project_path: '/work/app',
-          project_name: 'app',
-        },
-      },
+      draftSession: { mode: 'build', project: { project_path: '/work/app' } },
     })
     expect(commandCatalogOwner('draft:2', { ...row, mode: 'chat' })).toEqual({
       sessionId: 'draft:2',

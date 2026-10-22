@@ -50,7 +50,6 @@ import { runInitialStartup } from './appStartup'
 import { showDataNotices } from './appDataNotices'
 import { buildSlashPaletteItems } from './commands'
 import {
-  commandCatalogKey,
   commandCatalogOwner,
   createCommandCatalogLoader,
   createCommandCompleter,
@@ -377,8 +376,9 @@ function commandOwner() {
   return commandCatalogOwner(id, sessionStore.getSession(id))
 }
 
+// Another session, draft or draft project: another catalog.
 watch(
-  () => commandCatalogKey(commandOwner()),
+  () => JSON.stringify(commandOwner()),
   () => void loadCommands(),
 )
 

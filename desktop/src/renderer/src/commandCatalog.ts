@@ -10,13 +10,10 @@ import type { SessionInfo } from './types'
  */
 export interface CommandCatalogOwner {
   sessionId: string
+  /** Core reads a Build draft's Skills from `project_path`. */
   draftSession?: {
     mode: 'chat' | 'build'
-    project: {
-      project_id: string | null
-      project_path: string | null
-      project_name: string | null
-    } | null
+    project: { project_path: string | null } | null
   }
 }
 
@@ -33,23 +30,9 @@ export function commandCatalogOwner(
     sessionId: id,
     draftSession: {
       mode: build ? 'build' : 'chat',
-      project: build
-        ? {
-            project_id: row.project_id ?? null,
-            project_path: row.project_path ?? null,
-            project_name: row.project_name ?? null,
-          }
-        : null,
+      project: build ? { project_path: row.project_path ?? null } : null,
     },
   }
-}
-
-/** One catalog per session, and per draft and project. */
-export function commandCatalogKey(owner: CommandCatalogOwner | null): string {
-  const draft = owner?.draftSession
-  return draft
-    ? `${owner.sessionId}\n${draft.mode}\n${draft.project?.project_path ?? ''}`
-    : (owner?.sessionId ?? '')
 }
 
 export interface CommandCatalogLoaderOptions {
@@ -63,7 +46,11 @@ export interface CommandCatalogLoader {
   refresh: () => Promise<void>
 }
 
-/** Keeps the last good catalog visible while coalescing concurrent rescans. */
+/**
+ * Keeps the last good catalog visible while coalescing concurrent rescans.
+ * One catalog per owner: a session, or a draft with its mode and project
+ * (the owner's JSON is the key).
+ */
 export function createCommandCatalogLoader(
   options: CommandCatalogLoaderOptions,
 ): CommandCatalogLoader {
@@ -73,7 +60,7 @@ export function createCommandCatalogLoader(
     const owner = options.currentOwner()
     // Nothing on screen yet (start-up): the shown list stays.
     if (!owner) return Promise.resolve()
-    const key = commandCatalogKey(owner)
+    const key = JSON.stringify(owner)
     if (inFlight) {
       if (inFlight.key === key) return inFlight.promise
       return inFlight.promise.then(() => refresh())
@@ -81,7 +68,7 @@ export function createCommandCatalogLoader(
     const promise = options
       .list(owner)
       .then((commands) => {
-        if (commandCatalogKey(options.currentOwner()) === key)
+        if (JSON.stringify(options.currentOwner()) === key)
           options.apply(commands)
       })
       .catch((cause: unknown) => {
