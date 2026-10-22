@@ -71,6 +71,12 @@ const CHEAP_KDF: MasterKdf = {
   kind: 'scrypt',
   params: { cost: 1024, blockSize: 8, parallelization: 1, keyLength: 32 },
 }
+/**
+ * Room for tests that derive at the production cost on purpose: a 128 MiB
+ * scrypt takes 0.17 s on an idle Mac and up to 8 s on loaded, throttled
+ * cores, where the three-derivation test below took 25 s (FIX-17).
+ */
+const PRODUCTION_KDF_MS = 60_000
 const LEGACY_ARGON2_KDF: MasterKdf = {
   kind: 'argon2id',
   params: { memory: 65536, passes: 3, parallelism: 4, tagLength: 32 },
@@ -268,41 +274,47 @@ describe('CredentialVault', () => {
     ])
   })
 
-  it('uses a scrypt master password, locks on restart and after inactivity', async () => {
-    const path = vaultPath()
-    let now = 10_000
-    const vault = new CredentialVault({ path, storage, now: () => now })
-    const handle = vault.save({
-      label: 'site',
-      bindings: [{ kind: 'origin', origin: 'https://x.test' }],
-      password: 'private',
-    })
-    await vault.setMasterPassword(
-      'correct horse battery',
-      'correct horse battery',
-    )
-    const stored = JSON.parse(readFileSync(path, 'utf8')) as {
-      master: { kind: string; params: unknown }
-    }
-    expect(stored.master).toMatchObject({
-      kind: 'scrypt',
-      params: {
-        cost: 131_072,
-        blockSize: 8,
-        parallelization: 1,
-        keyLength: 32,
-      },
-    })
-    vault.lock()
-    expect(vault.locked).toBe(true)
-    expect(() => vault.secret(handle.handleId, 'password')).toThrow()
-    expect(await vault.unlock('incorrect')).toBe(false)
-    expect(await vault.unlock('correct horse battery')).toBe(true)
-    expect(vault.secret(handle.handleId, 'password')).toBe('private')
-    now += 30 * 60_000 + 1
-    expect(vault.locked).toBe(true)
-    expect(new CredentialVault({ path, storage }).locked).toBe(true)
-  })
+  it(
+    'uses a scrypt master password, locks on restart and after inactivity',
+    async () => {
+      const path = vaultPath()
+      let now = 10_000
+      const vault = new CredentialVault({ path, storage, now: () => now })
+      const handle = vault.save({
+        label: 'site',
+        bindings: [{ kind: 'origin', origin: 'https://x.test' }],
+        password: 'private',
+      })
+      await vault.setMasterPassword(
+        'correct horse battery',
+        'correct horse battery',
+      )
+      const stored = JSON.parse(readFileSync(path, 'utf8')) as {
+        master: { kind: string; params: unknown }
+      }
+      expect(stored.master).toMatchObject({
+        kind: 'scrypt',
+        params: {
+          cost: 131_072,
+          blockSize: 8,
+          parallelization: 1,
+          keyLength: 32,
+        },
+      })
+      vault.lock()
+      expect(vault.locked).toBe(true)
+      expect(() => vault.secret(handle.handleId, 'password')).toThrow()
+      expect(await vault.unlock('incorrect')).toBe(false)
+      expect(await vault.unlock('correct horse battery')).toBe(true)
+      expect(vault.secret(handle.handleId, 'password')).toBe('private')
+      now += 30 * 60_000 + 1
+      expect(vault.locked).toBe(true)
+      expect(new CredentialVault({ path, storage }).locked).toBe(true)
+      // Three derivations at the production cost (128 MiB scrypt): 0.5 s on an
+      // idle Mac, past 10 s on a loaded runner (FIX-17).
+    },
+    PRODUCTION_KDF_MS,
+  )
 
   it('refuses to create entries without local encryption', () => {
     const vault = new CredentialVault({
@@ -551,46 +563,51 @@ describe('CredentialVault', () => {
     expect(legacy.secret(handle.handleId, 'password')).toBe('private')
   })
 
-  it('sets a master password where the runtime has no Argon2', async () => {
-    runtime.argon2 = false
-    try {
-      const path = vaultPath()
-      const vault = new CredentialVault({ path, storage })
-      const handle = vault.save({
-        label: 'site',
-        bindings: [{ kind: 'origin', origin: 'https://x.test' }],
-        password: 'private',
-      })
-      await vault.setMasterPassword(
-        'correct horse battery',
-        'correct horse battery',
-      )
-      vault.lock()
-      expect(await vault.unlock('correct horse battery')).toBe(true)
-      expect(vault.secret(handle.handleId, 'password')).toBe('private')
-
-      // An Argon2id vault written where Argon2 existed cannot open here.
-      const older = vaultPath()
-      runtime.argon2 = true
-      await new CredentialVault({
-        path: older,
-        storage,
-        kdf: LEGACY_ARGON2_KDF,
-      }).setMasterPassword('correct horse battery', 'correct horse battery')
+  it(
+    'sets a master password where the runtime has no Argon2',
+    async () => {
       runtime.argon2 = false
-      const failure = await caughtAsync(() =>
-        new CredentialVault({ path: older, storage }).unlock(
+      try {
+        const path = vaultPath()
+        const vault = new CredentialVault({ path, storage })
+        const handle = vault.save({
+          label: 'site',
+          bindings: [{ kind: 'origin', origin: 'https://x.test' }],
+          password: 'private',
+        })
+        await vault.setMasterPassword(
           'correct horse battery',
-        ),
-      )
-      expect([failure.reason, failure.code]).toEqual([
-        'vault-kdf-unavailable',
-        'CAPABILITY_DISABLED',
-      ])
-    } finally {
-      runtime.argon2 = true
-    }
-  })
+          'correct horse battery',
+        )
+        vault.lock()
+        expect(await vault.unlock('correct horse battery')).toBe(true)
+        expect(vault.secret(handle.handleId, 'password')).toBe('private')
+
+        // An Argon2id vault written where Argon2 existed cannot open here.
+        const older = vaultPath()
+        runtime.argon2 = true
+        await new CredentialVault({
+          path: older,
+          storage,
+          kdf: LEGACY_ARGON2_KDF,
+        }).setMasterPassword('correct horse battery', 'correct horse battery')
+        runtime.argon2 = false
+        const failure = await caughtAsync(() =>
+          new CredentialVault({ path: older, storage }).unlock(
+            'correct horse battery',
+          ),
+        )
+        expect([failure.reason, failure.code]).toEqual([
+          'vault-kdf-unavailable',
+          'CAPABILITY_DISABLED',
+        ])
+      } finally {
+        runtime.argon2 = true
+      }
+      // The default KDF where Argon2 is missing is the production scrypt.
+    },
+    PRODUCTION_KDF_MS,
+  )
 
   it('names the local key as its backend on every platform, never the Keychain', () => {
     const path = vaultPath()
@@ -755,7 +772,11 @@ describe('CredentialVault', () => {
 
   it('resets past a key file that fails its checks, with a new key', async () => {
     const path = vaultPath()
-    const first = new CredentialVault({ path, storage: localKey(path) })
+    const first = new CredentialVault({
+      path,
+      storage: localKey(path),
+      kdf: CHEAP_KDF,
+    })
     first.save({
       label: 'site',
       bindings: [{ kind: 'origin', origin: 'https://x.test' }],
