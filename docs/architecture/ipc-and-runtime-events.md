@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：桌面端与 Core 开发者<br>
-> 最后核验：2026-10-22（对照 `1a5cef69`）<br>
+> 最后核验：2026-10-22（对照 `1bb92495`）<br>
 > 事实源：`packages/core/src/api/operations.ts`、`desktop/src/main/core-host.ts`、`desktop/src/main/ipc.ts`、`desktop/src/preload/`、`packages/core/src/harness/projection/`、`packages/core/src/session-log/history.ts`、`packages/core/src/harness/host/session-views.ts`、`packages/core/src/public/runtime-contract.ts`、`desktop/src/shared/ipc-contract.ts`、`desktop/src/main/desktop-capability-ipc.ts`、`desktop/src/main/browser-view.ts`、`desktop/src/main/browser-view-policy.ts`、`desktop/src/preload/desktop-capabilities.ts`、`desktop/src/main/event-bridge.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/conversation/`、`desktop/src/renderer/src/runtime/`、`desktop/src/shared/content-security-policy.ts`、`desktop/src/main/trusted-renderer.ts`、`desktop/src/main/renderer-permissions.ts`、`desktop/src/main/app-menu.ts`、`desktop/src/main/open-path-ipc.ts`、`desktop/src/main/app-version-ipc.ts`、`desktop/src/main/remote-image-ipc.ts`、`desktop/src/main/screenshot-ipc.ts`、`desktop/src/main/logging/`、`desktop/src/main/diagnostics-bundle.ts`、`desktop/src/main/diagnostics-bundle-ipc.ts`、`desktop/src/main/recovery.ts`、`desktop/src/renderer/src/composables/useMarkdownLinks.ts`、`packages/core/src/harness/projection/wire-names.ts`、`packages/core/src/updates/`、`desktop/src/main/update-host.ts`
 
 Electron renderer 不直接导入 Core，也不访问本地文件。同步请求走 preload 的 Core IPC contract；异步过程分两条管线：Chat 与 Trajectory 渲染所需的原始 session 事件走独立的 session event 通道，其余状态走 runtime events（UiEvent）。
@@ -172,7 +172,7 @@ Renderer 对 UiEvent 的 session、task 和 replay 处理使用小型 domain act
 ## 其他 operation 约束
 
 - `tasks.*` 的 `sessionId` 未写时为调用方显示的会话；`tasks.wait`、`tasks.readOutput`、`tasks.transcript` 只读；`tasks.cancel` 任何时候都可以停止，不经过 mutation guard。
-- `chat.stopRuntime({ taskId?, sessionId? })`：带 `taskId` 时停止该任务，否则停止 `sessionId` 指明的会话的 turn；两者都没有时返回 `SESSION_REQUIRED`，不再默认到任何会话。
+- `chat.stopRuntime({ taskId?, sessionId? })`：带 `taskId` 时停止该任务，否则停止 `sessionId` 指明的会话的 turn；两者都没有时返回 `SESSION_REQUIRED`，不再默认到任何会话。草稿的第一条消息发出后、`session_created` 到达前按下的停止，renderer 先记住，等 Core 给出会话 id 再发；这段空档里再发的消息与输入的命令也等到那时，用真实会话 id 发出（FIX-13）。
 - `processes.list/cancel/reparent` 只作用于参数 `sessionId` 指明的会话的受管进程，缺少时返回 `SESSION_REQUIRED`；cancel/reparent 要求 lease，reparent 不能跨 session。
 - `goals.get/pause/resume(goalId, sessionId?)`、`goals.cancel(goalId, reason?, sessionId?)`、`goals.list({ sessionId? })`：会话未写时为调用方显示的会话；renderer 写明当前会话。
 - `scheduler.createJob` / `updateJob`：任务载荷没写会话时绑定到调用方显示的会话。运行记录（`runHistory[]`）的 `status` 增加 `blocked`（定时 turn 遇到审批或提问，已自动拒绝），失败的记录带 `errorCode`（例如 `AUTH`、`TIMEOUT`、`NOT_CONSUMED`）；`scheduler_run_error` 同时用于 `error` 与 `blocked`，带 `status` 与 `code`。

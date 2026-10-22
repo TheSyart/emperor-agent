@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：维护者、开发者、希望理解产品边界的用户<br>
-> 最后核验：2026-10-22（对照 `1a5cef69`）<br>
+> 最后核验：2026-10-22（对照 `1bb92495`）<br>
 > 事实源：`packages/core/src/harness/host/host.ts`、`packages/core/src/api/core-api.ts`、`packages/core/src/api/operations.ts`、`desktop/src/main/`、`desktop/src/preload/`、`desktop/src/renderer/src/router.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/workspace/`、`packages/core/src/harness/delegation/`、`desktop/src/main/logging/`、`desktop/src/main/home-backup.ts`
 
 Emperor Agent 的桌面主产品是本地单用户 Electron 应用。Electron main 进程内创建一个 TypeScript `CoreApi`；`CoreApi` 背后是唯一的内核组合根 `HarnessHost`。Vue renderer 只能通过 preload 暴露的 IPC contract 请求 Core，并通过 runtime events 接收过程状态。源码还提供默认不随桌面安装包开放的 ACP V1 stdio operator preview，它为受信本机 client 创建独立的 `CoreApi`。产品主线没有 Python runtime、HTTP backend 或 WebSocket backend。
@@ -51,7 +51,7 @@ flowchart LR
 
 ## 一次会话请求
 
-1. Renderer 提交 `chat.submit`，附带 session、文本、附件和可选 Skill，以及输入框芯片的位置 `references`（`kind`、`id`、`label`、`start`、`end`；每项在文本中的切片必须正是 `/名称` 或 `@ID`，否则请求被拒；显示文本或命令解析后的文本与位置对不上时，Core 丢弃这些位置，并在 `host/user-meta` 里记 `referencesDropped: true`）。草稿 session 在第一条消息时才被提升为真实 session。
+1. Renderer 提交 `chat.submit`，附带 session、文本、附件和可选 Skill，以及输入框芯片的位置 `references`（`kind`、`id`、`label`、`start`、`end`；每项在文本中的切片必须正是 `/名称` 或 `@ID`，否则请求被拒；显示文本或命令解析后的文本与位置对不上时，Core 丢弃这些位置，并在 `host/user-meta` 里记 `referencesDropped: true`）。草稿 session 在第一条消息时才被提升为真实 session：草稿自己的计划模式与权限预设（`draftSession.plan`、`draftSession.preset`）在发出 `session_created` 和第一轮之前生效；同一个 `clientDraftId` 只提升一次，空档里再提交的消息进入已建好的会话。
 2. `ChatService` 把请求交给 `HarnessHost.submit()`：先在 session log 写入仅供界面使用的 `host/user-meta`（显示文本、附件、`references` 等），再把用户消息放入该 session Agent 的 inbox（`followup`，或运行中插话时 `steer`）。文本里已有某个 Skill 的 `/名称` 手势时，`requestedSkills` 不再在前面重复添加。
 3. `Agent` 空闲时启动驱动循环：一个 turn 由若干 step 组成；每个 step 认领 inbox、执行 pre-step middleware（工作区说明、长期记忆、Skill 目录、压缩、Hooks、Goal、Plan）、从 session log 推导模型请求并调用 LLM。
 4. 模型的流式输出逐块写入 log。模型提出工具调用时，`ToolRegistry` 依次执行参数校验、pre-execute middleware（Hooks）、审批、guard、工具体、post-execute middleware（重复提醒、大结果落盘、Hooks）。并发安全的调用可重叠执行，其余调用形成屏障，结果按模型顺序提交。
