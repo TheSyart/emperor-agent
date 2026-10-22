@@ -300,6 +300,21 @@ describe('faces (UI-S14 · 4)', () => {
     })
   })
 
+  it('FIX-15 · 4 · a run that failed before it started says why on its row', () => {
+    const row = subagentRowOf(
+      external('dlg-p', 'codex', {
+        phase: 'failed',
+        finishedAt: T0 + 34,
+        detail:
+          '准备工作区失败：当前签名执行环境中没有可用 Git（探测失败：timeout）。',
+      }),
+    )
+    expect(row).toMatchObject({ state: 'failed', label: '失败', tone: 'error' })
+    expect(row.summary).toBe(
+      '准备工作区失败：当前签名执行环境中没有可用 Git（探测失败：timeout）。',
+    )
+  })
+
   it('stacks at most three faces, the running ones first', () => {
     const rows = [
       subagentRowOf(
