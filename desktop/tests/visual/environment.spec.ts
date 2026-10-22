@@ -10,8 +10,8 @@ import {
 } from './visualBridge'
 
 // Environment card (环境信息), the changes pill above the composer and the
-// turn scrubber: wide (the chat makes room) vs narrow (the card overlays)
-// × Build vs plain chat, light + dark.
+// turn scrubber: beside the chat, the chat moved clear of it, or over the
+// chat (UI-S16) × Build vs plain chat, light + dark.
 const screenshotDir = resolve(process.cwd(), 'screenshots', 'environment')
 const FIXTURE_TIME = Date.parse('2026-06-26T12:00:00.000Z')
 
@@ -216,14 +216,30 @@ async function open(
     theme?: Theme
     /** The saved card preference (frameState `envCard`). */
     envCard?: 'auto' | 'open' | 'closed'
+    /** An open workspace this wide, on its start view. */
+    workspace?: number
   } = {},
 ) {
-  await page.addInitScript((envCard) => {
-    localStorage.setItem(
-      'emperor.frame.v2',
-      JSON.stringify({ sidebar: 280, envCard }),
-    )
-  }, options.envCard ?? 'open')
+  await page.addInitScript(
+    ({ envCard, workspace }) => {
+      if (window !== window.top) return
+      localStorage.setItem(
+        'emperor.frame.v2',
+        JSON.stringify({
+          sidebar: 280,
+          envCard,
+          ...(workspace
+            ? {
+                workspace,
+                workspaceWidth: workspace,
+                workspacePane: 'launcher',
+              }
+            : {}),
+        }),
+      )
+    },
+    { envCard: options.envCard ?? 'open', workspace: options.workspace ?? 0 },
+  )
   await page.setViewportSize({
     width: options.width ?? 1600,
     height: options.height ?? 900,
@@ -253,6 +269,69 @@ async function expectNoHorizontalOverflow(page: Page) {
 }
 
 const card = (page: Page) => page.locator('.environment-card')
+
+interface Box {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+const right = (box: Box) => box.x + box.width
+const bottom = (box: Box) => box.y + box.height
+const centre = (box: Box) => box.x + box.width / 2
+
+/**
+ * UI-S16: the conversation region (`.conversation-root`), its scroller and
+ * column, the environment card, the composer card and stack, and whether the
+ * card floats over the chat (`data-env-overlay`).
+ */
+async function regionLayout(page: Page) {
+  return page.evaluate(() => {
+    const rect = (selector: string) => {
+      const element = document.querySelector(selector)
+      if (!element) return null
+      const { x, y, width, height } = element.getBoundingClientRect()
+      return { x, y, width, height }
+    }
+    const scroller = document.querySelector<HTMLElement>(
+      '[data-conversation-scroll]',
+    )!
+    return {
+      region: rect('.conversation-root')!,
+      scroller: rect('[data-conversation-scroll]')!,
+      scrollbar: scroller.offsetWidth - scroller.clientWidth,
+      column: rect('[data-chat-flow]')!,
+      card: rect('.environment-card'),
+      composer: rect('.composer-root .card')!,
+      stack: rect('.composer-seat .stack')!,
+      overlay: document
+        .querySelector('.conversation-root')!
+        .hasAttribute('data-env-overlay'),
+      shadow: document.querySelector('.environment-card')
+        ? getComputedStyle(document.querySelector('.environment-card')!)
+            .boxShadow
+        : '',
+    }
+  })
+}
+
+type RegionLayout = Awaited<ReturnType<typeof regionLayout>>
+
+/** The column (and the composer under it) centred in the whole region. */
+function expectCentred(layout: RegionLayout) {
+  const { region, column, composer, scrollbar } = layout
+  expect(centre(column)).toBeCloseTo(
+    region.x + (region.width - scrollbar) / 2,
+    0,
+  )
+  expect(centre(composer)).toBeCloseTo(region.x + region.width / 2, 0)
+}
+
+/** How far the column moves left of centre to clear a card `card` wide. */
+function expectedShift(layout: RegionLayout) {
+  const { region, column, card } = layout
+  return Math.max(0, column.width / 2 + card!.width + 32 - region.width / 2)
+}
 
 for (const theme of ['dark', 'light'] as const) {
   test(`Build card beside a wide chat (${theme}) @baseline`, async ({
@@ -325,16 +404,11 @@ for (const theme of ['dark', 'light'] as const) {
       await envCard.locator('button:visible:not([data-source-item])').count(),
     ).toBeLessThanOrEqual(8)
 
-    // The chat body and the composer make room for the card.
-    const cardBox = (await envCard.boundingBox())!
-    const composerBox = (await page
-      .locator('.composer-root .card')
-      .boundingBox())!
-    expect(composerBox.x + composerBox.width).toBeLessThanOrEqual(cardBox.x)
-    const padding = await page
-      .locator('.chat-body-slot')
-      .evaluate((el) => parseFloat(getComputedStyle(el).paddingInlineEnd))
-    expect(padding).toBeGreaterThanOrEqual(340)
+    // UI-S16: a 1320px region; the column moves left just clear of the card.
+    const layout = await regionLayout(page)
+    expect(layout.overlay).toBe(false)
+    expect(right(layout.column)).toBeCloseTo(layout.card!.x - 16, 0)
+    expect(layout.column.width).toBe(748)
     await expectNoHorizontalOverflow(page)
     await shot(page, `card-wide-build-${theme}`)
     await expectBaseline(page, 'conversation', `environment-card-${theme}`)
@@ -344,12 +418,12 @@ for (const theme of ['dark', 'light'] as const) {
     await open(page, '/chat/build-ui', { theme, width: 1180 })
     const envCard = card(page)
     await expect(envCard).toBeVisible()
-    // An opened card always reserves its space, narrow or wide.
-    const cardBox = (await envCard.boundingBox())!
-    const composerBox = (await page
-      .locator('.composer-root .card')
-      .boundingBox())!
-    expect(composerBox.x + composerBox.width).toBeLessThanOrEqual(cardBox.x)
+    // UI-S16: no room beside a 900px region; the chat stays centred and the
+    // card floats over it, above the composer.
+    const layout = await regionLayout(page)
+    expect(layout.overlay).toBe(true)
+    expectCentred(layout)
+    expect(bottom(layout.card!)).toBeLessThanOrEqual(layout.stack.y - 16 + 0.5)
     await expectNoHorizontalOverflow(page)
     await shot(page, `card-narrow-build-${theme}`)
     const toggle = page.getByRole('button', { name: '环境信息', exact: true })
@@ -699,3 +773,218 @@ test('scrubber hides in a narrow column', async ({ page }) => {
   await page.locator('.session-row', { hasText: '普通对话' }).click()
   await expect(page.locator('.turn-scrubber .tick')).toHaveCount(3)
 })
+
+// ── UI-S16: one region, one scrollbar, a floating card ─────────────────────
+// The chat and the card share the conversation region: the scroller spans
+// all of it (its scrollbar at the far right, under the card), the card floats
+// at the top right, 340 wide. The column (748) and the composer stay centred;
+// where the centred column would run under the card they move left just clear
+// of it (16px), keeping 32px on the left; where even that does not fit, they
+// stay centred and the card floats over the chat with a deeper shadow. The
+// card never covers the composer stack.
+
+test('UI-S16 1 · 2 · the scroller spans the region; a wide one keeps the card beside the centred chat', async ({
+  page,
+}) => {
+  await open(page, '/chat/build-ui', { width: 1920 })
+  await expect(card(page)).toBeVisible()
+  const layout = await regionLayout(page)
+  const { region, scroller, column, composer } = layout
+  const envCard = layout.card!
+  // One region: the scroller (and so its scrollbar) runs to the far right.
+  expect(scroller.x).toBeCloseTo(region.x, 0)
+  expect(right(scroller)).toBeCloseTo(right(region), 0)
+  // The card: 340 wide, 12 from the top and 16 from the right of the region.
+  expect(envCard.width).toBe(340)
+  expect(right(envCard)).toBeCloseTo(right(region) - 16, 0)
+  expect(envCard.y).toBeCloseTo(scroller.y + 12, 0)
+  // Beside: the centred column ends at least 16 short of the card.
+  expect(layout.overlay).toBe(false)
+  expectCentred(layout)
+  expect(column.width).toBe(748)
+  expect(composer.width).toBe(780)
+  expect(right(column)).toBeLessThanOrEqual(envCard.x - 16)
+})
+
+test('UI-S16 3 · at 1440 the column moves left just clear of the card, 32 or more from the left', async ({
+  page,
+}) => {
+  await open(page, '/chat/build-ui', { width: 1440 })
+  await expect(card(page)).toBeVisible()
+  const layout = await regionLayout(page)
+  const { region, scroller, column, composer } = layout
+  const envCard = layout.card!
+  expect(right(scroller)).toBeCloseTo(right(region), 0)
+  expect(layout.overlay).toBe(false)
+  expect(column.width).toBe(748)
+  expect(right(column)).toBeCloseTo(envCard.x - 16, 0)
+  expect(column.x - region.x).toBeGreaterThanOrEqual(32)
+  // The composer moves with it, 16 wider on either side.
+  expect(centre(composer)).toBeCloseTo(centre(column) + layout.scrollbar / 2, 0)
+  expect(composer.width).toBe(780)
+})
+
+for (const { name, width, workspace } of [
+  { name: 'a narrow window', width: 860, workspace: 0 },
+  { name: '1440 with the workspace open', width: 1440, workspace: 560 },
+])
+  test(`UI-S16 4 · in ${name} the card floats over the centred chat, above the composer`, async ({
+    page,
+  }) => {
+    // A short window: the card's rows outgrow the room above the composer.
+    await open(page, '/chat/build-ui', { width, height: 620, workspace })
+    const envCard = card(page)
+    await expect(envCard).toBeVisible()
+    await expect(page.locator('[data-subagent-dock]')).toBeVisible()
+    await page.waitForTimeout(300)
+    const layout = await regionLayout(page)
+    expect(layout.overlay).toBe(true)
+    expectCentred(layout)
+    // Over the chat: the column runs under the card.
+    expect(right(layout.column)).toBeGreaterThan(layout.card!.x)
+    expect(right(layout.card!)).toBeCloseTo(right(layout.region) - 16, 0)
+    expect(layout.card!.width).toBe(Math.min(340, layout.region.width - 32))
+    // The deeper (dialog) shadow.
+    await page.locator('.conversation-root').evaluate((root) => {
+      root.removeAttribute('data-env-overlay')
+    })
+    const beside = await envCard.evaluate(
+      (element) => getComputedStyle(element).boxShadow,
+    )
+    expect(layout.shadow).not.toBe(beside)
+    // It stops 16 above the composer stack and scrolls inside.
+    expect(bottom(layout.card!)).toBeLessThanOrEqual(layout.stack.y - 16 + 0.5)
+    const body = envCard.locator('.card-body')
+    expect(
+      await body.evaluate(
+        (element) => element.scrollHeight > element.clientHeight,
+      ),
+    ).toBe(true)
+    await shot(page, `ui-s16-overlay-${width}-${workspace}`)
+  })
+
+test('UI-S16 5 · closed, the column is centred; opening the card moves it only by the shift', async ({
+  page,
+}) => {
+  await open(page, '/chat/build-ui', { width: 1920, envCard: 'closed' })
+  const toggle = page.getByRole('button', { name: '环境信息', exact: true })
+  const column = page.locator('[data-chat-flow]')
+  for (const width of [1920, 1440, 860]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect(card(page)).toHaveCount(0)
+    await page.waitForTimeout(100)
+    const closed = await regionLayout(page)
+    expectCentred(closed)
+    await toggle.click()
+    await expect(card(page)).toBeVisible()
+    const opened = await regionLayout(page)
+    // Same width (nothing reflows); moved by the shift, or not at all.
+    expect(opened.column.width).toBe(closed.column.width)
+    const shift = opened.overlay ? 0 : expectedShift(opened)
+    expect(opened.column.x).toBeCloseTo(closed.column.x - shift, 0)
+    expect(opened.composer.x).toBeCloseTo(closed.composer.x - shift, 0)
+    if (width === 1440) expect(shift).toBeGreaterThan(100)
+    else expect(shift).toBe(0)
+    await toggle.click()
+    await expect(card(page)).toHaveCount(0)
+    expect((await column.boundingBox())!.x).toBeCloseTo(closed.column.x, 0)
+  }
+})
+
+test('UI-S16 6 · with the workspace open the same rules follow the narrower region', async ({
+  page,
+}) => {
+  // 2240 − 280: beside. With a 560 workspace the region is 1400: shift.
+  await open(page, '/chat/build-ui', { width: 2240 })
+  await expect(card(page)).toBeVisible()
+  const wide = await regionLayout(page)
+  expect(wide.overlay).toBe(false)
+  expectCentred(wide)
+  await page.getByRole('button', { name: '工作台', exact: true }).click()
+  await expect(page.locator('.workspace-panel')).toBeVisible()
+  await page.waitForTimeout(400)
+  const layout = await regionLayout(page)
+  const workspace = (await page.locator('.workspace-panel').boundingBox())!
+  expect(layout.region.width).toBeLessThan(wide.region.width)
+  // The card at the region's top right, left of the workspace.
+  expect(right(layout.card!)).toBeCloseTo(right(layout.region) - 16, 0)
+  expect(right(layout.card!)).toBeLessThanOrEqual(workspace.x)
+  expect(right(layout.scroller)).toBeCloseTo(right(layout.region), 0)
+  expect(layout.overlay).toBe(false)
+  expect(expectedShift(layout)).toBeGreaterThan(0)
+  expect(right(layout.column)).toBeCloseTo(layout.card!.x - 16, 0)
+  expect(layout.column.x - layout.region.x).toBeGreaterThanOrEqual(32)
+  // The scrubber stays at the left edge.
+  const scrubber = (await page.locator('.turn-scrubber').boundingBox())!
+  expect(scrubber.x - layout.region.x).toBeLessThan(8)
+})
+
+test('UI-S16 7 · the to-bottom button and the docks follow the column in every state', async ({
+  page,
+}) => {
+  await open(page, '/chat/build-ui?visualQueue=on', { width: 1920 })
+  await expect(page.locator('.queue-dock')).toBeVisible()
+  await expect(page.locator('[data-subagent-dock]')).toBeVisible()
+  const states: Record<number, string> = {
+    1920: 'beside',
+    1440: 'shift',
+    860: 'overlay',
+  }
+  for (const [width, state] of Object.entries(states)) {
+    await page.setViewportSize({ width: Number(width), height: 900 })
+    await expect(card(page)).toBeVisible()
+    await page.waitForTimeout(300)
+    await page.locator('[data-conversation-scroll]').evaluate((element) => {
+      element.scrollTop = 0
+      element.dispatchEvent(new Event('scroll'))
+    })
+    const toBottom = page.getByRole('button', { name: '回到底部' })
+    await expect(toBottom).toBeVisible()
+    const layout = await regionLayout(page)
+    expect(layout.overlay, state).toBe(state === 'overlay')
+    const axis = centre(layout.column) + layout.scrollbar / 2
+    expect(right((await toBottom.boundingBox())!), state).toBeCloseTo(
+      right(layout.column),
+      0,
+    )
+    for (const selector of [
+      '[data-subagent-dock]',
+      '.changes-dock',
+      '.todo-dock',
+      '.queue-dock',
+      '.composer-root .card',
+    ]) {
+      const dock = (await page.locator(selector).boundingBox())!
+      expect(centre(dock), `${state} ${selector}`).toBeCloseTo(axis, 0)
+    }
+    // The pill starts at its dock's left edge.
+    const pill = (await page.locator('.changes-pill').boundingBox())!
+    const pillDock = (await page.locator('.changes-dock').boundingBox())!
+    expect(pill.x).toBeCloseTo(pillDock.x, 0)
+  }
+})
+
+// Baselines of the three states (the 1600px `environment-card` above is the
+// shifted one).
+for (const theme of ['dark', 'light'] as const) {
+  for (const { state, place, width } of [
+    { state: 'beside', place: 'beside', width: 1920 },
+    { state: 'overlay', place: 'over', width: 860 },
+  ])
+    test(`UI-S16 8 · the card ${place} the chat (${theme}) @baseline`, async ({
+      page,
+    }) => {
+      await open(page, '/chat/build-ui', { theme, width })
+      await expect(card(page)).toBeVisible()
+      await expect(page.locator('[data-subagent-dock]')).toBeVisible()
+      const layout = await regionLayout(page)
+      expect(layout.overlay).toBe(state === 'overlay')
+      await page.mouse.move(0, 0)
+      await shot(page, `ui-s16-${state}-${theme}`)
+      await expectBaseline(
+        page,
+        'conversation',
+        `environment-card-${state}-${theme}`,
+      )
+    })
+}

@@ -47,6 +47,7 @@ import {
 } from '../../workspace/workspaceState'
 import type { SourcesViewState } from './sourcesModel'
 import { resetFrameStateForTest, useFrameState } from '../../shell/frameState'
+import { previewLayout } from '../computer-use/computerUsePreviewState'
 
 let app: App | undefined
 let element: HTMLDivElement | undefined
@@ -59,6 +60,7 @@ afterEach(() => {
   const pending = workspaceRequest().value
   if (pending) consumeWorkspaceRequest(pending)
   resetFrameStateForTest()
+  previewLayout.reservedHeight = 0
 })
 
 const written: ChatNode = {
@@ -165,6 +167,26 @@ async function settle() {
 }
 
 describe('EnvironmentCard (UI-S05: a read-only summary)', () => {
+  it('UI-S16: stops above the composer stack and the preview in CSS, unmeasured', async () => {
+    const source = readFileSync(
+      resolve(__dirname, 'EnvironmentCard.vue'),
+      'utf8',
+    )
+    expect(source).toContain(
+      'max-height: calc(\n    100% - var(--space-3) -\n      max(var(--space-4), var(--env-card-reserve, 0px))\n  );',
+    )
+    expect(source).not.toContain('ResizeObserver')
+    previewLayout.reservedHeight = 208
+    mount()
+    await nextTick()
+    const card = document.querySelector<HTMLElement>('.environment-card')!
+    expect(card.style.maxHeight).toBe('')
+    expect(card.style.getPropertyValue('--env-card-reserve')).toBe('208px')
+    previewLayout.reservedHeight = 0
+    await nextTick()
+    expect(card.style.getPropertyValue('--env-card-reserve')).toBe('0px')
+  })
+
   it('stays within 600 lines', () => {
     const source = readFileSync(
       resolve(__dirname, 'EnvironmentCard.vue'),

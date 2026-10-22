@@ -138,13 +138,37 @@ describe('ConversationView composer seat integration', () => {
     expect(source).toContain('container: conversation / inline-size')
   })
 
-  it('seats the environment card beside chat with reserved space at every opened width', () => {
+  it('UI-S16: floats the environment card over one scrolling region', () => {
     expect(source).toContain('v-if="envCardShown"')
     expect(source).toContain("phase.value !== 'hero'")
     expect(source).toContain('@reveal="revealRow"')
     expect(source).toContain('@close="closeEnvCard"')
-    expect(source).toContain('@container conversation (min-width: 1120px)')
-    expect(source).toContain('padding-inline-end: calc(var(--env-card-width)')
+    // No column reserved for the card: the scroller spans the region.
+    expect(source).not.toContain(
+      'padding-inline-end: calc(var(--env-card-width)',
+    )
+    expect(source).toContain(
+      '--env-card-width: min(340px, 100cqi - 2 * var(--space-4))',
+    )
+    // The chat and the composer move left of a card only from 1152px
+    // (748 + 340 + 2 × 32); narrower the card floats over the chat.
+    expect(source).toContain('@container conversation (min-width: 1152px)')
+    expect(source).toContain('--chat-shift: max(')
+    expect(source).toContain('padding-inline-end: calc(2 * var(--chat-shift')
+    expect(source).toContain(':data-env-overlay="envCardOverlay || undefined"')
+    expect(source).toMatch(/const FLOAT_BESIDE_MIN = 1152\b/)
+  })
+
+  it('UI-S16: the scroller and the computer-use preview use the same 1152px rule', () => {
+    const timeline = readFileSync(join(__dirname, 'ChatTimeline.vue'), 'utf8')
+    expect(timeline).toContain(
+      'padding-inline-end: calc(var(--space-8) + 2 * var(--chat-shift, 0px))',
+    )
+    const preview = readFileSync(
+      join(__dirname, 'computer-use/ComputerUsePreviewStack.vue'),
+      'utf8',
+    )
+    expect(preview).toMatch(/const BESIDE_MIN = 1152\b/)
   })
 
   it('docks the changes pill and seats the async turn scrubber', () => {

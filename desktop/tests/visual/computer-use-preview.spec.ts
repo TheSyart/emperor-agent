@@ -142,13 +142,15 @@ for (const theme of ['light', 'dark'] as const) {
     expect(card.y + card.height).toBeLessThanOrEqual(stack.y)
     const composer = await box(page.locator('.composer-seat .stack'))
     expect(stack.y + stack.height).toBeLessThanOrEqual(composer.y + 1)
-    // The chat body makes room: the preview does not cover the messages.
-    const body = await box(page.locator('.chat-body-slot'))
-    const content = await page.evaluate(() => {
-      const slot = document.querySelector('.chat-body-slot')!
-      return Number.parseFloat(getComputedStyle(slot).paddingRight)
-    })
-    expect(body.x + body.width - content).toBeLessThanOrEqual(stack.x)
+    // UI-S16: one scroller across the region; the column moves left just
+    // clear of the preview (as of the card), the composer with it.
+    const region = await box(page.locator('.conversation-root'))
+    const scroller = await box(page.locator('[data-conversation-scroll]'))
+    expect(scroller.x + scroller.width).toBeCloseTo(region.x + region.width, 0)
+    const column = await box(page.locator('[data-chat-flow]'))
+    expect(column.width).toBe(748)
+    expect(column.x + column.width).toBeCloseTo(stack.x - 16, 0)
+    expect(column.x - region.x).toBeGreaterThanOrEqual(32)
     await shot(page, `beside-chat-${theme}`)
 
     // A strip only brings its card forward.
