@@ -11,7 +11,9 @@
     "ServerRequest.json",
     "ToolRequestUserInputParams.json",
     "ToolRequestUserInputResponse.json",
+    "v1/InitializeResponse.json",
     "v2/AgentMessageDeltaNotification.json",
+    "v2/ModelListResponse.json",
     "v2/ThreadReadParams.json",
     "v2/ThreadResumeParams.json",
     "v2/ThreadStartParams.json",
@@ -25,6 +27,6 @@
     "v2/TurnSteerResponse.json"
   ],
   "digests": [
-    "55e0998b0734b92d22abd3d5a702d9122c87933407114b79b38254706ba46592"
+    "833cc8902e82977fcf7129b0f7f4d56a4b074f0012ffc90fa81fad28edabb98d"
   ]
 }
