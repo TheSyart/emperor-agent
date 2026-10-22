@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：贡献者、发布维护者<br>
-> 最后核验：2026-10-22（对照 `5b9583f4`）<br>
+> 最后核验：2026-10-22（对照 `681628a0`）<br>
 > 事实源：`packages/core/src/harness/delegation/adapters/`、`packages/core/src/harness/delegation/process.ts`、`packages/core/src/harness/delegation/journal.ts`、`packages/core/src/harness/delegation/codex-auth.ts`、`packages/core/src/harness/delegation/login-shell.ts`、`packages/core/src/harness/delegation/compatibility.ts`、`packages/core/src/harness/delegation/executable.ts`、`packages/core/src/harness/delegation/protocol/`、`scripts/codex-protocol-digest.mjs`、`scripts/codex-protocol-handshake.mjs`、`scripts/smoke-external-agents.mjs`、`desktop/tests/external-agents.e2e.mjs`、`desktop/electron-builder.yml`、`desktop/scripts/after-pack.cjs`
 
 ## 版本兼容：能力握手
@@ -16,9 +16,9 @@
 
 1. 把官方包装进临时前缀：`npm install --prefix "$TMP/codex-<version>" @openai/codex@<version>`。不全局安装，不用你自己的 codex，也不登录。
 2. `node scripts/codex-protocol-digest.mjs --codex "$TMP/codex-<version>/node_modules/.bin/codex"` 看摘要是否已知（schema 在私有 HOME 与 CODEX_HOME 里生成）。摘要不同时，把完整 schema 与上一版对比，逐项检查适配器发送的请求与回复、读取的字段、启动时设的 feature（`codex features list` 加同样的 `-c`）。
-3. 按差异更新适配器；`adapters/codex-contract.test.ts` 对每份已记录的协议（`VERIFIED`）校验适配器发出的每个请求和回复、读取的每个字段，`adapters/codex-schema-test-fixture.ts` 是它用的 JSON Schema 校验。需要模拟新协议时，`testing.ts` 的假 app-server 有 `version`（真实格式的 user agent、该版本的 turn 结构）与 `answer`（带 MessagePhase 的消息）。
-4. `node scripts/codex-protocol-handshake.mjs --codex <同一个 codex>`：在 Seatbelt 断网、不登录、私有 HOME/CODEX_HOME 下经真实适配器跑探测与摘要、握手、`thread/start`、一轮里的 steer 与 interrupt、关闭后无残留、恢复与历史、`config/read` 与 `model/list`，输出一份 JSON 回执；只能在 macOS 上运行。
-5. `--write` 把依赖的 schema 文件与 `digest.json` 写入 `protocol/codex-<version>/`（适配器新依赖的文件用 `--file <path>` 加入，之后的版本沿用最新一份的清单），用 prettier 格式化，再在 `compatibility.ts` 的 `KNOWN_CODEX_PROTOCOLS` 按版本顺序注册，并把版本加入 contract 测试的 `VERIFIED`。需要登录的真实两轮/问题/干预/取消/恢复证据由维护者在真机上补齐。
+3. 按差异更新适配器；新版本默认打开、会越出 Emperor 边界（进程寿命、工作区、审批、网络、计费）的 feature 加进 `adapters/codex.ts` 的关闭清单（`CODEX_FEATURES`），旧版本不认识的键要先确认它会忽略。`adapters/codex-contract.test.ts` 对每份已记录的协议（`VERIFIED`）固定关闭后仍开着的 feature（`EFFECTIVE_ON`，由 `features.json` 算出），校验适配器发出的每个请求和回复、读取的每个字段，`adapters/codex-schema-test-fixture.ts` 是它用的 JSON Schema 校验。需要模拟新协议时，`testing.ts` 的假 app-server 有 `version`（真实格式的 user agent、该版本的 turn 结构）与 `answer`（带 MessagePhase 的消息）。
+4. `node scripts/codex-protocol-handshake.mjs --codex <同一个 codex>`：在 Seatbelt 断网、不登录、私有 HOME/CODEX_HOME 下经真实适配器跑探测与摘要、feature（`codex features list` 加适配器的开关，每个开关都生效）、握手、`thread/start`、一轮里的 steer 与 interrupt、关闭后无残留进程与 socket、恢复与历史、用任务同样参数启动的 `config/read`（关闭的开关显示为关）与 `model/list`，输出一份 JSON 回执；只能在 macOS 上运行。
+5. `--write` 把依赖的 schema 文件、`digest.json` 与 `features.json`（`codex features list` 的默认值）写入 `protocol/codex-<version>/`（适配器新依赖的文件用 `--file <path>` 加入，之后的版本沿用最新一份的清单），用 prettier 格式化，再在 `compatibility.ts` 的 `KNOWN_CODEX_PROTOCOLS` 按版本顺序注册，并把版本加入 contract 测试的 `VERIFIED`。需要登录的真实两轮/问题/干预/取消/恢复证据由维护者在真机上补齐。
 
 同一 minor 的不同摘要可写进同一份 `digest.json` 的 `digests`；`registry.test.ts` 要求每个 `protocol/codex-*` 目录都已注册且摘要与签入文件一致，`compatibility.test.ts` 要求维护脚本与运行时对每份协议算出同一个摘要。
 

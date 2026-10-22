@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：开发者、维护者<br>
-> 最后核验：2026-10-22（对照 `5b9583f4`）<br>
+> 最后核验：2026-10-22（对照 `681628a0`）<br>
 > 事实源：`packages/core/src/harness/delegation/`（含 `consent.ts`）、`packages/core/src/workspace/delegation-*.ts`（含 `delegation-results.ts`）、`packages/core/src/environment/probe.ts`（检查结论的缓存）、`packages/core/src/api/services/delegation-service.ts`、`packages/core/src/runtime/agent-view.ts`、`packages/core/src/harness/host/host.ts`（`stop`、`close`）、`desktop/src/renderer/src/components/settings/executors/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/sidebar/agentTree.ts`
 
 Emperor 的父 Agent 可以通过原有子智能体工具选择 `internal`、`claude-code` 或 `codex`。未指定 backend 时仍用 internal。两个外部 profile 复用本机 CLI 登录，但默认关闭：它们使用用户自己的订阅额度或 API 计费，需要用户在设置里打开，并在第一次交出任务时于对话中确认（见下文「默认关闭与首次同意」）。设置「子智能体」统一展示本地、Claude Code 与 Codex；外部来源可切换启用状态，通过全局检测读取 CLI 与本地登录可用条件，异常时按需更正可执行文件路径。多份 profile 以来源内选择器切换，不合并或覆盖其他 profile。设置保留既有认证及调度限制；默认模型支持跟随 CLI、候选选择和自定义，修改后只用于之后的任务。已有配置中的开关、路径和有效凭据引用保持不变；旧版空引用按本机登录解析，不自动覆写文件。backend 与内部 provider/model 路由是不同维度。
@@ -45,7 +45,7 @@ flowchart TD
 - 通知只有新增（`thread/readState/changed`、`thread/attachment/updated`、`thread/prediction/updated`、`account/gatewayOAuth/changed`），适配器忽略。
 - `MessagePhase` 新增 `partial_answer`：一轮的回答可以分成几条，中间穿插工具。适配器把这一轮的 `partial_answer` 消息和最后一条消息依次拼成结果（`codexAnswerText`，最长 8192 字，先保最后一条），不含 `commentary`；要求结构化输出的轮次仍只解析最后一条。0.153 没有这个阶段，结果和以前一样。
 - `Turn.error` 的说明从「只在失败时」改为「失败或被中断的轮次」：被中断的轮次可能带原因，适配器照旧报 `interrupted` 并附上 `error`，不当作失败。
-- 适配器启动时关闭和打开的 feature 在 0.163 都还在，并按设定生效（`codex features list` 加同样的 `-c`）。0.163 默认打开了一些新 feature（如 `daemon_auto_start`、`worktrees`）；离线检查里 app-server 只有它自己的进程，关闭后进程组为空，没有留下别的进程。
+- feature：适配器原有的开关在 0.163 都还在并生效。0.163 默认新打开了 15 个 feature，Emperor 启动的每个 app-server（任务与模型列表都用 `codexAppServerArgs()`，开关同时放进 `thread/start` 的 `config`）关掉其中 10 个：`daemon_auto_start`（共享 daemon 可能比这次运行和 Emperor 活得久）、`worktrees`（工作区和租约归 Emperor）、`realtime_conversation`、`in_app_voice`、`browser_annotation_api`（无界面的委派用不到）、`ultrafast_mode`（速度档位，Emperor 不选档位）、`cli_daybreak`（Daybreak，按线程换用自己模型的模式）、`unified_exec_tty`（伪终端里的命令有自己的会话，会离开 Emperor 停止的进程组）、`write_stdin_approval`（新的审批路径）、`instant_interrupt`（开发中，改变中断结束一轮的方式）。保留 5 个：`api_key_model_discovery`、`api_key_cyber_access_programs`（API Key 账号的模型目录与元数据）、`code_mode_interrupt`（中断能停下正在运行的 code mode 单元，进程仍在组里）、`guardian_reuse_parent_compaction`（审批审核者的上下文；Emperor 从不请求审批，审核者不运行）、`system_proxy_fallback`（Codex 自己连提供方时可回退到 macOS 系统代理，不放宽命令的网络）。0.153.4 不认识其中 8 个键，静默忽略（没有警告、没有错误），所以两版用同一组参数；0.163 遇到不认识的键会发 `configWarning`，而它认识全部开关。关掉之后仍开着的 feature（0.153.4 31 个、0.163.0 33 个）按协议固定在 contract 测试里：由 `protocol/codex-<version>/features.json` 记录的默认值算出，并与真实二进制在同样参数下报告的一致。离线检查里 app-server 只有它自己的进程，关闭后进程组为空，私有目录下没有留下 socket。
 - 未登录时的内置模型目录，默认模型从 `gpt-6-astra` 变为 `gpt-6.1-sol`。
 
 两份协议对同样 21 个文件计算摘要：AGT-13 起加入 `v1/InitializeResponse.json`（握手读的 user agent）与 `v2/ModelListResponse.json`（FIX-16 读的 `isDefault`），0.153.4 的摘要按同一清单重算，原来 19 个文件与官方 0.153.4 重新生成的逐字节一致。适配器的 contract 测试对两份协议逐一校验它发出的每个请求和回复、读取的每个字段；`scripts/codex-protocol-handshake.mjs` 在 Seatbelt 断网、不登录的条件下，用真实的 0.163.0 与 0.153.4 跑通探测与摘要、握手、`thread/start`、一轮里的 steer 与 interrupt、关闭后无残留、恢复与历史、`config/read` 与 `model/list`。需要登录的部分（模型回答、工具、用量、ChatGPT 登录下的模型列表与 `gpt-6.1-sol` 是否可用、刷新令牌时 `auth.json` 的写法）还没有用 0.163 在真机上运行验证。
