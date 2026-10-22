@@ -65,8 +65,9 @@ jobs:
         run: |
           swift scripts/ci/macos-font-context.swift >font-context-before.json
           defaults write NSGlobalDomain AppleLanguages -array zh-Hans en
-          swift scripts/ci/macos-font-context.swift >font-context.json
+          swift scripts/ci/macos-font-context.swift --ensure-document-fonts >font-context.json
       - name: Upload runtime context
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: runtime-context-nightly
