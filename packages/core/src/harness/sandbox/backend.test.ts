@@ -279,46 +279,66 @@ describe('Computer Use Seatbelt confinement', () => {
   it.skipIf(process.platform !== 'darwin')(
     'rejects connections to both helper socket directories',
     async () => {
-      const directories = [
-        join(homedir(), '.emperor', 'run'),
-        join(tmpdir(), `emperor-${process.getuid?.() ?? 0}`),
+      // Never the real ~/.emperor/run: a test must not write in the user's
+      // Emperor Home, and a 0755 run folder it leaves on a CI runner makes
+      // the packaged Native Messaging host refuse its socket as insecure.
+      // The home folder gets the same rule as a custom Emperor Home's run
+      // folder (emperorSocketDirectories), exercised here with a temporary
+      // state root; the per-user temp folder is created (0700) and removed
+      // only when the test made it.
+      const stateRoot = mkdtempSync(join(tmpdir(), 'emperor-socket-state-'))
+      const workspace = mkdtempSync(join(tmpdir(), 'emperor-socket-ws-'))
+      const userTemp = join(tmpdir(), `emperor-${process.getuid?.() ?? 0}`)
+      const madeUserTemp = !existsSync(userTemp)
+      const cases = [
+        {
+          directory: join(stateRoot, 'run'),
+          sandbox: new LocalSandbox({ protectedStateRoot: stateRoot }),
+        },
+        { directory: userTemp, sandbox: new LocalSandbox() },
       ]
-      for (const directory of directories) {
-        mkdirSync(directory, { recursive: true })
-        const socketPath = join(
-          directory,
-          `st-${randomUUID().slice(0, 8)}.sock`,
-        )
-        const server = createServer()
-        try {
-          await new Promise<void>((resolve, reject) => {
-            server.once('error', reject)
-            server.listen(socketPath, resolve)
-          })
-          const script =
-            `require('node:net').createConnection(${JSON.stringify(socketPath)})` +
-            `.on('connect', () => process.exit(0))` +
-            `.on('error', e => { console.error(e.code); process.exit(13) })`
-          const direct = spawnSync(process.execPath, ['-e', script], {
-            encoding: 'utf8',
-            timeout: 5_000,
-          })
-          expect(direct.status).toBe(0)
-          const sandbox = new LocalSandbox()
-          const confined = sandbox.confine([process.execPath, '-e', script], {
-            mode: 'read-only',
-            workspaceRoot: directory,
-          })
-          const denied = spawnSync(confined.argv[0]!, confined.argv.slice(1), {
-            encoding: 'utf8',
-            timeout: 5_000,
-          })
-          expect(denied.status).toBe(13)
-          expect(denied.stderr).toContain('EPERM')
-        } finally {
-          await new Promise<void>((resolve) => server.close(() => resolve()))
-          rmSync(socketPath, { force: true })
+      try {
+        for (const { directory, sandbox } of cases) {
+          mkdirSync(directory, { recursive: true, mode: 0o700 })
+          const socketPath = join(
+            directory,
+            `st-${randomUUID().slice(0, 8)}.sock`,
+          )
+          const server = createServer()
+          try {
+            await new Promise<void>((resolve, reject) => {
+              server.once('error', reject)
+              server.listen(socketPath, resolve)
+            })
+            const script =
+              `require('node:net').createConnection(${JSON.stringify(socketPath)})` +
+              `.on('connect', () => process.exit(0))` +
+              `.on('error', e => { console.error(e.code); process.exit(13) })`
+            const direct = spawnSync(process.execPath, ['-e', script], {
+              encoding: 'utf8',
+              timeout: 5_000,
+            })
+            expect(direct.status).toBe(0)
+            const confined = sandbox.confine([process.execPath, '-e', script], {
+              mode: 'read-only',
+              workspaceRoot: workspace,
+            })
+            const denied = spawnSync(
+              confined.argv[0]!,
+              confined.argv.slice(1),
+              { encoding: 'utf8', timeout: 5_000 },
+            )
+            expect(denied.status).toBe(13)
+            expect(denied.stderr).toContain('EPERM')
+          } finally {
+            await new Promise<void>((resolve) => server.close(() => resolve()))
+            rmSync(socketPath, { force: true })
+          }
         }
+      } finally {
+        rmSync(stateRoot, { recursive: true, force: true })
+        rmSync(workspace, { recursive: true, force: true })
+        if (madeUserTemp) rmSync(userTemp, { recursive: true, force: true })
       }
     },
   )
