@@ -16,6 +16,17 @@ describe('ConversationView composer seat integration', () => {
     )
   })
 
+  it('FIX-14 F1: 「没有找到这个会话」 disables the composer; the docks of the session behind go', () => {
+    expect(source).toContain(':unavailable-reason="composerUnavailableReason"')
+    expect(source).toMatch(/<GoalBar\s+v-if="activeGoal && !unknownSession"/)
+    expect(source).toMatch(
+      /<QueueDock\s+v-if="!takeoverOpen && !unknownSession"/,
+    )
+    expect(source).toMatch(
+      /unknownSession\.value\s*\?\s*null\s*:\s*activeTakeover\(pendingInteraction\.value\)/,
+    )
+  })
+
   it('docks the queue above the composer card and enforces the single slot', () => {
     expect(source).toContain('<QueueDock')
     expect(source).toContain(

@@ -32,7 +32,9 @@
  * Child (subagent) sessions — ids outside the sidebar list whose lineage has
  * ancestors — render the same timeline (live through the watch set), the
  * lineage breadcrumb in the header and a read-only composer with a stop
- * button while the child runs.
+ * button while the child runs. An id that is neither says 「没有找到这个会话。」:
+ * the composer stays, disabled, with the way out as its placeholder, and the
+ * docks of the session behind the page go (F1).
  *
  * The subagent status bar (UI-S14, SubagentDock, loaded on first use) sits
  * above the todo dock while the conversation's subagents are at work and
@@ -456,6 +458,14 @@ const currentModel = computed(
 const providerOptions = computed(
   () => ctx.boot.value?.modelConfig?.providerOptions || [],
 )
+/** The composer's placeholder while there is no session here to act on (F1). */
+const composerUnavailableReason = computed(() =>
+  !unknownSession.value
+    ? ''
+    : lineageLoading.value
+      ? '正在读取会话…'
+      : '没有找到这个会话，请从侧栏打开其他会话',
+)
 const sendBlockedReason = computed(() => {
   const availability = ctx.boot.value?.modelConfig?.availability
   return availability?.usable === false
@@ -465,7 +475,11 @@ const sendBlockedReason = computed(() => {
 const pendingInteraction = computed(
   () => ctx.pendingInteractionsBySession[ctx.sessionId.value] || null,
 )
-const takeover = computed(() => activeTakeover(pendingInteraction.value))
+// On 「没有找到这个会话」 the takeover, goal and queue docks would act on the
+// session behind the page: they go, and the composer shows disabled (F1).
+const takeover = computed(() =>
+  unknownSession.value ? null : activeTakeover(pendingInteraction.value),
+)
 /** A takeover card in the composer seat (folded with Esc, it gives the seat back). */
 const takeoverOpen = computed(
   () =>
@@ -1193,7 +1207,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         />
         <TodoDock v-if="!takeoverOpen" :todos="latestTodos" />
         <GoalBar
-          v-if="activeGoal"
+          v-if="activeGoal && !unknownSession"
           :goal="activeGoal"
           :action-pending="goalActionPending"
           @action="runGoalStatusAction"
@@ -1201,7 +1215,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
         />
         <TakeoverSeat v-if="takeover" :interaction="pendingInteraction" />
         <QueueDock
-          v-if="!takeoverOpen"
+          v-if="!takeoverOpen && !unknownSession"
           :items="ctx.queuedPrompts.value"
           @edit="editQueuedPrompt"
           @interject="interjectQueuedPrompt"
@@ -1233,6 +1247,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
             ctx.boot.value?.modelConfig?.current?.capabilities?.vision ?? false
           "
           :send-blocked-reason="sendBlockedReason"
+          :unavailable-reason="composerUnavailableReason"
           :complete-command="ctx.completeSlashCommand"
           :refresh-commands="ctx.refreshCommands"
           @set-permission="ctx.setPermissionMode"
