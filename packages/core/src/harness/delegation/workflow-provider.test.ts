@@ -291,7 +291,8 @@ it('keeps workflow concurrency inside the global/profile limits and records nati
           Object.values(state.runs).some(
             (r) =>
               r.failureCode === 'EXECUTOR_TURN_FAILED' &&
-              r.summary === 'fixture native failure',
+              // The executor's error, after why the turn failed (FIX-16).
+              r.summary === 'Codex 这一轮失败：fixture native failure',
           ),
         ),
     ).toBe(true)

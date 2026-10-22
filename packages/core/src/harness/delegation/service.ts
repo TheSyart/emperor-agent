@@ -67,6 +67,7 @@ import type { CodexAuthLink } from './codex-auth'
 import { executorGrants } from './environment'
 import {
   describeRunFailure,
+  describeTurnError,
   sanitizeFailureMessage,
   type RunStage,
 } from './failure'
@@ -1916,11 +1917,34 @@ export class DelegationService {
           void this.handleQuestion(question, controller.signal)
         }
         if (event.type === 'turn_finished') {
+          // An empty text is no text: it must not hide the error (FIX-16).
+          const text = event.text?.trim() ? event.text : undefined
+          const failure =
+            event.status === 'failed'
+              ? describeTurnError(event.error, record.backend, {
+                  ...(model ? { model } : {}),
+                  secrets,
+                })
+              : undefined
           status = event.status
           structured = event.structured
-          if (event.status === 'failed')
+          if (event.status === 'failed') {
             failureCode = event.failureCode ?? 'EXECUTOR_TURN_FAILED'
-          summary = boundText(event.text ?? event.error ?? summary, 8192)
+            // An adapter's generic code gives way to a precise one.
+            if (failureCode === 'EXECUTOR_TURN_FAILED' && failure?.failureCode)
+              failureCode = failure.failureCode
+          }
+          // A failed turn opens with why it failed, then what the subagent
+          // wrote; the summary, its row, 任务详情, the parent's notice and
+          // collect_agent all show it (FIX-16).
+          summary = boundText(
+            failure
+              ? text
+                ? failure.reason + '\n\n' + text
+                : failure.reason
+              : (text ?? event.error ?? summary),
+            8192,
+          )
           break
         }
       }

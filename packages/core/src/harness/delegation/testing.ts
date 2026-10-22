@@ -262,3 +262,18 @@ export function fixtureDelegationRun(id = 'dgr-1'): DelegationRunRecord {
     acceptance: 'unverified',
   }
 }
+
+/**
+ * The error a Codex turn reports when the account refuses its model, as
+ * Codex 0.153.4 reported it for the user on 2026-10-22 (FIX-16).
+ */
+export function codexModelRejection(model: string): string {
+  return JSON.stringify({
+    type: 'error',
+    status: 400,
+    error: {
+      type: 'invalid_request_error',
+      message: `The '${model}' model is not supported when using Codex with a ChatGPT account.`,
+    },
+  })
+}

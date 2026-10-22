@@ -635,3 +635,57 @@ it('改代码的位置 (AGT-10): a writing task works where the settings say unl
     }),
   )
 })
+
+it('FIX-16 · 7 · collect_agent and a foreground wait carry the refused model’s code and reason, and the model a run used instead', async () => {
+  const { codexModelRejection } = await import('./testing')
+  const runtime = serviceFixture(async function* (turn, open) {
+      yield {
+        type: 'turn_finished',
+        status: 'failed',
+        text: '',
+        error: codexModelRejection('gpt-6.1-sol'),
+        delegationId: open.delegationId,
+        runId: turn.runId,
+        generation: open.generation,
+      }
+    }),
+    f = fixture(runtime.service)
+  const reason =
+    'Codex 不支持模型 gpt-6.1-sol（ChatGPT 账号登录）。请在 设置 › 子智能体 › Codex › 默认模型 里换一个可用的模型。'
+  try {
+    const started = await f.call('subagent', {
+      backend: 'codex',
+      description: 'Review parser',
+      prompt: 'Inspect parser.ts',
+      workspace: 'shared-readonly',
+    })
+    const meta = started.meta as { subagentId: string; runId: string }
+    await runtime.service.wait(meta.subagentId, meta.runId)
+    const collected = await f.call('collect_agent', {
+      agent_id: meta.subagentId,
+    })
+    const text = JSON.stringify(collected.content)
+    expect(text).toContain('"failureCode\\":\\"EXECUTOR_MODEL_UNSUPPORTED')
+    expect(text).toContain(reason)
+    const foreground = await f.h.tools.execute({
+      name: 'subagent',
+      arguments: {
+        backend: 'codex',
+        description: 'Review again',
+        prompt: 'Inspect parser.ts',
+        workspace: 'shared-readonly',
+        run_in_background: false,
+      },
+      agent: f.root,
+      callId: 'call-foreground',
+      signal: new AbortController().signal,
+    })
+    expect(foreground.isError).toBe(true)
+    expect(JSON.stringify(foreground.content)).toContain(
+      `EXECUTOR_MODEL_UNSUPPORTED — ${reason}`,
+    )
+  } finally {
+    await runtime.service.shutdown()
+    runtime.cleanup()
+  }
+})
