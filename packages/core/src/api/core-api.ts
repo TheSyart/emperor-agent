@@ -1361,18 +1361,21 @@ export class CoreApi {
       goals: host.goals,
       agentFor: (sessionId) => host.agentFor(sessionId),
       goalView: (sessionId) => host.goalView(sessionId),
-      materializeSession: async (input) =>
-        (
+      materializeSession: async (input) => {
+        const draft = (input.draftSession ?? null) as DraftSessionInput | null
+        return (
           await this.chatService.materializeSession(
             {
               sessionId: input.sessionId,
               clientDraftId: input.clientDraftId ?? null,
-              draftSession: (input.draftSession ??
-                null) as DraftSessionInput | null,
+              // Plan and goal exclude each other: a goal takes the draft's
+              // preset, never its plan mode (FIX-13).
+              draftSession: draft === null ? null : { ...draft, plan: false },
             },
             'goals.start',
           )
-        ).session,
+        ).session
+      },
     })
     this.sessionApplicationService = new CoreSessionApplicationService({
       sessions: kept.sessionStore,
@@ -2485,14 +2488,26 @@ export class CoreApi {
   readonly sessions = {
     list: (opts: { includeArchived?: boolean } = {}) =>
       this.sessionApplicationService.list(opts),
+    /**
+     * `plan` / `preset`: a draft's own settings when a typed command creates
+     * its session (FIX-13), set before anything runs in it.
+     */
     create: (
       opts: {
         title?: string
         mode?: string
         project?: Dict | null
         project_path?: string | null
+        plan?: boolean
+        preset?: string
       } = {},
-    ) => this.sessionApplicationService.create(opts),
+    ) => {
+      const { plan, preset, ...rest } = opts
+      this.chatService.checkDraftSettings({ preset })
+      const session = this.sessionApplicationService.create(rest)
+      this.chatService.applyDraftSettings(session.id, { plan, preset })
+      return session
+    },
     rename: async (
       sessionId: string,
       patch: string | { title?: string | null; archived?: boolean | null },

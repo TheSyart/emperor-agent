@@ -242,6 +242,41 @@ describe('Core operation registry', () => {
     ).toThrow()
   })
 
+  it('FIX-13 · a draft carries its own plan mode and preset', () => {
+    const draftSession = { mode: 'chat', plan: true, preset: 'read-only' }
+    expect(
+      CORE_OPERATION_REGISTRY['chat.submit'].args.parse([
+        { content: 'hi', sessionId: 'draft:1', draftSession },
+      ])[0],
+    ).toMatchObject({ draftSession })
+    expect(
+      CORE_OPERATION_REGISTRY['goals.start'].args.parse([
+        { objective: '目标', sessionId: 'draft:1', draftSession },
+      ])[0],
+    ).toMatchObject({ draftSession })
+    expect(
+      CORE_OPERATION_REGISTRY['sessions.create'].args.parse([
+        { title: '新会话', mode: 'chat', plan: true, preset: 'read-only' },
+      ]),
+    ).toEqual([
+      { title: '新会话', mode: 'chat', plan: true, preset: 'read-only' },
+    ])
+    for (const bad of [
+      { ...draftSession, preset: 'plan' },
+      { ...draftSession, plan: 'yes' },
+    ])
+      expect(() =>
+        CORE_OPERATION_REGISTRY['chat.submit'].args.parse([
+          { content: 'hi', sessionId: 'draft:1', draftSession: bad },
+        ]),
+      ).toThrow()
+    expect(() =>
+      CORE_OPERATION_REGISTRY['sessions.create'].args.parse([
+        { preset: 'full_access' },
+      ]),
+    ).toThrow()
+  })
+
   it('uses exact Zod tuples for no-arg, optional, single, and multi-arg operations', () => {
     expect(CORE_OPERATION_REGISTRY['memory.tokens'].args.parse([])).toEqual([])
   })

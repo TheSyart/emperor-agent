@@ -1191,6 +1191,23 @@ describe('CoreApi goals', () => {
     await api.host.agentFor(real).whenIdle()
   })
 
+  it('FIX-13 · 2 · a goal started from a draft takes its preset, never its plan mode', async () => {
+    const { api } = await setup({ replies: [{ text: 'round one' }] })
+    const started = await api.goals.start({
+      sessionId: 'draft:fix13',
+      clientDraftId: 'draft:fix13',
+      draftSession: { mode: 'chat', plan: true, preset: 'read-only' },
+      objective: 'ship from a draft',
+    })
+    const real = started.sessionId!
+    // Plan and goal exclude each other (composerLifecycle).
+    expect(api.control.get(real)).toMatchObject({
+      plan: false,
+      preset: 'read-only',
+    })
+    await api.host.agentFor(real).whenIdle()
+  })
+
   it('starts, lists, pauses, resumes, and cancels a goal', async () => {
     const { api, adapter, events } = await setup({
       replies: [{ text: 'round one' }, { text: 'round two' }],
@@ -1243,6 +1260,34 @@ describe('CoreApi goals', () => {
     await expect(
       api.goals.start({ sessionId: id, objective: '  ' }),
     ).rejects.toMatchObject({ code: 'goal_objective_invalid' })
+  })
+})
+
+describe('CoreApi sessions.create (FIX-13)', () => {
+  it('2 · a session a typed command creates for a draft starts in its plan mode and preset', async () => {
+    const { api, adapter } = await setup()
+    const created = api.sessions.create({
+      title: '新会话',
+      mode: 'chat',
+      plan: true,
+      preset: 'danger-full-access',
+    })
+    expect(api.control.get(String(created.id))).toMatchObject({
+      plan: true,
+      preset: 'danger-full-access',
+    })
+    // A creation-time fact: nothing is announced to the model.
+    const types = api.host
+      .sessionLog(String(created.id))!
+      .events.map((event) => event.type)
+    expect(types).not.toContain('context/message')
+    expect(adapter.requests).toHaveLength(0)
+    // Without them it is the defaults, as before.
+    const plain = api.sessions.create({ title: 'plain' })
+    expect(api.control.get(String(plain.id))).toMatchObject({
+      plan: false,
+      preset: api.host.defaultPreset,
+    })
   })
 })
 

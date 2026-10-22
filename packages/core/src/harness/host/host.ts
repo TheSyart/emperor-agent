@@ -2625,6 +2625,14 @@ export class HarnessHost {
     return this.controlPayload(sessionId)
   }
 
+  /**
+   * A new session starts in `preset` (a draft's choice, FIX-13): logged as a
+   * creation-time fact like the default, with no notice to the model.
+   */
+  pinPermissionPreset(sessionId: string, preset: string): void {
+    this.presets.pin(this.agentFor(sessionId).session, preset)
+  }
+
   setSandboxMode(sessionId: string, mode: SandboxMode): void {
     this.sandbox.set(this.agentFor(sessionId).session, mode)
   }

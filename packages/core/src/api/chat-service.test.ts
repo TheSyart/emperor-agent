@@ -2,8 +2,9 @@
 // promotion, fallback, rejection of unknown / archived / transitioned
 // sessions), submit results, and the queued-prompt surface while a turn is
 // blocked on a pending question.
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EmperorError } from '../errors'
+import { PLAN_MODE_SECTION } from '../harness/plan/plan-mode'
 import { replyChunks, type ScriptedReply } from '../harness/testing'
 import type { CoreApi } from './core-api'
 import { InvalidSessionError } from './chat-service'
@@ -291,6 +292,84 @@ describe('ChatService', () => {
           event.client_message_id === 'client-q',
       ),
     ).toBeDefined()
+  })
+
+  // FIX-13: the start page is a draft; its plan mode and permission preset
+  // are its own and travel with its first message.
+  it("FIX-13 · 2 · a draft's plan mode and preset apply before its first turn", async () => {
+    const { api, adapter } = await setup([{ text: '# 计划\n\n先读代码' }])
+    const atCreation: Array<Record<string, unknown>> = []
+    const emitHost = api.host.emitHost.bind(api.host)
+    vi.spyOn(api.host, 'emitHost').mockImplementation((event) => {
+      if (event.event === 'session_created')
+        atCreation.push(api.control.get(String(event.session_id)))
+      emitHost(event)
+    })
+    const result = await api.chat.submit({
+      content: '帮我规划迁移',
+      sessionId: 'draft:plan',
+      clientDraftId: 'draft:plan',
+      draftSession: { mode: 'chat', plan: true, preset: 'read-only' },
+    })
+    const id = String(result.activeSessionId)
+    expect(id.startsWith('draft:')).toBe(false)
+    // Already set when the renderer hears of the session.
+    expect(atCreation).toEqual([
+      expect.objectContaining({ plan: true, preset: 'read-only' }),
+    ])
+    expect(api.control.get(id)).toMatchObject({
+      plan: true,
+      preset: 'read-only',
+    })
+    // The first step of the first turn already ran in plan mode.
+    expect(adapter.requests[0]!.system).toContain(PLAN_MODE_SECTION)
+    const types = api.host.sessionLog(id)!.events.map((event) => event.type)
+    expect(types.indexOf('plan/mode')).toBeGreaterThanOrEqual(0)
+    expect(types.indexOf('plan/mode')).toBeLessThan(
+      types.indexOf('request/header'),
+    )
+    expect(types.lastIndexOf('permission/preset')).toBeLessThan(
+      types.indexOf('request/header'),
+    )
+  })
+
+  it('FIX-13 · 2 · a draft without its own settings starts in the defaults', async () => {
+    const { api } = await setup()
+    const { session } = await api.chatService.materializeSession({
+      sessionId: 'draft:plain',
+      draftSession: { mode: 'chat' },
+    })
+    expect(api.control.get(session.id)).toMatchObject({
+      plan: false,
+      preset: api.host.defaultPreset,
+    })
+  })
+
+  it('FIX-13 · 4 · the same draft sent twice makes one session', async () => {
+    const { api, events } = await setup()
+    const draft = {
+      sessionId: 'draft:twice',
+      clientDraftId: 'draft:twice',
+      draftSession: { mode: 'chat', plan: true },
+    }
+    const first = await api.chatService.materializeSession(draft)
+    const second = await api.chatService.materializeSession(draft)
+    expect(first.promoted).toBe(true)
+    expect(second).toMatchObject({
+      promoted: false,
+      clientDraftId: 'draft:twice',
+      session: { id: first.session.id },
+    })
+    expect(api.sessions.list()).toHaveLength(1)
+    expect(
+      events.filter((event) => event.event === 'session_created'),
+    ).toHaveLength(1)
+    // A deleted one is not reused.
+    api.sessions.create({ title: 'Other' })
+    await api.sessions.delete(first.session.id)
+    const third = await api.chatService.materializeSession(draft)
+    expect(third.promoted).toBe(true)
+    expect(third.session.id).not.toBe(first.session.id)
   })
 
   it('FIX-13 · 6 · an unknown session is invalid_session, which the interface explains', async () => {
