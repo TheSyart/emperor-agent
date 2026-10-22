@@ -111,6 +111,9 @@ it('uses one runtime fact store for settings and parent routing, preserving evid
       { expectedRevision: config.revision, config },
       VIEW,
     )
+    // The probe after the edit sees the test helper's fake Codex, on a
+    // developer's Mac and on CI alike, never a Codex installed there.
+    expect(api.executorFacts.probe(profile)?.executableVersion).toBe('0.163.0')
     expect(
       api.executors.list().profiles[1]!.runtime.nativeCapabilities.search
         .status,
