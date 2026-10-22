@@ -981,10 +981,18 @@ for (const theme of ['dark', 'light'] as const) {
       expect(layout.overlay).toBe(state === 'overlay')
       await page.mouse.move(0, 0)
       await shot(page, `ui-s16-${state}-${theme}`)
-      await expectBaseline(
-        page,
-        'conversation',
-        `environment-card-${state}-${theme}`,
-      )
+      // One literal name per state: the baseline manifest reads the calls.
+      if (state === 'beside')
+        await expectBaseline(
+          page,
+          'conversation',
+          `environment-card-beside-${theme}`,
+        )
+      else
+        await expectBaseline(
+          page,
+          'conversation',
+          `environment-card-overlay-${theme}`,
+        )
     })
 }
