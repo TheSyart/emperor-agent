@@ -191,10 +191,42 @@ export function createCodexUsageMeter(): {
     },
   }
 }
+/**
+ * A turn's answer from its agent messages, in order (AGT-13). Codex 0.163
+ * can split the answer into `partial_answer` messages — answer text that
+ * more output or tools may follow (MessagePhase) — before its last message;
+ * commentary is not part of it. Without partial answers (0.153 has no such
+ * phase) the answer is the last message, as before.
+ */
+export function codexAnswerText(
+  messages: readonly { text: string; phase?: unknown }[],
+): string | undefined {
+  const last = messages.at(-1)
+  if (!last) return undefined
+  return [
+    ...messages.slice(0, -1).filter((m) => m.phase === 'partial_answer'),
+    last,
+  ]
+    .map((m) => m.text)
+    .join('\n\n')
+}
+/**
+ * The partial answers so far and the latest message, within `limit`
+ * characters: the latest message is kept whole first.
+ */
+function boundedAnswer(partial: string, latest: string, limit: number) {
+  if (!partial) return latest.slice(0, limit)
+  const room = limit - latest.length - 2
+  return room > 0
+    ? partial.slice(0, room) + '\n\n' + latest
+    : latest.slice(0, limit)
+}
 export function normalizeCodexNotification(
   method: string,
   params: Record<string, unknown>,
   meter?: ReturnType<typeof createCodexUsageMeter>,
+  /** A structured-output turn is parsed from its last message only. */
+  options: { lastMessageOnly?: boolean } = {},
 ): ExecutorEventPayload[] {
   if (method === 'model/rerouted' && typeof params.toModel === 'string')
     return [
@@ -311,7 +343,10 @@ export function normalizeCodexNotification(
     const messages = (Array.isArray(turn.items) ? turn.items : [])
       .map(record)
       .filter((i) => i.type === 'agentMessage' && typeof i.text === 'string')
-    const text = string(messages.at(-1)?.text)
+      .map((i) => ({ text: i.text as string, phase: i.phase }))
+    const text = codexAnswerText(
+      options.lastMessageOnly ? messages.slice(-1) : messages,
+    )
     const error = string(record(turn.error).message)
     return [
       {
@@ -438,6 +473,8 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
       providerTurnId: string | undefined,
       closed = false,
       summary = '',
+      /** This turn's `partial_answer` messages so far (AGT-13). */
+      partialAnswer = '',
       startFailure: DelegationError | undefined,
       /** The model the thread reports: Codex's own default, or Emperor's. */
       threadModel: string | undefined,
@@ -547,13 +584,18 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
       if (method === 'turn/started') return
       if (method === 'item/completed') {
         const item = record(params.item)
-        if (item.type === 'agentMessage' && typeof item.text === 'string')
-          summary = item.text.slice(
-            0,
-            active.outputSchema ? 4 * 1024 * 1024 : 8192,
-          )
+        if (item.type === 'agentMessage' && typeof item.text === 'string') {
+          if (active.outputSchema) summary = item.text.slice(0, 4 * 1024 * 1024)
+          else {
+            summary = boundedAnswer(partialAnswer, item.text, 8192)
+            if (item.phase === 'partial_answer')
+              partialAnswer = boundedAnswer(partialAnswer, item.text, 8192)
+          }
+        }
       }
-      for (let event of normalizeCodexNotification(method, params, meter)) {
+      for (let event of normalizeCodexNotification(method, params, meter, {
+        lastMessageOnly: !!active.outputSchema,
+      })) {
         if (event.type === 'text_delta')
           summary = (summary + event.text).slice(
             0,
@@ -1042,6 +1084,7 @@ export class CodexExecutorAdapter implements ExecutorAdapter {
         // The same turn again, in the same thread, on the chosen model.
         providerTurnId = undefined
         summary = ''
+        partialAnswer = ''
         releaseTurn = rpc!.hold?.()
         return { providerTurnId: await startTurn(turn), model: pick }
       },

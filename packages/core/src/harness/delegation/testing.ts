@@ -272,10 +272,16 @@ export interface FakeCodexModel {
   hidden?: boolean
 }
 /**
- * What the fake `codex app-server` does (FIX-16). Tests never run the real
- * codex.
+ * What the fake `codex app-server` does (FIX-16, AGT-13). Tests never run
+ * the real codex.
  */
 export interface FakeCodexOptions {
+  /**
+   * The Codex release it speaks (default 0.153.4): `initialize` reports it
+   * in the user agent a real app-server returns, and from 0.163 turns carry
+   * `rootTurnId` as they do there.
+   */
+  version?: string
   /**
    * The model its own configuration selects (the user's
    * `~/.codex/config.toml`): `thread/start` without a model reports it.
@@ -292,6 +298,11 @@ export interface FakeCodexOptions {
   modelListFailures?: number
   /** A completed turn's final message; the model it ran on follows it. */
   reply?: string
+  /**
+   * A completed turn's agent messages instead, as sent, each with its
+   * MessagePhase (0.163 can split an answer into `partial_answer` ones).
+   */
+  answer?: { text: string; phase?: string }[]
 }
 /**
  * The error a Codex turn reports when the account refuses its model, as
@@ -308,12 +319,12 @@ export function codexModelRejection(model: string): string {
   })
 }
 /**
- * A stand-in for `codex app-server --listen stdio://` (FIX-16): JSON-RPC
- * over stdio, answering `initialize`, `thread/start|resume` (reporting the
- * model it will use), `config/read`, `model/list`, `turn/start` and
- * `turn/interrupt`. Every request is appended, with its `model`, to
- * `$TMPDIR/fake-codex.jsonl` ({@link fakeCodexRequests}); the run's TMPDIR
- * is its private temp folder.
+ * A stand-in for `codex app-server --listen stdio://` (FIX-16, AGT-13):
+ * JSON-RPC over stdio, answering `initialize`, `thread/start|resume`
+ * (reporting the model it will use), `config/read`, `model/list`,
+ * `turn/start` and `turn/interrupt`. Every request is appended, with its
+ * `model`, to `$TMPDIR/fake-codex.jsonl` ({@link fakeCodexRequests}); the
+ * run's TMPDIR is its private temp folder.
  */
 export function fakeCodexScript(options: FakeCodexOptions = {}): string {
   return `
@@ -322,6 +333,9 @@ const fs = require('node:fs'), path = require('node:path')
 const log = path.join(process.env.TMPDIR || '.', 'fake-codex.jsonl')
 let threadId = null, threadModel = null, turns = 0
 let listFailures = options.modelListFailures || 0
+const version = options.version || '0.153.4'
+const since0163 = (() => { const [a, b] = version.split('.').map(Number); return a > 0 || b >= 163 })()
+const turnOf = (id, status, rest) => ({ id, ...(since0163 ? { rootTurnId: id } : {}), status, items: [], itemsView: 'notLoaded', ...rest })
 const send = (frame) => process.stdout.write(JSON.stringify(frame) + '\\n')
 const note = (entry) => { try { fs.appendFileSync(log, JSON.stringify(entry) + '\\n') } catch {} }
 const rejection = (model) => JSON.stringify({ type: 'error', status: 400, error: { type: 'invalid_request_error', message: "The '" + model + "' model is not supported when using Codex with a ChatGPT account." } })
@@ -336,8 +350,11 @@ lines.on('line', (line) => {
   const reply = (result) => send({ id: frame.id, result })
   const fail = (message) => send({ id: frame.id, error: { code: -32603, message } })
   switch (frame.method) {
-    case 'initialize':
-      return reply({ userAgent: 'codex/0.153.4' })
+    case 'initialize': {
+      // The user agent a real app-server builds from the client's info.
+      const client = params.clientInfo || {}
+      return reply({ userAgent: client.name + '/' + version + ' (Mac OS 26.4.1; arm64) unknown (' + client.name + '; ' + client.version + ')' })
+    }
     case 'thread/start':
     case 'thread/resume':
       threadId = params.threadId || 'thread-fake'
@@ -348,24 +365,28 @@ lines.on('line', (line) => {
     case 'model/list':
       if (listFailures > 0) { listFailures--; return fail('models are unavailable') }
       return reply({
-        data: (options.models || []).map((m) => ({ id: m.id, model: m.id, displayName: m.id, hidden: !!m.hidden, isDefault: !!m.isDefault })),
+        data: (options.models || []).map((m) => ({ id: m.id, model: m.id, displayName: m.id, hidden: !!m.hidden, isDefault: !!m.isDefault, ...(since0163 ? { availableAccessPrograms: null } : {}) })),
         nextCursor: null,
       })
     case 'turn/start': {
       if (params.model) threadModel = params.model
       const turnId = 'turn-' + ++turns, model = threadModel
-      reply({ turn: { id: turnId, status: 'inProgress', items: [] } })
+      reply({ turn: turnOf(turnId, 'inProgress') })
       setTimeout(() => {
-        send({ method: 'turn/started', params: { threadId, turn: { id: turnId, status: 'inProgress', items: [] } } })
+        send({ method: 'turn/started', params: { threadId, turn: turnOf(turnId, 'inProgress') } })
         if (model === options.rejectModel) {
-          send({ method: 'turn/completed', params: { threadId, turn: { id: turnId, status: 'failed', items: [], error: { message: rejection(model) } } } })
+          send({ method: 'turn/completed', params: { threadId, turn: turnOf(turnId, 'failed', { error: { message: rejection(model) } }) } })
           return
         }
-        const text = (options.reply || 'done') + ' (' + model + ')'
-        const item = { type: 'agentMessage', id: 'msg-' + turnId, text }
-        send({ method: 'item/agentMessage/delta', params: { threadId, turnId, itemId: item.id, delta: text } })
-        send({ method: 'item/completed', params: { threadId, turnId, item } })
-        send({ method: 'turn/completed', params: { threadId, turn: { id: turnId, status: 'completed', items: [item] } } })
+        const messages = options.answer || [{ text: (options.reply || 'done') + ' (' + model + ')' }]
+        const items = messages.map((m, i) => ({ type: 'agentMessage', id: 'msg-' + turnId + '-' + i, text: m.text, ...(m.phase ? { phase: m.phase } : {}) }))
+        for (const item of items) {
+          send({ method: 'item/agentMessage/delta', params: { threadId, turnId, itemId: item.id, delta: item.text } })
+          send({ method: 'item/completed', params: { threadId, turnId, item } })
+        }
+        // As the real app-server sends them, turn notifications list no
+        // items (itemsView notLoaded): the answer comes from item/completed.
+        send({ method: 'turn/completed', params: { threadId, turn: turnOf(turnId, 'completed') } })
       }, 10)
       return
     }

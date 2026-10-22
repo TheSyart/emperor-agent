@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
-import { CodexExecutorAdapter } from './codex'
+import { CodexExecutorAdapter, normalizeCodexNotification } from './codex'
 import { ManagedAgentProcess } from '../process'
 import { defaultExecutorConfig } from '../config'
 import { delegationTestDirectory } from '../testing'
@@ -564,4 +564,155 @@ it('7 · the Codex brief carries the project’s AGENTS.md summary and the devel
   })
   await session.close()
   f.cleanup()
+})
+
+/** What the real 0.163 app-server answers to Emperor's clientInfo. */
+const USER_AGENT_0163 =
+  'emperor-agent/0.163.0 (Mac OS 26.4.1; arm64) unknown (emperor-agent; 0.1.0)'
+async function finished(session: { events: AsyncIterable<unknown> }) {
+  for await (const event of session.events as AsyncIterable<{
+    type: string
+    text?: string
+    status?: string
+    structured?: unknown
+    error?: string
+  }>)
+    if (event.type === 'turn_finished') return event
+  throw new Error('no turn_finished')
+}
+function agentMessage(
+  f: ReturnType<typeof fixture>,
+  id: string,
+  text: string,
+  phase?: string,
+) {
+  f.notify('item/completed', {
+    threadId: 'thread-fixture',
+    turnId: 'turn-fixture',
+    item: { type: 'agentMessage', id, text, ...(phase ? { phase } : {}) },
+  })
+}
+
+it('AGT-13 · a 0.163 answer split into partial_answer messages reaches the parent whole, without the commentary', async () => {
+  const f = fixture(USER_AGENT_0163)
+  const session = await f.adapter.open(f.input)
+  await session.submit({ runId: 'dgr-a', messageId: 'dgm-a', text: 'task' })
+  agentMessage(f, 'm1', 'Looking at the parser first.', 'commentary')
+  agentMessage(f, 'm2', 'The parser drops trailing commas.', 'partial_answer')
+  f.notify('item/completed', {
+    threadId: 'thread-fixture',
+    turnId: 'turn-fixture',
+    item: { type: 'commandExecution', id: 'c1', status: 'completed' },
+  })
+  agentMessage(f, 'm3', 'Running the tests now.', 'commentary')
+  agentMessage(f, 'm4', 'Fixed; all 42 tests pass.', 'final_answer')
+  f.notify('turn/completed', {
+    threadId: 'thread-fixture',
+    turn: { id: 'turn-fixture', status: 'completed', items: [] },
+  })
+  expect(await finished(session)).toMatchObject({
+    status: 'completed',
+    text: 'The parser drops trailing commas.\n\nFixed; all 42 tests pass.',
+  })
+  await session.close()
+  f.cleanup()
+})
+
+it('AGT-13 · a turn/completed that lists its items gives the same whole answer', () => {
+  const message = (id: string, text: string, phase: string) => ({
+    type: 'agentMessage',
+    id,
+    text,
+    phase,
+  })
+  expect(
+    normalizeCodexNotification('turn/completed', {
+      turn: {
+        id: 'turn',
+        status: 'completed',
+        items: [
+          message('m1', 'Looking first.', 'commentary'),
+          message('m2', 'Part one.', 'partial_answer'),
+          message('m3', 'Part two.', 'partial_answer'),
+          message('m4', 'Done.', 'final_answer'),
+        ],
+      },
+    }),
+  ).toEqual([
+    {
+      type: 'turn_finished',
+      status: 'completed',
+      text: 'Part one.\n\nPart two.\n\nDone.',
+    },
+  ])
+})
+
+it('AGT-13 · without partial answers (0.153, or 0.163 on most turns) the last message is the answer, as before', async () => {
+  const f = fixture()
+  const session = await f.adapter.open(f.input)
+  await session.submit({ runId: 'dgr-a', messageId: 'dgm-a', text: 'task' })
+  agentMessage(f, 'm1', 'Looking at the parser first.', 'commentary')
+  agentMessage(f, 'm2', 'Fixed; all 42 tests pass.', 'final_answer')
+  f.notify('turn/completed', {
+    threadId: 'thread-fixture',
+    turn: { id: 'turn-fixture', status: 'completed', items: [] },
+  })
+  expect((await finished(session)).text).toBe('Fixed; all 42 tests pass.')
+  await session.close()
+  f.cleanup()
+  expect(
+    normalizeCodexNotification('turn/completed', {
+      turn: {
+        id: 'turn',
+        status: 'completed',
+        items: [
+          { type: 'agentMessage', id: 'a', text: 'first' },
+          { type: 'agentMessage', id: 'b', text: 'last' },
+        ],
+      },
+    }),
+  ).toEqual([{ type: 'turn_finished', status: 'completed', text: 'last' }])
+})
+
+it('AGT-13 · a structured-output turn is parsed from its final message only', async () => {
+  const f = fixture(USER_AGENT_0163)
+  const session = await f.adapter.open(f.input)
+  await session.submit({
+    runId: 'dgr-a',
+    messageId: 'dgm-a',
+    text: 'task',
+    outputSchema: {
+      type: 'object',
+      properties: { ok: { type: 'boolean' } },
+      required: ['ok'],
+      additionalProperties: false,
+    },
+  })
+  agentMessage(f, 'm1', 'Checking.', 'partial_answer')
+  agentMessage(f, 'm2', '{"ok":true}', 'final_answer')
+  f.notify('turn/completed', {
+    threadId: 'thread-fixture',
+    turn: { id: 'turn-fixture', status: 'completed', items: [] },
+  })
+  expect(await finished(session)).toMatchObject({
+    status: 'completed',
+    structured: { ok: true },
+  })
+  await session.close()
+  f.cleanup()
+})
+
+it('AGT-13 · the real 0.163 user agent passes the handshake', async () => {
+  const f = fixture(USER_AGENT_0163)
+  const session = await f.adapter.open(f.input)
+  expect(session.providerSessionId).toBe('thread-fixture')
+  await session.close()
+  f.cleanup()
+  for (const version of ['0.162.0', '0.164.0']) {
+    const other = fixture(USER_AGENT_0163.replace('0.163.0', version))
+    await expect(other.adapter.open(other.input)).rejects.toThrow(
+      /EXECUTOR_INCOMPATIBLE.*0\.153\.x \/ 0\.163\.x/,
+    )
+    other.cleanup()
+  }
 })

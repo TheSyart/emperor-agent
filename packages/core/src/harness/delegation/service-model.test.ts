@@ -284,3 +284,55 @@ it('FIX-16 · 5 · when the list stays unknown the refusal stands, with its reas
   })
   expect(run.modelChoice).toBeUndefined()
 })
+
+// AGT-13: the same rules on Codex 0.163, whose fake app-server speaks the
+// 0.163 protocol (its user agent, rootTurnId, partial answers).
+it('AGT-13 · on Codex 0.163 the user’s own default, when the login offers it, runs as is', async () => {
+  const f = withFakeCodex({
+    version: '0.163.0',
+    defaultModel: 'gpt-6.1-sol',
+    models: [{ id: 'gpt-6.1-sol', isDefault: true }, ...ACCOUNT_MODELS],
+  })
+  const { run, requests } = await settle(f)
+  expect(run).toMatchObject({
+    phase: 'completed',
+    summary: 'done (gpt-6.1-sol)',
+  })
+  expect(run.modelChoice).toBeUndefined()
+  expect(requests.filter((r) => r.method === 'model/list')).toHaveLength(1)
+  expect(turnStarts(requests).map((r) => r.model)).toEqual([null])
+})
+
+it('AGT-13 · on Codex 0.163 a default the login does not offer still gives way to the list’s default', async () => {
+  const f = withFakeCodex({
+    version: '0.163.0',
+    defaultModel: 'gpt-6.1-sol',
+    models: ACCOUNT_MODELS,
+    rejectModel: 'gpt-6.1-sol',
+  })
+  const { run, requests } = await settle(f)
+  expect(run).toMatchObject({
+    phase: 'completed',
+    summary: 'done (gpt-5.6-sol)',
+    modelChoice: { configured: 'gpt-6.1-sol', used: 'gpt-5.6-sol' },
+  })
+  expect(turnStarts(requests).map((r) => r.model)).toEqual(['gpt-5.6-sol'])
+})
+
+it('AGT-13 · on Codex 0.163 an answer split into partial answers is the run’s whole summary', async () => {
+  const f = withFakeCodex({
+    version: '0.163.0',
+    defaultModel: 'gpt-6.1-sol',
+    models: [{ id: 'gpt-6.1-sol', isDefault: true }],
+    answer: [
+      { text: 'Reading the parser first.', phase: 'commentary' },
+      { text: 'The parser drops trailing commas.', phase: 'partial_answer' },
+      { text: 'Fixed; all 42 tests pass.', phase: 'final_answer' },
+    ],
+  })
+  const { run } = await settle(f)
+  expect(run).toMatchObject({
+    phase: 'completed',
+    summary: 'The parser drops trailing commas.\n\nFixed; all 42 tests pass.',
+  })
+})
