@@ -134,6 +134,33 @@ describe('the nightly plan (REL-04 test 3)', () => {
     ])
   })
 
+  // FIX-17: on GitHub's shared runner the frame budgets are reported, not
+  // enforced; a local run enforces them unless told otherwise.
+  it('reports the frame budgets on the shared runner instead of failing on them', () => {
+    const workflow = fs.readFileSync(
+      path.join(repoRoot, '.github', 'workflows', 'nightly.yml'),
+      'utf8',
+    )
+    expect(workflow).toMatch(/^\s+EMPEROR_PERF_BUDGETS: report$/m)
+    const source = fs.readFileSync(
+      path.join(repoRoot, 'desktop', 'tests', 'visual', 'streaming.spec.ts'),
+      'utf8',
+    )
+    expect(source).toContain("process.env.EMPEROR_PERF_BUDGETS ?? 'enforce'")
+    // Every frame budget goes through budget(), the one switch.
+    const lines = source.split('\n')
+    const budgets = lines
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) =>
+        /scriptP95\)\.toBeLessThan\(8\)|fps\)\.toBeGreaterThan\(50\)/i.test(
+          line,
+        ),
+      )
+    expect(budgets.length).toBeGreaterThanOrEqual(3)
+    for (const { line, index } of budgets)
+      expect(lines[index - 1], line).toMatch(/^\s+budget\(/)
+  })
+
   it('tags every wall-clock budget of the streaming suite @perf', () => {
     const source = fs.readFileSync(
       path.join(repoRoot, 'desktop', 'tests', 'visual', 'streaming.spec.ts'),
