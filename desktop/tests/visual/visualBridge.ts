@@ -4412,6 +4412,19 @@ export async function installVisualCoreBridge(
         delete payload.content
         return payload
       }
+      /**
+       * Core's answer to a call that needs a real session and names none
+       * (`SESSION_REQUIRED`) or names a draft (`invalid_session`); null when
+       * it names a session.
+       */
+      function visualSessionRefusal(sessionId: unknown) {
+        const id = String(sessionId ?? '').trim()
+        if (!id)
+          return visualSkillError('请先打开一个会话再试。', 'SESSION_REQUIRED')
+        if (id.startsWith('draft:'))
+          return visualSkillError(`unknown session ${id}`, 'invalid_session')
+        return null
+      }
       function visualSkillError(message: string, code: string, action = '') {
         return {
           ok: false,
@@ -5489,6 +5502,7 @@ export async function installVisualCoreBridge(
               // Recorded so specs can assert where a message was sent.
               const record = window as unknown as {
                 __visualSubmits?: Array<Record<string, unknown>>
+                __visualPromotionDelayMs?: number
               }
               ;(record.__visualSubmits ??= []).push({ ...input })
               // Core promotes a draft on its first message and announces the
@@ -5497,6 +5511,12 @@ export async function installVisualCoreBridge(
               const target = String(input.sessionId || '')
               if (!target.startsWith('draft:'))
                 return streamVisualReply(target, input)
+              // FIX-13: `__visualPromotionDelayMs` holds the announcement
+              // back, for what the user does in the meantime.
+              if (record.__visualPromotionDelayMs)
+                await new Promise((resolve) =>
+                  setTimeout(resolve, record.__visualPromotionDelayMs),
+                )
               const promoted = session(
                 `created-${sessions.length}`,
                 '新会话',
@@ -7699,9 +7719,24 @@ export async function installVisualCoreBridge(
               const [plugin] = index >= 0 ? boot.plugins.splice(index, 1) : []
               return { changed: Boolean(plugin), plugin }
             }
+            // Like Core (FIX-13): no session (a draft) gets the defaults,
+            // and a change needs a real session. A draft keeps plan mode
+            // and the preset itself, so a call here with none is a bug.
             case 'control.get':
-              return { ...boot.control }
+              return args[0]
+                ? { ...boot.control }
+                : {
+                    ...boot.control,
+                    mode:
+                      boot.control.mode === 'plan'
+                        ? String(boot.control.previous_mode || 'auto')
+                        : boot.control.mode,
+                    plan: false,
+                    pending: null,
+                  }
             case 'control.setPermissionMode': {
+              const refused = visualSessionRefusal(args[1])
+              if (refused) return refused
               const permissionMode = String(args[0] || 'ask_before_edit')
               if (boot.control.mode === 'plan')
                 boot.control.previous_mode = permissionMode
@@ -7712,6 +7747,8 @@ export async function installVisualCoreBridge(
               return { ...boot.control }
             }
             case 'control.setMode': {
+              const refused = visualSessionRefusal(args[1])
+              if (refused) return refused
               const nextMode = String(args[0] || 'ask_before_edit')
               if (nextMode === 'plan') {
                 boot.control.previous_mode =
@@ -8035,8 +8072,22 @@ export async function installVisualCoreBridge(
                 ],
               }
             }
-            case 'chat.stopRuntime':
+            case 'chat.stopRuntime': {
+              // Recorded (FIX-13), and refused without a session like Core.
+              const input = (args[0] ?? {}) as {
+                taskId?: string | null
+                sessionId?: string | null
+              }
+              const record = window as unknown as {
+                __visualStops?: Array<Record<string, unknown>>
+              }
+              ;(record.__visualStops ??= []).push({ ...input })
+              if (!input.taskId) {
+                const refused = visualSessionRefusal(input.sessionId)
+                if (refused) return refused
+              }
               return { cancelled: false }
+            }
             case 'computerUse.status':
               return visualComputerUse()
             case 'browser.preferences':
