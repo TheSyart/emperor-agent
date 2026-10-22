@@ -45,7 +45,10 @@ import {
 } from './components/ui/toasts'
 import { activeConfirm } from './components/ui/confirm'
 import { isConversationRoute, sessionLocation } from './router'
-import { shouldShowModelSetupPrompt } from './components/onboarding/modelSetupDialogModel'
+import {
+  readFirstRunDismissed,
+  shouldOpenFirstRun,
+} from './components/onboarding/firstRunGate'
 import { runInitialStartup } from './appStartup'
 import { buildSlashPaletteItems } from './commands'
 import {
@@ -96,9 +99,9 @@ const WorkspacePanel = defineAsyncComponent(
 const SettingsModal = defineAsyncComponent(
   () => import('./components/settings/SettingsModal.vue'),
 )
-// Shown only while no model is configured.
-const ModelSetupRequiredDialog = defineAsyncComponent(
-  () => import('./components/onboarding/ModelSetupRequiredDialog.vue'),
+// The first-run guide: at launch with no model at all, or from the hero.
+const FirstRunOnboarding = defineAsyncComponent(
+  () => import('./components/onboarding/FirstRunOnboarding.vue'),
 )
 // The confirm() dialog loads on the first request (confirm.ts queues it).
 // The toast stack's view loads with the first toast (the queue is eager).
@@ -113,8 +116,7 @@ const router = useRouter()
 const route = useRoute()
 const settingsRoute = useSettingsRoute()
 const agentTree = useAgentTree()
-const modelSetupPromptOpen = ref(false)
-const modelSetupDismissed = ref(false)
+const firstRunOpen = ref(false)
 const commandDescriptors = ref<CommandDescriptor[]>([])
 
 function showToast(message: string, options?: ToastOptions) {
@@ -123,11 +125,6 @@ function showToast(message: string, options?: ToastOptions) {
 
 function showError(error: unknown, context?: string) {
   showErrorToast(error, context)
-}
-
-function closeModelSetupPrompt() {
-  modelSetupDismissed.value = true
-  modelSetupPromptOpen.value = false
 }
 
 const bootstrap = useBootstrap(showToast, {
@@ -316,11 +313,6 @@ const {
 const slashPaletteItems = computed(() =>
   buildSlashPaletteItems(commandDescriptors.value),
 )
-const modelSetupMessage = computed(
-  () =>
-    boot.value?.modelConfig?.availability?.message ||
-    '还没有可用模型，请先配置模型。',
-)
 
 onMounted(async () => {
   await runInitialStartup({
@@ -465,26 +457,25 @@ async function openCommandSurface(
   }
 }
 
-async function configureModelFromPrompt() {
-  modelSetupDismissed.value = true
-  modelSetupPromptOpen.value = false
-  await settingsRoute.openSettings('model')
-}
-
+// UI-S17: decided once, when the first bootstrap arrives. Losing the last
+// model later (or deleting it in 设置) leaves it to the hero's row.
+let firstRunChecked = false
 watch(
-  () => boot.value?.modelConfig?.availability?.usable,
-  () => {
-    if (!boot.value) return
-    const shouldPrompt = shouldShowModelSetupPrompt(boot.value)
-    if (!shouldPrompt) {
-      modelSetupPromptOpen.value = false
-      modelSetupDismissed.value = false
-      return
-    }
-    if (!modelSetupDismissed.value) modelSetupPromptOpen.value = true
+  boot,
+  (value) => {
+    if (!value || firstRunChecked) return
+    firstRunChecked = true
+    firstRunOpen.value = shouldOpenFirstRun(value, {
+      dismissed: readFirstRunDismissed(),
+      settingsOpen: settingsRoute.open.value,
+    })
   },
   { immediate: true },
 )
+
+function openModelSetup() {
+  firstRunOpen.value = true
+}
 
 async function runSafely(task: () => Promise<void>) {
   try {
@@ -789,7 +780,7 @@ provideAppContext({
   completeSlashCommand,
   refreshAll,
   refreshMemory,
-  openProfileInterviewSession,
+  openModelSetup,
   startProfileInterview,
   skipProfileInterview,
   compactMemory,
@@ -866,13 +857,7 @@ provideAppContext({
     </AppFrame>
     <ImageViewerHost :owner="viewedSessionId" />
     <SettingsModal />
-    <ModelSetupRequiredDialog
-      v-if="modelSetupPromptOpen"
-      :open="modelSetupPromptOpen"
-      :message="modelSetupMessage"
-      @close="closeModelSetupPrompt"
-      @configure="configureModelFromPrompt"
-    />
+    <FirstRunOnboarding v-if="firstRunOpen" @close="firstRunOpen = false" />
   </template>
 
   <ToastStack v-if="visibleToasts.length" />

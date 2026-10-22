@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-21<br>
+> 最后核验：2026-10-22<br>
 > 事实源：`desktop/src/renderer/src/theme/primitives.css`（字体、`--fs-*`/`--lh-*`、`--type-*`、`--md-h*`、`--weight-*`）、`theme/base.css`、`styles.css`、`desktop/src/renderer/index.html`、`components/pages/PageShell.vue`、`components/settings/SettingsModal.vue`、`components/settings/ui/`、`components/ui/`（`PaneHeader.vue`、`Button.vue`、`Tabs.vue`、`Badge.vue`、`ListRow.vue`、`ListSection.vue`、`Field.vue`、`TooltipBubble.vue`、`MenuItem.vue`、`CodeBlock.vue`）、`components/conversation/parts/ConversationMarkdown.vue`、`components/conversation/nodes/UserBubble.vue`、`components/sidebar/`；测试 `style-audit.test.ts`、`styleAuditRules.ts`、`theme/tokens.test.ts`、`desktop/tests/visual/process.spec.ts`、`pages.spec.ts`、`settings-groups.spec.ts`
 
 界面是中文为主、夹杂英文与代码的桌面应用。排版的目标是：字号少而稳，层级主要靠颜色和字重而不是靠放大；中英混排自然；数字对齐。字号、行高和字重都来自[设计令牌](tokens.md)，颜色层级见[颜色使用规范](color.md)。
@@ -87,11 +87,11 @@
 - **中英文间距**：`body` 开启 `text-autospace: normal`，浏览器在中文与英文、数字之间自动加一个窄空格，源文本里不手写空格。已经自带间距或者格式固定的文字关掉它：侧栏会话的相对时间用 `text-autospace: no-autospace`，让「6月26日」不变成「6 月 26 日」，而「5 分钟」本来就带空格。浏览器不支持时这条规则被忽略，不影响布局。
 - **数字**：会变化或需要上下对齐的数字一律 `font-variant-numeric: tabular-nums`——计数、时间与用时、token 用量、体积、行号、Git 增删数、缩放比例（约 70 处）。快捷键提示 `Kbd` 用 `font-feature-settings: 'tnum'`。
 - **换行**：
-  - 说明文字和提示条用 `text-wrap: pretty`，避免最后一行只剩一个字；只有首启弹窗的大标题用 `text-wrap: balance`。
+  - 说明文字和提示条用 `text-wrap: pretty`，避免最后一行只剩一个字；只有首启引导的大标题用 `text-wrap: balance`。
   - 代码、URL、命令、审批目标用 `word-break: break-all`，长串可以在任意位置断开。
   - 正文与工具输出用 `overflow-wrap: anywhere`（或 `word-break: break-word`），只在放不下时才断开长单词。
 - **截断**：单行截断是标准写法（`overflow: hidden; text-overflow: ellipsis; white-space: nowrap`），用于页面与分区标题、会话标题、菜单项。多行截断只在 MCP 卡片、诊断项和记录结构里出现。
-- **字距**：默认 0，中文不加字距。只有几处英文或小字有轻微字距：品牌名与 `Kbd` 0.02em、空会话首页标题与首启弹窗的字标 0.01em。字距令牌 `--tracking-*` 与行高倍数 `--leading-*` 定义在 L1，目前没有组件使用。
+- **字距**：默认 0，中文不加字距。只有几处英文或小字有轻微字距：品牌名与 `Kbd` 0.02em、空会话首页标题与首启引导的品牌名 0.01em。字距令牌 `--tracking-*` 与行高倍数 `--leading-*` 定义在 L1，目前没有组件使用。
 
 ## 写样式时
 

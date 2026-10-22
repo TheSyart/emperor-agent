@@ -2,16 +2,16 @@
 
 > 文档状态：Active<br>
 > 面向读者：前端开发者、设计者<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 最后核验：2026-10-22（对照 `b4b98b8c`）<br>
 > 事实源：`desktop/src/renderer/src/components/ui/`（`useFocusTrap.ts`、`modalStack.ts`、`Modal.vue`、`confirm.ts`、`ConfirmHost.vue`、`toasts.ts`、`ToastStack.vue`、`Popover.vue`）、`components/ui/overlays.test.ts`
 
 Emperor 的浮层分四类：模态弹窗、确认框、轻提示（toast）和锚定面板（popover）。每类只有一个实现，界面不再各写一套。
 
 ## 模态弹窗
 
-`ui/Modal`、设置面板 `SettingsModal`、图片灯箱 `ImageLightbox` 和首启的「配置模型」弹窗都是模态层，遵守同一套规则：
+`ui/Modal`、设置面板 `SettingsModal`、图片灯箱 `ImageLightbox` 和铺满窗口的首启引导都是模态层，遵守同一套规则：
 
-- **Esc 只关最上层**：打开时加入 `modalStack`，Esc 交给最上面的一层；设置面板里再打开的弹窗先关，设置面板不动。不可关闭的弹窗吞掉 Esc。
+- **Esc 只关最上层**：打开时加入 `modalStack`，Esc 交给最上面的一层；设置面板里再打开的弹窗先关，设置面板不动。不可关闭的弹窗吞掉 Esc。首启引导的 Esc 是返回上一步，在欢迎页等于「稍后配置」。
 - **焦点进入弹窗**：打开后焦点落在弹窗里第一个控件上。带 `data-autofocus` 的控件优先；关闭按钮（`data-dismiss`）只在没有其他控件时才拿到焦点；什么控件都没有时落在弹窗本身。设置面板落在面板本身，灯箱落在关闭按钮。
 - **Tab 不离开弹窗**：Tab 和 Shift+Tab 在弹窗内循环；焦点跑到弹窗外时，下一次 Tab 把它拉回来。
 - **背后不可操作**：弹窗所在浮层之外的内容加 `inert` 属性（点击、焦点、读屏都到不了）；嵌套弹窗打开时，下层弹窗也变为 `inert`，关闭后恢复。轻提示栈带 `data-overlay-keep`，弹窗开着时仍可点「复制详情」。

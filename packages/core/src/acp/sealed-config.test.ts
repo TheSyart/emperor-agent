@@ -29,7 +29,6 @@ describe('sealed model keys without the desktop main process (SEC-06)', () => {
       stateRoot,
       templatesDir: TEMPLATES_DIR,
       appVersion: '0.0.0',
-      enableFirstRunOnboarding: false,
       initializeMcp: false,
     })
     apis.push(api)

@@ -11,6 +11,11 @@ import { createRoutingChildProvider } from './workflow-provider'
 import { fixture } from './service-test-fixture'
 import { FakeExecutorAdapter } from './testing'
 import { DelegationError } from './types'
+
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 function setup() {
   const f = fixture(),
     parent = createTestHarness().agent('root'),
@@ -170,7 +175,7 @@ it('cancels a child waiting for the global/profile slot so it never submits afte
     backend: 'codex',
     clientRequestId: 'first',
   })
-  await vi.waitFor(() => expect(f.adapter.submitted).toHaveLength(1))
+  await vi.waitFor(() => expect(f.adapter.submitted).toHaveLength(1), LOADED)
   const controller = new AbortController(),
     b = await provider.start({
       parent,
@@ -278,7 +283,7 @@ it('keeps workflow concurrency inside the global/profile limits and records nati
         'return await parallel([()=>agent("ordinary failure",{backend:"codex"}),()=>agent("second",{backend:"codex"}),()=>agent("third",{backend:"claude-code"})]);',
     })
   try {
-    await vi.waitFor(() => expect(live.total).toBe(2))
+    await vi.waitFor(() => expect(live.total).toBe(2), LOADED)
     expect(peak).toEqual({ total: 2, codex: 1, claude: 1 })
     release()
     const result = await run.result

@@ -26,6 +26,10 @@ import {
   type SyncPersistenceAdapter,
 } from '../../store/persistence'
 
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 const cleanup: Array<() => void> = []
 afterEach(() => cleanup.splice(0).forEach((f) => f()))
 
@@ -160,10 +164,12 @@ it('a run that was active when Emperor quit is interrupted after restart and hol
   })
   cleanup.push(f.cleanup)
   const record = await f.service.start(f.owner, spec)
-  await vi.waitFor(() =>
-    expect(f.service.inspect(record.id).runs[record.currentRunId!]?.phase).toBe(
-      'running',
-    ),
+  await vi.waitFor(
+    () =>
+      expect(
+        f.service.inspect(record.id).runs[record.currentRunId!]?.phase,
+      ).toBe('running'),
+    LOADED,
   )
   // Force quit: a new process opens the same state; the old one never stops.
   const restarted = new DelegationService({

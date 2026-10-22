@@ -25,6 +25,17 @@ import {
 // them alone on one worker after the rest of the suite (`visual:perf`, one
 // retry of what failed); they failed when other workers shared the CPU.
 // 7 measures nothing and stays in the main run.
+//
+// FIX-17: the budgets hold on a Mac. A shared CI runner (three virtual CPUs,
+// no GPU, other jobs on the host) cannot promise 60 Hz frames, so the
+// nightly sets EMPEROR_PERF_BUDGETS=report: the numbers are still measured
+// and recorded, a budget they miss is annotated and logged, and the test
+// does not fail on it. Unset or `enforce`, a missed budget fails as before.
+const PERF_BUDGETS = process.env.EMPEROR_PERF_BUDGETS ?? 'enforce'
+if (!['enforce', 'report'].includes(PERF_BUDGETS))
+  throw new Error(
+    `EMPEROR_PERF_BUDGETS must be enforce or report, not ${PERF_BUDGETS}`,
+  )
 const outDir = resolve(process.cwd(), 'screenshots', 'streaming')
 const SESSION = 'build-ui'
 const FRAME_MS = 1000 / 60
@@ -280,6 +291,24 @@ async function traced<T>(
   return { result, events }
 }
 
+/** A wall-clock budget: enforced, or with EMPEROR_PERF_BUDGETS=report only reported. */
+function budget(what: string, check: () => void): void {
+  if (PERF_BUDGETS === 'enforce') {
+    check()
+    return
+  }
+  try {
+    check()
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error)
+    test.info().annotations.push({
+      type: 'perf-budget-missed',
+      description: `${what}: ${detail}`,
+    })
+    console.log(`[FIX-17] budget missed, reported only: ${what}: ${detail}`)
+  }
+}
+
 function record(name: string, report: Record<string, unknown>): void {
   writeFileSync(
     resolve(outDir, `perf-${name}.json`),
@@ -302,7 +331,9 @@ test(
     record('500-turns-cpu1', { ...report, cpu: 1, replyChars: reply.length })
     await expect(streamingAnswer(page, session)).toContainText('第 1 部分')
     expect(report.frames).toBeGreaterThan(100)
-    expect(report.scriptP95).toBeLessThan(8)
+    budget('script per frame p95 < 8 ms', () =>
+      expect(report.scriptP95).toBeLessThan(8),
+    )
   },
 )
 
@@ -321,7 +352,9 @@ test(
     )
     const report = analyzeTrace(events, raf)
     record('500-turns-cpu4', { ...report, cpu: 4, replyChars: reply.length })
-    expect(report.traceFps).toBeGreaterThan(50)
+    budget('> 50 fps on a 4× slower CPU', () =>
+      expect(report.traceFps).toBeGreaterThan(50),
+    )
   },
 )
 
@@ -387,7 +420,9 @@ for (const cpu of [1, 4]) {
       })
       expect(Buffer.byteLength(reply, 'utf8')).toBeGreaterThanOrEqual(50_000)
       const fps = report.mainFrames > 0 ? report.traceFps : report.rafFps
-      expect(fps).toBeGreaterThan(50)
+      budget(`50 KB reply > 50 fps (CPU ×${cpu})`, () =>
+        expect(fps).toBeGreaterThan(50),
+      )
     },
   )
 }

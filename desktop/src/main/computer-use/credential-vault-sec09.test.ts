@@ -598,9 +598,13 @@ describe('SEC-09 #9 scrypt off the main thread, with backoff', () => {
     await tick()
     histogram.disable()
     expect(unlocked).toBe(true)
-    // Two real derivations took a while, but never held the loop.
+    // Two real derivations took a while, but never held the loop. On the
+    // main thread one derivation would hold it for half of `derived`; the
+    // spikes a busy machine adds while it schedules other work stay far
+    // below that, but past a fixed 50 ms (FIX-17: 52–56 ms under load, with
+    // the derivations taking 9 s instead of 0.3 s).
     expect(derived).toBeGreaterThan(50)
-    expect(histogram.max / 1e6).toBeLessThan(50)
+    expect(histogram.max / 1e6).toBeLessThan(Math.max(50, derived / 4))
   }, 30_000)
 
   it('backs off exponentially after five wrong passwords, up to five minutes', async () => {

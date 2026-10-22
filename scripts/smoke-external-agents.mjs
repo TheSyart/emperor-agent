@@ -45,7 +45,6 @@ const receipt = {
 const api = await CoreApi.create({
   root: process.cwd(),
   stateRoot: options.state,
-  enableFirstRunOnboarding: false,
   initializeMcp: false,
   eventSink: () => {},
 })

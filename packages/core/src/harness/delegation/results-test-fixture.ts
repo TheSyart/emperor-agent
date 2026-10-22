@@ -171,9 +171,14 @@ export function resultsFixture(
     capabilities: registry.capabilities(p.backend),
   }))
   let script: ResultScript = input.script ?? writes({})
-  const adapter = new FakeExecutorAdapter('codex', (turn, open) =>
-    script(turn, open),
-  )
+  /** Delegations whose run reached the executor, and who waits for one. */
+  const reached = new Set<string>()
+  const reachWaiters = new Map<string, () => void>()
+  const adapter = new FakeExecutorAdapter('codex', (turn, open) => {
+    reached.add(open.delegationId)
+    reachWaiters.get(open.delegationId)?.()
+    return script(turn, open)
+  })
   // A stop reaches a waiting script, as a real executor's turn would end.
   const open = adapter.open.bind(adapter)
   adapter.open = async (input) => {
@@ -251,6 +256,26 @@ export function resultsFixture(
     const record = service.inspect(id).record!
     return service.wait(id, record.currentRunId!)
   }
+  /**
+   * Wait until the run of `id` reaches its executor: its workspace is bound
+   * and locked by then. Fails at once if the run ends first. No clock: on a
+   * loaded machine the Git work before it takes as long as it takes.
+   */
+  const reachesExecutor = async (id: string): Promise<void> => {
+    if (reached.has(id)) return
+    const record = service.inspect(id).record!
+    const started = new Promise<void>((resolve) => {
+      reachWaiters.set(id, resolve)
+    })
+    const ended = service.wait(id, record.currentRunId!).then(
+      (run) => `ended ${run.phase}`,
+      (error: unknown) => `failed: ${String(error)}`,
+    )
+    const outcome = await Promise.race([started.then(() => null), ended])
+    reachWaiters.delete(id)
+    if (outcome !== null && !reached.has(id))
+      throw new Error(`the run ${outcome} before it reached the executor`)
+  }
   return {
     ...w,
     state,
@@ -264,6 +289,7 @@ export function resultsFixture(
     service,
     start,
     settle,
+    reachesExecutor,
     setScript: (next: ResultScript) => {
       script = next
     },

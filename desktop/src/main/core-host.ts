@@ -38,7 +38,6 @@ export async function createCoreHost(opts: {
   const coreApi = await CoreApi.create({
     root: opts.root,
     eventSink: bridge.sink(),
-    enableFirstRunOnboarding: true,
     ...opts.coreOptions,
   })
   const sessionBridge = opts.sessionEventBridge ?? new SessionEventBridge()

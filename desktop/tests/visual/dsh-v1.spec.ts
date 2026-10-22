@@ -1147,27 +1147,17 @@ test('capabilities tools fit a narrow window', async ({ page }) => {
   await expect(page).toHaveURL(/\/capabilities(\?|$)/)
 })
 
-test('first-run model prompt opens the settings model section', async ({
-  page,
-}) => {
-  await open(page, '/chat?visualModel=unavailable')
-  const prompt = page.getByRole('dialog', { name: '把任务交给本地 Agent。' })
-  await expect(prompt).toBeVisible()
-  await prompt.getByRole('button', { name: '去配置模型' }).click()
-  await expect(page).toHaveURL(/settings=model/)
-  await expect(
-    page.getByRole('button', { name: '添加模型', exact: true }),
-  ).toBeVisible()
-})
-
-// UI-S12: the illustration fills the dialog behind the copy and follows
-// the theme; the brand line is the vector mark plus the name.
+// UI-S17: the first-run guide fills the window; the illustration sits on
+// the right (capped, faded into the canvas) and follows the theme.
 for (const theme of ['dark', 'light'] as const) {
-  test(`first-run model prompt artwork (${theme})`, async ({ page }) => {
+  test(`first-run guide welcome (${theme})`, async ({ page }) => {
     await open(page, '/chat?visualModel=unavailable', { theme })
-    const prompt = page.getByRole('dialog', { name: '把任务交给本地 Agent。' })
-    await expect(prompt).toBeVisible()
-    const art = prompt.locator('img.model-setup-art')
+    const guide = page.getByTestId('first-run')
+    await expect(guide).toBeVisible()
+    await expect(
+      guide.getByRole('heading', { name: /把任务交给\s*本地 Agent/ }),
+    ).toBeVisible()
+    const art = guide.locator('img.art')
     await expect(art).toHaveAttribute(
       'src',
       new RegExp(`model-setup-hero-${theme}\\.webp`),
@@ -1175,24 +1165,70 @@ for (const theme of ['dark', 'light'] as const) {
     await expect
       .poll(() => art.evaluate((img: HTMLImageElement) => img.naturalWidth))
       .toBe(1600)
-    await expect(prompt.locator('svg.brand-mark')).toBeVisible()
-    await expect(prompt.locator('.model-setup-wordmark')).toHaveText(
-      'Emperor Agent',
-    )
-    const box = (await prompt.boundingBox())!
-    const copy = (await prompt.locator('.model-setup-copy').boundingBox())!
-    // The art fills the dialog at 16:10; the copy keeps to the empty left.
-    expect(box.width / box.height).toBeCloseTo(1.6, 1)
-    expect(copy.x + copy.width - box.x).toBeLessThanOrEqual(box.width * 0.45)
-    await expect(
-      prompt.getByRole('button', { name: '去配置模型' }),
-    ).toBeFocused()
+    expect((await art.boundingBox())!.width).toBeLessThanOrEqual(1040)
+    await expect(guide.locator('svg.brand-mark').first()).toBeVisible()
+    // A local server answered: it comes first, recommended.
+    const choices = guide.locator('[data-choice]')
+    await expect(choices).toHaveCount(2)
+    await expect(choices.first()).toHaveAttribute('data-choice', 'local')
+    await expect(choices.first()).toContainText('推荐')
+    await expect(choices.first()).toBeFocused()
+    const box = (await guide.boundingBox())!
+    expect(box.width).toBe(1440)
+    expect(box.height).toBe(900)
     await expectNoHorizontalOverflow(page)
-    await shot(page, `first-run-model-${theme}`)
+    await shot(page, `first-run-welcome-${theme}`)
   })
 }
 
-test('first-run model prompt stacks the artwork on a narrow window', async ({
+test('first-run guide adds a model and returns to the hero', async ({
+  page,
+}) => {
+  await open(page, '/chat?visualModel=unavailable')
+  const guide = page.getByTestId('first-run')
+  await guide.locator('[data-choice="key"]').click()
+  await expect(
+    guide.getByRole('heading', { name: '选择模型服务' }),
+  ).toBeVisible()
+  await expect(guide.locator('[aria-current="step"]')).toContainText('连接')
+  await guide.locator('[data-provider="deepseek"]').click()
+  await expect(
+    guide.getByRole('heading', { name: '连接 DeepSeek' }),
+  ).toBeVisible()
+  await guide.getByLabel('API Key').fill('sk-visual-test')
+  await shot(page, 'first-run-connect')
+  await guide.getByRole('button', { name: '连接并获取模型' }).click()
+  await expect(
+    guide.getByRole('heading', { name: '选择要用的模型' }),
+  ).toBeVisible()
+  await guide.getByRole('button', { name: /^添加 \d+ 个模型$/ }).click()
+  await expect(guide.getByRole('heading', { name: '准备好了' })).toBeVisible()
+  await expect(guide.getByRole('status')).toHaveText('连接测试通过')
+  await shot(page, 'first-run-ready')
+  await guide.getByRole('button', { name: '开始使用' }).click()
+  await expect(guide).toHaveCount(0)
+  await expect(page.locator('.hero-model-prompt')).toHaveCount(0)
+})
+
+test('first-run guide put off: the hero keeps a way back', async ({ page }) => {
+  await open(page, '/chat/chat-main?visualModel=unavailable')
+  const guide = page.getByTestId('first-run')
+  await expect(guide.locator('[data-choice]').first()).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(guide).toHaveCount(0)
+  const row = page.locator('.hero-model-prompt')
+  await expect(row).toContainText('还没有可用模型')
+  await shot(page, 'hero-no-model')
+  // 稍后配置 is remembered: the next launch opens straight to the chat.
+  await page.reload()
+  await expect(page.locator('.app-frame')).toBeVisible()
+  await expect(page.locator('.hero-model-prompt')).toBeVisible()
+  await expect(guide).toHaveCount(0)
+  await row.getByRole('button', { name: '开始接入' }).click()
+  await expect(guide).toBeVisible()
+})
+
+test('first-run guide on a narrow window puts the artwork on top', async ({
   page,
 }) => {
   await open(page, '/chat?visualModel=unavailable', {
@@ -1200,15 +1236,23 @@ test('first-run model prompt stacks the artwork on a narrow window', async ({
     height: 860,
     theme: 'light',
   })
-  const prompt = page.getByRole('dialog', { name: '把任务交给本地 Agent。' })
-  await expect(prompt).toBeVisible()
-  const art = (await prompt.locator('img.model-setup-art').boundingBox())!
-  const copy = (await prompt.locator('.model-setup-copy').boundingBox())!
-  expect(art.height).toBe(200)
-  expect(copy.y).toBeGreaterThanOrEqual(art.y + art.height - 1)
-  await expect(prompt.getByRole('button', { name: '稍后配置' })).toBeVisible()
+  const guide = page.getByTestId('first-run')
+  await expect(guide).toBeVisible()
+  const art = (await guide.locator('img.art').boundingBox())!
+  expect(art.y).toBe(0)
+  expect(art.height).toBe(250)
+  await expect(guide.locator('.rail')).toHaveCount(0)
+  await expect(guide.getByRole('button', { name: /稍后配置/ })).toBeVisible()
   await expectNoHorizontalOverflow(page)
-  await shot(page, 'first-run-model-narrow')
+  await shot(page, 'first-run-narrow')
+})
+
+test('the hero greets the user by the profile 称呼', async ({ page }) => {
+  await open(page, '/chat/chat-main?visualProfile=named')
+  await expect(page.locator('.empty-hero .headline')).toHaveText(
+    '小周，今天想推进什么？',
+  )
+  await shot(page, 'hero-named')
 })
 
 test('profile onboarding starts from the hero and stays in 记忆', async ({

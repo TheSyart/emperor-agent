@@ -13,6 +13,10 @@ import {
 import type { DelegationRecord } from '../../harness/delegation/types'
 import { ClaudeCodeHooks } from '../../harness/hooks/claude-code'
 
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -122,12 +126,14 @@ it('marks a run without an outcome as ended from the conversation', async () => 
       failureCode: 'OUTPUT_LIMIT',
       abandoned: { by: 'user' },
     })
-    await vi.waitFor(() =>
-      expect(
-        second.api.agents
-          .list({ rootSessionIds: [root] })
-          .agents.find((agent) => agent.id === 'dlg-stuck')?.needsExit,
-      ).toBeUndefined(),
+    await vi.waitFor(
+      () =>
+        expect(
+          second.api.agents
+            .list({ rootSessionIds: [root] })
+            .agents.find((agent) => agent.id === 'dlg-stuck')?.needsExit,
+        ).toBeUndefined(),
+      LOADED,
     )
   } finally {
     await second.api.close()

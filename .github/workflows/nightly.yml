@@ -60,6 +60,9 @@ jobs:
       - name: Nightly suites
         env:
           NIGHTLY_ONLY: ${{ inputs.only }}
+          # A shared runner cannot promise 60 Hz frames: the @perf frame
+          # budgets are measured and reported, not enforced (FIX-17).
+          EMPEROR_PERF_BUDGETS: report
         run: node scripts/ci/nightly.mjs --report nightly-report ${NIGHTLY_ONLY:+--only "$NIGHTLY_ONLY"}
       - name: Upload the nightly report
         if: always()

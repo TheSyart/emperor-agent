@@ -56,7 +56,8 @@ export interface AppContext {
 
   refreshAll: () => Promise<void>
   refreshMemory: (shouldToast?: boolean) => Promise<void>
-  openProfileInterviewSession: (sessionId: string | null) => Promise<void>
+  /** Open the first-run guide (the hero's 开始接入, UI-S17). */
+  openModelSetup: () => void
   startProfileInterview: () => Promise<void>
   skipProfileInterview: () => Promise<void>
   compactMemory: () => Promise<CompactResult>

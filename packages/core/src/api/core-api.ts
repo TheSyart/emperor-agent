@@ -290,8 +290,6 @@ export interface CoreApiCreateOptions extends HarnessHostOptions {
   terminalEventSink?: ((event: TerminalEvent) => void) | null
   /** Host public HTTP client used by plugin installs and lazy reference previews. */
   webFetchClient?: WebFetchClient | null
-  /** Start the first-run profile interview after a model is configured. */
-  enableFirstRunOnboarding?: boolean
   /** Where the host writes its logs (REL-01); diagnostics show it. */
   logDirectory?: string | null
   /**
@@ -478,7 +476,6 @@ export class CoreApi {
       stateRoot: this.paths.stateRoot,
       templatesDir: kept.templatesDir,
       userFile: kept.sharedMemory.userFile,
-      enabled: opts.enableFirstRunOnboarding === true,
       readUserProfile: () => kept.sharedMemory.readUser(),
       modelAvailable: () => host.llm.activeRoute() !== undefined,
       anyBusy: () => host.busySessions().length > 0,
@@ -490,6 +487,7 @@ export class CoreApi {
           : null
       },
       onPendingChange: (listener) => host.pending.onChange(listener),
+      onProfileWrite: (listener) => kept.sharedMemory.onUserWrite(listener),
       sessions: kept.sessionStore,
       // The interview runs as a background turn in its own session; the
       // user answers its questions in that session (policy `wait`).
@@ -550,7 +548,6 @@ export class CoreApi {
     this.modelService = new CoreModelService(this.paths.stateRoot, {
       sealer: kept.secretSealer,
       refreshModelConfig: () => host.refreshModelConfig(),
-      afterConfigSaved: () => this.onboardingService.start({ manual: false }),
     })
     this.hooksService = new CoreHooksService({
       stateRoot: this.paths.stateRoot,
@@ -2384,8 +2381,7 @@ export class CoreApi {
 
   readonly onboarding = {
     getProfileStatus: () => this.onboardingService.payload(),
-    startProfileInterview: async () =>
-      this.onboardingService.start({ manual: true }),
+    startProfileInterview: async () => this.onboardingService.start(),
     skipProfileInterview: async () => this.onboardingService.skip(),
   }
 

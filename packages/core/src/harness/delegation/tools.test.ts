@@ -12,6 +12,11 @@ import {
 import { fixture as serviceFixture } from './service-test-fixture'
 import { fixtureDelegationRecord, fixtureDelegationRun } from './testing'
 import { DelegationError, type DelegationRunRecord } from './types'
+
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 function fixture(
   externalService?: DelegationToolService,
   approve?: DelegationToolOptions['approve'],
@@ -143,7 +148,7 @@ it('foreground external cancellation reaches the exact child run and returns an 
     callId: 'foreground-call',
     signal: controller.signal,
   })
-  await vi.waitFor(() => expect(f.service.wait).toHaveBeenCalled())
+  await vi.waitFor(() => expect(f.service.wait).toHaveBeenCalled(), LOADED)
   controller.abort()
   expect((await run).isError).toBe(true)
   expect(f.service.interrupt).toHaveBeenCalledWith('dlg-test', 'dgr-1')
@@ -172,7 +177,7 @@ it('collect_agent stops waiting within a second when the turn is stopped (AGT-09
     callId: 'collect-call',
     signal: controller.signal,
   })
-  await vi.waitFor(() => expect(f.service.wait).toHaveBeenCalled())
+  await vi.waitFor(() => expect(f.service.wait).toHaveBeenCalled(), LOADED)
   const stoppedAt = Date.now()
   controller.abort()
   const result = await collected
@@ -200,7 +205,7 @@ it('a foreground external wait ends when the turn is stopped, before the run set
     callId: 'foreground-stop',
     signal: controller.signal,
   })
-  await vi.waitFor(() => expect(f.service.wait).toHaveBeenCalled())
+  await vi.waitFor(() => expect(f.service.wait).toHaveBeenCalled(), LOADED)
   const stoppedAt = Date.now()
   controller.abort()
   expect((await run).isError).toBe(true)
@@ -352,7 +357,10 @@ it('dispatches one task envelope through the real tool and service and formats c
       text: 'Inspect tests too',
       delivery: 'queue',
     })
-    await vi.waitFor(() => expect(runtime.adapter.submitted).toHaveLength(2))
+    await vi.waitFor(
+      () => expect(runtime.adapter.submitted).toHaveLength(2),
+      LOADED,
+    )
     // A follow-up is a new instruction: it is delivered as written.
     expect(runtime.adapter.submitted[1]!.text).toBe('Inspect tests too')
   } finally {

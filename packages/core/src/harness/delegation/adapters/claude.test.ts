@@ -12,6 +12,11 @@ import { ManagedAgentProcess, type ManagedProcessHandle } from '../process'
 import { defaultExecutorConfig } from '../config'
 import { delegationTestDirectory } from '../testing'
 import type { ExecutorOpenInput, NormalizedExecutorEvent } from '../types'
+
+/** Waits on work that runs processes, Git or the file system: room for a
+ * loaded CI runner instead of the 1 s default (FIX-17). */
+const LOADED = { timeout: 10_000 }
+
 function fixture(
   ask = false,
   processes?: ManagedAgentProcess,
@@ -214,7 +219,7 @@ it('keeps the SDK question callback pending until a generation-matching answer a
     kind: 'question',
     answers: { 'q-0': 'a.txt' },
   })
-  await vi.waitFor(() => expect(f.wasAnswered()).toBe(true))
+  await vi.waitFor(() => expect(f.wasAnswered()).toBe(true), LOADED)
   await submit
   await session.close()
   f.cleanup()

@@ -41,6 +41,19 @@ function streamsFor(route: RouteSpec): ProviderStreams {
   return (openAi ??= openAICompletionsApi())
 }
 
+/**
+ * The key a keyless route sends (FIX-18). pi-ai makes no request without
+ * a key. Ollama, LM Studio and other local OpenAI-compatible servers need
+ * none and ignore it; an auth header the route configures still wins.
+ */
+const KEYLESS_API_KEY = 'unused'
+
+function routeApiKey(route: RouteSpec): string {
+  return route.apiKey === null || route.apiKey === ''
+    ? KEYLESS_API_KEY
+    : assertUsableApiKey(route.apiKey, route.displayName)
+}
+
 /** Build the pi-ai model descriptor for one route. */
 export function piModel(route: RouteSpec): Model<Api> {
   return {
@@ -96,10 +109,7 @@ export class PiAiAdapter implements LlmAdapter {
         'pi-ai routes do not support stop sequences',
         'UNSUPPORTED_OPTION',
       )
-    const apiKey =
-      route.apiKey === null || route.apiKey === ''
-        ? undefined
-        : assertUsableApiKey(route.apiKey, route.displayName)
+    const apiKey = routeApiKey(route)
     const model = piModel(route)
     const consumer = new AbortController()
     const upstream =
@@ -122,7 +132,7 @@ export class PiAiAdapter implements LlmAdapter {
       const reasoning = piReasoningLevel(options)
       const extraBody = route.extraBody
       const streamOptions: SimpleStreamOptions = {
-        ...(apiKey === undefined ? {} : { apiKey }),
+        apiKey,
         ...(reasoning === undefined ? {} : { reasoning }),
         ...(options.temperature === undefined
           ? {}

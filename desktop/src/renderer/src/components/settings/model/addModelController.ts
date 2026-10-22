@@ -3,7 +3,9 @@
  * steps through provide/inject: connect (provider, key, address, a probe
  * and the vendor's list), pick (filters, families, preselection, manual
  * ids, manage-mode guards) and confirm (per-model parameters, then one
- * `model.saveEntries`). Pure decisions live in addModelModel.ts.
+ * `model.saveEntries`). Pure decisions live in addModelModel.ts. The
+ * first-run guide (onboarding/FirstRunOnboarding) drives the same steps
+ * with `skipKnownConfirm`: when every value is known, 选择模型 saves.
  */
 import {
   computed,
@@ -70,6 +72,8 @@ export function createAddModelController(input: {
   manageProvider?: string | null
   onSaved: (result: Saved) => void
   sleep?: (ms: number) => Promise<void>
+  /** Save from 选择模型 when no picked model has an unknown value. */
+  skipKnownConfirm?: boolean
 }) {
   const sleep =
     input.sleep ?? ((ms: number) => new Promise((done) => setTimeout(done, ms)))
@@ -86,6 +90,8 @@ export function createAddModelController(input: {
     useSavedKey: false,
   })
   const local = reactive<Record<string, LocalStatus>>({})
+  /** Every local server has answered (or timed out). */
+  const localProbed = ref(false)
   const connecting = ref(false)
   const error = ref<ConnectError | null>(null)
   const note = ref('')
@@ -172,6 +178,17 @@ export function createAddModelController(input: {
     savedEntries.value.filter((entry) => !selected.value.has(entry.modelId)),
   )
   const blocked = computed(() => needsConfirmation(drafts.value))
+  /** 选择模型 saves directly (`skipKnownConfirm`, every value known). */
+  const direct = computed(
+    () =>
+      Boolean(input.skipKnownConfirm) &&
+      !manage.value &&
+      !needsConfirmation(
+        picked.value.map((model) =>
+          buildEntryDraft(model, { local: isLocal.value }),
+        ),
+      ),
+  )
 
   function pickProvider(name: string, apiBase?: string): void {
     const found = options.value.find((item) => item.name === name)
@@ -234,6 +251,7 @@ export function createAddModelController(input: {
           }
         }),
     )
+    localProbed.value = true
   }
 
   function describe(
@@ -387,9 +405,17 @@ export function createAddModelController(input: {
       (model) =>
         kept.get(model.id) ?? buildEntryDraft(model, { local: isLocal.value }),
     )
+    // A model unchecked since it was picked as the one to use: drop it.
+    if (
+      activateModelId.value !== null &&
+      !drafts.value.some((draft) => draft.modelId === activateModelId.value)
+    )
+      activateModelId.value = null
     if (activateModelId.value === null && !input.payload().activeModelId)
       activateModelId.value = drafts.value[0]?.modelId ?? null
-    step.value = drafts.value.length ? 'confirm' : step.value
+    if (!drafts.value.length) return
+    if (direct.value) void save()
+    else step.value = 'confirm'
   }
 
   function setAllMaxTokens(value: number): void {
@@ -458,6 +484,7 @@ export function createAddModelController(input: {
     query,
     connection,
     local,
+    localProbed,
     connecting,
     error,
     note,
@@ -489,6 +516,7 @@ export function createAddModelController(input: {
     picked,
     removed,
     blocked,
+    direct,
     pickProvider,
     setQuery,
     setProtocol,

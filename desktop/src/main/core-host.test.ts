@@ -14,6 +14,7 @@ import {
 } from './core-host'
 import { SessionEventBridge } from './event-bridge'
 import type { CoreApiLike } from './ipc'
+import { QUIET_TOOLCHAIN } from './test-fixtures/test-core'
 
 describe('desktop CoreApi host (MIG-IPC-002)', () => {
   it('registers every CoreApi operation on the Electron IPC boundary', () => {
@@ -303,6 +304,7 @@ describe('desktop CoreApi host (MIG-IPC-002)', () => {
         stateRootSource: 'explicit',
         emperorHomePrepared: false,
         initializeMcp: false,
+        environmentProbeRunner: QUIET_TOOLCHAIN,
       },
     })
     try {

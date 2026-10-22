@@ -1,5 +1,5 @@
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -23,7 +23,10 @@ const owner = {
   sessionId: 'session-a',
 }
 
-function sandboxExecution(root: string) {
+function sandboxExecution(
+  root: string,
+  executables: string[] = [process.execPath],
+) {
   return {
     kind: 'sandbox' as const,
     policy: processContainmentPolicy({
@@ -32,7 +35,7 @@ function sandboxExecution(root: string) {
       tempDir: root,
       network: 'deny',
       fallback: 'refuse',
-      executables: [process.execPath],
+      executables,
     }),
   }
 }
@@ -279,16 +282,14 @@ describe('OwnedProcessRuntime receipts', () => {
     async () => {
       const root = mkdtempSync(join(tmpdir(), 'emperor-owned-tree-'))
       const ready = join(root, 'grandchild-started')
-      const marker = join(root, 'grandchild-finished')
       const runtime = new OwnedProcessRuntime(root)
-      // The grandchild writes its marker 1.5 s after it starts. On macOS the
-      // tree kill first walks descendants with pgrep and ps, which on a
-      // loaded CI runner outlasted a 500 ms marker delay.
-      const childScript = `require('node:fs').writeFileSync(${JSON.stringify(ready)},'ready');setTimeout(()=>require('node:fs').writeFileSync(${JSON.stringify(marker)},'done'),1500)`
+      // The grandchild leaves the process group (detached) and writes its pid
+      // once it runs; the cancel has to find it through the tree walk.
+      const childScript = `require('node:fs').writeFileSync(${JSON.stringify(ready)},String(process.pid));setTimeout(()=>{},30000)`
       const parentScript = [
         'const {spawn}=require("node:child_process")',
         `spawn(process.execPath,['-e',${JSON.stringify(childScript)}],{detached:true,stdio:'ignore'}).unref()`,
-        'setTimeout(()=>{},5000)',
+        'setTimeout(()=>{},30000)',
       ].join(';')
       const running = runtime.run({
         executable: process.execPath,
@@ -297,19 +298,55 @@ describe('OwnedProcessRuntime receipts', () => {
         env: { PATH: process.env.PATH ?? '' },
         owner,
         execution: sandboxExecution(root),
-        timeoutMs: 5_000,
+        timeoutMs: 30_000,
       })
-      await waitFor(() => runtime.list({ activeOnly: true }).length === 1)
-      await waitFor(() => existsSync(ready))
+      // Two node processes start one after the other: seconds on a loaded runner.
+      await waitFor(
+        () => existsSync(ready) && readFileSync(ready, 'utf8').length > 0,
+      )
+      const grandchild = Number(readFileSync(ready, 'utf8'))
+      try {
+        await runtime.cancelOwner(owner, 'session closed')
+        await expect(running).resolves.toMatchObject({ status: 'cancelled' })
+        // The kill is sent before cancelOwner returns; the grandchild is gone
+        // as soon as the system has reaped it.
+        await waitFor(() => !pidIsAlive(grandchild))
+        expect(runtime.list()[0]).toMatchObject({
+          status: 'cancelled',
+          terminalReason: 'session closed',
+        })
+      } finally {
+        if (pidIsAlive(grandchild)) process.kill(grandchild, 'SIGKILL')
+      }
+    },
+  )
 
-      await runtime.cancelOwner(owner, 'session closed')
-      await expect(running).resolves.toMatchObject({ status: 'cancelled' })
-      await delay(2_000)
-      expect(existsSync(marker)).toBe(false)
-      expect(runtime.list()[0]).toMatchObject({
-        status: 'cancelled',
-        terminalReason: 'session closed',
+  it.skipIf(process.platform === 'win32')(
+    'stops a shell before its children, so it never runs its next command (FIX-17)',
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), 'emperor-owned-shell-'))
+      const late = join(root, 'late')
+      const runtime = new OwnedProcessRuntime(root)
+      // A subshell waits on its own sleep. Killing the sleep before the
+      // subshell let the subshell run `echo` while the tree walk went on.
+      const running = runtime.run({
+        executable: '/bin/sh',
+        args: ['-c', '(sleep 20; echo late > "$LATE") & sleep 20'],
+        cwd: root,
+        env: { PATH: '/usr/bin:/bin', LATE: late },
+        owner,
+        execution: sandboxExecution(root, ['/bin/sh']),
+        timeoutMs: 30_000,
       })
+      await waitFor(() => (runtime.list({ activeOnly: true })[0]?.pid ?? 0) > 0)
+      const pid = runtime.list({ activeOnly: true })[0]!.pid!
+      // The subshell's sleep runs: the tree is two levels deep.
+      await waitFor(() => childPids(pid).some((c) => childPids(c).length > 0))
+      await runtime.cancelOwner(owner, 'session closed')
+      // The output pipe closes only once every process holding it is gone,
+      // the subshell too: whatever it was going to write is written by now.
+      await expect(running).resolves.toMatchObject({ status: 'cancelled' })
+      expect(existsSync(late)).toBe(false)
     },
   )
 
@@ -519,12 +556,31 @@ describe('OwnedProcessRuntime recovery and capability', () => {
   )
 })
 
-async function waitFor(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (predicate()) return
+/** Poll until `predicate` holds; bounded by time, not by a count of polls. */
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 10_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() > deadline)
+      throw new Error(`condition not reached in ${timeoutMs} ms`)
     await delay(10)
   }
-  throw new Error('condition not reached')
+}
+
+/** The direct children of `pid` (none when it has none or is gone). */
+function childPids(pid: number): number[] {
+  try {
+    return execFileSync('/usr/bin/pgrep', ['-P', String(pid)], {
+      encoding: 'utf8',
+    })
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(Number)
+  } catch {
+    return []
+  }
 }
 
 function runningReceipt(
