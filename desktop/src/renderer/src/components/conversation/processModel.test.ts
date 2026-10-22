@@ -18,6 +18,7 @@ import {
   streamingScenario,
 } from './gallery/scenarios'
 import {
+  processContinuedLabel,
   processExpansionKey,
   processLiveStep,
   processSummary,
@@ -605,5 +606,126 @@ describe('chat durations', () => {
     expect(formatRunDuration(72_000)).toBe('1 分 12 秒')
     expect(formatRunDuration(60_000)).toBe('1 分')
     expect(formatRunDuration(3_720_000)).toBe('1 小时 2 分')
+  })
+})
+
+describe('turns a result woke (UI-S15)', () => {
+  type Opener =
+    | 'user'
+    | 'steer'
+    | {
+        readonly producer: string
+        readonly form?: string
+        /** The user inserts a message into the turn's second step. */
+        readonly steer?: boolean
+        /** …or into its first step, before it starts. */
+        readonly steerFirst?: boolean
+      }
+
+  /** One turn: its opening message, a read, the answer. */
+  function turn(log: LogBuilder, number: number, opener: Opener): void {
+    log.add('turn/start', { turn: number })
+    log.add('step/start', { turn: number, step: 1 })
+    if (opener === 'user' || opener === 'steer') {
+      if (opener === 'user') log.user(`u${number}`, 'go on')
+    } else
+      log.add(
+        'user/message',
+        {
+          id: `n${number}`,
+          role: 'user',
+          content: [{ type: 'text', text: 'a result' }],
+          source: {
+            kind: 'context',
+            producer: opener.producer,
+            form: opener.form ?? 'notice',
+            summary: 'a result',
+          },
+        },
+        { surfaceOp: 'append' },
+      )
+    if (typeof opener === 'object' && opener.steerFirst) {
+      const message = {
+        id: `f${number}`,
+        role: 'user',
+        content: [],
+        source: { kind: 'user' },
+      }
+      log.add('agent/inbox/spliced', {
+        target: 'next-step',
+        start: 0,
+        inserted: [message],
+      })
+      log.add('agent/inbox/spliced', {
+        target: 'next-step',
+        start: 0,
+        removedCount: 1,
+        inserted: [],
+      })
+      log.user(`f${number}`, 'right as it starts')
+    }
+    log.message(number, 1, [
+      {
+        type: 'tool-call',
+        id: `c${number}`,
+        name: 'read',
+        arguments: '{"file_path":"a.ts"}',
+      },
+    ])
+    log.call(number, 1, `c${number}`, 'read', { file_path: 'a.ts' })
+    log.result(number, 1, `c${number}`, 'ok')
+    log.add('step/end', { turn: number, step: 1 })
+    log.add('step/start', { turn: number, step: 2 })
+    if (opener === 'steer' || (typeof opener === 'object' && opener.steer))
+      log.user(`s${number}`, 'also this')
+    log.message(number, 2, [{ type: 'text', text: 'done' }])
+    log.add('step/end', { turn: number, step: 2 })
+    log.add('turn/end', { turn: number, reason: { kind: 'completed' } })
+  }
+
+  function continued(openers: Opener[]): Array<string | undefined> {
+    const log = new LogBuilder()
+    openers.forEach((opener, index) => turn(log, index + 1, opener))
+    return processRows(snapshotOf(log.events)).map((row) => row.continued)
+  }
+
+  it('marks the process row of a turn a subagent’s result woke', () => {
+    expect(continued(['user', { producer: 'subagent' }])).toEqual([
+      undefined,
+      'subagent',
+    ])
+    // A message the user inserts into the turn changes nothing, even one
+    // that lands in its first step.
+    expect(
+      continued([
+        { producer: 'subagent', steer: true },
+        { producer: 'subagent', steerFirst: true },
+      ]),
+    ).toEqual(['subagent', 'subagent'])
+    // A background subagent's report, Claude Code's or Codex's settlement.
+    expect(
+      continued([
+        { producer: 'subagent', form: 'relay' },
+        { producer: 'delegation' },
+      ]),
+    ).toEqual(['subagent', 'subagent'])
+  })
+
+  it('marks a turn a background job’s result woke', () => {
+    expect(continued(['user', { producer: 'jobs' }])).toEqual([
+      undefined,
+      'job',
+    ])
+  })
+
+  it('leaves a turn the user opened, a goal round and a steered turn unmarked', () => {
+    expect(
+      continued(['user', { producer: 'goal', form: 'relay' }, 'steer']),
+    ).toEqual([undefined, undefined, undefined])
+  })
+
+  it('names why the turn went on', () => {
+    expect(processContinuedLabel('subagent')).toBe('子智能体完成后继续')
+    expect(processContinuedLabel('job')).toBe('后台任务完成后继续')
   })
 })

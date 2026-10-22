@@ -29,6 +29,8 @@ export const REPAIR_CONTRIBUTORS: readonly RepairContributor[] = [
 export const EXEMPT_OPENERS: Readonly<Record<string, string>> = {
   'llm/retry-started':
     'marks a retry attempt inside a step; the turn closer ends the step',
+  'task/started':
+    'closed with task/ended by the turn file recorder when the session is next opened: recording the task takes a Git snapshot, which crash repair cannot (UI-S15)',
 }
 
 const OPENER =

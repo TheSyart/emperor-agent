@@ -1091,7 +1091,10 @@ export function linksScenario(now = Date.now()): Scenario {
   }
 }
 
-/** Turns that changed files: a recorded card, an undone one, an unrecorded one. */
+/**
+ * Tasks of one turn each that changed files: a recorded card, an undone
+ * one, an unrecorded one (UI-S15: every record names its task).
+ */
 export function turnFilesScenario(now = Date.now()): Scenario {
   const log = new ShowcaseLog(now - 8 * 60_000)
   const files = [
@@ -1145,6 +1148,7 @@ export function turnFilesScenario(now = Date.now()): Scenario {
   )
   log.add('turn/files', {
     turn: 1,
+    task: { firstTurn: 1, lastTurn: 1 },
     mode: 'git',
     status: 'recorded',
     files,
@@ -1155,6 +1159,7 @@ export function turnFilesScenario(now = Date.now()): Scenario {
   turn(2, '顺便更新一下 README。', 'README 已更新。')
   log.add('turn/files', {
     turn: 2,
+    task: { firstTurn: 2, lastTurn: 2 },
     mode: 'git',
     status: 'recorded',
     files: [
@@ -1172,6 +1177,7 @@ export function turnFilesScenario(now = Date.now()): Scenario {
   turn(3, '整理一下 dist 目录。', '整理完成。')
   log.add('turn/files', {
     turn: 3,
+    task: { firstTurn: 3, lastTurn: 3 },
     mode: 'git',
     status: 'skipped',
     skipReason: 'timeout',
@@ -1180,8 +1186,193 @@ export function turnFilesScenario(now = Date.now()): Scenario {
   })
   return {
     id: 'turn-files',
-    label: '本轮改动',
+    label: '改动卡',
     sessions: [{ id: 'turn-files', events: log.events }],
+  }
+}
+
+/**
+ * UI-S15: one task, two turns — the user's message starts three background
+ * writers; their results wake Emperor, which assembles the book. While the
+ * writers run there is no files card (`running`); once the woken turn ends
+ * one card sums the whole task, after that turn, before its footer.
+ */
+export function taskFilesScenario(
+  now = Date.now(),
+  phase: 'running' | 'done' = 'done',
+): Scenario {
+  const log = new ShowcaseLog(now - (phase === 'done' ? 7 : 2) * 60_000)
+  const writers = [
+    { id: 'writer-1', chapter: '01-订单.md', title: '写第 1 章 订单' },
+    { id: 'writer-2', chapter: '02-回声.md', title: '写第 2 章 回声' },
+    { id: 'writer-3', chapter: '03-另一个我.md', title: '写第 3 章 另一个我' },
+  ]
+  log.user('设定圣经写好了。派三个子智能体各写一章，写完汇编成全书。')
+  log.turnStart(1)
+  log.toolStep(
+    1,
+    1,
+    [{ reasoning: '先把设定圣经落盘，再把三章分给三个执笔者。' }],
+    [
+      {
+        id: 'call_bible',
+        name: 'write',
+        args: { file_path: 'novel/00-设定圣经.md', content: '# 设定圣经\n' },
+        result:
+          '<path>novel/00-设定圣经.md</path>\n<type>file</type>\n<content>\nCreated file\n</content>',
+        extra: {
+          meta: {
+            path: 'novel/00-设定圣经.md',
+            kind: 'write',
+            operation: 'create',
+            added: 153,
+            removed: 0,
+          },
+        },
+      },
+      ...writers.map((writer) => ({
+        id: `call_${writer.id}`,
+        name: 'subagent',
+        args: {
+          description: writer.title,
+          prompt: `按设定圣经${writer.title}，写进 novel/${writer.chapter}。`,
+          run_in_background: true,
+        },
+        between: (l: ShowcaseLog) => {
+          l.add('subagent/started', {
+            subagentId: writer.id,
+            description: writer.title,
+            mode: 'spawn',
+            background: true,
+            callId: `call_${writer.id}`,
+          })
+        },
+        result: `started subagent ${writer.id}`,
+        extra: {
+          meta: {
+            kind: 'continuable',
+            subagentId: writer.id,
+            description: writer.title,
+            mode: 'spawn',
+          },
+        },
+      })),
+    ],
+  )
+  log.stepStart(1, 2)
+  log.stream(1, 2, [
+    { text: '三位执笔者已经开工，三章都交回后我再统一校对、汇编全书。' },
+  ])
+  log.stepEnd(1, 2)
+  log.turnEnd(1)
+  if (phase === 'running')
+    return {
+      id: 'task-files-running',
+      label: '任务进行中',
+      sessions: [{ id: 'task-files-running', events: log.events }],
+    }
+
+  log.tick(5 * 60_000)
+  for (const writer of writers)
+    log.add('subagent/settled', {
+      subagentId: writer.id,
+      stopReason: 'completed',
+      text: `${writer.chapter} 已写完。`,
+    })
+  // The writers' results wake Emperor: the same task goes on.
+  log.turnStart(2)
+  log.stepStart(2, 1)
+  for (const writer of writers)
+    log.context('subagent', `Subagent ${writer.id} completed.`, {
+      form: 'notice',
+      summary: `${writer.title} 已完成`,
+    })
+  log.stream(2, 1, [
+    { reasoning: '三章都在了，读一遍再汇编。' },
+    {
+      tool: {
+        id: 'call_read',
+        name: 'read',
+        args: { file_path: 'novel/02-回声.md' },
+      },
+    },
+    {
+      tool: {
+        id: 'call_book',
+        name: 'write',
+        args: { file_path: 'novel/全书.md', content: '# 全书\n' },
+      },
+    },
+  ])
+  log.call(2, 1, 'call_read', 'read', { file_path: 'novel/02-回声.md' })
+  log.result(2, 1, 'call_read', '# 第 2 章 回声\n……')
+  log.call(2, 1, 'call_book', 'write', {
+    file_path: 'novel/全书.md',
+    content: '# 全书\n',
+  })
+  log.result(
+    2,
+    1,
+    'call_book',
+    '<path>novel/全书.md</path>\n<type>file</type>\n<content>\nCreated file\n</content>',
+    {
+      meta: {
+        path: 'novel/全书.md',
+        kind: 'write',
+        operation: 'create',
+        added: 640,
+        removed: 0,
+      },
+    },
+  )
+  log.stepEnd(2, 1)
+  log.stepStart(2, 2)
+  log.stream(2, 2, [
+    {
+      text: '全书已汇编并校对：第 2 章执笔者交回的是改过的版本，时间线和人物称谓都已统一。',
+    },
+  ])
+  log.stepEnd(2, 2)
+  log.turnEnd(2)
+  log.add('turn/files', {
+    turn: 2,
+    task: { firstTurn: 1, lastTurn: 2 },
+    mode: 'git',
+    status: 'recorded',
+    files: [
+      {
+        path: 'novel/00-设定圣经.md',
+        status: 'added',
+        additions: 153,
+        deletions: 0,
+      },
+      {
+        path: 'novel/01-订单.md',
+        status: 'added',
+        additions: 214,
+        deletions: 0,
+      },
+      {
+        path: 'novel/02-回声.md',
+        status: 'added',
+        additions: 192,
+        deletions: 0,
+      },
+      {
+        path: 'novel/03-另一个我.md',
+        status: 'added',
+        additions: 201,
+        deletions: 0,
+      },
+      { path: 'novel/全书.md', status: 'added', additions: 640, deletions: 0 },
+    ],
+    totals: { files: 5, additions: 1400, deletions: 0 },
+    snapshot: { before: 'e'.repeat(40), after: 'f'.repeat(40) },
+  })
+  return {
+    id: 'task-files',
+    label: '这次任务的改动',
+    sessions: [{ id: 'task-files', events: log.events }],
   }
 }
 
@@ -1885,6 +2076,8 @@ export const SCENARIO_BUILDERS: Record<string, (now: number) => Scenario> = {
   long: longScenario,
   links: linksScenario,
   'turn-files': turnFilesScenario,
+  'task-files': (now) => taskFilesScenario(now, 'done'),
+  'task-files-running': (now) => taskFilesScenario(now, 'running'),
   'subagent-results': subagentResultsScenario,
   preparing: preparingScenario,
   'long-process': longProcessScenario,

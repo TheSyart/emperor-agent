@@ -211,13 +211,25 @@ export type RawSessionTap = (sessionId: string, event: SessionEvent) => void
  * {@link HarnessHost.extend} instead of reaching into the tool registry,
  * the hook runner or the Skill loaders.
  */
+/** How long closing waits for stopped agents to end their turns (UI-S15). */
+const TASK_CLOSE_IDLE_MS = 2_000
+/** How long closing waits for open tasks to be recorded (UI-S15). */
+const TASK_CLOSE_RECORD_MS = 5_000
+
 export interface HostExtensions {
-  /** Records the files each turn changes (watches tool writes and turn ends). */
+  /**
+   * Records the files each task changes (watches tool writes, root turns,
+   * and when nothing of a task can go on; UI-S15).
+   */
   readonly turnFiles?: {
     install(port: {
       tools: ToolRegistry
       rawTap(listener: RawSessionTap): () => void
+      onTaskQuiet(listener: (rootSessionId: string) => void): () => void
+      onSessionOpened(listener: (session: Session) => void): () => void
     }): () => void
+    /** Emperor is quitting: record every open task now. */
+    closeAll?(): Promise<void>
   }
   /** One workspace writer at a time: a lease for each file-writing tool call. */
   readonly workspaceAccess?: WorkspaceAccessLeaseProvider
@@ -411,6 +423,12 @@ export class HarnessHost {
     (_sessionId, projectRoot) => projectRoot
   /** Each root session's task tree: its subagents, their jobs, its budget (KRN-03). */
   private readonly taskTrees = new Map<string, TaskTree>()
+  /** Told when a root's task can no longer go on (UI-S15). */
+  private readonly taskQuietListeners = new Set<(rootId: string) => void>()
+  /** Roots whose task is looked at again once the current work has run. */
+  private readonly taskQuietChecks = new Set<string>()
+  /** Records the tasks still open when the host closes (UI-S15). */
+  private closeOpenTasks: (() => Promise<void>) | undefined
   /** 设置 › 高级 › 任务预算 (the cost cap is the model policy's). */
   private taskBudgetSettings: TaskBudgetSettings
   private readonly projectors = new Map<string, SessionProjector>()
@@ -900,8 +918,13 @@ export class HarnessHost {
       },
     })
     this.jobs.onJobDone((_snapshot, owner) => {
-      if (owner !== undefined)
-        goal.driver.delegationSettled(this.rootOf(owner).id)
+      if (owner === undefined) return
+      goal.driver.delegationSettled(this.rootOf(owner).id)
+      this.noteTaskSettled(this.rootOf(owner).id)
+    })
+    // A goal that stops (done, paused, blocked) lets its task end.
+    this.goals.onChange(({ agent }) => {
+      this.noteTaskSettled(this.rootOf(agent).id)
     })
     // A step of a project session holds the project's MCP instance (started
     // on first use) until its agent goes idle, before its tools are listed
@@ -1000,8 +1023,14 @@ export class HarnessHost {
         extensions.turnFiles.install({
           tools: this.tools,
           rawTap: (listener) => this.rawTap(listener),
+          onTaskQuiet: (listener) => this.onTaskQuiet(listener),
+          onSessionOpened: (listener) => this.sessions.onOpened(listener),
         }),
       )
+    if (extensions.turnFiles?.closeAll) {
+      const files = extensions.turnFiles
+      this.closeOpenTasks = () => files.closeAll?.() ?? Promise.resolve()
+    }
     if (extensions.workspaceAccess)
       this.tools.setWorkspaceAccessLeaseProvider(extensions.workspaceAccess)
     if (extensions.pluginReferences)
@@ -1787,6 +1816,8 @@ export class HarnessHost {
       },
       status: (_agent, status) => {
         if (status === 'idle') this.projectMcp.release(sessionId)
+        // The root or one of its subagents stopped: the task may be over.
+        if (status === 'idle') this.noteTaskSettled(this.rootOf(agent).id)
         if (status === 'idle' && agent.owner === undefined) {
           try {
             const last = agent.session.lastOf('assistant/message')
@@ -1847,6 +1878,75 @@ export class HarnessHost {
   /** The task tree an agent (root or child) belongs to. */
   private taskTreeOf(agent: Agent): TaskTree {
     return this.taskTree(this.rootOf(agent).id)
+  }
+
+  /**
+   * Listen for roots whose task can no longer go on (UI-S15): the root is
+   * idle, and no subagent, background job or external run of its tree
+   * runs, and no goal round is due. Returns an unsubscribe.
+   */
+  onTaskQuiet(listener: (rootId: string) => void): () => void {
+    this.taskQuietListeners.add(listener)
+    return () => {
+      this.taskQuietListeners.delete(listener)
+    }
+  }
+
+  /**
+   * Something of a root's task stopped (the root or a subagent went idle, a
+   * job or an external run settled, a goal changed): once the work this
+   * set off has run — a result may wake the root right away — look whether
+   * the task can still go on, and tell the listeners when it cannot.
+   */
+  noteTaskSettled(rootId: string): void {
+    if (this.closed || this.taskQuietListeners.size === 0) return
+    if (this.taskQuietChecks.has(rootId)) return
+    this.taskQuietChecks.add(rootId)
+    setTimeout(() => {
+      this.taskQuietChecks.delete(rootId)
+      if (!this.taskQuiet(rootId)) return
+      for (const listener of [...this.taskQuietListeners]) {
+        try {
+          listener(rootId)
+        } catch (error: unknown) {
+          logger.warn('a task-quiet listener failed', {
+            session: rootId,
+            error: String(error),
+          })
+        }
+      }
+    }, 0)
+  }
+
+  /**
+   * Quitting (UI-S15): once the stopped agents have ended their turns,
+   * record every task still open, as if it had gone quiet. Bounded: what is
+   * not done in time is recorded when the session is next opened.
+   */
+  private async recordOpenTasks(stopping: readonly Agent[]): Promise<void> {
+    const close = this.closeOpenTasks
+    if (close === undefined) return
+    const within = (work: Promise<unknown>, ms: number) =>
+      Promise.race([
+        work.catch(() => undefined),
+        new Promise<void>((done) => setTimeout(done, ms).unref?.()),
+      ])
+    await within(
+      Promise.all(stopping.map((agent) => agent.whenIdle())),
+      TASK_CLOSE_IDLE_MS,
+    )
+    await within(close(), TASK_CLOSE_RECORD_MS)
+  }
+
+  /** Nothing of a root's task runs, and nothing can wake the root. */
+  private taskQuiet(rootId: string): boolean {
+    const root = this.agents.get(rootId)
+    if (root === undefined || root.owner !== undefined) return false
+    if (root.status !== 'idle') return false
+    if (this.taskTreeBusy(rootId)) return false
+    if (this.delegations?.hasOutstanding(rootId) === true) return false
+    const goal = this.goals.get(root)
+    return !(goal?.phase === 'active' && goal.activation === 'armed')
   }
 
   /** Whether a root's subagents, or any background job of its tree, still run. */
@@ -2754,10 +2854,12 @@ export class HarnessHost {
       }),
     )
     await this.computerUse?.dispose().catch(() => {})
-    for (const agent of this.agents.values()) agent.dispose()
+    const stopping = [...this.agents.values()]
+    for (const agent of stopping) agent.dispose()
     for (const unsubscribe of this.unsubscribes.values()) unsubscribe()
     await this.jobs.dispose()
     await this.hooks.dispose()
+    await this.recordOpenTasks(stopping)
     this.sessions.closeAll()
     await this.projectMcp.close()
     this.mcpTools.dispose()

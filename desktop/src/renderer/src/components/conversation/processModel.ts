@@ -11,6 +11,12 @@
 // The subagents a step sends out leave the process for an `agents` row of
 // their own (UI-S14): one row per step, a group when it sent out two or
 // more; a step that only sends out subagents shows its words above them.
+// The first process row of a turn a subagent's or background job's result
+// woke says so (UI-S15: such a turn continues the task, see `turnOpener`).
+import {
+  turnOpener,
+  type TurnOpenerSource,
+} from '@emperor/core/runtime-contract'
 import type { ProcessDisplay } from '../../composables/useUiPreferences'
 import { conversationContextKey, deepEqual } from '../../conversation/assembler'
 import type { ConversationTimeline } from '../../conversation/locationIndex'
@@ -57,7 +63,15 @@ export interface ProcessRow {
   readonly startedAt: number | null
   /** Null while live or when the end is outside the window. */
   readonly endedAt: number | null
+  /**
+   * The turn's first process row, when a subagent's (local, Claude Code,
+   * Codex) or a background job's result woke the session for it (UI-S15).
+   */
+  readonly continued?: ProcessContinuation
 }
+
+/** What woke the session for a turn that continues a task. */
+export type ProcessContinuation = 'subagent' | 'job'
 
 export interface NodeRow {
   readonly kind: 'node'
@@ -200,6 +214,36 @@ function nodeTime(node: ChatNode | undefined): number | null {
   }
 }
 
+/**
+ * Turns of the window a result woke, by what woke them: the messages of
+ * each turn's first step (a hidden prompt counts too; a message inserted
+ * into the running turn does not).
+ */
+function continuedTurns(
+  nodes: ReadonlyMap<string, ChatNode>,
+): Map<number, ProcessContinuation> {
+  const sources = new Map<number, TurnOpenerSource[]>()
+  for (const node of nodes.values()) {
+    if (node.turn === null || node.step !== 1) continue
+    const source: TurnOpenerSource | undefined =
+      node.kind === 'user'
+        ? { kind: 'user', steering: node.data.steering }
+        : node.kind === 'context' && node.data.origin === 'message'
+          ? { kind: 'context', producer: node.data.producer }
+          : undefined
+    if (source === undefined) continue
+    const list = sources.get(node.turn)
+    if (list === undefined) sources.set(node.turn, [source])
+    else list.push(source)
+  }
+  const continued = new Map<number, ProcessContinuation>()
+  for (const [turn, list] of sources) {
+    const opener = turnOpener(list)
+    if (opener === 'subagent' || opener === 'job') continued.set(turn, opener)
+  }
+  return continued
+}
+
 /** Rows of one snapshot (see {@link timelineRows}). */
 export function timelineRowsOf(
   snapshot: Pick<ChatSnapshot, 'order' | 'nodes' | 'timeline' | 'turnStatus'>,
@@ -230,6 +274,7 @@ export function timelineRows(
   const { nodes, openTurn } = input
   const rows: TimelineRow[] = []
   const groupsPerTurn = new Map<number, number>()
+  const continued = continuedTurns(nodes)
   let preparing = preparingMembers(input)
   let run: ChatNode[] = []
 
@@ -244,6 +289,7 @@ export function timelineRows(
     for (const member of members) steps += memberSteps(member, nodes)
     const location = input.timeline.turns.get(turn)
     const first = members[0]
+    const woke = ordinal === 0 ? continued.get(turn) : undefined
     rows.push({
       kind: 'process',
       id: `process:${turn}:${ordinal}`,
@@ -258,6 +304,7 @@ export function timelineRows(
             ? null
             : nodeTime(nodes.get(first.key)),
       endedAt: null,
+      ...(woke === undefined ? {} : { continued: woke }),
     })
   }
 
@@ -564,6 +611,11 @@ export function processSummary(
   return row.startedAt === null || row.endedAt === null
     ? head
     : `${head} · 用时 ${formatRunDuration(Math.max(0, row.endedAt - row.startedAt))}`
+}
+
+/** The tag beside a woken turn's folded line (UI-S15). */
+export function processContinuedLabel(kind: ProcessContinuation): string {
+  return kind === 'job' ? '后台任务完成后继续' : '子智能体完成后继续'
 }
 
 /** The verb a call is phrased with (「正在读取」, 「准备读取」). */

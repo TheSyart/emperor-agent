@@ -1079,6 +1079,76 @@ describe('turn files', () => {
     ).toHaveLength(2)
   })
 
+  it('puts a task’s card after its last turn — the one a subagent woke — and keeps the task (UI-S15)', () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.user('u1', 'have the writers start')
+    log.message(1, 1, [{ type: 'text', text: 'the writers are on it' }])
+    log.add('step/end', { turn: 1, step: 1 })
+    log.add('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    log.add('turn/start', { turn: 2 })
+    log.add('step/start', { turn: 2, step: 1 })
+    log.add(
+      'user/message',
+      {
+        id: 'n1',
+        role: 'user',
+        content: [{ type: 'text', text: 'Subagent sub-1 completed.' }],
+        source: {
+          kind: 'context',
+          producer: 'subagent',
+          form: 'notice',
+          summary: 'Subagent sub-1 completed',
+        },
+      },
+      { surfaceOp: 'append' },
+    )
+    log.message(2, 1, [{ type: 'text', text: 'all chapters are in' }])
+    log.add('step/end', { turn: 2, step: 1 })
+    log.add('turn/end', { turn: 2, reason: { kind: 'completed' } })
+    log.add('turn/files', {
+      ...record,
+      turn: 2,
+      task: { firstTurn: 1, lastTurn: 2 },
+    })
+    const { snapshot } = replay(log.events)
+    const kinds = describeNodes(snapshot).filter(
+      (line) => !line.startsWith('context'),
+    )
+    // No card inside the task; one after its last turn, before that footer.
+    expect(kinds.filter((line) => line.startsWith('turnFiles'))).toEqual([
+      'turnFiles: turn 2 files=1',
+    ])
+    expect(kinds.slice(-2)).toEqual([
+      'turnFiles: turn 2 files=1',
+      'turnTail: turn 2 steps=1',
+    ])
+    expect(nodeOf(snapshot, 'turnFiles').data.task).toEqual({
+      firstTurn: 1,
+      lastTurn: 2,
+    })
+    expect(nodeOf(snapshot, 'turnFiles').data.recovered).toBe(false)
+    expectConverges(log)
+  })
+
+  it('carries that a task was recorded only after Emperor came back (UI-S15)', () => {
+    const log = new LogBuilder()
+    log.add('turn/start', { turn: 1 })
+    log.add('step/start', { turn: 1, step: 1 })
+    log.message(1, 1, [{ type: 'text', text: 'half done' }])
+    log.add('step/end', { turn: 1, step: 1 })
+    log.add('turn/end', { turn: 1, reason: { kind: 'interrupted' } })
+    log.add('turn/files', {
+      ...record,
+      task: { firstTurn: 1, lastTurn: 1 },
+      recovered: true,
+    })
+    const { snapshot } = replay(log.events)
+    expect(nodeOf(snapshot, 'turnFiles').data.recovered).toBe(true)
+    expectConverges(log)
+  })
+
   it('shows a standalone run closed by crash repair as interrupted', () => {
     const log = new LogBuilder()
     log.add('tool-workflow/run-start', { runId: 'run-3', name: 'nightly' })

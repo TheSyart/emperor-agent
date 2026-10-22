@@ -107,6 +107,12 @@ describe('crash repair matrix', () => {
       expect(types.has(opener), opener).toBe(true)
   })
 
+  it('leaves an open task to the turn file recorder, which needs Git (UI-S15)', () => {
+    expect(types.get('task/started')).toBe('harness/host/turn-files.ts')
+    expect(types.get('task/ended')).toBe('harness/host/turn-files.ts')
+    expect(EXEMPT_OPENERS['task/started']).toMatch(/turn file recorder/)
+  })
+
   it('keeps contributor ids unique', () => {
     const ids = ALL.map((contributor) => contributor.id)
     expect(new Set(ids).size).toBe(ids.length)

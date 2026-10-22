@@ -6,6 +6,10 @@ import type {
   DelegationRunRecord,
 } from './types'
 import type { DelegationNotice } from './fold'
+
+/** Context producer of a settled run's notice to its parent. */
+export const DELEGATION_NOTICE_PRODUCER = 'delegation'
+
 export function settlementNotice(
   record: DelegationRecord,
   run: DelegationRunRecord,
@@ -64,7 +68,7 @@ export class DelegationNoticeOutbox {
     if (!this.options.canWake(owner))
       return { delivered: false, duplicate: false }
     const message = {
-      ...contextMessage('delegation', notice.text, {
+      ...contextMessage(DELEGATION_NOTICE_PRODUCER, notice.text, {
         form: 'notice',
         summary: 'External run settled',
       }),
