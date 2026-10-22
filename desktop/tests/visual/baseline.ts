@@ -40,6 +40,8 @@ import {
   type Page,
   type TestInfo,
 } from '@playwright/test'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 
 export { expect }
 
@@ -145,6 +147,78 @@ export const test = base.extend<
     },
     { auto: true },
   ],
+})
+
+// One sample per worker, taken after a comparison: diagnose platform font
+// substitution without changing the UI, the baseline or the tolerance.
+let fontEvidenceWritten = false
+test.afterEach(async ({ page }, info) => {
+  if (fontEvidenceWritten || !isBaseline(info) || page.isClosed()) return
+  const session = await page
+    .context()
+    .newCDPSession(page)
+    .catch(() => null)
+  if (!session) return
+  try {
+    await session.send('DOM.enable')
+    await session.send('CSS.enable')
+    const { nodes } = (await session.send('DOM.getFlattenedDocument', {
+      depth: -1,
+    })) as {
+      nodes: Array<{ nodeType: number; nodeValue: string; parentId?: number }>
+    }
+    const parents = [
+      ...new Set(
+        nodes
+          .filter(
+            (node) =>
+              node.nodeType === 3 && /[\u4e00-\u9fff]/.test(node.nodeValue),
+          )
+          .map((node) => node.parentId)
+          .filter((id): id is number => id !== undefined),
+      ),
+    ].slice(0, 200)
+    if (!parents.length) return
+    const samples: unknown[] = []
+    for (const nodeId of parents) {
+      const sample = (await session.send('CSS.getPlatformFontsForNode', {
+        nodeId,
+      })) as { fonts: unknown[] }
+      if (sample.fonts.length) samples.push(sample)
+      if (samples.length === 10) break
+    }
+    if (!samples.length) return
+    const path = info.outputPath('platform-fonts.json')
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(
+      path,
+      JSON.stringify(
+        {
+          samples,
+          browser: await page.evaluate(() => ({
+            userAgent: navigator.userAgent,
+            language: navigator.language,
+            scale: devicePixelRatio,
+            family: getComputedStyle(document.body).fontFamily,
+          })),
+        },
+        null,
+        2,
+      ),
+    )
+    await info.attach('platform-fonts', {
+      path,
+      contentType: 'application/json',
+    })
+    fontEvidenceWritten = true
+  } catch (error) {
+    await info.attach('platform-font-error', {
+      body: String(error),
+      contentType: 'text/plain',
+    })
+  } finally {
+    await session.detach().catch(() => undefined)
+  }
 })
 
 /**

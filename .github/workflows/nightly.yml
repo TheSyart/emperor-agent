@@ -61,11 +61,19 @@ jobs:
         run: npm --prefix desktop exec -- playwright install chromium
       - name: Record OS runtime enforcement controls
         run: node scripts/ci/macos-runtime-context.mjs >runtime-context.json
+      - name: Set the visual fixture locale and record font provenance
+        run: |
+          swift scripts/ci/macos-font-context.swift >font-context-before.json
+          defaults write NSGlobalDomain AppleLanguages -array zh-Hans en
+          swift scripts/ci/macos-font-context.swift >font-context.json
       - name: Upload runtime context
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: runtime-context-nightly
-          path: runtime-context.json
+          path: |
+            runtime-context.json
+            font-context-before.json
+            font-context.json
           retention-days: 7
       - name: Nightly suites
         env:
