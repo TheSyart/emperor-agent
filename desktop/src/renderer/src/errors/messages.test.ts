@@ -220,6 +220,16 @@ describe('Core error messages (UI-S10)', () => {
     expect(text).not.toContain('timed out')
   })
 
+  it('FIX-14 · a command list asked for without a session or draft reads in Chinese', () => {
+    // CoreOperationArgumentsError: the code and an English message over IPC.
+    const text = coreErrorText({
+      code: 'invalid_core_arguments',
+      message: 'Invalid arguments for commands.list',
+    })
+    expect(text).toBe('这次请求的参数不正确，请刷新后重试。')
+    expect(text).not.toContain('commands.list')
+  })
+
   it('keeps the first line of a tool’s own output after the text', () => {
     expect(
       coreErrorText({
