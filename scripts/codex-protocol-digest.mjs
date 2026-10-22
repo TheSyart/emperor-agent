@@ -12,7 +12,10 @@
 // files Emperor's adapter depends on — the newest recorded protocol's list,
 // plus any --file — and says whether that digest is already known. --write
 // copies those files into packages/core/src/harness/delegation/protocol/
-// codex-<version>/ with a digest.json; format them with prettier, then
+// codex-<version>/ with a digest.json and, when it ran the binary, a
+// features.json: `codex features list` with no overrides, the defaults the
+// adapter's feature overrides are checked against (AGT-13). Format them with
+// prettier, then
 // register the new folder in compatibility.ts (KNOWN_CODEX_PROTOCOLS) after
 // the adapter's contract tests, scripts/codex-protocol-handshake.mjs and a
 // real run pass. The algorithm matches codexProtocolDigest().
@@ -122,7 +125,25 @@ function contractFiles(known) {
 const codex = argument('--codex') ?? 'codex'
 let schema = argument('--schema')
 let version = argument('--version')
-let temporary
+/** `codex features list` (private HOME and CODEX_HOME): name → stage, default. */
+function featureDefaults(home) {
+  const output = execFileSync(codex, ['features', 'list'], {
+    env: { ...process.env, HOME: home, CODEX_HOME: home },
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'inherit'],
+  })
+  const features = {}
+  for (const line of output.split('\n')) {
+    if (!line.trim()) continue
+    const [name, stage, state, ...rest] = line.trim().split(/\s{2,}/)
+    if (!name || !stage || !['true', 'false'].includes(state) || rest.length)
+      throw new Error('unreadable `codex features list` line: ' + line)
+    features[name] = { stage, enabled: state === 'true' }
+  }
+  return features
+}
+
+let temporary, features
 try {
   if (!version) {
     const output = execFileSync(codex, ['--version'], { encoding: 'utf8' })
@@ -145,6 +166,7 @@ try {
         stdio: ['ignore', 'ignore', 'inherit'],
       },
     )
+    features = featureDefaults(join(temporary, 'home'))
   }
   const known = knownProtocols()
   const files = contractFiles(known)
@@ -177,6 +199,21 @@ try {
       join(target, 'digest.json'),
       JSON.stringify(record, null, 2) + '\n',
     )
+    if (features)
+      writeFileSync(
+        join(target, 'features.json'),
+        JSON.stringify(
+          {
+            schemaVersion: 1,
+            codexVersion: version,
+            generatedBy:
+              'codex features list (private HOME and CODEX_HOME, no overrides)',
+            features,
+          },
+          null,
+          2,
+        ) + '\n',
+      )
     console.error(
       `wrote ${target}; register it in compatibility.ts and run the contract tests`,
     )
