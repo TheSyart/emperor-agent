@@ -14,6 +14,7 @@ import {
   claimProfileOnboardingTrigger,
   ensureUserProfileFile,
   isUserProfileStillDefault,
+  profileAddressName,
   profileOnboardingAgentPrompt,
 } from './onboarding'
 
@@ -376,5 +377,60 @@ describe('ProfileOnboardingCoordinator first-run flow (repo templates)', () => {
     )
     expect(coordinator.reconcileProfile().status).toBe('completed')
     expect(existsSync(join(stateRoot, 'onboarding.json'))).toBe(true)
+  })
+})
+
+describe('profileAddressName (UI-S17)', () => {
+  const profile = (value: string) =>
+    `# 用户档案\n\n## 基本信息\n\n- **称呼**：${value}\n- **时区**：UTC+8\n`
+
+  it('reads the 称呼 the interview or the user wrote', () => {
+    expect(profileAddressName(profile('小周'))).toBe('小周')
+    expect(profileAddressName(profile('  Anran  '))).toBe('Anran')
+    expect(profileAddressName('- 称呼: 小周\n')).toBe('小周')
+    expect(profileAddressName('* **称呼**:「小周」\n')).toBe('小周')
+    expect(profileAddressName(profile('“阿周”'))).toBe('阿周')
+  })
+
+  it('keeps the first name when the line explains or lists alternatives', () => {
+    expect(profileAddressName(profile('小周（朋友都这么叫）'))).toBe('小周')
+    expect(profileAddressName(profile('安然 / Anran'))).toBe('安然')
+    expect(profileAddressName(profile('周哥，或者直接叫名字'))).toBe('周哥')
+  })
+
+  it('treats the seed value and "just call me 你" as no name', () => {
+    for (const value of [
+      '未设置',
+      '',
+      '你',
+      '直接称呼“你”',
+      '直接称呼你',
+      '暂不设置',
+      '不需要称呼',
+      '无',
+      '-',
+    ])
+      expect(profileAddressName(profile(value)), value).toBeNull()
+    expect(profileAddressName('# 用户档案\n\n没有基本信息\n')).toBeNull()
+  })
+
+  it('caps a runaway value', () => {
+    expect(profileAddressName(profile('周'.repeat(80)))).toBe('周'.repeat(32))
+  })
+
+  it('travels with the onboarding payload', () => {
+    const stateRoot = tmp('emperor-onboarding-name-')
+    const templatesDir = seedTemplatesDir(stateRoot, SEED)
+    const coordinator = new ProfileOnboardingCoordinator({
+      stateRoot,
+      templatesDir,
+    })
+    expect(coordinator.payload().addressName).toBeNull()
+    writeFileSync(coordinator.userFile, profile('小周'), 'utf8')
+    expect(coordinator.payload().addressName).toBe('小周')
+    expect(coordinator.reconcileProfile()).toMatchObject({
+      status: 'completed',
+      addressName: '小周',
+    })
   })
 })

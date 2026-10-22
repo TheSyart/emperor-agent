@@ -25,6 +25,7 @@ export class MemoryStore {
   readonly userFile: string
   readonly memoryTemplate: string | null
   readonly versions: MemoryVersionStore
+  private readonly userWriteListeners = new Set<() => void>()
 
   constructor(
     memoryDir: string,
@@ -119,5 +120,20 @@ export class MemoryStore {
         reason: 'write_user',
       })
     MemoryVersionStore.atomicWriteText(this.userFile, content.trim() + '\n')
+    for (const listener of this.userWriteListeners) {
+      try {
+        listener()
+      } catch {
+        // a listener never fails the write
+      }
+    }
+  }
+
+  /** Called after each `writeUser` (UI-S17: the hero's 称呼 follows it). */
+  onUserWrite(listener: () => void): () => void {
+    this.userWriteListeners.add(listener)
+    return () => {
+      this.userWriteListeners.delete(listener)
+    }
   }
 }

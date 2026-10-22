@@ -59,6 +59,43 @@ export function ensureUserProfileFile(
   return userFile
 }
 
+/** Values of 称呼 that mean "no name": the seed, "just call me 你", none. */
+const NO_ADDRESS_NAMES = new Set([
+  '未设置',
+  '暂不设置',
+  '不设置',
+  '暂无',
+  '无',
+  '你',
+  '-',
+  '—',
+  'none',
+  'n/a',
+])
+
+/**
+ * The name the user wants to be called (UI-S17: the new-chat hero greets
+ * with it), read from the first `称呼` line of the profile. Only the first
+ * name is kept when the line explains itself or lists alternatives
+ * (「小周（朋友都这么叫）」, 「安然 / Anran」); the seed value and
+ * 「直接称呼"你"」 mean no name.
+ */
+export function profileAddressName(content: string): string | null {
+  const match =
+    /^[ \t]*[-*][ \t]*(?:\*\*)?称呼(?:\*\*)?[ \t]*[:：][ \t]*(.*)$/m.exec(
+      String(content ?? ''),
+    )
+  if (!match) return null
+  const [head = ''] = (match[1] ?? '')
+    .replace(/\*\*/g, '')
+    .split(/[（(，,；;/|、]/)
+  const first = head.replace(/["'“”‘’「」『』`]/g, '').trim()
+  if (!first) return null
+  if (NO_ADDRESS_NAMES.has(first.toLowerCase())) return null
+  if (/^直接(称呼|叫)/.test(first) || /^不(需要|用)/.test(first)) return null
+  return Array.from(first).slice(0, 32).join('')
+}
+
 /** 内容是否与种子模板逐字相同（trim 后比较），即"从未被定制过"。 */
 export function isUserProfileStillDefault(
   content: string,
@@ -82,6 +119,8 @@ export interface ProfileOnboardingPayload {
   lastError: string | null
   canStart: boolean
   canSkip: boolean
+  /** The profile's 称呼, or null when none is set (UI-S17). */
+  addressName: string | null
 }
 
 export interface ProfileOnboardingActionResult {
@@ -178,7 +217,12 @@ export class ProfileOnboardingCoordinator {
       lastError: this.state.lastError,
       canStart: status === 'pending' || status === 'skipped',
       canSkip: status === 'pending' || status === 'in_progress',
+      addressName: profileAddressName(this.readProfile()),
     }
+  }
+
+  private readProfile(): string {
+    return existsSync(this.userFile) ? readFileSync(this.userFile, 'utf8') : ''
   }
 
   beginAttempt(

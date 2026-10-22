@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
+> 最后核验：2026-10-22（对照 `b4b98b8c`）<br>
 > 事实源：`desktop/src/renderer/src/theme/`（`primitives.css`、`semantic.dark.css`、`semantic.light.css`、`components.css`、`base.css`、`retired-tokens.json`、`legacy-keys.json`、`tokens.test.ts`）、`desktop/src/renderer/src/style-audit.test.ts` 与 `style-audit-ratchet.json`、`scripts/codemods/tokens-v2.mjs`、`desktop/src/main/window-background.ts`
 
 界面的颜色、尺寸、字号、圆角、间距和动效都来自三层令牌。组件只用 L2 与 L3，不直接写颜色值，也不直接用 L1 的颜色原子；新增样式先加令牌再使用。这里列出令牌本身；怎样用见[颜色使用规范](color.md)、[排版](typography.md)、[外壳布局](layout.md)与[动效](motion.md)。
@@ -122,7 +122,7 @@
 
 环境信息卡（UI-S05）：`--env-card-fill`（深色 `--surface-raised`，浅色 `--surface-base`）、`--env-card-edge`（两套主题都是 `--elev-2`）；卡片圆角 `--r-lg`，行高 `--row-h`，分节之间 12px、不画线。
 
-背板与固定色（DS-02）：`--backdrop-blur` 12px（遮罩、看图、附件预览、首启弹窗的背景模糊）、`--backdrop-blur-strong` 24px（浮动菜单、看图工具栏）、`--mask-blur` 2px；`--site-icon-plate`（站点图标下的白底）、`--pointer-ink`（电脑操作截图上的指针）两套主题相同；看图底色的透明度 `--image-viewer-veil` 在 `base.css`。减少透明度时 `a11y.css` 把两档背景模糊归零、看图底色改为 0.98。
+背板与固定色（DS-02）：`--backdrop-blur` 12px（遮罩、看图、附件预览的背景模糊）、`--backdrop-blur-strong` 24px（浮动菜单、看图工具栏）、`--mask-blur` 2px；`--site-icon-plate`（站点图标下的白底）、`--pointer-ink`（电脑操作截图上的指针）两套主题相同；看图底色的透明度 `--image-viewer-veil` 在 `base.css`。减少透明度时 `a11y.css` 把两档背景模糊归零、看图底色改为 0.98。
 
 DS-04 组件尺寸（[组件规范](components.md)）：`--badge-h` 18、`--dot-sm` 6、`--dot-md` 8、`--field-h` 32、`--field-h-sm` 28、`--field-fill`（输入框底色）、`--list-row-sm` 32、`--list-row-md` 40、`--list-row-lg` 52、`--list-inset` 16（组内细线左缩进）、`--pane-header-h` 48、`--switch-thumb`（开关圆钮，两套主题都是白色）。
 
@@ -161,5 +161,5 @@ codemod 把旧名改成新名；下面这些改写会让数值变化（其余改
 | `--duration-ds-fast` 100ms、`--duration-ds-slow` 300ms、`--ease-in-out` | `--motion-fast` 120ms、`--motion-slow` 320ms、`--ease-standard` | 约 70 处悬停、展开与动画                                                                                                                          | 略慢 20ms，曲线前快后缓                                  |
 | 图标 11 / 13 / 15 / 19 / 22px                                           | 12 / 14 / 16 / 20 / 20px                                        | 73 处                                                                                                                                             | 图标大 1px 或小 2px                                      |
 | Markdown `<hr>`：1px `#e5e7eb`                                          | 0.5px `--hairline`                                              | Markdown 正文里的分隔线                                                                                                                           | 深色下不再是一条亮线                                     |
-| 首启弹窗背景 z-index 70                                                 | `--z-drawer` 60                                                 | 「配置模型」弹窗                                                                                                                                  | 无（仍在页面、吸顶栏之上，在弹层、提示、模态与菜单之下） |
+| 首启弹窗背景 z-index 70                                                 | `--z-drawer` 60                                                 | 首启引导（UI-S17 起铺满窗口）                                                                                                                     | 无（仍在页面、吸顶栏之上，在弹层、提示、模态与菜单之下） |
 | 运行中定时任务的旋转 `LoaderCircle`                                     | `Spinner`（金色）                                               | 定时任务行                                                                                                                                        | 加载圈样式统一                                           |

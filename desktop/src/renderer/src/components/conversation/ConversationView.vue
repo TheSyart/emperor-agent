@@ -77,12 +77,8 @@ import { sessionLocation } from '../../router'
 import { normalizeGoal } from '../../runtime/handlers/goals'
 import { isTerminalGoal, type GoalCardAction } from '../../runtime/goalRender'
 import { activeGoalForSession, hasProjectedGoal } from '../../runtime/selectors'
-import type {
-  ChatSendPayload,
-  ModelConfigPayload,
-  QueuedPromptItem,
-  TodoItem,
-} from '../../types'
+import { applyModelConfig } from '../../model/applyModelConfig'
+import type { ChatSendPayload, QueuedPromptItem, TodoItem } from '../../types'
 import ChangesPill from '../composer/ChangesPill.vue'
 import ComposerCard from '../composer/ComposerCard.vue'
 import GoalBar from '../composer/GoalBar.vue'
@@ -99,6 +95,7 @@ import type { SubagentRowView } from './subagentRows'
 import { useSubagentDock } from './useSubagentDock'
 import ConversationHeader from './ConversationHeader.vue'
 import EmptyHero from './EmptyHero.vue'
+import HeroModelPrompt from './HeroModelPrompt.vue'
 import HeroProfilePrompt from './HeroProfilePrompt.vue'
 import {
   conversationCrumbs,
@@ -1036,25 +1033,11 @@ async function dismissLifecycle(): Promise<void> {
   if (!result.ok && result.error) ctx.showToast(result.error)
 }
 
-async function applyModelConfig(payload: ModelConfigPayload): Promise<void> {
-  if (!ctx.boot.value) return
-  ctx.boot.value.modelConfig = payload
-  ctx.boot.value.model = payload.current?.modelId || ''
-  ctx.boot.value.provider = payload.current?.provider || undefined
-  ctx.boot.value.providerLabel = payload.current?.providerLabel || undefined
-  if (payload.profileOnboarding)
-    ctx.boot.value.profileOnboarding = payload.profileOnboarding.state
-  if (payload.profileOnboarding?.started)
-    await ctx.openProfileInterviewSession(
-      payload.profileOnboarding.state.sessionId,
-    )
-}
-
 function switchModel(entryId: string): void {
   const payload = ctx.boot.value?.modelConfig
   if (!payload || payload.current?.entryId === entryId) return
   void ctx.runSafely(async () => {
-    await applyModelConfig(await activateModelEntry(entryId))
+    applyModelConfig(ctx.boot.value, await activateModelEntry(entryId))
   })
 }
 
@@ -1077,7 +1060,8 @@ function setReasoningEffort(level: string | null): void {
   const nextValue = normalizeReasoningEffort(level)
   if (currentValue === nextValue) return
   void ctx.runSafely(async () => {
-    await applyModelConfig(
+    applyModelConfig(
+      ctx.boot.value,
       await setModelReasoningEffort(activeId, nextValue || null),
     )
   })
@@ -1208,7 +1192,11 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
     </div>
 
     <div v-if="tab === 'chat'" class="composer-seat">
-      <EmptyHero v-if="phase === 'hero'" :project-name="projectName" />
+      <EmptyHero
+        v-if="phase === 'hero'"
+        :project-name="projectName"
+        :address-name="ctx.boot.value?.profileOnboarding?.addressName ?? null"
+      />
       <template v-if="child">
         <TakeoverSeat v-if="childInteraction" :interaction="childInteraction" />
         <ChildComposer
@@ -1298,6 +1286,7 @@ async function sendQueuedPrompt(item: QueuedPromptItem): Promise<void> {
           @error="ctx.showToast"
         />
       </div>
+      <HeroModelPrompt v-if="phase === 'hero' && !child" />
       <HeroProfilePrompt
         v-if="phase === 'hero' && !child"
         :session-id="viewingId || ''"

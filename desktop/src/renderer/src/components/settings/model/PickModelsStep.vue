@@ -6,7 +6,8 @@
  * limits, where the facts came from and 已添加 / 将下线 / 已退役. A list of
  * three or fewer starts all checked; otherwise the newest live model of
  * each family. 找不到？ adds an id by hand with catalog defaults. Rows render
- * lazily (`content-visibility`) so lists of hundreds stay quick.
+ * lazily (`content-visibility`) so lists of hundreds stay quick. In the
+ * first-run guide (`add.direct`) the footer saves and offers 默认使用.
  */
 import { computed, ref } from 'vue'
 import type { DiscoveredModel } from '@emperor/core/api'
@@ -46,8 +47,18 @@ const nextLabel = computed(() => {
   const count = add.picked.length
   if (add.manage && !count)
     return add.removed.length ? `移除 ${add.removed.length} 个` : '完成'
-  return '下一步'
+  return add.direct ? `添加 ${count} 个模型` : '下一步'
 })
+/** 默认使用 (direct saves only): the picked model the app switches to. */
+const defaultOptions = computed(() =>
+  add.picked.map((model) => ({ value: model.id, label: model.id })),
+)
+const defaultModel = computed(
+  () =>
+    add.picked.find((model) => model.id === add.activateModelId)?.id ??
+    add.picked[0]?.id ??
+    null,
+)
 
 function capabilities(model: DiscoveredModel): string[] {
   const out: string[] = []
@@ -216,6 +227,17 @@ function startManual(id = ''): void {
       </template>
     </div>
 
+    <div v-if="add.direct && add.picked.length > 1" class="default-row">
+      <span aria-hidden="true">默认使用</span>
+      <Select
+        :model-value="defaultModel"
+        :options="defaultOptions"
+        size="sm"
+        aria-label="默认使用"
+        @update:model-value="(value) => (add.activateModelId = value as string)"
+      />
+    </div>
+
     <div class="footer">
       <span class="count"
         >已选 {{ add.picked.length }} 个<template v-if="add.manage">
@@ -354,6 +376,15 @@ function startManual(id = ''): void {
   font-size: var(--fs-xxs);
   color: rgb(var(--text-3));
   white-space: nowrap;
+}
+
+.default-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--fs-xs);
+  color: rgb(var(--text-2));
 }
 
 .footer {
