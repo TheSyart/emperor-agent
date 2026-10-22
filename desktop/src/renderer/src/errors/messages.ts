@@ -85,6 +85,10 @@ export const ERROR_MESSAGES: Readonly<Record<string, string>> = {
     '找不到 Claude Code / Codex 的命令行程序，请先安装，或在「设置 › 子智能体」更正路径。',
   EXECUTOR_DISABLED: '请先在「设置 › 子智能体」里启用它。',
   EXECUTOR_INCOMPATIBLE: '命令行程序的版本不在支持范围内。',
+  EXECUTOR_UPGRADING:
+    '它正在升级，升级完成前不接新的子任务；可以改用本地子智能体。',
+  EXECUTOR_UPGRADE_UNAVAILABLE:
+    '这个版本不能在这里一键升级，请在「设置 › 子智能体」重新检测后再试。',
   CONTAINMENT_UNAVAILABLE:
     '操作系统的执行边界不可用，请在「设置 › 子智能体」查看诊断。',
   PROTOCOL_FRAMING: '子智能体返回了无法识别的数据。',

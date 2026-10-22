@@ -7,7 +7,9 @@
  * Console sign-in, 退出登录, 使用 API Key and what outranks the login),
  * the default model and custom models, what it
  * is good at, and what Core verified about it (「联网搜索：已验证」).
- * Saved at once; the text editors save on 保存 / 完成.
+ * Saved at once; the text editors save on 保存 / 完成. 版本 comes first
+ * (AGT-13): installed, how, the latest, what Emperor verified, 升级 and
+ * 检查更新 (ExecutorVersionGroup).
  */
 import { computed, ref } from 'vue'
 import type { ExecutorProfile } from '@emperor/core/runtime-contract'
@@ -47,9 +49,11 @@ import {
   versionText,
 } from './executorText'
 import ClaudeSignInNotice from './ClaudeSignInNotice.vue'
+import ExecutorVersionGroup from './ExecutorVersionGroup.vue'
 import { ADD_CUSTOM_MODEL, useExecutorSettings } from './useExecutorSettings'
 
 const props = defineProps<{ backend: 'claude-code' | 'codex' }>()
+const emit = defineEmits<{ 'recheck-upgrade': [profileId: string] }>()
 
 const s = useExecutorSettings()
 const { busy, tokenBusy, catalogs, catalogBusy, runtimes, signingIn } = s
@@ -265,6 +269,11 @@ const runFacts = computed(() => {
         tone="error"
         :title="s.error.value"
         data-executor-error
+      />
+      <ExecutorVersionGroup
+        v-if="profile.enabled"
+        :profile-id="profile.id"
+        @recheck="(id) => emit('recheck-upgrade', id)"
       />
       <SettingsGroup title="状态">
         <SettingsRow :title="name">

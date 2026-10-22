@@ -323,6 +323,42 @@ export function rowSummary(
     : `${version} · ${shortSignIn(facts)}`
 }
 
+/**
+ * The row says what the executor runs with — nothing to fix, nothing to
+ * warn about — so it can carry the version line (AGT-13).
+ */
+export function rowReady(
+  profile: ExecutorProfile,
+  facts: ExecutorFacts,
+): boolean {
+  return (
+    !!profile.enabled &&
+    !!facts.probe &&
+    !claudeMissing(profile, facts) &&
+    !needsSignIn(profile, facts) &&
+    !statusDetail(profile, facts) &&
+    !compatibilityWarning(profile, facts)
+  )
+}
+
+/**
+ * The start of a ready row's version line (AGT-13): Claude Code's sign-in
+ * in a word or two (the account is on its detail page), so 「本机 x · 可升级
+ * 到 y」 fits beside the row's controls; nothing for Codex.
+ */
+export function readyLead(
+  profile: ExecutorProfile,
+  facts: ExecutorFacts,
+): string {
+  if (profile.backend === 'codex') return ''
+  const auth = facts.probe?.auth
+  if (auth?.source === 'model-route') return '使用已有模型配置'
+  if (auth?.endpoint) return '第三方端点'
+  if (auth?.source) return '使用 API Key'
+  if (auth?.method === 'api_key') return '已登录 Console'
+  return '已登录'
+}
+
 /** Claude's sign-in in a few words, for the one-line row. */
 function shortSignIn(facts: ExecutorFacts): string {
   const auth = facts.probe?.auth

@@ -13,7 +13,8 @@
  * the panel on open, Tab stays inside it, the app behind is inert, and
  * closing returns focus to the previously focused element.
  *
- * Layout: 200px nav (four groups, SettingsNav) + content column. The
+ * Layout: 200px nav (four groups, SettingsNav; 子智能体 carries a dot while
+ * Claude Code or Codex has a new version, AGT-13) + content column. The
  * content column is a 54px header (16/600 section title, the section's
  * header actions, close) over the options area (padding 0 24 24, content ≤
  * 720px, scrolls vertically).
@@ -88,6 +89,32 @@ function settingsView(query: LocationQuery): string {
 
 const settings = useSettingsRoute()
 const { open, section } = settings
+// The dot on 子智能体: a new Claude Code or Codex version, or a failed
+// upgrade (AGT-13). Read when the settings open; 子智能体 asks npm itself.
+// Loaded, not imported: it is shared with that section's chunk.
+const executorsMarked = ref(false)
+let markFollowed = false
+watch(
+  open,
+  (isOpen) => {
+    if (!isOpen) return
+    void import('./executors/executorUpgrades').then((module) => {
+      const upgrades = module.useExecutorUpgrades()
+      if (!markFollowed) {
+        markFollowed = true
+        watch(
+          upgrades.attention,
+          (marked) => {
+            executorsMarked.value = marked
+          },
+          { immediate: true },
+        )
+      }
+      return upgrades.load()
+    })
+  },
+  { immediate: true },
+)
 const header = provideSettingsHeader({
   page: () => settings.page.value,
   go: (page) => void settings.openPage(page),
@@ -165,7 +192,12 @@ watch(
         data-testid="settings-modal"
       >
         <div class="settings-layout">
-          <SettingsNav :active="section" :title-id="titleId" @select="select" />
+          <SettingsNav
+            :active="section"
+            :title-id="titleId"
+            :marks="{ executors: executorsMarked }"
+            @select="select"
+          />
           <div class="settings-content">
             <div class="settings-header">
               <h2 :id="sectionTitleId" class="section-title">

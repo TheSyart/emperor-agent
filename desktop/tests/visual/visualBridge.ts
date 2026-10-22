@@ -236,6 +236,113 @@ export async function installVisualCoreBridge(
       // is not in the list its ChatGPT login offers.
       const visualCodexDefaultUnavailable =
         visualParams.get('visualCodexDefault') === 'unavailable'
+      // AGT-13: `?visualExecutorUpgrade=found|unverified|failed` — versions
+      // in 设置 › 子智能体, both executors on and installed with npm:
+      // Claude Code 2.1.281 (npm has 2.1.308), Codex 0.153.4 (0.163.0);
+      // `unverified`: Emperor has verified only 0.153; `failed`: a Codex
+      // upgrade failed without write permission. A spec moves an upgrade on
+      // with window.__visualExecutorUpgrade('running' | 'done' | 'failed').
+      const visualUpgradeMode = visualParams.get('visualExecutorUpgrade')
+      const visualUpgrade = {
+        claude: '2.1.281',
+        codex: '0.153.4',
+        dismissed: false,
+        upgrades: [] as Record<string, unknown>[],
+      }
+      const VISUAL_NPM = '/opt/homebrew/lib/node_modules'
+      const VISUAL_CODEX_COMMAND = 'npm install -g @openai/codex@0.163.0'
+      // One upgrade: Core keeps its start time in every event.
+      const visualRunStarted = Date.now() - 12_000
+      const visualCodexRun = (over: Record<string, unknown>) => ({
+        profileId: 'codex-default',
+        backend: 'codex',
+        from: '0.153.4',
+        target: '0.163.0',
+        command: VISUAL_CODEX_COMMAND,
+        state: 'running',
+        startedAt: visualRunStarted,
+        log: [
+          `$ ${VISUAL_CODEX_COMMAND}`,
+          'added 1 package, changed 2 packages in 9s',
+          '正在重新检测 Codex…',
+        ],
+        ...over,
+      })
+      const visualFailedRun = () =>
+        visualCodexRun({
+          state: 'failed',
+          reason: 'permission',
+          path: VISUAL_NPM,
+          exitCode: 243,
+          finishedAt: Date.now(),
+          manualCommand: VISUAL_CODEX_COMMAND,
+          log: [
+            `$ ${VISUAL_CODEX_COMMAND}`,
+            'npm error code EACCES',
+            'npm error syscall rename',
+            `npm error path ${VISUAL_NPM}/@openai/codex`,
+            "npm error Error: EACCES: permission denied, rename '/opt/homebrew/lib/node_modules/@openai/codex'",
+          ],
+        })
+      if (visualUpgradeMode === 'failed') {
+        visualUpgrade.claude = '2.1.308'
+        visualUpgrade.upgrades = [visualFailedRun()]
+      }
+      const visualVersions = () => {
+        const unverified = visualUpgradeMode === 'unverified'
+        const claudeTarget =
+          visualUpgrade.claude === '2.1.308' ? null : '2.1.308'
+        const codexTarget =
+          unverified || visualUpgrade.codex === '0.163.0' ? null : '0.163.0'
+        return {
+          checkedAt: Date.now() - 10 * 60_000,
+          checking: false,
+          error: null,
+          dismissed: visualUpgrade.dismissed,
+          upgrades: visualUpgrade.upgrades,
+          executors: [
+            {
+              profileId: 'claude-default',
+              backend: 'claude-code',
+              enabled: true,
+              installed: visualUpgrade.claude,
+              install: {
+                kind: 'npm',
+                location: `${VISUAL_NPM}/@anthropic-ai/claude-code`,
+              },
+              latest: '2.1.308',
+              verified: [],
+              target: claudeTarget,
+              unverified: null,
+              upgrade: claudeTarget
+                ? {
+                    oneClick: true,
+                    command: 'npm install -g @anthropic-ai/claude-code@2.1.308',
+                  }
+                : null,
+              activeRuns: 0,
+            },
+            {
+              profileId: 'codex-default',
+              backend: 'codex',
+              enabled: true,
+              installed: visualUpgrade.codex,
+              install: { kind: 'npm', location: `${VISUAL_NPM}/@openai/codex` },
+              latest: '0.163.0',
+              verified: unverified ? ['0.153'] : ['0.153', '0.163'],
+              target: codexTarget,
+              unverified:
+                unverified && visualUpgrade.codex !== '0.163.0'
+                  ? '0.163.0'
+                  : null,
+              upgrade: codexTarget
+                ? { oneClick: true, command: VISUAL_CODEX_COMMAND }
+                : null,
+              activeRuns: 1,
+            },
+          ],
+        }
+      }
       const visualExecutorProfiles = [
         {
           id: 'claude-default',
@@ -249,7 +356,7 @@ export async function installVisualCoreBridge(
         {
           id: 'codex-default',
           backend: 'codex',
-          enabled: false,
+          enabled: visualUpgradeMode !== null,
           executablePath: 'codex',
           authRef: { kind: 'managed-cli-login' },
           stateDirectoryId: 'codex-default',
@@ -299,7 +406,12 @@ export async function installVisualCoreBridge(
         const base = {
           checkedAt: Date.now(),
           authVerified: false,
-          executableVersion: id === 'codex-default' ? '0.153.4' : '2.1.300',
+          executableVersion:
+            id === 'codex-default'
+              ? visualUpgrade.codex
+              : visualUpgradeMode
+                ? visualUpgrade.claude
+                : '2.1.300',
           capabilities: {
             persistentSession: true,
             queuedFollowup: true,
@@ -8337,6 +8449,61 @@ export async function installVisualCoreBridge(
             case 'executors.dismissNotice':
               visualSignInNotice = false
               return {}
+            case 'executors.versions': {
+              if (!visualUpgradeMode) return {}
+              // A spec moves an upgrade on the way Core pushes it.
+              ;(
+                window as unknown as {
+                  __visualExecutorUpgrade?: (step: string) => void
+                }
+              ).__visualExecutorUpgrade = (step) => {
+                const emit = (event: Record<string, unknown>) => {
+                  for (const target of environmentListeners)
+                    target({ seq: 0, ...event })
+                }
+                visualUpgrade.claude = '2.1.308'
+                const run =
+                  step === 'running'
+                    ? visualCodexRun({})
+                    : step === 'done'
+                      ? visualCodexRun({
+                          state: 'succeeded',
+                          installed: '0.163.0',
+                          finishedAt: Date.now(),
+                        })
+                      : visualFailedRun()
+                if (step === 'done') visualUpgrade.codex = '0.163.0'
+                visualUpgrade.upgrades = [run]
+                emit({
+                  event: 'executor_upgrade',
+                  upgrade: run,
+                  ...(step === 'done'
+                    ? { probe: visualExecutorProbe('codex-default', null) }
+                    : {}),
+                })
+                emit({ event: 'executor_upgrade', versions: visualVersions() })
+              }
+              return visualVersions()
+            }
+            case 'executors.upgrade': {
+              const input = (args[0] || {}) as { profileId?: string }
+              return {
+                upgrade: visualCodexRun({
+                  profileId: String(input.profileId),
+                  state: 'waiting',
+                }),
+              }
+            }
+            case 'executors.cancelUpgrade':
+              return {
+                upgrade: visualCodexRun({
+                  state: 'cancelled',
+                  finishedAt: Date.now(),
+                }),
+              }
+            case 'executors.dismissUpgrades':
+              visualUpgrade.dismissed = true
+              return visualVersions()
             default:
               return {}
           }

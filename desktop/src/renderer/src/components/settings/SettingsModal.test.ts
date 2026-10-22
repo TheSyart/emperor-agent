@@ -170,6 +170,55 @@ describe('SettingsModal', () => {
     expect(document.activeElement).toBe(dialog)
   })
 
+  it('marks 子智能体 while Claude Code or Codex has a new version (AGT-13)', async () => {
+    const { resetExecutorUpgrades } =
+      await import('./executors/executorUpgrades')
+    resetExecutorUpgrades()
+    core.mockImplementation(async (operation: string) =>
+      operation === 'executors.versions'
+        ? {
+            checkedAt: 1,
+            checking: false,
+            error: null,
+            dismissed: false,
+            upgrades: [],
+            executors: [
+              {
+                profileId: 'codex-default',
+                backend: 'codex',
+                enabled: true,
+                installed: '0.153.4',
+                install: { kind: 'npm', location: null },
+                latest: '0.163.0',
+                verified: ['0.153', '0.163'],
+                target: '0.163.0',
+                unverified: null,
+                upgrade: {
+                  oneClick: true,
+                  command: 'npm install -g @openai/codex@0.163.0',
+                },
+                activeRuns: 0,
+              },
+            ],
+          }
+        : [],
+    )
+    await mount('/chat/s1?settings=general')
+    // Read when the settings open, without asking npm.
+    await vi.waitFor(
+      () =>
+        expect(
+          modal()?.querySelector(
+            '.nav-cell[data-section="executors"] [data-nav-mark]',
+          ),
+        ).not.toBeNull(),
+      SECTION_LOAD,
+    )
+    expect(core).toHaveBeenCalledWith('executors.versions', {})
+    expect(modal()!.querySelectorAll('[data-nav-mark]')).toHaveLength(1)
+    resetExecutorUpgrades()
+  })
+
   it('groups nine sections under 常规, 智能, 操控 and 系统 (UI-S07)', async () => {
     await mount('/chat/s1?settings=general')
     const dialog = modal()

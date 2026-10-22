@@ -22,7 +22,8 @@
  * Slots: `leading` (a step marker or icon left of the text; the row then
  * aligns to the top), `eyebrow` (a small label above the title, e.g. ⚠
  * 风险升高), `title`, `description`, `badge` (inline after the title, e.g.
- * a Badge), default (the control / value).
+ * a Badge), default (the control / value), `below` (a full-width line
+ * under text and control, lined up with the text: progress, output).
  */
 import { computed } from 'vue'
 import { useSurface } from '../../ui/surface'
@@ -86,6 +87,7 @@ withDefaults(
       </div>
     </div>
     <div v-if="$slots.default" class="control"><slot /></div>
+    <div v-if="$slots.below" class="below"><slot name="below" /></div>
   </div>
 </template>
 
@@ -164,6 +166,16 @@ withDefaults(
   gap: var(--space-2);
   min-width: 0;
   max-width: 100%;
+}
+
+.below {
+  flex: 1 0 100%;
+  min-width: 0;
+}
+
+/* Under a leading icon: start where the text starts. */
+.ds-settings-row[data-leading] > .below {
+  grid-column: 2 / -1;
 }
 
 .ds-settings-row[data-layout='stacked'] {

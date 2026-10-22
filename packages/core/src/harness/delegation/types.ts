@@ -235,6 +235,80 @@ export interface ClaudeSignInView {
   /** A failed sign-in: the same login as one line for the user's Terminal. */
   command?: string
 }
+/** How a CLI was installed, from where it really lives (AGT-13). */
+export type ExecutorInstallKind =
+  'npm' | 'homebrew' | 'claude-native' | 'desktop' | 'unknown'
+/** 设置 › 子智能体 › 版本 for one profile (AGT-13). */
+export interface ExecutorVersionView {
+  profileId: string
+  backend: ExternalBackend
+  /** The user turned it on: only then is an upgrade offered. */
+  enabled: boolean
+  /** What the last probe found; null: not installed or not checked. */
+  installed: string | null
+  install: { kind: ExecutorInstallKind; location: string | null }
+  /** npm's `latest`; null: not checked yet, or the check failed. */
+  latest: string | null
+  /** Codex: the major.minor lines Emperor verified (`0.153`). */
+  verified: string[]
+  /** What 升级 installs; null: nothing newer to install. */
+  target: string | null
+  /** Codex: a newer release Emperor has not verified (尚未验证). */
+  unverified: string | null
+  /**
+   * How the upgrade runs: one click, or a command for the user's own
+   * Terminal (`manual`: why not — a desktop app, an unknown install, or
+   * Homebrew offering another version). Null without a target.
+   */
+  upgrade: {
+    oneClick: boolean
+    command: string | null
+    manual?: 'desktop' | 'unknown' | 'homebrew'
+  } | null
+  /** Its subtasks running now; an upgrade waits for them. */
+  activeRuns: number
+}
+/** 升级 while it runs and once it ended (AGT-13). */
+export interface ExecutorUpgradeView {
+  profileId: string
+  backend: ExternalBackend
+  from: string | null
+  target: string
+  /** The command as the confirmation showed it. */
+  command: string
+  state: 'waiting' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  /** waiting: its subtasks still running. */
+  waitingFor?: number
+  /** waiting: behind another executor's upgrade. */
+  queued?: boolean
+  startedAt: number
+  finishedAt?: number
+  /** The command and its output, cleaned (查看过程). */
+  log: string[]
+  /**
+   * Why it failed: `permission` (no write access; `path`), `network`,
+   * `exit` (another non-zero exit), `start`, `timeout`, `not-upgraded`
+   * (it ended, but the probe still finds the old version).
+   */
+  reason?:
+    'permission' | 'network' | 'exit' | 'start' | 'timeout' | 'not-upgraded'
+  exitCode?: number
+  path?: string
+  /** The version the probe found afterwards. */
+  installed?: string
+  /** failed: the same upgrade for the user's own Terminal. */
+  manualCommand?: string
+}
+export interface ExecutorVersionsView {
+  checkedAt: number | null
+  checking: boolean
+  /** The last check could not reach npm (`offline`) or got no answer. */
+  error: 'offline' | 'registry' | null
+  executors: ExecutorVersionView[]
+  upgrades: ExecutorUpgradeView[]
+  /** 稍后 for every version offered now: no notice, no dot. */
+  dismissed: boolean
+}
 export type NativeCapabilityStatus =
   | 'unverified'
   | 'verifying'
@@ -629,6 +703,14 @@ export class DelegationError extends Error {
       ],
       CONTAINMENT_UNAVAILABLE: [
         '操作系统的执行边界不可用，请在「设置 › 子智能体」查看诊断。',
+        'configure_executor',
+      ],
+      EXECUTOR_UPGRADING: [
+        '它正在升级，升级完成前不接新的子任务；可以改用本地子智能体。',
+        'configure_executor',
+      ],
+      EXECUTOR_UPGRADE_UNAVAILABLE: [
+        '这个版本不能在这里一键升级，请在「设置 › 子智能体」重新检测后再试。',
         'configure_executor',
       ],
     }

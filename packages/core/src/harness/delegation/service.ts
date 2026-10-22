@@ -66,6 +66,7 @@ import {
 import { delegationNeedsExit } from '../../runtime/agent-view'
 import { durableReplaceSync } from '../../store/persistence'
 import type { CodexAuthLink } from './codex-auth'
+import type { ExecutorDispatchGate } from './dispatch-gate'
 import { executorGrants } from './environment'
 import {
   describeRunFailure,
@@ -186,6 +187,11 @@ export interface DelegationServiceOptions {
   boundaryMarkerDir?: string
   /** The wait between stop steps for a recovered process group (tests). */
   stopGraceMs?: number
+  /**
+   * An executor being upgraded (AGT-13): new delegations to it are
+   * refused; a run that starts while the upgrade command runs waits.
+   */
+  dispatchGate?: Pick<ExecutorDispatchGate, 'refused' | 'settled'>
 }
 interface Entry {
   journal: DelegationJournal
@@ -687,6 +693,13 @@ export class DelegationService {
   list(): DelegationState[] {
     return [...this.entries.values()].map((e) => e.journal.load())
   }
+  /** Runs of this executor going on now (an upgrade waits for them). */
+  activeRuns(backend: ExternalBackend): number {
+    let count = 0
+    for (const e of this.entries.values())
+      if (e.active && e.journal.load().record?.backend === backend) count++
+    return count
+  }
   async probeProfiles(): Promise<void> {
     let config: ExecutorConfig
     try {
@@ -1170,6 +1183,8 @@ export class DelegationService {
       config.limits.maxDepth,
     )
     const profile = this.profile(spec)
+    const upgrading = this.options.dispatchGate?.refused(profile.backend)
+    if (upgrading) throw new DelegationError('EXECUTOR_UPGRADING', upgrading)
     let probe = await this.options.registry.requireAvailable(profile, signal)
     // Not signed in: fail now, before the user is asked (AGT-02).
     const check = this.options.checkAuth
@@ -1536,6 +1551,11 @@ export class DelegationService {
     let structured: unknown
     try {
       if (e.stop) controller.abort()
+      // Its CLI is being replaced right now: start once it is done (AGT-13).
+      await this.options.dispatchGate?.settled(
+        record.backend,
+        controller.signal,
+      )
       const config = this.options.config()
       this.budget.reconfigure(config)
       if (this.options.taskBudget?.exhausted(record.owner))

@@ -84,7 +84,7 @@ import { hardenSession } from './computer-use/session-hardening'
 import { registerOpenPathIpc } from './open-path-ipc'
 import { registerAppVersionIpc } from './app-version-ipc'
 import { createQuarantine } from './quarantine'
-import { updateHostOptions } from './update-host'
+import { executorVersionHostOptions, updateHostOptions } from './update-host'
 import { registerRemoteImageIpc } from './remote-image-ipc'
 import {
   createScreenshotCapture,
@@ -1718,6 +1718,15 @@ async function startup(): Promise<void> {
           tempDir: app.getPath('temp'),
           reveal: (target) => shell.showItemInFolder(target),
           markQuarantine: createQuarantine(),
+          request: (options) =>
+            net.request(options) as unknown as ElectronRequestLike,
+          log: (line) => console.info(line),
+        }),
+        // AGT-13 子智能体 › 版本: npm's public version numbers.
+        executorVersions: executorVersionHostOptions({
+          env: process.env,
+          isPackaged: app.isPackaged,
+          packagedSmoke: Boolean(packagedSmoke),
           request: (options) =>
             net.request(options) as unknown as ElectronRequestLike,
           log: (line) => console.info(line),

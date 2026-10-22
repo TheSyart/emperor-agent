@@ -8,7 +8,10 @@
  * into a top strip: title + one horizontally scrolling row of cells, the
  * group labels dropped.
  *
- * Props: active (current section), titleId (id for aria-labelledby).
+ * Props: active (current section), titleId (id for aria-labelledby),
+ * marks? (sections with something new: a 6px gold dot at the cell's end,
+ * read out as 「有新版本」 — 子智能体 when Claude Code or Codex can be
+ * upgraded, AGT-13).
  * Emits: select(section).
  */
 import {
@@ -17,7 +20,11 @@ import {
   type SettingsModalSection,
 } from './settingsSections'
 
-defineProps<{ active: SettingsModalSection; titleId: string }>()
+defineProps<{
+  active: SettingsModalSection
+  titleId: string
+  marks?: Partial<Record<SettingsModalSection, boolean>>
+}>()
 const emit = defineEmits<{ select: [section: SettingsModalSection] }>()
 
 const LABELS = Object.fromEntries(
@@ -50,6 +57,9 @@ const LABELS = Object.fromEntries(
           @click="emit('select', key)"
         >
           <span class="nav-label">{{ LABELS[key] }}</span>
+          <span v-if="marks?.[key]" class="nav-mark" data-nav-mark
+            ><span class="nav-mark-text">，有新版本</span></span
+          >
         </button>
       </div>
     </div>
@@ -136,6 +146,25 @@ const LABELS = Object.fromEntries(
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.nav-mark {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: var(--space-2);
+  border-radius: 50%;
+  background: rgb(var(--accent));
+}
+
+/* Read out, not shown. */
+.nav-mark-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 @container settings-panel (max-width: 639px) {

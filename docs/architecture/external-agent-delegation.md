@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：开发者、维护者<br>
-> 最后核验：2026-10-22（对照 `681628a0`）<br>
+> 最后核验：2026-10-22（对照 `a7597a58`）<br>
 > 事实源：`packages/core/src/harness/delegation/`（含 `consent.ts`）、`packages/core/src/workspace/delegation-*.ts`（含 `delegation-results.ts`）、`packages/core/src/environment/probe.ts`（检查结论的缓存）、`packages/core/src/api/services/delegation-service.ts`、`packages/core/src/runtime/agent-view.ts`、`packages/core/src/harness/host/host.ts`（`stop`、`close`）、`desktop/src/renderer/src/components/settings/executors/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/sidebar/agentTree.ts`
 
 Emperor 的父 Agent 可以通过原有子智能体工具选择 `internal`、`claude-code` 或 `codex`。未指定 backend 时仍用 internal。两个外部 profile 复用本机 CLI 登录，但默认关闭：它们使用用户自己的订阅额度或 API 计费，需要用户在设置里打开，并在第一次交出任务时于对话中确认（见下文「默认关闭与首次同意」）。设置「子智能体」统一展示本地、Claude Code 与 Codex；外部来源可切换启用状态，通过全局检测读取 CLI 与本地登录可用条件，异常时按需更正可执行文件路径。多份 profile 以来源内选择器切换，不合并或覆盖其他 profile。设置保留既有认证及调度限制；默认模型支持跟随 CLI、候选选择和自定义，修改后只用于之后的任务。已有配置中的开关、路径和有效凭据引用保持不变；旧版空引用按本机登录解析，不自动覆写文件。backend 与内部 provider/model 路由是不同维度。
@@ -49,6 +49,19 @@ flowchart TD
 - 未登录时的内置模型目录，默认模型从 `gpt-6-astra` 变为 `gpt-6.1-sol`。
 
 两份协议对同样 21 个文件计算摘要：AGT-13 起加入 `v1/InitializeResponse.json`（握手读的 user agent）与 `v2/ModelListResponse.json`（FIX-16 读的 `isDefault`），0.153.4 的摘要按同一清单重算，原来 19 个文件与官方 0.153.4 重新生成的逐字节一致。适配器的 contract 测试对两份协议逐一校验它发出的每个请求和回复、读取的每个字段；`scripts/codex-protocol-handshake.mjs` 在 Seatbelt 断网、不登录的条件下，用真实的 0.163.0 与 0.153.4 跑通探测与摘要、握手、`thread/start`、一轮里的 steer 与 interrupt、关闭后无残留、恢复与历史、`config/read` 与 `model/list`。需要登录的部分（模型回答、工具、用量、ChatGPT 登录下的模型列表与 `gpt-6.1-sol` 是否可用、刷新令牌时 `auth.json` 的写法）还没有用 0.163 在真机上运行验证。
+
+### 版本检测与一键升级（AGT-13）
+
+设置「子智能体」检测两个 CLI 的版本，并能按用户当初的安装方式升级它们（Core：`install-source.ts`、`published-versions.ts`、`upgrade-process.ts`、`upgrade-service.ts`、`dispatch-gate.ts`；接口在 `CoreExecutorService`）。
+
+- **安装方式**（`detectInstallSource`）：按可执行文件的真实路径（解析符号链接）判断。`<prefix>/Cellar/<formula>/…` 或 `<prefix>/Caskroom/<cask>/…` 为 Homebrew（先判断：formula 的 npm 包在它的 keg 里）；`<prefix>/lib/node_modules/<该 CLI 的包>/…` 为 npm 全局安装（包名必须是 `@anthropic-ai/claude-code` 或 `@openai/codex`，用这个 prefix 自己的 `bin/npm`，没有时用 PATH 上的 npm 并明确 `--prefix`）；Claude Code 的 `…/share/claude/versions/<版本>`（`~/.local/bin/claude` 指向它）为 Claude 官方安装器；`….app/Contents/…` 里的为桌面版自带；其他（包括旧的 `~/.claude/local` 安装）为未知。
+- **最新版本**：只读 npm 仓库的公开元数据，`GET https://registry.npmjs.org/@anthropic-ai/claude-code/latest`，Codex 取 abbreviated 文档（`Accept: application/vnd.npm.install-v1+json`）里的 `dist-tags.latest` 与全部 `x.y.z` 发布版（预发布与平台包忽略）。走宿主给的 HTTP（Electron 的 net，不带 Cookie 与凭据，与检查更新同一个），只允许这个源；跳转离开源即失败。`EMPEROR_EXECUTOR_REGISTRY_URL` 可指向本机回环地址上的测试仓库（主进程读取，非回环地址忽略并记日志）。结果缓存在 `<delegations>/executor-versions.json`（同时记「稍后」）；连不上为 `error: 'offline'`，返回错误或无法解析为 `'registry'`，保留上次的结果，界面显示未知。打开设置页时查一次（`refresh: 'auto'`，一分钟内不重复），每天第一次启动时在 30 秒后查一次（只在打包应用里，或设了测试仓库时；packaged smoke 不查），「检查更新」立即查。
+- **升级目标**：Claude Code 为 npm 的 `latest`，且不低于 `CLAUDE_MINIMUM_VERSION`、高于本机版本（`claudeUpgradeTarget`）。Codex 为主次版本在运行时的 `KNOWN_CODEX_PROTOCOLS` 里的最高发布版（`codexUpgradeTarget`；可注入协议表做测试），只升不降；`latest` 所在的主次版本未验证且比本机和目标都新时报为 `unverified`（界面「尚未验证」），从不提供升级。验证过 0.153 与 0.163 后，0.153.4 的目标是 0.163.0。没有安装的不提供升级。
+- **命令**（`upgradeCommand`）：npm 为该 prefix 的 npm `install -g <包>@<版本>`（环境里带 `npm_config_prefix=<prefix>`，PATH 前面是 `<prefix>/bin`，让 `#!/usr/bin/env node` 找到同一个 node）；Homebrew 为 `brew upgrade [--cask] <名字>`，只在 `brew info --json=v2`（`HOMEBREW_NO_AUTO_UPDATE=1`）报告的版本正好是目标时一键，否则只给命令；Claude 官方安装器为 `<claude> install <版本>`；桌面版自带没有命令（随桌面版更新）；未知安装给出可复制的命令（Claude Code 为 `claude update`，Codex 为 `npm install -g @openai/codex@<版本>`）。
+- **运行**（`startUpgradeProcess`）：只在用户确认后，`executors.upgrade { profileId, target }`（按 view 校验；`target` 必须等于当前提供的版本，否则 `EXECUTOR_UPGRADE_UNAVAILABLE`）。不进 Seatbelt，不经 sudo（命令是 sudo、doas、su 时拒绝），stdin 关闭，自成进程组；`executors.cancelUpgrade { profileId }`、10 分钟上限或 Emperor 退出时 SIGTERM 进程组，3 秒后 SIGKILL。环境是执行器环境去掉 `ANTHROPIC_*`、`CLAUDE_CODE_OAUTH*`、`OPENAI_*`、`CODEX_*`、`AZURE_OPENAI_*`、`EMPEROR_*`，加 `NO_COLOR` 与关闭 npm 的进度、fund、audit、更新提示；Claude Code 的命令另带 `CLAUDE_CONFIG_DIR=<delegations>/claude-code/config`，`claude install` 的记录写进 Emperor 的专用目录，不写 `~/.claude`。npm 与 Claude 官方安装器先检查要写的目录（`lib/node_modules`、包目录、`bin`；`share/claude`、`~/.local/bin`）是否可写，不可写直接失败，不运行命令。同一执行器一次一个升级，再点加入正在进行的；不同执行器依次运行。
+- **不派新任务**：确认后 `ExecutorDispatchGate.hold(backend)`，`DelegationService` 新建这个执行器的委派时抛 `EXECUTOR_UPGRADING`（不建记录，父 Agent 可改用本地子智能体）。升级先等这个执行器正在运行的子任务（`DelegationService.activeRuns(backend)`）结束（`waiting`，`waitingFor` 为个数）；命令运行期间（`installing`）已有委派的后续运行在 `settled` 等它结束，停止这次运行会结束等待。
+- **结果**：命令结束后重新探测（与「重新检测」相同，更新 `ExecutorFactsStore` 的探测结果）。退出码 0 且探测到目标版本为 `succeeded`；退出码 0 但版本没变为 `failed`（`not-upgraded`）；否则按输出分为 `permission`（EACCES、EPERM、permission denied，`path` 为要写的第一个目录）、`network`（ENOTFOUND、ETIMEDOUT、EAI_AGAIN 等）、`exit`（带退出码），以及 `timeout`、`start`；失败带 `manualCommand`（与确认时同一条命令）。
+- **推送**：host 事件 `executor_upgrade { upgrade?, probe?, versions? }`：升级的每次变化（`ExecutorUpgradeView`；输出每 250 ms 合并一次，日志保留命令和最后 200 行，每行去掉 ANSI、凭据、URL 里的用户名密码和 npm 令牌，用户目录换成 `~`，最长 500 字），结束时附新的探测结果；检查、升级结束与「稍后」之后附 `ExecutorVersionsView`。`executors.versions { refresh? }` 返回每个 profile 的 `ExecutorVersionView`（本机版本、`enabled`、安装方式与位置、最新版本、已验证的主次版本、目标、未验证的新版本、命令、正在运行的子任务数）、检查时间与错误、进行中和已结束的升级、是否已「稍后」。`executors.dismissUpgrades {}`（「稍后」）记下当前提供的各版本，有更新的版本时再提示。日志只记开始与结束（profile、版本、安装方式、状态、原因、退出码）。
 
 ## 专长与原生能力事实
 
