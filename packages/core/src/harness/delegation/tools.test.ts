@@ -689,3 +689,18 @@ it('FIX-16 路 7 路 collect_agent and a foreground wait carry the refused model鈥
     runtime.cleanup()
   }
 })
+
+it('FIX-16 路 3 路 collect_agent says which model a run used instead of Codex鈥檚 own default', async () => {
+  const f = fixture()
+  Object.assign(f.state.runs['dgr-1']!, {
+    modelChoice: {
+      configured: 'gpt-6.1-sol',
+      used: 'gpt-5.6-sol',
+      reason: 'default-unavailable',
+    },
+  })
+  const collected = await f.call('collect_agent', { agent_id: 'dlg-test' })
+  expect(JSON.stringify(collected.content)).toContain(
+    "Codex's own default model gpt-6.1-sol is not available to this login; this run used gpt-5.6-sol.",
+  )
+})

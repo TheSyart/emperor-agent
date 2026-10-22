@@ -26,7 +26,7 @@ import type {
   DelegationRunRecord,
   DelegationStart,
 } from './types'
-import { resultLine } from './notices'
+import { modelChoiceLine, resultLine } from './notices'
 import type { DelegationState } from './fold'
 import { buildDelegationContext, type DelegationBriefInput } from './context'
 import { jsonSchema } from '../tools/json-schema'
@@ -185,6 +185,7 @@ function closingText(
       providerTurnId: run.providerTurnId,
     }) +
     resultLine(run) +
+    modelChoiceLine(run) +
     '\n' +
     (run.summary || '(executor returned no closing text)')
   )

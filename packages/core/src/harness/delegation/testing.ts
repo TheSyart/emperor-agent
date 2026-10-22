@@ -263,6 +263,36 @@ export function fixtureDelegationRun(id = 'dgr-1'): DelegationRunRecord {
   }
 }
 
+import { ManagedAgentProcess } from './process'
+
+/** A Codex model the fake app-server offers in `model/list`. */
+export interface FakeCodexModel {
+  id: string
+  isDefault?: boolean
+  hidden?: boolean
+}
+/**
+ * What the fake `codex app-server` does (FIX-16). Tests never run the real
+ * codex.
+ */
+export interface FakeCodexOptions {
+  /**
+   * The model its own configuration selects (the user's
+   * `~/.codex/config.toml`): `thread/start` without a model reports it.
+   */
+  defaultModel?: string
+  /** `model/list`: the models this login offers. */
+  models?: FakeCodexModel[]
+  /**
+   * A model the account refuses: a turn on it fails at once with the 400
+   * payload a ChatGPT login gets ({@link codexModelRejection}).
+   */
+  rejectModel?: string
+  /** `model/list` answers with an error this many times first. */
+  modelListFailures?: number
+  /** A completed turn's final message; the model it ran on follows it. */
+  reply?: string
+}
 /**
  * The error a Codex turn reports when the account refuses its model, as
  * Codex 0.153.4 reported it for the user on 2026-10-22 (FIX-16).
@@ -276,4 +306,105 @@ export function codexModelRejection(model: string): string {
       message: `The '${model}' model is not supported when using Codex with a ChatGPT account.`,
     },
   })
+}
+/**
+ * A stand-in for `codex app-server --listen stdio://` (FIX-16): JSON-RPC
+ * over stdio, answering `initialize`, `thread/start|resume` (reporting the
+ * model it will use), `config/read`, `model/list`, `turn/start` and
+ * `turn/interrupt`. Every request is appended, with its `model`, to
+ * `$TMPDIR/fake-codex.jsonl` ({@link fakeCodexRequests}); the run's TMPDIR
+ * is its private temp folder.
+ */
+export function fakeCodexScript(options: FakeCodexOptions = {}): string {
+  return `
+const options = ${JSON.stringify(options)}
+const fs = require('node:fs'), path = require('node:path')
+const log = path.join(process.env.TMPDIR || '.', 'fake-codex.jsonl')
+let threadId = null, threadModel = null, turns = 0
+let listFailures = options.modelListFailures || 0
+const send = (frame) => process.stdout.write(JSON.stringify(frame) + '\\n')
+const note = (entry) => { try { fs.appendFileSync(log, JSON.stringify(entry) + '\\n') } catch {} }
+const rejection = (model) => JSON.stringify({ type: 'error', status: 400, error: { type: 'invalid_request_error', message: "The '" + model + "' model is not supported when using Codex with a ChatGPT account." } })
+const lines = require('node:readline').createInterface({ input: process.stdin })
+lines.on('close', () => process.exit(0))
+lines.on('line', (line) => {
+  let frame
+  try { frame = JSON.parse(line) } catch { return }
+  if (frame.id === undefined || typeof frame.method !== 'string') return
+  const params = frame.params || {}
+  note({ method: frame.method, model: params.model ?? null, includeHidden: params.includeHidden ?? null })
+  const reply = (result) => send({ id: frame.id, result })
+  const fail = (message) => send({ id: frame.id, error: { code: -32603, message } })
+  switch (frame.method) {
+    case 'initialize':
+      return reply({ userAgent: 'codex/0.153.4' })
+    case 'thread/start':
+    case 'thread/resume':
+      threadId = params.threadId || 'thread-fake'
+      threadModel = params.model || threadModel || options.defaultModel || 'gpt-5.6-sol'
+      return reply({ thread: { id: threadId }, model: threadModel, modelProvider: 'openai' })
+    case 'config/read':
+      return reply({ config: { model: options.defaultModel ?? null } })
+    case 'model/list':
+      if (listFailures > 0) { listFailures--; return fail('models are unavailable') }
+      return reply({
+        data: (options.models || []).map((m) => ({ id: m.id, model: m.id, displayName: m.id, hidden: !!m.hidden, isDefault: !!m.isDefault })),
+        nextCursor: null,
+      })
+    case 'turn/start': {
+      if (params.model) threadModel = params.model
+      const turnId = 'turn-' + ++turns, model = threadModel
+      reply({ turn: { id: turnId, status: 'inProgress', items: [] } })
+      setTimeout(() => {
+        send({ method: 'turn/started', params: { threadId, turn: { id: turnId, status: 'inProgress', items: [] } } })
+        if (model === options.rejectModel) {
+          send({ method: 'turn/completed', params: { threadId, turn: { id: turnId, status: 'failed', items: [], error: { message: rejection(model) } } } })
+          return
+        }
+        const text = (options.reply || 'done') + ' (' + model + ')'
+        const item = { type: 'agentMessage', id: 'msg-' + turnId, text }
+        send({ method: 'item/agentMessage/delta', params: { threadId, turnId, itemId: item.id, delta: text } })
+        send({ method: 'item/completed', params: { threadId, turnId, item } })
+        send({ method: 'turn/completed', params: { threadId, turn: { id: turnId, status: 'completed', items: [item] } } })
+      }, 10)
+      return
+    }
+    case 'turn/interrupt':
+      return reply({})
+    default:
+      return send({ id: frame.id, error: { code: -32601, message: 'unsupported ' + frame.method } })
+  }
+})
+`
+}
+/** Processes whose every spawn runs the fake Codex app-server instead. */
+export function fakeCodexProcesses(
+  options: FakeCodexOptions = {},
+): ManagedAgentProcess {
+  const processes = new ManagedAgentProcess({ stopGraceMs: 500 })
+  const spawn = processes.spawn.bind(processes)
+  processes.spawn = (spec) =>
+    spawn({
+      ...spec,
+      executable: process.execPath,
+      args: ['-e', fakeCodexScript(options)],
+    })
+  return processes
+}
+/** What the fake Codex was asked, in order, under one temp folder. */
+export function fakeCodexRequests(
+  tempRoot: string,
+): Array<{
+  method: string
+  model: string | null
+  includeHidden: boolean | null
+}> {
+  try {
+    return readFileSync(join(tempRoot, 'fake-codex.jsonl'), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+  } catch {
+    return []
+  }
 }
