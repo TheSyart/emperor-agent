@@ -11,6 +11,7 @@ import {
 import { join } from 'node:path'
 import { assertNotNewerSync, durableReplaceSync } from '../../store/persistence'
 import type { SecretSealer } from '../../security/secret-sealer'
+import { installClaudeSecurity } from './claude-keychain'
 import type { LoginShellEnvironment } from './login-shell'
 import type { ManagedAgentProcess } from './process'
 import {
@@ -29,9 +30,11 @@ import {
  *   `claude auth login` (FIX-11: started by Core, finished in the browser),
  *   `claude auth logout` — uses one
  *   dedicated CLAUDE_CONFIG_DIR and HOME under Emperor Home
- *   ({@link claudeDirectories}); claude keeps its login there (the Keychain
- *   entry it keys to that folder, or `.credentials.json` in it), and
- *   Emperor never reads it;
+ *   ({@link claudeDirectories}); claude keeps its login there, in
+ *   `.credentials.json` (macOS has no login keychain under that HOME, and
+ *   the `security` first on PATH answers claude's keychain calls as
+ *   unavailable instead of raising the system dialog: claude-keychain.ts,
+ *   FIX-19), and Emperor never reads it;
  * - Emperor asks claude whether it is signed in (`claude auth status`,
  *   JSON) and reports the method and account, nothing token-like;
  * - besides that sign-in Emperor passes only the user's own API
@@ -54,20 +57,31 @@ export interface ClaudeDirectories {
   config: string
   /** HOME (and XDG folders) for every Claude Code process. */
   home: string
+  /** First on PATH: the `security` that keeps claude off the keychain. */
+  bin: string
 }
 
 export function claudeDirectories(root: string): ClaudeDirectories {
   const base = join(root, CLAUDE_CODE_STATE)
-  return { root: base, config: join(base, 'config'), home: join(base, 'home') }
+  return {
+    root: base,
+    config: join(base, 'config'),
+    home: join(base, 'home'),
+    bin: join(base, 'bin'),
+  }
 }
 
-/** The folders, private to the user (0700); safe to call from every run. */
+/**
+ * The folders, private to the user (0700), and the `security` in `bin`
+ * (FIX-19); safe to call from every run.
+ */
 export function prepareClaudeDirectories(root: string): ClaudeDirectories {
   const dirs = claudeDirectories(root)
-  for (const dir of [dirs.root, dirs.config, dirs.home]) {
+  for (const dir of [dirs.root, dirs.config, dirs.home, dirs.bin]) {
     mkdirSync(dir, { recursive: true, mode: 0o700 })
     chmodSync(dir, 0o700)
   }
+  installClaudeSecurity(dirs.bin)
   return dirs
 }
 
@@ -448,12 +462,16 @@ const SIGN_IN_UNSET = [
   'ANTHROPIC_AUTH_TOKEN',
   'CLAUDE_CODE_OAUTH_TOKEN',
 ] as const
-/** The folders that make the login the one every run finds again. */
+/**
+ * The folders that make the login the one every run finds again, and the
+ * PATH that puts Emperor's `security` first (FIX-19).
+ */
 const SIGN_IN_ENVIRONMENT = [
   'CLAUDE_CONFIG_DIR',
   'HOME',
   'XDG_CONFIG_HOME',
   'XDG_CACHE_HOME',
+  'PATH',
 ] as const
 
 const signInArgs = (console: boolean) =>

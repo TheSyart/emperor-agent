@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：用户、维护者、数据与迁移开发者<br>
-> 最后核验：2026-10-22（对照 `1a5cef69`）<br>
+> 最后核验：2026-10-23（对照 `cd4d8656`）<br>
 > 事实源：`desktop/src/main/state-directory-lock.ts`、`desktop/src/main/single-instance.ts`、`desktop/src/main/logging/log-location.ts`、`desktop/src/main/quit-coordinator.ts`、`desktop/src/main/user-downloads.ts`、`packages/core/src/workspace/turn-snapshots.ts`、`packages/core/src/workspace/delegation-workspaces.ts`、`packages/core/src/harness/delegation/`、`desktop/src/main/index.ts`、`packages/core/src/runtime/paths.ts`、`packages/core/src/runtime/installation.ts`、`packages/core/src/runtime/data-version.ts`、`packages/core/src/store/persistence/version.ts`、`packages/core/src/storage/data-files.ts`、`packages/core/src/storage/backup.ts`、`packages/core/src/migrations/`、`desktop/src/main/home-backup.ts`、`packages/core/src/runtime/migrate-state-root.ts`、`packages/core/src/harness/host/services.ts`、`packages/core/src/harness/tools/builtin/fs/fsio.ts`、`packages/core/src/session-log/store.ts`、`packages/core/src/skills/file-loader.ts`、`packages/core/src/api/services/skill-service.ts`、`packages/core/src/plugins/service.ts`、各领域 Store、`packages/core/src/updates/service.ts`
 
 ## 两个根的区分
@@ -153,8 +153,9 @@ Computer Use Helper 的 socket（`<Emperor Home>/run/cu-<uid>.sock`，由 main �
     consent.json             # 「以后都允许」
     credentials.json         # 「使用 API Key」保存的 Claude Code API Key（本地密钥加密，0600）；升级时删除旧版本保存的 Claude 令牌，并在这里记一次提示
     claude-code/             # Claude Code 的专用目录（AGT-12，0700，跨运行持久；Emperor 不读其中的登录）
-      config/                # 每次运行、claude auth status、登录与退出登录共用的 CLAUDE_CONFIG_DIR：Claude Code 自己的设置、会话记录（projects/）与登录（钥匙串条目以此目录为键，钥匙串不可用时为 .credentials.json）；settings.json 由 Emperor 写，只含模型设置
+      config/                # 每次运行、claude auth status、登录与退出登录共用的 CLAUDE_CONFIG_DIR：Claude Code 自己的设置、会话记录（projects/）与登录（.credentials.json，FIX-19 起不用钥匙串）；settings.json 由 Emperor 写，只含模型设置
       home/                  # 它们共用的 HOME（与 XDG_CONFIG_HOME、XDG_CACHE_HOME）
+      bin/security           # 排在它们 PATH 最前面：把钥匙串密码调用答成不可用，免得在专用 HOME 下弹出「找不到钥匙串」（FIX-19）
     runtime-facts.json       # 能力验证事实
     model-catalog-cache.json # Claude Code / Codex 的模型候选缓存
     conversations/<dlg-id>/  # journal.jsonl、snapshot.json、runs/
