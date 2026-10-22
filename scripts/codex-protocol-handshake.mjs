@@ -12,22 +12,28 @@
 // (`sandbox-exec`, macOS), so no model can be reached:
 //
 // 1. probe   `codex --version` and the protocol digest (ExecutorRegistry);
+//    features  `codex features list` with the adapter's overrides: every
+//            feature Emperor turns off is off (CODEX_FEATURES);
 // 2. open    `app-server --listen stdio://` with the adapter's flags:
 //            initialize, the user-agent check, initialized, thread/start;
 // 3. turn    turn/start (Codex waits for a network it cannot reach),
 //            turn/steer, turn/interrupt, until turn_finished;
-// 4. close   the run's process group is gone and nothing it started is left;
+// 4. close   the run's process group is gone, nothing it started is left
+//            running, and no daemon socket was made under the private root;
 // 5. resume  the adapter's history check: thread/resume (excludeTurns),
 //            thread/read, thread/turns/list;
-// 6. models  config/read and model/list, read as FIX-16 reads them.
+// 6. models  a process with the run's arguments: config/read shows the
+//            overrides, model/list is read as FIX-16 reads it.
 //
 // What needs a login — a model's answer, tools, usage, a model refusal, the
 // ChatGPT model list — is out of reach here; a real run checks those.
 import { build } from 'esbuild'
 import { execFileSync } from 'node:child_process'
 import {
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -61,13 +67,12 @@ const bundle = join(cache, 'core.mjs')
 await build({
   stdin: {
     contents: [
-      'export { CodexExecutorAdapter } from "./packages/core/src/harness/delegation/adapters/codex"',
+      'export { CodexExecutorAdapter, CODEX_FEATURES, codexAppServerArgs } from "./packages/core/src/harness/delegation/adapters/codex"',
       'export { CodexRpc } from "./packages/core/src/harness/delegation/adapters/codex-rpc"',
       'export { ManagedAgentProcess } from "./packages/core/src/harness/delegation/process"',
       'export { ExecutorRegistry } from "./packages/core/src/harness/delegation/registry"',
       'export { defaultExecutorConfig } from "./packages/core/src/harness/delegation/config"',
       'export { codexModelRows, replacementModel } from "./packages/core/src/harness/delegation/model-choice"',
-      'export { CODEX_FILE_CREDENTIALS } from "./packages/core/src/harness/delegation/codex-auth"',
     ].join('\n'),
     resolveDir: repo,
   },
@@ -122,6 +127,16 @@ async function until(check, ms, what) {
     await sleep(50)
   }
   throw new Error('timed out waiting for ' + what)
+}
+/** Unix sockets under a folder (a daemon would leave one). */
+function sockets(dir) {
+  const found = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) found.push(...sockets(path))
+    else if (lstatSync(path).isSocket()) found.push(path)
+  }
+  return found
 }
 /** Processes started from this binary's package or under the private root. */
 function leftovers() {
@@ -190,6 +205,40 @@ await step('probe', async () => {
   }
 })
 
+await step('features', async () => {
+  const flags = Object.entries(core.CODEX_FEATURES).flatMap(([name, on]) => [
+    '-c',
+    `features.${name}=${on}`,
+  ])
+  const output = execFileSync(
+    '/usr/bin/sandbox-exec',
+    ['-p', OFFLINE, codex, 'features', ...flags, 'list'],
+    { env: environment, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+  )
+  const effective = {}
+  for (const line of output.split('\n')) {
+    const [name, , state] = line.trim().split(/\s{2,}/)
+    if (name && (state === 'true' || state === 'false'))
+      effective[name] = state === 'true'
+  }
+  const wrong = Object.entries(core.CODEX_FEATURES)
+    .filter(([name, on]) => name in effective && effective[name] !== on)
+    .map(([name]) => name)
+  if (wrong.length)
+    throw new Error('overrides not in effect: ' + wrong.join(', '))
+  return {
+    off: Object.entries(core.CODEX_FEATURES)
+      .filter(([name, on]) => !on && name in effective)
+      .map(([name]) => name),
+    unknownToThisCodex: Object.keys(core.CODEX_FEATURES).filter(
+      (name) => !(name in effective),
+    ),
+    leftOn: Object.keys(effective)
+      .filter((name) => effective[name])
+      .sort(),
+  }
+})
+
 const adapter = new core.CodexExecutorAdapter({ processes })
 let session, threadId, threadModel
 const events = []
@@ -241,9 +290,17 @@ await step('close', async () => {
   const exit = await session.close()
   await sleep(500)
   const left = leftovers()
+  const daemonSockets = sockets(root)
   if (!exit.quiescent) throw new Error('the process group did not stop')
   if (left.length) throw new Error('left running: ' + left.join(' | '))
-  return { quiescent: exit.quiescent, processesSpawned: spawned.length }
+  if (daemonSockets.length)
+    throw new Error('sockets left: ' + daemonSockets.join(' | '))
+  return {
+    quiescent: exit.quiescent,
+    processesSpawned: spawned.length,
+    leftRunning: left,
+    sockets: daemonSockets,
+  }
 })
 
 await step('resume', async () => {
@@ -259,14 +316,8 @@ await step('resume', async () => {
 await step('models', async () => {
   const handle = processes.spawn({
     executable: codex,
-    args: [
-      'app-server',
-      '--listen',
-      'stdio://',
-      '-c',
-      'mcp_servers={}',
-      ...core.CODEX_FILE_CREDENTIALS,
-    ],
+    // The arguments of a run and of the model list.
+    args: core.codexAppServerArgs(),
     cwd: join(root, 'workspace'),
     env: environment,
     policy: input(3).policy,
@@ -294,8 +345,15 @@ await step('models', async () => {
       includeHidden: true,
     })
     const rows = core.codexModelRows(list.data)
+    const features = config.config?.features ?? {}
+    const notOff = Object.entries(core.CODEX_FEATURES)
+      .filter(([name, on]) => !on && features[name] !== false)
+      .map(([name]) => name)
+    if (notOff.length)
+      throw new Error('config/read does not show off: ' + notOff.join(', '))
     return {
       userAgent: initialized.userAgent,
+      configReadShowsOverridesOff: true,
       configuredModel: config.config?.model ?? null,
       rows: rows.length,
       defaults: rows.filter((r) => r.isDefault).map((r) => r.id),
@@ -311,10 +369,14 @@ await step('models', async () => {
   }
 })
 
-receipt.ok = Object.values(receipt.steps).every((s) => s.ok)
 receipt.leftovers = leftovers()
+receipt.sockets = sockets(root)
+receipt.ok =
+  Object.values(receipt.steps).every((s) => s.ok) &&
+  !receipt.leftovers.length &&
+  !receipt.sockets.length
 const text = JSON.stringify(receipt, null, 2) + '\n'
 if (out) writeFileSync(out, text)
 else process.stdout.write(text)
 rmSync(root, { recursive: true, force: true })
-process.exit(receipt.ok && !receipt.leftovers.length ? 0 : 1)
+process.exit(receipt.ok ? 0 : 1)
