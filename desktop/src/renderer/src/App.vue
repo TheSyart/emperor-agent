@@ -264,17 +264,9 @@ async function runGoalAction(
 async function onSessionActivate(id: string) {
   await sessionStore.activate(id)
   switchSession(id)
-  // The start page shows its draft's own plan mode and preset, never the
-  // previous chat's plan or goal (FIX-13).
-  if (sessionStore.isDraftSessionId(id))
-    return import('./runtime/draftControls').then((controls) =>
-      controls.showDraftControls(
-        boot,
-        () =>
-          sessionId.value === id ? sessionStore.getSession(id) : undefined,
-        () => core('control.get', null),
-      ),
-    )
+  // A draft has no bootstrap; ConversationView shows its own plan mode and
+  // preset (FIX-13).
+  if (sessionStore.isDraftSessionId(id)) return
   await bootstrap.loadBootstrap(false, sessionStore.backendSessionId())
   restoreRuntimeState()
 }

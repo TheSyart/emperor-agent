@@ -112,6 +112,7 @@ import {
   saveComposerDraft,
   takeComposerDraft,
 } from '../../composables/useComposerDrafts'
+import { showDraftControls } from '../../runtime/draftControls'
 import { activeTakeover, isTakeoverMinimized } from './takeover/takeoverModel'
 import {
   activeTurnTick,
@@ -452,6 +453,27 @@ function backToParent(): void {
 }
 
 // ── composer inputs ───────────────────────────────────────────────────────
+// The start page shows its draft's own plan mode and preset and no goal,
+// never the previous chat's (FIX-13). Before this view renders, so the
+// previous chat's 「计划 ×」 never shows on it.
+watch(
+  () =>
+    sessionStore.isDraftSessionId(ctx.sessionId.value)
+      ? ctx.sessionId.value
+      : null,
+  (draft) => {
+    if (draft)
+      void showDraftControls(
+        ctx.boot,
+        () =>
+          ctx.sessionId.value === draft
+            ? sessionStore.getSession(draft)
+            : undefined,
+        () => core('control.get', null),
+      )
+  },
+  { flush: 'pre', immediate: true },
+)
 const modelEntries = computed(() => ctx.boot.value?.modelConfig?.models || [])
 const currentModel = computed(
   () => ctx.boot.value?.modelConfig?.current || null,
