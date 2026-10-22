@@ -2,16 +2,20 @@
 // Records the Codex app-server protocol Emperor has verified (AGT-01).
 //
 //   node scripts/codex-protocol-digest.mjs                 # check the installed codex
+//   node scripts/codex-protocol-digest.mjs --codex <path>  # check another codex
 //   node scripts/codex-protocol-digest.mjs --write         # add protocol/codex-<version>/
 //   node scripts/codex-protocol-digest.mjs --schema <dir> --version 0.153.4
+//   ... --file v2/Foo.json                                 # depend on one more file
 //
 // It runs `codex app-server generate-json-schema` into a temporary directory
-// (no model call, no login), digests the schema files Emperor's adapter
-// depends on, and says whether that digest is already known. --write copies
-// those files into packages/core/src/harness/delegation/protocol/
-// codex-<version>/ with a digest.json; register the new folder in
-// compatibility.ts (KNOWN_CODEX_PROTOCOLS) after the adapter's contract tests
-// and a real run pass. The algorithm matches codexProtocolDigest().
+// (private HOME and CODEX_HOME; no model call, no login), digests the schema
+// files Emperor's adapter depends on — the newest recorded protocol's list,
+// plus any --file — and says whether that digest is already known. --write
+// copies those files into packages/core/src/harness/delegation/protocol/
+// codex-<version>/ with a digest.json; format them with prettier, then
+// register the new folder in compatibility.ts (KNOWN_CODEX_PROTOCOLS) after
+// the adapter's contract tests, scripts/codex-protocol-handshake.mjs and a
+// real run pass. The algorithm matches codexProtocolDigest().
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
@@ -35,6 +39,22 @@ const protocolRoot = resolve(
 function argument(name) {
   const index = process.argv.indexOf(name)
   return index === -1 ? undefined : process.argv[index + 1]
+}
+
+function argumentsOf(name) {
+  return process.argv.flatMap((value, index) =>
+    value === name && process.argv[index + 1] ? [process.argv[index + 1]] : [],
+  )
+}
+
+function versionKey(text) {
+  return (/(\d+)\.(\d+)\.(\d+)/.exec(text) ?? [0, 0, 0, 0]).slice(1).map(Number)
+}
+
+function compareVersions(a, b) {
+  const x = versionKey(a),
+    y = versionKey(b)
+  return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]
 }
 
 function canonicalJson(value) {
@@ -67,6 +87,7 @@ function digest(root, files) {
   return hash.digest('hex')
 }
 
+/** Recorded protocols, oldest first by version. */
 function knownProtocols() {
   return readdirSync(protocolRoot)
     .filter((name) => name.startsWith('codex-'))
@@ -76,16 +97,26 @@ function knownProtocols() {
         ? [{ name, ...JSON.parse(readFileSync(path, 'utf8')) }]
         : []
     })
+    .sort((a, b) => compareVersions(a.codexVersion, b.codexVersion))
 }
 
-/** The newest known file list; the original manifest before any digest existed. */
+/**
+ * The newest known file list (the original manifest before any digest
+ * existed), plus the files named with --file.
+ */
 function contractFiles(known) {
   const newest = known.at(-1)
-  if (newest) return newest.files
-  const manifest = JSON.parse(
-    readFileSync(join(protocolRoot, 'codex-0.153.4', 'manifest.json'), 'utf8'),
-  )
-  return Object.keys(manifest.sha256).sort()
+  const files = newest
+    ? newest.files
+    : Object.keys(
+        JSON.parse(
+          readFileSync(
+            join(protocolRoot, 'codex-0.153.4', 'manifest.json'),
+            'utf8',
+          ),
+        ).sha256,
+      )
+  return [...new Set([...files, ...argumentsOf('--file')])].sort()
 }
 
 const codex = argument('--codex') ?? 'codex'
@@ -106,7 +137,11 @@ try {
       codex,
       ['app-server', 'generate-json-schema', '--out', schema],
       {
-        env: { ...process.env, CODEX_HOME: join(temporary, 'home') },
+        env: {
+          ...process.env,
+          HOME: join(temporary, 'home'),
+          CODEX_HOME: join(temporary, 'home'),
+        },
         stdio: ['ignore', 'ignore', 'inherit'],
       },
     )
