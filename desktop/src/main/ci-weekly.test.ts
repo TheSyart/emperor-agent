@@ -66,7 +66,9 @@ function run(args: string[]) {
   return spawnSync(process.execPath, [weekly, '--dry-run', ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
-    env: { ...process.env, GITHUB_REF_NAME: 'main' },
+    // A push or schedule run sets GITHUB_BASE_REF to an empty string (it is
+    // only filled for pull requests); the base must still be main.
+    env: { ...process.env, GITHUB_BASE_REF: '', GITHUB_REF_NAME: 'main' },
     timeout: 120_000,
   })
 }

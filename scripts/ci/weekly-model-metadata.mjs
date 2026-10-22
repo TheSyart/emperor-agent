@@ -121,10 +121,11 @@ function main(argv) {
     .filter(Boolean)
   const date = options.date ?? new Date().toISOString().slice(0, 10)
   const branch = `bot/model-metadata-${date}`
+  // GITHUB_BASE_REF is set but empty outside pull requests (push, schedule).
   const base =
-    options.base ??
-    process.env.GITHUB_BASE_REF ??
-    process.env.GITHUB_REF_NAME ??
+    options.base ||
+    process.env.GITHUB_BASE_REF ||
+    process.env.GITHUB_REF_NAME ||
     'main'
   const title = `chore(models): refresh the models.dev snapshot (${date})`
   const outDir = options.outDir ?? METADATA
