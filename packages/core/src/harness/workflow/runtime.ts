@@ -341,10 +341,6 @@ export function createExecutionKit(deps: ExecutionKitDeps): ExecutionKit {
             { cause: error },
           )
         }
-        if (this.isCancelled()) {
-          await run.dispose()
-          throw this.cancelledError()
-        }
         const info: WorkflowAgentInfo = {
           seq,
           label,
@@ -355,7 +351,15 @@ export function createExecutionKit(deps: ExecutionKitDeps): ExecutionKit {
             : { externalRunId: run.externalRunId }),
           ...(run.backend === undefined ? {} : { backend: run.backend }),
         }
+        // The host has started the child (its session exists), so it is
+        // published even when a cancel crossed with the start: the run's
+        // record lists every child that ran, this one ended as cancelled.
         this.observer.agentStart(info)
+        if (this.isCancelled()) {
+          this.observer.agentEnd({ ...info, outcome: 'cancelled' })
+          await run.dispose()
+          throw this.cancelledError()
+        }
         try {
           let result
           try {
