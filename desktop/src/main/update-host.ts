@@ -21,6 +21,7 @@
  */
 import {
   feedOverrideUrl,
+  registryOverrideUrl,
   type UpdateHostOptions,
   type UpdateTransport,
 } from '@emperor/core/host-capabilities'
@@ -87,6 +88,38 @@ export function updateHostOptions(input: UpdateHostInput): UpdateHostOptions {
       : input.packagedSmoke
         ? 'smoke'
         : 'development',
+  }
+}
+
+/**
+ * 设置 › 子智能体 › 版本 (AGT-13): npm's public version numbers through the
+ * same net (no cookies, no credentials). The check once a day at startup
+ * runs in the packaged app (not the packaged smoke); a development build
+ * checks by itself only with EMPEROR_EXECUTOR_REGISTRY_URL, a test registry
+ * on this Mac. Opening the page checks in any build.
+ */
+export function executorVersionHostOptions(
+  input: Pick<
+    UpdateHostInput,
+    'env' | 'isPackaged' | 'packagedSmoke' | 'request' | 'log'
+  >,
+): { transport: UpdateTransport; registry: string | null; automatic: boolean } {
+  let registry: string | null = null
+  const raw = input.env.EMPEROR_EXECUTOR_REGISTRY_URL
+  if (raw) {
+    try {
+      registry = registryOverrideUrl(raw)?.href ?? null
+      if (registry) input.log(`test executor registry in effect: ${registry}`)
+    } catch {
+      input.log(
+        'EMPEROR_EXECUTOR_REGISTRY_URL ignored: only a registry on this Mac',
+      )
+    }
+  }
+  return {
+    transport: createElectronUpdateTransport(input.request),
+    registry,
+    automatic: !input.packagedSmoke && (input.isPackaged || registry !== null),
   }
 }
 

@@ -6,6 +6,7 @@ import type {
 } from './public-http-client'
 import {
   createElectronUpdateTransport,
+  executorVersionHostOptions,
   updateHostOptions,
   type UpdateHostInput,
 } from './update-host'
@@ -180,5 +181,45 @@ describe('Electron update transport', () => {
       accept: 'application/vnd.github+json',
       'user-agent': 'Emperor-Agent/0.2.0',
     })
+  })
+})
+
+// AGT-13: 设置 › 子智能体 › 版本 reads npm's public registry through the
+// same net; the check once a day at startup runs in the packaged app, or
+// with a test registry on this Mac (EMPEROR_EXECUTOR_REGISTRY_URL).
+describe('executor version host options', () => {
+  it('the packaged app checks npm once a day; development and the smoke do not', () => {
+    const packaged = executorVersionHostOptions(input())
+    expect(packaged).toMatchObject({ automatic: true, registry: null })
+    expect(typeof packaged.transport).toBe('function')
+    expect(
+      executorVersionHostOptions(input({ isPackaged: false })).automatic,
+    ).toBe(false)
+    expect(
+      executorVersionHostOptions(input({ packagedSmoke: true })).automatic,
+    ).toBe(false)
+  })
+
+  it('a test registry on this Mac turns the check on and is logged; anything else is ignored', () => {
+    const logs: string[] = []
+    expect(
+      executorVersionHostOptions(
+        input({
+          isPackaged: false,
+          env: { EMPEROR_EXECUTOR_REGISTRY_URL: 'http://127.0.0.1:4873/' },
+          log: (line) => logs.push(line),
+        }),
+      ),
+    ).toMatchObject({ automatic: true, registry: 'http://127.0.0.1:4873/' })
+    expect(logs.join('\n')).toContain('test executor registry')
+    const ignored = executorVersionHostOptions(
+      input({
+        isPackaged: false,
+        env: { EMPEROR_EXECUTOR_REGISTRY_URL: 'https://registry.example.com/' },
+        log: (line) => logs.push(line),
+      }),
+    )
+    expect(ignored).toMatchObject({ automatic: false, registry: null })
+    expect(logs.join('\n')).toContain('EMPEROR_EXECUTOR_REGISTRY_URL ignored')
   })
 })

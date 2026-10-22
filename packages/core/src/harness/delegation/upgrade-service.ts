@@ -166,7 +166,7 @@ export class ExecutorUpgradeService {
     this.options.published.dismiss(
       Object.fromEntries(
         entries
-          .filter((e) => e.view.target && e.plan?.oneClick)
+          .filter((e) => e.view.enabled && e.view.target && e.plan?.oneClick)
           .map((e) => [e.view.profileId, e.view.target!]),
       ),
     )
@@ -189,7 +189,9 @@ export class ExecutorUpgradeService {
     const list = entries ?? (await this.entries())
     const snapshot = this.options.published.read()
     const dismissed = this.options.published.dismissed()
-    const offered = list.filter((e) => e.view.target && e.plan?.oneClick)
+    const offered = list.filter(
+      (e) => e.view.enabled && e.view.target && e.plan?.oneClick,
+    )
     return {
       checkedAt: snapshot.checkedAt,
       checking: this.options.published.checking,
@@ -244,6 +246,7 @@ export class ExecutorUpgradeService {
       view: {
         profileId: profile.id,
         backend,
+        enabled: profile.enabled,
         installed,
         install: {
           kind: source?.kind ?? 'unknown',

@@ -146,6 +146,8 @@ export type { LogLevel, LogLine, LogSink } from '../util/log'
 // REL-02 检查更新: the desktop host checks the test-feed variable and
 // hands Core its transport, Finder and Downloads folder.
 export { feedOverrideUrl, GITHUB_RELEASE_HOSTS } from '../updates/http'
+// AGT-13: a test npm registry for 设置 › 子智能体 › 版本 (loopback only).
+export { registryOverrideUrl } from '../harness/delegation/published-versions'
 export type {
   UpdateHostOptions,
   UpdateTransport,

@@ -242,6 +242,8 @@ export type ExecutorInstallKind =
 export interface ExecutorVersionView {
   profileId: string
   backend: ExternalBackend
+  /** The user turned it on: only then is an upgrade offered. */
+  enabled: boolean
   /** What the last probe found; null: not installed or not checked. */
   installed: string | null
   install: { kind: ExecutorInstallKind; location: string | null }
