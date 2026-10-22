@@ -1468,9 +1468,30 @@ it('FIX-16 · 6 · the Codex 详情 page says when Codex’s own default model i
 })
 
 it('FIX-16 · 6 · no such line when Codex’s default is offered, or for Claude Code', async () => {
+  const followsCli = payload()
+  for (const profile of followsCli.config.profiles) delete profile.defaultModel
+  listExecutors.mockResolvedValue(followsCli)
   await mount()
   expect(
     (await openDetail('codex')).querySelector(
+      '[data-default-model-unavailable]',
+    ),
+  ).toBeNull()
+  // Core sets it only for Codex: Claude Code's page has no such line.
+  listExecutorModels.mockImplementation(async ({ profileId }) => ({
+    profileId,
+    models: [],
+    configuredModel: null,
+    provider: 'anthropic',
+    checkedAt: 1000,
+    diagnostic: null,
+    defaultUnavailable: null,
+  }))
+  app?.unmount()
+  root?.remove()
+  await mount()
+  expect(
+    (await openDetail('claude-code')).querySelector(
       '[data-default-model-unavailable]',
     ),
   ).toBeNull()
