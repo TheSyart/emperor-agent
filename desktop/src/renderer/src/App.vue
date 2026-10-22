@@ -196,6 +196,7 @@ const {
   cancelInteraction,
   stopActive,
   restoreRuntimeState,
+  draftSession,
 } = runtime
 
 /** The session's goal: live projection first, bootstrap snapshot as fallback. */
@@ -411,6 +412,9 @@ async function resolveCommandSessionId(): Promise<string> {
   const current = sessionStore.backendSessionId()
   if (current) return current
   const draftId = sessionId.value
+  // A first message is already creating this draft's session (FIX-13).
+  const sending = await draftSession(draftId)
+  if (sending) return sending
   const draft = sessionStore.getSession(draftId)
   const { mode, project, ...settings } = draftSessionOf(draft)
   const created = await core('sessions.create', {

@@ -144,6 +144,16 @@ export function useRuntime(options: {
   const queuedPrompts = ref<QueuedPromptItem[]>([])
   /** Sends waiting for the host to take them, by client message id. */
   const admissions = new Map<string, (accepted: boolean) => void>()
+  /**
+   * Drafts whose first message is on its way (FIX-13): draft id → the
+   * session Core creates for it, named by `session_created` (null: the
+   * submit failed first). A stop or another message sent meanwhile waits
+   * for it instead of reaching Core without a session.
+   */
+  const promotions = new Map<
+    string,
+    { session: Promise<string | null>; settle: (id: string | null) => void }
+  >()
   const pendingInteractionsBySession = reactive<
     Record<string, ControlInteraction>
   >({})
@@ -393,23 +403,35 @@ export function useRuntime(options: {
     return prompt
   }
 
-  function sendMessageViaCore(opts: {
-    text: string
-    displayText: string
-    attachments: AttachmentRef[]
-    requestedSkills: RequestedSkill[]
-    references: MessageReference[]
-    delivery?: 'queue' | 'interject'
-  }) {
-    const activeSessionId = sessionId.value
+  function sendMessageViaCore(
+    opts: {
+      text: string
+      displayText: string
+      attachments: AttachmentRef[]
+      requestedSkills: RequestedSkill[]
+      references: MessageReference[]
+      delivery?: 'queue' | 'interject'
+    },
+    activeSessionId = sessionId.value,
+  ): boolean | Promise<boolean> {
     if (!activeSessionId) {
       updatePending('尚无会话', '请先创建会话', 'running', 3000)
       return false
     }
+    // FIX-13: the draft's first message is creating its session; this one
+    // goes there once it exists, not into a second new session.
+    const promoting = promotions.get(activeSessionId)?.session
+    if (promoting)
+      return promoting.then((id) => (id ? sendMessageViaCore(opts, id) : false))
     // P1-6：draft 首条提交带上 client_draft_id 与项目元数据，由 Core 创建真实 session
     const draftPayload = isDraftSessionId(activeSessionId)
       ? draftSubmitPayload(activeSessionId)
       : null
+    if (draftPayload) {
+      let settle!: (id: string | null) => void
+      const session = new Promise<string | null>((done) => (settle = done))
+      promotions.set(activeSessionId, { session, settle })
+    }
     const userMsg: { id: string } = opts.delivery
       ? enqueueLocalPrompt(
           opts.displayText || opts.text,
@@ -444,8 +466,12 @@ export function useRuntime(options: {
       ...(opts.delivery ? { delivery: opts.delivery } : {}),
       ...(draftPayload ?? {}),
     })
-      .then(() => settleAdmission(userMsg.id, true))
+      .then((result) => {
+        settlePromotion(activeSessionId, result?.activeSessionId ?? null)
+        settleAdmission(userMsg.id, true)
+      })
       .catch((err) => {
+        settlePromotion(activeSessionId, null)
         if (opts.delivery) {
           queuedPrompts.value = queuedPrompts.value.filter(
             (prompt) => prompt.id !== userMsg.id,
@@ -477,6 +503,16 @@ export function useRuntime(options: {
       clientDraftId: draftId,
       draftSession: draftSessionOf(options.resolveDraftSession?.(draftId)),
     }
+  }
+
+  function settlePromotion(draftId: string, id: string | null): void {
+    promotions.get(draftId)?.settle(id)
+    promotions.delete(draftId)
+  }
+
+  /** The session a draft's first message is creating, once Core names it (null: none). */
+  async function draftSession(draftId: string): Promise<string | null> {
+    return (await promotions.get(draftId)?.session) ?? null
   }
 
   async function refreshQueuedPrompts(ownerSessionId = sessionId.value) {
@@ -608,11 +644,15 @@ export function useRuntime(options: {
   async function stopActive() {
     updatePending('正在停止当前任务...', '', 'running')
     try {
-      // Stop the session on screen, named (KRN-01: Core has no default).
+      // Stop the session on screen, named (KRN-01: Core has no default). A
+      // draft is stopped in the session its first message is creating, as
+      // soon as Core names it; with nothing sent there is nothing to stop
+      // (FIX-13).
       const target = sessionId.value
-      const data = await core('chat.stopRuntime', {
-        sessionId: target && !isDraftSessionId(target) ? target : null,
-      })
+      const draft = isDraftSessionId(target)
+      const named = draft ? await draftSession(target) : target || null
+      if (draft && !named) return handleStopResult({ cancelled: 0 })
+      const data = await core('chat.stopRuntime', { sessionId: named })
       return handleStopResult(data)
     } catch (err) {
       updatePending(
@@ -1117,6 +1157,8 @@ export function useRuntime(options: {
     origin: 'live' | 'replay',
   ): void {
     if (data.event === 'session_created') {
+      if (data.client_draft_id && data.session?.id)
+        settlePromotion(data.client_draft_id, data.session.id)
       if (
         data.client_draft_id &&
         data.client_draft_id === sessionId.value &&
@@ -1485,6 +1527,7 @@ export function useRuntime(options: {
     approvePlan,
     cancelInteraction,
     stopActive,
+    draftSession,
     restoreRuntimeState,
   }
 }

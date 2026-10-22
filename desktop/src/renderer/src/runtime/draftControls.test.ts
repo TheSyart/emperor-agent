@@ -91,6 +91,10 @@ describe('App.vue on the start page (FIX-13)', () => {
     )
   })
 
+  it('4 · a typed command waits for the session a first message is creating', () => {
+    expect(app).toContain('const sending = await draftSession(draftId)')
+  })
+
   it('1 · keeps plan mode and the preset on the draft, and sends them with it', () => {
     expect(app).toContain('updateDraft: sessionStore.updateDraft')
     expect(app).toContain('draftSessionOf(draft)')

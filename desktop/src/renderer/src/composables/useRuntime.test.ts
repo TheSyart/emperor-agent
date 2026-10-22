@@ -1962,7 +1962,8 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
   })
 })
 
-// FIX-13: a draft's first message carries the draft's own settings.
+// FIX-13: between sending a draft's first message and Core naming its
+// session, a stop or a second message waits for that session.
 describe('a draft while Core creates its session (FIX-13)', () => {
   function draftRow(id: string, extra: Record<string, unknown> = {}) {
     return {
@@ -2036,6 +2037,72 @@ describe('a draft while Core creates its session (FIX-13)', () => {
       clientDraftId: 'draft:own',
       draftSession: { mode: 'chat', plan: true, preset: 'read-only' },
     })
+  })
+
+  it('5 · a stop pressed before the session exists reaches it once it does', async () => {
+    const f = setup('draft:d1')
+    void f.runtime.sendMessage('第一条')
+    await flushPromises()
+    const stopped = f.runtime.stopActive()
+    await flushPromises()
+    // Held: Core has no session to stop yet.
+    expect(f.stops()).toEqual([])
+    f.created('session-d1')
+    await expect(stopped).resolves.toBe(true)
+    expect(f.stops()).toEqual([
+      ['chat.stopRuntime', { sessionId: 'session-d1' }],
+    ])
+    expect(f.runtime.busy.value).toBe(false)
+  })
+
+  it('5 · a stop on a draft with nothing sent asks Core nothing', async () => {
+    const f = setup('draft:idle')
+    await expect(f.runtime.stopActive()).resolves.toBe(false)
+    expect(f.stops()).toEqual([])
+    expect(f.runtime.pending.label).toBe('没有正在运行的任务')
+  })
+
+  it('4 · a second message waits for the session instead of making another', async () => {
+    const f = setup('draft:d2', { plan: true })
+    void f.runtime.sendMessage('第一条')
+    await flushPromises()
+    const second = f.runtime.sendMessage({
+      content: '第二条',
+      attachments: [],
+    })
+    await flushPromises()
+    expect(f.submits()).toHaveLength(1)
+    f.created('session-d2')
+    await flushPromises(10)
+    expect(f.submits()).toHaveLength(2)
+    const sent = f.submits()[1]!
+    expect(sent).toMatchObject({
+      sessionId: 'session-d2',
+      content: '第二条',
+      delivery: 'queue',
+    })
+    expect(sent).not.toHaveProperty('clientDraftId')
+    expect(sent).not.toHaveProperty('draftSession')
+    void second
+  })
+
+  it('4 · when the first message fails, the waiting one is handed back', async () => {
+    let fail!: (error: Error) => void
+    const f = setup('draft:fail', {}, () =>
+      f.submits().length === 1
+        ? new Promise((_resolve, reject) => (fail = reject))
+        : new Promise(() => {}),
+    )
+    void f.runtime.sendMessage('第一条')
+    await flushPromises()
+    const second = f.runtime.sendMessage({
+      content: '第二条',
+      attachments: [],
+    })
+    await flushPromises()
+    fail(new Error('模型不可用'))
+    await expect(second).resolves.toBe(false)
+    expect(f.submits()).toHaveLength(1)
   })
 })
 
