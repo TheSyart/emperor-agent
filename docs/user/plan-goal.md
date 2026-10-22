@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：需要控制权限、审阅方案或持续推进任务的用户<br>
-> 最后核验：2026-10-21（对照 `ce55ee4a`）<br>
-> 事实源：`packages/core/src/harness/approval/presets.ts`、`packages/core/src/api/services/session-defaults-service.ts`、`desktop/src/renderer/src/components/conversation/takeover/PlanReviewPanel.vue`、`desktop/src/renderer/src/composables/composerLifecycle.ts`、`packages/core/src/harness/sandbox/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/goal/`、`packages/core/src/commands/builtins.ts`
+> 最后核验：2026-10-22（对照 `1bb92495`）<br>
+> 事实源：`packages/core/src/harness/approval/presets.ts`、`packages/core/src/api/services/session-defaults-service.ts`、`desktop/src/renderer/src/components/conversation/takeover/PlanReviewPanel.vue`、`desktop/src/renderer/src/composables/composerLifecycle.ts`、`desktop/src/renderer/src/runtime/sessionDrafts.ts`、`packages/core/src/api/chat-service.ts`、`packages/core/src/harness/sandbox/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/goal/`、`packages/core/src/commands/builtins.ts`
 
 权限预设决定 Agent 能写哪里；计划模式决定 Agent 先提方案还是直接动手；目标让 Agent 在你不再输入时继续推进同一件事。三者可以组合使用。
 
@@ -41,6 +41,8 @@
 - 计划模式主要通过提示词约束 Agent，实际能否写入仍由当前权限预设决定；想确保规划阶段不会改动文件，可以同时切换到 `read-only`。少数地方另有硬限制：计划模式下 Claude Code / Codex 子智能体只能做只读审查，工作流里的子智能体也是只读的。
 - 目标进行中从输入框切到计划模式，会先取消这个目标（提示「目标已取消，已切换到计划。」）。
 - Agent 运行中切换计划模式时，切换会在下一个步骤边界生效。
+- 在起始页（新对话还没发出第一条消息时）也可以先开计划模式、先选权限预设：它们只属于这个新对话，发出第一条消息、会话建好时就生效，Agent 的第一步已经在计划模式里。在起始页直接启动目标时只带上权限预设，不带计划模式（计划和目标不能同时开）。
+- 新对话从全局默认开始（「设置 › 常规 › 会话 › 新会话的权限」，计划模式关闭），不会沿用上一个对话的计划模式或目标。
 
 ## Agent 提问
 

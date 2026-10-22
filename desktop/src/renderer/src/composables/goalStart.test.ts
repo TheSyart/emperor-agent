@@ -71,4 +71,29 @@ describe('createGoalStarter', () => {
     })
     expect(f.apply).toHaveBeenCalledWith('s-real', expect.anything())
   })
+
+  it("FIX-13 · 2 · a draft's goal takes its preset, never its plan mode", async () => {
+    const current = { id: 'draft:2' }
+    const f = setup(current, {
+      'draft:2': {
+        id: 'draft:2',
+        mode: 'chat',
+        plan: true,
+        preset: 'read-only',
+      } as SessionInfo,
+    })
+    const running = f.startGoal('ship')
+    f.pending.resolve({ accepted: true, goal, sessionId: 's-real' })
+    await running
+    expect(f.start).toHaveBeenCalledWith({
+      objective: 'ship',
+      sessionId: 'draft:2',
+      clientDraftId: 'draft:2',
+      draftSession: {
+        mode: 'chat',
+        project: { project_id: null, project_path: null, project_name: null },
+        preset: 'read-only',
+      },
+    })
+  })
 })

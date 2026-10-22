@@ -2,8 +2,8 @@
 
 > 文档状态：Active<br>
 > 面向读者：设计者、前端开发者、维护者<br>
-> 最后核验：2026-10-22（对照 `5ec88219`）<br>
-> 事实源：`desktop/src/renderer/src/components/composer/`（`ComposerCard.vue`、`PermissionChip.vue`、`PlanChip.vue`、`ModelPicker.vue`、`ContextMeter.vue`、`ChangesPill.vue`、`TodoDock.vue`、`SubagentDock.vue`、`GoalBar.vue`、`QueueDock.vue`）、`components/chat/composerController.ts`、`composerPalette.ts`、`composerModelControl.ts`、`components/conversation/HeroProfilePrompt.vue`、`theme/components.css`（`--composer-*`）、`desktop/src/main/screenshot-ipc.ts`；`components/conversation/ConversationView.vue`（停用的卡片）；测试 `ComposerBottomBar.test.ts`、`QueueDock.test.ts`、`composerArchitecture.test.ts`、`desktop/tests/visual/composer.spec.ts`、`desktop/tests/visual/session-not-found.spec.ts`
+> 最后核验：2026-10-22（对照 `1bb92495`）<br>
+> 事实源：`desktop/src/renderer/src/components/composer/`（`ComposerCard.vue`、`PermissionChip.vue`、`PlanChip.vue`、`ModelPicker.vue`、`ContextMeter.vue`、`ChangesPill.vue`、`TodoDock.vue`、`SubagentDock.vue`、`GoalBar.vue`、`QueueDock.vue`）、`components/chat/composerController.ts`、`composerPalette.ts`、`composerModelControl.ts`、`components/conversation/HeroProfilePrompt.vue`、`theme/components.css`（`--composer-*`）、`desktop/src/main/screenshot-ipc.ts`；`components/conversation/ConversationView.vue`（停用的卡片）、`runtime/sessionDrafts.ts` 与 `runtime/draftControls.ts`（起始页草稿自己的计划与权限）；测试 `ComposerBottomBar.test.ts`、`QueueDock.test.ts`、`composerArchitecture.test.ts`、`desktop/tests/visual/composer.spec.ts`、`desktop/tests/visual/session-not-found.spec.ts`
 
 输入框在对话面板底部：上面是按需出现的几条 dock，下面一张卡片，卡片里是富文本编辑器和一排控件。布局沿用 Emperor 自己的结构；0.2 只提升卡片的质感（参考 Codex 的视觉品质，不照搬它的布局）。
 
@@ -28,6 +28,7 @@
 | 右   | 发送位（32px 圆形） | 空草稿：麦克风（有听写时）；有草稿：金色发送键；运行中：停止键，有草稿时旁边多一个「加入队列」         |
 
 - 发送位是唯一的金色主操作；其他控件都是中性色。
+- 起始页（草稿）上，权限芯片和计划胶囊显示的是这个草稿自己的选择，起点是全局默认（`control.get(null)`），不是上一个对话的状态；切换只改草稿，不调用 Core，提示语与真实会话相同（「已进入计划模式」「执行权限已切换为只读」）。发出第一条消息时它们随草稿交给 Core，在第一轮之前生效。
 - 截图由 main 运行系统的交互式截图（`screencapture -i`），窗口暂时隐藏，截下的 PNG 作为附件放进托盘；Esc 什么都不放。屏幕录制权限被拒绝时轻提示写明去哪里允许。
 - 听写时整行换成录音条（取消、波形、停止）和发送键，行为见用户手册的[语音听写](../user/chat-build.md#语音听写)。
 

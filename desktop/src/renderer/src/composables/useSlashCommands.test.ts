@@ -227,3 +227,87 @@ describe('Core-owned slash command dispatch', () => {
     vi.useRealTimers()
   })
 })
+
+// FIX-13: on the start page (a draft) plan mode and the preset are the
+// draft's own; Core has no session to ask yet.
+describe('plan mode and permissions on a draft (FIX-13)', () => {
+  function onDraft() {
+    const ctx = setup()
+    const draft = { plan: false, preset: undefined as string | undefined }
+    ctx.deps.boot.value = {
+      control: {
+        version: 3,
+        mode: 'workspace-write',
+        preset: 'workspace-write',
+        plan: false,
+        pending: null,
+      },
+    } as unknown as BootstrapPayload
+    ctx.deps.controlSessionId = () => null
+    ctx.deps.draftId = () => 'draft:1'
+    ctx.deps.updateDraft = vi.fn((id, patch) => {
+      expect(id).toBe('draft:1')
+      Object.assign(draft, patch)
+    })
+    return { ...ctx, draft }
+  }
+
+  it('1 · turns plan mode on and off without calling Core', async () => {
+    const ctx = onDraft()
+    await expect(ctx.activatePlan()).resolves.toMatchObject({
+      ok: true,
+      mode: 'plan',
+    })
+    expect(core).not.toHaveBeenCalled()
+    expect(ctx.draft.plan).toBe(true)
+    expect(ctx.deps.boot.value!.control).toMatchObject({
+      plan: true,
+      preset: 'workspace-write',
+    })
+    expect(ctx.deps.showToast).toHaveBeenCalledWith('已进入计划模式')
+    await expect(ctx.dismissLifecycle()).resolves.toMatchObject({
+      ok: true,
+      mode: null,
+    })
+    expect(core).not.toHaveBeenCalled()
+    expect(ctx.draft.plan).toBe(false)
+    expect(ctx.deps.showToast).toHaveBeenCalledWith('已退出计划模式')
+  })
+
+  it('1 · switches the preset without calling Core', async () => {
+    const ctx = onDraft()
+    await expect(ctx.setPermissionMode('read-only')).resolves.toEqual({
+      ok: true,
+    })
+    expect(core).not.toHaveBeenCalled()
+    expect(ctx.draft.preset).toBe('read-only')
+    expect(ctx.deps.boot.value!.control).toMatchObject({
+      preset: 'read-only',
+      mode: 'read-only',
+    })
+    expect(ctx.deps.showToast).toHaveBeenCalledWith('执行权限已切换为只读')
+  })
+
+  it('1 · a real session still goes to Core', async () => {
+    const ctx = onDraft()
+    ctx.deps.draftId = () => null
+    ctx.deps.controlSessionId = () => 'session-1'
+    vi.mocked(core).mockResolvedValueOnce({
+      outcome: 'committed',
+      control: { preset: 'workspace-write', plan: true },
+    } as never)
+    await ctx.activatePlan()
+    expect(core).toHaveBeenCalledWith('control.setMode', 'plan', 'session-1')
+    expect(ctx.deps.updateDraft).not.toHaveBeenCalled()
+    vi.mocked(core).mockResolvedValueOnce({
+      preset: 'read-only',
+      plan: true,
+    } as never)
+    await ctx.setPermissionMode('read-only')
+    expect(core).toHaveBeenCalledWith(
+      'control.setPermissionMode',
+      'read-only',
+      'session-1',
+    )
+  })
+})

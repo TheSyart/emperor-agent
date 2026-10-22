@@ -44,6 +44,29 @@ describe('mutation guard (MIG-IPC-008)', () => {
     }
   })
 
+  it('FIX-13 · 7 · reads plan mode from the v3 control payload', () => {
+    // v3: `mode` is the permission preset; plan mode is its own flag.
+    const plan = {
+      version: 3,
+      mode: 'workspace-write',
+      preset: 'workspace-write',
+      plan: true,
+      pending: null,
+    }
+    expect(() =>
+      assertCoreMutationAllowed(plan, {
+        area: 'processes',
+        action: 'reparent',
+      }),
+    ).toThrow(expect.objectContaining({ code: 'mutation_blocked_plan' }))
+    expect(() =>
+      assertCoreMutationAllowed(
+        { ...plan, plan: false },
+        { area: 'processes', action: 'reparent' },
+      ),
+    ).not.toThrow()
+  })
+
   it('FIX-10 · 4 · carries a code and Chinese text across IPC', () => {
     for (const [control, code, text] of [
       [{ mode: 'plan', pending: null }, 'mutation_blocked_plan', '计划模式'],

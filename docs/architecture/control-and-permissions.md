@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：Core 开发者、安全审查者、维护者<br>
-> 最后核验：2026-10-22（对照 `84245509`）<br>
+> 最后核验：2026-10-22（对照 `1bb92495`）<br>
 > 事实源：`packages/core/src/sandbox/`、`packages/core/src/harness/sandbox/`、`packages/core/src/mcp/containment.ts`、`packages/core/src/harness/hooks/contained.ts`、`packages/core/src/harness/workflow/process-worker.ts`、`packages/core/src/api/services/session-defaults-service.ts`、`packages/core/src/harness/approval/`、`packages/core/src/harness/plan/plan-mode.ts`、`packages/core/src/harness/questions/`、`packages/core/src/harness/host/interactions.ts`、`packages/core/src/harness/computer-use/`、`packages/core/src/harness/tools/builtin/skill-manage.ts`、`packages/core/src/harness/tools/builtin/mcp-config.ts`、`packages/core/src/api/mutation-guard.ts`、`packages/core/src/workspace/git-runner.ts`、`packages/core/src/security/`、`packages/core/src/config/model-config.ts`、`packages/core/src/mcp/config.ts`
 
 Agent 能做什么由两个独立旋钮决定：**沙箱模式**限制文件写入范围，**审批策略**决定需要批准的操作是否询问用户。用户看到的是把两者打包在一起的**权限预设**。Plan 模式是独立的会话状态，不是第四种权限。
@@ -143,6 +143,7 @@ Seatbelt 取最后一条匹配的规则，所以 profile 分层写：宽泛放�
 - 进入后系统提示词加入 `plan:policy` 章节：先只读探索，不修改文件、不改配置、不提交；只对用户拥有的选择使用 `ask_user_question`；最终以 `exit_plan_mode` 提交以 `#` 标题开头的完整计划。
 - 工具目录在 Plan 模式下保持不变，以维持请求缓存；普通文件与 Shell 工具没有统一的 Plan guard，实际写入仍受当前沙箱模式约束。有硬性限制的只有：电脑操作工具（观察可用，交互、跳转、传输和高影响动作拒绝）；外部子智能体只能以 `shared-readonly` 做只读审查，要写的以 `PLAN_MODE_UNSUPPORTED` 拒绝；工作流里的子智能体只读；以及下文 mutation guard 的 403。
 - Composer 在目标进行中切到计划模式时，先取消这个目标（`composerLifecycle.ts`，原因 `user_switch_to_plan`），再开启 Plan 模式。
+- 起始页（还没发出第一条消息的草稿）上的计划模式与权限预设属于草稿本身，界面不调用 Core（FIX-13）。Core 在为草稿创建会话时让它们生效：`chat.submit`、`goals.start` 的 `draftSession.plan` / `draftSession.preset`，以及输入命令时 `sessions.create` 的 `plan` / `preset`。预设与默认预设一样作为创建时的事实记入（`host.pinPermissionPreset`，不通知模型），计划模式随后提交（新会话没有进行中的回合，立即写入 `plan/mode`），两者都在 `session_created` 发出和第一轮之前，所以第一步就在 Plan 模式里。`goals.start` 只带预设，不带计划模式（计划和目标互斥）。
 - `exit_plan_mode` 通过问题服务发起审阅，Core 的选项为 `Approve` 与 `Keep planning`，界面显示为「批准并执行」「继续规划」，右上角 ×「忽略」。批准离开 Plan 模式，从下一步开始执行计划；继续规划保留 Plan 模式，把用户的反馈（`control.commentPlan`）以工具错误 `PLAN_REJECTED` 返回给模型。用户关闭审阅（改为输入自己的话）时保持 Plan 模式，工具返回成功结果并直接结束本轮（`turn/end` 原因为 `plan-dismissed`），不再为“等待用户”多请求一次模型；审阅通道不可用时同样保持 Plan 模式，原因作为工具错误返回给模型。
 - turn 运行中请求的切换会排队，在下一个 step 边界以一条 `plan/mode` 事件生效；用户发起的切换会以通知告知模型。
 
@@ -164,11 +165,11 @@ Plan 模式与权限预设相互独立：在 Plan 模式中切换预设，只改
 
 ## CoreApi mutation guard
 
-`packages/core/src/api/mutation-guard.ts` 只保护**属于某个对话**的、由界面发起的写入：给子智能体发消息、应用或丢弃它的成果（`delegations.*`，按任务所属的主会话判断），以及把后台进程转给别的属主（`processes.reparent`）。这个对话有待处理的提问、权限或计划审批时返回 409（`mutation_blocked_pending`），处于 Plan 模式时返回 403（`mutation_blocked_plan`）。
+`packages/core/src/api/mutation-guard.ts` 只保护**属于某个对话**的、由界面发起的写入：给子智能体发消息、应用或丢弃它的成果（`delegations.*`，按任务所属的主会话判断），以及把后台进程转给别的属主（`processes.reparent`）。这个对话有待处理的提问、权限或计划审批时返回 409（`mutation_blocked_pending`），处于 Plan 模式时返回 403（`mutation_blocked_plan`）。守卫直接读控制状态（v3）：Plan 模式看 `plan` 标志，`mode` 在 v3 里是权限预设。
 
 设置是全局的，不看窗口背后显示的是哪个对话、它处于什么状态（FIX-10）：模型、MCP、Skills、插件、Hooks、定时任务、子智能体、浏览器与电脑操作、存储清理、会话默认值、任务预算、网络工具和用户配置随时可以保存。停止也总是可用：`tasks.cancel`、`processes.cancel`、取消环境安装不经守卫。Plan 模式约束的是 Agent（见上文的工具与子智能体限制），不是用户自己的设置。
 
-守卫与 CoreApi 的其他拒绝（例如进程不属于这个会话 `mutation_forbidden`、状态冲突 `mutation_conflict`）都是 `EmperorError`，错误码与中文说明经 IPC 原样到达界面，不会显示成「发生内部错误」。Git 写操作另外通过 workspace mutation coordinator 按 worktree 串行。
+守卫与 CoreApi 的其他拒绝（例如进程不属于这个会话 `mutation_forbidden`、状态冲突 `mutation_conflict`）都是 `EmperorError`，错误码与中文说明经 IPC 原样到达界面，不会显示成「发生内部错误」。会话不存在、已删除或是草稿 id（`InvalidSessionError`，`host.agentFor` / `host.scopeFor` 同样抛它）是 `invalid_session`，界面显示「会话不存在或已被删除。」；没有指明会话的 `SESSION_REQUIRED` 只说「请先打开一个会话再试。」，操作名留在错误的 `operation` 字段里。Git 写操作另外通过 workspace mutation coordinator 按 worktree 串行。
 
 ## 用户直控 Terminal
 

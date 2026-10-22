@@ -2,7 +2,7 @@
 
 > 文档状态：Active<br>
 > 面向读者：使用普通会话或项目会话的用户<br>
-> 最后核验：2026-10-22（对照 `5ec88219`）<br>
+> 最后核验：2026-10-22（对照 `1bb92495`）<br>
 > 事实源：`packages/core/src/sessions/store.ts`、`packages/core/src/harness/host/host.ts`、`packages/core/src/harness/prompt/agent-instructions.ts`、`packages/core/src/harness/memory/memory.ts`、`packages/core/src/workspace/pull-request-browser.ts`、`desktop/src/renderer/src/shortcuts.ts`、`desktop/src/renderer/src/components/shell/`、`desktop/src/renderer/src/components/sidebar/`、`desktop/src/renderer/src/components/conversation/`、`desktop/src/renderer/src/components/composer/`、`desktop/src/renderer/src/components/trajectory/`、`desktop/src/renderer/src/components/workspace/`、`desktop/src/renderer/src/components/pages/pulls/`、`desktop/src/renderer/src/components/pages/github/`、`desktop/src/main/browser-view.ts`
 
 Chat（普通对话）和 Build（项目工作）是会话类型。它们决定 Agent 的工作目录和能看到哪些长期上下文，不决定权限。
@@ -343,7 +343,8 @@ Build 绑定一个本地文件夹。Agent 在该目录内读取文件、按当�
 - 归档、重命名或删除失败时会弹出说明原因的提示，会话保持原样（不取消置顶、不跳转）。
 - 打开一个不存在或已删除的会话（例如旧链接）时，页面写「没有找到这个会话。」，下方的输入框停用，提示「没有找到这个会话，请从侧栏打开其他会话」；计划、权限、目标和模型按钮都不能用，不会作用到背后的另一个会话。从侧栏打开其他会话即可继续。
 - 切换会话不会把进行中的后台 turn 转移到新会话。
-- 新建会话时界面先创建本地草稿，发送第一条消息后才创建真实会话；首条消息之后会自动生成标题。
+- 新建会话时界面先创建本地草稿，发送第一条消息后才创建真实会话；首条消息之后会自动生成标题。在起始页选的计划模式和执行权限属于这个草稿，随第一条消息一起生效（见[计划与目标](plan-goal.md#计划先规划再执行)）；新对话不会显示上一个对话的计划或目标。
+- 第一条消息发出、会话还没建好的那一瞬间，按停止会停在新建的这个会话上；再发一条会排进同一个会话，不会多出一个新会话。
 
 ### 通知
 
@@ -371,7 +372,7 @@ Agent 正在回复时仍可输入文字、添加附件和引用 Skill：
 ### 草稿不会丢
 
 - 发送被拒绝（例如队列已满、会话正在切换、模型不可用）时，原文、Skill 芯片和附件都会放回输入框；如果期间你又输入了内容，退回的消息接在后面。
-- 每个会话有自己的草稿：切到别的会话再切回来，未发送的文字、芯片和已上传的附件还在。草稿只保存在当前窗口，重新加载后清空。
+- 每个会话有自己的草稿：切到别的会话再切回来，未发送的文字、芯片和已上传的附件还在。草稿只保存在当前窗口，重新加载后清空。新对话发出第一条消息后、会话建好时，输入框里接着打的字和还在进行的听写都留在原处。
 - 附件上传完成前不能发送，发送按钮暂时不可用。可以直接粘贴截图或复制的文件，它们会成为附件。
 - 编辑排队消息或历史消息时，如果输入框里已有内容，原内容保留，被编辑的消息接在后面；排队消息的附件和芯片一起回来。
 - 消息里像是 API Key、令牌或私钥时，发送前会提示：可以「遮掩后发送」（替换为 `[已遮掩]`）、「仍然发送」或取消。

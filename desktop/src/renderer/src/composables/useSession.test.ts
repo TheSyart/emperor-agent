@@ -373,4 +373,28 @@ describe('useSession IPC session routes (MIG-IPC-010)', () => {
     expect(session.activeId.value).toBe('real-1')
     expect(session.getSession('real-1')?.draft).toBeUndefined()
   })
+
+  it("FIX-13 · 1 · changes a draft's own plan mode and preset, never a real session's", async () => {
+    g.window = {
+      emperor: {
+        invokeCore: async (...args: unknown[]) => {
+          if (args[0] === 'sessions.list')
+            return [{ id: 's1', title: 'Main', updated_at: '2026-01-01' }]
+          if (args[0] === 'projects.list') return []
+          return { ok: true }
+        },
+      },
+    }
+    const session = useSession()
+    await session.load()
+    const draft = await session.create({ mode: 'chat', title: '新会话' })
+    session.updateDraft(draft.id, { plan: true })
+    session.updateDraft(draft.id, { preset: 'read-only' })
+    session.updateDraft('s1', { plan: true })
+    expect(session.getSession(draft.id)).toMatchObject({
+      plan: true,
+      preset: 'read-only',
+    })
+    expect(session.getSession('s1')?.plan).toBeUndefined()
+  })
 })

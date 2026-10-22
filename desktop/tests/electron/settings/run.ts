@@ -820,15 +820,12 @@ async function settings(page: Page, home: string): Promise<void> {
       // The user's report: a chat waiting in Plan mode made every save in
       // 设置 fail with 「发生内部错误」.
       if (await dialogOf(page).isVisible()) await page.keyboard.press('Escape')
-      // Earlier checks left 能力 open: start a chat (a draft is not gated,
-      // a real chat is), then turn on Plan mode from 添加.
+      // Earlier checks left 能力 open: start a chat and turn on Plan mode
+      // from 添加 on the start page (FIX-13: a draft keeps it itself), then
+      // send: the chat Core creates is in Plan mode behind the window.
       await page.getByRole('button', { name: '新对话' }).first().click()
       const box = page.getByLabel('消息输入框').first()
       await box.waitFor({ timeout: 10_000 })
-      await box.click()
-      await box.fill('你好')
-      await box.press('Enter')
-      await page.getByText('你好').first().waitFor({ timeout: 10_000 })
       await page.getByRole('button', { name: '添加' }).first().click()
       await page
         .getByRole('menuitem', { name: /计划模式/ })
@@ -836,6 +833,37 @@ async function settings(page: Page, home: string): Promise<void> {
         .click()
       const capsule = page.getByRole('button', { name: '退出计划' })
       await capsule.waitFor({ timeout: 10_000 })
+      const refused = page
+        .locator('.ds-toast')
+        .filter({ hasText: /失败|会话|sessionId/ })
+      if (await refused.count())
+        throw new Error(`toast: ${await refused.first().innerText()}`)
+      await box.click()
+      await box.fill('你好')
+      await box.press('Enter')
+      await page.getByText('你好').first().waitFor({ timeout: 10_000 })
+      const sessionId = await page.evaluate(async () => {
+        const deadline = Date.now() + 10_000
+        while (Date.now() < deadline) {
+          const id = decodeURIComponent(location.href).split('/chat/')[1]
+          if (id && !id.startsWith('draft:')) return id.split(/[/?]/)[0]
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
+        return null
+      })
+      const control = (await page.evaluate(
+        async (id) =>
+          await (
+            window as unknown as {
+              emperor: {
+                invokeCore: (op: string, ...args: unknown[]) => Promise<unknown>
+              }
+            }
+          ).emperor.invokeCore('control.get', id),
+        sessionId,
+      )) as { plan?: boolean }
+      if (!sessionId || control.plan !== true)
+        throw new Error(`chat ${sessionId} plan ${String(control.plan)}`)
       const codexSwitch = (dialog: Locator) =>
         dialog.locator(
           '[data-settings-agent="codex"] [data-executor-enabled] [role="switch"], [data-settings-agent="codex"] [role="switch"][data-executor-enabled]',
@@ -860,7 +888,7 @@ async function settings(page: Page, home: string): Promise<void> {
       await page.keyboard.press('Escape')
       await capsule.click()
       await capsule.waitFor({ state: 'detached', timeout: 10_000 })
-      return { saved: true }
+      return { saved: true, planChat: sessionId }
     },
   )
 }

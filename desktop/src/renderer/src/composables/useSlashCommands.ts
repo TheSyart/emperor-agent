@@ -37,6 +37,16 @@ export interface SlashCommandDeps {
   resolveSessionId: () => Promise<string>
   /** Backend session that control changes apply to (null for drafts). */
   controlSessionId?: () => string | null
+  /**
+   * The draft on screen, null on a real session (FIX-13): its plan mode and
+   * preset are its own until its first message, so Core is not asked.
+   */
+  draftId?: () => string | null
+  /** Change a draft's own plan mode or preset. */
+  updateDraft?: (
+    id: string,
+    patch: { plan: boolean } | { preset: PermissionPreset },
+  ) => void
   /** `true` once the host took the message; `false` if it was refused. */
   sendMessage: (payload: string | ChatSendPayload) => SendOutcome
   /** Load the command list when it is still empty, waiting at most `timeoutMs`. */
@@ -256,12 +266,18 @@ export function useSlashCommands(deps: SlashCommandDeps) {
     preset: PermissionPreset,
   ): Promise<{ ok: boolean; error?: string }> {
     try {
-      const data = await core(
-        'control.setPermissionMode',
-        preset,
-        deps.controlSessionId?.() ?? null,
-      )
-      applyControl(data)
+      const draft = deps.draftId?.()
+      if (draft) {
+        deps.updateDraft?.(draft, { preset })
+        applyControl({ ...deps.boot.value?.control, preset, mode: preset })
+      } else
+        applyControl(
+          await core(
+            'control.setPermissionMode',
+            preset,
+            deps.controlSessionId?.() ?? null,
+          ),
+        )
       deps.showToast(`执行权限已切换为${permissionLabel(preset)}`)
       return { ok: true }
     } catch (error) {
@@ -273,14 +289,17 @@ export function useSlashCommands(deps: SlashCommandDeps) {
 
   /** Plan mode is a toggle separate from the permission preset. */
   async function writeControlMode(mode: 'plan' | 'default') {
-    const data = await core(
-      'control.setMode',
-      mode,
-      deps.controlSessionId?.() ?? null,
-    )
-    applyControl(data.control)
-    deps.showToast(mode === 'plan' ? '已进入计划模式' : '已退出计划模式')
-    return data
+    const plan = mode === 'plan'
+    const draft = deps.draftId?.()
+    if (draft) {
+      deps.updateDraft?.(draft, { plan })
+      applyControl({ ...deps.boot.value?.control, plan })
+    } else
+      applyControl(
+        (await core('control.setMode', mode, deps.controlSessionId?.() ?? null))
+          .control,
+      )
+    deps.showToast(plan ? '已进入计划模式' : '已退出计划模式')
   }
 
   async function setControlMode(

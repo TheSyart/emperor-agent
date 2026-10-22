@@ -1,5 +1,5 @@
 /**
- * REL-03 at startup (kept tiny: App.vue loads it): an older Emperor than
+ * REL-03 at startup (App.vue loads it once started): an older Emperor than
  * last time gets a banner (a sticky notice with 「查看」 → 设置 › 高级 ›
  * 存储); the first start after a restore says so once.
  */

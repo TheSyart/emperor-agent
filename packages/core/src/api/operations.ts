@@ -764,6 +764,13 @@ const referenceResolveSchema = z
   })
   .strict()
 
+/** The three permission presets (`control.setPermissionMode`). */
+const permissionPresetSchema = z.enum([
+  'read-only',
+  'workspace-write',
+  'danger-full-access',
+])
+
 const draftSessionSchema = z
   .object({
     mode: nullableStringSchema,
@@ -776,6 +783,9 @@ const draftSessionSchema = z
       .strict()
       .nullable()
       .optional(),
+    // FIX-13: the draft's own plan mode and preset, set before its first turn.
+    plan: z.boolean().optional(),
+    preset: permissionPresetSchema.optional(),
   })
   .strict()
 
@@ -1421,10 +1431,7 @@ export const CORE_OPERATION_REGISTRY = {
       api.control.get(requiredSession(sessionId, ctx, 'control.get')),
   ),
   'control.setPermissionMode': operation(
-    z.tuple([
-      z.enum(['read-only', 'workspace-write', 'danger-full-access']),
-      nullableStringSchema,
-    ]),
+    z.tuple([permissionPresetSchema, nullableStringSchema]),
     (api, [preset, sessionId], ctx) =>
       api.control.setPermissionMode(
         preset,
@@ -2113,6 +2120,8 @@ export const CORE_OPERATION_REGISTRY = {
           mode: z.string().optional(),
           project: dictSchema.nullable().optional(),
           project_path: nullableStringSchema,
+          plan: z.boolean().optional(),
+          preset: permissionPresetSchema.optional(),
         })
         .strict()
         .optional(),

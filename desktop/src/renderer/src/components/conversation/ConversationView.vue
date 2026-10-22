@@ -108,9 +108,11 @@ import { createLinkStatusSource, LINK_STATUS_KEY } from './parts/linkStatus'
 import TakeoverSeat from './takeover/TakeoverSeat.vue'
 import type { ComposerDraft } from '../chat/composerDraft'
 import {
+  isDraftPromotion,
   saveComposerDraft,
   takeComposerDraft,
 } from '../../composables/useComposerDrafts'
+import { showDraftControls } from '../../runtime/draftControls'
 import { activeTakeover, isTakeoverMinimized } from './takeover/takeoverModel'
 import {
   activeTurnTick,
@@ -451,6 +453,27 @@ function backToParent(): void {
 }
 
 // ── composer inputs ───────────────────────────────────────────────────────
+// The start page shows its draft's own plan mode and preset and no goal,
+// never the previous chat's (FIX-13). Before this view renders, so the
+// previous chat's 「计划 ×」 never shows on it.
+watch(
+  () =>
+    sessionStore.isDraftSessionId(ctx.sessionId.value)
+      ? ctx.sessionId.value
+      : null,
+  (draft) => {
+    if (draft)
+      void showDraftControls(
+        ctx.boot,
+        () =>
+          ctx.sessionId.value === draft
+            ? sessionStore.getSession(draft)
+            : undefined,
+        () => core('control.get', null),
+      )
+  },
+  { flush: 'pre', immediate: true },
+)
 const modelEntries = computed(() => ctx.boot.value?.modelConfig?.models || [])
 const currentModel = computed(
   () => ctx.boot.value?.modelConfig?.current || null,
@@ -822,12 +845,14 @@ function sendFromComposer(
   return ctx.submitFromComposer(payload)
 }
 
-// Each chat keeps its own unsent draft (text, chips, uploaded files).
+// Each chat keeps its own unsent draft (text, chips, uploaded files). A
+// draft that became its session is the same chat: what was typed while its
+// first message went out stays (FIX-13).
 watch(
   viewingId,
   (next, previous) => {
     const handle = composer.value
-    if (!handle || next === previous) return
+    if (!handle || next === previous || isDraftPromotion(previous, next)) return
     if (previous) saveComposerDraft(previous, handle.takeSnapshot())
     handle.applySnapshot(takeComposerDraft(next))
   },

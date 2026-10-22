@@ -5,9 +5,10 @@
  * final result goes in once, where dictation began. While it records, the
  * recording bar (DictationBar.vue, RV-06) takes the composer's bottom row
  * and draws the last 3 seconds of the microphone's loudness. The recording
- * stops as soon as you switch chats or the composer goes away. A result
- * that arrives after that is kept in memory for its own chat and offered
- * there; it is never written into another chat. Dictation never sends by
+ * stops as soon as you switch chats or the composer goes away (a draft
+ * becoming its session is not a switch). A result that arrives after that
+ * is kept in memory for its own chat and offered there; it is never
+ * written into another chat. Dictation never sends by
  * itself: only the bar's send button does, once the final text is in.
  */
 import {
@@ -30,6 +31,7 @@ import {
   type DictationEvent,
 } from '../../api/dictation'
 import { acceleratorMatches, dictationRequest } from '../../dictation/model'
+import { isDraftPromotion } from '../../composables/useComposerDrafts'
 import { useDictationSettings } from '../../dictation/settings'
 import { detectShortcutPlatform } from '../../shortcuts'
 import type { ComposerEditorHandle } from '../chat/composerController'
@@ -89,6 +91,11 @@ export function dictationErrorText(
     default:
       return `听写失败：${message}`
   }
+}
+
+/** The same chat: unchanged, or a draft that became its session (FIX-13). */
+function sameChat(previous: string | null, next: string | null): boolean {
+  return previous === next || isDraftPromotion(previous, next)
 }
 
 export function useComposerDictation(options: {
@@ -211,7 +218,9 @@ export function useComposerDictation(options: {
         void cancelDictation(result.session)
         return reset()
       }
-      if (abandoned === 'detach' || options.chat() !== chat) return detach()
+      if (abandoned === 'detach' || !sameChat(chat, options.chat()))
+        return detach()
+      owner = options.chat()
       options.editor.value.dictationBegin(result.session)
       for (const event of pending) onEvent(event)
     } catch {
@@ -304,7 +313,12 @@ export function useComposerDictation(options: {
   }
 
   watch(options.chat, (next, previous) => {
-    if (next !== previous) detach()
+    if (sameChat(previous, next)) {
+      // The draft became its session (FIX-13): keep recording for it.
+      if (owner === previous) owner = next
+      return
+    }
+    detach()
   })
 
   onBeforeUnmount(() => {

@@ -21,7 +21,9 @@ export class CoreMutationGuardError extends EmperorError {
  * A write that belongs to one chat (a subagent's message or result, a
  * process changing owner) waits while that chat has a question or plan
  * pending, and is refused in plan mode. Settings are global and never pass
- * here (FIX-10).
+ * here (FIX-10). `control` is the chat's control payload: in v3 plan mode is
+ * its `plan` flag (`mode` is the permission preset); a `mode` of `plan` is
+ * still read for older callers (FIX-13).
  */
 export function assertCoreMutationAllowed(
   control: Record<string, unknown>,
@@ -35,7 +37,7 @@ export function assertCoreMutationAllowed(
       'mutation_blocked_pending',
     )
   }
-  if (String(control.mode || '') === 'plan') {
+  if (control.plan === true || String(control.mode || '') === 'plan') {
     throw new CoreMutationGuardError(
       403,
       `这个对话处于计划模式，先批准计划或退出计划模式再试（${opts.area} · ${opts.action}）。`,

@@ -185,6 +185,7 @@ import {
 import { REPAIR_CONTRIBUTORS } from './repair-contributors'
 import {
   DEFAULT_BACKGROUND_TURN_TIMEOUT_MS,
+  InvalidSessionError,
   realTimers,
   scopeOfEntry,
   SessionRequiredError,
@@ -1578,7 +1579,8 @@ export class HarnessHost {
     const id = String(sessionId ?? '').trim()
     if (!id) throw new SessionRequiredError(operation)
     const entry = this.kept.sessionStore.get(id)
-    if (entry === null) throw new Error(`unknown session ${id}`)
+    if (entry === null)
+      throw new InvalidSessionError(`unknown session ${id}`, id)
     return {
       ...scopeOfEntry(entry, this.chatWorkspace()),
       workspaceRoot: this.workspaceRootFor(entry),
@@ -1748,7 +1750,8 @@ export class HarnessHost {
     const existing = this.agents.get(sessionId)
     if (existing !== undefined) return existing
     const entry = this.kept.sessionStore.get(sessionId)
-    if (entry === null) throw new Error(`unknown session ${sessionId}`)
+    if (entry === null)
+      throw new InvalidSessionError(`unknown session ${sessionId}`, sessionId)
     const cwd = this.workspaceRootFor(entry)
     let session =
       this.sessions.get(sessionId) ?? this.sessions.tryOpen(sessionId)
@@ -2622,6 +2625,14 @@ export class HarnessHost {
     const agent = this.agentFor(sessionId)
     this.presets.set(agent, preset)
     return this.controlPayload(sessionId)
+  }
+
+  /**
+   * A new session starts in `preset` (a draft's choice, FIX-13): logged as a
+   * creation-time fact like the default, with no notice to the model.
+   */
+  pinPermissionPreset(sessionId: string, preset: string): void {
+    this.presets.pin(this.agentFor(sessionId).session, preset)
   }
 
   setSandboxMode(sessionId: string, mode: SandboxMode): void {

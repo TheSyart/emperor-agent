@@ -236,6 +236,24 @@ describe('the session in view only decides what the UI shows (KRN-01)', () => {
     ).resolves.toMatchObject({ cancelled: 0 })
   })
 
+  it('FIX-13 · E2 · the refusal speaks to the user; the operation stays on the error', async () => {
+    fixture = await makeApi()
+    const { api } = fixture
+    const refused = await invokeCoreOperation(api, 'control.setMode', [
+      'plan',
+      null,
+    ]).then(
+      () => null,
+      (error: unknown) => error as Error & { code: string; operation: string },
+    )
+    expect(refused).toMatchObject({
+      code: 'SESSION_REQUIRED',
+      message: '请先打开一个会话再试。',
+      operation: 'control.setMode',
+    })
+    expect(refused!.message).not.toContain('sessionId')
+  })
+
   it('11: a subagent sees the same MCP tools as its root session', async () => {
     fixture = await makeApi({
       replies: [

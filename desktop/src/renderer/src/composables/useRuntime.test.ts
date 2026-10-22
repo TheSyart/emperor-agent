@@ -1962,6 +1962,150 @@ describe('useRuntime IPC runtime path (MIG-IPC-010)', () => {
   })
 })
 
+// FIX-13: between sending a draft's first message and Core naming its
+// session, a stop or a second message waits for that session.
+describe('a draft while Core creates its session (FIX-13)', () => {
+  function draftRow(id: string, extra: Record<string, unknown> = {}) {
+    return {
+      id,
+      title: '新会话',
+      created_at: '',
+      updated_at: '',
+      preview: '',
+      mode: 'chat' as const,
+      project_id: null,
+      project_path: null,
+      project_name: null,
+      message_count: 0,
+      title_status: 'draft',
+      control_pending: null,
+      version: 1,
+      draft: true,
+      ...extra,
+    }
+  }
+
+  function setup(
+    draftId: string,
+    extra: Record<string, unknown> = {},
+    submit: (args: unknown[]) => Promise<unknown> = () => new Promise(() => {}),
+  ) {
+    let listener: ((event: unknown) => void) | null = null
+    const calls: unknown[][] = []
+    g.window = fakeWindow({
+      invokeCore: async (...args: unknown[]) => {
+        calls.push(args)
+        if (args[0] === 'chat.submit') return await submit(args)
+        if (args[0] === 'chat.stopRuntime') return { cancelled: 1, active: [] }
+        return { ok: true }
+      },
+      onCoreEvent: (callback: (event: unknown) => void) => {
+        listener = callback
+        return () => undefined
+      },
+    })
+    const options = testOptions()
+    const runtime = useRuntime({
+      ...options,
+      resolveDraftSession: (id: string) =>
+        id === draftId ? draftRow(id, extra) : undefined,
+    })
+    runtime.connectSocket()
+    runtime.switchSession(draftId)
+    const created = (sessionId: string) =>
+      emitCoreEvent(listener, {
+        event: 'session_created',
+        seq: 1,
+        session_id: sessionId,
+        session: { id: sessionId, title: '新会话' },
+        client_draft_id: draftId,
+      })
+    const submits = () =>
+      calls
+        .filter((call) => call[0] === 'chat.submit')
+        .map((call) => call[1] as Record<string, unknown>)
+    const stops = () => calls.filter((call) => call[0] === 'chat.stopRuntime')
+    return { runtime, options, calls, created, submits, stops }
+  }
+
+  it("2 · the first message carries the draft's plan mode and preset", async () => {
+    const f = setup('draft:own', { plan: true, preset: 'read-only' })
+    void f.runtime.sendMessage('先出计划')
+    await flushPromises()
+    expect(f.submits()[0]).toMatchObject({
+      sessionId: 'draft:own',
+      clientDraftId: 'draft:own',
+      draftSession: { mode: 'chat', plan: true, preset: 'read-only' },
+    })
+  })
+
+  it('5 · a stop pressed before the session exists reaches it once it does', async () => {
+    const f = setup('draft:d1')
+    void f.runtime.sendMessage('第一条')
+    await flushPromises()
+    const stopped = f.runtime.stopActive()
+    await flushPromises()
+    // Held: Core has no session to stop yet.
+    expect(f.stops()).toEqual([])
+    f.created('session-d1')
+    await expect(stopped).resolves.toBe(true)
+    expect(f.stops()).toEqual([
+      ['chat.stopRuntime', { sessionId: 'session-d1' }],
+    ])
+    expect(f.runtime.busy.value).toBe(false)
+  })
+
+  it('5 · a stop on a draft with nothing sent asks Core nothing', async () => {
+    const f = setup('draft:idle')
+    await expect(f.runtime.stopActive()).resolves.toBe(false)
+    expect(f.stops()).toEqual([])
+    expect(f.runtime.pending.label).toBe('没有正在运行的任务')
+  })
+
+  it('4 · a second message waits for the session instead of making another', async () => {
+    const f = setup('draft:d2', { plan: true })
+    void f.runtime.sendMessage('第一条')
+    await flushPromises()
+    const second = f.runtime.sendMessage({
+      content: '第二条',
+      attachments: [],
+    })
+    await flushPromises()
+    expect(f.submits()).toHaveLength(1)
+    f.created('session-d2')
+    await flushPromises(10)
+    expect(f.submits()).toHaveLength(2)
+    const sent = f.submits()[1]!
+    expect(sent).toMatchObject({
+      sessionId: 'session-d2',
+      content: '第二条',
+      delivery: 'queue',
+    })
+    expect(sent).not.toHaveProperty('clientDraftId')
+    expect(sent).not.toHaveProperty('draftSession')
+    void second
+  })
+
+  it('4 · when the first message fails, the waiting one is handed back', async () => {
+    let fail!: (error: Error) => void
+    const f = setup('draft:fail', {}, () =>
+      f.submits().length === 1
+        ? new Promise((_resolve, reject) => (fail = reject))
+        : new Promise(() => {}),
+    )
+    void f.runtime.sendMessage('第一条')
+    await flushPromises()
+    const second = f.runtime.sendMessage({
+      content: '第二条',
+      attachments: [],
+    })
+    await flushPromises()
+    fail(new Error('模型不可用'))
+    await expect(second).resolves.toBe(false)
+    expect(f.submits()).toHaveLength(1)
+  })
+})
+
 async function flushPromises(count = 5): Promise<void> {
   for (let i = 0; i < count; i += 1) await Promise.resolve()
 }
